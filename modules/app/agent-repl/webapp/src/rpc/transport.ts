@@ -15,6 +15,7 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import type { Interceptor, Transport } from "@connectrpc/connect";
 import { createLinkedAbortController } from "@connectrpc/connect/protocol";
 import type { DaemonOrigin } from "./daemon-origin.js";
+import { pageEnding } from "../page-teardown.js";
 
 export interface DaemonTransportOptions {
   /**
@@ -101,4 +102,17 @@ export function createDaemonTransport(base: string | DaemonOrigin, opts: DaemonT
               signal: init?.signal == null ? signal : createLinkedAbortController(init.signal, signal).signal,
             }),
   });
+}
+
+/** Which document a page transport serves: a workspace page, or the webhost. */
+export type PageClient = "page" | "webhost";
+
+/**
+ * THE TRANSPORT OF A DOCUMENT the daemon serves: every request aborted at the
+ * page's end (page-teardown.ts), and named under CLIENT and its CONNECTION
+ * (`connectionRequestIds`). A workspace page and the webhost both build theirs
+ * here, so neither can drop the abort or the request ids.
+ */
+export function createPageTransport(base: string | DaemonOrigin, client: PageClient, connectionId: string): Transport {
+  return createDaemonTransport(base, { signal: pageEnding(), requestId: connectionRequestIds(client, connectionId) });
 }

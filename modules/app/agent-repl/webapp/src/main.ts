@@ -63,7 +63,7 @@ import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../..
 import { installPagePresenceLog } from "./page-presence.js";
 import { installPageCensus } from "./page-census.js";
 import { pageAfter } from "./every.js";
-import { beginPage, endPageAtPagehide, pageEnding, stopAtPageTeardown } from "./page-teardown.js";
+import { beginPage, endPageAtPagehide, stopAtPageTeardown } from "./page-teardown.js";
 import { connectToHost } from "./host/embed.js";
 import { installForwardingLogger, installTextAffordances } from "./document-runtime.js";
 import { mintConnectionId } from "./connection-id.js";
@@ -83,7 +83,7 @@ import { createPageSeen } from "./page-seen.js";
 import { createAgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
 import { isHostAddress, pageAddress } from "./rpc/page-address.js";
-import { connectionRequestIds, createDaemonTransport } from "./rpc/transport.js";
+import { createPageTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import type { FeedId } from "../../proto/gen/ts/frontend/v1/feed_pb";
@@ -136,10 +136,7 @@ export async function boot(): Promise<void> {
     beginPage();
     endPageAtPagehide(window);
     const connectionId = mintConnectionId();
-    const transport = createDaemonTransport(window.location.origin, {
-      signal: pageEnding(),
-      requestId: connectionRequestIds("page", connectionId),
-    });
+    const transport = createPageTransport(window.location.origin, "page", connectionId);
     const client = createAgentReplClient(transport);
 
     bindLogContext({
