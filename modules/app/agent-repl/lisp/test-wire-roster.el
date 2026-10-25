@@ -1332,7 +1332,8 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                                             :entries nil
                                             :shows (:arm :workspaces :value nil)))
                                :open-count (:workspaces 2))
-                   :open (:label (:text "Open") :fold (:arm :collapsed :value nil) :shows (:arm :workspaces :value nil))
+                   :open (:label (:text "Open") :fold (:arm :collapsed :value nil) :shows (:arm :workspaces :value nil)
+                          :merge-queue-paused nil)
                    :hidden (:header (:label (:text "Hidden") :count (:workspaces 0))
                             :hidden-rows (:rows nil)
                             :fold (:arm :expanded :value nil))
@@ -1677,7 +1678,8 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-open-section
                   "{\"label\":{\"text\":\"Open\"},\"expanded\":{},\"workspaces\":{}}")
-                 '(:label (:text "Open") :fold (:arm :expanded :value nil) :shows (:arm :workspaces :value nil)))))
+                 '(:label (:text "Open") :fold (:arm :expanded :value nil) :shows (:arm :workspaces :value nil)
+                   :merge-queue-paused nil))))
 
 (ert-deftest agent-repl-test-wire-roster-an-open-section-without-a-fold-is-a-breach ()
   "The open section's fold is never unset on the wire."
@@ -1700,6 +1702,28 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                              "{\"label\":{\"text\":\"Open\"},\"expanded\":{},\"mergeQueues\":{}}")
                             :shows)
                  '(:arm :merge-queues :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-an-open-section-decodes-a-paused-merge-queue ()
+  "The open section says when a repository's merge queue is paused."
+  (should (eq (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-open-section
+                          "{\"label\":{\"text\":\"Open\"},\"expanded\":{},\"workspaces\":{},\"mergeQueuePaused\":{}}")
+                         :merge-queue-paused)
+              t)))
+
+(ert-deftest agent-repl-test-wire-roster-an-open-section-without-a-paused-merge-queue ()
+  "The open section with no paused merge queue decodes the marker as nil."
+  (should (null (plist-get (agent-repl-test-wire-roster--decode
+                            #'agent-repl-wire-decode-roster-open-section
+                            "{\"label\":{\"text\":\"Open\"},\"expanded\":{},\"workspaces\":{}}")
+                           :merge-queue-paused))))
+
+(ert-deftest agent-repl-test-wire-roster-an-open-section-refuses-a-non-empty-paused-marker ()
+  "The open section's merge-queue-paused marker is empty; a field in it is refused."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-open-section
+                  "{\"label\":{\"text\":\"Open\"},\"expanded\":{},\"workspaces\":{},\"mergeQueuePaused\":{\"x\":1}}")
+                 '("RosterOpenSectionMergeQueuePaused" x "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-an-open-section-without-shows-is-a-breach ()
   "What the open section shows is never unset on the wire."

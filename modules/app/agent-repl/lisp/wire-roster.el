@@ -1405,15 +1405,25 @@ the wire is an unknown field."
   "Decode VALUE as the empty message `RosterOpenSectionShowsMergeQueues'."
   (agent-repl-wire--decode-empty "RosterOpenSectionShowsMergeQueues" value))
 
+(defun agent-repl-wire-decode-roster-open-section-merge-queue-paused (value)
+  "Decode VALUE as `RosterOpenSectionMergeQueuePaused' and return t.
+The MERGE-QUEUE-PAUSED marker: a repository\='s merge queue is paused.
+EMPTY, and PRESENCE IS THE FACT.  Emacs draws nothing from it: it colors
+the webapp sidebar\='s merge-queue toggle."
+  (agent-repl-wire--decode-empty "RosterOpenSectionMergeQueuePaused" value)
+  t)
+
 (defun agent-repl-wire-decode-roster-open-section (value)
-  "Decode VALUE as `RosterOpenSection', a plist `(:label :fold :shows)'.
+  "Decode VALUE as `RosterOpenSection'.
+The result is a plist `(:label :fold :shows :merge-queue-paused)'.
 The heading over the repository sections; its fold folds sidebar rows
-only, and what its sections show (their workspaces or their merge queues)
-changes the sidebar only, so the tab bar reads nothing off it.  It is
-decoded because the codec refuses unknown fields."
+only, what its sections show (their workspaces or their merge queues)
+and whether a merge queue is paused change the sidebar only, so the tab
+bar reads nothing off it.  It is decoded because the codec refuses
+unknown fields."
   (let ((object (agent-repl-wire--object "RosterOpenSection" value)))
     (agent-repl-wire--check-keys "RosterOpenSection" object
-                                 '(label expanded collapsed workspaces mergeQueues))
+                                 '(label expanded collapsed workspaces mergeQueues mergeQueuePaused))
     (agent-repl-wire--decoded
      "RosterOpenSection"
      (list :label (agent-repl-wire--decode-message
@@ -1426,7 +1436,10 @@ decoded because the codec refuses unknown fields."
            :shows (agent-repl-wire--decode-oneof
                    "RosterOpenSection" 'shows object
                    '((workspaces :workspaces agent-repl-wire-decode-roster-open-section-shows-workspaces)
-                     (mergeQueues :merge-queues agent-repl-wire-decode-roster-open-section-shows-merge-queues)))))))
+                     (mergeQueues :merge-queues agent-repl-wire-decode-roster-open-section-shows-merge-queues)))
+           :merge-queue-paused (agent-repl-wire--decode-optional-message
+                                "RosterOpenSection" 'mergeQueuePaused object
+                                #'agent-repl-wire-decode-roster-open-section-merge-queue-paused)))))
 
 ;;;; ---- The views and the roster ----
 

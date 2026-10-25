@@ -431,13 +431,14 @@ export function hiddenSection(
  * The open-workspaces section. Its daemon-held fold is EXPANDED unless said,
  * as the daemon draws a section nobody has folded, and its repository
  * sections show their WORKSPACES unless said, as the daemon draws a view
- * nobody has toggled.
+ * nobody has toggled. No merge queue is paused unless said.
  */
-export function openSection(collapsed: boolean = false, mergeQueues: boolean = false): RosterOpenSection {
+export function openSection(collapsed: boolean = false, mergeQueues: boolean = false, mergeQueuePaused: boolean = false): RosterOpenSection {
   return create(RosterOpenSectionSchema, {
     label: { text: "Open" },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
     shows: mergeQueues ? { case: "mergeQueues", value: {} } : { case: "workspaces", value: {} },
+    mergeQueuePaused: mergeQueuePaused ? {} : undefined,
   });
 }
 

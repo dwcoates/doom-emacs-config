@@ -667,10 +667,11 @@ message RosterOpenSection {
     RosterOpenSectionCollapsed collapsed = 3;
   }
   // WHAT THE REPOSITORY SECTIONS SHOW, drawn as the merge-queue toggle on
-  // the section's header line: a merge glyph in the expanded repository
-  // names' colour while the sections show their workspaces, in the purple of
-  // a merge in progress while they show their merge queues (owner request,
-  // 2026-10-24). DAEMON-HELD (agentrepl.v1.UpdateSidebarView show_open), so
+  // the section's header line: a merge glyph in the purple of a merge in
+  // progress (the amber of a paused queue while `merge_queue_paused` stands)
+  // while the sections show their workspaces, and in the expanded repository
+  // names' colour while they show their merge queues (owner requests,
+  // 2026-10-24 and 2026-10-25). DAEMON-HELD (agentrepl.v1.UpdateSidebarView show_open), so
   // every page draws the same view, and every repository section states the
   // same arm in its own `shows` (RosterRepoSection.shows). It changes the
   // SIDEBAR only: the Emacs tab bar draws the open workspaces whichever arm
@@ -683,7 +684,20 @@ message RosterOpenSection {
     // (RosterRepoSection.merge_queue).
     RosterOpenSectionShowsMergeQueues merge_queues = 5;
   }
+  // The MERGE-QUEUE-PAUSED marker: present exactly while the merge queue of
+  // at least one repository is paused, whether or not a merge is on it. See
+  // RosterOpenSectionMergeQueuePaused, which carries the marker's contract.
+  optional RosterOpenSectionMergeQueuePaused merge_queue_paused = 6;
 }
+
+// The MERGE-QUEUE-PAUSED marker of the open section: a repository's merge
+// queue is paused, so nothing it holds lands until it resumes. Empty:
+// presence is the fact. The sidebar draws the merge-queue toggle in
+// `render-colors.json#paused_merge_mark`'s ink while it stands and the
+// sections show their workspaces (owner request, 2026-10-25), so a paused
+// queue reads from the toggle even with no merge on it. The Emacs tab bar
+// draws nothing for it.
+message RosterOpenSectionMergeQueuePaused {}
 
 // The repository sections show their open workspaces. DELIBERATELY EMPTY: the
 // arm is the fact.

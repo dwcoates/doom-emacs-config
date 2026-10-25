@@ -86,7 +86,13 @@ import {
   type RosterSectionFold,
 } from "./section-fold.js";
 import { openScope, type DrawScope } from "./scope.js";
-import { drawMergeQueueToggle, drawRosterMergeQueue, drawRosterOpenSectionShows, drawRosterRepoShows } from "./merge-queue-view.js";
+import {
+  drawMergeQueueToggle,
+  drawRosterMergeQueue,
+  drawRosterOpenSectionMergeQueuePaused,
+  drawRosterOpenSectionShows,
+  drawRosterRepoShows,
+} from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
   drawRosterRowDetailCommits,
@@ -471,8 +477,9 @@ export function drawRosterOpenSection(
   count.textContent = `(${view.openCount})`;
   header.appendChild(count);
   // THE MERGE-QUEUE TOGGLE (merge-queue-view.ts, owner request 2026-10-24):
-  // what every repository section below shows, the daemon's like the fold.
-  header.appendChild(drawMergeQueueToggle(sc, drawRosterOpenSectionShows(u, path)));
+  // what every repository section below shows, the daemon's like the fold,
+  // and whether a merge queue is paused.
+  header.appendChild(drawMergeQueueToggle(sc, drawRosterOpenSectionShows(u, path), drawRosterOpenSectionMergeQueuePaused(u)));
   section.appendChild(header);
   section.appendChild(view.body);
   return section;

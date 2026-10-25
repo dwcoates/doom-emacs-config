@@ -1650,10 +1650,12 @@ describe("the open section's merge-queue toggle", () => {
   });
 
   it.each([
-    { name: "the expanded repository names' colour while the workspaces show", mergeQueues: false, want: "var(--repo-head-expanded)" },
-    { name: "the canonical purple while the merge queues show", mergeQueues: true, want: "var(--blocked)" },
-  ])("draws the glyph in $name", ({ mergeQueues, want }) => {
-    const drawn = drawWorkspaceRoster(roster({ open: openSection(false, mergeQueues) }), sidebarContext());
+    { name: "the canonical purple while the workspaces show", mergeQueues: false, paused: false, want: "var(--blocked)" },
+    { name: "the paused merge bubble's amber while the workspaces show under a paused queue", mergeQueues: false, paused: true, want: "var(--merge-paused)" },
+    { name: "the expanded repository names' colour while the merge queues show", mergeQueues: true, paused: false, want: "var(--repo-head-expanded)" },
+    { name: "the expanded repository names' colour while the merge queues show under a paused queue", mergeQueues: true, paused: true, want: "var(--repo-head-expanded)" },
+  ])("draws the glyph in $name", ({ mergeQueues, paused, want }) => {
+    const drawn = drawWorkspaceRoster(roster({ open: openSection(false, mergeQueues, paused) }), sidebarContext());
     expect(inRail(drawn, () => cascadedValue(toggleIn(drawn), "color"))).toBe(want);
   });
 
