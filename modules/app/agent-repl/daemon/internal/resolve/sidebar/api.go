@@ -107,6 +107,9 @@ type Resolver interface {
 	// newer than the revision it is stated with. False when no roster was
 	// resolved yet or the last one carries no row of the workspace.
 	Row(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool)
+	// Thread reports whether the last roster lists WS as a chat thread, with
+	// its revision.
+	Thread(ws ids.WorkspaceID) (uint64, bool)
 	// Revision answers the revision of the roster last resolved (frontend.v1
 	// WorkspaceRoster.revision), zero before any: every roster at that
 	// revision or later carries every change made before the call.

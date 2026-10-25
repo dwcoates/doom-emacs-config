@@ -485,7 +485,7 @@ func (s *fakeServer) OpenTabs(ctx context.Context, req *connect.Request[v1.OpenT
 		row.Workspace = &frontendv1.RosterRowWorkspace{Workspace: w.GetWorkspace()}
 		opened := &v1.OpenTabsResponse{Frame: &v1.OpenTabsResponse_Opened{Opened: &v1.OpenTabsOpened{
 			Workspace: w.GetWorkspace(),
-			Outcome:   &v1.OpenTabsOpened_Ready{Ready: &v1.OpenTabsOpenedReady{Row: row}},
+			Outcome:   &v1.OpenTabsOpened_Ready{Ready: &v1.OpenTabsOpenedReady{Listing: &v1.OpenTabsOpenedReady_Row{Row: row}}},
 		}}}
 		if err := stream.Send(opened); err != nil {
 			return err

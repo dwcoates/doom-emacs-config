@@ -1377,11 +1377,19 @@ opens are OpenTabs streams."
   (let ((outcome (agent-repl-test-wire-host--opened
                   "ready" (format "{\"row\":%s}" agent-repl-test-wire-host--row-json))))
     (should (equal (list (plist-get outcome :arm)
-                         (plist-get (plist-get (plist-get (plist-get (plist-get outcome :value) :row)
+                         (plist-get (plist-get (plist-get (plist-get (plist-get (plist-get outcome :value) :listing)
+                                                                     :value)
                                                           :workspace)
                                                :workspace)
                                     :id))
                    '(:ready "w1")))))
+
+(ert-deftest agent-repl-test-wire-host-open-tabs-ready-lists-a-thread ()
+  "A ready answer for a chat thread decodes its thread listing."
+  (should (equal (plist-get (plist-get (agent-repl-test-wire-host--opened "ready" "{\"thread\":{}}")
+                                       :value)
+                            :listing)
+                 '(:arm :thread :value nil))))
 
 (ert-deftest agent-repl-test-wire-host-open-tabs-ready-carries-its-roster-revision ()
   "A ready answer decodes the revision its row was taken from."
@@ -1392,11 +1400,11 @@ opens are OpenTabs streams."
                             :roster-revision)
                  7)))
 
-(ert-deftest agent-repl-test-wire-host-open-tabs-ready-without-a-row-is-a-breach ()
-  "A ready answer with no row is a contract breach."
+(ert-deftest agent-repl-test-wire-host-open-tabs-ready-without-a-listing-is-a-breach ()
+  "A ready answer listing the workspace neither as a row nor as a thread is a breach."
   (should (equal (agent-repl-test-wire-host--breach
                   #'agent-repl-wire-decode-open-tabs-opened-ready "{}")
-                 '("OpenTabsOpenedReady" row "required message field is absent"))))
+                 '("OpenTabsOpenedReady" listing "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-host-open-tabs-failed-carries-its-reason-and-row ()
   "A failed answer decodes its reason and the workspace's roster row."
@@ -1405,7 +1413,10 @@ opens are OpenTabs streams."
                                             agent-repl-test-wire-host--row-json))
                           :value)))
     (should (equal (list (plist-get value :reason)
-                         (plist-get (plist-get (plist-get (plist-get value :row) :workspace) :workspace) :id))
+                         (plist-get (plist-get (plist-get (plist-get (plist-get value :listing) :value)
+                                                         :workspace)
+                                              :workspace)
+                                   :id))
                    '("spawn refused" "w1")))))
 
 (ert-deftest agent-repl-test-wire-host-open-tabs-decodes-each-other-outcome ()

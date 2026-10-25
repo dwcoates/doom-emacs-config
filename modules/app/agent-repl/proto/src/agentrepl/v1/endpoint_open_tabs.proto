@@ -201,11 +201,17 @@ message OpenTabsOpened {
 
 // Everything the workspace needs is done.
 message OpenTabsOpenedReady {
-  // THE WORKSPACE'S ROSTER ROW AS OF THIS ANSWER: its status, name and
-  // markers, so the tab is drawn true from the frame that opens it rather
-  // than from the next roster push. The roster stream carries every later
-  // change.
-  frontend.v1.RosterRow row = 1;
+  // How the roster lists the workspace. The set arm IS the listing.
+  oneof listing {
+    // THE WORKSPACE'S ROSTER ROW AS OF THIS ANSWER: its status, name and
+    // markers, so the tab is drawn true from the frame that opens it rather
+    // than from the next roster push. The roster stream carries every later
+    // change.
+    frontend.v1.RosterRow row = 1;
+    // A zettel chat thread, listed in the roster's thread section and never
+    // on the tab bar, so no row is drawn for it.
+    OpenTabsOpenedThread thread = 3;
+  }
   // The revision of the roster `row` was taken from (WorkspaceRoster.revision):
   // a consumer that already holds that revision or a later one already holds
   // this row or a newer one, and keeps what it has.
@@ -216,12 +222,21 @@ message OpenTabsOpenedReady {
 message OpenTabsOpenedFailed {
   // Why, in the daemon's words. Printed verbatim.
   string reason = 1;
-  // The workspace's roster row as of this answer, drawing the failure; as
-  // OpenTabsOpenedReady.row.
-  frontend.v1.RosterRow row = 2;
+  // How the roster lists the workspace, as OpenTabsOpenedReady.listing.
+  oneof listing {
+    // The workspace's roster row as of this answer, drawing the failure; as
+    // OpenTabsOpenedReady.row.
+    frontend.v1.RosterRow row = 2;
+    // A zettel chat thread, as OpenTabsOpenedReady.thread.
+    OpenTabsOpenedThread thread = 4;
+  }
   // As OpenTabsOpenedReady.roster_revision.
   uint64 roster_revision = 3;
 }
+
+// The workspace is a zettel chat thread, which no tab row draws. DELIBERATELY
+// EMPTY: the arm is the fact.
+message OpenTabsOpenedThread {}
 
 // Not visible, so nothing was started. DELIBERATELY EMPTY.
 message OpenTabsOpenedHidden {}

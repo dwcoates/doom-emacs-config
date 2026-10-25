@@ -136,3 +136,44 @@ func TestTheAppSwitcherShowsTheSelectedWorkspacesApp(t *testing.T) {
 		})
 	}
 }
+
+func TestThreadAnswersALaidOutThreadWithItsRostersRevision(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	r.SetRegistry(withThreads(thread("t-1", "why", nil)))
+
+	// Act
+	revision, ok := r.Thread(ids.WorkspaceID("t-1"))
+
+	// Assert
+	if !ok || revision != latest(t, r).GetRevision() {
+		t.Fatalf("Thread = %d, %v, want the roster's revision %d", revision, ok, latest(t, r).GetRevision())
+	}
+}
+
+func TestThreadAnswersFalseForAWorkspaceThatIsARow(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	r.SetRegistry(withThreads(thread("t-1", "why", nil)))
+
+	// Act
+	_, ok := r.Thread(ids.WorkspaceID("w-a"))
+
+	// Assert
+	if ok {
+		t.Fatal("Thread listed a repository workspace as a thread")
+	}
+}
+
+func TestThreadAnswersFalseBeforeAnyRegistry(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+
+	// Act
+	_, ok := r.Thread(ids.WorkspaceID("t-1"))
+
+	// Assert
+	if ok {
+		t.Fatal("Thread answered before any roster was resolved")
+	}
+}

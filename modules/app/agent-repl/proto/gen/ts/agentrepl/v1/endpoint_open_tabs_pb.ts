@@ -37,7 +37,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_tabs.proto.
  */
 export const file_agentrepl_v1_endpoint_open_tabs: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl90YWJzLnByb3RvEgxhZ2VudHJlcGwudjEiRgoPT3BlblRhYnNSZXF1ZXN0EjMKCndvcmtzcGFjZXMYASADKAsyHy5hZ2VudHJlcGwudjEuT3BlblRhYnNXb3Jrc3BhY2UisAEKEU9wZW5UYWJzV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoHbG9hZGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5PcGVuVGFic1BhZ2VMb2FkaW5nSAASLgoEbm9uZRgDIAEoCzIeLmFnZW50cmVwbC52MS5PcGVuVGFic1BhZ2VOb25lSABCBgoEcGFnZSIVChNPcGVuVGFic1BhZ2VMb2FkaW5nIhIKEE9wZW5UYWJzUGFnZU5vbmUiqwEKEE9wZW5UYWJzUmVzcG9uc2USKgoEc3RlcBgBIAEoCzIaLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBIABIuCgZvcGVuZWQYAiABKAsyHC5hZ2VudHJlcGwudjEuT3BlblRhYnNPcGVuZWRIABIyCghmaW5pc2hlZBgDIAEoCzIeLmFnZW50cmVwbC52MS5PcGVuVGFic0ZpbmlzaGVkSABCBwoFZnJhbWUihAcKDE9wZW5UYWJzU3RlcBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBWF0X21zGAIgASgDEkUKEHN0YXJ0aW5nX3Nlc3Npb24YAyABKAsyKS5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwU3RhcnRpbmdTZXNzaW9uSAASMgoGd2FraW5nGAQgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFdha2luZ0gAEjYKCHJlc3VtaW5nGAUgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFJlc3VtaW5nSAASQwoPdmVuZG9yX3JldHJ5aW5nGAYgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFZlbmRvclJldHJ5aW5nSAASQwoPdmVuZG9yX3JlamVjdGVkGAcgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFZlbmRvclJlamVjdGVkSAASPwoNdmVuZG9yX2ZhaWxlZBgIIAEoCzImLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBWZW5kb3JGYWlsZWRIABI3Cgljb2xkX2dhdGUYCSABKAsyIi5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwQ29sZEdhdGVIABI0CgdvZmZsaW5lGAogASgLMiEuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcE9mZmxpbmVIABIyCgZzZXJ2ZWQYCyABKAsyIC5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwU2VydmVkSAASQQoOcGFnZV9jb25uZWN0ZWQYDCABKAsyJy5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwUGFnZUNvbm5lY3RlZEgAEjkKCnBhZ2VfZHJhd24YDSABKAsyIy5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwUGFnZURyYXduSAASRwoRY29udmVyc2F0aW9uX3JlYWQYDiABKAsyKi5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwQ29udmVyc2F0aW9uUmVhZEgAEkYKEXJlc3VtaW5nX2N1dF90dXJuGA8gASgLMikuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFJlc3VtaW5nQ3V0VHVybkgAQgYKBHN0ZXAiHQobT3BlblRhYnNTdGVwU3RhcnRpbmdTZXNzaW9uIhQKEk9wZW5UYWJzU3RlcFdha2luZyIWChRPcGVuVGFic1N0ZXBSZXN1bWluZyItChpPcGVuVGFic1N0ZXBWZW5kb3JSZXRyeWluZxIPCgdhdHRlbXB0GAEgASgNIisKGk9wZW5UYWJzU3RlcFZlbmRvclJlamVjdGVkEg0KBWNhdXNlGAEgASgJIhoKGE9wZW5UYWJzU3RlcFZlbmRvckZhaWxlZCIWChRPcGVuVGFic1N0ZXBDb2xkR2F0ZSIVChNPcGVuVGFic1N0ZXBPZmZsaW5lIhQKEk9wZW5UYWJzU3RlcFNlcnZlZCIbChlPcGVuVGFic1N0ZXBQYWdlQ29ubmVjdGVkIhcKFU9wZW5UYWJzU3RlcFBhZ2VEcmF3biIeChxPcGVuVGFic1N0ZXBDb252ZXJzYXRpb25SZWFkIh0KG09wZW5UYWJzU3RlcFJlc3VtaW5nQ3V0VHVybiKxAgoOT3BlblRhYnNPcGVuZWQSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhINCgVhdF9tcxgCIAEoAxIyCgVyZWFkeRgDIAEoCzIhLmFnZW50cmVwbC52MS5PcGVuVGFic09wZW5lZFJlYWR5SAASNAoGZmFpbGVkGAQgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzT3BlbmVkRmFpbGVkSAASNAoGaGlkZGVuGAUgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzT3BlbmVkSGlkZGVuSAASNgoHcmVmdXNlZBgGIAEoCzIjLmFnZW50cmVwbC52MS5PcGVuVGFic09wZW5lZFJlZnVzZWRIAEIJCgdvdXRjb21lIlMKE09wZW5UYWJzT3BlbmVkUmVhZHkSIwoDcm93GAEgASgLMhYuZnJvbnRlbmQudjEuUm9zdGVyUm93EhcKD3Jvc3Rlcl9yZXZpc2lvbhgCIAEoBCJkChRPcGVuVGFic09wZW5lZEZhaWxlZBIOCgZyZWFzb24YASABKAkSIwoDcm93GAIgASgLMhYuZnJvbnRlbmQudjEuUm9zdGVyUm93EhcKD3Jvc3Rlcl9yZXZpc2lvbhgDIAEoBCIWChRPcGVuVGFic09wZW5lZEhpZGRlbiLUAgoVT3BlblRhYnNPcGVuZWRSZWZ1c2VkEkoKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5UYWJzUmVmdXNlZFVua25vd25Xb3Jrc3BhY2VIABJTChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjEuYWdlbnRyZXBsLnYxLk9wZW5UYWJzUmVmdXNlZFdvcmtzcGFjZVJlZk1pc21hdGNoSAASSgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLS5hZ2VudHJlcGwudjEuT3BlblRhYnNSZWZ1c2VkVHJhbnNmZXJyaW5nQXdheUgAEkUKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIqLmFnZW50cmVwbC52MS5PcGVuVGFic1JlZnVzZWROb3RZZXRBZG9wdGVkSABCBwoFY2F1c2UiIQofT3BlblRhYnNSZWZ1c2VkVW5rbm93bldvcmtzcGFjZSI7CiNPcGVuVGFic1JlZnVzZWRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMgofT3BlblRhYnNSZWZ1c2VkVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh4KHE9wZW5UYWJzUmVmdXNlZE5vdFlldEFkb3B0ZWQiZwoQT3BlblRhYnNGaW5pc2hlZBINCgVyZWFkeRgBIAEoDRINCgV0b3RhbBgCIAEoDRI1CgZmYWlsZWQYAyADKAsyJS5hZ2VudHJlcGwudjEuT3BlblRhYnNGYWlsZWRXb3Jrc3BhY2UiVgoXT3BlblRhYnNGYWlsZWRXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_sidebar, file_workspace_v1_workspace]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl90YWJzLnByb3RvEgxhZ2VudHJlcGwudjEiRgoPT3BlblRhYnNSZXF1ZXN0EjMKCndvcmtzcGFjZXMYASADKAsyHy5hZ2VudHJlcGwudjEuT3BlblRhYnNXb3Jrc3BhY2UisAEKEU9wZW5UYWJzV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNAoHbG9hZGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5PcGVuVGFic1BhZ2VMb2FkaW5nSAASLgoEbm9uZRgDIAEoCzIeLmFnZW50cmVwbC52MS5PcGVuVGFic1BhZ2VOb25lSABCBgoEcGFnZSIVChNPcGVuVGFic1BhZ2VMb2FkaW5nIhIKEE9wZW5UYWJzUGFnZU5vbmUiqwEKEE9wZW5UYWJzUmVzcG9uc2USKgoEc3RlcBgBIAEoCzIaLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBIABIuCgZvcGVuZWQYAiABKAsyHC5hZ2VudHJlcGwudjEuT3BlblRhYnNPcGVuZWRIABIyCghmaW5pc2hlZBgDIAEoCzIeLmFnZW50cmVwbC52MS5PcGVuVGFic0ZpbmlzaGVkSABCBwoFZnJhbWUihAcKDE9wZW5UYWJzU3RlcBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBWF0X21zGAIgASgDEkUKEHN0YXJ0aW5nX3Nlc3Npb24YAyABKAsyKS5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwU3RhcnRpbmdTZXNzaW9uSAASMgoGd2FraW5nGAQgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFdha2luZ0gAEjYKCHJlc3VtaW5nGAUgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFJlc3VtaW5nSAASQwoPdmVuZG9yX3JldHJ5aW5nGAYgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFZlbmRvclJldHJ5aW5nSAASQwoPdmVuZG9yX3JlamVjdGVkGAcgASgLMiguYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFZlbmRvclJlamVjdGVkSAASPwoNdmVuZG9yX2ZhaWxlZBgIIAEoCzImLmFnZW50cmVwbC52MS5PcGVuVGFic1N0ZXBWZW5kb3JGYWlsZWRIABI3Cgljb2xkX2dhdGUYCSABKAsyIi5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwQ29sZEdhdGVIABI0CgdvZmZsaW5lGAogASgLMiEuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcE9mZmxpbmVIABIyCgZzZXJ2ZWQYCyABKAsyIC5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwU2VydmVkSAASQQoOcGFnZV9jb25uZWN0ZWQYDCABKAsyJy5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwUGFnZUNvbm5lY3RlZEgAEjkKCnBhZ2VfZHJhd24YDSABKAsyIy5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwUGFnZURyYXduSAASRwoRY29udmVyc2F0aW9uX3JlYWQYDiABKAsyKi5hZ2VudHJlcGwudjEuT3BlblRhYnNTdGVwQ29udmVyc2F0aW9uUmVhZEgAEkYKEXJlc3VtaW5nX2N1dF90dXJuGA8gASgLMikuYWdlbnRyZXBsLnYxLk9wZW5UYWJzU3RlcFJlc3VtaW5nQ3V0VHVybkgAQgYKBHN0ZXAiHQobT3BlblRhYnNTdGVwU3RhcnRpbmdTZXNzaW9uIhQKEk9wZW5UYWJzU3RlcFdha2luZyIWChRPcGVuVGFic1N0ZXBSZXN1bWluZyItChpPcGVuVGFic1N0ZXBWZW5kb3JSZXRyeWluZxIPCgdhdHRlbXB0GAEgASgNIisKGk9wZW5UYWJzU3RlcFZlbmRvclJlamVjdGVkEg0KBWNhdXNlGAEgASgJIhoKGE9wZW5UYWJzU3RlcFZlbmRvckZhaWxlZCIWChRPcGVuVGFic1N0ZXBDb2xkR2F0ZSIVChNPcGVuVGFic1N0ZXBPZmZsaW5lIhQKEk9wZW5UYWJzU3RlcFNlcnZlZCIbChlPcGVuVGFic1N0ZXBQYWdlQ29ubmVjdGVkIhcKFU9wZW5UYWJzU3RlcFBhZ2VEcmF3biIeChxPcGVuVGFic1N0ZXBDb252ZXJzYXRpb25SZWFkIh0KG09wZW5UYWJzU3RlcFJlc3VtaW5nQ3V0VHVybiKxAgoOT3BlblRhYnNPcGVuZWQSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhINCgVhdF9tcxgCIAEoAxIyCgVyZWFkeRgDIAEoCzIhLmFnZW50cmVwbC52MS5PcGVuVGFic09wZW5lZFJlYWR5SAASNAoGZmFpbGVkGAQgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzT3BlbmVkRmFpbGVkSAASNAoGaGlkZGVuGAUgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzT3BlbmVkSGlkZGVuSAASNgoHcmVmdXNlZBgGIAEoCzIjLmFnZW50cmVwbC52MS5PcGVuVGFic09wZW5lZFJlZnVzZWRIAEIJCgdvdXRjb21lIpYBChNPcGVuVGFic09wZW5lZFJlYWR5EiUKA3JvdxgBIAEoCzIWLmZyb250ZW5kLnYxLlJvc3RlclJvd0gAEjQKBnRocmVhZBgDIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuVGFic09wZW5lZFRocmVhZEgAEhcKD3Jvc3Rlcl9yZXZpc2lvbhgCIAEoBEIJCgdsaXN0aW5nIqcBChRPcGVuVGFic09wZW5lZEZhaWxlZBIOCgZyZWFzb24YASABKAkSJQoDcm93GAIgASgLMhYuZnJvbnRlbmQudjEuUm9zdGVyUm93SAASNAoGdGhyZWFkGAQgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5UYWJzT3BlbmVkVGhyZWFkSAASFwoPcm9zdGVyX3JldmlzaW9uGAMgASgEQgkKB2xpc3RpbmciFgoUT3BlblRhYnNPcGVuZWRUaHJlYWQiFgoUT3BlblRhYnNPcGVuZWRIaWRkZW4i1AIKFU9wZW5UYWJzT3BlbmVkUmVmdXNlZBJKChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzItLmFnZW50cmVwbC52MS5PcGVuVGFic1JlZnVzZWRVbmtub3duV29ya3NwYWNlSAASUwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIxLmFnZW50cmVwbC52MS5PcGVuVGFic1JlZnVzZWRXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkoKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi0uYWdlbnRyZXBsLnYxLk9wZW5UYWJzUmVmdXNlZFRyYW5zZmVycmluZ0F3YXlIABJFCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKi5hZ2VudHJlcGwudjEuT3BlblRhYnNSZWZ1c2VkTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIiEKH09wZW5UYWJzUmVmdXNlZFVua25vd25Xb3Jrc3BhY2UiOwojT3BlblRhYnNSZWZ1c2VkV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjIKH09wZW5UYWJzUmVmdXNlZFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIeChxPcGVuVGFic1JlZnVzZWROb3RZZXRBZG9wdGVkImcKEE9wZW5UYWJzRmluaXNoZWQSDQoFcmVhZHkYASABKA0SDQoFdG90YWwYAiABKA0SNQoGZmFpbGVkGAMgAygLMiUuYWdlbnRyZXBsLnYxLk9wZW5UYWJzRmFpbGVkV29ya3NwYWNlIlYKF09wZW5UYWJzRmFpbGVkV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDAoEbmFtZRgCIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_frontend_v1_sidebar, file_workspace_v1_workspace]);
 
 /**
  * The workspaces the editor wants open.
@@ -626,14 +626,31 @@ export const OpenTabsOpenedSchema: GenMessage<OpenTabsOpened> = /*@__PURE__*/
  */
 export type OpenTabsOpenedReady = Message<"agentrepl.v1.OpenTabsOpenedReady"> & {
   /**
-   * THE WORKSPACE'S ROSTER ROW AS OF THIS ANSWER: its status, name and
-   * markers, so the tab is drawn true from the frame that opens it rather
-   * than from the next roster push. The roster stream carries every later
-   * change.
+   * How the roster lists the workspace. The set arm IS the listing.
    *
-   * @generated from field: frontend.v1.RosterRow row = 1;
+   * @generated from oneof agentrepl.v1.OpenTabsOpenedReady.listing
    */
-  row?: RosterRow | undefined;
+  listing: {
+    /**
+     * THE WORKSPACE'S ROSTER ROW AS OF THIS ANSWER: its status, name and
+     * markers, so the tab is drawn true from the frame that opens it rather
+     * than from the next roster push. The roster stream carries every later
+     * change.
+     *
+     * @generated from field: frontend.v1.RosterRow row = 1;
+     */
+    value: RosterRow;
+    case: "row";
+  } | {
+    /**
+     * A zettel chat thread, listed in the roster's thread section and never
+     * on the tab bar, so no row is drawn for it.
+     *
+     * @generated from field: agentrepl.v1.OpenTabsOpenedThread thread = 3;
+     */
+    value: OpenTabsOpenedThread;
+    case: "thread";
+  } | { case: undefined; value?: undefined };
 
   /**
    * The revision of the roster `row` was taken from (WorkspaceRoster.revision):
@@ -666,12 +683,28 @@ export type OpenTabsOpenedFailed = Message<"agentrepl.v1.OpenTabsOpenedFailed"> 
   reason: string;
 
   /**
-   * The workspace's roster row as of this answer, drawing the failure; as
-   * OpenTabsOpenedReady.row.
+   * How the roster lists the workspace, as OpenTabsOpenedReady.listing.
    *
-   * @generated from field: frontend.v1.RosterRow row = 2;
+   * @generated from oneof agentrepl.v1.OpenTabsOpenedFailed.listing
    */
-  row?: RosterRow | undefined;
+  listing: {
+    /**
+     * The workspace's roster row as of this answer, drawing the failure; as
+     * OpenTabsOpenedReady.row.
+     *
+     * @generated from field: frontend.v1.RosterRow row = 2;
+     */
+    value: RosterRow;
+    case: "row";
+  } | {
+    /**
+     * A zettel chat thread, as OpenTabsOpenedReady.thread.
+     *
+     * @generated from field: agentrepl.v1.OpenTabsOpenedThread thread = 4;
+     */
+    value: OpenTabsOpenedThread;
+    case: "thread";
+  } | { case: undefined; value?: undefined };
 
   /**
    * As OpenTabsOpenedReady.roster_revision.
@@ -689,6 +722,22 @@ export const OpenTabsOpenedFailedSchema: GenMessage<OpenTabsOpenedFailed> = /*@_
   messageDesc(file_agentrepl_v1_endpoint_open_tabs, 21);
 
 /**
+ * The workspace is a zettel chat thread, which no tab row draws. DELIBERATELY
+ * EMPTY: the arm is the fact.
+ *
+ * @generated from message agentrepl.v1.OpenTabsOpenedThread
+ */
+export type OpenTabsOpenedThread = Message<"agentrepl.v1.OpenTabsOpenedThread"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenTabsOpenedThread.
+ * Use `create(OpenTabsOpenedThreadSchema)` to create a new message.
+ */
+export const OpenTabsOpenedThreadSchema: GenMessage<OpenTabsOpenedThread> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 22);
+
+/**
  * Not visible, so nothing was started. DELIBERATELY EMPTY.
  *
  * @generated from message agentrepl.v1.OpenTabsOpenedHidden
@@ -701,7 +750,7 @@ export type OpenTabsOpenedHidden = Message<"agentrepl.v1.OpenTabsOpenedHidden"> 
  * Use `create(OpenTabsOpenedHiddenSchema)` to create a new message.
  */
 export const OpenTabsOpenedHiddenSchema: GenMessage<OpenTabsOpenedHidden> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 22);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 23);
 
 /**
  * The daemon refused to open the workspace.
@@ -754,7 +803,7 @@ export type OpenTabsOpenedRefused = Message<"agentrepl.v1.OpenTabsOpenedRefused"
  * Use `create(OpenTabsOpenedRefusedSchema)` to create a new message.
  */
 export const OpenTabsOpenedRefusedSchema: GenMessage<OpenTabsOpenedRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 23);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 24);
 
 /**
  * The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
@@ -769,7 +818,7 @@ export type OpenTabsRefusedUnknownWorkspace = Message<"agentrepl.v1.OpenTabsRefu
  * Use `create(OpenTabsRefusedUnknownWorkspaceSchema)` to create a new message.
  */
 export const OpenTabsRefusedUnknownWorkspaceSchema: GenMessage<OpenTabsRefusedUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 24);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 25);
 
 /**
  * The echoed dir disagrees with the registry's dir for this id.
@@ -790,7 +839,7 @@ export type OpenTabsRefusedWorkspaceRefMismatch = Message<"agentrepl.v1.OpenTabs
  * Use `create(OpenTabsRefusedWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const OpenTabsRefusedWorkspaceRefMismatchSchema: GenMessage<OpenTabsRefusedWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 25);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 26);
 
 /**
  * This daemon released the workspace to a successor.
@@ -811,7 +860,7 @@ export type OpenTabsRefusedTransferringAway = Message<"agentrepl.v1.OpenTabsRefu
  * Use `create(OpenTabsRefusedTransferringAwaySchema)` to create a new message.
  */
 export const OpenTabsRefusedTransferringAwaySchema: GenMessage<OpenTabsRefusedTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 26);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 27);
 
 /**
  * A joining daemon has not finished adopting this workspace yet.
@@ -827,7 +876,7 @@ export type OpenTabsRefusedNotYetAdopted = Message<"agentrepl.v1.OpenTabsRefused
  * Use `create(OpenTabsRefusedNotYetAdoptedSchema)` to create a new message.
  */
 export const OpenTabsRefusedNotYetAdoptedSchema: GenMessage<OpenTabsRefusedNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 27);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 28);
 
 /**
  * Every workspace of the request has had its `opened`.
@@ -863,7 +912,7 @@ export type OpenTabsFinished = Message<"agentrepl.v1.OpenTabsFinished"> & {
  * Use `create(OpenTabsFinishedSchema)` to create a new message.
  */
 export const OpenTabsFinishedSchema: GenMessage<OpenTabsFinished> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 28);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 29);
 
 /**
  * A workspace that opened with a service-level failure.
@@ -891,5 +940,5 @@ export type OpenTabsFailedWorkspace = Message<"agentrepl.v1.OpenTabsFailedWorksp
  * Use `create(OpenTabsFailedWorkspaceSchema)` to create a new message.
  */
 export const OpenTabsFailedWorkspaceSchema: GenMessage<OpenTabsFailedWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 29);
+  messageDesc(file_agentrepl_v1_endpoint_open_tabs, 30);
 

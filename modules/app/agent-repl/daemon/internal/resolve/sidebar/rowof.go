@@ -30,6 +30,22 @@ func (r *resolver) Row(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool)
 	return cloned, r.last.GetRevision(), true
 }
 
+// Thread implements Resolver: whether the last roster lists WS in its thread
+// section, with that roster's revision.
+func (r *resolver) Thread(ws ids.WorkspaceID) (uint64, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.last == nil {
+		return 0, false
+	}
+	for _, row := range r.last.GetThreads().GetRows() {
+		if row.GetThread().GetId() == string(ws) {
+			return r.last.GetRevision(), true
+		}
+	}
+	return 0, false
+}
+
 // Revision implements Resolver.
 func (r *resolver) Revision() uint64 {
 	r.mu.Lock()

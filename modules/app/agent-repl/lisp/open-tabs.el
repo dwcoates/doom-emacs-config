@@ -383,10 +383,13 @@ once a daemon is serving."
          (agent-repl-open-tabs--hide row))
         (t
          ;; THE ROW RIDES THE ANSWER: indexed before the tab is drawn, so it
-         ;; is drawn with the workspace's status as of the answer.
-         (let ((value (plist-get outcome :value)))
-           (agent-repl-roster-note-row (plist-get value :row)
-                                       (or (plist-get value :roster-revision) 0)))
+         ;; is drawn with the workspace's status as of the answer.  A chat
+         ;; thread has no row: the roster lists it in its thread section.
+         (let* ((value (plist-get outcome :value))
+                (listing (plist-get value :listing)))
+           (when (eq (plist-get listing :arm) :row)
+             (agent-repl-roster-note-row (plist-get listing :value)
+                                         (or (plist-get value :roster-revision) 0))))
          (when (eq (plist-get outcome :arm) :failed)
            (agent-repl-open-tabs--say "%s: session failed to start: %s."
                                       ws (plist-get (plist-get outcome :value) :reason)))

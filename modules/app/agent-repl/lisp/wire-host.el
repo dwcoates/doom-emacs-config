@@ -2090,13 +2090,26 @@ An empty list is refused here: the daemon would refuse it as malformed."
            :step (agent-repl-wire--decode-oneof
                   "OpenTabsStep" 'step object agent-repl-wire-open-tabs-step-arms)))))
 
+(agent-repl-wire--define-empty-decoder
+ agent-repl-wire-decode-open-tabs-opened-thread "OpenTabsOpenedThread")
+
+(defconst agent-repl-wire-open-tabs-listing-arms
+  '((row :row agent-repl-wire-decode-roster-row)
+    (thread :thread agent-repl-wire-decode-open-tabs-opened-thread))
+  "An opened answer's `listing''s arms: (WIRE-KEY ARM-KEYWORD DECODER).
+`row' is the workspace's roster row; `thread' says the roster lists it as
+a chat thread, which has no row.")
+
 (defun agent-repl-wire-decode-open-tabs-opened-ready (value)
-  "Decode VALUE as `OpenTabsOpenedReady', `(:row ROW :roster-revision N)'.
-ROW is the workspace's decoded roster row as of the answer, REQUIRED."
+  "Decode VALUE as `OpenTabsOpenedReady', `(:listing ONEOF :roster-revision N)'.
+LISTING is how the roster lists the workspace as of the answer, REQUIRED."
   (let ((object (agent-repl-wire--object "OpenTabsOpenedReady" value)))
-    (agent-repl-wire--check-keys "OpenTabsOpenedReady" object '(row rosterRevision))
-    (list :row (agent-repl-wire--decode-message "OpenTabsOpenedReady" 'row object
-                                                #'agent-repl-wire-decode-roster-row)
+    (agent-repl-wire--check-keys
+     "OpenTabsOpenedReady" object
+     (cons 'rosterRevision (mapcar #'car agent-repl-wire-open-tabs-listing-arms)))
+    (list :listing (agent-repl-wire--decode-oneof
+                    "OpenTabsOpenedReady" 'listing object
+                    agent-repl-wire-open-tabs-listing-arms)
           :roster-revision (agent-repl-wire--decode-uint64
                             "OpenTabsOpenedReady" 'rosterRevision object))))
 (agent-repl-wire--define-empty-decoder
@@ -2104,12 +2117,16 @@ ROW is the workspace's decoded roster row as of the answer, REQUIRED."
 
 (defun agent-repl-wire-decode-open-tabs-opened-failed (value)
   "Decode VALUE as `OpenTabsOpenedFailed'.
-Returns `(:reason S :row ROW :roster-revision N)'."
+Returns `(:reason S :listing ONEOF :roster-revision N)', LISTING as in
+`agent-repl-wire-decode-open-tabs-opened-ready'."
   (let ((object (agent-repl-wire--object "OpenTabsOpenedFailed" value)))
-    (agent-repl-wire--check-keys "OpenTabsOpenedFailed" object '(reason row rosterRevision))
+    (agent-repl-wire--check-keys
+     "OpenTabsOpenedFailed" object
+     (append '(reason rosterRevision) (mapcar #'car agent-repl-wire-open-tabs-listing-arms)))
     (list :reason (agent-repl-wire--decode-string "OpenTabsOpenedFailed" 'reason object)
-          :row (agent-repl-wire--decode-message "OpenTabsOpenedFailed" 'row object
-                                                #'agent-repl-wire-decode-roster-row)
+          :listing (agent-repl-wire--decode-oneof
+                    "OpenTabsOpenedFailed" 'listing object
+                    agent-repl-wire-open-tabs-listing-arms)
           :roster-revision (agent-repl-wire--decode-uint64
                             "OpenTabsOpenedFailed" 'rosterRevision object))))
 
