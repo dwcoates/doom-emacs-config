@@ -273,23 +273,25 @@ func owningScript(l suites.Layout, path string) (roster.Suite, error) {
 // splits, narrowed, and the atomic units and programs they depend on.
 func (r Resolved) Narrow(s roster.Suite, u suites.Units) (suites.Units, error) {
 	var splits []suites.Split
-	var atomic []run.Spec
 	for _, t := range r.targets[s.Name] {
 		if t.kind == kindSuite {
 			// The whole suite runs, whatever else of it was named.
 			return u, nil
 		}
 	}
+	if s.Kind == roster.Script {
+		// A Script suite is its one unit (suites.Units.Atomic), with no
+		// split, dependency or program to keep beside it.
+		got, err := narrowScript(u, r.targets[s.Name])
+		if err != nil {
+			return suites.Units{}, err
+		}
+		return suites.Units{Atomic: got}, nil
+	}
 	for _, t := range r.targets[s.Name] {
 		var got []suites.Split
 		var err error
 		switch {
-		case t.kind == kindHarness && s.Kind == roster.Script:
-			if !t.all {
-				return suites.Units{}, fmt.Errorf("%s: has no groups to name; select all of it", t.what)
-			}
-			atomic = append(atomic, u.Atomic...)
-			continue
 		case t.kind == kindGo:
 			got, err = narrowGo(s, u, t)
 		default:
@@ -307,9 +309,6 @@ func (r Resolved) Narrow(s roster.Suite, u suites.Units) (suites.Units, error) {
 		for _, d := range sp.Deps {
 			needed[d] = true
 		}
-	}
-	for _, a := range atomic {
-		needed[a.ID] = true
 	}
 	// The closure over the atomic units: a kept unit's own dependencies are
 	// kept too.
@@ -337,6 +336,31 @@ func (r Resolved) Narrow(s roster.Suite, u suites.Units) (suites.Units, error) {
 		}
 	}
 	return out, nil
+}
+
+// narrowScript narrows a Script suite, which every one of targets selects,
+// to its one unit: whole when any target asks for all of it, otherwise
+// running just the Go tests the targets name, once each. Only a suite that
+// lists its Go tests (suites.Units.Tests) has names to select.
+func narrowScript(u suites.Units, targets []target) ([]run.Spec, error) {
+	var names []string
+	for _, t := range targets {
+		if t.all {
+			return u.Atomic, nil
+		}
+		if u.Only == nil {
+			return nil, fmt.Errorf("%s: has no groups to name; select all of it", t.what)
+		}
+		for _, n := range t.names {
+			if !slices.Contains(u.Tests, n) {
+				return nil, fmt.Errorf("%s: runs no test %s (it runs %s)", t.what, n, strings.Join(u.Tests, ", "))
+			}
+			if !slices.Contains(names, n) {
+				names = append(names, n)
+			}
+		}
+	}
+	return []run.Spec{u.Only(names)}, nil
 }
 
 // narrowGo narrows a Go suite to one package's named tests.

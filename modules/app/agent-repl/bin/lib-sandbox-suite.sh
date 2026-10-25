@@ -6,6 +6,12 @@
 # container. A further sandboxed suite sources it too rather than carrying a
 # copy of the preflight, build and decline that drifts.
 #
+# WHICH TESTS RUN IS THE RUNNER'S. A sandboxed suite's script takes the
+# -test.run pattern as its one argument: the roster's pattern for a whole run
+# (testrun/roster, the suite's GoTests), or exactly the tests a run names
+# (`agent-repld test run -harness SCRIPT=TestA,TestB`), which testrun checks
+# against the package's tests before it starts the script.
+#
 # THE CONTAINER IS A PRECONDITION, NOT A FAILURE. A sandboxed suite must never
 # run unsandboxed -- it starts an editor that would otherwise reach the
 # developer's own ~/.claude, ~/.emacs.d and ~/.config -- so when the sandbox is
@@ -20,12 +26,16 @@
 # 77 is the autotools "skipped" convention, and it is used rather than 0 so
 # that a gate run can never show a green suite that did not execute.
 
-# run_sandbox_suite LABEL PATTERN WHAT [GO-TEST-ARGS...] runs the e2e module's
-# tests matching PATTERN inside the sandbox, announcing itself as LABEL and
-# WHAT; it execs, so it never returns.
+# run_sandbox_suite LABEL WHAT PATTERN runs the e2e module's tests matching
+# PATTERN (go test -run) inside the sandbox, announcing itself as LABEL and
+# WHAT; it execs, so it never returns. A missing or empty PATTERN, or any
+# further argument, is refused (exit 2) before the sandbox is touched.
 run_sandbox_suite() {
-  local label=$1 pattern=$2 what=$3
-  shift 3
+  if [ "$#" -ne 3 ] || [ -z "$3" ]; then
+      printf '[%s] REFUSED: the suite takes exactly one argument, the non-empty go test -run pattern testrun hands it\n' "${1:-?}" >&2
+      exit 2
+  fi
+  local label=$1 what=$2 pattern=$3
   local THIS_DIR MODULE_ROOT SANDBOX
   THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   MODULE_ROOT="$(cd "$THIS_DIR/.." && pwd)"
@@ -73,5 +83,5 @@ run_sandbox_suite() {
       export AGENT_REPL_SANDBOX_CPUS="$AGENT_REPL_UNIT_SLOTS"
   fi
   printf '[%s] running %s inside the sandbox\n' "$label" "$what"
-  exec "$SANDBOX" run --dir e2e go test ./ -run "$pattern" -v "$@"
+  exec "$SANDBOX" run --dir e2e go test ./ -run "$pattern" -v
 }

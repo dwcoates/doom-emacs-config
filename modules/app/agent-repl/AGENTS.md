@@ -238,6 +238,9 @@ dependency chain first. Parallelism belongs to this scheduler:
 - e2e and integration packages build their shared binaries once in a prebuild
   unit, then every test chunk consumes those exact binaries;
 - slow shell harnesses expose `--list` / `--only` groups and per-group timing.
+- a sandboxed suite (`e2e-emacs`) runs whole as one unit, in one container; its
+  roster entry's `GoTests` names its Go tests, so a run that names some of them
+  (`-harness bin/test-e2e-emacs.sh=TestA,TestB`) hands its script exactly those.
 - a unit that cannot be pinned to one core holds a WIDTH of slots and caps
   itself to exactly that many cores. `e2e-emacs` is four slots wide (the VM its
   Emacs parallelism bound was measured on); testrun hands the width over in

@@ -129,17 +129,60 @@ func TestReadFailingTestsLeavesAGoChunkWithNoFailLineUnnamed(t *testing.T) {
 	}
 }
 
-func TestReadFailingTestsRunsTheEmacsClientLayersTestsThroughItsScript(t *testing.T) {
-	// Arrange.
-	out := failedUnit("e2e-emacs", "e2e-emacs", "--- FAIL: TestEmacsRestartKeepsTheSelectedWorkspace (8.74s)", "FAIL")
+func TestReadFailingTestsRunsTheEmacsClientLayersFailingTestsThroughItsScript(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{
+			name:  "one failing test reruns alone",
+			lines: []string{"--- FAIL: TestEmacsRestartKeepsTheSelectedWorkspace (8.74s)", "FAIL"},
+			want:  TestRunCommand + " -harness '/wt/modules/app/agent-repl/bin/test-e2e-emacs.sh=TestEmacsRestartKeepsTheSelectedWorkspace'",
+		},
+		{
+			name: "a failing subtest reruns its top-level test, named once",
+			lines: []string{"    --- FAIL: TestEmacsA/a_case (1.00s)", "--- FAIL: TestEmacsA (1.00s)",
+				"--- FAIL: TestDoomB (2.00s)", "FAIL"},
+			want: TestRunCommand + " -harness '/wt/modules/app/agent-repl/bin/test-e2e-emacs.sh=TestEmacsA,TestDoomB'",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			out := failedUnit("e2e-emacs", "e2e-emacs", tt.lines...)
 
-	// Act.
-	s := suiteOf(t, readFailingTests(out, testModule), "e2e-emacs")
+			// Act.
+			s := suiteOf(t, readFailingTests(out, testModule), "e2e-emacs")
 
-	// Assert.
-	want := TestRunCommand + " -harness '/wt/modules/app/agent-repl/bin/test-e2e-emacs.sh'"
-	if got := s.groups[0].command(); got != want {
-		t.Fatalf("command = %q, want %q", got, want)
+			// Assert.
+			if got := s.groups[0].command(); got != tt.want {
+				t.Fatalf("command = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTopLevel(t *testing.T) {
+	tests := []struct {
+		name  string
+		names []string
+		want  []string
+	}{
+		{name: "top-level tests stay as named", names: []string{"TestA", "TestB"}, want: []string{"TestA", "TestB"}},
+		{name: "a subtest path becomes its top-level test", names: []string{"TestA/x/y"}, want: []string{"TestA"}},
+		{name: "a test and its subtests are named once, where first named", names: []string{"TestB/x", "TestA", "TestB"}, want: []string{"TestB", "TestA"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := topLevel(tt.names)
+
+			// Assert.
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("topLevel(%v) = %v, want %v", tt.names, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -27,7 +27,7 @@ import (
 // so every failure line is read inside the unit that printed it. Each kind of
 // suite prints its failures its own way, and each is read by its own pattern:
 //
-//	Go (GoModule, E2E, e2e-emacs)  "--- FAIL: TestName (1.23s)"      go test -v
+//	Go (GoModule, E2E, GoTests)    "--- FAIL: TestName (1.23s)"      go test -v
 //	ERT                            "FAILED  3/40  name (0.1 sec) at test-x.el:12"
 //	vitest                         " FAIL  test/x.test.ts > describe > name"
 //	script harnesses               "FAIL - what failed" / "  FAIL: what failed"
@@ -196,11 +196,12 @@ func readUnit(found *failingTests, unit, suiteName string, lines []string, modul
 	named := false
 	switch {
 	case !known:
-	case suiteName == "e2e-emacs":
-		// The Emacs layer runs whole: its harness has no tests to name.
+	case suite.GoTests != nil:
+		// A sandboxed suite's harness reruns its failing top-level tests
+		// alone (roster.Suite.GoTests): a harness names no subtest.
 		script := filepath.Join(module, suite.Path)
-		named = readGoUnit(s, lines, "e2e-emacs", func([]string) []string {
-			return []string{selectionFlag("harness", script, nil)}
+		named = readGoUnit(s, lines, suiteName, func(names []string) []string {
+			return []string{selectionFlag("harness", script, topLevel(names))}
 		})
 	case suite.Kind == roster.GoModule || suite.Kind == roster.E2E:
 		rel, _, ok := goUnitPackage(unit, suiteName)
@@ -260,6 +261,18 @@ func deepest(names []string) []string {
 		nested := slices.ContainsFunc(names, func(o string) bool { return strings.HasPrefix(o, n+"/") })
 		if !nested && !slices.Contains(out, n) {
 			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// topLevel is the top-level tests of names (Go test paths), each once, in
+// the order first named.
+func topLevel(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if top, _, _ := strings.Cut(n, "/"); !slices.Contains(out, top) {
+			out = append(out, top)
 		}
 	}
 	return out

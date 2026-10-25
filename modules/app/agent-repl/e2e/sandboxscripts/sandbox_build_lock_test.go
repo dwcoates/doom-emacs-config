@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"agentrepl/testrun/roster"
 )
 
 // THE SANDBOX BUILD GATE.
@@ -594,7 +596,7 @@ func TestE2EEmacsScriptHandsItsSlotWidthToTheSandbox(t *testing.T) {
 			// sandbox runner that reports the CPU cap it was handed.
 			script := sandboxSuiteModule(t, "test-e2e-emacs.sh", "[ \"$1\" = preflight ] && exit 0\n"+
 				"printf 'cpus=%s\\n' \"${AGENT_REPL_SANDBOX_CPUS:-unset}\"\n")
-			cmd := exec.Command("bash", script)
+			cmd := exec.Command("bash", script, e2eEmacsPattern)
 			var env []string
 			for _, kv := range os.Environ() {
 				if !strings.HasPrefix(kv, "AGENT_REPL_UNIT_SLOTS=") && !strings.HasPrefix(kv, "AGENT_REPL_SANDBOX_CPUS=") {
@@ -779,9 +781,9 @@ func sandboxSuiteModule(t *testing.T, script, sandbox string) string {
 }
 
 // runE2EEmacs runs the suite script at SCRIPT, answering its output and exit.
-func runE2EEmacs(t *testing.T, script string) (string, int) {
+func runE2EEmacs(t *testing.T, script string, args ...string) (string, int) {
 	t.Helper()
-	cmd := exec.Command("bash", script)
+	cmd := exec.Command("bash", append([]string{script}, args...)...)
 	cmd.Env = append(os.Environ(), "AGENT_REPL_BACKGROUND_PRIORITY=1")
 	out, err := cmd.CombinedOutput()
 	var exit *exec.ExitError
@@ -795,6 +797,16 @@ func runE2EEmacs(t *testing.T, script string) (string, int) {
 		return "", 0
 	}
 }
+
+// e2eEmacsPattern is the -test.run pattern testrun hands test-e2e-emacs.sh
+// for a whole run: the roster's, read rather than copied.
+var e2eEmacsPattern = func() string {
+	s, ok := roster.Lookup("e2e-emacs")
+	if !ok || s.GoTests == nil {
+		panic("the roster has no e2e-emacs suite with Go tests")
+	}
+	return s.GoTests.Pattern
+}()
 
 // builtSandbox is a fake runner whose image does not exist until `build`.
 const builtSandbox = `case $1 in
@@ -810,7 +822,7 @@ func TestE2EEmacsBuildsThisCheckoutsImageWhenItIsNotBuilt(t *testing.T) {
 	script := e2eEmacsModule(t, builtSandbox)
 
 	// Act.
-	out, code := runE2EEmacs(t, script)
+	out, code := runE2EEmacs(t, script, e2eEmacsPattern)
 
 	// Assert.
 	if code != 0 || !strings.Contains(out, "BUILT\n") || !strings.Contains(out, "RAN\n") {
@@ -829,7 +841,7 @@ esac
 `)
 
 	// Act.
-	out, code := runE2EEmacs(t, script)
+	out, code := runE2EEmacs(t, script, e2eEmacsPattern)
 
 	// Assert: a failure, never the decline (77) and never a run.
 	if code == 0 || code == 77 || strings.Contains(out, "RAN\n") {
@@ -848,7 +860,7 @@ esac
 `)
 
 	// Act.
-	out, code := runE2EEmacs(t, script)
+	out, code := runE2EEmacs(t, script, e2eEmacsPattern)
 
 	// Assert.
 	if code != 77 || strings.Contains(out, "BUILT\n") || strings.Contains(out, "RAN\n") {
@@ -984,37 +996,67 @@ func TestSourcingTheSandboxScriptDispatchesNothing(t *testing.T) {
 	}
 }
 
-// TestEachSandboxedSuiteRunsItsOwnTestsInTheSandbox: both sandboxed suites
-// go through lib-sandbox-suite.sh, each running its own tests and declining
-// (77) when the sandbox is unusable.
+// TestEachSandboxedSuiteRunsItsOwnTestsInTheSandbox: every sandboxed suite
+// goes through lib-sandbox-suite.sh, running in the sandbox exactly the tests
+// its one argument (testrun's -test.run pattern) matches, refusing any other
+// argument list, and declining (77) when the sandbox is unusable.
 func TestEachSandboxedSuiteRunsItsOwnTestsInTheSandbox(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name, script, pattern, label string
 	}{
-		{name: "the Emacs client layer and the Doom tier", script: "test-e2e-emacs.sh", pattern: "TestEmacs|TestDoom", label: "e2e-emacs"},
+		{name: "the Emacs client layer and the Doom tier", script: "test-e2e-emacs.sh", pattern: e2eEmacsPattern, label: "e2e-emacs"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name+" runs its tests", func(t *testing.T) {
-			t.Parallel()
-			// Arrange
-			script := sandboxSuiteModule(t, tt.script, "[ \"$1\" = preflight ] && exit 0\necho \"RAN $*\"\n")
+		runs := []struct{ name, pattern string }{
+			{name: " runs its tests", pattern: tt.pattern},
+			{name: " runs just the tests a run names", pattern: "^(TestEmacsA|TestDoomB)$"},
+		}
+		for _, r := range runs {
+			t.Run(tt.name+r.name, func(t *testing.T) {
+				t.Parallel()
+				// Arrange
+				script := sandboxSuiteModule(t, tt.script, "[ \"$1\" = preflight ] && exit 0\necho \"RAN $*\"\n")
 
-			// Act
-			out, code := runE2EEmacs(t, script)
+				// Act
+				out, code := runE2EEmacs(t, script, r.pattern)
 
-			// Assert
-			if code != 0 || !strings.Contains(out, "RAN run --dir e2e go test ./ -run "+tt.pattern+" -v\n") || !strings.Contains(out, "["+tt.label+"] running") {
-				t.Fatalf("%s exit %d, want %s run in the sandbox under [%s]:\n%s", tt.script, code, tt.pattern, tt.label, out)
-			}
-		})
+				// Assert
+				if code != 0 || !strings.Contains(out, "RAN run --dir e2e go test ./ -run "+r.pattern+" -v\n") || !strings.Contains(out, "["+tt.label+"] running") {
+					t.Fatalf("%s exit %d, want %s run in the sandbox under [%s]:\n%s", tt.script, code, r.pattern, tt.label, out)
+				}
+			})
+		}
+		refusals := []struct {
+			name string
+			args []string
+		}{
+			{name: " refuses a run with no pattern", args: nil},
+			{name: " refuses an empty pattern", args: []string{""}},
+			{name: " refuses a second argument", args: []string{tt.pattern, "-count=2"}},
+		}
+		for _, r := range refusals {
+			t.Run(tt.name+r.name, func(t *testing.T) {
+				t.Parallel()
+				// Arrange
+				script := sandboxSuiteModule(t, tt.script, "echo \"SANDBOX $*\"\n")
+
+				// Act
+				out, code := runE2EEmacs(t, script, r.args...)
+
+				// Assert
+				if code != 2 || strings.Contains(out, "SANDBOX") || !strings.Contains(out, "["+tt.label+"] REFUSED") {
+					t.Fatalf("%s %q exit %d, want a refusal (2) before the sandbox is touched:\n%s", tt.script, r.args, code, out)
+				}
+			})
+		}
 		t.Run(tt.name+" declines an unusable sandbox", func(t *testing.T) {
 			t.Parallel()
 			// Arrange
 			script := sandboxSuiteModule(t, tt.script, "[ \"$1\" = preflight ] && { echo 'docker is not running'; exit 3; }\necho RAN\n")
 
 			// Act
-			out, code := runE2EEmacs(t, script)
+			out, code := runE2EEmacs(t, script, tt.pattern)
 
 			// Assert
 			if code != 77 || strings.Contains(out, "RAN") || !strings.Contains(out, "docker is not running") {

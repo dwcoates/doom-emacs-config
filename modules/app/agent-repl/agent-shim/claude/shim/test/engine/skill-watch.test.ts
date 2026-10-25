@@ -46,6 +46,34 @@ describe("SkillSetWatch", () => {
     expect(changes).toEqual([`${ROOT}/beta`]);
   });
 
+  it("records every event it sees at DEBUG, naming the watched directory and the entry", () => {
+    const { fsys, watch } = arrange();
+    watch.start();
+
+    const records = logRecordsDuring(() => fsys.fire(ROOT, "beta"));
+
+    expect(
+      records.some(
+        (r) =>
+          r.level === "debug" &&
+          r.message === "a watch on the vendor's skills saw an event" &&
+          r.context["watched"] === ROOT &&
+          r.context["entry"] === "beta",
+      ),
+    ).toBe(true);
+  });
+
+  it("records an event that names no entry with an empty entry", () => {
+    const { fsys, watch } = arrange();
+    watch.start();
+
+    const records = logRecordsDuring(() => fsys.fire(ROOT, null));
+
+    expect(
+      records.some((r) => r.message === "a watch on the vendor's skills saw an event" && r.context["entry"] === ""),
+    ).toBe(true);
+  });
+
   it("reports a change to a linked skill's SKILL.md, watched at the link's target", () => {
     const { fsys, changes, watch } = arrange();
     watch.start();

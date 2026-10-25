@@ -251,6 +251,93 @@ func TestScriptUnitsThatReadTheWebappDistNeverBuildIt(t *testing.T) {
 	}
 }
 
+// goTestsSuite is a sandbox-like Script suite over a package in repo holding
+// tests some of which its pattern matches.
+func goTestsSuite(t *testing.T, repo, pattern string) roster.Suite {
+	t.Helper()
+	write(t, filepath.Join(repo, "bin", "e.sh"), "#!/bin/sh\n", 0o755)
+	write(t, filepath.Join(repo, "pkg", "x_test.go"), "package pkg\n\nimport \"testing\"\n\n"+
+		"func TestEmacsA(t *testing.T) {}\nfunc TestDoomB(t *testing.T) {}\nfunc TestOther(t *testing.T) {}\nfunc TestWithinTestEmacs(t *testing.T) {}\n", 0o644)
+	return roster.Suite{Name: "e", Kind: roster.Script, Path: "bin/e.sh", MayDecline: true, Slots: 2, NeedsWebappDist: true,
+		GoTests: &roster.GoTests{Dir: "pkg", Pattern: pattern}}
+}
+
+func TestScriptUnitsOfAGoTestsSuite(t *testing.T) {
+	// Arrange
+	repo := t.TempDir()
+	s := goTestsSuite(t, repo, "TestEmacs|TestDoom")
+	script := filepath.Join(repo, "bin", "e.sh")
+
+	// Act
+	u, err := scriptUnits(Layout{Repo: repo, Module: repo}, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	only := u.Only([]string{"TestEmacsA", "TestDoomB"})
+
+	// Assert
+	t.Run("a whole run hands the script the roster's pattern unchanged", func(t *testing.T) {
+		if len(u.Atomic) != 1 || !reflect.DeepEqual(u.Atomic[0].Argv, []string{script, "TestEmacs|TestDoom"}) {
+			t.Fatalf("atomic = %+v, want one unit running %s with the pattern", u.Atomic, script)
+		}
+	})
+	t.Run("its tests are every top-level test the pattern matches, as go test -run matches", func(t *testing.T) {
+		if want := []string{"TestDoomB", "TestEmacsA", "TestWithinTestEmacs"}; !reflect.DeepEqual(u.Tests, want) {
+			t.Fatalf("tests = %v, want %v", u.Tests, want)
+		}
+	})
+	t.Run("a run of named tests hands the script exactly those", func(t *testing.T) {
+		if want := []string{script, gotest.TopPattern([]string{"TestEmacsA", "TestDoomB"})}; !reflect.DeepEqual(only.Argv, want) {
+			t.Fatalf("only argv = %v, want %v", only.Argv, want)
+		}
+	})
+	t.Run("a run of named tests is the whole run's unit in everything but its argument", func(t *testing.T) {
+		whole := u.Atomic[0]
+		whole.Argv, only.Argv = nil, nil
+		if !reflect.DeepEqual(whole, only) {
+			t.Fatalf("only = %+v, want the whole unit %+v", only, whole)
+		}
+	})
+}
+
+func TestScriptUnitsOfAnyOtherScriptListNoTests(t *testing.T) {
+	// Arrange
+	repo := t.TempDir()
+	write(t, filepath.Join(repo, "bin", "e.sh"), "#!/bin/sh\n", 0o755)
+
+	// Act
+	u, err := scriptUnits(Layout{Repo: repo, Module: repo}, roster.Suite{Name: "e", Kind: roster.Script, Path: "bin/e.sh"})
+
+	// Assert
+	if err != nil || u.Tests != nil || u.Only != nil {
+		t.Fatalf("units = %+v, %v; want no tests to name", u, err)
+	}
+}
+
+func TestScriptUnitsOfAGoTestsSuiteRefuse(t *testing.T) {
+	tests := []struct {
+		name, pattern, want string
+	}{
+		{name: "a pattern that matches no test", pattern: "TestNone", want: `suites: e's pattern "TestNone" matches no test in pkg`},
+		{name: "a pattern that does not compile", pattern: "Test(", want: `suites: e's Go test pattern "Test("`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			repo := t.TempDir()
+			s := goTestsSuite(t, repo, tt.pattern)
+
+			// Act
+			_, err := scriptUnits(Layout{Repo: repo, Module: repo}, s)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseScriptList(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -30,6 +30,7 @@ import (
 //	-ert FILE=test-a,test-b        those ert-deftests
 //	-harness SCRIPT                the whole shell harness
 //	-harness SCRIPT=group1,group2  those groups of a harness that lists groups
+//	-harness SCRIPT=TestA,TestB    those top-level Go tests of a sandboxed suite (bin/test-e2e-emacs.sh)
 //	-suite NAME                    one roster suite, whole
 //	-every-suite                   the whole roster: the merge queue's gate, run
 //	                               by an agent only with a stated reason
