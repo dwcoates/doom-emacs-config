@@ -2319,13 +2319,14 @@ describe("the async-merging marker", () => {
   });
 });
 
-// A PAUSED QUEUE (owner ruling, 2026-10-14): the merge indicator greys and
+// A PAUSED QUEUE (owner ruling, 2026-10-14; amber per owner request
+// 2026-10-25): the merge indicator takes the paused amber and
 // the name stops breathing for the merge, keeping its color.
 describe("the merge-paused marker", () => {
 
-  it("greys a paused merging row's glyph", () => {
+  it("inks amber a paused merging row's glyph", () => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "merging", value: {} }, mergePaused: true }), sidebarContext(), "R");
-    expect(dotOf(drawn).classList.contains("ink-grey")).toBe(true);
+    expect(dotOf(drawn).classList.contains("ink-amber")).toBe(true);
   });
 
   it("stops a paused merging row's name breathing", () => {
@@ -2338,12 +2339,12 @@ describe("the merge-paused marker", () => {
     expect([drawn.classList.contains("tone-purple"), dotOf(drawn).classList.contains("tone-purple")]).toEqual([true, true]);
   });
 
-  it("greys a paused merge_queued row's glyph", () => {
+  it("inks amber a paused merge_queued row's glyph", () => {
     const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "mergeQueued", value: {} }, mergePaused: true }), sidebarContext(), "R");
-    expect([dotOf(drawn).classList.contains("ink-grey"), dotOf(drawn).classList.contains("ink-purple")]).toEqual([true, false]);
+    expect([dotOf(drawn).classList.contains("ink-amber"), dotOf(drawn).classList.contains("ink-purple")]).toEqual([true, false]);
   });
 
-  it("greys a paused async merge's mark and stops the name breathing", () => {
+  it("inks amber a paused async merge's mark and stops the name breathing", () => {
     const drawn = drawRosterRow(
       row({ id: "ws-1", status: { case: "ready", value: {} }, asyncMerging: true, mergePaused: true }),
       sidebarContext(),
@@ -2351,7 +2352,7 @@ describe("the merge-paused marker", () => {
     );
     expect([
       dotOf(drawn).getAttribute("data-glyph"),
-      dotOf(drawn).classList.contains("ink-grey"),
+      dotOf(drawn).classList.contains("ink-amber"),
       dotOf(drawn).classList.contains("ink-purple"),
       nameOf(drawn).classList.contains("breathes"),
       drawn.classList.contains("tone-green"),

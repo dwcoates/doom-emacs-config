@@ -121,7 +121,7 @@ type AsyncMergeMark struct {
 // paused (frontend.v1.RosterRowMergePaused, owner ruling 2026-10-14): the ink
 // every merge indicator of the row takes, and the motion the merge's breath
 // on the row's name takes. Every renderer reads it here, so no surface picks
-// its own grey.
+// its own amber.
 type PausedMergeMark struct {
 	Ink    string `json:"ink"`
 	Motion string `json:"motion"`

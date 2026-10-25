@@ -249,16 +249,16 @@ describe("a row's mark with its merge-paused marker", () => {
   const PAUSED: RowMarkers = { oneShot: false, asyncMerging: false, mergePaused: true };
   const PAUSED_ASYNC: RowMarkers = { oneShot: false, asyncMerging: true, mergePaused: true };
 
-  it.each(["merging", "mergeQueued"] as const)("inks the paused %s glyph grey and holds it still on its own tone", (arm) => {
-    expect(rosterRowMark(arm, PAUSED)).toEqual({ ...rosterArmMark(arm), ink: "grey", motion: "still" });
+  it.each(["merging", "mergeQueued"] as const)("inks the paused %s glyph amber and holds it still on its own tone", (arm) => {
+    expect(rosterRowMark(arm, PAUSED)).toEqual({ ...rosterArmMark(arm), ink: "amber", motion: "still" });
   });
 
-  it("greys the async-merge mark over a plain idle dot and holds it still", () => {
+  it("ambers the async-merge mark over a plain idle dot and holds it still", () => {
     expect(rosterRowMark("ready", PAUSED_ASYNC)).toEqual({
       ...rosterArmMark("ready"),
       glyph: "merge",
       image: GLYPH_IMAGES.merge,
-      ink: "grey",
+      ink: "amber",
       motion: "still",
     });
   });

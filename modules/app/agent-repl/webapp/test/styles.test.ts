@@ -4515,11 +4515,11 @@ describe("the rail's tone rules", () => {
     expect(rules[inkAt].declarations).toMatch(/(?:^|;)\s*color\s*:/);
   });
 
-  it("inks a paused queue's merge indicators in the inactive dot's grey", () => {
+  it("inks a paused queue's merge indicators in the paused merge bubble's amber", () => {
     const rules = rulesOf(stylesheet).filter(
       (rule) => isOwnRule(rule, `#ws-sidebar .st.ink-${renderColors.paused_merge_mark.ink}`),
     );
-    expect(rules.at(-1)?.declarations).toContain("color: var(--muted)");
+    expect(rules.at(-1)?.declarations).toContain("color: var(--merge-paused)");
   });
 });
 

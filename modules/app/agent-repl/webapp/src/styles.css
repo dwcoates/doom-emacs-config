@@ -415,7 +415,8 @@
   --merge-card: #fef3c7;
   --merge-border: #ca8a04;
   /* A PAUSED MERGE QUEUE'S AMBER (owner request, 2026-10-23): the merge
-     bubble's "paused" pill, its queue tab's banner and its frame. A warm
+     bubble's "paused" pill, its queue tab's banner and its frame, and the
+     sidebar's paused merge glyphs (render-colors.json's 'amber' ink). A warm
      orange, so a stopped queue reads at a glance apart from the purple of a
      merge at work. */
   --merge-paused: #d97706;
@@ -1033,9 +1034,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .repo.folded > .repo-head .sb-today-count { display: none; }
 /* THE MERGE-QUEUE TOGGLE on the OPEN header line (owner request, 2026-10-24;
    src/sidebar/merge-queue-view.ts): the feed's merge glyph at the line's
-   right end, in the expanded repository names' colour while the repository
-   sections show their workspaces, and in the canonical purple of a merge in
-   progress (--blocked, .tone-purple's) while they show their merge queues.
+   right end, in the canonical purple of a merge in progress (--blocked,
+   .tone-purple's) while the repository sections show their workspaces, the
+   amber a paused merge bubble is framed in (--merge-paused) while a merge
+   queue is paused, and in the expanded repository names' colour while they
+   show their merge queues (owner request, 2026-10-25).
    It takes the click in the area around the glyph, as a triangle does, and
    keeps the header's weight and case out of the glyph, bare as the rail's
    glyph controls are. */
@@ -1051,9 +1054,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   text-transform: none;
   letter-spacing: 0;
   cursor: pointer;
-  color: var(--repo-head-expanded);
+  color: var(--blocked);
 }
-#ws-sidebar .repo-head > .sb-merge-queue-toggle[data-shows="merge-queues"] { color: var(--blocked); }
+#ws-sidebar .repo-head > .sb-merge-queue-toggle[data-merge-queue-paused] { color: var(--merge-paused); }
+/* After the paused amber, at its specificity, so the queues' view wins. */
+#ws-sidebar .repo-head > .sb-merge-queue-toggle[data-shows="merge-queues"] { color: var(--repo-head-expanded); }
 /* A folded open workspaces section folds away every grouping section it
    holds, headers included; only its own header stays. */
 #ws-sidebar .repo.open-section.folded > .sb-sections { display: none; }
@@ -6711,9 +6716,10 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .st.ink-orange { color: var(--compact-rule); }
 #ws-sidebar .st.ink-purple { color: var(--blocked); }
 /* A PAUSED QUEUE'S MERGE INDICATORS (render-colors.json paused_merge_mark,
-   owner ruling 2026-10-14): the merge glyph of a merging, queued or async
-   merge whose queue is paused, in the grey of an inactive dot. */
-#ws-sidebar .st.ink-grey { color: var(--muted); }
+   owner ruling 2026-10-14, amber per owner request 2026-10-25): the merge
+   glyph of a merging, queued or async merge whose queue is paused, in the
+   amber a paused merge bubble is framed in. */
+#ws-sidebar .st.ink-amber { color: var(--merge-paused); }
 #ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
 /* ONE ANIMATION FOR THE WHOLE RAIL (owner ruling, 2026-10-13): every breath
    (bright, faded, bright) runs the same keyframes, easing and

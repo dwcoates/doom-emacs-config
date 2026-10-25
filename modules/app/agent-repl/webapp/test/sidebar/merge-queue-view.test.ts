@@ -16,9 +16,11 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   drawMergeQueueToggle,
   drawRosterMergeQueue,
+  drawRosterOpenSectionMergeQueuePaused,
   drawRosterOpenSectionShows,
   drawRosterRepoShows,
   MERGE_QUEUE_CLASS,
+  MERGE_QUEUE_PAUSED_ATTRIBUTE,
   MERGE_QUEUE_TOGGLE_CLASS,
   OPEN_SHOWS_VIEW_KEY,
   paintMergeQueueToggle,
@@ -62,6 +64,15 @@ describe("drawRosterOpenSectionShows", () => {
   });
 });
 
+describe("drawRosterOpenSectionMergeQueuePaused", () => {
+  it.each([
+    { name: "a paused merge queue when the marker stands", paused: true },
+    { name: "no paused merge queue when the marker is absent", paused: false },
+  ])("reads $name", ({ paused }) => {
+    expect(drawRosterOpenSectionMergeQueuePaused(openSection(false, false, paused))).toBe(paused);
+  });
+});
+
 describe("drawRosterRepoShows", () => {
   it("reads the workspaces", () => {
     expect(drawRosterRepoShows(repoSection({ id: "repo-1" }), "section")).toEqual({ case: "workspaces" });
@@ -91,7 +102,7 @@ describe("paintMergeQueueToggle", () => {
 describe("drawMergeQueueToggle", () => {
   it("draws the merge glyph", () => {
     const { sc } = daemon();
-    const toggle = drawMergeQueueToggle(sc, false);
+    const toggle = drawMergeQueueToggle(sc, false, false);
     expect([toggle.className, toggle.textContent]).toEqual([MERGE_QUEUE_TOGGLE_CLASS, MERGE_GLYPH]);
   });
 
@@ -100,13 +111,13 @@ describe("drawMergeQueueToggle", () => {
     { name: "the merge queues", wire: true, shows: "merge-queues" },
   ])("is drawn as the wire says when it shows $name", ({ wire, shows }) => {
     const { sc } = daemon();
-    expect(drawMergeQueueToggle(sc, wire).getAttribute(SHOWS_ATTRIBUTE)).toBe(shows);
+    expect(drawMergeQueueToggle(sc, wire, false).getAttribute(SHOWS_ATTRIBUTE)).toBe(shows);
   });
 
   it("is drawn as this page asked while its ask is in flight", () => {
     const { sc } = daemon();
     sc.view.ask(OPEN_SHOWS_VIEW_KEY, true);
-    expect(drawMergeQueueToggle(sc, false).getAttribute(SHOWS_ATTRIBUTE)).toBe("merge-queues");
+    expect(drawMergeQueueToggle(sc, false, false).getAttribute(SHOWS_ATTRIBUTE)).toBe("merge-queues");
   });
 
   it.each([
@@ -114,14 +125,29 @@ describe("drawMergeQueueToggle", () => {
     { name: "asks for the workspaces while the merge queues show", wire: true, want: "workspaces" },
   ])("$name", async ({ wire, want }) => {
     const { asked, sc } = daemon();
-    drawMergeQueueToggle(sc, wire).click();
+    drawMergeQueueToggle(sc, wire, false).click();
     await settled();
     expect(asked.map((r) => (r.change.case === "showOpen" ? r.change.value.shows.case : r.change.case))).toEqual([want]);
   });
 
-  it("turns purple at once, before the daemon answers", () => {
+  it.each([
+    { name: "marked while a merge queue is paused", paused: true },
+    { name: "unmarked while no merge queue is paused", paused: false },
+  ])("is $name", ({ paused }) => {
     const { sc } = daemon();
-    const toggle = drawMergeQueueToggle(sc, false);
+    expect(drawMergeQueueToggle(sc, false, paused).hasAttribute(MERGE_QUEUE_PAUSED_ATTRIBUTE)).toBe(paused);
+  });
+
+  it("keeps the paused mark across a click", () => {
+    const { sc } = daemon();
+    const toggle = drawMergeQueueToggle(sc, false, true);
+    toggle.click();
+    expect(toggle.hasAttribute(MERGE_QUEUE_PAUSED_ATTRIBUTE)).toBe(true);
+  });
+
+  it("shows the merge queues at once, before the daemon answers", () => {
+    const { sc } = daemon();
+    const toggle = drawMergeQueueToggle(sc, false, false);
     toggle.click();
     expect(toggle.getAttribute(SHOWS_ATTRIBUTE)).toBe("merge-queues");
   });
@@ -131,7 +157,7 @@ describe("drawMergeQueueToggle", () => {
       throw new Error("down");
     });
     const host = document.createElement("div");
-    const toggle = drawMergeQueueToggle(sc, false);
+    const toggle = drawMergeQueueToggle(sc, false, false);
     host.appendChild(toggle);
     toggle.click();
     await settled();
@@ -143,7 +169,7 @@ describe("drawMergeQueueToggle", () => {
     const header = document.createElement("div");
     let folds = 0;
     header.addEventListener("click", () => folds++);
-    const toggle = drawMergeQueueToggle(sc, false);
+    const toggle = drawMergeQueueToggle(sc, false, false);
     header.appendChild(toggle);
     toggle.click();
     expect(folds).toBe(0);

@@ -396,9 +396,9 @@ func setHiddenFold(section *frontendv1.RosterHiddenSection, folded bool) {
 	section.Fold = &frontendv1.RosterHiddenSection_Expanded{Expanded: &frontendv1.RosterHiddenSectionExpanded{}}
 }
 
-// openSection resolves the open-workspaces section: its heading, its fold and
-// what its repository sections show, the same view repositoryView states on
-// each of them.
+// openSection resolves the open-workspaces section: its heading, its fold,
+// what its repository sections show (the same view repositoryView states on
+// each of them) and whether any repository's merge queue is paused.
 // The groupings it boxes stay on the roster, each carrying its own count
 // (openCount). The fold is the daemon's so every page draws the same one
 // (UpdateSidebarView); it folds sidebar rows only, never a tab.
@@ -413,6 +413,9 @@ func (r *resolver) openSection() *frontendv1.RosterOpenSection {
 		section.Shows = &frontendv1.RosterOpenSection_MergeQueues{MergeQueues: &frontendv1.RosterOpenSectionShowsMergeQueues{}}
 	} else {
 		section.Shows = &frontendv1.RosterOpenSection_Workspaces{Workspaces: &frontendv1.RosterOpenSectionShowsWorkspaces{}}
+	}
+	if r.state.anyMergeQueuePaused() {
+		section.MergeQueuePaused = &frontendv1.RosterOpenSectionMergeQueuePaused{}
 	}
 	return section
 }

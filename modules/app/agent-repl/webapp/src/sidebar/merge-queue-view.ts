@@ -3,11 +3,14 @@
  * repository section draws while it is on (owner request, 2026-10-24).
  *
  * The OPEN header line carries the merge glyph the feed's merge bubble draws
- * (`merge-glyph.ts`). In the expanded repository names' colour it says each
- * repository section shows its open workspaces; a click asks for the merge
- * queues, and the glyph turns the purple of a merge in progress while every
- * section lists its queue instead. A click on the purple glyph asks for the
- * workspaces again.
+ * (`merge-glyph.ts`). In the purple of a merge in progress it says each
+ * repository section shows its open workspaces, and a click asks for the
+ * merge queues; the glyph takes the expanded repository names' colour while
+ * every section lists its queue instead, and a click on it asks for the
+ * workspaces again (owner request, 2026-10-25: the colour marks the way to
+ * the queues). While a repository's merge queue is paused
+ * (`frontend.v1.RosterOpenSection.merge_queue_paused`) the purple turns the
+ * amber a paused merge bubble is framed in.
  *
  * WHAT THE SECTIONS SHOW IS THE DAEMON'S (`frontend.v1.RosterOpenSection.shows`,
  * restated on every `RosterRepoSection.shows`), like every fold, so every
@@ -48,6 +51,12 @@ export const MERGE_QUEUE_TOGGLE_CLASS = "sb-merge-queue-toggle";
  */
 export const SHOWS_ATTRIBUTE = "data-shows";
 
+/**
+ * The attribute the toggle carries, valueless, while a repository's merge
+ * queue is paused. The stylesheet colours the glyph from it.
+ */
+export const MERGE_QUEUE_PAUSED_ATTRIBUTE = "data-merge-queue-paused";
+
 /** The class of a repository section's body while it lists its merge queue. */
 export const MERGE_QUEUE_CLASS = "sb-merge-queue";
 
@@ -64,6 +73,11 @@ export function drawRosterOpenSectionShows(u: RosterOpenSection, path: string): 
       return unreachableArm(`${path}.shows`, other.case);
     }
   }
+}
+
+/** Whether U says a repository's merge queue is paused: the marker's presence is the fact. */
+export function drawRosterOpenSectionMergeQueuePaused(u: RosterOpenSection): boolean {
+  return u.mergeQueuePaused !== undefined;
 }
 
 /** What a repository section's body shows. */
@@ -93,13 +107,15 @@ export function paintMergeQueueToggle(toggle: HTMLElement, mergeQueues: boolean)
 
 /**
  * The merge-queue toggle, drawn as WIRE_MERGE_QUEUES says unless this page's
- * own ask is still in flight. A click asks for the other view; it never
- * reaches the header, whose click folds the section.
+ * own ask is still in flight, and marked while a merge queue is PAUSED. A
+ * click asks for the other view; it never reaches the header, whose click
+ * folds the section.
  */
-export function drawMergeQueueToggle(sc: SidebarContext, wireMergeQueues: boolean): HTMLElement {
+export function drawMergeQueueToggle(sc: SidebarContext, wireMergeQueues: boolean, paused: boolean): HTMLElement {
   const toggle = createControl();
   toggle.className = MERGE_QUEUE_TOGGLE_CLASS;
   toggle.textContent = MERGE_GLYPH;
+  toggle.toggleAttribute(MERGE_QUEUE_PAUSED_ATTRIBUTE, paused);
   paintMergeQueueToggle(toggle, sc.view.track(OPEN_SHOWS_VIEW_KEY, wireMergeQueues, (value) => paintMergeQueueToggle(toggle, value)));
   toggle.addEventListener("click", (event) => {
     event.preventDefault();

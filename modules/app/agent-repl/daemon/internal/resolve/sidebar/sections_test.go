@@ -1079,6 +1079,44 @@ func TestOpenSectionStatesWhatItsRepositorySectionsShow(t *testing.T) {
 	}
 }
 
+func TestOpenSectionMarksAPausedMergeQueue(t *testing.T) {
+	// queueStep states one repository's queue; a case's steps apply in order.
+	type queueStep struct {
+		repo  wsm.RepoKey
+		queue sidebar.MergeQueue
+	}
+	running := sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: []ids.WorkspaceID{"w1"}}
+	tests := []struct {
+		name       string
+		steps      []queueStep
+		wantPaused bool
+	}{
+		{"no queue stated", nil, false},
+		{"a running queue", []queueStep{{theRepo, running}}, false},
+		{"a paused queue with a merge on it", []queueStep{{theRepo, sidebar.MergeQueue{Paused: true, Workspaces: running.Workspaces, Line: running.Line}}}, true},
+		{"a paused queue with no merge on it", []queueStep{{theRepo, sidebar.MergeQueue{Paused: true}}}, true},
+		{"one paused queue among running ones", []queueStep{{theRepo, running}, {wsm.RepoKey("/repos/two/.git"), sidebar.MergeQueue{Paused: true}}}, true},
+		{"a pause since lifted", []queueStep{{theRepo, sidebar.MergeQueue{Paused: true}}, {theRepo, sidebar.MergeQueue{}}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			for _, step := range tt.steps {
+				r.SetMergeQueue(step.repo, step.queue)
+			}
+
+			// Act.
+			r.SetRegistry(registry(workspace("w1", "one")))
+
+			// Assert.
+			if got := latest(t, r).GetOpen().GetMergeQueuePaused() != nil; got != tt.wantPaused {
+				t.Fatalf("merge_queue_paused present = %v, want %v", got, tt.wantPaused)
+			}
+		})
+	}
+}
+
 func TestEveryRepositorySectionShowsItsWorkspacesByDefault(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)

@@ -173,7 +173,7 @@ const OWN_MERGE_ARMS: ReadonlySet<string> = new Set(["merging", "mergeQueued"]);
  * mark at all. The row keeps the arm's tone either way, so its NAME stays the
  * workspace's own status color.
  *
- * A PAUSED QUEUE (`merge_paused`, owner ruling 2026-10-14) greys every merge
+ * A PAUSED QUEUE (`merge_paused`, owner ruling 2026-10-14) inks every merge
  * indicator the row draws, in `render-colors.json#paused_merge_mark`'s ink,
  * and takes the merge's breath off the row's name. The merge glyph of a
  * `merging` or `merge_queued` arm takes the section's motion. The async-merge
