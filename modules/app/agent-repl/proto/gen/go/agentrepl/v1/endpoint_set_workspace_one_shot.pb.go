@@ -195,8 +195,16 @@ type SetWorkspaceOneShotSuccess struct {
 	// sentence a one-shot's first message carries -- what the agent does when
 	// its work is done. UNSET when unmarked.
 	CompletionDirective *string `protobuf:"bytes,1,opt,name=completion_directive,json=completionDirective,proto3,oneof" json:"completion_directive,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// The revision of the roster the daemon resolved after the change
+	// (frontend.v1.WorkspaceRoster.revision): every roster at or above it draws
+	// the workspace's family in, or out of, its repository's one-shot
+	// subsection (frontend.v1.RosterSubsectionOneShot). A sidebar that drew a
+	// drag into that subsection at once holds its drawing until a push at or
+	// above it arrives, as it does for ArrangeSidebarSuccess.roster_revision.
+	// 0 when the daemon has resolved no roster yet.
+	RosterRevision uint64 `protobuf:"varint,2,opt,name=roster_revision,json=rosterRevision,proto3" json:"roster_revision,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SetWorkspaceOneShotSuccess) Reset() {
@@ -234,6 +242,13 @@ func (x *SetWorkspaceOneShotSuccess) GetCompletionDirective() string {
 		return *x.CompletionDirective
 	}
 	return ""
+}
+
+func (x *SetWorkspaceOneShotSuccess) GetRosterRevision() uint64 {
+	if x != nil {
+		return x.RosterRevision
+	}
+	return 0
 }
 
 // Validation failures (unset field, blank string) are Connect InvalidArgument,
@@ -637,9 +652,10 @@ const file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDesc = "" +
 	"\x1bSetWorkspaceOneShotResponse\x12D\n" +
 	"\asuccess\x18\x01 \x01(\v2(.agentrepl.v1.SetWorkspaceOneShotSuccessH\x00R\asuccess\x12>\n" +
 	"\x05error\x18\x02 \x01(\v2&.agentrepl.v1.SetWorkspaceOneShotErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"m\n" +
+	"\x06result\"\x96\x01\n" +
 	"\x1aSetWorkspaceOneShotSuccess\x126\n" +
-	"\x14completion_directive\x18\x01 \x01(\tH\x00R\x13completionDirective\x88\x01\x01B\x17\n" +
+	"\x14completion_directive\x18\x01 \x01(\tH\x00R\x13completionDirective\x88\x01\x01\x12'\n" +
+	"\x0froster_revision\x18\x02 \x01(\x04R\x0erosterRevisionB\x17\n" +
 	"\x15_completion_directive\"\xe1\x04\n" +
 	"\x18SetWorkspaceOneShotError\x12`\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v21.agentrepl.v1.SetWorkspaceOneShotUnknownWorkspaceH\x00R\x10unknownWorkspace\x12m\n" +

@@ -51,3 +51,9 @@ This change runs as a one-shot workspace with contract changes pre-approved by t
 - What: a third arm, `ArrangedOneShot { repeated ArrangedWorkspace workspaces }`, listed last and only while it has families.
 - Why: `GetSidebarArrangement` answers what the sidebar draws. Without the arm, an agent would read a marked family as an unsectioned one, at a place where the sidebar does not draw it.
 - Consequences: an agent sees the one-shot subsection, and still cannot name it in `ArrangeSidebar`.
+
+### 5. `agentrepl.v1.SetWorkspaceOneShotSuccess` gains `roster_revision`
+
+- What: the revision of the roster resolved after the mark changed, as `ArrangeSidebarSuccess.roster_revision` carries for a placement.
+- Why: a drag into the one-shot subsection is `SetWorkspaceOneShot`. The page holds its drawing until the push that shows the change, and without a revision it could only let go at once, so an older push would put the row back for an instant.
+- Consequences: the daemon reads the revision after `SetOneShot` republished, as `ArrangeSidebar` does.
