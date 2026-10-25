@@ -404,6 +404,7 @@ func (d Deps) validate() error {
 	check(d.Occupy != nil, "Occupy")
 	check(d.StartSession != nil, "StartSession")
 	check(d.StopSession != nil, "StopSession")
+	check(d.HoldStarts != nil, "HoldStarts")
 	check(d.CaptureDisplaced != nil, "CaptureDisplaced")
 	check(d.Freeness != nil, "Freeness")
 	check(d.TurnInFlight != nil, "TurnInFlight")

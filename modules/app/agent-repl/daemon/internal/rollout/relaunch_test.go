@@ -441,6 +441,53 @@ func TestTheRelaunchHoldsStartsFromTheStandDownThroughTheResume(t *testing.T) {
 	}
 }
 
+func TestARelaunchOfAClosedWorkspaceIsDroppedBeforeAnythingIsSpawned(t *testing.T) {
+	// Arrange: the workspace closed while its bounce waited.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: instant, By: wsm.CloseByMerge}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+
+	// Act
+	err := bounceAndWait(t, h, ws, ReasonRestartVerb, false)
+
+	// Assert
+	if bounce.OutcomeOf(err) != bounce.OutcomeUnregistered {
+		t.Fatalf("bounce = %v, want it dropped as unregistered", err)
+	}
+	taken := h.order.Taken()
+	for _, step := range []string{"prelaunch", "kill_session", "install", "resume"} {
+		if indexOf(taken, step) >= 0 {
+			t.Fatalf("steps = %v, want nothing spawned, stood down, installed or resumed", taken)
+		}
+	}
+	if countOf(taken, "hold_starts") != countOf(taken, "release_starts") {
+		t.Fatalf("steps = %v, want the start hold released", taken)
+	}
+	if _, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRelaunch,
+		Message: "the workspace closed before its shim was replaced; a closed workspace's session is never brought back, so the bounce is dropped"}); !found {
+		t.Fatalf("the drop was not recorded at INFO")
+	}
+}
+
+func TestTheStartHoldIsTakenBeforeThePrelaunch(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	if err := runRelaunch(t, h, ws, ReasonRestartVerb); err != nil {
+		t.Fatalf("bounce: %v", err)
+	}
+
+	// Assert
+	taken := h.order.Taken()
+	if hold, prelaunch := indexOf(taken, "hold_starts"), indexOf(taken, "prelaunch"); hold < 0 || hold > prelaunch {
+		t.Fatalf("steps = %v, want starts held before the prelaunch", taken)
+	}
+}
+
 func TestEveryFailedRelaunchReleasesTheStartHold(t *testing.T) {
 	for _, tt := range failedRelaunches {
 		t.Run(tt.name, func(t *testing.T) {

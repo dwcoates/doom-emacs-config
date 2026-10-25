@@ -2280,9 +2280,12 @@ type harness struct {
 	// stoppedSessions records the landed workspaces whose sessions were reaped
 	// before their worktrees were removed.
 	stoppedSessions []ids.WorkspaceID
-	stopForces      []bool
-	stopAt          int
-	stopErr         error
+	// startHolds records every HoldStarts and its release, in order, each at
+	// the harness's sequence.
+	startHolds []startHold
+	stopForces []bool
+	stopAt     int
+	stopErr    error
 	// occupancyReleases counts the occupancy guards dropped.
 	occupancyReleases int
 	// displaced is what CaptureDisplaced answers with, nil for none.
@@ -2685,6 +2688,18 @@ func (h *harness) deps() Deps {
 			h.db.sessions[ws] = wsm.Session{Workspace: ws}
 			h.db.mu.Unlock()
 			return nil
+		},
+		HoldStarts: func(ws ids.WorkspaceID) func() {
+			at := h.next()
+			h.mu.Lock()
+			h.startHolds = append(h.startHolds, startHold{ws: ws, at: at})
+			h.mu.Unlock()
+			return func() {
+				at := h.next()
+				h.mu.Lock()
+				h.startHolds = append(h.startHolds, startHold{ws: ws, at: at, release: true})
+				h.mu.Unlock()
+			}
 		},
 		StopSession: func(_ context.Context, ws ids.WorkspaceID, force bool) error {
 			at := h.next()
@@ -3368,4 +3383,11 @@ func forgetTakeBackAtCleanup(t *testing.T, h *harness, ws ids.WorkspaceID) {
 
 func (q *fakeQueue) Supersede(context.Context, ids.WorkspaceID, ids.TurnID) (bool, error) {
 	return false, nil
+}
+
+// startHold is one recorded HoldStarts, or its release.
+type startHold struct {
+	ws      ids.WorkspaceID
+	at      int
+	release bool
 }

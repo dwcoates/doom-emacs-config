@@ -177,6 +177,37 @@ func (c *controller) shimBounce(reason RelaunchReason, force bool) bounce.Func {
 // and reap of `old`, the install and the resume. It answers the installed
 // shim and the resume's outcome.
 func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reason RelaunchReason, force bool, old shimclient.Client, hasOld bool, lease **wsm.Lease, mergeHeld *bool, fields dlog.Context) (shimclient.Client, Resumed, error) {
+	// NO OTHER START REACHES THE WORKSPACE FROM THE PRELAUNCH TO THE RESUME.
+	// Once the old shim is down and the replacement is installed, the fleet
+	// holds a shim with no session, and any start -- an announcement reviving
+	// the recorded conversation, a prompt's revival -- would start the session
+	// on it. The resume then found the conversation taken and the bounce
+	// failed `conversation_owned` (2026-10-25, emacs-window-focus-bar: Emacs
+	// re-registered it at the handover's link-up between the install and the
+	// resume). Held here, a start waits and then finds the resumed session.
+	release := c.deps.Shims.HoldStarts(ws)
+	defer release()
+
+	// A CLOSED WORKSPACE'S SESSION IS NEVER BROUGHT BACK, and the close can
+	// land while the bounce waits: a merge workspace's stale-build bounce,
+	// registered behind its merge, fired as the merge's work ended, and the
+	// merge then closed the workspace and removed its worktree under the
+	// replacement it resumed (2026-10-25, settings-page-land: the vendor died
+	// on a path that no longer existed, and the daemon tried to relaunch it,
+	// prelaunching node in a directory that was gone).
+	// Read under the start gate, the close a start would also refuse is seen
+	// here, before anything is spawned, and the bounce is dropped with the old
+	// shim untouched.
+	record, err := c.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		c.log.Error(opRelaunch, "could not read whether the workspace is closed before its shim is replaced", dlog.WithCause(fields, err))
+		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: read the workspace: %w", ws, err)
+	}
+	if record.Closed {
+		c.log.Info(opRelaunch, "the workspace closed before its shim was replaced; a closed workspace's session is never brought back, so the bounce is dropped", fields)
+		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: the workspace is closed: %w", ws, bounce.ErrUnregistered)
+	}
+
 	// THE PRELAUNCH COEXISTS WITH THE LIVE SHIM. An inert shim holds NEITHER
 	// kernel lock -- by ruling the shim takes both inside StartSession, not
 	// at startup -- so a second process for one workspace comes up beside
@@ -216,17 +247,6 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 			c.log.Debug(opRelaunch, "took the restart-pending hold; the tray draws it now", fields)
 		}
 	}
-
-	// NO OTHER START REACHES THE WORKSPACE FROM THE STAND-DOWN TO THE RESUME.
-	// Once the old shim is down and the replacement is installed, the fleet
-	// holds a shim with no session, and any start -- an announcement reviving
-	// the recorded conversation, a prompt's revival -- would start the session
-	// on it. The resume then found the conversation taken and the bounce
-	// failed `conversation_owned` (2026-10-25, emacs-window-focus-bar: Emacs
-	// re-registered it at the handover's link-up between the install and the
-	// resume). Held here, a start waits and then finds the resumed session.
-	release := c.deps.Shims.HoldStarts(ws)
-	defer release()
 
 	if hasOld {
 		// THE STAND-DOWN IS THE POINT OF NO RETURN, so a replacement that

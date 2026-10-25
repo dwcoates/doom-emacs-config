@@ -602,6 +602,13 @@ type Deps struct {
 	// worktree is removed. The process must lose its working directory only
 	// after it has stopped writing through it.
 	StopSession StopSessionFunc
+	// HoldStarts holds the workspace's session starts and relaunches off
+	// until the answered release is called (workspace.Fleet.HoldStarts). The
+	// close of a landed workspace holds it across stopping the session and
+	// removing the worktree, so no relaunch in flight installs a shim into a
+	// directory about to vanish: one already running finishes first and is
+	// stopped, and one after it finds the workspace closed and drops.
+	HoldStarts func(ws ids.WorkspaceID) (release func())
 	// PublishRegistry republishes the roster's DURABLE half. A landed merge
 	// stamps merged_at and closes the workspace in the registry, and the
 	// roster's `recently_merged` section is composed from exactly those
