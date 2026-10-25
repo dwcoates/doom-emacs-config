@@ -29,7 +29,9 @@ func (s *server) SetWorkspaceOneShot(
 	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
-	success := &agentreplv1.SetWorkspaceOneShotSuccess{}
+	// THE VERB REPUBLISHED BEFORE ANSWERING, so the roster resolved now draws
+	// the family in or out of the one-shot subsection.
+	success := &agentreplv1.SetWorkspaceOneShotSuccess{RosterRevision: s.deps.Sidebar.Revision()}
 	if req.Msg.GetOneShot() {
 		success.CompletionDirective = &directive
 	}

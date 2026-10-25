@@ -849,6 +849,22 @@ func TestSetWorkspaceOneShotHandsTheVerbItsAskAndAnswersTheDirective(t *testing.
 	}
 }
 
+func TestSetWorkspaceOneShotAnswersTheRosterRevisionThatCarriesTheChange(t *testing.T) {
+	// Arrange -- a sidebar that drew a drag into the one-shot subsection
+	// holds its drawing until a push at this revision.
+	h := newHarness(t)
+	h.Deps.Sidebar.(*fakeSidebar).revision = 42
+
+	// Act
+	resp, err := h.Client.SetWorkspaceOneShot(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceOneShotRequest{
+		Workspace: ref(), Requester: userRequester(), OneShot: true}))
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess().GetRosterRevision() != 42 {
+		t.Fatalf("SetWorkspaceOneShot = %v, %v; want success at the sidebar's revision 42", resp, err)
+	}
+}
+
 func TestSetWorkspaceOneShotAnswersTheVerbsRefusal(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
