@@ -16,10 +16,19 @@
  *   nothing is swallowed, because the fault is the record.
  * - HANDING THE ANSWER ON IS PART OF THE READ: a conversion that throws is
  *   the read failing, stated the same way.
+ * - A READ THE SESSION CUT SHORT IS NOT A FAULT. When the session closed the
+ *   very query the read was waiting on (a stand-down, a replaced query, a
+ *   failed start), the vendor's "Query closed before response received" is
+ *   the session's own act: it is recorded at INFO, and no fault is raised for
+ *   a vendor that did nothing wrong (2026-10-25: every KillSession that landed
+ *   while a turn-end context reading was in flight opened a fault).
  */
+import { bindLog } from "../log.js";
 import { sessionFault } from "../service/failures.js";
 import type { QueryLike } from "../sdk/types.js";
 import type { SessionPushes } from "./pushes.js";
+
+const LOGGER = bindLog({ component: "shim-engine-vendor-probe", operation: "shim.engine.vendor_probe" });
 
 /** Where a probe states its health: the session's fault table. */
 export type ProbeHealth = Pick<SessionPushes, "resolveComponent" | "fault">;
@@ -36,17 +45,28 @@ export interface VendorProbe<T> {
   readonly take: (answer: T) => void;
 }
 
-/** Read one vendor fact from ACTIVE, stating the read's health on HEALTH. */
+/**
+ * Read one vendor fact from ACTIVE, stating the read's health on HEALTH.
+ * CLOSED_BY_SESSION answers whether the session itself closed a query.
+ */
 export async function probeVendorFact<T>(
   health: ProbeHealth,
   active: QueryLike | undefined,
   probe: VendorProbe<T>,
+  closedBySession: (query: QueryLike) => boolean,
 ): Promise<void> {
   if (active === undefined) return;
   try {
     probe.take(await probe.read(active));
     health.resolveComponent(probe.component, 0);
   } catch (err) {
+    if (closedBySession(active)) {
+      LOGGER.info(
+        { component_read: probe.component, call: probe.call, cause: err instanceof Error ? err.message : String(err) },
+        "a vendor read was cut short by the session closing its own query; no fault is raised",
+      );
+      return;
+    }
     health.fault(
       sessionFault(
         { kind: "vendorQueryFailed" },
