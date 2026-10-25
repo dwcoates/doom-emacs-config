@@ -25,10 +25,9 @@ import { log } from "../log.js";
 import { CHAT_LEEWAY_FRACTION, chatEndTop, landChatAtEnd, revealChatExchange } from "../scroll.js";
 import { installChatOverscroll } from "./overscroll.js";
 import type { AppContext } from "../rpc/context.js";
-import { noteRefusedArm } from "../rpc/refusal.js";
-import { requireCase, requireMessage } from "../rpc/strict.js";
+import { sendGesture } from "../rpc/gesture.js";
+import { requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
-import { callUnary } from "../rpc/unary.js";
 import { ChatStream, type ChatActions } from "./chat-view.js";
 import { markConversationDrawn } from "../feed/conversation-drawn.js";
 
@@ -68,10 +67,8 @@ function intersectionObserver(onSeen: (element: Element) => void): AnswerObserve
   );
 }
 
-/** A refused gesture, recorded at INFO: the next view is the answer. */
-function refused(rpc: string, result: { case?: string | undefined; value?: unknown }): void {
-  noteRefusedArm(rpc, "chat.gesture-refused", result);
-}
+/** The operation every refused chat gesture is recorded under: the next view is the answer. */
+const GESTURE_REFUSED = "chat.gesture-refused";
 
 /**
  * The question VIEW has in flight, as one string standing for its quote and
@@ -137,14 +134,12 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
     const nodes = seen;
     seen = [];
     if (nodes.length === 0) return;
-    callUnary(
+    void sendGesture(
       ctx,
       "ReportChatSightings",
+      GESTURE_REFUSED,
       (client) => client.reportChatSightings({ thread, nodes: nodes.map((id) => ({ id })) }),
       ReportChatSightingsResponseSchema,
-    ).then(
-      (response) => refused("ReportChatSightings", requireCase(response.result, "ReportChatSightingsResponse.result")),
-      () => undefined, // the transport failure is callUnary's to record
     );
   };
   const observer = (deps.observe ?? intersectionObserver)((element) => {
@@ -157,9 +152,10 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
   const actions: ChatActions = {
     switchSibling(node, way) {
       log.info("switching a chat sibling", { operation: "chat.switch-sibling", context: { node, way } });
-      callUnary(
+      void sendGesture(
         ctx,
         "SwitchChatSibling",
+        GESTURE_REFUSED,
         (client) =>
           client.switchChatSibling({
             thread,
@@ -167,16 +163,14 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
             direction: { way: way === "next" ? { case: "next", value: {} } : { case: "previous", value: {} } },
           }),
         SwitchChatSiblingResponseSchema,
-      ).then(
-        (response) => refused("SwitchChatSibling", requireCase(response.result, "SwitchChatSiblingResponse.result")),
-        () => undefined,
       );
     },
     select(node, words, context) {
       log.info("holding a chat highlight", { operation: "chat.select", context: { node, words: words.length } });
-      callUnary(
+      void sendGesture(
         ctx,
         "SelectChatText",
+        GESTURE_REFUSED,
         (client) =>
           client.selectChatText({
             thread,
@@ -188,21 +182,16 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
             },
           }),
         SelectChatTextResponseSchema,
-      ).then(
-        (response) => refused("SelectChatText", requireCase(response.result, "SelectChatTextResponse.result")),
-        () => undefined,
       );
     },
     clearSelection() {
       log.info("letting the chat highlight go", { operation: "chat.clear-selection" });
-      callUnary(
+      void sendGesture(
         ctx,
         "SelectChatText",
+        GESTURE_REFUSED,
         (client) => client.selectChatText({ thread, selection: { state: { case: "cleared", value: {} } } }),
         SelectChatTextResponseSchema,
-      ).then(
-        (response) => refused("SelectChatText", requireCase(response.result, "SelectChatTextResponse.result")),
-        () => undefined,
       );
     },
     observeAnswer(node, element) {

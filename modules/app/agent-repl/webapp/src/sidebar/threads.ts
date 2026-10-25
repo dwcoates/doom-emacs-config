@@ -35,9 +35,8 @@ import type { NodeId } from "../../../proto/gen/ts/zettel/v1/zettel_pb.js";
 import { createControl } from "../control.js";
 import { log } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
-import { noteRefusedArm } from "../rpc/refusal.js";
+import { sendGesture } from "../rpc/gesture.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
 import type { RailContext, SidebarContext } from "./context.js";
 import { openScope, type DrawScope } from "./scope.js";
 import type { Dropdowns } from "./dropdowns.js";
@@ -64,10 +63,8 @@ export function showsChat(switcher: RosterAppSwitcher): boolean {
   return requireCase(requireMessage(switcher.shown, "RosterAppSwitcher.shown").app, "SidebarApp.app").case === "chat";
 }
 
-/** A refused verb's arm, recorded at INFO: the next roster is the answer. */
-function refusedArm(rpc: string, result: { case?: string | undefined; value?: unknown }): string | null {
-  return noteRefusedArm(rpc, "sidebar.app-refused", result);
-}
+/** The operation every refused rail gesture here is recorded under: the next roster is the answer. */
+const GESTURE_REFUSED = "sidebar.app-refused";
 
 /** Create the switcher: the title button and the menu under it. */
 export function createAppSwitcher(ctx: DaemonContext, dropdowns: Dropdowns): AppSwitcher {
@@ -106,12 +103,7 @@ export function createAppSwitcher(ctx: DaemonContext, dropdowns: Dropdowns): App
   const show = (app: SidebarApp, label: string): void => {
     close();
     log.info(`showing the ${label} app`, { operation: "sidebar.show-app", context: { app: app.app.case } });
-    callUnary(ctx, "ShowSidebarApp", (client) => client.showSidebarApp({ app }), ShowSidebarAppResponseSchema).then(
-      (response) => {
-        refusedArm("ShowSidebarApp", requireCase(response.result, "ShowSidebarAppResponse.result"));
-      },
-      () => undefined, // the transport failure is callUnary's to record
-    );
+    void sendGesture(ctx, "ShowSidebarApp", GESTURE_REFUSED, (client) => client.showSidebarApp({ app }), ShowSidebarAppResponseSchema);
   };
 
   return {
@@ -187,14 +179,13 @@ export function drawThreadSection(section: RosterThreadSection, sc: SidebarConte
   button.addEventListener("click", () => {
     log.info("asking the editor for a new thread", { operation: "sidebar.new-thread" });
     note.hidden = true;
-    callUnary(ctx, "RequestNewThread", (client) => client.requestNewThread({}), RequestNewThreadResponseSchema).then(
-      (response) => {
-        if (refusedArm("RequestNewThread", requireCase(response.result, "RequestNewThreadResponse.result")) === "noEditor") {
+    void sendGesture(ctx, "RequestNewThread", GESTURE_REFUSED, (client) => client.requestNewThread({}), RequestNewThreadResponseSchema).then(
+      (arm) => {
+        if (arm === "noEditor") {
           note.textContent = "no Emacs is connected to type the question in";
           note.hidden = false;
         }
       },
-      () => undefined,
     );
   });
 
@@ -258,12 +249,7 @@ function drawThreadRow(row: RosterThreadRow, sc: SidebarContext, path: string, a
   ws.append(drawThreadMenu(target, archived));
   line.addEventListener("click", () => {
     log.info("selecting a thread from the rail", { operation: "sidebar.thread.select", context: { thread: thread.id } });
-    callUnary(ctx, "SelectWorkspace", (client) => client.selectWorkspace({ workspace: thread }), SelectWorkspaceResponseSchema).then(
-      (response) => {
-        refusedArm("SelectWorkspace", requireCase(response.result, "SelectWorkspaceResponse.result"));
-      },
-      () => undefined,
-    );
+    void sendGesture(ctx, "SelectWorkspace", GESTURE_REFUSED, (client) => client.selectWorkspace({ workspace: thread }), SelectWorkspaceResponseSchema);
   });
   return ws;
 }
@@ -285,12 +271,7 @@ function drawOutline(outline: RosterThreadOutline, sc: SidebarContext, thread: W
   const show = (node: NodeId | undefined, at: string): void => {
     const id = requireMessage(node, at).id;
     log.info("showing a node of the thread's outline", { operation: "sidebar.outline.show", context: { thread: thread.id, node: id } });
-    callUnary(sc.ctx, "ShowChatNode", (client) => client.showChatNode({ thread, node: { id } }), ShowChatNodeResponseSchema).then(
-      (response) => {
-        refusedArm("ShowChatNode", requireCase(response.result, "ShowChatNodeResponse.result"));
-      },
-      () => undefined, // the transport failure is callUnary's to record
-    );
+    void sendGesture(sc.ctx, "ShowChatNode", GESTURE_REFUSED, (client) => client.showChatNode({ thread, node: { id } }), ShowChatNodeResponseSchema);
   };
   if (outline.breadcrumb !== undefined) box.append(drawCrumbs(outline.breadcrumb, show, `${path}.breadcrumb`));
   outline.rows.forEach((row, i) => {
