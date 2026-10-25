@@ -5,7 +5,7 @@
 // a real `ResizeObserver` to the tail owner, and the subscription being wired
 // to THAT element is half of what the footer-occlusion cases assert.
 import scrollSource from "../src/scroll.ts?raw";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SCROLL_CAUSES,
   armedWheelAction,
@@ -39,6 +39,7 @@ import {
   type RevealGeometry,
   heldRowName,
   entryOf,
+  openAtNewest,
 } from "../src/scroll.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
 import { tailTriggers, type TailTriggers } from "./tail-triggers.js";
@@ -141,9 +142,13 @@ describe("sectionTakesWheel", () => {
 });
 
 describe("armedWheelAction", () => {
+  const feed = { name: "feed" };
   const base = {
-    armed: { name: "armed" },
+    armed: { name: "armed" } as { name: string } | null,
     wheelScroller: { name: "other" } as { name: string } | null,
+    armedEncloses: false,
+    armedHeight: 200,
+    feed,
     feedScrollable: true,
     deltaY: 40,
     deltaMode: 0,
@@ -152,7 +157,7 @@ describe("armedWheelAction", () => {
 
   it("redirects a wheel over a non-armed box to the feed", () => {
     // Arrange + Act + Assert
-    expect(armedWheelAction(base)).toBe(40);
+    expect(armedWheelAction(base)).toEqual({ to: feed, delta: 40 });
   });
 
   it("leaves a wheel over the armed box to the browser", () => {
@@ -179,7 +184,33 @@ describe("armedWheelAction", () => {
 
   it("converts the delta to pixels before handing it to the feed", () => {
     // Arrange + Act + Assert — line-mode delta 2 at LINE_PX 16.
-    expect(armedWheelAction({ ...base, deltaY: 2, deltaMode: 1 })).toBe(32);
+    expect(armedWheelAction({ ...base, deltaY: 2, deltaMode: 1 })).toEqual({ to: feed, delta: 32 });
+  });
+
+  it("redirects a wheel over a non-armed box inside the armed one to the armed box", () => {
+    // Arrange — the armed box's own scrolling slid an inner box under the cursor.
+    const armed = { name: "armed" };
+    // Act + Assert
+    expect(armedWheelAction({ ...base, armed, armedEncloses: true })).toEqual({ to: armed, delta: 40 });
+  });
+
+  it("redirects to the enclosing armed box even when the feed cannot scroll", () => {
+    // Arrange
+    const armed = { name: "armed" };
+    // Act + Assert
+    expect(armedWheelAction({ ...base, armed, armedEncloses: true, feedScrollable: false })).toEqual({ to: armed, delta: 40 });
+  });
+
+  it("measures a page-mode delta by the armed box's height when it redirects there", () => {
+    // Arrange
+    const armed = { name: "armed" };
+    // Act + Assert — one page of a 200px box.
+    expect(armedWheelAction({ ...base, armed, armedEncloses: true, deltaY: 1, deltaMode: 2 })).toEqual({ to: armed, delta: 200 });
+  });
+
+  it("redirects to the feed when nothing is armed, whatever encloses the box", () => {
+    // Arrange + Act + Assert
+    expect(armedWheelAction({ ...base, armed: null, armedEncloses: true })).toEqual({ to: feed, delta: 40 });
   });
 });
 
@@ -1591,10 +1622,11 @@ describe("no scroll write outside scroll.ts", () => {
     expect(writes).toEqual([
       "this.box.scrollTop = this.box.scrollHeight;",
       "if (delta !== 0) this.box.scrollTop = to;",
-      "feed.scrollTop += delta;",
+      "redirect.to.scrollTop += redirect.delta;",
       "section.scrollTop = 0;",
       "scroller.scrollTop += step;",
       "region.scrollTop += delta;",
+      "box.scrollTop += delta;",
     ]);
   });
 
@@ -2468,6 +2500,29 @@ describe("installIntentScroll", () => {
     wheelAt(box, 40);
     // Assert
     expect(feed.scrollTop).toBe(0);
+  });
+
+  it("hands a wheel over an unarmed box inside the armed one to the armed box, never the feed", () => {
+    // Arrange — the reader armed the outer box; its own scrolling then slid an
+    // inner box (a suite's output) under the still cursor.
+    const feed = makeFeed();
+    const outer = makeSection(feed);
+    let outerTop = 0;
+    Object.defineProperty(outer, "scrollTop", {
+      get: () => outerTop,
+      set: (v: number) => {
+        outerTop = v;
+      },
+      configurable: true,
+    });
+    const inner = makeSection(feed);
+    outer.append(inner);
+    installIntentScroll(feed, noneOpen);
+    pointerAt("pointermove", outer);
+    // Act
+    const e = wheelAt(inner, 40);
+    // Assert — the armed box moved, the feed did not, and the browser did not scroll the inner box.
+    expect([outerTop, feed.scrollTop, e.defaultPrevented]).toEqual([40, 0, true]);
   });
 
   it("programmatic arm() does not arm a different, unarmed section", () => {
@@ -4260,5 +4315,140 @@ describe("TailFollow.onViewChanged", () => {
     a.tail.jumpToTail();
     // Assert
     expect(views).toEqual([]);
+  });
+});
+
+describe("openAtNewest", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+    vi.unstubAllGlobals();
+  });
+
+  /** A sub-feed bubble mounted in the page, the bound every opening stays inside. */
+  function makeBubble(): HTMLElement {
+    const bubble = document.createElement("div");
+    bubble.className = "tool-card bubble-fold";
+    document.body.append(bubble);
+    return bubble;
+  }
+
+  /** Make EL a laid-out box at RECT, scrolling SCROLL_HEIGHT within CLIENT_HEIGHT when it overflows. */
+  function layOut(el: HTMLElement, rect: { top: number; height: number }, scroll?: { scrollHeight: number; clientHeight: number }): void {
+    el.getClientRects = () => [boxRect(rect)] as unknown as DOMRectList;
+    el.getBoundingClientRect = () => boxRect(rect);
+    if (scroll === undefined) return;
+    el.style.overflowY = "auto";
+    Object.defineProperty(el, "scrollHeight", { value: scroll.scrollHeight, configurable: true });
+    Object.defineProperty(el, "clientHeight", { value: scroll.clientHeight, configurable: true });
+  }
+
+  it("takes content that is its own scroll box to its end", () => {
+    // Arrange
+    const view = document.createElement("div");
+    makeBubble().append(view);
+    layOut(view, { top: 0, height: 300 }, { scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    openAtNewest(view);
+    // Assert
+    expect(view.scrollTop).toBe(700);
+  });
+
+  it("brings content's last line to the bottom of the box enclosing it", () => {
+    // Arrange — a 300px box at 100, content ending 900px down the page.
+    const box = document.createElement("div");
+    const content = document.createElement("div");
+    box.append(content);
+    makeBubble().append(box);
+    layOut(box, { top: 100, height: 300 }, { scrollHeight: 2000, clientHeight: 300 });
+    layOut(content, { top: 200, height: 700 });
+    // Act
+    openAtNewest(content);
+    // Assert — 900 - (100 + 300).
+    expect(box.scrollTop).toBe(500);
+  });
+
+  it("moves nothing when nothing inside the bubble scrolls", () => {
+    // Arrange
+    const content = document.createElement("div");
+    makeBubble().append(content);
+    layOut(content, { top: 0, height: 50 });
+    // Act
+    openAtNewest(content);
+    // Assert
+    expect(content.scrollTop).toBe(0);
+  });
+
+  it("never moves a scroll box outside the bubble", () => {
+    // Arrange — the box above the bubble stands for the feed.
+    const feedBox = document.createElement("div");
+    document.body.append(feedBox);
+    const bubble = document.createElement("div");
+    bubble.className = "bubble-fold";
+    feedBox.append(bubble);
+    const content = document.createElement("div");
+    bubble.append(content);
+    layOut(feedBox, { top: 0, height: 300 }, { scrollHeight: 3000, clientHeight: 300 });
+    layOut(content, { top: 0, height: 50 });
+    // Act
+    openAtNewest(content);
+    // Assert
+    expect(feedBox.scrollTop).toBe(0);
+  });
+
+  it("waits for content's first layout, then moves once", () => {
+    // Arrange — opened before it is laid out, as a nested strip's panel is.
+    const view = document.createElement("div");
+    makeBubble().append(view);
+    openAtNewest(view);
+    const before = view.scrollTop;
+    layOut(view, { top: 0, height: 300 }, { scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    fireResize(view);
+    // Assert — moved on the layout, and no longer watched after it.
+    expect([before, view.scrollTop, (() => { try { fireResize(view); return "watched"; } catch { return "released"; } })()]).toEqual([0, 700, "released"]);
+  });
+
+  it("keeps waiting through a resize that leaves content unlaid", () => {
+    // Arrange — the bubble's sub-feed is still hidden.
+    const view = document.createElement("div");
+    makeBubble().append(view);
+    openAtNewest(view);
+    // Act
+    fireResize(view);
+    layOut(view, { top: 0, height: 300 }, { scrollHeight: 1000, clientHeight: 300 });
+    fireResize(view);
+    // Assert
+    expect(view.scrollTop).toBe(700);
+  });
+
+  it("refuses content laid out outside any sub-feed bubble", () => {
+    // Arrange
+    const content = document.createElement("div");
+    document.body.append(content);
+    layOut(content, { top: 0, height: 50 });
+    // Act + Assert
+    expect(() => openAtNewest(content)).toThrow("outside a sub-feed bubble");
+  });
+
+  it("refuses to wait on a page with no ResizeObserver", () => {
+    // Arrange
+    const content = document.createElement("div");
+    makeBubble().append(content);
+    vi.stubGlobal("ResizeObserver", undefined);
+    // Act + Assert
+    expect(() => openAtNewest(content)).toThrow("no ResizeObserver");
+  });
+
+  it("records each opening at DEBUG with the box it moved", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const view = document.createElement("div");
+    makeBubble().append(view);
+    layOut(view, { top: 0, height: 300 }, { scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    openAtNewest(view);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.open-at-newest");
+    expect(record.context).toMatchObject({ moved: true, delta: 700 });
   });
 });

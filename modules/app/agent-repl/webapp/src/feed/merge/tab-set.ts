@@ -21,6 +21,8 @@
  * THE PANEL IS DRAWN IN PLACE while the same tab stays the one shown: its panel
  * object updates itself (a nested strip draws its own tabs again), and only a
  * different tab, or a panel that cannot follow the change, is drawn afresh.
+ * Only a different tab OPENS its panel (`TabPanel.opened`), which is when a
+ * panel of agent or test output shows its newest page.
  * EVERYTHING IS DRAWN BEFORE THE OLD CONTENT COMES DOWN, and the swap is one
  * DOM operation (owner ruling, 2026-10-08: a merge bubble's update never moves
  * a scroll).
@@ -54,6 +56,14 @@ export interface TabPanel {
    * here; a panel without leaves it unset, and the click only pins the tab.
    */
   reselect?(badge: HTMLElement): void;
+  /**
+   * The strip just OPENED this panel: its tab became the one shown (the
+   * reader's click, the auto rule moving on, or the strip's first draw when
+   * its bubble or its parent tab opened), never a redraw of the tab already
+   * shown. A panel holding agent or test output brings its newest page into
+   * view here (`openAtNewest`, scroll.ts); a panel without leaves it unset.
+   */
+  opened?(): void;
 }
 
 /** Builds the panel of one tab. */
@@ -155,10 +165,12 @@ export function createTabSet(
       shown = null;
       return;
     }
+    const opening = shown === null || shown.tab.id !== active.id;
     const next = panelOf(active);
     panel.setAttribute("data-merge-tab-body", active.kind);
     replaceTicking(panel, [...next.nodes]);
     shown = { tab: active, panel: next };
+    if (opening) next.opened?.();
   }
 
   /**
