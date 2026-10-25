@@ -108,6 +108,69 @@
   (seq-some (lambda (text) (seq-every-p (lambda (part) (string-search part text)) parts))
             agent-repl-test-pu--logged))
 
+;;;; ---- The one announced drop ----
+
+(defun agent-repl-test-pu--announce (still)
+  "Drop alpha's page through the announced drop while STILL answers non-nil.
+Answers the outcomes, newest first: (dropped) or (kept WHY)."
+  (let ((outcomes nil))
+    (agent-repl-page-drop-announced
+     "alpha"
+     (lambda () (funcall still))
+     (lambda ()
+       (push (list 'dropped (agent-repl--ws-get "alpha" :page-unloading)) outcomes)
+       (agent-repl-webhost-remove "alpha"))
+     (lambda (why) (push (list 'kept why) outcomes)))
+    (lambda () outcomes)))
+
+(ert-deftest agent-repl-test-pu-an-announced-drop-reports-before-it-drops ()
+  "The daemon is told first, and the drop runs once it answers."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    ;; Act
+    (let ((outcomes (agent-repl-test-pu--announce (lambda () t))))
+      ;; Assert
+      (should (equal (list (reverse agent-repl-test-pu--events) (funcall outcomes))
+                     '(((report "alpha") (drop "alpha")) ((dropped nil))))))))
+
+(ert-deftest agent-repl-test-pu-an-announced-drop-marks-its-report-in-flight ()
+  "While the report is unanswered the workspace reads `:page-unloading'."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--report 'pending)
+    ;; Act
+    (agent-repl-test-pu--announce (lambda () t))
+    ;; Assert
+    (should (equal (list (agent-repl--ws-get "alpha" :page-unloading) agent-repl-test-pu--dropped)
+                   '(t nil)))))
+
+(ert-deftest agent-repl-test-pu-an-announced-drop-whose-report-did-not-land-keeps-the-page ()
+  "A report the daemon did not take keeps the page, and says why."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--report 'refused)
+    ;; Act
+    (let ((outcomes (agent-repl-test-pu--announce (lambda () t))))
+      ;; Assert
+      (should (equal (list (funcall outcomes) agent-repl-test-pu--dropped
+                           (agent-repl--ws-get "alpha" :page-unloading))
+                     '(((kept not-reported)) nil nil))))))
+
+(ert-deftest agent-repl-test-pu-an-announced-drop-no-longer-wanted-keeps-the-page ()
+  "A drop whose cause changed while the report was in flight keeps the page."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (let ((wanted t))
+      (setq agent-repl-test-pu--report 'pending)
+      (let ((outcomes (agent-repl-test-pu--announce (lambda () wanted))))
+        (setq wanted nil)
+        ;; Act
+        (funcall (nth 1 (car agent-repl-test-pu--pending)))
+        ;; Assert
+        (should (equal (list (funcall outcomes) agent-repl-test-pu--dropped
+                             (agent-repl--ws-get "alpha" :page-unloading))
+                       '(((kept changed)) nil nil)))))))
+
 ;;;; ---- What counts as a look ----
 
 (ert-deftest agent-repl-test-pu-a-page-shown-past-the-dwell-is-looked-at ()
