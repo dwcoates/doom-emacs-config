@@ -480,6 +480,9 @@ type DB interface {
 	PrioritizeMerge(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error)
 	// AdmitMerge marks the entry the orchestrator is running now.
 	AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
+	// ReturnAdmittedMerge puts an admitted merge with no run back in line at
+	// its own place, waiting, under its ledger identity.
+	ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID) error
 	// RemoveMergeQueueEntry drops one entry with the cause it was dropped for.
 	RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string) error
 	// DropAdmittedMerge drops an admitted merge with no run: its entry, its

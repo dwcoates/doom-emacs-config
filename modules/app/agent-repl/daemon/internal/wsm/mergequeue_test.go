@@ -1,6 +1,7 @@
 package wsm
 
 import (
+	"agent-repld/internal/dlog"
 	"context"
 	"database/sql"
 	"errors"
@@ -1650,5 +1651,73 @@ func TestDropAdmittedMergeRefusesALeaseThatIsNotTheWorkspacesMergeLeaseAndKeepsT
 	}
 	if !loggedOperation(log, "daemon.wsm.drop_admitted_merge", "debug") {
 		t.Fatalf("the refusal was not recorded: %v", log.Records())
+	}
+}
+
+func TestReturnAdmittedMergeKeepsItsPlaceInLine(t *testing.T) {
+	// Arrange: the head is admitted, two merges wait behind it.
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	head, second, third := testWorkspace(t, s), testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, head.ID, instant)
+	queued(t, s, repo, second.ID, instant.Add(time.Minute))
+	queued(t, s, repo, third.ID, instant.Add(2*time.Minute))
+	if err := s.AdmitMerge(ctx, repo, head.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	ledger := NewLeaseID()
+
+	// Act
+	if err := s.ReturnAdmittedMerge(ctx, repo, head.ID, ledger); err != nil {
+		t.Fatalf("ReturnAdmittedMerge: %v", err)
+	}
+
+	// Assert
+	got, err := s.MergeQueue(ctx, repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	if len(got) != 3 || got[0].Workspace != head.ID || got[0].State != MergeQueued || got[0].Ledger != ledger ||
+		got[1].Workspace != second.ID || got[2].Workspace != third.ID {
+		t.Fatalf("queue = %+v, want the returned head first, waiting under the new ledger, the rest in order", got)
+	}
+}
+
+func TestReturnAdmittedMergeRefuses(t *testing.T) {
+	cases := []struct {
+		name   string
+		admit  bool
+		ledger LeaseID
+		want   string
+	}{
+		{name: "a merge that is only waiting", admit: false, ledger: "lease-x", want: "admitted merge of workspace"},
+		{name: "a return with no ledger identity", admit: true, ledger: "", want: "with its bubble's ledger identity"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, logs := testStore(t)
+			ctx := context.Background()
+			repo := RepoKey(t.TempDir())
+			ws := testWorkspace(t, s)
+			queued(t, s, repo, ws.ID, instant)
+			if tc.admit {
+				if err := s.AdmitMerge(ctx, repo, ws.ID); err != nil {
+					t.Fatalf("AdmitMerge: %v", err)
+				}
+			}
+
+			// Act
+			err := s.ReturnAdmittedMerge(ctx, repo, ws.ID, tc.ledger)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ReturnAdmittedMerge = %v, want an error containing %q", err, tc.want)
+			}
+			if _, found := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Operation: "daemon.wsm.return_admitted_merge"}); !found {
+				t.Fatalf("records = %+v, want the refusal recorded", logs.Records())
+			}
+		})
 	}
 }

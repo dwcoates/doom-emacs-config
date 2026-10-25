@@ -36,8 +36,9 @@ type QueueChangeKind int
 const (
 	// QueueChangeEnqueued is a merge put in line.
 	QueueChangeEnqueued QueueChangeKind = iota + 1
-	// QueueChangeRequeued is a merge a restart cut short, put back in line,
-	// at the back, to run again. It never left the queue.
+	// QueueChangeRequeued is a merge a restart cut short before it took a
+	// step, put back in line at its own place, to run again. It never left the
+	// queue.
 	QueueChangeRequeued
 	// QueueChangeStarted is a merge admitted: it has started.
 	QueueChangeStarted
@@ -248,6 +249,14 @@ func (d queueEventsDB) QueueMerge(ctx context.Context, repo wsm.RepoKey, id wsm.
 		return queueWrite{report: true, kind: kind, subject: id}, err
 	})
 	return place, err
+}
+
+// ReturnAdmittedMerge puts an admitted merge with no run back in line at its
+// place and reports it requeued.
+func (d queueEventsDB) ReturnAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, ledger wsm.LeaseID) error {
+	return d.reported(ctx, repo, false, func() (queueWrite, error) {
+		return queueWrite{report: true, kind: QueueChangeRequeued, subject: id}, d.DB.ReturnAdmittedMerge(ctx, repo, id, ledger)
+	})
 }
 
 // AdmitMerge starts a merge and reports it.

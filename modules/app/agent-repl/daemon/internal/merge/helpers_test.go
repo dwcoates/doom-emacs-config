@@ -774,6 +774,22 @@ func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id i
 	return fmt.Errorf("no queue entry for %s", id)
 }
 
+// ReturnAdmittedMerge puts an admitted entry back in line where it stands.
+func (f *fakeDB) ReturnAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, ledger wsm.LeaseID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.shut {
+		return errStateClientClosed
+	}
+	for i, entry := range f.queues[repo] {
+		if entry.Workspace == id && entry.State == wsm.MergeAdmitted {
+			f.queues[repo][i].State, f.queues[repo][i].Ledger = wsm.MergeQueued, ledger
+			return nil
+		}
+	}
+	return fmt.Errorf("no admitted queue entry for %s", id)
+}
+
 // DropAdmittedMerge stands for the store's one transaction: the admitted
 // entry, the merge lease and its progress record go together, or nothing does.
 func (f *fakeDB) DropAdmittedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, lease wsm.LeaseID, cause string) error {

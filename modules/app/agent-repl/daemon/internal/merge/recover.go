@@ -297,22 +297,15 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		o.ledgerOf[ws] = lease.ID
 	}
 	o.mu.Unlock()
-	// The entry goes back in line, with the source it was asked with, so the
-	// ordinary admission path runs it again under a lease of its own.
-	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, causeRestartResume); err != nil {
-		return err
-	}
-	if err := o.deps.DB.RequestMerge(ctx, repo, ws, entry.Source, o.deps.Now()); err != nil {
-		return err
-	}
+	// THE ENTRY GOES BACK IN LINE AT ITS OWN PLACE, with the source it was
+	// asked with, so the ordinary admission path runs it again under a lease
+	// of its own. A remove and re-request once sent the head to the back
+	// (2026-10-24: deploy-stage-concurrency went from the head to 19th).
 	ledger := o.mintLedger(ws)
 	if !held && entry.Ledger != "" {
 		ledger = o.ledgerOfEntry(entry)
 	}
-	if _, err := o.deps.DB.QueueMerge(ctx, repo, ws, ledger); err != nil {
-		return err
-	}
-	return nil
+	return o.deps.DB.ReturnAdmittedMerge(ctx, repo, ws, ledger)
 }
 
 // loadProgress reads an admitted merge's progress record, and answers it when

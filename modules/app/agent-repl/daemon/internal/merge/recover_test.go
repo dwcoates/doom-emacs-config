@@ -761,3 +761,27 @@ func TestRecoverReArmsADetachedPickTheRestartCaughtBeforeItsHandOff(t *testing.T
 		t.Fatalf("merge workspace entry = %+v, %v; want its pick begun", entry, ok)
 	}
 }
+
+func TestRecoverPutsARecordlessHeadBackAtItsOwnPlace(t *testing.T) {
+	// Arrange: the head was interrupted before it took a step, with two
+	// merges waiting behind it.
+	h := newHarness(t)
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "two")
+	queueAnother(t, h, "ws-3", "three")
+	interruptMerge(t, h)
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert: it heads the line again, waiting, and was told requeued.
+	queue, err := h.db.MergeQueue(context.Background(), h.repoKey())
+	if err != nil || len(queue) != 3 || queue[0].Workspace != theWorkspace || queue[0].State != wsm.MergeQueued {
+		t.Fatalf("queue = %+v, %v; want the interrupted head first, waiting", queue, err)
+	}
+	if kinds := h.events.kinds(); len(kinds) == 0 || kinds[len(kinds)-1] != QueueChangeRequeued {
+		t.Fatalf("changes = %v, want the head reported requeued", kinds)
+	}
+}

@@ -537,6 +537,34 @@ func (s *store) AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) er
 	return s.setMergeQueueState(ctx, "daemon.wsm.admit_merge", repo, id, MergeAdmitted, dlog.Context{})
 }
 
+// ReturnAdmittedMerge puts an ADMITTED merge that has no run back in line AT
+// ITS OWN PLACE, waiting, under LEDGER: a merge a restart interrupted before it
+// took a step runs again from where it stood -- the head of the line -- never
+// from the back. Its source, its front mark and its place are kept. An entry
+// that is not admitted is refused: the caller lost track of the queue.
+func (s *store) ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID) error {
+	const op = "daemon.wsm.return_admitted_merge"
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
+		return err
+	}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id), "ledger": string(ledger)}
+	if ledger == "" {
+		err := errors.New("wsm: a merge is put back in line with its bubble's ledger identity")
+		s.log.Error(op, "refused to return a merge to its line with no ledger identity", withError(fields, err))
+		return err
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, ledger_id = ? WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
+			int(MergeQueued), ledger, key, id, int(MergeAdmitted))
+		if err != nil {
+			return err
+		}
+		return requireOneRow(res, fmt.Sprintf("wsm: admitted merge of workspace %s in repo %q", id, key))
+	})
+}
+
 // RemoveMergeQueueEntry drops one entry, recording the cause it was dropped for
 // in the operation's log record. Removing an entry that is not queued is a
 // refusal, never a no-op: it means the caller lost track of the queue.
