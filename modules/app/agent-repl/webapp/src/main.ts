@@ -413,12 +413,15 @@ interface PageBody {
   workspaceSelected(): void;
   /** A footer jump row asked for a detached work's row. */
   selectDetachedWork(id: FeedId): Promise<boolean>;
+  /** The daemon asked for a feed row to be revealed (WebWorkspaceRevealRow). */
+  revealRow(id: FeedId): Promise<boolean>;
 }
 
 /**
- * A chat thread's body: the chat, drawn in the feed's own box. A thread runs
- * no tools, so it has no detached work for the footer to jump to; a jump row
- * reaching it is a defect, thrown as one.
+ * A chat thread's body: the chat, drawn in the feed's own box. A thread has no
+ * feed rows: it runs no tools, so no detached work for the footer to jump to,
+ * and the daemon reveals no row of it. Either ask reaching it is a defect,
+ * thrown as one (`noFeedRow`).
  */
 function mountThreadBody(shell: ReturnType<typeof shellElements>, ctx: AppContext): PageBody {
   mountChat(shell.feed, ctx, { scroll: shell.feedScroll, shown: () => pagePresence().shown() });
@@ -426,14 +429,16 @@ function mountThreadBody(shell: ReturnType<typeof shellElements>, ctx: AppContex
     workspaceSelected: () => {
       shell.feedScroll.scrollTop = shell.feedScroll.scrollHeight;
     },
-    selectDetachedWork: (id) => {
-      log.error("a footer jump row reached a chat thread, which runs no detached work", {
-        operation: "main.thread-detached-work",
-        context: { id: id.value },
-      });
-      return Promise.reject(new Error("a chat thread has no detached work to select"));
-    },
+    selectDetachedWork: (id) =>
+      noFeedRow(id, "main.thread-detached-work", "a footer jump row reached a chat thread, which runs no detached work"),
+    revealRow: (id) => noFeedRow(id, "main.thread-reveal-row", "the daemon asked a chat thread to reveal a feed row"),
   };
+}
+
+/** Refuse an ask for feed row ID on a chat thread's page, which has none. */
+function noFeedRow(id: FeedId, operation: string, said: string): Promise<boolean> {
+  log.error(said, { operation, context: { id: id.value } });
+  return Promise.reject(new Error(`a chat thread has no feed row ${id.value}: ${said}`));
 }
 
 /**

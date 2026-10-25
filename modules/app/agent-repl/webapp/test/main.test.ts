@@ -76,6 +76,8 @@ interface BootRecord {
   loginOpen: Mock;
   /** The footer's `selectDetachedWork`, and the feed handle's it must reach. */
   footerSelectDetachedWork: ((id: unknown) => void) | null;
+  /** The reveal the page bound for the daemon's reveal_row asks. */
+  revealRow: ((id: { value: string }) => Promise<boolean>) | null;
   feedSelectDetachedWork: Mock;
   /** The feed's "this workspace was switched to", as the boot wires it. */
   feedWorkspaceSelected: Mock;
@@ -111,6 +113,7 @@ function freshRecord(): BootRecord {
     openLogin: null,
     loginOpen: vi.fn(),
     footerSelectDetachedWork: null,
+    revealRow: null,
     feedSelectDetachedWork: vi.fn(),
     feedWorkspaceSelected: vi.fn(),
     feedDeps: null,
@@ -224,6 +227,14 @@ async function runBoot(rec: BootRecord): Promise<void> {
         });
       },
     })),
+  }));
+  vi.doMock("../src/lifecycle/reveal-relay.js", () => ({
+    createRevealRelay: () => ({
+      request: vi.fn(),
+      bind: (fn: (id: { value: string }) => Promise<boolean>) => {
+        rec.revealRow = fn;
+      },
+    }),
   }));
   vi.doMock("../src/lifecycle/lifecycle.js", () => ({
     adoptAtBoot: vi.fn(async () => {
@@ -609,7 +620,14 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
 
     await expect(
       (page.footerSelectDetachedWork as unknown as (id: { value: string }) => Promise<boolean>)({ value: "row-1" }),
-    ).rejects.toThrow("a chat thread has no detached work to select");
+    ).rejects.toThrow("a chat thread has no feed row row-1");
+  });
+
+  test("a reveal_row ask reaching a chat thread is a refused defect", async () => {
+    page.adopt = async () => ({ outcome: "no-transfer", page: "thread" });
+    await bootMain();
+
+    await expect(page.revealRow?.({ value: "row-1" })).rejects.toThrow("a chat thread has no feed row row-1");
   });
 
   test("mounts the feed before the footer whose jump rows reveal its rows", async () => {
