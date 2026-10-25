@@ -44,6 +44,8 @@ export const HOLDS_CURRENT_ATTRIBUTE = "data-holds-current";
  * 2026-10-20): collapsing it would stand down the session the user is in, so
  * the gesture asks nothing while the box carries `HOLDS_CURRENT_ATTRIBUTE`.
  * The daemon refuses such a collapse too, for a page a push behind a switch.
+ * The other way round, selecting a workspace in a collapsed section expands
+ * it daemon-side, so its push repaints the fold (wsm's setCurrent).
  */
 export function sectionFold(sc: SidebarContext, foldKey: string, target: FoldTarget): FoldGesture {
   return (section, control) => {

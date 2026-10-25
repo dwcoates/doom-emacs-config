@@ -20,7 +20,8 @@ const opFoldRepository = "daemon.workspace.fold_repository"
 // and the Emacs tab bar hides that repository's workspaces, both off the one
 // pushed fold. COLLAPSING STANDS THE SECTION'S OPEN WORKSPACES' SESSIONS DOWN
 // (only visible workspaces run), each as hiding it would; EXPANDING starts
-// nothing, the editor asks with OpenTabs.
+// nothing, the editor asks with OpenTabs. Selecting a workspace expands the
+// folds holding it without coming here (wsm's setCurrent).
 func (v *verbs) FoldRepository(ctx context.Context, repo ids.RepoID, folded bool) error {
 	log := v.deps.Log.Global().With(dlog.Context{"repo_id": string(repo), "folded": folded})
 	return v.foldTabs(ctx, log, foldTabsSpec{
