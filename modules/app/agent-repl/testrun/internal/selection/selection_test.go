@@ -249,6 +249,7 @@ func TestNarrowRefuses(t *testing.T) {
 		{name: "a package with no tests", sel: goAll(mod + "daemon/internal/empty"), suite: "daemon", units: goUnits("daemon", "internal/merge"), want: "holds no test in it"},
 		{name: "a vitest file its suite does not run", sel: vitestNamed(mod+"webapp/src/nope.test.ts", "x"), suite: "webapp", units: suites.Units{Splits: []suites.Split{{Group: "webapp", Items: []string{"src/a.test.ts"}}}}, want: "its suite does not run it"},
 		{name: "groups of a harness that has none", sel: harness(mod+"bin/test-test-all.sh", "g"), suite: "orchestrator-harness", units: suites.Units{Atomic: []run.Spec{{Unit: sched.Unit{ID: "orchestrator-harness"}}}}, want: "has no groups to name"},
+		{name: "a test a Go-tests harness does not run", sel: harness(mod+"bin/test-e2e-emacs.sh", "TestEmacsA", "TestNope"), suite: "e2e-emacs", units: goTestsHarnessUnits(), want: "runs no test TestNope (it runs TestDoomB, TestEmacsA)"},
 		{name: "a group the harness does not list", sel: harness(mod+"bin/test-build-frontend.sh", "nope"), suite: "build-frontend-harness", units: suites.Units{Splits: []suites.Split{{Group: "build-frontend-harness", Items: []string{"a", "b"}}}}, want: "has no group nope"},
 	}
 	for _, tc := range cases {
@@ -329,6 +330,48 @@ func TestNarrowRunsNamedHarnessGroups(t *testing.T) {
 	// Assert
 	if err != nil || len(got.Splits) != 1 || !reflect.DeepEqual(got.Splits[0].Items, []string{"b"}) {
 		t.Fatalf("Narrow = %+v, %v; want group b alone", got, err)
+	}
+}
+
+// goTestsHarnessUnits is a Go-tests Script suite's units (e2e-emacs's
+// shape): one whole unit, its tests, and the unit running just named ones.
+func goTestsHarnessUnits() suites.Units {
+	return suites.Units{
+		Atomic: []run.Spec{{Unit: sched.Unit{ID: "e2e-emacs"}, Argv: []string{"whole"}}},
+		Tests:  []string{"TestDoomB", "TestEmacsA"},
+		Only: func(names []string) run.Spec {
+			return run.Spec{Unit: sched.Unit{ID: "e2e-emacs"}, Argv: append([]string{"only"}, names...)}
+		},
+	}
+}
+
+func TestNarrowRunsTheNamedTestsOfAGoTestsHarness(t *testing.T) {
+	const script = mod + "bin/test-e2e-emacs.sh"
+	tests := []struct {
+		name string
+		sels []*testrunv1.TestSelection
+		want []string
+	}{
+		{name: "one named test runs alone", sels: []*testrunv1.TestSelection{harness(script, "TestEmacsA")}, want: []string{"only", "TestEmacsA"}},
+		{name: "a test named twice runs once", sels: []*testrunv1.TestSelection{harness(script, "TestEmacsA", "TestDoomB"), harness(script, "TestEmacsA")}, want: []string{"only", "TestEmacsA", "TestDoomB"}},
+		{name: "the whole harness named beside its tests runs whole", sels: []*testrunv1.TestSelection{harness(script, "TestEmacsA"), harness(script)}, want: []string{"whole"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r, err := Resolve(request(tt.sels...), layout)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			got, err := r.Narrow(suiteNamed(t, "e2e-emacs"), goTestsHarnessUnits())
+
+			// Assert
+			if err != nil || len(got.Atomic) != 1 || len(got.Splits) != 0 || !reflect.DeepEqual(got.Atomic[0].Argv, tt.want) {
+				t.Fatalf("Narrow = %+v, %v; want one unit running %v", got, err, tt.want)
+			}
+		})
 	}
 }
 

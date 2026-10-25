@@ -38,8 +38,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
+	"agentrepl/testrun/internal/gotest"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
@@ -88,6 +90,11 @@ type Units struct {
 	// Programs are the shared programs (roster.Programs) the suite's units
 	// run; the run builds each once (ProgramUnits).
 	Programs []string
+	// Tests are the top-level Go tests a Script suite's one unit runs, for a
+	// suite that names them (roster.Suite.GoTests), in name order; Only is
+	// that unit running just the named ones of them. Both are nil otherwise.
+	Tests []string
+	Only  func(names []string) run.Spec
 }
 
 // Build turns one suite into units.
@@ -154,14 +161,54 @@ func scriptUnits(l Layout, s roster.Suite) (Units, error) {
 	if s.Slots < 0 {
 		return Units{}, fmt.Errorf("suites: %s has a negative width %d", s.Name, s.Slots)
 	}
-	u := spec(s.Name, s.Name, filepath.Dir(path), append([]string{path}, s.Args...))
-	u.MayDecline = s.MayDecline
-	u.Slots = s.Slots
-	u.Env = append(u.Env, fmt.Sprintf("%s=%d", UnitSlotsEnv, u.Width()))
-	if s.NeedsWebappDist {
-		u.Env = append(u.Env, NoWebappBuildEnv+"=1")
+	// unit is the suite's one unit running the script with args: a whole run
+	// and a run of named tests differ in nothing else.
+	unit := func(args ...string) run.Spec {
+		u := spec(s.Name, s.Name, filepath.Dir(path), append([]string{path}, args...))
+		u.MayDecline = s.MayDecline
+		u.Slots = s.Slots
+		u.Env = append(u.Env, fmt.Sprintf("%s=%d", UnitSlotsEnv, u.Width()))
+		if s.NeedsWebappDist {
+			u.Env = append(u.Env, NoWebappBuildEnv+"=1")
+		}
+		return u
 	}
-	return Units{Atomic: []run.Spec{u}}, nil
+	if s.GoTests == nil {
+		return Units{Atomic: []run.Spec{unit(s.Args...)}}, nil
+	}
+	tests, err := scriptGoTests(l, s)
+	if err != nil {
+		return Units{}, err
+	}
+	return Units{
+		Atomic: []run.Spec{unit(s.GoTests.Pattern)},
+		Tests:  tests,
+		Only:   func(names []string) run.Spec { return unit(gotest.TopPattern(names)) },
+	}, nil
+}
+
+// scriptGoTests are the top-level tests of a GoTests suite's package that its
+// pattern matches, as `go test -run` matches a top-level name. A pattern that
+// matches none is refused: the suite would run nothing.
+func scriptGoTests(l Layout, s roster.Suite) ([]string, error) {
+	pattern, err := regexp.Compile(s.GoTests.Pattern)
+	if err != nil {
+		return nil, fmt.Errorf("suites: %s's Go test pattern %q: %w", s.Name, s.GoTests.Pattern, err)
+	}
+	all, err := GoTopLevelTests(l.resolve(s.GoTests.Dir))
+	if err != nil {
+		return nil, err
+	}
+	var tests []string
+	for _, t := range all {
+		if pattern.MatchString(t) {
+			tests = append(tests, t)
+		}
+	}
+	if len(tests) == 0 {
+		return nil, fmt.Errorf("suites: %s's pattern %q matches no test in %s", s.Name, s.GoTests.Pattern, s.GoTests.Dir)
+	}
+	return tests, nil
 }
 
 func executableScriptPath(l Layout, s roster.Suite) (string, error) {

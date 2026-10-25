@@ -89,6 +89,37 @@ func TestOnlyScriptSuitesHaveAWidth(t *testing.T) {
 	}
 }
 
+func TestOnlyArgumentlessScriptSuitesRunGoTests(t *testing.T) {
+	// The script's one argument is the -test.run pattern, so another kind
+	// would ignore GoTests and arguments of its own would collide with it.
+	for _, s := range Suites {
+		if s.GoTests != nil && (s.Kind != Script || len(s.Args) > 0) {
+			t.Errorf("suite %s runs Go tests but is kind %d with args %v; want an argumentless Script suite", s.Name, s.Kind, s.Args)
+		}
+	}
+}
+
+func TestEverySandboxedSuiteNamesItsGoTests(t *testing.T) {
+	// A sandboxed suite's tests run where the runner cannot reach them, so
+	// GoTests is the only way one of them reruns alone.
+	for name := range sandboxed {
+		s, ok := Lookup(name)
+		if !ok || s.GoTests == nil || s.GoTests.Dir == "" || s.GoTests.Pattern == "" {
+			t.Errorf("sandboxed suite %s = %+v, want its Go tests' package and pattern", name, s)
+		}
+	}
+}
+
+func TestTheSandboxSuiteRunsTheEmacsLayerAndTheDoomTier(t *testing.T) {
+	// Arrange
+	s, _ := Lookup("e2e-emacs")
+
+	// Assert
+	if s.GoTests == nil || *s.GoTests != (GoTests{Dir: "e2e", Pattern: "TestEmacs|TestDoom"}) {
+		t.Fatalf("e2e-emacs GoTests = %+v, want the e2e package's TestEmacs and TestDoom tests", s.GoTests)
+	}
+}
+
 func TestTheSandboxSuiteHoldsTheCoresItsContainerUses(t *testing.T) {
 	// Arrange
 	s, ok := Lookup("e2e-emacs")

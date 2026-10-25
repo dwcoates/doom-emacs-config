@@ -119,12 +119,29 @@ type Suite struct {
 	// The run builds each program ONCE (Programs) and every chunk of a package
 	// named here waits for it and reads it from AGENT_REPL_TEST_PROGRAMS.
 	Programs map[string][]string
+	// GoTests marks a Script suite whose script runs the Go tests of one
+	// package where the runner cannot run them itself (inside the e2e
+	// sandbox), and is the one home of which tests those are. The script
+	// takes the -test.run pattern as its one argument: a whole run hands it
+	// GoTests.Pattern, unchanged, and a run that names some of its tests
+	// (`-harness SCRIPT=TestA,TestB`) hands it exactly those, so one failing
+	// test reruns without the rest of the suite.
+	GoTests *GoTests
 	// Reuse marks a suite a run may skip when every input it reads is
 	// byte-identical to inputs an earlier run passed whole
 	// (agentrepl/testrun/internal/reuse). Nil means the suite ALWAYS runs: the
 	// end-to-end suites run every system for real, and a shell harness's
 	// inputs are a call graph no tool derives.
 	Reuse *Reuse
+}
+
+// GoTests is the Go tests a Script suite's script runs.
+type GoTests struct {
+	// Dir is the package's directory, relative to the agent-repl module root.
+	Dir string
+	// Pattern is the -test.run pattern a whole run runs: every top-level test
+	// of the package it matches.
+	Pattern string
 }
 
 // Parallel is how a wait-bound Go package's chunks overlap their tests.
@@ -366,7 +383,13 @@ var Suites = []Suite{
 	// CPUs nearly as fast as on four -- 82s against 66s alone, worst Doom
 	// boot 0.88s against its 3.5s bound (2026-10-12) -- while holding half
 	// the run's slots: 264 -> 164 slot-seconds, a fifth of a full run's.
-	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true, Slots: 2, NeedsWebappDist: true},
+	//
+	// THE DOOM TIER RUNS HERE TOO (TestDoom*, e2e/doomtier_test.go): it boots
+	// the same Doom in the same image, so it shares this suite's container
+	// rather than paying a second container start for tests of about three
+	// seconds each.
+	{Name: "e2e-emacs", Kind: Script, Path: "bin/test-e2e-emacs.sh", MayDecline: true, Slots: 2, NeedsWebappDist: true,
+		GoTests: &GoTests{Dir: "e2e", Pattern: "TestEmacs|TestDoom"}},
 }
 
 // AlwaysRunRegions are the parts of the repository that only suites which

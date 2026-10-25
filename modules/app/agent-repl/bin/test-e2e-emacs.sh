@@ -16,7 +16,8 @@ set -euo pipefail
 
 # shellcheck source=lib-sandbox-suite.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib-sandbox-suite.sh"
-# THE DOOM TIER RUNS HERE TOO (TestDoom*, e2e/doomtier_test.go): it boots the
-# same Doom in the same image, so it shares this suite's container rather than
-# paying a second container start for tests of about three seconds each.
-run_sandbox_suite e2e-emacs 'TestEmacs|TestDoom' 'the Emacs client layer and the Doom tier' "$@"
+# Which tests run is the runner's, never this script's: its one argument is
+# the -test.run pattern, the roster's (testrun/roster, e2e-emacs's GoTests)
+# for a whole run, or just the tests a run names. The Doom tier (TestDoom*)
+# shares this suite's container; the roster says why.
+run_sandbox_suite e2e-emacs 'the Emacs client layer and the Doom tier' "$@"
