@@ -83,8 +83,9 @@ type Resolver interface {
 	// status arm and its glyph.
 	SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts)
 	// SetMergeQueue installs, WHOLE, REPO's merge queue as the roster draws
-	// it: whether it is paused, the workspaces with a row on it, and the
-	// workspaces whose own branch has an async merge on it. The merge
+	// it: whether it is paused, the workspaces with a row on it, the merges
+	// in line, and the workspaces whose own branch has an async merge on it.
+	// The merge
 	// orchestrator is the one caller, on every change of the queue's rows and
 	// of its pause.
 	SetMergeQueue(repo wsm.RepoKey, queue MergeQueue)
@@ -201,6 +202,12 @@ type MergeQueue struct {
 	// Workspaces are the workspaces with a row on the queue, in queue order:
 	// the queue a `merging` or `merge_queued` row's own merge is on.
 	Workspaces []ids.WorkspaceID
+	// Line is the workspaces whose merge is IN LINE, front first: the
+	// running merge (when one runs) first, then every waiting merge in the
+	// order it will run -- Workspaces less the merges only requested. A
+	// repository section showing its merge queue draws one row for each
+	// (frontend.v1.RosterRepoMergeQueue).
+	Line []ids.WorkspaceID
 	// AsyncRequesters are the workspaces whose own branch has an async merge
 	// on the queue, from the moment the async request is recorded until its
 	// merge leaves the queue. Each row carries the `async_merging` marker

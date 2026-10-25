@@ -2,6 +2,7 @@ package sidebar
 
 import (
 	"fmt"
+	"slices"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -34,8 +35,16 @@ const OpenSectionLabel = "Open"
 // rows still draws: both are registered, and a section that vanished when its
 // last workspace left would make the grouping flicker (and leave an empty
 // subsection nowhere to drag a workspace into).
+//
+// Every section states what its body shows (RosterRepoSection.shows): its
+// entries, or its merge queue's line (queueLines) while the view shows the
+// merge queues, the header then counting the queue's rows.
 func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.RosterRepositoryView {
 	repos, orphans := openTree(r.state.reg, log)
+	var lines map[ids.RepoID][]wsm.Workspace
+	if r.state.reg.View.OpenShowsMergeQueues {
+		lines = r.queueLines(log)
+	}
 	current := r.selectedWorkspace()
 	out := &frontendv1.RosterRepositoryView{}
 	numbers := &tabNumberer{}
@@ -67,14 +76,79 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 			setSubsectionFold(sub, region.subsection.Folded, wsm.SubsectionMembers(region.subsection.ID).HoldsCurrent(current))
 			section.Entries = append(section.Entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Subsection{Subsection: sub}})
 		}
-		section.Header = sectionHeader(placed.repo.Name, count)
 		shown += count
+		headerCount := count
+		if r.state.reg.View.OpenShowsMergeQueues {
+			queue := r.mergeQueueRows(lines[placed.repo.ID], rc, repoLog)
+			headerCount = len(queue.Rows)
+			section.Shows = &frontendv1.RosterRepoSection_MergeQueue{MergeQueue: queue}
+		} else {
+			section.Shows = &frontendv1.RosterRepoSection_Workspaces{Workspaces: &frontendv1.RosterRepoShowsWorkspaces{}}
+		}
+		section.Header = sectionHeader(placed.repo.Name, headerCount)
 		setRepoFold(section, placed.repo.Folded, wsm.RepositoryMembers(placed.repo.ID).HoldsCurrent(current))
 		out.Sections = append(out.Sections, section)
 	}
 	r.assertRepositoryInvariant(orphans, "daemon.sidebar.repository_view", "the repo grouping", log)
 	out.OpenCount = &frontendv1.RosterOpenCount{Workspaces: uint32(shown)}
 	return out
+}
+
+// mergeQueueRows composes one repository's merge queue: a FLAT row for each
+// merge in LINE, front first.
+func (r *resolver) mergeQueueRows(line []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRepoMergeQueue {
+	out := &frontendv1.RosterRepoMergeQueue{}
+	for _, ws := range line {
+		out.Rows = append(out.Rows, &frontendv1.RosterMergeQueueRow{Row: r.row(ws, rc, log)})
+	}
+	return out
+}
+
+// queueLines answers every repository's merge queue line, front first, each
+// merge as the registry records the workspace it is drawn as, keyed by that
+// workspace's repository: a queue is keyed by its repository's git common
+// dir, which only the merge orchestrator resolves, and every merge on one
+// queue is a workspace of that queue's repository.
+//
+// TWO QUEUES ON ONE REPOSITORY, and a merge in line naming a workspace the
+// registry does not carry, are INVARIANT VIOLATIONS (one queue per
+// repository; a queue entry references a registered workspace), recorded
+// loudly here as assertRepositoryInvariant records its own. Nothing is
+// dropped to hide the first: both queues' merges are drawn, in queue-key
+// order. A merge with no record cannot be drawn and is named in the record.
+func (r *resolver) queueLines(log dlog.Logger) map[ids.RepoID][]wsm.Workspace {
+	const op = "daemon.sidebar.queue_lines"
+	byID := make(map[ids.WorkspaceID]wsm.Workspace, len(r.state.reg.Workspaces))
+	for _, ws := range r.state.reg.Workspaces {
+		byID[ws.ID] = ws
+	}
+	keys := make([]wsm.RepoKey, 0, len(r.state.queues))
+	for key := range r.state.queues {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	lines := map[ids.RepoID][]wsm.Workspace{}
+	queueOf := map[ids.RepoID]wsm.RepoKey{}
+	for _, key := range keys {
+		for _, id := range r.state.queues[key].line {
+			ws, ok := byID[id]
+			if !ok {
+				log.Error(op, "a merge in line names a workspace the registry does not carry, so its queue row is not drawn", dlog.Context{
+					"repo": string(key), "workspace_id": string(id),
+					"invariant_violation": "a merge queue entry references a registered workspace"})
+				continue
+			}
+			if first, seen := queueOf[ws.Repo]; seen && first != key {
+				log.Error(op, "two merge queues hold merges of one repository; both are drawn", dlog.Context{
+					"repo_id": string(ws.Repo), "first_queue": string(first), "second_queue": string(key), "workspace_id": string(id),
+					"invariant_violation": "one merge queue per repository"})
+			} else {
+				queueOf[ws.Repo] = key
+			}
+			lines[ws.Repo] = append(lines[ws.Repo], ws)
+		}
+	}
+	return lines
 }
 
 // openRows composes one region's open rows, depth-first, each taking the next
@@ -297,7 +371,9 @@ func setHiddenFold(section *frontendv1.RosterHiddenSection, folded bool) {
 	section.Fold = &frontendv1.RosterHiddenSection_Expanded{Expanded: &frontendv1.RosterHiddenSectionExpanded{}}
 }
 
-// openSection resolves the open-workspaces section: its heading and its fold.
+// openSection resolves the open-workspaces section: its heading, its fold and
+// what its repository sections show, the same view repositoryView states on
+// each of them.
 // The groupings it boxes stay on the roster, each carrying its own count
 // (openCount). The fold is the daemon's so every page draws the same one
 // (UpdateSidebarView); it folds sidebar rows only, never a tab.
@@ -307,6 +383,11 @@ func (r *resolver) openSection() *frontendv1.RosterOpenSection {
 		section.Fold = &frontendv1.RosterOpenSection_Collapsed{Collapsed: &frontendv1.RosterOpenSectionCollapsed{}}
 	} else {
 		section.Fold = &frontendv1.RosterOpenSection_Expanded{Expanded: &frontendv1.RosterOpenSectionExpanded{}}
+	}
+	if r.state.reg.View.OpenShowsMergeQueues {
+		section.Shows = &frontendv1.RosterOpenSection_MergeQueues{MergeQueues: &frontendv1.RosterOpenSectionShowsMergeQueues{}}
+	} else {
+		section.Shows = &frontendv1.RosterOpenSection_Workspaces{Workspaces: &frontendv1.RosterOpenSectionShowsWorkspaces{}}
 	}
 	return section
 }
