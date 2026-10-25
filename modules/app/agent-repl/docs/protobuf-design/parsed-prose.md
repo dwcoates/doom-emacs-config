@@ -299,8 +299,10 @@ wrong labels). That needs one parse, in one place, that every program reads.
     does, and the next selection push takes it down
     (`webapp/src/feed/revealed-node.ts`).
   - **The click asks nothing of Emacs.** RET on a selected prompt still resends the
-    composer's words whole. `RollBackResend.edit.entry` has no client since the click
-    stopped filling the composer.
+    composer's words whole.
+  - **The entry edit is retired with it** (owner ruling, 2026-10-24):
+    `RollBackResend.edit.entry` (tag 4) and `RollBackError.cause.entry_not_found`
+    (tag 12) are reserved, since only the click ever made an entry edit.
 
 ### 9. `C-o` descends an entry to its node's first child
 
