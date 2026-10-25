@@ -29,6 +29,7 @@ import { requireCase, requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { callUnary } from "../rpc/unary.js";
 import { ChatStream, type ChatActions } from "./chat-view.js";
+import { markConversationDrawn } from "../feed/conversation-drawn.js";
 
 /** How long sightings gather before they are reported together. */
 export const SIGHTING_BATCH_MS = 1000;
@@ -176,6 +177,11 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
     const atEnd = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24;
     flushSync(() => root.render(<ChatStream view={view} actions={actions} />));
     if (atEnd) landChatAtEnd(scroll, "chatAnswerFollowed");
+    // THE THREAD'S FIRST VIEW IS ITS CONVERSATION DRAWN, as the feed's opening
+    // page is the feed's: the daemon opens the thread's tab (OpenTabs) only
+    // once its page says so (page-drawn-report.ts), and the frame follows the
+    // thread only once its tab is open.
+    markConversationDrawn("page");
   };
 
   const stream: StreamHandle = watchStream(ctx, {

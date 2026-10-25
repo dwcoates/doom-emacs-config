@@ -15,6 +15,7 @@ import { ChatViewSchema, type ChatView } from "../../../proto/gen/ts/frontend/v1
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { mountChat, SIGHTING_BATCH_MS, type ChatHandle } from "../../src/chat/chat.js";
 import { HIGHLIGHT_CLASS, QUOTE_MARK_CLASS } from "../../src/chat/chat-view.js";
+import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { fakeTicker, SINK } from "../sidebar/harness.js";
@@ -154,6 +155,20 @@ describe("the chat view", () => {
 
     // Assert
     expect((await drawn("[data-chat-empty]")).textContent).toBe("Ask your first question.");
+  });
+
+  it("marks the page's conversation drawn with its first view, so the thread's tab can open", async () => {
+    // Arrange
+    document.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
+    const d = daemon();
+    mount(d);
+
+    // Act
+    d.push({ state: { case: "empty", value: { hint: { text: "Ask your first question." } } } });
+    await drawn("[data-chat-empty]");
+
+    // Assert
+    await vi.waitFor(() => expect(document.documentElement.getAttribute(CONVERSATION_DRAWN_ATTRIBUTE)).toBe("page"));
   });
 
   it("draws the path's questions and answers, a quote, and a sibling control", async () => {
