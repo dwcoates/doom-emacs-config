@@ -1029,6 +1029,31 @@ func (s *server) SetWorkspacePrincipalLink(
 	return connect.NewResponse(resp), nil
 }
 
+// SetWorkspaceName renames the workspace: its name only, never its branch or
+// its directory. The new name arrives on the roster and topbar streams.
+func (s *server) SetWorkspaceName(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspaceNameRequest],
+) (*connect.Response[agentreplv1.SetWorkspaceNameResponse], error) {
+	const rpc = "SetWorkspaceName"
+	if err := validateSetWorkspaceNameRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.SetWorkspaceNameResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	name, err := s.deps.Verbs.SetName(ctx, subject.Record.ID, req.Msg.GetName())
+	if err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.SetWorkspaceNameResponse_Success{
+		Success: &agentreplv1.SetWorkspaceNameSuccess{Name: name},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // SetWorkspaceHidden moves a workspace into the roster's hidden section, or
 // back out of it. The new state arrives on the roster stream.
 func (s *server) SetWorkspaceHidden(

@@ -2395,3 +2395,97 @@ func TestFinishWorkspaceRefusesABehindPlacementNamingNoMerge(t *testing.T) {
 		t.Fatalf("FinishWorkspace = %v, requests %+v; want the empty merge refused as invalid", err, h.Merge.requests)
 	}
 }
+
+// ---- SetWorkspaceName ------------------------------------------------------
+
+// TestSetWorkspaceNameHandsTheNameToTheVerb pins the requested name reaching
+// the verb, and the verb's answered name coming back as the success.
+func TestSetWorkspaceNameHandsTheNameToTheVerb(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	resp, err := h.Client.SetWorkspaceName(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceNameRequest{Workspace: ref(), Name: "better-name"}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetWorkspaceName: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetName(); got != "better-name" {
+		t.Fatalf("result = %v, want success naming better-name", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.names) != 1 || h.Verbs.names[0] != "better-name" {
+		t.Fatalf("names = %q, want [better-name]", h.Verbs.names)
+	}
+}
+
+// TestSetWorkspaceNameRefusesAnUnknownWorkspace pins the unknown_workspace
+// arm, with no verb reached.
+func TestSetWorkspaceNameRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	resp, err := h.Client.SetWorkspaceName(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceNameRequest{Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"}, Name: "better-name"}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetWorkspaceName: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.names) != 0 {
+		t.Fatalf("names = %q, want none for an unknown workspace", h.Verbs.names)
+	}
+}
+
+// TestSetWorkspaceNameMapsTheVerbsRefusals pins each of the verb's own
+// refusals reaching its arm with its evidence, nested arms included.
+func TestSetWorkspaceNameMapsTheVerbsRefusals(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal *workspace.Refusal
+		check   func(*agentreplv1.SetWorkspaceNameError) bool
+	}{
+		{name: "invalid_name, with its rule", refusal: &workspace.Refusal{Arm: workspace.ArmInvalidName, Reason: "bad slug",
+			Fields: map[string]any{"name": "Bad Name", "component": "Bad Name", "rule": workspace.NameRuleSlug}},
+			check: func(e *agentreplv1.SetWorkspaceNameError) bool {
+				got := e.GetInvalidName()
+				return got.GetName() == "Bad Name" && got.GetComponent() == "Bad Name" && got.GetSlug() != nil
+			}},
+		{name: "name_taken by a workspace", refusal: &workspace.Refusal{Arm: workspace.ArmNameTaken, Reason: "held",
+			Fields: map[string]any{"name": "better-name", "workspace": &workspacev1.WorkspaceRef{Id: "ws-holder", Dir: "/tmp/holder"}}},
+			check: func(e *agentreplv1.SetWorkspaceNameError) bool {
+				got := e.GetNameTaken()
+				return got.GetName() == "better-name" && got.GetWorkspace().GetId() == "ws-holder" && got.GetWorkspace().GetDir() == "/tmp/holder"
+			}},
+		{name: "name_taken by a pending reservation", refusal: &workspace.Refusal{Arm: workspace.ArmNameTaken, Reason: "reserved",
+			Fields: map[string]any{"name": "better-name", "holder": refusalarm.Nested("pending")}},
+			check: func(e *agentreplv1.SetWorkspaceNameError) bool {
+				got := e.GetNameTaken()
+				return got.GetName() == "better-name" && got.GetPending() != nil
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Verbs.setNameErr = tt.refusal
+
+			// Act
+			resp, err := h.Client.SetWorkspaceName(context.Background(),
+				connect.NewRequest(&agentreplv1.SetWorkspaceNameRequest{Workspace: ref(), Name: "better-name"}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetWorkspaceName: %v", err)
+			}
+			if !tt.check(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm with its evidence", resp.Msg.GetResult(), tt.refusal.Arm)
+			}
+		})
+	}
+}

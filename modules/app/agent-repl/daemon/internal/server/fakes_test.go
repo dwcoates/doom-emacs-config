@@ -347,6 +347,10 @@ type fakeVerbs struct {
 	// clear; setPrincipalLinkErr is what it answers.
 	principalLinks      []string
 	setPrincipalLinkErr error
+	// names records every name SetName received; setNameErr is what it
+	// answers, and a success answers the name it received.
+	names      []string
+	setNameErr error
 	// opens and selects count every Open and Select the handlers made: the
 	// two verbs that bring a workspace up.
 	opens, selects atomic.Int32
@@ -643,6 +647,14 @@ func (f *fakeVerbs) SetPrincipalLink(_ context.Context, _ ids.WorkspaceID, link 
 	}
 	f.principalLinks = append(f.principalLinks, url)
 	return f.setPrincipalLinkErr
+}
+
+func (f *fakeVerbs) SetName(_ context.Context, _ ids.WorkspaceID, name string) (string, error) {
+	f.names = append(f.names, name)
+	if f.setNameErr != nil {
+		return "", f.setNameErr
+	}
+	return name, nil
 }
 
 func (f *fakeVerbs) RegisterRepository(_ context.Context, path string) (workspace.RegisteredRepository, error) {
