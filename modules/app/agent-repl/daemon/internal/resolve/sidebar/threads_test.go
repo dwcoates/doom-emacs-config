@@ -72,6 +72,25 @@ func TestTheThreadSectionPutsTheMostRecentlyInteractedFirst(t *testing.T) {
 	}
 }
 
+func TestArchivedThreadsFollowEveryOpenThread(t *testing.T) {
+	// Arrange: the archived thread is the most recently interacted with.
+	r, _ := newResolver(t)
+	archived, open := thread("t-1", "archived", at(2*time.Minute)), thread("t-2", "open", at(time.Minute))
+	archived.Closed = true
+
+	// Act
+	r.SetRegistry(withThreads(archived, open))
+
+	// Assert
+	rows := latest(t, r).GetThreads().GetRows()
+	if len(rows) != 2 || rows[0].GetName().GetText() != "open" || rows[1].GetName().GetText() != "archived" {
+		t.Fatalf("thread rows = %v, want the open thread first", rows)
+	}
+	if rows[0].GetStanding().GetOpen() == nil || rows[1].GetStanding().GetArchived() == nil {
+		t.Fatalf("standings = %v, %v; want open then archived", rows[0].GetStanding(), rows[1].GetStanding())
+	}
+}
+
 func TestAThreadRowCarriesItsSummaryAndCurrent(t *testing.T) {
 	// Arrange
 	r, _ := newResolver(t)

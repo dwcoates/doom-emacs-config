@@ -78,11 +78,15 @@ func (r *resolver) appSwitcher() *frontendv1.RosterAppSwitcher {
 	}
 }
 
-// threadSection resolves the thread list: every open thread, the one the
-// user interacted with last first.
+// threadSection resolves the thread list: every open thread and then every
+// archived one (a closed thread's workspace), each the one the user
+// interacted with last first.
 func (r *resolver) threadSection(threads []wsm.Workspace) *frontendv1.RosterThreadSection {
 	sorted := append([]wsm.Workspace(nil), threads...)
 	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].Closed != sorted[j].Closed {
+			return !sorted[i].Closed
+		}
 		a, b := sorted[i].LastInteractedAt(), sorted[j].LastInteractedAt()
 		if !a.Equal(b) {
 			return a.After(b)
@@ -92,8 +96,9 @@ func (r *resolver) threadSection(threads []wsm.Workspace) *frontendv1.RosterThre
 	out := &frontendv1.RosterThreadSection{NewThread: &frontendv1.RosterThreadNewButton{Label: NewThreadLabel}}
 	for _, ws := range sorted {
 		row := &frontendv1.RosterThreadRow{
-			Thread: ws.Ref(),
-			Name:   &frontendv1.RosterThreadName{Text: ws.Name},
+			Thread:   ws.Ref(),
+			Name:     &frontendv1.RosterThreadName{Text: ws.Name},
+			Standing: threadStanding(ws),
 		}
 		if s, ok := r.state.workspaces[ws.ID]; ok && s.summary != "" {
 			row.Summary = &frontendv1.RosterThreadSummary{Text: s.summary}
@@ -104,4 +109,13 @@ func (r *resolver) threadSection(threads []wsm.Workspace) *frontendv1.RosterThre
 		out.Rows = append(out.Rows, row)
 	}
 	return out
+}
+
+// threadStanding is a thread's standing: archived when its workspace is
+// closed, open otherwise.
+func threadStanding(ws wsm.Workspace) *frontendv1.RosterThreadStanding {
+	if ws.Closed {
+		return &frontendv1.RosterThreadStanding{Standing: &frontendv1.RosterThreadStanding_Archived{Archived: &frontendv1.RosterThreadArchived{}}}
+	}
+	return &frontendv1.RosterThreadStanding{Standing: &frontendv1.RosterThreadStanding_Open{Open: &frontendv1.RosterThreadOpen{}}}
 }
