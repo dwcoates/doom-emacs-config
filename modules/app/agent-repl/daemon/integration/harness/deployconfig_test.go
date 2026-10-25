@@ -2,6 +2,9 @@ package harness
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -40,15 +43,58 @@ func TestAgentReplDeployStatesAgentReplsPipeline(t *testing.T) {
 	}
 }
 
-func TestTheDeployLandingScriptCallsTheDaemonWithItsDeploy(t *testing.T) {
+func TestTheFrontDoorIsReadOffTheRealDeployScript(t *testing.T) {
+	// Arrange
+	script, err := os.ReadFile(filepath.Join(RepoRoot(t), DeployLandingScript))
+	if err != nil {
+		t.Fatalf("read the deploy script: %v", err)
+	}
+
 	// Act
-	body := deployLandingScript("/built/agent-repld")
+	door := frontDoorOf(t, string(script))
 
 	// Assert
-	for _, want := range []string{"'/built/agent-repld' runtime roll-out-landing -deploy \"$AGENT_REPL_DEPLOY_LEDGER\"", "'/built/agent-repld' runtime roll-out-landing\n"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("the deploy script reads %q, want %q", body, want)
-		}
+	if door != "modules/app/agent-repl/skills/agent-repl-workspaces/agent-repld" {
+		t.Fatalf("front door = %q, want agent-repl's own", door)
+	}
+}
+
+func TestTheDeployScriptCallsTheDaemonRunningItsDeploy(t *testing.T) {
+	tests := []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{name: "a hold's release names nothing", want: "runtime roll-out-landing"},
+		{name: "a deploy names its ledger and its daemon",
+			env:  []string{"AGENT_REPL_DEPLOY_LEDGER=ledger-1", "AGENT_REPL_DEPLOY_DAEMON=127.0.0.1:4242"},
+			want: "runtime roll-out-landing -deploy ledger-1 -daemon 127.0.0.1:4242"},
+		{name: "a deploy run by a daemon that names no address", env: []string{"AGENT_REPL_DEPLOY_LEDGER=ledger-1"},
+			want: "runtime roll-out-landing -deploy ledger-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the real script in a repository whose front door
+			// prints what it was asked.
+			root := t.TempDir()
+			script, err := os.ReadFile(filepath.Join(RepoRoot(t), DeployLandingScript))
+			if err != nil {
+				t.Fatalf("read the deploy script: %v", err)
+			}
+			writeExecutable(t, filepath.Join(root, DeployLandingScript), string(script))
+			writeExecutable(t, filepath.Join(root, frontDoorOf(t, string(script))), "#!/bin/sh\necho \"$@\"\n")
+			cmd := exec.Command("bash", filepath.Join(root, DeployLandingScript))
+			cmd.Dir = root
+			cmd.Env = append([]string{"PATH=" + os.Getenv("PATH")}, tt.env...)
+
+			// Act
+			out, err := cmd.Output()
+
+			// Assert
+			if err != nil || strings.TrimSpace(string(out)) != tt.want {
+				t.Fatalf("the script asked %q (%v), want %q", out, err, tt.want)
+			}
+		})
 	}
 }
 

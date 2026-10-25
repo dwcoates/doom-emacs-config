@@ -3,9 +3,10 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"strings"
+	"testing"
 
 	"agent-repld/internal/deployconfig"
-	"agent-repld/internal/shellword"
 )
 
 // EVERY FIXTURE REPOSITORY STATES ITS DEPLOY. A repository with no
@@ -55,25 +56,38 @@ func (r *Repo) RemoveDeployConfig() {
 }
 
 // DeploysAsAgentRepl makes the repository deploy as agent-repl's own does
-// (AgentReplDeploy), with a deploy hook that calls back into the daemon under
-// test exactly as agent-repl's bin/deploy-landing.sh calls the deployed
-// build's front door: the hook inherits the daemon's AGENT_REPL_STATE_DIR, so
-// the CLI dials that daemon.
+// (AgentReplDeploy), with agent-repl's REAL deploy hook, bin/deploy-landing.sh,
+// copied in verbatim: the front door it execs is linked to the daemon binary
+// under test, and the hook inherits the daemon's AGENT_REPL_STATE_DIR and the
+// deploy's environment, so it calls back the daemon exactly as in production.
 func (r *Repo) DeploysAsAgentRepl() {
 	r.t.Helper()
 	r.WriteDeployConfig(AgentReplDeploy)
-	writeExecutable(r.t, filepath.Join(r.Dir, DeployLandingScript), deployLandingScript(DaemonBinary(r.t)))
+	source := filepath.Join(RepoRoot(r.t), DeployLandingScript)
+	script, err := os.ReadFile(source)
+	if err != nil {
+		r.t.Fatalf("harness: read %s: %v", source, err)
+	}
+	writeExecutable(r.t, filepath.Join(r.Dir, DeployLandingScript), string(script))
+	door := filepath.Join(r.Dir, frontDoorOf(r.t, string(script)))
+	if err := os.MkdirAll(filepath.Dir(door), 0o755); err != nil {
+		r.t.Fatalf("harness: mkdir %s: %v", filepath.Dir(door), err)
+	}
+	if err := os.Symlink(DaemonBinary(r.t), door); err != nil {
+		r.t.Fatalf("harness: link the front door %s: %v", door, err)
+	}
 }
 
-// deployLandingScript is the fixture's deploy hook body, calling the daemon
-// binary at BINARY.
-func deployLandingScript(binary string) string {
-	cli := shellword.Quote(binary)
-	return `#!/bin/sh
-set -eu
-if [ -n "${AGENT_REPL_DEPLOY_LEDGER:-}" ]; then
-  exec ` + cli + ` runtime roll-out-landing -deploy "$AGENT_REPL_DEPLOY_LEDGER"
-fi
-exec ` + cli + ` runtime roll-out-landing
-`
+// frontDoorOf answers the path, relative to the repository root, SCRIPT's
+// `FRONT_DOOR=` line names: read off the script, so the harness never restates
+// it.
+func frontDoorOf(t testing.TB, script string) string {
+	t.Helper()
+	for _, line := range strings.Split(script, "\n") {
+		if value, ok := strings.CutPrefix(line, "FRONT_DOOR="); ok {
+			return strings.Trim(value, `"`)
+		}
+	}
+	t.Fatalf("harness: %s names no FRONT_DOOR", DeployLandingScript)
+	return ""
 }
