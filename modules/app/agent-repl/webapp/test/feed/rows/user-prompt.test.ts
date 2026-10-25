@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { FeedUserPromptSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedUserPromptBodySchema, FeedUserPromptSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import { drawFeedUserPrompt } from "../../../src/feed/rows/user-prompt.js";
+import { drawFeedUserPrompt, userPromptLook } from "../../../src/feed/rows/user-prompt.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import { BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
@@ -470,5 +470,30 @@ describe("drawFeedUserPrompt: the copy control", () => {
       el.remove();
       restore();
     }
+  });
+});
+
+describe("userPromptLook: the one source of the user prompt's look", () => {
+  const body = create(FeedUserPromptBodySchema, {
+    blocks: [{ block: { case: "text", value: { prose: servedProse("fix **the** test") } } }],
+  });
+
+  it("puts the copy control in the corner, copying the person's markdown", () => {
+    // Arrange / Act
+    const look = userPromptLook(body, "Body");
+    // Assert
+    expect(look.corner.map((el) => [el.classList.contains(PROMPT_COPY_CLASS), boundCopyText(el).text])).toEqual([
+      [true, "fix **the** test"],
+    ]);
+  });
+
+  it("draws one content node per block", () => {
+    // Arrange / Act / Assert
+    expect(userPromptLook(body, "Body").content).toHaveLength(1);
+  });
+
+  it("folds with no line cap", () => {
+    // Arrange / Act / Assert
+    expect(userPromptLook(body, "Body").capLines).toBe(USER_PROMPT_CAP_LINES);
   });
 });
