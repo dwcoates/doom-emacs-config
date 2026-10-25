@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -1038,5 +1039,88 @@ func TestAnUnresolvedAnswerRecordNamesItsPlaneAndWhetherTheRowWasDrawn(t *testin
 				t.Fatalf("record context = %v, want plane %q and answer_row_known false", ctx, tt.wantPlane)
 			}
 		})
+	}
+}
+
+// ---- AN ANSWER ON A PAGE THE WALK HAS NOT LOADED ----
+
+// cutAnswerBook is turn-1 answered by ans-1 and concluded naming it, on a store
+// page of two serving turn heads: [terminal ans-3 | head prompt-1, steps
+// between] [ans-2 ans-1] [prompt-1 prompt-0]. The newest page holds the turn's
+// terminal while the answer it names stands with its earlier steps below.
+func (h *harness) cutAnswerBook() {
+	book := []bookEntry{{entry: promptEntry("turn-0", "first")}, {entry: promptEntry("turn-1", "long")}}
+	for i := 1; i <= 3; i++ {
+		book = append(book, answerEntry("turn-1", fmt.Sprintf("ans-%d", i)))
+	}
+	book = append(book, bookEntry{turn: "turn-1", entry: frameEntry(mainAgent(), completedWith("ans-1"))})
+	store := h.mainBook(2, book)
+	store.heads = true
+}
+
+func TestAnAnswerOnAnUnloadedPageRaisesNoFault(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.cutAnswerBook()
+
+	// Act: a reader opens the newest page, the terminal on it.
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	if got := h.errorRecords("daemon.feed.final_answer_unresolved"); len(got) != 0 {
+		t.Fatalf("an answer on an unloaded page logged %d unresolved records, want none", len(got))
+	}
+	if fault := h.standingAnswerFault(); fault != nil {
+		t.Fatalf("an answer on an unloaded page raised a fault: %v", fault.Evidence)
+	}
+}
+
+func TestAnAnswerOnAnUnloadedPageIsRecordedPending(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.cutAnswerBook()
+
+	// Act.
+	h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	if !h.hasRecordWith(dlog.LevelInfo, "daemon.feed.final_answer_pending", "unit", "ans-1") {
+		t.Fatal("no INFO record says the answer waits on an older page")
+	}
+}
+
+func TestAPendingAnswerIsDrawnGreenWhenTheWalkLoadsItsPage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.cutAnswerBook()
+	h.openPage(rootFeed(), "reader-1")
+
+	// Act: the walk loads the page holding ans-1.
+	h.nextPage("reader-1")
+
+	// Assert.
+	row, ok := h.findRow(rootFeed(), h.responseRowID("ans-1"))
+	if !ok || !row.GetActivity().GetResponse().GetFinalAnswer() {
+		t.Fatalf("ans-1 row = %v, want it drawn as the turn's final answer", row)
+	}
+	if !h.hasRecordWith(dlog.LevelInfo, "daemon.feed.final_answer_landed_late", "unit", "ans-1") {
+		t.Fatal("no INFO record says the held answer landed")
+	}
+}
+
+func TestAPendingAnswerLeavesTheOtherResponsesUnmarked(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.cutAnswerBook()
+	h.openPage(rootFeed(), "reader-1")
+
+	// Act.
+	h.nextPage("reader-1")
+
+	// Assert: only the named answer is green.
+	for _, unit := range []string{"ans-2", "ans-3"} {
+		if row, ok := h.findRow(rootFeed(), h.responseRowID(unit)); ok && row.GetActivity().GetResponse().GetFinalAnswer() {
+			t.Fatalf("%s was drawn as a final answer; only ans-1 was named", unit)
+		}
 	}
 }

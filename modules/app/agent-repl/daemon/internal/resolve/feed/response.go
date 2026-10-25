@@ -223,6 +223,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 
 	id := r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindActivity, ID: unit})
 	s.answerRows[unit] = id
+	r.landPendingAnswer(s, id, unit)
 	// THE SETTLED WHOLE IS THE BLOCK'S ONLY ROW, even when the two store planes
 	// delivered the block under DIVERGENT activity ids. A settling frame retires
 	// any same-turn fragment that lost its opening deltas to the other id, so the
