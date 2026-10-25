@@ -1002,8 +1002,7 @@ to the oldest."
     (:prompt-not-recorded . "the conversation holds no record of that prompt")
     (:first-prompt . "the first prompt can't be rolled back; /clear starts over")
     (:unseen-prompt . "a later prompt the feed never showed would be dropped")
-    (:files-not-restorable . "files can't be restored to that prompt")
-    (:entry-not-found . "the edited entry is not one the selected prompt holds; click the entry again"))
+    (:files-not-restorable . "files can't be restored to that prompt"))
   "Each PlanRollback / RollBack / ListRollbackPrompts refusal arm, in plain words.")
 
 (defun agent-repl--input-rollback-refusal-text (cause)
@@ -1044,7 +1043,7 @@ They come in the order the confirmation lists them."
 (defun agent-repl--input-rollback-confirmation (plan &optional resend)
   "Return the y/n question that states PLAN, side effects in the `error' face.
 RESEND, when the composer's words are sent in the prompt's place, is
-named too: the entry it edits, or the composer's words whole."
+named too."
   (let* ((target (plist-get plan :target))
          (dropped (plist-get target :prompts-dropped))
          (head (format "%s \"%s\"%s."
@@ -1063,17 +1062,9 @@ named too: the entry it edits, or the composer's words whole."
                           (agent-repl--input-rollback-side-effects plan))))
     (concat (mapconcat #'identity
                        (append (list head files) effects
-                               (when resend (list (agent-repl--input-resend-sentence resend))))
+                               (when resend (list "The composer's words are sent in its place.")))
                        " ")
             " Roll back? ")))
-
-(defun agent-repl--input-resend-sentence (resend)
-  "Return the confirmation's sentence naming what RESEND sends."
-  (let ((edit (plist-get resend :edit)))
-    (if (eq (plist-get edit :arm) :entry)
-        (format "The prompt is sent again with entry %s as the composer holds it."
-                (plist-get (plist-get edit :value) :label))
-      "The composer's words are sent in its place.")))
 
 (defun agent-repl--input-rollback-refused (ws verb cause)
   "Log and flash WS's VERB (`plan', `roll-back' or `list') refusal CAUSE.

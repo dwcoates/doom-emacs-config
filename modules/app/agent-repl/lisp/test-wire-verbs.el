@@ -4554,14 +4554,6 @@ webapp's alone."
                             :token)
           :resend (list :idempotency-key "k-1" :origin :user-sent :edit edit)))))
 
-(ert-deftest agent-repl-test-wire-verbs-roll-back-resend-entry-shape ()
-  "An entry edit carries its key, origin, label, words and the prompt it edits."
-  (agent-repl-test-wire-verbs--with-common
-    (should (string-match-p
-             (regexp-quote "\"resend\":{\"idempotencyKey\":\"k-1\",\"origin\":\"ORIGIN::user-sent\",\"entry\":{\"label\":\"3.1\",\"text\":\"new\",\"row\":{\"value\":\"p1\"}}}")
-             (agent-repl-test-wire-verbs--roll-back-with
-              '(:arm :entry :value (:row (:value "p1") :label "3.1" :text "new")))))))
-
 (ert-deftest agent-repl-test-wire-verbs-roll-back-resend-whole-shape ()
   "A whole resend carries the composer's prompt."
   (agent-repl-test-wire-verbs--with-common
@@ -4581,13 +4573,6 @@ webapp's alone."
                          :token (plist-get (agent-repl-test-wire-verbs--plan
                                             agent-repl-test-wire-verbs--minimal-plan)
                                            :token))))))))
-
-(ert-deftest agent-repl-test-wire-verbs-roll-back-resend-entry-without-a-row-refused ()
-  "An entry edit naming no prompt is refused before anything is sent."
-  (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-test-wire-verbs--roll-back-with
-                   '(:arm :entry :value (:label "3.1" :text "new")))
-                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-roll-back-resend-unknown-edit-refused ()
   "An edit arm the schema does not declare is refused before anything is sent."
@@ -4609,7 +4594,7 @@ webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_roll_back.pb.go" "RollBackResend")
                        #'string<)
-                 '("entry" "whole"))))
+                 '("whole"))))
 
 (ert-deftest agent-repl-test-wire-verbs-roll-back-missing-token-refused ()
   "The token is REQUIRED."
@@ -4670,9 +4655,7 @@ webapp's alone."
                     ("{\"firstPrompt\":{}}" (:arm :first-prompt :value nil))
                     ("{\"unseenPrompt\":{}}" (:arm :unseen-prompt :value nil))
                     ("{\"filesNotRestorable\":{\"vendorMessage\":\"gone\"}}"
-                     (:arm :files-not-restorable :value (:vendor-message "gone")))
-                    ("{\"entryNotFound\":{\"label\":\"3.1\"}}"
-                     (:arm :entry-not-found :value (:label "3.1")))))
+                     (:arm :files-not-restorable :value (:vendor-message "gone")))))
       (should (equal (agent-repl-wire-decode-roll-back-response
                       (agent-repl-test-wire-verbs--parse
                        (concat "{\"error\":" (car case) "}")))
@@ -4692,7 +4675,7 @@ webapp's alone."
                        #'string<)
                  (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway"
                              "notYetAdopted" "planStale" "noSession" "promptNotRecorded"
-                             "firstPrompt" "unseenPrompt" "filesNotRestorable" "entryNotFound")
+                             "firstPrompt" "unseenPrompt" "filesNotRestorable")
                        #'string<))))
 
 ;;;; ---- EditHeldPrompt ------------------------------------------------------

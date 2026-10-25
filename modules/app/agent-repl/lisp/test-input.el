@@ -5079,7 +5079,7 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
   "A refused rollback sent nothing, so the composer gets its words back."
   (agent-repl-test-input--with-rollback
       (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) t
-      (agent-repl-test-input--refusal :entry-not-found '(:label "3.1"))
+      (agent-repl-test-input--refusal :first-prompt nil)
     ;; Arrange
     (agent-repl-test-input--type "new words")
     ;; Act
@@ -5130,15 +5130,3 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
   (should (string-match-p "The composer's words are sent in its place."
                           (agent-repl--input-rollback-confirmation
                            (agent-repl-test-input--plan) (agent-repl-test-input--resend-of "x")))))
-
-(ert-deftest agent-repl-test-input-rollback-confirm-names-the-edited-entry ()
-  "The confirmation names the entry an entry resend edits."
-  (should (string-match-p "with entry 3.1 as the composer holds it"
-                          (agent-repl--input-rollback-confirmation
-                           (agent-repl-test-input--plan)
-                           (list :edit '(:arm :entry :value (:row (:value "p1") :label "3.1" :text "x")))))))
-
-(ert-deftest agent-repl-test-input-rollback-refusal-names-an-entry-not-found ()
-  "An `entry_not_found' refusal is drawn in plain words."
-  (should (equal (agent-repl--input-rollback-refusal-text '(:arm :entry-not-found :value (:label "3.1")))
-                 "rollback: the edited entry is not one the selected prompt holds; click the entry again")))

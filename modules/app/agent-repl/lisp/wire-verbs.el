@@ -5070,9 +5070,7 @@ ENTRIES are newest first, possibly none."
 (defun agent-repl-wire-encode-roll-back-resend (resend)
   "Encode RollBackResend from plist RESEND.
 RESEND is (:idempotency-key KEY :origin KEYWORD :edit EDIT), all required.
-EDIT is (:arm :whole :value (:said SAID)) for a whole new prompt, or (:arm
-:entry :value (:row FEEDID :label LABEL :text TEXT)) for the rolled-back
-prompt ROW with the entry answering LABEL saying TEXT instead."
+EDIT is (:arm :whole :value (:said SAID)), the whole new prompt."
   (let* ((message "RollBackResend")
          (edit (agent-repl-wire-verbs--require message "edit" (plist-get resend :edit)))
          (value (plist-get edit :value)))
@@ -5088,15 +5086,6 @@ prompt ROW with the entry answering LABEL saying TEXT instead."
                                       (agent-repl-wire-encode-user-said
                                        (agent-repl-wire-verbs--require
                                         "RollBackResendWhole" "said" (plist-get value :said)))))))
-            (:entry (cons 'entry
-                          (list (cons 'label
-                                      (agent-repl-wire-verbs--require
-                                       "RollBackResendEntry" "label" (plist-get value :label)))
-                                (cons 'text (or (plist-get value :text) ""))
-                                (cons 'row
-                                      (agent-repl-wire-encode-feed-id
-                                       (agent-repl-wire-verbs--require
-                                        "RollBackResendEntry" "row" (plist-get value :row)))))))
             (other (agent-repl-wire-verbs--fail message "edit" (format "unknown edit arm %S" other)))))))
 
 (defun agent-repl-wire-encode-roll-back-request (request)
@@ -5140,12 +5129,6 @@ request carried a resend."
                    message 'resend json
                    #'agent-repl-wire-decode-submit-prompt-response))))
 
-(defun agent-repl-wire-decode-roll-back-entry-not-found (json)
-  "Decode RollBackEntryNotFound from JSON into (:label LABEL)."
-  (let ((message "RollBackEntryNotFound"))
-    (agent-repl-wire-verbs--check-keys message json '(label))
-    (list :label (agent-repl-wire-verbs--decode-string message 'label json))))
-
 (defconst agent-repl-wire-roll-back-error-own-arms
   '((planStale :plan-stale "RollBackPlanStale")
     (noSession :no-session "RollBackNoSession")
@@ -5163,7 +5146,7 @@ is judged after the answer, and the daemon draws the prompts back."
     (agent-repl-wire-verbs--check-keys
      message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
                     planStale noSession promptNotRecorded firstPrompt unseenPrompt
-                    filesNotRestorable entryNotFound))
+                    filesNotRestorable))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -5175,9 +5158,7 @@ is judged after the answer, and the daemon draws the prompts back."
                     agent-repl-wire-roll-back-error-own-arms)
             (list (list 'filesNotRestorable :files-not-restorable
                         (lambda (v) (agent-repl-wire-verbs--decode-vendor-message
-                                     "RollBackFilesNotRestorable" v)))
-                  (list 'entryNotFound :entry-not-found
-                        #'agent-repl-wire-decode-roll-back-entry-not-found)))))))
+                                     "RollBackFilesNotRestorable" v)))))))))
 
 (defun agent-repl-wire-decode-roll-back-response (json)
   "Decode RollBackResponse from JSON into (:arm ARM :value V)."
