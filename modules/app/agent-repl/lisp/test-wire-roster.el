@@ -1745,18 +1745,86 @@ A hand-rolled list decoder would skip the shared helper and fail here."
           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":1}},"
           "\"expanded\":{\"collapsible\":{}}" shows "}"))
 
-(ert-deftest agent-repl-test-wire-roster-repo-section-decodes-its-merge-queue-rows ()
-  "A section showing its merge queue carries the queue's rows, front first."
-  (let ((shows (plist-get
-                (agent-repl-test-wire-roster--decode
-                 #'agent-repl-wire-decode-roster-repo-section
-                 (agent-repl-test-wire-roster--section-showing
-                  (format ",\"mergeQueue\":{\"rows\":[{\"row\":%s}]}"
-                          (agent-repl-test-wire-roster--row "\"mergeQueued\":{}"))))
-                :shows)))
+(defconst agent-repl-test-wire-roster--subject
+  "{\"workspace\":{\"id\":\"w1\",\"dir\":\"/src\"},\"name\":\"one\",\"reveal\":{\"value\":\"b1\"},\"mode\":{\"async\":{}}}"
+  "A merge queue subject's JSON: w1, named one, revealing b1, async.")
+
+(ert-deftest agent-repl-test-wire-roster-repo-section-decodes-its-merge-queue ()
+  "A section showing its merge queue carries its head, waiting and pause."
+  (let* ((shows (plist-get
+                 (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-repo-section
+                  (agent-repl-test-wire-roster--section-showing
+                   (format ",\"mergeQueue\":{\"head\":{\"subject\":%s,\"stages\":[{\"label\":\"queue\",\"round\":1,\"live\":{\"startedAtMs\":\"5\"}}],\"merging\":{\"step\":\"testing\"}},\"waiting\":[{\"subject\":%s,\"queuedAtMs\":\"9\",\"placedAtFront\":true}],\"paused\":{}}"
+                           agent-repl-test-wire-roster--subject agent-repl-test-wire-roster--subject)))
+                 :shows))
+         (queue (plist-get shows :value))
+         (head (plist-get queue :head)))
     (should (equal (list (plist-get shows :arm)
-                         (length (plist-get (plist-get shows :value) :rows)))
-                   '(:merge-queue 1)))))
+                         (plist-get (plist-get head :subject) :name)
+                         (plist-get (plist-get (plist-get head :subject) :mode) :arm)
+                         (plist-get (plist-get (plist-get head :subject) :reveal) :value)
+                         (plist-get (car (plist-get head :stages)) :label)
+                         (plist-get (plist-get (car (plist-get head :stages)) :state) :value)
+                         (plist-get head :standing)
+                         (plist-get (car (plist-get queue :waiting)) :queued-at-ms)
+                         (plist-get (car (plist-get queue :waiting)) :placed-at-front)
+                         (plist-get queue :paused))
+                   '(:merge-queue "one" :async "b1" "queue" (:started-at-ms 5)
+                                  (:arm :merging :value (:step "testing")) 9 t t)))))
+
+(ert-deftest agent-repl-test-wire-roster-an-empty-merge-queue-decodes-to-nothing ()
+  "A queue with no head and nothing waiting decodes to no head, none waiting, not paused."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-repo-merge-queue "{}")
+                 '(:head nil :waiting nil :paused nil))))
+
+(ert-deftest agent-repl-test-wire-roster-a-failed-merge-queue-head-decodes-its-account ()
+  "A failed head carries the daemon's account."
+  (should (equal (plist-get
+                  (agent-repl-test-wire-roster--decode
+                   #'agent-repl-wire-decode-roster-merge-queue-head
+                   (format "{\"subject\":%s,\"failed\":{\"summary\":\"the tests failed\"}}"
+                           agent-repl-test-wire-roster--subject))
+                  :standing)
+                 '(:arm :failed :value (:summary "the tests failed")))))
+
+(ert-deftest agent-repl-test-wire-roster-a-waiting-merge-queue-head-decodes-when-it-was-queued ()
+  "A waiting head carries when it was put in line."
+  (should (equal (plist-get
+                  (agent-repl-test-wire-roster--decode
+                   #'agent-repl-wire-decode-roster-merge-queue-head
+                   (format "{\"subject\":%s,\"waiting\":{\"queuedAtMs\":\"3\"}}"
+                           agent-repl-test-wire-roster--subject))
+                  :standing)
+                 '(:arm :waiting :value (:queued-at-ms 3)))))
+
+(ert-deftest agent-repl-test-wire-roster-every-merge-queue-stage-state-decodes ()
+  "A stage decodes each of its three states with its span."
+  (should (equal (mapcar (lambda (json)
+                           (plist-get (agent-repl-test-wire-roster--decode
+                                       #'agent-repl-wire-decode-roster-merge-queue-stage json)
+                                      :state))
+                         '("{\"label\":\"tests\",\"round\":1,\"live\":{\"startedAtMs\":\"1\"}}"
+                           "{\"label\":\"tests\",\"round\":1,\"succeeded\":{\"startedAtMs\":\"1\",\"endedAtMs\":\"2\"}}"
+                           "{\"label\":\"tests\",\"round\":1,\"failed\":{\"startedAtMs\":\"1\",\"endedAtMs\":\"2\"}}"))
+                 '((:arm :live :value (:started-at-ms 1))
+                   (:arm :succeeded :value (:started-at-ms 1 :ended-at-ms 2))
+                   (:arm :failed :value (:started-at-ms 1 :ended-at-ms 2))))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-without-standing-is-a-breach ()
+  "Where the head stands is never unset on the wire."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-head
+                  (format "{\"subject\":%s}" agent-repl-test-wire-roster--subject))
+                 '("RosterMergeQueueHead" standing "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-subject-without-mode-is-a-breach ()
+  "How a merge runs is a required message on its subject."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-subject
+                  "{\"workspace\":{\"id\":\"w1\"},\"name\":\"one\"}")
+                 '("RosterMergeQueueSubject" mode "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-repo-section-without-shows-is-a-breach ()
   "What a repository section shows is never unset on the wire."
@@ -1765,11 +1833,11 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   (agent-repl-test-wire-roster--section-showing ""))
                  '("RosterRepoSection" shows "oneof is unset"))))
 
-(ert-deftest agent-repl-test-wire-roster-a-merge-queue-row-refuses-an-unknown-field ()
-  "An unknown key on a merge queue row is refused at the row."
+(ert-deftest agent-repl-test-wire-roster-a-merge-queue-refuses-an-unknown-field ()
+  "An unknown key on a merge queue is refused at the queue."
   (should (equal (agent-repl-test-wire-roster--breach
-                  #'agent-repl-wire-decode-roster-merge-queue-row "{\"tab\":{}}")
-                 '("RosterMergeQueueRow" tab "unknown field"))))
+                  #'agent-repl-wire-decode-roster-repo-merge-queue "{\"rows\":[]}")
+                 '("RosterRepoMergeQueue" rows "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-an-open-count-refuses-an-unknown-field ()
   "An unknown key on the open count is refused at the count."

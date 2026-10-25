@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -465,8 +466,11 @@ func TestATabRoundsLedgerWritesOutliveTheRunsCancellation(t *testing.T) {
 	r.closeTab(ctx, round, "failed")
 
 	// Assert.
+	// The store records the end over the begun interval (RecordTabInterval
+	// updates the same round and kind), so the round is ONE interval, begun
+	// at its start and ended as failed.
 	intervals := ledgerIntervals(h)
-	if len(intervals) != 2 || intervals[1].EndedAt == nil || intervals[1].Outcome != "failed" {
+	if len(intervals) != 1 || !intervals[0].StartedAt.Equal(round.started) || intervals[0].EndedAt == nil || intervals[0].Outcome != "failed" {
 		t.Fatalf("the ledger holds %+v, want the round begun and then ended as failed", intervals)
 	}
 	for _, rec := range h.logs.Records() {
@@ -1082,5 +1086,38 @@ func TestAMergeBringsUpASessionThatIsRecordedButNotLive(t *testing.T) {
 	// Assert
 	if err != nil || len(h.startedSessions) != 1 || h.startedSessions[0] != theWorkspace {
 		t.Fatalf("ensureSession = %v, starts %v; want the recorded session brought up", err, h.startedSessions)
+	}
+}
+
+func TestEveryTabIntervalTheRunRecordsReachesTheRosterQueue(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	landing(h, 1)
+	enqueue(t, h)
+
+	// Act
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+
+	// Assert: the roster saw the rebasing stage open live, and then settle.
+	h.sidebar.mu.Lock()
+	told := append([]sidebar.MergeQueue(nil), h.sidebar.told...)
+	h.sidebar.mu.Unlock()
+	var sawLive, sawSettled bool
+	for _, queue := range told {
+		if len(queue.Line) == 0 {
+			continue
+		}
+		for _, st := range queue.Line[0].Stages {
+			if st.GetLabel() != "rebasing" {
+				continue
+			}
+			sawLive = sawLive || st.GetLive() != nil
+			sawSettled = sawSettled || st.GetSucceeded() != nil
+		}
+	}
+	if !sawLive || !sawSettled {
+		t.Fatalf("the roster saw the rebasing stage live=%v settled=%v, want both", sawLive, sawSettled)
 	}
 }

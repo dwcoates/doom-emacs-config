@@ -92,6 +92,8 @@ import {
   drawRosterOpenSectionMergeQueuePaused,
   drawRosterOpenSectionShows,
   drawRosterRepoShows,
+  MERGE_QUEUE_EMPTY_CLASS,
+  mergeQueueEmpty,
 } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
@@ -529,9 +531,13 @@ export function drawRosterRepoSection(
       className: "repo-section",
       target: { case: "repository", value: key },
       foldBy: "triangle",
-      decorateHeader: (header) => {
+      decorateHeader: (header, section) => {
         headerLabel(header).title = divergence;
         header.appendChild(drawCreateSubsectionControl(key, sc));
+        // A SECTION WHOSE MERGE QUEUE HOLDS NOTHING draws its header alone,
+        // in the folded header's faded grey (styles.css).
+        const shows = drawRosterRepoShows(u, path);
+        if (shows.case === "mergeQueue" && mergeQueueEmpty(shows.queue)) section.classList.add(MERGE_QUEUE_EMPTY_CLASS);
       },
     },
     () => {

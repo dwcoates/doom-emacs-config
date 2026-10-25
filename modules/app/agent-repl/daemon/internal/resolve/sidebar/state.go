@@ -438,12 +438,14 @@ type mergeQueue struct {
 	// async are the workspaces whose own branch has an async merge on it.
 	async map[ids.WorkspaceID]struct{}
 	// line is the merges in line, front first (MergeQueue.Line).
-	line []ids.WorkspaceID
+	line []QueueEntry
+	// failed is the last merge on the queue that failed (MergeQueue.Failed).
+	failed *FailedMerge
 }
 
 // newMergeQueue indexes one stated queue.
 func newMergeQueue(q MergeQueue) mergeQueue {
-	return mergeQueue{paused: q.Paused, members: setOf(q.Workspaces), async: setOf(q.AsyncRequesters), line: q.Line}
+	return mergeQueue{paused: q.Paused, members: setOf(q.Workspaces), async: setOf(q.AsyncRequesters), line: q.Line, failed: q.Failed}
 }
 
 // setOf indexes WS as a set.
@@ -455,10 +457,10 @@ func setOf(ws []ids.WorkspaceID) map[ids.WorkspaceID]struct{} {
 	return set
 }
 
-// empty reports whether the queue says nothing a row could draw: not paused,
-// and no workspace on it.
+// empty reports whether the queue says nothing the roster could draw: not
+// paused, no workspace on it, and no failed merge standing.
 func (q mergeQueue) empty() bool {
-	return !q.paused && len(q.members) == 0 && len(q.async) == 0 && len(q.line) == 0
+	return !q.paused && len(q.members) == 0 && len(q.async) == 0 && len(q.line) == 0 && q.failed == nil
 }
 
 // newRosterState builds an empty roster accumulation.

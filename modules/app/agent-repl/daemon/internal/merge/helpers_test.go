@@ -146,6 +146,8 @@ type fakeDB struct {
 	beforeRelease func(f *fakeDB)
 	// queueReadErr, when set, fails every MergeQueue read.
 	queueReadErr error
+	// ledgerReadErr, when set, fails every MergeLedger read.
+	ledgerReadErr error
 	// openChildrenErr, when set, is what every RequireNoOpenChildren
 	// answers; openChildrenAsked records each workspace it was asked about.
 	openChildrenErr   error
@@ -493,13 +495,23 @@ func (f *fakeDB) RecordTabInterval(ctx context.Context, lease wsm.LeaseID, inter
 	if f.tabErr != nil {
 		return f.tabErr
 	}
+	// As the store does: the same (round, kind) is UPDATED rather than
+	// duplicated, which is how a running interval records its end.
 	for id, entries := range f.ledger {
 		for i := range entries {
-			if entries[i].Lease == lease {
-				entries[i].Intervals = append(entries[i].Intervals, interval)
-				f.ledger[id] = entries
-				return nil
+			if entries[i].Lease != lease {
+				continue
 			}
+			for j, held := range entries[i].Intervals {
+				if held.Round == interval.Round && held.Kind == interval.Kind {
+					entries[i].Intervals[j] = interval
+					f.ledger[id] = entries
+					return nil
+				}
+			}
+			entries[i].Intervals = append(entries[i].Intervals, interval)
+			f.ledger[id] = entries
+			return nil
 		}
 	}
 	return fmt.Errorf("no ledger for lease %s", lease)
@@ -508,6 +520,9 @@ func (f *fakeDB) RecordTabInterval(ctx context.Context, lease wsm.LeaseID, inter
 func (f *fakeDB) MergeLedger(_ context.Context, id ids.WorkspaceID) ([]wsm.MergeLedgerEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.ledgerReadErr != nil {
+		return nil, f.ledgerReadErr
+	}
 	return append([]wsm.MergeLedgerEntry(nil), f.ledger[id]...), nil
 }
 

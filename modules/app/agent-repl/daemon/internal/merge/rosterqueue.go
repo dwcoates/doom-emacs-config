@@ -2,10 +2,14 @@ package merge
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
+	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
@@ -170,11 +174,28 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 	for _, entry := range entries {
 		queue.Workspaces = append(queue.Workspaces, entry.Workspace)
 	}
-	for _, entry := range inLine(entries) {
-		queue.Line = append(queue.Line, entry.Workspace)
+	line, err := o.rosterLine(ctx, inLine(entries))
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), op, "could not resolve the merges in line as the roster draws them, so the roster is not told the queue",
+			"the line's read ended when its context was cancelled; the roster is not told the queue",
+			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
+		return
 	}
-	o.deps.Log.Global().Debug(op, "told the roster the merge queue",
-		dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.Line), "paused": paused, "requesters": ids.Strings(requesters)})
+	queue.Line = line
+	o.retireFailed(repo, inLine(entries))
+	failed, err := o.rosterFailed(ctx, repo)
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), op, "could not read the failed merge's stages, so the roster is not told the queue",
+			"the failed merge's read ended when its context was cancelled; the roster is not told the queue",
+			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
+		return
+	}
+	queue.Failed = failed
+	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": paused, "requesters": ids.Strings(requesters)}
+	if failed != nil {
+		fields["failed"] = string(failed.Entry.Workspace)
+	}
+	o.deps.Log.Global().Debug(op, "told the roster the merge queue", fields)
 	o.deps.Sidebar.SetMergeQueue(repo, queue)
 }
 
@@ -184,17 +205,161 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 func (o *orchestrator) asyncRequesters(ctx context.Context, entries []wsm.MergeQueueEntry) ([]ids.WorkspaceID, error) {
 	var out []ids.WorkspaceID
 	for _, entry := range entries {
-		if entry.Source.Detach != "" {
-			out = append(out, entry.Workspace)
-			continue
-		}
-		record, err := o.deps.DB.Workspace(ctx, entry.Workspace)
+		credited, async, err := o.creditOf(ctx, entry.Workspace, entry.Source.Detach != "")
 		if err != nil {
 			return nil, err
 		}
-		if record.MergeOf != nil {
-			out = append(out, record.MergeOf.Requester)
+		if async {
+			out = append(out, credited)
 		}
 	}
 	return out, nil
+}
+
+// creditOf answers the workspace the roster credits the merge running in WS
+// to, and whether that merge is ASYNC: a detached request (DETACHED) is
+// credited to its own workspace, a merge workspace to its requester, and
+// every other merge to WS itself. It is the one place the roster's credit is
+// decided, so the async-merging marker and the merge queue view never
+// disagree on who a merge is drawn as.
+func (o *orchestrator) creditOf(ctx context.Context, ws ids.WorkspaceID, detached bool) (ids.WorkspaceID, bool, error) {
+	if detached {
+		return ws, true, nil
+	}
+	record, err := o.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return "", false, err
+	}
+	if record.MergeOf != nil {
+		return record.MergeOf.Requester, true, nil
+	}
+	return ws, false, nil
+}
+
+// rosterLine answers the merges in line as the roster draws them, front
+// first: each one's credit and the bubble a click on it opens, and the front's
+// stages read from its ledger.
+func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntry) ([]sidebar.QueueEntry, error) {
+	out := make([]sidebar.QueueEntry, 0, len(line))
+	for i, entry := range line {
+		credited, async, err := o.creditOf(ctx, entry.Workspace, entry.Source.Detach != "")
+		if err != nil {
+			return nil, err
+		}
+		drawn := sidebar.QueueEntry{
+			Workspace:     entry.Workspace,
+			Credited:      credited,
+			Async:         async,
+			QueuedAt:      entry.EnqueuedAt,
+			PlacedAtFront: entry.Source.Front,
+			Admitted:      entry.State != wsm.MergeQueued,
+		}
+		if lease, ok := o.leaseOf(entry.Workspace); ok {
+			drawn.Reveal = o.bubbleHeadID(entry.Workspace, lease)
+			if i == 0 {
+				stages, err := o.ledgerStages(ctx, entry.Workspace, lease)
+				if err != nil {
+					return nil, err
+				}
+				drawn.Stages = stages
+			}
+		}
+		out = append(out, drawn)
+	}
+	return out, nil
+}
+
+// bubbleHeadID is the row id of the head of the merge bubble the merge
+// running in WS draws under LEASE, on the root feed of the workspace the
+// bubble is drawn in (bubbleOf): what a click on the merge in the roster's
+// queue reveals.
+func (o *orchestrator) bubbleHeadID(ws ids.WorkspaceID, lease ids.LeaseID) *frontendv1.FeedId {
+	return feedid.Encode(headRef(o.bubbleOf(ws).ws, lease))
+}
+
+// failedMerge is a queue's last failed merge as the orchestrator keeps it:
+// the merge as the roster draws it, without its stages, which are read from
+// its ledger each time the queue is published. It is kept in memory only, so
+// a daemon restart forgets it.
+type failedMerge struct {
+	entry   sidebar.QueueEntry
+	lease   ids.LeaseID
+	summary string
+}
+
+// noteFailed records the merge running in WS, under LEASE, as REPO's last
+// failed merge, with SUMMARY the account its bubble carries, and republishes
+// REPO's queue so the roster draws it. Every failure a merge resolves with
+// goes through it.
+func (o *orchestrator) noteFailed(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lease ids.LeaseID, summary string) {
+	credited, async, err := o.creditOf(ctx, ws, false)
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), "daemon.merge.roster_queue", "could not resolve who a failed merge is credited to, so the roster does not draw it",
+			"the failed merge's read ended when its context was cancelled; the roster does not draw it",
+			dlog.Context{"repo": string(repo), "workspace": string(ws)}, err)
+		return
+	}
+	entry := sidebar.QueueEntry{Workspace: ws, Credited: credited, Async: async, Admitted: true}
+	if lease != "" {
+		entry.Reveal = o.bubbleHeadID(ws, lease)
+	}
+	o.mu.Lock()
+	o.failed[repo] = failedMerge{entry: entry, lease: lease, summary: summary}
+	o.mu.Unlock()
+	o.publishRosterQueue(ctx, repo)
+}
+
+// retireFailed drops REPO's failed merge once LINE, the merges in line, holds
+// any other merge: the roster draws a failed merge only until the next merge
+// joins the line. The failed merge itself may still be in line as it fails
+// (its entry leaves after its terminal), and a merge put back in line under
+// the same ledger is still that merge, so neither retires it.
+func (o *orchestrator) retireFailed(repo wsm.RepoKey, line []wsm.MergeQueueEntry) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	failed, ok := o.failed[repo]
+	if !ok {
+		return
+	}
+	for _, entry := range line {
+		if entry.Workspace != failed.entry.Workspace || entry.Ledger != failed.lease {
+			delete(o.failed, repo)
+			return
+		}
+	}
+}
+
+// rosterFailed answers REPO's failed merge as the roster draws it, its stages
+// read from its ledger, and nil when none stands.
+func (o *orchestrator) rosterFailed(ctx context.Context, repo wsm.RepoKey) (*sidebar.FailedMerge, error) {
+	o.mu.Lock()
+	failed, ok := o.failed[repo]
+	o.mu.Unlock()
+	if !ok {
+		return nil, nil
+	}
+	entry := failed.entry
+	if failed.lease != "" {
+		stages, err := o.ledgerStages(ctx, entry.Workspace, failed.lease)
+		if err != nil {
+			return nil, err
+		}
+		entry.Stages = stages
+	}
+	return &sidebar.FailedMerge{Entry: entry, Summary: failed.summary}, nil
+}
+
+// ledgerStages answers the stages of the merge running in WS under LEASE, read
+// from its ledger (stagesOf). A ledger not opened yet has no stages.
+func (o *orchestrator) ledgerStages(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID) ([]*frontendv1.RosterMergeQueueStage, error) {
+	ledgers, err := o.deps.DB.MergeLedger(ctx, ws)
+	if err != nil {
+		return nil, fmt.Errorf("merge: read the ledger of %s: %w", ws, err)
+	}
+	for _, ledger := range ledgers {
+		if ledger.Lease == lease {
+			return stagesOf(ledger.Intervals)
+		}
+	}
+	return nil, nil
 }

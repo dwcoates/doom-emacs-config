@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/repodivergence"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
@@ -37,13 +38,13 @@ const OpenSectionLabel = "Open"
 // subsection nowhere to drag a workspace into).
 //
 // Every section states what its body shows (RosterRepoSection.shows): its
-// entries, or its merge queue's line (queueLines) while the view shows the
-// merge queues, the header then counting the queue's rows.
+// entries, or its merge queue (repoQueues) while the view shows the merge
+// queues, the header then counting the merges in line.
 func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.RosterRepositoryView {
 	repos, orphans := openTree(r.state.reg, log)
-	var lines map[ids.RepoID][]wsm.Workspace
+	var queues map[ids.RepoID]repoQueue
 	if r.state.reg.View.OpenShowsMergeQueues {
-		lines = r.queueLines(log)
+		queues = r.repoQueues(log)
 	}
 	current := r.selectedWorkspace()
 	out := &frontendv1.RosterRepositoryView{}
@@ -85,8 +86,8 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 		shown += count
 		headerCount := count
 		if r.state.reg.View.OpenShowsMergeQueues {
-			queue := r.mergeQueueRows(lines[placed.repo.ID], rc, repoLog)
-			headerCount = len(queue.Rows)
+			queue := r.drawMergeQueue(queues[placed.repo.ID], repoLog)
+			headerCount = len(queues[placed.repo.ID].line)
 			section.Shows = &frontendv1.RosterRepoSection_MergeQueue{MergeQueue: queue}
 		} else {
 			section.Shows = &frontendv1.RosterRepoSection_Workspaces{Workspaces: &frontendv1.RosterRepoShowsWorkspaces{}}
@@ -100,61 +101,183 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 	return out
 }
 
-// mergeQueueRows composes one repository's merge queue: a FLAT row for each
-// merge in LINE, front first.
-func (r *resolver) mergeQueueRows(line []wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRepoMergeQueue {
+// repoQueue is one repository's merge queue as its section draws it: the
+// merges in line front first, the failed merge standing, and the pause.
+type repoQueue struct {
+	line   []QueueEntry
+	failed *FailedMerge
+	paused bool
+}
+
+// drawMergeQueue composes one repository's merge queue: the merge at the
+// front of the line as its head, or the failed merge while the line is empty,
+// and every merge behind the front as waiting. EVERY MERGE IS CREDITED AS THE
+// ROSTER CREDITS IT (QueueEntry.Credited), so a hidden merge workspace is
+// never named here.
+func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.RosterRepoMergeQueue {
+	const op = "daemon.sidebar.merge_queue"
 	out := &frontendv1.RosterRepoMergeQueue{}
-	for _, ws := range line {
-		out.Rows = append(out.Rows, &frontendv1.RosterMergeQueueRow{Row: r.row(ws, rc, log)})
+	if q.paused {
+		out.Paused = &frontendv1.RosterMergeQueuePaused{}
+	}
+	byID := r.workspacesByID()
+	subject := func(entry QueueEntry) (*frontendv1.RosterMergeQueueSubject, bool) {
+		credited, ok := byID[entry.Credited]
+		if !ok {
+			log.Error(op, "a merge in the queue is credited to a workspace the registry does not carry, so it is not drawn", dlog.Context{
+				"workspace_id": string(entry.Workspace), "credited": string(entry.Credited),
+				"invariant_violation": "a merge queue entry is credited to a registered workspace"})
+			return nil, false
+		}
+		return queueSubject(credited, entry), true
+	}
+	switch {
+	case len(q.line) > 0:
+		front := q.line[0]
+		if sub, ok := subject(front); ok {
+			head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages}
+			if front.Admitted {
+				merging := &frontendv1.RosterMergeQueueHeadMerging{}
+				if words, ok := mergeStepWords(r.mergeFacts(front.Workspace)); ok {
+					merging.Step = &words
+				}
+				head.Standing = &frontendv1.RosterMergeQueueHead_Merging{Merging: merging}
+			} else {
+				head.Standing = &frontendv1.RosterMergeQueueHead_Waiting{Waiting: &frontendv1.RosterMergeQueueHeadWaiting{QueuedAtMs: front.QueuedAt.UnixMilli()}}
+			}
+			out.Head = head
+		}
+		for _, entry := range q.line[1:] {
+			sub, ok := subject(entry)
+			if !ok {
+				continue
+			}
+			out.Waiting = append(out.Waiting, &frontendv1.RosterMergeQueueWaiting{
+				Subject: sub, QueuedAtMs: entry.QueuedAt.UnixMilli(), PlacedAtFront: entry.PlacedAtFront})
+		}
+	case q.failed != nil:
+		if sub, ok := subject(q.failed.Entry); ok {
+			out.Head = &frontendv1.RosterMergeQueueHead{
+				Subject:  sub,
+				Stages:   q.failed.Entry.Stages,
+				Standing: &frontendv1.RosterMergeQueueHead_Failed{Failed: &frontendv1.RosterMergeQueueHeadFailed{Summary: q.failed.Summary}},
+			}
+		}
 	}
 	return out
 }
 
-// queueLines answers every repository's merge queue line, front first, each
-// merge as the registry records the workspace it is drawn as, keyed by that
-// workspace's repository: a queue is keyed by its repository's git common
-// dir, which only the merge orchestrator resolves, and every merge on one
-// queue is a workspace of that queue's repository.
-//
-// TWO QUEUES ON ONE REPOSITORY, and a merge in line naming a workspace the
-// registry does not carry, are INVARIANT VIOLATIONS (one queue per
-// repository; a queue entry references a registered workspace), recorded
-// loudly here as assertRepositoryInvariant records its own. Nothing is
-// dropped to hide the first: both queues' merges are drawn, in queue-key
-// order. A merge with no record cannot be drawn and is named in the record.
-func (r *resolver) queueLines(log dlog.Logger) map[ids.RepoID][]wsm.Workspace {
-	const op = "daemon.sidebar.queue_lines"
+// queueSubject is the subject a merge in the queue is drawn as: the workspace
+// it is credited to, where a click on it goes, and how it runs.
+func queueSubject(credited wsm.Workspace, entry QueueEntry) *frontendv1.RosterMergeQueueSubject {
+	mode := &frontendv1.RosterMergeQueueMode{Mode: &frontendv1.RosterMergeQueueMode_Sync{Sync: &frontendv1.RosterMergeQueueModeSync{}}}
+	if entry.Async {
+		mode.Mode = &frontendv1.RosterMergeQueueMode_Async{Async: &frontendv1.RosterMergeQueueModeAsync{}}
+	}
+	return &frontendv1.RosterMergeQueueSubject{Workspace: credited.Ref(), Name: credited.Name, Reveal: entry.Reveal, Mode: mode}
+}
+
+// mergeFacts answers the merge facts the roster holds for WS, the zero facts
+// when it holds none.
+func (r *resolver) mergeFacts(ws ids.WorkspaceID) footer.MergeFacts {
+	if s, ok := r.state.workspaces[ws]; ok {
+		return s.merge
+	}
+	return footer.MergeFacts{}
+}
+
+// mergeStepWords is the step a merge being worked on stands on and its
+// figure, in the footer's plain words ("rebasing 3/7", "fixing attempt
+// 2/3"), and false when FACTS name no step of a merge being worked on.
+func mergeStepWords(facts footer.MergeFacts) (string, bool) {
+	if facts.State != "merging" || facts.Step == "" {
+		return "", false
+	}
+	words := facts.Step.Words()
+	switch facts.Step {
+	case footer.StepRebasing:
+		words += fmt.Sprintf(" %d/%d", facts.Replayed, facts.Total)
+	case footer.StepFixing:
+		words += fmt.Sprintf(" attempt %d/%d", facts.Attempt, facts.MaxAttempts)
+	}
+	return words, true
+}
+
+// workspacesByID indexes the registry's workspaces by id.
+func (r *resolver) workspacesByID() map[ids.WorkspaceID]wsm.Workspace {
 	byID := make(map[ids.WorkspaceID]wsm.Workspace, len(r.state.reg.Workspaces))
 	for _, ws := range r.state.reg.Workspaces {
 		byID[ws.ID] = ws
 	}
+	return byID
+}
+
+// repoQueues answers every repository's merge queue, keyed by the repository
+// of the workspace each merge runs in: a queue is keyed by its repository's
+// git common dir, which only the merge orchestrator resolves, and every merge
+// on one queue is a workspace of that queue's repository.
+//
+// TWO QUEUES ON ONE REPOSITORY, and a merge naming a workspace the registry
+// does not carry, are INVARIANT VIOLATIONS (one queue per repository; a queue
+// entry references a registered workspace), recorded loudly here as
+// assertRepositoryInvariant records its own. Nothing is dropped to hide the
+// first: both queues' merges are drawn, in queue-key order. A merge with no
+// record cannot be drawn and is named in the record. A FAILED merge whose
+// workspace has since left the registry (closed and forgotten) is placed by
+// the workspace it is credited to.
+func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
+	const op = "daemon.sidebar.queue_lines"
+	byID := r.workspacesByID()
 	keys := make([]wsm.RepoKey, 0, len(r.state.queues))
 	for key := range r.state.queues {
 		keys = append(keys, key)
 	}
 	slices.Sort(keys)
-	lines := map[ids.RepoID][]wsm.Workspace{}
+	out := map[ids.RepoID]repoQueue{}
 	queueOf := map[ids.RepoID]wsm.RepoKey{}
+	claim := func(key wsm.RepoKey, repo ids.RepoID, ws ids.WorkspaceID) {
+		if first, seen := queueOf[repo]; seen && first != key {
+			log.Error(op, "two merge queues hold merges of one repository; both are drawn", dlog.Context{
+				"repo_id": string(repo), "first_queue": string(first), "second_queue": string(key), "workspace_id": string(ws),
+				"invariant_violation": "one merge queue per repository"})
+			return
+		}
+		queueOf[repo] = key
+	}
 	for _, key := range keys {
-		for _, id := range r.state.queues[key].line {
-			ws, ok := byID[id]
+		q := r.state.queues[key]
+		for _, entry := range q.line {
+			ws, ok := byID[entry.Workspace]
 			if !ok {
 				log.Error(op, "a merge in line names a workspace the registry does not carry, so its queue row is not drawn", dlog.Context{
-					"repo": string(key), "workspace_id": string(id),
+					"repo": string(key), "workspace_id": string(entry.Workspace),
 					"invariant_violation": "a merge queue entry references a registered workspace"})
 				continue
 			}
-			if first, seen := queueOf[ws.Repo]; seen && first != key {
-				log.Error(op, "two merge queues hold merges of one repository; both are drawn", dlog.Context{
-					"repo_id": string(ws.Repo), "first_queue": string(first), "second_queue": string(key), "workspace_id": string(id),
-					"invariant_violation": "one merge queue per repository"})
-			} else {
-				queueOf[ws.Repo] = key
+			claim(key, ws.Repo, entry.Workspace)
+			rq := out[ws.Repo]
+			rq.line = append(rq.line, entry)
+			rq.paused = rq.paused || q.paused
+			out[ws.Repo] = rq
+		}
+		if q.failed != nil {
+			ws, ok := byID[q.failed.Entry.Workspace]
+			if !ok {
+				ws, ok = byID[q.failed.Entry.Credited]
 			}
-			lines[ws.Repo] = append(lines[ws.Repo], ws)
+			if !ok {
+				log.Info(op, "the failed merge's workspaces have left the registry, so it is not drawn", dlog.Context{
+					"repo": string(key), "workspace_id": string(q.failed.Entry.Workspace), "credited": string(q.failed.Entry.Credited)})
+			} else {
+				claim(key, ws.Repo, q.failed.Entry.Workspace)
+				rq := out[ws.Repo]
+				rq.failed = q.failed
+				rq.paused = rq.paused || q.paused
+				out[ws.Repo] = rq
+			}
 		}
 	}
-	return lines
+	return out
 }
 
 // openRows composes one region's open rows, depth-first, each taking the next

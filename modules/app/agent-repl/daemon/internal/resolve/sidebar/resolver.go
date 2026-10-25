@@ -429,9 +429,13 @@ func (r *resolver) SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts) {
 
 // SetMergeQueue replaces REPO's merge queue as the roster draws it.
 func (r *resolver) SetMergeQueue(repo wsm.RepoKey, queue MergeQueue) {
+	fields := dlog.Context{"repo": string(repo), "paused": queue.Paused,
+		"workspaces": ids.Strings(queue.Workspaces), "line": ids.Strings(queue.LineWorkspaces()), "async_requesters": ids.Strings(queue.AsyncRequesters)}
+	if queue.Failed != nil {
+		fields["failed"] = string(queue.Failed.Entry.Workspace)
+	}
 	r.mutate("daemon.sidebar.set_merge_queue", "the roster took a repository's merge queue",
-		dlog.Context{"repo": string(repo), "paused": queue.Paused,
-			"workspaces": ids.Strings(queue.Workspaces), "line": ids.Strings(queue.Line), "async_requesters": ids.Strings(queue.AsyncRequesters)},
+		fields,
 		r.log.Global(),
 		func() {
 			q := newMergeQueue(queue)

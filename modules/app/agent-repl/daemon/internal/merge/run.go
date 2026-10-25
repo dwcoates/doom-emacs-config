@@ -334,7 +334,7 @@ func (r *run) openTab(ctx context.Context, kind string) tabRound {
 	// cancellation cannot cut it: a cancel arriving between the check and the
 	// write (the daemon's drain, an abandon) stops the run's work, and an
 	// interval already begun is no work left to stop.
-	if err := r.o.deps.DB.RecordTabInterval(context.WithoutCancel(ctx), r.lease.ID, wsm.TabInterval{
+	if err := r.recordInterval(context.WithoutCancel(ctx), wsm.TabInterval{
 		Round: round.n, Kind: kind, StartedAt: started,
 	}); err != nil {
 		r.tabRecordFailed(ctx, "daemon.merge.tab_open", "could not record a tab interval", round, err)
@@ -365,7 +365,7 @@ func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 	// round is already out of openRounds, so an end the run's cancellation
 	// cut here would leave the ledger's interval open with nothing left to
 	// close it.
-	if err := r.o.deps.DB.RecordTabInterval(context.WithoutCancel(ctx), r.lease.ID, wsm.TabInterval{
+	if err := r.recordInterval(context.WithoutCancel(ctx), wsm.TabInterval{
 		Round: round.n, Kind: round.kind, StartedAt: round.started, EndedAt: &ended, Outcome: outcome,
 	}); err != nil {
 		r.tabRecordFailed(ctx, "daemon.merge.tab_close", "could not record a tab interval's end; the round stays open", round, err)
@@ -378,6 +378,19 @@ func (r *run) closeTab(ctx context.Context, round tabRound, outcome string) {
 	r.mu.Lock()
 	delete(r.openRounds, round.key())
 	r.mu.Unlock()
+}
+
+// recordInterval writes one tab interval to the run's ledger and, once it is
+// written, republishes the run's repository queue to the roster, whose head
+// draws the front merge's stages from the ledger (ledgerStages). It is the
+// ONE writer of the ledger's intervals, so no stage change can reach the
+// ledger without reaching the roster.
+func (r *run) recordInterval(ctx context.Context, interval wsm.TabInterval) error {
+	if err := r.o.deps.DB.RecordTabInterval(ctx, r.lease.ID, interval); err != nil {
+		return err
+	}
+	r.o.publishRosterQueue(ctx, r.repo)
+	return nil
 }
 
 // tabRecordFailed records a tab interval write that failed: at INFO when the

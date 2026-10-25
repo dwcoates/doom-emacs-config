@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/repodivergence"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 
@@ -1042,13 +1043,34 @@ func queueView(ws ...wsm.Workspace) sidebar.Registry {
 	return reg
 }
 
-// queueRowIDs reads the workspace ids of a section's merge queue rows.
-func queueRowIDs(section *frontendv1.RosterRepoSection) []string {
-	var out []string
-	for _, row := range section.GetMergeQueue().GetRows() {
-		out = append(out, row.GetRow().GetWorkspace().GetWorkspace().GetId())
+// inLine is a line of sync merges, each running in and credited to its own
+// workspace, front first; the front is admitted.
+func inLine(ws ...ids.WorkspaceID) []sidebar.QueueEntry {
+	out := make([]sidebar.QueueEntry, 0, len(ws))
+	for i, w := range ws {
+		out = append(out, sidebar.QueueEntry{Workspace: w, Credited: w, Admitted: i == 0})
 	}
 	return out
+}
+
+// queueSubjectIDs reads the workspace ids a section's merge queue draws: its
+// head's, then each waiting merge's.
+func queueSubjectIDs(section *frontendv1.RosterRepoSection) []string {
+	queue := section.GetMergeQueue()
+	var out []string
+	if head := queue.GetHead(); head != nil {
+		out = append(out, head.GetSubject().GetWorkspace().GetId())
+	}
+	for _, waiting := range queue.GetWaiting() {
+		out = append(out, waiting.GetSubject().GetWorkspace().GetId())
+	}
+	return out
+}
+
+// firstQueue reads the first repository section's merge queue.
+func firstQueue(t *testing.T, r sidebar.Resolver) *frontendv1.RosterRepoMergeQueue {
+	t.Helper()
+	return latest(t, r).GetRepository().GetSections()[0].GetMergeQueue()
 }
 
 func TestOpenSectionStatesWhatItsRepositorySectionsShow(t *testing.T) {
@@ -1085,7 +1107,7 @@ func TestOpenSectionMarksAPausedMergeQueue(t *testing.T) {
 		repo  wsm.RepoKey
 		queue sidebar.MergeQueue
 	}
-	running := sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: []ids.WorkspaceID{"w1"}}
+	running := sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")}
 	tests := []struct {
 		name       string
 		steps      []queueStep
@@ -1122,7 +1144,7 @@ func TestEveryRepositorySectionShowsItsWorkspacesByDefault(t *testing.T) {
 	r, _ := newResolver(t)
 	other := workspace("w2", "two")
 	other.Repo = otherRepo.ID
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: []ids.WorkspaceID{"w1"}})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")})
 
 	// Act.
 	r.SetRegistry(twoRepoRegistry(workspace("w1", "one"), other))
@@ -1135,7 +1157,7 @@ func TestEveryRepositorySectionShowsItsWorkspacesByDefault(t *testing.T) {
 	}
 }
 
-func TestARepositorySectionShowingItsMergeQueueListsTheLineFrontFirst(t *testing.T) {
+func TestARepositorySectionShowingItsMergeQueueDrawsTheFrontAsItsHeadAndTheRestWaiting(t *testing.T) {
 	// Arrange: three of the fixture repository's workspaces in line, the
 	// running one first, and one of otherRepo's on its own queue.
 	r, _ := newResolver(t)
@@ -1143,11 +1165,11 @@ func TestARepositorySectionShowingItsMergeQueueListsTheLineFrontFirst(t *testing
 	other.Repo = otherRepo.ID
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
 		Workspaces: []ids.WorkspaceID{"w3", "w1", "w2"},
-		Line:       []ids.WorkspaceID{"w3", "w1", "w2"},
+		Line:       inLine("w3", "w1", "w2"),
 	})
 	r.SetMergeQueue(wsm.RepoKey("/repos/two/.git"), sidebar.MergeQueue{
 		Workspaces: []ids.WorkspaceID{"w-other"},
-		Line:       []ids.WorkspaceID{"w-other"},
+		Line:       inLine("w-other"),
 	})
 
 	// Act.
@@ -1155,27 +1177,30 @@ func TestARepositorySectionShowingItsMergeQueueListsTheLineFrontFirst(t *testing
 
 	// Assert.
 	sections := latest(t, r).GetRepository().GetSections()
-	if got, want := queueRowIDs(sections[0]), []string{"w3", "w1", "w2"}; !slices.Equal(got, want) {
+	if got := sections[0].GetMergeQueue().GetHead().GetSubject().GetName(); got != "three" {
+		t.Fatalf("first section's head = %q, want the front, three", got)
+	}
+	if got, want := queueSubjectIDs(sections[0]), []string{"w3", "w1", "w2"}; !slices.Equal(got, want) {
 		t.Fatalf("first section's queue = %v, want %v", got, want)
 	}
-	if got, want := queueRowIDs(sections[1]), []string{"w-other"}; !slices.Equal(got, want) {
+	if got, want := queueSubjectIDs(sections[1]), []string{"w-other"}; !slices.Equal(got, want) {
 		t.Fatalf("second section's queue = %v, want %v", got, want)
 	}
 }
 
-func TestARepositorySectionShowingItsMergeQueueCountsTheQueuesRows(t *testing.T) {
+func TestARepositorySectionShowingItsMergeQueueCountsTheMergesInLine(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: []ids.WorkspaceID{"w1"}})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: inLine("w1", "w2")})
 
 	// Act.
 	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two"), workspace("w3", "three")))
 
-	// Assert: the header counts the one merge; the open count still counts
+	// Assert: the header counts the two merges; the open count still counts
 	// the three open workspaces.
 	roster := latest(t, r)
-	if got := roster.GetRepository().GetSections()[0].GetHeader().GetCount().GetWorkspaces(); got != 1 {
-		t.Fatalf("header count = %d, want the queue's 1 row", got)
+	if got := roster.GetRepository().GetSections()[0].GetHeader().GetCount().GetWorkspaces(); got != 2 {
+		t.Fatalf("header count = %d, want the 2 merges in line", got)
 	}
 	if got := roster.GetRepository().GetOpenCount().GetWorkspaces(); got != 3 {
 		t.Fatalf("open count = %d, want the 3 open workspaces", got)
@@ -1198,16 +1223,18 @@ func TestARepositorySectionShowingItsMergeQueueKeepsItsEntries(t *testing.T) {
 	}
 }
 
-func TestAnEmptyMergeQueueListsNoRow(t *testing.T) {
+func TestAnEmptyMergeQueueDrawsNothing(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
 
 	// Act.
 	r.SetRegistry(queueView(workspace("w1", "one")))
 
-	// Assert: the arm is set, with no row, and the header counts none.
+	// Assert: the arm is set, with no head and nothing waiting, and the
+	// header counts none.
 	section := latest(t, r).GetRepository().GetSections()[0]
-	if section.GetMergeQueue() == nil || len(section.GetMergeQueue().GetRows()) != 0 {
+	queue := section.GetMergeQueue()
+	if queue == nil || queue.GetHead() != nil || len(queue.GetWaiting()) != 0 {
 		t.Fatalf("shows = %v, want an empty merge queue", section.GetShows())
 	}
 	if got := section.GetHeader().GetCount().GetWorkspaces(); got != 0 {
@@ -1215,36 +1242,266 @@ func TestAnEmptyMergeQueueListsNoRow(t *testing.T) {
 	}
 }
 
-func TestAHiddenMergeWorkspaceInLineIsDrawnInItsQueue(t *testing.T) {
-	// Arrange: an async merge's merge workspace, drawn in no other list.
+func TestAnAsyncMergeIsDrawnAsItsRequesterNeverItsMergeWorkspace(t *testing.T) {
+	// Arrange: an async merge's hidden merge workspace at the front, and
+	// another waiting behind it.
 	r, _ := newResolver(t)
-	mergeWS := workspace("w-merge", "merge of one")
+	mergeWS := workspace("w-merge", "land-one")
 	mergeWS.MergeOf = &wsm.MergeOrigin{Requester: "w1"}
+	waitWS := workspace("w-merge2", "land-two")
+	waitWS.MergeOf = &wsm.MergeOrigin{Requester: "w2"}
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
-		Workspaces:      []ids.WorkspaceID{"w-merge"},
-		Line:            []ids.WorkspaceID{"w-merge"},
-		AsyncRequesters: []ids.WorkspaceID{"w1"},
+		Workspaces: []ids.WorkspaceID{"w-merge", "w-merge2"},
+		Line: []sidebar.QueueEntry{
+			{Workspace: "w-merge", Credited: "w1", Async: true, Admitted: true},
+			{Workspace: "w-merge2", Credited: "w2", Async: true},
+		},
+		AsyncRequesters: []ids.WorkspaceID{"w1", "w2"},
 	})
 
 	// Act.
-	r.SetRegistry(queueView(workspace("w1", "one"), mergeWS))
+	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two"), mergeWS, waitWS))
 
 	// Assert.
-	if got := queueRowIDs(latest(t, r).GetRepository().GetSections()[0]); !slices.Equal(got, []string{"w-merge"}) {
-		t.Fatalf("queue = %v, want the merge workspace", got)
+	queue := firstQueue(t, r)
+	head := queue.GetHead().GetSubject()
+	if head.GetWorkspace().GetId() != "w1" || head.GetName() != "one" || head.GetMode().GetAsync() == nil {
+		t.Fatalf("head = %v, want the requester one, async", head)
+	}
+	waiting := queue.GetWaiting()[0].GetSubject()
+	if waiting.GetWorkspace().GetId() != "w2" || waiting.GetName() != "two" || waiting.GetMode().GetAsync() == nil {
+		t.Fatalf("waiting = %v, want the requester two, async", waiting)
+	}
+}
+
+func TestASyncMergeIsDrawnAsItsOwnWorkspace(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Assert.
+	if head := firstQueue(t, r).GetHead().GetSubject(); head.GetName() != "one" || head.GetMode().GetSync() == nil {
+		t.Fatalf("head = %v, want one, sync", head)
+	}
+}
+
+func TestEveryMergeInTheQueueCarriesTheBubbleItReveals(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	line := inLine("w1", "w2")
+	line[0].Reveal = &frontendv1.FeedId{Value: "bubble-1"}
+	line[1].Reveal = &frontendv1.FeedId{Value: "bubble-2"}
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+	// Assert.
+	queue := firstQueue(t, r)
+	if got := queue.GetHead().GetSubject().GetReveal().GetValue(); got != "bubble-1" {
+		t.Fatalf("head reveal = %q, want bubble-1", got)
+	}
+	if got := queue.GetWaiting()[0].GetSubject().GetReveal().GetValue(); got != "bubble-2" {
+		t.Fatalf("waiting reveal = %q, want bubble-2", got)
+	}
+}
+
+func TestTheHeadStatesItsStanding(t *testing.T) {
+	queued := time.UnixMilli(7_000)
+	tests := []struct {
+		name     string
+		admitted bool
+		facts    *footer.MergeFacts
+		want     string
+		wantStep *string
+	}{
+		{name: "a front not yet admitted waits", want: "waiting"},
+		{name: "an admitted front with no step yet merges with no step", admitted: true, want: "merging"},
+		{name: "a rebasing front states its replay", admitted: true, facts: &footer.MergeFacts{State: "merging", Step: footer.StepRebasing, Replayed: 3, Total: 7}, want: "merging", wantStep: ptr("rebasing 3/7")},
+		{name: "a fixing front states its attempt", admitted: true, facts: &footer.MergeFacts{State: "merging", Step: footer.StepFixing, Attempt: 2, MaxAttempts: 3}, want: "merging", wantStep: ptr("fixing attempt 2/3")},
+		{name: "a testing front states its step", admitted: true, facts: &footer.MergeFacts{State: "merging", Step: footer.StepTesting}, want: "merging", wantStep: ptr("testing")},
+		{name: "facts of no merge in flight state no step", admitted: true, facts: &footer.MergeFacts{State: "failed", Step: footer.StepTesting}, want: "merging"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			r.SetRegistry(queueView(workspace("w1", "one")))
+			if tt.facts != nil {
+				r.SetMerge("w1", *tt.facts)
+			}
+
+			// Act.
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"},
+				Line: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", Admitted: tt.admitted, QueuedAt: queued}}})
+
+			// Assert.
+			head := firstQueue(t, r).GetHead()
+			switch tt.want {
+			case "waiting":
+				if head.GetWaiting().GetQueuedAtMs() != queued.UnixMilli() {
+					t.Fatalf("head = %v, want waiting since %d", head, queued.UnixMilli())
+				}
+			case "merging":
+				merging := head.GetMerging()
+				if merging == nil {
+					t.Fatalf("head = %v, want merging", head)
+				}
+				if (merging.Step == nil) != (tt.wantStep == nil) || (tt.wantStep != nil && merging.GetStep() != *tt.wantStep) {
+					t.Fatalf("step = %v, want %v", merging.Step, tt.wantStep)
+				}
+			}
+		})
+	}
+}
+
+func TestTheHeadCarriesItsStages(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	line := inLine("w1")
+	line[0].Stages = []*frontendv1.RosterMergeQueueStage{{Label: "queue", Round: 1,
+		State: &frontendv1.RosterMergeQueueStage_Live{Live: &frontendv1.RosterMergeQueueStageLive{StartedAtMs: 5}}}}
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: line})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Assert.
+	if got := firstQueue(t, r).GetHead().GetStages(); len(got) != 1 || !proto.Equal(got[0], line[0].Stages[0]) {
+		t.Fatalf("stages = %v, want the front's", got)
+	}
+}
+
+func TestAWaitingMergeCarriesWhenAndWhereItWasPutInLine(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	queued := time.UnixMilli(9_000)
+	line := inLine("w1", "w2")
+	line[1].QueuedAt = queued
+	line[1].PlacedAtFront = true
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+	// Assert.
+	waiting := firstQueue(t, r).GetWaiting()[0]
+	if waiting.GetQueuedAtMs() != queued.UnixMilli() || !waiting.GetPlacedAtFront() {
+		t.Fatalf("waiting = %v, want queued at %d, placed at the front", waiting, queued.UnixMilli())
+	}
+}
+
+func TestAPausedQueueSaysSo(t *testing.T) {
+	tests := []struct {
+		name   string
+		paused bool
+	}{
+		{"a paused queue", true},
+		{"a running queue", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Paused: tt.paused, Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")})
+
+			// Act.
+			r.SetRegistry(queueView(workspace("w1", "one")))
+
+			// Assert.
+			if got := firstQueue(t, r).GetPaused() != nil; got != tt.paused {
+				t.Fatalf("paused = %v, want %v", got, tt.paused)
+			}
+		})
+	}
+}
+
+func TestAFailedMergeIsTheHeadWhileTheLineIsEmpty(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Failed: &sidebar.FailedMerge{
+		Entry:   sidebar.QueueEntry{Workspace: "w1", Credited: "w1", Admitted: true, Reveal: &frontendv1.FeedId{Value: "bubble-1"}},
+		Summary: "the tests failed",
+	}})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Assert.
+	section := latest(t, r).GetRepository().GetSections()[0]
+	head := section.GetMergeQueue().GetHead()
+	if head.GetFailed().GetSummary() != "the tests failed" || head.GetSubject().GetName() != "one" || head.GetSubject().GetReveal().GetValue() != "bubble-1" {
+		t.Fatalf("head = %v, want one's failure with its bubble", head)
+	}
+	if got := section.GetHeader().GetCount().GetWorkspaces(); got != 0 {
+		t.Fatalf("header count = %d, want no merge in line", got)
+	}
+}
+
+func TestAFailedMergeIsNotTheHeadWhileAMergeIsInLine(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
+		Workspaces: []ids.WorkspaceID{"w2"},
+		Line:       inLine("w2"),
+		Failed:     &sidebar.FailedMerge{Entry: sidebar.QueueEntry{Workspace: "w1", Credited: "w1"}, Summary: "it failed"},
+	})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+	// Assert.
+	if got := queueSubjectIDs(latest(t, r).GetRepository().GetSections()[0]); !slices.Equal(got, []string{"w2"}) {
+		t.Fatalf("queue = %v, want the merge in line alone", got)
+	}
+}
+
+func TestAFailedMergeWhoseWorkspaceLeftIsPlacedByItsCredit(t *testing.T) {
+	// Arrange: the failed merge workspace is gone; its requester remains.
+	r, _ := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Failed: &sidebar.FailedMerge{
+		Entry: sidebar.QueueEntry{Workspace: "w-merge", Credited: "w1", Async: true}, Summary: "it failed"}})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Assert.
+	if head := firstQueue(t, r).GetHead(); head.GetSubject().GetName() != "one" || head.GetFailed() == nil {
+		t.Fatalf("head = %v, want one's failure", head)
+	}
+}
+
+func TestAFailedMergeWhoseWorkspacesAllLeftIsRecordedAndNotDrawn(t *testing.T) {
+	// Arrange.
+	r, logs := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Failed: &sidebar.FailedMerge{
+		Entry: sidebar.QueueEntry{Workspace: "w-merge", Credited: "w-gone", Async: true}, Summary: "it failed"}})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Assert.
+	if head := firstQueue(t, r).GetHead(); head != nil {
+		t.Fatalf("head = %v, want none", head)
+	}
+	if !hasRecord(logs.Records(), dlog.LevelInfo, "daemon.sidebar.queue_lines") {
+		t.Fatal("the failed merge that cannot be placed was not recorded")
 	}
 }
 
 func TestAMergeOnlyRequestedIsNotInTheQueueView(t *testing.T) {
 	// Arrange: w2 has a row on the queue but is not in line yet.
 	r, _ := newResolver(t)
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: []ids.WorkspaceID{"w1"}})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: inLine("w1")})
 
 	// Act.
 	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
 
 	// Assert.
-	if got := queueRowIDs(latest(t, r).GetRepository().GetSections()[0]); !slices.Equal(got, []string{"w1"}) {
+	if got := queueSubjectIDs(latest(t, r).GetRepository().GetSections()[0]); !slices.Equal(got, []string{"w1"}) {
 		t.Fatalf("queue = %v, want only the merge in line", got)
 	}
 }
@@ -1255,24 +1512,38 @@ func TestAQueueWhoseLineAloneIsSetIsKept(t *testing.T) {
 	r.SetRegistry(queueView(workspace("w1", "one")))
 
 	// Act.
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Line: []ids.WorkspaceID{"w1"}})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Line: inLine("w1")})
 
 	// Assert.
-	if got := queueRowIDs(latest(t, r).GetRepository().GetSections()[0]); !slices.Equal(got, []string{"w1"}) {
+	if got := queueSubjectIDs(latest(t, r).GetRepository().GetSections()[0]); !slices.Equal(got, []string{"w1"}) {
 		t.Fatalf("queue = %v, want the line's merge", got)
+	}
+}
+
+func TestAQueueWhoseFailedMergeAloneIsSetIsKept(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Act.
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Failed: &sidebar.FailedMerge{Entry: sidebar.QueueEntry{Workspace: "w1", Credited: "w1"}, Summary: "it failed"}})
+
+	// Assert.
+	if head := firstQueue(t, r).GetHead(); head.GetFailed() == nil {
+		t.Fatalf("head = %v, want the failed merge", head)
 	}
 }
 
 func TestAMergeInLineTheRegistryDoesNotCarryIsRecordedAndNotDrawn(t *testing.T) {
 	// Arrange.
 	r, logs := newResolver(t)
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Line: []ids.WorkspaceID{"w-gone", "w1"}})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Line: inLine("w-gone", "w1")})
 
 	// Act.
 	r.SetRegistry(queueView(workspace("w1", "one")))
 
 	// Assert.
-	if got := queueRowIDs(latest(t, r).GetRepository().GetSections()[0]); !slices.Equal(got, []string{"w1"}) {
+	if got := queueSubjectIDs(latest(t, r).GetRepository().GetSections()[0]); !slices.Equal(got, []string{"w1"}) {
 		t.Fatalf("queue = %v, want the registered merge alone", got)
 	}
 	if !hasError(logs.Records(), "daemon.sidebar.queue_lines") {
@@ -1280,17 +1551,36 @@ func TestAMergeInLineTheRegistryDoesNotCarryIsRecordedAndNotDrawn(t *testing.T) 
 	}
 }
 
+func TestAMergeCreditedToAWorkspaceTheRegistryDoesNotCarryIsRecordedAndNotDrawn(t *testing.T) {
+	// Arrange: the front runs in w1 but is credited to a workspace gone.
+	r, logs := newResolver(t)
+	line := inLine("w1", "w2")
+	line[0].Credited = "w-gone"
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Line: line})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+	// Assert.
+	if got := queueSubjectIDs(latest(t, r).GetRepository().GetSections()[0]); !slices.Equal(got, []string{"w2"}) {
+		t.Fatalf("queue = %v, want the credited merge alone", got)
+	}
+	if !hasError(logs.Records(), "daemon.sidebar.merge_queue") {
+		t.Fatal("the merge credited to an unregistered workspace was not recorded at error")
+	}
+}
+
 func TestTwoQueuesOfOneRepositoryAreRecordedAndBothDrawn(t *testing.T) {
 	// Arrange.
 	r, logs := newResolver(t)
-	r.SetMergeQueue(wsm.RepoKey("/a/.git"), sidebar.MergeQueue{Line: []ids.WorkspaceID{"w1"}})
-	r.SetMergeQueue(wsm.RepoKey("/b/.git"), sidebar.MergeQueue{Line: []ids.WorkspaceID{"w2"}})
+	r.SetMergeQueue(wsm.RepoKey("/a/.git"), sidebar.MergeQueue{Line: inLine("w1")})
+	r.SetMergeQueue(wsm.RepoKey("/b/.git"), sidebar.MergeQueue{Line: inLine("w2")})
 
 	// Act.
 	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
 
 	// Assert: both, in queue-key order.
-	if got := queueRowIDs(latest(t, r).GetRepository().GetSections()[0]); !slices.Equal(got, []string{"w1", "w2"}) {
+	if got := queueSubjectIDs(latest(t, r).GetRepository().GetSections()[0]); !slices.Equal(got, []string{"w1", "w2"}) {
 		t.Fatalf("queue = %v, want both queues' merges", got)
 	}
 	if !hasError(logs.Records(), "daemon.sidebar.queue_lines") {

@@ -38,7 +38,10 @@
  * A LINE IS ONE `.row`, a nested family member included, a folded
  * repository's header, or the header of a subsection that is folded or empty
  * (a subsection with no rows to show draws its header alone, so it is a line
- * as a folded repository's header is), and a viewport of K lines is exactly as tall as the
+ * as a folded repository's header is). While the repository sections show
+ * their merge queues, a queue's head card and each waiting merge is a line,
+ * and so is the header of a repository whose queue holds nothing, which draws
+ * its header alone. A viewport of K lines is exactly as tall as the
  * first K lines are drawn, the header above a line (a repository section's,
  * a subsection's, a Recently Merged repository group's) riding with it, so no
  * line is cut through but the lowest section's last. A folded section shows no
@@ -68,6 +71,7 @@
 import { sameLocalDate, type Ticker } from "../clock.js";
 import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
+import { MERGE_QUEUE_EMPTY_CLASS, MERGE_QUEUE_HEAD_CLASS, MERGE_QUEUE_WAITING_CLASS } from "./merge-queue-view.js";
 import { mergedToday } from "./row.js";
 
 /** The classes the three sections are drawn with. */
@@ -111,7 +115,15 @@ export const EMPTY_SUBSECTION_ATTRIBUTE = "data-empty";
  * What one line is: a row, a folded repository section's header, or the
  * header of a subsection that is folded or empty.
  */
-const LINE_SELECTOR = `.row, .repo.folded > .repo-head, .sb-subsection.folded > .sb-subsection-head, .sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head`;
+const LINE_SELECTOR = [
+  ".row",
+  ".repo.folded > .repo-head",
+  ".sb-subsection.folded > .sb-subsection-head",
+  `.sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head`,
+  `.${MERGE_QUEUE_HEAD_CLASS}`,
+  `.${MERGE_QUEUE_WAITING_CLASS}`,
+  `.repo.${MERGE_QUEUE_EMPTY_CLASS} > .repo-head`,
+].join(", ");
 
 /** How many lines each section's viewport shows. */
 export interface SectionLines {

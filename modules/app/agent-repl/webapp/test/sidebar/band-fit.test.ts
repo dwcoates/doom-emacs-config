@@ -295,6 +295,24 @@ describe("regionLines", () => {
     expect(regionLines(box).map((el) => el.className)).toEqual(["row"]);
   });
 
+  it("counts a merge queue's head card and each waiting merge as a line", () => {
+    // Arrange
+    const box = document.createElement("div");
+    box.innerHTML = '<div class="repo"><div class="repo-head"></div><div class="rows sb-merge-queue"><div class="sb-mq-head"></div><div class="sb-mq-waiting"></div></div></div>';
+    for (const el of box.querySelectorAll<HTMLElement>(".repo-head, .sb-mq-head, .sb-mq-waiting")) el.getBoundingClientRect = () => rect(0, ROW);
+    // Act / Assert
+    expect(regionLines(box).map((el) => el.className)).toEqual(["sb-mq-head", "sb-mq-waiting"]);
+  });
+
+  it("counts the header of a repository whose merge queue holds nothing as a line", () => {
+    // Arrange: an empty queue draws its header alone.
+    const box = document.createElement("div");
+    box.innerHTML = '<div class="repo sb-merge-queue-empty"><div class="repo-head"></div><div class="rows sb-merge-queue"></div></div>';
+    for (const el of box.querySelectorAll<HTMLElement>(".repo-head")) el.getBoundingClientRect = () => rect(0, ROW);
+    // Act / Assert
+    expect(regionLines(box).map((el) => el.className)).toEqual(["repo-head"]);
+  });
+
   it("counts an expanded repository's header as no line", () => {
     // Arrange
     const box = document.createElement("div");

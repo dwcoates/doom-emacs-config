@@ -19,10 +19,17 @@ import {
   RosterMergedRepoGroupSchema,
   RosterMergedSectionSchema,
   RosterRepoEntrySchema,
+  RosterMergeQueueHeadSchema,
+  RosterMergeQueueSubjectSchema,
+  RosterMergeQueueWaitingSchema,
+  RosterRepoMergeQueueSchema,
   RosterRepoSectionSchema,
   RosterSubsectionSchema,
   WorkspaceRosterSchema,
   type RosterHiddenSection,
+  type RosterMergeQueueHead,
+  type RosterMergeQueueSubject,
+  type RosterMergeQueueWaiting,
   type RosterOpenSection,
   type RosterMergedRepoGroup,
   type RosterMergedSection,
@@ -295,10 +302,10 @@ export function repoSection(init: {
    */
   subsections?: Array<{ id: string; label?: string; rows?: RosterRow[]; collapsed?: boolean; holdsCurrent?: boolean; before?: string }>;
   /**
-   * The repository's merge queue, front first, when the section shows it;
-   * unless said, the section shows its workspaces.
+   * The repository's merge queue when the section shows it; unless said, the
+   * section shows its workspaces.
    */
-  mergeQueue?: RosterRow[];
+  mergeQueue?: MessageInitShape<typeof RosterRepoMergeQueueSchema>;
   /** The rows of the repository's one-shot subsection, drawn last; none unless said. */
   oneShot?: RosterRow[];
 }): RosterRepoSection {
@@ -344,7 +351,7 @@ export function repoSection(init: {
     shows:
       init.mergeQueue === undefined
         ? { case: "workspaces", value: {} }
-        : { case: "mergeQueue", value: { rows: init.mergeQueue.map((row) => ({ row })) } },
+        : { case: "mergeQueue", value: create(RosterRepoMergeQueueSchema, init.mergeQueue) },
   });
 }
 
@@ -511,4 +518,38 @@ export function drawnEntries(list: Element): string[] {
         : `[${el.getAttribute("data-subsection")}]`
       : (el.getAttribute("data-roster-row") ?? "?"),
   );
+}
+
+/**
+ * A merge queue subject credited to workspace ID, named NAME (ID unless
+ * said), running sync unless ASYNC, revealing REVEAL when given.
+ */
+export function queueSubject(id: string, init: { name?: string; async?: boolean; reveal?: string } = {}): RosterMergeQueueSubject {
+  return create(RosterMergeQueueSubjectSchema, {
+    workspace: { id, dir: `/w/${id}` },
+    name: init.name ?? id,
+    reveal: init.reveal === undefined ? undefined : { value: init.reveal },
+    mode: { mode: init.async === true ? { case: "async", value: {} } : { case: "sync", value: {} } },
+  });
+}
+
+/** A merge queue head being worked on, credited to ID, at STEP when given, with STAGES. */
+export function mergingHead(
+  id: string,
+  init: { step?: string; stages?: MessageInitShape<typeof RosterMergeQueueHeadSchema>["stages"]; subject?: RosterMergeQueueSubject } = {},
+): RosterMergeQueueHead {
+  return create(RosterMergeQueueHeadSchema, {
+    subject: init.subject ?? queueSubject(id),
+    stages: init.stages ?? [],
+    standing: { case: "merging", value: { step: init.step } },
+  });
+}
+
+/** A merge waiting in line, credited to ID, queued at QUEUED_AT_MS. */
+export function waitingMerge(id: string, init: { queuedAtMs?: bigint; front?: boolean; subject?: RosterMergeQueueSubject } = {}): RosterMergeQueueWaiting {
+  return create(RosterMergeQueueWaitingSchema, {
+    subject: init.subject ?? queueSubject(id),
+    queuedAtMs: init.queuedAtMs ?? 0n,
+    placedAtFront: init.front ?? false,
+  });
 }

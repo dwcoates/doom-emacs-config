@@ -92,7 +92,7 @@ export const SECTIONED_KINDS: readonly string[] = ["rebaseCommit"];
  * its repository's test turn (`waitingForTurn`) wears a hollow dot: it is
  * under way, with its clock ticking, but nothing of it runs yet.
  */
-const STATE_GLYPHS = {
+export const STATE_GLYPHS = {
   live: "●",
   waitingOnUser: "❓",
   waitingForTurn: "○",
@@ -330,8 +330,17 @@ export function drawFeedMergeTabLabel(label: FeedMergeTabLabel): HTMLElement {
       return unreachableArm(`${PATH}.label.words`, other.case);
     }
   }
-  if (label.round > 1) el.append(` (${label.round})`);
+  el.append(roundSuffix(label.round));
   return el;
+}
+
+/**
+ * The words a label's ROUND adds after it: " (2)" for every round past the
+ * first, and nothing for round 1. Every drawn merge stage label (a bubble's
+ * tab, the sidebar queue's stage) decorates its round through it.
+ */
+export function roundSuffix(round: number): string {
+  return round > 1 ? ` (${round})` : "";
 }
 
 /** The state glyph: filled dot live, check or cross settled. */

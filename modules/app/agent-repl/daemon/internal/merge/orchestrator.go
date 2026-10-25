@@ -155,6 +155,10 @@ type orchestrator struct {
 	// later acquired under, so the queued bubble and the admitted one are one
 	// bubble.
 	ledgerOf map[ids.WorkspaceID]ids.LeaseID
+	// failed is each queue's last FAILED merge as the roster draws it
+	// (sidebar.MergeQueue.Failed): set when a merge fails (noteFailed), and
+	// retired once another merge is in line on its queue (retireFailed).
+	failed map[wsm.RepoKey]failedMerge
 	// originsOf caches, per merging workspace, its merge origin: set
 	// (non-nil) for a merge workspace, nil for every other. A workspace's
 	// merge origin and dir are fixed at its registration, so the answer never
@@ -323,6 +327,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		runsByWorkspace:    map[ids.WorkspaceID]*run{},
 		requested:          map[ids.WorkspaceID]*requestWait{},
 		ledgerOf:           map[ids.WorkspaceID]ids.LeaseID{},
+		failed:             map[wsm.RepoKey]failedMerge{},
 		originsOf:          map[ids.WorkspaceID]*mergeOrigin{},
 		heads:              newHeadBook(),
 		picks:              map[ids.WorkspaceID]*pick{},
