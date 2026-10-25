@@ -27,7 +27,7 @@ import {
   standingClientFailure,
 } from "../../src/rpc/link.js";
 import { createFeedTail, latestEntry, mountFeed, rootRows } from "../../src/feed/feed.js";
-import { COMPOSER_ENTRY_STYLE_ID } from "../../src/feed/composer-entry.js";
+import { COMPOSER_ENTRY_CLASS } from "../../src/feed/composer-entry.js";
 import { SCROLL_FLOOR_CLASS } from "../../src/scroll.js";
 import { JUMP_TO_TAIL_CLASS } from "../../src/feed/jump-to-tail.js";
 import {
@@ -193,8 +193,14 @@ describe("mountFeed: opening the root feed", () => {
       }),
     );
     await settle();
-    // Assert — the highlight's stylesheet names the node.
-    expect(document.getElementById(COMPOSER_ENTRY_STYLE_ID)?.textContent).toContain('[data-node="3.1"]');
+    // Assert — a line of that node drawn in that row is boxed.
+    const row = document.createElement("article");
+    row.setAttribute("data-feed-row", "r1");
+    row.innerHTML = `<div class="mp-tree"><div class="mp-line" data-node="3.1"><span class="mp-prefix">└── <span class="mp-label">3.1</span> </span><span class="mp-content">x</span></div></div>`;
+    document.body.append(row);
+    channel.push(create(WatchFeedResponseSchema, { composerEntry: { at: { case: "node", value: { row: { value: "r1" }, label: "3.1" } } } }));
+    await settle();
+    expect(row.querySelector(`.${COMPOSER_ENTRY_CLASS}`)).not.toBeNull();
   });
 
   it("routes a selection frame to the feed rather than reading it as a row", async () => {

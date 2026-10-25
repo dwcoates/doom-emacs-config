@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { beforeEach, describe, expect, it } from "vitest";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { FeedComposerEntrySchema, type FeedComposerEntry } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { ProseTreeNodeSchema, ProseTreeSchema, type ProseTree } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import {
-  COMPOSER_ENTRY_STYLE_ID,
-  composerEntryRule,
+  COMPOSER_ENTRY_CLASS,
+  COMPOSER_LEFT_PROPERTY,
+  COMPOSER_RIGHT_PROPERTY,
   createComposerEntryHighlight,
+  markComposerEntry,
 } from "../../src/feed/composer-entry.js";
+import { renderTreeHtml } from "../../src/metaprompt-tree.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
@@ -17,111 +21,154 @@ const nodeEntry = (row: string, label: string): FeedComposerEntry =>
 /** The push naming no node. */
 const noEntry = (): FeedComposerEntry => create(FeedComposerEntrySchema, { at: { case: "none", value: {} } });
 
-/**
- * A response row holding node 3.1 (a head and a wrap line), its child and
- * grandchild, its parent, its next sibling, and 3.10, whose label merely opens
- * on the same characters.
- */
-function rowWithNode(): HTMLElement {
-  const row = document.createElement("article");
-  row.setAttribute("data-feed-row", "r1");
-  row.innerHTML =
-    `<div class="mp-line" data-node="3">parent</div>` +
-    `<div class="mp-line" data-node="3.1">head</div>` +
-    `<div class="mp-line" data-node="3.1">wrap</div>` +
-    `<div class="mp-line" data-node="3.1.1">child</div>` +
-    `<div class="mp-line" data-node="3.1.1.1">grandchild</div>` +
-    `<div class="mp-line" data-node="3.2">sibling</div>` +
-    `<div class="mp-line" data-node="3.10">lookalike</div>`;
-  document.body.replaceChildren(row);
-  return row;
+/** A node's place: a root with no PARENT, else a branch under it. */
+function placeOf(parent: number | undefined): MessageInitShape<typeof ProseTreeNodeSchema>["place"] {
+  return parent === undefined ? { case: "root", value: {} } : { case: "branch", value: { parent: { index: parent } } };
 }
 
-describe("composerEntryRule", () => {
-  it("selects the node's whole subtree in its row, and nothing else", () => {
+/** A tree of NODES, each (label, text, parent index or none). */
+function tree(nodes: [string, string, number?][]): ProseTree {
+  return create(ProseTreeSchema, {
+    nodes: nodes.map(([label, text, parent], index) => ({
+      id: { index },
+      place: placeOf(parent),
+      label: { text: label },
+      text: { markdown: text },
+    })),
+  });
+}
+
+/**
+ * The owner's example: 1, its child 1.1 and grandchild 1.1.1, then 1.2 and
+ * 1.10, whose label merely opens on 1.1's characters.
+ */
+const example = tree([
+  ["1", "The subtree highlight landed"],
+  ["1.1", "It hasn't reached the running build yet", 0],
+  ["1.1.1", "It goes live with the next rollout", 1],
+  ["1.2", "A sibling", 0],
+  ["1.10", "A lookalike", 0],
+]);
+
+/** A response row ROW drawing TREES, each in its own `.mp-tree`, in the document. */
+function drawnRow(row: string, ...trees: ProseTree[]): HTMLElement {
+  const el = document.createElement("article");
+  el.setAttribute("data-feed-row", row);
+  el.innerHTML = trees.map((t) => `<div class="mp-tree">${renderTreeHtml(t, (s) => s, 120)}</div>`).join("");
+  document.body.replaceChildren(el);
+  return el;
+}
+
+/** Each line of EL inside the box, as (its node, its left edge, its right edge). */
+const boxed = (el: HTMLElement): [string | null, string, string][] =>
+  [...el.querySelectorAll<HTMLElement>(`.${COMPOSER_ENTRY_CLASS}`)].map((l) => [
+    l.getAttribute("data-node"),
+    l.style.getPropertyValue(COMPOSER_LEFT_PROPERTY),
+    l.style.getPropertyValue(COMPOSER_RIGHT_PROPERTY),
+  ]);
+
+const highlight = createComposerEntryHighlight(document);
+
+beforeEach(() => {
+  highlight.apply(noEntry());
+});
+
+describe("the composer's box", () => {
+  it("spans the node's subtree, from its label's column to the widest line", () => {
     // Arrange
-    const row = rowWithNode();
-    const selector = composerEntryRule(nodeEntry("r1", "3.1")).split(" {")[0];
+    const row = drawnRow("r1", example);
     // Act
-    const hits = [...document.querySelectorAll(selector)].map((el) => el.textContent);
+    highlight.apply(nodeEntry("r1", "1.1"));
+    // Assert: `└── ` is four columns; the grandchild's line is the widest.
+    const widest = `    └── 1.1.1 It goes live with the next rollout`.length;
+    expect(boxed(row)).toEqual([
+      ["1.1", "4ch", `${widest}ch`],
+      ["1.1.1", "4ch", `${widest}ch`],
+    ]);
+  });
+
+  it("starts at the first column for a root", () => {
+    // Arrange
+    const row = drawnRow("r1", example);
+    // Act
+    highlight.apply(nodeEntry("r1", "1"));
     // Assert
-    expect([hits, row.isConnected]).toEqual([["head", "wrap", "child", "grandchild"], true]);
+    expect(boxed(row).map(([, left]) => left)).toEqual(["0ch", "0ch", "0ch", "0ch", "0ch"]);
   });
 
-  it("selects nothing in another row", () => {
+  it("leaves out the node's parent, its siblings and a label that merely shares its characters", () => {
     // Arrange
-    rowWithNode();
-    const selector = composerEntryRule(nodeEntry("r2", "3.1")).split(" {")[0];
-    // Act + Assert
-    expect(document.querySelectorAll(selector).length).toBe(0);
+    const row = drawnRow("r1", example);
+    // Act
+    highlight.apply(nodeEntry("r1", "1.1"));
+    // Assert
+    expect(boxed(row).map(([node]) => node)).toEqual(["1.1", "1.1.1"]);
   });
 
-  it("draws nothing when no node is answered", () => {
-    // Act + Assert
-    expect(composerEntryRule(noEntry())).toBe("");
-  });
-
-  it("quotes a row and a label carrying quotes and backslashes", () => {
+  it("boxes nothing in another row", () => {
     // Arrange
-    const row = document.createElement("article");
-    row.setAttribute("data-feed-row", 'r"1\\');
-    row.innerHTML = `<div class="mp-line" data-node='3"1'>head</div>`;
-    document.body.replaceChildren(row);
-    const selector = composerEntryRule(nodeEntry('r"1\\', '3"1')).split(" {")[0];
-    // Act + Assert
-    expect(document.querySelectorAll(selector).length).toBe(1);
+    const row = drawnRow("r2", example);
+    // Act
+    highlight.apply(nodeEntry("r1", "1.1"));
+    // Assert
+    expect(boxed(row)).toEqual([]);
+  });
+
+  it("is taken down when the composer answers no node", () => {
+    // Arrange
+    const row = drawnRow("r1", example);
+    highlight.apply(nodeEntry("r1", "1.1"));
+    // Act
+    highlight.apply(noEntry());
+    // Assert
+    expect(boxed(row)).toEqual([]);
+  });
+
+  it("moves when the composer moves to another node", () => {
+    // Arrange
+    const row = drawnRow("r1", example);
+    highlight.apply(nodeEntry("r1", "1.1"));
+    // Act
+    highlight.apply(nodeEntry("r1", "1.2"));
+    // Assert
+    expect(boxed(row).map(([node]) => node)).toEqual(["1.2"]);
+  });
+
+  it("is drawn again on a repaint of the row's prose", () => {
+    // Arrange
+    highlight.apply(nodeEntry("r1", "1.1"));
+    // Act: the prose is painted afresh, and its paint marks it.
+    const row = drawnRow("r1", example);
+    markComposerEntry(row, "r1");
+    // Assert
+    expect(boxed(row).map(([node]) => node)).toEqual(["1.1", "1.1.1"]);
+  });
+
+  it("boxes each tree holding the node on its own, and no tree that does not", () => {
+    // Arrange
+    const other = tree([["2", "Elsewhere"]]);
+    const row = drawnRow("r1", example, other, example);
+    // Act
+    highlight.apply(nodeEntry("r1", "1.1"));
+    // Assert
+    expect(boxed(row).map(([node]) => node)).toEqual(["1.1", "1.1.1", "1.1", "1.1.1"]);
   });
 
   it.each([
     ["no state", create(FeedComposerEntrySchema, {})],
-    ["a node naming no row", create(FeedComposerEntrySchema, { at: { case: "node", value: { label: "3.1" } } })],
+    ["a node naming no row", create(FeedComposerEntrySchema, { at: { case: "node", value: { label: "1.1" } } })],
   ])("refuses a push with %s", (_name, entry) => {
     // Act + Assert
-    expect(() => composerEntryRule(entry)).toThrow(MalformedView);
-  });
-});
-
-describe("createComposerEntryHighlight", () => {
-  it("draws each push into one style element", () => {
-    // Arrange
-    const highlight = createComposerEntryHighlight(document);
-    // Act
-    highlight.apply(nodeEntry("r1", "3.1"));
-    highlight.apply(nodeEntry("r1", "3.2"));
-    // Assert
-    const styles = document.querySelectorAll(`#${COMPOSER_ENTRY_STYLE_ID}`);
-    expect([styles.length, styles[0]?.textContent]).toEqual([1, composerEntryRule(nodeEntry("r1", "3.2"))]);
+    expect(() => highlight.apply(entry)).toThrow(MalformedView);
   });
 
-  it("clears the highlight when no node is answered", () => {
-    // Arrange
-    const highlight = createComposerEntryHighlight(document);
-    highlight.apply(nodeEntry("r1", "3.1"));
-    // Act
-    highlight.apply(noEntry());
-    // Assert
-    expect(document.getElementById(COMPOSER_ENTRY_STYLE_ID)?.textContent).toBe("");
-  });
-
-  it("keeps highlighting lines a repaint drew after the push", () => {
-    // Arrange
-    const highlight = createComposerEntryHighlight(document);
-    highlight.apply(nodeEntry("r1", "3.1"));
-    // Act: the row's prose is repainted from scratch.
-    rowWithNode();
-    // Assert
-    const selector = composerEntryRule(nodeEntry("r1", "3.1")).split(" {")[0];
-    expect(document.querySelectorAll(selector).length).toBe(4);
-  });
-
-  it("records each highlight at info", async () => {
+  it("records each push at info", async () => {
     // Arrange
     const capture = captureLogRecords();
-    const highlight = createComposerEntryHighlight(document);
     // Act
-    highlight.apply(nodeEntry("r1", "3.1"));
+    highlight.apply(nodeEntry("r1", "1.1"));
     // Assert
     const record = await forwardedRecord(capture, "feed.composer-entry.applied");
-    expect([record.level.case, record.context]).toEqual(["info", expect.objectContaining({ row: "r1", label: "3.1" })]);
+    expect([record.level.case, record.context]).toEqual(["info", expect.objectContaining({ row: "r1", label: "1.1" })]);
   });
 });
