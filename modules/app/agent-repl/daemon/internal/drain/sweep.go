@@ -34,6 +34,14 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 	if err != nil {
 		return nil, err
 	}
+	// EVERY SESSION IN ONE READ: a read per workspace queued each behind every
+	// other reader on the store's one connection, every pass.
+	sessions, err := wsm.SessionsByWorkspace(ctx, c.deps.DB)
+	if err != nil {
+		readFailed(c.log, opSweep, "could not read the workspaces' sessions",
+			"the session read ended when the drain loop's context was cancelled", nil, err)
+		return nil, fmt.Errorf("drain: sweep: %w", err)
+	}
 	var hibernated []ids.WorkspaceID
 	for _, ws := range workspaces {
 		fields := dlog.Context{"workspace": string(ws.ID), "cutoff": c.deps.IdleCutoff.String()}
@@ -44,12 +52,7 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 		// on the record. Deferring the sweep on it instead cost an ERROR per
 		// pass per workspace and left the session unhibernated forever.
 		log := c.workspaceLog(ws)
-		session, found, err := c.deps.DB.Session(ctx, ws.ID)
-		if err != nil {
-			readFailed(log, opSweep, "could not read a workspace's session",
-				"the session read ended when the drain loop's context was cancelled", fields, err)
-			return nil, fmt.Errorf("drain: sweep %q: %w", ws.ID, err)
-		}
+		session, found := sessions[ws.ID]
 		if !found {
 			log.Debug(opSweep, "the workspace has no session to hibernate", fields)
 			continue

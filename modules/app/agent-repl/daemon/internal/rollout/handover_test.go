@@ -1789,3 +1789,92 @@ func TestRendezvousClosed(t *testing.T) {
 		})
 	}
 }
+
+// manifestSessionsDB counts the manifest's session reads and can fail the bulk
+// one.
+type manifestSessionsDB struct {
+	wsm.DB
+	single, bulk *int
+	err          error
+}
+
+func (d manifestSessionsDB) Session(ctx context.Context, ws ids.WorkspaceID) (wsm.Session, bool, error) {
+	*d.single++
+	return d.DB.Session(ctx, ws)
+}
+
+func (d manifestSessionsDB) Sessions(ctx context.Context) ([]wsm.Session, error) {
+	*d.bulk++
+	if d.err != nil {
+		return nil, d.err
+	}
+	return d.DB.Sessions(ctx)
+}
+
+// TestTheManifestReadsEverySessionAtOnce pins the manifest onto the shared
+// bulk index: it is written at the handover's busiest instant, when a read per
+// workspace queued each behind every other reader.
+func TestTheManifestReadsEverySessionAtOnce(t *testing.T) {
+	// Arrange
+	var single, bulk int
+	h := newHarness(t)
+	h.c.deps.DB = manifestSessionsDB{DB: h.c.deps.DB, single: &single, bulk: &bulk}
+	var workspaces []wsm.Workspace
+	for range 3 {
+		ws, dir := h.workspace(t)
+		workspaces = append(workspaces, wsm.Workspace{ID: ws, Dir: dir})
+	}
+
+	// Act
+	m := h.c.manifest(context.Background(), "127.0.0.1:1", workspaces, map[ids.WorkspaceID]Participants{})
+
+	// Assert
+	if bulk != 1 || single != 0 {
+		t.Fatalf("session reads: bulk = %d, single = %d; want one bulk read and no single reads", bulk, single)
+	}
+	for _, entry := range m.Sessions {
+		if entry.Intent != IntentPreserve {
+			t.Fatalf("manifest sessions = %+v, want every live shim preserved", m.Sessions)
+		}
+	}
+}
+
+// TestAManifestWhoseSessionReadFailsRecordsItOnce covers the read's failure:
+// recorded at ERROR once for the whole manifest, and no entry claims a
+// session the daemon could not read.
+func TestAManifestWhoseSessionReadFailsRecordsItOnce(t *testing.T) {
+	// Arrange
+	var single, bulk int
+	h := newHarness(t)
+	h.c.deps.DB = manifestSessionsDB{DB: h.c.deps.DB, single: &single, bulk: &bulk, err: errFake}
+	var workspaces []wsm.Workspace
+	for range 2 {
+		ws, dir := h.workspace(t)
+		workspaces = append(workspaces, wsm.Workspace{ID: ws, Dir: dir})
+	}
+
+	// Act
+	m := h.c.manifest(context.Background(), "127.0.0.1:1", workspaces, map[ids.WorkspaceID]Participants{})
+
+	// Assert
+	if len(m.Sessions) != len(workspaces) {
+		t.Fatalf("manifest sessions = %d, want an entry per workspace (each arms the rendezvous)", len(m.Sessions))
+	}
+	for _, entry := range m.Sessions {
+		if entry.Intent != IntentNoSession || entry.VendorSessionID != "" {
+			t.Fatalf("manifest sessions = %+v, want no entry claiming an unread session", m.Sessions)
+		}
+	}
+	var failures int
+	for _, rec := range h.log.Records() {
+		if rec.Level == "error" && rec.Operation == opManifest && rec.Message == "could not read the sessions for the intent manifest" {
+			failures++
+			if rec.Context["workspaces"] != len(workspaces) {
+				t.Fatalf("failure context = %+v, want the workspace count", rec.Context)
+			}
+		}
+	}
+	if failures != 1 {
+		t.Fatalf("manifest read failures recorded = %d, want exactly one; records = %+v", failures, h.log.Records())
+	}
+}

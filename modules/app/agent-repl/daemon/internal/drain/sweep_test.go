@@ -1327,11 +1327,11 @@ func (d sweepReadErrDB) AllMergeQueues(ctx context.Context) (map[wsm.RepoKey][]w
 	return d.DB.AllMergeQueues(ctx)
 }
 
-func (d sweepReadErrDB) Session(ctx context.Context, ws wsm.WorkspaceID) (wsm.Session, bool, error) {
-	if d.read == "session" {
-		return wsm.Session{}, false, d.err
+func (d sweepReadErrDB) Sessions(ctx context.Context) ([]wsm.Session, error) {
+	if d.read == "sessions" {
+		return nil, d.err
 	}
-	return d.DB.Session(ctx, ws)
+	return d.DB.Sessions(ctx)
 }
 
 // TestSweepLevelsEachReadByWhetherTheLoopWasCancelled pins the level of every
@@ -1349,9 +1349,9 @@ func TestSweepLevelsEachReadByWhetherTheLoopWasCancelled(t *testing.T) {
 		{name: "the workspace list failing while serving", read: "list", readErr: errFake, wantLevel: "error"},
 		{name: "the merge queues cut by the exit", read: "queues", readErr: context.Canceled, wantLevel: "debug"},
 		{name: "the merge queues failing while serving", read: "queues", readErr: errFake, wantLevel: "error"},
-		{name: "a session read cut by the exit", read: "session", readErr: context.Canceled, wantLevel: "debug"},
-		{name: "a session read timing out", read: "session", readErr: context.DeadlineExceeded, wantLevel: "debug"},
-		{name: "a session read failing while serving", read: "session", readErr: errFake, wantLevel: "error"},
+		{name: "the session read cut by the exit", read: "sessions", readErr: context.Canceled, wantLevel: "debug"},
+		{name: "the session read timing out", read: "sessions", readErr: context.DeadlineExceeded, wantLevel: "debug"},
+		{name: "the session read failing while serving", read: "sessions", readErr: errFake, wantLevel: "error"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1376,5 +1376,43 @@ func TestSweepLevelsEachReadByWhetherTheLoopWasCancelled(t *testing.T) {
 				t.Fatalf("read levels = %v, want exactly [%s]", levels, tt.wantLevel)
 			}
 		})
+	}
+}
+
+// sweepReadCountDB counts the sweep's session reads, single and bulk.
+type sweepReadCountDB struct {
+	wsm.DB
+	single, bulk *int
+}
+
+func (d sweepReadCountDB) Session(ctx context.Context, ws wsm.WorkspaceID) (wsm.Session, bool, error) {
+	*d.single++
+	return d.DB.Session(ctx, ws)
+}
+
+func (d sweepReadCountDB) Sessions(ctx context.Context) ([]wsm.Session, error) {
+	*d.bulk++
+	return d.DB.Sessions(ctx)
+}
+
+// TestSweepReadsEverySessionAtOnce pins the sweep onto the shared bulk index:
+// a read per workspace queued each behind every other reader on the store's
+// one connection, on every pass.
+func TestSweepReadsEverySessionAtOnce(t *testing.T) {
+	// Arrange
+	var single, bulk int
+	h := newHarness(t, func(d *Deps) { d.DB = sweepReadCountDB{DB: d.DB, single: &single, bulk: &bulk} })
+	for range 3 {
+		h.workspace(t, instant.Add(-2*time.Hour))
+	}
+
+	// Act
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	if bulk != 1 || single != 0 {
+		t.Fatalf("session reads: bulk = %d, single = %d; want one bulk read and no single reads", bulk, single)
 	}
 }

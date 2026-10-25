@@ -1245,6 +1245,16 @@ func (c *controller) manifest(ctx context.Context, successor string, workspaces 
 		WrittenAt: c.deps.Clock.Now(),
 		Sessions:  make([]ManifestSession, 0, len(workspaces)),
 	}
+	// EVERY SESSION IN ONE READ: the manifest is written at the handover's
+	// busiest instant, and a read per workspace queued each behind every
+	// other reader on the store's one connection. A failed read is recorded
+	// once and leaves every entry without its session, as a failed read per
+	// workspace always left that workspace's.
+	sessions, err := wsm.SessionsByWorkspace(ctx, c.deps.DB)
+	if err != nil {
+		c.log.Error(opManifest, "could not read the sessions for the intent manifest",
+			dlog.WithCause(dlog.Context{"workspaces": len(workspaces)}, err))
+	}
 	for _, ws := range workspaces {
 		record := ManifestSession{
 			Workspace:    ws.ID,
@@ -1253,11 +1263,7 @@ func (c *controller) manifest(ctx context.Context, successor string, workspaces 
 			ExpectedHost: snapshot[ws.ID].Host,
 			ExpectedWeb:  snapshot[ws.ID].Web,
 		}
-		session, found, err := c.deps.DB.Session(ctx, ws.ID)
-		if err != nil {
-			c.log.Error(opManifest, "could not read a session for the intent manifest",
-				dlog.WithCause(dlog.Context{"workspace": string(ws.ID)}, err))
-		} else if found {
+		if session, found := sessions[ws.ID]; found {
 			record.VendorSessionID = session.VendorSessionID
 			if session.ShimPID != nil {
 				record.ShimPID = *session.ShimPID
