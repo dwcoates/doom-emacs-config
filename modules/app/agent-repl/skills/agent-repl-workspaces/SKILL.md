@@ -131,12 +131,10 @@ Choose the combination from what the work needs:
 
 ## Marking this workspace (`workspace set`)
 
-- **ONE-SHOT.** When this workspace commits to finishing the REST of its work
-  unattended, run `workspace set here -one-shot` at once, without asking. That
-  means the user told it to one-shot itself, to make this a one-shot, or to
-  land it when done, or the remaining work needs no further input. The answer
-  carries the daemon's completion directive: follow it when the work is done.
-  A child its owner lands cannot be marked.
+- **ONE-SHOT.** When to mark this workspace a one-shot is the metaprompt's
+  rule ("One-shot workspaces"). The verb is `workspace set here -one-shot`,
+  and its answer carries the daemon's completion directive: follow it when the
+  work is done. A child its owner lands cannot be marked.
 - **BACK FROM A ONE-SHOT.** When a workspace marked one-shot is reopened,
   restored, or prompted for more work after it finished, or the user steps in
   to steer it, run `workspace set here -not-one-shot` at once, without asking,
