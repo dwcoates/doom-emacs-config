@@ -861,15 +861,20 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   border-bottom: 1px solid var(--border);
 }
 #ws-sidebar .sb-title { font-weight: 600; font-size: 0.95rem; }
-/* THE AGENT-REPL VERSION (owner request, 2026-10-21): pushed to the head's
-   top right, small, in a grey mixed most of the way into the rail's ground so
-   it reads only when looked for. Mixed from the theme's tokens, so either
-   theme's ground and grey carry it. */
+/* THE AGENT-REPL VERSION (owner request, 2026-10-21): small, in a grey
+   mixed most of the way into the rail's ground so it reads only when looked
+   for. Mixed from the theme's tokens, so either theme's ground and grey carry
+   it. Tucked into the head's top-right corner, out of the title's line, and
+   a touch smaller and dimmer (owner request, 2026-10-25). The head is its
+   containing block (`position: relative`, the apps section below). */
 #ws-sidebar .sb-version {
-  margin-left: auto;
-  font-size: 0.68rem;
+  position: absolute;
+  top: 5px;
+  right: 0.7rem;
+  font-size: 0.64rem;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
-  color: color-mix(in srgb, var(--muted) 45%, var(--sidebar-bg));
+  color: color-mix(in srgb, var(--muted) 38%, var(--sidebar-bg));
 }
 /* THE SEARCH (src/sidebar/search.ts): the magnifier left of the title, and
    the bar it slides open under the head. The bar hangs absolutely, its top
@@ -9561,11 +9566,15 @@ ar-button.merge-queue-move[aria-disabled="true"] {
    hugs the right rail. */
 /* THE CHAT'S TEXT IS A SHADE GREYER than the theme's foreground (owner
    request, 2026-10-25): mixed a fifth of the way toward --muted, so either
-   theme's pair carries it. */
+   theme's pair carries it.
+   AND IT IS SET IN A SERIF (owner ruling, 2026-10-25): Source Serif 4, the
+   free stand-in for claude.ai's Tiempos-derived serif, bundled (main.ts).
+   Code keeps its monospace through its own rules (`.md code`, `pre`). */
 .chat-col {
   width: var(--agent-bubble-cap); margin: 0 auto; padding: 28px 0 48px;
   display: flex; flex-direction: column; gap: 18px;
   color: color-mix(in srgb, var(--fg) 80%, var(--muted));
+  font-family: "Source Serif 4 Variable", ui-serif, Georgia, serif;
 }
 .chat-empty { color: var(--muted); text-align: center; margin-top: 18vh; line-height: 1.7; }
 .chat-exchange { display: flex; flex-direction: column; gap: 18px; }
