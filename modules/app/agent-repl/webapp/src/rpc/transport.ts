@@ -12,7 +12,7 @@
  * answers across origins for the host alone; no credentials ride either way.
  */
 import { createConnectTransport } from "@connectrpc/connect-web";
-import type { Transport } from "@connectrpc/connect";
+import type { Interceptor, Transport } from "@connectrpc/connect";
 import { createLinkedAbortController } from "@connectrpc/connect/protocol";
 import type { DaemonOrigin } from "./daemon-origin.js";
 
@@ -30,6 +30,36 @@ export interface DaemonTransportOptions {
    * into a page that is gone.
    */
   signal?: AbortSignal;
+  /**
+   * Names each request for the daemon's records: the value sent in
+   * `REQUEST_ID_HEADER`, which the daemon's request boundary records, and a
+   * fold names its requester by (`workspace.FoldRequester`). Unset sends none.
+   */
+  requestId?: () => string;
+}
+
+/**
+ * The header a request's id rides in, as the daemon reads it
+ * (`daemon/internal/server/requestlog.go` `requestIDHeader`).
+ */
+export const REQUEST_ID_HEADER = "X-Agent-Repl-Request-Id";
+
+/**
+ * Request ids for one connection of one client: `<client>-<connection>-<n>`,
+ * n counting from 1, so a daemon record names the page and the call that
+ * asked.
+ */
+export function connectionRequestIds(client: string, connectionId: string): () => string {
+  let n = 0;
+  return () => `${client}-${connectionId}-${++n}`;
+}
+
+/** The interceptor that sends each request's id. */
+function requestIdInterceptor(requestId: () => string): Interceptor {
+  return (next) => (req) => {
+    req.header.set(REQUEST_ID_HEADER, requestId());
+    return next(req);
+  };
 }
 
 /**
@@ -56,6 +86,7 @@ export function createDaemonTransport(base: string | DaemonOrigin, opts: DaemonT
   return createConnectTransport({
     baseUrl,
     useBinaryFormat: true,
+    interceptors: opts.requestId === undefined ? [] : [requestIdInterceptor(opts.requestId)],
     fetch:
       signal === undefined
         ? fetch

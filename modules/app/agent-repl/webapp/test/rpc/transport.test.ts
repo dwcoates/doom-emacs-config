@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createDaemonTransport } from "../../src/rpc/transport.js";
+import { connectionRequestIds, createDaemonTransport, REQUEST_ID_HEADER } from "../../src/rpc/transport.js";
 import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 
 describe("createDaemonTransport", () => {
@@ -152,5 +152,47 @@ describe("createDaemonTransport", () => {
       "http://host.localhost:1000/agentrepl.v1.AgentRepl/DaemonHealth",
       "http://host.localhost:2000/agentrepl.v1.AgentRepl/DaemonHealth",
     ]);
+  });
+
+  it.each([
+    { name: "with a request id source, sends each call's id in order", ids: true, want: ["webhost-c1-1", "webhost-c1-2"] },
+    { name: "with no request id source, sends none", ids: false, want: [null, null] },
+  ])("$name", async ({ ids, want }) => {
+    // Arrange
+    const seen: Array<string | null> = [];
+    const fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers).get(REQUEST_ID_HEADER));
+      return new Response(new Uint8Array(), { status: 500 });
+    });
+    const client = createAgentReplClient(
+      createDaemonTransport("http://localhost:8080", {
+        fetch: fetchFn as unknown as typeof globalThis.fetch,
+        ...(ids ? { requestId: connectionRequestIds("webhost", "c1") } : {}),
+      }),
+    );
+    // Act
+    await expect(client.daemonHealth({})).rejects.toBeDefined();
+    await expect(client.daemonHealth({})).rejects.toBeDefined();
+    // Assert
+    expect(seen).toEqual(want);
+  });
+});
+
+describe("connectionRequestIds", () => {
+  it("counts from one under the client and connection", () => {
+    // Arrange
+    const next = connectionRequestIds("page", "c9");
+    // Act / Assert
+    expect([next(), next(), next()]).toEqual(["page-c9-1", "page-c9-2", "page-c9-3"]);
+  });
+
+  it("counts each connection on its own", () => {
+    // Arrange
+    const a = connectionRequestIds("page", "a");
+    const b = connectionRequestIds("page", "b");
+    // Act
+    a();
+    // Assert
+    expect(b()).toBe("page-b-1");
   });
 });

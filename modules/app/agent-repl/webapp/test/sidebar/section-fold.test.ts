@@ -109,6 +109,33 @@ describe("sectionFold", () => {
   });
 });
 
+describe("sectionFold's record of a fold it asks", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.replaceChildren();
+  });
+
+  it.each([
+    { folded: false, collapse: true, message: "the section's fold gesture asks the daemon to collapse it" },
+    { folded: true, collapse: false, message: "the section's fold gesture asks the daemon to expand it" },
+  ])("records at info a gesture asking collapse $collapse", ({ folded, collapse, message }) => {
+    // Arrange
+    const { sc } = recording();
+    const section = document.createElement("div");
+    section.classList.toggle("folded", folded);
+    const control = document.createElement("span");
+    section.appendChild(control);
+    document.body.appendChild(section);
+    const info = vi.spyOn(log, "info");
+
+    // Act
+    sectionFold(sc, "repo:r1", { case: "repository", value: { id: "r1", dir: "/r1" } })(section, control);
+
+    // Assert
+    expect(info).toHaveBeenCalledWith(message, { operation: "sidebar.fold.asked", context: { section: "repo:r1", collapse } });
+  });
+});
+
 describe("sectionFold on a section holding the current workspace", () => {
   afterEach(() => {
     vi.restoreAllMocks();

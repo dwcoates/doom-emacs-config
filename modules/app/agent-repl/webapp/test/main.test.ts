@@ -37,6 +37,7 @@ import { resolve } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { ClientLogResponseSchema } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import type { DaemonTransportOptions } from "../src/rpc/transport.js";
 import { dispatchPageTransition } from "./page-transition.js";
 
 /** One `ClientLog` call the installed logger forwarded. */
@@ -57,6 +58,8 @@ type ClientLogCall = { record: { message: string; context?: Record<string, unkno
 interface BootRecord {
   /** Every mount, in the order the boot called it. */
   order: string[];
+  /** The options the page's one transport was built with. */
+  transportOptions: DaemonTransportOptions | null;
   /** Whether the mocked `ClientLog` rejects every record. */
   clientLogFails: boolean;
   /** The `ClientLog` calls the installed logger forwarded. */
@@ -103,6 +106,7 @@ interface BootRecord {
 function freshRecord(): BootRecord {
   return {
     order: [],
+    transportOptions: null,
     clientLogFails: false,
     clientLogs: [],
     rethrown: [],
@@ -207,8 +211,12 @@ async function runBoot(rec: BootRecord): Promise<void> {
   // the merge gate's load. No boot test reads a style; the stylesheet's own
   // suites (test/styles.test.ts) load it once per file.
   vi.doMock("../src/styles.css", () => ({}));
-  vi.doMock("../src/rpc/transport.js", () => ({
-    createDaemonTransport: vi.fn(() => ({ transport: true })),
+  vi.doMock("../src/rpc/transport.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("../src/rpc/transport.js")>()),
+    createDaemonTransport: vi.fn((_base: unknown, opts: DaemonTransportOptions) => {
+      rec.transportOptions = opts;
+      return { transport: true };
+    }),
   }));
   vi.doMock("../src/rpc/client.js", () => ({
     createAgentReplClient: vi.fn(() => ({
@@ -444,6 +452,16 @@ beforeAll(async () => {
 beforeEach(arrangePage);
 afterEach(teardownPage, BOOT_TIMEOUT_MS);
 describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
+  test("names each of the page's requests under the page and its connection", async () => {
+    await bootMain();
+
+    const requestId = page.transportOptions?.requestId;
+    expect([requestId?.(), requestId?.()]).toEqual([
+      expect.stringMatching(/^page-.+-1$/),
+      expect.stringMatching(/^page-.+-2$/),
+    ]);
+  });
+
   test("mounts every component on the shell element that names it", async () => {
     await bootMain();
 

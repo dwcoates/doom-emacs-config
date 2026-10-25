@@ -33,7 +33,7 @@ import { installForwardingLogger, installTextAffordances } from "../document-run
 import { beginPage, endPageAtPagehide, pageEnding, stopAtPageTeardown } from "../page-teardown.js";
 import { createAgentReplClient, type AgentReplClient } from "../rpc/client.js";
 import { createDaemonContext } from "../rpc/context.js";
-import { createDaemonTransport } from "../rpc/transport.js";
+import { connectionRequestIds, createDaemonTransport } from "../rpc/transport.js";
 import type { DaemonOrigin } from "../rpc/daemon-origin.js";
 import { readWebappBuild } from "../webapp-build.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
@@ -79,10 +79,15 @@ export function startWebhostSidebar(
   // every request its transport made is aborted, so its standing streams (the
   // sidebar's roster) neither answer nor reopen into a document that is gone.
   beginPage();
+  const connectionId = mintConnectionId();
   const client =
     deps.client ??
-    createAgentReplClient(createDaemonTransport(deps.daemon ?? win.location.origin, { signal: pageEnding() }));
-  const connectionId = mintConnectionId();
+    createAgentReplClient(
+      createDaemonTransport(deps.daemon ?? win.location.origin, {
+        signal: pageEnding(),
+        requestId: connectionRequestIds("webhost", connectionId),
+      }),
+    );
   bindLogContext({ connection_id: connectionId });
   installForwardingLogger(() => client, { case: "webhost", value: {} }, deps.level ?? "info", deps.installLogger ?? setLogger);
 

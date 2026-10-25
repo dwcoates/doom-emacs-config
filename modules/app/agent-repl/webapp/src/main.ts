@@ -83,7 +83,7 @@ import { createPageSeen } from "./page-seen.js";
 import { createAgentReplClient } from "./rpc/client.js";
 import { createAppContext, type AppContext } from "./rpc/context.js";
 import { isHostAddress, pageAddress } from "./rpc/page-address.js";
-import { createDaemonTransport } from "./rpc/transport.js";
+import { connectionRequestIds, createDaemonTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
 import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import type { FeedId } from "../../proto/gen/ts/frontend/v1/feed_pb";
@@ -135,10 +135,13 @@ export async function boot(): Promise<void> {
     // a page that is gone.
     beginPage();
     endPageAtPagehide(window);
-    const transport = createDaemonTransport(window.location.origin, { signal: pageEnding() });
+    const connectionId = mintConnectionId();
+    const transport = createDaemonTransport(window.location.origin, {
+      signal: pageEnding(),
+      requestId: connectionRequestIds("page", connectionId),
+    });
     const client = createAgentReplClient(transport);
 
-    const connectionId = mintConnectionId();
     bindLogContext({
       connection_id: connectionId,
       workspace_id: workspace.id,
