@@ -172,6 +172,7 @@ var migrations = []migration{
 	{To: 73, Name: "durable_rows_parsed_prose", Kind: MigrationAdditive, Rewrite: rewriteParsedProseRows},
 	{To: 74, Name: "merge_queue_behind", Kind: MigrationAdditive, DDL: mergeQueueBehindDDL},
 	{To: 75, Name: "merge_queue_lookup_indexes", Kind: MigrationAdditive, DDL: mergeQueueLookupIndexesDDL},
+	{To: 76, Name: "sidebar_view_open_shows", Kind: MigrationAdditive, DDL: openShowsDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

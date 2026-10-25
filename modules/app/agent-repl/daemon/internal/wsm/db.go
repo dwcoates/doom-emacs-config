@@ -378,6 +378,10 @@ type DB interface {
 	// SetOpenSectionFolded records whether the open-workspaces section is
 	// collapsed.
 	SetOpenSectionFolded(ctx context.Context, folded bool) error
+	// SetOpenShowsMergeQueues records whether the open-workspaces section's
+	// repository sections show their merge queues rather than their open
+	// workspaces.
+	SetOpenShowsMergeQueues(ctx context.Context, mergeQueues bool) error
 	// SidebarView loads the sidebar's view state that belongs to no row, or
 	// DefaultSidebarView when nobody has changed it.
 	SidebarView(ctx context.Context) (SidebarView, error)
