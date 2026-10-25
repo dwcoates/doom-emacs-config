@@ -55,6 +55,11 @@ type Client interface {
 	Thread(ctx context.Context, thread ids.WorkspaceID) ([]*zettelv1.Node, error)
 	// RecordSightings counts one sighting per node, all or nothing.
 	RecordSightings(ctx context.Context, nodes []*zettelv1.NodeId) error
+	// SearchThreads answers every thread whose nodes say QUERY's words, the
+	// best match first.
+	SearchThreads(ctx context.Context, query string) ([]*zettelv1.SearchThreadsMatch, error)
+	// DeleteThread destroys one thread's graph, answering how many nodes went.
+	DeleteThread(ctx context.Context, thread ids.WorkspaceID) (uint32, error)
 }
 
 type client struct {
@@ -121,6 +126,38 @@ func (c *client) RecordSightings(ctx context.Context, nodes []*zettelv1.NodeId) 
 		return refused(rpc, result.Failure)
 	default:
 		return unarmed(rpc)
+	}
+}
+
+func (c *client) SearchThreads(ctx context.Context, query string) ([]*zettelv1.SearchThreadsMatch, error) {
+	const rpc = "SearchThreads"
+	resp, err := c.rpc.SearchThreads(ctx, connect.NewRequest(&zettelv1.SearchThreadsRequest{Query: query}))
+	if err != nil {
+		return nil, unavailable(rpc, err)
+	}
+	switch result := resp.Msg.GetResult().(type) {
+	case *zettelv1.SearchThreadsResponse_Success:
+		return result.Success.GetMatches(), nil
+	case *zettelv1.SearchThreadsResponse_Failure:
+		return nil, refused(rpc, result.Failure)
+	default:
+		return nil, unarmed(rpc)
+	}
+}
+
+func (c *client) DeleteThread(ctx context.Context, thread ids.WorkspaceID) (uint32, error) {
+	const rpc = "DeleteThread"
+	resp, err := c.rpc.DeleteThread(ctx, connect.NewRequest(&zettelv1.DeleteThreadRequest{Thread: &zettelv1.ThreadId{Id: string(thread)}}))
+	if err != nil {
+		return 0, unavailable(rpc, err)
+	}
+	switch result := resp.Msg.GetResult().(type) {
+	case *zettelv1.DeleteThreadResponse_Success:
+		return result.Success.GetNodesDeleted(), nil
+	case *zettelv1.DeleteThreadResponse_Failure:
+		return 0, refused(rpc, result.Failure)
+	default:
+		return 0, unarmed(rpc)
 	}
 }
 

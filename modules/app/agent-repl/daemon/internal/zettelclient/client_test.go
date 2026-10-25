@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	zettelv1 "agentrepl/proto/zettel/v1"
@@ -25,6 +26,8 @@ type fakeZettel struct {
 	record    *zettelv1.RecordExchangeResponse
 	thread    *zettelv1.GetThreadResponse
 	sightings *zettelv1.RecordSightingsResponse
+	search    *zettelv1.SearchThreadsResponse
+	deleted   *zettelv1.DeleteThreadResponse
 	err       error
 	got       *zettelv1.RecordExchangeRequest
 }
@@ -49,6 +52,20 @@ func (f *fakeZettel) RecordSightings(context.Context, *connect.Request[zettelv1.
 		return nil, f.err
 	}
 	return connect.NewResponse(f.sightings), nil
+}
+
+func (f *fakeZettel) SearchThreads(context.Context, *connect.Request[zettelv1.SearchThreadsRequest]) (*connect.Response[zettelv1.SearchThreadsResponse], error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return connect.NewResponse(f.search), nil
+}
+
+func (f *fakeZettel) DeleteThread(context.Context, *connect.Request[zettelv1.DeleteThreadRequest]) (*connect.Response[zettelv1.DeleteThreadResponse], error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return connect.NewResponse(f.deleted), nil
 }
 
 // serve runs the fake on a private unix socket and answers a Client of it, so
@@ -188,6 +205,83 @@ func TestThreadAnswersTheNodes(t *testing.T) {
 	// Assert
 	if err != nil || len(nodes) != 2 {
 		t.Errorf("nodes = %v, err = %v", nodes, err)
+	}
+}
+
+func TestSearchThreadsAnswersTheMatches(t *testing.T) {
+	// Arrange
+	match := &zettelv1.SearchThreadsMatch{Thread: &zettelv1.ThreadId{Id: "t1"}, Node: &zettelv1.NodeId{Id: "n1"}}
+	c := serve(t, &fakeZettel{search: &zettelv1.SearchThreadsResponse{Result: &zettelv1.SearchThreadsResponse_Success{
+		Success: &zettelv1.SearchThreadsSuccess{Matches: []*zettelv1.SearchThreadsMatch{match}},
+	}}})
+
+	// Act
+	got, err := c.SearchThreads(context.Background(), "sky")
+
+	// Assert
+	if err != nil || len(got) != 1 || got[0].GetThread().GetId() != "t1" {
+		t.Fatalf("SearchThreads = %v, %v; want the one match", got, err)
+	}
+}
+
+func TestDeleteThreadAnswersTheNodesDeleted(t *testing.T) {
+	// Arrange
+	c := serve(t, &fakeZettel{deleted: &zettelv1.DeleteThreadResponse{Result: &zettelv1.DeleteThreadResponse_Success{
+		Success: &zettelv1.DeleteThreadSuccess{NodesDeleted: 3},
+	}}})
+
+	// Act
+	got, err := c.DeleteThread(context.Background(), "t1")
+
+	// Assert
+	if err != nil || got != 3 {
+		t.Fatalf("DeleteThread = %d, %v; want 3", got, err)
+	}
+}
+
+func TestSearchAndDeleteMapEveryOutcome(t *testing.T) {
+	tests := []struct {
+		name     string
+		f        *fakeZettel
+		wantKind string
+		wantDown bool
+	}{
+		{name: "search: invalid request", wantKind: "invalid_request", f: &fakeZettel{search: &zettelv1.SearchThreadsResponse{Result: &zettelv1.SearchThreadsResponse_Failure{
+			Failure: &zettelv1.SearchThreadsFailure{Kind: &zettelv1.SearchThreadsFailure_InvalidRequest{InvalidRequest: &zettelv1.SearchThreadsInvalidRequest{Field: "query"}}},
+		}}}},
+		{name: "search: unarmed", wantKind: "unset", f: &fakeZettel{search: &zettelv1.SearchThreadsResponse{}}},
+		{name: "search: transport", wantDown: true, f: &fakeZettel{err: connect.NewError(connect.CodeUnavailable, errors.New("down"))}},
+		{name: "delete: storage failure", wantKind: "storage_failure", f: &fakeZettel{deleted: &zettelv1.DeleteThreadResponse{Result: &zettelv1.DeleteThreadResponse_Failure{
+			Failure: &zettelv1.DeleteThreadFailure{Kind: &zettelv1.DeleteThreadFailure_StorageFailure{StorageFailure: &zettelv1.DeleteThreadStorageFailure{}}},
+		}}}},
+		{name: "delete: unarmed", wantKind: "unset", f: &fakeZettel{deleted: &zettelv1.DeleteThreadResponse{}}},
+		{name: "delete: transport", wantDown: true, f: &fakeZettel{err: connect.NewError(connect.CodeUnavailable, errors.New("down"))}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			c := serve(t, tt.f)
+
+			// Act
+			var err error
+			if strings.HasPrefix(tt.name, "search") {
+				_, err = c.SearchThreads(context.Background(), "sky")
+			} else {
+				_, err = c.DeleteThread(context.Background(), "t1")
+			}
+
+			// Assert
+			if tt.wantDown {
+				if !errors.Is(err, ErrUnavailable) {
+					t.Fatalf("err = %v, want ErrUnavailable", err)
+				}
+				return
+			}
+			var refused *RefusedError
+			if !errors.As(err, &refused) || refused.Kind != tt.wantKind {
+				t.Fatalf("err = %v, want a refusal of kind %s", err, tt.wantKind)
+			}
+		})
 	}
 }
 
