@@ -38,6 +38,24 @@ function reselectingPanel(tab: MergeTab, log: string[]): TabPanel {
   };
 }
 
+/** A panel recording every opening it was told of. */
+function openingPanel(tab: MergeTab, log: string[], accept = true): TabPanel {
+  return {
+    ...recordingPanel(tab, log, accept),
+    opened(): void {
+      log.push(`opened ${tab.id}`);
+    },
+  };
+}
+
+/** A tab set over opening panels, with its panel log. */
+function opening(accept = true) {
+  const host = document.createElement("div");
+  const log: string[] = [];
+  const set = createTabSet(host, createTicker(1000), "nested", (tab) => openingPanel(tab, log, accept));
+  return { host, log, set };
+}
+
 /** A tab set mounted on a fresh host, with its panel log. */
 function mounted(depth: "top" | "nested" = "top", accept = true) {
   const host = document.createElement("div");
@@ -147,6 +165,53 @@ describe("createTabSet", () => {
     set.draw(tabs(["a", { kind: "committing", state: "live" }]));
     set.draw([]);
     expect(host.querySelector(".merge-tab-panel")?.children.length).toBe(0);
+  });
+
+  it("opens the panel its first draw shows", () => {
+    const { log, set } = opening();
+    set.draw(tabs(["a", { kind: "committing", state: "live" }]));
+    expect(log).toEqual(["draw a", "opened a"]);
+  });
+
+  it("opens the panel of a tab the reader clicked", () => {
+    const { host, log, set } = opening();
+    set.draw(tabs(["a", { kind: "queue", state: "settled", outcome: "succeeded" }], ["b", { kind: "committing", state: "live" }]));
+    host.querySelector<HTMLElement>('[data-merge-tab="queue"]')?.click();
+    expect(log).toEqual(["draw b", "opened b", "draw a", "opened a"]);
+  });
+
+  it("opens the panel of a tab the auto rule moved on to", () => {
+    const { log, set } = opening();
+    set.draw(tabs(["a", { kind: "queue", state: "live" }]));
+    set.draw(tabs(["a", { kind: "queue", state: "settled", outcome: "succeeded" }], ["b", { kind: "committing", state: "live" }]));
+    expect(log).toEqual(["draw a", "opened a", "draw b", "opened b"]);
+  });
+
+  it("does not open a panel it updated in place", () => {
+    const { log, set } = opening();
+    const served = tabs(["a", { kind: "committing", state: "live" }]);
+    set.draw(served);
+    set.draw(served);
+    expect(log).toEqual(["draw a", "opened a", "update a"]);
+  });
+
+  it("does not open a panel it redrew afresh for the tab already shown", () => {
+    const { log, set } = opening(false);
+    const served = tabs(["a", { kind: "committing", state: "live" }]);
+    set.draw(served);
+    set.draw(served);
+    expect(log).toEqual(["draw a", "opened a", "update a", "draw a"]);
+  });
+
+  it("opens a panel only once it is mounted in the strip's panel", () => {
+    const host = document.createElement("div");
+    const mountedWhenOpened: boolean[] = [];
+    const set = createTabSet(host, createTicker(1000), "nested", (tab) => {
+      const panel = recordingPanel(tab, []);
+      return { ...panel, opened: () => mountedWhenOpened.push(panel.nodes[0].parentElement?.classList.contains("merge-tab-panel") ?? false) };
+    });
+    set.draw(tabs(["a", { kind: "committing", state: "live" }]));
+    expect(mountedWhenOpened).toEqual([true]);
   });
 
   it("takes its parts off the host when disposed", () => {

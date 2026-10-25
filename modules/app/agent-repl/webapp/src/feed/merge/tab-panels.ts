@@ -59,6 +59,7 @@ import {
 import { drawFeedMergeTabHookScript } from "./hook-tabs.js";
 import { buildInterruptMergeTabRequest } from "../requests.js";
 import { drawStopControl, type StopSite } from "../stop-control.js";
+import { openAtNewest } from "../../scroll.js";
 
 /** The stop a running agent stream offers: its row, stopped as a merge tab. */
 const MERGE_TAB_STOP: StopSite = {
@@ -152,6 +153,9 @@ function agenticPanel(
       placeChildren(stream.rows, agenticRowsOf(next, view));
       shown = next;
       return true;
+    },
+    opened(): void {
+      openAtNewest(stream.rows);
     },
   };
 }
@@ -274,6 +278,11 @@ function commitPanel(tab: MergeTab, view: SubfeedView, rc: RowContext): TabPanel
       shown = next;
       return true;
     },
+    opened(): void {
+      // A commit with no conflict is a few lines of narration, with no agent
+      // output to open at.
+      if (stream !== null) openAtNewest(stream);
+    },
   };
 }
 
@@ -336,7 +345,8 @@ export function fixingOf(run: MergeTab, view: SubfeedView): MergeTab | undefined
  * (the suites and the log, updated where they stand) and, once a fixing attempt followed the run, its REMEDIATION view (the
  * attempt's agent stream under its heading). BOTH VIEWS STAY DRAWN and only
  * the one shown is unhidden, so switching views neither redraws a row nor
- * restarts a clock. `reselect` (the reader clicked the run's badge again)
+ * restarts a clock. The view shown when the panel opens, and every view shown
+ * after it, opens at its newest page (`openAtNewest`). `reselect` (the reader clicked the run's badge again)
  * opens the dropdown that switches them; a run with no remediation has only
  * the one view, and offers none.
  */
@@ -379,11 +389,18 @@ function runPanel(tab: MergeTab, view: SubfeedView, rc: RowContext): TabPanel {
     fixing = { tab: fix, panel };
   };
 
+  /** Whether the strip opened this panel yet, and the view it showed last. */
+  let open = false;
+  let showing: RunView | null = null;
   const show = (): void => {
     const current = chosen ?? autoRunView(fixing?.tab);
     host.setAttribute(RUN_VIEW_ATTRIBUTE, current);
     tests.hidden = current !== "tests";
     remediation.hidden = current !== "remediation";
+    // A VIEW NEWLY SHOWN OPENS AT ITS NEWEST PAGE, as the panel itself did: the
+    // reader's pick, or the remediation that followed a failed run.
+    if (open && current !== showing) openAtNewest(current === "tests" ? tests : remediation);
+    showing = current;
   };
 
   placeFixing(fixingOf(tab, view));
@@ -407,6 +424,10 @@ function runPanel(tab: MergeTab, view: SubfeedView, rc: RowContext): TabPanel {
         return;
       }
       menu.toggle(badge, chosen ?? autoRunView(fixing.tab));
+    },
+    opened(): void {
+      open = true;
+      openAtNewest(showing === "remediation" ? remediation : tests);
     },
   };
 }

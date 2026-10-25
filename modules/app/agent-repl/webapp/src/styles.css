@@ -8690,6 +8690,17 @@ bubble-body.bubble-body { display: block; }
   min-height: 0;
   overflow-y: auto;
 }
+/* AN OPEN MERGE BUBBLE NEVER CHAINS ITS SCROLL TO THE FEED (owner request,
+   2026-10-24): a fast gesture through a merge agent's output stops at the
+   output's own top and bottom edges rather than carrying on into the feed,
+   whichever box scrolls it (the sub-feed, or the tests tab's run view). The
+   native half of the containment; installIntentScroll (scroll.ts) hands a
+   wheel over a box nested inside the armed one to the armed box, never the
+   feed. */
+.bubble-fold[data-merge-bubble][data-expanded="true"] > .bubble-subfeed,
+.bubble-fold[data-merge-bubble][data-expanded="true"] .merge-run-view {
+  overscroll-behavior: contain;
+}
 /* A RUN'S BADGE IS ABOUT HALF A TAB (owner request, 2026-10-13): a run is a
    view switch inside the tests tab, not a phase of the merge, and reads as the
    smaller thing it is. */

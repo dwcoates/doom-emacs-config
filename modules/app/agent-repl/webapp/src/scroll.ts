@@ -33,7 +33,7 @@
  * no implicit writer at all. `test/scroll.test.ts` scans every other source
  * module and fails on any scroll write found outside this one.
  */
-import { ancestorMatching, nodeLabel, pageMutationObserver } from "./dom.js";
+import { ancestorMatching, nodeLabel, pageMutationObserver, pageResizeObserver } from "./dom.js";
 import { log } from "./log.js";
 import { nextFrame } from "./frame.js";
 import { feedRowId, feedRowOf } from "./feed/row-id.js";
@@ -1638,28 +1638,50 @@ export function sectionTakesWheel<T>(armed: T | null, wheelScroller: T | null): 
   return wheelScroller !== null && wheelScroller === armed;
 }
 
+/** Where a redirected wheel goes: the box TO, moved by DELTA pixels. */
+export interface WheelRedirect<T> {
+  to: T;
+  delta: number;
+}
+
 /**
- * The whole wheel decision: null leaves the event to the browser, a
- * number is the pixel delta to add to the feed's scrollTop instead.
+ * The whole wheel decision: null leaves the event to the browser, a redirect
+ * names the box to move instead (the armed box or the feed) and by how much.
  *
  * A purely horizontal wheel is always the browser's, so a wide code block
  * inside a section still pans on shift-wheel. A wheel over the armed section,
- * over no section, or with no scrollable feed to redirect to is likewise the
- * browser's; only a wheel over a NON-armed section is redirected to the feed.
+ * or over no section, is likewise the browser's.
+ *
+ * A wheel over a NON-armed box INSIDE the armed one goes to the ARMED box
+ * (owner request, 2026-10-24): the armed box's own scrolling slid the inner
+ * box under the still cursor, exactly as the feed slides a box under it, so
+ * the inner box was never entered, and the reader is still scrolling the box
+ * they armed. Handing that wheel to the feed instead is what moved the feed
+ * mid-gesture out of a merge bubble's agent output whenever a suite's output
+ * box or a card's scroll box rose under the cursor. Every other non-armed box
+ * hands its wheel to the feed, when the feed can scroll at all.
  */
 export function armedWheelAction<T>(opts: {
   armed: T | null;
   wheelScroller: T | null;
+  /** Whether the armed box encloses the box under the wheel. */
+  armedEncloses: boolean;
+  /** The armed box's visible height, for a page-mode delta. */
+  armedHeight: number;
+  feed: T;
   feedScrollable: boolean;
   deltaY: number;
   deltaMode: number;
   feedHeight: number;
-}): number | null {
+}): WheelRedirect<T> | null {
   if (opts.deltaY === 0) return null;
-  if (!opts.feedScrollable) return null;
   if (opts.wheelScroller === null) return null;
   if (sectionTakesWheel(opts.armed, opts.wheelScroller)) return null;
-  return wheelDeltaPx(opts, opts.feedHeight);
+  if (opts.armed !== null && opts.armedEncloses) {
+    return { to: opts.armed, delta: wheelDeltaPx(opts, opts.armedHeight) };
+  }
+  if (!opts.feedScrollable) return null;
+  return { to: opts.feed, delta: wheelDeltaPx(opts, opts.feedHeight) };
 }
 
 /**
@@ -1795,21 +1817,27 @@ export function installIntentScroll(
       if (e.deltaY !== 0 && !sectionTakesDelta(target, open, e.deltaY)) e.preventDefault();
       return;
     }
-    const delta = armedWheelAction({
+    const wheelScroller = scrollerUnder(e.target);
+    const redirect = armedWheelAction({
       armed,
-      wheelScroller: scrollerUnder(e.target),
+      wheelScroller,
+      armedEncloses: armed !== null && wheelScroller !== null && armed.contains(wheelScroller),
+      armedHeight: armed?.clientHeight ?? 0,
+      feed,
       feedScrollable: feed.scrollHeight - feed.clientHeight > 1,
       deltaY: e.deltaY,
       deltaMode: e.deltaMode,
       feedHeight: feed.clientHeight,
     });
-    if (delta === null) return;
+    if (redirect === null) return;
     e.preventDefault();
     // NOT through TailFollow, and deliberately so: this IS the reader's own
-    // wheel, merely redirected off a section onto the feed, so it is user input
-    // and no implicit cause. The owner reads it as the gesture it is (up ends
-    // the follow), exactly the treatment a wheel on the feed itself gets.
-    feed.scrollTop += delta;
+    // wheel, merely redirected off a section onto the box they mean (the armed
+    // box enclosing it, or the feed), so it is user input and no implicit
+    // cause. The owner reads a feed move as the gesture it is (up ends the
+    // follow), exactly the treatment a wheel on the feed itself gets. The
+    // armed box's own move stops at its edge, so it never chains on.
+    redirect.to.scrollTop += redirect.delta;
   };
 
   // A pointer act names the box the reader means: the one under the pointer
@@ -1869,4 +1897,66 @@ export function dragEdgeScroll(scroller: { scrollTop: number }, step: number): v
  */
 export function selectionRowScroll(region: { scrollTop: number }, delta: number): void {
   region.scrollTop += delta;
+}
+
+/** The sub-feed bubble a merge tab's output is drawn in, which bounds `openAtNewest`. */
+const BUBBLE_FOLD_SELECTOR = ".bubble-fold";
+
+/**
+ * THE READER OPENED A MERGE TAB'S OUTPUT: show its newest page (owner request,
+ * 2026-10-24). A tests tab's run view, a fixing attempt's or a prompt hook's
+ * agent stream, and a conflicted commit's resolution all open with their
+ * latest output in view, rather than at the top of a log the reader would
+ * otherwise scroll down every time.
+ *
+ * The scroll box moved is the nearest one at or above CONTENT, inside CONTENT's
+ * sub-feed bubble and never past it, so the feed itself is never moved: when
+ * CONTENT is that box, it goes to its end; otherwise CONTENT's last line is
+ * brought to the box's bottom. Content too short to scroll moves nothing.
+ *
+ * Like the selection's rail scroll, this carries the reader's own act (opening
+ * the tab, opening the bubble it is shown in, or picking a run's view) to the
+ * box it lands in, and runs once per opening, never on a push that restates
+ * the tab, so it never undoes the reader's own scrolling of it. A panel is
+ * opened as it is drawn, often before it is laid out (a nested strip's panel
+ * before its parent is mounted, a bubble's first page before the bubble shows
+ * it), so the move waits for CONTENT's first layout.
+ */
+export function openAtNewest(content: HTMLElement): void {
+  if (pinToNewest(content)) return;
+  const Observer = pageResizeObserver(content);
+  if (Observer === null) throw new Error("scroll: the page has no ResizeObserver to wait for a merge tab's layout");
+  const observer = new Observer(() => {
+    if (!pinToNewest(content)) return;
+    observer.disconnect();
+  });
+  observer.observe(content);
+}
+
+/**
+ * Bring CONTENT's newest page into view now, answering whether it could: false
+ * while CONTENT is not laid out (detached, or under a hidden ancestor).
+ */
+function pinToNewest(content: HTMLElement): boolean {
+  if (!content.isConnected || content.getClientRects().length === 0) return false;
+  const bubble = content.closest<HTMLElement>(BUBBLE_FOLD_SELECTOR);
+  if (bubble === null) throw new Error("scroll: a merge tab's output was opened outside a sub-feed bubble");
+  const box = ancestorMatching<HTMLElement>(content, bubble, (node) => isScrollBox(domMetrics(node)));
+  if (box === null) {
+    log.debug("an opened merge tab's output is short enough to show whole", {
+      operation: "scroll.open-at-newest",
+      context: { content: nodeLabel(content), moved: false },
+    });
+    return true;
+  }
+  const delta =
+    box === content
+      ? box.scrollHeight - box.clientHeight - box.scrollTop
+      : content.getBoundingClientRect().bottom - (box.getBoundingClientRect().top + box.clientTop + box.clientHeight);
+  box.scrollTop += delta;
+  log.debug("an opened merge tab's output shows its newest page", {
+    operation: "scroll.open-at-newest",
+    context: { content: nodeLabel(content), box: nodeLabel(box), moved: true, delta: Math.round(delta) },
+  });
+  return true;
 }

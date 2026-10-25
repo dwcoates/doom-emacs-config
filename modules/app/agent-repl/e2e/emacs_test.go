@@ -250,9 +250,13 @@ const emacsBootBound = 500 * time.Millisecond
 // against its own phase. Per SPEC.md section B a per-site bound is a NAMED
 // constant with a stated reason, and this is that site's.
 //
-// MEASURED: the longest healthy link was 265ms, remarkably stable across
-// runs (263-265ms). Not quite 4x that.
-const daemonLinkBound = 1 * time.Second
+// MEASURED UNDER REALISTIC CONCURRENCY (2026-10-25): 2513 links across 143
+// merge-gate runs of the full suite, on the granted clock, ran p50 253ms,
+// p99 328ms, p999 647ms and max 856ms. The earlier 1s was sized off an idle
+// host's 265ms and sat at 1.17x that maximum, so a full run's cold daemon
+// boot (TestEmacsProofOfLife's link took 1.18s granted while its fresh state
+// database was created) failed it with nothing hung. Just over 2x the max.
+const daemonLinkBound = 1800 * time.Millisecond
 
 // doomBootBound is how long Emacs may take to finish Doom's own
 // initialization and publish the readiness stamp.

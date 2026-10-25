@@ -579,7 +579,15 @@ hand any more:
   every other `src` module and fails on a `scrollTop`/`scrollLeft` assignment,
   a `scrollIntoView`/`scrollTo`/`scrollBy` call, or a park/place/shift call.
   A bubble's own scroll box (an expanded thinking, prompt, tool or async
-  bubble) has NO implicit writer: it moves only on the reader's input. The
+  bubble) has NO implicit writer: it moves only on the reader's input. A
+  merge tab's agent or test output OPENING is that input (owner request,
+  2026-10-24): the strip opening a tab's panel (`TabPanel.opened`, a click,
+  the auto rule moving on, or the bubble opening) and a run's view newly
+  shown each bring the output's newest page into view once
+  (`openAtNewest`), never on a push that restates the tab. A wheel over an
+  unarmed box nested inside the armed one scrolls the armed box, never the
+  feed, and an open merge bubble's boxes wear `overscroll-behavior:
+  contain`. The
   feed moves implicitly only for the closed set `SCROLL_CAUSES` —
   `promptSent`, `promptHeld` (a held prompt's card drawn in the held section for the
   FIRST time parks the feed at its tail and follows, as a sent prompt does; a

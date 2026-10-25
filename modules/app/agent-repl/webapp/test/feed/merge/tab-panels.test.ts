@@ -252,6 +252,131 @@ describe("mergeTabPanel", () => {
   });
 });
 
+describe("a panel's opening shows its newest output", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  /** Mount NODES in a sub-feed bubble's scroll box, as the merge body does. */
+  function inBubble(nodes: readonly HTMLElement[]): { subfeed: HTMLElement } {
+    const bubble = document.createElement("div");
+    bubble.className = "tool-card bubble-fold";
+    const subfeed = document.createElement("div");
+    subfeed.className = "agent-panel bubble-subfeed";
+    subfeed.append(...nodes);
+    bubble.append(subfeed);
+    document.body.append(bubble);
+    return { subfeed };
+  }
+
+  /** Make EL a laid-out box, scrolling 1000px within 300 when SCROLLS. */
+  function layOut(el: HTMLElement, rect: { top: number; height: number }, scrolls: boolean): void {
+    el.getClientRects = () => [rect] as unknown as DOMRectList;
+    el.getBoundingClientRect = () => ({ ...rect, bottom: rect.top + rect.height }) as DOMRect;
+    if (!scrolls) return;
+    el.style.overflowY = "auto";
+    Object.defineProperty(el, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(el, "clientHeight", { value: 300, configurable: true });
+  }
+
+  /** The run view VIEW of a drawn run panel. */
+  const runView = (view: "tests" | "remediation"): HTMLElement => {
+    const el = document.querySelector<HTMLElement>(`.merge-run-view[data-run-view="${view}"]`);
+    if (el === null) throw new Error(`no ${view} view`);
+    return el;
+  };
+
+  it("opens a run at the end of its tests", () => {
+    const run = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } });
+    const panel = mergeTabPanel(tabOf(run), new FakeSubfeed([run]), rc());
+    inBubble(panel.nodes);
+    layOut(runView("tests"), { top: 0, height: 300 }, true);
+    panel.opened?.();
+    expect(runView("tests").scrollTop).toBe(700);
+  });
+
+  it("opens a run already remediating at the end of its remediation", () => {
+    const run = tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" });
+    const fix = tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" });
+    const panel = mergeTabPanel(tabOf(run), new FakeSubfeed([run, fix]), rc());
+    inBubble(panel.nodes);
+    layOut(runView("remediation"), { top: 0, height: 300 }, true);
+    panel.opened?.();
+    expect(runView("remediation").scrollTop).toBe(700);
+  });
+
+  it("opens the remediation a failed run moves on to at its end", () => {
+    const run = tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" });
+    const view = new FakeSubfeed([run]);
+    const panel = mergeTabPanel(tabOf(run), view, rc());
+    inBubble(panel.nodes);
+    panel.opened?.();
+    layOut(runView("remediation"), { top: 0, height: 300 }, true);
+    view.push([run, tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })]);
+    panel.update(tabOf(run));
+    expect(runView("remediation").scrollTop).toBe(700);
+  });
+
+  it("leaves a run's views where they stand until the strip opens it", () => {
+    const run = tabRow("t-run", { kind: "testsRun", state: "settled", outcome: "failed", parent: "t-tests" });
+    const view = new FakeSubfeed([run]);
+    const panel = mergeTabPanel(tabOf(run), view, rc());
+    inBubble(panel.nodes);
+    layOut(runView("remediation"), { top: 0, height: 300 }, true);
+    view.push([run, tabRow("t-fix", { kind: "testsRunFixing", state: "live", parent: "t-run" })]);
+    panel.update(tabOf(run));
+    expect(runView("remediation").scrollTop).toBe(0);
+  });
+
+  it("leaves the shown view where the reader scrolled it across a push", () => {
+    const run = tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(1) } } });
+    const panel = mergeTabPanel(tabOf(run), new FakeSubfeed([run]), rc());
+    inBubble(panel.nodes);
+    layOut(runView("tests"), { top: 0, height: 300 }, true);
+    panel.opened?.();
+    runView("tests").scrollTop = 100;
+    panel.update(tabOf(tabRow("t-run", { kind: "testsRun", state: "live", parent: "t-tests", payload: { output: { suites: RUN_SUITES(2) } } })));
+    expect(runView("tests").scrollTop).toBe(100);
+  });
+
+  it("opens an agent stream with its last row at the bottom of the sub-feed", () => {
+    const tab = tabRow("t1", { kind: "hookPrompt", state: "settled", outcome: "succeeded" });
+    const panel = mergeTabPanel(tabOf(tab), new FakeSubfeed([tab, childRow("r1", "t1")]), rc());
+    const { subfeed } = inBubble(panel.nodes);
+    layOut(subfeed, { top: 0, height: 300 }, true);
+    const rows = document.querySelector<HTMLElement>(".merge-tab-rows");
+    if (rows === null) throw new Error("no stream");
+    layOut(rows, { top: 100, height: 800 }, false);
+    panel.opened?.();
+    expect(subfeed.scrollTop).toBe(600);
+  });
+
+  it("opens a conflicted commit with its resolution's last row at the bottom of the sub-feed", () => {
+    const commit = tabRow("c1", {
+      kind: "rebaseCommit",
+      state: "live",
+      payload: { conflict: { state: { case: "live", value: { startedAtMs: 1n } }, files: [] } },
+    });
+    const panel = mergeTabPanel(tabOf(commit), new FakeSubfeed([commit, childRow("r1", "c1")]), rc());
+    const { subfeed } = inBubble(panel.nodes);
+    layOut(subfeed, { top: 0, height: 300 }, true);
+    const rows = document.querySelector<HTMLElement>(".merge-conflict .merge-tab-rows");
+    if (rows === null) throw new Error("no resolution stream");
+    layOut(rows, { top: 50, height: 450 }, false);
+    panel.opened?.();
+    expect(subfeed.scrollTop).toBe(200);
+  });
+
+  it("opens a commit with no conflict without moving anything", () => {
+    const commit = tabRow("c1", { kind: "rebaseCommit", state: "live" });
+    const panel = mergeTabPanel(tabOf(commit), new FakeSubfeed([commit]), rc());
+    const { subfeed } = inBubble(panel.nodes);
+    layOut(subfeed, { top: 0, height: 300 }, true);
+    panel.opened?.();
+    expect(subfeed.scrollTop).toBe(0);
+  });
+});
+
 describe("swapHeading", () => {
   it("puts the next heading in the old one's place", () => {
     const host = document.createElement("div");

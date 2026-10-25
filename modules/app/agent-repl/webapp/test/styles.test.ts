@@ -571,12 +571,26 @@ describe("the collapse/expand height model", () => {
     },
   );
 
-  it("contains no collapsed box's overscroll, whose wheel stays the feed's", () => {
+  it.each([
+    '.bubble-fold[data-merge-bubble][data-expanded="true"] > .bubble-subfeed',
+    '.bubble-fold[data-merge-bubble][data-expanded="true"] .merge-run-view',
+  ])("contains the overscroll of the open merge bubble's box %s, so it never chains to the feed", (selector) => {
     // Arrange / Act
+    const containing = rulesOf(stylesheet).filter(
+      (rule) => rule.selectors.includes(selector) && /overscroll-behavior:\s*contain/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(containing).toHaveLength(1);
+  });
+
+  it("contains no collapsed box's overscroll, whose wheel stays the feed's", () => {
+    // Arrange / Act — a box is open by its own `.expanded`, or by sitting in an
+    // expanded sub-feed bubble (`[data-expanded="true"]`).
     const containing = rulesOf(stylesheet)
       .filter((rule) => /overscroll-behavior/.test(rule.declarations))
       .flatMap((rule) => rule.selectors)
-      .filter((selector) => !selector.includes(".expanded"));
+      .filter((selector) => !selector.includes(".expanded") && !selector.includes('[data-expanded="true"]'));
 
     // Assert
     expect(containing).toEqual([]);
