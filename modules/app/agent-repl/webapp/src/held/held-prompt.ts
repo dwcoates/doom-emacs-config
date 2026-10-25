@@ -983,6 +983,8 @@ export function foldHeldPromptRefusal(cause: FoldHeldPromptCause): string {
       return `a held prompt being edited cannot be folded (turn ${cause.value.editingTurn?.value ?? ""})`;
     case "beingDelivered":
       return BEING_DELIVERED;
+    case "threadQuestion":
+      return "a chat thread's questions are asked one at a time, so none is folded into another";
     default: {
       const other: { case: string } = cause;
       return unreachableArm("FoldHeldPromptError.cause", other.case);

@@ -11,7 +11,8 @@
  * of cards with a "2 of 3" control under it, answers are full-width cards, and
  * the question in flight is drawn last with its answer arriving.
  */
-import { useLayoutEffect, useRef, type ReactElement, type WheelEvent } from "react";
+import { createElement, useCallback, useLayoutEffect, useRef, type ReactElement, type ReactNode, type WheelEvent } from "react";
+import { armButtonRole, CONTROL_TAG } from "../control.js";
 import type {
   ChatAnswer,
   ChatExchange,
@@ -109,13 +110,13 @@ function Exchange({ exchange, actions }: { exchange: ChatExchange; actions: Chat
         <Question question={requireMessage(exchange.question, "ChatExchange.question")} stacked={siblings !== undefined} />
         {siblings !== undefined && (
           <div className="chat-siblings" data-chat-siblings="">
-            <button type="button" aria-label="previous sibling" onClick={() => actions.switchSibling(node, "previous")}>
+            <ChatControl label="previous sibling" onPress={() => actions.switchSibling(node, "previous")}>
               ‹
-            </button>
+            </ChatControl>
             <span>{requireMessage(siblings.position, "ChatSiblings.position").label}</span>
-            <button type="button" aria-label="next sibling" onClick={() => actions.switchSibling(node, "next")}>
+            <ChatControl label="next sibling" onPress={() => actions.switchSibling(node, "next")}>
               ›
-            </button>
+            </ChatControl>
           </div>
         )}
       </div>
@@ -217,4 +218,15 @@ function Streaming({ markdown }: { markdown: string }): ReactElement {
     if (ref.current !== null) ref.current.innerHTML = renderMarkdown(markdown);
   }, [markdown]);
   return <div ref={ref} className="chat-a md chat-a-streaming" data-chat-streaming="" />;
+}
+
+/**
+ * The chat's one clickable control: the app's control element (control.ts),
+ * armed as a button once React mounts it, so the chat builds no native button.
+ */
+function ChatControl({ label, onPress, children }: { label: string; onPress: () => void; children: ReactNode }) {
+  const arm = useCallback((el: HTMLElement | null) => {
+    if (el !== null) armButtonRole(el);
+  }, []);
+  return createElement(CONTROL_TAG, { ref: arm, "aria-label": label, onClick: onPress }, children);
 }

@@ -38,6 +38,7 @@ import { createComposerGate, mountComposer } from "./composer/composer.js";
 import { createRowRenderers } from "./feed/renderers.js";
 import { mountFeed } from "./feed/feed.js";
 import { mountChat } from "./chat/chat.js";
+import { landChatAtEnd } from "./scroll.js";
 import { mountFooter } from "./footer/footer.js";
 import { adoptAtBoot, startLifecycle } from "./lifecycle/lifecycle.js";
 import { createRevealRelay } from "./lifecycle/reveal-relay.js";
@@ -427,7 +428,7 @@ function mountThreadBody(shell: ReturnType<typeof shellElements>, ctx: AppContex
   mountChat(shell.feed, ctx, { scroll: shell.feedScroll, shown: () => pagePresence().shown() });
   return {
     workspaceSelected: () => {
-      shell.feedScroll.scrollTop = shell.feedScroll.scrollHeight;
+      landChatAtEnd(shell.feedScroll, "workspaceSelected");
     },
     selectDetachedWork: (id) =>
       noFeedRow(id, "main.thread-detached-work", "a footer jump row reached a chat thread, which runs no detached work"),

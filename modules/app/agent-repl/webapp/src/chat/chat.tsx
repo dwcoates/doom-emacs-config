@@ -22,6 +22,7 @@ import { SelectChatTextResponseSchema } from "../../../proto/gen/ts/agentrepl/v1
 import { ReportChatSightingsResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_report_chat_sightings_pb.js";
 import type { ChatView } from "../../../proto/gen/ts/frontend/v1/chat_pb.js";
 import { log } from "../log.js";
+import { landChatAtEnd } from "../scroll.js";
 import type { AppContext } from "../rpc/context.js";
 import { noteRefusedArm } from "../rpc/refusal.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
@@ -174,7 +175,7 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
     const scroll = deps.scroll;
     const atEnd = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24;
     flushSync(() => root.render(<ChatStream view={view} actions={actions} />));
-    if (atEnd) scroll.scrollTop = scroll.scrollHeight;
+    if (atEnd) landChatAtEnd(scroll, "chatAnswerFollowed");
   };
 
   const stream: StreamHandle = watchStream(ctx, {

@@ -221,7 +221,7 @@ describe("the chat's gestures", () => {
     const control = await drawn("[data-chat-siblings]");
 
     // Act
-    control.querySelectorAll("button")[button].click();
+    control.querySelectorAll<HTMLElement>("ar-button")[button].click();
 
     // Assert
     await vi.waitFor(() => expect(d.switches).toHaveLength(1));

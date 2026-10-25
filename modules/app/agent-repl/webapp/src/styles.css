@@ -9493,11 +9493,12 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   display: flex; align-items: center; gap: 2px; font-size: 12px; color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.chat-siblings button {
+.chat-siblings ar-button {
+  display: inline-flex; align-items: center; justify-content: center;
   border: 0; background: transparent; color: var(--muted); cursor: pointer;
   width: 22px; height: 22px; border-radius: 5px; font-size: 14px; line-height: 1;
 }
-.chat-siblings button:hover { background: var(--card); color: var(--fg); }
+.chat-siblings ar-button:hover { background: var(--card); color: var(--fg); }
 .chat-a {
   background: var(--assistant); border-radius: 8px; box-shadow: var(--bubble-shadow);
   padding: 14px 18px; line-height: 1.6; overflow-wrap: anywhere;
@@ -9524,25 +9525,25 @@ ar-button.merge-queue-move[aria-disabled="true"] {
    and the Chat app's body is the thread list. The head is otherwise as it
    was; the title only gains its caret and its menu. */
 #ws-sidebar .sb-head { position: relative; }
-#ws-sidebar button.sb-title {
+#ws-sidebar ar-button.sb-title {
   display: inline-flex; align-items: center; gap: 4px; font: inherit;
   font-weight: 600; font-size: 0.95rem; color: var(--fg); background: none; border: 0;
   padding: 3px 6px; margin-left: -6px; border-radius: 6px; cursor: pointer;
 }
-#ws-sidebar button.sb-title:hover, #ws-sidebar button.sb-title.open { background: var(--card); }
+#ws-sidebar:not(.sb-hover-suspended) ar-button.sb-title:hover, #ws-sidebar ar-button.sb-title.open { background: var(--card); }
 #ws-sidebar .sb-title-caret { color: var(--muted); font-size: 0.75em; transition: transform .15s; }
-#ws-sidebar button.sb-title.open .sb-title-caret { transform: rotate(180deg); }
+#ws-sidebar ar-button.sb-title.open .sb-title-caret { transform: rotate(180deg); }
 #ws-sidebar .sb-apps-menu {
   position: absolute; top: calc(var(--topbar-h) - 6px); left: 34px; min-width: 200px;
   background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: var(--sidebar-shadow); padding: 4px; z-index: 5;
 }
-#ws-sidebar .sb-apps-menu button {
+#ws-sidebar .sb-apps-menu ar-button {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
   border: 0; background: none; color: var(--fg); font: inherit; font-size: 13px;
   padding: 7px 10px; border-radius: 6px; cursor: pointer;
 }
-#ws-sidebar .sb-apps-menu button:hover { background: var(--card); }
+#ws-sidebar:not(.sb-hover-suspended) .sb-apps-menu ar-button:hover { background: var(--card); }
 #ws-sidebar .sb-app-check { width: 12px; color: var(--muted); }
 #ws-sidebar .sb-app-hint { margin-left: auto; font-size: 11px; color: var(--muted); }
 #ws-sidebar .sb-threads { display: flex; flex-direction: column; padding: 4px 0 12px; }
@@ -9551,7 +9552,7 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   border: 1px solid var(--border); background: transparent; color: var(--fg);
   font: inherit; font-weight: 550; padding: 8px 10px; border-radius: 8px; cursor: pointer;
 }
-#ws-sidebar .sb-new-thread:hover { background: var(--card); }
+#ws-sidebar:not(.sb-hover-suspended) .sb-new-thread:hover { background: var(--card); }
 #ws-sidebar .sb-new-thread-note { margin: -4px 14px 10px; font-size: 12px; color: var(--muted); }
 #ws-sidebar .sb-thread > .row { cursor: pointer; }
 #ws-sidebar .sb-thread-summary {

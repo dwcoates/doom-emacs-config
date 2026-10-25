@@ -26,6 +26,7 @@ import type {
   RosterThreadSection,
   SidebarApp,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb.js";
+import { createControl } from "../control.js";
 import { log } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
 import { noteRefusedArm } from "../rpc/refusal.js";
@@ -59,8 +60,7 @@ function refusedArm(rpc: string, result: { case?: string | undefined; value?: un
 
 /** Create the switcher: the title button and the menu under it. */
 export function createAppSwitcher(ctx: DaemonContext, dropdowns: Dropdowns): AppSwitcher {
-  const title = document.createElement("button");
-  title.type = "button";
+  const title = createControl();
   title.className = "sb-title";
   title.setAttribute("data-app-title", "");
   const name = document.createElement("span");
@@ -108,8 +108,7 @@ export function createAppSwitcher(ctx: DaemonContext, dropdowns: Dropdowns): App
       const options = switcher.options.map((option, i) => {
         const label = requireMessage(option.label, `RosterAppSwitcher.options[${i}].label`).text;
         const app = requireMessage(option.app, `RosterAppSwitcher.options[${i}].app`);
-        const button = document.createElement("button");
-        button.type = "button";
+        const button = createControl();
         button.setAttribute("data-app-option", label);
         const check = document.createElement("span");
         check.className = "sb-app-check";
@@ -162,8 +161,7 @@ export function drawThreadSection(section: RosterThreadSection, sc: SidebarConte
   box.className = "sb-threads";
   box.setAttribute("data-thread-section", "");
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = createControl();
   button.className = "sb-new-thread";
   button.setAttribute("data-new-thread", "");
   button.textContent = `＋ ${requireMessage(section.newThread, "RosterThreadSection.new_thread").label}`;

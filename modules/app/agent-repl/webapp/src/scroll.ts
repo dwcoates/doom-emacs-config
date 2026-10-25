@@ -147,6 +147,7 @@ export const SCROLL_CAUSES = [
   "tailJumped",
   "prependCompensation",
   "latestVisible",
+  "chatAnswerFollowed",
 ] as const;
 
 /** One named reason the feed may move without the reader's scroll input. */
@@ -1959,4 +1960,19 @@ function pinToNewest(content: HTMLElement): boolean {
     context: { content: nodeLabel(content), box: nodeLabel(box), moved: true, delta: Math.round(delta) },
   });
   return true;
+}
+
+/**
+ * Land a chat thread's scroll box at its end, under CAUSE: the thread was
+ * switched to (`workspaceSelected`), or its answer grew while the reader was
+ * at the end (`chatAnswerFollowed`). The chat has no tail-follow of its own,
+ * so this is its one scroll write, recorded as every caused move is.
+ */
+export function landChatAtEnd(box: HTMLElement, cause: Extract<ScrollCause, "workspaceSelected" | "chatAnswerFollowed">): void {
+  const from = box.scrollTop;
+  box.scrollTop = box.scrollHeight;
+  log.info("the chat moved to its end", {
+    operation: "scroll.chat-moved",
+    context: { cause, from, to: box.scrollTop },
+  });
 }
