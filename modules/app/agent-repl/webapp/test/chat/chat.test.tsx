@@ -525,3 +525,81 @@ describe("the chat's leeway past its end", () => {
     expect(host.style.paddingBottom).toBe("25cqh");
   });
 });
+
+/**
+ * A NODE THE USER ASKED TO SEE IS BROUGHT INTO VIEW (the sidebar's outline,
+ * ShowChatNode): once per new reveal sequence, never for the one the page's
+ * first view carried.
+ */
+describe("the chat's reveal of an asked-for node", () => {
+  let moves: unknown[];
+
+  beforeEach(() => {
+    moves = [];
+    vi.spyOn(log, "info").mockImplementation((_message, fields) => {
+      if (fields?.operation === "scroll.chat-moved") moves.push((fields.context as { cause: string }).cause);
+    });
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  /** Three exchanges, revealing NODE at SEQUENCE when given. */
+  function revealing(node?: string, sequence?: number): ViewInit {
+    const view = conversation([exchange("n1", "q1", "a1"), exchange("n2", "q2", "a2"), exchange("n3", "q3", "a3")]);
+    if (node !== undefined && view.state?.case === "conversation") {
+      view.state.value.reveal = { node: { id: node }, sequence: BigInt(sequence ?? 1) };
+    }
+    return view;
+  }
+
+  it("brings a newly revealed node into view", async () => {
+    const d = daemon();
+    mount(d);
+    d.push(revealing());
+    await drawn('[data-chat-answer="n3"]');
+    moves = [];
+
+    d.push(revealing("n2", 1));
+    await vi.waitFor(() => expect(moves).toEqual(["chatNodeRevealed"]));
+  });
+
+  it("records a reveal of a node it did not draw as the defect it is", async () => {
+    const errors: unknown[] = [];
+    vi.spyOn(log, "error").mockImplementation((_message, fields) => void errors.push(fields?.operation));
+    const d = daemon();
+    mount(d);
+    d.push(revealing());
+    await drawn('[data-chat-answer="n3"]');
+
+    d.push(revealing("n9", 1));
+
+    await vi.waitFor(() => expect(errors).toContain("chat.reveal-missing"));
+    expect(moves).not.toContain("chatNodeRevealed");
+  });
+
+  it("does not act on the reveal the page's first view carries", async () => {
+    const d = daemon();
+    mount(d);
+
+    d.push(revealing("n2", 4));
+    await drawn('[data-chat-answer="n3"]');
+
+    expect(moves).not.toContain("chatNodeRevealed");
+  });
+
+  it("acts on a reveal once, not again when the view is pushed unchanged", async () => {
+    const d = daemon();
+    mount(d);
+    d.push(revealing());
+    await drawn('[data-chat-answer="n3"]');
+    d.push(revealing("n2", 1));
+    await vi.waitFor(() => expect(moves).toContain("chatNodeRevealed"));
+    moves = [];
+
+    d.push(revealing("n2", 1));
+    d.push(conversation([exchange("n1", "q1", "a1"), exchange("n2", "q2", "a2"), exchange("n3", "q3", "a3"), exchange("n4", "q4", "a4")]));
+    await drawn('[data-chat-answer="n4"]');
+
+    expect(moves).not.toContain("chatNodeRevealed");
+  });
+});

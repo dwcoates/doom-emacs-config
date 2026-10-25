@@ -9291,6 +9291,35 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 #ws-sidebar .sb-threads-open .sb-add { margin-left: auto; text-transform: none; letter-spacing: 0; }
 #ws-sidebar .sb-new-thread-note { margin: 0 14px 6px; font-size: 12px; color: var(--muted); }
 #ws-sidebar .sb-thread > .row { cursor: pointer; }
+/* THE CURRENT THREAD'S BRANCHES (src/sidebar/threads.ts drawOutline; owner
+   ruling, 2026-10-25): the folded levels' breadcrumb, then a row per run,
+   indented by its depth (at most three, so it always fits). A blue dot marks
+   the shown path; the run on screen takes the selected row's fill. */
+#ws-sidebar .sb-outline { padding: 1px 0 6px; }
+#ws-sidebar .sb-outline-crumbs {
+  margin: 0 0.7rem 2px 1.4rem; font-size: 11px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#ws-sidebar .sb-outline-crumb { cursor: pointer; }
+#ws-sidebar:not(.sb-hover-suspended) .sb-outline-crumb:hover { color: var(--fg); }
+#ws-sidebar .sb-outline-row {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  padding: 2px 0.7rem 2px calc(1.4rem + var(--outline-depth) * 12px);
+  border-radius: 5px; cursor: pointer; font-size: 12px; white-space: nowrap;
+  color: color-mix(in srgb, var(--fg) 70%, var(--muted));
+}
+#ws-sidebar:not(.sb-hover-suspended) .sb-outline-row:hover { background: var(--card); }
+#ws-sidebar .sb-outline-row.on-path, #ws-sidebar .sb-outline-row.shown { color: var(--fg); }
+#ws-sidebar .sb-outline-row.shown { background-color: var(--row-current-tint); }
+#ws-sidebar .sb-outline-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
+#ws-sidebar .sb-outline-row.on-path .sb-outline-dot,
+#ws-sidebar .sb-outline-row.shown .sb-outline-dot { background: var(--accent); }
+#ws-sidebar .sb-outline-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#ws-sidebar .sb-outline-turns { flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#ws-sidebar .sb-outline-folded {
+  flex: none; font-size: 10px; color: var(--muted); border: 1px solid var(--border);
+  border-radius: 999px; padding: 0 5px; line-height: 15px;
+}
 /* A THREAD'S MENU CONTROL SITS AT THE ROW'S RIGHT EDGE (owner request,
    2026-10-25): the name takes the row's free width. */
 #ws-sidebar .sb-thread > .row .name { flex: 1 1 auto; }

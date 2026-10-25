@@ -3,18 +3,19 @@
  * THE SIDEBAR'S APPS: the rail title's switcher and the Chat app's thread
  * list, drawn from the roster and acted on through the daemon.
  */
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { RequestNewThreadResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_request_new_thread_pb";
 import { SelectWorkspaceResponseSchema, type SelectWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { ShowSidebarAppResponseSchema, type ShowSidebarAppRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_sidebar_app_pb";
+import { ShowChatNodeResponseSchema, type ShowChatNodeRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_chat_node_pb";
 import { CloseWorkspaceResponseSchema, type CloseWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
 import { SearchChatsResponseSchema, type SearchChatsRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_search_chats_pb";
 import { ARCHIVED_HEADING, OPEN_HEADING } from "../../src/sidebar/threads.js";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
-import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterThreadOutlineSchema, WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { mountSidebar } from "../../src/sidebar/sidebar.js";
 import { frameQueue, type FrameQueue } from "../frame-queue.js";
@@ -384,5 +385,73 @@ describe("the rail's search in the Chat app", () => {
 
     // Assert
     expect(asked).toBe(0);
+  });
+});
+
+describe("the current thread's outline", () => {
+  /** An outline of three runs: the shown one, one on its path, one off it. */
+  const OUTLINE: MessageInitShape<typeof RosterThreadOutlineSchema> = {
+    breadcrumb: { extent: { case: "elided", value: { first: { node: { id: "n1" }, label: { text: "why?" } }, omitted: 4, last: { node: { id: "n7" }, label: { text: "deeper" } } } } },
+    rows: [
+      { node: { id: "n8" }, label: { text: "and then?" }, depth: 0, turns: 3, place: { place: { case: "onPath", value: {} } } },
+      { node: { id: "n9" }, label: { text: "aside" }, depth: 1, turns: 1, folded: { runs: 5 }, place: { place: { case: "off", value: {} } } },
+      { node: { id: "n10" }, label: { text: "here" }, depth: 1, turns: 1, place: { place: { case: "shown", value: {} } } },
+    ],
+  };
+
+  it("draws a row per run, indented by its depth and marked by its place", async () => {
+    // Arrange / Act
+    const host = mount([roster({ chat: [{ id: "t-1", name: "why", current: true, outline: OUTLINE }] })]);
+    await settle();
+
+    // Assert
+    const rows = [...host.querySelectorAll<HTMLElement>('[data-roster-row="t-1"] .sb-outline-row')];
+    expect(
+      rows.map((r) => [r.getAttribute("data-outline-node"), r.style.getPropertyValue("--outline-depth"), r.className]),
+    ).toEqual([
+      ["n8", "0", "sb-outline-row on-path"],
+      ["n9", "1", "sb-outline-row"],
+      ["n10", "1", "sb-outline-row shown"],
+    ]);
+    expect([rows[0].querySelector(".sb-outline-turns")?.textContent, rows[1].querySelector(".sb-outline-folded")?.textContent]).toEqual(["3", "+5"]);
+  });
+
+  it("draws an elided breadcrumb as its first and last crumbs around the count between", async () => {
+    // Arrange / Act
+    const host = mount([roster({ chat: [{ id: "t-1", name: "why", current: true, outline: OUTLINE }] })]);
+    await settle();
+
+    // Assert
+    expect(host.querySelector(".sb-outline-crumbs")?.textContent).toBe("why? › … 4 more › deeper");
+  });
+
+  it.each([
+    ["a row", ".sb-outline-row:nth-of-type(2)", "n8"],
+    ["a crumb", ".sb-outline-crumb", "n1"],
+  ])("shows the node %s is clicked for", async (_name, selector, want) => {
+    // Arrange
+    const shown: ShowChatNodeRequest[] = [];
+    const host = mount([roster({ chat: [{ id: "t-1", name: "why", current: true, outline: OUTLINE }] })], {
+      showChatNode: (request) => {
+        shown.push(request);
+        return create(ShowChatNodeResponseSchema, { result: { case: "success", value: {} } });
+      },
+    });
+    await settle();
+
+    // Act
+    await click(host.querySelector(`[data-thread-outline] ${selector}`));
+
+    // Assert
+    expect(shown.map((r) => [r.thread?.id, r.node?.id])).toEqual([["t-1", want]]);
+  });
+
+  it("draws nothing under a row the roster gives no outline", async () => {
+    // Arrange / Act
+    const host = mount([roster({ chat: [{ id: "t-1", name: "why", current: true }] })]);
+    await settle();
+
+    // Assert
+    expect(host.querySelector("[data-thread-outline]")).toBeNull();
   });
 });

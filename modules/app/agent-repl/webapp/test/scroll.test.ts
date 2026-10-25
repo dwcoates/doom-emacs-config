@@ -5,7 +5,7 @@
 // a real `ResizeObserver` to the tail owner, and the subscription being wired
 // to THAT element is half of what the footer-occlusion cases assert.
 import scrollSource from "../src/scroll.ts?raw";
-import { CHAT_LEEWAY_FRACTION, chatEndTop } from "../src/scroll.js";
+import { CHAT_LEEWAY_FRACTION, chatEndTop, revealChatExchange } from "../src/scroll.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SCROLL_CAUSES,
@@ -418,6 +418,7 @@ describe("SCROLL_CAUSES", () => {
       "prependCompensation",
       "latestVisible",
       "chatAnswerFollowed",
+      "chatNodeRevealed",
     ]);
   });
 });
@@ -1630,6 +1631,7 @@ describe("no scroll write outside scroll.ts", () => {
       "region.scrollTop += delta;",
       "box.scrollTop += delta;",
       "box.scrollTop = chatEndTop(box);",
+      "box.scrollTop = to;",
     ]);
   });
 
@@ -4470,5 +4472,39 @@ describe("chatEndTop", () => {
 
   it("is the top for a chat shorter than its box", () => {
     expect(chatEndTop(box(110, 100))).toBe(0);
+  });
+});
+
+describe("revealChatExchange", () => {
+  /** A scroll box 600 tall over 3000 of content at TOP, holding an exchange whose top is AT below the box's. */
+  const arrange = (top: number, at: number) => {
+    const box = document.createElement("div");
+    const exchange = document.createElement("div");
+    box.append(exchange);
+    let scrollTop = top;
+    Object.defineProperty(box, "scrollHeight", { get: () => 3000 });
+    Object.defineProperty(box, "clientHeight", { get: () => 600 });
+    Object.defineProperty(box, "scrollTop", { get: () => scrollTop, set: (v: number) => (scrollTop = v) });
+    box.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+    exchange.getBoundingClientRect = () => ({ top: at }) as DOMRect;
+    return { box, exchange };
+  };
+
+  it("puts the exchange's top a sixth of the box below the box's top", () => {
+    const { box, exchange } = arrange(1000, 400);
+    revealChatExchange(box, exchange);
+    expect(box.scrollTop).toBe(1000 + 400 - 100);
+  });
+
+  it("stops at the top", () => {
+    const { box, exchange } = arrange(50, 0);
+    revealChatExchange(box, exchange);
+    expect(box.scrollTop).toBe(0);
+  });
+
+  it("stops at the end the box can reach", () => {
+    const { box, exchange } = arrange(2300, 500);
+    revealChatExchange(box, exchange);
+    expect(box.scrollTop).toBe(2400);
   });
 });

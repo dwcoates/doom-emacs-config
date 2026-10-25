@@ -5,7 +5,7 @@
  * every test roster builder spreads `rosterApps()` rather than spelling them.
  */
 import type { MessageInitShape } from "@bufbuild/protobuf";
-import type { WorkspaceRosterSchema } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterThreadOutlineSchema, WorkspaceRosterSchema } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** One thread row of a test roster. */
 export interface TestThread {
@@ -15,6 +15,8 @@ export interface TestThread {
   current?: boolean;
   /** The thread is archived; open unless said. */
   archived?: boolean;
+  /** The thread's outline, which only the current thread's row carries. */
+  outline?: MessageInitShape<typeof RosterThreadOutlineSchema>;
 }
 
 type RosterInit = MessageInitShape<typeof WorkspaceRosterSchema>;
@@ -43,6 +45,7 @@ export function rosterApps(chat?: TestThread[]): Pick<RosterInit, "appSwitcher" 
         summary: t.summary === undefined ? undefined : { text: t.summary },
         current: t.current === true ? {} : undefined,
         standing: { standing: t.archived === true ? { case: "archived", value: {} } : { case: "open", value: {} } },
+        outline: t.outline,
       })),
     },
   };

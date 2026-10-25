@@ -19,13 +19,19 @@
  */
 import { RequestNewThreadResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_request_new_thread_pb.js";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb.js";
+import { ShowChatNodeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_chat_node_pb.js";
 import { ShowSidebarAppResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_sidebar_app_pb.js";
 import type {
   RosterAppSwitcher,
+  RosterThreadOutline,
+  RosterThreadOutlineBreadcrumb,
+  RosterThreadOutlineCrumb,
   RosterThreadRow,
   RosterThreadSection,
   SidebarApp,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb.js";
+import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb.js";
+import type { NodeId } from "../../../proto/gen/ts/zettel/v1/zettel_pb.js";
 import { createControl } from "../control.js";
 import { log } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
@@ -248,6 +254,7 @@ function drawThreadRow(row: RosterThreadRow, sc: SidebarContext, path: string, a
     summary.textContent = row.summary.text;
     ws.append(summary);
   }
+  if (row.outline !== undefined) ws.append(drawOutline(row.outline, sc, thread, `${path}.outline`));
   ws.append(drawThreadMenu(target, archived));
   line.addEventListener("click", () => {
     log.info("selecting a thread from the rail", { operation: "sidebar.thread.select", context: { thread: thread.id } });
@@ -259,4 +266,115 @@ function drawThreadRow(row: RosterThreadRow, sc: SidebarContext, path: string, a
     );
   });
   return ws;
+}
+
+/** The class of a thread's outline, drawn under its row. */
+export const OUTLINE_CLASS = "sb-outline";
+
+/**
+ * THE CURRENT THREAD'S BRANCHES (frontend.v1.RosterThreadOutline; owner
+ * ruling, 2026-10-25): the breadcrumb of the folded levels above, then one
+ * row per run, indented by its depth, which the daemon keeps within the
+ * rail's width. A click on a row or a crumb shows that run's first question
+ * (ShowChatNode); the chat page then brings it into view.
+ */
+function drawOutline(outline: RosterThreadOutline, sc: SidebarContext, thread: WorkspaceRef, path: string): HTMLElement {
+  const box = document.createElement("div");
+  box.className = OUTLINE_CLASS;
+  box.setAttribute("data-thread-outline", "");
+  const show = (node: NodeId | undefined, at: string): void => {
+    const id = requireMessage(node, at).id;
+    log.info("showing a node of the thread's outline", { operation: "sidebar.outline.show", context: { thread: thread.id, node: id } });
+    callUnary(sc.ctx, "ShowChatNode", (client) => client.showChatNode({ thread, node: { id } }), ShowChatNodeResponseSchema).then(
+      (response) => {
+        refusedArm("ShowChatNode", requireCase(response.result, "ShowChatNodeResponse.result"));
+      },
+      () => undefined, // the transport failure is callUnary's to record
+    );
+  };
+  if (outline.breadcrumb !== undefined) box.append(drawCrumbs(outline.breadcrumb, show, `${path}.breadcrumb`));
+  outline.rows.forEach((row, i) => {
+    const at = `${path}.rows[${i}]`;
+    const line = document.createElement("div");
+    line.className = "sb-outline-row";
+    line.setAttribute("data-outline-node", requireMessage(row.node, `${at}.node`).id);
+    line.style.setProperty("--outline-depth", String(row.depth));
+    const place = requireCase(requireMessage(row.place, `${at}.place`).place, `${at}.place.place`);
+    switch (place.case) {
+      case "off":
+        break;
+      case "onPath":
+        line.classList.add("on-path");
+        break;
+      case "shown":
+        line.classList.add("shown");
+        break;
+      default: {
+        const other: { case: string } = place;
+        unreachableArm(`${at}.place.place`, other.case);
+      }
+    }
+    const dot = document.createElement("span");
+    dot.className = "sb-outline-dot";
+    const label = document.createElement("span");
+    label.className = "sb-outline-label";
+    label.textContent = requireMessage(row.label, `${at}.label`).text;
+    line.append(dot, label);
+    if (row.turns > 1) {
+      const turns = document.createElement("span");
+      turns.className = "sb-outline-turns";
+      turns.textContent = String(row.turns);
+      line.append(turns);
+    }
+    if (row.folded !== undefined) {
+      const folded = document.createElement("span");
+      folded.className = "sb-outline-folded";
+      folded.textContent = `+${row.folded.runs}`;
+      folded.title = `${row.folded.runs} more below`;
+      line.append(folded);
+    }
+    line.addEventListener("click", () => show(row.node, `${at}.node`));
+    box.append(line);
+  });
+  return box;
+}
+
+/** The breadcrumb: every folded level, or the oldest and newest with the rest counted. */
+function drawCrumbs(
+  breadcrumb: RosterThreadOutlineBreadcrumb,
+  show: (node: NodeId | undefined, at: string) => void,
+  path: string,
+): HTMLElement {
+  const line = document.createElement("div");
+  line.className = "sb-outline-crumbs";
+  const crumb = (c: RosterThreadOutlineCrumb, at: string): HTMLElement => {
+    const el = document.createElement("span");
+    el.className = "sb-outline-crumb";
+    el.textContent = requireMessage(c.label, `${at}.label`).text;
+    el.addEventListener("click", () => show(c.node, `${at}.node`));
+    return el;
+  };
+  const parts: (HTMLElement | string)[] = [];
+  const extent = requireCase(breadcrumb.extent, `${path}.extent`);
+  switch (extent.case) {
+    case "whole":
+      extent.value.crumbs.forEach((c, i) => parts.push(crumb(c, `${path}.whole.crumbs[${i}]`)));
+      break;
+    case "elided":
+      parts.push(
+        crumb(requireMessage(extent.value.first, `${path}.elided.first`), `${path}.elided.first`),
+        `… ${extent.value.omitted} more`,
+        crumb(requireMessage(extent.value.last, `${path}.elided.last`), `${path}.elided.last`),
+      );
+      break;
+    default: {
+      const other: { case: string } = extent;
+      unreachableArm(`${path}.extent`, other.case);
+    }
+  }
+  parts.forEach((part, i) => {
+    if (i > 0) line.append(" › ");
+    line.append(part);
+  });
+  return line;
 }

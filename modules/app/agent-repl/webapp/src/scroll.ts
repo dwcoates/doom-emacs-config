@@ -149,6 +149,7 @@ export const SCROLL_CAUSES = [
   "prependCompensation",
   "latestVisible",
   "chatAnswerFollowed",
+  "chatNodeRevealed",
 ] as const;
 
 /** One named reason the feed may move without the reader's scroll input. */
@@ -1997,5 +1998,21 @@ export function landChatAtEnd(
   log.info("the chat moved to its end", {
     operation: "scroll.chat-moved",
     context: { cause, from, to: box.scrollTop },
+  });
+}
+
+/**
+ * Bring a chat EXCHANGE into view in its scroll BOX: its top a sixth of the
+ * box below the box's top, as far as the box can scroll. The chat's one move
+ * for a node the user asked to see (agentrepl.v1.ShowChatNode's reveal).
+ */
+export function revealChatExchange(box: HTMLElement, exchange: HTMLElement): void {
+  const from = box.scrollTop;
+  const offset = exchange.getBoundingClientRect().top - box.getBoundingClientRect().top;
+  const to = Math.max(0, Math.min(box.scrollHeight - box.clientHeight, from + offset - box.clientHeight / 6));
+  box.scrollTop = to;
+  log.info("the chat revealed a node", {
+    operation: "scroll.chat-moved",
+    context: { cause: "chatNodeRevealed" satisfies ScrollCause, from, to },
   });
 }
