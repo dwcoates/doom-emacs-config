@@ -5540,6 +5540,24 @@ instead diverges from it unseen."
                      (list :workspace agent-repl-test-wire-verbs--ref :label "3.1" :direction '(:arm :previous))))
                    "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"label\":\"3.1\",\"direction\":{\"previous\":{}}}"))))
 
+(ert-deftest agent-repl-test-wire-verbs-find-entry-neighbor-encodes-every-way ()
+  "Each way the composer asks for is its own arm of the direction."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case '((:next "next") (:previous "previous") (:first-child "firstChild")))
+      (should (equal (json-serialize
+                      (cdr (assq 'direction
+                                 (agent-repl-wire-encode-find-entry-neighbor-request
+                                  (list :workspace agent-repl-test-wire-verbs--ref :label "3.1"
+                                        :direction (list :arm (car case)))))))
+                     (format "{\"%s\":{}}" (cadr case)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-entry-neighbor-direction-arms-pinned ()
+  "EntryNeighborDirection's way oneof has exactly the arms encoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_find_entry_neighbor.pb.go" "EntryNeighborDirection")
+                       #'string<)
+                 '("firstChild" "next" "previous"))))
+
 (ert-deftest agent-repl-test-wire-verbs-find-entry-neighbor-refuses-a-missing-direction ()
   "The direction is REQUIRED."
   (agent-repl-test-wire-verbs--with-common

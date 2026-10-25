@@ -588,15 +588,121 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
     (agent-repl-prompt-entries-open-below)
     (should (cl-some (lambda (m) (string-match-p "neighbor-unknown-arm ws=ws-1 arm=:mystery" m)) logs))))
 
-(ert-deftest agent-repl-test-prompt-entries-o-and-O-are-bound-in-command-mode ()
-  "`o' and `O' are bound in the composer's normal state to the entry-aware opens."
+(ert-deftest agent-repl-test-prompt-entries-entry-keys-are-bound ()
+  "`o' and `O' are bound in command mode, and `C-o' in command and insert mode."
   (let (bound)
     (cl-letf (((symbol-function 'evil-define-key*)
                (lambda (state map &rest bindings) (push (list state (eq map agent-repl-input-mode-map) bindings) bound))))
       (agent-repl-prompt-entries-bind-keys))
-    (should (equal bound
+    (should (equal (nreverse bound)
                    (list (list 'normal t (list "o" #'agent-repl-prompt-entries-open-below
-                                               "O" #'agent-repl-prompt-entries-open-above)))))))
+                                               "O" #'agent-repl-prompt-entries-open-above))
+                         (list '(normal insert) t (list (kbd "C-o") agent-repl-prompt-entries--descend-binding)))))))
+
+;;;; ---- Descending an entry to its node's first child ----
+
+(defmacro agent-repl-test-prompt-entries--descending (answer &rest body)
+  "Run BODY as `agent-repl-test-prompt-entries--opening' does, the flash recorded on `flashed'."
+  (declare (indent 1))
+  `(let ((flashed nil))
+     (agent-repl-test-prompt-entries--opening ,answer
+       (cl-letf (((symbol-function 'agent-repl--input-flash) (lambda (ws text) (push (list ws text) flashed))))
+         ,@body))))
+
+(defconst agent-repl-test-prompt-entries--child
+  '(:arm :success :value (:neighbor (:arm :found :value (:label "1.1.1"))))
+  "The daemon naming 1.1.1 as the node's first child.")
+
+(ert-deftest agent-repl-test-prompt-entries-C-o-relabels-the-entry-to-the-first-child ()
+  "`C-o' on an entry relabels it to its node's first child, its words kept."
+  (agent-repl-test-prompt-entries--descending agent-repl-test-prompt-entries--child
+    ;; Arrange
+    (goto-char 10)
+    ;; Act
+    (agent-repl-prompt-entries-descend)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction) (plist-get (car asked) :label))
+                   '("1.1.1 - yes" (:arm :first-child) "1.1")))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-o-keeps-point-after-the-label ()
+  "Point after the label stays as far from the line's end; in the label it goes to the new label's end."
+  ;; Each case: where point stands in `1.1 - yes', and its column after the
+  ;; label grows by two: the line's end, just past the separator, inside `1.1'.
+  (dolist (case '((10 11) (7 8) (2 5)))
+    (agent-repl-test-prompt-entries--descending agent-repl-test-prompt-entries--child
+      ;; Arrange
+      (goto-char (car case))
+      ;; Act
+      (agent-repl-prompt-entries-descend)
+      ;; Assert
+      (should (equal (list (car case) (- (point) (line-beginning-position))) case)))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-o-with-no-child-keeps-the-label-and-says-so ()
+  "A node with no first child keeps its label; the composer flashes why, recorded at info."
+  (agent-repl-test-prompt-entries--descending '(:arm :success :value (:neighbor (:arm :none :value nil)))
+    ;; Arrange
+    (goto-char 10)
+    ;; Act
+    (agent-repl-prompt-entries-descend)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) flashed)
+                   '("1.1 - yes" (("ws-1" "1.1 has no child to answer")))))
+    (should (cl-some (lambda (m) (string-match-p "descend-no-child ws=ws-1 label=1.1" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-o-is-recorded-at-info ()
+  "A descent leaves an INFO record naming the label and the child."
+  (agent-repl-test-prompt-entries--descending agent-repl-test-prompt-entries--child
+    ;; Arrange
+    (goto-char 10)
+    ;; Act
+    (agent-repl-prompt-entries-descend)
+    ;; Assert
+    (should (cl-some (lambda (m) (string-match-p "descended ws=ws-1 label=1.1 child=1.1.1" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-descend-off-an-entry-refuses-and-asks-nothing ()
+  "Run off an entry line, the descent is refused, recorded, and asks the daemon nothing."
+  (agent-repl-test-prompt-entries--descending agent-repl-test-prompt-entries--child
+    ;; Arrange
+    (goto-char 15)
+    ;; Act / Assert
+    (should-error (agent-repl-prompt-entries-descend) :type 'user-error)
+    (should (equal asked nil))
+    (should (cl-some (lambda (m) (string-match-p "descend-off-entry ws=ws-1" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-o-descends-only-on-an-entry-line ()
+  "The `C-o' binding names the descent on an entry line and nothing elsewhere."
+  (agent-repl-test-prompt-entries--descending agent-repl-test-prompt-entries--child
+    (dolist (case '((3 agent-repl-prompt-entries-descend) (15 nil)))
+      ;; Arrange
+      (goto-char (car case))
+      ;; Act / Assert
+      (should (equal (list (car case) (agent-repl-prompt-entries--descend-filter 'agent-repl-prompt-entries-descend))
+                     case)))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-o-falls-through-off-an-entry-line ()
+  "Looked up through the active keymaps, `C-o' descends on an entry line and keeps its own binding elsewhere."
+  (agent-repl-test-prompt-entries--descending agent-repl-test-prompt-entries--child
+    ;; Arrange: the composer's map above a map binding `C-o' as it always was.
+    (let ((ours (make-sparse-keymap))
+          (theirs (make-sparse-keymap)))
+      (define-key ours (kbd "C-o") agent-repl-prompt-entries--descend-binding)
+      (define-key theirs (kbd "C-o") 'agent-repl-test-prompt-entries--its-own)
+      (use-local-map theirs)
+      (let ((minor-mode-map-alist (cons (cons t ours) minor-mode-map-alist)))
+        (dolist (case '((3 agent-repl-prompt-entries-descend) (15 agent-repl-test-prompt-entries--its-own)))
+          ;; Act
+          (goto-char (car case))
+          ;; Assert
+          (should (equal (list (car case) (key-binding (kbd "C-o"))) case)))))))
+
+(ert-deftest agent-repl-test-prompt-entries-relabel-refuses-a-line-not-opening-on-its-label ()
+  "Relabelling a line that does not open on the label it names is an error, the line untouched."
+  (with-temp-buffer
+    ;; Arrange
+    (insert "2.1 - no")
+    ;; Act / Assert
+    (should-error (agent-repl-prompt-entries--relabel "1.1" "1.1.1"))
+    (should (equal (buffer-string) "2.1 - no"))))
 
 (provide 'test-prompt-entries)
 

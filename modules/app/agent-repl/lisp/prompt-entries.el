@@ -43,6 +43,7 @@
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl-host-conn-or-primary "host" (ws))
 (declare-function agent-repl-host-unanswered-entries "host" (ws))
+(declare-function agent-repl--input-flash "input" (ws text))
 (declare-function agent-repl--input-buffer "input" (ws))
 (declare-function agent-repl-rpc-report-composer-entries "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-find-entry-neighbor-sync "rpc" (conn request &optional timeout))
@@ -351,25 +352,26 @@ command sends it again; DONE ends the report."
 (defconst agent-repl-prompt-entries--neighbor-timeout 1.0
   "Seconds `o' and `O' wait for the daemon to name the neighbor label.")
 
-(defun agent-repl-prompt-entries--neighbor (label next)
-  "The label of LABEL's next (NEXT) or previous node in its target tree, or nil.
+(defun agent-repl-prompt-entries--neighbor (label way)
+  "The label of LABEL's node WAY from it in its target tree, or nil.
+WAY is `:next', `:previous' or `:first-child' (EntryNeighborDirection).
 Nil, with the reason logged, when the composer is not reporting, no ref or
 connection stands, the daemon refused, or it never answered."
   (let* ((ws agent-repl-prompt-entries--ws)
          (ref (and ws (agent-repl-host-ref ws)))
          (conn (and ws (agent-repl-host-conn-or-primary ws))))
     (if (not (and ref conn))
-        (progn (agent-repl--log ws "elisp.prompt-entries.neighbor-skipped ws=%s label=%s" ws label) nil)
+        (progn (agent-repl--log ws "elisp.prompt-entries.neighbor-skipped ws=%s label=%s way=%s" ws label way) nil)
       (condition-case err
           (let ((response (agent-repl-rpc-find-entry-neighbor-sync
                            conn (list :workspace ref :label label
-                                      :direction (list :arm (if next :next :previous)))
+                                      :direction (list :arm way))
                            agent-repl-prompt-entries--neighbor-timeout)))
             (pcase (plist-get response :arm)
               (:success
                (let ((neighbor (plist-get (plist-get response :value) :neighbor)))
-                 (agent-repl--log ws "elisp.prompt-entries.neighbor ws=%s label=%s next=%s neighbor=%S"
-                                  ws label next neighbor)
+                 (agent-repl--log ws "elisp.prompt-entries.neighbor ws=%s label=%s way=%s neighbor=%S"
+                                  ws label way neighbor)
                  (when (eq (plist-get neighbor :arm) :found)
                    (plist-get (plist-get neighbor :value) :label))))
               (:error
@@ -390,13 +392,17 @@ an entry, and a click on a response's branch in the webview
 \(`agent-repl-input-compose-entry')."
   (concat label " - "))
 
+(defun agent-repl-prompt-entries--label-at-point ()
+  "The label of the entry point's line holds, or nil off an entry line."
+  (and agent-repl-prompt-entries--parser
+       (agent-repl-prompt-entries--entry-at-point (agent-repl-prompt-entries--entries))))
+
 (defun agent-repl-prompt-entries--open (next)
   "Open a line below (NEXT) or above point's line, filled with a neighbor.
 On an entry line whose label has a neighbor that way, the new line opens
 on `LABEL - '; otherwise it opens empty, as `evil-open-below' does."
-  (let* ((label (and agent-repl-prompt-entries--parser
-                     (agent-repl-prompt-entries--entry-at-point (agent-repl-prompt-entries--entries))))
-         (neighbor (and label (agent-repl-prompt-entries--neighbor label next))))
+  (let* ((label (agent-repl-prompt-entries--label-at-point))
+         (neighbor (and label (agent-repl-prompt-entries--neighbor label (if next :next :previous)))))
     (if next (evil-open-below 1) (evil-open-above 1))
     (when neighbor (insert (agent-repl-prompt-entries-opening neighbor)))))
 
@@ -414,11 +420,67 @@ the entry targets."
   (interactive)
   (agent-repl-prompt-entries--open nil))
 
+;;;; ---- Descending an entry to its node's first child ----
+;;
+;; `C-o' on an entry line, in command or insert mode, relabels the entry to
+;; answer its node's first child, in the tree the entry targets: `3.2 - '
+;; becomes `3.2.1 - ', the entry's words kept.  The daemon finds the child
+;; (FindEntryNeighbor's `first_child').  Off an entry line `C-o' is what it
+;; always was.
+
+(defun agent-repl-prompt-entries--relabel (from to)
+  "Replace point's entry label FROM with TO, point keeping its place after it.
+Point after the label stays as far from the line's end as it was; point in
+or before the label moves to the new label's end."
+  (let* ((beg (line-beginning-position))
+         (end (+ beg (length from)))
+         (from-eol (- (line-end-position) (point)))
+         (after (> (point) end)))
+    (unless (equal (buffer-substring-no-properties beg end) from)
+      (error "prompt-entries: the entry line does not open on its label %S" from))
+    (delete-region beg end)
+    (goto-char beg)
+    (insert to)
+    (when after (goto-char (- (line-end-position) from-eol)))))
+
+(defun agent-repl-prompt-entries-descend ()
+  "Relabel point's entry to answer its node's first child.
+The composer's `C-o' on an entry line: `3.2 - ' becomes `3.2.1 - ', its
+words kept, the child found in the tree the entry targets.  A node with
+no first child there keeps its label, and the composer says so."
+  (interactive)
+  (let* ((ws agent-repl-prompt-entries--ws)
+         (label (agent-repl-prompt-entries--label-at-point))
+         (child (and label (agent-repl-prompt-entries--neighbor label :first-child))))
+    (cond
+     ((null label)
+      (agent-repl--info ws "elisp.prompt-entries.descend-off-entry ws=%s point=%d" ws (point))
+      (user-error "Point is on no entry line"))
+     ((null child)
+      (agent-repl--info ws "elisp.prompt-entries.descend-no-child ws=%s label=%s" ws label)
+      (agent-repl--input-flash ws (format "%s has no child to answer" label)))
+     (t
+      (agent-repl-prompt-entries--relabel label child)
+      (agent-repl--info ws "elisp.prompt-entries.descended ws=%s label=%s child=%s" ws label child)))))
+
+(defun agent-repl-prompt-entries--descend-filter (command)
+  "COMMAND on an entry line, else nil, so `C-o' off one keeps its own binding."
+  (and (agent-repl-prompt-entries--label-at-point) command))
+
+(defconst agent-repl-prompt-entries--descend-binding
+  '(menu-item "" agent-repl-prompt-entries-descend
+              :filter agent-repl-prompt-entries--descend-filter)
+  "The composer's `C-o': descend on an entry line, and fall through elsewhere.")
+
 (defun agent-repl-prompt-entries-bind-keys ()
-  "Bind `o' and `O' in the composer's command mode to the entry-aware opens."
+  "Bind the composer's entry-aware keys.
+`o' and `O' in command mode open a line on a neighbor's label; `C-o' in
+command and insert mode descends an entry line's entry."
   (evil-define-key* 'normal agent-repl-input-mode-map
     "o" #'agent-repl-prompt-entries-open-below
-    "O" #'agent-repl-prompt-entries-open-above))
+    "O" #'agent-repl-prompt-entries-open-above)
+  (evil-define-key* '(normal insert) agent-repl-input-mode-map
+    (kbd "C-o") agent-repl-prompt-entries--descend-binding))
 
 (with-eval-after-load 'evil
   (agent-repl-prompt-entries-bind-keys))

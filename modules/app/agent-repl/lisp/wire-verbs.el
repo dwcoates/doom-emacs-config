@@ -4765,8 +4765,9 @@ The success is empty; the error is one of the four handover arms."
 (defun agent-repl-wire-encode-find-entry-neighbor-request (request)
   "Encode FindEntryNeighborRequest from plist REQUEST.
 \(:workspace REF :label LABEL :direction DIRECTION): DIRECTION (:arm :next)
-for the node below (`o') or (:arm :previous) for the node above (`O').
-All three are required."
+for the node below (`o'), (:arm :previous) for the node above (`O') or
+\(:arm :first-child) for the node's first child (`C-o').  All three are
+required."
   (let ((message "FindEntryNeighborRequest"))
     (list (cons 'workspace
                 (agent-repl-wire-encode-workspace-ref
@@ -4777,7 +4778,8 @@ All three are required."
                        "EntryNeighborDirection" "way"
                        (agent-repl-wire-verbs--require message "direction" (plist-get request :direction))
                        (list (list :next 'next #'ignore)
-                             (list :previous 'previous #'ignore))))))))
+                             (list :previous 'previous #'ignore)
+                             (list :first-child 'firstChild #'ignore))))))))
 
 (defun agent-repl-wire-decode-find-entry-neighbor-response (json)
   "Decode FindEntryNeighborResponse from JSON into (:arm ARM :value V).

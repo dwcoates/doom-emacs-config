@@ -301,3 +301,16 @@ wrong labels). That needs one parse, in one place, that every program reads.
   - **The click asks nothing of Emacs.** RET on a selected prompt still resends the
     composer's words whole. `RollBackResend.edit.entry` has no client since the click
     stopped filling the composer.
+
+### 9. `C-o` descends an entry to its node's first child
+
+- **What:** `EntryNeighborDirection` gained `first_child` (tag 3), and the daemon's
+  `feed.NeighborWay` replaced the next-or-previous flag.
+- **Why:** the owner's ask of 2026-10-24. On an entry line in the composer, filled
+  or not, `C-o` relabels the entry to answer its node's first child: `3.2 - `
+  becomes `3.2.1 - `.
+- **Decisions inside the shape:**
+  - **The entry keeps its words**, and point keeps its place after the label.
+  - **Off an entry line `C-o` is what it was** (Evil's own binding), through a
+    conditional binding (`agent-repl-prompt-entries--descend-binding`).
+  - **A node with no first child keeps its label**, and the composer flashes why.
