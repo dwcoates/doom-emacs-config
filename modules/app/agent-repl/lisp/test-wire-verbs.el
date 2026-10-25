@@ -4019,13 +4019,13 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-move-arms-pinned ()
   "SelectFeedRowRequest's move oneof has exactly the arms the schema declares.
 Emacs spells two of them; `leftView', `bubble' (a click), `answer' (a
-click on a linked label) and `entry' (a click on a prompt's entry) are the
-webapp's alone."
+click on a linked label), `entry' (a click on a prompt's entry) and
+`branch' (a click on a response's branch) are the webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_select_feed_row.pb.go"
                         "SelectFeedRowRequest")
                        #'string<)
-                 '("answer" "bubble" "clear" "entry" "leftView" "turnBoundary"))))
+                 '("answer" "branch" "bubble" "clear" "entry" "leftView" "turnBoundary"))))
 
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-answer-and-entry-have-no-spelling ()
   "The webapp's label and entry clicks are never sent from Emacs, so each is refused."
