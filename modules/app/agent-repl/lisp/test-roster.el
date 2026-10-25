@@ -247,7 +247,7 @@ whose calls are the observation."
              (append (plist-get section :entries)
                      (seq-map-indexed (lambda (rows i)
                                         (agent-repl-test--subsection-entry
-                                         (list :key (list :subsection-id (format "sub-%d" i))
+                                         (list :kind (list :arm :named :value (list :key (list :subsection-id (format "sub-%d" i))))
                                                :header (list :label (list :text (format "sub %d" i)))
                                                :open-rows (agent-repl-test--open-rows rows)
                                                :fold (list :arm :expanded :value nil))))
@@ -284,6 +284,22 @@ whose calls are the observation."
                        (agent-repl-roster-flatten (agent-repl-roster-section-rows section)))))
       ;; Assert
       (should (equal ids '("a" "s" "b"))))))
+
+(ert-deftest agent-repl-test-roster-section-rows-walk-the-one-shot-subsection-last ()
+  "The one-shot subsection's rows are read like any subsection's, where it stands: last."
+  ;; Arrange
+  (let ((section (list :entries
+                       (append (agent-repl-test--row-entries
+                                (list (agent-repl-test-roster--row "a" "a-row" :ready)))
+                               (list (agent-repl-test--subsection-entry
+                                      (list :kind (list :arm :one-shot :value nil)
+                                            :open-rows (agent-repl-test--open-rows
+                                                        (list (agent-repl-test-roster--row "o" "o-row" :ready))))))))))
+    ;; Act
+    (let ((ids (mapcar #'agent-repl-roster-row-id
+                       (agent-repl-roster-flatten (agent-repl-roster-section-rows section)))))
+      ;; Assert
+      (should (equal ids '("a" "o"))))))
 
 (ert-deftest agent-repl-test-roster-section-rows-refuse-an-entry-of-no-known-arm ()
   "An entry on no arm the contract names is an error, never a skipped row."
