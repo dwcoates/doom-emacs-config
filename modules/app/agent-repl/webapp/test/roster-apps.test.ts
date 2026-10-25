@@ -10,7 +10,7 @@ import { rosterApps } from "./roster-apps.js";
 describe("rosterApps", () => {
   it.each([
     ["Workspaces", undefined, false],
-    ["Chat", [], true],
+    ["Chats", [], true],
   ])("shows %s, marked once in the menu", (title, chat, chatShown) => {
     // Act
     const roster = create(WorkspaceRosterSchema, rosterApps(chat));

@@ -1783,12 +1783,12 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   "The switcher decodes its title, the app shown, and each option."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-app-switcher
-                  (concat "{\"title\":{\"text\":\"Chat\"},\"shown\":{\"chat\":{}},\"options\":["
-                          "{\"label\":{\"text\":\"Workspaces\"},\"hint\":{\"text\":\"agent-repl\"},\"app\":{\"workspaces\":{}}},"
-                          "{\"label\":{\"text\":\"Chat\"},\"hint\":{\"text\":\"zettel\"},\"app\":{\"chat\":{}},\"shown\":{}}]}"))
-                 '(:title "Chat" :shown :chat
-                   :options ((:label "Workspaces" :hint "agent-repl" :app :workspaces :shown nil)
-                             (:label "Chat" :hint "zettel" :app :chat :shown t))))))
+                  (concat "{\"title\":{\"text\":\"Chats\"},\"shown\":{\"chat\":{}},\"options\":["
+                          "{\"label\":{\"text\":\"Workspaces\"},\"app\":{\"workspaces\":{}}},"
+                          "{\"label\":{\"text\":\"Chats\"},\"app\":{\"chat\":{}},\"shown\":{}}]}"))
+                 '(:title "Chats" :shown :chat
+                   :options ((:label "Workspaces" :app :workspaces :shown nil)
+                             (:label "Chats" :app :chat :shown t))))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-thread-section ()
   "The thread section decodes its button and each thread, newest first."

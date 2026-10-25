@@ -18,12 +18,8 @@ import (
 const (
 	// WorkspacesAppLabel is the Workspaces app's title and option.
 	WorkspacesAppLabel = "Workspaces"
-	// WorkspacesAppHint is the Workspaces option's hint.
-	WorkspacesAppHint = "agent-repl's coding workspaces"
 	// ChatAppLabel is the Chat app's title and option.
-	ChatAppLabel = "Chat"
-	// ChatAppHint is the Chat option's hint.
-	ChatAppHint = "zettel's chat threads"
+	ChatAppLabel = "Chats"
 	// NewThreadLabel is the thread section's new-thread button.
 	NewThreadLabel = "New thread"
 )
@@ -57,10 +53,9 @@ func (r *resolver) appSwitcher() *frontendv1.RosterAppSwitcher {
 	if chat {
 		title, shown = ChatAppLabel, chatApp()
 	}
-	option := func(label, hint string, app *frontendv1.SidebarApp, isShown bool) *frontendv1.RosterAppSwitcherOption {
+	option := func(label string, app *frontendv1.SidebarApp, isShown bool) *frontendv1.RosterAppSwitcherOption {
 		o := &frontendv1.RosterAppSwitcherOption{
 			Label: &frontendv1.RosterAppSwitcherOptionLabel{Text: label},
-			Hint:  &frontendv1.RosterAppSwitcherOptionHint{Text: hint},
 			App:   app,
 		}
 		if isShown {
@@ -72,8 +67,8 @@ func (r *resolver) appSwitcher() *frontendv1.RosterAppSwitcher {
 		Title: &frontendv1.RosterAppSwitcherTitle{Text: title},
 		Shown: shown,
 		Options: []*frontendv1.RosterAppSwitcherOption{
-			option(WorkspacesAppLabel, WorkspacesAppHint, workspacesApp(), !chat),
-			option(ChatAppLabel, ChatAppHint, chatApp(), chat),
+			option(WorkspacesAppLabel, workspacesApp(), !chat),
+			option(ChatAppLabel, chatApp(), chat),
 		},
 	}
 }

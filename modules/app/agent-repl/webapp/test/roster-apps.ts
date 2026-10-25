@@ -28,11 +28,11 @@ export function rosterApps(chat?: TestThread[]): Pick<RosterInit, "appSwitcher" 
   const app = (which: "workspaces" | "chat") => ({ app: { case: which, value: {} } }) as const;
   return {
     appSwitcher: {
-      title: { text: showsChat ? "Chat" : "Workspaces" },
+      title: { text: showsChat ? "Chats" : "Workspaces" },
       shown: app(showsChat ? "chat" : "workspaces"),
       options: [
-        { label: { text: "Workspaces" }, hint: { text: "agent-repl" }, app: app("workspaces"), shown: showsChat ? undefined : {} },
-        { label: { text: "Chat" }, hint: { text: "zettel" }, app: app("chat"), shown: showsChat ? {} : undefined },
+        { label: { text: "Workspaces" }, app: app("workspaces"), shown: showsChat ? undefined : {} },
+        { label: { text: "Chats" }, app: app("chat"), shown: showsChat ? {} : undefined },
       ],
     },
     threads: {
