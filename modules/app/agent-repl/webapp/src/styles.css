@@ -33,11 +33,14 @@
      dark theme sets its own (owner ruling, 2026-09-27). */
   --panel-bg: var(--card);
   /* The fill of every card with a tool-card title (Bash, Skill, Question, a
-     subagent or merge bubble, ...): --panel-bg moved 40% of the way to the
-     feed's --bg (owner request, 2026-10-24), here #eef1f4 toward #ffffff, so
-     the cards sit quieter than the response bubble. The dark theme moves its
-     own --panel-bg the same 40%. */
-  --tool-card-bg: #f5f7f8;
+     subagent or merge bubble, ...) AND of the response bubble (--assistant):
+     --panel-bg moved 20% of the way to the feed's --bg, here #eef1f4 toward
+     #ffffff. The cards sat 40% of the way (owner request, 2026-10-24) and the
+     response on --panel-bg itself; the owner asked (2026-10-25) that the two
+     meet in the middle as one color, so the response derives from this token
+     rather than carrying a second copy. The dark theme moves its own
+     --panel-bg the same 20%. */
+  --tool-card-bg: #f1f4f6;
   /* The workspaces rail's fill: a touch LIGHTER than the feed (--bg), so the
      sidebar reads as a lifted dock rather than the same sheet the
      conversation scrolls on. In the light theme --bg is already pure white —
@@ -93,16 +96,15 @@
      (`agent-repl-command-completion-known`), deepened so it reads on the
      prompt blue. */
   --known-command: #7e22ce;
-  /* THE RESPONSE BUBBLE'S FILL IS THE SHARED PANEL FILL (owner ruling,
-     2026-10-11, "a slightly darker background ... same color as the toolcard
-     backgrounds"; narrowed by owner request, 2026-10-14, when the dark
-     theme's tool cards stepped darker on their own while responses, notes and
-     merge bubbles kept this fill): derived from --panel-bg rather than
-     copied, so every state a response passes through (in flight, interim,
-     final, cut short) wears it. Resolved where it is declared, on :root, so
-     the dark theme's own --panel-bg carries through without a dark override
-     of this token. */
-  --assistant: var(--panel-bg);
+  /* THE RESPONSE BUBBLE'S FILL IS THE TOOL CARD'S FILL (owner ruling,
+     2026-10-11, "same color as the toolcard backgrounds"; the two drifted
+     apart 2026-10-14 and 2026-10-24, and the owner asked on 2026-10-25 that
+     they meet in the middle as one color again): derived from --tool-card-bg
+     rather than copied, so every state a response passes through (in flight,
+     interim, final, cut short) wears it and the two cannot drift. Resolved
+     where it is declared, on :root, so the dark theme's own --tool-card-bg
+     carries through without a dark override of this token. */
+  --assistant: var(--tool-card-bg);
   --accent: #2563eb;
   /* The node the composer is answering, highlighted while its entry is typed
      (feed/composer-entry.ts). */
@@ -508,13 +510,13 @@
        grounds, with the warmth carried by the text at a yellow-leaning hue.
        Each token takes the lightness of its Claude counterpart, named on it.
        design-dark-palette-tuner.html beside this module tunes the set. */
-    /* The shared panel fill, Claude's code block. The response bubble's
-       --assistant is this same fill (owner ruling, 2026-10-11). */
+    /* The shared panel fill, Claude's code block. */
     --panel-bg: #1a1a19;
-    /* The tool card: --panel-bg (Claude's code block) moved 40% of the way
-       to --bg (owner request, 2026-10-24), #1a1a19 toward #151514, so it
-       still lifts off the feed, just less. */
-    --tool-card-bg: #181817;
+    /* The tool card and the response bubble (--assistant): --panel-bg
+       (Claude's code block) moved 20% of the way to --bg (owner request,
+       2026-10-25, meeting the 40% tool card and the --panel-bg response in
+       the middle), #1a1a19 toward #151514, so it still lifts off the feed. */
+    --tool-card-bg: #191918;
     /* Claude's sidebar, darker than the feed, so the rail recedes behind the
        conversation while its --card hover/detail washes lift off it. */
     --sidebar-bg: #111110;
@@ -596,7 +598,7 @@
        the selected-entry ring still reads against the dark page. */
     --selected-entry: #8bbeff;
     /* A moderate grey a little lighter than the dark --assistant (the dark
-       --panel-bg, #1a1a19). */
+       --tool-card-bg, #191918). */
     --selected-bubble-bg: #313130;
     /* A darker blue than the dark --user (#0764c2). */
     --selected-prompt-bg: #044a91;
