@@ -3,6 +3,8 @@ package sidebar
 import (
 	"time"
 
+	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"agent-repld/internal/ids"
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/resolve/footer"
@@ -154,6 +156,9 @@ type wsState struct {
 	merge footer.MergeFacts
 	// summary is the row detail's summary line, empty when none is set.
 	summary string
+	// outline is a chat thread's outline, as the chat service last handed
+	// it; nil while it has none.
+	outline *frontendv1.RosterThreadOutline
 }
 
 // resultState is the read state of the last turn's result.

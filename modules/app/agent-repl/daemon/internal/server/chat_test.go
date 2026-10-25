@@ -42,6 +42,7 @@ type fakeChat struct {
 	asked     []*zettelv1.NodeParent
 	switches  []string
 	selects   []*chat.Highlight
+	shows     []chat.NodeID
 	sightings [][]chat.NodeID
 	matches   []*zettelv1.SearchThreadsMatch
 	searchErr error
@@ -83,6 +84,11 @@ func (f *fakeChat) SwitchSibling(_ context.Context, _ ids.WorkspaceID, shown cha
 		word = "previous"
 	}
 	f.switches = append(f.switches, string(shown)+":"+word)
+	return f.gestErr
+}
+
+func (f *fakeChat) Show(_ context.Context, _ ids.WorkspaceID, node chat.NodeID) error {
+	f.shows = append(f.shows, node)
 	return f.gestErr
 }
 
@@ -278,6 +284,38 @@ func TestSwitchChatSiblingCarriesTheDirection(t *testing.T) {
 	}
 }
 
+func TestShowChatNodeShowsTheNode(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	thread := withThread(h)
+
+	// Act
+	resp, err := h.Client.ShowChatNode(context.Background(), connect.NewRequest(&agentreplv1.ShowChatNodeRequest{
+		Thread: thread, Node: &zettelv1.NodeId{Id: "n2"},
+	}))
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess() == nil || len(h.Chat.shows) != 1 || h.Chat.shows[0] != "n2" {
+		t.Fatalf("resp = %v, err = %v, shows = %v", resp, err, h.Chat.shows)
+	}
+}
+
+func TestShowChatNodeRefusesAnAgentWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	agent := &workspacev1.WorkspaceRef{Id: string(testWorkspaceID), Dir: testWorkspaceDir}
+
+	// Act
+	resp, err := h.Client.ShowChatNode(context.Background(), connect.NewRequest(&agentreplv1.ShowChatNodeRequest{
+		Thread: agent, Node: &zettelv1.NodeId{Id: "n1"},
+	}))
+
+	// Assert
+	if err != nil || resp.Msg.GetError().GetNotAThread() == nil || len(h.Chat.shows) != 0 {
+		t.Fatalf("resp = %v, err = %v, shows = %v; want not_a_thread and nothing shown", resp, err, h.Chat.shows)
+	}
+}
+
 func TestChatGestureRefusalsAnswerTheirArms(t *testing.T) {
 	cases := []struct {
 		name string
@@ -287,6 +325,12 @@ func TestChatGestureRefusalsAnswerTheirArms(t *testing.T) {
 			resp, err := h.Client.SwitchChatSibling(context.Background(), connect.NewRequest(&agentreplv1.SwitchChatSiblingRequest{
 				Thread: thread, Shown: &zettelv1.NodeId{Id: "nope"},
 				Direction: &agentreplv1.SwitchChatSiblingDirection{Way: &agentreplv1.SwitchChatSiblingDirection_Next{Next: &agentreplv1.SwitchChatSiblingNext{}}},
+			}))
+			return resp.Msg.GetError().GetUnknownNode() != nil, err
+		}},
+		{name: "show", call: func(h *harness, thread *workspacev1.WorkspaceRef) (bool, error) {
+			resp, err := h.Client.ShowChatNode(context.Background(), connect.NewRequest(&agentreplv1.ShowChatNodeRequest{
+				Thread: thread, Node: &zettelv1.NodeId{Id: "nope"},
 			}))
 			return resp.Msg.GetError().GetUnknownNode() != nil, err
 		}},
@@ -334,6 +378,10 @@ func TestChatGesturesValidateTheirRequests(t *testing.T) {
 		}},
 		{name: "sightings of no node", call: func(h *harness, thread *workspacev1.WorkspaceRef) error {
 			_, err := h.Client.ReportChatSightings(context.Background(), connect.NewRequest(&agentreplv1.ReportChatSightingsRequest{Thread: thread}))
+			return err
+		}},
+		{name: "a show of no node", call: func(h *harness, thread *workspacev1.WorkspaceRef) error {
+			_, err := h.Client.ShowChatNode(context.Background(), connect.NewRequest(&agentreplv1.ShowChatNodeRequest{Thread: thread}))
 			return err
 		}},
 		{name: "a selection with no state", call: func(h *harness, thread *workspacev1.WorkspaceRef) error {

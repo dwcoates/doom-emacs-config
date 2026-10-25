@@ -237,7 +237,11 @@ type ChatViewConversation struct {
 	// The question in flight, drawn below the last exchange. UNSET when no
 	// question is being answered. The shown path always ends at the pending
 	// question's parent while one is in flight.
-	Pending       *ChatPending `protobuf:"bytes,2,opt,name=pending,proto3,oneof" json:"pending,omitempty"`
+	Pending *ChatPending `protobuf:"bytes,2,opt,name=pending,proto3,oneof" json:"pending,omitempty"`
+	// The node the user last asked to see (agentrepl.v1.ShowChatNode), which
+	// the page brings into view when the sequence is one it has not acted on.
+	// UNSET until the thread's first such ask.
+	Reveal        *ChatReveal `protobuf:"bytes,3,opt,name=reveal,proto3,oneof" json:"reveal,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -286,6 +290,70 @@ func (x *ChatViewConversation) GetPending() *ChatPending {
 	return nil
 }
 
+func (x *ChatViewConversation) GetReveal() *ChatReveal {
+	if x != nil {
+		return x.Reveal
+	}
+	return nil
+}
+
+// A node to bring into view. A value in a whole-replaced view, so its
+// sequence tells a new ask from the one already acted on: a page acts on a
+// sequence above the last it saw, and a page's first view only records it.
+type ChatReveal struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The node, on the shown path.
+	Node *v1.NodeId `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	// Raised by one on every ask, from 1.
+	Sequence      uint64 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChatReveal) Reset() {
+	*x = ChatReveal{}
+	mi := &file_frontend_v1_chat_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChatReveal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChatReveal) ProtoMessage() {}
+
+func (x *ChatReveal) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_chat_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChatReveal.ProtoReflect.Descriptor instead.
+func (*ChatReveal) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ChatReveal) GetNode() *v1.NodeId {
+	if x != nil {
+		return x.Node
+	}
+	return nil
+}
+
+func (x *ChatReveal) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
 // One node on the shown path: its question bubble, its sibling control and
 // its answer bubble.
 type ChatExchange struct {
@@ -306,7 +374,7 @@ type ChatExchange struct {
 
 func (x *ChatExchange) Reset() {
 	*x = ChatExchange{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[4]
+	mi := &file_frontend_v1_chat_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -318,7 +386,7 @@ func (x *ChatExchange) String() string {
 func (*ChatExchange) ProtoMessage() {}
 
 func (x *ChatExchange) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[4]
+	mi := &file_frontend_v1_chat_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -331,7 +399,7 @@ func (x *ChatExchange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatExchange.ProtoReflect.Descriptor instead.
 func (*ChatExchange) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{4}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ChatExchange) GetNode() *v1.NodeId {
@@ -376,7 +444,7 @@ type ChatQuestion struct {
 
 func (x *ChatQuestion) Reset() {
 	*x = ChatQuestion{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[5]
+	mi := &file_frontend_v1_chat_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -388,7 +456,7 @@ func (x *ChatQuestion) String() string {
 func (*ChatQuestion) ProtoMessage() {}
 
 func (x *ChatQuestion) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[5]
+	mi := &file_frontend_v1_chat_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -401,7 +469,7 @@ func (x *ChatQuestion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatQuestion.ProtoReflect.Descriptor instead.
 func (*ChatQuestion) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{5}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ChatQuestion) GetText() *ChatQuestionText {
@@ -429,7 +497,7 @@ type ChatQuestionText struct {
 
 func (x *ChatQuestionText) Reset() {
 	*x = ChatQuestionText{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[6]
+	mi := &file_frontend_v1_chat_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -441,7 +509,7 @@ func (x *ChatQuestionText) String() string {
 func (*ChatQuestionText) ProtoMessage() {}
 
 func (x *ChatQuestionText) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[6]
+	mi := &file_frontend_v1_chat_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -454,7 +522,7 @@ func (x *ChatQuestionText) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatQuestionText.ProtoReflect.Descriptor instead.
 func (*ChatQuestionText) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{6}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ChatQuestionText) GetText() string {
@@ -475,7 +543,7 @@ type ChatQuestionQuote struct {
 
 func (x *ChatQuestionQuote) Reset() {
 	*x = ChatQuestionQuote{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[7]
+	mi := &file_frontend_v1_chat_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -487,7 +555,7 @@ func (x *ChatQuestionQuote) String() string {
 func (*ChatQuestionQuote) ProtoMessage() {}
 
 func (x *ChatQuestionQuote) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[7]
+	mi := &file_frontend_v1_chat_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -500,7 +568,7 @@ func (x *ChatQuestionQuote) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatQuestionQuote.ProtoReflect.Descriptor instead.
 func (*ChatQuestionQuote) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{7}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ChatQuestionQuote) GetText() string {
@@ -522,7 +590,7 @@ type ChatSiblings struct {
 
 func (x *ChatSiblings) Reset() {
 	*x = ChatSiblings{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[8]
+	mi := &file_frontend_v1_chat_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -534,7 +602,7 @@ func (x *ChatSiblings) String() string {
 func (*ChatSiblings) ProtoMessage() {}
 
 func (x *ChatSiblings) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[8]
+	mi := &file_frontend_v1_chat_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -547,7 +615,7 @@ func (x *ChatSiblings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatSiblings.ProtoReflect.Descriptor instead.
 func (*ChatSiblings) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{8}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ChatSiblings) GetPosition() *ChatSiblingsPosition {
@@ -568,7 +636,7 @@ type ChatSiblingsPosition struct {
 
 func (x *ChatSiblingsPosition) Reset() {
 	*x = ChatSiblingsPosition{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[9]
+	mi := &file_frontend_v1_chat_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -580,7 +648,7 @@ func (x *ChatSiblingsPosition) String() string {
 func (*ChatSiblingsPosition) ProtoMessage() {}
 
 func (x *ChatSiblingsPosition) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[9]
+	mi := &file_frontend_v1_chat_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -593,7 +661,7 @@ func (x *ChatSiblingsPosition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatSiblingsPosition.ProtoReflect.Descriptor instead.
 func (*ChatSiblingsPosition) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{9}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ChatSiblingsPosition) GetLabel() string {
@@ -622,7 +690,7 @@ type ChatAnswer struct {
 
 func (x *ChatAnswer) Reset() {
 	*x = ChatAnswer{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[10]
+	mi := &file_frontend_v1_chat_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -634,7 +702,7 @@ func (x *ChatAnswer) String() string {
 func (*ChatAnswer) ProtoMessage() {}
 
 func (x *ChatAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[10]
+	mi := &file_frontend_v1_chat_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -647,7 +715,7 @@ func (x *ChatAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatAnswer.ProtoReflect.Descriptor instead.
 func (*ChatAnswer) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{10}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ChatAnswer) GetMarkdown() *ChatAnswerMarkdown {
@@ -682,7 +750,7 @@ type ChatAnswerMarkdown struct {
 
 func (x *ChatAnswerMarkdown) Reset() {
 	*x = ChatAnswerMarkdown{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[11]
+	mi := &file_frontend_v1_chat_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -694,7 +762,7 @@ func (x *ChatAnswerMarkdown) String() string {
 func (*ChatAnswerMarkdown) ProtoMessage() {}
 
 func (x *ChatAnswerMarkdown) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[11]
+	mi := &file_frontend_v1_chat_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -707,7 +775,7 @@ func (x *ChatAnswerMarkdown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatAnswerMarkdown.ProtoReflect.Descriptor instead.
 func (*ChatAnswerMarkdown) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{11}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ChatAnswerMarkdown) GetText() string {
@@ -728,7 +796,7 @@ type ChatAnswerQuoteMark struct {
 
 func (x *ChatAnswerQuoteMark) Reset() {
 	*x = ChatAnswerQuoteMark{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[12]
+	mi := &file_frontend_v1_chat_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -740,7 +808,7 @@ func (x *ChatAnswerQuoteMark) String() string {
 func (*ChatAnswerQuoteMark) ProtoMessage() {}
 
 func (x *ChatAnswerQuoteMark) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[12]
+	mi := &file_frontend_v1_chat_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -753,7 +821,7 @@ func (x *ChatAnswerQuoteMark) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatAnswerQuoteMark.ProtoReflect.Descriptor instead.
 func (*ChatAnswerQuoteMark) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{12}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ChatAnswerQuoteMark) GetText() string {
@@ -774,7 +842,7 @@ type ChatAnswerHighlight struct {
 
 func (x *ChatAnswerHighlight) Reset() {
 	*x = ChatAnswerHighlight{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[13]
+	mi := &file_frontend_v1_chat_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -786,7 +854,7 @@ func (x *ChatAnswerHighlight) String() string {
 func (*ChatAnswerHighlight) ProtoMessage() {}
 
 func (x *ChatAnswerHighlight) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[13]
+	mi := &file_frontend_v1_chat_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -799,7 +867,7 @@ func (x *ChatAnswerHighlight) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatAnswerHighlight.ProtoReflect.Descriptor instead.
 func (*ChatAnswerHighlight) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{13}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ChatAnswerHighlight) GetText() string {
@@ -822,7 +890,7 @@ type ChatPending struct {
 
 func (x *ChatPending) Reset() {
 	*x = ChatPending{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[14]
+	mi := &file_frontend_v1_chat_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -834,7 +902,7 @@ func (x *ChatPending) String() string {
 func (*ChatPending) ProtoMessage() {}
 
 func (x *ChatPending) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[14]
+	mi := &file_frontend_v1_chat_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -847,7 +915,7 @@ func (x *ChatPending) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatPending.ProtoReflect.Descriptor instead.
 func (*ChatPending) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{14}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ChatPending) GetQuestion() *ChatQuestion {
@@ -880,7 +948,7 @@ type ChatPendingAnswer struct {
 
 func (x *ChatPendingAnswer) Reset() {
 	*x = ChatPendingAnswer{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[15]
+	mi := &file_frontend_v1_chat_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -892,7 +960,7 @@ func (x *ChatPendingAnswer) String() string {
 func (*ChatPendingAnswer) ProtoMessage() {}
 
 func (x *ChatPendingAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[15]
+	mi := &file_frontend_v1_chat_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -905,7 +973,7 @@ func (x *ChatPendingAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatPendingAnswer.ProtoReflect.Descriptor instead.
 func (*ChatPendingAnswer) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{15}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ChatPendingAnswer) GetProgress() isChatPendingAnswer_Progress {
@@ -958,7 +1026,7 @@ type ChatPendingAnswerWaiting struct {
 
 func (x *ChatPendingAnswerWaiting) Reset() {
 	*x = ChatPendingAnswerWaiting{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[16]
+	mi := &file_frontend_v1_chat_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -970,7 +1038,7 @@ func (x *ChatPendingAnswerWaiting) String() string {
 func (*ChatPendingAnswerWaiting) ProtoMessage() {}
 
 func (x *ChatPendingAnswerWaiting) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[16]
+	mi := &file_frontend_v1_chat_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -983,7 +1051,7 @@ func (x *ChatPendingAnswerWaiting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatPendingAnswerWaiting.ProtoReflect.Descriptor instead.
 func (*ChatPendingAnswerWaiting) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{16}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{17}
 }
 
 // Answer text is arriving.
@@ -997,7 +1065,7 @@ type ChatPendingAnswerStreaming struct {
 
 func (x *ChatPendingAnswerStreaming) Reset() {
 	*x = ChatPendingAnswerStreaming{}
-	mi := &file_frontend_v1_chat_proto_msgTypes[17]
+	mi := &file_frontend_v1_chat_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1009,7 +1077,7 @@ func (x *ChatPendingAnswerStreaming) String() string {
 func (*ChatPendingAnswerStreaming) ProtoMessage() {}
 
 func (x *ChatPendingAnswerStreaming) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_chat_proto_msgTypes[17]
+	mi := &file_frontend_v1_chat_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1022,7 +1090,7 @@ func (x *ChatPendingAnswerStreaming) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatPendingAnswerStreaming.ProtoReflect.Descriptor instead.
 func (*ChatPendingAnswerStreaming) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{17}
+	return file_frontend_v1_chat_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ChatPendingAnswerStreaming) GetMarkdown() *ChatAnswerMarkdown {
@@ -1044,12 +1112,18 @@ const file_frontend_v1_chat_proto_rawDesc = "" +
 	"\rChatViewEmpty\x122\n" +
 	"\x04hint\x18\x01 \x01(\v2\x1e.frontend.v1.ChatViewEmptyHintR\x04hint\"'\n" +
 	"\x11ChatViewEmptyHint\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\x94\x01\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xd5\x01\n" +
 	"\x14ChatViewConversation\x127\n" +
 	"\texchanges\x18\x01 \x03(\v2\x19.frontend.v1.ChatExchangeR\texchanges\x127\n" +
-	"\apending\x18\x02 \x01(\v2\x18.frontend.v1.ChatPendingH\x00R\apending\x88\x01\x01B\n" +
+	"\apending\x18\x02 \x01(\v2\x18.frontend.v1.ChatPendingH\x00R\apending\x88\x01\x01\x124\n" +
+	"\x06reveal\x18\x03 \x01(\v2\x17.frontend.v1.ChatRevealH\x01R\x06reveal\x88\x01\x01B\n" +
 	"\n" +
-	"\b_pending\"\xe6\x01\n" +
+	"\b_pendingB\t\n" +
+	"\a_reveal\"O\n" +
+	"\n" +
+	"ChatReveal\x12%\n" +
+	"\x04node\x18\x01 \x01(\v2\x11.zettel.v1.NodeIdR\x04node\x12\x1a\n" +
+	"\bsequence\x18\x02 \x01(\x04R\bsequence\"\xe6\x01\n" +
 	"\fChatExchange\x12%\n" +
 	"\x04node\x18\x01 \x01(\v2\x11.zettel.v1.NodeIdR\x04node\x125\n" +
 	"\bquestion\x18\x02 \x01(\v2\x19.frontend.v1.ChatQuestionR\bquestion\x12:\n" +
@@ -1106,54 +1180,57 @@ func file_frontend_v1_chat_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_chat_proto_rawDescData
 }
 
-var file_frontend_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_frontend_v1_chat_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_frontend_v1_chat_proto_goTypes = []any{
 	(*ChatView)(nil),                   // 0: frontend.v1.ChatView
 	(*ChatViewEmpty)(nil),              // 1: frontend.v1.ChatViewEmpty
 	(*ChatViewEmptyHint)(nil),          // 2: frontend.v1.ChatViewEmptyHint
 	(*ChatViewConversation)(nil),       // 3: frontend.v1.ChatViewConversation
-	(*ChatExchange)(nil),               // 4: frontend.v1.ChatExchange
-	(*ChatQuestion)(nil),               // 5: frontend.v1.ChatQuestion
-	(*ChatQuestionText)(nil),           // 6: frontend.v1.ChatQuestionText
-	(*ChatQuestionQuote)(nil),          // 7: frontend.v1.ChatQuestionQuote
-	(*ChatSiblings)(nil),               // 8: frontend.v1.ChatSiblings
-	(*ChatSiblingsPosition)(nil),       // 9: frontend.v1.ChatSiblingsPosition
-	(*ChatAnswer)(nil),                 // 10: frontend.v1.ChatAnswer
-	(*ChatAnswerMarkdown)(nil),         // 11: frontend.v1.ChatAnswerMarkdown
-	(*ChatAnswerQuoteMark)(nil),        // 12: frontend.v1.ChatAnswerQuoteMark
-	(*ChatAnswerHighlight)(nil),        // 13: frontend.v1.ChatAnswerHighlight
-	(*ChatPending)(nil),                // 14: frontend.v1.ChatPending
-	(*ChatPendingAnswer)(nil),          // 15: frontend.v1.ChatPendingAnswer
-	(*ChatPendingAnswerWaiting)(nil),   // 16: frontend.v1.ChatPendingAnswerWaiting
-	(*ChatPendingAnswerStreaming)(nil), // 17: frontend.v1.ChatPendingAnswerStreaming
-	(*v1.NodeId)(nil),                  // 18: zettel.v1.NodeId
+	(*ChatReveal)(nil),                 // 4: frontend.v1.ChatReveal
+	(*ChatExchange)(nil),               // 5: frontend.v1.ChatExchange
+	(*ChatQuestion)(nil),               // 6: frontend.v1.ChatQuestion
+	(*ChatQuestionText)(nil),           // 7: frontend.v1.ChatQuestionText
+	(*ChatQuestionQuote)(nil),          // 8: frontend.v1.ChatQuestionQuote
+	(*ChatSiblings)(nil),               // 9: frontend.v1.ChatSiblings
+	(*ChatSiblingsPosition)(nil),       // 10: frontend.v1.ChatSiblingsPosition
+	(*ChatAnswer)(nil),                 // 11: frontend.v1.ChatAnswer
+	(*ChatAnswerMarkdown)(nil),         // 12: frontend.v1.ChatAnswerMarkdown
+	(*ChatAnswerQuoteMark)(nil),        // 13: frontend.v1.ChatAnswerQuoteMark
+	(*ChatAnswerHighlight)(nil),        // 14: frontend.v1.ChatAnswerHighlight
+	(*ChatPending)(nil),                // 15: frontend.v1.ChatPending
+	(*ChatPendingAnswer)(nil),          // 16: frontend.v1.ChatPendingAnswer
+	(*ChatPendingAnswerWaiting)(nil),   // 17: frontend.v1.ChatPendingAnswerWaiting
+	(*ChatPendingAnswerStreaming)(nil), // 18: frontend.v1.ChatPendingAnswerStreaming
+	(*v1.NodeId)(nil),                  // 19: zettel.v1.NodeId
 }
 var file_frontend_v1_chat_proto_depIdxs = []int32{
 	1,  // 0: frontend.v1.ChatView.empty:type_name -> frontend.v1.ChatViewEmpty
 	3,  // 1: frontend.v1.ChatView.conversation:type_name -> frontend.v1.ChatViewConversation
 	2,  // 2: frontend.v1.ChatViewEmpty.hint:type_name -> frontend.v1.ChatViewEmptyHint
-	4,  // 3: frontend.v1.ChatViewConversation.exchanges:type_name -> frontend.v1.ChatExchange
-	14, // 4: frontend.v1.ChatViewConversation.pending:type_name -> frontend.v1.ChatPending
-	18, // 5: frontend.v1.ChatExchange.node:type_name -> zettel.v1.NodeId
-	5,  // 6: frontend.v1.ChatExchange.question:type_name -> frontend.v1.ChatQuestion
-	8,  // 7: frontend.v1.ChatExchange.siblings:type_name -> frontend.v1.ChatSiblings
-	10, // 8: frontend.v1.ChatExchange.answer:type_name -> frontend.v1.ChatAnswer
-	6,  // 9: frontend.v1.ChatQuestion.text:type_name -> frontend.v1.ChatQuestionText
-	7,  // 10: frontend.v1.ChatQuestion.quote:type_name -> frontend.v1.ChatQuestionQuote
-	9,  // 11: frontend.v1.ChatSiblings.position:type_name -> frontend.v1.ChatSiblingsPosition
-	11, // 12: frontend.v1.ChatAnswer.markdown:type_name -> frontend.v1.ChatAnswerMarkdown
-	12, // 13: frontend.v1.ChatAnswer.quote_marks:type_name -> frontend.v1.ChatAnswerQuoteMark
-	13, // 14: frontend.v1.ChatAnswer.highlight:type_name -> frontend.v1.ChatAnswerHighlight
-	5,  // 15: frontend.v1.ChatPending.question:type_name -> frontend.v1.ChatQuestion
-	15, // 16: frontend.v1.ChatPending.answer:type_name -> frontend.v1.ChatPendingAnswer
-	16, // 17: frontend.v1.ChatPendingAnswer.waiting:type_name -> frontend.v1.ChatPendingAnswerWaiting
-	17, // 18: frontend.v1.ChatPendingAnswer.streaming:type_name -> frontend.v1.ChatPendingAnswerStreaming
-	11, // 19: frontend.v1.ChatPendingAnswerStreaming.markdown:type_name -> frontend.v1.ChatAnswerMarkdown
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	5,  // 3: frontend.v1.ChatViewConversation.exchanges:type_name -> frontend.v1.ChatExchange
+	15, // 4: frontend.v1.ChatViewConversation.pending:type_name -> frontend.v1.ChatPending
+	4,  // 5: frontend.v1.ChatViewConversation.reveal:type_name -> frontend.v1.ChatReveal
+	19, // 6: frontend.v1.ChatReveal.node:type_name -> zettel.v1.NodeId
+	19, // 7: frontend.v1.ChatExchange.node:type_name -> zettel.v1.NodeId
+	6,  // 8: frontend.v1.ChatExchange.question:type_name -> frontend.v1.ChatQuestion
+	9,  // 9: frontend.v1.ChatExchange.siblings:type_name -> frontend.v1.ChatSiblings
+	11, // 10: frontend.v1.ChatExchange.answer:type_name -> frontend.v1.ChatAnswer
+	7,  // 11: frontend.v1.ChatQuestion.text:type_name -> frontend.v1.ChatQuestionText
+	8,  // 12: frontend.v1.ChatQuestion.quote:type_name -> frontend.v1.ChatQuestionQuote
+	10, // 13: frontend.v1.ChatSiblings.position:type_name -> frontend.v1.ChatSiblingsPosition
+	12, // 14: frontend.v1.ChatAnswer.markdown:type_name -> frontend.v1.ChatAnswerMarkdown
+	13, // 15: frontend.v1.ChatAnswer.quote_marks:type_name -> frontend.v1.ChatAnswerQuoteMark
+	14, // 16: frontend.v1.ChatAnswer.highlight:type_name -> frontend.v1.ChatAnswerHighlight
+	6,  // 17: frontend.v1.ChatPending.question:type_name -> frontend.v1.ChatQuestion
+	16, // 18: frontend.v1.ChatPending.answer:type_name -> frontend.v1.ChatPendingAnswer
+	17, // 19: frontend.v1.ChatPendingAnswer.waiting:type_name -> frontend.v1.ChatPendingAnswerWaiting
+	18, // 20: frontend.v1.ChatPendingAnswer.streaming:type_name -> frontend.v1.ChatPendingAnswerStreaming
+	12, // 21: frontend.v1.ChatPendingAnswerStreaming.markdown:type_name -> frontend.v1.ChatAnswerMarkdown
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_chat_proto_init() }
@@ -1166,10 +1243,10 @@ func file_frontend_v1_chat_proto_init() {
 		(*ChatView_Conversation)(nil),
 	}
 	file_frontend_v1_chat_proto_msgTypes[3].OneofWrappers = []any{}
-	file_frontend_v1_chat_proto_msgTypes[4].OneofWrappers = []any{}
 	file_frontend_v1_chat_proto_msgTypes[5].OneofWrappers = []any{}
-	file_frontend_v1_chat_proto_msgTypes[10].OneofWrappers = []any{}
-	file_frontend_v1_chat_proto_msgTypes[15].OneofWrappers = []any{
+	file_frontend_v1_chat_proto_msgTypes[6].OneofWrappers = []any{}
+	file_frontend_v1_chat_proto_msgTypes[11].OneofWrappers = []any{}
+	file_frontend_v1_chat_proto_msgTypes[16].OneofWrappers = []any{
 		(*ChatPendingAnswer_Waiting)(nil),
 		(*ChatPendingAnswer_Streaming)(nil),
 	}
@@ -1179,7 +1256,7 @@ func file_frontend_v1_chat_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_chat_proto_rawDesc), len(file_frontend_v1_chat_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

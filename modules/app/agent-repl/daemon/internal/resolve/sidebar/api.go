@@ -143,6 +143,10 @@ type Resolver interface {
 	// other arm. The OpenTabs
 	// coordinator is the one caller.
 	SetOpening(ws ids.WorkspaceID, opening bool)
+	// SetThreadOutline installs a chat thread's outline (the chat service's,
+	// chat.Deps.Outline), nil once it has none. The current thread's row
+	// carries it (frontend.v1.RosterThreadRow.outline).
+	SetThreadOutline(ws ids.WorkspaceID, outline *frontendv1.RosterThreadOutline)
 	// SetVendorStart installs where the workspace's vendor-start run stands
 	// (the fleet's vendor-start faults). Any run standing draws `vendor_fault`
 	// (turquoise); the footer carries which of the three steps it is (owner

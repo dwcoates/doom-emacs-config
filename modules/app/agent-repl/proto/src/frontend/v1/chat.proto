@@ -65,6 +65,20 @@ message ChatViewConversation {
   // question is being answered. The shown path always ends at the pending
   // question's parent while one is in flight.
   optional ChatPending pending = 2;
+  // The node the user last asked to see (agentrepl.v1.ShowChatNode), which
+  // the page brings into view when the sequence is one it has not acted on.
+  // UNSET until the thread's first such ask.
+  optional ChatReveal reveal = 3;
+}
+
+// A node to bring into view. A value in a whole-replaced view, so its
+// sequence tells a new ask from the one already acted on: a page acts on a
+// sequence above the last it saw, and a page's first view only records it.
+message ChatReveal {
+  // The node, on the shown path.
+  zettel.v1.NodeId node = 1;
+  // Raised by one on every ask, from 1.
+  uint64 sequence = 2;
 }
 
 // One node on the shown path: its question bubble, its sibling control and

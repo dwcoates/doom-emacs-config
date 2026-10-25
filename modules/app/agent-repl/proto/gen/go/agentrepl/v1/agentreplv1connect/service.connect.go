@@ -199,6 +199,8 @@ const (
 	// AgentReplSwitchChatSiblingProcedure is the fully-qualified name of the AgentRepl's
 	// SwitchChatSibling RPC.
 	AgentReplSwitchChatSiblingProcedure = "/agentrepl.v1.AgentRepl/SwitchChatSibling"
+	// AgentReplShowChatNodeProcedure is the fully-qualified name of the AgentRepl's ShowChatNode RPC.
+	AgentReplShowChatNodeProcedure = "/agentrepl.v1.AgentRepl/ShowChatNode"
 	// AgentReplReportChatSightingsProcedure is the fully-qualified name of the AgentRepl's
 	// ReportChatSightings RPC.
 	AgentReplReportChatSightingsProcedure = "/agentrepl.v1.AgentRepl/ReportChatSightings"
@@ -421,6 +423,7 @@ var (
 	agentReplRequestNewThreadMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("RequestNewThread")
 	agentReplWatchChatMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("WatchChat")
 	agentReplSwitchChatSiblingMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SwitchChatSibling")
+	agentReplShowChatNodeMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("ShowChatNode")
 	agentReplReportChatSightingsMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportChatSightings")
 	agentReplSelectChatTextMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SelectChatText")
 	agentReplSearchChatsMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SearchChats")
@@ -665,6 +668,8 @@ type AgentReplClient interface {
 	WatchChat(context.Context, *connect.Request[v1.WatchChatRequest]) (*connect.ServerStreamForClient[v1.WatchChatResponse], error)
 	// Show a bubble's previous or next sibling.
 	SwitchChatSibling(context.Context, *connect.Request[v1.SwitchChatSiblingRequest]) (*connect.Response[v1.SwitchChatSiblingResponse], error)
+	// Put a node of the thread's outline on its shown path, and reveal it.
+	ShowChatNode(context.Context, *connect.Request[v1.ShowChatNodeRequest]) (*connect.Response[v1.ShowChatNodeResponse], error)
 	// Answer bubbles were seen.
 	ReportChatSightings(context.Context, *connect.Request[v1.ReportChatSightingsRequest]) (*connect.Response[v1.ReportChatSightingsResponse], error)
 	// Hold or clear the thread's highlight.
@@ -1217,6 +1222,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSwitchChatSiblingMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		showChatNode: connect.NewClient[v1.ShowChatNodeRequest, v1.ShowChatNodeResponse](
+			httpClient,
+			baseURL+AgentReplShowChatNodeProcedure,
+			connect.WithSchema(agentReplShowChatNodeMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		reportChatSightings: connect.NewClient[v1.ReportChatSightingsRequest, v1.ReportChatSightingsResponse](
 			httpClient,
 			baseURL+AgentReplReportChatSightingsProcedure,
@@ -1645,6 +1656,7 @@ type agentReplClient struct {
 	requestNewThread           *connect.Client[v1.RequestNewThreadRequest, v1.RequestNewThreadResponse]
 	watchChat                  *connect.Client[v1.WatchChatRequest, v1.WatchChatResponse]
 	switchChatSibling          *connect.Client[v1.SwitchChatSiblingRequest, v1.SwitchChatSiblingResponse]
+	showChatNode               *connect.Client[v1.ShowChatNodeRequest, v1.ShowChatNodeResponse]
 	reportChatSightings        *connect.Client[v1.ReportChatSightingsRequest, v1.ReportChatSightingsResponse]
 	selectChatText             *connect.Client[v1.SelectChatTextRequest, v1.SelectChatTextResponse]
 	searchChats                *connect.Client[v1.SearchChatsRequest, v1.SearchChatsResponse]
@@ -1995,6 +2007,11 @@ func (c *agentReplClient) WatchChat(ctx context.Context, req *connect.Request[v1
 // SwitchChatSibling calls agentrepl.v1.AgentRepl.SwitchChatSibling.
 func (c *agentReplClient) SwitchChatSibling(ctx context.Context, req *connect.Request[v1.SwitchChatSiblingRequest]) (*connect.Response[v1.SwitchChatSiblingResponse], error) {
 	return c.switchChatSibling.CallUnary(ctx, req)
+}
+
+// ShowChatNode calls agentrepl.v1.AgentRepl.ShowChatNode.
+func (c *agentReplClient) ShowChatNode(ctx context.Context, req *connect.Request[v1.ShowChatNodeRequest]) (*connect.Response[v1.ShowChatNodeResponse], error) {
+	return c.showChatNode.CallUnary(ctx, req)
 }
 
 // ReportChatSightings calls agentrepl.v1.AgentRepl.ReportChatSightings.
@@ -2479,6 +2496,8 @@ type AgentReplHandler interface {
 	WatchChat(context.Context, *connect.Request[v1.WatchChatRequest], *connect.ServerStream[v1.WatchChatResponse]) error
 	// Show a bubble's previous or next sibling.
 	SwitchChatSibling(context.Context, *connect.Request[v1.SwitchChatSiblingRequest]) (*connect.Response[v1.SwitchChatSiblingResponse], error)
+	// Put a node of the thread's outline on its shown path, and reveal it.
+	ShowChatNode(context.Context, *connect.Request[v1.ShowChatNodeRequest]) (*connect.Response[v1.ShowChatNodeResponse], error)
 	// Answer bubbles were seen.
 	ReportChatSightings(context.Context, *connect.Request[v1.ReportChatSightingsRequest]) (*connect.Response[v1.ReportChatSightingsResponse], error)
 	// Hold or clear the thread's highlight.
@@ -3027,6 +3046,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSwitchChatSiblingMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplShowChatNodeHandler := connect.NewUnaryHandler(
+		AgentReplShowChatNodeProcedure,
+		svc.ShowChatNode,
+		connect.WithSchema(agentReplShowChatNodeMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplReportChatSightingsHandler := connect.NewUnaryHandler(
 		AgentReplReportChatSightingsProcedure,
 		svc.ReportChatSightings,
@@ -3510,6 +3535,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplWatchChatHandler.ServeHTTP(w, r)
 		case AgentReplSwitchChatSiblingProcedure:
 			agentReplSwitchChatSiblingHandler.ServeHTTP(w, r)
+		case AgentReplShowChatNodeProcedure:
+			agentReplShowChatNodeHandler.ServeHTTP(w, r)
 		case AgentReplReportChatSightingsProcedure:
 			agentReplReportChatSightingsHandler.ServeHTTP(w, r)
 		case AgentReplSelectChatTextProcedure:
@@ -3869,6 +3896,10 @@ func (UnimplementedAgentReplHandler) WatchChat(context.Context, *connect.Request
 
 func (UnimplementedAgentReplHandler) SwitchChatSibling(context.Context, *connect.Request[v1.SwitchChatSiblingRequest]) (*connect.Response[v1.SwitchChatSiblingResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SwitchChatSibling is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ShowChatNode(context.Context, *connect.Request[v1.ShowChatNodeRequest]) (*connect.Response[v1.ShowChatNodeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ShowChatNode is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) ReportChatSightings(context.Context, *connect.Request[v1.ReportChatSightingsRequest]) (*connect.Response[v1.ReportChatSightingsResponse], error) {

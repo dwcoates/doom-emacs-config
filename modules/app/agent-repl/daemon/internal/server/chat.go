@@ -43,6 +43,8 @@ type Chat interface {
 	Asked(ctx context.Context, thread ids.WorkspaceID, asked *zettelv1.NodeParent) error
 	// SwitchSibling shows a shown node's previous or next sibling.
 	SwitchSibling(ctx context.Context, thread ids.WorkspaceID, shown chat.NodeID, way chat.Direction) error
+	// Show moves the shown path through a node and reveals it.
+	Show(ctx context.Context, thread ids.WorkspaceID, node chat.NodeID) error
 	// Select holds a highlight, or clears it (nil).
 	Select(ctx context.Context, thread ids.WorkspaceID, h *chat.Highlight) error
 	// Sightings counts one sighting per named node.
@@ -196,6 +198,28 @@ func (s *server) SwitchChatSibling(
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	resp.Result = &agentreplv1.SwitchChatSiblingResponse_Success{Success: &agentreplv1.SwitchChatSiblingSuccess{}}
+	return connect.NewResponse(resp), nil
+}
+
+// ShowChatNode moves a thread's shown path through a node of its outline and
+// reveals it.
+func (s *server) ShowChatNode(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ShowChatNodeRequest],
+) (*connect.Response[agentreplv1.ShowChatNodeResponse], error) {
+	const rpc = "ShowChatNode"
+	if strings.TrimSpace(req.Msg.GetNode().GetId()) == "" {
+		return nil, invalid("node.id", "the node is required")
+	}
+	resp := &agentreplv1.ShowChatNodeResponse{}
+	subject, cerr, done := s.threadSubject(ctx, rpc, req.Msg.GetThread(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	if err := s.deps.Chat.Show(ctx, subject.Record.ID, chat.NodeID(req.Msg.GetNode().GetId())); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.ShowChatNodeResponse_Success{Success: &agentreplv1.ShowChatNodeSuccess{}}
 	return connect.NewResponse(resp), nil
 }
 
