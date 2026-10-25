@@ -111,17 +111,15 @@ describe("the page's one connection", () => {
 });
 
 /**
- * THE RECONNECT CASES' OWN BOUND. A reconnect is TWO page attaches -- the
- * boot's, then the re-subscribe of every view over a fresh page stream, each a
- * real stream over the fake daemon's socket with its replay -- where the then-900ms
- * global (vitest.integration.config.ts) was sized on single-attach pages
- * (slowest healthy test 274.8ms). Measured 2026-10-06, the file run 12 times
- * on a quiet host: these three tests' medians 63-67ms against 33-45ms for the
- * single-attach ones, and their slowest 516ms, 457ms and 429ms. Under a full
- * suite run two of them crossed 900ms twice in a day. ~3x the slowest healthy
- * case.
+ * THE RECONNECT AND MOVE CASES TAKE THE INTEGRATION GLOBAL
+ * (vitest.integration.config.ts, 3000ms). They once carried 1500ms of their
+ * own, ~3x their slowest quiet run (516ms, 2026-10-06), to RAISE them above
+ * the then-900ms global. The global has since been resized from the merge
+ * gate's loaded runs (max 1475ms for single-attach pages, 2026-10-13), so the
+ * old figure had turned into a bound TIGHTER than every single-attach page's,
+ * on the cases that attach twice. In 29 gate passes the move case's slowest
+ * was 68ms; one gate run (2026-10-25) stalled it past 1500ms.
  */
-const RECONNECT_BOUND_MS = 1_500;
 
 describe("the page's stream dropping", () => {
   it("reports the degraded state the views share", async () => {
@@ -158,7 +156,7 @@ describe("the page's stream dropping", () => {
     // COUNT that carries the guarantee, not the names.
     expect(harness.fake.attachedPages()).toHaveLength(1);
     expect(harness.fake.pageSubscriptions()).toHaveLength(before.length);
-  }, RECONNECT_BOUND_MS);
+  });
 
   it("replays each view exactly as its own rpc replays it", async () => {
     // Arrange: the footer says one thing while the page is connected.
@@ -188,7 +186,7 @@ describe("the page's stream dropping", () => {
     // whatever the dead stream last said — which is indistinguishable from a
     // healthy page until the moment it matters.
     expect(harness.$(".footer-tokens")?.textContent).toContain("while-it-was-down");
-  }, RECONNECT_BOUND_MS);
+  });
 
   it("retracts the degraded state once the views are drawing again", async () => {
     // Arrange.
@@ -206,7 +204,7 @@ describe("the page's stream dropping", () => {
     // Assert: the card is a statement about NOW, so a recovered page must not
     // keep wearing it.
     expect(harness.failureArms()).not.toContain("daemonUnreachable");
-  }, RECONNECT_BOUND_MS);
+  });
 });
 
 describe("a view's planned ending", () => {
@@ -327,7 +325,7 @@ describe("the workspace moving away", () => {
     // Assert: the connection is released rather than left reopening on backoff
     // for a workspace this page can never get back.
     expect(harness.fake.attachedPages()).toEqual([]);
-  }, 1_500);
+  });
 
   it("draws nothing the old workspace pushes afterwards", async () => {
     // Arrange.
