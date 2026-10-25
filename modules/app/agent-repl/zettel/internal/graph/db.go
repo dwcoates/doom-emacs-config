@@ -120,6 +120,7 @@ type migration struct {
 // layout is the number of steps applied to it.
 var migrations = []migration{
 	{Version: 1, Name: "graph", DDL: layoutOneDDL},
+	{Version: 2, Name: "search", DDL: layoutTwoDDL},
 }
 
 const layoutOneDDL = `
@@ -152,6 +153,33 @@ CREATE TABLE revision (
   written_at_ms  INTEGER NOT NULL,
   PRIMARY KEY (node_id, number)
 );
+`
+
+// layoutTwoDDL is the search index (search.go): every node's question and
+// newest answer, kept in step with the node and revision tables by triggers,
+// so no write path can leave the index behind. The index names its node by
+// id, never by rowid, which a VACUUM may renumber.
+const layoutTwoDDL = `
+CREATE VIRTUAL TABLE node_text USING fts5(
+  question, answer, node_id UNINDEXED, thread_id UNINDEXED,
+  tokenize = 'unicode61 remove_diacritics 2'
+);
+INSERT INTO node_text (question, answer, node_id, thread_id)
+  SELECT node.question,
+         (SELECT markdown FROM revision WHERE revision.node_id = node.id ORDER BY number DESC LIMIT 1),
+         node.id, node.thread_id
+    FROM node;
+CREATE TRIGGER node_text_on_node AFTER INSERT ON node BEGIN
+  INSERT INTO node_text (question, answer, node_id, thread_id) VALUES (NEW.question, '', NEW.id, NEW.thread_id);
+END;
+CREATE TRIGGER node_text_on_revision AFTER INSERT ON revision
+  WHEN NEW.number = (SELECT MAX(number) FROM revision WHERE node_id = NEW.node_id)
+BEGIN
+  UPDATE node_text SET answer = NEW.markdown WHERE node_id = NEW.node_id;
+END;
+CREATE TRIGGER node_text_on_delete AFTER DELETE ON node BEGIN
+  DELETE FROM node_text WHERE node_id = OLD.id;
+END;
 `
 
 // migrate applies every step the file has not had, each in its own

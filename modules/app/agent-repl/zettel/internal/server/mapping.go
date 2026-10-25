@@ -76,3 +76,20 @@ func NodeToProto(n graph.Node) *zettelv1.Node {
 		Turn:        &zettelv1.ExchangeTurn{TurnId: n.Turn},
 	}
 }
+
+// MatchToProto renders a search match.
+func MatchToProto(m graph.Match) *zettelv1.SearchThreadsMatch {
+	snippet := &zettelv1.Snippet{}
+	for _, part := range m.Snippet {
+		if part.Hit {
+			snippet.Parts = append(snippet.Parts, &zettelv1.SnippetPart{Part: &zettelv1.SnippetPart_Hit{Hit: part.Text}})
+		} else {
+			snippet.Parts = append(snippet.Parts, &zettelv1.SnippetPart{Part: &zettelv1.SnippetPart_Plain{Plain: part.Text}})
+		}
+	}
+	return &zettelv1.SearchThreadsMatch{
+		Thread:  &zettelv1.ThreadId{Id: string(m.Thread)},
+		Node:    &zettelv1.NodeId{Id: string(m.Node)},
+		Snippet: snippet,
+	}
+}

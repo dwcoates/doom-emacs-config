@@ -144,6 +144,58 @@ func (s *Server) GetThread(ctx context.Context, req *connect.Request[zettelv1.Ge
 	return connect.NewResponse(&zettelv1.GetThreadResponse{Result: &zettelv1.GetThreadResponse_Success{Success: success}}), nil
 }
 
+// SearchThreads serves the threads whose nodes say the query's words.
+func (s *Server) SearchThreads(ctx context.Context, req *connect.Request[zettelv1.SearchThreadsRequest]) (*connect.Response[zettelv1.SearchThreadsResponse], error) {
+	const op = "zettel.rpc.search_threads"
+	fail := func(f *zettelv1.SearchThreadsFailure) (*connect.Response[zettelv1.SearchThreadsResponse], error) {
+		return connect.NewResponse(&zettelv1.SearchThreadsResponse{Result: &zettelv1.SearchThreadsResponse_Failure{Failure: f}}), nil
+	}
+	matches, err := s.graph.Search(ctx, req.Msg.GetQuery())
+	switch {
+	case errors.Is(err, graph.ErrBlankQuery):
+		s.refused(op, "invalid_request", "query")
+		return fail(&zettelv1.SearchThreadsFailure{
+			Detail: err.Error(), Kind: &zettelv1.SearchThreadsFailure_InvalidRequest{InvalidRequest: &zettelv1.SearchThreadsInvalidRequest{Field: "query"}},
+		})
+	case err != nil:
+		return fail(&zettelv1.SearchThreadsFailure{
+			Detail: err.Error(), Kind: &zettelv1.SearchThreadsFailure_StorageFailure{StorageFailure: &zettelv1.SearchThreadsStorageFailure{}},
+		})
+	}
+	success := &zettelv1.SearchThreadsSuccess{}
+	for _, m := range matches {
+		success.Matches = append(success.Matches, MatchToProto(m))
+	}
+	s.log.Debug(op, "served", zlog.Context{"matches": len(matches)})
+	return connect.NewResponse(&zettelv1.SearchThreadsResponse{Result: &zettelv1.SearchThreadsResponse_Success{Success: success}}), nil
+}
+
+// ---- Deletion ----
+
+// DeleteThread destroys one thread's graph, all of it or none.
+func (s *Server) DeleteThread(ctx context.Context, req *connect.Request[zettelv1.DeleteThreadRequest]) (*connect.Response[zettelv1.DeleteThreadResponse], error) {
+	const op = "zettel.rpc.delete_thread"
+	fail := func(f *zettelv1.DeleteThreadFailure) (*connect.Response[zettelv1.DeleteThreadResponse], error) {
+		return connect.NewResponse(&zettelv1.DeleteThreadResponse{Result: &zettelv1.DeleteThreadResponse_Failure{Failure: f}}), nil
+	}
+	thread, ok := threadOf(req.Msg.GetThread())
+	if !ok {
+		s.refused(op, "invalid_request", "thread")
+		return fail(&zettelv1.DeleteThreadFailure{
+			Detail: "missing or empty field thread", Kind: &zettelv1.DeleteThreadFailure_InvalidRequest{InvalidRequest: &zettelv1.DeleteThreadInvalidRequest{Field: "thread"}},
+		})
+	}
+	deleted, err := s.graph.DeleteThread(ctx, thread)
+	if err != nil {
+		return fail(&zettelv1.DeleteThreadFailure{
+			Detail: err.Error(), Kind: &zettelv1.DeleteThreadFailure_StorageFailure{StorageFailure: &zettelv1.DeleteThreadStorageFailure{}},
+		})
+	}
+	return connect.NewResponse(&zettelv1.DeleteThreadResponse{Result: &zettelv1.DeleteThreadResponse_Success{
+		Success: &zettelv1.DeleteThreadSuccess{NodesDeleted: uint32(deleted)},
+	}}), nil
+}
+
 // ---- Sightings ----
 
 // RecordSightings counts one sighting per named node, all or nothing.

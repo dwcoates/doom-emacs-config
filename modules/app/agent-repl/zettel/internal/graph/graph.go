@@ -66,6 +66,8 @@ var (
 	// ErrThreadAlreadyStarted: the thread already has a root from another
 	// turn.
 	ErrThreadAlreadyStarted = errors.New("the thread already started")
+	// ErrBlankQuery: a search named no word to search for.
+	ErrBlankQuery = errors.New("the search names no word")
 )
 
 // UnknownNodeError names the first node a request named that does not exist.

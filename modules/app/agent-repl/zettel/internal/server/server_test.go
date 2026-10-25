@@ -255,3 +255,102 @@ func TestStorageFailureAnswersTheStorageArm(t *testing.T) {
 		t.Errorf("no error record for the storage failure: %q", f.log.String())
 	}
 }
+
+func TestSearchThreadsArms(t *testing.T) {
+	cases := []struct {
+		name  string
+		query string
+		want  func(*zettelv1.SearchThreadsResponse) bool
+	}{
+		{"a blank query", "  ", func(r *zettelv1.SearchThreadsResponse) bool {
+			return r.GetFailure().GetInvalidRequest().GetField() == "query"
+		}},
+		{"a matching query", "turn1", func(r *zettelv1.SearchThreadsResponse) bool {
+			m := r.GetSuccess().GetMatches()
+			return len(m) == 1 && m[0].GetThread().GetId() == "t" && m[0].GetNode().GetId() == "id1" &&
+				len(m[0].GetSnippet().GetParts()) > 0
+		}},
+		{"a query nothing says", "nowhere", func(r *zettelv1.SearchThreadsResponse) bool {
+			return r.GetSuccess() != nil && len(r.GetSuccess().GetMatches()) == 0
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.answered(t, "t", "turn1", threadStart())
+
+			// Act
+			resp, err := f.srv.SearchThreads(ctx(), connect.NewRequest(&zettelv1.SearchThreadsRequest{Query: tc.query}))
+
+			// Assert
+			if err != nil || !tc.want(resp.Msg) {
+				t.Errorf("response = %v, err = %v", resp.Msg, err)
+			}
+		})
+	}
+}
+
+func TestMatchToProtoMarksEachPart(t *testing.T) {
+	// Act
+	got := MatchToProto(graph.Match{Thread: "t", Node: "n", Snippet: []graph.SnippetPart{{Text: "a "}, {Text: "b", Hit: true}}})
+
+	// Assert
+	parts := got.GetSnippet().GetParts()
+	if len(parts) != 2 || parts[0].GetPlain() != "a " || parts[1].GetHit() != "b" {
+		t.Fatalf("parts = %v, want a plain run then a hit", parts)
+	}
+}
+
+func TestDeleteThreadArms(t *testing.T) {
+	cases := []struct {
+		name   string
+		thread *zettelv1.ThreadId
+		want   func(*zettelv1.DeleteThreadResponse) bool
+	}{
+		{"an unset thread", nil, func(r *zettelv1.DeleteThreadResponse) bool {
+			return r.GetFailure().GetInvalidRequest().GetField() == "thread"
+		}},
+		{"a thread with a node", &zettelv1.ThreadId{Id: "t"}, func(r *zettelv1.DeleteThreadResponse) bool {
+			return r.GetSuccess().GetNodesDeleted() == 1
+		}},
+		{"a thread zettel holds nothing of", &zettelv1.ThreadId{Id: "other"}, func(r *zettelv1.DeleteThreadResponse) bool {
+			return r.GetSuccess() != nil && r.GetSuccess().GetNodesDeleted() == 0
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.answered(t, "t", "turn1", threadStart())
+
+			// Act
+			resp, err := f.srv.DeleteThread(ctx(), connect.NewRequest(&zettelv1.DeleteThreadRequest{Thread: tc.thread}))
+
+			// Assert
+			if err != nil || !tc.want(resp.Msg) {
+				t.Errorf("response = %v, err = %v", resp.Msg, err)
+			}
+		})
+	}
+}
+
+func TestSearchAndDeleteAnswerTheStorageArm(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	if err := f.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	search, serr := f.srv.SearchThreads(ctx(), connect.NewRequest(&zettelv1.SearchThreadsRequest{Query: "sky"}))
+	del, derr := f.srv.DeleteThread(ctx(), connect.NewRequest(&zettelv1.DeleteThreadRequest{Thread: &zettelv1.ThreadId{Id: "t"}}))
+
+	// Assert
+	if serr != nil || search.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Errorf("search = %v, err = %v, want the storage arm", search.Msg, serr)
+	}
+	if derr != nil || del.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Errorf("delete = %v, err = %v, want the storage arm", del.Msg, derr)
+	}
+}
