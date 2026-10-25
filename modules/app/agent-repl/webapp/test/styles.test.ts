@@ -3065,14 +3065,18 @@ describe("the held prompt's control row", () => {
     // Arrange / Act
     const size = valueOf(allDeclarationsOf(".queued-actions ar-button"), "font-size");
     // Assert
-    expect(size).toBe("calc(0.75rem * var(--feed-text-scale))");
+    expect(size).toBe("calc(0.68rem * var(--feed-text-scale))");
   });
 
-  it("keeps a control's leading at 1.15, about 10% shorter than 1.3", () => {
-    // Arrange / Act
-    const leading = valueOf(allDeclarationsOf(".queued-actions ar-button"), "line-height");
+  it("keeps a control's line box at a 0.75rem text's 1.15 leading, so the smaller label leaves the control's height alone", () => {
+    // Arrange
+    const decls = allDeclarationsOf(".queued-actions ar-button");
+    const size = Number(/calc\(([\d.]+)rem \* var\(--feed-text-scale\)\)/.exec(valueOf(decls, "font-size") ?? "")?.[1]);
+    const leading = /calc\(([\d.]+) \* ([\d.]+) \/ ([\d.]+)\)/.exec(valueOf(decls, "line-height") ?? "");
+    // Act
+    const lineBox = size * (Number(leading?.[1]) * Number(leading?.[2])) / Number(leading?.[3]);
     // Assert
-    expect(leading).toBe("1.15");
+    expect(lineBox).toBeCloseTo(0.75 * 1.15, 10);
   });
 
   it("draws every control in the one plain border, none in a color of its own", () => {
