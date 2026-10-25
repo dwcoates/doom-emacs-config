@@ -22,13 +22,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sweepguard"
 	"agent-repld/internal/wsm"
 )
 
@@ -67,7 +67,7 @@ const (
 
 // ErrSweepRunning is Sweep's refusal while another sweep of this reaper is in
 // flight. The sweep never runs concurrently with itself.
-var ErrSweepRunning = errors.New("worktreereap: a sweep is already running")
+var ErrSweepRunning = sweepguard.ErrRunning
 
 // Git is the part of the git leaf the reaper drives.
 type Git interface {
@@ -122,8 +122,8 @@ type Deps struct {
 // Reaper is the landed-worktree reaper.
 type Reaper struct {
 	deps Deps
-	// sweeping is held for one sweep's whole run; TryLock is the refusal.
-	sweeping sync.Mutex
+	// guard serializes the sweeps, in this process and across daemons.
+	guard *sweepguard.Guard
 }
 
 // New builds the reaper, refusing a missing collaborator or a non-positive
@@ -146,7 +146,7 @@ func New(deps Deps) (*Reaper, error) {
 		return nil, fmt.Errorf("worktreereap: the windows must be positive (idle after %v, expire after %v, start delay %v, every %v)",
 			deps.IdleAfter, deps.ExpireAfter, deps.StartDelay, deps.Every)
 	}
-	return &Reaper{deps: deps}, nil
+	return &Reaper{deps: deps, guard: sweepguard.New("worktreereap", deps.LockPath, opSweep)}, nil
 }
 
 // Keep reasons: why a worktree was left alone. They are the summary's keys.
@@ -196,31 +196,22 @@ type Report struct {
 // recorded at ERROR and the sweep goes on; only a registry that cannot be read,
 // or the daemon's own exit, ends it early.
 func (r *Reaper) Sweep(ctx context.Context) (Report, error) {
-	if !r.sweeping.TryLock() {
-		r.deps.Log.Info(opSweep, "a sweep was asked for while one is running; it is not started", nil)
-		return Report{}, ErrSweepRunning
+	var (
+		report Report
+		err    error
+	)
+	ran, guardErr := r.guard.Do(r.deps.Log, func() { report, err = r.sweep(ctx) })
+	if guardErr != nil {
+		return Report{}, guardErr
 	}
-	defer r.sweeping.Unlock()
-
-	lock, held, err := acquireLock(r.deps.LockPath)
-	if err != nil {
-		r.deps.Log.Error(opSweep, "the sweep's kernel lock could not be told about; nothing is swept", dlog.Context{
-			"lock": r.deps.LockPath, "cause": err.Error(),
-		})
-		return Report{}, err
-	}
-	if !held {
-		r.deps.Log.Info(opSweep, "another daemon is sweeping; this one does not", dlog.Context{"lock": r.deps.LockPath})
+	if !ran {
 		return Report{}, nil
 	}
-	defer func() {
-		if err := lock.Release(); err != nil {
-			r.deps.Log.Error(opSweep, "the sweep's kernel lock could not be released", dlog.Context{
-				"lock": r.deps.LockPath, "cause": err.Error(),
-			})
-		}
-	}()
+	return report, err
+}
 
+// sweep is one sweep, run under the guard.
+func (r *Reaper) sweep(ctx context.Context) (Report, error) {
 	now := r.deps.Clock.Now()
 	report := Report{Kept: map[string]int{}}
 	repos, err := r.deps.Registry.ListRepositories(ctx)

@@ -9,10 +9,11 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/recordlock"
+	"agent-repld/internal/sweepguard"
 	"agent-repld/internal/wsm"
 )
 
@@ -87,26 +88,24 @@ func refreshError(e *agentreplv1.RefreshNewsDigestError) *agentreplv1.RefreshNew
 // another run ended since the schedule looked.
 func (d *Digester) run(ctx context.Context, trigger string, onlyIfDue bool) (outcome, error) {
 	log := d.deps.Log.With(dlog.Context{"trigger": trigger})
-	if !d.running.TryLock() {
-		log.Info(opRun, "a news digest run is already in progress in this daemon", nil)
+	var (
+		got    outcome
+		runErr error
+	)
+	ran, err := d.guard.Do(log, func() { got, runErr = d.locked(ctx, log, onlyIfDue) })
+	switch {
+	case errors.Is(err, sweepguard.ErrRunning):
+		return outcome{}, ErrAlreadyRunning
+	case err != nil:
+		return outcome{}, err
+	case !ran:
 		return outcome{}, ErrAlreadyRunning
 	}
-	defer d.running.Unlock()
-	lock, held, err := recordlock.Hold(d.deps.LockPath)
-	if err != nil {
-		log.Error(opRun, "the news digest run lock could not be taken", dlog.Context{"lock": d.deps.LockPath, "cause": err.Error()})
-		return outcome{}, fmt.Errorf("newsdigest: %w", err)
-	}
-	if !held {
-		log.Info(opRun, "another daemon is running a news digest", dlog.Context{"lock": d.deps.LockPath})
-		return outcome{}, ErrAlreadyRunning
-	}
-	defer func() {
-		if err := lock.Release(); err != nil {
-			log.Error(opRun, "the news digest run lock could not be released", dlog.Context{"lock": d.deps.LockPath, "cause": err.Error()})
-		}
-	}()
+	return got, runErr
+}
 
+// locked is one run, under the run lock.
+func (d *Digester) locked(ctx context.Context, log dlog.Logger, onlyIfDue bool) (outcome, error) {
 	state, err := d.deps.Store.NewsDigestState(ctx)
 	if err != nil {
 		return outcome{}, fmt.Errorf("newsdigest: read the digest state: %w", err)

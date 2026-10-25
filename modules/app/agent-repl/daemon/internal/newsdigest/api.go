@@ -40,6 +40,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/sweepguard"
 	"agent-repld/internal/wsm"
 )
 
@@ -134,8 +135,8 @@ type Deps struct {
 type Digester struct {
 	deps      Deps
 	condenser condenser
-	// running is held for one run's whole length; TryLock is the refusal.
-	running sync.Mutex
+	// guard serializes the runs, in this process and across daemons.
+	guard *sweepguard.Guard
 	// standingMu serializes every change of the standing digest with its
 	// publication, so the topic never shows an order the store does not.
 	standingMu sync.Mutex
@@ -180,7 +181,8 @@ func New(deps Deps) (*Digester, error) {
 		timeout = DefaultModelTimeout
 	}
 	return &Digester{
-		deps: deps,
+		deps:  deps,
+		guard: sweepguard.New("newsdigest", deps.LockPath, opRun),
 		condenser: condenser{
 			headless: deps.Headless, promptsDir: deps.PromptsDir,
 			configDir: deps.ConfigDir, timeout: timeout,

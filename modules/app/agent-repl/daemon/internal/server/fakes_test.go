@@ -50,6 +50,7 @@ import (
 	"agent-repld/internal/restarttiming/restarttimingtest"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/runtimemetrics"
+	"agent-repld/internal/storagesweep"
 	"agent-repld/internal/subagentmaker"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -1739,6 +1740,7 @@ type harness struct {
 	HiddenKeepalives *fakeHiddenKeepalives
 	// NewsDigest is the news digest the two rpcs delegate to.
 	NewsDigest *fakeNewsDigest
+	Storage    *fakeStorageSweep
 	// ClassifierPrompt is the routing brief's updater the rpc delegates to.
 	ClassifierPrompt *fakeClassifierPrompt
 	EditorInstances  *fakeEditorInstances
@@ -1849,6 +1851,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		RPCs:             &fakeRPCs{},
 		ReconnectRecords: &restarttimingtest.Recorder{},
 		NewsDigest:       &fakeNewsDigest{},
+		Storage:          &fakeStorageSweep{},
 		ClassifierPrompt: &fakeClassifierPrompt{},
 		EditorInstances:  &fakeEditorInstances{},
 		OpenWorld:        newFakeOpenWorld(),
@@ -1897,6 +1900,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		PersistentWifi:    h.PersistentWifi,
 		HiddenKeepalives:  h.HiddenKeepalives,
 		NewsDigest:        h.NewsDigest,
+		Storage:           h.Storage,
 		ClassifierPrompt:  h.ClassifierPrompt,
 		EditorInstances:   h.EditorInstances,
 		Opens:             h.Opens,
@@ -2146,6 +2150,22 @@ func (f *fakePersistentWifi) Topic() *publish.Topic[*agentreplv1.PersistentWifiS
 
 // fakeNewsDigest records every dismiss and refresh and answers scripted
 // responses or failures.
+// fakeStorageSweep answers PruneStorage's sweep with a scripted report and
+// error, recording each dry-run flag it was asked with.
+type fakeStorageSweep struct {
+	mu     sync.Mutex
+	report storagesweep.Report
+	err    error
+	asked  []bool
+}
+
+func (f *fakeStorageSweep) Sweep(_ context.Context, dryRun bool) (storagesweep.Report, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, dryRun)
+	return f.report, f.err
+}
+
 type fakeNewsDigest struct {
 	mu           sync.Mutex
 	topic        publish.Topic[*agentreplv1.NewsDigestStanding]

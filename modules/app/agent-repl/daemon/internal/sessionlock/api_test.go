@@ -128,6 +128,54 @@ func TestWorkspaceLockPathRefusesEmptyDir(t *testing.T) {
 	}
 }
 
+// TestWorkspaceKeySpelling asserts the key is md5hex(abs dir)[:8], the name
+// the shim files the workspace's state directory under.
+func TestWorkspaceKeySpelling(t *testing.T) {
+	// Arrange.
+	wsDir := "/no/such/root/some/workspace"
+	sum := md5.Sum([]byte(wsDir))
+
+	// Act.
+	got, err := WorkspaceKey(wsDir)
+
+	// Assert.
+	if err != nil || got != hex.EncodeToString(sum[:])[:8] {
+		t.Fatalf("WorkspaceKey() = (%q, %v), want %q", got, err, hex.EncodeToString(sum[:])[:8])
+	}
+}
+
+// TestWorkspaceKeyRefusesEmptyDir asserts an empty workspace dir names no key.
+func TestWorkspaceKeyRefusesEmptyDir(t *testing.T) {
+	// Act.
+	got, err := WorkspaceKey(" ")
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("WorkspaceKey() = %q, want an error", got)
+	}
+}
+
+// TestWorkspaceLockPathIsNamedByTheWorkspaceKey asserts the lock and the
+// shim's state directory share one derivation, so a sweep that keys the
+// state directory by WorkspaceKey names the same workspace the lock does.
+func TestWorkspaceLockPathIsNamedByTheWorkspaceKey(t *testing.T) {
+	// Arrange.
+	runDir := t.TempDir()
+	wsDir := "/tmp/some/other/../workspace/"
+	key, err := WorkspaceKey(wsDir)
+	if err != nil {
+		t.Fatalf("WorkspaceKey() error = %v", err)
+	}
+
+	// Act.
+	got, err := WorkspaceLockPath(runDir, wsDir)
+
+	// Assert.
+	if err != nil || filepath.Base(got) != "workspace-"+key+".lock" {
+		t.Fatalf("WorkspaceLockPath() = (%q, %v), want the lock named by key %q", got, err, key)
+	}
+}
+
 // TestSessionLockPathSpelling asserts the session lock's name.
 func TestSessionLockPathSpelling(t *testing.T) {
 	// Arrange.

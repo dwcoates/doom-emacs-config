@@ -1388,6 +1388,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, err
 	}
 
+	// THE STORAGE SWEEP deletes the shim state and cache entries nothing
+	// will read again; it reads the registry and is background work too.
+	storageSweep, err := buildStorageSweep(p.DB, p.Layout, paths.RunDir, os.Getenv, log)
+	if err != nil {
+		return nil, err
+	}
+
 	// THE REPOSITORY DIVERGENCE MEASURER fetches each registered repository's
 	// primary-branch upstream once now and every five minutes after, and hands
 	// each ahead/behind count to the roster, which draws it as the repository
@@ -1467,6 +1474,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
 		}},
 		{Name: "worktree_reaper", Run: reaper.Run},
+		{Name: "storage_sweep", Run: storageSweep.Run},
 		{Name: "repo_divergence", Run: divergence.Run},
 		{Name: "selection_follow", Run: selectionFollower.Run},
 		{Name: "merge_workspace_sweep", Run: func(ctx context.Context) error {
@@ -1535,6 +1543,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			PersistentWifi:    wifi,
 			HiddenKeepalives:  cacheKeeper,
 			NewsDigest:        digest,
+			Storage:           storageSweep,
 			ClassifierPrompt:  classifierPrompt,
 			EditorInstances:   editors,
 			Opens:             opens,

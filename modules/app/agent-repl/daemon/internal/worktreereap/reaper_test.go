@@ -11,6 +11,7 @@ import (
 
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/recordlock"
 	"agent-repld/internal/wsm"
 )
 
@@ -765,7 +766,7 @@ func TestASweepHeldByAnotherProcessIsSkippedAtInfo(t *testing.T) {
 	w := newWorld(t)
 	repo := w.addRepo("repo")
 	w.addTree(repo, tree{name: "landed"})
-	held, ok, err := acquireLock(w.lockPath)
+	held, ok, err := recordlock.Hold(w.lockPath)
 	if err != nil || !ok {
 		t.Fatalf("taking the lock = (%v, %v)", ok, err)
 	}

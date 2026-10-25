@@ -128,6 +128,10 @@ func (c *cliClient) UpdateDeployHold(_ context.Context, req *connect.Request[age
 	return connect.NewResponse(&agentreplv1.UpdateDeployHoldResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) PruneStorage(_ context.Context, req *connect.Request[agentreplv1.PruneStorageRequest]) (*connect.Response[agentreplv1.PruneStorageResponse], error) {
+	return connect.NewResponse(&agentreplv1.PruneStorageResponse{}), c.record(req.Msg)
+}
+
 func (c *cliClient) RollOutLanding(_ context.Context, req *connect.Request[agentreplv1.RollOutLandingRequest]) (*connect.Response[agentreplv1.RollOutLandingResponse], error) {
 	return connect.NewResponse(&agentreplv1.RollOutLandingResponse{}), c.record(req.Msg)
 }
@@ -687,6 +691,39 @@ func TestDeployHoldHoldsOrReleasesTheNamedRepository(t *testing.T) {
 			req := only[*agentreplv1.UpdateDeployHoldRequest](t, f)
 			if req.GetRepository().GetId() != "repo-1" || (req.GetRelease() != nil) != tt.release {
 				t.Fatalf("request = %v, want the caller's repository, release %v", req, tt.release)
+			}
+		})
+	}
+}
+
+func TestPruneStorageAsksForASweepOrAPreview(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		code    int
+		preview bool
+	}{
+		{name: "a sweep", args: nil, code: exitSuccess},
+		{name: "a preview", args: []string{"-preview"}, code: exitSuccess, preview: true},
+		{name: "a positional", args: []string{"now"}, code: exitFailure},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(runtimeNoun, append([]string{"prune-storage"}, tt.args...)...)
+
+			// Assert
+			if code != tt.code {
+				t.Fatalf("exit %d, stderr %q; want %d", code, f.errOut.String(), tt.code)
+			}
+			if tt.code != exitSuccess {
+				return
+			}
+			if req := only[*agentreplv1.PruneStorageRequest](t, f); req.GetDryRun() != tt.preview {
+				t.Fatalf("request = %v, want dry run %v", req, tt.preview)
 			}
 		})
 	}

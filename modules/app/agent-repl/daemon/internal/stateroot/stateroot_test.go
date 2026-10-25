@@ -69,6 +69,7 @@ func TestLayoutPaths(t *testing.T) {
 		{name: "logs dir", got: l.LogsDir(), want: "/state/logs"},
 		{name: "run log", got: l.RunLog(), want: "/state/logs/daemon.run.log"},
 		{name: "sock dir", got: l.SockDir(), want: "/state/sock"},
+		{name: "shim dir", got: l.ShimDir(), want: "/state/shim"},
 		{name: "shim socket", got: l.ShimSocket("abcdef0123456789"), want: "/state/sock/abcdef0123456789.sock"},
 		{name: "intent dir", got: l.IntentDir(), want: "/state/intent"},
 		{name: "intent manifest", got: l.IntentManifest(), want: "/state/intent/manifest.json"},

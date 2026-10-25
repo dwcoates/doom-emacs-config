@@ -97,12 +97,26 @@ func WorkspaceLockPath(runDir, workspaceDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	key, err := WorkspaceKey(workspaceDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "workspace-"+key+".lock"), nil
+}
+
+// WorkspaceKey derives the key the shim files a workspace's lock and its
+// state directory (<state root>/shim/<key>) under:
+// md5hex(filepath.Clean(absDir), symlinks resolved)[:8].
+func WorkspaceKey(workspaceDir string) (string, error) {
+	if strings.TrimSpace(workspaceDir) == "" {
+		return "", errors.New("sessionlock: workspace dir is empty")
+	}
 	abs, err := filepath.Abs(workspaceDir)
 	if err != nil {
 		return "", fmt.Errorf("sessionlock: absolute workspace dir %q: %w", workspaceDir, err)
 	}
 	sum := md5.Sum([]byte(resolveForKey(abs)))
-	return filepath.Join(dir, "workspace-"+hex.EncodeToString(sum[:])[:8]+".lock"), nil
+	return hex.EncodeToString(sum[:])[:8], nil
 }
 
 // SessionLockPath derives a session's lock path,
