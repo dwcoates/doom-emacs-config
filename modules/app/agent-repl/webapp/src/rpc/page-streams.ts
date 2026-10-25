@@ -238,6 +238,10 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhostBu
     schema: WatchPageResponseSchema,
     open: (client, signal) =>
       client.watchPage(webhostBuild === undefined ? { page } : { page, webhost: { webappBuild: webhostBuild } }, { signal }),
+    // THE DAEMON'S PLANNED EXIT ENDS THE PAGE WITH `ending`, after every
+    // subscription on it has sent its own last frame: the page reopens on the
+    // daemon that serves next without filing the unreachable failure.
+    plannedEnding: (response) => response.frame.case === "ending",
     onPush: (response) => routeFrame(response),
     onEnd: () => detach(),
   });
@@ -368,6 +372,10 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhostBu
             );
         }
       }
+      case "ending":
+        // CONSUMED BY THE STREAM'S PLANNED-ENDING CHECK before it can be
+        // routed, so reaching here is this module's own defect.
+        throw new Error("page-streams: the page's planned ending reached routeFrame past its plannedEnding check");
       default:
         throw new MalformedView(
           "WatchPageResponse.frame",

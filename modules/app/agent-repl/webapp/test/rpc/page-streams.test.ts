@@ -27,6 +27,7 @@ import {
   type WatchPageRequest,
   type WatchPageResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_page_pb";
+import { DaemonStreamEndingSchema } from "../../../proto/gen/ts/agentrepl/v1/daemon_stream_ending_pb";
 import { WatchFooterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
 import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
 import { FooterViewSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
@@ -65,6 +66,13 @@ class RecordingSink implements FailureSink {
 /** Let the router transport's zero-delay frames land. */
 async function settle(): Promise<void> {
   for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
+}
+
+/** The page stream's planned ending frame. */
+function pageEnding(): WatchPageResponse {
+  return create(WatchPageResponseSchema, {
+    frame: { case: "ending", value: create(DaemonStreamEndingSchema, {}) },
+  });
 }
 
 /** A frame carrying the attachment latch. */
@@ -576,6 +584,47 @@ describe("the page's one standing stream", () => {
     // Assert: the ONE stream is standing again, so the subscriptions that
     // ended with it have something to reopen onto.
     expect(daemon.streamOpens.filter((name) => name === "WatchPage").length).toBeGreaterThan(1);
+    ctx.quiesce();
+  });
+
+  it("reopens without filing the unreachable failure after the daemon's planned ending", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const sink = new RecordingSink();
+    const ctx = contextFor(client, sink);
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    // Act: the daemon stands down in a planned exit, ending the page with its
+    // `ending` frame.
+    daemon.send(pageEnding());
+    daemon.endPageStream();
+    await settle();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+
+    // Assert: the page reopened, and nothing called the daemon unreachable.
+    expect(daemon.streamOpens.filter((name) => name === "WatchPage").length).toBeGreaterThan(1);
+    expect(sink.reported).not.toContain("daemonUnreachable");
+    ctx.quiesce();
+  });
+
+  it("files the unreachable failure when the page's stream ends with no planned ending", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const sink = new RecordingSink();
+    const ctx = contextFor(client, sink);
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    // Act: the link drops with no ending frame.
+    daemon.endPageStream();
+    await settle();
+
+    // Assert.
+    expect(sink.reported).toContain("daemonUnreachable");
     ctx.quiesce();
   });
 

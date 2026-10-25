@@ -40,6 +40,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/daemon_stream_ending.proto";
 import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
 import "agentrepl/v1/endpoint_watch_web_workspace.proto";
 import "agentrepl/v1/endpoint_watch_daemon.proto";
@@ -84,6 +85,14 @@ message WatchPageResponse {
     PageFrame push = 2;
     // One subscription is over and will push nothing further.
     PageSubscriptionEnded ended = 3;
+    // The daemon is standing down in a PLANNED EXIT and this is the page
+    // stream's last frame, sent once every subscription on it has sent its
+    // own last frame (each kind's planned `ending`, where its rpc has one).
+    // A page reading it reopens on the daemon that serves next WITHOUT
+    // filing the unreachable failure: the end is the daemon's own decision,
+    // never a cut link. No `ended` frame is sent for a subscription the exit
+    // ends; this frame is its end.
+    DaemonStreamEnding ending = 4;
   }
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1195,4 +1196,126 @@ func TestASubscriptionThatAcceptsAndEndsAtOnceIsStillAccepted(t *testing.T) {
 	}
 	cancel()
 	<-drained
+}
+
+// pageFramesToEnd reads a page's stream to its end, answering every frame and
+// the end's error.
+func pageFramesToEnd(stream *connect.ServerStreamForClient[agentreplv1.WatchPageResponse]) ([]*agentreplv1.WatchPageResponse, error) {
+	var frames []*agentreplv1.WatchPageResponse
+	for stream.Receive() {
+		frames = append(frames, stream.Msg())
+	}
+	return frames, stream.Err()
+}
+
+// TestAPlannedCloseEndsAPageInOrder pins the page's planned exit: each
+// subscription's own planned ending first, where its rpc has one, then the
+// page's `ending` as the LAST frame, and no `ended` frame for a subscription
+// the exit ended. The webhost's page read the bare end of its stream as a cut
+// link and drew the unreachable chip on every handover (2026-10-24).
+func TestAPlannedCloseEndsAPageInOrder(t *testing.T) {
+	tests := []struct {
+		name string
+		// subscribe opens the subscription and proves it live by reading one
+		// push off the page.
+		subscribe   func(t *testing.T, ctx context.Context, h *harness, stream *connect.ServerStreamForClient[agentreplv1.WatchPageResponse])
+		wantEndings int
+	}{
+		{
+			name: "a roster subscription sends the roster's ending",
+			subscribe: func(t *testing.T, ctx context.Context, h *harness, stream *connect.ServerStreamForClient[agentreplv1.WatchPageResponse]) {
+				subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{Page: "page-1", Subscription: "roster-1",
+					Request: &agentreplv1.SubscribePageRequest_Roster{Roster: &agentreplv1.WatchWorkspaceRosterRequest{}}})
+				h.Sidebar.topic.Publish(&frontendv1.WorkspaceRoster{})
+				if !stream.Receive() || stream.Msg().GetPush().GetRoster().GetRoster() == nil {
+					t.Fatalf("prove the roster subscription: %v", stream.Err())
+				}
+			},
+			wantEndings: 1,
+		},
+		{
+			name: "a footer subscription, whose rpc has no ending, sends nothing more",
+			subscribe: func(t *testing.T, ctx context.Context, h *harness, stream *connect.ServerStreamForClient[agentreplv1.WatchPageResponse]) {
+				subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{Page: "page-1", Subscription: "footer-1",
+					Request: &agentreplv1.SubscribePageRequest_Footer{Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()}}})
+				h.Footer.topic.Publish(footerView(7))
+				if !stream.Receive() || stream.Msg().GetPush().GetFooter() == nil {
+					t.Fatalf("prove the footer subscription: %v", stream.Err())
+				}
+			},
+			wantEndings: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := attachPageStream(t, h, ctx, "page-1")
+			tt.subscribe(t, ctx, h, stream)
+
+			// Act
+			if err := h.Server.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			frames, err := pageFramesToEnd(stream)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("the page's stream ended with %v, want a clean end", err)
+			}
+			if len(frames) == 0 || frames[len(frames)-1].GetEnding() == nil {
+				t.Fatalf("frames = %v, want the page's ending last", frames)
+			}
+			endings := 0
+			for _, frame := range frames[:len(frames)-1] {
+				if frame.GetEnded() != nil {
+					t.Fatalf("frames = %v, want no ended frame for a subscription the exit ended", frames)
+				}
+				if frame.GetPush().GetRoster().GetEnding() != nil {
+					endings++
+				}
+			}
+			if endings != tt.wantEndings {
+				t.Fatalf("subscription endings = %d, want %d; frames = %v", endings, tt.wantEndings, frames)
+			}
+		})
+	}
+}
+
+// TestAPageClosingRefusesANewSubscription pins the drain's bound: once a
+// planned exit drains a page, nothing new may join what it waits out.
+func TestAPageClosingRefusesANewSubscription(t *testing.T) {
+	// Arrange: a page whose drain has begun.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attachPageStream(t, h, ctx, "page-1")
+	page, ok := h.Server.(*server).pageFor("page-1")
+	if !ok {
+		t.Fatal("the attached page is not registered")
+	}
+	page.mu.Lock()
+	page.closing = true
+	page.mu.Unlock()
+
+	// Act
+	_, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+		Page: "page-1", Subscription: "footer-1",
+		Request: &agentreplv1.SubscribePageRequest_Footer{Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()}},
+	}))
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "ending with this daemon's planned exit") {
+		t.Fatalf("SubscribePage = %v, want the closing page's refusal", err)
+	}
+}
+
+// subscribePage subscribes REQ on its page, failing the test on a refusal.
+func subscribePage(t *testing.T, ctx context.Context, h *harness, req *agentreplv1.SubscribePageRequest) {
+	t.Helper()
+	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(req)); err != nil {
+		t.Fatalf("subscribe %s: %v", req.GetSubscription(), err)
+	}
 }

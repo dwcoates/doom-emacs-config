@@ -59,9 +59,21 @@ type pageStream struct {
 	out chan *agentreplv1.WatchPageResponse
 	// ctx ends when the page's stream ends, which ends every subscription on it.
 	ctx context.Context
+	// writerGone closes when the page's writer stops taking frames, which is
+	// when a send can no longer reach the page. It is NOT ctx: a planned exit
+	// ends ctx and the subscriptions with it, while the writer stays to carry
+	// each subscription's last frame and then the page's own ending.
+	writerGone chan struct{}
+	// running counts the subscription bodies that have yet to send their last
+	// frame, which a planned exit's drain waits out. Added to under mu, and
+	// never once closing is set.
+	running sync.WaitGroup
 
 	mu   sync.Mutex
 	subs map[string]*pageSubscription
+	// closing is set when the planned exit's drain begins; a subscription
+	// asked for after it is refused, since the page will carry nothing more.
+	closing bool
 }
 
 // pageSubscription is one watch running on a page. Every field is read and
@@ -86,7 +98,7 @@ func (p *pageStream) send(msg *agentreplv1.WatchPageResponse) error {
 	select {
 	case p.out <- msg:
 		return nil
-	case <-p.ctx.Done():
+	case <-p.writerGone:
 		return errPageGone
 	}
 }
@@ -120,10 +132,11 @@ func (s *server) attachPage(id string, ctx context.Context) (*pageStream, error)
 		return nil, fmt.Errorf("page %q already holds a stream on this daemon", id)
 	}
 	p := &pageStream{
-		id:   id,
-		out:  make(chan *agentreplv1.WatchPageResponse),
-		ctx:  ctx,
-		subs: make(map[string]*pageSubscription),
+		id:         id,
+		out:        make(chan *agentreplv1.WatchPageResponse),
+		ctx:        ctx,
+		writerGone: make(chan struct{}),
+		subs:       make(map[string]*pageSubscription),
 	}
 	s.pages[id] = p
 	// THE OPENS LEARN OF THE PAGE UNDER THE SAME LOCK, so the attach and the
@@ -181,6 +194,7 @@ func (s *server) WatchPage(
 		return TransportClosed(s.log, rpc, "page_already_attached", err.Error(), false)
 	}
 	defer s.detachPage(page)
+	defer close(page.writerGone)
 	// THE WEB VIEW HOST'S BUILD stands for as long as its page stream does:
 	// a deploy reloads a host on an older webapp (deploy.Deployer.webapp).
 	if host := req.Msg.GetWebhost(); host != nil {
@@ -201,6 +215,14 @@ func (s *server) WatchPage(
 	for {
 		select {
 		case <-streamCtx.Done():
+			// A PLANNED EXIT ENDS THE PAGE IN ORDER: every subscription's
+			// last frame, then the page's own ending, so the page reopens on
+			// the next daemon without reading a cut link. A client that left
+			// is owed nothing.
+			if s.life.Err() != nil && ctx.Err() == nil {
+				s.drainPageForExit(rpc, page, ctx, out)
+				return nil
+			}
 			s.log.Debug(rpc, "the page's stream ended on cancellation",
 				dlog.Context{"page": page.id})
 			return nil
@@ -268,7 +290,14 @@ func (s *server) SubscribePage(
 			fmt.Sprintf("page %q already holds a subscription %q",
 				req.Msg.GetPage(), req.Msg.GetSubscription()), false)
 	}
+	if page.closing {
+		page.mu.Unlock()
+		cancel()
+		return nil, TransportClosed(s.log, rpc, "page_closing",
+			fmt.Sprintf("page %q is ending with this daemon's planned exit", req.Msg.GetPage()), false)
+	}
 	page.subs[req.Msg.GetSubscription()] = record
+	page.running.Add(1)
 	page.mu.Unlock()
 
 	// The acceptance latch: the body signals through the subscription's own
@@ -301,6 +330,7 @@ func (s *server) SubscribePage(
 	// frame the ending owes.
 	done := make(chan error, 1)
 	go func() {
+		defer page.running.Done()
 		err := watch.Run(subCtx)
 		s.endPageSubscription(page, req.Msg.GetSubscription(), err)
 		done <- err
@@ -415,6 +445,16 @@ func (s *server) endPageSubscription(page *pageStream, id string, err error) {
 		// exist. Announcing its end would name an id it never held.
 		return
 	}
+	// THE EXIT'S END IS THE PAGE'S ENDING, NOT AN `ended` FRAME: an ended
+	// subscription that nobody unsubscribed reads on the page as a source
+	// that finished, which it files as a failure. The page's `ending` frame,
+	// sent once every subscription has finished, is this subscription's end.
+	if !unsubscribed && s.life.Err() != nil {
+		s.log.Debug("daemon.server.page_subscription_ended",
+			"a page subscription ended with the daemon's planned exit; the page's ending frame is its end",
+			dlog.Context{"page": page.id, "subscription": id})
+		return
+	}
 	ended, arm := endedFrame(id, unsubscribed, err)
 	// The page's writer may already be gone; a failed send here means the page
 	// itself ended, which is the strongest form of the same news.
@@ -506,7 +546,11 @@ func (s *server) pageWatchFor(
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Roster{Roster: m}}
 			}}
 		return pageWatch{"WatchWorkspaceRoster", func(ctx context.Context) error {
-			return s.watchWorkspaceRoster(ctx, watch.Roster, sink)
+			if err := s.watchWorkspaceRoster(ctx, watch.Roster, sink); err != nil {
+				return err
+			}
+			endStandingStream(s, "WatchWorkspaceRoster", s.log, sink, rosterEnding())
+			return nil
 		}}, true
 	case *agentreplv1.SubscribePageRequest_WebWorkspace:
 		sink := pageSink[agentreplv1.WatchWebWorkspaceResponse]{page: page, sub: sub,
@@ -522,7 +566,11 @@ func (s *server) pageWatchFor(
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Daemon{Daemon: m}}
 			}}
 		return pageWatch{"WatchDaemon", func(ctx context.Context) error {
-			return s.watchDaemon(ctx, watch.Daemon, sink)
+			if err := s.watchDaemon(ctx, watch.Daemon, sink); err != nil {
+				return err
+			}
+			endStandingStream(s, "WatchDaemon", s.log, sink, daemonEnding())
+			return nil
 		}}, true
 	case *agentreplv1.SubscribePageRequest_Topbar:
 		sink := pageSink[agentreplv1.WatchTopbarResponse]{page: page, sub: sub,
@@ -558,5 +606,46 @@ func (s *server) pageWatchFor(
 		}}, true
 	default:
 		return pageWatch{}, false
+	}
+}
+
+// drainPageForExit ends a page in a planned exit: it keeps carrying frames
+// until every subscription on the page has sent its last one (its kind's
+// planned ending, where its rpc has one), then sends the page's own ending.
+// A page whose client goes away meanwhile is owed nothing more.
+func (s *server) drainPageForExit(rpc string, page *pageStream, ctx context.Context, out streamSink[agentreplv1.WatchPageResponse]) {
+	page.mu.Lock()
+	page.closing = true
+	page.mu.Unlock()
+	drained := make(chan struct{})
+	go func() {
+		page.running.Wait()
+		close(drained)
+	}()
+	for {
+		select {
+		case msg := <-page.out:
+			if err := out.Send(msg); err != nil {
+				s.log.Debug(rpc, "the page's client went away while its exit drained",
+					dlog.Context{"page": page.id, "cause": err.Error()})
+				return
+			}
+		case <-drained:
+			endStandingStream(s, rpc, s.log, out, pageEnding())
+			s.log.Debug(rpc, "the page's subscriptions sent their last frames; the page was told the daemon is standing down",
+				dlog.Context{"page": page.id})
+			return
+		case <-ctx.Done():
+			s.log.Debug(rpc, "the page's client went away while its exit drained",
+				dlog.Context{"page": page.id})
+			return
+		}
+	}
+}
+
+// pageEnding is the page stream's planned ending frame.
+func pageEnding() *agentreplv1.WatchPageResponse {
+	return &agentreplv1.WatchPageResponse{
+		Frame: &agentreplv1.WatchPageResponse_Ending{Ending: &agentreplv1.DaemonStreamEnding{}},
 	}
 }

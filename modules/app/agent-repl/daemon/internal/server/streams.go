@@ -208,10 +208,16 @@ func (s *server) WatchWorkspaceRoster(
 	if err := s.watchWorkspaceRoster(ctx, req.Msg, out); err != nil {
 		return err
 	}
-	endStandingStream(s, rpc, s.log, out, &agentreplv1.WatchWorkspaceRosterResponse{
-		Push: &agentreplv1.WatchWorkspaceRosterResponse_Ending{Ending: &agentreplv1.DaemonStreamEnding{}},
-	})
+	endStandingStream(s, rpc, s.log, out, rosterEnding())
 	return nil
+}
+
+// rosterEnding is the roster stream's planned ending frame, the dedicated
+// rpc's and a page subscription's alike.
+func rosterEnding() *agentreplv1.WatchWorkspaceRosterResponse {
+	return &agentreplv1.WatchWorkspaceRosterResponse{
+		Push: &agentreplv1.WatchWorkspaceRosterResponse_Ending{Ending: &agentreplv1.DaemonStreamEnding{}},
+	}
 }
 
 // watchWorkspaceRoster is the body, written to whatever sink carries it: the
@@ -548,10 +554,16 @@ func (s *server) WatchDaemon(
 	if err := s.watchDaemon(ctx, req.Msg, out); err != nil {
 		return err
 	}
-	endStandingStream(s, "WatchDaemon", s.log, out, &agentreplv1.WatchDaemonResponse{
-		Push: &agentreplv1.WatchDaemonResponse_Ending{Ending: &agentreplv1.DaemonStreamEnding{}},
-	})
+	endStandingStream(s, "WatchDaemon", s.log, out, daemonEnding())
 	return nil
+}
+
+// daemonEnding is the daemon stream's planned ending frame, the dedicated
+// rpc's and a page subscription's alike.
+func daemonEnding() *agentreplv1.WatchDaemonResponse {
+	return &agentreplv1.WatchDaemonResponse{
+		Push: &agentreplv1.WatchDaemonResponse_Ending{Ending: &agentreplv1.DaemonStreamEnding{}},
+	}
 }
 
 // watchDaemon is the body, written to whatever sink carries it. It merges the
