@@ -860,9 +860,13 @@ func TestFailMarkerFailsAPreDeployHooksDeploy(t *testing.T) {
 func mqPauseQueue(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef) {
 	t.Helper()
 	resp, err := w.Client().UpdateMergeQueue(w.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
-		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: repoRef}},
+		Requester: harness.User(),
+		Action:    &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: repoRef}},
 	}))
-	if err != nil || resp.Msg.GetError() != nil {
-		t.Fatalf("UpdateMergeQueue(pause) = %v, %v, want the repository's queue paused", resp.Msg, err)
+	if err != nil {
+		t.Fatalf("UpdateMergeQueue(pause): %v, want the repository's queue paused", err)
+	}
+	if resp.Msg.GetError() != nil {
+		t.Fatalf("UpdateMergeQueue(pause) refused: %v, want the repository's queue paused", resp.Msg.GetError())
 	}
 }
