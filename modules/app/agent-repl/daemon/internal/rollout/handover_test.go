@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -658,6 +660,38 @@ func TestATakenBackWorkspaceIsTransferredAgainAfterItsDelay(t *testing.T) {
 	}
 	if len(kinds) != 3 || kinds[2] != "transferred" {
 		t.Fatalf("pushes for the workspace = %v, want a fresh transfer notice after the retraction", kinds)
+	}
+}
+
+func TestATakenBackColdGatedWorkspaceIsOfferedAgain(t *testing.T) {
+	// Arrange: a parked shim runs no session, so it never re-announces facts.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.fleet.coldGates[ws] = &conversationv1.SessionCold{ContextTokens: 77}
+	h.fleet.factsErr[ws] = context.DeadlineExceeded
+
+	// Act
+	expireAdoption(t, h)
+
+	// Assert
+	if !hasRecord(h, opHandover, "info", "the workspace was taken back after its adoption window expired; it is offered to the successor again") {
+		t.Fatalf("records = %+v, want the cold-gated workspace offered again", records(h.log, opHandover))
+	}
+}
+
+func TestATakenBackColdGatedWorkspaceWaitsForNoSessionFacts(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.fleet.coldGates[ws] = &conversationv1.SessionCold{ContextTokens: 77}
+	h.fleet.factsErr[ws] = context.DeadlineExceeded
+
+	// Act
+	expireAdoption(t, h)
+
+	// Assert
+	if hasRecord(h, opTransfer, "error", "the re-attached shim never re-announced its session facts; this daemon cannot see its turn in flight, and the workspace is drawn degraded until it does") {
+		t.Fatalf("records = %+v, want no wait on facts a parked shim never announces", records(h.log, opTransfer))
 	}
 }
 

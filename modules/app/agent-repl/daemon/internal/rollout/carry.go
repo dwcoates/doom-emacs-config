@@ -238,6 +238,10 @@ type sealedMove struct {
 	midWork bool
 	// participants is the stream occupancy the move was sealed with.
 	participants Participants
+	// parked reports that the shim stood at a cold gate when the move was
+	// sealed. A parked shim runs no session, and the hold the move took keeps
+	// one from starting, so a take-back has no session facts to wait for.
+	parked bool
 }
 
 // seal takes a running transfer's queue memory and writes the workspace's
@@ -278,6 +282,7 @@ func (c *controller) seal(ctx context.Context, ws ids.WorkspaceID, fields dlog.C
 			return nil, errors.Join(fmt.Errorf("rollout: carry the cold gate of %q: %w", ws, err), c.unseal(ctx, ws, move, fields))
 		}
 		carry.ColdGate = raw
+		move.parked = true
 	}
 	if err := c.writeCarry(carry); err != nil {
 		return nil, errors.Join(err, c.unseal(ctx, ws, move, fields))

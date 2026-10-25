@@ -613,6 +613,12 @@ func (c *controller) reclaim(ctx context.Context, ws ids.WorkspaceID, lease ids.
 			c.log.Error(opTransfer, "the taken-back workspace's running shim could not be re-attached; it is served without a session until its next prompt revives one",
 				dlog.WithCause(fields, err))
 			failures = append(failures, fmt.Errorf("rollout: reclaim %q: re-attach the shim: %w", ws, err))
+		} else if move != nil && move.parked {
+			// A PARKED SHIM ANNOUNCES NO FACTS: it runs no session, so the wait
+			// could only expire, and an expiry made the take-back unclean -- never
+			// offered again, its incumbent never exiting, and Emacs held between
+			// the two daemons (2026-10-25: fourteen cold-gated workspaces).
+			c.log.Debug(opTransfer, "the re-attached shim stands at a cold gate and runs no session; there are no session facts to wait for", fields)
 		} else if err := c.awaitReattachedFacts(ctx, ws, fields); err != nil {
 			failures = append(failures, err)
 		}
