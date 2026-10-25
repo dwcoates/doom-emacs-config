@@ -123,12 +123,8 @@ func (s *store) DropMergeProgress(ctx context.Context, lease LeaseID) (bool, err
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		dropped = n > 0
-		return nil
+		dropped, err = touchedRow(res)
+		return err
 	})
 	if err != nil {
 		return false, err

@@ -577,14 +577,22 @@ func updateWorkspaceColumns(ctx context.Context, tx *sql.Tx, id WorkspaceID, col
 // requireOneRow turns "no rows affected" into a refusal. A write that matched
 // nothing is an unknown id, never a success.
 func requireOneRow(res sql.Result, what string) error {
-	n, err := res.RowsAffected()
+	touched, err := touchedRow(res)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
+	if !touched {
 		return fmt.Errorf("%s: %w", what, ErrNotFound)
 	}
 	return nil
+}
+
+// touchedRow answers whether RES's statement changed a row: THE ONE READ of
+// whether a write found what it named, which every "did it touch anything"
+// question in the store asks.
+func touchedRow(res sql.Result) (bool, error) {
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // MarkClosed records that a workspace's editor state is torn down, and, in the
@@ -930,12 +938,22 @@ func (s *store) SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceI
 
 // setCurrent is SetCurrent's and SetCurrentKeepingLastSelected's one write.
 // A nil STAMP leaves last_selected_at as it stands.
+//
+// SELECTING A WORKSPACE EXPANDS THE FOLDS HOLDING IT (owner request,
+// 2026-10-25): its repository's section and the subsection it sits in
+// (expandFoldsHolding), in the same transaction as the selection. A switch
+// from anywhere -- `SPC p p`, a notification, an agent's select -- to a
+// workspace in a collapsed section therefore opens that section, and no
+// reader can ever see the current workspace inside a collapsed one: with the
+// collapse that would hold it refused (holds_current), the current workspace
+// sitting in a collapsed section is a state the store cannot reach.
 func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp *time.Time) error {
 	fields := dlog.Context{"workspace": string(id)}
 	if stamp != nil {
 		fields["at"] = *stamp
 	}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	var expanded expandedFolds
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET is_current = 0 WHERE is_current = 1`); err != nil {
 			return err
 		}
@@ -943,8 +961,49 @@ func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp
 		if err != nil {
 			return err
 		}
-		return requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id))
+		if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
+			return err
+		}
+		expanded, err = expandFoldsHolding(ctx, tx, id)
+		return err
 	})
+	if err != nil {
+		return err
+	}
+	if expanded.repository || expanded.subsection {
+		s.log.Info(op, "the selection expanded the collapsed folds holding the workspace", dlog.Merge(fields, dlog.Context{
+			"expanded_repository": expanded.repository, "expanded_subsection": expanded.subsection,
+		}))
+	}
+	return nil
+}
+
+// expandedFolds says which folds holding a just-selected workspace its
+// selection expanded.
+type expandedFolds struct {
+	repository, subsection bool
+}
+
+// expandFoldsHolding expands, within TX, workspace ID's repository section
+// and the subsection it sits in (rootSubsectionColumn, so a child expands its
+// family's), answering which of them were collapsed.
+func expandFoldsHolding(ctx context.Context, tx *sql.Tx, id WorkspaceID) (expandedFolds, error) {
+	var out expandedFolds
+	res, err := tx.ExecContext(ctx, `UPDATE repositories SET folded = 0 WHERE folded = 1 AND id = (SELECT repo_id FROM workspaces WHERE id = ?)`, id)
+	if err != nil {
+		return out, fmt.Errorf("wsm: expand the repository of %s: %w", id, err)
+	}
+	if out.repository, err = touchedRow(res); err != nil {
+		return out, fmt.Errorf("wsm: expand the repository of %s: %w", id, err)
+	}
+	res, err = tx.ExecContext(ctx, `UPDATE subsections SET folded = 0 WHERE folded = 1 AND id = (SELECT `+rootSubsectionColumn+` FROM workspaces WHERE id = ?)`, id)
+	if err != nil {
+		return out, fmt.Errorf("wsm: expand the subsection of %s: %w", id, err)
+	}
+	if out.subsection, err = touchedRow(res); err != nil {
+		return out, fmt.Errorf("wsm: expand the subsection of %s: %w", id, err)
+	}
+	return out, nil
 }
 
 // Current reports the currently selected workspace, nil when none is.

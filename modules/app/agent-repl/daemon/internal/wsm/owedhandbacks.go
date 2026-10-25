@@ -148,12 +148,8 @@ func (s *store) PayHandBack(ctx context.Context, mergeWS WorkspaceID) (bool, err
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		paid = n > 0
-		return nil
+		paid, err = touchedRow(res)
+		return err
 	})
 	return paid, err
 }

@@ -5,8 +5,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
+
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestNormalizeDirCollapsesEverySpelling(t *testing.T) {
@@ -1713,5 +1718,225 @@ func TestTheMigrationAddsTheRepositoriesFoldedColumn(t *testing.T) {
 	got := scalar[int](t, handle.(*store), `SELECT count(*) FROM pragma_table_info('repositories') WHERE name = 'folded'`)
 	if got != 1 {
 		t.Fatalf("repositories carries the folded column %d times after the migration, want 1", got)
+	}
+}
+
+// selectionFoldWorld is a workspace in a subsection of its repository, a child
+// of it, and a workspace of another repository, every fold collapsed.
+type selectionFoldWorld struct {
+	root, child, other Workspace
+	sub                Subsection
+}
+
+func newSelectionFoldWorld(t *testing.T, s *store) selectionFoldWorld {
+	t.Helper()
+	ctx := context.Background()
+	repo := arrangeRepo(t, "repo")
+	root := registerIn(t, s, repo, "root", nil)
+	child := registerChild(t, s, repo, "child", root.ID)
+	other := registerIn(t, s, arrangeRepo(t, "other"), "other", nil)
+	sub := mustSubsection(t, s, root.Repo, "later")
+	mustPlace(t, s, root.ID, &sub.ID, AtEnd{})
+	for _, repo := range []RepoID{root.Repo, other.Repo} {
+		if err := s.SetRepositoryFolded(ctx, repo, true); err != nil {
+			t.Fatalf("SetRepositoryFolded: %v", err)
+		}
+	}
+	if err := s.SetSubsectionFolded(ctx, sub.ID, true); err != nil {
+		t.Fatalf("SetSubsectionFolded: %v", err)
+	}
+	return selectionFoldWorld{root: root, child: child, other: other, sub: sub}
+}
+
+// repositoryFolded reads whether REPO's section is collapsed.
+func repositoryFolded(t *testing.T, s *store, repo RepoID) bool {
+	t.Helper()
+	return scalar[bool](t, s, `SELECT folded FROM repositories WHERE id = ?`, repo)
+}
+
+func TestSelectingAWorkspaceExpandsTheFoldsHoldingIt(t *testing.T) {
+	tests := []struct {
+		name   string
+		pick   func(selectionFoldWorld) Workspace
+		act    func(*store, WorkspaceID) error
+		wantOp string
+	}{
+		{
+			name: "a selection expands the root's repository and subsection",
+			pick: func(w selectionFoldWorld) Workspace { return w.root },
+			act: func(s *store, id WorkspaceID) error {
+				return s.SetCurrent(context.Background(), id, instant)
+			},
+			wantOp: "daemon.wsm.set_current",
+		},
+		{
+			name: "a selection expands a child's family subsection",
+			pick: func(w selectionFoldWorld) Workspace { return w.child },
+			act: func(s *store, id WorkspaceID) error {
+				return s.SetCurrent(context.Background(), id, instant)
+			},
+			wantOp: "daemon.wsm.set_current",
+		},
+		{
+			name: "a recency walk's step expands them too",
+			pick: func(w selectionFoldWorld) Workspace { return w.root },
+			act: func(s *store, id WorkspaceID) error {
+				return s.SetCurrentKeepingLastSelected(context.Background(), id)
+			},
+			wantOp: "daemon.wsm.set_current_keeping_last_selected",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			w := newSelectionFoldWorld(t, s)
+			ws := tt.pick(w)
+
+			// Act
+			err := tt.act(s, ws.ID)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("select: %v", err)
+			}
+			if repositoryFolded(t, s, ws.Repo) {
+				t.Fatal("the selected workspace's repository is still collapsed")
+			}
+			if subsectionNow(t, s, w.sub.ID).Folded {
+				t.Fatal("the selected workspace's subsection is still collapsed")
+			}
+			if !repositoryFolded(t, s, w.other.Repo) {
+				t.Fatal("another repository's collapse was expanded")
+			}
+			rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: tt.wantOp,
+				Message: "the selection expanded the collapsed folds holding the workspace"})
+			if !ok {
+				t.Fatalf("the expansion was not recorded at info: %v", log.Records())
+			}
+			if rec.Context["workspace"] != string(ws.ID) || rec.Context["expanded_repository"] != true || rec.Context["expanded_subsection"] != true {
+				t.Fatalf("the expansion's record = %+v, want the workspace and both folds named", rec.Context)
+			}
+		})
+	}
+}
+
+func TestSelectingAWorkspaceInExpandedFoldsRecordsNoExpansion(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.SetCurrent(context.Background(), ws.ID, instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+	if repositoryFolded(t, s, ws.Repo) {
+		t.Fatal("an expanded repository was collapsed by the selection")
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Message: "the selection expanded the collapsed folds holding the workspace"}); ok {
+		t.Fatalf("a selection that expanded nothing recorded an expansion: %v", log.Records())
+	}
+}
+
+func TestSelectingAWorkspaceIsAtomicWithItsExpansion(t *testing.T) {
+	tests := []struct {
+		name    string
+		trigger string
+	}{
+		{"the repository's expansion fails", `CREATE TRIGGER fail_the_expansion BEFORE UPDATE OF folded ON repositories
+			BEGIN SELECT RAISE(ABORT, 'the expansion failed'); END`},
+		{"the subsection's expansion fails", `CREATE TRIGGER fail_the_expansion BEFORE UPDATE OF folded ON subsections
+			BEGIN SELECT RAISE(ABORT, 'the expansion failed'); END`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			w := newSelectionFoldWorld(t, s)
+			if err := s.SetCurrent(context.Background(), w.other.ID, instant); err != nil {
+				t.Fatalf("SetCurrent: %v", err)
+			}
+			corrupt(t, s, tt.trigger)
+
+			// Act
+			err := s.SetCurrent(context.Background(), w.root.ID, instant)
+
+			// Assert -- the failure rolls the selection back with the folds.
+			if err == nil {
+				t.Fatal("SetCurrent succeeded through a failed expansion")
+			}
+			got, err := s.Current(context.Background())
+			if err != nil {
+				t.Fatalf("Current: %v", err)
+			}
+			if got == nil || *got != w.other.ID {
+				t.Fatalf("current = %v after the failure, want %q", got, w.other.ID)
+			}
+			if !repositoryFolded(t, s, w.root.Repo) || !subsectionNow(t, s, w.sub.ID).Folded {
+				t.Fatal("a fold was expanded by a selection that failed")
+			}
+			if !loggedOperation(log, "daemon.wsm.set_current", "error") {
+				t.Fatalf("the failed selection was not logged at error: %v", log.Records())
+			}
+		})
+	}
+}
+
+// affected is a sql.Result answering N rows affected, or ERR.
+type affected struct {
+	n   int64
+	err error
+}
+
+func (affected) LastInsertId() (int64, error)   { return 0, errors.New("not asked") }
+func (a affected) RowsAffected() (int64, error) { return a.n, a.err }
+
+func TestTouchedRow(t *testing.T) {
+	failed := errors.New("rows affected unreadable")
+	tests := []struct {
+		name    string
+		res     affected
+		want    bool
+		wantErr error
+	}{
+		{"no row is untouched", affected{n: 0}, false, nil},
+		{"one row is touched", affected{n: 1}, true, nil},
+		{"many rows are touched", affected{n: 3}, true, nil},
+		{"an unreadable count is the error", affected{err: failed}, false, failed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := touchedRow(tt.res)
+
+			// Assert
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("touchedRow err = %v, want %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("touchedRow = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryTouchedQuestionAsksTouchedRow pins that no store write hand-rolls
+// "did it touch a row" off RowsAffected: a count compared with zero is
+// touchedRow's one question.
+func TestEveryTouchedQuestionAsksTouchedRow(t *testing.T) {
+	// Arrange
+	handRolled := regexp.MustCompile(`n, err :?= res\.RowsAffected\(\)(?s:.{0,200}?)\bn (>|==|!=) 0\b`)
+
+	for _, file := range sourcescan.Production(t) {
+		// Act
+		src := strings.Replace(string(file.Source), "func touchedRow(res sql.Result) (bool, error) {\n\tn, err := res.RowsAffected()\n\treturn n > 0, err", "", 1)
+
+		// Assert
+		if loc := handRolled.FindStringIndex(src); loc != nil {
+			t.Errorf("%s hand-rolls touchedRow: %q", file.Name, src[loc[0]:loc[1]])
+		}
 	}
 }
