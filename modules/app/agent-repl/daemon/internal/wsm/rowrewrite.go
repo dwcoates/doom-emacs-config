@@ -11,53 +11,98 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-// THE ONE WAY A LAYOUT STEP RE-ENCODES STORED FEED ROWS: every row of
-// durable_feed_rows is handed to a rewrite, and the rows it changed are
-// written back in the step's transaction. Each step that carries a retired
-// row shape onto today's (layout 73's parsed prose, layout 76's retired
-// fields) runs on it, so none can re-encode rows its own way.
+// THE ONE WAY A LAYOUT STEP EDITS STORED FEED ROWS: every row of
+// durable_feed_rows is handed to the step's edit, and the rows it rewrote or
+// dropped are written back in the step's transaction. Each step that carries a
+// retired row shape onto today's (layout 73's parsed prose, layout 77's
+// retired fields) or drops one nothing can draw (layout 79's retired merge
+// tabs) runs on it, so none can edit rows its own way.
 
-// rewriteDurableRows hands every stored row to REWRITE and writes back each
-// row it changed, recording how many under DONE. A row REWRITE refuses fails
-// the whole step: its transaction rolls back, and nothing is rewritten.
-func rewriteDurableRows(ctx context.Context, tx *sql.Tx, log dlog.Logger, done string, rewrite func(raw []byte) ([]byte, bool, error)) error {
+// rowEdit is what a step does to one stored row: keeps it, rewrites it to
+// row, or drops it.
+type rowEdit struct {
+	rewrite bool
+	drop    bool
+	row     []byte
+}
+
+// editDurableRows hands every stored row to EDIT, then writes back each
+// rewrite and deletes each drop, answering how many of each. A row EDIT
+// refuses fails the whole step: its transaction rolls back, and nothing is
+// edited.
+func editDurableRows(ctx context.Context, tx *sql.Tx, edit func(raw []byte) (rowEdit, error)) (rewritten, dropped int, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, row_id, row FROM durable_feed_rows`)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
-	type rewritten struct {
+	type edited struct {
 		ws, id string
-		row    []byte
+		edit   rowEdit
 	}
-	var rewrites []rewritten
+	var edits []edited
 	for rows.Next() {
 		var ws, id string
 		var raw []byte
 		if err := rows.Scan(&ws, &id, &raw); err != nil {
 			rows.Close()
-			return err
+			return 0, 0, err
 		}
-		out, changed, err := rewrite(raw)
+		e, err := edit(raw)
 		if err != nil {
 			rows.Close()
-			return fmt.Errorf("durable feed row %s/%s: %w", ws, id, err)
+			return 0, 0, fmt.Errorf("durable feed row %s/%s: %w", ws, id, err)
 		}
-		if changed {
-			rewrites = append(rewrites, rewritten{ws: ws, id: id, row: out})
+		if e.rewrite || e.drop {
+			edits = append(edits, edited{ws: ws, id: id, edit: e})
 		}
 	}
 	if err := rows.Close(); err != nil {
-		return err
+		return 0, 0, err
 	}
 	if err := rows.Err(); err != nil {
+		return 0, 0, err
+	}
+	for _, e := range edits {
+		if e.edit.drop {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM durable_feed_rows WHERE workspace_id = ? AND row_id = ?`, e.ws, e.id); err != nil {
+				return 0, 0, err
+			}
+			dropped++
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE durable_feed_rows SET row = ? WHERE workspace_id = ? AND row_id = ?`, e.edit.row, e.ws, e.id); err != nil {
+			return 0, 0, err
+		}
+		rewritten++
+	}
+	return rewritten, dropped, nil
+}
+
+// rewriteDurableRows hands every stored row to REWRITE and writes back each
+// row it changed, recording how many under DONE.
+func rewriteDurableRows(ctx context.Context, tx *sql.Tx, log dlog.Logger, done string, rewrite func(raw []byte) ([]byte, bool, error)) error {
+	rewritten, _, err := editDurableRows(ctx, tx, func(raw []byte) (rowEdit, error) {
+		out, changed, err := rewrite(raw)
+		return rowEdit{rewrite: changed, row: out}, err
+	})
+	if err != nil {
 		return err
 	}
-	for _, rw := range rewrites {
-		if _, err := tx.ExecContext(ctx, `UPDATE durable_feed_rows SET row = ? WHERE workspace_id = ? AND row_id = ?`, rw.row, rw.ws, rw.id); err != nil {
-			return err
-		}
+	log.Info("daemon.wsm.open", done, dlog.Context{"rows": rewritten})
+	return nil
+}
+
+// dropDurableRows deletes every stored row DROP answers true for, recording
+// how many under DONE.
+func dropDurableRows(ctx context.Context, tx *sql.Tx, log dlog.Logger, done string, drop func(raw []byte) (bool, error)) error {
+	_, dropped, err := editDurableRows(ctx, tx, func(raw []byte) (rowEdit, error) {
+		gone, err := drop(raw)
+		return rowEdit{drop: gone}, err
+	})
+	if err != nil {
+		return err
 	}
-	log.Info("daemon.wsm.open", done, dlog.Context{"rows": len(rewrites)})
+	log.Info("daemon.wsm.open", done, dlog.Context{"rows": dropped})
 	return nil
 }
 
