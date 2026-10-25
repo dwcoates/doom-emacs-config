@@ -41,6 +41,7 @@
 (require 'json)
 (require 'url-parse)
 
+(declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
@@ -674,14 +675,49 @@ link and drew the unreachable chip (2026-10-24).  The navigation runs on
 the host's answer (`agent-repl--webhost-on-retired')."
   (setq agent-repl--webhost-reload-timer nil)
   (if (agent-repl-webhost-xwidget)
-      (progn
-        (setq agent-repl--webhost-retiring-conn conn)
-        (if (agent-repl-webhost-read "retireAll" nil 'agent-repl--webhost-on-retired)
-            (agent-repl--log agent-repl--webhost-central "elisp.webhost.retiring pages=%d"
-                             (hash-table-count agent-repl--webhost-pages))
-          (setq agent-repl--webhost-retiring-conn nil)
-          (agent-repl--webhost-navigate conn)))
+      (agent-repl--webhost-report-pages-unloading
+       (agent-repl--webhost-page-workspaces)
+       (lambda () (agent-repl--webhost-retire conn)))
     (agent-repl--log agent-repl--webhost-central "elisp.webhost.reload-skipped reason=no-host")))
+
+(defun agent-repl--webhost-page-workspaces ()
+  "Every workspace the host holds a page for, by name."
+  (let (out)
+    (maphash (lambda (id _url)
+               (when-let ((ws (and (fboundp 'agent-repl--ws-by-ref-id) (agent-repl--ws-by-ref-id id))))
+                 (push ws out)))
+             agent-repl--webhost-pages)
+    (nreverse out)))
+
+(defun agent-repl--webhost-report-pages-unloading (workspaces then)
+  "Tell the daemon each of WORKSPACES' pages is unloading on purpose, then THEN.
+THE DAEMON IS TOLD FIRST, as a page unload tells it
+\(`agent-repl-host-report-page-unloading'): a page's web stream that ends
+with the host's reload is then an awaited hop, never a hop down, and its
+row is not drawn severed (2026-10-24, seven rows on every webapp deploy).
+THEN runs once every report has answered, landed or not: the reload is
+the deploy's, and a page whose report did not land is recorded."
+  (let ((left (length workspaces)))
+    (if (zerop left)
+        (funcall then)
+      (dolist (ws workspaces)
+        (let ((answered (lambda ()
+                          (setq left (1- left))
+                          (when (zerop left) (funcall then)))))
+          (agent-repl-host-report-page-unloading
+           ws answered
+           (lambda ()
+             (agent-repl--info ws "elisp.webhost.reload-unloading-unreported ws=%s" ws)
+             (funcall answered))))))))
+
+(defun agent-repl--webhost-retire (conn)
+  "Ask the host to end every page, navigating onto CONN on its answer."
+  (setq agent-repl--webhost-retiring-conn conn)
+  (if (agent-repl-webhost-read "retireAll" nil 'agent-repl--webhost-on-retired)
+      (agent-repl--log agent-repl--webhost-central "elisp.webhost.retiring pages=%d"
+                       (hash-table-count agent-repl--webhost-pages))
+    (setq agent-repl--webhost-retiring-conn nil)
+    (agent-repl--webhost-navigate conn)))
 
 (defun agent-repl--webhost-on-retired (raw)
   "Navigate the host now that RAW, its `retireAll' answer, says its pages ended.

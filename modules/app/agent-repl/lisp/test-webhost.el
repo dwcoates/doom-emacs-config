@@ -26,11 +26,15 @@
 (defvar agent-repl-test-wh--host 'host-xwidget
   "What the stubbed host lookup answers: the host, or nil.")
 
+(defvar agent-repl-test-wh--reported nil
+  "The workspaces a reload reported unloading, newest first.")
+
 (defmacro agent-repl-test-wh--with-host (&rest body)
   "Run BODY with a host present, its scripts recorded, and refs for two workspaces."
   (declare (indent 0))
   `(agent-repl-test--with-clean-state
      (let ((agent-repl-test-wh--calls nil)
+           (agent-repl-test-wh--reported nil)
            (agent-repl-test-wh--host 'host-xwidget)
            (agent-repl--webhost-url nil)
            (agent-repl--webhost-daemon-origin nil)
@@ -43,6 +47,12 @@
                  ((symbol-function 'agent-repl-host-ref)
                   (lambda (ws) (list :id (concat "id-" ws) :dir (concat "/tmp/" ws))))
                  ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
+                 ((symbol-function 'agent-repl--ws-by-ref-id)
+                  (lambda (id) (and (string-prefix-p "id-" id) (substring id 3))))
+                 ((symbol-function 'agent-repl-host-report-page-unloading)
+                  (lambda (ws on-reported _on-not-reported)
+                    (push ws agent-repl-test-wh--reported)
+                    (funcall on-reported)))
                  ((symbol-function 'agent-repl-webhost-ensure) (lambda (_conn) 'host-xwidget))
                  ((symbol-function 'agent-repl-frontend-webview-url)
                   (lambda (ws) (concat "http://ws-" ws ".localhost:1/"))))
@@ -1315,3 +1325,55 @@ The current tab's page, not shown here, is the nearest of all."
          "{\"op\":\"retireAll\",\"id\":null,\"outcome\":\"queued\",\"notes\":[]}"))
       ;; Assert
       (should (equal navigated '("http://host.localhost:4242/?host=1"))))))
+
+;;;; ---- A reload tells the daemon its pages are unloading first ----
+
+(ert-deftest agent-repl-test-wh-a-reload-reports-every-page-unloading-before-it-retires ()
+  "Every page's unload is reported before the host is asked to retire them.
+2026-10-24: a page's web stream ending with the reload read as a hop down,
+and seven rows drew severed on every webapp deploy."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "beta")
+    (let (order)
+      (cl-letf (((symbol-function 'agent-repl-host-report-page-unloading)
+                 (lambda (ws on-reported _n) (push (list 'report ws) order) (funcall on-reported)))
+                ((symbol-function 'agent-repl-webhost-read)
+                 (lambda (method _args _cb) (push (list 'read method) order) t)))
+        ;; Act
+        (agent-repl--webhost-reload-now 'conn))
+      ;; Assert
+      (should (equal (reverse order) '((report "alpha") (report "beta") (read "retireAll")))))))
+
+(ert-deftest agent-repl-test-wh-a-reload-retires-only-once-every-report-answered ()
+  "The retire waits for the last report's answer."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-ensure-page "beta")
+    (let (pending)
+      (cl-letf (((symbol-function 'agent-repl-host-report-page-unloading)
+                 (lambda (_ws on-reported _n) (push on-reported pending))))
+        ;; Act
+        (agent-repl--webhost-reload-now 'conn)
+        (funcall (car pending))
+        (let ((before (length (agent-repl-test-wh--sent "retireAll"))))
+          (funcall (cadr pending))
+          ;; Assert
+          (should (equal (list before (length (agent-repl-test-wh--sent "retireAll"))) '(0 1))))))))
+
+(ert-deftest agent-repl-test-wh-a-page-whose-report-did-not-land-is-recorded-and-the-reload-goes-on ()
+  "A report that did not land is recorded, and the host still retires."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (let (infos)
+      (cl-letf (((symbol-function 'agent-repl-host-report-page-unloading)
+                 (lambda (_ws _on-reported on-not-reported) (funcall on-not-reported)))
+                ((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+        ;; Act
+        (agent-repl--webhost-reload-now 'conn))
+      ;; Assert
+      (should (member "elisp.webhost.reload-unloading-unreported ws=alpha" infos))
+      (should (= 1 (length (agent-repl-test-wh--sent "retireAll")))))))
