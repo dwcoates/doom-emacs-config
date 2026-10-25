@@ -35,6 +35,15 @@
 (defvar agent-repl-test-open-tabs--rows-noted nil "Every roster row an answer indexed, oldest first.")
 (defvar agent-repl-test-open-tabs--noted-at-show nil "The rows indexed when each tab was drawn.")
 
+(defvar agent-repl-test-open-tabs--report 'reported
+  "How the stand-in daemon answers a page-unloading report.
+`reported' answers success at once, `refused' answers failure at once, and
+`pending' holds the answer in `agent-repl-test-open-tabs--pending'.")
+(defvar agent-repl-test-open-tabs--pending nil
+  "The held reports, newest first, each (WS ON-REPORTED ON-NOT-REPORTED).")
+(defvar agent-repl-test-open-tabs--events nil
+  "Every report and dropped page, oldest first, as (KIND WS).")
+
 (defvar agent-repl-test-open-tabs--milestones nil
   "Every startup milestone the open reached, and `:ended' for the startup's end, in order.")
 
@@ -58,6 +67,9 @@ A ref id names the workspace of the same name."
            (agent-repl-test-open-tabs--paged nil)
            (agent-repl-test-open-tabs--no-page nil)
            (agent-repl-test-open-tabs--dropped nil)
+           (agent-repl-test-open-tabs--report 'reported)
+           (agent-repl-test-open-tabs--pending nil)
+           (agent-repl-test-open-tabs--events nil)
            (agent-repl-test-open-tabs--switches nil)
            (agent-repl-test-open-tabs--undrawn nil)
            (agent-repl-test-open-tabs--armed 0)
@@ -86,8 +98,17 @@ A ref id names the workspace of the same name."
                         (unless (member ws agent-repl-test-open-tabs--no-page)
                           (cl-pushnew ws agent-repl-test-open-tabs--paged :test #'equal)
                           :created)))
+                     ((symbol-function 'agent-repl-host-report-page-unloading)
+                      (agent-repl-test--page-unloading-reporter
+                       (lambda () agent-repl-test-open-tabs--report)
+                       (lambda (ws)
+                         (setq agent-repl-test-open-tabs--events
+                               (append agent-repl-test-open-tabs--events (list (list 'report ws)))))
+                       (lambda (held) (push held agent-repl-test-open-tabs--pending))))
                      ((symbol-function 'agent-repl--frontend-detach-webview)
                       (lambda (ws _buf)
+                        (setq agent-repl-test-open-tabs--events
+                              (append agent-repl-test-open-tabs--events (list (list 'drop ws))))
                         (push ws agent-repl-test-open-tabs--dropped)
                         (setq agent-repl-test-open-tabs--paged
                               (remove ws agent-repl-test-open-tabs--paged))))
@@ -425,6 +446,48 @@ A ref id names the workspace of the same name."
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" t))
     ;; Assert
     (should (equal agent-repl-test-open-tabs--dropped '("a")))))
+
+(ert-deftest agent-repl-test-open-tabs-a-hide-tells-the-daemon-before-it-drops-the-page ()
+  "The daemon answers the report first, so the page's end is never drawn severed."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Act
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" t))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--events '((report "a") (drop "a"))))))
+
+(ert-deftest agent-repl-test-open-tabs-a-hide-whose-report-did-not-land-keeps-the-page ()
+  "A report the daemon did not take leaves the page loaded, the tab dormant."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    (setq agent-repl-test-open-tabs--report 'refused)
+    ;; Act
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" t))
+    ;; Assert
+    (should (equal (list agent-repl-test-open-tabs--dropped
+                         (and (member "a" agent-repl-test-open-tabs--paged) t)
+                         (gethash "a" agent-repl-open-tabs--state))
+                   '(nil t dormant)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-row-shown-while-its-hide-is-reported-keeps-the-page ()
+  "A row shown again before the daemon answers the hide's report keeps its page."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    (setq agent-repl-test-open-tabs--report 'pending)
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" t))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (funcall (nth 1 (car agent-repl-test-open-tabs--pending)))
+    ;; Assert
+    (should (equal (list agent-repl-test-open-tabs--dropped
+                         (and (member "a" agent-repl-test-open-tabs--paged) t))
+                   '(nil t)))))
 
 (ert-deftest agent-repl-test-open-tabs-a-hidden-row-keeps-its-place ()
   "An open workspace that is hidden keeps its place in the order, undrawn."

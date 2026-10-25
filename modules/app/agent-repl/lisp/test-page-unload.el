@@ -80,13 +80,10 @@
                        ((symbol-function 'agent-repl-open-tabs-hidden-p)
                         (lambda (ws) (member ws agent-repl-test-pu--hidden)))
                        ((symbol-function 'agent-repl-host-report-page-unloading)
-                        (lambda (ws on-reported on-not-reported)
-                          (push (list 'report ws) agent-repl-test-pu--events)
-                          (pcase agent-repl-test-pu--report
-                            ('reported (funcall on-reported))
-                            ('refused (funcall on-not-reported))
-                            ('pending (push (list ws on-reported on-not-reported)
-                                            agent-repl-test-pu--pending)))))
+                        (agent-repl-test--page-unloading-reporter
+                         (lambda () agent-repl-test-pu--report)
+                         (lambda (ws) (push (list 'report ws) agent-repl-test-pu--events))
+                         (lambda (held) (push held agent-repl-test-pu--pending))))
                        ((symbol-function 'agent-repl-webhost-has-page-p)
                         (lambda (ws) (and (member ws agent-repl-test-pu--pages) t)))
                        ((symbol-function 'agent-repl-webhost-remove)
@@ -107,6 +104,179 @@
   "Non-nil when one INFO record holds every one of PARTS."
   (seq-some (lambda (text) (seq-every-p (lambda (part) (string-search part text)) parts))
             agent-repl-test-pu--logged))
+
+;;;; ---- The one announced drop ----
+
+(defun agent-repl-test-pu--announce (still)
+  "Drop alpha's page through the announced drop while STILL answers non-nil.
+Answers the outcomes, newest first: (dropped) or (kept WHY)."
+  (let ((outcomes nil))
+    (agent-repl-page-drop-announced
+     "alpha"
+     (lambda () (funcall still))
+     (lambda ()
+       (push (list 'dropped (agent-repl--ws-get "alpha" :page-unloading)) outcomes)
+       (agent-repl-webhost-remove "alpha"))
+     (lambda (why) (push (list 'kept why) outcomes)))
+    (lambda () outcomes)))
+
+(ert-deftest agent-repl-test-pu-an-announced-drop-reports-before-it-drops ()
+  "The daemon is told first, and the drop runs once it answers."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    ;; Act
+    (let ((outcomes (agent-repl-test-pu--announce (lambda () t))))
+      ;; Assert
+      (should (equal (list (reverse agent-repl-test-pu--events) (funcall outcomes))
+                     '(((report "alpha") (drop "alpha")) ((dropped nil))))))))
+
+(ert-deftest agent-repl-test-pu-an-announced-drop-marks-its-report-in-flight ()
+  "While the report is unanswered the workspace reads `:page-unloading'."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--report 'pending)
+    ;; Act
+    (agent-repl-test-pu--announce (lambda () t))
+    ;; Assert
+    (should (equal (list (agent-repl--ws-get "alpha" :page-unloading) agent-repl-test-pu--dropped)
+                   '(t nil)))))
+
+(ert-deftest agent-repl-test-pu-an-announced-drop-whose-report-did-not-land-keeps-the-page ()
+  "A report the daemon did not take keeps the page, and says why."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--report 'refused)
+    ;; Act
+    (let ((outcomes (agent-repl-test-pu--announce (lambda () t))))
+      ;; Assert
+      (should (equal (list (funcall outcomes) agent-repl-test-pu--dropped
+                           (agent-repl--ws-get "alpha" :page-unloading))
+                     '(((kept not-reported)) nil nil))))))
+
+(ert-deftest agent-repl-test-pu-an-announced-drop-no-longer-wanted-keeps-the-page ()
+  "A drop whose cause changed while the report was in flight keeps the page."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (let ((wanted t))
+      (setq agent-repl-test-pu--report 'pending)
+      (let ((outcomes (agent-repl-test-pu--announce (lambda () wanted))))
+        (setq wanted nil)
+        ;; Act
+        (funcall (nth 1 (car agent-repl-test-pu--pending)))
+        ;; Assert
+        (should (equal (list (funcall outcomes) agent-repl-test-pu--dropped
+                             (agent-repl--ws-get "alpha" :page-unloading))
+                       '(((kept changed)) nil nil)))))))
+
+;;;; ---- Every page drop is announced ----
+
+(defconst agent-repl-test-pu--page-drops
+  '(agent-repl-webhost-remove agent-repl--frontend-detach-webview)
+  "The calls that drop a workspace's page.")
+
+(defconst agent-repl-test-pu--unannounced-drops
+  '((agent-repl--frontend-detach-webview . "the drop primitive itself; its callers announce")
+    (agent-repl--frontend-release-workspace-webview . "the workspace is ending: the daemon ended it first"))
+  "The definitions that may drop a page unannounced, each with why.")
+
+(defun agent-repl-test-pu--unannounced-drop-p (form)
+  "Non-nil when FORM calls a page drop outside `agent-repl-page-drop-announced'."
+  (cond
+   ((not (consp form)) nil)
+   ((eq (car form) 'agent-repl-page-drop-announced) nil)
+   ((memq (car form) '(declare-function quote function))
+    (and (eq (car form) 'function) (memq (cadr form) agent-repl-test-pu--page-drops)))
+   ((memq (car form) agent-repl-test-pu--page-drops) t)
+   (t (let ((found nil) (rest form))
+        (while (and (consp rest) (not found))
+          (setq found (agent-repl-test-pu--unannounced-drop-p (car rest))
+                rest (cdr rest)))
+        found))))
+
+(defun agent-repl-test-pu--unannounced-droppers (forms)
+  "The names of the definitions among FORMS that drop a page unannounced."
+  (let (out)
+    (dolist (form forms (nreverse out))
+      (when (and (consp form) (memq (car form) '(defun defmacro cl-defun))
+                 (agent-repl-test-pu--unannounced-drop-p (cdddr form)))
+        (push (cadr form) out)))))
+
+(defun agent-repl-test-pu--source-forms ()
+  "Every top-level form of agent-repl's elisp sources, tests excluded."
+  (let ((dir (file-name-directory (or load-file-name buffer-file-name
+                                      (locate-library "test-page-unload"))))
+        forms)
+    (dolist (file (directory-files dir t "\\`[^.].*\\.el\\'") forms)
+      (unless (string-prefix-p "test-" (file-name-nondirectory file))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (condition-case nil
+              (while t (push (read (current-buffer)) forms))
+            (end-of-file nil)))))))
+
+(defvar agent-repl-test-pu--source-forms (agent-repl-test-pu--source-forms)
+  "The sources' forms, read once when this file loads.")
+
+(ert-deftest agent-repl-test-pu-every-page-drop-is-announced ()
+  "Only the named exceptions drop a page without telling the daemon first."
+  ;; Act
+  (let ((droppers (agent-repl-test-pu--unannounced-droppers agent-repl-test-pu--source-forms)))
+    ;; Assert
+    (should (equal (sort (mapcar #'symbol-name droppers) #'string<)
+                   (sort (mapcar (lambda (e) (symbol-name (car e)))
+                                 agent-repl-test-pu--unannounced-drops)
+                         #'string<)))))
+
+(ert-deftest agent-repl-test-pu-the-drop-scan-catches-a-hand-rolled-drop ()
+  "A definition that drops a page itself is found; one through the helper is not."
+  ;; Arrange
+  (let ((forms '((defun hand-rolled (ws buf) (when buf (agent-repl--frontend-detach-webview ws buf)))
+                 (defun by-symbol (ws) (mapc #'agent-repl-webhost-remove (list ws)))
+                 (defun announced (ws)
+                   (agent-repl-page-drop-announced
+                    ws #'always (lambda () (agent-repl-webhost-remove ws)) #'ignore)))))
+    ;; Act
+    (let ((droppers (agent-repl-test-pu--unannounced-droppers forms)))
+      ;; Assert
+      (should (equal droppers '(hand-rolled by-symbol))))))
+
+;;;; ---- A hot reload heals the rows an unannounced drop left severed ----
+
+(ert-deftest agent-repl-test-pu-every-pageless-workspace-is-reported ()
+  "Each open workspace the host holds no page for is reported, once each."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta" "gamma")
+    (setq agent-repl-test-pu--pages '("alpha"))
+    ;; Act
+    (let ((sent (agent-repl-page-unload-report-pageless)))
+      ;; Assert
+      (should (equal (list sent (reverse agent-repl-test-pu--events))
+                     '(2 ((report "beta") (report "gamma"))))))))
+
+(ert-deftest agent-repl-test-pu-a-pageless-workspace-already-reporting-is-skipped ()
+  "A workspace whose report is in flight is not reported a second time."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--pages nil)
+    (agent-repl--ws-put "alpha" :page-unloading t)
+    ;; Act
+    (agent-repl-page-unload-report-pageless)
+    ;; Assert
+    (should (equal (reverse agent-repl-test-pu--events) '((report "beta"))))))
+
+(ert-deftest agent-repl-test-pu-a-pageless-report-records-its-outcome ()
+  "A landed report and one that did not land are each recorded."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil)
+    (agent-repl-page-unload-report-pageless)
+    (setq agent-repl-test-pu--report 'refused)
+    ;; Act
+    (agent-repl-page-unload-report-pageless)
+    ;; Assert
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.pageless-reported ws=alpha"))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.pageless-unreported ws=alpha"))))
 
 ;;;; ---- What counts as a look ----
 

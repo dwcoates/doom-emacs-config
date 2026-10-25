@@ -222,29 +222,57 @@ reported."
          (not (agent-repl--ws-get ws :page-unloading))
          buf)))
 
-(defun agent-repl-page-unload--unload (ws reason now)
-  "Unload WS\='s page for REASON, found at NOW, once the daemon is told.
-The page is detached only when the report answers success and the page
-is still one a pass may unload: the user may have switched to it while
-the report was in flight."
+(defun agent-repl-page-drop-announced (ws still-p drop on-kept)
+  "Drop open workspace WS\='s page by calling DROP, once the daemon is told.
+EVERY PATH THAT DROPS THE PAGE OF A WORKSPACE THAT STAYS OPEN COMES
+THROUGH HERE: the unload pass, a hide, closing the panel.  The page\='s web
+stream ends with the page, and a stream that ends unannounced is drawn as
+a broken link, blue (2026-10-25: a fold of a repository section drew a
+busy workspace severed).  So the daemon is told first
+\(`agent-repl-host-report-page-unloading'), and DROP runs only once it has
+answered success AND STILL-P, called with no argument, still answers
+non-nil: what asked for the drop may have changed while the report was in
+flight.  Otherwise ON-KEPT is called with `changed' or `not-reported', and
+the page stays loaded.  The caller records each outcome.
+
+WS\='s `:page-unloading' is set while the report is in flight.
+
+A workspace that is ENDING (closed, killed, merged) drops its page
+unannounced (`agent-repl--frontend-release-workspace-webview'): the daemon
+ended it first, so its stream\='s end draws nothing."
   (agent-repl--ws-put ws :page-unloading t)
   (agent-repl-host-report-page-unloading
    ws
    (lambda ()
      (agent-repl--ws-put ws :page-unloading nil)
-     (if (agent-repl-page-unload--holdable-p ws)
-         (progn
-           ;; THE PAGE GOES, THE SLOT STAYS: its windows are the panels.
-           (agent-repl-webhost-remove ws)
-           (agent-repl--ws-put ws :page-remounting nil)
-           (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s unlooked-s=%d"
-                             ws reason
-                             (round (- now (or (agent-repl--ws-get ws :page-looked-at) now)))))
-       (agent-repl--info ws "elisp.page-unload.kept ws=%s reason=%s why=in-use-since-report"
-                         ws reason)))
+     (if (funcall still-p)
+         (funcall drop)
+       (funcall on-kept 'changed)))
    (lambda ()
      (agent-repl--ws-put ws :page-unloading nil)
-     (agent-repl--info ws "elisp.page-unload.kept ws=%s reason=%s why=not-reported" ws reason))))
+     (funcall on-kept 'not-reported))))
+
+(defun agent-repl-page-unload--unload (ws reason now)
+  "Unload WS\='s page for REASON, found at NOW, once the daemon is told.
+The page is detached only when the report answers success and the page
+is still one a pass may unload: the user may have switched to it while
+the report was in flight."
+  (agent-repl-page-drop-announced
+   ws
+   (lambda () (agent-repl-page-unload--holdable-p ws))
+   (lambda ()
+     ;; THE PAGE GOES, THE SLOT STAYS: its windows are the panels.
+     (agent-repl-webhost-remove ws)
+     (agent-repl--ws-put ws :page-remounting nil)
+     (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s unlooked-s=%d"
+                       ws reason
+                       (round (- now (or (agent-repl--ws-get ws :page-looked-at) now)))))
+   (lambda (why)
+     (agent-repl--info ws "elisp.page-unload.kept ws=%s reason=%s why=%s"
+                       ws reason (pcase why
+                                   ('changed "in-use-since-report")
+                                   ('not-reported "not-reported")
+                                   (_ (error "Unknown kept reason %S" why)))))))
 
 (defun agent-repl-page-unload--abandon (ws)
   "Ask the host whether WS\='s remounted page has drawn, the user having left it.
@@ -331,6 +359,32 @@ Registered on `agent-repl-link-up-functions'; a timer already running is kept."
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl-page-unload-start)
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-page-unload-on-roster-update)
+
+(defun agent-repl-page-unload-report-pageless ()
+  "Tell the daemon about every open workspace whose page the host does not hold.
+A page dropped before every drop was announced (`agent-repl-page-drop-announced')
+left its workspace drawn severed, blue, until a page connected again.
+Reporting it now has the daemon await its page instead, so the row heals.
+A workspace whose report is already in flight is skipped.  Answers how
+many reports were sent."
+  (let ((sent 0))
+    (dolist (ws (agent-repl--live-ws-names) sent)
+      (unless (or (agent-repl-webhost-has-page-p ws) (agent-repl--ws-get ws :page-unloading))
+        (when (agent-repl-host-report-page-unloading
+               ws
+               (lambda () (agent-repl--info ws "elisp.page-unload.pageless-reported ws=%s" ws))
+               (lambda () (agent-repl--info ws "elisp.page-unload.pageless-unreported ws=%s" ws)))
+          (setq sent (1+ sent)))))))
+
+(defvar agent-repl-page-unload--loaded nil
+  "Non-nil once this file has loaded: a later load is a hot reload.")
+
+;; A HOT RELOAD HEALS THE ROWS AN UNANNOUNCED DROP LEFT SEVERED.  The first
+;; load has no daemon link yet, and a fresh daemon awaits every page anyway.
+(when agent-repl-page-unload--loaded
+  (agent-repl--info agent-repl--page-unload-central "elisp.page-unload.reloaded reported=%d"
+                    (agent-repl-page-unload-report-pageless)))
+(setq agent-repl-page-unload--loaded t)
 
 (provide 'page-unload)
 ;;; page-unload.el ends here
