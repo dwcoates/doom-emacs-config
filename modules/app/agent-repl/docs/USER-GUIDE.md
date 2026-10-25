@@ -508,6 +508,9 @@ The one-shot commission prompt (`SPC TAB o` and `SPC TAB C-o`) saves what you ty
   - The text you were typing is the first history entry, in full.
 - The text also stays in the history when you press `C-g`.
 - The history is shared by every workspace, in `~/.claude-emacs/oneshot-commission-history.el`.
+- `C-r` searches the history backward as you type, like a shell's `C-r`.
+  - Press `C-r` again for the next older match, and `RET` to keep it.
+  - Every creation prompt has this search, including the initial prompt of a new workspace.
 
 ## Creating a workspace leaves you where you are
 

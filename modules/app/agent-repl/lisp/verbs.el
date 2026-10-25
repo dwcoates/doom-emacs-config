@@ -77,6 +77,7 @@
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-log-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-require-known "agent-repl-workspace" (ws context))
+(declare-function agent-repl-refill-keymap "agent-repl-core" (map fill))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
@@ -2279,7 +2280,10 @@ fresh piece of work, not whatever the current workspace was drafting.
 With HISTORY-FILE, the prompt's history lives in that file and the text
 being typed is saved there on every edit
 \(`agent-repl-verbs--read-string-persisted').  Without it, the read uses
-the ordinary minibuffer history."
+the ordinary minibuffer history.
+
+Either way `C-r' searches that history backward
+\(`agent-repl-verbs--prompt-history-map')."
   (let* ((ws (unless unseeded (agent-repl--ws-current-log-name)))
          (buffered (and ws (agent-repl--read-input-buffer ws)))
          (initial (and buffered (not (string-empty-p (string-trim buffered)))
@@ -2287,9 +2291,29 @@ the ordinary minibuffer history."
     (unless (or ws unseeded)
       (agent-repl--log '(:agent-repl-central "the current buffer has no workspace composer")
                        "elisp.verbs.read-prompt prompt=%S composer=none" prompt-text))
-    (if history-file
-        (agent-repl-verbs--read-string-persisted prompt-text initial history-file)
-      (read-string prompt-text initial))))
+    (minibuffer-with-setup-hook #'agent-repl-verbs--install-prompt-history-map
+      (if history-file
+          (agent-repl-verbs--read-string-persisted prompt-text initial history-file)
+        (read-string prompt-text initial)))))
+
+(defvar agent-repl-verbs--prompt-history-map (make-sparse-keymap)
+  "Keys a creation prompt's minibuffer adds over its own local map.
+`C-r' searches the prompt's history backward, as a shell's `C-r' does:
+the minibuffer's isearch walks past the text being typed into the history
+entries (`minibuffer-history-isearch-setup').  Doom's evil bindings put
+`evil-paste-from-register' on `C-r' in every minibuffer map, so without
+this map the search is unreachable.")
+
+(agent-repl-refill-keymap
+ agent-repl-verbs--prompt-history-map
+ (lambda (map) (define-key map (kbd "C-r") #'isearch-backward)))
+
+(defun agent-repl-verbs--install-prompt-history-map ()
+  "Put `agent-repl-verbs--prompt-history-map' over the minibuffer's local map.
+Run from `minibuffer-setup-hook' by `agent-repl-verbs--read-prompt', so
+only the creation prompt's own minibuffer carries it."
+  (use-local-map (make-composed-keymap agent-repl-verbs--prompt-history-map
+                                       (current-local-map))))
 
 (defun agent-repl-verbs--read-required-prompt (prompt-text refusal &optional history-file unseeded)
   "Read a creation prompt with PROMPT-TEXT that must not be blank.
