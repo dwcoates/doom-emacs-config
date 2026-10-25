@@ -43,18 +43,28 @@ type EmacsWorld struct {
 	// Launchctl is the launchctl a service restart would drive
 	// (AGENT_REPL_LAUNCHCTL), so no deploy here reaches a launchd.
 	Launchctl *harness.Recorder
+	// Zettel is the world's real zettel (WithZettel), or nil.
+	Zettel *Zettel
 }
 
-// EmacsWorldOption tunes one EmacsWorld. There is exactly one option, and
-// it exists for exactly one reason: the DAEMON in this layer is spawned by
-// Emacs, so anything the Go layer states through `harness.Opts` can only be
-// stated here as environment the EMACS process carries and its daemon child
-// inherits.
+// EmacsWorldOption tunes one EmacsWorld. The DAEMON in this layer is spawned
+// by Emacs, so anything the Go layer states through `harness.Opts` can only
+// be stated here as environment the EMACS process carries and its daemon
+// child inherits (WithEmacsEnv); the one other option runs a real zettel
+// (WithZettel).
 type EmacsWorldOption func(*emacsWorldConfig)
 
 // emacsWorldConfig is the accumulated options.
 type emacsWorldConfig struct {
 	extraEnv []string
+	// zettel runs a real zettel beside the daemon (WithZettel).
+	zettel bool
+}
+
+// WithZettel runs a REAL zettel beside the daemon Emacs spawns, on a socket
+// and a graph of the world's own, for a scenario about the chat threads.
+func WithZettel() EmacsWorldOption {
+	return func(c *emacsWorldConfig) { c.zettel = true }
 }
 
 // WithEmacsEnv threads one `KEY=VALUE` into the Emacs process's environment,
@@ -187,6 +197,14 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		"AGENT_REPL_LAUNCH_AGENTS_DIR=" + filepath.Join(box.Scratch(), "LaunchAgents"),
 		harness.UnservedZettelEnv(harness.ShortTempDir(t)),
 	}
+	var zettel *Zettel
+	if cfg.zettel {
+		zettel = startZettel(t, shortSocketPath(t, "zettel"), filepath.Join(box.Scratch(), "zettel.db"),
+			filepath.Join(logsDir, "zettel.log"), lockDir)
+		t.Cleanup(func() { requireZettelOutlivedTheTest(t, zettel) })
+		// After the unserved socket above, so this one is the daemon's.
+		extraEnv = append(extraEnv, harness.ZettelSocketEnv+"="+zettel.Socket)
+	}
 	// LAST, so a scenario's own statement is the one the process carries.
 	extraEnv = append(extraEnv, cfg.extraEnv...)
 
@@ -265,7 +283,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	// Workspace-owned records go to each repo's .claude/emacs, which a test
 	// adds once it has a repo.
 	e.ArtifactPaths = append(e.ArtifactPaths, git.StateFile, logsDir)
-	return &EmacsWorld{Emacs: e, Store: store, Sidecar: sidecar, Git: git, Deploy: deploy, Launchctl: launchctl}
+	return &EmacsWorld{Emacs: e, Store: store, Sidecar: sidecar, Git: git, Deploy: deploy, Launchctl: launchctl, Zettel: zettel}
 }
 
 // webappDistOnce checks the staged webapp dist at most once per test binary.

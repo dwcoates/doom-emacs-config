@@ -19,7 +19,6 @@ import (
 	"agentrepl/proto/zettel/v1/zettelv1connect"
 
 	"agent-repld/integration/grantedclock"
-	"agent-repld/integration/harness"
 )
 
 var zettelProgram = &programOnce{name: "zettel", build: func() (string, error) {
@@ -55,20 +54,7 @@ func startZettel(t testing.TB, socket, dbPath, logPath, lockDir string) *Zettel 
 	if lockDir == "" {
 		t.Fatal("e2e: zettel needs the world's lock dir; an empty one would write its build report over the owner's own in ~/.cache/agent-repl/run")
 	}
-	cmd := exec.Command(bin, "--socket", socket, "--db", dbPath, "--log", logPath)
-	cmd.Env = append(os.Environ(),
-		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
-		"AGENT_REPL_LOCK_DIR="+lockDir,
-	)
-	cmd.Env = append(cmd.Env, coverageEnv(t, "zettel")...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("e2e: start zettel: %v", err)
-	}
-	// Its --log path lives under the daemon's state root, so its argv names
-	// the state directory a daemon's stray reap matches on: this test owns it.
-	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
+	cmd := startService(t, "zettel", "start", bin, []string{"--socket", socket, "--db", dbPath, "--log", logPath}, lockDir)
 	z := &Zettel{
 		t: t, Socket: socket, DBPath: dbPath, LogPath: logPath,
 		Client: zettelv1connect.NewZettelClient(udsHTTPClient(socket), "http://zettel"),
