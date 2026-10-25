@@ -118,7 +118,7 @@ import { REVEAL_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
 import { queryAll } from "../dom.js";
 
 /** How long a revealed row wears the highlight that says "here". */
-export const REVEAL_HIGHLIGHT_MS = 1500;
+export const REVEAL_HIGHLIGHT_MS = 1000;
 
 /** What the chip's `request` evidence names a jump's failed expansion as. */
 export const JUMP_EXPAND_REQUEST = "expand the entry a jump landed on";
