@@ -5,26 +5,15 @@
  * their copy control measured against the bubble's own edges and its text.
  */
 import { create } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
-import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
-import {
-  FeedIdSchema,
-  FeedResponseSchema,
-  FeedRowSchema,
-  FeedUserPromptSchema,
-} from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { FeedResponseSchema, FeedUserPromptSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawFeedUserPrompt } from "../../src/feed/rows/user-prompt.js";
 import { drawFeedResponse } from "../../src/feed/cards/response.js";
 import { BUBBLE_COPY_CLASS } from "../../src/bubble/copy-room.js";
 import { BUBBLE_SCROLL_CLASS } from "../../src/feed/bubble-scroll.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
 import { SELECTED_ENTRY_CLASS } from "../../src/feed/selected-entry.js";
-import { createTicker } from "../../src/clock.js";
-import { createAgentReplClient } from "../../src/rpc/client.js";
-import { testAppContext } from "../rpc/app-context.js";
-import { orderFor } from "../feed-order.js";
 import { servedProse } from "../prose.js";
+import { pagedRowContext } from "../feed/harness.js";
 import { installPageLogger } from "./page-log";
 
 installPageLogger("bubble-copy");
@@ -136,28 +125,13 @@ window.bubbleCopy = {
   },
 
   measureResponse(text) {
-    const transport = createRouterTransport(({ service }) => {
-      service(AgentRepl, {});
-    });
     const bubble = drawFeedResponse(
       create(FeedResponseSchema, {
         finalAnswer: true,
         usage: { text: "12.3k", atMs: 1_000n, heat: { position: 0.5 } },
         result: { case: "success", value: { prose: { prose: servedProse(text) } } },
       }),
-      {
-        ctx: testAppContext({
-          client: createAgentReplClient(transport),
-          workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
-          ticker: createTicker(1000),
-          failures: { report: () => {}, retract: () => {} },
-          composerEnabled: false,
-        }),
-        feed: "root",
-        arrival: "page",
-        row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }), order: orderFor("row-1") }),
-        revealRow: async () => true,
-      },
+      pagedRowContext(),
     );
     return measure(bubble);
   },
