@@ -943,6 +943,16 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 			},
 		},
 		{
+			name: "no chat system prompt",
+			deps: FleetDeps{
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
+				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
+				Steps: func(ids.WorkspaceID, opentabs.Step) {}, Restarts: &restarttimingtest.Recorder{},
+			},
+		},
+		{
 			name: "no session-up hook",
 			deps: FleetDeps{
 				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
