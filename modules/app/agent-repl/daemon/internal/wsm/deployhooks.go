@@ -94,8 +94,8 @@ func decodeHooks(table, row, field, raw string) ([]*repoconfigv1.DeployHook, err
 // rewriteDeployQueueRows is layout 68's Go rewrite: the stored merge tabs and
 // the stored progress records a previous build wrote, each read again in the
 // deploy queue's vocabulary.
-func rewriteDeployQueueRows(ctx context.Context, tx *sql.Tx, _ dlog.Logger) error {
-	if err := rewriteRetiredMergeTabs(ctx, tx); err != nil {
+func rewriteDeployQueueRows(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
+	if err := rewriteRetiredMergeTabs(ctx, tx, log); err != nil {
 		return err
 	}
 	return rewriteRetiredProgressSteps(ctx, tx)
@@ -237,44 +237,8 @@ const (
 // queue is drawn again whole. The two retired messages and FeedMergeTabHookPrompt
 // share their field numbers (state: live 1, settled 2), so the arm's bytes are
 // carried over as they are. Every other row is left byte for byte as it was.
-func rewriteRetiredMergeTabs(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, row_id, row FROM durable_feed_rows`)
-	if err != nil {
-		return err
-	}
-	type rewrite struct {
-		ws, id string
-		row    []byte
-	}
-	var rewrites []rewrite
-	for rows.Next() {
-		var ws, id string
-		var raw []byte
-		if err := rows.Scan(&ws, &id, &raw); err != nil {
-			rows.Close()
-			return err
-		}
-		out, changed, err := rewriteRetiredMergeTab(raw)
-		if err != nil {
-			rows.Close()
-			return fmt.Errorf("durable feed row %s/%s: %w", ws, id, err)
-		}
-		if changed {
-			rewrites = append(rewrites, rewrite{ws: ws, id: id, row: out})
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, rw := range rewrites {
-		if _, err := tx.ExecContext(ctx, `UPDATE durable_feed_rows SET row = ? WHERE workspace_id = ? AND row_id = ?`, rw.row, rw.ws, rw.id); err != nil {
-			return err
-		}
-	}
-	return nil
+func rewriteRetiredMergeTabs(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
+	return rewriteDurableRows(ctx, tx, log, "re-encoded the stored merge tabs of retired prompt kinds as prompt hooks' tabs", rewriteRetiredMergeTab)
 }
 
 // rewriteRetiredMergeTab re-encodes one stored frontend.v1.FeedRow whose merge
