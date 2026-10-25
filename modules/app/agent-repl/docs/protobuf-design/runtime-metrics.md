@@ -270,6 +270,7 @@ owner's delegation.
 - What:
   - `agentrepl.v1.ReportedLatencyKind` gains `PAGE_STALL` (a shown page's main thread late by at least the vocabulary's detection floor) and `RELOAD_BLANK` (a reload's start to the reloaded page drawn, measured only by a page shown when it draws).
   - `agentrepl.v1.ReportLatenciesRequest` gains `repeated ReportedEditorLatency editor_latencies = 3`, each an `agentrepl.v1.EditorLatencyKind` (`STALL`, `ELISP_RELOAD`) and its seconds.
+  - 2026-10-25: `agentrepl.v1.EditorLatencyKind` gains `EDITOR_LATENCY_KIND_INPUT_WAIT = 3`, typed input left unread while the command loop ran filters and timers (a deploy's handover burst), which the `STALL` sampler cannot see because the loop stays free enough to run it.
   - The host-to-page presence message (webapp `host/protocol.ts`, not a protobuf) gains `reloadStartedAtMs`, which Emacs hands the host with the `ensure` or `reload` call a reload makes.
 - Why: the owner sees the webapp flash, the font size change and Emacs freeze during hot reloads (2026-10-23), and no metric measured any of it: `workspace_reconnect` ends when the streams are back, not when the page has painted, and nothing measured either event loop the person waits on.
 - Why a stall and not every sample: a sampler runs every 100ms, and only a run at least the detection floor (50ms) late is reported, so a healthy loop sends nothing and the histogram is the distribution of freezes a person felt.

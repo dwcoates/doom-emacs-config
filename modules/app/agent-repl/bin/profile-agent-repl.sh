@@ -59,6 +59,8 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="${AGENT_REPL_PROFILE_ROOT:-$HOME/.cache/agent-repl/profiles}"
 ACTIVE="$ROOT/active"
 ARMED="$ROOT/armed"
+# THE WINDOW every runtime stops profiling by itself after, the contract's.
+MAX_SECONDS="$(sed -n 's/^ *"max_seconds": *\([0-9][0-9]*\).*/\1/p' "$THIS_DIR/../proto/vocab/profile-session.json")"
 
 die() {
     printf 'profile-agent-repl: %s\n' "$*" >&2
@@ -162,6 +164,53 @@ call_emacs() {
     fi
 }
 
+# EMACS'S CPU IS SAMPLED FROM OUTSIDE.  Emacs's own CPU profiler is driven by
+# SIGPROF, and in an Emacs hosting WebKit a SIGPROF that lands on a WebKit
+# thread is forwarded with pthread_kill and can abort the editor (2026-10-25,
+# profiling.el).  macOS `sample' reads the main thread's stacks without
+# sending Emacs anything: C frames (garbage collection, redisplay, process
+# output, byte-code), not Lisp function names.
+#
+# start_emacs_sample SESSION_DIR -- sample Emacs's CPU into the session until
+# stop_emacs_sample, or the contract's window, whichever comes first.
+start_emacs_sample() {
+    local dir="$1" pid
+    if ! pid="$(eval_emacs '(emacs-pid)' 2>&1)" || ! [[ $pid =~ ^[0-9]+$ ]]; then
+        printf 'emacs: no CPU sample: its pid is unknown: %s\n' "$pid"
+        return 0
+    fi
+    sample "$pid" "$MAX_SECONDS" 1 -mayDie -file "$dir/emacs-$pid.cpu.sample" \
+        </dev/null >/dev/null 2>"$dir/emacs-sample.err" &
+    printf '%s\n' "$!" >"$dir/emacs-sample.pid"
+    disown
+    printf 'emacs: sampling the CPU of pid %s\n' "$pid"
+}
+
+# stop_emacs_sample SESSION_DIR -- interrupt the session's Emacs sample, which
+# writes its report as it exits, and wait for it to have written.
+stop_emacs_sample() {
+    local dir="$1" pid
+    [ -f "$dir/emacs-sample.pid" ] || return 0
+    pid="$(cat "$dir/emacs-sample.pid")"
+    rm -f "$dir/emacs-sample.pid"
+    if ! kill -INT "$pid" 2>/dev/null; then
+        printf 'emacs: the CPU sample (pid %s) had already stopped\n' "$pid"
+        return 0
+    fi
+    # `sample' writes and exits within a second of the interrupt; ten is the
+    # bound past which it is stuck, said so rather than waited on forever.
+    local tries=0
+    while kill -0 "$pid" 2>/dev/null; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 100 ]; then
+            printf 'emacs: the CPU sample (pid %s) did not exit within 10s of its interrupt\n' "$pid"
+            return 1
+        fi
+        sleep 0.1
+    done
+    printf 'emacs: the CPU sample (pid %s) wrote its report\n' "$pid"
+}
+
 # sampler SESSION_DIR INTERVAL -- append one JSON line per agent-repl process
 # per tick until killed.
 sampler() {
@@ -254,7 +303,7 @@ cmd_start() {
     # reconciles into it reads it (proto/vocab/profile-session.json).
     [ -z "$level" ] || printf '%s\n' "$level" >"$dir/log-level"
     printf '%s\n' "$id" >"$ACTIVE"
-    { signal_armed; call_emacs; } | tee -a "$dir/control.log"
+    { signal_armed; call_emacs; start_emacs_sample "$dir"; } | tee -a "$dir/control.log"
     sampler "$dir" "$interval" </dev/null >/dev/null 2>"$dir/sampler.err" &
     printf '%s\n' "$!" >"$dir/sampler.pid"
     disown
@@ -267,7 +316,7 @@ cmd_stop() {
     id="$(cat "$ACTIVE")"
     dir="$ROOT/$id"
     rm -f "$ACTIVE"
-    { signal_armed; call_emacs; } | tee -a "$dir/control.log"
+    { signal_armed; call_emacs; stop_emacs_sample "$dir"; } | tee -a "$dir/control.log"
     if [ -f "$dir/sampler.pid" ]; then
         pid="$(cat "$dir/sampler.pid")"
         kill "$pid" 2>/dev/null || printf 'the sampler (pid %s) had already stopped\n' "$pid"

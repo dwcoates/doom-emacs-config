@@ -1421,9 +1421,7 @@ one to its caller.  A caller that must abort signals for itself."
 (defmacro agent-repl-test--with-atomic-dir (var &rest body)
   "Run BODY with VAR naming a fresh temporary directory, removed afterwards."
   (declare (indent 1))
-  `(let ((,var (make-temp-file "atomic-write-" t)))
-     (unwind-protect (progn ,@body)
-       (delete-directory ,var t))))
+  `(agent-repl-test--with-temp-dir ,var "atomic-write-" ,@body))
 
 (defun agent-repl-test--atomic-dir-files (dir)
   "Return every entry of DIR but `.' and `..', hidden ones included."
@@ -6693,9 +6691,7 @@ restores them afterwards."
   "Run BODY with DIR bound to a fresh directory the sweep is pointed at."
   (declare (indent 1))
   `(agent-repl-test--with-clean-state
-     (let ((,dir (make-temp-file "agent-repl-sweep-" t)))
-       (unwind-protect (progn ,@body)
-         (delete-directory ,dir t)))))
+     (agent-repl-test--with-temp-dir ,dir "agent-repl-sweep-" ,@body)))
 
 (defun agent-repl-test--sweep-file (dir name &optional age-seconds)
   "Write NAME in DIR, last written AGE-SECONDS ago (default: now); return its path."

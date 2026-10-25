@@ -140,6 +140,18 @@
       "buckets_seconds": [0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30]
     },
     {
+      "name": "editor_input_wait",
+      "description": "typed input waiting unread while Emacs's command loop runs other work",
+      "start": "the first run of Emacs's steady sampling timer that found input pending",
+      "end": "the first later run that found none, when input was pending across at least two runs",
+      "measured_by": "emacs",
+      "threshold_ms": 100,
+      "reason": "nothing typed reaches the screen meanwhile; anything past ~100ms reads as the editor freezing",
+      "reported_as": "EDITOR_LATENCY_KIND_INPUT_WAIT",
+      "detection_floor_ms": 100,
+      "buckets_seconds": [0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10, 30]
+    },
+    {
       "name": "page_stall",
       "description": "a stall of a shown page's main thread",
       "start": "the moment the shown page's steady sampling timer was due",

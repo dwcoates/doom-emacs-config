@@ -106,6 +106,13 @@ enum EditorLatencyKind {
   // load to its heartbeat assertion done. The editor runs nothing else
   // meanwhile.
   EDITOR_LATENCY_KIND_ELISP_RELOAD = 2;
+  // Input the person typed that waited unread while the editor's command
+  // loop ran other work (process filters, timers): from the first run of the
+  // steady sampling timer that found input pending to the first that found
+  // none, when it was pending across at least two runs. The loop was free
+  // enough to run the timer, so EDITOR_LATENCY_KIND_STALL never saw it, yet
+  // nothing typed reached the screen.
+  EDITOR_LATENCY_KIND_INPUT_WAIT = 3;
 }
 
 // One finished editor-wide interaction.

@@ -128,6 +128,7 @@ func TestValidateEditorLatency(t *testing.T) {
 	}{
 		{name: "a stall", latency: &agentreplv1.ReportedEditorLatency{Kind: stall, Seconds: 0.2}, want: "editor_stall"},
 		{name: "an elisp reload", latency: &agentreplv1.ReportedEditorLatency{Kind: agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_ELISP_RELOAD, Seconds: 0.2}, want: "elisp_reload"},
+		{name: "an input wait", latency: &agentreplv1.ReportedEditorLatency{Kind: agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_INPUT_WAIT, Seconds: 0.2}, want: "editor_input_wait"},
 		{name: "an unspecified kind", latency: &agentreplv1.ReportedEditorLatency{Seconds: 0.2}},
 		{name: "a negative duration", latency: &agentreplv1.ReportedEditorLatency{Kind: stall, Seconds: -1}},
 		{name: "a NaN duration", latency: &agentreplv1.ReportedEditorLatency{Kind: stall, Seconds: math.NaN()}},

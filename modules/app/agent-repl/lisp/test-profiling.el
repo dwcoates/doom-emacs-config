@@ -52,7 +52,6 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
                    ((symbol-function 'agent-repl--ws-list-names) (lambda () nil)))
            ,@body)
        (when (profiler-running-p)
-         (when (fboundp 'profiler-cpu-stop) (profiler-cpu-stop))
          (profiler-memory-stop))
        (delete-directory root t))))
 
@@ -105,8 +104,16 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
     (should (profiler-running-p))
     (should (equal (car (car logged)) 'info))))
 
-(ert-deftest agent-repl-test-profiling-closing-the-session-writes-the-profiles ()
-  "Closing the session stops the profiler and writes four files."
+(ert-deftest agent-repl-test-profiling-never-starts-the-cpu-profiler ()
+  "The SIGPROF CPU profiler stays off: its signals crash an Emacs hosting WebKit."
+  (agent-repl-test-profiling--with-root
+    (agent-repl-test-profiling--open root "s1")
+    (agent-repl-profiling-reconcile)
+    (should (profiler-memory-running-p))
+    (should-not (profiler-cpu-running-p))))
+
+(ert-deftest agent-repl-test-profiling-closing-the-session-writes-the-memory-profile ()
+  "Closing the session stops the profiler and writes the memory profile and its tree."
   (agent-repl-test-profiling--with-root
     (agent-repl-test-profiling--open root "s1")
     (agent-repl-profiling-reconcile)
@@ -115,6 +122,9 @@ Binds `root' to the root and `logged' to the (LEVEL . MESSAGE) records."
     (let ((answer (agent-repl-profiling-reconcile)))
       (should (string-prefix-p "stopped s1 pages=0 " answer))
       (should-not (profiler-running-p))
+      (should (equal (mapcar #'file-name-nondirectory (nthcdr 3 (split-string answer " ")))
+                     (list (format "emacs-%d.mem.elprof" (emacs-pid))
+                           (format "emacs-%d.mem.txt" (emacs-pid)))))
       (dolist (file (nthcdr 3 (split-string answer " ")))
         (should (file-exists-p file))))))
 

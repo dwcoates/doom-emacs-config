@@ -39,7 +39,27 @@ EOF
 cat >"$STUBS/emacsclient" <<'EOF'
 #!/usr/bin/env bash
 printf 'emacsclient %s\n' "$*" >>"$STUB_LOG"
-printf '"%s"\n' "${STUB_EMACS_ANSWER:-started}"
+case "$*" in
+    *"(emacs-pid)"*) printf '%s\n' "${STUB_EMACS_PID:-606}" ;;
+    *) printf '"%s"\n' "${STUB_EMACS_ANSWER:-started}" ;;
+esac
+EOF
+# sample PID SECONDS INTERVAL -mayDie -file FILE: records its arguments and,
+# like macOS sample, writes its report when interrupted.  Perl, not bash: the
+# collector starts it in the background of a non-interactive shell, which
+# hands it SIGINT ignored, and a bash script cannot trap a signal it inherited
+# ignored, while a program (macOS sample included) installs its own handler.
+cat >"$STUBS/sample" <<'EOF'
+#!/usr/bin/perl
+open(my $log, '>>', $ENV{STUB_LOG}) or die; print $log "sample @ARGV\n"; close($log);
+my ($file) = map { $ARGV[$_ + 1] } grep { $ARGV[$_] eq '-file' } 0 .. $#ARGV;
+$SIG{INT} = sub {
+    open(my $out, '>', $file) or die;
+    print $out "Sort by top of stack, same collapsed (when >= 5):\n        process_mark_stack  (in Emacs)        7\n";
+    close($out);
+    exit 0;
+};
+sleep 3600 while 1;
 EOF
 chmod +x "$STUBS"/*
 
@@ -64,7 +84,7 @@ collector() {
 
 remember_sampler() {
     local f
-    for f in "$W"/root/*/sampler.pid; do
+    for f in "$W"/root/*/sampler.pid "$W"/root/*/emacs-sample.pid; do
         [ -e "$f" ] && SAMPLERS+=("$(cat "$f")")
     done
 }
@@ -102,6 +122,12 @@ if grep -q 'agent-repl-profiling-reconcile' "$W/log" && grep -q '^emacs: "starte
     pass "start asks Emacs to reconcile and records its answer"
 else
     fail "start asks Emacs to reconcile and records its answer" "$(cat "$W/log")"
+fi
+if grep -qx "sample 606 1800 1 -mayDie -file $W/root/$session/emacs-606.cpu.sample" "$W/log" &&
+    grep -q '^emacs: sampling the CPU of pid 606$' "$W/root/$session/control.log"; then
+    pass "start samples Emacs's CPU from outside, for the contract's window, into the session"
+else
+    fail "start samples Emacs's CPU from outside, for the contract's window, into the session" "$(cat "$W/log")"
 fi
 for _ in $(seq 1 100); do
     [ -s "$W/root/$session/samples.jsonl" ] && break
@@ -158,6 +184,13 @@ if ! kill -0 "$sampler_pid" 2>/dev/null; then
 else
     fail "stop ends the sampler" "pid $sampler_pid is still running"
 fi
+if grep -q 'process_mark_stack' "$W/root/$session/emacs-606.cpu.sample" 2>/dev/null &&
+    grep -q '^emacs: the CPU sample (pid [0-9]*) wrote its report$' "$W/root/$session/control.log" &&
+    [ ! -e "$W/root/$session/emacs-sample.pid" ]; then
+    pass "stop interrupts Emacs's CPU sample and waits for its report"
+else
+    fail "stop interrupts Emacs's CPU sample and waits for its report" "$(cat "$W/root/$session/control.log")"
+fi
 
 set +e
 out="$(collector stop 2>&1)"
@@ -196,7 +229,8 @@ EOF
 cat >"$R/sess/shim-404.heapprofile" <<'EOF'
 {"head":{"callFrame":{"functionName":"(root)","url":"","lineNumber":-1},"selfSize":0,"children":[{"callFrame":{"functionName":"alloc","url":"file:///x/main.js","lineNumber":4},"selfSize":4096,"children":[]}]}}
 EOF
-printf 'reversed tree line 1\nline 2\n' >"$R/sess/emacs-9.cpu.txt"
+printf 'reversed tree line 1\nline 2\n' >"$R/sess/emacs-9.mem.txt"
+printf 'Call graph:\n\nSort by top of stack, same collapsed (when >= 5):\n        process_mark_stack  (in Emacs)        80\n        exec_byte_code  (in Emacs)        20\n\nBinary Images:\n' >"$R/sess/emacs-9.cpu.sample"
 printf '{"session":"s","ws":"a","ok":true,"interval_ms":50,"ticks":10,"wall_ms":5000,"stalled_ms":240,"longest_ms":180,"stalls":[[1000,60],[3000,180]]}' >"$R/sess/webapp-a.lag.json"
 cat >"$R/logs.jsonl" <<'EOF'
 {"timestamp":"2026-10-12T12:00:00.000-04:00","runtime":"daemon","operation":"daemon.cmd.boot","message":"boot","workspace_id":""}
@@ -252,6 +286,12 @@ if grep -q 'reversed tree line 1' <<<"$report"; then
     pass "the report carries Emacs's reversed call tree"
 else
     fail "the report carries Emacs's reversed call tree" "$report"
+fi
+if grep -q '### emacs-9.cpu.sample' <<<"$report" && grep -q 'process_mark_stack  (in Emacs)        80' <<<"$report" &&
+    ! grep -q 'Binary Images' <<<"$report"; then
+    pass "the report carries the leaf frames of Emacs's CPU sample"
+else
+    fail "the report carries the leaf frames of Emacs's CPU sample" "$report"
 fi
 if grep -q '| first switch to a never-shown workspace (keystroke to page painted) | 100ms | 1 | 1300ms | 1300ms | 1300ms | 13.0x |' <<<"$report"; then
     pass "a first switch is measured from the keystroke to the page painted"
@@ -433,7 +473,8 @@ printf 'emacsclient %s\n' "$form" >>"$STUB_LOG"
 case $form in
     *fboundp*switch-tour-state*) printf '%s\n' "${STUB_EMACS_TOUR:-t}" ;;
     *emacs-pid*)
-        n="$(wc -l <"$STUB_LOG.pids" 2>/dev/null || printf 0)"
+        n=0
+        [ ! -f "$STUB_LOG.pids" ] || n="$(wc -l <"$STUB_LOG.pids")"
         printf 'x\n' >>"$STUB_LOG.pids"
         pid="$(sed -n "$((n + 1))p" "$STUB_EMACS_PIDS")"
         [ -n "$pid" ] || pid="$(tail -1 "$STUB_EMACS_PIDS")"
@@ -504,8 +545,10 @@ else
     fail "switch-bench refuses an Emacs with no switch tour, opening nothing" "rc=$rc out=$out"
 fi
 
+# The session's start asks Emacs its pid once for the CPU sample, then the
+# bench asks before its tours and after them: the third answer is the rollout.
 BENCH_PIDS="$TMP/changed-pids"
-printf '999\n1000\n' >"$BENCH_PIDS"
+printf '999\n999\n1000\n' >"$BENCH_PIDS"
 bench --slow 1:0.05 --fast 1:0.05
 unset BENCH_PIDS
 if [ "$rc" -ne 0 ] && grep -q 'INVALID RUN: a rollout replaced a runtime' <<<"$out" && [ ! -e "$W/root/active" ]; then

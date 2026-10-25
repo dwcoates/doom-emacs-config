@@ -139,3 +139,59 @@ func TestLoadBudgetsRefusesAnUnreadableVocabulary(t *testing.T) {
 		t.Fatalf("err = %v, want the read refused", err)
 	}
 }
+
+func TestSampleTop(t *testing.T) {
+	report := "Call graph:\n    10 Thread_1\n\nTotal number in stack (recursive counted multiple, when >=5):\n\n" +
+		"Sort by top of stack, same collapsed (when >= 5):\n" +
+		"        mach_msg2_trap  (in libsystem_kernel.dylib)        900\n" +
+		"        process_mark_stack  (in Emacs)        80\n" +
+		"        exec_byte_code  (in Emacs)        20\n" +
+		"\nBinary Images:\n    0x1 Emacs\n"
+	tests := []struct {
+		name    string
+		content string
+		n       int
+		want    string
+		wantErr string
+	}{
+		{name: "every leaf of the section", content: report, n: 15,
+			want: "mach_msg2_trap  (in libsystem_kernel.dylib)        900\nprocess_mark_stack  (in Emacs)        80\nexec_byte_code  (in Emacs)        20\n"},
+		{name: "the first n leaves", content: report, n: 2,
+			want: "mach_msg2_trap  (in libsystem_kernel.dylib)        900\nprocess_mark_stack  (in Emacs)        80\n"},
+		{name: "a report without the section", content: "Call graph:\n    10 Thread_1\n", n: 15,
+			wantErr: `has no "Sort by top of stack" section`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			path := filepath.Join(t.TempDir(), "emacs-1.cpu.sample")
+			if err := os.WriteFile(path, []byte(tt.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			// Act
+			got, err := sampleTop(path, tt.n)
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("sampleTop error = %v, want it to contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("sampleTop: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("sampleTop = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSampleTopRefusesAMissingFile(t *testing.T) {
+	// Act
+	_, err := sampleTop(filepath.Join(t.TempDir(), "absent.cpu.sample"), 15)
+	// Assert
+	if err == nil {
+		t.Fatal("sampleTop of an absent file answered no error")
+	}
+}

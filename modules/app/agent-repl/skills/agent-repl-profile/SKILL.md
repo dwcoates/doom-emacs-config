@@ -20,7 +20,7 @@ reports on them; each runtime profiles itself without a restart.
 | store | SIGWINCH, `armed/store-<pid>` | `store-<pid>.cpu.pprof`, `.heap.pprof` |
 | sidecar | SIGWINCH, `armed/sidecar-<pid>` | `sidecar-<pid>.cpu.pprof`, `.heap.pprof` |
 | every shim | SIGWINCH, `armed/shim-<pid>` | `shim-<pid>.cpuprofile` (Chrome DevTools), `.heapprofile` |
-| Emacs | `emacsclient --eval (agent-repl-profiling-reconcile)` | `emacs-<pid>.{cpu,mem}.elprof` (`M-x profiler-find-profile`), `.{cpu,mem}.txt` (reversed call tree) |
+| Emacs | `emacsclient --eval (agent-repl-profiling-reconcile)`, and the collector's `sample` of its main thread | `emacs-<pid>.mem.elprof` (`M-x profiler-find-profile`), `.mem.txt` (reversed call tree); `emacs-<pid>.cpu.sample` (C frames: garbage collection, redisplay, process output, byte-code; no Lisp function names) |
 | webapp pages | injected by Emacs's reconcile through the webview read channel | `webapp-<workspace>.lag.json` (main-thread stalls) |
 | every process | the collector's sampler | `samples.jsonl` (CPU-seconds and RSS every 2s, WebKit included) |
 
@@ -67,7 +67,7 @@ which every runtime stops by itself.
 
 3. Read the results: `bin/agent-repl-profile.sh report`.
   - a. **Processes** ranks every process by CPU-seconds with its average and peak RSS, and sums per runtime. This is the battery view. WebKit processes are every app's (`webkit:*`); close Safari for a clean reading.
-  - b. **Hottest frames** per runtime: `go tool pprof -top` for the Go runtimes (`go tool pprof -http=: <file>` to explore), self samples and self bytes for the shim (load `.cpuprofile` into Chrome DevTools for a flame chart), Emacs's reversed call tree, and each page's main-thread stalls.
+  - b. **Hottest frames** per runtime: `go tool pprof -top` for the Go runtimes (`go tool pprof -http=: <file>` to explore), self samples and self bytes for the shim (load `.cpuprofile` into Chrome DevTools for a flame chart), Emacs's `sample` leaf frames and its memory reversed call tree, and each page's main-thread stalls.
   - c. **User-visible latency** pairs real INFO log edges per interaction, ranked by how far its p90 is over the budget a user perceives:
 
     | Interaction | Start edge | End edge | Budget |
@@ -185,6 +185,15 @@ which every runtime stops by itself.
 - **Status / next step**: open; the sidebar fix above cuts most of it.
 - **Flagged by**: found by profiling, 2026-10-12.
 
+### Deploy handover freezes Emacs
+- **Interaction**: typing while a deploy rolls out; nothing typed reaches the screen until the editor comes back.
+- **Budget**: keystroke, 50-100ms.
+- **Measured**: 2026-10-25, 5-10s owner-observed. A `sample` of Emacs across a deploy: ~10.5s inside the roster stream's process filter, ~9.8s of it garbage collection on a 145MB heap (gcmh's idle threshold 800KB, `gc-cons-percentage` 0.1). A handover sent 93-131 full-roster pushes over 3.5-17s. One push's decode: 27.6ms and 554K conses interpreted, 2.8ms and 36K byte-compiled; its apply: 8ms and 192K conses, then 3ms and 42K.
+- **Code paths**: `lisp/wire-roster.el` (decode), `lisp/roster.el` (apply), `lisp/bytecode.el` (compiles what each load defined), `lisp/stall.el` (`editor_stall`, `editor_input_wait`).
+- **Contributors**: measured: every function ran interpreted after each load (fixed: `bytecode.el` compiles them in place); four walks of every row per push (fixed: one walk); the stall sampler could not see input waiting behind filters (fixed: the `editor_input_wait` latency).
+- **Status / next step**: fixed on branch `hotreload-perf`; read `editor_input_wait` (`/agent-repl-metrics`) across the next deploys.
+- **Flagged by**: the owner, 2026-10-25 ("emacs hangs for some 5-10 seconds on every deploy").
+
 ### Web view memory
 - **Interaction**: none directly; every workspace page shares one WebKit web content process, and while its footprint stands above WebKit's threshold a memory-pressure relief (a full garbage collection) runs on the main thread every 30s, a stall on whatever the user is doing.
 - **Budget**: below WebKit's memory-pressure threshold, so no relief ever runs (no `daemon.webprocess.stall_beat`).
@@ -225,6 +234,7 @@ which every runtime stops by itself.
 
 - **CRITICAL: Read the stored metrics first.** `/agent-repl-metrics` says from 30 days of history which version or day a latency or a process's CPU and memory changed; a profile session then finds the code responsible.
 - **CRITICAL: Never leave a session open.** Stop it when the interaction is done.
+- **CRITICAL: Never start Emacs's CPU profiler (`profiler-start 'cpu`) in the live editor.** Its signals crashed an Emacs hosting WebKit (2026-10-25); the collector's `sample` is Emacs's CPU profile.
 - **CRITICAL: Only the lead session runs the startup assessment** or otherwise launches, quits or drives Emacs.
 - **IMPORTANT: Profile with rollouts held,** so a landing cannot replace the profiled build mid-session.
 - **IMPORTANT: Read latencies only from real log edges** (the table above). Harness overhead, tool-call timing and estimates are never evidence.

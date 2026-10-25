@@ -42,6 +42,7 @@
 (declare-function agent-repl--elisp-file-sha256 "config" (file))
 (declare-function agent-repl--elisp-module-file "config" (root module))
 (declare-function agent-repl-latency-report-editor "latency-report" (kind seconds))
+(declare-function agent-repl-bytecode-schedule "bytecode" (root modules))
 
 (defvar agent-repl--elisp-module-builds)
 (defvar agent-repl--frontend-root)
@@ -238,6 +239,9 @@ failure is already recorded at ERROR."
              (failures (cdr loaded)))
         (setq agent-repl--elisp-module-builds entries)
         (agent-repl--elisp-reload-report-heartbeat (agent-repl--assert-heartbeat-armed))
+        ;; The load replaced every compiled function with its interpreted
+        ;; source; bytecode.el compiles them again, never ahead of input.
+        (agent-repl-bytecode-schedule root (mapcar #'car entries))
         ;; THE EDITOR RAN NOTHING ELSE from the first load to here, so this
         ;; span is how long the reload held the person up (`elisp_reload').
         (agent-repl-latency-report-editor

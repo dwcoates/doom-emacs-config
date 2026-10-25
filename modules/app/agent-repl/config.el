@@ -278,6 +278,7 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; that push to it and rpc.el asks it for the build, both at call time; its
 ;; own needs are core.el's logging ladder and heartbeat assertion.
 (agent-repl--load-module "elisp-build")
+(agent-repl--load-module "bytecode")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
@@ -479,7 +480,17 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
       (error "[agent-repl] FATAL: %d module(s) failed to load — see messages above"
              (length agent-repl--load-errors)))
   (agent-repl--info '(:agent-repl-central "module loading is process-wide")
-                    "Loaded Agent-Repl package."))
+                    "Loaded Agent-Repl package.")
+  ;; EVERY MODULE WAS LOADED FROM SOURCE, so its functions run interpreted
+  ;; until bytecode.el compiles them in place, a slice at a time and never
+  ;; ahead of a keystroke.  GATED ON `noninteractive': a batch run's suites
+  ;; stub functions by redefining them, and a compile landing mid-suite
+  ;; would race those stubs.
+  (if noninteractive
+      (agent-repl--boot-info "bytecode: compile NOT scheduled batch=%s" noninteractive)
+    (agent-repl-bytecode-schedule
+     (file-name-directory (or load-file-name buffer-file-name))
+     (mapcar #'car agent-repl--elisp-module-builds))))
 
 ;; NO SNAPSHOT RESTORE.  The durable Emacs workspace-roster snapshot is
 ;; gone: THE DAEMON is the source of which workspaces exist, and on connect

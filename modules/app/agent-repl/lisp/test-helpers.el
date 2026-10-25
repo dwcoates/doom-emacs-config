@@ -1088,6 +1088,17 @@ in, so every other suite records at this boundary."
                   (selected-window))))
        ,@body)))
 
+(defmacro agent-repl-test--with-temp-dir (var prefix &rest body)
+  "Bind VAR to a fresh temporary directory for BODY, deleted afterwards.
+The directory's name starts with PREFIX, VAR holds it as a directory name
+\(with its trailing slash), and it is deleted with everything in it however
+BODY exits.  THE ONE temporary-directory fixture every suite uses
+\(test-test-helpers.el holds every suite to it)."
+  (declare (indent 2) (debug (symbolp form body)))
+  `(let ((,var (file-name-as-directory (make-temp-file ,prefix t))))
+     (unwind-protect (progn ,@body)
+       (delete-directory ,var t))))
+
 (defmacro agent-repl-test--with-temp-buffer (name &rest body)
   "Create (or reuse) buffer NAME, execute BODY, kill buffer only if we created it.
 If NAME already refers to a live buffer when the macro runs (e.g. `*scratch*',
