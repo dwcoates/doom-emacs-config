@@ -48,6 +48,11 @@ func TestClaimMergeNameAnswersTakenForWhatIsAlreadyTaken(t *testing.T) {
 		{name: "a registered workspace", arrange: func(_ *testing.T, f *fixture) {
 			f.db.with(wsm.Workspace{ID: "ws-other", Name: "ABC/reconnect-fix", Dir: "/tmp/other"})
 		}},
+		// A rename parts a workspace's name from its branch; the branch is
+		// still the registered workspace's, whatever git's fake answers.
+		{name: "a registered workspace's branch, renamed away from", arrange: func(_ *testing.T, f *fixture) {
+			f.db.with(wsm.Workspace{ID: "ws-other", Name: "ABC/something-else", Branch: "ABC/reconnect-fix", Dir: "/tmp/other"})
+		}},
 		{name: "a branch", arrange: func(_ *testing.T, f *fixture) { f.git.existingBranches = map[string]bool{"ABC/reconnect-fix": true} }},
 		{name: "a reservation", arrange: func(_ *testing.T, f *fixture) {
 			f.db.reserved = map[string]ids.WorkspaceID{"reconnect-fix": "ws-other"}

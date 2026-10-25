@@ -17,7 +17,7 @@ import (
 // merge reserves can never be taken before its merge workspace is created
 // under it (docs/protobuf-design/sync-async-merges.md).
 //
-// A name is taken when it is a registered workspace's, a branch of the
+// A name is taken when it is a registered workspace's name or branch, a branch of the
 // repository, a standing async request's reservation (durable, on its queue
 // row), an occupied worktree directory (worktreeOccupied), or CLAIMED in this
 // process: a create holds a claim on the name it
@@ -59,12 +59,21 @@ func (v *verbs) claimLocked(branch string) func() {
 	}
 }
 
-// takenLocked answers every branch name that is taken without asking git: the
-// registered workspaces' names, the standing reservations, and the claims.
-// EXCEPT names a reservation the given workspace itself holds, which is free
-// to the fork that reservation was made for. The caller holds v.names.mu.
-func (v *verbs) takenLocked(ctx context.Context, except ids.WorkspaceID) (map[string]bool, error) {
-	taken, err := v.takenNames(ctx)
+// nameHolder is what holds a taken name: a registered workspace, or, when
+// Workspace is empty, a standing reservation or a claim whose workspace is
+// not registered yet.
+type nameHolder struct {
+	Workspace ids.WorkspaceID
+}
+
+// holdersLocked answers every branch name that is taken without asking git,
+// and what holds it: the registered workspaces' names and branches
+// (registeredHolders), the standing reservations, and the claims. EXCEPT
+// names a reservation the given workspace itself holds, which is free to the
+// fork that reservation was made for. A registered holder outranks a pending
+// one for the same name. The caller holds v.names.mu.
+func (v *verbs) holdersLocked(ctx context.Context, except ids.WorkspaceID) (map[string]nameHolder, error) {
+	registered, err := v.registeredHolders(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -72,14 +81,32 @@ func (v *verbs) takenLocked(ctx context.Context, except ids.WorkspaceID) (map[st
 	if err != nil {
 		return nil, fmt.Errorf("read the reserved merge names: %w", err)
 	}
+	held := make(map[string]nameHolder, len(registered)+len(reserved)+len(v.names.claimed))
 	for name, holder := range reserved {
 		if except != "" && holder == except {
 			continue
 		}
-		taken[suppliedBranch(name)] = true
+		held[suppliedBranch(name)] = nameHolder{}
 	}
 	for branch := range v.names.claimed {
-		taken[branch] = true
+		held[branch] = nameHolder{}
+	}
+	for name, workspace := range registered {
+		held[name] = nameHolder{Workspace: workspace}
+	}
+	return held, nil
+}
+
+// takenLocked answers holdersLocked's names, for the allocations that need
+// only whether a name is taken. The caller holds v.names.mu.
+func (v *verbs) takenLocked(ctx context.Context, except ids.WorkspaceID) (map[string]bool, error) {
+	held, err := v.holdersLocked(ctx, except)
+	if err != nil {
+		return nil, err
+	}
+	taken := make(map[string]bool, len(held))
+	for name := range held {
+		taken[name] = true
 	}
 	return taken, nil
 }
