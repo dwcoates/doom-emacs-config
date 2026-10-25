@@ -23,8 +23,7 @@ frame\='s paint is undone afterwards, so no case leaks into another."
          (logs nil))
      (cl-letf (((symbol-function 'agent-repl--titlebar-frames) (lambda () (list frame)))
                ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) ,focused))
-               ((symbol-function 'agent-repl--log)
-                (lambda (_scope fmt &rest args) (push (apply #'format fmt args) logs))))
+               ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs)))
        (unwind-protect
            (progn ,@body)
          (agent-repl--titlebar-unpaint frame)))))
