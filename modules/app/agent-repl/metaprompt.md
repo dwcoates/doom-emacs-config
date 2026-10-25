@@ -252,6 +252,15 @@
   - The verb and its flags are `/agent-repl-workspaces`'.
 - The daemon clears the mark itself when I take the workspace back, so no workspace unmarks itself.
 
+## Deleted worktrees
+
+### A workspace whose worktree was deleted recreates it without asking
+
+- When a workspace finds its own worktree gone while the workspace is still open (a landing removed it), it recreates the worktree at once, without asking.
+  - It recreates it at the workspace's own directory, on the workspace's branch, reset to the main branch's tip (`git -C <main checkout> worktree add <dir> <branch>`).
+  - The directory still holds the session's `.claude` state, so that state is moved aside for the `worktree add` and moved straight back.
+- Work never moves to a side worktree instead: the daemon serves only the workspace's own directory, so tests and merges run from nowhere else.
+
 ## Tool rejections
 
 ### A rejected tool call stops that call, never the work it served
