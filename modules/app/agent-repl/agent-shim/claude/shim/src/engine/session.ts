@@ -927,6 +927,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let releaseLock: LockRelease | undefined;
   let releaseWorkspaceLock: LockRelease | undefined;
   let query: QueryLike | undefined;
+  /**
+   * THE QUERIES THIS SESSION CLOSED ITSELF, so a vendor read cut short by one
+   * is told from a vendor that failed (engine/vendor-probe.ts). Every close
+   * of the main query goes through `closeQuery`.
+   */
+  const closedQueries = new WeakSet<QueryLike>();
+  function closeQuery(closing: QueryLike): void {
+    closedQueries.add(closing);
+    closing.close();
+  }
+  function closedBySession(asked: QueryLike): boolean {
+    return closedQueries.has(asked);
+  }
   let abort: AbortController | undefined;
   /**
    * THE LIVE QUERY'S RELEASE, fired only by the shim (`letQueryGo`) and
@@ -2132,7 +2145,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       call: "getContextUsage",
       read: (active) => active.getContextUsage(),
       take: (usage) => pushes.push(contextUsageUpdate(usage)),
-    });
+    }, closedBySession);
   }
 
   /** One usage window, or absence when the vendor could not state it. */
@@ -2364,7 +2377,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       take: (models) => {
         modelCatalog = modelOptions(models);
       },
-    });
+    }, closedBySession);
   }
 
   /**
@@ -2384,7 +2397,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         const changed = pushes.push(commandCatalogUpdate(catalog));
         LOGGER.debug({ commands: catalog.commands.length, changed }, "read the runtime's slash-command catalog");
       },
-    });
+    }, closedBySession);
   }
 
   /** Probe every declared mcp server's health and state each one. */
@@ -2396,7 +2409,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       take: (statuses) => {
         for (const status of statuses) pushes.push(mcpUpdate(status));
       },
-    });
+    }, closedBySession);
   }
 
   /**
@@ -5058,7 +5071,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (previous !== undefined) endVendorProcessWork("the vendor query was replaced by a new one");
     letQueryGo();
     previousPrompts?.close();
-    previous?.close();
+    if (previous !== undefined) closeQuery(previous);
     // THE REPLACED QUERY ANSWERS NOTHING MORE, so nothing it announced can
     // settle; the fold lets go of it before the new query's first message.
     deps.fold.endQuery("the query was replaced");
@@ -5612,7 +5625,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         prompts = undefined;
         letQueryGo();
         abort = undefined;
-        orphan.close();
+        closeQuery(orphan);
         LOGGER.info({ vendor_session_id: inForce }, "closed the vendor query the failed start had opened");
       }
       await releaseLock?.();
@@ -7581,7 +7594,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     keepaliveScope.abandon(`the session is being torn down: ${reason}`);
     prompts?.close();
     letQueryGo();
-    active?.close();
+    if (active !== undefined) closeQuery(active);
     query = undefined;
     endVendorProcessWork(`the session is being torn down: ${reason}`);
     // BOUNDED, BECAUSE A CLOSED QUERY IS NOT A PROMISE THAT SETTLES. `close()`

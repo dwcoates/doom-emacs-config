@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import { conversationv1 } from "../../src/proto.js";
 import { probeVendorFact, type ProbeHealth } from "../../src/engine/vendor-probe.js";
 import type { QueryLike } from "../../src/sdk/types.js";
+import { logRecordsSince, logSinkMark } from "../log-records.js";
 
 /** A health table that records what it was told. */
 function recordingHealth(): ProbeHealth & {
@@ -36,6 +37,9 @@ function recordingHealth(): ProbeHealth & {
 
 const ACTIVE = {} as QueryLike;
 
+/** The session closed no query. */
+const NEVER_CLOSED = (): boolean => false;
+
 describe("probeVendorFact", () => {
   it("hands the answer on and lifts the component's fault", async () => {
     // Arrange.
@@ -48,7 +52,7 @@ describe("probeVendorFact", () => {
       call: "readThing",
       read: async () => "the answer",
       take: (answer) => taken.push(answer),
-    });
+    }, NEVER_CLOSED);
 
     // Assert.
     expect(taken).toEqual(["the answer"]);
@@ -69,7 +73,7 @@ describe("probeVendorFact", () => {
         throw new Error("the vendor is busy");
       },
       take: (answer) => taken.push(answer),
-    });
+    }, NEVER_CLOSED);
 
     // Assert.
     expect(taken).toEqual([]);
@@ -91,7 +95,7 @@ describe("probeVendorFact", () => {
         throw "the endpoint went away";
       },
       take: () => undefined,
-    });
+    }, NEVER_CLOSED);
 
     // Assert.
     expect(health.faults.map((fault) => fault.detail)).toEqual(["readThing failed: the endpoint went away"]);
@@ -109,7 +113,7 @@ describe("probeVendorFact", () => {
       take: () => {
         throw new Error("could not convert");
       },
-    });
+    }, NEVER_CLOSED);
 
     // Assert.
     expect(health.resolved).toEqual([]);
@@ -130,12 +134,75 @@ describe("probeVendorFact", () => {
         return "never";
       },
       take: () => undefined,
-    });
+    }, NEVER_CLOSED);
 
     // Assert.
     expect(reads).toBe(0);
     expect(health.resolved).toEqual([]);
     expect(health.faults).toEqual([]);
+  });
+
+  it("raises no fault for a read cut short by the session closing its own query", async () => {
+    // Arrange.
+    const health = recordingHealth();
+    const before = logSinkMark();
+
+    // Act.
+    await probeVendorFact(
+      health,
+      ACTIVE,
+      {
+        component: "vendor-thing",
+        call: "readThing",
+        read: async (): Promise<string> => {
+          throw new Error("Query closed before response received");
+        },
+        take: () => undefined,
+      },
+      (query) => query === ACTIVE,
+    );
+
+    // Assert.
+    expect(health.faults).toEqual([]);
+    expect(health.resolved).toEqual([]);
+    expect(
+      logRecordsSince(before)
+        .filter((record) => String(record.message).includes("cut short by the session closing its own query"))
+        .map((record) => [record.level, record.context.call, record.context.cause]),
+    ).toEqual([["info", "readThing", "Query closed before response received"]]);
+  });
+
+  it("still faults a read whose query the session did not close", async () => {
+    // Arrange.
+    const health = recordingHealth();
+    const other = {} as QueryLike;
+
+    // Act.
+    await probeVendorFact(
+      health,
+      ACTIVE,
+      {
+        component: "vendor-thing",
+        call: "readThing",
+        read: async (): Promise<string> => {
+          throw new Error("Query closed before response received");
+        },
+        take: () => undefined,
+      },
+      (query) => query === other,
+    );
+
+    // Assert.
+    expect(health.faults.map((fault) => fault.detail)).toEqual([
+      "readThing failed: Query closed before response received",
+    ]);
+  });
+
+  it("is told of every close of the session's main query", () => {
+    // A close that skips `closeQuery` leaves a read it cuts short reading as a vendor fault.
+    const source = readFileSync(path.join(import.meta.dirname, "../../src/engine/session.ts"), "utf8");
+    expect(source).not.toMatch(/\b(previous|orphan|active)\??\.close\(\)/);
+    expect(source.match(/closeQuery\((previous|orphan|active)\)/g)?.length).toBe(3);
   });
 
   it("is the one read every pulled-fact probe of the session goes through", () => {
