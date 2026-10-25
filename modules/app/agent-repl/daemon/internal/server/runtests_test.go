@@ -139,11 +139,6 @@ func agent() *agentreplv1.WorkspaceRequester {
 		Workspace: &workspacev1.WorkspaceRef{Id: "ws-asker"}}}}
 }
 
-// user is the user asking.
-func user() *agentreplv1.WorkspaceRequester {
-	return &agentreplv1.WorkspaceRequester{Asker: &agentreplv1.WorkspaceRequester_User{User: &agentreplv1.WorkspaceRequesterUser{}}}
-}
-
 func oneHarness() *testrunv1.TestRunRequest {
 	return &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{{Target: &testrunv1.TestSelection_Harness{Harness: &testrunv1.TestSelectionHarness{
 		Script: "bin/test-x.sh", Groups: &testrunv1.TestSelectionHarness_All{All: &testrunv1.TestSelectionHarnessAllGroups{}}}}}}}
@@ -212,12 +207,12 @@ func TestRunTestsRefuses(t *testing.T) {
 		{name: "a recording run repeated", req: func(h *harness) *agentreplv1.RunTestsRequest {
 			run := oneHarness()
 			run.Record = true
-			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: run, Runs: 2, Requester: user()}
+			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: run, Runs: 2, Requester: userRequester()}
 		}, check: func(e *agentreplv1.RunTestsError) bool {
 			return strings.Contains(e.GetInvalid().GetDetail(), "a recording run runs once")
 		}},
 		{name: "CPU load of no loop", req: func(h *harness) *agentreplv1.RunTestsRequest {
-			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: oneHarness(), CpuLoad: &agentreplv1.RunTestsCpuLoad{}, Requester: user()}
+			return &agentreplv1.RunTestsRequest{Workspace: testsWorkspace(t, h, testsDeploy), Run: oneHarness(), CpuLoad: &agentreplv1.RunTestsCpuLoad{}, Requester: userRequester()}
 		}, check: func(e *agentreplv1.RunTestsError) bool {
 			return strings.Contains(e.GetInvalid().GetDetail(), "names no busy loop")
 		}},
@@ -385,7 +380,7 @@ func TestRunTestsHoldsTheUsersRunUnderCPULoad(t *testing.T) {
 	h.Tests.events = []*testrunv1.TestRunEvent{endedPassed()}
 
 	// Act
-	frames := runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), CpuLoad: &agentreplv1.RunTestsCpuLoad{Loops: 4}, Requester: user()})
+	frames := runTests(t, h, &agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), CpuLoad: &agentreplv1.RunTestsCpuLoad{Loops: 4}, Requester: userRequester()})
 
 	// Assert
 	bin := filepath.Join(ref.GetDir(), "bin")

@@ -1,6 +1,11 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 )
@@ -77,4 +82,32 @@ func validAsyncMerge(edit func(*agentreplv1.CreateWorkspaceAsyncMerge)) *agentre
 		req.Requester = workspaceRequester(ref())
 		req.ContextOrigin = forkContext(ref())
 	})
+}
+
+// TestTheUserRequesterIsSpelledOnce keeps every server test asking as the user
+// through userRequester: a second spelling (runtests_test.go's user() was one)
+// is a copy to drift.
+func TestTheUserRequesterIsSpelledOnce(t *testing.T) {
+	// Arrange
+	names, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+
+	// Act
+	var offenders []string
+	for _, name := range names {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if name != "agentapi_helpers_test.go" && strings.Contains(string(source), "WorkspaceRequester_User{") {
+			offenders = append(offenders, name)
+		}
+	}
+
+	// Assert
+	if len(offenders) != 0 {
+		t.Fatalf("%v spell the user requester by hand; use userRequester", offenders)
+	}
 }
