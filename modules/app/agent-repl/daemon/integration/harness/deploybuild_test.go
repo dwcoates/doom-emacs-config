@@ -158,18 +158,16 @@ func TestUnservedZettelEnvNamesTheZettelSocketUnderDir(t *testing.T) {
 	}
 }
 
-// TestEveryTestDaemonLauncherStatesTheUnservedZettel pins both launchers of
-// a test daemon to UnservedZettelEnv, so neither can reach the owner's zettel.
-func TestEveryTestDaemonLauncherStatesTheUnservedZettel(t *testing.T) {
-	for _, file := range []string{"daemon.go", "../../../e2e/emacs_e2e_test.go"} {
-		t.Run(file, func(t *testing.T) {
-			// Act
-			source := readOrFail(t, file)
+// TestTheHarnessDaemonStatesTheUnservedZettel pins the harness's own launcher
+// to UnservedZettelEnv, so no harness daemon can reach the owner's zettel. The
+// Emacs e2e world's launcher is pinned by its own package
+// (e2e/emacs_zettel_unit_test.go).
+func TestTheHarnessDaemonStatesTheUnservedZettel(t *testing.T) {
+	// Act
+	source := readOrFail(t, "daemon.go")
 
-			// Assert
-			if !strings.Contains(source, "UnservedZettelEnv(") {
-				t.Fatalf("%s states no UnservedZettelEnv", file)
-			}
-		})
+	// Assert
+	if !strings.Contains(source, "UnservedZettelEnv(") {
+		t.Fatal("daemon.go states no UnservedZettelEnv")
 	}
 }
