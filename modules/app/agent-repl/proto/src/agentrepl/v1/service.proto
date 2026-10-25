@@ -111,6 +111,7 @@ import "agentrepl/v1/endpoint_subscribe_merge_queue.proto";
 import "agentrepl/v1/endpoint_unsubscribe_merge_queue.proto";
 import "agentrepl/v1/endpoint_update_deploy_hold.proto";
 import "agentrepl/v1/endpoint_prune_storage.proto";
+import "agentrepl/v1/endpoint_reap_worktrees.proto";
 import "agentrepl/v1/endpoint_roll_out_landing.proto";
 import "agentrepl/v1/endpoint_evaluate_in_editor.proto";
 import "agentrepl/v1/endpoint_answer_editor_evaluation.proto";
@@ -446,6 +447,10 @@ service AgentRepl {
   // Run the storage sweep now, or judge one without deleting anything. See
   // endpoint_prune_storage.proto.
   rpc PruneStorage(PruneStorageRequest) returns (PruneStorageResponse);
+  // Run the landed-worktree reaper now, judge one without changing anything,
+  // or take closed workspaces' worktrees without waiting. See
+  // endpoint_reap_worktrees.proto.
+  rpc ReapWorktrees(ReapWorktreesRequest) returns (ReapWorktreesResponse);
 
   // Is the daemon itself healthy? Unhealthy is an ANSWER. See
   // endpoint_daemon_health.proto.

@@ -196,6 +196,18 @@ func WorktreeDir(repoDir, branch string) (string, error) {
 	if bare == "" || bare == "." || bare == string(filepath.Separator) {
 		return "", fmt.Errorf("branch %q has no safe worktree directory name", branch)
 	}
+	parent, err := WorktreeParent(repoDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(parent, bare), nil
+}
+
+// WorktreeParent answers the directory repoDir's new worktrees are made in,
+// by WorktreeDir's placement rule: the SIBLING "<repo basename>-worktrees" of
+// a main worktree, or a linked worktree's own parent. The landed-worktree
+// reaper reads it for the leftovers that lie beside the worktrees.
+func WorktreeParent(repoDir string) (string, error) {
 	repoDir = MainWorktreeDir(repoDir)
 	gitPath := filepath.Join(repoDir, ".git")
 	info, err := os.Stat(gitPath)
@@ -206,7 +218,7 @@ func WorktreeDir(repoDir, branch string) (string, error) {
 	if !info.Mode().IsRegular() {
 		parent = filepath.Join(parent, filepath.Base(repoDir)+WorktreeDirSuffix)
 	}
-	return filepath.Join(parent, bare), nil
+	return parent, nil
 }
 
 // MainWorktreeDir answers the worktree a repository directory names: a common

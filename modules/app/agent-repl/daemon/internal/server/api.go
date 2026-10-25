@@ -154,6 +154,8 @@ type Deps struct {
 	NewsDigest NewsDigest
 	// Storage backs PruneStorage: the storage sweep.
 	Storage StorageSweep
+	// Worktrees backs ReapWorktrees: the landed-worktree reaper.
+	Worktrees WorktreeReaper
 	// ClassifierPrompt backs UpdateClassifierPrompt: the routing brief's
 	// rewrite and its commit (internal/classifierupdate).
 	ClassifierPrompt ClassifierPrompt
@@ -527,6 +529,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the news digest")
 	case deps.Storage == nil:
 		return nil, missing("the storage sweep")
+	case deps.Worktrees == nil:
+		return nil, missing("the landed-worktree reaper")
 	case deps.ClassifierPrompt == nil:
 		return nil, missing("the classifier prompt updater")
 	case deps.EditorInstances == nil:

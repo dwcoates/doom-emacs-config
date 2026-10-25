@@ -132,6 +132,10 @@ func (c *cliClient) PruneStorage(_ context.Context, req *connect.Request[agentre
 	return connect.NewResponse(&agentreplv1.PruneStorageResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) ReapWorktrees(_ context.Context, req *connect.Request[agentreplv1.ReapWorktreesRequest]) (*connect.Response[agentreplv1.ReapWorktreesResponse], error) {
+	return connect.NewResponse(&agentreplv1.ReapWorktreesResponse{}), c.record(req.Msg)
+}
+
 func (c *cliClient) RollOutLanding(_ context.Context, req *connect.Request[agentreplv1.RollOutLandingRequest]) (*connect.Response[agentreplv1.RollOutLandingResponse], error) {
 	return connect.NewResponse(&agentreplv1.RollOutLandingResponse{}), c.record(req.Msg)
 }
@@ -757,6 +761,42 @@ func TestPruneStorageAsksForASweepOrAPreview(t *testing.T) {
 			}
 			if req := only[*agentreplv1.PruneStorageRequest](t, f); req.GetDryRun() != tt.preview {
 				t.Fatalf("request = %v, want dry run %v", req, tt.preview)
+			}
+		})
+	}
+}
+
+func TestReapWorktreesAsksForASweepAPreviewOrAForce(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		code    int
+		preview bool
+		force   bool
+	}{
+		{name: "a sweep", args: nil, code: exitSuccess},
+		{name: "a preview", args: []string{"-preview"}, code: exitSuccess, preview: true},
+		{name: "a forced sweep", args: []string{"-force"}, code: exitSuccess, force: true},
+		{name: "a forced preview", args: []string{"-preview", "-force"}, code: exitSuccess, preview: true, force: true},
+		{name: "a positional", args: []string{"now"}, code: exitFailure},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(runtimeNoun, append([]string{"reap-worktrees"}, tt.args...)...)
+
+			// Assert
+			if code != tt.code {
+				t.Fatalf("exit %d, stderr %q; want %d", code, f.errOut.String(), tt.code)
+			}
+			if tt.code != exitSuccess {
+				return
+			}
+			if req := only[*agentreplv1.ReapWorktreesRequest](t, f); req.GetDryRun() != tt.preview || req.GetForce() != tt.force {
+				t.Fatalf("request = %v, want dry run %v and force %v", req, tt.preview, tt.force)
 			}
 		})
 	}

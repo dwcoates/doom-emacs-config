@@ -53,6 +53,7 @@ import (
 	"agent-repld/internal/storagesweep"
 	"agent-repld/internal/subagentmaker"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/worktreereap"
 	"agent-repld/internal/wsm"
 )
 
@@ -1782,6 +1783,8 @@ type harness struct {
 	// NewsDigest is the news digest the two rpcs delegate to.
 	NewsDigest *fakeNewsDigest
 	Storage    *fakeStorageSweep
+	// Worktrees is the landed-worktree reaper ReapWorktrees delegates to.
+	Worktrees *fakeWorktreeReaper
 	// ClassifierPrompt is the routing brief's updater the rpc delegates to.
 	ClassifierPrompt *fakeClassifierPrompt
 	EditorInstances  *fakeEditorInstances
@@ -1893,6 +1896,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		ReconnectRecords: &restarttimingtest.Recorder{},
 		NewsDigest:       &fakeNewsDigest{},
 		Storage:          &fakeStorageSweep{},
+		Worktrees:        &fakeWorktreeReaper{},
 		ClassifierPrompt: &fakeClassifierPrompt{},
 		EditorInstances:  &fakeEditorInstances{},
 		OpenWorld:        newFakeOpenWorld(),
@@ -1942,6 +1946,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		HiddenKeepalives:  h.HiddenKeepalives,
 		NewsDigest:        h.NewsDigest,
 		Storage:           h.Storage,
+		Worktrees:         h.Worktrees,
 		ClassifierPrompt:  h.ClassifierPrompt,
 		EditorInstances:   h.EditorInstances,
 		Opens:             h.Opens,
@@ -2205,6 +2210,22 @@ func (f *fakeStorageSweep) Sweep(_ context.Context, dryRun bool) (storagesweep.R
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.asked = append(f.asked, dryRun)
+	return f.report, f.err
+}
+
+// fakeWorktreeReaper answers ReapWorktrees' sweep with a scripted report and
+// error, recording the options it was asked with.
+type fakeWorktreeReaper struct {
+	mu     sync.Mutex
+	report worktreereap.Report
+	err    error
+	asked  []worktreereap.Options
+}
+
+func (f *fakeWorktreeReaper) SweepWith(_ context.Context, opts worktreereap.Options) (worktreereap.Report, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, opts)
 	return f.report, f.err
 }
 

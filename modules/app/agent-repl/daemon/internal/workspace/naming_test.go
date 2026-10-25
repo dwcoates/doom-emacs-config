@@ -440,3 +440,66 @@ func TestCreateAndRenameRefuseABadNameAlike(t *testing.T) {
 		t.Fatalf("rename refused %q %v, create %q %v; want them alike", renamed.Reason, renamed.Fields, createdRefusal.Reason, createdRefusal.Fields)
 	}
 }
+
+func TestWorktreeParentIsTheDirectoryWorktreeDirPlacesIn(t *testing.T) {
+	tests := []struct {
+		name  string
+		stage func(t *testing.T, parent string) string
+		want  func(parent string) string
+	}{
+		{
+			name: "a main worktree's sibling worktrees directory",
+			stage: func(t *testing.T, parent string) string {
+				repo := filepath.Join(parent, "doom")
+				if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				return repo
+			},
+			want: func(parent string) string { return filepath.Join(parent, "doom-worktrees") },
+		},
+		{
+			name: "a linked worktree's own parent",
+			stage: func(t *testing.T, parent string) string {
+				worktree := filepath.Join(parent, "existing")
+				if err := os.MkdirAll(worktree, 0o755); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+					t.Fatalf("write: %v", err)
+				}
+				return worktree
+			},
+			want: func(parent string) string { return parent },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			parent := t.TempDir()
+			repo := tt.stage(t, parent)
+
+			// Act.
+			got, err := WorktreeParent(repo)
+			dir, dirErr := WorktreeDir(repo, "ABC/fix-login")
+
+			// Assert: the parent, and the one WorktreeDir places in.
+			if err != nil || got != tt.want(parent) {
+				t.Fatalf("WorktreeParent() = (%q, %v), want %q", got, err, tt.want(parent))
+			}
+			if dirErr != nil || filepath.Dir(dir) != got {
+				t.Fatalf("WorktreeDir() = (%q, %v), want a child of %q", dir, dirErr, got)
+			}
+		})
+	}
+}
+
+func TestWorktreeParentOfAMissingRepositoryFails(t *testing.T) {
+	// Act.
+	_, err := WorktreeParent(filepath.Join(t.TempDir(), "absent"))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("WorktreeParent of a missing repository answered no error")
+	}
+}

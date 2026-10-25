@@ -824,6 +824,13 @@ func (s *requestLoggingServer) UpdateDeployHold(
 	return serveUnary(s, ctx, "UpdateDeployHold", req, s.server.UpdateDeployHold)
 }
 
+func (s *requestLoggingServer) ReapWorktrees(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReapWorktreesRequest],
+) (*connect.Response[agentreplv1.ReapWorktreesResponse], error) {
+	return serveUnary(s, ctx, "ReapWorktrees", req, s.server.ReapWorktrees)
+}
+
 func (s *requestLoggingServer) PruneStorage(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.PruneStorageRequest],
