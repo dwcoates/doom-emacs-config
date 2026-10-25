@@ -2466,6 +2466,28 @@ html[data-page-unshown] *::after {
   margin-left: auto;
   margin-right: auto;
 }
+/* A TITLED CARD GROWS WITH ITS TITLE (owner request, 2026-10-24: "the
+   bubbles should animate out with the text ... the bubble should be the
+   canonical distance from the text at every point in that streaming
+   process", for "everything with a blue title"). Every card that heads with
+   the one head row (`.tool-head`, src/feed/cards/tool-head.ts: a tool call,
+   a skill, a hook, a shell, a subagent or merge bubble) fits its content
+   the way a response bubble does, so while its title types out
+   (src/feed/title-reveal.ts) the card's right edge keeps the card's own
+   padding from the last typed character. It hangs on the response's LEFT
+   rail rather than centering, so the edge that moves is the one the text
+   grows toward. The shared cap above still bounds it, where a one-line title
+   folds under its `…`. A card shown in a tool group fills the group instead
+   (`.feed-group-panel > .feed-item > .tool-card`, below), and an expanded
+   sub-feed bubble spans the cap (below), because its panel is a feed. */
+.feed-item > .tool-card:has(> .tool-head) {
+  width: fit-content;
+  margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
+  margin-right: auto;
+}
+.feed-item > .tool-card.bubble-fold[data-expanded="true"] {
+  width: auto;
+}
 /* SHRINK-TO-FIT, CAPPED AT THE MAX (owner ruling, 2026-09-15, reversing the
    fill-cap pin of the same date). Every bubble sizes to its widest RENDERED
    line plus its padding via `width: fit-content`, capped at
@@ -9056,6 +9078,7 @@ ar-button.merge-queue-move[aria-disabled="true"] {
    card is also taller by the strip: the strip's own inset above it, the strip
    itself, and the same gap again beneath it before the card's head. */
 .feed-group-panel > .feed-item > .tool-card {
+  width: auto;
   max-width: none;
   margin-left: 0;
   margin-right: 0;
