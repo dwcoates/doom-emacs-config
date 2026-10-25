@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/workspace"
 	"agent-repld/internal/worktreereap"
 )
 
@@ -92,7 +93,9 @@ func buildWorktreeReaper(git worktreereap.Git, registry worktreereap.Registry, l
 		ExpireAfter:  expire,
 		StartDelay:   start,
 		Every:        every,
-		Log:          log,
+		// The leftovers lie where WorktreeDir makes worktrees.
+		WorktreeParent: workspace.WorktreeParent,
+		Log:            log,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the landed-worktree reaper: %w", err)

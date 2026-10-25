@@ -425,7 +425,10 @@ func (w *world) deps() Deps {
 		ExpireAfter:  DefaultExpireAfter,
 		StartDelay:   DefaultStartDelay,
 		Every:        DefaultEvery,
-		Log:          w.log,
+		WorktreeParent: func(string) (string, error) {
+			return filepath.Join(w.root, "trees"), nil
+		},
+		Log: w.log,
 	}
 }
 
