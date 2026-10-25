@@ -526,7 +526,32 @@ message RosterOpenSection {
     // The repository sections are folded away; the header and its count stay.
     RosterOpenSectionCollapsed collapsed = 3;
   }
+  // WHAT THE REPOSITORY SECTIONS SHOW, drawn as the merge-queue toggle on
+  // the section's header line: a merge glyph in the expanded repository
+  // names' colour while the sections show their workspaces, in the purple of
+  // a merge in progress while they show their merge queues (owner request,
+  // 2026-10-24). DAEMON-HELD (agentrepl.v1.UpdateSidebarView show_open), so
+  // every page draws the same view, and every repository section states the
+  // same arm in its own `shows` (RosterRepoSection.shows). It changes the
+  // SIDEBAR only: the Emacs tab bar draws the open workspaces whichever arm
+  // is set. Never changed by anyone, it is WORKSPACES. Never unset on the
+  // wire.
+  oneof shows {
+    // Each repository section shows its open workspaces (its `entries`).
+    RosterOpenSectionShowsWorkspaces workspaces = 4;
+    // Each repository section shows its merge queue
+    // (RosterRepoSection.merge_queue).
+    RosterOpenSectionShowsMergeQueues merge_queues = 5;
+  }
 }
+
+// The repository sections show their open workspaces. DELIBERATELY EMPTY: the
+// arm is the fact.
+message RosterOpenSectionShowsWorkspaces {}
+
+// The repository sections show their merge queues. DELIBERATELY EMPTY: the
+// arm is the fact.
+message RosterOpenSectionShowsMergeQueues {}
 
 // An expanded open-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
 message RosterOpenSectionExpanded {}
@@ -583,6 +608,45 @@ message RosterRepoSection {
   // startup and every five minutes after, so it may be up to that old. Always
   // set: a repository not yet measured carries the pending arm.
   RosterRepoDivergence divergence = 6;
+  // WHAT THE SECTION'S BODY SHOWS below its header, the open section's own
+  // arm restated on every repository section (RosterOpenSection.shows): the
+  // daemon resolves both from the one view it holds, so they never disagree.
+  // `entries` is carried under EITHER arm, because the Emacs tab bar walks
+  // it whatever the sidebar shows; under `merge_queue` the sidebar draws the
+  // queue in its place, and the header's count is the queue's rows. Never
+  // unset on a wire section.
+  oneof shows {
+    // The body is `entries`.
+    RosterRepoShowsWorkspaces workspaces = 10;
+    // The body is the repository's merge queue.
+    RosterRepoMergeQueue merge_queue = 11;
+  }
+}
+
+// The section's body is its open workspaces. DELIBERATELY EMPTY: the arm is
+// the fact.
+message RosterRepoShowsWorkspaces {}
+
+// ONE REPOSITORY'S MERGE QUEUE as its section draws it: every merge in line,
+// front first -- the running merge (when one runs) first, then every waiting
+// merge in the order it will run -- the same line agentrepl.v1
+// .MergeQueueStatus.entries reads. A merge only REQUESTED, its asking turn
+// still running, is in no line and is not listed. An empty queue lists no
+// row.
+message RosterRepoMergeQueue {
+  // Each merge in line, front first.
+  repeated RosterMergeQueueRow rows = 1;
+}
+
+// ONE MERGE IN LINE, drawn as the workspace it runs in: the workspace landing
+// its own branch, an async merge's merge workspace once it exists (a hidden
+// merge workspace is drawn here though no other list carries it), or, for an
+// async merge waiting to start, the workspace that asked for it. FLAT: a
+// queue lists merges, not families. The row's own status arm says whether it
+// runs (`merging`) or waits (`merge_queued`).
+message RosterMergeQueueRow {
+  // The row as every list draws it.
+  RosterRow row = 1;
 }
 
 // One entry of a repository section's body: a top-level row in no

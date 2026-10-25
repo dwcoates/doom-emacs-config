@@ -8,7 +8,10 @@
 // box it styles:
 //
 //   - a section's fold: RosterRepoSection.fold, RosterMergedSection.fold,
-//     RosterHiddenSection.fold, RosterOpenSection.fold.
+//     RosterHiddenSection.fold, RosterOpenSection.fold;
+//   - what the open section's repository sections show, their workspaces or
+//     their merge queues: RosterOpenSection.shows, restated on each
+//     RosterRepoSection.shows.
 //
 // It is DURABLE: it survives a daemon restart.
 //
@@ -39,8 +42,29 @@ message UpdateSidebarViewRequest {
   oneof change {
     // Fold or unfold one section.
     SidebarViewFoldSection fold_section = 1;
+    // Show the open section's repository sections' workspaces, or their
+    // merge queues (frontend.v1.RosterOpenSection.shows).
+    SidebarViewShowOpen show_open = 3;
   }
 }
+
+// What the open section's repository sections show. There is nothing to
+// refuse: the roster carries exactly one open section.
+message SidebarViewShowOpen {
+  // THE ARM IS THE VIEW ASKED FOR. Unset is malformed.
+  oneof shows {
+    // Each repository section shows its open workspaces.
+    SidebarViewShowWorkspaces workspaces = 1;
+    // Each repository section shows its merge queue.
+    SidebarViewShowMergeQueues merge_queues = 2;
+  }
+}
+
+// The open workspaces. DELIBERATELY EMPTY: the arm is the view.
+message SidebarViewShowWorkspaces {}
+
+// The merge queues. DELIBERATELY EMPTY: the arm is the view.
+message SidebarViewShowMergeQueues {}
 
 // Fold or unfold one section.
 //
