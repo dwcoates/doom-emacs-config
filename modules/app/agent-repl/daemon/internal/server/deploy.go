@@ -20,6 +20,10 @@ import (
 // Deployer is the daemon's deploy, as the Deploy rpc asks it.
 type Deployer interface {
 	Deploy(ctx context.Context, force bool) (deploy.Result, error)
+	// ReconcileWebhost reloads a web view host standing on another webapp
+	// than the installed one, on EDGE: a host's page stream or an Emacs's
+	// daemon stream attaching (deploy/webhost.go).
+	ReconcileWebhost(edge string) int
 }
 
 const opDeployRPC = "daemon.server.deploy"

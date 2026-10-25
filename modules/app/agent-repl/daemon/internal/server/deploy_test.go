@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"slices"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -540,4 +541,50 @@ func TestTheHostReloadReachesEveryEmacsAndNoWebview(t *testing.T) {
 		}
 	}
 	t.Fatalf("the Emacs stream ended without the host's reload: %v", emacs.Err())
+}
+
+// TestTheEdgesThatCanReloadTheWebviewHostReconcileIt pins the two server edges
+// the web view host's reload rides (deploy/webhost.go): a host's page stream
+// attaching, and an Emacs's daemon stream attaching. A webview's daemon
+// stream is neither.
+func TestTheEdgesThatCanReloadTheWebviewHostReconcileIt(t *testing.T) {
+	tests := []struct {
+		name string
+		open func(t *testing.T, h *harness, ctx context.Context)
+		want []string
+	}{
+		{name: "a host's page stream attaching", open: func(t *testing.T, h *harness, ctx context.Context) {
+			stream, err := h.Client.WatchPage(ctx, connect.NewRequest(&agentreplv1.WatchPageRequest{
+				Page: "webhost-1", Webhost: &agentreplv1.WebhostPage{WebappBuild: "Web1"},
+			}))
+			if err != nil || !stream.Receive() {
+				t.Fatalf("the host's page stream did not attach: %v", err)
+			}
+		}, want: []string{deploy.WebhostEdgeHostAttached}},
+		{name: "a workspace page's stream attaching", open: func(t *testing.T, h *harness, ctx context.Context) {
+			attachPageStream(t, h, ctx, "page-1")
+		}},
+		{name: "an Emacs's daemon stream attaching", open: func(t *testing.T, h *harness, ctx context.Context) {
+			openDaemonStream(t, h, ctx, emacsDaemonRequest)
+		}, want: []string{deploy.WebhostEdgeEmacsAttached}},
+		{name: "a webview's daemon stream attaching", open: func(t *testing.T, h *harness, ctx context.Context) {
+			openDaemonStream(t, h, ctx, &agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Webview{Webview: &agentreplv1.WatchDaemonWebview{}}})
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// Act
+			tt.open(t, h, ctx)
+
+			// Assert
+			if got := h.Deployer.reconciled(); !slices.Equal(got, tt.want) {
+				t.Fatalf("reconciles = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

@@ -1104,6 +1104,22 @@ type fakeDeployer struct {
 	forced []bool
 	result deploy.Result
 	err    error
+	// edges are the web view host reconciles asked for, in order.
+	edges []string
+}
+
+func (f *fakeDeployer) ReconcileWebhost(edge string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.edges = append(f.edges, edge)
+	return 0
+}
+
+// reconciled answers the web view host reconciles asked for so far.
+func (f *fakeDeployer) reconciled() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.edges...)
 }
 
 func (f *fakeDeployer) Deploy(_ context.Context, force bool) (deploy.Result, error) {

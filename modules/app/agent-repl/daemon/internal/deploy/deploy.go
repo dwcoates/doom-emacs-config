@@ -281,6 +281,9 @@ type Deployer struct {
 	deps Deps
 	log  dlog.Logger
 
+	// webhost is what the web view host's reconcile last pushed (webhost.go).
+	webhost webhostReload
+
 	mu sync.Mutex
 	// running is true while a deploy runs.
 	running bool
@@ -1079,24 +1082,9 @@ func (d *Deployer) webapp(fresh builds) Outcome {
 		})
 	}
 	// THE WEB VIEW HOST is no workspace's webview, and a handover no longer
-	// reloads it, so a host on an older webapp is reloaded here.
-	for _, running := range d.deps.Clients.WebhostBuilds() {
-		if running == fresh.webapp {
-			continue
-		}
-		reached := d.deps.Clients.PushReloadWebhost(fresh.webapp)
-		out.Recipients += reached
-		if reached == 0 {
-			d.log.Error(opDecide, "the web view host runs an older webapp, but no Emacs stream took its reload", dlog.Context{
-				"running": running, "fresh": fresh.webapp,
-			})
-		} else {
-			d.log.Info(opDecide, "the web view host runs an older webapp; pushed its reload", dlog.Context{
-				"running": running, "fresh": fresh.webapp, "emacs": reached,
-			})
-		}
-		break
-	}
+	// reloads it: its reload is the one reconcile every edge that can bring
+	// it onto the installed webapp runs (webhost.go), this deploy among them.
+	out.Recipients += d.ReconcileWebhost(WebhostEdgeDeploy)
 	if out.Recipients > 0 {
 		out.Kind = ReloadPushed
 	}

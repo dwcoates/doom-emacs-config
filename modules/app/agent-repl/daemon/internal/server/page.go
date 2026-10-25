@@ -10,6 +10,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
+	"agent-repld/internal/deploy"
 	"agent-repld/internal/dlog"
 )
 
@@ -199,6 +200,9 @@ func (s *server) WatchPage(
 	// a deploy reloads a host on an older webapp (deploy.Deployer.webapp).
 	if host := req.Msg.GetWebhost(); host != nil {
 		defer s.holdWebhostBuild(host.GetWebappBuild())()
+		// A HOST ATTACHING ON ANOTHER WEBAPP than the installed one is
+		// reloaded onto it (deploy/webhost.go): a handover never reloads it.
+		s.deps.Deploy.ReconcileWebhost(deploy.WebhostEdgeHostAttached)
 	}
 
 	s.acceptStream(ctx, rpc)

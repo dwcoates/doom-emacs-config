@@ -9,6 +9,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/deploy"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
@@ -627,6 +628,12 @@ func (s *server) watchDaemon(
 	// shared: once registered, a deploy's reload may move it under s.mu.
 	reported := w.elispBuild
 	s.addDaemonWatcher(w)
+	// AN EMACS ATTACHING CAN CARRY A WEB VIEW HOST'S RELOAD that no stream
+	// stood to take before it (deploy/webhost.go): the push waits on this
+	// stream's own queue until its loop below sends it.
+	if w.emacs {
+		s.deps.Deploy.ReconcileWebhost(deploy.WebhostEdgeEmacsAttached)
+	}
 	// A DEPARTING STREAM IS A SATISFIED ONE: the announcer waits for delivery
 	// or for the stream to be gone, never for a client that has stopped
 	// listening.

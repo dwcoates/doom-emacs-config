@@ -623,7 +623,9 @@ func TestTheWebviewHostOnAnOlderBuildIsReloadedOnce(t *testing.T) {
 		{name: "a host on the fresh build is left alone", hosts: []string{"Web2"}, reach: 1, wantKind: UpToDate},
 		{name: "a host on an older build is reloaded onto the fresh one", hosts: []string{"Web1"}, reach: 1, wantPush: []string{"Web2"}, wantKind: ReloadPushed, wantLevel: "info"},
 		{name: "two stale host streams are one reload", hosts: []string{"Web1", "Web1"}, reach: 1, wantPush: []string{"Web2"}, wantKind: ReloadPushed, wantLevel: "info"},
-		{name: "a reload no Emacs took is an error", hosts: []string{"Web1"}, reach: 0, wantPush: []string{"Web2"}, wantKind: UpToDate, wantLevel: "error"},
+		// AMENDED (2026-10-24): an Emacs attaching carries a reload no stream
+		// stood to take (webhost.go), so it is awaited at INFO, not an error.
+		{name: "a reload no Emacs took awaits one", hosts: []string{"Web1"}, reach: 0, wantPush: []string{"Web2"}, wantKind: UpToDate, wantLevel: "awaited"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -645,11 +647,11 @@ func TestTheWebviewHostOnAnOlderBuildIsReloadedOnce(t *testing.T) {
 			if got := outcome(t, result, ComponentWebapp); got.Kind != tt.wantKind {
 				t.Fatalf("webapp = %+v, want %s", got, tt.wantKind)
 			}
-			if tt.wantLevel == "info" && !logged(h.log, "info", opDecide, "the web view host runs an older webapp; pushed its reload") {
+			if tt.wantLevel == "info" && !logged(h.log, "info", opWebhost, "the web view host runs another webapp than the installed one; pushed its reload") {
 				t.Fatalf("records = %+v, want the reload at INFO", h.log.Records())
 			}
-			if tt.wantLevel == "error" && !logged(h.log, "error", opDecide, "the web view host runs an older webapp, but no Emacs stream took its reload") {
-				t.Fatalf("records = %+v, want the unreached reload at ERROR", h.log.Records())
+			if tt.wantLevel == "awaited" && !logged(h.log, "info", opWebhost, "a web view host runs another webapp and no Emacs stream stands to take its reload; it is pushed when one attaches") {
+				t.Fatalf("records = %+v, want the awaited reload at INFO", h.log.Records())
 			}
 		})
 	}
