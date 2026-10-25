@@ -3,13 +3,21 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/workspace"
 )
+
+// foldRequester names who asked for a fold: RPC, and the request id the
+// client sent in HEADER, the one the request's boundary records too.
+func foldRequester(rpc string, header http.Header) workspace.FoldRequester {
+	return workspace.FoldRequester{RPC: rpc, RequestID: header.Get(requestIDHeader)}
+}
 
 // UpdateSidebarView changes one piece of the sidebar's view state — a
 // section's fold, or what the open section's repository sections show —
@@ -30,7 +38,7 @@ func (s *server) UpdateSidebarView(
 			answered bool
 			cerr     *connect.Error
 		)
-		answered, cerr, err = s.foldSection(ctx, rpc, resp, change.FoldSection)
+		answered, cerr, err = s.foldSection(ctx, rpc, resp, change.FoldSection, foldRequester(rpc, req.Header()))
 		if answered {
 			return answer(resp, cerr)
 		}
@@ -58,6 +66,7 @@ func (s *server) foldSection(
 	rpc string,
 	resp *agentreplv1.UpdateSidebarViewResponse,
 	fold *agentreplv1.SidebarViewFoldSection,
+	requester workspace.FoldRequester,
 ) (answered bool, cerr *connect.Error, err error) {
 	folded := fold.GetCollapse() != nil
 	switch section := fold.GetSection().(type) {
@@ -66,7 +75,7 @@ func (s *server) foldSection(
 		if done {
 			return true, refused, nil
 		}
-		return false, nil, s.deps.Verbs.FoldRepository(ctx, repository.ID, folded)
+		return false, nil, s.deps.Verbs.FoldRepository(ctx, repository.ID, folded, requester)
 	case *agentreplv1.SidebarViewFoldSection_RecentlyMerged:
 		return false, nil, s.deps.Verbs.FoldMergedSection(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Hidden:
@@ -74,7 +83,7 @@ func (s *server) foldSection(
 	case *agentreplv1.SidebarViewFoldSection_Open:
 		return false, nil, s.deps.Verbs.FoldOpenSection(ctx, folded)
 	case *agentreplv1.SidebarViewFoldSection_Subsection:
-		return false, nil, s.deps.Verbs.FoldSubsection(ctx, ids.SubsectionID(section.Subsection.GetId()), folded)
+		return false, nil, s.deps.Verbs.FoldSubsection(ctx, ids.SubsectionID(section.Subsection.GetId()), folded, requester)
 	default:
 		panic(fmt.Sprintf("UpdateSidebarView: section arm %T passed validation that no case handles", section))
 	}
