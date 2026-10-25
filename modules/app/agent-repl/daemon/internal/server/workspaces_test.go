@@ -1442,7 +1442,9 @@ func TestFinishWorkspaceMapsTheQueuesRefusalsOntoItsArms(t *testing.T) {
 			}},
 		{name: "placed behind a merge not in line", refusal: &merge.RefusalError{Arm: merge.ArmPlacementBehindNotInLine, Reason: "none",
 			Fields: map[string]any{"behind": "two"}},
-			got: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetPlacementBehindNotInLine().GetBehind() == "two" }},
+			got: func(e *agentreplv1.FinishWorkspaceError) bool {
+				return e.GetPlacementBehindNotInLine().GetBehind() == "two"
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
