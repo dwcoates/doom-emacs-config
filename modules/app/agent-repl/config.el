@@ -438,6 +438,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; file never triggers that module's panel close: the panels belong to the
 ;; workspace the file is being routed INTO.
 (agent-repl--load-module "find-file-workspace")
+;; WHY: splash.el dresses Doom's dashboard as ZETTEL.  Its shortcuts name
+;; commands from keybindings.el, worktree.el and input-help.el, and its mode
+;; line reads the release out of roster.el's view, all loaded above.
+(agent-repl--load-module "splash")
 ;; WHY: interaction-record.el depends on core.el alone (the logging
 ;; ladder and the state-dir resolver) and is loaded LAST so its
 ;; startup env check (`AGENT_REPL_RECORD_INTERACTIONS') arms

@@ -80,6 +80,7 @@
   (load (expand-file-name "test-open-tabs.el" dir) nil t)
   (load (expand-file-name "test-rpc.el" dir) nil t)
   (load (expand-file-name "test-services.el" dir) nil t)
+  (load (expand-file-name "test-splash.el" dir) nil t)
   (load (expand-file-name "test-session.el" dir) nil t)
   (load (expand-file-name "test-sibling-popup.el" dir) nil t)
   (load (expand-file-name "test-spell.el" dir) nil t)
