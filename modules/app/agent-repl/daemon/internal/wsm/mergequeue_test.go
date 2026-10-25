@@ -1721,3 +1721,155 @@ func TestReturnAdmittedMergeRefuses(t *testing.T) {
 		})
 	}
 }
+
+// behindQueued requests a merge placed directly behind AHEAD and moves it into
+// line, answering its place.
+func behindQueued(t *testing.T, s *store, repo RepoKey, id, ahead WorkspaceID, at time.Time) int {
+	t.Helper()
+	if err := s.RequestMerge(context.Background(), repo, id, MergeSource{Kind: MergeSourceOwnBranch, Behind: ahead}, at); err != nil {
+		t.Fatalf("RequestMerge(behind): %v", err)
+	}
+	position, err := s.QueueMerge(context.Background(), repo, id, NewLeaseID())
+	if err != nil {
+		t.Fatalf("QueueMerge(behind): %v", err)
+	}
+	return position
+}
+
+// frontMarks answers each merge in line's front mark, in line order.
+func frontMarks(t *testing.T, s *store, repo RepoKey) []bool {
+	t.Helper()
+	entries, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	out := make([]bool, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Source.Front)
+	}
+	return out
+}
+
+func TestQueueMergePutsABehindMergeDirectlyBehindItsNeighbor(t *testing.T) {
+	cases := []struct {
+		name      string
+		arrange   func(t *testing.T, s *store, repo RepoKey, ws []WorkspaceID) WorkspaceID
+		wantOrder func(ws []WorkspaceID, b WorkspaceID) []WorkspaceID
+		wantMarks []bool
+	}{
+		{name: "behind a waiting ordinary merge, taking its ordinary mark",
+			arrange: func(t *testing.T, s *store, repo RepoKey, ws []WorkspaceID) WorkspaceID {
+				queued(t, s, repo, ws[0], instant)
+				queued(t, s, repo, ws[1], instant.Add(time.Minute))
+				queued(t, s, repo, ws[2], instant.Add(2*time.Minute))
+				return ws[0]
+			},
+			wantOrder: func(ws []WorkspaceID, b WorkspaceID) []WorkspaceID { return []WorkspaceID{ws[0], b, ws[1], ws[2]} },
+			wantMarks: []bool{false, false, false, false}},
+		{name: "behind a waiting front merge, taking its front mark",
+			arrange: func(t *testing.T, s *store, repo RepoKey, ws []WorkspaceID) WorkspaceID {
+				queued(t, s, repo, ws[0], instant)
+				frontQueued(t, s, repo, ws[1], instant.Add(time.Minute))
+				frontQueued(t, s, repo, ws[2], instant.Add(2*time.Minute))
+				return ws[1]
+			},
+			wantOrder: func(ws []WorkspaceID, b WorkspaceID) []WorkspaceID { return []WorkspaceID{ws[1], b, ws[2], ws[0]} },
+			wantMarks: []bool{true, true, true, false}},
+		{name: "behind the running merge, first in line ahead of front merges, marked front",
+			arrange: func(t *testing.T, s *store, repo RepoKey, ws []WorkspaceID) WorkspaceID {
+				queued(t, s, repo, ws[0], instant)
+				if err := s.AdmitMerge(context.Background(), repo, ws[0]); err != nil {
+					t.Fatalf("AdmitMerge: %v", err)
+				}
+				frontQueued(t, s, repo, ws[1], instant.Add(time.Minute))
+				queued(t, s, repo, ws[2], instant.Add(2*time.Minute))
+				return ws[0]
+			},
+			wantOrder: func(ws []WorkspaceID, b WorkspaceID) []WorkspaceID { return []WorkspaceID{ws[0], b, ws[1], ws[2]} },
+			wantMarks: []bool{false, true, true, false}},
+		{name: "behind the last merge waiting, at the back with its mark",
+			arrange: func(t *testing.T, s *store, repo RepoKey, ws []WorkspaceID) WorkspaceID {
+				queued(t, s, repo, ws[0], instant)
+				queued(t, s, repo, ws[1], instant.Add(time.Minute))
+				queued(t, s, repo, ws[2], instant.Add(2*time.Minute))
+				return ws[2]
+			},
+			wantOrder: func(ws []WorkspaceID, b WorkspaceID) []WorkspaceID { return []WorkspaceID{ws[0], ws[1], ws[2], b} },
+			wantMarks: []bool{false, false, false, false}},
+		{name: "behind a merge that has left the line, at the head of the waiting line",
+			arrange: func(t *testing.T, s *store, repo RepoKey, ws []WorkspaceID) WorkspaceID {
+				queued(t, s, repo, ws[0], instant)
+				queued(t, s, repo, ws[1], instant.Add(time.Minute))
+				queued(t, s, repo, ws[2], instant.Add(2*time.Minute))
+				if err := s.RemoveMergeQueueEntry(context.Background(), repo, ws[0], "merged"); err != nil {
+					t.Fatalf("RemoveMergeQueueEntry: %v", err)
+				}
+				return ws[0]
+			},
+			wantOrder: func(ws []WorkspaceID, b WorkspaceID) []WorkspaceID { return []WorkspaceID{b, ws[1], ws[2]} },
+			wantMarks: []bool{true, false, false}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			ws := []WorkspaceID{testWorkspace(t, s).ID, testWorkspace(t, s).ID, testWorkspace(t, s).ID}
+			ahead := tc.arrange(t, s, repo, ws)
+			b := testWorkspace(t, s).ID
+
+			// Act
+			behindQueued(t, s, repo, b, ahead, instant.Add(3*time.Minute))
+
+			// Assert
+			if got, want := queueOrder(t, s, repo), tc.wantOrder(ws, b); !slices.Equal(got, want) {
+				t.Fatalf("queue = %v, want %v", got, want)
+			}
+			if got := frontMarks(t, s, repo); !slices.Equal(got, tc.wantMarks) {
+				t.Fatalf("front marks = %v, want %v", got, tc.wantMarks)
+			}
+		})
+	}
+}
+
+func TestABehindRequestCarriesItsAskUntilItIsPlaced(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	ahead, ws := testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, ahead.ID, instant)
+	if err := s.RequestMerge(ctx, repo, ws.ID, MergeSource{Kind: MergeSourceOwnBranch, Behind: ahead.ID}, instant.Add(time.Minute)); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+	requested, err := s.MergeQueue(ctx, repo)
+	if err != nil || len(requested) != 2 || requested[1].Source.Behind != ahead.ID {
+		t.Fatalf("MergeQueue = %+v, %v; want the request carrying Behind", requested, err)
+	}
+
+	// Act
+	if _, err := s.QueueMerge(ctx, repo, ws.ID, NewLeaseID()); err != nil {
+		t.Fatalf("QueueMerge: %v", err)
+	}
+
+	// Assert
+	placed, err := s.MergeQueue(ctx, repo)
+	if err != nil || len(placed) != 2 || placed[1].Source.Behind != "" {
+		t.Fatalf("MergeQueue = %+v, %v; want the placed merge's ask spent", placed, err)
+	}
+}
+
+func TestRequestMergeRefusesAMergePlacedFrontAndBehind(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ahead, ws := testWorkspace(t, s), testWorkspace(t, s)
+
+	// Act
+	err := s.RequestMerge(context.Background(), repo, ws.ID, MergeSource{Kind: MergeSourceOwnBranch, Front: true, Behind: ahead.ID}, instant)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "placed at the front or behind") {
+		t.Fatalf("RequestMerge = %v, want the contradiction refused", err)
+	}
+}

@@ -1106,6 +1106,15 @@ type MergeSource struct {
 	// already running. Any arm may ask for it; a hotfix that must land before
 	// the work already waiting is what it is for.
 	Front bool
+	// Behind puts the merge DIRECTLY BEHIND the named merge (by its queue
+	// workspace) when it is put in line, instead of at the back or the front;
+	// "" places it by Front. It takes its neighbor's front mark, so a front
+	// merge never ends up behind an ordinary one: behind the running merge it
+	// is the first in line, marked front; behind a waiting merge it takes
+	// that merge's mark. A merge that has left the line by then left its
+	// place at the head of the waiting line, which is where this merge goes.
+	// Only a REQUEST carries it: the ask is spent once the merge is placed.
+	Behind WorkspaceID
 	// Version is how the merge moves agent-repl's version once it lands
 	// (agentrepl.v1.MergeWorkspaceRequest.version_increment), nil when it
 	// moves none. A detached request's hand-off carries it onto the merge

@@ -91,6 +91,7 @@ func (s *server) createAsyncMerge(
 		Detached: merge.NewDetachedRun(async.GetName(), async.GetInstruction(), async.GetCompactAfter(), closes,
 			async.GetCleanupWorktree(), deployHooksOf(async.GetDeployHooks()), maker, async.GetTarget().GetMaker() != nil),
 	}
+	request.PlaceBehind = placedBehind(async.GetPlacement())
 	enqueued, err := s.deps.Merge.Enqueue(ctx, request)
 	if err != nil {
 		return answer(resp, s.answerRefusal(log, rpc, resp, err, asyncMergeRenames))

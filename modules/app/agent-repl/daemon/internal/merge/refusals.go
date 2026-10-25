@@ -89,6 +89,9 @@ const (
 	// pending async merge's reservation (CreateWorkspaceError.async_merge_name_taken). Its `branch`
 	// field names the branch the name resolves to.
 	ArmNameTaken = "async_merge_name_taken"
+	// ArmPlacementBehindNotInLine refuses a merge asked to go behind a merge
+	// that does not stand in its queue.
+	ArmPlacementBehindNotInLine = "placement_behind_not_in_line"
 	// ArmNoBranchCheckedOut refuses a merge of a workspace's own branch whose
 	// worktree has a detached HEAD (MergeWorkspaceError.no_branch_checked_out).
 	// Its `dir` field names the worktree.

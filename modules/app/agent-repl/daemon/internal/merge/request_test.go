@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -638,5 +639,63 @@ func TestARequestWhoseFamilyReadFailsIsRefusedWithNothingRecorded(t *testing.T) 
 	}
 	if _, logged := h.recordFor("error", "daemon.merge.enqueue"); !logged {
 		t.Fatalf("the failed read was not recorded at ERROR: %+v", h.logs.Records())
+	}
+}
+
+func TestEnqueueResolvesAMergePlacedBehindByItsQueueName(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	queueAnother(t, h, "ws-2", "two")
+
+	// Act.
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser, PlaceBehind: "two"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	entry, err := h.o.entryOf(context.Background(), h.repoKey(), theWorkspace)
+	if err != nil || entry.Source.Behind != "ws-2" {
+		t.Fatalf("entry = %+v, %v; want it placed behind ws-2", entry, err)
+	}
+}
+
+func TestEnqueueRefusesAMergePlacedBehindOneNotInLine(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	queueAnother(t, h, "ws-2", "two")
+
+	// Act.
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, By: RequestedByUser, PlaceBehind: "nowhere"})
+
+	// Assert.
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmPlacementBehindNotInLine || refusal.Fields["behind"] != "nowhere" || !strings.Contains(err.Error(), "in line: two") {
+		t.Fatalf("Enqueue = %v, want the placement_behind_not_in_line refusal naming what is in line", err)
+	}
+	if _, err := h.o.entryOf(context.Background(), h.repoKey(), theWorkspace); err == nil {
+		t.Fatal("a refused request left an entry")
+	}
+	if !loggedLike(h, logLike{level: "warn", op: "daemon.merge.enqueue", text: "refused a merge placed behind a merge not in its queue", context: map[string]string{"place_behind": "nowhere"}}) {
+		t.Fatalf("no record of the refusal: %+v", h.logs.Records())
+	}
+}
+
+func TestEnqueueRefusesAMergePlacedFrontAndBehind(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	queueAnother(t, h, "ws-2", "two")
+	front := ownBranch
+	front.Front = true
+
+	// Act.
+	_, err := h.o.Enqueue(context.Background(), Request{Workspace: theWorkspace, Source: front, By: RequestedByUser, PlaceBehind: "two"})
+
+	// Assert.
+	if _, refused := Refused(err); err == nil || refused || !strings.Contains(err.Error(), "placed at the front and behind") {
+		t.Fatalf("Enqueue = %v, want the contradiction failed as a caller defect", err)
+	}
+	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.enqueue", text: "contradicts itself about its placement"}) {
+		t.Fatalf("no record of the contradiction: %+v", h.logs.Records())
 	}
 }

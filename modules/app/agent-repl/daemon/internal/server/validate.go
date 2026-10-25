@@ -595,7 +595,10 @@ func validateWorkspaceTopology(field string, t *agentreplv1.WorkspaceTopology) *
 // validateMergeQueuePlacement is MergeQueuePlacement's base function.
 func validateMergeQueuePlacement(field string, p *agentreplv1.MergeQueuePlacement) *connect.Error {
 	if p.GetPlace() == nil {
-		return invalid(field, "a placement arm (back or front) is required")
+		return invalid(field, "a placement arm (back, front or behind) is required")
+	}
+	if b := p.GetBehind(); b != nil && strings.TrimSpace(b.GetMerge()) == "" {
+		return invalid(field+".behind.merge", "the merge to be placed behind is required")
 	}
 	return nil
 }

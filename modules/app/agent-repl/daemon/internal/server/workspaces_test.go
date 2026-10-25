@@ -1440,6 +1440,9 @@ func TestFinishWorkspaceMapsTheQueuesRefusalsOntoItsArms(t *testing.T) {
 			got: func(e *agentreplv1.FinishWorkspaceError) bool {
 				return e.GetDeployConfigInvalid().GetPath() == "/repo/.agent-repl/deploy.yaml" && e.GetDeployConfigInvalid().GetDetail() == "pre_deploy is required"
 			}},
+		{name: "placed behind a merge not in line", refusal: &merge.RefusalError{Arm: merge.ArmPlacementBehindNotInLine, Reason: "none",
+			Fields: map[string]any{"behind": "two"}},
+			got: func(e *agentreplv1.FinishWorkspaceError) bool { return e.GetPlacementBehindNotInLine().GetBehind() == "two" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2351,5 +2354,42 @@ func TestCreateWorkspaceReleasesASynchronousTicketWithItsAnswer(t *testing.T) {
 	// Assert.
 	if h.Creates.InFlight() != 0 {
 		t.Fatalf("in flight after the answer = %d, want 0", h.Creates.InFlight())
+	}
+}
+
+// behindPlacement places a merge directly behind MERGE.
+func behindPlacement(merge string) *agentreplv1.MergeQueuePlacement {
+	return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Behind{Behind: &agentreplv1.MergeQueuePlacementBehind{Merge: merge}}}
+}
+
+func TestFinishWorkspaceCarriesABehindPlacement(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	req := ownFinish()
+	req.Placement = behindPlacement(" two ")
+
+	// Act.
+	if _, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(req)); err != nil {
+		t.Fatalf("FinishWorkspace: %v", err)
+	}
+
+	// Assert.
+	if len(h.Merge.requests) != 1 || h.Merge.requests[0].PlaceBehind != "two" || h.Merge.requests[0].Source.Front {
+		t.Fatalf("requests = %+v, want one placed behind two", h.Merge.requests)
+	}
+}
+
+func TestFinishWorkspaceRefusesABehindPlacementNamingNoMerge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	req := ownFinish()
+	req.Placement = behindPlacement(" ")
+
+	// Act.
+	_, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(req))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(err.Error(), "placement.behind.merge") || len(h.Merge.requests) != 0 {
+		t.Fatalf("FinishWorkspace = %v, requests %+v; want the empty merge refused as invalid", err, h.Merge.requests)
 	}
 }

@@ -365,6 +365,10 @@ func (m MergeSource) validate() error {
 	if !m.Kind.valid() {
 		return fmt.Errorf("unknown merge source kind %d", int(m.Kind))
 	}
+	// A MERGE IS PLACED ONE WAY: at the front, or behind a named merge.
+	if m.Front && m.Behind != "" {
+		return fmt.Errorf("a merge is placed at the front or behind %s, not both", m.Behind)
+	}
 	if m.KeepOpen && !m.Kind.ClosesRequester() {
 		return fmt.Errorf("a %s source cannot keep the requester open", m.Kind)
 	}

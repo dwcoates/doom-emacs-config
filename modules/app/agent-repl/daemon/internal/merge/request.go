@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -45,6 +46,13 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		log.Error(op, "a one-shot merge request contradicts itself", withField(fields, "error", err.Error()))
 		return Enqueued{}, err
 	}
+	// A MERGE IS PLACED ONE WAY, at the front or behind a named merge: the
+	// placement's oneof at the boundary guarantees it.
+	if req.Source.Front && req.PlaceBehind != "" {
+		err := fmt.Errorf("merge: the merge of %s is placed at the front and behind %q at once", ws, req.PlaceBehind)
+		log.Error(op, "a merge request contradicts itself about its placement", withField(fields, "error", err.Error()))
+		return Enqueued{}, err
+	}
 	// WHO ASKED IS NAMED EXACTLY WHEN AN AGENT ASKED: the boundary that
 	// builds the request guarantees it.
 	if (req.By == RequestedByAgent) != (req.Asker != "") {
@@ -70,6 +78,17 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	if err != nil {
 		log.Warn(op, "refused a merge request", withField(fields, "error", err.Error()))
 		return Enqueued{}, err
+	}
+	if req.PlaceBehind != "" {
+		fields["place_behind"] = req.PlaceBehind
+		if source.Behind, err = o.placeBehind(ctx, record, req); err != nil {
+			if _, refused := Refused(err); refused {
+				log.Warn(op, "refused a merge placed behind a merge not in its queue", withField(fields, "error", err.Error()))
+			} else {
+				log.Error(op, "could not read the queue a merge is placed in", withField(fields, "error", err.Error()))
+			}
+			return Enqueued{}, err
+		}
 	}
 	if v := req.Source.Version; v != nil {
 		fields["version_part"] = v.Part.String()
@@ -705,4 +724,28 @@ func (o *orchestrator) publishOneShot(ctx context.Context, log dlog.Logger, ws i
 		log.Error(op, "could not republish the roster after marking the requester a one-shot",
 			dlog.Context{"workspace": string(ws), "error": err.Error()})
 	}
+}
+
+// placeBehind resolves the merge REQ is placed behind, by the name the queue
+// lists it under, to its queue workspace. It must stand in the requester's
+// queue, waiting or running.
+func (o *orchestrator) placeBehind(ctx context.Context, record wsm.Workspace, req Request) (wsm.WorkspaceID, error) {
+	repo, err := o.repoKeyFor(ctx, record.Dir)
+	if err != nil {
+		return "", err
+	}
+	queue, err := o.readQueue(ctx, o.deps.DB, repo)
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for _, member := range queue.Members {
+		if member.Name == req.PlaceBehind {
+			return member.Workspace, nil
+		}
+		names = append(names, member.Name)
+	}
+	refusal := refuse(ArmPlacementBehindNotInLine, req.Workspace, "no merge named %q stands in the queue to be placed behind (in line: %s)", req.PlaceBehind, strings.Join(names, ", "))
+	refusal.Fields = map[string]any{"behind": req.PlaceBehind}
+	return "", refusal
 }

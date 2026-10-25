@@ -268,6 +268,11 @@ type Request struct {
 	// from. It is legal on an in-place own-branch source that does not keep
 	// the requester open, alone.
 	OneShot bool
+	// PlaceBehind names the merge, as the queue lists it (QueueMember.Name),
+	// this one is put in line directly behind (wsm.MergeSource.Behind); ""
+	// places it at the back or, with Source.Front, at the front. The named
+	// merge must stand in the requester's queue when it is asked.
+	PlaceBehind string
 }
 
 // Enqueued is what a recorded request reserved.

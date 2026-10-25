@@ -98,10 +98,11 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 			state   int64
 			detach  sql.NullString
 			front   bool
+			behind  sql.NullString
 			verPart sql.NullInt64
 			verLine sql.NullString
 		)
-		err := tx.QueryRowContext(ctx, `SELECT state, source_detach_id, source_front, source_version_part, source_changelog_line FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, requester).Scan(&state, &detach, &front, &verPart, &verLine)
+		err := tx.QueryRowContext(ctx, `SELECT state, source_detach_id, source_front, source_behind, source_version_part, source_changelog_line FROM merge_queue WHERE repo_key = ? AND workspace_id = ?`, key, requester).Scan(&state, &detach, &front, &behind, &verPart, &verLine)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("wsm: hand-off of detached merge %s: workspace %s has no merge request: %w", request, requester, ErrNotFound)
@@ -126,7 +127,7 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 		// THE MERGE WORKSPACE CARRIES THE REQUEST'S PLACE IN LINE AND ITS
 		// VERSION INCREMENT: a detached merge asked for the front still goes
 		// to the front, and the version it asked for is applied where it lands.
-		return insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch, Front: front, Pick: pick, Version: version}, at)
+		return insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch, Front: front, Behind: WorkspaceID(behind.String), Pick: pick, Version: version}, at)
 	})
 }
 

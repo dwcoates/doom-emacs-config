@@ -363,12 +363,16 @@ func TestAWorkspaceIsNamedByNameDirectoryOrHere(t *testing.T) {
 
 func TestFinishedNamesItsPlacement(t *testing.T) {
 	tests := []struct {
-		name  string
-		args  []string
-		code  int
-		front bool
+		name   string
+		args   []string
+		code   int
+		front  bool
+		behind string
 	}{
 		{name: "at the front", args: []string{"here", "-placement", "front"}, code: exitSuccess, front: true},
+		{name: "behind a named merge", args: []string{"here", "-placement", "behind=two"}, code: exitSuccess, behind: "two"},
+		{name: "behind no merge", args: []string{"here", "-placement", "behind="}, code: exitFailure},
+		{name: "with an unknown placement", args: []string{"here", "-placement", "middle"}, code: exitFailure},
 		{name: "with no placement", args: []string{"here"}, code: exitFailure},
 	}
 	for _, tt := range tests {
@@ -385,6 +389,9 @@ func TestFinishedNamesItsPlacement(t *testing.T) {
 			}
 			if tt.front && only[*agentreplv1.FinishWorkspaceRequest](t, f).GetPlacement().GetFront() == nil {
 				t.Error("the deploy was not placed at the front")
+			}
+			if tt.behind != "" && only[*agentreplv1.FinishWorkspaceRequest](t, f).GetPlacement().GetBehind().GetMerge() != tt.behind {
+				t.Errorf("the deploy was not placed behind %s", tt.behind)
 			}
 		})
 	}

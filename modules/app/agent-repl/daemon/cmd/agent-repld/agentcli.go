@@ -135,10 +135,10 @@ type cliCommand struct {
 var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
 		"create":      {usage: "create -repository here|DIR -topology primary|child [-origin-master] [-owner WS] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-as-user]", run: workspaceCreate},
-		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
+		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":      {usage: "prompt WS TEXT", run: workspacePrompt},
 		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-principal-link URL|-no-principal-link] [-as-user]", run: workspaceSet},
-		"finished":    {usage: "finished WS -placement back|front [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
+		"finished":    {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":        {usage: "open WS", run: workspaceOpen},
 		"close":       {usage: "close WS [-as-user]", run: workspaceClose},
 		"kill":        {usage: "kill WS", run: workspaceKill},
@@ -468,15 +468,22 @@ func deployHooks(pre, post *hookList) *agentreplv1.CreateWorkspaceDeployHooks {
 	return &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: pre.hooks, PostDeploy: post.hooks}
 }
 
-// placement reads a -placement flag; nothing is defaulted.
+// placement reads a -placement flag: back, front, or behind=MERGE (directly
+// behind the merge the queue lists under that name). Nothing is defaulted.
 func placement(text string) (*agentreplv1.MergeQueuePlacement, error) {
+	if merge, behind := strings.CutPrefix(text, "behind="); behind {
+		if strings.TrimSpace(merge) == "" {
+			return nil, fmt.Errorf("-placement behind= names no merge")
+		}
+		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Behind{Behind: &agentreplv1.MergeQueuePlacementBehind{Merge: merge}}}, nil
+	}
 	switch text {
 	case "back":
 		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Back{Back: &agentreplv1.MergeQueuePlacementBack{}}}, nil
 	case "front":
 		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Front{Front: &agentreplv1.MergeQueuePlacementFront{}}}, nil
 	}
-	return nil, fmt.Errorf("-placement is back or front, not %q", text)
+	return nil, fmt.Errorf("-placement is back, front or behind=MERGE, not %q", text)
 }
 
 // versionIncrement reads -version-part and -changelog-line, nil when neither

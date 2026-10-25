@@ -140,13 +140,13 @@ func insertRequest(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID,
 		return err
 	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker, source_behind)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		key, id, next, int(MergeRequested), nanos(at),
 		int(source.Kind), source.KeepOpen, nullableText(string(source.Workspace)), nullableText(source.Branch), nullableText(string(source.Detach)), source.Front,
 		nullableText(source.DetachName), nullableText(source.Pick), nullNanos(source.PickStartedAt), nullableText(string(source.PickTurn)), source.CompactAfter,
 		nullableText(string(source.CloseOnLanding)), source.CleanupWorktree, nullableText(source.CleanupDir), versionPart(source.Version), versionLine(source.Version),
-		before, after, nullableText(string(source.DetachMaker)), source.DetachTargetMaker)
+		before, after, nullableText(string(source.DetachMaker)), source.DetachTargetMaker, nullableText(string(source.Behind)))
 	return err
 }
 
@@ -199,22 +199,40 @@ func (s *store) QueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, le
 // placeInLine answers the sequence number a requested merge takes as it is put
 // in line: one past the queue's last, or -- for a merge that asked for the
 // FRONT (MergeSource.Front) -- the place of the first ORDINARY merge still
-// WAITING, with that merge and every row behind it moved back one. So front
-// merges keep their own arrival order ahead of every ordinary waiting merge,
-// and a merge already ADMITTED is never passed: it holds the repository's one
-// slot. A queue with no ordinary merge waiting puts a front merge at the back,
-// which is behind every earlier front merge and ahead of nothing it should
-// pass.
+// WAITING, with that merge and every row behind it moved back one, or -- for a
+// merge that asked to go BEHIND another (MergeSource.Behind) -- the place
+// directly behind it (placeBehind). So front merges keep their own arrival
+// order ahead of every ordinary waiting merge, and a merge already ADMITTED is
+// never passed: it holds the repository's one slot. A queue with no ordinary
+// merge waiting puts a front merge at the back, which is behind every earlier
+// front merge and ahead of nothing it should pass.
 //
 // The requested row goes to the back, then moves up through moveAhead.
 func placeInLine(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID) (int64, error) {
-	var front bool
-	if err := tx.QueryRowContext(ctx, `SELECT source_front FROM merge_queue WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
-		key, id, int(MergeRequested)).Scan(&front); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	var (
+		front  bool
+		behind sql.NullString
+	)
+	if err := tx.QueryRowContext(ctx, `SELECT source_front, source_behind FROM merge_queue WHERE repo_key = ? AND workspace_id = ? AND state = ?`,
+		key, id, int(MergeRequested)).Scan(&front, &behind); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
 	var waiting sql.NullInt64
-	if front {
+	switch {
+	case behind.Valid:
+		target, mark, err := placeBehind(ctx, tx, key, WorkspaceID(behind.String))
+		if err != nil {
+			return 0, err
+		}
+		// THE NEIGHBOR'S FRONT MARK, so no front merge waits behind an
+		// ordinary one and moves keep the order placeInLine makes. The ask
+		// is spent once placed: a merge in line holds its place by its mark
+		// and its sequence alone, as every other does.
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET source_front = ?, source_behind = NULL WHERE repo_key = ? AND workspace_id = ?`, mark, key, id); err != nil {
+			return 0, err
+		}
+		waiting = target
+	case front:
 		if err := tx.QueryRowContext(ctx, `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ? AND source_front = 0`,
 			key, int(MergeQueued)).Scan(&waiting); err != nil {
 			return 0, err
@@ -238,6 +256,37 @@ func placeInLine(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID) (
 		return 0, err
 	}
 	return waiting.Int64, nil
+}
+
+// placeBehind answers the place directly behind AHEAD in KEY's line, and the
+// front mark a merge put there takes: the first waiting merge after a waiting
+// AHEAD, with AHEAD's own mark; the first waiting place behind an ADMITTED
+// AHEAD (the running merge), marked front, since it passes every waiting
+// merge; and the same for an AHEAD no longer in line, whose place was the
+// head of the waiting line once it was taken. No place answered (an invalid
+// target) is the back, past the last waiting merge.
+func placeBehind(ctx context.Context, tx *sql.Tx, key RepoKey, ahead WorkspaceID) (sql.NullInt64, bool, error) {
+	var (
+		seq   int64
+		state int64
+		front bool
+	)
+	err := tx.QueryRowContext(ctx, `SELECT seq, state, source_front FROM merge_queue WHERE repo_key = ? AND workspace_id = ? AND state IN (?, ?)`,
+		key, ahead, int(MergeQueued), int(MergeAdmitted)).Scan(&seq, &state, &front)
+	var target sql.NullInt64
+	switch {
+	case errors.Is(err, sql.ErrNoRows), err == nil && MergeQueueState(state) == MergeAdmitted:
+		if err := tx.QueryRowContext(ctx, `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ?`, key, int(MergeQueued)).Scan(&target); err != nil {
+			return sql.NullInt64{}, false, err
+		}
+		return target, true, nil
+	case err != nil:
+		return sql.NullInt64{}, false, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ? AND seq > ?`, key, int(MergeQueued), seq).Scan(&target); err != nil {
+		return sql.NullInt64{}, false, err
+	}
+	return target, front, nil
 }
 
 // moveAhead moves one row up to the place target, moving every row from target
@@ -671,7 +720,7 @@ func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEnt
 // mergeQueueColumns are the merge_queue columns every queue read selects, in
 // the order scanMergeQueue scans them: the one list, so a read cannot select
 // columns its scan does not expect.
-const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker`
+const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, ledger_id, source_front, source_detach_name, source_pick, pick_started_at, pick_turn, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker, source_behind`
 
 // scanMergeQueue is the one queue-decoding path, so both readers reject an
 // undeclared state identically and number positions the same way. TAIL is the
@@ -710,8 +759,9 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			after     string
 			maker     sql.NullString
 			toMaker   bool
+			behind    sql.NullString
 		)
-		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued, &kind, &keepOpen, &sourceWS, &sourceRef, &detach, &ledger, &front, &name, &pick, &picked, &pickTurn, &compact, &closes, &cleanup, &cleanDir, &verPart, &verLine, &before, &after, &maker, &toMaker); err != nil {
+		if err := rows.Scan(&entry.Repo, &entry.Workspace, &state, &enqueued, &kind, &keepOpen, &sourceWS, &sourceRef, &detach, &ledger, &front, &name, &pick, &picked, &pickTurn, &compact, &closes, &cleanup, &cleanDir, &verPart, &verLine, &before, &after, &maker, &toMaker, &behind); err != nil {
 			return nil, err
 		}
 		row := fmt.Sprintf("%s/%s", entry.Repo, entry.Workspace)
@@ -724,7 +774,7 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			Detach: DetachedMergeID(detach.String), Front: front, DetachName: name.String, Pick: pick.String, PickStartedAt: optTime(picked),
 			PickTurn: TurnID(pickTurn.String), CompactAfter: compact,
 			CloseOnLanding: WorkspaceID(closes.String), CleanupWorktree: cleanup, CleanupDir: cleanDir.String,
-			DetachMaker: WorkspaceID(maker.String), DetachTargetMaker: toMaker,
+			DetachMaker: WorkspaceID(maker.String), DetachTargetMaker: toMaker, Behind: WorkspaceID(behind.String),
 		}
 		version, err := scanVersion(verPart, verLine)
 		if err != nil {

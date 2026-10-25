@@ -58,7 +58,10 @@ Before an async merge:
 Either kind:
 
 - `-placement front` only for a merge that must land before the work already
-  waiting (a hotfix); otherwise `-placement back`.
+  waiting (a hotfix); `-placement behind=MERGE` to land directly after a named
+  merge in line (the name `merge-queue status` lists), taking its front mark;
+  otherwise `-placement back`. A name not in line is refused
+  (`placement_behind_not_in_line`).
 - `-compact-after`, and the hook flags `-pre-deploy-prompt`,
   `-pre-deploy-script`, `-post-deploy-prompt` and `-post-deploy-script` (which
   replace the repository's hooks of that stage), ONLY when the user asked for

@@ -351,3 +351,28 @@ func TestMergeWorkspaceRemovedAtAnswersNoneForAWorkspaceNeverRemoved(t *testing.
 		t.Fatalf("MergeWorkspaceRemovedAt = %v, %v; want none", found, err)
 	}
 }
+
+func TestHandOffDetachedMergeCarriesABehindRequestToTheMergeWorkspace(t *testing.T) {
+	// Arrange: a detached merge asked to go behind another merge.
+	s, _ := testStore(t)
+	requester := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	request := NewDetachedMergeID()
+	source := MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", Detach: request, DetachMaker: "maker", DetachName: "sample-merge", Behind: "ws-ahead"}
+	if err := s.RequestMerge(context.Background(), repo, requester.ID, source, time.Unix(100, 0)); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+	forked := registerMergeWorkspace(t, s, requester.ID, request)
+
+	// Act
+	err := s.HandOffDetachedMerge(context.Background(), repo, requester.ID, request, forked.ID, "sample-merge", "", time.Unix(200, 0))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("HandOffDetachedMerge: %v", err)
+	}
+	queue, err := s.MergeQueue(context.Background(), repo)
+	if err != nil || len(queue) != 1 || queue[0].Source.Behind != "ws-ahead" {
+		t.Fatalf("MergeQueue = %+v, %v; want the merge workspace's entry carrying Behind", queue, err)
+	}
+}

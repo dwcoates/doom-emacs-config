@@ -170,7 +170,16 @@ var migrations = []migration{
 	{To: 71, Name: "principal_link", Kind: MigrationAdditive, DDL: principalLinkDDL},
 	{To: 72, Name: "account_usage_windows", Kind: MigrationAdditive, DDL: accountUsageWindowsDDL},
 	{To: 73, Name: "durable_rows_parsed_prose", Kind: MigrationAdditive, Rewrite: rewriteParsedProseRows},
+	{To: 74, Name: "merge_queue_behind", Kind: MigrationAdditive, DDL: mergeQueueBehindDDL},
 }
+
+// mergeQueueBehindDDL records the merge a merge asked to be put in line
+// directly behind (MergeSource.Behind). IT IS ADDITIVE: the previous build's
+// INSERT names no such column, so a row it writes takes NULL -- placed at the
+// back or the front, which is all that build could ask for.
+const mergeQueueBehindDDL = `
+ALTER TABLE merge_queue ADD COLUMN source_behind TEXT;
+`
 
 // mergeQueueFrontDDL records whether a merge asked to go to the FRONT of its
 // queue (MergeSource.Front). IT IS ADDITIVE: the previous build's INSERT names

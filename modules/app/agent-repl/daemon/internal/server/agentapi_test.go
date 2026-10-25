@@ -940,3 +940,32 @@ func TestAnAgentSentPromptNeitherQuotesNorEndsTheUsersSelection(t *testing.T) {
 		t.Fatalf("selected = %q, want resp-1-old (the user's selection survived)", got)
 	}
 }
+
+func TestAnAsyncMergeCarriesABehindPlacement(t *testing.T) {
+	// Arrange
+	h, req := asyncHarness(t)
+	req.GetAsyncMerge().Placement = behindPlacement("two")
+
+	// Act
+	_, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+	// Assert
+	if err != nil || len(h.Merge.requests) != 1 || h.Merge.requests[0].PlaceBehind != "two" {
+		t.Fatalf("CreateWorkspace = %v, requests %+v; want the async merge placed behind two", err, h.Merge.requests)
+	}
+}
+
+func TestAnAsyncMergePlacedBehindAMergeNotInLineIsRefused(t *testing.T) {
+	// Arrange
+	h, req := asyncHarness(t)
+	req.GetAsyncMerge().Placement = behindPlacement("two")
+	h.Merge.enqueueErr = &merge.RefusalError{Arm: merge.ArmPlacementBehindNotInLine, Reason: "none", Fields: map[string]any{"behind": "two"}}
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+	// Assert
+	if err != nil || resp.Msg.GetError().GetPlacementBehindNotInLine().GetBehind() != "two" {
+		t.Fatalf("CreateWorkspace = %v, %v; want the placement_behind_not_in_line arm", resp, err)
+	}
+}

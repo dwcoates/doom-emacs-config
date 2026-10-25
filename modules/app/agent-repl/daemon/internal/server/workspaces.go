@@ -778,8 +778,16 @@ func finishRequest(ws ids.WorkspaceID, req *agentreplv1.FinishWorkspaceRequest) 
 	out.By, out.Asker = askerOf(req.GetRequester())
 	out.Source = wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
 	out.Source.Front = req.GetPlacement().GetFront() != nil
+	out.PlaceBehind = placedBehind(req.GetPlacement())
 	out.Source.Version = versionIncrement(req.GetVersionIncrement())
 	return out
+}
+
+// placedBehind is the merge a placement puts this one directly behind, by
+// the name the queue lists it under; "" for a placement at the back or the
+// front.
+func placedBehind(p *agentreplv1.MergeQueuePlacement) string {
+	return strings.TrimSpace(p.GetBehind().GetMerge())
 }
 
 // askerOf is who asked, as the merge queue reads it: the user, or a
