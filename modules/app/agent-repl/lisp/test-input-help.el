@@ -145,19 +145,36 @@ map's `[intercept-state] all'."
 
 ;;;; ---- The header line ----
 
-(ert-deftest agent-repl-test-input-help-header-line-is-one-help-button ()
-  "The header line's only text, apart from the bar, is the Help button."
+(ert-deftest agent-repl-test-input-help-header-line-is-settings-then-help ()
+  "The header line's only words, apart from the bar, are its two buttons."
   (let ((line (agent-repl--input-help-header-line-text)))
-    (should (equal (string-trim (substring-no-properties line)) "Help"))
-    (should (eq (get-text-property (string-search "Help" line) 'face line)
-                'agent-repl-input-help-button))))
+    (should (equal (split-string (substring-no-properties line)) '("Settings" "Help")))
+    (dolist (word '("Settings" "Help"))
+      (should (eq (get-text-property (string-search word line) 'face line)
+                  'agent-repl-input-help-button)))))
 
-(ert-deftest agent-repl-test-input-help-button-click-runs-the-click-command ()
-  "The button's `mouse-1' in the header line runs `agent-repl-input-help-click'."
-  (let ((button (agent-repl--input-help-button)))
-    (should (eq (lookup-key (get-text-property 1 'local-map button) [header-line mouse-1])
-                #'agent-repl-input-help-click))
-    (should (eq (get-text-property 1 'mouse-face button) 'mode-line-highlight))))
+(ert-deftest agent-repl-test-input-help-help-button-click-runs-the-menu ()
+  "The Help button's `mouse-1' in the header line drops the topic menu."
+  (let ((line (agent-repl--input-help-header-line-text)))
+    (should (eq (lookup-key (get-text-property (string-search "Help" line) 'local-map line)
+                            [header-line mouse-1])
+                #'agent-repl-input-help-click))))
+
+(ert-deftest agent-repl-test-input-help-settings-button-click-opens-settings ()
+  "The Settings button's `mouse-1' in the header line opens the Settings page."
+  (let ((line (agent-repl--input-help-header-line-text)))
+    (should (eq (lookup-key (get-text-property (string-search "Settings" line) 'local-map line)
+                            [header-line mouse-1])
+                #'agent-repl-settings))))
+
+(ert-deftest agent-repl-test-input-help-button-is-raised-and-highlights ()
+  "A bar button wears the button face, highlights under the mouse, and clicks through its map."
+  (let* ((map (make-sparse-keymap))
+         (button (agent-repl--input-help-button "  X  " "echo" map)))
+    (should (eq (get-text-property 1 'face button) 'agent-repl-input-help-button))
+    (should (eq (get-text-property 1 'mouse-face button) 'mode-line-highlight))
+    (should (eq (get-text-property 1 'local-map button) map))
+    (should (equal (get-text-property 1 'help-echo button) "echo"))))
 
 ;;;; ---- The bar's colors ----
 
@@ -187,18 +204,19 @@ webapp/test/styles.test.ts."
                  agent-repl-input-help-button-background)))
 
 (ert-deftest agent-repl-test-input-help-header-line-grounds-every-gap-with-the-bar ()
-  "Every character outside the button carries the bar's face."
+  "Every character outside the buttons carries the bar's face."
   (let ((line (agent-repl--input-help-header-line-text)))
     (dotimes (i (length line))
       (unless (eq (get-text-property i 'face line) 'agent-repl-input-help-button)
         (should (eq (get-text-property i 'face line) 'agent-repl-input-help-bar))))))
 
-(ert-deftest agent-repl-test-input-help-header-line-puts-the-button-at-the-right-edge ()
-  "The bar stretches to just short of the right edge, where the button sits."
-  (let ((line (agent-repl--input-help-header-line-text)))
+(ert-deftest agent-repl-test-input-help-header-line-puts-the-buttons-at-the-right-edge ()
+  "The bar stretches to just short of the right edge, where the buttons sit."
+  (let* ((line (agent-repl--input-help-header-line-text))
+         (buttons (substring-no-properties line 1 (1- (length line)))))
     (should (equal (get-text-property 0 'display line)
-                   `(space :align-to (- right ,(1+ (string-width agent-repl-input-help--button-label))))))
-    (should (equal (substring-no-properties line 1) (concat agent-repl-input-help--button-label " ")))))
+                   `(space :align-to (- right ,(1+ (string-width buttons))))))
+    (should (equal buttons "  Settings     Help  "))))
 
 ;;;; ---- Installing the header line ----
 
@@ -633,7 +651,7 @@ Compared in description order: a keymap's own order says nothing."
 
 (ert-deftest agent-repl-test-input-help-click-drops-the-menu-at-the-click ()
   "Clicking the button pops the topic menu at the click's event."
-  (let ((event (agent-repl-test-input-help--click-event agent-repl-input-help--button-label 2))
+  (let ((event (agent-repl-test-input-help--click-event "  Help  " 2))
         popped)
     (cl-letf (((symbol-function 'popup-menu) (lambda (menu position) (push (list menu position) popped))))
       (agent-repl-input-help-click event))

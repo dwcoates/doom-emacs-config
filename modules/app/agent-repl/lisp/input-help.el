@@ -28,6 +28,7 @@
 (declare-function agent-repl-popup-show "popup" (buffer))
 (declare-function agent-repl-defface "core" (face spec doc &rest args))
 (declare-function agent-repl-refill-keymap "core" (map fill))
+(declare-function agent-repl-settings "settings" ())
 (defvar agent-repl-input-mode-map)
 (defvar evil-normal-state-map)
 (defvar evil-insert-state-map)
@@ -278,7 +279,17 @@
                 (agent-repl-toggle-debug "Show or hide debug logging in *Messages*.")
                 (agent-repl-toggle-verbose-to-disk "Write verbose logging to the log file, or stop.")
                 (agent-repl-reload-config "Reload agent-repl's config.")
-                (agent-repl-revert-and-eval-buffer "Revert this buffer from disk, then evaluate it as Elisp."))))
+                (agent-repl-revert-and-eval-buffer "Revert this buffer from disk, then evaluate it as Elisp.")))
+    ;; ---- Settings ----
+    (:id settings
+     :group "Settings"
+     :title "Settings page"
+     :keymaps (agent-repl-settings-mode-map)
+     :bindings ((agent-repl-settings-toggle-section "Open or shut the section at point.")
+                (agent-repl-settings-refresh "Draw the page again, reading every key afresh."))
+     :features ("Click a key to change or remove it, and + to add one; a key is any sequence of keys, ended by ESC."
+                "A changed command shows changed, and reset puts its keys back."
+                "Changes are saved in ~/zettel/settings.eld and laid over the defaults at every start.")))
   "Every topic of agent-repl's help, in menu order.
 Each is a plist: `:id' (a symbol), `:group' (the menu's submenu),
 `:title' (the menu item's label and the popup's heading), `:keymaps' (the
@@ -298,6 +309,7 @@ binding form of the module and every one of its keymaps.")
 (defconst agent-repl-input-help-unlisted-commands
   '((ignore . "the Help button's press, which only keeps a click from dragging the header line")
     (agent-repl-input-help-click . "the Help button itself")
+    (agent-repl-settings . "the Settings buttons themselves, on the composer's bar and the splash")
     (agent-repl-input-company-return . "RET in the completion popup, described under Writing prompts")
     (company-complete-selection . "TAB in the completion popup, described under Writing prompts")
     (isearch-backward . "C-r in a creation prompt's minibuffer, not the composer, described in USER-GUIDE.md"))
@@ -347,38 +359,52 @@ stays quieter than the composer's own text.")
 ;;;; ---- The header line ------------------------------------------------
 
 (defvar agent-repl-input-help-button-map (make-sparse-keymap)
-  "Keymap of the help button in the composer's header line.")
+  "Keymap of the Help button in the composer's header line.")
 
-(agent-repl-refill-keymap
- agent-repl-input-help-button-map
- (lambda (map)
-   (define-key map [header-line mouse-1] #'agent-repl-input-help-click)
-   ;; A press on the button is not a header-line drag.
-   (define-key map [header-line down-mouse-1] #'ignore)))
+(defvar agent-repl-input-help-settings-button-map (make-sparse-keymap)
+  "Keymap of the Settings button in the composer's header line.")
 
-(defconst agent-repl-input-help--button-label "  Help  "
-  "The help button's text, padded inside its raised face.")
+(defun agent-repl--input-help-fill-button-map (command)
+  "Return a fill binding a header-line button's click to COMMAND."
+  (lambda (map)
+    (define-key map [header-line mouse-1] command)
+    ;; A press on a button is not a header-line drag.
+    (define-key map [header-line down-mouse-1] #'ignore)))
 
-(defun agent-repl--input-help-button ()
-  "Return the header line's one help button."
-  (propertize agent-repl-input-help--button-label
+(agent-repl-refill-keymap agent-repl-input-help-button-map
+                          (agent-repl--input-help-fill-button-map #'agent-repl-input-help-click))
+(agent-repl-refill-keymap agent-repl-input-help-settings-button-map
+                          (agent-repl--input-help-fill-button-map #'agent-repl-settings))
+
+(defconst agent-repl-input-help--bar-buttons
+  '(("  Settings  " "mouse-1: change any key binding" agent-repl-input-help-settings-button-map)
+    ("  Help  " "mouse-1: composer keys and features" agent-repl-input-help-button-map))
+  "The bar's buttons, left to right: (LABEL HELP-ECHO KEYMAP-VARIABLE).")
+
+(defun agent-repl--input-help-button (label echo map)
+  "Return a header-line button LABEL, explained by ECHO, clicked through MAP."
+  (propertize label
               'face 'agent-repl-input-help-button
               'mouse-face 'mode-line-highlight
               'pointer 'hand
-              'help-echo "mouse-1: composer keys and features"
-              'local-map agent-repl-input-help-button-map))
+              'help-echo echo
+              'local-map map))
 
 (defun agent-repl--input-help-header-line-text ()
-  "Return the composer's header line: the bar, then the help button at its right.
-Every column of it is this text: the bar's stretch reaches to the button,
-which ends one column short of the window's right edge, so the bar's
-ground is `agent-repl-input-help-bar' whatever face a theme (solaire's,
-say) remaps `header-line' to."
-  (let ((width (1+ (string-width agent-repl-input-help--button-label))))
+  "Return the composer's header line: the bar, then its buttons at the right.
+Every column of it is this text: the bar's stretch reaches to the
+buttons, which end one column short of the window's right edge, so the
+bar's ground is `agent-repl-input-help-bar' whatever face a theme
+\(solaire's, say) remaps `header-line' to."
+  (let* ((gap (propertize " " 'face 'agent-repl-input-help-bar))
+         (buttons (mapconcat (pcase-lambda (`(,label ,echo ,map))
+                               (agent-repl--input-help-button label echo (symbol-value map)))
+                             agent-repl-input-help--bar-buttons gap))
+         (width (1+ (string-width buttons))))
     (concat (propertize " " 'face 'agent-repl-input-help-bar
                         'display `(space :align-to (- right ,width)))
-            (agent-repl--input-help-button)
-            (propertize " " 'face 'agent-repl-input-help-bar))))
+            buttons
+            gap)))
 
 ;;;; ---- The topic menu -------------------------------------------------
 
@@ -656,30 +682,37 @@ command no map binds, or a variable that is not bound, is fatal."
             ": "
             (propertize (prin1-to-string (symbol-value variable)) 'face 'font-lock-string-face))))
 
-(defun agent-repl--input-help-insert-row (row column)
-  "Insert ROW, (CELL DESCRIPTION VARIABLES), its text wrapping at COLUMN."
-  (pcase-let ((`(,cell ,description ,variables) row)
-              (start (point))
-              (align `(space :align-to ,column)))
+(defun agent-repl--input-help-insert-row (cell description lines column)
+  "Insert a row: CELL, then DESCRIPTION and each of LINES at COLUMN.
+The text wraps back to COLUMN, and a CELL too wide for COLUMN
+puts DESCRIPTION on the next line.  Shared by the help popup and the
+Settings page (settings.el), so their rows are laid out alike."
+  (let ((start (point))
+        (align `(space :align-to ,column)))
     (insert "  " cell)
     (when (> (+ 2 (string-width cell)) (- column 2))
       (insert "\n"))
     (insert (propertize " " 'display align) description "\n")
-    (dolist (variable variables)
-      (insert (propertize " " 'display align) (agent-repl--input-help-variable-line variable) "\n"))
+    (dolist (line lines)
+      (insert (propertize " " 'display align) line "\n"))
     (put-text-property start (point) 'wrap-prefix align)))
+
+(defun agent-repl--input-help-key-column (cells)
+  "Return the description column for rows whose key cells are CELLS."
+  (+ 2 (min agent-repl-input-help--key-column-max
+            (apply #'max 0 (mapcar #'string-width cells)))
+     3))
 
 (defun agent-repl--input-help-insert (topic rows)
   "Insert TOPIC's help, with its resolved ROWS, at point."
-  (let ((column (+ 2 (min agent-repl-input-help--key-column-max
-                          (apply #'max 0 (mapcar (lambda (row) (string-width (car row))) rows)))
-                   3))
+  (let ((column (agent-repl--input-help-key-column (mapcar #'car rows)))
         (features (plist-get topic :features)))
     (insert (propertize (plist-get topic :title) 'face 'agent-repl-input-help-title) "\n")
     (when rows
       (insert "\n" (propertize "Keys" 'face 'agent-repl-input-help-section) "\n")
-      (dolist (row rows)
-        (agent-repl--input-help-insert-row row column)))
+      (pcase-dolist (`(,cell ,description ,variables) rows)
+        (agent-repl--input-help-insert-row
+         cell description (mapcar #'agent-repl--input-help-variable-line variables) column)))
     (when features
       (insert "\n" (propertize "Good to know" 'face 'agent-repl-input-help-section) "\n")
       (dolist (line features)

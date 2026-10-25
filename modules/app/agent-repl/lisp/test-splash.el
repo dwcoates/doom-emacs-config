@@ -23,6 +23,12 @@
 (defvar +doom-dashboard-ascii-banner-fn)
 (defvar +doom-dashboard-menu-sections)
 (defvar +doom-dashboard-mode-hook)
+(defvar +doom-dashboard-functions)
+
+(defconst agent-repl-test-splash--doom-widgets
+  '(doom-dashboard-widget-banner doom-dashboard-widget-shortmenu
+    doom-dashboard-widget-loaded doom-dashboard-widget-footer)
+  "Doom's own dashboard widgets, in its order.")
 (defvar doom-version)
 
 (defmacro agent-repl-test-splash--with-dashboard (name &rest body)
@@ -33,6 +39,7 @@ Redraws are recorded in `reloads'; centering pads to the width as Doom's does."
          (+doom-dashboard--width 80)
          (+doom-dashboard-ascii-banner-fn nil)
          (+doom-dashboard-menu-sections nil)
+         (+doom-dashboard-functions agent-repl-test-splash--doom-widgets)
          (+doom-dashboard-mode-hook nil)
          (agent-repl-roster-update-functions nil)
          (doom-version "2.1.0")
@@ -89,6 +96,48 @@ Redraws are recorded in `reloads'; centering pads to the width as Doom's does."
   (dolist (section agent-repl-splash-menu-sections)
     (should (commandp (plist-get (cdr section) :action)))))
 
+;;;; ---- The Settings button ----
+
+(ert-deftest agent-repl-test-splash-settings-widget-is-a-centered-button ()
+  "The Settings widget is one button, centered on the dashboard's width."
+  (agent-repl-test-splash--with-dashboard "*doom*"
+    (with-temp-buffer
+      (agent-repl-splash-widget-settings)
+      (should (equal (buffer-string)
+                     (concat (make-string (ceiling (- 80 (length "  Settings  ")) 2) ?\s)
+                             "  Settings  \n")))
+      (should (button-at (- (point-max) 4))))))
+
+(ert-deftest agent-repl-test-splash-settings-widget-opens-settings ()
+  "Pushing the splash's Settings button opens the Settings page."
+  (let (opened)
+    (agent-repl-test-splash--with-dashboard "*doom*"
+      (cl-letf (((symbol-function 'agent-repl-settings) (lambda () (push t opened))))
+        (with-temp-buffer
+          (agent-repl-splash-widget-settings)
+          (push-button (- (point-max) 4)))))
+    (should opened)))
+
+(ert-deftest agent-repl-test-splash-with-settings-goes-right-after-the-banner ()
+  "The Settings widget is placed right after Doom's banner widget."
+  (should (equal (agent-repl-splash--with-settings agent-repl-test-splash--doom-widgets)
+                 '(doom-dashboard-widget-banner agent-repl-splash-widget-settings
+                   doom-dashboard-widget-shortmenu doom-dashboard-widget-loaded
+                   doom-dashboard-widget-footer))))
+
+(ert-deftest agent-repl-test-splash-with-settings-adds-it-once ()
+  "A second install, as a reload makes, does not add the widget again."
+  (let ((once (agent-repl-splash--with-settings agent-repl-test-splash--doom-widgets)))
+    (should (equal (agent-repl-splash--with-settings once) once))))
+
+(ert-deftest agent-repl-test-splash-with-settings-without-a-banner-is-fatal ()
+  "Doom's widgets with no banner to follow signal, naming the list."
+  (let (fatals)
+    (cl-letf (((symbol-function 'agent-repl--fatal)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) fatals) (error "fatal"))))
+      (should-error (agent-repl-splash--with-settings '(doom-dashboard-widget-footer))))
+    (should (equal fatals '("elisp.splash.widgets: no banner widget functions=(doom-dashboard-widget-footer)")))))
+
 ;;;; ---- The mode name ----
 
 (ert-deftest agent-repl-test-splash-mode-name-with-a-release ()
@@ -121,7 +170,8 @@ Redraws are recorded in `reloads'; centering pads to the width as Doom's does."
     (agent-repl-splash-install)
     (should (eq +doom-dashboard-ascii-banner-fn #'agent-repl-splash-draw-banner))
     (should (eq +doom-dashboard-menu-sections agent-repl-splash-menu-sections))
-    (should (= +doom-dashboard--width (agent-repl-splash-banner-width)))))
+    (should (= +doom-dashboard--width (agent-repl-splash-banner-width)))
+    (should (memq #'agent-repl-splash-widget-settings +doom-dashboard-functions))))
 
 (ert-deftest agent-repl-test-splash-install-hooks-the-mode-and-roster ()
   "Installing hooks the dashboard's mode and the roster's updates."

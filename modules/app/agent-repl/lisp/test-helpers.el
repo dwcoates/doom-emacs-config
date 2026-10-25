@@ -100,6 +100,14 @@ load (BATCH-P nil) is already inert and is never refused."
            nil ,(if noerror noerror t))))
 
 ;; Doom workspace API
+;; Doom's dashboard module, which splash.el dresses as ZETTEL: its widget
+;; list as Doom defines it (agent-repl loads after every Doom module, so
+;; the variable is always bound there).
+(defvar +doom-dashboard-functions
+  '(doom-dashboard-widget-banner doom-dashboard-widget-shortmenu
+    doom-dashboard-widget-loaded doom-dashboard-widget-footer)
+  "Stub: Doom's dashboard widgets, in Doom's order.")
+
 (unless (fboundp '+workspace-current-name)
   (defun +workspace-current-name ()
     "Stub: return test workspace name."
