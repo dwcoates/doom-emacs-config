@@ -757,7 +757,7 @@ order a close lands by."
               ((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
               ((symbol-function 'agent-repl-host-pending-selection) (lambda () nil))
               ((symbol-function 'agent-repl-host-request-switch) (lambda (&rest _) t))
-              ((symbol-function 'agent-repl--roster-recent-names) (lambda () '("a" "b")))
+              ((symbol-function 'agent-repl--recent-workspace-and-thread-names) (lambda () '("a" "b")))
               ((symbol-function 'agent-repl--info) #'ignore)
               ((symbol-function 'message) #'ignore))
       ;; Act
@@ -787,7 +787,7 @@ order a close lands by."
       (cl-letf (((symbol-function 'agent-repl--jump-log-ws)
                  (lambda (_shown) (setq used t) "log"))
                 ((symbol-function 'agent-repl--ws-current-name) (lambda () "here"))
-                ((symbol-function 'agent-repl--roster-recent-names) (lambda () '("here")))
+                ((symbol-function 'agent-repl--recent-workspace-and-thread-names) (lambda () '("here")))
                 ((symbol-function 'agent-repl--drawn-tab-names) (lambda () '("here")))
                 ((symbol-function 'agent-repl-roster-last-finished-name) #'ignore)
                 ((symbol-function 'agent-repl--info) #'ignore)
@@ -804,7 +804,7 @@ Binds `switched' to the requested target and `logged' to the log lines."
   `(let ((switched nil) (logged nil) (said nil))
      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () ,shown))
                ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
-               ((symbol-function 'agent-repl--roster-recent-names) (lambda () ,recent))
+               ((symbol-function 'agent-repl--recent-workspace-and-thread-names) (lambda () ,recent))
                ((symbol-function 'agent-repl--info)
                 (agent-repl-test--record-into logged))
                ((symbol-function 'agent-repl-host-request-switch)
@@ -836,30 +836,110 @@ Binds `switched' to the requested target and `logged' to the log lines."
   (agent-repl-test-commands--with-previous "here" '("here")
     (agent-repl-switch-to-previous-workspace)
     (should-not switched)
-    (should (equal said "[agent-repl] No previous workspace to switch to"))
+    (should (equal said "[agent-repl] No previous workspace or thread to switch to"))
     (should (member "elisp.commands.previous-none from=here" logged))))
+
+(defmacro agent-repl-test-commands--with-roster (history rows threads &rest body)
+  "Run BODY over a roster of open ROWS and open THREADS, with HISTORY.
+ROWS are workspace ids, each opened under its own name; THREADS are the
+ids of thread rows, each opened under its own name unless it is a cons
+`(ID . nil)', a thread Emacs has not opened yet.  Binds `shown' to the
+workspace the frame stands on (nil) and `requests' to the switches asked
+for, each landing as an activation."
+  (declare (indent 3))
+  `(let ((agent-repl--workspace-history ,history)
+         (agent-repl--recency-walk-landing nil)
+         (shown nil) (requests nil))
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () shown))
+               ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+               ((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) nil))
+               ((symbol-function 'agent-repl-verbs--all-rows) (lambda () ,rows))
+               ((symbol-function 'agent-repl-roster-row-closed-p) (lambda (_row) nil))
+               ((symbol-function 'agent-repl-roster-row-ref) (lambda (row) (list :id row)))
+               ((symbol-function 'agent-repl-roster-last-selected-ms) #'ignore)
+               ((symbol-function 'agent-repl-roster-threads)
+                (lambda (&optional _roster)
+                  (mapcar (lambda (thread)
+                            (list :thread (list :id (if (consp thread) (car thread) thread))))
+                          ,threads)))
+               ((symbol-function 'agent-repl--ws-by-ref-id)
+                (lambda (id)
+                  (and (not (member id (mapcar #'car (cl-remove-if-not #'consp ,threads))))
+                       id)))
+               ((symbol-function 'agent-repl--info) #'ignore)
+               ((symbol-function 'agent-repl-host-request-switch)
+                (lambda (ws _trigger)
+                  (push ws requests)
+                  (setq shown ws)
+                  (agent-repl--record-workspace-history))))
+       ,@body)))
 
 (ert-deftest agent-repl-test-commands-previous-toggles-with-the-recorded-history ()
   "A switch by ANY means feeds the history, so two presses come back where they began."
-  (let ((agent-repl--workspace-history '("b" "a"))
-        (shown "b") (requests nil))
-    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () shown))
-              ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
-              ((symbol-function 'agent-repl--ws-known-p) (lambda (_ws) nil))
-              ((symbol-function 'agent-repl-verbs--all-rows) (lambda () '(a b)))
-              ((symbol-function 'agent-repl-roster-row-closed-p) (lambda (_row) nil))
-              ((symbol-function 'agent-repl-roster-row-ref)
-               (lambda (row) (list :id (symbol-name row))))
-              ((symbol-function 'agent-repl--ws-by-ref-id) #'identity)
-              ((symbol-function 'agent-repl--info) #'ignore)
-              ((symbol-function 'agent-repl-host-request-switch)
-               (lambda (ws _trigger)
-                 (push ws requests)
-                 (setq shown ws)
-                 (agent-repl--record-workspace-history))))
-      (agent-repl-switch-to-previous-workspace)
-      (agent-repl-switch-to-previous-workspace)
-      (should (equal (nreverse requests) '("a" "b"))))))
+  (agent-repl-test-commands--with-roster '("b" "a") '("a" "b") nil
+    (setq shown "b")
+    (agent-repl-switch-to-previous-workspace)
+    (agent-repl-switch-to-previous-workspace)
+    (should (equal (nreverse requests) '("a" "b")))))
+
+(ert-deftest agent-repl-test-commands-previous-goes-back-to-a-thread-looked-at-last ()
+  "From a workspace, `SPC TAB TAB' goes back to the chat thread selected before it."
+  (agent-repl-test-commands--with-roster '("a" "chat/t" "b") '("a" "b") '("chat/t")
+    (setq shown "a")
+    (agent-repl-switch-to-previous-workspace)
+    (should (equal requests '("chat/t")))))
+
+(ert-deftest agent-repl-test-commands-previous-toggles-between-a-thread-and-a-workspace ()
+  "From a thread, two presses go to the workspace selected before it and back."
+  (agent-repl-test-commands--with-roster '("chat/t" "a" "b") '("a" "b") '("chat/t")
+    (setq shown "chat/t")
+    (agent-repl-switch-to-previous-workspace)
+    (agent-repl-switch-to-previous-workspace)
+    (should (equal (nreverse requests) '("a" "chat/t")))))
+
+(ert-deftest agent-repl-test-commands-previous-goes-back-to-a-workspace-looked-at-last ()
+  "A workspace selected after the thread is the one `SPC TAB TAB' goes back to."
+  (agent-repl-test-commands--with-roster '("a" "b" "chat/t") '("a" "b") '("chat/t")
+    (setq shown "a")
+    (agent-repl-switch-to-previous-workspace)
+    (should (equal requests '("b")))))
+
+;;;; ---- The candidate lists the recency jumps order ----
+
+(ert-deftest agent-repl-test-commands-open-thread-names-are-the-opened-threads-in-row-order ()
+  "Each open thread row names its workspace, in the order the rows give."
+  (agent-repl-test-commands--with-roster nil nil '("chat/t2" "chat/t1")
+    (should (equal (agent-repl--open-thread-names) '("chat/t2" "chat/t1")))))
+
+(ert-deftest agent-repl-test-commands-open-thread-names-leave-out-an-unopened-thread ()
+  "A thread whose workspace Emacs has not opened yet names none."
+  (agent-repl-test-commands--with-roster nil nil '("chat/t1" ("chat/t2" . nil))
+    (should (equal (agent-repl--open-thread-names) '("chat/t1")))))
+
+(ert-deftest agent-repl-test-commands-roster-recent-names-leave-out-threads ()
+  "The most-recent cycle (`SPC TAB R') stays on workspaces, a thread looked at last or not."
+  (agent-repl-test-commands--with-roster '("chat/t" "b") '("a" "b") '("chat/t")
+    (should (equal (agent-repl--roster-recent-names) '("b" "a")))))
+
+(ert-deftest agent-repl-test-commands-workspace-and-thread-names-interleave-by-history ()
+  "Workspaces and threads share the one recency order: this session's history first."
+  (agent-repl-test-commands--with-roster '("b" "chat/t" "a") '("a" "b" "c") '("chat/t")
+    (should (equal (agent-repl--recent-workspace-and-thread-names) '("b" "chat/t" "a" "c")))))
+
+(ert-deftest agent-repl-test-commands-recent-lists-share-the-open-roster-names ()
+  "Both recency lists draw their workspaces from `agent-repl--roster-open-names'."
+  (cl-letf (((symbol-function 'agent-repl--roster-open-names) (lambda () '("w")))
+            ((symbol-function 'agent-repl--open-thread-names) (lambda () '("chat/t")))
+            ((symbol-function 'agent-repl-roster-selection-recency-order) #'identity))
+    (should (equal (agent-repl--roster-recent-names) '("w")))
+    (should (equal (agent-repl--recent-workspace-and-thread-names) '("w" "chat/t")))))
+
+(ert-deftest agent-repl-test-commands-recency-walk-stays-on-the-drawn-tabs ()
+  "`s-[' and `s-]' walk the drawn tabs only: a thread looked at last is no step."
+  (let ((agent-repl--workspace-history '("chat/t" "b" "a")))
+    (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () '("a" "b")))
+              ((symbol-function 'agent-repl-roster-last-selected-ms) #'ignore))
+      (should (equal (agent-repl--recency-ring "a") '("b" "a"))))))
 
 ;;;; ---- The jump to the workspace that most recently finished ----
 

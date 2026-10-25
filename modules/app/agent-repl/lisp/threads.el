@@ -32,13 +32,13 @@
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--global-state-file "core" (relative))
-(declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--when-minibuffer-free "workspace" (scope label key fn))
 (declare-function agent-repl-verbs--read-required-prompt "verbs" (prompt-text refusal &optional history-file unseeded))
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-rpc-create-thread "rpc" (conn request &rest keys))
 (declare-function agent-repl-roster-threads "roster" (&optional roster))
+(declare-function agent-repl-roster-thread-row-ws "roster" (row))
 
 (defconst agent-repl-threads--log-scope
   '(:agent-repl-central "a thread is created and picked from no workspace of its own")
@@ -115,8 +115,8 @@ a timer, and held while another minibuffer is open."
 
 (defun agent-repl-threads--open (row trigger)
   "Switch to the workspace of the thread ROW, recording TRIGGER."
-  (let* ((id (plist-get (plist-get row :thread) :id))
-         (ws (agent-repl--ws-by-ref-id id)))
+  (let ((id (plist-get (plist-get row :thread) :id))
+        (ws (agent-repl-roster-thread-row-ws row)))
     (if ws
         (agent-repl-host-request-switch ws trigger)
       (agent-repl--info agent-repl-threads--log-scope "elisp.threads.open-pending id=%s name=%s"

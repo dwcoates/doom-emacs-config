@@ -381,7 +381,7 @@ walked for KEY followed by its #\\='COMMAND."
               'agent-repl-show-hidden-workspace)))
 
 (ert-deftest agent-repl-test-keybindings-spc-tab-tab-switches-to-the-previous ()
-  "`SPC TAB TAB\=' goes back to the workspace selected before the one shown."
+  "`SPC TAB TAB\=' goes back to the workspace or thread selected before the one shown."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "TAB")
               'agent-repl-switch-to-previous-workspace)))
 

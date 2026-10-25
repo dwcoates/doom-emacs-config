@@ -92,6 +92,8 @@
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-selection-recency-order "agent-repl-roster" (names))
+(declare-function agent-repl-roster-threads "agent-repl-roster" (&optional roster))
+(declare-function agent-repl-roster-thread-row-ws "agent-repl-roster" (row))
 (declare-function agent-repl-roster-last-finished-name "agent-repl-roster" (names))
 (declare-function agent-repl-roster-last-turn-ended-ms "agent-repl-roster" (ws))
 (declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
@@ -1153,19 +1155,41 @@ work wanted is no longer current or recent.  See
 Reset when the cycle exhausts, so repeated presses walk the whole roster
 rather than sticking on the second-most-recent workspace.")
 
-(defun agent-repl--roster-recent-names ()
-  "Return open workspace names, most recently selected first.
-The open rows of the roster, ordered by the ONE selection-recency order
-\(`agent-repl-roster-selection-recency-order'): this session's switches,
-then the daemon's durable last-selected instant, then never-selected
-rows in roster order -- the same order a close lands by."
+(defun agent-repl--roster-open-names ()
+  "Return the open rows' workspace names, in roster walk order.
+A row whose workspace Emacs has not opened yet names none, so it is left out."
   (let (names)
     (dolist (row (agent-repl-verbs--all-rows))
       (unless (agent-repl-roster-row-closed-p row)
         (let* ((ref (agent-repl-roster-row-ref row))
                (ws (and ref (agent-repl--ws-by-ref-id (plist-get ref :id)))))
           (when ws (push ws names)))))
-    (agent-repl-roster-selection-recency-order (nreverse names))))
+    (nreverse names)))
+
+(defun agent-repl--open-thread-names ()
+  "Return the open chat threads' workspace names, the last interacted with first.
+A thread whose workspace Emacs has not opened yet names none, so it is left out."
+  (delq nil (mapcar #'agent-repl-roster-thread-row-ws (agent-repl-roster-threads))))
+
+(defun agent-repl--roster-recent-names ()
+  "Return open workspace names, most recently selected first.
+The open rows of the roster (`agent-repl--roster-open-names'), ordered by
+the ONE selection-recency order (`agent-repl-roster-selection-recency-order'):
+this session's switches, then the daemon's durable last-selected instant,
+then never-selected rows in roster order -- the same order a close lands by.
+Chat threads are not among them."
+  (agent-repl-roster-selection-recency-order (agent-repl--roster-open-names)))
+
+(defun agent-repl--recent-workspace-and-thread-names ()
+  "Return open workspace AND chat thread names, most recently selected first.
+`agent-repl--roster-recent-names' with the open threads
+\(`agent-repl--open-thread-names') among the candidates, ordered by the
+same selection-recency order.  A thread's activation feeds this session's
+history as a workspace's does, so a thread looked at last leads.  A thread
+carries no durable last-selected instant, so one this session never
+selected follows every workspace that has one."
+  (agent-repl-roster-selection-recency-order
+   (append (agent-repl--roster-open-names) (agent-repl--open-thread-names))))
 
 (defun agent-repl-open-most-recent-workspace ()
   "Switch to the most recently selected workspace not yet visited this cycle.
@@ -1208,23 +1232,26 @@ The target every recency jump logs under (`agent-repl--gesture-log-ws')."
   (agent-repl--gesture-log-ws shown "jump"))
 
 (defun agent-repl-switch-to-previous-workspace ()
-  "Switch to the workspace selected before the one shown.
+  "Switch to the workspace OR chat thread selected before the one shown.
 HOWEVER it was selected: the order is the ONE selection-recency order
-\(`agent-repl--roster-recent-names'), which every perspective activation
-feeds, so a tab click, a numeral, a picker or a close's landing all count.
-The switch itself is an activation, so pressing again comes back: the
-command toggles between the two most recent workspaces.
+over open workspaces and threads alike
+\(`agent-repl--recent-workspace-and-thread-names'), which every
+perspective activation feeds, so a tab click, a numeral, a picker, a
+thread command or a close's landing all count.  The switch itself is an
+activation, so pressing again comes back: the command toggles between the
+two most recent, a thread being one of them when it was looked at last.
+The selection-history walk (`agent-repl-switch-older') stays on the tabs.
 
-No other open workspace is a reported, logged no-op.  The target is
-REQUESTED of the daemon, never switched to here."
+No other open workspace or thread is a reported, logged no-op.  The
+target is REQUESTED of the daemon, never switched to here."
   (interactive)
   (let* ((shown (agent-repl--ws-current-name))
          (log-ws (agent-repl--jump-log-ws shown))
-         (target (car (remove shown (agent-repl--roster-recent-names)))))
+         (target (car (remove shown (agent-repl--recent-workspace-and-thread-names)))))
     (if (null target)
         (progn
           (agent-repl--info log-ws "elisp.commands.previous-none from=%s" shown)
-          (message "[agent-repl] No previous workspace to switch to"))
+          (message "[agent-repl] No previous workspace or thread to switch to"))
       (agent-repl--info log-ws "elisp.commands.previous from=%s target=%s" shown target)
       (agent-repl-host-request-switch target 'previous))))
 

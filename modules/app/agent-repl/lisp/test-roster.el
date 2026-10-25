@@ -3836,6 +3836,28 @@ judged as any roster is."
     (should (member "chat/why" agent-repl-test-roster--killed))
     (should-not (agent-repl--ws-by-ref-id "t1"))))
 
+(ert-deftest agent-repl-test-roster-thread-row-ws-names-the-opened-workspace ()
+  "A thread row resolves, by its ref id, to the workspace Emacs opened for it."
+  (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id)
+             (lambda (id) (and (equal id "t1") "chat/why"))))
+    (should (equal (agent-repl-roster-thread-row-ws '(:thread (:id "t1"))) "chat/why"))))
+
+(ert-deftest agent-repl-test-roster-thread-row-ws-is-nil-before-the-workspace-opens ()
+  "A thread whose workspace is not open yet resolves to nil."
+  (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) #'ignore))
+    (should-not (agent-repl-roster-thread-row-ws '(:thread (:id "t1"))))))
+
+(ert-deftest agent-repl-test-roster-thread-row-ws-is-every-row-lookup ()
+  "Every thread-row-to-workspace lookup goes through `agent-repl-roster-thread-row-ws'."
+  (let ((rows nil))
+    (cl-letf (((symbol-function 'agent-repl-roster-thread-row-ws)
+               (lambda (row) (push row rows) "chat/t"))
+              ((symbol-function 'agent-repl-roster-threads) (lambda (&optional _) '((:name "t"))))
+              ((symbol-function 'agent-repl-host-request-switch) #'ignore))
+      (agent-repl--open-thread-names)
+      (agent-repl-threads--open '(:name "t") 'thread-picker)
+      (should (equal rows '((:name "t") (:name "t")))))))
+
 (ert-deftest agent-repl-test-roster-threads-read-the-last-roster ()
   "The thread rows are the accepted roster's, newest first."
   (let ((agent-repl-roster-view (agent-repl-test-roster--roster :threads '(("t2" . "b") ("t1" . "a")))))

@@ -143,7 +143,7 @@ the module."
        :desc "Show a hidden workspace and switch to it" "H" #'agent-repl-show-hidden-workspace
        :desc "Finish current workspace (deploys, closes once deployed)" "M" #'agent-repl-finish-workspace
        :desc "Open most recent workspace" "R" #'agent-repl-open-most-recent-workspace
-       :desc "Switch to the previously selected workspace" "TAB" #'agent-repl-switch-to-previous-workspace
+       :desc "Switch to the previously selected workspace or thread" "TAB" #'agent-repl-switch-to-previous-workspace
        :desc "Switch to the workspace that most recently finished" "g" #'agent-repl-switch-to-last-finished-workspace
        :desc "Swap workspace with tab (digit, 0 = 10)" "p" #'agent-repl-workspace-swap
        :desc "Move workspace onto tab (digit, 0 = 10)" "P" #'agent-repl-workspace-move
