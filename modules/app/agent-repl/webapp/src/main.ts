@@ -33,6 +33,10 @@
  */
 import { installGateDock } from "./feed/gate-dock.js";
 import "./styles.css";
+// The chat's serif (styles.css, `.chat-col`), bundled so every machine draws
+// the same face: the optical-size axis, upright and italic.
+import "@fontsource-variable/source-serif-4/opsz.css";
+import "@fontsource-variable/source-serif-4/opsz-italic.css";
 import { createTicker } from "./clock.js";
 import { createComposerGate, mountComposer } from "./composer/composer.js";
 import { createRowRenderers } from "./feed/renderers.js";
