@@ -764,12 +764,14 @@ export function classifyAdoptionRefusal(error: AdoptWebWorkspaceError): Adoption
     // re-points it at the successor, so the boot stops rather than fails.
     case "transferringAway":
       return { kind: "moved", address: arm.value.address };
+    // THIS PAGE IS NOT PART OF THE TRANSFER: it was not open when the handover
+    // was announced (Emacs loaded it mid-handover, re-pointing it at the
+    // successor). Nothing is wrong with it; it waits for the rendezvous the
+    // transfer's own participants complete, and the successor then answers
+    // its adoption at once. Failing here left the page dead with a boot
+    // failure in its chip (2026-10-25, ship-gns).
     case "participantNotExpected":
-      return {
-        kind: "terminal",
-        arm: arm.case,
-        detail: "this page's stream was not open when the transfer was announced",
-      };
+      return { kind: "retry", arm: arm.case };
     default: {
       const other: { case: string } = arm;
       return unreachableArm("AdoptWebWorkspaceError.cause", other.case);

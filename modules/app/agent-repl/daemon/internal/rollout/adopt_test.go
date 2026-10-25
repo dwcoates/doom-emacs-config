@@ -389,6 +389,9 @@ func TestAnUnexpectedParticipantIsRefused(t *testing.T) {
 	if !errors.Is(err, ErrParticipantNotExpected) {
 		t.Fatalf("AdoptWeb answered %v, want participant_not_expected", err)
 	}
+	if _, warned := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelWarn}); warned {
+		t.Fatalf("the ordinary answer was recorded at WARN: %+v", h.log.Records())
+	}
 }
 
 func TestACallOnAnAlreadyAdoptedWorkspaceSucceedsAtOnce(t *testing.T) {

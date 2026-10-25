@@ -933,7 +933,7 @@ describe("classifyAdoptionRefusal", () => {
       "terminal",
     ],
     ["transferringAway", { case: "transferringAway", value: { address: "a:1" } }, "moved"],
-    ["participantNotExpected", { case: "participantNotExpected", value: {} }, "terminal"],
+    ["participantNotExpected", { case: "participantNotExpected", value: {} }, "retry"],
     ["transferDeferred", { case: "transferDeferred", value: {} }, "deferred"],
   ];
   for (const [name, cause, kind] of table) {
@@ -1077,6 +1077,29 @@ describe("adoptAtBoot", () => {
     expect(calls).toBe(3);
   });
 
+  it("waits out a transfer it is not part of, then is adopted", async () => {
+    // ARRANGE
+    let calls = 0;
+    const { client } = lifecycleClient({
+      adopt: () => {
+        calls += 1;
+        return calls < 3
+          ? refusal({ case: "participantNotExpected", value: {} })
+          : create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: { page: AGENT_PAGE } } });
+      },
+    });
+    const sink = new RecordingSink();
+    const ctx = lifecycleContext(client, sink, fakeTicker());
+    // ACT
+    const promise = adoptAtBoot(ctx, { initialMs: 250, maxMs: 5000, budgetMs: 60_000 });
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(0);
+    // ASSERT
+    await expect(promise).resolves.toEqual({ outcome: "adopted", page: "agent" });
+    expect([calls, sink.reported.length]).toEqual([3, 0]);
+  });
+
   it("gives up once the budget is spent, so a boot cannot hang forever", async () => {
     // ARRANGE
     const { client } = lifecycleClient({
@@ -1098,7 +1121,6 @@ describe("adoptAtBoot", () => {
   const terminal: ReadonlyArray<readonly [string, unknown]> = [
     ["unknownWorkspace", { case: "unknownWorkspace", value: {} }],
     ["workspaceRefMismatch", { case: "workspaceRefMismatch", value: { registryDir: "/x" } }],
-    ["participantNotExpected", { case: "participantNotExpected", value: {} }],
   ];
   for (const [name, cause] of terminal) {
     it(`fails the boot on ${name}, naming the arm`, async () => {

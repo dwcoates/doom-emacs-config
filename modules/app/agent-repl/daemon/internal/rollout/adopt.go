@@ -427,7 +427,10 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 	}
 	if !expects(e) {
 		c.mu.Unlock()
-		c.log.Warn(operation, "this participant's stream was not open at announcement", fields)
+		// INFO, not WARN: a page Emacs loaded mid-handover is not part of
+		// the transfer, and it waits for the expected participants to
+		// complete the rendezvous before its adoption is answered at once.
+		c.log.Info(operation, "this participant's stream was not open at announcement; it waits for the rendezvous", fields)
 		return ErrParticipantNotExpected
 	}
 	before := dlog.Context{"host_called": e.hostCalled, "web_called": e.webCalled}
