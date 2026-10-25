@@ -3484,10 +3484,11 @@ describe("a card head's clock holds a fixed footprint", () => {
 });
 
 /**
- * THE ONE BUBBLE RULE SET (owner rulings, 2026-09-23, and 2026-10-13 for a
- * prompt's leading). Every blue and purple bubble is drawn by
+ * THE ONE BUBBLE RULE SET (owner rulings, 2026-09-23, and 2026-10-25 for a
+ * prompt's type). Every blue and purple bubble is drawn by
  * src/bubble/draw.ts and styled by the rules on `.bubble`: the role sets the
- * side and the fill, and a prompt's role also sets its lines just inside a tree line apart;
+ * side and the fill, and a prompt's role also sets its text in a metaprompt
+ * tree's face, size and leading;
  * a variant or state sets only the border, `data-cap-lines` sets the collapsed
  * limit, and one size rule serves every kind (a thinking bubble and an interim
  * response narrow only the `--bubble-font-rem` token it reads, 2026-10-14).
@@ -3513,16 +3514,45 @@ describe("the one bubble rule set", () => {
     expect(bubble).toMatch(/font-size:\s*calc\(var\(--bubble-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
   });
 
-  it("spaces a prompt's lines 25% tighter than a metaprompt tree line", () => {
+  it.each([
+    ["face", /font-family:\s*var\(--tree-font-family\)/],
+    ["size", /--bubble-font-rem:\s*var\(--tree-font-rem\)/],
+    ["leading", /--md-line-h:\s*var\(--tree-line-h\)/],
+  ] as const)("sets a prompt's %s from the metaprompt tree's token", (_label, pattern) => {
     // Arrange / Act
     const prompt = declarationsOf('.bubble[data-role="prompt"]') ?? "";
+    // Assert
+    expect(prompt).toMatch(pattern);
+  });
+
+  it.each([
+    ["face", /font-family:\s*var\(--tree-font-family\)/],
+    ["size", /font-size:\s*calc\(var\(--tree-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/],
+    ["leading", /line-height:\s*var\(--tree-line-h\)/],
+  ] as const)("sets a metaprompt tree's %s from the token a prompt reads", (_label, pattern) => {
+    // Arrange / Act
     const tree = declarationsOf(".mp-tree") ?? "";
     // Assert
-    expect([
-      /--md-line-h:\s*calc\(1 \+ \(var\(--tree-font-rem\) \* var\(--tree-line-h\) \/ var\(--bubble-font-rem\) - 1\) \* 0\.75\)/.test(prompt),
-      /font-size:\s*calc\(var\(--tree-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/.test(tree),
-      /line-height:\s*var\(--tree-line-h\)/.test(tree),
-    ]).toEqual([true, true, true]);
+    expect(tree).toMatch(pattern);
+  });
+
+  it("declares the tree's face once, on the root", () => {
+    // Arrange / Act
+    const declarations = withoutBlockComments(stylesheet).match(/--tree-font-family\s*:/g) ?? [];
+    // Assert
+    expect([declarations.length, /--tree-font-family:\s*ui-monospace, monospace;/.test(declarationsOf(":root") ?? "")]).toEqual([1, true]);
+  });
+
+  it("hands a prompt bubble the tree's face through the cascade", () => {
+    // Arrange
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.setAttribute("data-role", "prompt");
+    bubble.setAttribute("data-variant", "user");
+    // Act
+    const face = inDocument(bubble, (el) => cascadedValue(el, "font-family"));
+    // Assert
+    expect(face).toBe("var(--tree-font-family)");
   });
 
   it("lets no rule on a bubble but the prompt's set its size or leading", () => {
@@ -5450,13 +5480,14 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
   });
 
   it("declares the smaller size once, on the rule both kinds share", () => {
-    // Arrange / Act
+    // Arrange / Act: the prompt's rule narrows the token too, to the tree's
+    // size (2026-10-25), and is the one other rule that may.
     const declaring = rulesOf(stylesheet)
       .filter((rule) => /(?:^|;)\s*--bubble-font-rem\s*:/.test(rule.declarations) && rule.selectors.some((sel) => sel !== ":root"))
       .map((rule) => rule.selectors);
 
     // Assert
-    expect(declaring).toEqual([[...DIMMED_TEXT_SELECTORS]]);
+    expect(declaring).toEqual([['.bubble[data-role="prompt"]'], [...DIMMED_TEXT_SELECTORS]]);
   });
 
   it("sets an interim response's prose in bold", () => {
