@@ -274,6 +274,7 @@ type FinishWorkspaceError struct {
 	//	*FinishWorkspaceError_NoBranchCheckedOut
 	//	*FinishWorkspaceError_NoDeployConfig
 	//	*FinishWorkspaceError_DeployConfigInvalid
+	//	*FinishWorkspaceError_PlacementBehindNotInLine
 	Cause         isFinishWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -460,6 +461,15 @@ func (x *FinishWorkspaceError) GetDeployConfigInvalid() *DeployConfigInvalid {
 	return nil
 }
 
+func (x *FinishWorkspaceError) GetPlacementBehindNotInLine() *MergeQueuePlacementBehindNotInLine {
+	if x != nil {
+		if x, ok := x.Cause.(*FinishWorkspaceError_PlacementBehindNotInLine); ok {
+			return x.PlacementBehindNotInLine
+		}
+	}
+	return nil
+}
+
 type isFinishWorkspaceError_Cause interface {
 	isFinishWorkspaceError_Cause()
 }
@@ -555,6 +565,12 @@ type FinishWorkspaceError_DeployConfigInvalid struct {
 	DeployConfigInvalid *DeployConfigInvalid `protobuf:"bytes,16,opt,name=deploy_config_invalid,json=deployConfigInvalid,proto3,oneof"`
 }
 
+type FinishWorkspaceError_PlacementBehindNotInLine struct {
+	// The merge asked to go behind a merge not in its queue. Nothing was
+	// recorded.
+	PlacementBehindNotInLine *MergeQueuePlacementBehindNotInLine `protobuf:"bytes,17,opt,name=placement_behind_not_in_line,json=placementBehindNotInLine,proto3,oneof"`
+}
+
 func (*FinishWorkspaceError_UnknownWorkspace) isFinishWorkspaceError_Cause() {}
 
 func (*FinishWorkspaceError_WorkspaceRefMismatch) isFinishWorkspaceError_Cause() {}
@@ -586,6 +602,8 @@ func (*FinishWorkspaceError_NoBranchCheckedOut) isFinishWorkspaceError_Cause() {
 func (*FinishWorkspaceError_NoDeployConfig) isFinishWorkspaceError_Cause() {}
 
 func (*FinishWorkspaceError_DeployConfigInvalid) isFinishWorkspaceError_Cause() {}
+
+func (*FinishWorkspaceError_PlacementBehindNotInLine) isFinishWorkspaceError_Cause() {}
 
 // The id names no workspace the daemon holds.
 type FinishWorkspaceUnknownWorkspace struct {
@@ -1047,7 +1065,7 @@ const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.FinishWorkspaceSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.FinishWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x18\n" +
-	"\x16FinishWorkspaceSuccess\"\x88\f\n" +
+	"\x16FinishWorkspaceSuccess\"\xfc\f\n" +
 	"\x14FinishWorkspaceError\x12\\\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2-.agentrepl.v1.FinishWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12i\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v21.agentrepl.v1.FinishWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12\\\n" +
@@ -1066,7 +1084,8 @@ const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\x16requester_may_not_land\x18\r \x01(\v20.agentrepl.v1.FinishWorkspaceRequesterMayNotLandH\x00R\x13requesterMayNotLand\x12d\n" +
 	"\x15no_branch_checked_out\x18\x0e \x01(\v2/.agentrepl.v1.FinishWorkspaceNoBranchCheckedOutH\x00R\x12noBranchCheckedOut\x12M\n" +
 	"\x10no_deploy_config\x18\x0f \x01(\v2!.agentrepl.v1.DeployConfigMissingH\x00R\x0enoDeployConfig\x12W\n" +
-	"\x15deploy_config_invalid\x18\x10 \x01(\v2!.agentrepl.v1.DeployConfigInvalidH\x00R\x13deployConfigInvalidB\a\n" +
+	"\x15deploy_config_invalid\x18\x10 \x01(\v2!.agentrepl.v1.DeployConfigInvalidH\x00R\x13deployConfigInvalid\x12r\n" +
+	"\x1cplacement_behind_not_in_line\x18\x11 \x01(\v20.agentrepl.v1.MergeQueuePlacementBehindNotInLineH\x00R\x18placementBehindNotInLineB\a\n" +
 	"\x05cause\"!\n" +
 	"\x1fFinishWorkspaceUnknownWorkspace\"H\n" +
 	"#FinishWorkspaceWorkspaceRefMismatch\x12!\n" +
@@ -1122,6 +1141,7 @@ var file_agentrepl_v1_endpoint_finish_workspace_proto_goTypes = []any{
 	(*WorkspaceHasOpenChildren)(nil),                 // 21: agentrepl.v1.WorkspaceHasOpenChildren
 	(*DeployConfigMissing)(nil),                      // 22: agentrepl.v1.DeployConfigMissing
 	(*DeployConfigInvalid)(nil),                      // 23: agentrepl.v1.DeployConfigInvalid
+	(*MergeQueuePlacementBehindNotInLine)(nil),       // 24: agentrepl.v1.MergeQueuePlacementBehindNotInLine
 }
 var file_agentrepl_v1_endpoint_finish_workspace_proto_depIdxs = []int32{
 	15, // 0: agentrepl.v1.FinishWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -1146,12 +1166,13 @@ var file_agentrepl_v1_endpoint_finish_workspace_proto_depIdxs = []int32{
 	14, // 19: agentrepl.v1.FinishWorkspaceError.no_branch_checked_out:type_name -> agentrepl.v1.FinishWorkspaceNoBranchCheckedOut
 	22, // 20: agentrepl.v1.FinishWorkspaceError.no_deploy_config:type_name -> agentrepl.v1.DeployConfigMissing
 	23, // 21: agentrepl.v1.FinishWorkspaceError.deploy_config_invalid:type_name -> agentrepl.v1.DeployConfigInvalid
-	15, // 22: agentrepl.v1.FinishWorkspaceOwnerLands.owner:type_name -> workspace.v1.WorkspaceRef
-	23, // [23:23] is the sub-list for method output_type
-	23, // [23:23] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	24, // 22: agentrepl.v1.FinishWorkspaceError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
+	15, // 23: agentrepl.v1.FinishWorkspaceOwnerLands.owner:type_name -> workspace.v1.WorkspaceRef
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_finish_workspace_proto_init() }
@@ -1185,6 +1206,7 @@ func file_agentrepl_v1_endpoint_finish_workspace_proto_init() {
 		(*FinishWorkspaceError_NoBranchCheckedOut)(nil),
 		(*FinishWorkspaceError_NoDeployConfig)(nil),
 		(*FinishWorkspaceError_DeployConfigInvalid)(nil),
+		(*FinishWorkspaceError_PlacementBehindNotInLine)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

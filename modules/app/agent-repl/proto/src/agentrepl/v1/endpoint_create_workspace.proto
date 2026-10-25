@@ -458,6 +458,8 @@ message CreateWorkspaceError {
     // pending async merge's reservation. Nothing was recorded; the caller
     // retries with another name.
     CreateWorkspaceAsyncMergeNameTaken async_merge_name_taken = 31;
+    // The async merge asked to go behind a merge not in its queue.
+    MergeQueuePlacementBehindNotInLine placement_behind_not_in_line = 45;
     // The async merge's close-after workspace is not open, is in another
     // repository, or is the requester itself.
     CreateWorkspaceAsyncMergeUnknownCloseAfter async_merge_unknown_close_after = 32;

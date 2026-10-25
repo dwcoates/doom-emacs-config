@@ -117,6 +117,9 @@ message FinishWorkspaceError {
     // The repository's `.agent-repl/deploy.yaml` could not be read or does not
     // decode as repoconfig.v1.DeployConfig. Nothing was recorded.
     DeployConfigInvalid deploy_config_invalid = 16;
+    // The merge asked to go behind a merge not in its queue. Nothing was
+    // recorded.
+    MergeQueuePlacementBehindNotInLine placement_behind_not_in_line = 17;
   }
 }
 // The id names no workspace the daemon holds.

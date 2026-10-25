@@ -700,6 +700,7 @@ type MergeQueuePlacement struct {
 	//
 	//	*MergeQueuePlacement_Back
 	//	*MergeQueuePlacement_Front
+	//	*MergeQueuePlacement_Behind
 	Place         isMergeQueuePlacement_Place `protobuf_oneof:"place"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -760,6 +761,15 @@ func (x *MergeQueuePlacement) GetFront() *MergeQueuePlacementFront {
 	return nil
 }
 
+func (x *MergeQueuePlacement) GetBehind() *MergeQueuePlacementBehind {
+	if x != nil {
+		if x, ok := x.Place.(*MergeQueuePlacement_Behind); ok {
+			return x.Behind
+		}
+	}
+	return nil
+}
+
 type isMergeQueuePlacement_Place interface {
 	isMergeQueuePlacement_Place()
 }
@@ -776,9 +786,21 @@ type MergeQueuePlacement_Front struct {
 	Front *MergeQueuePlacementFront `protobuf:"bytes,2,opt,name=front,proto3,oneof"`
 }
 
+type MergeQueuePlacement_Behind struct {
+	// Directly behind a named merge in the queue, waiting or running: the
+	// merge takes that neighbor's front mark, so front merges stay ahead of
+	// ordinary ones. The named merge must stand in the queue when this one
+	// is asked for (placement_behind_not_in_line otherwise); one that has
+	// left by the time this one is put in line left its place at the head
+	// of the waiting line, which is where this one goes.
+	Behind *MergeQueuePlacementBehind `protobuf:"bytes,3,opt,name=behind,proto3,oneof"`
+}
+
 func (*MergeQueuePlacement_Back) isMergeQueuePlacement_Place() {}
 
 func (*MergeQueuePlacement_Front) isMergeQueuePlacement_Place() {}
+
+func (*MergeQueuePlacement_Behind) isMergeQueuePlacement_Place() {}
 
 // The back of the queue. No fields.
 type MergeQueuePlacementBack struct {
@@ -854,6 +876,99 @@ func (*MergeQueuePlacementFront) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{13}
 }
 
+// Directly behind a named merge.
+type MergeQueuePlacementBehind struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// REQUIRED. The merge's name as the queue lists it (merge-queue status).
+	Merge         string `protobuf:"bytes,1,opt,name=merge,proto3" json:"merge,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeQueuePlacementBehind) Reset() {
+	*x = MergeQueuePlacementBehind{}
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeQueuePlacementBehind) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeQueuePlacementBehind) ProtoMessage() {}
+
+func (x *MergeQueuePlacementBehind) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeQueuePlacementBehind.ProtoReflect.Descriptor instead.
+func (*MergeQueuePlacementBehind) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *MergeQueuePlacementBehind) GetMerge() string {
+	if x != nil {
+		return x.Merge
+	}
+	return ""
+}
+
+// A merge asked to go behind a merge that does not stand in its queue.
+// Nothing was recorded.
+type MergeQueuePlacementBehindNotInLine struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The name asked for.
+	Behind        string `protobuf:"bytes,1,opt,name=behind,proto3" json:"behind,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeQueuePlacementBehindNotInLine) Reset() {
+	*x = MergeQueuePlacementBehindNotInLine{}
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeQueuePlacementBehindNotInLine) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeQueuePlacementBehindNotInLine) ProtoMessage() {}
+
+func (x *MergeQueuePlacementBehindNotInLine) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_topology_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeQueuePlacementBehindNotInLine.ProtoReflect.Descriptor instead.
+func (*MergeQueuePlacementBehindNotInLine) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_topology_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *MergeQueuePlacementBehindNotInLine) GetBehind() string {
+	if x != nil {
+		return x.Behind
+	}
+	return ""
+}
+
 var File_agentrepl_v1_workspace_topology_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_workspace_topology_proto_rawDesc = "" +
@@ -887,13 +1002,18 @@ const file_agentrepl_v1_workspace_topology_proto_rawDesc = "" +
 	"\fowner_notice\x18\x02 \x01(\v2/.agentrepl.v1.WorkspaceTopologyChildOwnerNoticeH\x00R\vownerNotice\x88\x01\x01B\x0f\n" +
 	"\r_owner_notice\"7\n" +
 	"!WorkspaceTopologyChildOwnerNotice\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\x9b\x01\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xde\x01\n" +
 	"\x13MergeQueuePlacement\x12;\n" +
 	"\x04back\x18\x01 \x01(\v2%.agentrepl.v1.MergeQueuePlacementBackH\x00R\x04back\x12>\n" +
-	"\x05front\x18\x02 \x01(\v2&.agentrepl.v1.MergeQueuePlacementFrontH\x00R\x05frontB\a\n" +
+	"\x05front\x18\x02 \x01(\v2&.agentrepl.v1.MergeQueuePlacementFrontH\x00R\x05front\x12A\n" +
+	"\x06behind\x18\x03 \x01(\v2'.agentrepl.v1.MergeQueuePlacementBehindH\x00R\x06behindB\a\n" +
 	"\x05place\"\x19\n" +
 	"\x17MergeQueuePlacementBack\"\x1a\n" +
-	"\x18MergeQueuePlacementFrontB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x18MergeQueuePlacementFront\"1\n" +
+	"\x19MergeQueuePlacementBehind\x12\x14\n" +
+	"\x05merge\x18\x01 \x01(\tR\x05merge\"<\n" +
+	"\"MergeQueuePlacementBehindNotInLine\x12\x16\n" +
+	"\x06behind\x18\x01 \x01(\tR\x06behindB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_workspace_topology_proto_rawDescOnce sync.Once
@@ -907,7 +1027,7 @@ func file_agentrepl_v1_workspace_topology_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_workspace_topology_proto_rawDescData
 }
 
-var file_agentrepl_v1_workspace_topology_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_agentrepl_v1_workspace_topology_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_agentrepl_v1_workspace_topology_proto_goTypes = []any{
 	(*WorkspaceRequester)(nil),                 // 0: agentrepl.v1.WorkspaceRequester
 	(*WorkspaceRequesterUser)(nil),             // 1: agentrepl.v1.WorkspaceRequesterUser
@@ -923,27 +1043,30 @@ var file_agentrepl_v1_workspace_topology_proto_goTypes = []any{
 	(*MergeQueuePlacement)(nil),                // 11: agentrepl.v1.MergeQueuePlacement
 	(*MergeQueuePlacementBack)(nil),            // 12: agentrepl.v1.MergeQueuePlacementBack
 	(*MergeQueuePlacementFront)(nil),           // 13: agentrepl.v1.MergeQueuePlacementFront
-	(*v1.WorkspaceRef)(nil),                    // 14: workspace.v1.WorkspaceRef
+	(*MergeQueuePlacementBehind)(nil),          // 14: agentrepl.v1.MergeQueuePlacementBehind
+	(*MergeQueuePlacementBehindNotInLine)(nil), // 15: agentrepl.v1.MergeQueuePlacementBehindNotInLine
+	(*v1.WorkspaceRef)(nil),                    // 16: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_workspace_topology_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.WorkspaceRequester.user:type_name -> agentrepl.v1.WorkspaceRequesterUser
 	2,  // 1: agentrepl.v1.WorkspaceRequester.workspace:type_name -> agentrepl.v1.WorkspaceRequesterWorkspace
-	14, // 2: agentrepl.v1.WorkspaceRequesterWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // 2: agentrepl.v1.WorkspaceRequesterWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
 	4,  // 3: agentrepl.v1.WorkspaceContextOrigin.fresh:type_name -> agentrepl.v1.WorkspaceContextOriginFresh
 	5,  // 4: agentrepl.v1.WorkspaceContextOrigin.fork:type_name -> agentrepl.v1.WorkspaceContextOriginFork
-	14, // 5: agentrepl.v1.WorkspaceContextOriginFork.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // 5: agentrepl.v1.WorkspaceContextOriginFork.workspace:type_name -> workspace.v1.WorkspaceRef
 	7,  // 6: agentrepl.v1.WorkspaceTopology.primary:type_name -> agentrepl.v1.WorkspaceTopologyPrimary
 	9,  // 7: agentrepl.v1.WorkspaceTopology.child:type_name -> agentrepl.v1.WorkspaceTopologyChild
 	8,  // 8: agentrepl.v1.WorkspaceTopologyPrimary.from_origin:type_name -> agentrepl.v1.WorkspaceTopologyPrimaryFromOrigin
-	14, // 9: agentrepl.v1.WorkspaceTopologyChild.owner:type_name -> workspace.v1.WorkspaceRef
+	16, // 9: agentrepl.v1.WorkspaceTopologyChild.owner:type_name -> workspace.v1.WorkspaceRef
 	10, // 10: agentrepl.v1.WorkspaceTopologyChild.owner_notice:type_name -> agentrepl.v1.WorkspaceTopologyChildOwnerNotice
 	12, // 11: agentrepl.v1.MergeQueuePlacement.back:type_name -> agentrepl.v1.MergeQueuePlacementBack
 	13, // 12: agentrepl.v1.MergeQueuePlacement.front:type_name -> agentrepl.v1.MergeQueuePlacementFront
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	14, // 13: agentrepl.v1.MergeQueuePlacement.behind:type_name -> agentrepl.v1.MergeQueuePlacementBehind
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_workspace_topology_proto_init() }
@@ -968,6 +1091,7 @@ func file_agentrepl_v1_workspace_topology_proto_init() {
 	file_agentrepl_v1_workspace_topology_proto_msgTypes[11].OneofWrappers = []any{
 		(*MergeQueuePlacement_Back)(nil),
 		(*MergeQueuePlacement_Front)(nil),
+		(*MergeQueuePlacement_Behind)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -975,7 +1099,7 @@ func file_agentrepl_v1_workspace_topology_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_workspace_topology_proto_rawDesc), len(file_agentrepl_v1_workspace_topology_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

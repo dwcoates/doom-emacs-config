@@ -148,9 +148,27 @@ message MergeQueuePlacement {
     // merge, never ahead of the merge already running: for a fix that must
     // land before the work already waiting.
     MergeQueuePlacementFront front = 2;
+    // Directly behind a named merge in the queue, waiting or running: the
+    // merge takes that neighbor's front mark, so front merges stay ahead of
+    // ordinary ones. The named merge must stand in the queue when this one
+    // is asked for (placement_behind_not_in_line otherwise); one that has
+    // left by the time this one is put in line left its place at the head
+    // of the waiting line, which is where this one goes.
+    MergeQueuePlacementBehind behind = 3;
   }
 }
 // The back of the queue. No fields.
 message MergeQueuePlacementBack {}
 // The front of the queue. No fields.
 message MergeQueuePlacementFront {}
+// Directly behind a named merge.
+message MergeQueuePlacementBehind {
+  // REQUIRED. The merge's name as the queue lists it (merge-queue status).
+  string merge = 1;
+}
+// A merge asked to go behind a merge that does not stand in its queue.
+// Nothing was recorded.
+message MergeQueuePlacementBehindNotInLine {
+  // The name asked for.
+  string behind = 1;
+}

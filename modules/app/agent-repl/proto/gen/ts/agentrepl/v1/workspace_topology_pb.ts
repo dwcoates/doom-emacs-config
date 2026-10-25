@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/workspace_topology.proto.
  */
 export const file_agentrepl_v1_workspace_topology: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvd29ya3NwYWNlX3RvcG9sb2d5LnByb3RvEgxhZ2VudHJlcGwudjEikwEKEldvcmtzcGFjZVJlcXVlc3RlchI0CgR1c2VyGAEgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlclVzZXJIABI+Cgl3b3Jrc3BhY2UYAiABKAsyKS5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVxdWVzdGVyV29ya3NwYWNlSABCBwoFYXNrZXIiGAoWV29ya3NwYWNlUmVxdWVzdGVyVXNlciJMChtXb3Jrc3BhY2VSZXF1ZXN0ZXJXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKYAQoWV29ya3NwYWNlQ29udGV4dE9yaWdpbhI6CgVmcmVzaBgBIAEoCzIpLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDb250ZXh0T3JpZ2luRnJlc2hIABI4CgRmb3JrGAIgASgLMiguYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNvbnRleHRPcmlnaW5Gb3JrSABCCAoGb3JpZ2luIh0KG1dvcmtzcGFjZUNvbnRleHRPcmlnaW5GcmVzaCJLChpXb3Jrc3BhY2VDb250ZXh0T3JpZ2luRm9yaxItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIo4BChFXb3Jrc3BhY2VUb3BvbG9neRI5CgdwcmltYXJ5GAEgASgLMiYuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVRvcG9sb2d5UHJpbWFyeUgAEjUKBWNoaWxkGAIgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVRvcG9sb2d5Q2hpbGRIAEIHCgVzaGFwZSJ2ChhXb3Jrc3BhY2VUb3BvbG9neVByaW1hcnkSSgoLZnJvbV9vcmlnaW4YASABKAsyMC5hZ2VudHJlcGwudjEuV29ya3NwYWNlVG9wb2xvZ3lQcmltYXJ5RnJvbU9yaWdpbkgAiAEBQg4KDF9mcm9tX29yaWdpbiIkCiJXb3Jrc3BhY2VUb3BvbG9neVByaW1hcnlGcm9tT3JpZ2luIqABChZXb3Jrc3BhY2VUb3BvbG9neUNoaWxkEikKBW93bmVyGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhJKCgxvd25lcl9ub3RpY2UYAiABKAsyLy5hZ2VudHJlcGwudjEuV29ya3NwYWNlVG9wb2xvZ3lDaGlsZE93bmVyTm90aWNlSACIAQFCDwoNX293bmVyX25vdGljZSIxCiFXb3Jrc3BhY2VUb3BvbG9neUNoaWxkT3duZXJOb3RpY2USDAoEdGV4dBgBIAEoCSKOAQoTTWVyZ2VRdWV1ZVBsYWNlbWVudBI1CgRiYWNrGAEgASgLMiUuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnRCYWNrSAASNwoFZnJvbnQYAiABKAsyJi5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudEZyb250SABCBwoFcGxhY2UiGQoXTWVyZ2VRdWV1ZVBsYWNlbWVudEJhY2siGgoYTWVyZ2VRdWV1ZVBsYWNlbWVudEZyb250QipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvd29ya3NwYWNlX3RvcG9sb2d5LnByb3RvEgxhZ2VudHJlcGwudjEikwEKEldvcmtzcGFjZVJlcXVlc3RlchI0CgR1c2VyGAEgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlclVzZXJIABI+Cgl3b3Jrc3BhY2UYAiABKAsyKS5hZ2VudHJlcGwudjEuV29ya3NwYWNlUmVxdWVzdGVyV29ya3NwYWNlSABCBwoFYXNrZXIiGAoWV29ya3NwYWNlUmVxdWVzdGVyVXNlciJMChtXb3Jrc3BhY2VSZXF1ZXN0ZXJXb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKYAQoWV29ya3NwYWNlQ29udGV4dE9yaWdpbhI6CgVmcmVzaBgBIAEoCzIpLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDb250ZXh0T3JpZ2luRnJlc2hIABI4CgRmb3JrGAIgASgLMiguYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNvbnRleHRPcmlnaW5Gb3JrSABCCAoGb3JpZ2luIh0KG1dvcmtzcGFjZUNvbnRleHRPcmlnaW5GcmVzaCJLChpXb3Jrc3BhY2VDb250ZXh0T3JpZ2luRm9yaxItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIo4BChFXb3Jrc3BhY2VUb3BvbG9neRI5CgdwcmltYXJ5GAEgASgLMiYuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVRvcG9sb2d5UHJpbWFyeUgAEjUKBWNoaWxkGAIgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVRvcG9sb2d5Q2hpbGRIAEIHCgVzaGFwZSJ2ChhXb3Jrc3BhY2VUb3BvbG9neVByaW1hcnkSSgoLZnJvbV9vcmlnaW4YASABKAsyMC5hZ2VudHJlcGwudjEuV29ya3NwYWNlVG9wb2xvZ3lQcmltYXJ5RnJvbU9yaWdpbkgAiAEBQg4KDF9mcm9tX29yaWdpbiIkCiJXb3Jrc3BhY2VUb3BvbG9neVByaW1hcnlGcm9tT3JpZ2luIqABChZXb3Jrc3BhY2VUb3BvbG9neUNoaWxkEikKBW93bmVyGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhJKCgxvd25lcl9ub3RpY2UYAiABKAsyLy5hZ2VudHJlcGwudjEuV29ya3NwYWNlVG9wb2xvZ3lDaGlsZE93bmVyTm90aWNlSACIAQFCDwoNX293bmVyX25vdGljZSIxCiFXb3Jrc3BhY2VUb3BvbG9neUNoaWxkT3duZXJOb3RpY2USDAoEdGV4dBgBIAEoCSLJAQoTTWVyZ2VRdWV1ZVBsYWNlbWVudBI1CgRiYWNrGAEgASgLMiUuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnRCYWNrSAASNwoFZnJvbnQYAiABKAsyJi5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVBsYWNlbWVudEZyb250SAASOQoGYmVoaW5kGAMgASgLMicuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVQbGFjZW1lbnRCZWhpbmRIAEIHCgVwbGFjZSIZChdNZXJnZVF1ZXVlUGxhY2VtZW50QmFjayIaChhNZXJnZVF1ZXVlUGxhY2VtZW50RnJvbnQiKgoZTWVyZ2VRdWV1ZVBsYWNlbWVudEJlaGluZBINCgVtZXJnZRgBIAEoCSI0CiJNZXJnZVF1ZXVlUGxhY2VtZW50QmVoaW5kTm90SW5MaW5lEg4KBmJlaGluZBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * Who asked. Workspace rpcs act differently for an agent asking from inside a
@@ -369,6 +369,19 @@ export type MergeQueuePlacement = Message<"agentrepl.v1.MergeQueuePlacement"> & 
      */
     value: MergeQueuePlacementFront;
     case: "front";
+  } | {
+    /**
+     * Directly behind a named merge in the queue, waiting or running: the
+     * merge takes that neighbor's front mark, so front merges stay ahead of
+     * ordinary ones. The named merge must stand in the queue when this one
+     * is asked for (placement_behind_not_in_line otherwise); one that has
+     * left by the time this one is put in line left its place at the head
+     * of the waiting line, which is where this one goes.
+     *
+     * @generated from field: agentrepl.v1.MergeQueuePlacementBehind behind = 3;
+     */
+    value: MergeQueuePlacementBehind;
+    case: "behind";
   } | { case: undefined; value?: undefined };
 };
 
@@ -408,4 +421,47 @@ export type MergeQueuePlacementFront = Message<"agentrepl.v1.MergeQueuePlacement
  */
 export const MergeQueuePlacementFrontSchema: GenMessage<MergeQueuePlacementFront> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_workspace_topology, 13);
+
+/**
+ * Directly behind a named merge.
+ *
+ * @generated from message agentrepl.v1.MergeQueuePlacementBehind
+ */
+export type MergeQueuePlacementBehind = Message<"agentrepl.v1.MergeQueuePlacementBehind"> & {
+  /**
+   * REQUIRED. The merge's name as the queue lists it (merge-queue status).
+   *
+   * @generated from field: string merge = 1;
+   */
+  merge: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeQueuePlacementBehind.
+ * Use `create(MergeQueuePlacementBehindSchema)` to create a new message.
+ */
+export const MergeQueuePlacementBehindSchema: GenMessage<MergeQueuePlacementBehind> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_topology, 14);
+
+/**
+ * A merge asked to go behind a merge that does not stand in its queue.
+ * Nothing was recorded.
+ *
+ * @generated from message agentrepl.v1.MergeQueuePlacementBehindNotInLine
+ */
+export type MergeQueuePlacementBehindNotInLine = Message<"agentrepl.v1.MergeQueuePlacementBehindNotInLine"> & {
+  /**
+   * The name asked for.
+   *
+   * @generated from field: string behind = 1;
+   */
+  behind: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeQueuePlacementBehindNotInLine.
+ * Use `create(MergeQueuePlacementBehindNotInLineSchema)` to create a new message.
+ */
+export const MergeQueuePlacementBehindNotInLineSchema: GenMessage<MergeQueuePlacementBehindNotInLine> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_workspace_topology, 15);
 
