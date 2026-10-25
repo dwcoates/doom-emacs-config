@@ -95,16 +95,14 @@ type Deps struct {
 	// the reaper never judges a worktree a retirement is removing.
 	WorktreeLock string
 	// Deploys tells the merge queue's subscribers each deploy's end
-	// (merge.Orchestrator.ReportDeploy), with Checkout the daemon's own
-	// checkout it deployed. Every deploy ends in PayOwed, so this is the one
-	// place a deploy's end is told.
-	Deploys  DeployReporter
-	Checkout string
+	// (mergenotice.Service.DeployEnded). Every deploy ends in PayOwed, so
+	// this is the one place a deploy's end is told.
+	Deploys DeployReporter
 }
 
 // DeployReporter tells the merge queue's subscribers a deploy ended.
 type DeployReporter interface {
-	ReportDeploy(ctx context.Context, checkout string, end merge.DeployEnd)
+	DeployEnded(end merge.DeployEnd)
 }
 
 // Service is the detached-merge service. It implements merge.DetachedMerges.
@@ -274,7 +272,7 @@ func (s *Service) PayOwed(ctx context.Context, coveredOnly bool, deployErr error
 	// THE DEPLOY HAS ENDED, whatever becomes of its reports: the queue's
 	// subscribers are told once the reports are handed back, naming the
 	// landings it carries.
-	defer func() { s.deps.Deploys.ReportDeploy(ctx, s.deps.Checkout, end) }()
+	defer func() { s.deps.Deploys.DeployEnded(end) }()
 	owed, err := s.deps.DB.OwedHandBacks(ctx, coveredOnly)
 	if err != nil {
 		failedUnlessStoodDown(ctx, log, log.Error, "payment", "could not read the owed landing reports; they stay owed", dlog.Context{"covered_only": coveredOnly}, err)

@@ -180,8 +180,9 @@ export const SubscribeMergeQueueAdvancesSchema: GenMessage<SubscribeMergeQueueAd
  * daemon's own checkout ends -- whichever daemon ends it, the one that stays
  * or the successor it handed over to, and a fresh boot on a new build --
  * once its build is running, shims judged, or once it failed. The notice
- * names the reported landings its build carries. It is told on the queue of
- * the repository whose checkout the daemon deploys.
+ * names the reported landings its build carries. A deploy is the daemon's
+ * own, not one queue's, so it is told to every subscription at this level
+ * (or every_change), whatever repository it scopes.
  *
  * @generated from message agentrepl.v1.SubscribeMergeQueueDeploys
  */

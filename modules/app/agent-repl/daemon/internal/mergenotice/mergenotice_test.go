@@ -861,9 +861,9 @@ func TestHeadlineOfAPausedQueueNamesNoMerge(t *testing.T) {
 	}
 }
 
-// deployed is a deploy's end on doom's queue, which still holds one merge.
+// deployed is a deploy's end, as DeployEnded reports it: no queue's.
 func deployed(end merge.DeployEnd) merge.QueueChange {
-	return merge.QueueChange{Kind: merge.QueueChangeDeployed, Deploy: end, Queue: merge.QueueSnapshot{Repo: repoDoom, Members: []merge.QueueMember{member("ws-other", "other", false, "")}}}
+	return merge.QueueChange{Kind: merge.QueueChangeDeployed, Deploy: end}
 }
 
 func TestASubscriberToldAtTheFinerOfDeploysAndAdvances(t *testing.T) {
@@ -887,11 +887,11 @@ func TestADeploysEndIsToldInFull(t *testing.T) {
 		sentenceHas []string
 	}{
 		{name: "a deploy whose build runs", end: merge.DeployEnd{Carried: []string{"fix-land", "docs-land"}},
-			headline: "merge queue of doom: a deploy finished", sentenceHas: []string{"its build is running, every shim judged against it", "It carries the landings of `fix-land`, `docs-land`."}},
+			headline: "the daemon's deploy: a deploy finished", sentenceHas: []string{"its build is running, every shim judged against it", "It carries the landings of `fix-land`, `docs-land`."}},
 		{name: "a deploy that failed", end: merge.DeployEnd{Failure: "the build failed"},
-			headline: "merge queue of doom: a deploy failed", sentenceHas: []string{"failed (the build failed)", "the running build does not carry"}},
+			headline: "the daemon's deploy: a deploy failed", sentenceHas: []string{"failed (the build failed)", "the running build does not carry"}},
 		{name: "a fresh boot", end: merge.DeployEnd{Boot: true},
-			headline: "merge queue of doom: the daemon booted on a new build", sentenceHas: []string{"The daemon booted on a new build"}},
+			headline: "the daemon's deploy: the daemon booted on a new build", sentenceHas: []string{"The daemon booted on a new build"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -924,5 +924,52 @@ func TestADeploysSubscriberIsToldWhatItAskedFor(t *testing.T) {
 	// Assert.
 	if values["detail"] != "each merge leaving the queue and each deploy's end" {
 		t.Fatalf("detail = %q", values["detail"])
+	}
+}
+
+func TestADeploysEndReachesEverySubscriptionThatAdmitsIt(t *testing.T) {
+	// Arrange: subscriptions of every scope and level.
+	subs := []wsm.MergeQueueSubscription{
+		sub(alice, repoDoom, wsm.MergeQueueDetailDeploys),
+		sub(bob, wsm.EveryRepository, wsm.MergeQueueDetailEveryChange),
+		sub("ws-carol", repoOther, wsm.MergeQueueDetailDeploys),
+		sub("ws-dave", repoDoom, wsm.MergeQueueDetailAdvances),
+	}
+
+	// Act.
+	got := Recipients(subs, deployed(merge.DeployEnd{}))
+
+	// Assert.
+	want := []Recipient{{Subscriber: alice, Detail: wsm.MergeQueueDetailDeploys}, {Subscriber: bob, Detail: wsm.MergeQueueDetailEveryChange},
+		{Subscriber: "ws-carol", Detail: wsm.MergeQueueDetailDeploys}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Recipients = %+v, want every scope's deploys and every-change subscribers, not advances", got)
+	}
+}
+
+func TestADeploysNoticeNamesNoQueue(t *testing.T) {
+	// Act.
+	values := Values(wsm.MergeQueueDetailDeploys, []string{Sentence(deployed(merge.DeployEnd{}))}, deployed(merge.DeployEnd{}))
+
+	// Assert.
+	if !strings.Contains(values["queue"], "not one queue's") || strings.Contains(values["queue"], "The queue of") {
+		t.Fatalf("queue = %q, want no queue's line", values["queue"])
+	}
+}
+
+func TestDeployEndedIsDeliveredToItsSubscribers(t *testing.T) {
+	// Arrange.
+	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoOther, wsm.MergeQueueDetailDeploys)}})
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act: the end is reported, then the loop runs it and drains.
+	f.s.DeployEnded(merge.DeployEnd{Carried: []string{"fix-land"}})
+	cancel()
+	f.s.Run(ctx, f.prompts)
+
+	// Assert.
+	got := f.prompts.submissions()
+	if len(got) != 1 || got[0].ws != alice || !strings.Contains(got[0].text, "`fix-land`") {
+		t.Fatalf("submissions = %+v, want alice told of the deploy carrying fix-land", got)
 	}
 }

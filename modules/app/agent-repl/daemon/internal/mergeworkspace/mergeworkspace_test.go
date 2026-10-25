@@ -167,12 +167,11 @@ type fixture struct {
 
 // fakeDeploys records every deploy end told to the queue's subscribers.
 type fakeDeploys struct {
-	checkouts []string
-	ends      []merge.DeployEnd
+	ends []merge.DeployEnd
 }
 
-func (d *fakeDeploys) ReportDeploy(_ context.Context, checkout string, end merge.DeployEnd) {
-	d.checkouts, d.ends = append(d.checkouts, checkout), append(d.ends, end)
+func (d *fakeDeploys) DeployEnded(end merge.DeployEnd) {
+	d.ends = append(d.ends, end)
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -201,7 +200,6 @@ func newFixture(t *testing.T) *fixture {
 		Now:          func() time.Time { return f.now },
 		WorktreeLock: filepath.Join(t.TempDir(), "worktree-reap.lock"),
 		Deploys:      f.deploys,
-		Checkout:     "/checkout",
 	})
 	return f
 }
@@ -1595,8 +1593,8 @@ func TestPayOwedTellsTheQueueHowTheDeployEnded(t *testing.T) {
 			f.svc.PayOwed(context.Background(), tc.coveredOnly, tc.deployErr)
 
 			// Assert
-			if len(f.deploys.ends) != 1 || !reflect.DeepEqual(f.deploys.ends[0], tc.want) || f.deploys.checkouts[0] != "/checkout" {
-				t.Fatalf("told %+v of %v, want %+v of /checkout", f.deploys.ends, f.deploys.checkouts, tc.want)
+			if len(f.deploys.ends) != 1 || !reflect.DeepEqual(f.deploys.ends[0], tc.want) {
+				t.Fatalf("told %+v, want %+v", f.deploys.ends, tc.want)
 			}
 		})
 	}

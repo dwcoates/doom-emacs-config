@@ -110,6 +110,14 @@ func (s *Service) QueueChanged(change merge.QueueChange) {
 	s.loop.Report(change)
 }
 
+// DeployEnded is told each deploy's end (mergeworkspace.Service.PayOwed). A
+// DEPLOY IS THE DAEMON'S OWN, not one queue's: it is told to every
+// subscription whose detail admits it, whatever repository it scopes, with no
+// queue read for it. It appends, as QueueChanged does, and never blocks.
+func (s *Service) DeployEnded(end merge.DeployEnd) {
+	s.loop.Report(merge.QueueChange{Kind: merge.QueueChangeDeployed, Deploy: end})
+}
+
 // Run delivers every reported change, in order, through PROMPTS until ctx
 // ends, and then delivers every change still pending before it returns. The
 // daemon ends it only after its merge drain, so a merge landing inside the
@@ -149,7 +157,8 @@ type Recipient struct {
 	Detail     wsm.MergeQueueDetail
 }
 
-// Recipients answers who is told CHANGE: every subscriber holding a
+// Recipients answers who is told CHANGE (a deploy's end: every subscriber
+// whose detail admits it, whatever its scope): every subscriber holding a
 // subscription in the change's queue's scope (that repository, or every
 // repository) whose detail admits it, ONCE each, in the subscriptions' order.
 // A subscriber holding both a scoped and an unscoped subscription that admit
@@ -158,7 +167,8 @@ func Recipients(subs []wsm.MergeQueueSubscription, change merge.QueueChange) []R
 	var out []Recipient
 	at := map[ids.WorkspaceID]int{}
 	for _, sub := range subs {
-		if sub.Repo != wsm.EveryRepository && sub.Repo != change.Queue.Repo {
+		// A deploy belongs to no one queue, so every scope hears it.
+		if change.Kind != merge.QueueChangeDeployed && sub.Repo != wsm.EveryRepository && sub.Repo != change.Queue.Repo {
 			continue
 		}
 		if !Admits(sub.Detail, change) {
@@ -256,10 +266,14 @@ func Values(detail wsm.MergeQueueDetail, sentences []string, latest merge.QueueC
 	if len(sentences) == 0 {
 		panic("mergenotice: a notice was composed of no change")
 	}
+	queue := Queue(latest.Queue)
+	if latest.Kind == merge.QueueChangeDeployed {
+		queue = "A deploy is the daemon's own, not one queue's: no queue's line changed with it."
+	}
 	return map[string]string{
 		"label":  Headline(latest),
 		"change": untoldnotice.Sentences(sentences),
-		"queue":  Queue(latest.Queue),
+		"queue":  queue,
 		"detail": detailWords(detail),
 	}
 }
@@ -273,7 +287,7 @@ func Headline(change merge.QueueChange) string {
 	case merge.QueueChangeResumed:
 		return head + "resumed"
 	case merge.QueueChangeDeployed:
-		return head + deployWords(change.Deploy)
+		return "the daemon's deploy: " + deployWords(change.Deploy)
 	}
 	line := head + change.Subject.Name + " " + kindWords(change)
 	if change.Depleted {

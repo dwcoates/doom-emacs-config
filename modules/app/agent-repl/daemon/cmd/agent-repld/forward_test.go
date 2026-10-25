@@ -723,4 +723,4 @@ func TestHoldsForwarderRefusesASupersessionBeforeTheQueue(t *testing.T) {
 // discardDeploys tells nobody of a deploy's end.
 type discardDeploys struct{}
 
-func (discardDeploys) ReportDeploy(context.Context, string, merge.DeployEnd) {}
+func (discardDeploys) DeployEnded(merge.DeployEnd) {}
