@@ -304,6 +304,26 @@ func TestASecondRequestIsRefusedAsAlreadyQueued(t *testing.T) {
 	}
 }
 
+func TestADuplicateRequestIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	if err := h.request(t, ownBranch, RequestedByAgent); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Act.
+	_ = h.request(t, ownBranch, RequestedByAgent)
+
+	// Assert.
+	records := h.logs.Records()
+	if _, found := dlog.FindRecord(records, dlog.RecordQuery{Level: "info", Operation: "daemon.merge.enqueue", Message: "refused a duplicate merge request"}); !found {
+		t.Fatalf("no INFO record of the duplicate's refusal: %+v", records)
+	}
+	if _, warned := dlog.FindRecord(records, dlog.RecordQuery{Level: "warn", Operation: "daemon.merge.enqueue"}); warned {
+		t.Fatalf("the duplicate's refusal was recorded at WARN: %+v", records)
+	}
+}
+
 func TestARequestTheStoreCannotRecordIsAnError(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
