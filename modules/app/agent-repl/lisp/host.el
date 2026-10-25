@@ -1690,15 +1690,26 @@ their own walk."
              (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
             (t
              (funcall restore)
-             (if (eq new (agent-repl-link-successor))
-                 (progn
-                   (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=t"
-                                      ws detail)
-                   (run-at-time agent-repl-host-handover-retry-delay nil
-                                #'agent-repl-host--adopt-onto ws new token trigger))
+             (cond
+              ((eq new (agent-repl-link-successor))
+               (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=t"
+                                  ws detail)
+               (run-at-time agent-repl-host-handover-retry-delay nil
+                            #'agent-repl-host--adopt-onto ws new token trigger))
+              ;; THE SUCCESSOR WAS PROMOTED WHILE THIS ADOPT WAS IN FLIGHT.  The
+              ;; promotion walked only the workspaces standing on the old
+              ;; daemon, and this one stood on NEW for the call; restored onto
+              ;; the old daemon, whose connection the promotion closes, it was
+              ;; stranded there with no walk left (2026-10-25: six workspaces).
+              ;; NEW serves every workspace now, so it registers there.
+              ((eq new (agent-repl-link-primary))
+               (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil registering=t"
+                                  ws detail)
+               (agent-repl-host--reattach ws new :register "adopt-after-promotion"))
+              (t
                (agent-repl-host--put ws :reattach nil)
                (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil"
-                                  ws detail)))))))))))
+                                  ws detail))))))))))))
 
 (defun agent-repl-host--transferred (ws &optional _value)
   "Adopt WS onto the successor daemon after the old one released it.

@@ -2615,6 +2615,58 @@ would adopt onto a connection the link has let go of."
       ;; Assert
       (should (null agent-repl-test-host--timers)))))
 
+(defmacro agent-repl-test-host--with-adopt-failing-across-promotion (&rest body)
+  "Run BODY with every adopt failing after its successor is promoted to primary.
+The successor slot empties and the primary link becomes the successor's
+connection BEFORE the answer lands, which is the order a promotion makes."
+  (declare (indent 0))
+  `(let ((primary nil)
+         (agent-repl--workspaces (make-hash-table :test #'equal)))
+     (puthash "ws-1" '(:project-dir "/tmp/ws-1") agent-repl--workspaces)
+     (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+           agent-repl-test-host--adopt-answer
+           (list :failure (list :kind :timeout :message "no answer")))
+     (agent-repl-test-host--subscribe "ws-1")
+     (cl-letf (((symbol-function 'agent-repl-link-primary) (lambda () primary))
+               ((symbol-function 'agent-repl-rpc-adopt-host-workspace)
+                (lambda (_conn _request &rest keys)
+                  (setq primary agent-repl-test-host--successor
+                        agent-repl-test-host--successor nil)
+                  (agent-repl-test-host--answer agent-repl-test-host--adopt-answer
+                                                (plist-get keys :on-response)
+                                                (plist-get keys :on-failure)))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-host-adopt-failure-after-promotion-registers-on-the-promoted-daemon ()
+  "An adopt in flight across the promotion registers the workspace on the promoted daemon."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-adopt-failing-across-promotion
+      ;; Act
+      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+      ;; Assert
+      (should (equal (agent-repl-connect-connection-address
+                      (nth 1 (assoc "RegisterWorkspace" agent-repl-test-host--calls)))
+                     "127.0.0.1:9100")))))
+
+(ert-deftest agent-repl-test-host-adopt-failure-after-promotion-leaves-no-old-connection ()
+  "A workspace whose adopt failed across the promotion is not left on the old daemon."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-adopt-failing-across-promotion
+      ;; Act
+      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+      ;; Assert
+      (should (equal (agent-repl-connect-connection-address (agent-repl-host-conn "ws-1"))
+                     "127.0.0.1:9100")))))
+
+(ert-deftest agent-repl-test-host-adopt-failure-after-promotion-is-logged-at-error ()
+  "The failed adopt is still surfaced at ERROR when the workspace registers instead."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-adopt-failing-across-promotion
+      ;; Act
+      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :error "elisp.host.adopt-failed ws=ws-1")))))
+
 (ert-deftest agent-repl-test-host-adopt-transport-failure-keeps-the-old-stream ()
   "A successor that cannot be reached is not a reason to strand a workspace."
   (agent-repl-test-host--with-harness
