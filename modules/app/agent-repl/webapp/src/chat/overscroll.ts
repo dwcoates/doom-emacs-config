@@ -9,6 +9,7 @@
  * paint only (a transform), so the scroll position never leaves its bounds.
  */
 import { log } from "../log.js";
+import { WINDOW_TIMERS, type Timers } from "../timers.js";
 
 /** How long the wheel must be quiet before the pull springs back. */
 export const OVERSCROLL_RELEASE_MS = 120;
@@ -29,17 +30,12 @@ export function rubberBand(pushed: number, height: number): number {
   return (1 - 1 / ((pushed * RUBBER_BAND_C) / height + 1)) * height;
 }
 
-/** The timer a pull's release waits on (a seam for tests). */
-export interface OverscrollTimers {
-  setTimeout(fn: () => void, ms: number): number;
-  clearTimeout(id: number): void;
-}
 
 /**
  * Pull CONTENT when a wheel pushes SCROLL past the end it can reach. Answers
  * the listener's teardown.
  */
-export function installChatOverscroll(scroll: HTMLElement, content: HTMLElement, timers: OverscrollTimers = window): () => void {
+export function installChatOverscroll(scroll: HTMLElement, content: HTMLElement, timers: Timers = WINDOW_TIMERS): () => void {
   let pushed = 0;
   let release = 0;
   const draw = (): void => {

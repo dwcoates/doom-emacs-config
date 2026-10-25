@@ -27,7 +27,8 @@ import type { AppContext, DaemonContext } from "../rpc/context.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
-import { AttentionRegistry, WINDOW_TIMERS, type BlinkTimers } from "./attention.js";
+import { WINDOW_TIMERS, type Timers } from "../timers.js";
+import { AttentionRegistry } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
 import { createRowHover } from "./row-hover.js";
 import { installTransients } from "./transients.js";
@@ -80,7 +81,7 @@ export interface SidebarDeps {
    */
   storage?: Storage | null;
   /** The blink timers. Defaults to the page's own. */
-  timers?: BlinkTimers;
+  timers?: Timers;
   /**
    * Told when this page's workspace becomes the selected one
    * (`selection-edge.ts`): the feed returns to its tail. Omitted by a mount
