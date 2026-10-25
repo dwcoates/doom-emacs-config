@@ -668,6 +668,11 @@ this file's verb — so the tab's whole birth is a perspective plus the
     ;; authority on the directory, so the write happens here, unconditionally,
     ;; from the same `dir' `:dir' gets.
     (agent-repl--ws-put name :project-dir dir)
+    ;; A THREAD IS MARKED AT ITS BIRTH, before its panels open below: the
+    ;; tab bar's rule reads the mark the moment the thread's webview comes
+    ;; on screen (`agent-repl--tabbar-target-rows'), and no later write
+    ;; repins the frame.
+    (agent-repl--ws-put name :thread (and (plist-get desired :thread) t))
     (agent-repl--info name "elisp.roster.tab-open: ws=%s id=%s dir=%s"
                       name (plist-get desired :id) dir)
     (agent-repl-roster--subscribe-host name ref)

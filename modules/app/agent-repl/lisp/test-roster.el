@@ -3772,6 +3772,25 @@ judged as any roster is."
     (should-not (agent-repl-roster-thread-p "one"))
     (should-not (agent-repl-roster-thread-p nil))))
 
+(ert-deftest agent-repl-test-roster-a-thread-is-marked-before-its-panels-open ()
+  "A thread's tab is a thread when its panels open, so the tab bar reads it."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl--panels-arrivals-armed t)
+          marked)
+      (cl-letf (((symbol-function 'agent-repl--panels-open-on-arrival)
+                 (lambda (ws _id) (push (cons ws (agent-repl-roster-thread-p ws)) marked))))
+        ;; Act
+        (agent-repl-roster-reconcile
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
+          :threads '(("t1" . "why-blue")))))
+      ;; Assert
+      (should (equal (alist-get "chat/why-blue" marked nil nil #'equal) t))
+      (should (assoc "one" marked))
+      (should-not (cdr (assoc "one" marked))))))
+
 (ert-deftest agent-repl-test-roster-a-thread-gone-from-the-roster-is-torn-down ()
   "A thread the next roster no longer carries loses its workspace."
   (agent-repl-test-roster--with-editor
