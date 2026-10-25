@@ -160,7 +160,7 @@ of them once, as where the focus came to rest: the daemon's report
 `agent-repl--emacs-focused-p' itself.")
 
 (defun agent-repl--focus-changed ()
-  "Run `agent-repl-focus-settled-hook' once the change that called this has settled.
+  "Run `agent-repl-focus-settled-hook' once the calling change has settled.
 Runs from `after-focus-change-function'."
   (unless (timerp agent-repl--focus-report-timer)
     (setq agent-repl--focus-report-timer
