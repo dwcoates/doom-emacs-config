@@ -604,13 +604,29 @@ closes it."
 (with-eval-after-load 'evil
   (agent-repl-settings--fill-map agent-repl-settings-mode-map))
 
+(defun agent-repl-settings--close-when-left (window)
+  "Close the Settings page's WINDOW once another window is selected.
+Run from the page's `window-selection-change-functions', so clicking away
+closes the page as q and ESC do.  The minibuffer is not away: entering a
+key, picking a mode or answering a question reads there, and the page
+stays for the answer."
+  (let ((selected (selected-window)))
+    (unless (or (eq selected window)
+                (not (window-live-p window))
+                (minibufferp (window-buffer selected)))
+      (agent-repl--log agent-repl-settings--log-scope
+                       "elisp.settings.close-when-left: window=%S selected=%S" window selected)
+      (delete-window window))))
+
 (define-derived-mode agent-repl-settings-mode special-mode "Settings"
-  "Major mode of the Settings page, on the webapp sidebar's dark ground."
+  "Major mode of the Settings page, on the webapp sidebar's dark ground.
+Selecting any other window closes it (`agent-repl-settings--close-when-left')."
   (agent-repl--set-buffer-background (agent-repl-settings--color 'ground))
   (face-remap-add-relative 'default :foreground (agent-repl-settings--color 'text))
   (setq-local truncate-lines nil)
   (setq-local line-spacing 0.2)
-  (visual-line-mode 1))
+  (visual-line-mode 1)
+  (add-hook 'window-selection-change-functions #'agent-repl-settings--close-when-left nil t))
 
 (agent-repl-settings-apply)
 

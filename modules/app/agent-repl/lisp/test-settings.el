@@ -530,6 +530,46 @@
   (should (eq (lookup-key agent-repl-settings-mode-map (kbd "TAB")) #'agent-repl-settings-toggle-section))
   (should (eq (lookup-key agent-repl-settings-mode-map (kbd "g")) #'agent-repl-settings-refresh)))
 
+(ert-deftest agent-repl-test-settings-mode-closes-when-left ()
+  "The page's mode watches its window's selection, to close when it is left."
+  (with-temp-buffer
+    (agent-repl-settings-mode)
+    (should (memq #'agent-repl-settings--close-when-left window-selection-change-functions))))
+
+(defmacro agent-repl-test-settings--leaving (selected-buffer &rest body)
+  "Run BODY with another live window selected, showing SELECTED-BUFFER.
+`delete-window' is recorded into `deleted' rather than performed."
+  (declare (indent 1))
+  `(let ((deleted nil)
+         (buffer ,selected-buffer))
+     (cl-letf (((symbol-function 'delete-window) (lambda (w) (push w deleted)))
+               ((symbol-function 'window-live-p) (lambda (_w) t))
+               ((symbol-function 'window-buffer) (lambda (_w) buffer)))
+       ,@body)))
+
+(ert-deftest agent-repl-test-settings-close-when-left-closes-on-another-window ()
+  "Selecting another window closes the page's window, and logs it."
+  (let (logged)
+    (with-temp-buffer
+      (agent-repl-test-settings--leaving (current-buffer)
+        (cl-letf (((symbol-function 'agent-repl--log) (agent-repl-test--record-into logged)))
+          (agent-repl-settings--close-when-left 'settings-window))
+        (should (equal deleted '(settings-window)))))
+    (should (string-match-p "elisp.settings.close-when-left: window=settings-window" (car logged)))))
+
+(ert-deftest agent-repl-test-settings-close-when-left-stays-for-the-minibuffer ()
+  "Selecting the minibuffer, to answer the page, keeps it open."
+  (agent-repl-test-settings--leaving (window-buffer (minibuffer-window))
+    (agent-repl-settings--close-when-left 'settings-window)
+    (should-not deleted)))
+
+(ert-deftest agent-repl-test-settings-close-when-left-stays-while-selected ()
+  "The page's own window being selected keeps it open."
+  (let (deleted)
+    (cl-letf (((symbol-function 'delete-window) (lambda (w) (push w deleted))))
+      (agent-repl-settings--close-when-left (selected-window)))
+    (should-not deleted)))
+
 (ert-deftest agent-repl-test-settings-mode-map-closes-on-q-and-escape ()
   "q and ESC close the Settings popup."
   (should (eq (lookup-key agent-repl-settings-mode-map (kbd "q")) #'agent-repl-popup-quit))
