@@ -2740,6 +2740,15 @@ html[data-page-unshown] *::after {
 .bubble-body > :last-child,
 .bubble-body > [data-markdown]:last-child > :last-child { margin-bottom: 0; }
 .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 0.6em 0 0.3em; line-height: 1.25; }
+/* A LEVEL-2 SECTION AFTER ANOTHER IS DIVIDED FROM IT (owner request,
+   2026-10-25): a short rule a shade darker than whatever ground the response
+   sits on, centered over the middle 60% of the response, above every `##`
+   that has an earlier `##` sibling. The first section gets none. */
+.md > h2 ~ h2 { position: relative; margin-top: 1.1em; padding-top: 0.8em; }
+.md > h2 ~ h2::before {
+  content: ""; position: absolute; top: 0; left: 20%; right: 20%; height: 1px;
+  background: color-mix(in srgb, black 30%, transparent); pointer-events: none;
+}
 .md h1 { font-size: calc(1.3rem * var(--feed-text-scale)); } .md h2 { font-size: calc(1.15rem * var(--feed-text-scale)); } .md h3 { font-size: calc(1.05rem * var(--feed-text-scale)); }
 .md p { margin: 0.4em 0; }
 .md ul, .md ol { margin: 0.4em 0; padding-left: 1.4em; }
