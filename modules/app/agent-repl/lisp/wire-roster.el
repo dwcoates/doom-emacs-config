@@ -1156,14 +1156,50 @@ open row in no subsection, or `:subsection'.  It is never unset."
                    '((row :row agent-repl-wire-decode-roster-open-row)
                      (subsection :subsection agent-repl-wire-decode-roster-subsection)))))))
 
+(defun agent-repl-wire-decode-roster-merge-queue-row (value)
+  "Decode VALUE as `RosterMergeQueueRow', a plist `(:row ROW)'.
+One merge in line, drawn as the workspace it runs in.  It nests nothing."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueRow" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueRow" object '(row))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueRow"
+     (list :row (agent-repl-wire--decode-message
+                 "RosterMergeQueueRow" 'row object #'agent-repl-wire-decode-roster-row)))))
+
+(defun agent-repl-wire-decode-roster-repo-merge-queue (value)
+  "Decode VALUE as `RosterRepoMergeQueue', a plist `(:rows QUEUE-ROWS)'.
+The repository's merges in line, front first, which the webview lists in
+the section's place while the open section shows the merge queues.  Emacs
+draws nothing from it, but the codec refuses unknown fields, so it is
+decoded and validated whole."
+  (agent-repl-wire--decode-row-list "RosterRepoMergeQueue" value
+                                    #'agent-repl-wire-decode-roster-merge-queue-row))
+
+(defun agent-repl-wire-decode-roster-repo-shows-workspaces (value)
+  "Decode VALUE as the empty message `RosterRepoShowsWorkspaces'."
+  (agent-repl-wire--decode-empty "RosterRepoShowsWorkspaces" value))
+
+(defun agent-repl-wire-decode-roster-repo-section-shows (object)
+  "Decode `RosterRepoSection''s `shows' oneof from OBJECT.
+THE ARM IS WHAT THE SIDEBAR DRAWS AS THE SECTION'S BODY: `:workspaces',
+its entries, or `:merge-queue', its queue.  The tab bar walks the entries
+under either arm.  It is never unset."
+  (agent-repl-wire--decode-oneof
+   "RosterRepoSection" 'shows object
+   '((workspaces :workspaces agent-repl-wire-decode-roster-repo-shows-workspaces)
+     (mergeQueue :merge-queue agent-repl-wire-decode-roster-repo-merge-queue))))
+
 (defun agent-repl-wire-decode-roster-repo-section (value)
   "Decode VALUE as `RosterRepoSection'.
-A plist `(:key :header :fold :divergence :entries)'.  ENTRIES is the
+A plist `(:key :header :fold :divergence :entries :shows)'.  ENTRIES is the
 section's body in drawn order: its rows in no subsection and its
-subsections, interleaved (`agent-repl-wire-decode-roster-repo-entry')."
+subsections, interleaved (`agent-repl-wire-decode-roster-repo-entry').
+SHOWS is what the sidebar draws in their place
+\(`agent-repl-wire-decode-roster-repo-section-shows')."
   (let ((object (agent-repl-wire--object "RosterRepoSection" value)))
     (agent-repl-wire--check-keys "RosterRepoSection" object
-                                 '(key header expanded collapsed divergence entries))
+                                 '(key header expanded collapsed divergence entries
+                                       workspaces mergeQueue))
     (agent-repl-wire--decoded
      "RosterRepoSection"
      (list :key (agent-repl-wire--decode-message
@@ -1178,7 +1214,8 @@ subsections, interleaved (`agent-repl-wire-decode-roster-repo-entry')."
                         #'agent-repl-wire-decode-roster-repo-divergence)
            :entries (agent-repl-wire--decode-repeated
                      "RosterRepoSection" 'entries object
-                     #'agent-repl-wire-decode-roster-repo-entry)))))
+                     #'agent-repl-wire-decode-roster-repo-entry)
+           :shows (agent-repl-wire-decode-roster-repo-section-shows object)))))
 
 (defun agent-repl-wire-decode-roster-merged-section-header (value)
   "Decode `RosterMergedSection''s `header' field VALUE."
@@ -1328,13 +1365,23 @@ the wire is an unknown field."
   "Decode VALUE as the empty message `RosterOpenSectionCollapsed'."
   (agent-repl-wire--decode-empty "RosterOpenSectionCollapsed" value))
 
+(defun agent-repl-wire-decode-roster-open-section-shows-workspaces (value)
+  "Decode VALUE as the empty message `RosterOpenSectionShowsWorkspaces'."
+  (agent-repl-wire--decode-empty "RosterOpenSectionShowsWorkspaces" value))
+
+(defun agent-repl-wire-decode-roster-open-section-shows-merge-queues (value)
+  "Decode VALUE as the empty message `RosterOpenSectionShowsMergeQueues'."
+  (agent-repl-wire--decode-empty "RosterOpenSectionShowsMergeQueues" value))
+
 (defun agent-repl-wire-decode-roster-open-section (value)
-  "Decode VALUE as `RosterOpenSection', a plist `(:label :fold)'.
+  "Decode VALUE as `RosterOpenSection', a plist `(:label :fold :shows)'.
 The heading over the repository sections; its fold folds sidebar rows
-only, so the tab bar reads nothing off it.  It is decoded because the
-codec refuses unknown fields."
+only, and what its sections show (their workspaces or their merge queues)
+changes the sidebar only, so the tab bar reads nothing off it.  It is
+decoded because the codec refuses unknown fields."
   (let ((object (agent-repl-wire--object "RosterOpenSection" value)))
-    (agent-repl-wire--check-keys "RosterOpenSection" object '(label expanded collapsed))
+    (agent-repl-wire--check-keys "RosterOpenSection" object
+                                 '(label expanded collapsed workspaces mergeQueues))
     (agent-repl-wire--decoded
      "RosterOpenSection"
      (list :label (agent-repl-wire--decode-message
@@ -1343,7 +1390,11 @@ codec refuses unknown fields."
            :fold (agent-repl-wire--decode-oneof
                   "RosterOpenSection" 'fold object
                   '((expanded :expanded agent-repl-wire-decode-roster-open-section-expanded)
-                    (collapsed :collapsed agent-repl-wire-decode-roster-open-section-collapsed)))))))
+                    (collapsed :collapsed agent-repl-wire-decode-roster-open-section-collapsed)))
+           :shows (agent-repl-wire--decode-oneof
+                   "RosterOpenSection" 'shows object
+                   '((workspaces :workspaces agent-repl-wire-decode-roster-open-section-shows-workspaces)
+                     (mergeQueues :merge-queues agent-repl-wire-decode-roster-open-section-shows-merge-queues)))))))
 
 ;;;; ---- The views and the roster ----
 
