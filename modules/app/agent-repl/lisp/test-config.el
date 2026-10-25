@@ -266,9 +266,7 @@ loaded after this one silently reached the real `git' / `gh' / daemon."
 (defmacro agent-repl-config-test--with-root (var &rest body)
   "Bind VAR to a fresh temp module root for BODY, deleted afterwards."
   (declare (indent 1))
-  `(let ((,var (file-name-as-directory (make-temp-file "agent-repl-config-root" t))))
-     (unwind-protect (progn ,@body)
-       (delete-directory ,var t))))
+  `(agent-repl-test--with-temp-dir ,var "agent-repl-config-root" ,@body))
 
 (ert-deftest agent-repl-config-test-file-sha256-hashes-the-bytes ()
   "A source's digest is the SHA-256 of its bytes on disk, non-ASCII included."

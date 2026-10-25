@@ -51,10 +51,9 @@
 (defmacro agent-repl-test-spell--with-cache (var &rest body)
   "Run BODY with a fresh `XDG_CACHE_HOME' bound to VAR, removed afterwards."
   (declare (indent 1))
-  `(let* ((,var (make-temp-file "agent-repl-test-spell-cache-" t))
-          (process-environment (cons (concat "XDG_CACHE_HOME=" ,var) process-environment)))
-     (unwind-protect (progn ,@body)
-       (delete-directory ,var t))))
+  `(agent-repl-test--with-temp-dir ,var "agent-repl-test-spell-cache-"
+     (let ((process-environment (cons (concat "XDG_CACHE_HOME=" ,var) process-environment)))
+       ,@body)))
 
 (defun agent-repl-test-spell--manifest (files)
   "Write a manifest whose `spell-dictionary' entry installs FILES; return its path.

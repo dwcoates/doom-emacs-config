@@ -605,6 +605,54 @@ A site that hand-rolls `delete-process' on a subprocess orphans its children."
       (should-not hand-rolled)
       (should (= helper 3)))))
 
+(ert-deftest agent-repl-test-helpers-with-temp-dir-binds-a-fresh-directory-name ()
+  "The variable names an existing, empty directory, as a directory name."
+  (agent-repl-test--with-temp-dir dir "agent-repl-temp-dir-test-"
+    ;; Assert
+    (should (file-directory-p dir))
+    (should (directory-name-p dir))
+    (should (string-prefix-p "agent-repl-temp-dir-test-"
+                             (file-name-nondirectory (directory-file-name dir))))
+    (should-not (directory-files dir nil directory-files-no-dot-files-regexp))))
+
+(ert-deftest agent-repl-test-helpers-with-temp-dir-deletes-it-with-its-contents ()
+  "The directory and everything written into it are gone after the body."
+  (let (seen)
+    ;; Act
+    (agent-repl-test--with-temp-dir dir "agent-repl-temp-dir-test-"
+      (setq seen dir)
+      (make-directory (expand-file-name "a/b" dir) t)
+      (with-temp-file (expand-file-name "a/b/f.txt" dir) (insert "x")))
+    ;; Assert
+    (should-not (file-exists-p seen))))
+
+(ert-deftest agent-repl-test-helpers-with-temp-dir-deletes-it-when-the-body-signals ()
+  "A body that signals still leaves no directory behind."
+  (let (seen)
+    ;; Act
+    (should-error
+     (agent-repl-test--with-temp-dir dir "agent-repl-temp-dir-test-"
+       (setq seen dir)
+       (error "Boom")))
+    ;; Assert
+    (should-not (file-exists-p seen))))
+
+(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-a-temp-dir-fixture ()
+  "Every temporary-directory fixture goes through `agent-repl-test--with-temp-dir'.
+A hand-rolled one is a macro deleting its own bound directory, the
+signature this looks for."
+  ;; Arrange
+  (let ((offenders nil))
+    (dolist (file (directory-files agent-repl-test--module-dir t "\\`test-.*\\.el\\'"))
+      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          ;; Act
+          (when (re-search-forward "(delete-directory ,[^ ]+ t)" nil t)
+            (push (file-name-nondirectory file) offenders)))))
+    ;; Assert
+    (should-not offenders)))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here

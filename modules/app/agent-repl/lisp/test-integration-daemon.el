@@ -75,10 +75,9 @@ address the instant it binds, so the poll runs at 20ms here: the
 timeouts the scenarios below set can then be sized by what they are
 actually asserting rather than by the tick that has to catch them."
   (declare (indent 1) (debug (symbolp body)))
-  `(let ((,dir (file-name-as-directory (make-temp-file "agent-repl-itest-boot-" t)))
-         (agent-repl-daemon-boot-poll-interval-seconds 0.02))
-     (unwind-protect (progn ,@body)
-       (ignore-errors (delete-directory ,dir t)))))
+  `(agent-repl-test--with-temp-dir ,dir "agent-repl-itest-boot-"
+     (let ((agent-repl-daemon-boot-poll-interval-seconds 0.02))
+       ,@body)))
 
 (defun agent-repl-itest-daemon--record-shell (command path)
   "Return shell that runs COMMAND and lands its stdout at PATH ATOMICALLY.

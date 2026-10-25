@@ -51,9 +51,7 @@
 (defmacro agent-repl-test-eb--with-root (var &rest body)
   "Bind VAR to a fresh temp module root for BODY, deleted afterwards."
   (declare (indent 1))
-  `(let ((,var (file-name-as-directory (make-temp-file "agent-repl-eb-root" t))))
-     (unwind-protect (progn ,@body)
-       (delete-directory ,var t))))
+  `(agent-repl-test--with-temp-dir ,var "agent-repl-eb-root" ,@body))
 
 (defun agent-repl-test-eb--write-root (root modules &optional absent)
   "Write a module root at ROOT: config.el naming MODULES, and their sources.

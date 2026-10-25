@@ -51,9 +51,7 @@ system does."
 (defmacro agent-repl-test-popup--with-tree (var &rest body)
   "Bind VAR to a fresh temp directory for BODY and delete it afterwards."
   (declare (indent 1))
-  `(let ((,var (make-temp-file "agent-repl-popup-" t)))
-     (unwind-protect (progn ,@body)
-       (delete-directory ,var t))))
+  `(agent-repl-test--with-temp-dir ,var "agent-repl-popup-" ,@body))
 
 (defun agent-repl-test-popup--seed (dir name content)
   "Write CONTENT into NAME under DIR and return the path."
