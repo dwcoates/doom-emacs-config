@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -64,6 +66,42 @@ func TestCreateThreadMakesARegisteredThreadWithItsSessionUp(t *testing.T) {
 	}
 	if len(f.fleet.started) != 1 || f.fleet.started[0] != record.ID {
 		t.Fatalf("started = %v, want the thread's session", f.fleet.started)
+	}
+}
+
+func TestCreateThreadAdmitsTheThreadAsEveryWorkspaceIs(t *testing.T) {
+	// Arrange
+	f, _ := newThreadFixture(t)
+
+	// Act
+	record, err := f.verbs.CreateThread(context.Background(), "why is the sky blue?")
+
+	// Assert: bound, primed and claimed, as a registration admits a workspace.
+	if err != nil {
+		t.Fatalf("CreateThread: %v", err)
+	}
+	if f.footer.dirs[record.ID] != record.Dir {
+		t.Fatalf("footer dirs = %v, want the thread's directory bound", f.footer.dirs)
+	}
+	if !slices.Contains(f.footer.primed, record.ID) {
+		t.Fatalf("primed = %v, want the thread's footer primed", f.footer.primed)
+	}
+}
+
+func TestEveryRegistrationAdmitsThroughAdmit(t *testing.T) {
+	// Arrange / Act: the one admission, and every site that admits a row.
+	sites := 0
+	for _, file := range []string{"register.go", "thread.go"} {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sites += strings.Count(string(src), "v.admit(ctx, log, record, ")
+	}
+
+	// Assert
+	if sites != 2 {
+		t.Fatalf("admit is called at %d sites, want registerRow's and CreateThread's", sites)
 	}
 }
 

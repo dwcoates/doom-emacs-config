@@ -98,6 +98,11 @@ func (v *verbs) CreateThread(ctx context.Context, question string) (wsm.Workspac
 		return wsm.Workspace{}, fmt.Errorf("create thread %q: resolve log sink: %w", name, err)
 	}
 	log = log.With(dlog.Context{"workspace": string(record.ID)})
+	// A THREAD IS ADMITTED AS EVERY WORKSPACE IS (admit): its directory bound
+	// on the resolvers, its naming published, its serving claimed.
+	if err := v.admit(ctx, log, record, true); err != nil {
+		return wsm.Workspace{}, fmt.Errorf("create thread %q: %w", name, err)
+	}
 
 	// THE SPAWN FACTS, with the host identity minted with the row, exactly as
 	// Create records them (create.go).
