@@ -174,20 +174,8 @@ const sessionSelectColumns = `workspace_id, host_session_id, vendor_session_id, 
 func (s *store) Sessions(ctx context.Context) ([]Session, error) {
 	var out []Session
 	err := s.read(ctx, "daemon.wsm.sessions", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db().QueryContext(ctx, `SELECT `+sessionSelectColumns+` FROM sessions ORDER BY workspace_id`)
+		loaded, err := listRows(ctx, s.db(), `SELECT `+sessionSelectColumns+` FROM sessions ORDER BY workspace_id`, scanSession)
 		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		var loaded []Session
-		for rows.Next() {
-			sess, err := scanSession(rows)
-			if err != nil {
-				return err
-			}
-			loaded = append(loaded, sess)
-		}
-		if err := rows.Err(); err != nil {
 			return err
 		}
 		out = loaded
