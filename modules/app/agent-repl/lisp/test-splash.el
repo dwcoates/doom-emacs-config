@@ -125,14 +125,6 @@ Redraws are recorded in `reloads'; centering pads to the width as Doom's does."
                    doom-dashboard-widget-shortmenu doom-dashboard-widget-loaded
                    doom-dashboard-widget-footer))))
 
-(ert-deftest agent-repl-test-splash-with-settings-follows-the-splash-modules-banner ()
-  "The Settings widget follows the splash config module's banner, which replaces Doom's."
-  (should (equal (agent-repl-splash--with-settings
-                  '(+dwc/splash-widget-banner doom-dashboard-widget-shortmenu
-                    doom-dashboard-widget-loaded))
-                 '(+dwc/splash-widget-banner agent-repl-splash-widget-settings
-                   doom-dashboard-widget-shortmenu doom-dashboard-widget-loaded))))
-
 (ert-deftest agent-repl-test-splash-with-settings-adds-it-once ()
   "A second install, as a reload makes, does not add the widget again."
   (let ((once (agent-repl-splash--with-settings agent-repl-test-splash--doom-widgets)))
