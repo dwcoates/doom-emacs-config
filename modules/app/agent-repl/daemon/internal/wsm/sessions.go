@@ -206,9 +206,11 @@ func (s *store) Sessions(ctx context.Context) ([]Session, error) {
 // workspace, and on this store's one connection every such read queued
 // behind every other reader.
 func SessionsByWorkspace(ctx context.Context, db DB) (map[WorkspaceID]Session, error) {
+	// The read's error is answered as it is, like every read of this store's:
+	// the caller states the failure, and the cause it records is the read's.
 	all, err := db.Sessions(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("wsm: read every session: %w", err)
+		return nil, err
 	}
 	out := make(map[WorkspaceID]Session, len(all))
 	for _, session := range all {

@@ -719,8 +719,8 @@ func TestSessionsByWorkspaceSurfacesAFailedRead(t *testing.T) {
 	got, err := SessionsByWorkspace(context.Background(), db)
 
 	// Assert
-	if !errors.Is(err, cause) {
-		t.Fatalf("SessionsByWorkspace err = %v, want it to wrap %v", err, cause)
+	if err != cause {
+		t.Fatalf("SessionsByWorkspace err = %v, want the read's own %v", err, cause)
 	}
 	if got != nil {
 		t.Fatalf("SessionsByWorkspace = %+v beside a failure, want nil", got)
