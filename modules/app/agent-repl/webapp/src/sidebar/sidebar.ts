@@ -463,9 +463,10 @@ export interface RailHead {
 export function drawRailHead(search: RailSearch, switcher: AppSwitcher): RailHead {
   const head = document.createElement("div");
   head.className = "sb-head";
-  head.appendChild(search.toggle);
-
-  head.append(switcher.title, switcher.menu);
+  // THE APPS MENU IS DRAWN UNDER THE HEAD (absolutely, styles.css), so it
+  // leads the head's children and leaves the toggle, title and version
+  // adjacent, in their drawn order.
+  head.append(switcher.menu, search.toggle, switcher.title);
 
   // THE VERSION IS THE DAEMON'S (frontend.v1.WorkspaceRoster.version), drawn
   // verbatim; UNSET until the daemon has resolved one, when nothing is drawn.
