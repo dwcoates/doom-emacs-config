@@ -5072,25 +5072,45 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
 });
 
 /**
- * THE LOAD-MORE PILL'S OUTLINE (owner request, 2026-10-08): the "load previous
- * page" control is outlined in exactly the token its text wears, in both
- * themes, so the border and the words cannot drift apart.
+ * THE LOAD-MORE CONTROL IS ITS SPINNER ALONE (owner request, 2026-10-25): no
+ * pill, no label, no bar marks the load point, so the control paints no border
+ * and no background of its own, and sits centered.
  */
-describe("the load-more control's outline", () => {
-  it("keeps the control's text in the muted token", () => {
+describe("the load-more control's face", () => {
+  it("draws no border", () => {
     // Arrange / Act
     const rule = declarationsOf(".feed-load-more") ?? "";
 
     // Assert
-    expect(rule).toMatch(/(?:^|;)\s*color:\s*var\(--muted\)/);
+    expect(rule).toMatch(/(?:^|;)\s*border:\s*none/);
   });
 
-  it("borders the control in the same token as its text", () => {
+  it("draws no background", () => {
     // Arrange / Act
     const rule = declarationsOf(".feed-load-more") ?? "";
 
     // Assert
-    expect(rule).toMatch(/(?:^|;)\s*border:\s*1px solid var\(--muted\)/);
+    expect(rule).toMatch(/(?:^|;)\s*background:\s*transparent/);
+  });
+
+  it("centers the control in its feed", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".feed-load-more") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/(?:^|;)\s*align-self:\s*center/);
+  });
+
+  it("leaves no rule giving the control a border color or a background", () => {
+    // Arrange / Act
+    const painted = rulesOf(stylesheet).filter(
+      (rule) =>
+        rule.selectors.some((selector) => /^\.feed-load-more(?![-\w])/.test(selector) && !/\s/.test(selector)) &&
+        /(?:^|;)\s*(?:border-color|background(?:-color)?)\s*:(?!\s*transparent)/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(painted.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 });
 
@@ -5139,25 +5159,17 @@ describe("the arc spinner's shape", () => {
 });
 
 /**
- * THE LOAD-MORE CONTROL WHILE ITS PAGE LOADS (feed/walk-control.ts): the pill
- * gives way to a spinner in the control's own muted token, spun by the
- * thinking spinner's keyframes.
+ * THE LOAD-MORE CONTROL WHILE ITS PAGE LOADS (feed/walk-control.ts): its
+ * spinner, in the muted token, turns on the thinking spinner's keyframes, and
+ * rests otherwise.
  */
 describe("the load-more control's loading face", () => {
-  /** Every rule naming SELECTOR, joined: the base rule follows the reduced-motion block. */
+  /** Every rule naming SELECTOR, joined. */
   const everyDeclarationOf = (selector: string): string =>
     rulesOf(stylesheet)
       .filter((rule) => rule.selectors.includes(selector))
       .map((rule) => rule.declarations)
       .join(";");
-
-  it("drops the pill's outline while loading", () => {
-    // Arrange / Act
-    const rule = declarationsOf(".feed-load-more[data-loading]") ?? "";
-
-    // Assert
-    expect(rule).toMatch(/(?:^|;)\s*border-color:\s*transparent/);
-  });
 
   it("draws the spinner in the control's muted token", () => {
     // Arrange / Act
@@ -5167,21 +5179,32 @@ describe("the load-more control's loading face", () => {
     expect(rule).toMatch(/(?:^|;)\s*--arc-color:\s*var\(--muted\)/);
   });
 
-  it("spins the spinner", () => {
+  it("spins the spinner while loading", () => {
     // Arrange / Act
-    const rule = everyDeclarationOf(".feed-load-more-spinner");
+    const rule = everyDeclarationOf(".feed-load-more[data-loading] .feed-load-more-spinner");
 
     // Assert
     expect(rule).toMatch(/(?:^|;)\s*animation:\s*thinking-spin\b/);
   });
 
-  it("slows the spinner under reduced motion", () => {
+  it("rests the spinner while idle", () => {
     // Arrange / Act
-    const css = withoutBlockComments(stylesheet);
-    const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    const rule = everyDeclarationOf(".feed-load-more-spinner");
 
     // Assert
-    expect(reduced).toMatch(/\.feed-load-more-spinner\s*\{\s*animation-duration:\s*1\.4s;/);
+    expect(rule).not.toMatch(/(?:^|;)\s*animation(?:-name)?\s*:/);
+  });
+
+  it("slows the spinner under reduced motion, after the rule it slows", () => {
+    // Arrange / Act
+    const css = withoutBlockComments(stylesheet);
+    const spin = css.indexOf(".feed-load-more[data-loading] .feed-load-more-spinner {\n  animation: thinking-spin");
+    const after = css.slice(spin + 1);
+
+    // Assert
+    expect(after).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.feed-load-more\[data-loading\] \.feed-load-more-spinner\s*\{\s*animation-duration:\s*1\.4s;/,
+    );
   });
 });
 
