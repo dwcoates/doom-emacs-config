@@ -255,8 +255,25 @@ func (s *server) SelectChatText(
 	if err := s.deps.Chat.Select(ctx, subject.Record.ID, highlight); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
+	if highlight != nil {
+		s.chatTextHighlighted(subject.Log, subject.Record.ID)
+	}
 	resp.Result = &agentreplv1.SelectChatTextResponse_Success{Success: &agentreplv1.SelectChatTextSuccess{}}
 	return connect.NewResponse(resp), nil
+}
+
+// chatTextHighlighted pushes chat_text_highlighted onto the thread's host
+// stream: the reader selected words the next question is asked of, so Emacs
+// puts the keyboard in the composer in insert state. It rides the host EVENT
+// stream, never a topic, so a reconnect never focuses the composer again for
+// a selection made long before (as finalResponseClicked).
+func (s *server) chatTextHighlighted(log dlog.Logger, thread ids.WorkspaceID) {
+	log.Info("SelectChatText", "words were highlighted; asked the host to focus the composer", nil)
+	s.hostEventStream(thread).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_ChatTextHighlighted{
+			ChatTextHighlighted: &agentreplv1.HostWorkspaceChatTextHighlighted{},
+		},
+	})
 }
 
 // submitThreadQuestion is SubmitPrompt's body for a chat thread: the question

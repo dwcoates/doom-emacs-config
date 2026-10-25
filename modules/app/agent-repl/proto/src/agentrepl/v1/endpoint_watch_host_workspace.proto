@@ -101,6 +101,13 @@ message WatchHostWorkspaceResponse {
     // state: never replayed to a late subscriber; the selection itself rides
     // `selection`.
     HostWorkspaceComposeEntry compose_entry = 14;
+    // THE READER SELECTED WORDS IN A CHAT THREAD'S ANSWER (SelectChatText's
+    // `highlighted`): the next question is asked of them, so Emacs puts the
+    // keyboard in this thread's composer, in insert state, ready to type it,
+    // exactly as for `final_response_clicked`. Never sent for a cleared
+    // selection. An event, not state: never replayed to a late subscriber,
+    // because a selection belongs to the moment it was made.
+    HostWorkspaceChatTextHighlighted chat_text_highlighted = 15;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -152,6 +159,11 @@ message HostWorkspaceNotificationClicked {}
 // selection push carries what was selected, so focusing the composer in
 // insert state is the whole of Emacs's obligation.
 message HostWorkspaceFinalResponseClicked {}
+
+// The reader selected words in this chat thread's answer. Empty: the stream
+// it rides names the thread, and the daemon holds the highlight, so focusing
+// the composer in insert state is the whole of Emacs's obligation.
+message HostWorkspaceChatTextHighlighted {}
 
 // The user clicked this workspace's row in a page's rail. Empty: the stream
 // it rides names the workspace, and requesting the switch to it is the whole
