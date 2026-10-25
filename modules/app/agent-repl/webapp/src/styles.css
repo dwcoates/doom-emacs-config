@@ -126,9 +126,10 @@
   /* A HELD PROMPT'S FILL (owner request, 2026-10-25): a markedly darker blue
      than --user, so a prompt that has not reached the agent reads as the
      prompt it will become, still parked. Its code sits a step darker again,
-     as a user prompt's does under --user. */
-  --held-prompt-bg: #7ea6e8;
-  --held-prompt-code-bg: #6690d8;
+     as a user prompt's does under --user. A step darker again (owner
+     request, 2026-10-25): #7ea6e8 -> #6c97df. */
+  --held-prompt-bg: #6c97df;
+  --held-prompt-code-bg: #5583d2;
   /* --ok, the green status: render-colors.json#color_values (src/vocab.ts). */
   /* The cold gate's compact border: the success green, a touch darker
      (owner request, 2026-10-03). */
@@ -569,8 +570,8 @@
     /* The same darker step under this theme's --user blue. */
     --prompt-code-bg: #054a91;
     /* The held prompt's darker blue, and its code's, under this theme's --user. */
-    --held-prompt-bg: #033a72;
-    --held-prompt-code-bg: #022a54;
+    --held-prompt-bg: #022f5e;
+    --held-prompt-code-bg: #012142;
     /* THE DARK ACCENTS ARE THE PASTEL SET (owner ruling, 2026-10-17): each hue
        kept, drawn at one lightness with its strength capped, as
        design-dark-accent-tuner.html beside this module derives them. The six
@@ -6453,6 +6454,9 @@ bubble-body.bubble-body { display: block; }
    card's own. The badges are
    the card's headline, so `.queued-head` wraps a row of them rather than
    widening the card. */
+/* THE HELD STATUS IS ITS WORDS ALONE (owner request, 2026-10-25): no
+   outline, and no side padding, so its text starts at the strip's edge. */
+.badge.held-badge { border: none; padding-left: 0; padding-right: 0; }
 .badge.held-badge.amber { color: var(--merge-border); }
 .badge.held-badge.teal { color: var(--hibernated); }
 /* A classifier still deciding: a slow breath, which is how every other
