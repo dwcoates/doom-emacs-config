@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { codeBlockHtml } from "../src/code-block.js";
-import { inline, renderMarkdown, setInlineMarkdown } from "../src/markdown.js";
+import { inline, LEAD_CLASS, renderMarkdown, setInlineMarkdown } from "../src/markdown.js";
 
 describe("renderMarkdown blocks", () => {
   it("renders headings at their level", () => {
@@ -586,5 +586,22 @@ describe("renderMarkdown TeX", () => {
 
     // Assert
     expect(el.querySelector('a[href^="javascript"]')).toBeNull();
+  });
+});
+
+describe("renderMarkdown: a list item's lead", () => {
+  it.each([
+    ["a tight list", "- **Term**: words"],
+    ["a loose list", "- **Term**: words\n\n- other"],
+  ])("marks bold words that open the item in %s", (_name, src) => {
+    expect(renderMarkdown(src)).toContain(`<strong class="${LEAD_CLASS}">Term</strong>`);
+  });
+
+  it("leaves bold words later in the item unmarked", () => {
+    expect(renderMarkdown("- a **Term** here")).toContain("<strong>Term</strong>");
+  });
+
+  it("leaves bold words outside a list unmarked", () => {
+    expect(renderMarkdown("**Term**: words")).toContain("<strong>Term</strong>");
   });
 });
