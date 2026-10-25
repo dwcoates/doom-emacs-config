@@ -659,6 +659,9 @@ const ROLLBACK_STOP_SETTLE_MS = 10_000;
 /** How often the account's rate-limit windows are sampled. */
 const ACCOUNT_USAGE_INTERVAL_MS = 5 * 60 * 1000;
 
+/** What a message loop's read answers when the shim let its query go first. */
+const LOOP_STOPPED: unique symbol = Symbol("the shim let the query go");
+
 /**
  * A push-style bridge onto the SDK's pull-style streaming input.
  *
@@ -922,6 +925,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let releaseWorkspaceLock: LockRelease | undefined;
   let query: QueryLike | undefined;
   let abort: AbortController | undefined;
+  /**
+   * THE LIVE QUERY'S RELEASE, fired only by the shim (`letQueryGo`) and
+   * watched only by its message loop. It is not the SDK's abort controller:
+   * the SDK may abort that one itself when the vendor exits, and a loop that
+   * stopped on it left unread the vendor's last words (an opening's error
+   * result) that were already on their way.
+   */
+  let release: AbortController | undefined;
   let prompts: PromptQueue | undefined;
   /**
    * THE SEND SLOT: the one turn whose send the shim has pushed or is pushing —
@@ -3935,7 +3946,32 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     await pushAppliedEffort();
   }
 
-  function runLoop(active: QueryLike, park: LoopPark): Promise<void> {
+  /**
+   * Let the live query go: abort the SDK's controller, and fire the release
+   * its message loop stops on. Every place the shim is done with a query
+   * calls this, so the loop's end is the shim's own act.
+   */
+  function letQueryGo(): void {
+    abort?.abort();
+    release?.abort();
+    release = undefined;
+  }
+
+  /**
+   * Run the message loop of `active`, which ends when the vendor's stream
+   * does or the moment `stop` (the query's release, see `letQueryGo`) fires.
+   *
+   * THE SHIM ENDS ITS OWN READ. Every place the shim lets a query go aborts
+   * its controller and closes it, but a closed query is not a stream that
+   * ends: nothing in the SDK's declared surface promises the iterator settles
+   * after `close()`, and on 2026-10-25's deploy three stand-downs each waited
+   * out the whole budget on a loop still parked in the vendor's iterator, at
+   * ERROR. The wait on the vendor is raced against the release, so the loop
+   * ends when the shim is done with the query, whatever the iterator does.
+   * A message the vendor sends after the release is not read: the shim has let
+   * the query go, and nothing it says can settle anything.
+   */
+  function runLoop(active: QueryLike, park: LoopPark, stop: AbortSignal): Promise<void> {
     const parkAt = (at: LoopPark["at"], message: string): void => {
       park.at = at;
       park.message = message;
@@ -3946,8 +3982,44 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // the next message is timed, and a long one is recorded with how busy
       // this shim was across it (vendor-cadence.ts).
       const cadence = new VendorCadence(deps.nowMs);
+      // THE VENDOR'S WORDS ALREADY SENT ARE STILL READ. Once the shim lets
+      // the query go, each read gets one turn of the event loop to answer:
+      // a message the SDK already holds (a refusal's error result, written
+      // before the vendor exited) answers within it, and only a read that
+      // would wait on the vendor ends the loop.
+      let released = stop.aborted;
+      const stopped = new Promise<typeof LOOP_STOPPED>((resolve) => {
+        if (stop.aborted) resolve(LOOP_STOPPED);
+        stop.addEventListener(
+          "abort",
+          () => {
+            released = true;
+            resolve(LOOP_STOPPED);
+          },
+          { once: true },
+        );
+      });
+      const oneTurn = (): Promise<typeof LOOP_STOPPED> =>
+        new Promise((resolve) => setImmediate(() => resolve(LOOP_STOPPED)));
+      const messages = active[Symbol.asyncIterator]();
       try {
-        for await (const message of active) {
+        for (;;) {
+          // THE RACES SUBSCRIBE TO THE PENDING READ, so a vendor read that
+          // rejects after the release won is a settled race's input, never an
+          // unhandled rejection. A live read is one race and nothing more, so
+          // the loop handles a message as soon after its arrival as it can.
+          const pending = messages.next();
+          let next = released ? LOOP_STOPPED : await Promise.race([pending, stopped]);
+          if (next === LOOP_STOPPED) next = await Promise.race([pending, oneTurn()]);
+          if (next === LOOP_STOPPED) {
+            LOGGER.debug(
+              { parked_ms: deps.nowMs() - park.sinceMs },
+              "the shim let the query go; its message loop reads no more of it",
+            );
+            return;
+          }
+          if (next.done === true) break;
+          const message = next.value;
           cadence.received();
           const named = messageKind(message);
           try {
@@ -4976,7 +5048,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // THE PREVIOUS VENDOR PROCESS ENDS HERE, and nothing it ran outlives it:
     // the next process states its own level from empty.
     if (previous !== undefined) endVendorProcessWork("the vendor query was replaced by a new one");
-    abort?.abort();
+    letQueryGo();
     previousPrompts?.close();
     previous?.close();
     // THE REPLACED QUERY ANSWERS NOTHING MORE, so nothing it announced can
@@ -5022,6 +5094,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     query = created;
     prompts = queue;
     abort = controller;
+    const released = new AbortController();
+    release = released;
     // A NEW QUERY RUNS NO VENDOR TURN YET: whatever the last one was midway
     // through ended with it.
     keepaliveScope.queryBound();
@@ -5031,7 +5105,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     beforeLoop?.(created);
     const park: LoopPark = { at: "vendor", message: "", sinceMs: deps.nowMs() };
     loopPark = park;
-    loop = runLoop(created, park);
+    loop = runLoop(created, park, released.signal);
     return created;
   }
 
@@ -5518,7 +5592,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         endVendorProcessWork("a failed start closed the vendor query it had opened");
         prompts?.close();
         prompts = undefined;
-        abort?.abort();
+        letQueryGo();
         abort = undefined;
         orphan.close();
         LOGGER.info({ vendor_session_id: inForce }, "closed the vendor query the failed start had opened");
@@ -7487,7 +7561,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     endTurnsForTeardown(reason);
     keepaliveScope.abandon(`the session is being torn down: ${reason}`);
     prompts?.close();
-    abort?.abort();
+    letQueryGo();
     active?.close();
     query = undefined;
     endVendorProcessWork(`the session is being torn down: ${reason}`);

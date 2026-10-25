@@ -557,6 +557,43 @@ describe("getSettings", () => {
   });
 });
 
+describe("a vendor gone at boot", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each(["start-error-result", "start-auth-error", "start-eof"])(
+    "fails its control calls under %s, as a gone process does",
+    async (lever) => {
+      // Arrange
+      vi.stubEnv("AGENT_REPL_FAKE_REFUSE", lever);
+      const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+
+      // Act + Assert
+      await expect(query.supportedModels()).rejects.toThrow(/exited at boot/);
+      query.close();
+    },
+  );
+
+  it("delivers what it wrote before the control call fails", async () => {
+    // Arrange: the refusal's error result is the stream's first message.
+    vi.stubEnv("AGENT_REPL_FAKE_REFUSE", "start-error-result");
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+    const order: string[] = [];
+
+    // Act
+    const control = query.supportedModels().catch(() => order.push("control failed"));
+    const first = query[Symbol.asyncIterator]()
+      .next()
+      .then(() => order.push("message read"));
+    await Promise.all([control, first]);
+
+    // Assert
+    expect(order).toEqual(["message read", "control failed"]);
+    query.close();
+  });
+});
+
 describe("applyFlagSettings", () => {
   afterEach(() => {
     vi.unstubAllEnvs();

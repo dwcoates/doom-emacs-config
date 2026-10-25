@@ -1680,6 +1680,8 @@ describe("the store writer's backpressure", () => {
     // Arrange. The writer reports a backlog episode that has not drained.
     const h = harness();
     await started(h);
+    // The start's own init message has passed its backpressure wait first.
+    await settledUntil(() => h.persistence.writableWaits >= 1);
     let drained: () => void = () => undefined;
     h.persistence.backlog = new Promise<void>((resolve) => {
       drained = resolve;
@@ -1701,6 +1703,8 @@ describe("the store writer's backpressure", () => {
     // Arrange.
     const h = harness();
     await started(h);
+    // The start's own init message has passed its backpressure wait first.
+    await settledUntil(() => h.persistence.writableWaits >= 1);
     let drained: () => void = () => undefined;
     h.persistence.backlog = new Promise<void>((resolve) => {
       drained = resolve;
@@ -5795,10 +5799,47 @@ describe("the teardown's waits are bounded", () => {
     );
   });
 
-  it("names where the message loop was parked when it outlives its budget after the close", async () => {
+  it("ends the message loop at the close even when the vendor's stream stays open", async () => {
     // Arrange: the loop waits on a vendor iterator the close never ends.
     const h = harness({ closeLeavesStreamOpen: true, watcherConclusionBudgetMs: 5 });
     await started(h);
+    const mark = logSinkMark();
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const records = logRecordsSince(mark);
+    expect([
+      records.some((entry) => entry.message.startsWith("the vendor message loop did not end within its budget")),
+      records.some((entry) => entry.message === "the shim let the query go; its message loop reads no more of it"),
+    ]).toEqual([false, true]);
+  });
+
+  it("still reads a message the vendor sent before the shim let the query go", async () => {
+    // Arrange: a message is already on its way when the teardown begins.
+    const h = harness({ closeLeavesStreamOpen: true, watcherConclusionBudgetMs: 5 });
+    await started(h);
+    const query = (await untilQuery(h, 0)).query;
+    const before = h.fold.seen.length;
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000c" }));
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    expect(h.fold.seen.length).toBe(before + 1);
+  });
+
+  it("names where the message loop was parked when it outlives its budget after the close", async () => {
+    // Arrange: the loop is held by the store writer's backpressure, which the
+    // close does not end.
+    const h = harness({ watcherConclusionBudgetMs: 5 });
+    await started(h);
+    h.persistence.backlog = new Promise<void>(() => undefined);
+    const query = (await untilQuery(h, 0)).query;
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000a" }));
+    await settledUntil(() => h.persistence.writableWaits >= 1);
     const mark = logSinkMark();
 
     // Act
@@ -5810,7 +5851,7 @@ describe("the teardown's waits are bounded", () => {
     );
     expect([record?.level, record?.context?.parked_at, typeof record?.context?.parked_ms]).toEqual([
       "error",
-      "vendor",
+      "backpressure",
       "number",
     ]);
   });
