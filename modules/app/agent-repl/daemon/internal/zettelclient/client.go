@@ -16,6 +16,7 @@ import (
 	"agentrepl/proto/zettel/v1/zettelv1connect"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/ids"
@@ -85,7 +86,7 @@ func (c *client) RecordExchange(ctx context.Context, thread ids.WorkspaceID, tur
 	case *zettelv1.RecordExchangeResponse_Success:
 		return result.Success.GetNode(), nil
 	case *zettelv1.RecordExchangeResponse_Failure:
-		return nil, refused(rpc, result.Failure.GetDetail(), result.Failure.GetKind())
+		return nil, refused(rpc, result.Failure)
 	default:
 		return nil, unarmed(rpc)
 	}
@@ -101,7 +102,7 @@ func (c *client) Thread(ctx context.Context, thread ids.WorkspaceID) ([]*zettelv
 	case *zettelv1.GetThreadResponse_Success:
 		return result.Success.GetNodes(), nil
 	case *zettelv1.GetThreadResponse_Failure:
-		return nil, refused(rpc, result.Failure.GetDetail(), result.Failure.GetKind())
+		return nil, refused(rpc, result.Failure)
 	default:
 		return nil, unarmed(rpc)
 	}
@@ -117,7 +118,7 @@ func (c *client) RecordSightings(ctx context.Context, nodes []*zettelv1.NodeId) 
 	case *zettelv1.RecordSightingsResponse_Success:
 		return nil
 	case *zettelv1.RecordSightingsResponse_Failure:
-		return refused(rpc, result.Failure.GetDetail(), result.Failure.GetKind())
+		return refused(rpc, result.Failure)
 	default:
 		return unarmed(rpc)
 	}
@@ -127,10 +128,22 @@ func unavailable(rpc string, err error) error {
 	return fmt.Errorf("%w: %s: %w", ErrUnavailable, rpc, err)
 }
 
-// refused names the failure arm set on kind, a oneof wrapper whose concrete
-// type is the arm (its Go name ends in the arm's camel-cased proto name).
-func refused(rpc, detail string, kind any) error {
-	return &RefusedError{RPC: rpc, Kind: armName(kind), Detail: detail}
+// failure is every zettel.v1 <Rpc>Failure: a detail and the `kind` oneof.
+type failure interface {
+	proto.Message
+	GetDetail() string
+}
+
+// refused names the arm set on FAILURE's `kind` oneof by its proto name, read
+// from the message itself, so no table can fall behind the contract; an unset
+// kind is "unset".
+func refused(rpc string, f failure) error {
+	m := f.ProtoReflect()
+	kind := "unset"
+	if arm := m.WhichOneof(m.Descriptor().Oneofs().ByName("kind")); arm != nil {
+		kind = string(arm.Name())
+	}
+	return &RefusedError{RPC: rpc, Kind: kind, Detail: f.GetDetail()}
 }
 
 // unarmed is a response with no outcome set: zettel always sets one, so this is

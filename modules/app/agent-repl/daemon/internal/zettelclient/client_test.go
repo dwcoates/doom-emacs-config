@@ -190,3 +190,26 @@ func TestThreadAnswersTheNodes(t *testing.T) {
 		t.Errorf("nodes = %v, err = %v", nodes, err)
 	}
 }
+
+func TestEveryZettelFailureHasTheShapeRefusedReads(t *testing.T) {
+	// Arrange: every message of zettel.v1 named <Rpc>Failure.
+	file := zettelv1.File_zettel_v1_service_proto
+	var failures []string
+	for i := 0; i < file.Services().Get(0).Methods().Len(); i++ {
+		out := file.Services().Get(0).Methods().Get(i).Output()
+		result := out.Oneofs().ByName("result")
+		for j := 0; result != nil && j < result.Fields().Len(); j++ {
+			if f := result.Fields().Get(j); f.Name() == "failure" {
+				failures = append(failures, string(f.Message().FullName()))
+
+				// Assert: refused reads `detail` and the `kind` oneof.
+				if f.Message().Oneofs().ByName("kind") == nil || f.Message().Fields().ByName("detail") == nil {
+					t.Errorf("%s has no `kind` oneof or no `detail`", f.Message().FullName())
+				}
+			}
+		}
+	}
+	if len(failures) != file.Services().Get(0).Methods().Len() {
+		t.Fatalf("failures = %v, want one per rpc", failures)
+	}
+}
