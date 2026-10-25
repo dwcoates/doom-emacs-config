@@ -141,7 +141,7 @@
                 (agent-repl-switch-right "Switch to the tab on the right, wrapping.")
                 (agent-repl-switch-older "Go back to the workspace viewed before this one.")
                 (agent-repl-switch-newer "Go forward to the workspace viewed after this one.")
-                (agent-repl-switch-to-previous-workspace "Switch to the workspace selected before this one.")
+                (agent-repl-switch-to-previous-workspace "Switch to the workspace or chat thread selected before this one.")
                 (agent-repl-switch-to-last-finished-workspace "Switch to the workspace that most recently finished its turn.")
                 (agent-repl-open-most-recent-workspace "Switch to the most recently selected workspace not yet visited this cycle.")
                 (agent-repl-switch-to-project "Switch to a current or recent workspace, or to a project.")

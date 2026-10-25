@@ -106,7 +106,7 @@ Findings are collected at the end, in "Audit findings".
 | `agent-repl-switch-to-project` | Switch to a current or recent workspace, or to a project. | `SPC p p` | leader | leader |
 | `agent-repl-switch-to-any-workspace` | Switch to any known workspace. | `SPC p P` | leader | leader |
 | `agent-repl-open-most-recent-workspace` | Switch to the most recently selected workspace not yet visited. | `SPC TAB R` | leader | leader |
-| `agent-repl-switch-to-previous-workspace` | Switch to the workspace selected before the one shown, however it was selected. | `SPC TAB TAB`, `` SPC TAB ` `` | leader | leader |
+| `agent-repl-switch-to-previous-workspace` | Switch to the workspace or chat thread selected before the one shown, however it was selected. | `SPC TAB TAB`, `` SPC TAB ` `` | leader | leader |
 | `agent-repl-switch-to-last-finished-workspace` | Switch to the workspace that most recently went from working to done. | `SPC TAB g` | leader | leader |
 
 ## 8. Workspace creation
