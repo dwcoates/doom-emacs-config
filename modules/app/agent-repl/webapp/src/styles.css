@@ -6485,11 +6485,14 @@ bubble-body.bubble-body { display: block; }
 /* SHORT, SLEEK CONTROLS (owner requests, 2026-10-13 and 2026-10-14): a
    small font, a tight leading and almost no vertical padding, so the row
    costs little height. The 1.15 leading makes a control about 10% shorter
-   than the 1.3 one did. Every control wears the same plain border. */
+   than the 1.3 one did. Every control wears the same plain border.
+   THE LABEL IS A BIT SMALLER THAN THE CONTROL (owner request, 2026-10-25):
+   the text is 0.68rem, and the leading is stretched by 0.75/0.68 so the line
+   box, and with it the control's height, stays the 0.75rem text's at 1.15. */
 .queued-actions ar-button {
   padding: 0.05rem 0.6rem;
-  font-size: calc(0.75rem * var(--feed-text-scale));
-  line-height: 1.15;
+  font-size: calc(0.68rem * var(--feed-text-scale));
+  line-height: calc(1.15 * 0.75 / 0.68);
   text-align: center;
   white-space: nowrap;
   border-radius: 5px;
