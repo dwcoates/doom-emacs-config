@@ -575,6 +575,7 @@ describe("retireAll", () => {
 
     // Assert
     expect([answer.outcome, answer.pages]).toEqual(["retired", 2]);
+    expect(answer.notes).toContainEqual({ level: "info", text: "retired 2 page(s) for the reload Emacs is about to make" });
     expect(document.querySelectorAll("iframe")).toHaveLength(0);
     expect(parsed(host.ids()).ids).toEqual([]);
   });
