@@ -673,6 +673,20 @@ type agentAPI struct {
 	oneShotErr   error
 	awaits       []fakeAwait
 	awaitErr     error
+	takeBacks    []fakeTakeBack
+	takeBackErr  error
+	// prompts, when set, is read at each take-back, so a test can tell
+	// whether the take-back came before the prompt was handed on.
+	prompts *fakePrompts
+}
+
+// fakeTakeBack is one TakeBackOneShot the fake verbs were asked for.
+type fakeTakeBack struct {
+	ws ids.WorkspaceID
+	by workspace.OneShotTakeBack
+	// submitsBefore is how many prompts had been handed on when it was asked
+	// for, -1 when the test wired no prompts.
+	submitsBefore int
 }
 
 // fakeOneShot is one SetOneShot the fake verbs were asked for.
@@ -704,6 +718,15 @@ func (f *fakeVerbs) SetOneShot(_ context.Context, ws ids.WorkspaceID, asker *ids
 		return f.api.directive, f.api.oneShotErr
 	}
 	return "", f.api.oneShotErr
+}
+
+func (f *fakeVerbs) TakeBackOneShot(_ context.Context, ws ids.WorkspaceID, by workspace.OneShotTakeBack) error {
+	before := -1
+	if f.api.prompts != nil {
+		before = f.api.prompts.submits
+	}
+	f.api.takeBacks = append(f.api.takeBacks, fakeTakeBack{ws: ws, by: by, submitsBefore: before})
+	return f.api.takeBackErr
 }
 
 func (f *fakeVerbs) SetCorrespondence(_ context.Context, ws ids.WorkspaceID, asker, awaited *ids.WorkspaceID) error {

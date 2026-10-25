@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompthandler"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/replyquote"
@@ -140,6 +141,14 @@ func (s *server) SubmitPrompt(
 	delivery, err := prompthandler.DeliveryOf(req.Msg.Delivery)
 	if err != nil {
 		return nil, fail(subject.Log, rpc, err)
+	}
+	// THE USER STEPPING IN TAKES A ONE-SHOT BACK, before the prompt reaches
+	// the agent: it no longer finishes unattended. An agent's prompt never
+	// does (promptorigin.UserSent).
+	if sentBy == nil && promptorigin.UserSent(req.Msg.GetOrigin()) {
+		if err := s.deps.Verbs.TakeBackOneShot(ctx, subject.Record.ID, workspace.TakenBackByUserPrompt); err != nil {
+			return nil, fail(subject.Log, rpc, err)
+		}
 	}
 	outcome, err := s.deps.Prompts.Submit(ctx, subject.Record.ID, said,
 		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), sentBy, delivery, target)
