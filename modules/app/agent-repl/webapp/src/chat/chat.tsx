@@ -22,7 +22,8 @@ import { SelectChatTextResponseSchema } from "../../../proto/gen/ts/agentrepl/v1
 import { ReportChatSightingsResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_report_chat_sightings_pb.js";
 import type { ChatView } from "../../../proto/gen/ts/frontend/v1/chat_pb.js";
 import { log } from "../log.js";
-import { landChatAtEnd } from "../scroll.js";
+import { CHAT_LEEWAY_FRACTION, chatEndTop, landChatAtEnd } from "../scroll.js";
+import { installChatOverscroll } from "./overscroll.js";
 import type { AppContext } from "../rpc/context.js";
 import { noteRefusedArm } from "../rpc/refusal.js";
 import { requireCase, requireMessage } from "../rpc/strict.js";
@@ -104,6 +105,11 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
   log.info("mounting the chat", { operation: "chat.mount" });
   const root: Root = createRoot(host);
   const thread = ctx.workspace;
+  // THE LEEWAY IS THE CHAT'S OWN BOTTOM PADDING, in `cqh` of the scroll box
+  // (#feed-scroll's size container), so the box can never scroll further
+  // than a quarter page past the last answer (scroll.ts CHAT_LEEWAY_FRACTION).
+  host.style.paddingBottom = `${CHAT_LEEWAY_FRACTION * 100}cqh`;
+  const releaseOverscroll = installChatOverscroll(deps.scroll, host);
 
   // ---- sightings ----
   const nodeOf = new Map<Element, string>();
@@ -209,21 +215,18 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
     // 2026-10-25), as a sent prompt parks the agent feed at its tail. The
     // first view is the thread's opening, not a question asked.
     const scroll = deps.scroll;
-    const atEnd = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24;
+    const atEnd = scroll.scrollTop >= chatEndTop(scroll) - 24;
     const asked = pendingQuestionOf(view);
     const sent = lastAsked !== undefined && asked !== null && asked !== lastAsked;
     lastAsked = asked;
     // A SIBLING SWITCH MOVES NOTHING (owner request, 2026-10-25): the view
-    // that swaps an exchange for its sibling keeps the scroll exactly where
-    // it was, neither following the end nor letting a shorter branch pull
-    // the page up. The column keeps the height it had (its min-height) until
-    // a view that is not a switch, so the browser has nothing to clamp.
+    // that swaps an exchange for its sibling keeps the scroll where it was,
+    // never following the end. Only a shorter branch can move it, and only
+    // as far as its own end plus the leeway: the chat never stands past that.
     const path = shownPathOf(view);
     const switched = !sent && pathSwapped(lastPath, path);
     lastPath = path;
     const top = scroll.scrollTop;
-    const height = host.offsetHeight;
-    host.style.minHeight = switched ? `${height}px` : "";
     flushSync(() => root.render(<ChatStream view={view} actions={actions} />));
     if (sent) landChatAtEnd(scroll, "promptSent");
     else if (switched) scroll.scrollTop = top;
@@ -248,6 +251,8 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
       stream.cancel();
       observer.disconnect();
       window.clearTimeout(flushTimer);
+      releaseOverscroll();
+      host.style.paddingBottom = "";
       root.unmount();
     },
   };

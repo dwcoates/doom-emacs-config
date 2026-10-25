@@ -1964,18 +1964,36 @@ function pinToNewest(content: HTMLElement): boolean {
 }
 
 /**
+ * THE CHAT'S LEEWAY (owner request, 2026-10-25): the share of the chat's
+ * visible height a reader may scroll past its last answer, so an answer near
+ * the end can stand at the middle of the screen. It is the ONLY room past the
+ * end: the chat draws it as its own bottom padding (`mountChat`), so the
+ * scroll box's extent stops there for every scroller, reader or code.
+ */
+export const CHAT_LEEWAY_FRACTION = 0.25;
+
+/**
+ * The scroll position at which BOX shows the chat's last answer at its bottom
+ * edge: its extent less the leeway, never below the top.
+ */
+export function chatEndTop(box: HTMLElement): number {
+  return Math.max(0, box.scrollHeight - box.clientHeight * (1 + CHAT_LEEWAY_FRACTION));
+}
+
+/**
  * Land a chat thread's scroll box at its end, under CAUSE: the thread was
  * switched to (`workspaceSelected`), a question was just asked in it
  * (`promptSent`), or its answer grew while the reader was at the end
- * (`chatAnswerFollowed`). The chat has no tail-follow of its own, so this is
- * its one scroll write, recorded as every caused move is.
+ * (`chatAnswerFollowed`). The end is the last answer's, never the leeway's
+ * (`chatEndTop`). The chat has no tail-follow of its own, so this is its one
+ * scroll write, recorded as every caused move is.
  */
 export function landChatAtEnd(
   box: HTMLElement,
   cause: Extract<ScrollCause, "workspaceSelected" | "promptSent" | "chatAnswerFollowed">,
 ): void {
   const from = box.scrollTop;
-  box.scrollTop = box.scrollHeight;
+  box.scrollTop = chatEndTop(box);
   log.info("the chat moved to its end", {
     operation: "scroll.chat-moved",
     context: { cause, from, to: box.scrollTop },

@@ -5,6 +5,7 @@
 // a real `ResizeObserver` to the tail owner, and the subscription being wired
 // to THAT element is half of what the footer-occlusion cases assert.
 import scrollSource from "../src/scroll.ts?raw";
+import { CHAT_LEEWAY_FRACTION, chatEndTop } from "../src/scroll.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SCROLL_CAUSES,
@@ -1628,7 +1629,7 @@ describe("no scroll write outside scroll.ts", () => {
       "scroller.scrollTop += step;",
       "region.scrollTop += delta;",
       "box.scrollTop += delta;",
-      "box.scrollTop = box.scrollHeight;",
+      "box.scrollTop = chatEndTop(box);",
     ]);
   });
 
@@ -4452,5 +4453,22 @@ describe("openAtNewest", () => {
     // Assert
     const record = await forwardedRecord(capture, "scroll.open-at-newest");
     expect(record.context).toMatchObject({ moved: true, delta: 700 });
+  });
+});
+
+describe("chatEndTop", () => {
+  const box = (scrollHeight: number, clientHeight: number): HTMLElement => {
+    const el = document.createElement("div");
+    Object.defineProperty(el, "scrollHeight", { get: () => scrollHeight });
+    Object.defineProperty(el, "clientHeight", { get: () => clientHeight });
+    return el;
+  };
+
+  it("is the extent less the box and its leeway", () => {
+    expect(chatEndTop(box(1000, 100))).toBe(1000 - 100 * (1 + CHAT_LEEWAY_FRACTION));
+  });
+
+  it("is the top for a chat shorter than its box", () => {
+    expect(chatEndTop(box(110, 100))).toBe(0);
   });
 });
