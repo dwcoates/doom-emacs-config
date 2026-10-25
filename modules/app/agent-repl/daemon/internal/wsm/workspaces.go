@@ -40,14 +40,21 @@ func normalizeDir(dir string) (string, error) {
 // FROM workspaces unaliased, so the correlated subqueries name
 // `workspaces.id`.
 //
+// THE QUEUE COLUMN IS TWO KEYED LOOKUPS, never a scan: merge_queue_by_workspace
+// finds a queue row by its workspace and workspaces_by_merge_of a workspace's
+// merge workspaces (layout 75). Spelled as one EXISTS with an IN over the
+// registry, it scanned every workspace for each queue row of each workspace,
+// and listing ~800 workspaces held the store's one connection for over a
+// second, every read (2026-10-24).
+//
 // THE LAST TURN END IS READ OFF THE TURNS THEMSELVES rather than stamped on
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
 const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, owner_lands, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, principal_link, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
-	`EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id ` +
-	`OR merge_queue.workspace_id IN (SELECT merge_ws.id FROM workspaces AS merge_ws WHERE merge_ws.merge_of = workspaces.id)), ` +
+	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
+	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
 	`(SELECT MAX(turns.closed_at) FROM turns WHERE turns.workspace_id = workspaces.id)`
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range

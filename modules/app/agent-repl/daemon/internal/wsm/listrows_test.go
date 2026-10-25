@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/sourcescan"
@@ -96,5 +97,47 @@ func TestRowDecodersListThroughListRows(t *testing.T) {
 	// Assert
 	if len(offenders) != 0 {
 		t.Fatalf("%v decode rows in a hand-rolled loop; use listRows", offenders)
+	}
+}
+
+// TestTheWorkspaceReadsLookUpTheirDerivedColumnsByKey pins the plan of the
+// select every workspace read shares: each derived column is a keyed SEARCH,
+// never a SCAN of a table inside the per-row subquery. The queue column once
+// scanned the registry per queue row per workspace, and a list of ~800 held
+// the store's one connection for over a second (2026-10-24).
+func TestTheWorkspaceReadsLookUpTheirDerivedColumnsByKey(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	rows, err := s.db().QueryContext(context.Background(), `EXPLAIN QUERY PLAN SELECT `+workspaceColumns+` FROM workspaces ORDER BY created_at, id`)
+	if err != nil {
+		t.Fatalf("EXPLAIN: %v", err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatalf("scan plan: %v", err)
+		}
+		plan = append(plan, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("plan rows: %v", err)
+	}
+
+	// Assert: the outer SCAN of workspaces is the read itself; nothing under
+	// it scans a table. The root subsection's recursive walk scans `up`, its
+	// own few rows of ancestors, which is no table.
+	scans := 0
+	for _, step := range plan {
+		if strings.HasPrefix(step, "SCAN ") && step != "SCAN up" {
+			scans++
+		}
+	}
+	if scans != 1 {
+		t.Fatalf("plan scans %d tables, want only the outer workspaces read; plan:\n%s", scans, strings.Join(plan, "\n"))
 	}
 }

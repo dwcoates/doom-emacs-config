@@ -171,7 +171,20 @@ var migrations = []migration{
 	{To: 72, Name: "account_usage_windows", Kind: MigrationAdditive, DDL: accountUsageWindowsDDL},
 	{To: 73, Name: "durable_rows_parsed_prose", Kind: MigrationAdditive, Rewrite: rewriteParsedProseRows},
 	{To: 74, Name: "merge_queue_behind", Kind: MigrationAdditive, DDL: mergeQueueBehindDDL},
+	{To: 75, Name: "merge_queue_lookup_indexes", Kind: MigrationAdditive, DDL: mergeQueueLookupIndexesDDL},
 }
+
+// mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
+// for its "in a merge queue" column: a queue row by its workspace, and a
+// workspace's merge workspaces by merge_of. Without them the column scanned
+// the whole registry for each queue row of each workspace, and listing ~800
+// workspaces held the store's one connection for over a second, every read
+// (2026-10-24's handovers). IT IS ADDITIVE: an index changes no row, and the
+// previous build's statements run on unchanged.
+const mergeQueueLookupIndexesDDL = `
+CREATE INDEX merge_queue_by_workspace ON merge_queue(workspace_id);
+CREATE INDEX workspaces_by_merge_of ON workspaces(merge_of) WHERE merge_of IS NOT NULL;
+`
 
 // mergeQueueBehindDDL records the merge a merge asked to be put in line
 // directly behind (MergeSource.Behind). IT IS ADDITIVE: the previous build's

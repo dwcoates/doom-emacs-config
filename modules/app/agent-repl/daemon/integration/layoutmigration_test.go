@@ -194,6 +194,7 @@ var layout3Undo = map[int][]string{
 	// Layout 73 re-encodes stored rows and changes no shape: nothing to undo.
 	73: {},
 	74: {`ALTER TABLE merge_queue DROP COLUMN source_behind`},
+	75: {`DROP INDEX merge_queue_by_workspace`, `DROP INDEX workspaces_by_merge_of`},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by
