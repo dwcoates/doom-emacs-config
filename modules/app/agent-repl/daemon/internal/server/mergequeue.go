@@ -168,6 +168,8 @@ func subscriptionDetailOf(detail *agentreplv1.SubscribeMergeQueueDetail) wsm.Mer
 		return wsm.MergeQueueDetailAdvances
 	case *agentreplv1.SubscribeMergeQueueDetail_Depletes:
 		return wsm.MergeQueueDetailDepletes
+	case *agentreplv1.SubscribeMergeQueueDetail_Deploys:
+		return wsm.MergeQueueDetailDeploys
 	}
 	panic(fmt.Sprintf("server: a merge queue subscription detail %T has no store detail", detail.GetLevel()))
 }

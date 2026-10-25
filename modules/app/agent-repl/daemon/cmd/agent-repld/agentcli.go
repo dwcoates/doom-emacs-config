@@ -161,7 +161,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"resume":         {usage: "resume [-repository here|DIR]", run: queuePause(false)},
 		"disable-racing": {usage: "disable-racing", run: queueRacing(false)},
 		"enable-racing":  {usage: "enable-racing", run: queueRacing(true)},
-		"subscribe":      {usage: "subscribe -detail every_change|advances|depletes [-repository here|DIR]", run: queueSubscribe},
+		"subscribe":      {usage: "subscribe -detail every_change|deploys|advances|depletes [-repository here|DIR]", run: queueSubscribe},
 		"unsubscribe":    {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
 	},
 	editorNoun: {
@@ -1370,6 +1370,7 @@ var queueDetails = map[string]*agentreplv1.SubscribeMergeQueueDetail{
 	"every_change": {Level: &agentreplv1.SubscribeMergeQueueDetail_EveryChange{EveryChange: &agentreplv1.SubscribeMergeQueueEveryChange{}}},
 	"advances":     {Level: &agentreplv1.SubscribeMergeQueueDetail_Advances{Advances: &agentreplv1.SubscribeMergeQueueAdvances{}}},
 	"depletes":     {Level: &agentreplv1.SubscribeMergeQueueDetail_Depletes{Depletes: &agentreplv1.SubscribeMergeQueueDepletes{}}},
+	"deploys":      {Level: &agentreplv1.SubscribeMergeQueueDetail_Deploys{Deploys: &agentreplv1.SubscribeMergeQueueDeploys{}}},
 }
 
 func queueSubscribe(c *cliCall, args []string) int {

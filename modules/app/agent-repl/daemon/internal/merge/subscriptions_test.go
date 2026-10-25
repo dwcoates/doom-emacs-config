@@ -794,3 +794,56 @@ func TestQueueObserversTellEveryObserverEachChange(t *testing.T) {
 		t.Fatalf("told %v and %v, want both %v", a.kinds, b.kinds, want)
 	}
 }
+
+func TestADeployEndIsReportedWithTheQueueAsItStands(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+	end := DeployEnd{Carried: []string{"one-land"}}
+
+	// Act.
+	h.o.ReportDeploy(context.Background(), h.targetD, end)
+
+	// Assert.
+	change := lastChange(t, h)
+	if change.Kind != QueueChangeDeployed || !reflect.DeepEqual(change.Deploy, end) {
+		t.Fatalf("change = %v %+v, want deployed %+v", change.Kind, change.Deploy, end)
+	}
+	if change.Queue.Repo != h.repoKey() || len(change.Queue.Members) != 1 || change.Queue.Members[0].Workspace != theWorkspace {
+		t.Fatalf("queue = %+v, want the checkout's queue with its one merge", change.Queue)
+	}
+	if change.Kind.Leaves() {
+		t.Fatal("a deploy's end reads as a merge leaving the queue")
+	}
+}
+
+func TestADeployEndIsRecordedAndNotReportedWhenItsQueueCannotBeRead(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(h *harness)
+		text    string
+	}{
+		{name: "a checkout that cannot be keyed", arrange: func(h *harness) { h.git.commonDirErr = errors.New("not a repository") },
+			text: "could not key the deployed checkout's queue"},
+		{name: "a queue that cannot be read", arrange: func(h *harness) { h.db.queueReadErr = errors.New("the store is gone") },
+			text: "could not read the deployed checkout's queue"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tc.arrange(h)
+
+			// Act.
+			h.o.ReportDeploy(context.Background(), h.targetD, DeployEnd{Failure: "the build failed"})
+
+			// Assert.
+			if kinds := h.events.kinds(); len(kinds) != 0 {
+				t.Fatalf("changes = %v, want none reported", kinds)
+			}
+			if !loggedLike(h, logLike{level: "error", op: opQueueEvents, text: tc.text, context: map[string]string{"failure": "the build failed"}}) {
+				t.Fatalf("no error record: %+v", h.logs.Records())
+			}
+		})
+	}
+}

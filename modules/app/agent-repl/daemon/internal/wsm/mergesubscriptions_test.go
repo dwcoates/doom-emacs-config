@@ -366,6 +366,7 @@ func TestMergeQueueDetailNamesEachDetail(t *testing.T) {
 		{detail: MergeQueueDetailEveryChange, want: "every_change"},
 		{detail: MergeQueueDetailAdvances, want: "advances"},
 		{detail: MergeQueueDetailDepletes, want: "depletes"},
+		{detail: MergeQueueDetailDeploys, want: "deploys"},
 		{detail: MergeQueueDetail(7), want: "MergeQueueDetail(7)"},
 	}
 	for _, tt := range tests {
@@ -382,7 +383,7 @@ func TestMergeQueueDetailNamesEachDetail(t *testing.T) {
 }
 
 func TestParseMergeQueueDetailReadsEachDetailsSpelling(t *testing.T) {
-	for _, want := range []MergeQueueDetail{MergeQueueDetailEveryChange, MergeQueueDetailAdvances, MergeQueueDetailDepletes} {
+	for _, want := range []MergeQueueDetail{MergeQueueDetailEveryChange, MergeQueueDetailDeploys, MergeQueueDetailAdvances, MergeQueueDetailDepletes} {
 		t.Run(want.String(), func(t *testing.T) {
 			// Act.
 			got, err := ParseMergeQueueDetail(want.String())
@@ -402,5 +403,48 @@ func TestParseMergeQueueDetailRefusesAnUndeclaredSpelling(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("ParseMergeQueueDetail accepted an undeclared detail")
+	}
+}
+
+func TestMergeQueueDetailFinenessRanksByHowMuchIsTold(t *testing.T) {
+	// Arrange: finest first, as the levels nest.
+	nested := []MergeQueueDetail{MergeQueueDetailEveryChange, MergeQueueDetailDeploys, MergeQueueDetailAdvances, MergeQueueDetailDepletes}
+
+	// Act / Assert.
+	for i := 1; i < len(nested); i++ {
+		if nested[i-1].Fineness() >= nested[i].Fineness() {
+			t.Fatalf("%s is not finer than %s", nested[i-1], nested[i])
+		}
+	}
+	if !MergeQueueDetailDeploys.Valid() || MergeQueueDetail(5).Valid() {
+		t.Fatal("deploys must be a declared detail, and the next number none")
+	}
+}
+
+func TestMergeQueueDetailFinenessFailsHardOnAnUndeclaredDetail(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("Fineness ranked an undeclared detail")
+		}
+	}()
+
+	// Act.
+	MergeQueueDetail(9).Fineness()
+}
+
+func TestADeploysSubscriptionIsStoredAndReadBack(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	want := subscription(ws.ID, EveryRepository, MergeQueueDetailDeploys)
+
+	// Act
+	mustSubscribe(t, s, want)
+
+	// Assert
+	if got := subscriptionsOf(t, s); !reflect.DeepEqual(got, []MergeQueueSubscription{want}) {
+		t.Fatalf("subscriptions = %+v, want the deploys subscription", got)
 	}
 }

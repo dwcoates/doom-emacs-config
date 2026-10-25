@@ -52,8 +52,9 @@ message SubscribeMergeQueueRequest {
 // How much of a queue's change a subscription reports.
 message SubscribeMergeQueueDetail {
   // THE ARM IS THE LEVEL. The levels nest -- every depletion is an advance,
-  // and every advance is a change -- so a subscriber picks the coarsest one
-  // that still wakes it for what it waits on.
+  // every advance is told at deploys, and all of it is a change -- so a
+  // subscriber picks the coarsest one that still wakes it for what it waits
+  // on.
   oneof level {
     // Every change of the queue.
     SubscribeMergeQueueEveryChange every_change = 1;
@@ -61,17 +62,27 @@ message SubscribeMergeQueueDetail {
     SubscribeMergeQueueAdvances advances = 2;
     // Only the queue running out of merges.
     SubscribeMergeQueueDepletes depletes = 3;
+    // A merge leaving the queue, and each deploy of the daemon's own
+    // checkout ending.
+    SubscribeMergeQueueDeploys deploys = 4;
   }
 }
 // EVERY CHANGE: a merge put in line, started, moved to a new step, landed,
 // failed, or taken off the queue (evicted, dequeued, or abandoned under its
-// closing workspace or a restart); the queue's order changed by a move; and
-// the queue paused or resumed. Several changes made at once arrive as one
+// closing workspace or a restart); the queue's order changed by a move; the
+// queue paused or resumed; and a deploy of the daemon's own checkout ended. Several changes made at once arrive as one
 // notice per change, each carrying the queue as it stood after its own.
 message SubscribeMergeQueueEveryChange {}
 // ADVANCES: a merge leaves the queue -- landed, failed, or taken off it. A
 // merge's start, its steps, a reorder and a pause are not reported.
 message SubscribeMergeQueueAdvances {}
+// DEPLOYS: a merge leaves the queue (as ADVANCES), and a deploy of the
+// daemon's own checkout ends -- whichever daemon ends it, the one that stays
+// or the successor it handed over to, and a fresh boot on a new build --
+// once its build is running, shims judged, or once it failed. The notice
+// names the reported landings its build carries. It is told on the queue of
+// the repository whose checkout the daemon deploys.
+message SubscribeMergeQueueDeploys {}
 // DEPLETES: a merge leaves the queue and no merge is left in line, reported
 // once per emptying. A queue that empties by a removal of a merge never put
 // in line is not reported, since nothing left the line.

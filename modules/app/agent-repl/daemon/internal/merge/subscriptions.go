@@ -58,6 +58,9 @@ const (
 	QueueChangePaused
 	// QueueChangeResumed is the queue resumed.
 	QueueChangeResumed
+	// QueueChangeDeployed is a deploy of the daemon's own checkout ended
+	// (QueueChange.Deploy says how), told on that checkout's queue.
+	QueueChangeDeployed
 )
 
 // String names the kind in log records.
@@ -83,6 +86,8 @@ func (k QueueChangeKind) String() string {
 		return "paused"
 	case QueueChangeResumed:
 		return "resumed"
+	case QueueChangeDeployed:
+		return "deployed"
 	}
 	return fmt.Sprintf("QueueChangeKind(%d)", int(k))
 }
@@ -171,6 +176,44 @@ type QueueChange struct {
 	Depleted bool
 	// Queue is the queue as it stands after the change.
 	Queue QueueSnapshot
+	// Deploy is how the deploy ended, for QueueChangeDeployed alone.
+	Deploy DeployEnd
+}
+
+// DeployEnd is how one deploy of the daemon's own checkout ended.
+type DeployEnd struct {
+	// Failure is why the deploy failed; "" for one whose build now runs,
+	// every shim judged against it.
+	Failure string
+	// Boot marks a fresh boot on a new build (the daemon restarted), rather
+	// than a deploy a running daemon carried out.
+	Boot bool
+	// Carried are the merges whose landing reports this deploy paid: the
+	// reported landings its build carries, by merge name.
+	Carried []string
+}
+
+// ReportDeploy tells the subscribers of the queue of CHECKOUT's repository
+// that a deploy of it ended, with the queue as it now stands. A queue that
+// cannot be read is recorded, and its subscribers are not told of that
+// deploy; the deploy itself has ended either way.
+func (o *orchestrator) ReportDeploy(ctx context.Context, checkout string, end DeployEnd) {
+	fields := dlog.Context{"checkout": checkout, "failure": end.Failure, "boot": end.Boot, "carried": len(end.Carried)}
+	repo, err := o.repoKeyFor(ctx, checkout)
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), opQueueEvents, "could not key the deployed checkout's queue; its subscribers are not told of the deploy",
+			"keying the deployed checkout's queue ended when its context was cancelled; its subscribers are not told of the deploy", fields, err)
+		return
+	}
+	o.events.mu.Lock()
+	queue, err := o.readQueue(ctx, o.deps.DB, repo)
+	o.events.mu.Unlock()
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), opQueueEvents, "could not read the deployed checkout's queue; its subscribers are not told of the deploy",
+			"the deployed checkout's queue read ended when its context was cancelled; its subscribers are not told of the deploy", dlog.Merge(fields, dlog.Context{"repo": string(repo)}), err)
+		return
+	}
+	o.tell(QueueChange{Kind: QueueChangeDeployed, Queue: queue, Deploy: end})
 }
 
 // QueueObserver is told every change of every merge queue this daemon makes,

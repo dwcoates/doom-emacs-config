@@ -46,8 +46,10 @@ const EveryRepository RepoKey = ""
 
 // MergeQueueDetail is how much of a merge queue's change a subscription
 // reports (agentrepl.v1.UpdateMergeQueueSubscribeDetail's arms), as the store
-// keeps it. The levels nest: every depletion is an advance, and every advance
-// is a change. ITS STORED VALUES ARE DURABLE and must not be renumbered.
+// keeps it. The levels nest: every depletion is an advance, every advance is
+// told at deploys (which adds each deploy's end), and all of it is a change.
+// ITS STORED VALUES ARE DURABLE and must not be renumbered, so their order is
+// not their nesting: Fineness is.
 type MergeQueueDetail int
 
 // The details. The zero value is no detail, so a detail left unset is never
@@ -59,7 +61,27 @@ const (
 	MergeQueueDetailAdvances
 	// MergeQueueDetailDepletes reports only the queue running out of merges.
 	MergeQueueDetailDepletes
+	// MergeQueueDetailDeploys reports a merge leaving the queue, and each
+	// deploy of the daemon's own checkout ending.
+	MergeQueueDetailDeploys
 )
+
+// Fineness ranks the details by how much they tell, finest (every change)
+// first: a subscriber holding two subscriptions that admit a change is told
+// at the finer.
+func (d MergeQueueDetail) Fineness() int {
+	switch d {
+	case MergeQueueDetailEveryChange:
+		return 0
+	case MergeQueueDetailDeploys:
+		return 1
+	case MergeQueueDetailAdvances:
+		return 2
+	case MergeQueueDetailDepletes:
+		return 3
+	}
+	panic(fmt.Sprintf("wsm: the undeclared merge queue detail %d has no fineness", int(d)))
+}
 
 // String names the detail in log records and in a notice.
 func (d MergeQueueDetail) String() string {
@@ -70,6 +92,8 @@ func (d MergeQueueDetail) String() string {
 		return "advances"
 	case MergeQueueDetailDepletes:
 		return "depletes"
+	case MergeQueueDetailDeploys:
+		return "deploys"
 	}
 	return fmt.Sprintf("MergeQueueDetail(%d)", int(d))
 }
@@ -77,17 +101,17 @@ func (d MergeQueueDetail) String() string {
 // ParseMergeQueueDetail reads a detail as String spells it, the spelling a
 // command file and the merge-queue verb carry. Any other text is refused.
 func ParseMergeQueueDetail(text string) (MergeQueueDetail, error) {
-	for _, detail := range []MergeQueueDetail{MergeQueueDetailEveryChange, MergeQueueDetailAdvances, MergeQueueDetailDepletes} {
+	for _, detail := range []MergeQueueDetail{MergeQueueDetailEveryChange, MergeQueueDetailDeploys, MergeQueueDetailAdvances, MergeQueueDetailDepletes} {
 		if detail.String() == text {
 			return detail, nil
 		}
 	}
-	return 0, fmt.Errorf("wsm: %q is none of the merge queue subscription details every_change, advances and depletes", text)
+	return 0, fmt.Errorf("wsm: %q is none of the merge queue subscription details every_change, deploys, advances and depletes", text)
 }
 
 // Valid reports whether d is one of the declared details.
 func (d MergeQueueDetail) Valid() bool {
-	return d >= MergeQueueDetailEveryChange && d <= MergeQueueDetailDepletes
+	return d >= MergeQueueDetailEveryChange && d <= MergeQueueDetailDeploys
 }
 
 // MergeQueueSubscription is one workspace's subscription to one scope's merge

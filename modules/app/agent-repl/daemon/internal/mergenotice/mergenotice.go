@@ -165,7 +165,7 @@ func Recipients(subs []wsm.MergeQueueSubscription, change merge.QueueChange) []R
 			continue
 		}
 		if i, seen := at[sub.Subscriber]; seen {
-			if sub.Detail < out[i].Detail {
+			if sub.Detail.Fineness() < out[i].Detail.Fineness() {
 				out[i].Detail = sub.Detail
 			}
 			continue
@@ -177,12 +177,14 @@ func Recipients(subs []wsm.MergeQueueSubscription, change merge.QueueChange) []R
 }
 
 // Admits reports whether a subscription at DETAIL is told CHANGE: every
-// change at every_change, a merge leaving at advances, and a leave that
-// emptied the line at depletes.
+// change at every_change, a merge leaving or a deploy ending at deploys, a
+// merge leaving at advances, and a leave that emptied the line at depletes.
 func Admits(detail wsm.MergeQueueDetail, change merge.QueueChange) bool {
 	switch detail {
 	case wsm.MergeQueueDetailEveryChange:
 		return true
+	case wsm.MergeQueueDetailDeploys:
+		return change.Kind.Leaves() || change.Kind == merge.QueueChangeDeployed
 	case wsm.MergeQueueDetailAdvances:
 		return change.Kind.Leaves()
 	case wsm.MergeQueueDetailDepletes:
@@ -270,6 +272,8 @@ func Headline(change merge.QueueChange) string {
 		return head + "paused"
 	case merge.QueueChangeResumed:
 		return head + "resumed"
+	case merge.QueueChangeDeployed:
+		return head + deployWords(change.Deploy)
 	}
 	line := head + change.Subject.Name + " " + kindWords(change)
 	if change.Depleted {
@@ -302,8 +306,43 @@ func Sentence(change merge.QueueChange) string {
 		return "The queue was paused: nothing new starts until it is resumed."
 	case merge.QueueChangeResumed:
 		return "The queue was resumed."
+	case merge.QueueChangeDeployed:
+		return DeploySentence(change.Deploy)
 	}
 	panic(fmt.Sprintf("mergenotice: a queue change of undeclared kind %d", int(change.Kind)))
+}
+
+// deployWords is a deploy's headline: how it ended.
+func deployWords(end merge.DeployEnd) string {
+	switch {
+	case end.Failure != "":
+		return "a deploy failed"
+	case end.Boot:
+		return "the daemon booted on a new build"
+	}
+	return "a deploy finished"
+}
+
+// DeploySentence states how a deploy ended, and the reported landings its
+// build carries.
+func DeploySentence(end merge.DeployEnd) string {
+	var b strings.Builder
+	switch {
+	case end.Failure != "":
+		b.WriteString(fmt.Sprintf("A deploy of the daemon's checkout failed (%s): the running build does not carry what it was to deploy.", end.Failure))
+	case end.Boot:
+		b.WriteString("The daemon booted on a new build: it, and every shim judged against it, now runs the checkout as it stands.")
+	default:
+		b.WriteString("A deploy of the daemon's checkout finished: its build is running, every shim judged against it.")
+	}
+	if len(end.Carried) > 0 {
+		names := make([]string, len(end.Carried))
+		for i, n := range end.Carried {
+			names[i] = "`" + n + "`"
+		}
+		b.WriteString(" It carries the landings of " + strings.Join(names, ", ") + ".")
+	}
+	return b.String()
 }
 
 // Queue states the queue as it stands, every member front first.
@@ -362,6 +401,8 @@ func detailWords(detail wsm.MergeQueueDetail) string {
 		return "each merge leaving the queue"
 	case wsm.MergeQueueDetailDepletes:
 		return "the queue emptying"
+	case wsm.MergeQueueDetailDeploys:
+		return "each merge leaving the queue and each deploy's end"
 	}
 	panic(fmt.Sprintf("mergenotice: a subscription holds the undeclared detail %d", int(detail)))
 }

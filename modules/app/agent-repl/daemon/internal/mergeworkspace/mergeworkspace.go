@@ -94,6 +94,17 @@ type Deps struct {
 	// (worktreereap.Deps.LockPath). The requesters are retired under it, so
 	// the reaper never judges a worktree a retirement is removing.
 	WorktreeLock string
+	// Deploys tells the merge queue's subscribers each deploy's end
+	// (merge.Orchestrator.ReportDeploy), with Checkout the daemon's own
+	// checkout it deployed. Every deploy ends in PayOwed, so this is the one
+	// place a deploy's end is told.
+	Deploys  DeployReporter
+	Checkout string
+}
+
+// DeployReporter tells the merge queue's subscribers a deploy ended.
+type DeployReporter interface {
+	ReportDeploy(ctx context.Context, checkout string, end merge.DeployEnd)
 }
 
 // Service is the detached-merge service. It implements merge.DetachedMerges.
@@ -256,12 +267,21 @@ func (s *Service) CoverOwed(ctx context.Context) error {
 // ERROR, and the next payment hands it back with the same key.
 func (s *Service) PayOwed(ctx context.Context, coveredOnly bool, deployErr error) {
 	log := s.deps.Log.Global()
+	end := merge.DeployEnd{Boot: !coveredOnly}
+	if deployErr != nil {
+		end.Failure = deployErr.Error()
+	}
+	// THE DEPLOY HAS ENDED, whatever becomes of its reports: the queue's
+	// subscribers are told once the reports are handed back, naming the
+	// landings it carries.
+	defer func() { s.deps.Deploys.ReportDeploy(ctx, s.deps.Checkout, end) }()
 	owed, err := s.deps.DB.OwedHandBacks(ctx, coveredOnly)
 	if err != nil {
 		failedUnlessStoodDown(ctx, log, log.Error, "payment", "could not read the owed landing reports; they stay owed", dlog.Context{"covered_only": coveredOnly}, err)
 		return
 	}
 	for _, report := range owed {
+		end.Carried = append(end.Carried, report.MergeName)
 		fields := dlog.Context{"requester": string(report.Requester), "merge_workspace": string(report.MergeWorkspace),
 			"outcome": merge.DetachedLanded.String(), "branch": report.Branch, "covered": report.Covered}
 		label, text := landedText(report.Branch, report.MergeName, report.Summary, deployedNote(deployErr))

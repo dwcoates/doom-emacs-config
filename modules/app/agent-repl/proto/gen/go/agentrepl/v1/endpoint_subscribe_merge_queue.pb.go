@@ -123,14 +123,16 @@ func (x *SubscribeMergeQueueRequest) GetDetail() *SubscribeMergeQueueDetail {
 type SubscribeMergeQueueDetail struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// THE ARM IS THE LEVEL. The levels nest -- every depletion is an advance,
-	// and every advance is a change -- so a subscriber picks the coarsest one
-	// that still wakes it for what it waits on.
+	// every advance is told at deploys, and all of it is a change -- so a
+	// subscriber picks the coarsest one that still wakes it for what it waits
+	// on.
 	//
 	// Types that are valid to be assigned to Level:
 	//
 	//	*SubscribeMergeQueueDetail_EveryChange
 	//	*SubscribeMergeQueueDetail_Advances
 	//	*SubscribeMergeQueueDetail_Depletes
+	//	*SubscribeMergeQueueDetail_Deploys
 	Level         isSubscribeMergeQueueDetail_Level `protobuf_oneof:"level"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -200,6 +202,15 @@ func (x *SubscribeMergeQueueDetail) GetDepletes() *SubscribeMergeQueueDepletes {
 	return nil
 }
 
+func (x *SubscribeMergeQueueDetail) GetDeploys() *SubscribeMergeQueueDeploys {
+	if x != nil {
+		if x, ok := x.Level.(*SubscribeMergeQueueDetail_Deploys); ok {
+			return x.Deploys
+		}
+	}
+	return nil
+}
+
 type isSubscribeMergeQueueDetail_Level interface {
 	isSubscribeMergeQueueDetail_Level()
 }
@@ -219,16 +230,24 @@ type SubscribeMergeQueueDetail_Depletes struct {
 	Depletes *SubscribeMergeQueueDepletes `protobuf:"bytes,3,opt,name=depletes,proto3,oneof"`
 }
 
+type SubscribeMergeQueueDetail_Deploys struct {
+	// A merge leaving the queue, and each deploy of the daemon's own
+	// checkout ending.
+	Deploys *SubscribeMergeQueueDeploys `protobuf:"bytes,4,opt,name=deploys,proto3,oneof"`
+}
+
 func (*SubscribeMergeQueueDetail_EveryChange) isSubscribeMergeQueueDetail_Level() {}
 
 func (*SubscribeMergeQueueDetail_Advances) isSubscribeMergeQueueDetail_Level() {}
 
 func (*SubscribeMergeQueueDetail_Depletes) isSubscribeMergeQueueDetail_Level() {}
 
+func (*SubscribeMergeQueueDetail_Deploys) isSubscribeMergeQueueDetail_Level() {}
+
 // EVERY CHANGE: a merge put in line, started, moved to a new step, landed,
 // failed, or taken off the queue (evicted, dequeued, or abandoned under its
-// closing workspace or a restart); the queue's order changed by a move; and
-// the queue paused or resumed. Several changes made at once arrive as one
+// closing workspace or a restart); the queue's order changed by a move; the
+// queue paused or resumed; and a deploy of the daemon's own checkout ended. Several changes made at once arrive as one
 // notice per change, each carrying the queue as it stood after its own.
 type SubscribeMergeQueueEveryChange struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -304,6 +323,48 @@ func (*SubscribeMergeQueueAdvances) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{3}
 }
 
+// DEPLOYS: a merge leaves the queue (as ADVANCES), and a deploy of the
+// daemon's own checkout ends -- whichever daemon ends it, the one that stays
+// or the successor it handed over to, and a fresh boot on a new build --
+// once its build is running, shims judged, or once it failed. The notice
+// names the reported landings its build carries. It is told on the queue of
+// the repository whose checkout the daemon deploys.
+type SubscribeMergeQueueDeploys struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeMergeQueueDeploys) Reset() {
+	*x = SubscribeMergeQueueDeploys{}
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeMergeQueueDeploys) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeMergeQueueDeploys) ProtoMessage() {}
+
+func (x *SubscribeMergeQueueDeploys) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeMergeQueueDeploys.ProtoReflect.Descriptor instead.
+func (*SubscribeMergeQueueDeploys) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{4}
+}
+
 // DEPLETES: a merge leaves the queue and no merge is left in line, reported
 // once per emptying. A queue that empties by a removal of a merge never put
 // in line is not reported, since nothing left the line.
@@ -315,7 +376,7 @@ type SubscribeMergeQueueDepletes struct {
 
 func (x *SubscribeMergeQueueDepletes) Reset() {
 	*x = SubscribeMergeQueueDepletes{}
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -327,7 +388,7 @@ func (x *SubscribeMergeQueueDepletes) String() string {
 func (*SubscribeMergeQueueDepletes) ProtoMessage() {}
 
 func (x *SubscribeMergeQueueDepletes) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -340,7 +401,7 @@ func (x *SubscribeMergeQueueDepletes) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeMergeQueueDepletes.ProtoReflect.Descriptor instead.
 func (*SubscribeMergeQueueDepletes) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{5}
 }
 
 // THE ARM IS THE OUTCOME.
@@ -357,7 +418,7 @@ type SubscribeMergeQueueResponse struct {
 
 func (x *SubscribeMergeQueueResponse) Reset() {
 	*x = SubscribeMergeQueueResponse{}
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -369,7 +430,7 @@ func (x *SubscribeMergeQueueResponse) String() string {
 func (*SubscribeMergeQueueResponse) ProtoMessage() {}
 
 func (x *SubscribeMergeQueueResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -382,7 +443,7 @@ func (x *SubscribeMergeQueueResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeMergeQueueResponse.ProtoReflect.Descriptor instead.
 func (*SubscribeMergeQueueResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SubscribeMergeQueueResponse) GetResult() isSubscribeMergeQueueResponse_Result {
@@ -439,7 +500,7 @@ type SubscribeMergeQueueSuccess struct {
 
 func (x *SubscribeMergeQueueSuccess) Reset() {
 	*x = SubscribeMergeQueueSuccess{}
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -451,7 +512,7 @@ func (x *SubscribeMergeQueueSuccess) String() string {
 func (*SubscribeMergeQueueSuccess) ProtoMessage() {}
 
 func (x *SubscribeMergeQueueSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -464,7 +525,7 @@ func (x *SubscribeMergeQueueSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeMergeQueueSuccess.ProtoReflect.Descriptor instead.
 func (*SubscribeMergeQueueSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SubscribeMergeQueueSuccess) GetTaken() *SubscribeMergeQueueSuccessTaken {
@@ -497,7 +558,7 @@ type SubscribeMergeQueueSuccessTaken struct {
 
 func (x *SubscribeMergeQueueSuccessTaken) Reset() {
 	*x = SubscribeMergeQueueSuccessTaken{}
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -509,7 +570,7 @@ func (x *SubscribeMergeQueueSuccessTaken) String() string {
 func (*SubscribeMergeQueueSuccessTaken) ProtoMessage() {}
 
 func (x *SubscribeMergeQueueSuccessTaken) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -522,7 +583,7 @@ func (x *SubscribeMergeQueueSuccessTaken) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeMergeQueueSuccessTaken.ProtoReflect.Descriptor instead.
 func (*SubscribeMergeQueueSuccessTaken) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SubscribeMergeQueueSuccessTaken) GetTaken() isSubscribeMergeQueueSuccessTaken_Taken {
@@ -577,7 +638,7 @@ type SubscribeMergeQueueSuccessTakenSubscribed struct {
 
 func (x *SubscribeMergeQueueSuccessTakenSubscribed) Reset() {
 	*x = SubscribeMergeQueueSuccessTakenSubscribed{}
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -589,7 +650,7 @@ func (x *SubscribeMergeQueueSuccessTakenSubscribed) String() string {
 func (*SubscribeMergeQueueSuccessTakenSubscribed) ProtoMessage() {}
 
 func (x *SubscribeMergeQueueSuccessTakenSubscribed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -602,7 +663,7 @@ func (x *SubscribeMergeQueueSuccessTakenSubscribed) ProtoReflect() protoreflect.
 
 // Deprecated: Use SubscribeMergeQueueSuccessTakenSubscribed.ProtoReflect.Descriptor instead.
 func (*SubscribeMergeQueueSuccessTakenSubscribed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{9}
 }
 
 // A replaced subscription. No fields.
@@ -614,7 +675,7 @@ type SubscribeMergeQueueSuccessTakenResubscribed struct {
 
 func (x *SubscribeMergeQueueSuccessTakenResubscribed) Reset() {
 	*x = SubscribeMergeQueueSuccessTakenResubscribed{}
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -626,7 +687,7 @@ func (x *SubscribeMergeQueueSuccessTakenResubscribed) String() string {
 func (*SubscribeMergeQueueSuccessTakenResubscribed) ProtoMessage() {}
 
 func (x *SubscribeMergeQueueSuccessTakenResubscribed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -639,7 +700,7 @@ func (x *SubscribeMergeQueueSuccessTakenResubscribed) ProtoReflect() protoreflec
 
 // Deprecated: Use SubscribeMergeQueueSuccessTakenResubscribed.ProtoReflect.Descriptor instead.
 func (*SubscribeMergeQueueSuccessTakenResubscribed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{10}
 }
 
 type SubscribeMergeQueueError struct {
@@ -656,7 +717,7 @@ type SubscribeMergeQueueError struct {
 
 func (x *SubscribeMergeQueueError) Reset() {
 	*x = SubscribeMergeQueueError{}
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -668,7 +729,7 @@ func (x *SubscribeMergeQueueError) String() string {
 func (*SubscribeMergeQueueError) ProtoMessage() {}
 
 func (x *SubscribeMergeQueueError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -681,7 +742,7 @@ func (x *SubscribeMergeQueueError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeMergeQueueError.ProtoReflect.Descriptor instead.
 func (*SubscribeMergeQueueError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SubscribeMergeQueueError) GetCause() isSubscribeMergeQueueError_Cause {
@@ -752,7 +813,7 @@ type SubscribeMergeQueueUnknownSubscriber struct {
 
 func (x *SubscribeMergeQueueUnknownSubscriber) Reset() {
 	*x = SubscribeMergeQueueUnknownSubscriber{}
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -764,7 +825,7 @@ func (x *SubscribeMergeQueueUnknownSubscriber) String() string {
 func (*SubscribeMergeQueueUnknownSubscriber) ProtoMessage() {}
 
 func (x *SubscribeMergeQueueUnknownSubscriber) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -777,7 +838,7 @@ func (x *SubscribeMergeQueueUnknownSubscriber) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use SubscribeMergeQueueUnknownSubscriber.ProtoReflect.Descriptor instead.
 func (*SubscribeMergeQueueUnknownSubscriber) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{12}
 }
 
 type SubscribeMergeQueueUnknownRepository struct {
@@ -788,7 +849,7 @@ type SubscribeMergeQueueUnknownRepository struct {
 
 func (x *SubscribeMergeQueueUnknownRepository) Reset() {
 	*x = SubscribeMergeQueueUnknownRepository{}
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -800,7 +861,7 @@ func (x *SubscribeMergeQueueUnknownRepository) String() string {
 func (*SubscribeMergeQueueUnknownRepository) ProtoMessage() {}
 
 func (x *SubscribeMergeQueueUnknownRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -813,7 +874,7 @@ func (x *SubscribeMergeQueueUnknownRepository) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use SubscribeMergeQueueUnknownRepository.ProtoReflect.Descriptor instead.
 func (*SubscribeMergeQueueUnknownRepository) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{13}
 }
 
 type SubscribeMergeQueueSubscriberClosed struct {
@@ -824,7 +885,7 @@ type SubscribeMergeQueueSubscriberClosed struct {
 
 func (x *SubscribeMergeQueueSubscriberClosed) Reset() {
 	*x = SubscribeMergeQueueSubscriberClosed{}
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -836,7 +897,7 @@ func (x *SubscribeMergeQueueSubscriberClosed) String() string {
 func (*SubscribeMergeQueueSubscriberClosed) ProtoMessage() {}
 
 func (x *SubscribeMergeQueueSubscriberClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -849,7 +910,7 @@ func (x *SubscribeMergeQueueSubscriberClosed) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use SubscribeMergeQueueSubscriberClosed.ProtoReflect.Descriptor instead.
 func (*SubscribeMergeQueueSubscriberClosed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP(), []int{14}
 }
 
 var File_agentrepl_v1_endpoint_subscribe_merge_queue_proto protoreflect.FileDescriptor
@@ -865,14 +926,16 @@ const file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDesc = "" +
 	"repository\x18\x02 \x01(\v2\x1b.workspace.v1.RepositoryRefH\x00R\n" +
 	"repository\x88\x01\x01\x12?\n" +
 	"\x06detail\x18\x03 \x01(\v2'.agentrepl.v1.SubscribeMergeQueueDetailR\x06detailB\r\n" +
-	"\v_repository\"\x89\x02\n" +
+	"\v_repository\"\xcf\x02\n" +
 	"\x19SubscribeMergeQueueDetail\x12Q\n" +
 	"\fevery_change\x18\x01 \x01(\v2,.agentrepl.v1.SubscribeMergeQueueEveryChangeH\x00R\veveryChange\x12G\n" +
 	"\badvances\x18\x02 \x01(\v2).agentrepl.v1.SubscribeMergeQueueAdvancesH\x00R\badvances\x12G\n" +
-	"\bdepletes\x18\x03 \x01(\v2).agentrepl.v1.SubscribeMergeQueueDepletesH\x00R\bdepletesB\a\n" +
+	"\bdepletes\x18\x03 \x01(\v2).agentrepl.v1.SubscribeMergeQueueDepletesH\x00R\bdepletes\x12D\n" +
+	"\adeploys\x18\x04 \x01(\v2(.agentrepl.v1.SubscribeMergeQueueDeploysH\x00R\adeploysB\a\n" +
 	"\x05level\" \n" +
 	"\x1eSubscribeMergeQueueEveryChange\"\x1d\n" +
-	"\x1bSubscribeMergeQueueAdvances\"\x1d\n" +
+	"\x1bSubscribeMergeQueueAdvances\"\x1c\n" +
+	"\x1aSubscribeMergeQueueDeploys\"\x1d\n" +
 	"\x1bSubscribeMergeQueueDepletes\"\xad\x01\n" +
 	"\x1bSubscribeMergeQueueResponse\x12D\n" +
 	"\asuccess\x18\x01 \x01(\v2(.agentrepl.v1.SubscribeMergeQueueSuccessH\x00R\asuccess\x12>\n" +
@@ -910,47 +973,49 @@ func file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescGZIP() []byte
 	return file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_goTypes = []any{
 	(*SubscribeMergeQueueRequest)(nil),                  // 0: agentrepl.v1.SubscribeMergeQueueRequest
 	(*SubscribeMergeQueueDetail)(nil),                   // 1: agentrepl.v1.SubscribeMergeQueueDetail
 	(*SubscribeMergeQueueEveryChange)(nil),              // 2: agentrepl.v1.SubscribeMergeQueueEveryChange
 	(*SubscribeMergeQueueAdvances)(nil),                 // 3: agentrepl.v1.SubscribeMergeQueueAdvances
-	(*SubscribeMergeQueueDepletes)(nil),                 // 4: agentrepl.v1.SubscribeMergeQueueDepletes
-	(*SubscribeMergeQueueResponse)(nil),                 // 5: agentrepl.v1.SubscribeMergeQueueResponse
-	(*SubscribeMergeQueueSuccess)(nil),                  // 6: agentrepl.v1.SubscribeMergeQueueSuccess
-	(*SubscribeMergeQueueSuccessTaken)(nil),             // 7: agentrepl.v1.SubscribeMergeQueueSuccessTaken
-	(*SubscribeMergeQueueSuccessTakenSubscribed)(nil),   // 8: agentrepl.v1.SubscribeMergeQueueSuccessTakenSubscribed
-	(*SubscribeMergeQueueSuccessTakenResubscribed)(nil), // 9: agentrepl.v1.SubscribeMergeQueueSuccessTakenResubscribed
-	(*SubscribeMergeQueueError)(nil),                    // 10: agentrepl.v1.SubscribeMergeQueueError
-	(*SubscribeMergeQueueUnknownSubscriber)(nil),        // 11: agentrepl.v1.SubscribeMergeQueueUnknownSubscriber
-	(*SubscribeMergeQueueUnknownRepository)(nil),        // 12: agentrepl.v1.SubscribeMergeQueueUnknownRepository
-	(*SubscribeMergeQueueSubscriberClosed)(nil),         // 13: agentrepl.v1.SubscribeMergeQueueSubscriberClosed
-	(*v1.WorkspaceRef)(nil),                             // 14: workspace.v1.WorkspaceRef
-	(*v1.RepositoryRef)(nil),                            // 15: workspace.v1.RepositoryRef
-	(*MergeQueueStatus)(nil),                            // 16: agentrepl.v1.MergeQueueStatus
+	(*SubscribeMergeQueueDeploys)(nil),                  // 4: agentrepl.v1.SubscribeMergeQueueDeploys
+	(*SubscribeMergeQueueDepletes)(nil),                 // 5: agentrepl.v1.SubscribeMergeQueueDepletes
+	(*SubscribeMergeQueueResponse)(nil),                 // 6: agentrepl.v1.SubscribeMergeQueueResponse
+	(*SubscribeMergeQueueSuccess)(nil),                  // 7: agentrepl.v1.SubscribeMergeQueueSuccess
+	(*SubscribeMergeQueueSuccessTaken)(nil),             // 8: agentrepl.v1.SubscribeMergeQueueSuccessTaken
+	(*SubscribeMergeQueueSuccessTakenSubscribed)(nil),   // 9: agentrepl.v1.SubscribeMergeQueueSuccessTakenSubscribed
+	(*SubscribeMergeQueueSuccessTakenResubscribed)(nil), // 10: agentrepl.v1.SubscribeMergeQueueSuccessTakenResubscribed
+	(*SubscribeMergeQueueError)(nil),                    // 11: agentrepl.v1.SubscribeMergeQueueError
+	(*SubscribeMergeQueueUnknownSubscriber)(nil),        // 12: agentrepl.v1.SubscribeMergeQueueUnknownSubscriber
+	(*SubscribeMergeQueueUnknownRepository)(nil),        // 13: agentrepl.v1.SubscribeMergeQueueUnknownRepository
+	(*SubscribeMergeQueueSubscriberClosed)(nil),         // 14: agentrepl.v1.SubscribeMergeQueueSubscriberClosed
+	(*v1.WorkspaceRef)(nil),                             // 15: workspace.v1.WorkspaceRef
+	(*v1.RepositoryRef)(nil),                            // 16: workspace.v1.RepositoryRef
+	(*MergeQueueStatus)(nil),                            // 17: agentrepl.v1.MergeQueueStatus
 }
 var file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_depIdxs = []int32{
-	14, // 0: agentrepl.v1.SubscribeMergeQueueRequest.subscriber:type_name -> workspace.v1.WorkspaceRef
-	15, // 1: agentrepl.v1.SubscribeMergeQueueRequest.repository:type_name -> workspace.v1.RepositoryRef
+	15, // 0: agentrepl.v1.SubscribeMergeQueueRequest.subscriber:type_name -> workspace.v1.WorkspaceRef
+	16, // 1: agentrepl.v1.SubscribeMergeQueueRequest.repository:type_name -> workspace.v1.RepositoryRef
 	1,  // 2: agentrepl.v1.SubscribeMergeQueueRequest.detail:type_name -> agentrepl.v1.SubscribeMergeQueueDetail
 	2,  // 3: agentrepl.v1.SubscribeMergeQueueDetail.every_change:type_name -> agentrepl.v1.SubscribeMergeQueueEveryChange
 	3,  // 4: agentrepl.v1.SubscribeMergeQueueDetail.advances:type_name -> agentrepl.v1.SubscribeMergeQueueAdvances
-	4,  // 5: agentrepl.v1.SubscribeMergeQueueDetail.depletes:type_name -> agentrepl.v1.SubscribeMergeQueueDepletes
-	6,  // 6: agentrepl.v1.SubscribeMergeQueueResponse.success:type_name -> agentrepl.v1.SubscribeMergeQueueSuccess
-	10, // 7: agentrepl.v1.SubscribeMergeQueueResponse.error:type_name -> agentrepl.v1.SubscribeMergeQueueError
-	7,  // 8: agentrepl.v1.SubscribeMergeQueueSuccess.taken:type_name -> agentrepl.v1.SubscribeMergeQueueSuccessTaken
-	16, // 9: agentrepl.v1.SubscribeMergeQueueSuccess.queues:type_name -> agentrepl.v1.MergeQueueStatus
-	8,  // 10: agentrepl.v1.SubscribeMergeQueueSuccessTaken.subscribed:type_name -> agentrepl.v1.SubscribeMergeQueueSuccessTakenSubscribed
-	9,  // 11: agentrepl.v1.SubscribeMergeQueueSuccessTaken.resubscribed:type_name -> agentrepl.v1.SubscribeMergeQueueSuccessTakenResubscribed
-	11, // 12: agentrepl.v1.SubscribeMergeQueueError.unknown_subscriber:type_name -> agentrepl.v1.SubscribeMergeQueueUnknownSubscriber
-	12, // 13: agentrepl.v1.SubscribeMergeQueueError.unknown_repository:type_name -> agentrepl.v1.SubscribeMergeQueueUnknownRepository
-	13, // 14: agentrepl.v1.SubscribeMergeQueueError.subscriber_closed:type_name -> agentrepl.v1.SubscribeMergeQueueSubscriberClosed
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	5,  // 5: agentrepl.v1.SubscribeMergeQueueDetail.depletes:type_name -> agentrepl.v1.SubscribeMergeQueueDepletes
+	4,  // 6: agentrepl.v1.SubscribeMergeQueueDetail.deploys:type_name -> agentrepl.v1.SubscribeMergeQueueDeploys
+	7,  // 7: agentrepl.v1.SubscribeMergeQueueResponse.success:type_name -> agentrepl.v1.SubscribeMergeQueueSuccess
+	11, // 8: agentrepl.v1.SubscribeMergeQueueResponse.error:type_name -> agentrepl.v1.SubscribeMergeQueueError
+	8,  // 9: agentrepl.v1.SubscribeMergeQueueSuccess.taken:type_name -> agentrepl.v1.SubscribeMergeQueueSuccessTaken
+	17, // 10: agentrepl.v1.SubscribeMergeQueueSuccess.queues:type_name -> agentrepl.v1.MergeQueueStatus
+	9,  // 11: agentrepl.v1.SubscribeMergeQueueSuccessTaken.subscribed:type_name -> agentrepl.v1.SubscribeMergeQueueSuccessTakenSubscribed
+	10, // 12: agentrepl.v1.SubscribeMergeQueueSuccessTaken.resubscribed:type_name -> agentrepl.v1.SubscribeMergeQueueSuccessTakenResubscribed
+	12, // 13: agentrepl.v1.SubscribeMergeQueueError.unknown_subscriber:type_name -> agentrepl.v1.SubscribeMergeQueueUnknownSubscriber
+	13, // 14: agentrepl.v1.SubscribeMergeQueueError.unknown_repository:type_name -> agentrepl.v1.SubscribeMergeQueueUnknownRepository
+	14, // 15: agentrepl.v1.SubscribeMergeQueueError.subscriber_closed:type_name -> agentrepl.v1.SubscribeMergeQueueSubscriberClosed
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_init() }
@@ -964,16 +1029,17 @@ func file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_init() {
 		(*SubscribeMergeQueueDetail_EveryChange)(nil),
 		(*SubscribeMergeQueueDetail_Advances)(nil),
 		(*SubscribeMergeQueueDetail_Depletes)(nil),
+		(*SubscribeMergeQueueDetail_Deploys)(nil),
 	}
-	file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[5].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[6].OneofWrappers = []any{
 		(*SubscribeMergeQueueResponse_Success)(nil),
 		(*SubscribeMergeQueueResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[7].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[8].OneofWrappers = []any{
 		(*SubscribeMergeQueueSuccessTaken_Subscribed)(nil),
 		(*SubscribeMergeQueueSuccessTaken_Resubscribed)(nil),
 	}
-	file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[10].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_msgTypes[11].OneofWrappers = []any{
 		(*SubscribeMergeQueueError_UnknownSubscriber)(nil),
 		(*SubscribeMergeQueueError_UnknownRepository)(nil),
 		(*SubscribeMergeQueueError_SubscriberClosed)(nil),
@@ -984,7 +1050,7 @@ func file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDesc), len(file_agentrepl_v1_endpoint_subscribe_merge_queue_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
