@@ -387,6 +387,14 @@
       (agent-repl-settings)
       (should (equal (mapcar #'buffer-name agent-repl-test--popups-shown) '("*zettel settings*"))))))
 
+(ert-deftest agent-repl-test-settings-keycap-names-its-mode-as-the-help-does ()
+  "A keycap's mode note is the help's own state label, so the two read alike."
+  (dolist (state '(nil "normal" "insert"))
+    (let ((keycap (substring-no-properties
+                   (agent-repl-settings--keycap 'c (list :description "K" :state state) '(:id x))))
+          (label (agent-repl--input-help-state-label (list state))))
+      (should (equal keycap (if label (concat "K " label) "K"))))))
+
 ;;;; ---- The page's commands ----
 
 (ert-deftest agent-repl-test-settings-add-key-binds-and-saves ()

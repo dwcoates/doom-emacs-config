@@ -47,6 +47,7 @@
 (declare-function agent-repl--input-help-insert-row "input-help" (cell description lines column))
 (declare-function agent-repl--input-help-key-column "input-help" (cells))
 (declare-function agent-repl--input-help-groups "input-help" ())
+(declare-function agent-repl--input-help-state-label "input-help" (states))
 (declare-function agent-repl--input-help-topic "input-help" (key value))
 (defvar agent-repl-input-help-topics)
 (defvar doom-leader-key)
@@ -291,11 +292,8 @@ prefix, cannot be bound at all.  Each refusal is a `user-error'."
                             'face 'help-key-binding
                             'help-echo "mouse-1, RET: change or remove this key"
                             'action (lambda (_) (agent-repl-settings-edit-key topic command source)))
-          (and (plist-get source :state)
-               (propertize (concat " " (if (equal (plist-get source :state) "normal")
-                                           "command mode"
-                                         (concat (plist-get source :state) " mode")))
-                           'face 'agent-repl-input-help-annotation))))
+          (let ((label (agent-repl--input-help-state-label (list (plist-get source :state)))))
+            (and label (propertize (concat " " label) 'face 'agent-repl-input-help-annotation)))))
 
 (defun agent-repl-settings--button (label echo action)
   "Return a button labeled LABEL, explained by ECHO, that runs ACTION."
