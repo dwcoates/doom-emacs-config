@@ -149,6 +149,14 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 			})
 			return Report{}, fmt.Errorf("boot: ensure the main worktrees: %w", err)
 		}
+		// EVERY THREAD A STOPPED DAEMON LEFT UNTITLED is titled now: its
+		// title arrives on its own goroutine, so the boot does not wait on it.
+		if err := s.deps.ResumeThreadTitles(ctx); err != nil {
+			log.Error("daemon.boot.run", "the untitled threads' titles could not be resumed", dlog.Context{
+				"error": err.Error(),
+			})
+			return Report{}, fmt.Errorf("boot: resume the thread titles: %w", err)
+		}
 		// What each taken-up carry leaves for after the drain: the re-judged
 		// verdicts and the carried shim replacements.
 		s.deps.Rollout.FinishCarries(ctx)

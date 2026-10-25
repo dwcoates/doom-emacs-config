@@ -85,8 +85,8 @@ func TestAChatThreadLivesItsWholeLife(t *testing.T) {
 		t.Fatalf("CreateThread = %v, %v", created, err)
 	}
 	thread := created.Msg.GetSuccess().GetThread()
-	if !strings.HasSuffix(thread.GetDir(), "/zettel/threads/"+harness.FakeClaudeMintedName) {
-		t.Fatalf("thread dir = %q, want the minted name under the zettel home", thread.GetDir())
+	if !strings.Contains(thread.GetDir(), "/zettel/threads/t-") {
+		t.Fatalf("thread dir = %q, want a token directory under the zettel home", thread.GetDir())
 	}
 	chat := w.WatchChat(thread)
 	defer chat.Close()
@@ -97,10 +97,10 @@ func TestAChatThreadLivesItsWholeLife(t *testing.T) {
 	if nodes := graphOf(t, w, thread); len(nodes) != 1 || nodes[0].GetQuestion().GetText() != "Why is the sky blue?" {
 		t.Fatalf("graph = %v, want the first question as its root", nodes)
 	}
-	harness.AwaitView(t, ctx, roster, "the thread listed open and current", func(r *frontendv1.WorkspaceRoster) bool {
+	harness.AwaitView(t, ctx, roster, "the thread listed open and current, under its title", func(r *frontendv1.WorkspaceRoster) bool {
 		row := threadRow(r, thread)
 		return row != nil && row.GetStanding().GetOpen() != nil && row.GetCurrent() != nil &&
-			r.GetAppSwitcher().GetShown().GetChat() != nil
+			r.GetAppSwitcher().GetShown().GetChat() != nil && row.GetName().GetText() == harness.FakeClaudeMintedTitle
 	})
 
 	// ---- A question typed in the composer is asked of the shown path ----

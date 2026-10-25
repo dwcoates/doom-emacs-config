@@ -84,6 +84,9 @@ type verbs struct {
 	// delivered (createfailed.go), so whoever must know they are done waits
 	// for them rather than for a record to appear.
 	createFailureReports sync.WaitGroup
+	// threadTitles counts the thread titles still being generated
+	// (threadtitle.go), so whoever must know they are done waits for them.
+	threadTitles sync.WaitGroup
 }
 
 // load resolves one workspace's durable record and its own logger. A REGISTERED

@@ -11,6 +11,8 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
 	"agent-repld/internal/wsm"
 )
 
@@ -39,34 +41,45 @@ func (r *threadRegistry) RegisterThread(_ context.Context, dir, name string) (ws
 	return ws, nil
 }
 
-// newThreadFixture is the verbs fixture whose state client registers threads.
+// FixtureThreadTitle is the title the fake model answers a thread's question with.
+const FixtureThreadTitle = "Why the Sky Is Blue"
+
+// newThreadFixture is the verbs fixture whose state client registers threads,
+// and whose model answers a title.
 func newThreadFixture(t *testing.T) (*fixture, *threadRegistry) {
 	t.Helper()
 	f := newFixture(t)
 	registry := &threadRegistry{fakeDB: f.db}
 	f.verbs.(*verbs).deps.DB = registry
+	f.headless.answers = []headlessAnswer{{text: FixtureThreadTitle}}
+	f.briefs[BriefThreadTitle] = prompts.Prompt{Name: BriefThreadTitle, Body: "title: {{question}}", Placeholders: []string{"question"}}
 	return f, registry
 }
 
-func TestCreateThreadMakesARegisteredThreadWithItsSessionUp(t *testing.T) {
+// titled waits for every title in flight.
+func (f *fixture) titled() { f.verbs.(*verbs).threadTitles.Wait() }
+
+func TestCreateThreadMakesTheThreadAtOnceUnderThePlaceholder(t *testing.T) {
 	// Arrange
 	f, registry := newThreadFixture(t)
 
 	// Act
 	record, err := f.verbs.CreateThread(context.Background(), "why is the sky blue?")
+	f.titled()
 
-	// Assert
+	// Assert: made at once, before any title, in a token directory.
 	if err != nil {
 		t.Fatalf("CreateThread: %v", err)
 	}
-	wantDir, err := normalizeDir(filepath.Join(f.home, "zettel", "threads", FixtureMintedName))
+	threads, err := normalizeDir(filepath.Join(f.home, "zettel", "threads"))
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
 	}
-	if record.Dir != wantDir || record.Name != FixtureMintedName || !record.IsThread() {
-		t.Fatalf("record = %+v, want thread %q at %q", record, FixtureMintedName, wantDir)
+	if record.Name != ThreadTitlePlaceholder || !record.IsThread() || filepath.Dir(record.Dir) != threads ||
+		!strings.HasPrefix(filepath.Base(record.Dir), "t-") {
+		t.Fatalf("record = %+v, want a thread named %q in a t- directory under %s", record, ThreadTitlePlaceholder, threads)
 	}
-	if info, err := os.Stat(wantDir); err != nil || !info.IsDir() {
+	if info, err := os.Stat(record.Dir); err != nil || !info.IsDir() {
 		t.Fatalf("the thread's directory was not made: %v", err)
 	}
 	if len(registry.registered) != 1 || len(f.db.putSessions) != 1 || f.db.putSessions[0].Workspace != record.ID {
@@ -74,6 +87,134 @@ func TestCreateThreadMakesARegisteredThreadWithItsSessionUp(t *testing.T) {
 	}
 	if len(f.fleet.started) != 1 || f.fleet.started[0] != record.ID {
 		t.Fatalf("started = %v, want the thread's session", f.fleet.started)
+	}
+}
+
+func TestATitledThreadIsRenamedToItsTitle(t *testing.T) {
+	// Arrange
+	f, _ := newThreadFixture(t)
+
+	// Act
+	record, err := f.verbs.CreateThread(context.Background(), "why is the sky blue?")
+	f.titled()
+
+	// Assert
+	if err != nil || f.db.workspaces[record.ID].Name != FixtureThreadTitle {
+		t.Fatalf("name = %q, err = %v; want %q", f.db.workspaces[record.ID].Name, err, FixtureThreadTitle)
+	}
+	if call := f.headless.calls[0]; !strings.Contains(call.Prompt, "why is the sky blue?") || call.Model != headless.ModelHaiku {
+		t.Fatalf("title call = %+v, want haiku asked about the question", call)
+	}
+}
+
+func TestAThreadThatCannotBeTitledIsUntitledAndRecorded(t *testing.T) {
+	cases := []struct {
+		name    string
+		answers []headlessAnswer
+	}{
+		{name: "the call fails", answers: []headlessAnswer{{err: &headless.Error{Cause: headless.CauseExitStatus, Detail: "exit status 3"}}}},
+		{name: "every answer is a slug", answers: []headlessAnswer{{text: "sky-color"}}},
+		{name: "the brief is missing", answers: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f, _ := newThreadFixture(t)
+			f.headless.answers = tc.answers
+			if tc.answers == nil {
+				delete(f.briefs, BriefThreadTitle)
+			}
+
+			// Act
+			record, err := f.verbs.CreateThread(context.Background(), "why?")
+			f.titled()
+
+			// Assert
+			if err != nil || f.db.workspaces[record.ID].Name != UntitledThread {
+				t.Fatalf("name = %q, err = %v; want %q", f.db.workspaces[record.ID].Name, err, UntitledThread)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opThreadTitle}); !ok {
+				t.Fatalf("no error record of the failed title in %+v", f.log.logger.Records())
+			}
+		})
+	}
+}
+
+func TestTwoThreadsOfOneTitleTakeASuffix(t *testing.T) {
+	// Arrange
+	f, _ := newThreadFixture(t)
+	first, err := f.verbs.CreateThread(context.Background(), "why?")
+	f.titled()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	second, err := f.verbs.CreateThread(context.Background(), "why, again?")
+	f.titled()
+
+	// Assert
+	names := []string{f.db.workspaces[first.ID].Name, f.db.workspaces[second.ID].Name}
+	if err != nil || !slices.Equal(names, []string{FixtureThreadTitle, FixtureThreadTitle + " (2)"}) {
+		t.Fatalf("names = %v, err = %v", names, err)
+	}
+}
+
+func TestAThreadMadeWhileAnotherIsUntitledTakesTheNextPlaceholder(t *testing.T) {
+	// Arrange: a thread still under the placeholder.
+	f, _ := newThreadFixture(t)
+	f.db.with(wsm.Workspace{ID: "held", Kind: wsm.WorkspaceKindThread, Dir: "/z/t-held", Name: ThreadTitlePlaceholder})
+
+	// Act
+	record, err := f.verbs.CreateThread(context.Background(), "why?")
+	f.titled()
+
+	// Assert
+	if err != nil || record.Name != ThreadTitlePlaceholder+" (2)" {
+		t.Fatalf("record = %+v, err = %v; want the next placeholder", record, err)
+	}
+}
+
+func TestValidateThreadTitle(t *testing.T) {
+	cases := []struct {
+		answer, want string
+		ok           bool
+	}{
+		{answer: "Fusion in the Sun", want: "Fusion in the Sun", ok: true},
+		{answer: "  \"Fusion in the Sun.\"  ", want: "Fusion in the Sun", ok: true},
+		{answer: "Sun  Fusion", want: "Sun Fusion", ok: true},
+		{answer: "sun-fusion", ok: false},
+		{answer: "One Two Three Four Five Six", ok: false},
+		{answer: "Two\nLines", ok: false},
+		{answer: "Supercalifragilistic Expialidocious Antidisestablishmentarian", ok: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.answer, func(t *testing.T) {
+			got, err := ValidateThreadTitle(tc.answer)
+			if (err == nil) != tc.ok || got != tc.want {
+				t.Fatalf("ValidateThreadTitle(%q) = %q, %v; want %q, ok %v", tc.answer, got, err, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestResumeThreadTitlesTitlesWhatAStoppedDaemonLeftUntitled(t *testing.T) {
+	// Arrange: one thread left under the placeholder, one titled, one agent workspace.
+	f, _ := newThreadFixture(t)
+	f.db.with(wsm.Workspace{ID: "untitled", Kind: wsm.WorkspaceKindThread, Dir: "/z/t-a", Name: ThreadTitlePlaceholder})
+	f.db.with(wsm.Workspace{ID: "done", Kind: wsm.WorkspaceKindThread, Dir: "/z/t-b", Name: "Rust Lifetime Basics"})
+	f.db.firstQuestions = map[ids.WorkspaceID]string{"untitled": "why is the sky blue?"}
+
+	// Act
+	err := f.verbs.(*verbs).ResumeThreadTitles(context.Background())
+	f.titled()
+
+	// Assert
+	if err != nil || f.db.workspaces["untitled"].Name != FixtureThreadTitle || f.db.workspaces["done"].Name != "Rust Lifetime Basics" {
+		t.Fatalf("names = %q, %q; err = %v", f.db.workspaces["untitled"].Name, f.db.workspaces["done"].Name, err)
+	}
+	if len(f.headless.calls) != 1 || !strings.Contains(f.headless.calls[0].Prompt, "why is the sky blue?") {
+		t.Fatalf("title calls = %+v, want one, of the untitled thread's question", f.headless.calls)
 	}
 }
 
@@ -113,22 +254,6 @@ func TestEveryRegistrationAdmitsThroughAdmit(t *testing.T) {
 	}
 }
 
-func TestCreateThreadTakesTheNextSuffixWhenTheDirectoryIsHeld(t *testing.T) {
-	// Arrange
-	f, _ := newThreadFixture(t)
-	if err := os.MkdirAll(filepath.Join(f.home, "zettel", "threads", FixtureMintedName), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	record, err := f.verbs.CreateThread(context.Background(), "why?")
-
-	// Assert
-	if err != nil || record.Name != FixtureMintedName+"-2" {
-		t.Fatalf("record = %+v, err = %v, want %s-2", record, err, FixtureMintedName)
-	}
-}
-
 func TestCreateThreadRefusals(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -136,10 +261,6 @@ func TestCreateThreadRefusals(t *testing.T) {
 		arrange  func(f *fixture)
 	}{
 		{name: "a blank question", question: "  "},
-		{name: "a naming call that fails", question: "why?", arrange: func(f *fixture) {
-			failed := headlessAnswer{err: &headless.Error{Cause: headless.CauseExitStatus, Detail: "exit status 3"}}
-			f.headless.answers = []headlessAnswer{failed, failed, failed}
-		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

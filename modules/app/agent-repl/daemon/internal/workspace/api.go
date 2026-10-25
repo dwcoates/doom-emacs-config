@@ -279,6 +279,10 @@ type Verbs interface {
 	// The boot calls it once its gone repositories are retired: a repository
 	// is known exactly as long as its main worktree is a registered workspace.
 	EnsureMainWorktrees(ctx context.Context) error
+	// ResumeThreadTitles titles every chat thread a stopped daemon left under
+	// its placeholder name, from its first question; the titles arrive on
+	// their own goroutines.
+	ResumeThreadTitles(ctx context.Context) error
 	// SettleMissingDirectory settles an OPEN workspace whose directory a stat
 	// found gone (statErr): recreated from its recorded branch, as an open of
 	// it does, or closed by the daemon when there is nothing to restore from.

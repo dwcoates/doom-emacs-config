@@ -14,6 +14,13 @@ back to the model to shorten through `workspace-name-shorten.md`; if the
 shortened answer is still over, it is taken anyway. The rule itself lives in
 `daemon/internal/workspace/naming.go`.
 
+A chat thread is TITLED, not named, through `chat-title-from-question.md`: a
+two-to-five-word Title Case summary of its first question, checked on the
+answer (`daemon/internal/workspace/threadtitle.go`). The thread is opened at
+once under "Loading…" and renamed when its title arrives. The e2e suite's fake
+vendor recognizes that file by its first line, "Title the chat thread", so a
+reworded first line needs `daemon/integration/harness/fakes.go` to follow it.
+
 **This directory is doom's own policy, not everyone's.** These files are the
 one-shot and merge policy of the ONE repository this checkout lives in. Every
 other repository states its own in `.agent-repl/prompts/` at its main checkout

@@ -22,9 +22,9 @@ import (
 	"agent-repld/integration/harness"
 )
 
-// emacsThreadName is the Emacs workspace a thread the fake vendor names opens
-// under (roster.el's `agent-repl-roster-thread-prefix').
-var emacsThreadName = "chat/" + harness.FakeClaudeMintedName
+// emacsThreadName is the Emacs workspace a thread is renamed to once the fake
+// vendor titles it (roster.el's `agent-repl-roster-thread-prefix').
+var emacsThreadName = "chat/" + harness.FakeClaudeMintedTitle
 
 // truthy reports whether an evaluated form answered non-nil.
 func truthy(raw json.RawMessage) bool { return !isJSONNull(raw) && string(raw) != "false" }
