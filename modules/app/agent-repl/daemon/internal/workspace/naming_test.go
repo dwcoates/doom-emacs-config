@@ -1,12 +1,14 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/refusalarm"
 )
 
@@ -371,5 +373,70 @@ func TestValidateSuppliedNameNamesTheFirstBreach(t *testing.T) {
 				t.Fatalf("ValidateSuppliedName(%q) = %+v, want component %q under rule %q", supplied, breach, tc.component, tc.rule)
 			}
 		})
+	}
+}
+
+func TestRefuseSuppliedNameRefusesWhatBreaksTheRule(t *testing.T) {
+	tests := []struct {
+		name      string
+		supplied  string
+		component string
+		rule      refusalarm.Nested
+	}{
+		{name: "a slug that is not lowercase hyphenated words", supplied: "Bad Name", component: "Bad Name", rule: NameRuleSlug},
+		{name: "a prefix that is not letters and digits", supplied: "A B/fine", component: "A B", rule: NameRulePrefix},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+
+			// Act
+			err := refuseSuppliedName(log, "SomeRpc", tt.supplied)
+
+			// Assert
+			refusal, ok := AsRefusal(err)
+			if !ok || refusal.Rpc != "SomeRpc" || refusal.Arm != ArmInvalidName {
+				t.Fatalf("refuseSuppliedName = %v, want SomeRpc's %s", err, ArmInvalidName)
+			}
+			if refusal.Fields["name"] != tt.supplied || refusal.Fields["component"] != tt.component || refusal.Fields["rule"] != tt.rule {
+				t.Errorf("fields = %v, want %q at %q breaking %s", refusal.Fields, tt.supplied, tt.component, tt.rule)
+			}
+			r, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRefusal})
+			if !found || r.Context["arm"] != ArmInvalidName || r.Context["arm_component"] != tt.component {
+				t.Errorf("record = %+v, want an INFO refusal naming the arm and the component", r)
+			}
+		})
+	}
+}
+
+func TestRefuseSuppliedNamePassesALegalName(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+
+	// Act
+	err := refuseSuppliedName(log, "SomeRpc", "ABC/fine-name")
+
+	// Assert
+	if err != nil || len(log.Records()) != 0 {
+		t.Fatalf("refuseSuppliedName = %v with records %v, want nil and nothing recorded", err, log.Records())
+	}
+}
+
+// TestCreateAndRenameRefuseABadNameAlike pins the two call sites to the one
+// refusal: the same supplied name is refused with the same reason and
+// evidence by a create and a rename.
+func TestCreateAndRenameRefuseABadNameAlike(t *testing.T) {
+	// Arrange
+	f := renameFixture(t)
+
+	// Act
+	_, renameErr := f.verbs.SetName(context.Background(), "w1", "Bad Name")
+	_, createErr := f.verbs.Create(context.Background(), CreateSpec{RepoDir: mainWorktree(t, f), Name: "Bad Name"})
+
+	// Assert
+	renamed, createdRefusal := asRefusal(t, renameErr, ArmInvalidName), asRefusal(t, createErr, ArmInvalidName)
+	if renamed.Reason != createdRefusal.Reason || fmt.Sprint(renamed.Fields) != fmt.Sprint(createdRefusal.Fields) {
+		t.Fatalf("rename refused %q %v, create %q %v; want them alike", renamed.Reason, renamed.Fields, createdRefusal.Reason, createdRefusal.Fields)
 	}
 }

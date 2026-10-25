@@ -37,10 +37,8 @@ func (v *verbs) SetName(ctx context.Context, ws ids.WorkspaceID, requested strin
 		return "", err
 	}
 	supplied := strings.TrimSpace(requested)
-	if breach := ValidateSuppliedName(supplied); breach != nil {
-		return "", refuseWith(log, rpcSetName, ArmInvalidName,
-			fmt.Sprintf("the name %q breaks the %s rule at %q", supplied, breach.Rule, breach.Component), false,
-			map[string]any{"name": supplied, "component": breach.Component, "rule": breach.Rule})
+	if err := refuseSuppliedName(log, rpcSetName, supplied); err != nil {
+		return "", err
 	}
 	name := suppliedBranch(supplied)
 	fields := dlog.Context{"name": name, "previous": record.Name, "branch": record.Branch}

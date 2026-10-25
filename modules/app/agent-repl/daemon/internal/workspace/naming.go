@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"agent-repld/internal/dirpath"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/refusalarm"
 )
 
@@ -140,6 +141,20 @@ func ValidateSuppliedName(name string) *NameBreach {
 		return &NameBreach{Component: components[last], Rule: NameRuleSlug}
 	}
 	return nil
+}
+
+// refuseSuppliedName refuses SUPPLIED as RPC's invalid_name, recorded on
+// LOG, when it breaks the naming rule (ValidateSuppliedName), and answers nil
+// for a legal name. It is the ONE spelling of that refusal: a create's
+// supplied name and a rename are held to one rule, so they are refused alike.
+func refuseSuppliedName(log dlog.Logger, rpc, supplied string) error {
+	breach := ValidateSuppliedName(supplied)
+	if breach == nil {
+		return nil
+	}
+	return refuseWith(log, rpc, ArmInvalidName,
+		fmt.Sprintf("the name %q breaks the %s rule at %q", supplied, breach.Rule, breach.Component), false,
+		map[string]any{"name": supplied, "component": breach.Component, "rule": breach.Rule})
 }
 
 // Name composes the workspace name (which is also the branch name) from the
