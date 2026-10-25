@@ -22,6 +22,7 @@ import {
   drawTabDuration,
   mergeTabIdsOf,
   readMergeTab,
+  roundSuffix,
   updateFeedMergeTab,
 } from "../../../src/feed/merge/tab-strip.js";
 import { oneofArms } from "../../arms.js";
@@ -172,6 +173,22 @@ describe("drawFeedMergeTabLabel: rounds beyond the first", () => {
   it("draws round 1 undecorated, so an ordinary run never reads as a retry", () => {
     const el = drawFeedMergeTabLabel(create(FeedMergeTabLabelSchema, { words: { case: "text", value: "tests" }, round: 1 }));
     expect(el.textContent).toBe("tests");
+  });
+});
+
+describe("roundSuffix: the words a round adds after its label", () => {
+  it.each([
+    { name: "adds nothing for round 1", round: 1, want: "" },
+    { name: "adds nothing for an unset round", round: 0, want: "" },
+    { name: "adds the number for round 2", round: 2, want: " (2)" },
+    { name: "adds the number for a later round", round: 7, want: " (7)" },
+  ])("$name", ({ round, want }) => {
+    expect(roundSuffix(round)).toBe(want);
+  });
+
+  it("is the suffix every tab label draws", () => {
+    const el = drawFeedMergeTabLabel(create(FeedMergeTabLabelSchema, { words: { case: "text", value: "committing" }, round: 3 }));
+    expect(el.textContent).toBe(`committing${roundSuffix(3)}`);
   });
 });
 
