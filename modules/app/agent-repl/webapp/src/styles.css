@@ -857,20 +857,25 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    rows. It overlaps .sb-scroll rather than taking room from it, so the band
    fit's measured height never moves for it. */
 #ws-sidebar { position: relative; }
-/* A FLOATING PURPLE MAGNIFIER (owner request, 2026-10-13): no visible
-   button around it -- no fill, no border, and no focus ring, which WebKit
-   otherwise draws as a grey bevelled box around the focused control. The
-   glyph wears the bands' header purple, held back a touch until hovered,
-   focused or open; the padding keeps the click square it always had. */
+/* THE RAIL'S BARE GLYPH CONTROLS: no visible button around the glyph --
+   no fill, no border, and no focus ring, which WebKit otherwise draws as a
+   grey bevelled box around the focused control. Every rail control drawn as
+   a glyph floating on the background takes its bare look from here. */
 #ws-sidebar .sb-search-btn {
-  display: inline-flex;
-  align-items: center;
-  color: var(--blocked);
   background: none;
   border: none;
   outline: none;
   -webkit-appearance: none;
   appearance: none;
+}
+/* A FLOATING PURPLE MAGNIFIER (owner request, 2026-10-13), bare as the
+   rail's glyph controls are. The glyph wears the bands' header purple, held
+   back a touch until hovered, focused or open; the padding keeps the click
+   square it always had. */
+#ws-sidebar .sb-search-btn {
+  display: inline-flex;
+  align-items: center;
+  color: var(--blocked);
   opacity: 0.75;
   cursor: pointer;
   padding: 0.1rem;
