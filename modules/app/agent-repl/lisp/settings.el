@@ -48,6 +48,7 @@
 (declare-function agent-repl--input-help-key-column "input-help" (cells))
 (declare-function agent-repl--input-help-groups "input-help" ())
 (declare-function agent-repl--input-help-state-label "input-help" (states))
+(declare-function agent-repl--input-help-variable-value "input-help" (variable))
 (declare-function agent-repl--input-help-topic "input-help" (key value))
 (defvar agent-repl-input-help-topics)
 (defvar doom-leader-key)
@@ -310,11 +311,10 @@ prefix, cannot be bound at all.  Each refusal is a `user-error'."
 
 (defun agent-repl-settings--variable-line (variable)
   "Return VARIABLE's line: its name and value, then a button to edit it."
-  (let ((print-escape-newlines t))
-    (concat (propertize (symbol-name variable) 'face 'agent-repl-input-help-variable)
-            ": " (propertize (prin1-to-string (symbol-value variable)) 'face 'font-lock-string-face)
-            "  " (agent-repl-settings--button "edit" (concat "Edit " (symbol-name variable))
-                                              (lambda () (agent-repl-settings-edit-variable variable))))))
+  (concat (propertize (symbol-name variable) 'face 'agent-repl-input-help-variable)
+          ": " (agent-repl--input-help-variable-value variable)
+          "  " (agent-repl-settings--button "edit" (concat "Edit " (symbol-name variable))
+                                            (lambda () (agent-repl-settings-edit-variable variable)))))
 
 (defun agent-repl-settings--rows (topic context)
   "Return TOPIC's rows as (CELL DESCRIPTION LINES), one per command.

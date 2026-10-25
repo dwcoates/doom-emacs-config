@@ -672,15 +672,20 @@ command no map binds, or a variable that is not bound, is fatal."
                       description variables))))
           (plist-get topic :bindings)))
 
+(defun agent-repl--input-help-variable-value (variable)
+  "Return VARIABLE's current value as shown: printed, newlines escaped.
+Shared by the help popup and the Settings page (settings.el)."
+  (let ((print-escape-newlines t))
+    (propertize (prin1-to-string (symbol-value variable)) 'face 'font-lock-string-face)))
+
 (defun agent-repl--input-help-variable-line (variable)
   "Return VARIABLE's line: its name, a button that describes it, and its value."
-  (let ((print-escape-newlines t))
-    (concat (make-text-button (symbol-name variable) nil
-                              'face 'agent-repl-input-help-variable
-                              'action (lambda (_) (describe-variable variable))
-                              'help-echo (concat "mouse-1: describe " (symbol-name variable)))
-            ": "
-            (propertize (prin1-to-string (symbol-value variable)) 'face 'font-lock-string-face))))
+  (concat (make-text-button (symbol-name variable) nil
+                            'face 'agent-repl-input-help-variable
+                            'action (lambda (_) (describe-variable variable))
+                            'help-echo (concat "mouse-1: describe " (symbol-name variable)))
+          ": "
+          (agent-repl--input-help-variable-value variable)))
 
 (defun agent-repl--input-help-insert-row (cell description lines column)
   "Insert a row: CELL, then DESCRIPTION and each of LINES at COLUMN.
