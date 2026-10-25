@@ -49,7 +49,7 @@ import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
 import { placeChildren } from "./children.js";
 import { queryAll } from "../dom.js";
 import { createSelectionFade } from "./selection-fade.js";
-import { createSelectionScroll } from "./selection-scroll.js";
+import { createSelectionScroll, RAIL_BODY_CLASS } from "./selection-scroll.js";
 import type { RosterVersion, WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** What every mount answers with. */
@@ -228,7 +228,7 @@ function mountSidebarIn(
     placeOpenRowDetails(body);
   });
   const body = document.createElement("div");
-  body.className = "sb-scroll";
+  body.className = RAIL_BODY_CLASS;
   // THE ARRANGEMENT'S OWN ELEMENTS OUTLIVE EVERY PUSH (arrange.ts): the layer
   // a drag's copy and a name popup are drawn in, and the slot a refused
   // arrangement is said in.
