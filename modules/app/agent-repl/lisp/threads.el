@@ -39,6 +39,8 @@
 (declare-function agent-repl-rpc-create-thread "rpc" (conn request &rest keys))
 (declare-function agent-repl-roster-threads "roster" (&optional roster))
 (declare-function agent-repl-roster-thread-row-ws "roster" (row))
+(defvar agent-repl-roster-view)
+(defvar agent-repl-roster-update-functions)
 
 (defconst agent-repl-threads--log-scope
   '(:agent-repl-central "a thread is created and picked from no workspace of its own")
@@ -130,6 +132,59 @@ a timer, and held while another minibuffer is open."
     (unless rows
       (user-error "agent-repl: there is no thread yet; SPC TAB t starts one"))
     (agent-repl-threads--open (car rows) 'thread-recent)))
+
+;;;; ---- Opening Chats from outside Emacs (Gippity.app) ----
+
+;; GIPPITY.APP OPENS A FILE (bin/install-gippity.sh): `open -a Emacs` on the
+;; launch file, lisp/open-chats.agent-repl-chats, whose name matches the
+;; regexp below. macOS holds that open until Emacs takes it, running or
+;; still starting, so no launch is lost to a server that is not up yet; the
+;; file's major mode opens the most recent thread, at once or, before the
+;; first roster, on its arrival.
+
+(defconst agent-repl-threads-launch-file-regexp "\\.agent-repl-chats\\'"
+  "The file names whose opening is a launch of Chats from outside Emacs.")
+
+(defvar agent-repl-threads--recent-owed nil
+  "Non-nil while a launch waits for the first roster to open its thread.")
+
+(defun agent-repl-threads--open-recent-launched ()
+  "Open the most recent thread for a launch; say so when there is none."
+  (let ((rows (agent-repl-roster-threads)))
+    (if rows
+        (agent-repl-threads--open (car rows) 'launch)
+      (agent-repl--info agent-repl-threads--log-scope "elisp.threads.launch-no-thread")
+      (message "[agent-repl] There is no thread yet; SPC TAB t starts one"))))
+
+(defun agent-repl-thread-recent-when-ready ()
+  "Open the most recent thread now, or once the daemon's first roster arrives."
+  (if agent-repl-roster-view
+      (agent-repl-threads--open-recent-launched)
+    (setq agent-repl-threads--recent-owed t)
+    (agent-repl--info agent-repl-threads--log-scope "elisp.threads.launch-deferred")))
+
+(defun agent-repl-threads--launch-on-roster (&rest _)
+  "Open the thread a launch owes, once, with the first roster."
+  (when agent-repl-threads--recent-owed
+    (setq agent-repl-threads--recent-owed nil)
+    (agent-repl-threads--open-recent-launched)))
+
+(add-hook 'agent-repl-roster-update-functions #'agent-repl-threads--launch-on-roster)
+
+(defun agent-repl-threads-launch-mode ()
+  "The mode of a launch file: drop its buffer, then open the most recent thread.
+Both run once `find-file' has finished with the buffer, which a mode
+function cannot kill from inside it."
+  (let ((buffer (current-buffer)))
+    (agent-repl--info agent-repl-threads--log-scope "elisp.threads.launched file=%s" buffer-file-name)
+    (run-at-time 0 nil (lambda ()
+                         (when (buffer-live-p buffer) (kill-buffer buffer))
+                         (agent-repl-thread-recent-when-ready)))))
+
+(add-to-list 'auto-mode-alist (cons agent-repl-threads-launch-file-regexp #'agent-repl-threads-launch-mode))
+(with-eval-after-load 'recentf
+  (defvar recentf-exclude)
+  (add-to-list 'recentf-exclude agent-repl-threads-launch-file-regexp))
 
 (defun agent-repl-thread-pick ()
   "Open a thread picked by name (`SPC TAB .\='), the most recent first."

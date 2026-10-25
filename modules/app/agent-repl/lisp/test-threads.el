@@ -124,6 +124,66 @@ WS is the workspace a thread is open in, nil while it is still opening."
         (agent-repl-thread-requested))
       (should (eq opened 'agent-repl-thread-new)))))
 
+;;;; ---- Opening Chats from outside Emacs ----
+
+(ert-deftest agent-repl-test-threads-a-launch-opens-the-newest-thread-at-once ()
+  "With a roster in hand, a launch opens the most recent thread."
+  (agent-repl-test-threads--with '(("t-2" "newer" "chat/newer") ("t-1" "older" "chat/older"))
+    (let ((agent-repl-threads--recent-owed nil))
+      ;; Act
+      (agent-repl-thread-recent-when-ready)
+      ;; Assert
+      (should (equal agent-repl-test-threads--switched '(("chat/newer" . launch)))))))
+
+(ert-deftest agent-repl-test-threads-a-launch-before-the-roster-waits-for-it ()
+  "Before the first roster a launch opens nothing, and the roster's arrival opens it once."
+  (agent-repl-test-threads--with '(("t-1" "why" "chat/why"))
+    (let ((roster agent-repl-roster-view)
+          (agent-repl-threads--recent-owed nil))
+      (let ((agent-repl-roster-view nil))
+        ;; Act
+        (agent-repl-thread-recent-when-ready)
+        ;; Assert
+        (should (null agent-repl-test-threads--switched))
+        (should (agent-repl-test-threads--recorded 'info "elisp.threads.launch-deferred")))
+      (agent-repl-threads--launch-on-roster roster)
+      (agent-repl-threads--launch-on-roster roster)
+      (should (equal agent-repl-test-threads--switched '(("chat/why" . launch)))))))
+
+(ert-deftest agent-repl-test-threads-a-launch-with-no-thread-says-so ()
+  "A launch with no thread yet raises nothing, and records it."
+  (agent-repl-test-threads--with '()
+    (let ((agent-repl-threads--recent-owed nil))
+      ;; Act
+      (agent-repl-thread-recent-when-ready)
+      ;; Assert
+      (should (null agent-repl-test-threads--switched))
+      (should (agent-repl-test-threads--recorded 'info "elisp.threads.launch-no-thread")))))
+
+(ert-deftest agent-repl-test-threads-the-launch-file-opens-chats-and-closes ()
+  "Visiting the launch file drops its buffer and opens the most recent thread."
+  (agent-repl-test-threads--with '(("t-1" "why" "chat/why"))
+    (let* ((agent-repl-threads--recent-owed nil)
+           ;; A copy of the launch file Gippity.app opens, so its name is the
+           ;; real one and the visit cannot touch the checked-in file.
+           (file (let ((copy (make-temp-file "gippity" t)))
+                   (copy-file (expand-file-name "open-chats.agent-repl-chats"
+                                                (file-name-directory (symbol-file 'agent-repl-threads-launch-mode 'defun)))
+                              (file-name-as-directory copy) t)
+                   (expand-file-name "open-chats.agent-repl-chats" copy)))
+           (before (copy-sequence timer-list))
+           (buffer (find-file-noselect file))
+           (scheduled (cl-set-difference timer-list before)))
+      (unwind-protect
+          (progn
+            ;; Act: the deferred half, the one timer the visit scheduled.
+            (should (= (length scheduled) 1))
+            (timer-event-handler (car scheduled))
+            ;; Assert
+            (should-not (buffer-live-p buffer))
+            (should (equal agent-repl-test-threads--switched '(("chat/why" . launch)))))
+        (delete-directory (file-name-directory file) t)))))
+
 (provide 'test-threads)
 
 ;;; test-threads.el ends here
