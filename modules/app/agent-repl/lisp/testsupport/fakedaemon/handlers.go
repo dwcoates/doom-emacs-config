@@ -563,6 +563,10 @@ func (s *fakeServer) UpdateDeployHold(ctx context.Context, req *connect.Request[
 	return handleUnary[v1.UpdateDeployHoldRequest, v1.UpdateDeployHoldResponse](ctx, s, "UpdateDeployHold", req.Msg)
 }
 
+func (s *fakeServer) ReapWorktrees(ctx context.Context, req *connect.Request[v1.ReapWorktreesRequest]) (*connect.Response[v1.ReapWorktreesResponse], error) {
+	return handleUnary[v1.ReapWorktreesRequest, v1.ReapWorktreesResponse](ctx, s, "ReapWorktrees", req.Msg)
+}
+
 func (s *fakeServer) PruneStorage(ctx context.Context, req *connect.Request[v1.PruneStorageRequest]) (*connect.Response[v1.PruneStorageResponse], error) {
 	return handleUnary[v1.PruneStorageRequest, v1.PruneStorageResponse](ctx, s, "PruneStorage", req.Msg)
 }
