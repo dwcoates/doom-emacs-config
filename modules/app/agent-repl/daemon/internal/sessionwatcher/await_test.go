@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -441,6 +443,43 @@ func TestTheFreenessEdgeReachesTheLifecycleSink(t *testing.T) {
 				t.Fatalf("the workspace fell free and OnFree was never told")
 			}
 		})
+	}
+}
+
+// TestATurnOpenedOnAnIdleSessionRaisesTheFreenessEdgeAtItsEnd pins the edge
+// for the commonest turn of all: one the queue opens on a session that came up
+// idle, with no detached work changing under it. Opening it is what makes the
+// session busy, so its end is a transition the sink is told of; without that,
+// a stand-down a collapse deferred under the turn waited for an edge that never
+// came (2026-10-25).
+func TestATurnOpenedOnAnIdleSessionRaisesTheFreenessEdgeAtItsEnd(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+	h.w.OnTurnOpened(h.w.ws, &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-1"},
+		Agent: agentID("main-1"),
+	}, nil)
+	h.w.dispatching.Wait()
+	select {
+	case ws := <-h.rec.frees:
+		t.Fatalf("OnFree(%q) was told while the turn runs", ws)
+	default:
+	}
+
+	// Act.
+	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+	h.w.dispatching.Wait()
+
+	// Assert.
+	select {
+	case ws := <-h.rec.frees:
+		if ws != h.w.ws {
+			t.Fatalf("OnFree named %q, want %q", ws, h.w.ws)
+		}
+	default:
+		t.Fatal("the turn ended and OnFree was never told")
 	}
 }
 

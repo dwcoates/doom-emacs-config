@@ -15,15 +15,28 @@ import (
 // opFoldRepository is the operation FoldRepository's records carry.
 const opFoldRepository = "daemon.workspace.fold_repository"
 
+// FoldRequester is who asked for a fold: the rpc it came by, and the request
+// id its client sent with it (empty when the client sent none). Every fold's
+// records carry it, so a fold that stood sessions down is never anonymous.
+type FoldRequester struct {
+	RPC       string
+	RequestID string
+}
+
+// context is the requester as a fold's records carry it.
+func (r FoldRequester) context() dlog.Context {
+	return dlog.Context{"requested_by_rpc": r.RPC, "request_id": r.RequestID}
+}
+
 // FoldRepository records whether a repository's roster section is collapsed,
 // then republishes the roster: the sidebar hides a collapsed section's rows
 // and the Emacs tab bar hides that repository's workspaces, both off the one
-// pushed fold. COLLAPSING STANDS THE SECTION'S OPEN WORKSPACES' SESSIONS DOWN
-// (only visible workspaces run), each as hiding it would; EXPANDING starts
+// pushed fold. COLLAPSING HIDES THE SECTION'S OPEN WORKSPACES and stands down
+// the sessions of those it does not spare (foldTabs); EXPANDING starts
 // nothing, the editor asks with OpenTabs. Selecting a workspace expands the
 // folds holding it without coming here (wsm's setCurrent).
-func (v *verbs) FoldRepository(ctx context.Context, repo ids.RepoID, folded bool) error {
-	log := v.deps.Log.Global().With(dlog.Context{"repo_id": string(repo), "folded": folded})
+func (v *verbs) FoldRepository(ctx context.Context, repo ids.RepoID, folded bool, requester FoldRequester) error {
+	log := v.deps.Log.Global().With(dlog.Merge(dlog.Context{"repo_id": string(repo), "folded": folded}, requester.context()))
 	return v.foldTabs(ctx, log, foldTabsSpec{
 		op:     opFoldRepository,
 		what:   "repository",
@@ -46,11 +59,11 @@ const opFoldSubsection = "daemon.workspace.fold_subsection"
 // FoldSubsection records whether a subsection of a repository's section is
 // collapsed, with the effect a repository's collapse has (FoldRepository):
 // the sidebar hides its rows, the Emacs tab bar folds its workspaces' tabs,
-// and COLLAPSING STANDS ITS OPEN WORKSPACES' SESSIONS DOWN. A workspace sits
-// in its root's subsection, so a family folds whole. An unknown subsection is
-// refused unknown_subsection.
-func (v *verbs) FoldSubsection(ctx context.Context, sub ids.SubsectionID, folded bool) error {
-	log := v.deps.Log.Global().With(dlog.Context{"subsection": string(sub), "folded": folded})
+// and COLLAPSING HIDES ITS OPEN WORKSPACES, standing down those it does not
+// spare. A workspace sits in its root's subsection, so a family folds whole.
+// An unknown subsection is refused unknown_subsection.
+func (v *verbs) FoldSubsection(ctx context.Context, sub ids.SubsectionID, folded bool, requester FoldRequester) error {
+	log := v.deps.Log.Global().With(dlog.Merge(dlog.Context{"subsection": string(sub), "folded": folded}, requester.context()))
 	return v.foldTabs(ctx, log, foldTabsSpec{
 		op:     opFoldSubsection,
 		what:   "subsection",
@@ -88,9 +101,14 @@ type foldTabsSpec struct {
 }
 
 // foldTabs is THE ONE PATH OF A FOLD THAT HIDES TABS: the fold recorded, the
-// roster republished, and, on a collapse, every open workspace it holds stood
-// down as hiding it would, so only visible workspaces run. Expanding starts
-// nothing: the editor asks with OpenTabs.
+// roster republished, and, on a collapse, every open workspace it holds
+// hidden. Expanding starts nothing: the editor asks with OpenTabs.
+//
+// A FOLD HIDES; IT NEVER CHANGES A STATUS (owner ruling, 2026-10-25). A
+// workspace its record spares (wsm.Workspace.FoldSpare: a one-shot, a merge
+// pending) keeps its session. Every other one is asked to stand down, and
+// the stand-down gate holds that back while a turn or detached work is in
+// flight, taking it only on the free edge after (drain's withheld path).
 func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec) error {
 	workspaces, err := v.recordFold(ctx, log, spec)
 	if err != nil {
@@ -101,15 +119,21 @@ func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec
 	if !spec.folded {
 		return nil
 	}
-	var withheld []string
+	hidden, spared, standingDown := []string{}, map[string]string{}, []string{}
 	for _, ws := range workspaces {
 		if !spec.members.StandsDown(ws) {
 			continue
 		}
-		withheld = append(withheld, string(ws.ID))
+		hidden = append(hidden, string(ws.ID))
+		if spare, ok := ws.FoldSpare(); ok {
+			spared[string(ws.ID)] = string(spare)
+			continue
+		}
+		standingDown = append(standingDown, string(ws.ID))
 		v.deps.StandDowns.StandDownWithheld(ws.ID)
 	}
-	log.Info(spec.op, "the collapsed "+spec.what+"'s open workspaces are stood down", dlog.Context{"workspaces": withheld})
+	log.Info(spec.op, "the collapsed "+spec.what+"'s open workspaces are hidden; the spared keep running, the rest stand down once free",
+		dlog.Context{"hidden": hidden, "spared": spared, "standing_down": standingDown})
 	return nil
 }
 

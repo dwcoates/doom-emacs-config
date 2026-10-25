@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createDaemonTransport } from "../../src/rpc/transport.js";
+import { connectionRequestIds, createDaemonTransport, createPageTransport, REQUEST_ID_HEADER } from "../../src/rpc/transport.js";
+import { beginPage, endPage } from "../../src/page-teardown.js";
+import { codeUnder } from "../files-under.js";
+import { join } from "node:path";
 import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 
 describe("createDaemonTransport", () => {
@@ -152,5 +155,105 @@ describe("createDaemonTransport", () => {
       "http://host.localhost:1000/agentrepl.v1.AgentRepl/DaemonHealth",
       "http://host.localhost:2000/agentrepl.v1.AgentRepl/DaemonHealth",
     ]);
+  });
+
+  it.each([
+    { name: "with a request id source, sends each call's id in order", ids: true, want: ["webhost-c1-1", "webhost-c1-2"] },
+    { name: "with no request id source, sends none", ids: false, want: [null, null] },
+  ])("$name", async ({ ids, want }) => {
+    // Arrange
+    const seen: Array<string | null> = [];
+    const fetchFn = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers).get(REQUEST_ID_HEADER));
+      return new Response(new Uint8Array(), { status: 500 });
+    });
+    const client = createAgentReplClient(
+      createDaemonTransport("http://localhost:8080", {
+        fetch: fetchFn as unknown as typeof globalThis.fetch,
+        ...(ids ? { requestId: connectionRequestIds("webhost", "c1") } : {}),
+      }),
+    );
+    // Act
+    await expect(client.daemonHealth({})).rejects.toBeDefined();
+    await expect(client.daemonHealth({})).rejects.toBeDefined();
+    // Assert
+    expect(seen).toEqual(want);
+  });
+});
+
+describe("connectionRequestIds", () => {
+  it("counts from one under the client and connection", () => {
+    // Arrange
+    const next = connectionRequestIds("page", "c9");
+    // Act / Assert
+    expect([next(), next(), next()]).toEqual(["page-c9-1", "page-c9-2", "page-c9-3"]);
+  });
+
+  it("counts each connection on its own", () => {
+    // Arrange
+    const a = connectionRequestIds("page", "a");
+    const b = connectionRequestIds("page", "b");
+    // Act
+    a();
+    // Assert
+    expect(b()).toBe("page-b-1");
+  });
+});
+
+describe("createPageTransport", () => {
+  /** A fetch that records each call's request id and signal, then fails it. */
+  function recordingFetch(): { fetch: typeof globalThis.fetch; ids: Array<string | null>; signals: Array<AbortSignal | null | undefined> } {
+    const ids: Array<string | null> = [];
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      ids.push(new Headers(init?.headers).get(REQUEST_ID_HEADER));
+      signals.push(init?.signal);
+      return new Response(new Uint8Array(), { status: 500 });
+    }) as unknown as typeof globalThis.fetch;
+    return { fetch, ids, signals };
+  }
+
+  it.each(["page", "webhost"] as const)("names each request under %s and its connection", async (client) => {
+    // Arrange
+    beginPage();
+    const recorded = recordingFetch();
+    vi.stubGlobal("fetch", recorded.fetch);
+    try {
+      const daemon = createAgentReplClient(createPageTransport("http://localhost:8080", client, "c1"));
+      // Act
+      await expect(daemon.daemonHealth({})).rejects.toBeDefined();
+      await expect(daemon.daemonHealth({})).rejects.toBeDefined();
+      // Assert
+      expect(recorded.ids).toEqual([`${client}-c1-1`, `${client}-c1-2`]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("aborts its requests at the page's end", async () => {
+    // Arrange
+    beginPage();
+    const recorded = recordingFetch();
+    vi.stubGlobal("fetch", recorded.fetch);
+    try {
+      const daemon = createAgentReplClient(createPageTransport("http://localhost:8080", "page", "c1"));
+      await expect(daemon.daemonHealth({})).rejects.toBeDefined();
+      // Act
+      endPage();
+      // Assert
+      expect(recorded.signals[0]?.aborted).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+      beginPage();
+    }
+  });
+
+  it("is the only way the webapp's sources build a daemon transport", () => {
+    // Arrange: every source file but the transport module itself.
+    const sources = [...codeUnder(join(__dirname, "../../src"))].filter(([file]) => file !== join("rpc", "transport.ts"));
+    // Act
+    const byHand = sources.filter(([, code]) => code.includes("createDaemonTransport(")).map(([file]) => file);
+    // Assert
+    expect(byHand).toEqual([]);
   });
 });

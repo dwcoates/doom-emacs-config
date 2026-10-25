@@ -462,7 +462,9 @@ open's) starts only workspaces `bringup.OnlyVisible` keeps: never one the user
 hid or whose repository section is collapsed. Collapsing stands the session
 down through the idle sweep's own gate and hibernation (`drain/withheld.go`);
 a turn in flight defers it to the free edge that turn's end raises, and a
-workspace expanded again meanwhile is not stood down. HIDING leaves the cache
+workspace expanded again meanwhile is not stood down. A fold never stands down
+a one-shot or a workspace with a merge pending (`wsm.Workspace.FoldSpare`):
+it hides them and changes no status. HIDING leaves the cache
 to lapse first (`internal/cachelapse`, 2026-10-13): the keeper holds the
 shim's keep-alives, records the lapse the held shim projects on the row (the
 hidden section counts down to it), and stands the session down through the

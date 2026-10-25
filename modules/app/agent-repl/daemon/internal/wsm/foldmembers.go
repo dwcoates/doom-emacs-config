@@ -32,3 +32,39 @@ func (m FoldMembers) StandsDown(ws Workspace) bool {
 func (m FoldMembers) HoldsCurrent(ws *Workspace) bool {
 	return ws != nil && m.StandsDown(*ws)
 }
+
+// FoldSpare is why a fold that hides a workspace leaves its session running.
+type FoldSpare string
+
+// The spares a workspace's own record answers. A turn in flight or live
+// detached work is not among them: that is the stand-down gate's live
+// answer (drain's gate), which holds a stand-down back until the session
+// falls free.
+const (
+	// FoldSpareOneShot is a one-shot: its work runs unattended, so a fold
+	// never stops it.
+	FoldSpareOneShot FoldSpare = "one_shot"
+	// FoldSpareMergePending is a workspace with a merge queue entry standing,
+	// waiting or running, its deploy hooks included.
+	FoldSpareMergePending FoldSpare = "merge_pending"
+)
+
+// FoldSpare answers why a fold leaves WS's session running, false when
+// nothing in WS's record spares it (owner ruling, 2026-10-25: a fold hides a
+// busy workspace and never changes its status).
+//
+// ONLY A FOLD SPARES. A workspace the user hid, or one closed, is withheld by
+// that act rather than by a fold, so it is spared nothing here and its cache
+// lapse stands it down as before.
+func (ws Workspace) FoldSpare() (FoldSpare, bool) {
+	switch {
+	case ws.Closed || ws.Hidden:
+		return "", false
+	case ws.OneShot:
+		return FoldSpareOneShot, true
+	case ws.MergePending:
+		return FoldSpareMergePending, true
+	default:
+		return "", false
+	}
+}

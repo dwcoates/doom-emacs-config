@@ -156,8 +156,8 @@ func TestUpdateSidebarViewHandsTheResolvedRepositoryFoldToTheVerb(t *testing.T) 
 		fold *agentreplv1.SidebarViewFoldSection
 		want repositoryFold
 	}{
-		{"collapse", &agentreplv1.SidebarViewFoldSection{Section: repositorySection("repo-1"), Fold: collapseFold()}, repositoryFold{repo: "repo-1", folded: true}},
-		{"expand", &agentreplv1.SidebarViewFoldSection{Section: repositorySection("repo-1"), Fold: expandFold()}, repositoryFold{repo: "repo-1", folded: false}},
+		{"collapse", &agentreplv1.SidebarViewFoldSection{Section: repositorySection("repo-1"), Fold: collapseFold()}, repositoryFold{repo: "repo-1", folded: true, requester: workspace.FoldRequester{RPC: "UpdateSidebarView"}}},
+		{"expand", &agentreplv1.SidebarViewFoldSection{Section: repositorySection("repo-1"), Fold: expandFold()}, repositoryFold{repo: "repo-1", folded: false, requester: workspace.FoldRequester{RPC: "UpdateSidebarView"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -173,6 +173,42 @@ func TestUpdateSidebarViewHandsTheResolvedRepositoryFoldToTheVerb(t *testing.T) 
 				t.Fatalf("folds = %+v, want %+v", h.Verbs.folds, tt.want)
 			}
 		})
+	}
+}
+
+func TestARepositoryFoldNamesTheRequestIDItsClientSent(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.DB.repositories = append(h.DB.repositories, wsm.Repository{ID: "repo-1", Dir: "/repos/one"})
+	req := connect.NewRequest(foldChange(&agentreplv1.SidebarViewFoldSection{Section: repositorySection("repo-1"), Fold: collapseFold()}))
+	req.Header().Set(requestIDHeader, "webhost-c1-7")
+
+	// Act
+	if _, err := h.Client.UpdateSidebarView(context.Background(), req); err != nil {
+		t.Fatalf("UpdateSidebarView: %v", err)
+	}
+
+	// Assert
+	want := workspace.FoldRequester{RPC: "UpdateSidebarView", RequestID: "webhost-c1-7"}
+	if len(h.Verbs.folds) != 1 || h.Verbs.folds[0].requester != want {
+		t.Fatalf("folds = %+v, want one asked by %+v", h.Verbs.folds, want)
+	}
+}
+
+func TestASubsectionFoldNamesTheRequestIDItsClientSent(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	req := connect.NewRequest(foldChange(&agentreplv1.SidebarViewFoldSection{Section: subsectionSection("sub-1"), Fold: collapseFold()}))
+	req.Header().Set(requestIDHeader, "webhost-c1-8")
+
+	// Act
+	if _, err := h.Client.UpdateSidebarView(context.Background(), req); err != nil {
+		t.Fatalf("UpdateSidebarView: %v", err)
+	}
+
+	// Assert
+	if want := `FoldSubsection sub-1 true by UpdateSidebarView "webhost-c1-8"`; len(h.Verbs.arrangements) != 1 || h.Verbs.arrangements[0] != want {
+		t.Fatalf("arrangements = %q, want %q", h.Verbs.arrangements, want)
 	}
 }
 
@@ -261,8 +297,8 @@ func TestUpdateSidebarViewHandsASubsectionFoldToTheVerb(t *testing.T) {
 		fold *agentreplv1.SidebarViewFoldSection
 		want string
 	}{
-		{"collapse", &agentreplv1.SidebarViewFoldSection{Section: subsectionSection("sub-1"), Fold: collapseFold()}, "FoldSubsection sub-1 true"},
-		{"expand", &agentreplv1.SidebarViewFoldSection{Section: subsectionSection("sub-1"), Fold: expandFold()}, "FoldSubsection sub-1 false"},
+		{"collapse", &agentreplv1.SidebarViewFoldSection{Section: subsectionSection("sub-1"), Fold: collapseFold()}, `FoldSubsection sub-1 true by UpdateSidebarView ""`},
+		{"expand", &agentreplv1.SidebarViewFoldSection{Section: subsectionSection("sub-1"), Fold: expandFold()}, `FoldSubsection sub-1 false by UpdateSidebarView ""`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -2075,8 +2075,9 @@ func receiveHostEvent(
 
 // repositoryFold is one FoldRepository the verb received.
 type repositoryFold struct {
-	repo   ids.RepoID
-	folded bool
+	repo      ids.RepoID
+	folded    bool
+	requester workspace.FoldRequester
 }
 
 func (v *fakeVerbs) Move(_ context.Context, ws, target ids.WorkspaceID) error {
@@ -2123,8 +2124,8 @@ func (v *fakeVerbs) SidebarArrangement(context.Context) ([]sidebar.ArrangedRepos
 	return v.arrangement, v.arrangementErr
 }
 
-func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bool) error {
-	v.folds = append(v.folds, repositoryFold{repo: repo, folded: folded})
+func (v *fakeVerbs) FoldRepository(_ context.Context, repo ids.RepoID, folded bool, requester workspace.FoldRequester) error {
+	v.folds = append(v.folds, repositoryFold{repo: repo, folded: folded, requester: requester})
 	return v.foldErr
 }
 
@@ -2477,8 +2478,8 @@ func (f *fakeDB) UnsubscribeWorkspace(_ context.Context, subscriber, followed id
 
 // FoldSubsection records the subsection fold as an arrangement call and
 // answers arrangeErr.
-func (v *fakeVerbs) FoldSubsection(_ context.Context, sub ids.SubsectionID, folded bool) error {
-	return v.arrange(fmt.Sprintf("FoldSubsection %s %v", sub, folded))
+func (v *fakeVerbs) FoldSubsection(_ context.Context, sub ids.SubsectionID, folded bool, requester workspace.FoldRequester) error {
+	return v.arrange(fmt.Sprintf("FoldSubsection %s %v by %s %q", sub, folded, requester.RPC, requester.RequestID))
 }
 
 // reconnects answers the harness's reconnect tracker, building it on first

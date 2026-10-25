@@ -57,6 +57,14 @@ export function sectionFold(sc: SidebarContext, foldKey: string, target: FoldTar
       });
       return;
     }
+    // A FOLD THAT ASKS IS RECORDED at info: a collapse hides a section's
+    // workspaces and stands down the ones it does not spare, so the daemon's
+    // fold record (`daemon.workspace.fold_repository`, named by this
+    // connection's request id) is matched to the gesture that asked for it.
+    log.info(collapse ? "the section's fold gesture asks the daemon to collapse it" : "the section's fold gesture asks the daemon to expand it", {
+      operation: "sidebar.fold.asked",
+      context: { section: foldKey, collapse },
+    });
     void changeView(sc, {
       key: foldViewKey(foldKey),
       value: collapse,

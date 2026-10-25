@@ -52,3 +52,31 @@ func TestFoldMembersHoldsCurrent(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkspaceFoldSpare(t *testing.T) {
+	tests := []struct {
+		name   string
+		ws     Workspace
+		want   FoldSpare
+		spared bool
+	}{
+		{"an ordinary open workspace is spared nothing", Workspace{}, "", false},
+		{"a one-shot is spared", Workspace{OneShot: true}, FoldSpareOneShot, true},
+		{"a workspace with a merge pending is spared", Workspace{MergePending: true}, FoldSpareMergePending, true},
+		{"a one-shot with a merge pending is spared as a one-shot", Workspace{OneShot: true, MergePending: true}, FoldSpareOneShot, true},
+		{"a hidden one-shot is spared nothing", Workspace{OneShot: true, Hidden: true}, "", false},
+		{"a closed one-shot is spared nothing", Workspace{OneShot: true, Closed: true}, "", false},
+		{"a hidden workspace with a merge pending is spared nothing", Workspace{MergePending: true, Hidden: true}, "", false},
+		{"a closed workspace with a merge pending is spared nothing", Workspace{MergePending: true, Closed: true}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, spared := tt.ws.FoldSpare()
+			// Assert
+			if got != tt.want || spared != tt.spared {
+				t.Fatalf("FoldSpare = %q, %v; want %q, %v", got, spared, tt.want, tt.spared)
+			}
+		})
+	}
+}

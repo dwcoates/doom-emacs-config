@@ -1575,7 +1575,7 @@ func TestFoldRepositoryHandsTheResolvedRepositoryAndFoldToTheVerb(t *testing.T) 
 				Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
 				Fold:       &agentreplv1.FoldRepositoryRequest_Collapse{Collapse: &agentreplv1.FoldRepositoryCollapse{}},
 			},
-			want: repositoryFold{repo: "repo-1", folded: true},
+			want: repositoryFold{repo: "repo-1", folded: true, requester: workspace.FoldRequester{RPC: "FoldRepository"}},
 		},
 		{
 			name: "expand by dir",
@@ -1583,7 +1583,7 @@ func TestFoldRepositoryHandsTheResolvedRepositoryAndFoldToTheVerb(t *testing.T) 
 				Repository: &workspacev1.RepositoryRef{Dir: "/repos/one"},
 				Fold:       &agentreplv1.FoldRepositoryRequest_Expand{Expand: &agentreplv1.FoldRepositoryExpand{}},
 			},
-			want: repositoryFold{repo: "repo-1", folded: false},
+			want: repositoryFold{repo: "repo-1", folded: false, requester: workspace.FoldRequester{RPC: "FoldRepository"}},
 		},
 	}
 	for _, tt := range tests {

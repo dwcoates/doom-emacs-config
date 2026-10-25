@@ -21,6 +21,13 @@ workspace's web page was checked by Emacs alone, never by the daemon.
    (`wsm.Workspace.KeepaliveHeld`). Selecting one revives it, and the old
    rule then stood that session down the moment it came up, so its cold gate
    stood again after every answer. Moving off it withholds it again.
+   Amended 2026-10-25 (owner ruling, verbatim): "folding a repository should
+   have no effect on workspaces with a turn active or background work in
+   flight, or in the merge queue, either. it should hide them from
+   visiblity, but not change their statuses". A fold hides every workspace
+   it holds, and spares the session of a one-shot or of a workspace with a
+   merge pending (`wsm.Workspace.FoldSpare`); see "Hide and collapse stand
+   sessions down".
    - Consequence: boot's bring-up and every open skip invisible workspaces;
      hide and collapse stand sessions down; show and expand start nothing by
      themselves, the editor asks with OpenTabs.
@@ -87,6 +94,29 @@ workspace's web page was checked by Emacs alone, never by the daemon.
   turn runs and taken once it ends (owner delegated the timing; recorded as
   the agent's decision: never interrupt a turn).
 - WHY: principle 1.
+- AMENDED 2026-10-25 for the collapse (owner ruling, quoted under principle
+  1): a fold HIDES; it never changes a workspace's status.
+  - A fold never stands down a workspace its own record spares
+    (`wsm.Workspace.FoldSpare`): a one-shot, or one with a merge queue entry
+    standing (requested, waiting or running, its deploy hooks included). A
+    hidden or closed workspace is withheld by that act, not a fold, and is
+    spared nothing.
+  - A workspace with a turn or detached work in flight is held back by the
+    stand-down gate, as before, and nothing reaches its turn or its session.
+  - THE IDLE-LATER CASE, decided by structure: a workspace held back while
+    busy is asked again on the free edge its last piece of work raises
+    (`lifecycleSink.OnFree`). Each attempt re-reads the record, so one that
+    became a one-shot or queued a merge meanwhile is spared; one that is now
+    idle, with nothing in flight and nothing queued, is stood down, exactly
+    as a workspace idle at the fold is. Why: the ruling protects work in
+    flight from the fold; a folded workspace with no work left is the idle
+    folded workspace principle 1 already stands down, and no timer decides it.
+  - A spared one-shot or merge-pending workspace is not asked again: it keeps
+    running until it is closed (its cache lapse then stands it down) or the
+    section is folded again.
+  - Every fold records who asked (the rpc and the client's request id), what
+    it hid, what it spared with the reason, and what is standing down
+    (`daemon.workspace.fold_repository`, `daemon.workspace.fold_subsection`).
 
 ## Decisions taken for the owner (delegated 2026-10-12, to confirm)
 - Collapsed repository sections count as not visible, like hidden ones.

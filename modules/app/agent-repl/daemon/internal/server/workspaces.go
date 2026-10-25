@@ -1278,7 +1278,7 @@ func (s *server) FoldRepository(
 		return answer(resp, cerr)
 	}
 	folded := req.Msg.GetCollapse() != nil
-	if err := s.deps.Verbs.FoldRepository(ctx, repository.ID, folded); err != nil {
+	if err := s.deps.Verbs.FoldRepository(ctx, repository.ID, folded, foldRequester(rpc, req.Header())); err != nil {
 		return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
 	}
 	resp.Result = &agentreplv1.FoldRepositoryResponse_Success{Success: &agentreplv1.FoldRepositorySuccess{}}

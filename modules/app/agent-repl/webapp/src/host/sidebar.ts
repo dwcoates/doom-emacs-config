@@ -30,10 +30,10 @@ import { createLocalFailures } from "../failure/local.js";
 import { bootFailed } from "../failure/sink.js";
 import { bindLogContext, log, setLogger, type ForwardingLogger } from "../log.js";
 import { installForwardingLogger, installTextAffordances } from "../document-runtime.js";
-import { beginPage, endPageAtPagehide, pageEnding, stopAtPageTeardown } from "../page-teardown.js";
+import { beginPage, endPageAtPagehide, stopAtPageTeardown } from "../page-teardown.js";
 import { createAgentReplClient, type AgentReplClient } from "../rpc/client.js";
 import { createDaemonContext } from "../rpc/context.js";
-import { createDaemonTransport } from "../rpc/transport.js";
+import { createPageTransport } from "../rpc/transport.js";
 import type { DaemonOrigin } from "../rpc/daemon-origin.js";
 import { readWebappBuild } from "../webapp-build.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
@@ -79,10 +79,10 @@ export function startWebhostSidebar(
   // every request its transport made is aborted, so its standing streams (the
   // sidebar's roster) neither answer nor reopen into a document that is gone.
   beginPage();
+  const connectionId = mintConnectionId();
   const client =
     deps.client ??
-    createAgentReplClient(createDaemonTransport(deps.daemon ?? win.location.origin, { signal: pageEnding() }));
-  const connectionId = mintConnectionId();
+    createAgentReplClient(createPageTransport(deps.daemon ?? win.location.origin, "webhost", connectionId));
   bindLogContext({ connection_id: connectionId });
   installForwardingLogger(() => client, { case: "webhost", value: {} }, deps.level ?? "info", deps.installLogger ?? setLogger);
 

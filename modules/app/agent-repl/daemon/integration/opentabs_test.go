@@ -147,6 +147,18 @@ var standDownWarnings = []string{
 	"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up",
 }
 
+// collapseRepository collapses F's repository section, as the sidebar's fold
+// gesture asks it.
+func collapseRepository(t *testing.T, f *fixture) {
+	t.Helper()
+	if _, err := f.d.Client().UpdateSidebarView(f.d.Ctx(), connect.NewRequest(foldSection(&agentreplv1.SidebarViewFoldSection{
+		Section: &agentreplv1.SidebarViewFoldSection_Repository{Repository: &workspacev1.RepositoryRef{Dir: f.repo.Dir}},
+		Fold:    &agentreplv1.SidebarViewFoldSection_Collapse{Collapse: &agentreplv1.SidebarViewCollapse{}},
+	}))); err != nil {
+		t.Fatalf("UpdateSidebarView(collapse) = error %v", err)
+	}
+}
+
 func TestCollapsingARepositoryStandsItsWorkspacesSessionDown(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -155,14 +167,37 @@ func TestCollapsingARepositoryStandsItsWorkspacesSessionDown(t *testing.T) {
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 
 	// Act
-	if _, err := f.d.Client().UpdateSidebarView(f.d.Ctx(), connect.NewRequest(foldSection(&agentreplv1.SidebarViewFoldSection{
-		Section: &agentreplv1.SidebarViewFoldSection_Repository{Repository: &workspacev1.RepositoryRef{Dir: f.repo.Dir}},
-		Fold:    &agentreplv1.SidebarViewFoldSection_Collapse{Collapse: &agentreplv1.SidebarViewCollapse{}},
-	}))); err != nil {
-		t.Fatalf("UpdateSidebarView(collapse) = error %v", err)
-	}
+	collapseRepository(t, f)
 
 	// Assert
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+}
+
+func TestCollapsingARepositoryNeverStandsDownAWorkspaceUnderItsTurn(t *testing.T) {
+	t.Parallel()
+	// Arrange: a turn running in the repository's one workspace.
+	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings(standDownWarnings...)
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
+	if got := f.submit("keep working", "k-fold-busy", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
+		t.Fatalf("SubmitPrompt = %v, want the turn accepted", got)
+	}
+	f.shim.ExpectStartTurn()
+
+	// Act: the repository is collapsed while the turn runs.
+	collapseRepository(t, f)
+
+	// Assert: nothing reaches the turn or the session while it runs.
+	for _, rpc := range []string{harness.RPCHibernate, harness.RPCKillSession, harness.RPCKillTurn} {
+		expectRPCCount(t, f.shim, rpc, 0, harness.ProbeWindow)
+	}
+
+	// Act: the turn ends, the repository still collapsed.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: idle now, with nothing in flight and nothing queued, it is stood
+	// down on that edge as any idle folded workspace is.
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
 }

@@ -226,7 +226,7 @@ func TestTheRepublishedRosterCarriesTheDefaultViewWhenNoneWasSet(t *testing.T) {
 	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1"})
 
 	// Act
-	if err := f.verbs.FoldRepository(context.Background(), "repo-1", true); err != nil {
+	if err := f.verbs.FoldRepository(context.Background(), "repo-1", true, testRequester); err != nil {
 		t.Fatalf("FoldRepository: %v", err)
 	}
 

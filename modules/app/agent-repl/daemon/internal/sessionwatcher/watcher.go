@@ -902,6 +902,12 @@ func (w *watcher) standTurnLocked(turn ids.TurnID, operation, message string) bo
 	w.log.Debug(operation, message, dlog.Context{
 		"turn_id": string(turn), "state": "turn_in_flight", "before": before, "after": string(turn),
 	})
+	// A TURN STANDING IN FLIGHT IS A FREENESS JUDGEMENT: it makes the session
+	// busy, so the turn's end is the true-to-false edge the lifecycle sink is
+	// told of. Without it, a turn opened on a session that came up idle ended
+	// with no edge at all, and a stand-down a collapse deferred under it was
+	// never taken (2026-10-25).
+	w.signalFreenessLocked()
 	return true
 }
 

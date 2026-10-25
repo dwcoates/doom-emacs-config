@@ -31,6 +31,7 @@ This change runs as a one-shot workspace with contract changes pre-approved by t
 
 - What: a third arm, `RosterSubsectionNeverCollapses`. The one-shot subsection always carries `expanded { never_collapses }`.
 - Why: a subsection collapse stands down its workspaces' sessions, and one-shots are working unattended. Folding the one-shot subsection would stop the very work it shows.
+  - Amended 2026-10-25: a fold no longer stands down a one-shot at all (`wsm.Workspace.FoldSpare`, open-tabs.md). The arm stands unchanged.
 - Consequences:
   - The webapp's fold gesture does nothing on that arm, as on `holds_current`.
   - Its tabs are folded only when the repository itself is collapsed, as for any subsection.
