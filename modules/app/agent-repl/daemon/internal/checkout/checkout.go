@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -39,15 +38,34 @@ const marker = "modules/app/agent-repl"
 // returns a loud error naming exePath and Env rather than a guessed or
 // relative path.
 func Root(exePath string) (string, error) {
-	return resolveRoot(exePath, compiledRoot)
+	return resolveRoot(exePath, builtFrom)
 }
 
-// resolveRoot is Root with its LAST RESORT injected. The compiled-in source
-// path is the one input the caller cannot supply and the process cannot
-// change, so the refusal that follows a walk finding nothing is unreachable
-// without a seam here; production passes compiledRoot and behaves exactly as
-// Root's documentation says.
-func resolveRoot(exePath string, compiled func() (string, bool)) (string, error) {
+// builtFrom is the module root this binary was built from, stamped at link
+// time (BuiltFromLink) by bin/build-frontend.sh. It is empty in a binary
+// nobody stamped (a test harness's or a hand-run `go build`), which then
+// resolves through the environment or its own location, or is refused.
+//
+// A STAMP, NOT THE COMPILED-IN SOURCE PATH. Every Go build here runs with
+// -trimpath, so worktrees share one build cache instead of each caching its
+// own copy of every package; -trimpath removes the absolute source paths
+// runtime.Caller would have answered, so the checkout is named explicitly.
+var builtFrom string
+
+// BuiltFromLink is the -ldflags -X binding that stamps root as the module
+// root a binary was built from.
+func BuiltFromLink(root string) string {
+	return builtFromSymbol + "=" + root
+}
+
+// builtFromSymbol is builtFrom's linker name.
+const builtFromSymbol = "agent-repld/internal/checkout.builtFrom"
+
+// resolveRoot is Root with its LAST RESORT injected. The stamp is the one
+// input the process cannot change, so the refusal that follows a walk finding
+// nothing is unreachable without a seam here; production passes builtFrom and
+// behaves exactly as Root's documentation says.
+func resolveRoot(exePath, stamp string) (string, error) {
 	if env, ok := os.LookupEnv(Env); ok {
 		return filepath.Clean(env), nil
 	}
@@ -73,54 +91,35 @@ func resolveRoot(exePath string, compiled func() (string, bool)) (string, error)
 		dir = parent
 	}
 
-	// THE BINARY WAS NOT DEPLOYED INTO THE CHECKOUT. `go build -o <tmp>` puts
-	// it outside the tree, which is what every build from a test harness or a
-	// scratch directory does. The path this source file was COMPILED from is
-	// still inside the checkout, so it names the tree the binary was built
-	// from — the same tree a deployed binary would have been copied out of.
-	if root, ok := compiled(); ok {
-		return root, nil
+	// THE BINARY WAS NOT DEPLOYED INTO THE CHECKOUT. A staged deploy build
+	// lands outside the tree, so the module root stamped into it at build
+	// time names the tree it was built from: the same tree a deployed binary
+	// would have been copied out of.
+	if stamp == "" {
+		return "", fmt.Errorf(
+			"resolve agent-repl checkout: no ancestor of %q contains %q, and the binary carries no %s stamp; set %s to override",
+			exePath, marker, builtFromSymbol, Env)
 	}
-
-	return "", fmt.Errorf(
-		"resolve agent-repl checkout: no ancestor of %q contains %q, and the compiled-in source path names none either; set %s to override",
-		exePath, marker, Env)
-}
-
-// compiledRoot answers the checkout this package was COMPILED from, walking up
-// from the source path the compiler recorded for this file. It is the last
-// resort, after the environment and after the executable's own location,
-// because a checkout that moved after it was built leaves a path that no
-// longer exists — which is exactly what the existence check below catches.
-func compiledRoot() (string, bool) {
-	_, file, _, ok := runtime.Caller(0)
-	return compiledRootFrom(file, ok)
-}
-
-// compiledRootFrom answers the checkout containing sourceFile, walking up from
-// its directory. known is runtime.Caller's own ok: an unknown caller frame
-// yields no root rather than a walk from an empty path. It is separated from
-// compiledRoot so the two answers a MISSING compiled path can give — a
-// checkout that moved after it was built, and a source path in no checkout at
-// all — are reachable without moving this package's own source.
-func compiledRootFrom(sourceFile string, known bool) (string, bool) {
-	if !known {
-		return "", false
+	root := filepath.Clean(stamp)
+	if !hasMarkerSuffix(root) {
+		return "", fmt.Errorf(
+			"resolve agent-repl checkout: no ancestor of %q contains %q, and the stamped root %q is not a %q module root; set %s to override",
+			exePath, marker, stamp, marker, Env)
 	}
-	dir := filepath.Dir(sourceFile)
-	for {
-		if hasMarkerSuffix(dir) {
-			if info, err := os.Stat(dir); err == nil && info.IsDir() {
-				return dir, true
-			}
-			return "", false
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-		dir = parent
+	// A checkout that moved after the binary was built leaves a stamp that no
+	// longer exists.
+	info, err := os.Stat(root)
+	if err != nil {
+		return "", fmt.Errorf(
+			"resolve agent-repl checkout: no ancestor of %q contains %q, and the stamped root is unusable: %w; set %s to override",
+			exePath, marker, err, Env)
 	}
+	if !info.IsDir() {
+		return "", fmt.Errorf(
+			"resolve agent-repl checkout: no ancestor of %q contains %q, and the stamped root %q is not a directory; set %s to override",
+			exePath, marker, stamp, Env)
+	}
+	return root, nil
 }
 
 // RepoRoot answers the repository root that contains the module root root:

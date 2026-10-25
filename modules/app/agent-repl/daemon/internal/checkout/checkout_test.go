@@ -88,30 +88,6 @@ func TestRootRepositoryRootAncestor(t *testing.T) {
 	}
 }
 
-// TestRootWithNoMarkerNearTheExecutableFallsBack covers the binary built
-// OUTSIDE the tree — `go build -o <tmp>`, which is what every test harness and
-// every scratch build does. The executable's own ancestors name no checkout,
-// so the path this package was compiled from answers instead of a refusal.
-func TestRootWithNoMarkerNearTheExecutableFallsBack(t *testing.T) {
-	// Arrange: a bare directory tree with no "modules/app/agent-repl" in it.
-	tmp := t.TempDir()
-	exePath := filepath.Join(tmp, "bin", "agent-repld")
-	if err := os.MkdirAll(filepath.Dir(exePath), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-
-	// Act.
-	got, err := Root(exePath)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Root() = %v, want the compiled-in checkout", err)
-	}
-	if filepath.Base(got) != "agent-repl" {
-		t.Fatalf("Root() = %q, want the agent-repl module root", got)
-	}
-}
-
 // TestDerivedPaths verifies the three fixed paths joined beneath a root.
 func TestDerivedPaths(t *testing.T) {
 	root := filepath.FromSlash("/checkout/modules/app/agent-repl")
@@ -167,102 +143,102 @@ func TestShimBuildStampIsBesideTheCompiledEntryPoint(t *testing.T) {
 	}
 }
 
-// TestResolveRootRefusesWhenNothingNamesACheckout covers the loud refusal: no
-// environment override, no marker above the executable, and a compiled-in
-// path that names none either — which is what a binary copied off a machine
-// whose checkout is gone looks like.
+// stampedTree builds a marked module root on disk and an executable path
+// outside it, so only the stamp can name the checkout.
+func stampedTree(t *testing.T) (root, exePath string) {
+	t.Helper()
+	unsetEnv(t)
+	root = filepath.Join(t.TempDir(), "repo", "modules", "app", "agent-repl")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	return root, filepath.Join(t.TempDir(), "bin", "agent-repld")
+}
+
+// TestResolveRootTakesTheStampOverTheRefusal pins that the stamp is consulted
+// before the refusal, which is what makes a staged deploy build, outside the
+// tree, resolvable at all.
+func TestResolveRootTakesTheStampOverTheRefusal(t *testing.T) {
+	tests := []struct {
+		name  string
+		stamp func(root string) string
+	}{
+		{"the stamp as written", func(root string) string { return root }},
+		{"a stamp with a trailing separator", func(root string) string { return root + "/" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			root, exePath := stampedTree(t)
+
+			// Act.
+			got, err := resolveRoot(exePath, tt.stamp(root))
+
+			// Assert.
+			if err != nil || got != root {
+				t.Fatalf("resolveRoot() = (%q, %v), want the stamped root %q", got, err, root)
+			}
+		})
+	}
+}
+
+// TestResolveRootRefusesWhenNothingNamesACheckout covers every loud refusal:
+// no environment override, no marker above the executable, and a stamp that
+// names no usable checkout. Each refusal names the executable, the marker and
+// the override, so the operator sees how to recover.
 func TestResolveRootRefusesWhenNothingNamesACheckout(t *testing.T) {
-	// Arrange.
-	unsetEnv(t)
-	exePath := filepath.Join(t.TempDir(), "bin", "agent-repld")
-
-	// Act.
-	got, err := resolveRoot(exePath, func() (string, bool) { return "", false })
-
-	// Assert.
-	if err == nil {
-		t.Fatalf("resolveRoot() = %q, want a refusal rather than a guessed root", got)
+	tests := []struct {
+		name string
+		// stamp is the stamp, given the marked root stampedTree made.
+		stamp func(t *testing.T, root string) string
+		// mentions are what the refusal must name besides exePath, marker and Env.
+		mentions []string
+	}{
+		{"an unstamped binary", func(*testing.T, string) string { return "" }, []string{builtFromSymbol}},
+		{"a stamp that is no module root", func(_ *testing.T, root string) string { return filepath.Dir(root) }, []string{"is not a"}},
+		{"a checkout that moved after the build", func(_ *testing.T, root string) string {
+			return filepath.Join(filepath.Dir(root), "gone", "modules", "app", "agent-repl")
+		}, []string{"unusable", "no such file"}},
+		{"a stamped root that is a file", func(t *testing.T, root string) string {
+			file := filepath.Join(filepath.Dir(root), "file", "modules", "app", "agent-repl")
+			if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+			if err := os.WriteFile(file, nil, 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			return file
+		}, []string{"is not a directory"}},
 	}
-	for _, want := range []string{exePath, marker, Env} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("err = %v, want it to name %q", err, want)
-		}
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			root, exePath := stampedTree(t)
 
-// TestResolveRootTakesTheCompiledFallbackOverTheRefusal pins that the last
-// resort is consulted before the refusal, which is what makes a binary built
-// with `go build -o <tmp>` resolvable at all.
-func TestResolveRootTakesTheCompiledFallbackOverTheRefusal(t *testing.T) {
-	// Arrange.
-	unsetEnv(t)
-	exePath := filepath.Join(t.TempDir(), "bin", "agent-repld")
+			stamp := tt.stamp(t, root)
 
-	// Act.
-	got, err := resolveRoot(exePath, func() (string, bool) { return "/built/from/here", true })
+			// Act.
+			got, err := resolveRoot(exePath, stamp)
 
-	// Assert.
-	if err != nil || got != "/built/from/here" {
-		t.Fatalf("resolveRoot() = (%q, %v), want the compiled-in root", got, err)
-	}
-}
-
-// TestCompiledRootFromRefusesAnUnknownFrame covers the case runtime.Caller
-// could not answer: no root, never a walk from an empty path.
-func TestCompiledRootFromRefusesAnUnknownFrame(t *testing.T) {
-	// Arrange, Act.
-	got, ok := compiledRootFrom("", false)
-
-	// Assert.
-	if ok {
-		t.Fatalf("compiledRootFrom() = (%q, true), want no root for an unknown frame", got)
-	}
-}
-
-// TestCompiledRootFromRefusesACheckoutThatMoved covers the reason the walk
-// stats at all: a checkout that moved after the binary was built leaves a
-// compiled-in path that no longer exists.
-func TestCompiledRootFromRefusesACheckoutThatMoved(t *testing.T) {
-	// Arrange: a marked path under a directory nothing was ever created in.
-	sourceFile := filepath.Join(t.TempDir(), "gone", "modules", "app", "agent-repl",
-		"daemon", "internal", "checkout", "checkout.go")
-
-	// Act.
-	got, ok := compiledRootFrom(sourceFile, true)
-
-	// Assert.
-	if ok {
-		t.Fatalf("compiledRootFrom() = (%q, true), want no root for a checkout that moved", got)
+			// Assert.
+			if err == nil {
+				t.Fatalf("resolveRoot() = %q, want a refusal rather than a guessed root", got)
+			}
+			for _, want := range append([]string{exePath, marker, Env}, tt.mentions...) {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("err = %v, want it to name %q", err, want)
+				}
+			}
+		})
 	}
 }
 
-// TestCompiledRootFromRefusesASourceInNoCheckout covers the walk running out
-// of ancestors: a source path with no marker anywhere above it.
-func TestCompiledRootFromRefusesASourceInNoCheckout(t *testing.T) {
-	// Arrange.
-	sourceFile := filepath.Join(t.TempDir(), "elsewhere", "checkout.go")
-
-	// Act.
-	got, ok := compiledRootFrom(sourceFile, true)
-
-	// Assert.
-	if ok {
-		t.Fatalf("compiledRootFrom() = (%q, true), want no root outside any checkout", got)
-	}
-}
-
-// TestCompiledRootAnswersThisPackagesOwnCheckout pins the production last
-// resort against the tree the tests themselves were compiled from.
-func TestCompiledRootAnswersThisPackagesOwnCheckout(t *testing.T) {
-	// Arrange, Act.
-	got, ok := compiledRoot()
-
-	// Assert.
-	if !ok {
-		t.Fatal("compiledRoot() = (_, false), want this package's own checkout")
-	}
-	if filepath.Base(got) != "agent-repl" {
-		t.Fatalf("compiledRoot() = %q, want the agent-repl module root", got)
+// TestBuiltFromLinkBindsTheStamp pins the -X binding's spelling to the
+// variable it sets: a rename of the package or the variable fails here rather
+// than leaving every deploy build silently unstamped.
+func TestBuiltFromLinkBindsTheStamp(t *testing.T) {
+	if got, want := BuiltFromLink("/r"), "agent-repld/internal/checkout.builtFrom=/r"; got != want {
+		t.Fatalf("BuiltFromLink() = %q, want %q", got, want)
 	}
 }
 
