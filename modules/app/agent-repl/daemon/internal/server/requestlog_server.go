@@ -888,6 +888,13 @@ func (s *requestLoggingServer) ReportChatSightings(
 	return serveUnary(s, ctx, "ReportChatSightings", req, s.server.ReportChatSightings)
 }
 
+func (s *requestLoggingServer) SearchChats(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SearchChatsRequest],
+) (*connect.Response[agentreplv1.SearchChatsResponse], error) {
+	return serveUnary(s, ctx, "SearchChats", req, s.server.SearchChats)
+}
+
 func (s *requestLoggingServer) SelectChatText(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SelectChatTextRequest],

@@ -47,6 +47,8 @@ type Chat interface {
 	Select(ctx context.Context, thread ids.WorkspaceID, h *chat.Highlight) error
 	// Sightings counts one sighting per named node.
 	Sightings(ctx context.Context, thread ids.WorkspaceID, nodes []chat.NodeID) error
+	// Search answers every thread whose chat says QUERY's words, best first.
+	Search(ctx context.Context, query string) ([]*zettelv1.SearchThreadsMatch, error)
 }
 
 // threadSubject resolves a chat verb's `thread` ref as subjectFor resolves a
@@ -334,6 +336,51 @@ func (s *server) ShowSidebarApp(
 	s.deps.Banners.Forget("a sidebar app was shown")
 	log.Info(rpc, "showed a sidebar app by selecting its most recent workspace", dlog.Context{"threads": threads})
 	resp.Result = &agentreplv1.ShowSidebarAppResponse_Success{Success: &agentreplv1.ShowSidebarAppSuccess{RosterRevision: s.deps.Sidebar.Revision()}}
+	return connect.NewResponse(resp), nil
+}
+
+// SearchChats answers the threads whose chats say the sidebar search's words,
+// each as the roster's thread rows carry it.
+func (s *server) SearchChats(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SearchChatsRequest],
+) (*connect.Response[agentreplv1.SearchChatsResponse], error) {
+	const rpc = "SearchChats"
+	query := req.Msg.GetQuery()
+	if strings.TrimSpace(query) == "" {
+		return nil, invalid("query", "a search needs a word to search for")
+	}
+	resp := &agentreplv1.SearchChatsResponse{}
+	matches, err := s.deps.Chat.Search(ctx, query)
+	if err != nil {
+		s.log.Error(rpc, "zettel could not search the chats", dlog.Context{"query": query, "cause": err.Error()})
+		return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
+			Arm: "graph_failed", Reason: err.Error(), Info: true,
+		})))
+	}
+	records, err := s.deps.DB.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, fail(s.log, rpc, fmt.Errorf("list the workspaces: %w", err))
+	}
+	threads := map[ids.WorkspaceID]wsm.Workspace{}
+	for _, r := range records {
+		if r.IsThread() {
+			threads[r.ID] = r
+		}
+	}
+	success := &agentreplv1.SearchChatsSuccess{}
+	for _, m := range matches {
+		record, ok := threads[ids.WorkspaceID(m.GetThread().GetId())]
+		if !ok {
+			// A GRAPH NO REGISTERED THREAD OWNS is a forgotten thread's: its
+			// graph outlived its record, and nothing on screen can open it.
+			s.log.Debug(rpc, "a matching graph belongs to no registered thread; it is not answered", dlog.Context{"thread": m.GetThread().GetId()})
+			continue
+		}
+		success.Matches = append(success.Matches, &agentreplv1.SearchChatsMatch{Thread: record.Ref(), Snippet: m.GetSnippet()})
+	}
+	s.log.Debug(rpc, "searched the chats", dlog.Context{"query": query, "matches": len(success.Matches)})
+	resp.Result = &agentreplv1.SearchChatsResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
 

@@ -3,10 +3,13 @@ package server
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -40,6 +43,9 @@ type fakeChat struct {
 	switches  []string
 	selects   []*chat.Highlight
 	sightings [][]chat.NodeID
+	matches   []*zettelv1.SearchThreadsMatch
+	searchErr error
+	searched  []string
 }
 
 func (f *fakeChat) Topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.ChatView] {
@@ -88,6 +94,11 @@ func (f *fakeChat) Select(_ context.Context, _ ids.WorkspaceID, h *chat.Highligh
 func (f *fakeChat) Sightings(_ context.Context, _ ids.WorkspaceID, nodes []chat.NodeID) error {
 	f.sightings = append(f.sightings, nodes)
 	return f.gestErr
+}
+
+func (f *fakeChat) Search(_ context.Context, query string) ([]*zettelv1.SearchThreadsMatch, error) {
+	f.searched = append(f.searched, query)
+	return f.matches, f.searchErr
 }
 
 // withThread registers a thread beside the harness's agent workspace.
@@ -668,4 +679,68 @@ func TestThePlainBootsAnswerNamesThePageToo(t *testing.T) {
 			}
 		})
 	}
+}
+
+// matchOf is a search match of THREAD saying WORDS.
+func matchOf(thread ids.WorkspaceID, words string) *zettelv1.SearchThreadsMatch {
+	return &zettelv1.SearchThreadsMatch{
+		Thread: &zettelv1.ThreadId{Id: string(thread)}, Node: &zettelv1.NodeId{Id: "n1"},
+		Snippet: &zettelv1.Snippet{Parts: []*zettelv1.SnippetPart{{Part: &zettelv1.SnippetPart_Hit{Hit: words}}}},
+	}
+}
+
+func TestSearchChatsAnswersEachRegisteredThreadWithItsSnippet(t *testing.T) {
+	// Arrange: one match is the registered thread, one a forgotten thread's graph.
+	h := newHarness(t)
+	ref := withThread(h)
+	h.Chat.matches = []*zettelv1.SearchThreadsMatch{matchOf(testThreadID, "sky"), matchOf("forgotten", "sky")}
+
+	// Act
+	resp, err := h.Client.SearchChats(context.Background(), connect.NewRequest(&agentreplv1.SearchChatsRequest{Query: "sky"}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SearchChats: %v", err)
+	}
+	matches := resp.Msg.GetSuccess().GetMatches()
+	if len(matches) != 1 || !proto.Equal(matches[0].GetThread(), ref) || matches[0].GetSnippet().GetParts()[0].GetHit() != "sky" {
+		t.Fatalf("matches = %v, want the registered thread alone with its snippet", matches)
+	}
+	if !slices.Equal(h.Chat.searched, []string{"sky"}) {
+		t.Fatalf("searched = %v, want the query passed through", h.Chat.searched)
+	}
+}
+
+func TestSearchChatsRefusesABlankQuery(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.Client.SearchChats(context.Background(), connect.NewRequest(&agentreplv1.SearchChatsRequest{Query: "  "}))
+
+	// Assert
+	if connectCode(t, err) != connect.CodeInvalidArgument {
+		t.Fatalf("err = %v, want InvalidArgument", err)
+	}
+}
+
+func TestSearchChatsAnswersAGraphFailure(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.Chat.searchErr = errors.New("zettelclient: SearchThreads refused (storage_failure): disk")
+
+	// Act
+	resp, err := h.Client.SearchChats(context.Background(), connect.NewRequest(&agentreplv1.SearchChatsRequest{Query: "sky"}))
+
+	// Assert
+	if err != nil || !strings.Contains(resp.Msg.GetError().GetGraphFailed().GetDetail(), "disk") {
+		t.Fatalf("resp = %v, err = %v, want graph_failed carrying zettel's account", resp, err)
+	}
+	for _, r := range log.Records() {
+		if r.Level == "error" && r.Operation == "SearchChats" && r.Context["query"] == "sky" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the failed search at error with its query", log.Records())
 }

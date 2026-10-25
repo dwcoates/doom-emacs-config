@@ -597,6 +597,10 @@ func (s *fakeServer) ReportChatSightings(ctx context.Context, req *connect.Reque
 	return handleUnary[v1.ReportChatSightingsRequest, v1.ReportChatSightingsResponse](ctx, s, "ReportChatSightings", req.Msg)
 }
 
+func (s *fakeServer) SearchChats(ctx context.Context, req *connect.Request[v1.SearchChatsRequest]) (*connect.Response[v1.SearchChatsResponse], error) {
+	return handleUnary[v1.SearchChatsRequest, v1.SearchChatsResponse](ctx, s, "SearchChats", req.Msg)
+}
+
 func (s *fakeServer) SelectChatText(ctx context.Context, req *connect.Request[v1.SelectChatTextRequest]) (*connect.Response[v1.SelectChatTextResponse], error) {
 	return handleUnary[v1.SelectChatTextRequest, v1.SelectChatTextResponse](ctx, s, "SelectChatText", req.Msg)
 }
