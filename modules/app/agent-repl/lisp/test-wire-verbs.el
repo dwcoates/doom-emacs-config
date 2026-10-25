@@ -4827,10 +4827,12 @@ encoder reads: the common codec owns the real encoding.")
     (should (equal (agent-repl-wire-encode-report-latencies-request
                     (list :editor-latencies
                           (list (list :kind :stall :seconds 0.25)
-                                (list :kind :elisp-reload :seconds 1))))
+                                (list :kind :elisp-reload :seconds 1)
+                                (list :kind :input-wait :seconds 0.4))))
                    '((editorStartup . [])
                      (editorLatencies . [((kind . "EDITOR_LATENCY_KIND_STALL") (seconds . 0.25))
-                                         ((kind . "EDITOR_LATENCY_KIND_ELISP_RELOAD") (seconds . 1.0))]))))))
+                                         ((kind . "EDITOR_LATENCY_KIND_ELISP_RELOAD") (seconds . 1.0))
+                                         ((kind . "EDITOR_LATENCY_KIND_INPUT_WAIT") (seconds . 0.4))]))))))
 
 (ert-deftest agent-repl-test-wire-verbs-report-latencies-refuses-a-malformed-editor-latency ()
   "An unknown kind or a bad time never reaches the wire."

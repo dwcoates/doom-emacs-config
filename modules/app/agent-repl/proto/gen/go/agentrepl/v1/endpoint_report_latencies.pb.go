@@ -144,6 +144,13 @@ const (
 	// load to its heartbeat assertion done. The editor runs nothing else
 	// meanwhile.
 	EditorLatencyKind_EDITOR_LATENCY_KIND_ELISP_RELOAD EditorLatencyKind = 2
+	// Input the person typed that waited unread while the editor's command
+	// loop ran other work (process filters, timers): from the first run of the
+	// steady sampling timer that found input pending to the first that found
+	// none, when it was pending across at least two runs. The loop was free
+	// enough to run the timer, so EDITOR_LATENCY_KIND_STALL never saw it, yet
+	// nothing typed reached the screen.
+	EditorLatencyKind_EDITOR_LATENCY_KIND_INPUT_WAIT EditorLatencyKind = 3
 )
 
 // Enum value maps for EditorLatencyKind.
@@ -152,11 +159,13 @@ var (
 		0: "EDITOR_LATENCY_KIND_UNSPECIFIED",
 		1: "EDITOR_LATENCY_KIND_STALL",
 		2: "EDITOR_LATENCY_KIND_ELISP_RELOAD",
+		3: "EDITOR_LATENCY_KIND_INPUT_WAIT",
 	}
 	EditorLatencyKind_value = map[string]int32{
 		"EDITOR_LATENCY_KIND_UNSPECIFIED":  0,
 		"EDITOR_LATENCY_KIND_STALL":        1,
 		"EDITOR_LATENCY_KIND_ELISP_RELOAD": 2,
+		"EDITOR_LATENCY_KIND_INPUT_WAIT":   3,
 	}
 )
 
@@ -1165,11 +1174,12 @@ const file_agentrepl_v1_endpoint_report_latencies_proto_rawDesc = "" +
 	"\x1fREPORTED_LATENCY_KIND_PAGE_BOOT\x10\x03\x12%\n" +
 	"!REPORTED_LATENCY_KIND_PROMPT_ECHO\x10\x04\x12$\n" +
 	" REPORTED_LATENCY_KIND_PAGE_STALL\x10\x05\x12&\n" +
-	"\"REPORTED_LATENCY_KIND_RELOAD_BLANK\x10\x06*}\n" +
+	"\"REPORTED_LATENCY_KIND_RELOAD_BLANK\x10\x06*\xa1\x01\n" +
 	"\x11EditorLatencyKind\x12#\n" +
 	"\x1fEDITOR_LATENCY_KIND_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19EDITOR_LATENCY_KIND_STALL\x10\x01\x12$\n" +
-	" EDITOR_LATENCY_KIND_ELISP_RELOAD\x10\x02*\xe0\x01\n" +
+	" EDITOR_LATENCY_KIND_ELISP_RELOAD\x10\x02\x12\"\n" +
+	"\x1eEDITOR_LATENCY_KIND_INPUT_WAIT\x10\x03*\xe0\x01\n" +
 	"\x16EditorStartupMilestone\x12(\n" +
 	"$EDITOR_STARTUP_MILESTONE_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dEDITOR_STARTUP_MILESTONE_INIT\x10\x01\x12*\n" +

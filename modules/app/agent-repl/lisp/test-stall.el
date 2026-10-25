@@ -15,15 +15,20 @@
 (defvar agent-repl-test-stall--reported nil "Every stall reported, newest first, as (KIND SECONDS).")
 (defvar agent-repl-test-stall--records nil "Every info record, newest first.")
 (defvar agent-repl-test-stall--clock 0.0 "What the stubbed wall clock answers.")
+(defvar agent-repl-test-stall--pending nil "What the stubbed input check answers.")
 
 (defmacro agent-repl-test-stall--with (&rest body)
   "Run BODY with a settable clock, a recording report and no prior run."
   (declare (indent 0))
   `(let ((agent-repl-stall--last nil)
+         (agent-repl-stall--input nil)
+         (agent-repl-test-stall--pending nil)
          (agent-repl-test-stall--reported nil)
          (agent-repl-test-stall--records nil)
          (agent-repl-test-stall--clock 100.0))
      (cl-letf (((symbol-function 'agent-repl--now) (lambda () agent-repl-test-stall--clock))
+               ((symbol-function 'agent-repl-stall--input-pending-p)
+                (lambda () agent-repl-test-stall--pending))
                ((symbol-function 'agent-repl-latency-report-editor)
                 (lambda (kind seconds) (push (list kind seconds) agent-repl-test-stall--reported)))
                ((symbol-function 'agent-repl--info)
@@ -126,6 +131,84 @@
                            (list 'timer agent-repl-stall-interval agent-repl-stall-interval
                                  #'agent-repl-stall-sample))))
       (should-not agent-repl-stall--last))))
+
+(ert-deftest agent-repl-test-stall-arming-forgets-an-input-wait ()
+  "Arming starts the input measurement afresh too."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (setq agent-repl-stall--input '(5.0 . 3))
+    (cl-letf (((symbol-function 'agent-repl--register-timer) (lambda (_key timer) timer))
+              ((symbol-function 'run-at-time) #'ignore))
+      ;; Act
+      (agent-repl--arm-stall-sampler))
+    ;; Assert
+    (should-not agent-repl-stall--input)))
+
+;;;; ---- Input left waiting ----
+
+(defun agent-repl-test-stall--runs-with-input (pending)
+  "Run the sampler once per element of PENDING, one interval apart.
+Each element is what the input check answers on that run."
+  (dolist (answer pending)
+    (setq agent-repl-test-stall--pending answer)
+    (agent-repl-test-stall--run-after agent-repl-stall-interval)))
+
+(ert-deftest agent-repl-test-stall-input-pending-across-runs-is-an-input-wait ()
+  "Input found by three runs is reported from the first of them to the run that found none."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    ;; Act
+    (agent-repl-test-stall--runs-with-input '(t t t nil))
+    ;; Assert
+    (should (equal (mapcar (lambda (r) (list (car r) (/ (round (* 1000 (cadr r))) 1000.0)))
+                           agent-repl-test-stall--reported)
+                   '((:input-wait 0.3))))))
+
+(ert-deftest agent-repl-test-stall-input-seen-by-one-run-is-no-wait ()
+  "Input one run found and the next found read waited less than an interval."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    ;; Act
+    (agent-repl-test-stall--runs-with-input '(t nil))
+    ;; Assert
+    (should-not agent-repl-test-stall--reported)))
+
+(ert-deftest agent-repl-test-stall-input-still-pending-reports-nothing-yet ()
+  "A wait is reported only once its input is read."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    ;; Act
+    (agent-repl-test-stall--runs-with-input '(t t t))
+    ;; Assert
+    (should-not agent-repl-test-stall--reported)
+    (should (equal (cdr agent-repl-stall--input) 3))))
+
+(ert-deftest agent-repl-test-stall-each-input-wait-is-measured-on-its-own ()
+  "Two waits with a read between them are reported separately."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    ;; Act
+    (agent-repl-test-stall--runs-with-input '(t t nil t t t nil))
+    ;; Assert
+    (should (equal (mapcar (lambda (r) (/ (round (* 1000 (cadr r))) 1000.0))
+                           agent-repl-test-stall--reported)
+                   '(0.3 0.2)))))
+
+(ert-deftest agent-repl-test-stall-a-host-sleep-drops-an-input-wait ()
+  "Input pending across a host sleep is not reported as a wait."
+  (agent-repl-test-stall--with
+    ;; Arrange
+    (agent-repl-stall-sample)
+    (agent-repl-test-stall--runs-with-input '(t t))
+    ;; Act
+    (setq agent-repl-test-stall--pending nil)
+    (agent-repl-test-stall--run-after 3600.0)
+    ;; Assert
+    (should-not agent-repl-test-stall--reported)))
 
 (ert-deftest agent-repl-test-stall-the-sampler-is-a-required-timer ()
   "The heartbeat assertion re-arms the sampler, through this file's arm function."

@@ -63,6 +63,7 @@ var ReportedKinds = map[agentreplv1.ReportedLatencyKind]LatencyKind{
 var EditorKinds = map[agentreplv1.EditorLatencyKind]LatencyKind{
 	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_STALL:        {Name: "editor_stall", Buckets: stallBuckets},
 	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_ELISP_RELOAD: {Name: "elisp_reload", Buckets: stallBuckets},
+	agentreplv1.EditorLatencyKind_EDITOR_LATENCY_KIND_INPUT_WAIT:   {Name: "editor_input_wait", Buckets: stallBuckets},
 }
 
 // WorkspaceOpen is the daemon-measured latency from an OpenWorkspace's
