@@ -12,7 +12,7 @@ import { SelectWorkspaceResponseSchema, type SelectWorkspaceRequest } from "../.
 import { ShowSidebarAppResponseSchema, type ShowSidebarAppRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_sidebar_app_pb";
 import { CloseWorkspaceResponseSchema, type CloseWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
 import { SearchChatsResponseSchema, type SearchChatsRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_search_chats_pb";
-import { ARCHIVED_HEADING } from "../../src/sidebar/threads.js";
+import { ARCHIVED_HEADING, OPEN_HEADING } from "../../src/sidebar/threads.js";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { createAgentReplClient } from "../../src/rpc/client.js";
@@ -123,6 +123,27 @@ describe("the Chat app's body", () => {
     expect(host.querySelector('[data-roster-row="ws-1"]')).toBeNull();
   });
 
+  it("draws the new-thread control as the green \"+\" beside the open threads' heading", async () => {
+    // Arrange / Act
+    const host = mount([roster({ chat: [{ id: "t-1", name: "why" }] })]);
+    await settle();
+
+    // Assert
+    const heading = host.querySelector(".sb-threads-open");
+    const plus = heading?.querySelector("[data-new-thread]");
+    expect([heading?.firstChild?.textContent, plus?.className, plus?.textContent]).toEqual([OPEN_HEADING, "sb-add", "+"]);
+  });
+
+  it("draws a thread's menu control after its name, at the row's right edge", async () => {
+    // Arrange / Act
+    const host = mount([roster({ chat: [{ id: "t-1", name: "why" }] })]);
+    await settle();
+
+    // Assert
+    const line = host.querySelector('[data-roster-row="t-1"] > .row');
+    expect([...(line?.children ?? [])].map((c) => c.className)).toEqual(["name", "sb-more"]);
+  });
+
   it("selects a thread its row is clicked for", async () => {
     // Arrange
     const selected: SelectWorkspaceRequest[] = [];
@@ -196,20 +217,21 @@ describe("the Chat app's archived threads", () => {
 
     // Assert
     const section = host.querySelector("[data-thread-section]")!;
+    // A heading reads as its words, the open one's "+" aside.
     const order = [...section.querySelectorAll(".sb-threads-heading, [data-roster-row]")].map((el) =>
-      el.classList.contains("sb-threads-heading") ? el.textContent : el.getAttribute("data-roster-row"),
+      el.classList.contains("sb-threads-heading") ? el.firstChild?.textContent : el.getAttribute("data-roster-row"),
     );
-    expect(order).toEqual(["t-1", ARCHIVED_HEADING, "t-2"]);
+    expect(order).toEqual([OPEN_HEADING, "t-1", ARCHIVED_HEADING, "t-2"]);
     expect(host.querySelector('[data-roster-row="t-2"]')?.classList.contains("sb-thread-archived")).toBe(true);
   });
 
-  it("draws no heading when no thread is archived", async () => {
+  it("draws no archived heading when no thread is archived", async () => {
     // Arrange / Act
     const host = mount([roster({ chat: [{ id: "t-1", name: "here" }] })]);
     await settle();
 
     // Assert
-    expect(host.querySelector(".sb-threads-heading")).toBeNull();
+    expect(host.querySelector(".sb-threads-archived-heading")).toBeNull();
   });
 });
 

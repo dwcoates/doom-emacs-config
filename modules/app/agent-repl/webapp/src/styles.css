@@ -1280,8 +1280,7 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 
 /* Workspace rows. Children nest inside .kids, which draws the family guide
    line; indentation compounds per generation (THE ROW INDENT, below). */
-/* ONE GUTTER WIDTH for every bar a rail row draws on its left (the
-   selection's accent, a merge-today's off-white), so the two never drift. */
+/* THE GUTTER WIDTH of the bar a merge-today row draws on its left. */
 #ws-sidebar { --row-gutter-w: 3px; }
 /* ONE VERTICAL PADDING for every rail row, read wherever a row's height is
    built out of it (Recently Merged's --merged-row-h), so the two never drift.
@@ -1295,11 +1294,14 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    every .ws inherits and each nesting adds one step to, through
    --row-indent-parent (a property may not read itself). */
 #ws-sidebar { --row-indent: 0rem; }
+/* A ROW'S FILL IS SUBTLY ROUNDED (owner request, 2026-10-25), the selected
+   row's and a hovered row's alike. */
 #ws-sidebar .row {
   display: flex;
   align-items: center;
   gap: 0.45rem;
   padding: var(--row-pad-y) 0.7rem var(--row-pad-y) calc(0.9rem + var(--row-indent));
+  border-radius: 5px;
   cursor: pointer;
   min-width: 0;
 }
@@ -1442,8 +1444,7 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    2026-10-13); a merged row's timestamp keeps its grey. */
 #ws-sidebar .row .name.band-name { color: var(--repo-head-expanded); }
 /* A merge that landed TODAY (local date) keeps the name's grey and marks the
-   ROW with an off-white gutter bar shaped like the selection's (owner request,
-   2026-10-11). `merged-today` is toggled on the row by the shared ticker in
+   ROW with an off-white gutter bar (owner request, 2026-10-11). `merged-today` is toggled on the row by the shared ticker in
    src/sidebar/row.ts, so the bar goes at midnight. The selector stays below
    `.ws.current > .row`'s weight, so a current merged row shows the accent. */
 #ws-sidebar .row.merged-today {
@@ -1520,29 +1521,25 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   pointer-events: none;
 }
 
-/* The workspace Emacs is currently showing. NEUTRAL, WITH A MUTED GUTTER
-   (owner ruling, 2026-10-17, superseding the accent-blue gutter and tint):
+/* The workspace Emacs is currently showing. NEUTRAL, WITH NO GUTTER (owner
+   request, 2026-10-25, retiring the muted gutter bar of 2026-10-17, which
+   superseded the accent-blue gutter and tint):
    the row line takes the rail's own lifted grey, --card, as Claude's
-   selected row does, and the gutter bar is the muted grey, so the palette's
-   grounds stay grey and no hue marks selection. However the workspace came
+   selected row does, so the palette's grounds stay grey and no hue marks
+   selection. However the workspace came
    to be selected. No bolder name. The fill sits partway back from --card
    toward the rail's own ground (owner request, 2026-10-18), so
-   a hover (--card) still lifts the selected row; then the fill (45%) and the
-   gutter bar (64% of --muted) were both taken a few steps less intense, with
+   a hover (--card) still lifts the selected row; then the fill (45%) was
+   taken a few steps less intense, with
    the Emacs tab bar's selected grey (owner ruling, 2026-10-18;
    design-selection-less-intense.html beside this module). The fill was
    then taken down again to 30% (owner request, 2026-10-19: "a bit darker
    and less intense"), sitting closer still to the rail's ground, and then
    back up to 38% (owner request, 2026-10-20: "slightly lighter"). */
 #ws-sidebar {
-  --row-current-gutter: color-mix(in srgb, var(--muted) 64%, var(--sidebar-bg));
   --row-current-tint: color-mix(in srgb, var(--card) 38%, var(--sidebar-bg));
 }
-#ws-sidebar .ws.current > .row {
-  background-color: var(--row-current-tint);
-  border-left: var(--row-gutter-w) solid var(--row-current-gutter);
-  padding-left: calc(0.9rem - var(--row-gutter-w) + var(--row-indent));
-}
+#ws-sidebar .ws.current > .row { background-color: var(--row-current-tint); }
 /* THE HIGHLIGHTED ROW'S TAB NUMBER IS WHITE (owner request, 2026-10-18): it
    rises from its own grey into white over half a second (owner request,
    2026-10-20: twice as fast as the second it first took) when the highlight
@@ -9288,14 +9285,15 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 #ws-sidebar:not(.sb-hover-suspended) .sb-apps-menu ar-button:hover { background: var(--card); }
 #ws-sidebar .sb-app-check { width: 12px; color: var(--muted); }
 #ws-sidebar .sb-threads { display: flex; flex-direction: column; padding: 4px 0 12px; }
-#ws-sidebar .sb-new-thread {
-  margin: 4px 12px 10px; display: flex; align-items: center; gap: 8px;
-  border: 1px solid var(--border); background: transparent; color: var(--fg);
-  font: inherit; font-weight: 550; padding: 8px 10px; border-radius: 8px; cursor: pointer;
-}
-#ws-sidebar:not(.sb-hover-suspended) .sb-new-thread:hover { background: var(--card); }
-#ws-sidebar .sb-new-thread-note { margin: -4px 14px 10px; font-size: 12px; color: var(--muted); }
+/* THE OPEN THREADS' HEADING carries the new-thread "+" at its right edge,
+   the same "+" a repository's header carries (owner request, 2026-10-25). */
+#ws-sidebar .sb-threads-heading.sb-threads-open { display: flex; align-items: center; margin-top: 4px; }
+#ws-sidebar .sb-threads-open .sb-add { margin-left: auto; text-transform: none; letter-spacing: 0; }
+#ws-sidebar .sb-new-thread-note { margin: 0 14px 6px; font-size: 12px; color: var(--muted); }
 #ws-sidebar .sb-thread > .row { cursor: pointer; }
+/* A THREAD'S MENU CONTROL SITS AT THE ROW'S RIGHT EDGE (owner request,
+   2026-10-25): the name takes the row's free width. */
+#ws-sidebar .sb-thread > .row .name { flex: 1 1 auto; }
 #ws-sidebar .sb-thread-summary {
   margin: -2px 0 4px; padding: 0 1.4rem; font-size: 12px; color: var(--info-agents);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

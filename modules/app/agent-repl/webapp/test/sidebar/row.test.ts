@@ -271,14 +271,21 @@ describe("the highlight and the receded styling", () => {
       .filter((rule) => rule.selectors.some((sel) => sel.includes(".ws.current")))
       .map((rule) => rule.declarations);
 
-  it("marks the current row with the muted gutter bar", () => {
+  it("draws no gutter bar on the current row (owner request, 2026-10-25)", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
     // Assert
-    expect(declarations.some((d) => /border-left:\s*var\(--row-gutter-w\) solid var\(--row-current-gutter\)/.test(d))).toBe(true);
+    expect(declarations.some((d) => /border-left/.test(d))).toBe(false);
   });
 
-  it("fills the current row's line and its gutter bar partway from --card and --muted toward the rail", () => {
+  it("rounds every row's fill subtly", () => {
+    // Arrange / Act
+    const row = rulesOf(stylesheet).find((rule) => rule.selectors.includes("#ws-sidebar .row"))?.declarations;
+    // Assert
+    expect(row).toMatch(/border-radius:\s*5px/);
+  });
+
+  it("fills the current row's line partway from --card toward the rail", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
     const token = (name: string): string | undefined =>
@@ -290,12 +297,7 @@ describe("the highlight and the receded styling", () => {
     expect([
       declarations.some((d) => /background-color:\s*var\(--row-current-tint\)/.test(d)),
       token("--row-current-tint"),
-      token("--row-current-gutter"),
-    ]).toEqual([
-      true,
-      "color-mix(in srgb, var(--card) 38%, var(--sidebar-bg))",
-      "color-mix(in srgb, var(--muted) 64%, var(--sidebar-bg))",
-    ]);
+    ]).toEqual([true, "color-mix(in srgb, var(--card) 38%, var(--sidebar-bg))"]);
   });
 
   it("paints the current row's tint through the cascade", () => {

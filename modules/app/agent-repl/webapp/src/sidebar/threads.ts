@@ -157,6 +157,9 @@ export function disposeThreadList(rail: RailContext): void {
   drawnLists.delete(rail);
 }
 
+/** The heading the open threads are listed under, beside the new-thread "+". */
+export const OPEN_HEADING = "Open";
+
 /** The heading the archived threads are listed under. */
 export const ARCHIVED_HEADING = "Archived";
 
@@ -168,9 +171,10 @@ export function drawThreadSection(section: RosterThreadSection, sc: SidebarConte
   box.setAttribute("data-thread-section", "");
 
   const button = createControl();
-  button.className = "sb-new-thread";
+  button.className = "sb-add";
   button.setAttribute("data-new-thread", "");
-  button.textContent = `＋ ${requireMessage(section.newThread, "RosterThreadSection.new_thread").label}`;
+  button.textContent = "+";
+  button.title = requireMessage(section.newThread, "RosterThreadSection.new_thread").label;
   const note = document.createElement("div");
   note.className = "sb-new-thread-note";
   note.hidden = true;
@@ -208,10 +212,13 @@ export function drawThreadSection(section: RosterThreadSection, sc: SidebarConte
       }
     }
   });
-  box.append(button, note, open);
+  const openHeading = document.createElement("div");
+  openHeading.className = "sb-threads-heading sb-threads-open";
+  openHeading.append(OPEN_HEADING, button);
+  box.append(openHeading, note, open);
   if (archived.childElementCount > 0) {
     const heading = document.createElement("div");
-    heading.className = "sb-threads-heading";
+    heading.className = "sb-threads-heading sb-threads-archived-heading";
     heading.textContent = ARCHIVED_HEADING;
     box.append(heading, archived);
   }
