@@ -86,7 +86,9 @@
                             ('reported (funcall on-reported))
                             ('refused (funcall on-not-reported))
                             ('pending (push (list ws on-reported on-not-reported)
-                                            agent-repl-test-pu--pending)))))
+                                            agent-repl-test-pu--pending)))
+                          ;; Sent, as the real report answers.
+                          t))
                        ((symbol-function 'agent-repl-webhost-has-page-p)
                         (lambda (ws) (and (member ws agent-repl-test-pu--pages) t)))
                        ((symbol-function 'agent-repl-webhost-remove)
@@ -243,6 +245,43 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
     (let ((droppers (agent-repl-test-pu--unannounced-droppers forms)))
       ;; Assert
       (should (equal droppers '(hand-rolled by-symbol))))))
+
+;;;; ---- A hot reload heals the rows an unannounced drop left severed ----
+
+(ert-deftest agent-repl-test-pu-every-pageless-workspace-is-reported ()
+  "Each open workspace the host holds no page for is reported, once each."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta" "gamma")
+    (setq agent-repl-test-pu--pages '("alpha"))
+    ;; Act
+    (let ((sent (agent-repl-page-unload-report-pageless)))
+      ;; Assert
+      (should (equal (list sent (reverse agent-repl-test-pu--events))
+                     '(2 ((report "beta") (report "gamma"))))))))
+
+(ert-deftest agent-repl-test-pu-a-pageless-workspace-already-reporting-is-skipped ()
+  "A workspace whose report is in flight is not reported a second time."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--pages nil)
+    (agent-repl--ws-put "alpha" :page-unloading t)
+    ;; Act
+    (agent-repl-page-unload-report-pageless)
+    ;; Assert
+    (should (equal (reverse agent-repl-test-pu--events) '((report "beta"))))))
+
+(ert-deftest agent-repl-test-pu-a-pageless-report-records-its-outcome ()
+  "A landed report and one that did not land are each recorded."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil)
+    (agent-repl-page-unload-report-pageless)
+    (setq agent-repl-test-pu--report 'refused)
+    ;; Act
+    (agent-repl-page-unload-report-pageless)
+    ;; Assert
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.pageless-reported ws=alpha"))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.pageless-unreported ws=alpha"))))
 
 ;;;; ---- What counts as a look ----
 

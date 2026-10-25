@@ -360,5 +360,31 @@ Registered on `agent-repl-link-up-functions'; a timer already running is kept."
 (add-hook 'agent-repl-link-up-functions #'agent-repl-page-unload-start)
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-page-unload-on-roster-update)
 
+(defun agent-repl-page-unload-report-pageless ()
+  "Tell the daemon about every open workspace whose page the host does not hold.
+A page dropped before every drop was announced (`agent-repl-page-drop-announced')
+left its workspace drawn severed, blue, until a page connected again.
+Reporting it now has the daemon await its page instead, so the row heals.
+A workspace whose report is already in flight is skipped.  Answers how
+many reports were sent."
+  (let ((sent 0))
+    (dolist (ws (agent-repl--live-ws-names) sent)
+      (unless (or (agent-repl-webhost-has-page-p ws) (agent-repl--ws-get ws :page-unloading))
+        (when (agent-repl-host-report-page-unloading
+               ws
+               (lambda () (agent-repl--info ws "elisp.page-unload.pageless-reported ws=%s" ws))
+               (lambda () (agent-repl--info ws "elisp.page-unload.pageless-unreported ws=%s" ws)))
+          (setq sent (1+ sent)))))))
+
+(defvar agent-repl-page-unload--loaded nil
+  "Non-nil once this file has loaded: a later load is a hot reload.")
+
+;; A HOT RELOAD HEALS THE ROWS AN UNANNOUNCED DROP LEFT SEVERED.  The first
+;; load has no daemon link yet, and a fresh daemon awaits every page anyway.
+(when agent-repl-page-unload--loaded
+  (agent-repl--info agent-repl--page-unload-central "elisp.page-unload.reloaded reported=%d"
+                    (agent-repl-page-unload-report-pageless)))
+(setq agent-repl-page-unload--loaded t)
+
 (provide 'page-unload)
 ;;; page-unload.el ends here
