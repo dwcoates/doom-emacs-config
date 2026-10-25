@@ -68,6 +68,15 @@ func (w Workspace) LastInteractedAt() time.Time {
 	return at
 }
 
+// AskedAt is when a thread was last asked a question, or created when it has
+// not been asked one yet: the Chats list's order, newest first.
+func (w Workspace) AskedAt() time.Time {
+	if w.LastAskedAt != nil && w.LastAskedAt.After(w.CreatedAt) {
+		return *w.LastAskedAt
+	}
+	return w.CreatedAt
+}
+
 // IsZettelHome reports whether the repository is the zettel home.
 func (r Repository) IsZettelHome() bool { return r.Kind == RepositoryKindZettel }
 

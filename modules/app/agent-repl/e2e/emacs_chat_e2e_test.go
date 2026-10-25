@@ -22,9 +22,9 @@ import (
 	"agent-repld/integration/harness"
 )
 
-// emacsThreadName is the Emacs workspace a thread the fake vendor names opens
-// under (roster.el's `agent-repl-roster-thread-prefix').
-var emacsThreadName = "chat/" + harness.FakeClaudeMintedName
+// emacsThreadPrefix is the prefix of a thread's Emacs workspace name, which
+// is its id, never its title (roster.el's `agent-repl-roster-thread-workspace-name').
+const emacsThreadPrefix = "chat/"
 
 // truthy reports whether an evaluated form answered non-nil.
 func truthy(raw json.RawMessage) bool { return !isJSONNull(raw) && string(raw) != "false" }
@@ -71,8 +71,18 @@ func TestEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
                         (lambda (&rest _) "Why is the sky blue?")))
                (call-interactively #'agent-repl-thread-new)
                t)`)
-	e.AwaitEvalFor(emacsVerbBound, "the thread's workspace, marked a thread",
-		`(agent-repl-roster-thread-p `+elispString(emacsThreadName)+`)`, truthy)
+	// The fake vendor titles the thread at once; the row then carries the
+	// title, and its workspace (named by its id) is open and marked a thread.
+	var threadID string
+	e.AwaitEvalFor(emacsVerbBound, "the titled thread's workspace, marked a thread",
+		`(let ((row (car (agent-repl-roster-threads))))
+           (and row (equal (plist-get row :name) `+elispString(harness.FakeClaudeMintedTitle)+`)
+                (agent-repl-roster-thread-p (agent-repl-roster-thread-workspace-name row))
+                (plist-get (plist-get row :thread) :id)))`,
+		func(raw json.RawMessage) bool {
+			return json.Unmarshal(raw, &threadID) == nil && threadID != ""
+		})
+	emacsThreadName := emacsThreadPrefix + threadID
 	e.AwaitEvalFor(emacsTabOpenBound, "the frame moved onto the new thread",
 		`(agent-repl--ws-current-name)`,
 		func(raw json.RawMessage) bool {
@@ -83,7 +93,6 @@ func TestEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
 		t.Fatalf("tab order = %v, want no tab for the thread", order)
 	}
 	threadDir := decodeStrings(e.Eval(`(list (plist-get (plist-get (car (agent-repl-roster-threads)) :thread) :dir))`))[0]
-	threadID := decodeStrings(e.Eval(`(list (plist-get (plist-get (car (agent-repl-roster-threads)) :thread) :id))`))[0]
 	thread := &workspacev1.WorkspaceRef{Id: threadID, Dir: threadDir}
 	awaitAnswered(t, e.DaemonAddr(), thread, "echo: Why is the sky blue?")
 

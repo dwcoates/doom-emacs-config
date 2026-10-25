@@ -74,15 +74,15 @@ func (r *resolver) appSwitcher() *frontendv1.RosterAppSwitcher {
 }
 
 // threadSection resolves the thread list: every open thread and then every
-// archived one (a closed thread's workspace), each the one the user
-// interacted with last first.
+// archived one (a closed thread's workspace), each the one last asked a
+// question first: viewing a thread never moves it (owner ruling, 2026-10-25).
 func (r *resolver) threadSection(threads []wsm.Workspace) *frontendv1.RosterThreadSection {
 	sorted := append([]wsm.Workspace(nil), threads...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if sorted[i].Closed != sorted[j].Closed {
 			return !sorted[i].Closed
 		}
-		a, b := sorted[i].LastInteractedAt(), sorted[j].LastInteractedAt()
+		a, b := sorted[i].AskedAt(), sorted[j].AskedAt()
 		if !a.Equal(b) {
 			return a.After(b)
 		}

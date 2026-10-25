@@ -56,7 +56,8 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
 	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
-	`(SELECT MAX(turns.closed_at) FROM turns WHERE turns.workspace_id = workspaces.id)`
+	`(SELECT MAX(turns.closed_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
+	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL)`
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range
 // priority is a decode failure, never a silently substituted default.
@@ -84,6 +85,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		landAt        sql.NullInt64
 		commits       sql.NullInt64
 		ended         sql.NullInt64
+		asked         sql.NullInt64
 		hiddenAt      sql.NullInt64
 		lapsesAt      sql.NullInt64
 		gated         sql.NullInt64
@@ -98,7 +100,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		principalLink sql.NullString
 		kind          string
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OwnerLands, &contextFrom, &requestedBy, &selfClose, &awaiting, &principalLink, &kind, &ws.OneShot, &ws.MergePending, &ended); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OwnerLands, &contextFrom, &requestedBy, &selfClose, &awaiting, &principalLink, &kind, &ws.OneShot, &ws.MergePending, &ended, &asked); err != nil {
 		return Workspace{}, err
 	}
 	switch WorkspaceKind(kind) {
@@ -175,6 +177,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	ws.LastSelectedAt = optTime(selected)
 	ws.LastActivityAt = optTime(activity)
 	ws.LastTurnEndedAt = optTime(ended)
+	ws.LastAskedAt = optTime(asked)
 	ws.StatusChangedAt = optTime(statusChanged)
 	ws.CloseWhenTurnEnds = optTime(selfClose)
 	if awaiting.Valid {

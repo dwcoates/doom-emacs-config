@@ -125,7 +125,7 @@ type WorkspaceRoster struct {
 	// selection shows Workspaces. Always set.
 	AppSwitcher *RosterAppSwitcher `protobuf:"bytes,16,opt,name=app_switcher,json=appSwitcher,proto3" json:"app_switcher,omitempty"`
 	// THE CHAT APP'S BODY: every chat thread, every open one first and then
-	// every archived one, each the most recently interacted with first, and the
+	// every archived one, each the one last asked a question first, and the
 	// new-thread button. Drawn in place of the open,
 	// hidden and recently-merged sections while Chat is shown. Threads appear
 	// nowhere else in the roster: no repository section, band or tab holds
@@ -662,8 +662,8 @@ type RosterThreadSection struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The new-thread button, drawn above the list.
 	NewThread *RosterThreadNewButton `protobuf:"bytes,1,opt,name=new_thread,json=newThread,proto3" json:"new_thread,omitempty"`
-	// The threads, the most recently interacted with first (asked in or
-	// opened). Empty when there are none.
+	// The threads, the one last asked a question first (or created, until
+	// asked one): viewing a thread never moves it. Empty when there are none.
 	Rows          []*RosterThreadRow `protobuf:"bytes,2,rep,name=rows,proto3" json:"rows,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

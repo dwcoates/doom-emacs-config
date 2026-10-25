@@ -3793,9 +3793,17 @@ judged as any roster is."
       :sections (list (agent-repl-test-roster--section
                        "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
       :threads '(("t1" . "why-blue"))))
-    (should (equal (agent-repl--ws-by-ref-id "t1") "chat/why-blue"))
-    (should (member "chat/why-blue" agent-repl-test-roster--created))
+    (should (equal (agent-repl--ws-by-ref-id "t1") "chat/t1"))
+    (should (member "chat/t1" agent-repl-test-roster--created))
     (should (equal (agent-repl-roster-drawn-tab-order) '("one")))))
+
+(ert-deftest agent-repl-test-roster-a-retitled-thread-keeps-its-workspace ()
+  "A thread's title arriving renames nothing in Emacs: its workspace is named by its id."
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :threads '(("t1" . "Loading…"))))
+    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :threads '(("t1" . "Fusion in the Sun"))))
+    (should (equal (list (agent-repl--ws-by-ref-id "t1") agent-repl-test-roster--created)
+                   '("chat/t1" ("chat/t1"))))))
 
 (ert-deftest agent-repl-test-roster-reconcile-marks-which-workspaces-are-threads ()
   "Every reconcile states whether each workspace it settled is a thread."
@@ -3805,7 +3813,7 @@ judged as any roster is."
       :sections (list (agent-repl-test-roster--section
                        "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
       :threads '(("t1" . "why-blue"))))
-    (should (agent-repl-roster-thread-p "chat/why-blue"))
+    (should (agent-repl-roster-thread-p "chat/t1"))
     (should-not (agent-repl-roster-thread-p "one"))
     (should-not (agent-repl-roster-thread-p nil))))
 
@@ -3824,7 +3832,7 @@ judged as any roster is."
                            "open" (list (agent-repl-test-roster--row "w1" "one" :ready))))
           :threads '(("t1" . "why-blue")))))
       ;; Assert
-      (should (equal (alist-get "chat/why-blue" marked nil nil #'equal) t))
+      (should (equal (alist-get "chat/t1" marked nil nil #'equal) t))
       (should (assoc "one" marked))
       (should-not (cdr (assoc "one" marked))))))
 
@@ -3833,7 +3841,7 @@ judged as any roster is."
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-reconcile (agent-repl-test-roster--roster :threads '(("t1" . "why"))))
     (agent-repl-roster-reconcile (agent-repl-test-roster--roster))
-    (should (member "chat/why" agent-repl-test-roster--killed))
+    (should (member "chat/t1" agent-repl-test-roster--killed))
     (should-not (agent-repl--ws-by-ref-id "t1"))))
 
 (ert-deftest agent-repl-test-roster-thread-row-ws-names-the-opened-workspace ()
@@ -3862,5 +3870,5 @@ judged as any roster is."
   "The thread rows are the accepted roster's, newest first."
   (let ((agent-repl-roster-view (agent-repl-test-roster--roster :threads '(("t2" . "b") ("t1" . "a")))))
     (should (equal (mapcar (lambda (row) (plist-get row :name)) (agent-repl-roster-threads)) '("b" "a")))
-    (should (equal (agent-repl-roster-thread-workspace-name (car (agent-repl-roster-threads))) "chat/b"))))
+    (should (equal (agent-repl-roster-thread-workspace-name (car (agent-repl-roster-threads))) "chat/t2"))))
 

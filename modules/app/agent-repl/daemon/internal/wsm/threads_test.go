@@ -390,3 +390,31 @@ func TestListRepositoriesNeverListsTheZettelHome(t *testing.T) {
 		}
 	}
 }
+
+func TestAskedAtIsTheNewestQuestionOrTheCreation(t *testing.T) {
+	created := time.Unix(100, 0)
+	asked := time.Unix(300, 0)
+	cases := []struct {
+		name  string
+		asked *time.Time
+		want  time.Time
+	}{
+		{name: "never asked", want: created},
+		{name: "asked since", asked: &asked, want: asked},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			selected := time.Unix(900, 0)
+			ws := Workspace{CreatedAt: created, LastAskedAt: tc.asked, LastSelectedAt: &selected}
+
+			// Act
+			got := ws.AskedAt()
+
+			// Assert: a later selection moves nothing.
+			if !got.Equal(tc.want) {
+				t.Fatalf("AskedAt = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

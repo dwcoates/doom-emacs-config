@@ -17,11 +17,11 @@ import (
 // zettelHomeID is the threads' repository, which the registry never lists.
 const zettelHomeID = ids.RepoID("repo-zettel")
 
-// thread is a chat thread in the zettel home, last interacted with at AT.
+// thread is a chat thread in the zettel home, last asked a question at AT.
 func thread(id, name string, at *time.Time) wsm.Workspace {
 	return wsm.Workspace{
 		ID: ids.WorkspaceID(id), Kind: wsm.WorkspaceKindThread, Repo: zettelHomeID,
-		Dir: "/home/zettel/threads/" + name, Name: name, CreatedAt: epoch, LastSelectedAt: at,
+		Dir: "/home/zettel/threads/" + name, Name: name, CreatedAt: epoch, LastAskedAt: at,
 	}
 }
 
@@ -55,11 +55,10 @@ func TestThreadsAreDrawnOnlyInTheThreadSection(t *testing.T) {
 	}
 }
 
-func TestTheThreadSectionPutsTheMostRecentlyInteractedFirst(t *testing.T) {
+func TestTheThreadSectionPutsTheMostRecentlyAskedFirst(t *testing.T) {
 	// Arrange
 	r, _ := newResolver(t)
-	older, newer := thread("t-1", "older", at(time.Minute)), thread("t-2", "newer", nil)
-	newer.LastActivityAt = at(2 * time.Minute)
+	older, newer := thread("t-1", "older", at(time.Minute)), thread("t-2", "newer", at(2*time.Minute))
 
 	// Act
 	r.SetRegistry(withThreads(older, newer))
@@ -74,8 +73,25 @@ func TestTheThreadSectionPutsTheMostRecentlyInteractedFirst(t *testing.T) {
 	}
 }
 
+func TestViewingAThreadDoesNotMoveIt(t *testing.T) {
+	// Arrange: the older-asked thread was viewed (and so worked in) last.
+	r, _ := newResolver(t)
+	viewed, asked := thread("t-1", "viewed", at(time.Minute)), thread("t-2", "asked", at(2*time.Minute))
+	viewed.LastSelectedAt = at(3 * time.Minute)
+	viewed.LastActivityAt = at(3 * time.Minute)
+
+	// Act
+	r.SetRegistry(withThreads(viewed, asked))
+
+	// Assert
+	rows := latest(t, r).GetThreads().GetRows()
+	if rows[0].GetName().GetText() != "asked" {
+		t.Fatalf("first row = %q, want the thread asked last", rows[0].GetName().GetText())
+	}
+}
+
 func TestArchivedThreadsFollowEveryOpenThread(t *testing.T) {
-	// Arrange: the archived thread is the most recently interacted with.
+	// Arrange: the archived thread is the one asked last.
 	r, _ := newResolver(t)
 	archived, open := thread("t-1", "archived", at(2*time.Minute)), thread("t-2", "open", at(time.Minute))
 	archived.Closed = true

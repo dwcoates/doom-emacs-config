@@ -13,7 +13,7 @@
 ;;
 ;;   `SPC TAB t'  a new thread, from a question read in the minibuffer, as a
 ;;                one-shot's commission is read;
-;;   `SPC TAB T'  the thread last interacted with;
+;;   `SPC TAB T'  the thread last asked a question;
 ;;   `SPC TAB .'  a thread picked by name.
 ;;
 ;; and the daemon's push asking for the new-thread prompt, which the
@@ -126,7 +126,7 @@ a timer, and held while another minibuffer is open."
       (message "[agent-repl] Thread %s is still opening" (plist-get row :name)))))
 
 (defun agent-repl-thread-recent ()
-  "Open the thread last interacted with (`SPC TAB T\=')."
+  "Open the thread last asked a question (`SPC TAB T\=')."
   (interactive)
   (let ((rows (agent-repl-roster-threads)))
     (unless rows

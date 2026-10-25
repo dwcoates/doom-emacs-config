@@ -325,6 +325,29 @@ func (s *store) OpenTurns(ctx context.Context, id WorkspaceID) ([]Turn, error) {
 	return out, nil
 }
 
+// FirstThreadQuestion answers the words of the oldest turn of a chat thread
+// that carries a question, and whether one does.
+func (s *store) FirstThreadQuestion(ctx context.Context, id WorkspaceID) (string, bool, error) {
+	var text string
+	var found bool
+	err := s.read(ctx, "daemon.wsm.first_thread_question", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
+		err := s.q(ctx).QueryRowContext(ctx,
+			`SELECT thread_question FROM turns WHERE workspace_id = ? AND thread_question IS NOT NULL ORDER BY started_at, id LIMIT 1`, id).Scan(&text)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found = true
+		return nil
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return text, found, nil
+}
+
 // HasTurns reports whether a workspace has EVER recorded a turn.
 //
 // IT IS DELIBERATELY KEYED ON THE WORKSPACE, because that is how the turns

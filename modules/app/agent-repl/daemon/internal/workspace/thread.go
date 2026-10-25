@@ -2,9 +2,7 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,10 +42,18 @@ func ChatSystemPrompt(dir string) func() (string, error) {
 	}
 }
 
-// CreateThread makes a new chat thread named after its first question and
-// brings its session up. The question itself is NOT submitted here: the
-// caller submits it through the prompt handler, the one submission path, so
-// it reaches the session exactly as every later question does.
+// CreateThread makes a new chat thread AT ONCE and brings its session up;
+// the thread is titled after its first question afterwards (startTitling).
+// The question itself is NOT submitted here: the caller submits it through
+// the prompt handler, the one submission path, so it reaches the session
+// exactly as every later question does.
+//
+// A THREAD IS SWITCHED TO BEFORE IT HAS A TITLE (owner ruling, 2026-10-25):
+// it is registered under ThreadTitlePlaceholder, which every surface draws
+// until the title arrives and renames it. Its DIRECTORY is a fresh token,
+// never its name, and never moves: the live session works in it and the
+// vendor keeps its transcript under its path, so a rename that moved it
+// would strand both.
 func (v *verbs) CreateThread(ctx context.Context, question string) (wsm.Workspace, error) {
 	threads := ThreadsDir(v.deps.HomeDir)
 	global := v.deps.Log.Global().With(dlog.Context{"threads_dir": threads})
@@ -55,42 +61,23 @@ func (v *verbs) CreateThread(ctx context.Context, question string) (wsm.Workspac
 		return wsm.Workspace{}, refuse(global, "CreateThread", ArmCreationFailed, "a thread starts from a question, and this one is blank", false)
 	}
 
-	slug, err := v.mintName(ctx, global, threads, question, "")
-	if err != nil {
-		var failure *namingFailure
-		if errors.As(err, &failure) {
-			return wsm.Workspace{}, refuse(global, "CreateThread", ArmCreationFailed,
-				fmt.Sprintf("the thread could not be named: %s", failure.Detail), false)
-		}
-		return wsm.Workspace{}, err
-	}
-	// A THREAD'S NAME IS ITS DIRECTORY'S, so a directory already there holds
-	// the name as surely as a registered workspace does.
-	name, release, err := v.freeNameAgainst(ctx, global, slug, func(candidate string) (bool, error) {
-		_, err := os.Stat(filepath.Join(threads, candidate))
-		switch {
-		case err == nil:
-			return true, nil
-		case errors.Is(err, fs.ErrNotExist):
-			return false, nil
-		}
-		return false, fmt.Errorf("probe the thread directory %q: %w", candidate, err)
-	})
-	if err != nil {
-		global.Error(opCreateThread, "could not find a free name for the thread", dlog.Context{"slug": slug, "cause": err.Error()})
-		return wsm.Workspace{}, fmt.Errorf("create thread %q: %w", slug, err)
-	}
-	defer release()
-
-	dir := filepath.Join(threads, name)
+	dir := filepath.Join(threads, newThreadToken())
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		global.Error(opCreateThread, "could not make the thread's directory", dlog.Context{"dir": dir, "cause": err.Error()})
-		return wsm.Workspace{}, fmt.Errorf("create thread %q: %w", name, err)
+		return wsm.Workspace{}, fmt.Errorf("create thread at %q: %w", dir, err)
 	}
-	record, err := v.deps.DB.RegisterThread(ctx, dir, name)
+	// THE PLACEHOLDER IS CLAIMED AND REGISTERED under one naming lock, so
+	// two threads created together take "Loading…" and "Loading… (2)".
+	v.names.mu.Lock()
+	name, err := v.freeThreadNameLocked(ctx, ThreadTitlePlaceholder, "")
+	var record wsm.Workspace
+	if err == nil {
+		record, err = v.deps.DB.RegisterThread(ctx, dir, name)
+	}
+	v.names.mu.Unlock()
 	if err != nil {
 		global.Error(opCreateThread, "could not register the thread", dlog.Context{"dir": dir, "cause": err.Error()})
-		return wsm.Workspace{}, fmt.Errorf("create thread %q: register: %w", name, err)
+		return wsm.Workspace{}, fmt.Errorf("create thread at %q: register: %w", dir, err)
 	}
 	log, err := v.deps.Log.Workspace(record.Dir)
 	if err != nil {
@@ -123,5 +110,12 @@ func (v *verbs) CreateThread(ctx context.Context, question string) (wsm.Workspac
 	}
 	log.Info(opCreateThread, "created the thread", dlog.Context{"name": name, "dir": record.Dir})
 	v.republishRegistry(ctx, log, opCreateThread)
+	v.startTitling(ctx, log, record, question)
 	return record, nil
+}
+
+// newThreadToken is a fresh name for a thread's directory: random, so no two
+// threads, and no title, can ever claim the same one.
+func newThreadToken() string {
+	return "t-" + string(wsm.NewWorkspaceID())
 }

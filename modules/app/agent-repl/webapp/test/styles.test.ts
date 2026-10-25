@@ -5936,3 +5936,20 @@ describe("the chat's quieter emphasis", () => {
     expect(tex).toEqual([lead, lead]);
   });
 });
+
+describe("a response's level-2 sections", () => {
+  it("divides a ## from an earlier ## sibling with a short, dark, centered rule", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".md > h2 ~ h2::before") ?? "";
+    // Assert
+    expect([rule.match(/left:\s*20%/) !== null, rule.match(/right:\s*20%/) !== null, rule.match(/height:\s*1px/) !== null,
+      rule.match(/background:\s*color-mix\(in srgb, black 30%, transparent\)/) !== null]).toEqual([true, true, true, true]);
+  });
+
+  it("draws no rule above any other heading level", () => {
+    // Arrange / Act
+    const others = ["h1", "h3", "h4", "h5", "h6"].map((h) => declarationsOf(`.md > ${h} ~ ${h}::before`));
+    // Assert
+    expect(others).toEqual([undefined, undefined, undefined, undefined, undefined]);
+  });
+});

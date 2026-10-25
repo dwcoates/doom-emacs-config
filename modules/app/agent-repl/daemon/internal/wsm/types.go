@@ -134,6 +134,12 @@ type Workspace struct {
 	// counts the idle time since work last finished and stays stable across
 	// mere selection, navigation, and the start of the next turn.
 	LastTurnEndedAt *time.Time
+	// LastAskedAt is when a chat thread was last asked a question: its newest
+	// question turn's start, derived on read from the turns, never stored on
+	// the row. Nil for a thread never asked one, and for every agent
+	// workspace. The Chats list's order (owner ruling, 2026-10-25): viewing a
+	// thread never moves it, asking one does.
+	LastAskedAt *time.Time
 	// StatusChangedAt is when the roster's status arm for the workspace last
 	// moved (SetStatusChangedAt); nil when no change has been recorded.
 	StatusChangedAt *time.Time

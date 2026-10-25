@@ -51,6 +51,8 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// firstQuestions are the threads' first questions (FirstThreadQuestion).
+	firstQuestions map[ids.WorkspaceID]string
 	// workspaceByDirErr fails WorkspaceByDir, at workspaceByDirErrAt alone
 	// when that is set.
 	workspaceByDirErr   error
@@ -1016,6 +1018,12 @@ func (d *fakeDB) BindSession(ctx context.Context, s wsm.Session) error {
 	delete(d.pendingForks, s.Workspace)
 	delete(d.lineage, s.Workspace)
 	return d.PutSession(ctx, s)
+}
+
+// FirstThreadQuestion answers the question seeded in firstQuestions.
+func (d *fakeDB) FirstThreadQuestion(_ context.Context, id ids.WorkspaceID) (string, bool, error) {
+	q, ok := d.firstQuestions[id]
+	return q, ok, nil
 }
 
 func (d *fakeDB) HeldPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.HeldPrompt, error) {

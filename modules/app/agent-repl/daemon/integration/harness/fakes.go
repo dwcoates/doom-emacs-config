@@ -188,6 +188,11 @@ const FakeClaudeLoginMarker = "FAKE-CLAUDE-LOGIN-READY"
 // assert on the branch a nameless create produced.
 const FakeClaudeMintedName = "fake-minted-name"
 
+// FakeClaudeMintedTitle is the title the fake vendor answers a chat thread's
+// title call with (the chat-title-from-question brief, which it recognizes by
+// its first line): what a created thread is renamed to.
+const FakeClaudeMintedTitle = "Fake Minted Title"
+
 // fakeClaudeScript is the vendor stand-in for BOTH call shapes the daemon
 // has. A headless run (`-p`) drains the question off stdin and answers as the
 // requested output format: a naming call gets the JSON envelope with a legal
@@ -197,10 +202,14 @@ const FakeClaudeMintedName = "fake-minted-name"
 const fakeClaudeScript = `#!/bin/sh
 for arg in "$@"; do
   if [ "$arg" = "-p" ]; then
-    cat > /dev/null
+    question=$(cat)
+    answer="` + FakeClaudeMintedName + `"
+    case "$question" in
+      *"Title the chat thread"*) answer="` + FakeClaudeMintedTitle + `" ;;
+    esac
     for fmt in "$@"; do
       if [ "$fmt" = "json" ]; then
-        printf '{"type":"result","subtype":"success","is_error":false,"result":"` + FakeClaudeMintedName + `"}'
+        printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}' "$answer"
         exit 0
       fi
     done
