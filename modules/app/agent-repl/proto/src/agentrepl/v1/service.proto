@@ -117,6 +117,7 @@ import "agentrepl/v1/endpoint_answer_editor_evaluation.proto";
 import "agentrepl/v1/endpoint_compact_workspace.proto";
 import "agentrepl/v1/endpoint_set_workspace_correspondence.proto";
 import "agentrepl/v1/endpoint_set_workspace_principal_link.proto";
+import "agentrepl/v1/endpoint_set_workspace_name.proto";
 import "agentrepl/v1/endpoint_set_workspace_one_shot.proto";
 import "agentrepl/v1/endpoint_create_thread.proto";
 import "agentrepl/v1/endpoint_request_new_thread.proto";
@@ -290,6 +291,9 @@ service AgentRepl {
   // Name the link that best stands for a workspace's task, which the topbar's
   // summary opens, or clear it. See endpoint_set_workspace_principal_link.proto.
   rpc SetWorkspacePrincipalLink(SetWorkspacePrincipalLinkRequest) returns (SetWorkspacePrincipalLinkResponse);
+  // Rename a workspace: its name only, never its branch or its worktree
+  // directory. See endpoint_set_workspace_name.proto.
+  rpc SetWorkspaceName(SetWorkspaceNameRequest) returns (SetWorkspaceNameResponse);
 
 
 

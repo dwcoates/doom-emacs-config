@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
+	"agent-repld/internal/ids"
 )
 
 // EVERY DYNAMICALLY CREATED WORKSPACE IS NAMED BY THE MODEL (owner ruling,
@@ -283,15 +284,22 @@ func (v *verbs) freeNameAgainst(ctx context.Context, log dlog.Logger, branch str
 	return "", nil, fmt.Errorf("no free workspace name after %d attempts at %q", CollisionSuffixLimit, branch)
 }
 
-// takenNames answers the workspace names the registry already holds.
-func (v *verbs) takenNames(ctx context.Context) (map[string]bool, error) {
+// registeredHolders answers every name the registry already holds, and the
+// workspace holding it. A workspace holds its NAME and its BRANCH: the two
+// are equal until a rename (SetName) parts them, and a name handed out later
+// becomes both a workspace's name and a branch, so neither may already be
+// another workspace's. A thread has no branch, so it holds its name alone.
+func (v *verbs) registeredHolders(ctx context.Context) (map[string]ids.WorkspaceID, error) {
 	records, err := v.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list the registered workspaces: %w", err)
 	}
-	taken := make(map[string]bool, len(records))
+	held := make(map[string]ids.WorkspaceID, 2*len(records))
 	for _, record := range records {
-		taken[record.Name] = true
+		held[record.Name] = record.ID
+		if record.Branch != "" {
+			held[record.Branch] = record.ID
+		}
 	}
-	return taken, nil
+	return held, nil
 }

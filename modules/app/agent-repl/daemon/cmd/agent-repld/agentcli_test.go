@@ -466,6 +466,39 @@ func TestSetRefusesASettingSetBothWays(t *testing.T) {
 	}
 }
 
+func (c *cliClient) SetWorkspaceName(_ context.Context, req *connect.Request[agentreplv1.SetWorkspaceNameRequest]) (*connect.Response[agentreplv1.SetWorkspaceNameResponse], error) {
+	return connect.NewResponse(&agentreplv1.SetWorkspaceNameResponse{}), c.record(req.Msg)
+}
+
+func TestSetNameSendsTheRename(t *testing.T) {
+	tests := []struct {
+		name   string
+		ws     string
+		wantID string
+	}{
+		{name: "the calling workspace, as here", ws: "here", wantID: "ws-caller"},
+		{name: "a workspace named by its roster name", ws: "peer", wantID: "ws-peer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, "set", tt.ws, "-name", "better-name")
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			req := only[*agentreplv1.SetWorkspaceNameRequest](t, f)
+			if req.GetWorkspace().GetId() != tt.wantID || req.GetName() != "better-name" {
+				t.Errorf("request = %v, want %s renamed better-name", req, tt.wantID)
+			}
+		})
+	}
+}
+
 func TestSetSendsThePrincipalLinkChange(t *testing.T) {
 	tests := []struct {
 		name    string

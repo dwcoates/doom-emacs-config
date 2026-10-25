@@ -189,8 +189,13 @@ type fakeDB struct {
 	setAwaitingErr  error
 	// setPrincipalLinkErr fails SetPrincipalLink.
 	setPrincipalLinkErr error
-	markSelfCloseErr    error
-	takeSelfCloseErr    error
+	// setNameErr fails SetName; listWorkspacesErrAfterRename becomes
+	// listWorkspacesErr once SetName writes, for a test that fails only the
+	// reads after a rename is recorded.
+	setNameErr                   error
+	listWorkspacesErrAfterRename error
+	markSelfCloseErr             error
+	takeSelfCloseErr             error
 	// reopened records every Reopen, in order.
 	reopened []ids.WorkspaceID
 	// closures is every close record MarkClosed was handed, in order, per
@@ -647,6 +652,24 @@ func (d *fakeDB) SetPrincipalLink(_ context.Context, id ids.WorkspaceID, link *s
 	ws := d.workspaces[id]
 	ws.PrincipalLink = link
 	d.workspaces[id] = ws
+	return nil
+}
+
+// SetName records the name on the fake's record; setNameErr fails it and
+// writes nothing.
+func (d *fakeDB) SetName(_ context.Context, id ids.WorkspaceID, name string) error {
+	if d.setNameErr != nil {
+		return d.setNameErr
+	}
+	ws, ok := d.workspaces[id]
+	if !ok {
+		return fmt.Errorf("fake: no such workspace %s: %w", id, wsm.ErrNotFound)
+	}
+	ws.Name = name
+	d.workspaces[id] = ws
+	if d.listWorkspacesErrAfterRename != nil {
+		d.listWorkspacesErr = d.listWorkspacesErrAfterRename
+	}
 	return nil
 }
 
@@ -1506,6 +1529,15 @@ type fakeMerge struct {
 	suspendErr error
 	// retired records every RetireConcluded.
 	retired []ids.WorkspaceID
+	// relabeled records every Relabel; relabelErr fails it.
+	relabeled  []ids.WorkspaceID
+	relabelErr error
+}
+
+// Relabel records the renamed workspace and answers relabelErr.
+func (m *fakeMerge) Relabel(_ context.Context, ws ids.WorkspaceID) error {
+	m.relabeled = append(m.relabeled, ws)
+	return m.relabelErr
 }
 
 // RetireConcluded records the retirement.
@@ -2743,6 +2775,7 @@ type fixture struct {
 	// topbarPrincipalLinks is every principal link the topbar seam was
 	// handed, in order; an empty one is a clear.
 	topbarPrincipalLinks []string
+	topbarNames          []string
 	// effortReads is every config root whose settings were read; the read
 	// answers effortSettings and effortErr.
 	effortReads    []string
@@ -2824,7 +2857,7 @@ func newFixture(t *testing.T) *fixture {
 	verbs, err := New(Deps{
 		Instance: fixtureInstance,
 		DB:       f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, principalLinks: &f.topbarPrincipalLinks}, Browser: f.browser,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, principalLinks: &f.topbarPrincipalLinks, names: &f.topbarNames}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -3016,6 +3049,8 @@ type stubTopbar struct {
 	// principalLinks records every principal link the verbs installed, in
 	// order; an empty one is a clear.
 	principalLinks *[]string
+	// names records every workspace name a rename installed, in order.
+	names *[]string
 	// window is the context window the strip answers; nil answers none and
 	// nil-panics, as every seam a test did not wire does.
 	window *int64
@@ -3049,6 +3084,11 @@ func (f *fakeFooter) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
 
 func (stubTopbar) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }
 func (stubTopbar) SetNaming(ids.WorkspaceID, topbar.Naming)      {}
+func (s stubTopbar) SetName(_ ids.WorkspaceID, name string) {
+	if s.names != nil {
+		*s.names = append(*s.names, name)
+	}
+}
 func (s stubTopbar) SetPrincipalLink(_ ids.WorkspaceID, link *string) {
 	if s.principalLinks == nil {
 		return

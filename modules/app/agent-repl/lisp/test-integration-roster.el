@@ -1655,12 +1655,12 @@ test-integration-link.el owns."
 ;; audit-3 #33
 (ert-deftest agent-repl-itest-roster-rename-re-keys-the-host-entry ()
   "RULING: a renamed tab's host entry moves to the NEW name, never stays keyed to OLD.
-WRONG today (roster.el:312): `agent-repl-roster--rename-tab' calls
-`agent-repl--ws-rename-state' and `--ws-rename-persp' but never re-keys
-`agent-repl-host--by-name'.  EXPECTED RED until that production fix lands
-— fanout §8 \"a rename of the row renames the tab\" + §7 host state keyed
-by WS-NAME + §9 REF via `agent-repl-host-ref' (nil -> `user-error' at every
-verb and the composer)."
+`agent-repl-roster--rename-tab' re-keys the host state
+\(`agent-repl-host-rename') in the same breath as the workspace table and
+the persp -- fanout §8 \"a rename of the row renames the tab\" + §7 host
+state keyed by WS-NAME + §9 REF via `agent-repl-host-ref' (nil ->
+`user-error' at every verb and the composer).  A daemon rename
+\(agentrepl.v1.SetWorkspaceName) reaches Emacs this way."
   ;; Arrange: a primary link, so the open tab starts a REAL host subscription.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon

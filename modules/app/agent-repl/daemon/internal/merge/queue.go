@@ -1204,6 +1204,34 @@ func (o *orchestrator) LeaseChanged(ws ids.WorkspaceID) {
 	o.kick(repo)
 }
 
+// Relabel implements Orchestrator: the queue view reads each entry's name when
+// it is composed (viewQueue), so republishing the queues WS stands in is the
+// whole relabel.
+func (o *orchestrator) Relabel(ctx context.Context, ws ids.WorkspaceID) error {
+	const op = "daemon.merge.relabel"
+	queues, err := o.deps.DB.AllMergeQueues(ctx)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read the merge queues to relabel a renamed workspace", dlog.Context{
+			"workspace": string(ws), "error": err.Error()})
+		return fmt.Errorf("merge: relabel %s: read the queues: %w", ws, err)
+	}
+	var errs []error
+	for repo, entries := range queues {
+		if !slices.ContainsFunc(entries, func(entry wsm.MergeQueueEntry) bool { return entry.Workspace == ws }) {
+			continue
+		}
+		if err := o.republishQueue(ctx, repo); err != nil {
+			o.deps.Log.Global().Error(op, "could not republish the merge queue a renamed workspace stands in", dlog.Context{
+				"workspace": string(ws), "repo": string(repo), "error": err.Error()})
+			errs = append(errs, fmt.Errorf("merge: relabel %s in %s: %w", ws, repo, err))
+			continue
+		}
+		o.deps.Log.Global().Info(op, "republished the merge queue a renamed workspace stands in", dlog.Context{
+			"workspace": string(ws), "repo": string(repo)})
+	}
+	return errors.Join(errs...)
+}
+
 // resumeIn answers the merge of one repository the boot recovery handed the
 // pump to resume as its head.
 //

@@ -549,10 +549,8 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 		// branch, the worktree directory and the tab label as it stands, so a
 		// name that breaks the naming rule is refused here, naming the part
 		// that broke it, rather than handed to `git` to fail on.
-		if breach := ValidateSuppliedName(supplied); breach != nil {
-			return "", nil, refuseWith(log, "CreateWorkspace", ArmInvalidName,
-				fmt.Sprintf("the name %q breaks the %s rule at %q", supplied, breach.Rule, breach.Component), false,
-				map[string]any{"name": supplied, "component": breach.Component, "rule": breach.Rule})
+		if err := refuseSuppliedName(log, "CreateWorkspace", supplied); err != nil {
+			return "", nil, err
 		}
 		return v.claimSupplied(ctx, log, repoDir, supplied, "")
 	}

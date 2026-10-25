@@ -53,7 +53,7 @@
 import { CONTROL_SELECTOR, createControl, type Control } from "../control.js";
 import type { RosterOpenRows, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { queryAll, windowOf } from "../dom.js";
+import { queryAll } from "../dom.js";
 import { EMPTY_SUBSECTION_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
 import { log } from "../log.js";
 import { requireMessage } from "../rpc/strict.js";
@@ -64,7 +64,8 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_one_shot_pb";
 import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
-import { sendArrangement, sendHeld, type ArrangeChange } from "./arrange.js";
+import { sendArrangement, sendHeld } from "./arrange.js";
+import { openNamePopup } from "./name-popup.js";
 import { subsectionFoldKey, type SidebarContext } from "./context.js";
 import { drawFoldToggle, drawRosterSectionFold, neverFolds, sectionFold, trackDaemonFold } from "./section-fold.js";
 import { pressToDrag, type DragSpec } from "./drag.js";
@@ -74,9 +75,6 @@ export const SUBSECTION_CLASS = "sb-subsection";
 
 /** The class of a subsection's header: its drag handle. */
 export const SUBSECTION_HEAD_CLASS = "sb-subsection-head";
-
-/** The class of the popup that asks for a subsection's name. */
-export const SUBSECTION_POPUP_CLASS = "sb-subsection-popup";
 
 /** The attribute a rows list states its subsection on; empty for the section's own. */
 export const BUCKET_ATTRIBUTE = "data-subsection";
@@ -212,11 +210,13 @@ export function drawRosterSubsection(
     label.title = "double-click to rename";
     label.addEventListener("dblclick", (event) => {
       event.preventDefault();
-      openSubsectionNamePopup(sc, label, {
+      openNamePopup(sc, label, {
+        subject: "subsection",
         placeholder: "subsection name",
         value: name,
         submitLabel: "Rename",
-        change: (newName) => ({ case: "renameSubsection", value: { subsection: { id }, name: newName } }),
+        send: (newName, control) =>
+          sendArrangement(sc, control, { case: "renameSubsection", value: { subsection: { id }, name: newName } }),
       });
     });
     const remove = createControl();
@@ -301,92 +301,15 @@ export function drawCreateSubsectionControl(repository: RepositoryRef, sc: Sideb
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    openSubsectionNamePopup(sc, button, {
+    openNamePopup(sc, button, {
+      subject: "subsection",
       placeholder: "new subsection name",
       value: "",
       submitLabel: "Add",
-      change: (name) => ({ case: "createSubsection", value: { repository, name } }),
+      send: (name, control) => sendArrangement(sc, control, { case: "createSubsection", value: { repository, name } }),
     });
   });
   return button;
-}
-
-/** What a name popup asks for and what it sends. */
-export interface NamePopupSpec {
-  placeholder: string;
-  value: string;
-  submitLabel: string;
-  /** The change the popup sends with the name typed. */
-  change: (name: string) => ArrangeChange;
-}
-
-/**
- * Open the name popup under ANCHOR, replacing any open one.
- *
- * Enter or the button sends; Escape or a press anywhere outside it closes it.
- * It is one of the rail's dropdowns (`dropdowns.ts`), so opening another
- * dropdown closes it, and so does the rail losing the user (`transients.ts`:
- * the page losing focus, as a click into Emacs outside the page does, which
- * the page never sees as a press). A blank name is not sent: the contract
- * refuses one, so the popup keeps waiting rather than provoking the refusal.
- */
-export function openSubsectionNamePopup(sc: SidebarContext, anchor: HTMLElement, spec: NamePopupSpec): HTMLElement {
-  const popup = document.createElement("div");
-  popup.className = SUBSECTION_POPUP_CLASS;
-  popup.setAttribute("data-subsection-popup", "");
-  const box = anchor.getBoundingClientRect();
-  popup.style.top = `${box.bottom + 4}px`;
-  popup.style.left = `${Math.max(4, box.right - 220)}px`;
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "sb-subsection-name";
-  input.setAttribute("data-subsection-name", "");
-  input.placeholder = spec.placeholder;
-  input.value = spec.value;
-  const submit = createControl();
-  submit.className = "sb-form-go";
-  submit.setAttribute("data-subsection-submit", "");
-  submit.textContent = spec.submitLabel;
-  popup.append(input, submit);
-
-  const win = windowOf(anchor);
-  const outside = (event: PointerEvent): void => {
-    if (!popup.contains(event.target as Node)) close("a press outside it");
-  };
-  const close = (why: string): void => {
-    log.debug("closing the subsection name popup", { operation: "sidebar.subsection.popup-close", context: { why } });
-    popup.remove();
-    win.document.removeEventListener("pointerdown", outside, true);
-    sc.dropdowns.released(popup);
-  };
-  const send = (): void => {
-    const name = input.value.trim();
-    if (name === "") return;
-    log.info("naming a sidebar subsection", { operation: "sidebar.subsection.name", context: { length: name.length } });
-    void sendArrangement(sc, submit, spec.change(name)).then((ok) => {
-      if (ok) close("the name was sent");
-    });
-  };
-  submit.addEventListener("click", (event) => {
-    event.preventDefault();
-    send();
-  });
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") send();
-    if (event.key === "Escape") close("Escape");
-  });
-  win.document.addEventListener("pointerdown", outside, true);
-  // Registered before it is drawn, so the popup it replaces is closed (and
-  // stops listening) first.
-  sc.dropdowns.opened({ kind: "subsection-popup", element: popup, openers: [anchor], close });
-  log.debug("opening the subsection name popup", {
-    operation: "sidebar.subsection.popup-open",
-    context: { submit: spec.submitLabel },
-  });
-  sc.arrange.layer.appendChild(popup);
-  input.focus();
-  return popup;
 }
 
 /** The refs a drop names, read from the roster last drawn. */

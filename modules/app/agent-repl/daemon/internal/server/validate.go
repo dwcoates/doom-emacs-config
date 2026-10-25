@@ -1300,6 +1300,20 @@ func validateSetWorkspacePrincipalLinkRequest(req *agentreplv1.SetWorkspacePrinc
 	return invalid("change", "a change arm (set or clear) is required")
 }
 
+// validateSetWorkspaceNameRequest is SetWorkspaceNameRequest's base function:
+// a workspace and a name that is not blank. Whether the name follows the
+// naming rule, and whether it is free, are the verb's invalid_name and
+// name_taken refusals, not a malformed request.
+func validateSetWorkspaceNameRequest(req *agentreplv1.SetWorkspaceNameRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.GetName()) == "" {
+		return invalid("name", "a rename names the new name")
+	}
+	return nil
+}
+
 // validateUpdateDeployHoldRequest is UpdateDeployHoldRequest's base function:
 // a repository and an action arm.
 func validateUpdateDeployHoldRequest(req *agentreplv1.UpdateDeployHoldRequest) *connect.Error {

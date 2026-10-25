@@ -1029,3 +1029,42 @@ describe("the new-subsection popup", () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// THE WORKSPACE RENAME POPUP (agentrepl.v1.SetWorkspaceName)
+//
+// A double-click on a row's name renames the workspace. Every SetWorkspaceName
+// arm, the cross-cutting four included, is drawn at the popup that asked.
+// ---------------------------------------------------------------------------
+
+describe("the workspace rename popup", () => {
+  /** Double-click the row's name and type a new one. */
+  const openPopup = async (refusal?: string): Promise<void> => {
+    harness = await startHarness({
+      arrange: (fake) => fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+    });
+    if (refusal !== undefined) harness.fake.refuse("setWorkspaceName", refusal);
+    harness.$(`[data-roster-row="${WORKSPACE_ID}"] .name`)?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    const name = harness.$("[data-workspace-popup] [data-workspace-name]") as HTMLInputElement;
+    name.value = "better-name";
+  };
+
+  it("renames the row's workspace", async () => {
+    // Arrange
+    await openPopup();
+    // Act
+    await harness.click("[data-workspace-submit]");
+    // Assert
+    const [request] = harness.fake.calls<{ workspace?: { id: string }; name?: string }>("setWorkspaceName");
+    expect([request.workspace?.id, request.name, harness.$("[data-workspace-popup]")]).toEqual([WORKSPACE_ID, "better-name", null]);
+  });
+
+  it.each(refusalArmsOf("setWorkspaceName"))("draws the %s arm at the popup", async (arm) => {
+    // Arrange
+    await openPopup(arm);
+    // Act
+    await harness.click("[data-workspace-submit]");
+    // Assert
+    expect(harness.$(`[data-workspace-popup] .refusal[data-arm="${arm}"]`)).not.toBeNull();
+  });
+});

@@ -1155,6 +1155,25 @@ func TestTheWorkspaceNameIsItsOwnElement(t *testing.T) {
 	}
 }
 
+func TestSetNameRedrawsTheNameAndKeepsTheSessionLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	sessionLine := h.view(t).GetSessionLine().GetText()
+
+	// Act
+	h.r.SetName(testWS, "renamed-workspace")
+
+	// Assert
+	view := h.view(t)
+	if got := view.GetWorkspaceName().GetText(); got != "renamed-workspace" {
+		t.Errorf("workspace name = %q, want %q", got, "renamed-workspace")
+	}
+	if got := view.GetSessionLine().GetText(); got != sessionLine {
+		t.Errorf("session line = %q, want the unchanged %q", got, sessionLine)
+	}
+}
+
 func TestTheTitleNeverCarriesTheNameOrTheBranch(t *testing.T) {
 	// Arrange: a workspace whose branch is minted from its name, the shape that
 	// used to print "<summary> · <name>".

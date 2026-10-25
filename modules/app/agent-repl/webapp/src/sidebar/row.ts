@@ -26,6 +26,7 @@
  * request, 2026-10-13).
  */
 import { createControl } from "../control.js";
+import { renameOnDoubleClick } from "./rename.js";
 import type {
   RosterRow,
   RosterRowAttention,
@@ -306,6 +307,7 @@ export function drawRosterRow(
   // mark stands still. Only a row that draws a mark breathes, so the bands'
   // names never do.
   if (place === "grouping" && mark.motion !== "still") label.classList.add(mark.motion);
+  if (place === "grouping") renameOnDoubleClick(label, sc, workspace, name);
   line.appendChild(label);
 
   // PRESENCE, NEVER A SENTINEL: an absent marker or badge draws nothing at

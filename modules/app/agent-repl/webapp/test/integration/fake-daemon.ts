@@ -93,6 +93,7 @@ import { NukeWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/
 import { FinishWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_finish_workspace_pb";
 import { RestartWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
 import { SetWorkspacePriorityResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_priority_pb";
+import { SetWorkspaceNameResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_name_pb";
 import { CreateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_task_pb";
 import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
 import { AssignWorkspaceTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_assign_workspace_task_pb";
@@ -1354,6 +1355,14 @@ export function createFakeDaemon(): FakeDaemon {
         record("restartWorkspace", request);
         return answerFor("restartWorkspace", RestartWorkspaceResponseSchema, {
           result: { case: "success", value: {} },
+        });
+      },
+      // A rename lands on the NEXT roster push, as the daemon's does; a test
+      // states that push with `setRoster`.
+      setWorkspaceName(request) {
+        record("setWorkspaceName", request);
+        return answerFor("setWorkspaceName", SetWorkspaceNameResponseSchema, {
+          result: { case: "success", value: { name: request.name, rosterRevision: 0n } },
         });
       },
       setWorkspacePriority(request) {

@@ -202,6 +202,35 @@ A workspace can have one principal link: the link that best stands for its task,
 - `agent-repld workspace status WS` shows the link as `principalLink`.
 - The link is kept across restarts.
 
+## Renaming a workspace
+
+A rename changes the workspace's name and nothing else.
+
+- **Double-click a workspace's name in the sidebar to rename it.**
+  - A box opens holding the current name; type the new one and press Enter.
+  - Escape, or a click outside the box, closes it unchanged.
+  - A refused name is explained beside the box, which stays open.
+  - Rows in Recently Merged and Hidden don't offer it, because a click there reopens or shows the workspace.
+- **From a shell:** `agent-repld workspace set WS -name NAME`.
+- **The new name shows everywhere at once:**
+  - the sidebar;
+  - the Emacs tab and its buffers;
+  - the top bar;
+  - the footer of any workspace waiting on it;
+  - the merge queue.
+- **The branch and the worktree directory keep their names.**
+  - The running session keeps working where it was.
+  - `agent-repld workspace status WS` still shows the branch.
+- **Every agent CLI call names the workspace by its new name from then on.** The old name no longer resolves.
+- **A name follows the same rule as `workspace create -name`:**
+  - lowercase words joined by hyphens;
+  - optionally a prefix such as `ABC/`.
+- **A name already in use is refused:**
+  - another workspace's name or branch, open or closed;
+  - a name a pending merge or create is about to take.
+- **Agents rename their own workspace, without asking, when its task has clearly moved away from its name.**
+- **The running session learns its new name only at its next start.**
+
 ## Sync and async merges
 
 - **A merge is a ONE-SHOT or ASYNC.**

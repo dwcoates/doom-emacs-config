@@ -310,6 +310,13 @@ func (s *requestLoggingServer) SetWorkspacePrincipalLink(
 	return serveUnary(s, ctx, "SetWorkspacePrincipalLink", req, s.server.SetWorkspacePrincipalLink)
 }
 
+func (s *requestLoggingServer) SetWorkspaceName(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetWorkspaceNameRequest],
+) (*connect.Response[agentreplv1.SetWorkspaceNameResponse], error) {
+	return serveUnary(s, ctx, "SetWorkspaceName", req, s.server.SetWorkspaceName)
+}
+
 func (s *requestLoggingServer) SetWorkspaceParent(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetWorkspaceParentRequest],

@@ -127,6 +127,11 @@ const (
 	// (CreateWorkspaceError.invalid_name, ValidateSuppliedName). It carries
 	// `name`, `component` and the nested `rule` arm.
 	ArmInvalidName = "invalid_name"
+	// ArmNameTaken refuses a rename (SetWorkspaceName) to a name another
+	// workspace holds as its name or branch, or a pending reservation or
+	// claim holds (holdersLocked). Its `name` is the name as it resolves,
+	// and its holder is `workspace` or the nested `holder` arm `pending`.
+	ArmNameTaken = "name_taken"
 	// ArmForkSourceHasNoConversation is a fork into the primary branch whose
 	// source never had a conversation.
 	ArmForkSourceHasNoConversation = "fork_source_has_no_conversation"
