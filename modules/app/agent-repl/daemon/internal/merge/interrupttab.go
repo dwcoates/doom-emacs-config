@@ -39,7 +39,7 @@ func (o *orchestrator) InterruptTab(ctx context.Context, requester ids.Workspace
 	ws, live := o.liveAgenticTab(requester, tab)
 	if !live {
 		refusal := refuse(ArmNotMergeTab, requester, "the row is no live agentic tab of a merge drawn in this workspace's feed")
-		log.Warn(op, "refused a merge-tab interrupt naming no live agentic tab", withField(fields, "error", refusal.Error()))
+		logRefusal(log, op, "refused a merge-tab interrupt naming no live agentic tab", fields, refusal)
 		return false, refusal
 	}
 	fields["merging_workspace"] = string(ws)

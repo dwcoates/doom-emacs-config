@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"agent-repld/internal/dlog"
 	"errors"
 	"fmt"
 	"strings"
@@ -67,5 +68,20 @@ func TestRefusalCarriesItsReason(t *testing.T) {
 	}
 	if !strings.Contains(message, string(theWorkspace)) {
 		t.Fatalf("the refusal reads %q, want it to name the workspace", message)
+	}
+}
+
+func TestLogRefusalRecordsAtInfoWithTheRefusal(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	refusal := refuse(ArmNameTaken, theWorkspace, "the name is taken")
+
+	// Act
+	logRefusal(log, "daemon.merge.enqueue", "refused an async merge whose name is taken", dlog.Context{"workspace": "w1"}, refusal)
+
+	// Assert
+	record, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.enqueue"})
+	if !found || record.Context["error"] != refusal.Error() || record.Context["workspace"] != "w1" {
+		t.Fatalf("record = (%+v, %v), want the refusal at INFO with the caller's fields", record, found)
 	}
 }

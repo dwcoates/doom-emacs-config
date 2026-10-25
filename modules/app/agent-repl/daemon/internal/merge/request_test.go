@@ -1,10 +1,12 @@
 package merge
 
 import (
+	"agent-repld/internal/sourcescan"
 	repoconfigv1 "agentrepl/proto/repoconfig/v1"
 	"context"
 	"errors"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -267,7 +269,7 @@ func TestARequestIsRefusedWhenItsSourceCannotBeMerged(t *testing.T) {
 			if _, recorded := h.entryState(); recorded {
 				t.Fatal("a refused request left a queue entry")
 			}
-			if _, logged := h.recordFor("warn", "daemon.merge.enqueue"); !logged {
+			if _, logged := h.recordFor("info", "daemon.merge.enqueue"); !logged {
 				t.Fatalf("the refusal was not recorded at WARN: %+v", h.logs.Records())
 			}
 		})
@@ -545,7 +547,7 @@ func TestAnInPlaceMergeLandsOnlyOnTheAskOfWhoMayLandIt(t *testing.T) {
 			if _, queued := h.entryOf(theWorkspace); queued {
 				t.Error("a refused merge was recorded")
 			}
-			if record, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "warn", Operation: "daemon.merge.enqueue", Message: "refused a merge its asker may not ask for"}); !found || record.Context["asker"] != string(tt.asker) {
+			if record, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.enqueue", Message: "refused a merge its asker may not ask for"}); !found || record.Context["asker"] != string(tt.asker) {
 				t.Errorf("no warn record naming the asker: %+v", h.logs.Records())
 			}
 			if tt.arm == ArmOwnerLands && refusal.Fields["owner"].(*workspacev1.WorkspaceRef).GetId() != string(owner) {
@@ -696,7 +698,7 @@ func TestEnqueueRefusesAMergePlacedBehindOneNotInLine(t *testing.T) {
 	if _, err := h.o.entryOf(context.Background(), h.repoKey(), theWorkspace); err == nil {
 		t.Fatal("a refused request left an entry")
 	}
-	if !loggedLike(h, logLike{level: "warn", op: "daemon.merge.enqueue", text: "refused a merge placed behind a merge not in its queue", context: map[string]string{"place_behind": "nowhere"}}) {
+	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.enqueue", text: "refused a merge placed behind a merge not in its queue", context: map[string]string{"place_behind": "nowhere"}}) {
 		t.Fatalf("no record of the refusal: %+v", h.logs.Records())
 	}
 }
@@ -717,5 +719,26 @@ func TestEnqueueRefusesAMergePlacedFrontAndBehind(t *testing.T) {
 	}
 	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.enqueue", text: "contradicts itself about its placement"}) {
 		t.Fatalf("no record of the contradiction: %+v", h.logs.Records())
+	}
+}
+
+// TestMergeRequestRefusalsAreRecordedThroughLogRefusal keeps every typed
+// refusal of a merge request on the one INFO helper: a refusal recorded at
+// WARN by hand is the drift this replaced.
+func TestMergeRequestRefusalsAreRecordedThroughLogRefusal(t *testing.T) {
+	// Arrange
+	byHand := regexp.MustCompile(`log\.(Warn|Info)\(op, "refused`)
+
+	// Act
+	var offenders []string
+	for _, file := range sourcescan.Production(t) {
+		if (file.Name == "request.go" || file.Name == "interrupttab.go") && byHand.Match(file.Source) {
+			offenders = append(offenders, file.Name)
+		}
+	}
+
+	// Assert
+	if len(offenders) != 0 {
+		t.Fatalf("%v record a refusal by hand; use logRefusal", offenders)
 	}
 }
