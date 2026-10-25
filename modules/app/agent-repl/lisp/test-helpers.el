@@ -1032,6 +1032,23 @@ tag inside the struct body rather than to the next line."
       (setq start (match-end 0)))
     (delete-dups names)))
 
+(defun agent-repl-test--page-unloading-reporter (answer on-report on-pending)
+  "A stand-in for `agent-repl-host-report-page-unloading' answering as ANSWER says.
+ANSWER is called with no argument for each report and answers `reported'
+\(success at once), `refused' (failure at once) or `pending' (held: ON-PENDING
+is called with the list (WS ON-REPORTED ON-NOT-REPORTED)).  ON-REPORT is
+called with WS before the answer.  Answers t, sent, as the real report does.
+THE ONE such stand-in for a three-way answer (test-test-helpers.el holds the
+suites to it)."
+  (lambda (ws on-reported on-not-reported)
+    (funcall on-report ws)
+    (pcase (funcall answer)
+      ('reported (funcall on-reported))
+      ('refused (funcall on-not-reported))
+      ('pending (funcall on-pending (list ws on-reported on-not-reported)))
+      (other (error "Unknown page-unloading answer %S" other)))
+    t))
+
 (defmacro agent-repl-test--record-into (place)
   "A stand-in for a logging rung that records each record's text into PLACE.
 The lambda takes the rung's arguments (SCOPE FMT &rest ARGS), formats the

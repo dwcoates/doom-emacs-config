@@ -99,14 +99,12 @@ A ref id names the workspace of the same name."
                           (cl-pushnew ws agent-repl-test-open-tabs--paged :test #'equal)
                           :created)))
                      ((symbol-function 'agent-repl-host-report-page-unloading)
-                      (lambda (ws on-reported on-not-reported)
-                        (setq agent-repl-test-open-tabs--events
-                              (append agent-repl-test-open-tabs--events (list (list 'report ws))))
-                        (pcase agent-repl-test-open-tabs--report
-                          ('reported (funcall on-reported))
-                          ('refused (funcall on-not-reported))
-                          ('pending (push (list ws on-reported on-not-reported)
-                                          agent-repl-test-open-tabs--pending)))))
+                      (agent-repl-test--page-unloading-reporter
+                       (lambda () agent-repl-test-open-tabs--report)
+                       (lambda (ws)
+                         (setq agent-repl-test-open-tabs--events
+                               (append agent-repl-test-open-tabs--events (list (list 'report ws)))))
+                       (lambda (held) (push held agent-repl-test-open-tabs--pending))))
                      ((symbol-function 'agent-repl--frontend-detach-webview)
                       (lambda (ws _buf)
                         (setq agent-repl-test-open-tabs--events

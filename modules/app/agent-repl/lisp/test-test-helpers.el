@@ -688,3 +688,58 @@ stubs every rung alike."
             (push (file-name-nondirectory file) hand-rolled)))))
     ;; Assert
     (should-not hand-rolled)))
+
+;;;; ---- The page-unloading reporter ----
+
+(defun agent-repl-test-helpers--report-through (answer)
+  "Report ws1 through a reporter answering ANSWER; answer what it did.
+A list: the reporter's return, the reports seen, the outcome, the held."
+  (let (seen outcome held)
+    (let ((sent (funcall (agent-repl-test--page-unloading-reporter
+                          (lambda () answer)
+                          (lambda (ws) (push ws seen))
+                          (lambda (h) (setq held h)))
+                         "ws1"
+                         (lambda () (setq outcome 'reported))
+                         (lambda () (setq outcome 'not-reported)))))
+      (list sent seen outcome (car held)))))
+
+(ert-deftest agent-repl-test-helpers-page-unloading-reporter-answers-success ()
+  "A `reported' answer calls the success continuation, and says it was sent."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-helpers--report-through 'reported) '(t ("ws1") reported nil))))
+
+(ert-deftest agent-repl-test-helpers-page-unloading-reporter-answers-failure ()
+  "A `refused' answer calls the failure continuation."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-helpers--report-through 'refused) '(t ("ws1") not-reported nil))))
+
+(ert-deftest agent-repl-test-helpers-page-unloading-reporter-holds-a-pending-answer ()
+  "A `pending' answer calls neither continuation and hands the report over."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-helpers--report-through 'pending) '(t ("ws1") nil "ws1"))))
+
+(ert-deftest agent-repl-test-helpers-page-unloading-reporter-refuses-an-unknown-answer ()
+  "An answer the reporter does not know is an error, never a silent default."
+  ;; Act / Assert
+  (should-error (agent-repl-test-helpers--report-through 'maybe)))
+
+(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-page-unloading-reporter ()
+  "Every suite that answers a report three ways uses the one reporter."
+  ;; Arrange
+  (let ((dir agent-repl-test-helpers--dir)
+        (hand-rolled nil))
+    ;; Act
+    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
+      (unless (equal (file-name-nondirectory file) "test-helpers.el")
+        (with-temp-buffer
+          (insert-file-contents file)
+          (while (re-search-forward
+                  "(symbol-function 'agent-repl-host-report-page-unloading)[ \t\n]*(lambda (ws on-reported on-not-reported)"
+                  nil t)
+            (let ((end (save-excursion (up-list -1) (forward-sexp) (point))))
+              (when (re-search-forward "'refused\\|'pending" end t)
+                (push (file-name-nondirectory file) hand-rolled)))))))
+    ;; Assert
+    (should-not hand-rolled)))
+

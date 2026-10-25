@@ -80,15 +80,10 @@
                        ((symbol-function 'agent-repl-open-tabs-hidden-p)
                         (lambda (ws) (member ws agent-repl-test-pu--hidden)))
                        ((symbol-function 'agent-repl-host-report-page-unloading)
-                        (lambda (ws on-reported on-not-reported)
-                          (push (list 'report ws) agent-repl-test-pu--events)
-                          (pcase agent-repl-test-pu--report
-                            ('reported (funcall on-reported))
-                            ('refused (funcall on-not-reported))
-                            ('pending (push (list ws on-reported on-not-reported)
-                                            agent-repl-test-pu--pending)))
-                          ;; Sent, as the real report answers.
-                          t))
+                        (agent-repl-test--page-unloading-reporter
+                         (lambda () agent-repl-test-pu--report)
+                         (lambda (ws) (push (list 'report ws) agent-repl-test-pu--events))
+                         (lambda (held) (push held agent-repl-test-pu--pending))))
                        ((symbol-function 'agent-repl-webhost-has-page-p)
                         (lambda (ws) (and (member ws agent-repl-test-pu--pages) t)))
                        ((symbol-function 'agent-repl-webhost-remove)

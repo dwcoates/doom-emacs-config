@@ -1007,9 +1007,10 @@ ANSWER is `reported' or `refused'.  `events' collects (report WS) and
        (agent-repl--ws-put "ws1" :frontend-buffer buf)
        (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
                  ((symbol-function 'agent-repl-host-report-page-unloading)
-                  (lambda (ws on-reported on-not-reported)
-                    (setq events (append events (list (list 'report ws))))
-                    (if (eq ,answer 'reported) (funcall on-reported) (funcall on-not-reported))))
+                  (agent-repl-test--page-unloading-reporter
+                   (lambda () ,answer)
+                   (lambda (ws) (setq events (append events (list (list 'report ws)))))
+                   (lambda (held) (error "close-panel's report was held: %S" held))))
                  ((symbol-function 'agent-repl-webhost-remove)
                   (lambda (ws) (setq events (append events (list (list 'drop ws)))))))
          (unwind-protect (progn ,@body)
