@@ -116,6 +116,6 @@ describe("the sidebar's name popups", () => {
     const openers = readdirSync(dir)
       .filter((file) => file.endsWith(".ts") && file !== "name-popup.ts")
       .filter((file) => /openNamePopup\(/.test(readFileSync(path.join(dir, file), "utf8")));
-    expect([spelled, openers.sort()]).toEqual([["name-popup.ts"], ["subsections.ts"]]);
+    expect([spelled, openers.sort()]).toEqual([["name-popup.ts"], ["rename.ts", "subsections.ts"]]);
   });
 });
