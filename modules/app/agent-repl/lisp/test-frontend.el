@@ -1619,23 +1619,26 @@ accessor would not reach the code under test."
                (lambda (_ws) '(:id "ws-1" :dir "/w")))
               ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) t))
               ((symbol-function 'agent-repl--ws-current-name) (lambda () "alpha"))
-              ((symbol-function 'agent-repl-page-unloaded-p) (lambda (_ws) nil))
               ((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t)))
       ;; Act / Assert
       (should-not (agent-repl--frontend-precreate-refusal "alpha")))))
 
-(ert-deftest agent-repl-test-frontend-precreate-refuses-an-unloaded-page ()
-  "A page unloaded for want of a look is not remade until the switch to it."
+(ert-deftest agent-repl-test-frontend-precreate-leaves-an-unloaded-pages-slot-alone ()
+  "An unloaded page keeps its slot, so pre-creation finds it already mounted.
+Only the page went (page-unload.el); its return is the slot's showing."
   ;; Arrange
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--ws-live-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
-              ((symbol-function 'agent-repl-host-ref)
-               (lambda (_ws) '(:id "ws-1" :dir "/w")))
-              ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) nil))
-              ((symbol-function 'agent-repl-page-unloaded-p) (lambda (_ws) t)))
-      ;; Act / Assert
-      (should (eq (agent-repl--frontend-precreate-refusal "alpha") :unloaded)))))
+    (let ((slot (get-buffer-create " *agent-frontend-alpha-slot*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-live-p) (lambda (_ws) t))
+                    ((symbol-function 'agent-repl--ws-gui-frontend-p) (lambda (_ws) t))
+                    ((symbol-function 'agent-repl-host-ref)
+                     (lambda (_ws) '(:id "ws-1" :dir "/w")))
+                    ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) nil)))
+            (agent-repl--ws-put "alpha" :frontend-buffer slot)
+            ;; Act / Assert
+            (should (eq (agent-repl--frontend-precreate-refusal "alpha") :already-mounted)))
+        (kill-buffer slot)))))
 
 (ert-deftest agent-repl-test-frontend-precreate-refuses-a-dead-workspace ()
   "A workspace that is gone gets no page."

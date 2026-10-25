@@ -7,8 +7,6 @@
 ;; Cross-file forward declarations.  These sources load in the dependency
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
-(declare-function agent-repl-page-unloaded-p "page-unload" (ws))
-(declare-function agent-repl-page-unload-remount "page-unload" (ws))
 (declare-function agent-repl-open-tabs-hidden-p "open-tabs" (ws))
 (declare-function agent-repl--frontend-precreate-webview "frontend" (ws))
 (declare-function agent-repl-input-hidden-p "window" (ws))
@@ -588,9 +586,14 @@ The switch\='s panel restore declined for want of a view (`no-live-view');
 the mount makes one when WS is entitled to it
 \(`agent-repl--frontend-precreate-webview'), and the restore runs again on
 it (`agent-repl--panels-on-view-created').  Every mount a switch owes goes
-through here, so none can make the view without restoring its panels."
-  (agent-repl--frontend-precreate-webview ws)
-  (agent-repl--panels-on-view-created ws))
+through here, so none can make the view without restoring its panels.
+
+THE RESTORE RUNS AGAIN ONLY ON A VIEW MADE.  A refused mount (a workspace
+owed no view, or not yet able to have one) leaves WS awaiting its view, for
+the pre-creation drain to restore once it makes one: running the restore
+again on no view would only decline and mount again, without end."
+  (when (agent-repl--frontend-precreate-webview ws)
+    (agent-repl--panels-on-view-created ws)))
 
 (defvar agent-repl--switch-trigger nil
   "What triggered the newest perspective activation, captured AT the activation.
@@ -709,19 +712,23 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
       (agent-repl--panels-note-restore-outcome ws reason)
       (when (eq reason 'default-open-now-missing)
         (agent-repl--frontend-dispatch-show ws))
-      ;; AN UNLOADED PAGE COMES BACK ON THE SWITCH TO IT (page-unload.el):
-      ;; the restore just awaited its view, and the remount's view runs it.
-      ;; A WITHHELD WORKSPACE THE USER SWITCHED TO HAS ITS PAGE MADE NOW: one
-      ;; hidden, or in a collapsed repository section, holds no page until
-      ;; it is looked at (`agent-repl-open-tabs-withheld-p'), and no
-      ;; pre-creation pass is owed it, so the switch is what makes it.
-      (when (eq reason 'no-live-view)
-        (cond
-         ((and (fboundp 'agent-repl-page-unloaded-p) (agent-repl-page-unloaded-p ws))
-          (agent-repl-page-unload-remount ws))
-         ((and (fboundp 'agent-repl-open-tabs-hidden-p) (agent-repl-open-tabs-hidden-p ws))
-          (agent-repl--info log-ws "elisp.panels.mount-withheld ws=%s" ws)
-          (agent-repl--panels-mount-awaited-view ws)))))
+      ;; A WORKSPACE THE USER SWITCHED TO WITH NO VIEW HAS ITS VIEW MADE NOW,
+      ;; whatever left it without one: the user is looking at it, and its
+      ;; panels are owed by this switch, not by a later pass.  A withheld
+      ;; one (hidden, or in a collapsed repository section) holds no page
+      ;; until it is looked at (`agent-repl-open-tabs-withheld-p'); one not
+      ;; yet reached by the staggered pre-creation pass has none either.  An
+      ;; unloaded page never reaches here: it keeps its slot (page-unload.el),
+      ;; and showing the slot puts its page back.  The mount's one
+      ;; eligibility answer still refuses what is owed no view.  A persp
+      ;; PLACEHOLDER ("main", "none") is no registered workspace and owns no
+      ;; view, so only a live workspace is mounted.
+      (when (and (eq reason 'no-live-view) (agent-repl--ws-live-p ws))
+        (agent-repl--info log-ws "elisp.panels.mount-on-switch ws=%s withheld=%s"
+                          ws (and (fboundp 'agent-repl-open-tabs-hidden-p)
+                                  (agent-repl-open-tabs-hidden-p ws)
+                                  t))
+        (agent-repl--panels-mount-awaited-view ws)))
     ;; Take over the frame with THIS workspace's own panels in fullscreen —
     ;; replacing every visible window with the input+view panels — when a
     ;; foreign workspace's panels were just purged.

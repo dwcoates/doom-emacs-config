@@ -3339,54 +3339,19 @@ is set, dispatching through WS's own frontend (the webview + input layout)."
               (should (member "elisp.panels.restore-decision: ws=my-ws decision=re-show reason=default-open-now-missing" infos))))
         (kill-buffer frontend-buf)))))
 
-(ert-deftest agent-repl-test-panels-a-switch-to-an-unloaded-page-remounts-it ()
-  "A restore that finds no view because the page was unloaded remounts it."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let ((remounted nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
-                ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
-                ((symbol-function 'agent-repl-page-unloaded-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl-page-unload-remount)
-                 (lambda (ws) (push ws remounted)))
-                ((symbol-function 'agent-repl--info) #'ignore))
-        ;; Act
-        (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
-        ;; Assert
-        (should (equal remounted '("my-ws")))))))
-
-(ert-deftest agent-repl-test-panels-a-switch-to-a-page-never-made-does-not-remount ()
-  "A missing view that was never unloaded is pre-creation's to make, not a remount."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let ((remounted nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
-                ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
-                ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
-                ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
-                ((symbol-function 'agent-repl-page-unloaded-p) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl-page-unload-remount)
-                 (lambda (ws) (push ws remounted)))
-                ((symbol-function 'agent-repl--info) #'ignore))
-        ;; Act
-        (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
-        ;; Assert
-        (should-not remounted)))))
-
 (defmacro agent-repl-test-panels--with-no-live-view (hidden &rest body)
   "Run BODY on a no-live-view restore of \"my-ws\", HIDDEN by the bar or not.
-The page was never unloaded; `mounted' collects the workspaces the restore
-mounts an awaited view for, and `infos' every INFO line."
+`mounted' collects the workspaces the restore mounts an awaited view for,
+and `infos' every INFO line.  \"my-ws\" is registered, so it is a live
+workspace rather than a persp placeholder."
   (declare (indent 1))
   `(agent-repl-test--with-clean-state
+     (agent-repl--ws-put "my-ws" :project-dir "/tmp/test-panels-my-ws/")
      (let ((mounted nil) (infos nil))
        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws"))
                  ((symbol-function 'agent-repl--stale-panel-windows) (lambda () nil))
                  ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                  ((symbol-function 'agent-repl--frontend-dispatch-show) #'ignore)
-                 ((symbol-function 'agent-repl-page-unloaded-p) (lambda (_ws) nil))
                  ((symbol-function 'agent-repl-open-tabs-hidden-p) (lambda (_ws) ,hidden))
                  ((symbol-function 'agent-repl--panels-mount-awaited-view)
                   (lambda (ws) (push ws mounted)))
@@ -3410,15 +3375,26 @@ section, landed on a perspective with no page, and nothing made one."
     ;; Act
     (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
     ;; Assert
-    (should (member "elisp.panels.mount-withheld ws=my-ws" infos))))
+    (should (member "elisp.panels.mount-on-switch ws=my-ws withheld=t" infos))))
 
-(ert-deftest agent-repl-test-panels-a-switch-to-a-drawn-workspace-with-no-page-mounts-nothing ()
-  "A drawn workspace's missing view is pre-creation's to make, not the switch's."
+(ert-deftest agent-repl-test-panels-a-switch-to-a-drawn-workspace-with-no-page-mounts-its-page ()
+  "A drawn workspace the user switched to with no view has it made by the switch.
+AMENDED (owner ruling, 2026-10-24): the panels are open by the time the user
+switches to a workspace, so a missing view is the switch\='s to make now,
+never left for the staggered pre-creation pass to make later."
   (agent-repl-test-panels--with-no-live-view nil
     ;; Act
     (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
     ;; Assert
-    (should-not mounted)))
+    (should (equal mounted '("my-ws")))))
+
+(ert-deftest agent-repl-test-panels-a-switch-to-a-drawn-workspace-with-no-page-records-the-mount ()
+  "The mount a drawn workspace's switch makes is recorded at INFO, not withheld."
+  (agent-repl-test-panels--with-no-live-view nil
+    ;; Act
+    (agent-repl--ensure-own-panels-on-persp-switch "my-ws")
+    ;; Assert
+    (should (member "elisp.panels.mount-on-switch ws=my-ws withheld=nil" infos))))
 
 (ert-deftest agent-repl-test-panels-ensure-own-records-restore-decision-already-visible ()
   "The panel-restore decision is recorded at INFO: decision=no-show reason=already-visible."
@@ -4955,3 +4931,28 @@ behind, so the composer never flashes under the docked banner."
     (agent-repl--after-persp-activated)
     ;; Assert
     (should (equal calls '((:scheduled "alpha"))))))
+
+(ert-deftest agent-repl-test-panels-a-refused-mount-does-not-restore-again ()
+  "A mount the switch owes but the mount refuses leaves the workspace awaiting.
+Running the restore again on no view would decline and mount again without end."
+  (agent-repl-test--with-clean-state
+    (let ((restored nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--panels-on-view-created)
+                 (lambda (ws) (push ws restored))))
+        ;; Act
+        (agent-repl--panels-mount-awaited-view "my-ws")
+        ;; Assert
+        (should-not restored)))))
+
+(ert-deftest agent-repl-test-panels-a-made-view-runs-the-awaiting-restore ()
+  "A mount that made the view runs the restore that awaited it."
+  (agent-repl-test--with-clean-state
+    (let ((restored nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview) (lambda (_ws) :created))
+                ((symbol-function 'agent-repl--panels-on-view-created)
+                 (lambda (ws) (push ws restored))))
+        ;; Act
+        (agent-repl--panels-mount-awaited-view "my-ws")
+        ;; Assert
+        (should (equal restored '("my-ws")))))))

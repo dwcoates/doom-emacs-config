@@ -3,7 +3,9 @@
 ;;; Commentary:
 
 ;; The pages nobody looks at are unloaded: what counts as a look, what a pass
-;; unloads and what it never does, and the remount on the switch back.
+;; unloads and what it never does, and the page's return when its slot is
+;; shown.  An unload drops the page and keeps the slot; the harness's host
+;; holds `agent-repl-test-pu--pages'.
 ;;
 ;; Run with:
 ;;   AGENT_REPL_FORBID_VENDOR_CALLS=1 emacs -batch -Q -l ert \
@@ -20,8 +22,11 @@
 (defvar agent-repl-test-pu--now 0
   "The harness's clock, in seconds.")
 
-(defvar agent-repl-test-pu--detached nil
-  "Workspaces the pass detached, newest first.")
+(defvar agent-repl-test-pu--dropped nil
+  "Workspaces whose page the pass dropped, newest first.")
+
+(defvar agent-repl-test-pu--pages nil
+  "Workspaces whose page the harness's host holds.")
 
 (defvar agent-repl-test-pu--hidden nil
   "Workspaces the roster answers hidden.")
@@ -38,19 +43,20 @@
   "The held reports, newest first, each (WS ON-REPORTED ON-NOT-REPORTED).")
 
 (defvar agent-repl-test-pu--events nil
-  "Every report and detach, newest first, as (KIND WS).")
+  "Every report, dropped page and page put back, newest first, as (KIND WS).")
 
 (defmacro agent-repl-test-pu--with (names &rest body)
   "Run BODY with live workspaces NAMES, each holding a page, on a hand clock."
   (declare (indent 1))
   `(agent-repl-test--with-clean-state
      (let ((agent-repl-test-pu--now 1000)
-           (agent-repl-test-pu--detached nil)
+           (agent-repl-test-pu--dropped nil)
            (agent-repl-test-pu--hidden nil)
            (agent-repl-test-pu--logged nil)
            (agent-repl-test-pu--report 'reported)
            (agent-repl-test-pu--pending nil)
            (agent-repl-test-pu--events nil)
+           (agent-repl-test-pu--pages (copy-sequence ,names))
            (agent-repl-page-unload--clock (lambda () agent-repl-test-pu--now))
            (agent-repl-page-unload--shown nil)
            (agent-repl-page-unload--shown-since nil)
@@ -81,12 +87,17 @@
                             ('refused (funcall on-not-reported))
                             ('pending (push (list ws on-reported on-not-reported)
                                             agent-repl-test-pu--pending)))))
-                       ((symbol-function 'agent-repl--frontend-detach-webview)
-                        (lambda (ws buf)
-                          (push (list 'detach ws) agent-repl-test-pu--events)
-                          (push ws agent-repl-test-pu--detached)
-                          (kill-buffer buf)
-                          (agent-repl--ws-put ws :frontend-buffer nil)))
+                       ((symbol-function 'agent-repl-webhost-has-page-p)
+                        (lambda (ws) (and (member ws agent-repl-test-pu--pages) t)))
+                       ((symbol-function 'agent-repl-webhost-remove)
+                        (lambda (ws)
+                          (push (list 'drop ws) agent-repl-test-pu--events)
+                          (push ws agent-repl-test-pu--dropped)
+                          (setq agent-repl-test-pu--pages (delete ws agent-repl-test-pu--pages))))
+                       ((symbol-function 'agent-repl-webhost-ensure-page)
+                        (lambda (ws)
+                          (push (list 'ensure ws) agent-repl-test-pu--events)
+                          (cl-pushnew ws agent-repl-test-pu--pages :test #'equal)))
                        ((symbol-function 'agent-repl--info)
                         (agent-repl-test--record-into agent-repl-test-pu--logged)))
                ,@body))
@@ -133,18 +144,14 @@
     ;; Assert
     (should (equal agent-repl-page-unload--shown-since 1000))))
 
-(ert-deftest agent-repl-test-pu-a-mount-is-a-look-and-ends-an-unload ()
-  "Mounting a page stamps it looked at and clears its unloaded mark, recorded."
+(ert-deftest agent-repl-test-pu-a-mount-is-a-look ()
+  "Mounting a page stamps it looked at."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
-    (agent-repl--ws-put "alpha" :page-unloaded t)
     ;; Act
     (agent-repl-page-unload-note-mounted "alpha")
     ;; Assert
-    (should (equal (list (agent-repl--ws-get "alpha" :page-looked-at)
-                         (agent-repl-page-unloaded-p "alpha"))
-                   '(1000 nil)))
-    (should (agent-repl-test-pu--said-p "elisp.page-unload.reloaded" "ws=alpha"))))
+    (should (equal (agent-repl--ws-get "alpha" :page-looked-at) 1000))))
 
 ;;;; ---- The pass ----
 
@@ -157,7 +164,7 @@
     (agent-repl-page-unload-pass)
     ;; Assert
     (should (equal (reverse agent-repl-test-pu--events)
-                   '((report "alpha") (detach "alpha"))))))
+                   '((report "alpha") (drop "alpha"))))))
 
 (ert-deftest agent-repl-test-pu-a-page-whose-report-did-not-land-is-kept ()
   "A report the daemon did not take leaves the page loaded, and recorded."
@@ -168,7 +175,7 @@
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
-    (should (equal (list agent-repl-test-pu--detached
+    (should (equal (list agent-repl-test-pu--dropped
                          (agent-repl-page-unloaded-p "alpha")
                          (agent-repl--ws-get "alpha" :page-unloading))
                    '(nil nil nil)))
@@ -185,7 +192,7 @@
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
-    (should (equal agent-repl-test-pu--detached '("alpha")))))
+    (should (equal agent-repl-test-pu--dropped '("alpha")))))
 
 (ert-deftest agent-repl-test-pu-a-report-in-flight-is-not-sent-again ()
   "A pass while a page's report is unanswered does not report it twice."
@@ -197,7 +204,7 @@
     ;; Act
     (let ((started (agent-repl-page-unload-pass)))
       ;; Assert
-      (should (equal (list started (length agent-repl-test-pu--pending) agent-repl-test-pu--detached)
+      (should (equal (list started (length agent-repl-test-pu--pending) agent-repl-test-pu--dropped)
                      '(0 1 nil))))))
 
 (ert-deftest agent-repl-test-pu-a-page-shown-while-its-report-was-in-flight-is-kept ()
@@ -211,7 +218,7 @@
     ;; Act
     (funcall (nth 1 (car agent-repl-test-pu--pending)))
     ;; Assert
-    (should (equal (list agent-repl-test-pu--detached (agent-repl-page-unloaded-p "alpha")
+    (should (equal (list agent-repl-test-pu--dropped (agent-repl-page-unloaded-p "alpha")
                          (agent-repl--ws-get "alpha" :page-unloading))
                    '(nil nil nil)))
     (should (agent-repl-test-pu--said-p "elisp.page-unload.kept" "ws=alpha" "why=in-use-since-report"))))
@@ -224,7 +231,7 @@
     ;; Act
     (let ((unloaded (agent-repl-page-unload-pass)))
       ;; Assert
-      (should (equal (list unloaded agent-repl-test-pu--detached (agent-repl-page-unloaded-p "alpha"))
+      (should (equal (list unloaded agent-repl-test-pu--dropped (agent-repl-page-unloaded-p "alpha"))
                      '(1 ("alpha") t)))
       (should (agent-repl-test-pu--said-p "elisp.page-unload.unloaded" "ws=alpha" "reason=unlooked")))))
 
@@ -236,7 +243,7 @@
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
-    (should-not agent-repl-test-pu--detached)))
+    (should-not agent-repl-test-pu--dropped)))
 
 ;;;; ---- The clock runs only while the system is in use ----
 
@@ -249,7 +256,7 @@
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
-    (should-not agent-repl-test-pu--detached)))
+    (should-not agent-repl-test-pu--dropped)))
 
 (ert-deftest agent-repl-test-pu-a-system-never-switched-in-is-idle ()
   "Before the first switch, nothing goes unlooked."
@@ -260,7 +267,7 @@
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
-    (should-not agent-repl-test-pu--detached)))
+    (should-not agent-repl-test-pu--dropped)))
 
 (ert-deftest agent-repl-test-pu-an-idle-system-still-unloads-a-hidden-page ()
   "Idleness stops the unlooked clock only: a hidden workspace's page still goes."
@@ -272,7 +279,7 @@
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
-    (should (equal agent-repl-test-pu--detached '("alpha")))))
+    (should (equal agent-repl-test-pu--dropped '("alpha")))))
 
 (ert-deftest agent-repl-test-pu-a-switch-after-idle-starts-every-hold-afresh ()
   "The first switch after idle starts the clock: a page unlooked for ages is held until the hold passes from it."
@@ -283,14 +290,14 @@
     (agent-repl-page-unload-note-shown "beta")
     ;; Act
     (agent-repl-page-unload-pass)
-    (let ((held-at-the-switch (null agent-repl-test-pu--detached)))
+    (let ((held-at-the-switch (null agent-repl-test-pu--dropped)))
       ;; Switches keep coming, each within the idle span of the last.
       (cl-loop for at in '(1250 1501) for ws in '("gamma" "beta")
                do (setq agent-repl-test-pu--now at)
                   (agent-repl-page-unload-note-shown ws))
       (agent-repl-page-unload-pass)
       ;; Assert
-      (should (equal (list held-at-the-switch agent-repl-test-pu--detached) '(t ("alpha")))))))
+      (should (equal (list held-at-the-switch agent-repl-test-pu--dropped) '(t ("alpha")))))))
 
 (ert-deftest agent-repl-test-pu-a-switch-in-use-keeps-the-spell-going ()
   "A switch while the system is in use moves the last switch, not the spell's start."
@@ -337,7 +344,7 @@
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
-    (should (equal agent-repl-test-pu--detached '("alpha")))
+    (should (equal agent-repl-test-pu--dropped '("alpha")))
     (should (agent-repl-test-pu--said-p "reason=hidden"))))
 
 (ert-deftest agent-repl-test-pu-the-shown-page-is-never-unloaded ()
@@ -349,7 +356,7 @@
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
-    (should-not agent-repl-test-pu--detached)))
+    (should-not agent-repl-test-pu--dropped)))
 
 (ert-deftest agent-repl-test-pu-the-current-workspace-page-is-never-unloaded ()
   "The current workspace's page stays even before the host has shown it."
@@ -360,7 +367,7 @@
       ;; Act
       (agent-repl-page-unload-pass))
     ;; Assert
-    (should-not agent-repl-test-pu--detached)))
+    (should-not agent-repl-test-pu--dropped)))
 
 (ert-deftest agent-repl-test-pu-a-page-with-no-look-recorded-is-stamped-not-unloaded ()
   "A page mounted before the module ran gets its first look now, not an unload."
@@ -369,7 +376,7 @@
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
-    (should (equal (list agent-repl-test-pu--detached (agent-repl--ws-get "alpha" :page-looked-at))
+    (should (equal (list agent-repl-test-pu--dropped (agent-repl--ws-get "alpha" :page-looked-at))
                    '(nil 1000)))))
 
 (ert-deftest agent-repl-test-pu-a-workspace-with-no-page-is-skipped ()
@@ -381,27 +388,68 @@
     ;; Act
     (let ((unloaded (agent-repl-page-unload-pass)))
       ;; Assert
-      (should (equal (list unloaded agent-repl-test-pu--detached) '(0 nil))))))
+      (should (equal (list unloaded agent-repl-test-pu--dropped) '(0 nil))))))
 
 ;;;; ---- The switch back ----
 
-(ert-deftest agent-repl-test-pu-the-switch-back-remounts-and-restores ()
-  "A remount clears the mark, makes the page, and runs the awaited panel restore."
+(ert-deftest agent-repl-test-pu-an-unload-keeps-the-slot ()
+  "An unload drops the page and keeps the slot, whose windows are the panels.
+2026-10-24: killing the slot with the page left the workspace's saved layout
+naming a dead buffer, and every switch back found its panels closed."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
-    (agent-repl--ws-put "alpha" :page-unloaded t)
-    (let (calls)
-      (cl-letf (((symbol-function 'agent-repl--frontend-precreate-webview)
-                 (lambda (ws)
-                   (push (list 'mount ws (agent-repl-page-unloaded-p ws)) calls)
-                   :created))
-                ((symbol-function 'agent-repl--panels-on-view-created)
-                 (lambda (ws) (push (list 'restore ws) calls))))
-        ;; Act
-        (agent-repl-page-unload-remount "alpha"))
-      ;; Assert: the mark is clear before the mount asks for eligibility.
-      (should (equal (reverse calls) '((mount "alpha" nil) (restore "alpha"))))
-      (should (agent-repl-test-pu--said-p "elisp.page-unload.remount" "ws=alpha")))))
+    (agent-repl--ws-put "alpha" :page-looked-at 0)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal (list (buffer-live-p (agent-repl--ws-get "alpha" :frontend-buffer))
+                         (agent-repl-page-unloaded-p "alpha"))
+                   '(t t)))))
+
+(ert-deftest agent-repl-test-pu-an-unloaded-page-is-not-unloaded-again ()
+  "A pass does not report a page it already unloaded."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-looked-at 0)
+    (agent-repl-page-unload-pass)
+    (setq agent-repl-test-pu--events nil)
+    ;; Act
+    (let ((started (agent-repl-page-unload-pass)))
+      ;; Assert
+      (should (equal (list started agent-repl-test-pu--events) '(0 nil))))))
+
+(ert-deftest agent-repl-test-pu-a-workspace-with-no-slot-is-not-unloaded ()
+  "Unloaded means a live slot without its page: no slot at all is not unloaded."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (kill-buffer (agent-repl--ws-get "alpha" :frontend-buffer))
+    (setq agent-repl-test-pu--pages nil)
+    ;; Act / Assert
+    (should-not (agent-repl-page-unloaded-p "alpha"))))
+
+(ert-deftest agent-repl-test-pu-showing-an-unloaded-page-puts-it-back ()
+  "Showing an unloaded page's slot puts the page back, marked as remounting."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil)
+    ;; Act
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Assert
+    (should (equal (list agent-repl-test-pu--events
+                         (agent-repl-page-unloaded-p "alpha")
+                         (agent-repl--ws-get "alpha" :page-remounting)
+                         (agent-repl--ws-get "alpha" :page-looked-at))
+                   '(((ensure "alpha")) nil t 1000)))
+    (should (agent-repl-test-pu--said-p "elisp.page-unload.returned" "ws=alpha"))))
+
+(ert-deftest agent-repl-test-pu-showing-a-held-page-puts-nothing-back ()
+  "Showing a page the host still holds sends it nothing."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    ;; Act
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Assert
+    (should-not agent-repl-test-pu--events)))
 
 ;;;; ---- A remount the user left before it drew ----
 
@@ -426,11 +474,11 @@ land in `recorded'."
                     :drawn ,(or drawn :null) :notes [])))
 
 (defun agent-repl-test-pu--remount-and-leave (ws other)
-  "Remount WS's page, show it, then switch on to OTHER."
-  (cl-letf (((symbol-function 'agent-repl--panels-mount-awaited-view) #'ignore))
-    (agent-repl-page-unload-remount ws))
+  "Unload WS's page, show its slot (which puts the page back), then show OTHER."
+  (setq agent-repl-test-pu--pages (delete ws agent-repl-test-pu--pages))
   (agent-repl-page-unload-note-shown ws)
-  (agent-repl-page-unload-note-shown other))
+  (agent-repl-page-unload-note-shown other)
+  (setq agent-repl-test-pu--events nil))
 
 (ert-deftest agent-repl-test-pu-leaving-a-remount-asks-the-host-if-it-drew ()
   "Switching away from a remounted page asks the host whether it has drawn."
@@ -466,7 +514,7 @@ land in `recorded'."
       (should (equal (list (reverse agent-repl-test-pu--events)
                            (agent-repl-page-unloaded-p "alpha")
                            (agent-repl--ws-get "alpha" :page-remounting))
-                     '(((report "alpha") (detach "alpha")) t nil)))
+                     '(((report "alpha") (drop "alpha")) t nil)))
       (should (agent-repl-test-pu--said-p "elisp.page-unload.unloaded" "ws=alpha" "reason=abandoned")))))
 
 (ert-deftest agent-repl-test-pu-the-drawn-answer-reaches-the-webhost-record ()
@@ -551,7 +599,7 @@ land in `recorded'."
       (agent-repl-page-unload--on-drawn-answer
        (agent-repl-test-pu--drawn-answer "alpha" "present" nil))
       ;; Assert
-      (should (equal (list agent-repl-test-pu--detached (agent-repl--ws-get "alpha" :page-remounting))
+      (should (equal (list agent-repl-test-pu--dropped (agent-repl--ws-get "alpha" :page-remounting))
                      '(nil t)))
       (should (agent-repl-test-pu--said-p "elisp.page-unload.kept" "ws=alpha" "why=not-reported")))))
 

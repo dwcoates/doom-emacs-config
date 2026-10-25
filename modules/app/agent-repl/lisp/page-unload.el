@@ -39,11 +39,20 @@
 ;; once it has answered: the report cannot lose a race with the stream's end.
 ;; A report that does not land leaves the page loaded.
 ;;
-;; AN UNLOADED PAGE COMES BACK ON THE SWITCH TO IT.  The unload is the same
-;; detach every remount uses (`agent-repl--frontend-detach-webview'), and the
-;; switch mounts a workspace with no page as it mounts a new one.  Until then
-;; the pre-creation pass (webview-recovery.el) leaves it unmade: the mount's
-;; one eligibility answer refuses it as `:unloaded'.
+;; AN UNLOAD DROPS THE PAGE AND KEEPS THE SLOT.  The page is what costs: it
+;; lives in the one web content process (webhost.el).  The workspace's slot
+;; buffer is free, a display of the host's one xwidget, and its windows are
+;; the workspace's panels.  Killing the slot with the page (as the unload once
+;; did) left the workspace's saved layout naming a dead buffer: the switch
+;; back found its panels closed and re-showed them, every time (2026-10-24).
+;; So a page is UNLOADED exactly when its workspace holds a live slot the host
+;; holds no page for (`agent-repl-page-unloaded-p'), a fact read off the two,
+;; never a flag beside them that could disagree.
+;;
+;; AN UNLOADED PAGE COMES BACK THE MOMENT ITS SLOT IS SHOWN.  The host shows
+;; whatever page the displayed slot names (`agent-repl-webhost-show'), and
+;; showing an unloaded one puts its page back first
+;; (`agent-repl-page-unload--return'), so the panels stand throughout.
 ;;
 ;; A REMOUNT THE USER LEFT BEFORE IT DREW IS ABANDONED (owner ruling,
 ;; 2026-10-24).  A remounted page boots in the one web content process every
@@ -63,9 +72,10 @@
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key value))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
-(declare-function agent-repl--frontend-detach-webview "agent-repl-frontend" (ws buf))
+(declare-function agent-repl-webhost-remove "webhost" (ws))
+(declare-function agent-repl-webhost-ensure-page "webhost" (ws))
+(declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
-(declare-function agent-repl--panels-mount-awaited-view "panels" (ws))
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
@@ -133,6 +143,8 @@ The page shown until now was looked at when it was shown for at least
 `agent-repl-page-unload-dwell' seconds."
   (let ((now (agent-repl-page-unload--now))
         (previous agent-repl-page-unload--shown))
+    (when (agent-repl-page-unloaded-p ws)
+      (agent-repl-page-unload--return ws))
     (when (and previous (not (equal previous ws))
                (>= (- now agent-repl-page-unload--shown-since) agent-repl-page-unload-dwell))
       (agent-repl--ws-put previous :page-looked-at now))
@@ -144,11 +156,8 @@ The page shown until now was looked at when it was shown for at least
         (agent-repl-page-unload--abandon previous)))))
 
 (defun agent-repl-page-unload-note-mounted (ws)
-  "Record that WS's page was just mounted: a look, and no longer unloaded."
-  (agent-repl--ws-put ws :page-looked-at (agent-repl-page-unload--now))
-  (when (agent-repl--ws-get ws :page-unloaded)
-    (agent-repl--ws-put ws :page-unloaded nil)
-    (agent-repl--info ws "elisp.page-unload.reloaded ws=%s" ws)))
+  "Record that WS's page was just mounted: a look."
+  (agent-repl--ws-put ws :page-looked-at (agent-repl-page-unload--now)))
 
 (defun agent-repl-page-unload--in-use-p (now)
   "Non-nil when the user switched workspaces within the idle span before NOW."
@@ -168,17 +177,21 @@ A switch after an idle spell starts the hold's clock afresh."
   (setq agent-repl-page-unload--last-switch-at now))
 
 (defun agent-repl-page-unloaded-p (ws)
-  "Non-nil when WS's page was unloaded and nobody has switched to it since."
-  (and (agent-repl--ws-get ws :page-unloaded) t))
+  "Non-nil when WS holds a live slot whose page the host does not hold.
+That is what an unload leaves (`agent-repl-page-unload--unload'), read off
+the slot and the host rather than kept as a flag beside them."
+  (and (buffer-live-p (agent-repl--ws-get ws :frontend-buffer))
+       (not (agent-repl-webhost-has-page-p ws))))
 
-(defun agent-repl-page-unload-remount (ws)
-  "Mount WS's unloaded page again, for the switch to WS, and restore its panels.
-Called from the switch's panel restore, which declined for want of the view
-this makes (panels.el); the restore runs again on the new view."
-  (agent-repl--ws-put ws :page-unloaded nil)
+(defun agent-repl-page-unload--return (ws)
+  "Put WS's unloaded page back in the host, its slot being shown.
+The slot and its windows stood throughout; only the page comes back.  A
+page the user leaves before it draws is unloaded again
+\(`agent-repl-page-unload--abandon')."
   (agent-repl--ws-put ws :page-remounting t)
-  (agent-repl--info ws "elisp.page-unload.remount ws=%s" ws)
-  (agent-repl--panels-mount-awaited-view ws))
+  (agent-repl-page-unload-note-mounted ws)
+  (agent-repl--info ws "elisp.page-unload.returned ws=%s" ws)
+  (agent-repl-webhost-ensure-page ws))
 
 (defun agent-repl-page-unload--reason (ws now)
   "Why WS's page should be unloaded at NOW, or nil when it should be held.
@@ -199,9 +212,11 @@ since the later of its look and the start of the present spell of use."
 (defun agent-repl-page-unload--holdable-p (ws)
   "The page of WS, when it is one a pass may unload, else nil.
 Neither the page the host shows nor the current workspace\='s is ever
-unloaded, and nor is one whose unload is already being reported."
+unloaded, nor one already unloaded, nor one whose unload is already being
+reported."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
     (and (buffer-live-p buf)
+         (agent-repl-webhost-has-page-p ws)
          (not (equal ws agent-repl-page-unload--shown))
          (not (equal ws (agent-repl--ws-current-name)))
          (not (agent-repl--ws-get ws :page-unloading))
@@ -217,10 +232,10 @@ the report was in flight."
    ws
    (lambda ()
      (agent-repl--ws-put ws :page-unloading nil)
-     (if-let ((buf (agent-repl-page-unload--holdable-p ws)))
+     (if (agent-repl-page-unload--holdable-p ws)
          (progn
-           (agent-repl--frontend-detach-webview ws buf)
-           (agent-repl--ws-put ws :page-unloaded t)
+           ;; THE PAGE GOES, THE SLOT STAYS: its windows are the panels.
+           (agent-repl-webhost-remove ws)
            (agent-repl--ws-put ws :page-remounting nil)
            (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s unlooked-s=%d"
                              ws reason
