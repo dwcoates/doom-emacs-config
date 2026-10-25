@@ -116,6 +116,23 @@ func TestAReplayedConclusionTellsItsAnswerButNotProseOrEnd(t *testing.T) {
 	}
 }
 
+func TestAnInheritedConclusionTellsTheSinkNothing(t *testing.T) {
+	// Arrange: a fork's inherited past is its ancestor's turns.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "why?")
+	h.resolver.mu.Lock()
+	h.resolver.state(testWorkspace).plane = planeInherited
+	h.resolver.mu.Unlock()
+
+	// Act
+	h.concludeAnswer("turn-1", "unit-1", "Because.")
+
+	// Assert
+	if len(h.chat.edges) != 0 {
+		t.Fatalf("edges = %+v, want none for an inherited turn", h.chat.edges)
+	}
+}
+
 func TestANoticeIsNeverToldAsProse(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

@@ -20,10 +20,12 @@ func (r *resolver) tellAnswerProse(s *wsState, at placement, fold *proseState) {
 	r.deps.Chat.AnswerProse(s.id, ids.TurnID(fold.turn), fold.markdown)
 }
 
-// tellTurnEnded tells the chat sink how a turn ended: its answer, on any
-// plane, when it concluded on one, then its end on the live plane.
+// tellTurnEnded tells the chat sink how a turn ended: its answer, on the
+// workspace's own planes, when it concluded on one, then its end on the live
+// plane. An INHERITED turn is a fork's ancestor's (its record is the
+// ancestor's), so the sink is told nothing of it.
 func (r *resolver) tellTurnEnded(s *wsState, turn ids.TurnID, ended *frontendv1.FeedTurnEnded) {
-	if r.deps.Chat == nil {
+	if r.deps.Chat == nil || s.plane == planeInherited {
 		return
 	}
 	if answer := ended.GetConcluded().GetAnswer().GetValue(); answer != "" {
