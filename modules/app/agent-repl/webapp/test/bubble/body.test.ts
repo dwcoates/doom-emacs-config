@@ -29,6 +29,7 @@ import {
   type BubbleBody,
 } from "../../src/bubble/body.js";
 import { drawBubble } from "../../src/bubble/draw.js";
+import { RESPONSE_RUN_CLASS } from "../../src/feed/response-run.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
 import { useTreeLayout } from "../tree-layout.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -65,6 +66,24 @@ function stageBody(opts: { detached?: boolean; bubbleClass?: string; boxClass?: 
   scroll.append(body);
   bubble.append(scroll);
   if (opts.detached !== true) mount(bubble);
+  return body;
+}
+
+/**
+ * A body inside a bubble COALESCED INTO A RESPONSE RUN: column > run > member
+ * item > bubble > scroll box > body, the shape feed/response-run.ts builds.
+ */
+function stageRunMemberBody(): HTMLElement {
+  const run = document.createElement("div");
+  run.className = RESPONSE_RUN_CLASS;
+  const item = document.createElement("div");
+  item.className = "feed-item";
+  run.append(item);
+  const body = stageBody({ detached: true });
+  const bubble = body.closest<HTMLElement>(".bubble");
+  if (bubble === null) throw new Error("no bubble");
+  item.append(bubble);
+  mount(run);
   return body;
 }
 
@@ -167,6 +186,26 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     Object.defineProperty(body, "clientWidth", { value: 100, configurable: true });
     // Assert — the budget is the cap's, unmoved.
     expect(measureTreeCols(body)).toBe(atCap);
+  });
+
+  it("measures a bubble coalesced into a run against the run's cap", () => {
+    // Arrange — the member's own max-width is `none`; the run carries 77%.
+    const body = stageRunMemberBody();
+    // Act
+    const cols = measureTreeCols(body);
+    // Assert — the same floor(742 / 8) as a bubble capped by itself.
+    expect(cols).toBe(92);
+  });
+
+  it("resolves a run member's cap against the run's containing block", () => {
+    // Arrange
+    const body = stageRunMemberBody();
+    const narrow = measureTreeCols(body);
+    // Act
+    staged.layout.containingPx = 1400;
+    const wide = measureTreeCols(body);
+    // Assert
+    expect(wide).toBeGreaterThan(narrow);
   });
 
   it("records the measured budget at debug", async () => {

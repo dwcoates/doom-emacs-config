@@ -22,6 +22,7 @@ import { TREE_CLASS, renderTreeHtml, type TreeCols, type TreeIssue } from "../me
 import { computedPx, pageResizeObserver, placeChildren, queryAll, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
 import { entryTreeHtml } from "../feed/entries.js";
+import { RESPONSE_RUN_CLASS } from "../feed/response-run.js";
 import { applyTextReveal, clearTextReveal, fullTextOf } from "./text-reveal.js";
 
 /** The webapp surfaces a wrap issue through the client logger. */
@@ -166,7 +167,8 @@ export function measureTreeCols(body: HTMLElement): number {
   const view = body.ownerDocument.defaultView;
   if (view === null) unmeasurable("the bubble body's document has no window", {});
   const bubble = requireBubble(body);
-  const containing = containingBlockOf(bubble);
+  const capped = cappedBoxOf(bubble);
+  const containing = containingBlockOf(capped);
 
   const probe = body.ownerDocument.createElement("div");
   probe.className = TREE_CLASS;
@@ -182,15 +184,17 @@ export function measureTreeCols(body: HTMLElement): number {
   if (!(containingPx > 0)) {
     unmeasurable("the bubble's containing block has no width", { containing_px: containingPx });
   }
-  const maxWidth = view.getComputedStyle(bubble).maxWidth;
+  const maxWidth = view.getComputedStyle(capped).maxWidth;
   const capPx = resolveCapPx(maxWidth, containingPx);
-  if (capPx === null) unmeasurable("the bubble's max-width does not resolve", { max_width: maxWidth });
+  if (capPx === null) {
+    unmeasurable("the bubble's max-width does not resolve", { max_width: maxWidth, capped_by: capped.className });
+  }
 
-  // The fixed chrome from the bubble's border box in to the body's content box:
-  // every border and padding on the way, plus the margins of the boxes inside
-  // the bubble. None of it depends on content.
-  let chromePx = insetXPx(bubble, view, { border: true, margin: false });
-  for (let el: HTMLElement | null = body; el !== null && el !== bubble; el = el.parentElement) {
+  // The fixed chrome from the capped box's border box in to the body's content
+  // box: every border and padding on the way, plus the margins of the boxes
+  // inside it (a run member's bubble included). None of it depends on content.
+  let chromePx = insetXPx(capped, view, { border: true, margin: false });
+  for (let el: HTMLElement | null = body; el !== null && el !== capped; el = el.parentElement) {
     chromePx += insetXPx(el, view, { border: true, margin: true });
   }
   // WRAP AS IF EXPANDED (owner ruling, 2026-09-23): the gutter an expanded
@@ -247,6 +251,18 @@ function scrollbarGutterPx(body: HTMLElement, view: Window): number {
 }
 
 /** The block the bubble's percentage cap resolves against: its parent. */
+/**
+ * The box whose `max-width` caps BUBBLE. A final response coalesced into a
+ * run (feed/response-run.ts) gives up its own cap -- the stylesheet sets its
+ * `max-width` to `none` and caps the RUN at `--bubble-max-width` -- so a tree
+ * in it wraps to the run's cap. Every other bubble caps itself. Reading the
+ * member's own `none` recorded every tree in a run as unmeasurable
+ * (2026-10-25).
+ */
+function cappedBoxOf(bubble: HTMLElement): HTMLElement {
+  return bubble.closest<HTMLElement>(`.${RESPONSE_RUN_CLASS}`) ?? bubble;
+}
+
 function containingBlockOf(bubble: HTMLElement): HTMLElement {
   const containing = bubble.parentElement;
   if (containing === null) unmeasurable("the bubble has no containing block", {});

@@ -18,9 +18,11 @@
  *     "laid out" test reads;
  *   - a `.mp-tree` element's rect is `CHARPX` per character of its text (the
  *     measure's probe is one);
- *   - an element holding a `.bubble` child reports `CONTAININGPX` as its
- *     `clientWidth` (the bubble's containing block);
- *   - `getComputedStyle` answers the bubble's `max-width` as MAXWIDTH, the
+ *   - an element holding a `.bubble` or `.response-run` child reports
+ *     `CONTAININGPX` as its `clientWidth` (the capped box's containing block);
+ *   - `getComputedStyle` answers a run's `max-width` as MAXWIDTH and a run
+ *     member bubble's as `none`, as the stylesheet does; any other bubble's
+ *     `max-width` as MAXWIDTH, the
  *     body's horizontal padding as BODYPADDINGPX a side, every other
  *     horizontal padding, border and margin as `0px`;
  *   - a `.bubble-box` element reports SCROLLBOXPX as its `offsetWidth` and,
@@ -106,7 +108,9 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
   Object.defineProperty(HTMLElement.prototype, "clientWidth", {
     configurable: true,
     get(this: HTMLElement): number {
-      if (this.isConnected && this.querySelector(":scope > .bubble") !== null) return layout.containingPx;
+      if (this.isConnected && this.querySelector(":scope > .bubble, :scope > .response-run") !== null) {
+        return layout.containingPx;
+      }
       if (this.isConnected && this.classList.contains("bubble-box")) return layout.scrollBoxPx - (this.classList.contains("bubble-scroll") ? layout.scrollbarPx : 0);
       return (clientWidth?.get?.call(this) as number | undefined) ?? 0;
     },
@@ -128,8 +132,12 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
     const real = originalStyle.call(window, el, pseudo);
     return new Proxy(real, {
       get(target, property): unknown {
-        if (property === "maxWidth" && el.classList.contains("bubble")) {
+        if (property === "maxWidth" && el.classList.contains("response-run")) {
           return el.isConnected ? layout.maxWidth : "";
+        }
+        if (property === "maxWidth" && el.classList.contains("bubble")) {
+          if (!el.isConnected) return "";
+          return el.closest(".response-run") === null ? layout.maxWidth : "none";
         }
         if (typeof property === "string" && LENGTHS.has(property)) {
           if (!el.isConnected) return "";
