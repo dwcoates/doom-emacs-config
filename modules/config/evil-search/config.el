@@ -4,20 +4,31 @@
 ;;
 ;; The match point is ON wears the `evil-ex-search' face, and every other
 ;; match wears `evil-ex-lazy-highlight'.  Evil itself draws the current
-;; match only while the `/' prompt is open: `RET' drops it (with
-;; `evil-ex-search-persistent-highlight' nil), and `n' / `N' re-highlight
+;; match only while the `/' prompt is open, and `n' / `N' re-highlight
 ;; every match but never the one they land on.  The current-match overlay
-;; below follows point instead: `RET', `n', `N', `*' and `#' all move it to
-;; the match they land on, and it goes when the search highlight does
-;; (`evil-ex-nohighlight', which Doom's ESC runs).
+;; below marks the match `n', `N', `*' and `#' land on.
+;;
+;; The overlay lives exactly as long as Evil's own search highlight: it is
+;; drawn only while that highlight is active, and goes when Evil deletes it.
+;; So `RET' at the `/' prompt (which ends the search and, with
+;; `evil-ex-search-persistent-highlight' nil, drops the highlight) leaves
+;; no mark behind, and `evil-ex-nohighlight' (Doom's ESC, which runs only
+;; while Evil's highlight is active) always takes the mark with it.
 
 (defvar-local +dwc/evil-search-current-overlay nil
   "The overlay marking the search match point last landed on, or nil.")
 
 (defun +dwc/evil-search-mark-current (&rest _)
   "Mark the match the last Evil search landed on with `evil-ex-search'.
-Evil records that match's bounds in `evil-ex-search-match-beg' and
-`evil-ex-search-match-end'; a search that lands records both."
+Marks only while Evil's search highlight is active, so the mark never
+outlives the search.  Evil records the landed match's bounds in
+`evil-ex-search-match-beg' and `evil-ex-search-match-end'; a search that
+lands records both."
+  (when (evil-ex-hl-active-p 'evil-ex-search)
+    (+dwc/evil-search--mark-landed-match)))
+
+(defun +dwc/evil-search--mark-landed-match ()
+  "Move the current-match overlay onto Evil's recorded match bounds."
   (unless (and (integer-or-marker-p evil-ex-search-match-beg)
                (integer-or-marker-p evil-ex-search-match-end))
     (error "evil-search: a landed search left no match bounds (beg=%S end=%S)"

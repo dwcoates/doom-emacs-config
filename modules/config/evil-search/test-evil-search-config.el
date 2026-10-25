@@ -48,8 +48,13 @@
          (evil-ex-delete-hl 'evil-ex-search)))))
 
 (defun test-evil-search--start (string)
-  "Run `evil-ex-start-search' forward for STRING as if typed at `/' and RET."
-  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) string)))
+  "Run `evil-ex-start-search' forward for STRING as if typed at `/' and RET.
+The prompt's session start activates Evil's search highlight, as the
+real `/' prompt's `evil-ex-search-start-session' does."
+  (cl-letf (((symbol-function 'read-string)
+             (lambda (&rest _)
+               (evil-ex-search-activate-highlight nil)
+               string)))
     (evil-ex-start-search 'forward 1)))
 
 (defun test-evil-search--current-bounds ()
@@ -59,17 +64,29 @@
     (cons (overlay-start +dwc/evil-search-current-overlay)
           (overlay-end +dwc/evil-search-current-overlay))))
 
-(ert-deftest test-evil-search-ret-marks-the-landed-match ()
-  "`RET' at the `/' prompt leaves the landed match marked."
+(ert-deftest test-evil-search-ret-ends-the-search-without-a-mark ()
+  "`RET' at the `/' prompt ends the search and leaves no mark behind."
   ;; Arrange
   (test-evil-search--with-buffer "foo bar foo baz foo"
     ;; Act
     (test-evil-search--start "foo")
     ;; Assert
-    (should (equal (test-evil-search--current-bounds) '(9 . 12)))))
+    (should (equal (list (point) (test-evil-search--current-bounds)
+                         (evil-ex-hl-active-p 'evil-ex-search))
+                   '(9 nil nil)))))
 
-(ert-deftest test-evil-search-n-moves-the-mark-to-the-next-match ()
-  "`n' moves the mark to the match it lands on."
+(ert-deftest test-evil-search-persistent-ret-marks-the-landed-match ()
+  "With a persistent highlight, `RET' leaves the landed match marked."
+  ;; Arrange
+  (test-evil-search--with-buffer "foo bar foo baz foo"
+    (let ((evil-ex-search-persistent-highlight t))
+      ;; Act
+      (test-evil-search--start "foo")
+      ;; Assert
+      (should (equal (test-evil-search--current-bounds) '(9 . 12))))))
+
+(ert-deftest test-evil-search-n-after-ret-marks-the-landed-match ()
+  "`n' after `RET' marks the match it lands on."
   ;; Arrange
   (test-evil-search--with-buffer "foo bar foo baz foo"
     (test-evil-search--start "foo")
@@ -77,6 +94,17 @@
     (evil-ex-search-next)
     ;; Assert
     (should (equal (test-evil-search--current-bounds) '(17 . 20)))))
+
+(ert-deftest test-evil-search-n-moves-the-mark-to-the-next-match ()
+  "`n' moves the mark to the match it lands on, wrapping around."
+  ;; Arrange
+  (test-evil-search--with-buffer "foo bar foo baz foo"
+    (test-evil-search--start "foo")
+    (evil-ex-search-next)
+    ;; Act
+    (evil-ex-search-next)
+    ;; Assert
+    (should (equal (test-evil-search--current-bounds) '(1 . 4)))))
 
 (ert-deftest test-evil-search-N-moves-the-mark-to-the-previous-match ()
   "`N' moves the mark back to the match it lands on."
@@ -105,8 +133,9 @@
   "The mark wears `evil-ex-search' above Evil's own highlight overlays."
   ;; Arrange
   (test-evil-search--with-buffer "foo bar foo"
-    ;; Act
     (test-evil-search--start "foo")
+    ;; Act
+    (evil-ex-search-next)
     ;; Assert
     (should (equal (list (overlay-get +dwc/evil-search-current-overlay 'face)
                          (overlay-get +dwc/evil-search-current-overlay 'priority))
@@ -117,6 +146,7 @@
   ;; Arrange
   (test-evil-search--with-buffer "foo bar foo"
     (test-evil-search--start "foo")
+    (evil-ex-search-next)
     ;; Act
     (evil-ex-nohighlight)
     ;; Assert
@@ -127,10 +157,22 @@
   ;; Arrange
   (test-evil-search--with-buffer "foo bar foo"
     (test-evil-search--start "foo")
+    (evil-ex-search-next)
     ;; Act
     (+dwc/evil-search-unmark-current 'evil-ex-substitute)
     ;; Assert
-    (should (equal (test-evil-search--current-bounds) '(9 . 12)))))
+    (should (equal (test-evil-search--current-bounds) '(1 . 4)))))
+
+(ert-deftest test-evil-search-inactive-highlight-leaves-no-mark ()
+  "A landed search marks nothing while Evil's search highlight is off."
+  ;; Arrange
+  (test-evil-search--with-buffer "foo bar foo"
+    (let ((evil-ex-search-highlight-all nil))
+      (test-evil-search--start "foo")
+      ;; Act
+      (evil-ex-search-next)
+      ;; Assert
+      (should (null (test-evil-search--current-bounds))))))
 
 (ert-deftest test-evil-search-failed-search-leaves-no-mark ()
   "A `/' search with no match signals and marks nothing."
@@ -145,6 +187,7 @@
   "Marking with no recorded match bounds is a broken invariant and signals."
   ;; Arrange
   (test-evil-search--with-buffer "foo"
+    (evil-ex-make-hl 'evil-ex-search)
     ;; Act / Assert
     (should-error (+dwc/evil-search-mark-current) :type 'error)
     (should (null +dwc/evil-search-current-overlay))))
