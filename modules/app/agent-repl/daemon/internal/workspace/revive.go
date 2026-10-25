@@ -59,120 +59,86 @@ func (v *verbs) unpark(ws ids.WorkspaceID) {
 // clears only when the bring-up lands) and each called Sessions.Start, which
 // logged the workspace revived four times over for one switch. So the
 // decision AND the start are single-flight, keyed by workspace: the first
-// caller leads, and every caller arriving while it runs JOINS it — it starts
-// nothing of its own, waits for the leader's outcome, and answers that outcome
-// as its own. A caller arriving after the flight ended starts a fresh one,
-// which re-reads the park and finds a revived workspace awake.
+// look leads, and every look arriving while it runs is carried by it and
+// starts nothing of its own. A look arriving after the flight ended leads a
+// fresh one, which re-reads the park and finds a revived workspace awake.
 type revivalFlights struct {
 	mu       sync.Mutex
-	inFlight map[ids.WorkspaceID]*revivalFlight
-	// observeJoin, when set, is told every caller that JOINED a flight rather
-	// than leading one, after it has joined. It is the test seam that lets a
-	// test release the leader only once every joiner is provably waiting on
-	// it; production leaves it nil.
+	inFlight map[ids.WorkspaceID]bool
+	// observeJoin, when set, is told every look that a flight in progress
+	// carried rather than one it led. It is a test seam; production leaves it
+	// nil.
 	observeJoin func(ids.WorkspaceID)
-	// observeFinish, when set, is told every flight that finished, after its
-	// outcome is published. It is the test seam for a revival that outlives
-	// the caller that started it; production leaves it nil.
-	observeFinish func(ids.WorkspaceID)
+	// observeFinish, when set, is told every flight that finished and how. It
+	// is the test seam for a revival no caller waits on; production leaves it
+	// nil.
+	observeFinish func(ws ids.WorkspaceID, revived bool, err error)
 }
 
-// revivalFlight is one revival's outcome, published to its joiners when done
-// closes. The fields are written by the leader before the close and read by
-// joiners only after it.
-type revivalFlight struct {
-	done    chan struct{}
-	revived bool
-	err     error
-}
-
-// join returns the workspace's flight and whether the caller LEADS it: true
-// for a caller that found none in flight (it must run the revival and call
-// finish), false for one that found a flight already running.
-func (r *revivalFlights) join(ws ids.WorkspaceID) (*revivalFlight, bool) {
+// join answers whether the caller LEADS the workspace's revival: true for one
+// that found none in flight (it must decide, start, and finish), false for one
+// a flight in progress already carries.
+func (r *revivalFlights) join(ws ids.WorkspaceID) bool {
 	r.mu.Lock()
-	if flight, ok := r.inFlight[ws]; ok {
+	if r.inFlight[ws] {
 		observe := r.observeJoin
 		r.mu.Unlock()
 		if observe != nil {
 			observe(ws)
 		}
-		return flight, false
+		return false
 	}
 	if r.inFlight == nil {
-		r.inFlight = map[ids.WorkspaceID]*revivalFlight{}
+		r.inFlight = map[ids.WorkspaceID]bool{}
 	}
-	flight := &revivalFlight{done: make(chan struct{})}
-	r.inFlight[ws] = flight
+	r.inFlight[ws] = true
 	r.mu.Unlock()
-	return flight, true
+	return true
 }
 
-// finish publishes the leader's outcome and retires the flight, so the next
-// caller leads a fresh one.
-func (r *revivalFlights) finish(ws ids.WorkspaceID, flight *revivalFlight, revived bool, err error) {
+// finish retires the workspace's flight, so the next look leads a fresh one.
+func (r *revivalFlights) finish(ws ids.WorkspaceID, revived bool, err error) {
 	r.mu.Lock()
 	delete(r.inFlight, ws)
 	observe := r.observeFinish
 	r.mu.Unlock()
-	flight.revived, flight.err = revived, err
-	close(flight.done)
 	if observe != nil {
-		observe(ws)
+		observe(ws, revived, err)
 	}
 }
 
-// reviveIfSessionless brings the session of a workspace with none behind it
-// up -- a hibernated one's, lifting its park, and any other open one's (see
-// lead). It reports whether a revival was performed, so the caller's own
-// record can say a look woke a workspace.
+// startRevival brings up the session of a workspace looked at with none
+// behind it -- a hibernated one's, lifting its park, and any other open
+// one's (see lead) -- WITHOUT THE CALLER WAITING FOR IT.
 //
-// SINGLE-FLIGHT PER WORKSPACE (see revivalFlights): a caller arriving while a
-// revival of the same workspace is in flight joins it and answers the
-// leader's outcome, a failure included, without starting anything itself.
+// A SESSION START IS NOT PART OF A SELECTION'S ANSWER (SelectWorkspace
+// answers that the workspace is selected, nothing more), exactly as it is not
+// part of a registration's (Fleet.StartDetached). Waiting on it made the
+// answer as slow as the vendor: on 2026-10-25T14:53:08 Emacs selected
+// `fold-spares-busy`, whose session had to be brought up, and timed the
+// select out at 10s with the selection long recorded. The bring-up reports
+// its own outcome -- the REVIVING marker, its records, a fault the start
+// itself raises -- so nothing about it is lost by not answering it here.
 //
-// While the leader's Sessions.Start runs, the roster row carries the REVIVING
-// marker; it is lowered the moment Start returns, whichever way it returned,
-// so the row never says "coming back" about a session that already did or
-// never will.
-//
-// THE REVIVAL IS NOT THE CALLER'S TO CANCEL. It runs as a detached start
-// (Sessions.StartDetached, on the fleet's own lifetime, which the daemon's
-// exit ends and joins), so a caller that leaves mid-bring-up -- a user
-// switching workspaces quickly -- stops WAITING and nothing else: the
-// bring-up lands whole. Bound to the rpc, it was torn in half at its session
-// record's write ("begin transaction: context canceled") and reported at
-// ERROR as a session that did not come back (2026-09-24T18:28:56, workspace
-// 0100059cb65649bc). A caller that left is recorded at INFO and answered its
-// own cancellation.
-func (v *verbs) reviveIfSessionless(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) (bool, error) {
-	flight, leads := v.revivals.join(ws)
-	if leads {
-		v.lead(ctx, log, operation, ws, flight)
-	} else {
-		log.Debug(operation, "a revival of this workspace is already in flight; joining it", nil)
+// THE DECISION IS SYNCHRONOUS AND ONLY THE BRING-UP IS DETACHED. The reads
+// that decide whether a start is owed are the caller's to see fail, and a
+// daemon that is standing down refuses the start before anything is detached
+// (shimclient.ErrStandingDown), so the caller can still tell its client to
+// ask the daemon that serves next. A look carried by a flight in progress
+// answers nil: that flight starts the session.
+func (v *verbs) startRevival(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) error {
+	if !v.revivals.join(ws) {
+		log.Debug(operation, "a revival of this workspace is already in flight; it carries this look too", nil)
+		return nil
 	}
-	select {
-	case <-flight.done:
-		return flight.revived, flight.err
-	case <-ctx.Done():
-	}
-	// An outcome that is already published is answered: the caller did not
-	// miss it.
-	select {
-	case <-flight.done:
-		return flight.revived, flight.err
-	default:
-	}
-	log.Info(operation, "the caller left before the revival finished; the revival goes on without it", dlog.Context{"cause": ctx.Err().Error()})
-	return false, fmt.Errorf("revive %q: await the revival: %w", ws, ctx.Err())
+	return v.lead(context.WithoutCancel(ctx), log, operation, ws)
 }
 
-// lead is the leader's half of reviveIfSessionless: the session check and,
-// for a workspace with no session behind it, the detached bring-up. A parked
+// lead is the leader's half of startRevival: the session check and, for a
+// workspace with no session behind it, the detached bring-up. A parked
 // workspace's bring-up runs under the REVIVING marker and lifts the park. It
-// finishes the flight on every path. The reads are the flight's, not the
-// caller's, so they are not cancelled with the caller either.
+// finishes the flight on every path, and answers only what failed before
+// anything was detached.
 //
 // A WORKSPACE LOOKED AT WITH NO SESSION IS STARTED, PARKED OR NOT (owner
 // ruling, 2026-10-02: "it should be structurally required to have started up
@@ -183,17 +149,18 @@ func (v *verbs) reviveIfSessionless(ctx context.Context, log dlog.Logger, operat
 // left session-less any other way -- a bring-up that failed, a shim left down
 // after dying twice, a row never opened -- stayed blank. A closed workspace is
 // not started: closing it is how the user said it should have no session.
-func (v *verbs) lead(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID, flight *revivalFlight) {
-	reads := context.WithoutCancel(ctx)
-	asleep, err := v.parked(reads, ws)
+func (v *verbs) lead(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) error {
+	asleep, err := v.parked(ctx, ws)
 	if err != nil {
 		log.Error(operation, "could not tell whether the workspace was hibernated", dlog.Context{"cause": err.Error()})
-		v.revivals.finish(ws, flight, false, err)
-		return
+		v.revivals.finish(ws, false, err)
+		return err
 	}
 	if !asleep {
-		v.startSessionless(reads, log, operation, ws, flight)
-		return
+		return v.startSessionless(ctx, log, operation, ws)
+	}
+	if err := v.refuseStartStandingDown(ws); err != nil {
+		return err
 	}
 	log.Info(operation, "reviving the hibernated workspace", nil)
 	v.deps.Sidebar.SetReviving(ws, true)
@@ -205,34 +172,51 @@ func (v *verbs) lead(ctx context.Context, log dlog.Logger, operation string, ws 
 			} else {
 				log.Error(operation, "the hibernated workspace's session did not come back up", dlog.Context{"cause": err.Error()})
 			}
-			v.revivals.finish(ws, flight, false, fmt.Errorf("revive %q: start the session: %w", ws, err))
+			v.revivals.finish(ws, false, fmt.Errorf("revive %q: start the session: %w", ws, err))
 			return
 		}
 		v.unpark(ws)
 		log.Info(operation, "revived the hibernated workspace", nil)
-		v.revivals.finish(ws, flight, true, nil)
+		v.revivals.finish(ws, true, nil)
 	})
+	return nil
+}
+
+// refuseStartStandingDown finishes the workspace's flight and answers
+// shimclient.ErrStandingDown when this daemon is standing down: it starts no
+// session for a workspace it is about to stop serving, and says so before
+// anything is detached.
+func (v *verbs) refuseStartStandingDown(ws ids.WorkspaceID) error {
+	if !v.deps.Sessions.StandingDown() {
+		return nil
+	}
+	v.revivals.finish(ws, false, shimclient.ErrStandingDown)
+	return fmt.Errorf("revive %q: %w", ws, shimclient.ErrStandingDown)
 }
 
 // startSessionless is lead's branch for a workspace that is NOT parked: a
 // live session or a closed row is left as it is, and anything else -- an open
 // workspace with no session behind it -- has its session started detached,
 // exactly as a parked one's revival is. It finishes the flight on every path.
-func (v *verbs) startSessionless(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID, flight *revivalFlight) {
+func (v *verbs) startSessionless(ctx context.Context, log dlog.Logger, operation string, ws ids.WorkspaceID) error {
 	if v.deps.Sessions.Live(ws) {
-		v.revivals.finish(ws, flight, false, nil)
-		return
+		v.revivals.finish(ws, false, nil)
+		return nil
 	}
 	record, err := v.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		log.Error(operation, "could not read the workspace looked at with no session behind it", dlog.Context{"cause": err.Error()})
-		v.revivals.finish(ws, flight, false, fmt.Errorf("revive %q: read the workspace: %w", ws, err))
-		return
+		err = fmt.Errorf("revive %q: read the workspace: %w", ws, err)
+		v.revivals.finish(ws, false, err)
+		return err
 	}
 	if record.Closed {
 		log.Debug(operation, "a closed workspace was looked at; it is not started", nil)
-		v.revivals.finish(ws, flight, false, nil)
-		return
+		v.revivals.finish(ws, false, nil)
+		return nil
+	}
+	if err := v.refuseStartStandingDown(ws); err != nil {
+		return err
 	}
 	log.Info(operation, "starting the session of a workspace looked at with none behind it", nil)
 	v.deps.Sessions.StartDetached(ws, func(err error) {
@@ -242,12 +226,13 @@ func (v *verbs) startSessionless(ctx context.Context, log dlog.Logger, operation
 			} else {
 				log.Error(operation, "the looked-at workspace's session did not come up", dlog.Context{"cause": err.Error()})
 			}
-			v.revivals.finish(ws, flight, false, fmt.Errorf("revive %q: start the session: %w", ws, err))
+			v.revivals.finish(ws, false, fmt.Errorf("revive %q: start the session: %w", ws, err))
 			return
 		}
 		log.Info(operation, "started the session of the looked-at workspace", nil)
-		v.revivals.finish(ws, flight, true, nil)
+		v.revivals.finish(ws, true, nil)
 	})
+	return nil
 }
 
 // startEndedByDaemon reports whether a DETACHED start ended for a reason that

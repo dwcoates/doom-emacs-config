@@ -955,6 +955,10 @@ type Sessions interface {
 	// a caller uses when the start is occasioned by its answer rather than
 	// contained in it; see Fleet.StartDetached for why the register uses it.
 	StartDetached(ws ids.WorkspaceID, done func(error))
+	// StandingDown reports whether this daemon has begun standing down, when
+	// it starts no session (shimclient.ErrStandingDown). A caller that answers
+	// before its start runs reads it to refuse up front.
+	StandingDown() bool
 	// Live reports whether the workspace has nothing for a start to do: a
 	// session runs on its shim, or a cold gate parks it.
 	Live(ws ids.WorkspaceID) bool
