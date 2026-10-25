@@ -34,14 +34,18 @@
 (declare-function agent-repl-wire--decode-message "wire-common")
 (declare-function agent-repl-wire--decode-oneof "wire-common")
 (declare-function agent-repl-wire--decode-optional-message "wire-common")
+(declare-function agent-repl-wire--decode-optional-string "wire-common")
 (declare-function agent-repl-wire--decode-repeated "wire-common")
 (declare-function agent-repl-wire--decode-string "wire-common")
 (declare-function agent-repl-wire--decoded "wire-common")
 (declare-function agent-repl-wire-decode-daemon-stream-ending "wire-common")
+(declare-function agent-repl-wire-decode-feed-id "wire-common")
 (declare-function agent-repl-wire--encode-empty "wire-common")
 (declare-function agent-repl-wire--encoded "wire-common")
 (declare-function agent-repl-wire--fail "wire-common")
 (declare-function agent-repl-wire--object "wire-common")
+(declare-function agent-repl-wire--present-p "wire-common")
+(declare-function agent-repl-wire--raw "wire-common")
 (declare-function agent-repl-wire-decode-repository-ref "wire-common")
 (declare-function agent-repl-wire-decode-workspace-ref "wire-common")
 
@@ -1189,24 +1193,144 @@ open row in no subsection, or `:subsection'.  It is never unset."
                    '((row :row agent-repl-wire-decode-roster-open-row)
                      (subsection :subsection agent-repl-wire-decode-roster-subsection)))))))
 
-(defun agent-repl-wire-decode-roster-merge-queue-row (value)
-  "Decode VALUE as `RosterMergeQueueRow', a plist `(:row ROW)'.
-One merge in line, drawn as the workspace it runs in.  It nests nothing."
-  (let ((object (agent-repl-wire--object "RosterMergeQueueRow" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueRow" object '(row))
+;;;; ---- frontend.v1.RosterRepoMergeQueue ----
+;; The repository's merge queue, which the webview draws in the section's
+;; place while the open section shows the merge queues.  Emacs draws nothing
+;; from it, but the codec refuses unknown fields, so it is decoded and
+;; validated whole.
+
+(defun agent-repl-wire-decode-roster-merge-queue-mode (value)
+  "Decode VALUE as `RosterMergeQueueMode', a plist `(:arm ARM)'.
+ARM is `:sync' or `:async'.  It is never unset."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueMode" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueMode" object '(sync async))
     (agent-repl-wire--decoded
-     "RosterMergeQueueRow"
-     (list :row (agent-repl-wire--decode-message
-                 "RosterMergeQueueRow" 'row object #'agent-repl-wire-decode-roster-row)))))
+     "RosterMergeQueueMode"
+     (list :arm (plist-get
+                 (agent-repl-wire--decode-oneof
+                  "RosterMergeQueueMode" 'mode object
+                  `((sync :sync ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueModeSync" v)))
+                    (async :async ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueModeAsync" v)))))
+                 :arm)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-subject (value)
+  "Decode VALUE as `RosterMergeQueueSubject'.
+A plist `(:workspace REF :name NAME :reveal FEED-ID :mode MODE)': the
+workspace the merge is credited to, its name, the bubble a click reveals
+\(nil when none), and how the merge runs."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueSubject" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueSubject" object '(workspace name reveal mode))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueSubject"
+     (list :workspace (agent-repl-wire--decode-message
+                       "RosterMergeQueueSubject" 'workspace object #'agent-repl-wire-decode-workspace-ref)
+           :name (agent-repl-wire--decode-string "RosterMergeQueueSubject" 'name object)
+           :reveal (agent-repl-wire--decode-optional-message
+                    "RosterMergeQueueSubject" 'reveal object #'agent-repl-wire-decode-feed-id)
+           :mode (agent-repl-wire--decode-message
+                  "RosterMergeQueueSubject" 'mode object #'agent-repl-wire-decode-roster-merge-queue-mode)))))
+
+(defconst agent-repl-wire--roster-merge-queue-instants
+  '((startedAtMs . :started-at-ms) (endedAtMs . :ended-at-ms) (queuedAtMs . :queued-at-ms))
+  "Each epoch-ms field a merge queue's span messages carry, and its keyword.")
+
+(defun agent-repl-wire--decode-roster-merge-queue-span (message-name value fields)
+  "Decode VALUE as MESSAGE-NAME, a message of the epoch-ms FIELDS alone.
+Returns a plist keyed by each field's keyword
+\(`agent-repl-wire--roster-merge-queue-instants')."
+  (let ((object (agent-repl-wire--object message-name value)))
+    (agent-repl-wire--check-keys message-name object fields)
+    (agent-repl-wire--decoded
+     message-name
+     (mapcan (lambda (field)
+               (list (cdr (assq field agent-repl-wire--roster-merge-queue-instants))
+                     (agent-repl-wire--decode-int64 message-name field object)))
+             fields))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-stage (value)
+  "Decode VALUE as `RosterMergeQueueStage'.
+A plist `(:label LABEL :round ROUND :state (:arm ARM :value SPAN))', ARM
+`:live', `:succeeded' or `:failed'."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueStage" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueStage" object '(label round live succeeded failed))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueStage"
+     (list :label (agent-repl-wire--decode-string "RosterMergeQueueStage" 'label object)
+           :round (agent-repl-wire--decode-uint32 "RosterMergeQueueStage" 'round object)
+           :state (agent-repl-wire--decode-oneof
+                   "RosterMergeQueueStage" 'state object
+                   `((live :live ,(lambda (v) (agent-repl-wire--decode-roster-merge-queue-span
+                                               "RosterMergeQueueStageLive" v '(startedAtMs))))
+                     (succeeded :succeeded ,(lambda (v) (agent-repl-wire--decode-roster-merge-queue-span
+                                                         "RosterMergeQueueStageSucceeded" v '(startedAtMs endedAtMs))))
+                     (failed :failed ,(lambda (v) (agent-repl-wire--decode-roster-merge-queue-span
+                                                   "RosterMergeQueueStageFailed" v '(startedAtMs endedAtMs))))))))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-head-merging (value)
+  "Decode VALUE as `RosterMergeQueueHeadMerging', a plist `(:step STEP)'.
+STEP is the daemon's words for the step, nil while none is named."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueHeadMerging" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueHeadMerging" object '(step))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueHeadMerging"
+     (list :step (agent-repl-wire--decode-optional-string "RosterMergeQueueHeadMerging" 'step object)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-head-failed (value)
+  "Decode VALUE as `RosterMergeQueueHeadFailed', a plist `(:summary TEXT)'."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueHeadFailed" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueHeadFailed" object '(summary))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueHeadFailed"
+     (list :summary (agent-repl-wire--decode-string "RosterMergeQueueHeadFailed" 'summary object)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-head (value)
+  "Decode VALUE as `RosterMergeQueueHead'.
+A plist `(:subject SUBJECT :stages STAGES :standing (:arm ARM :value V))',
+ARM `:waiting', `:merging' or `:failed'.  The standing is never unset."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueHead" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueHead" object '(subject stages waiting merging failed))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueHead"
+     (list :subject (agent-repl-wire--decode-message
+                     "RosterMergeQueueHead" 'subject object #'agent-repl-wire-decode-roster-merge-queue-subject)
+           :stages (agent-repl-wire--decode-repeated
+                    "RosterMergeQueueHead" 'stages object #'agent-repl-wire-decode-roster-merge-queue-stage)
+           :standing (agent-repl-wire--decode-oneof
+                      "RosterMergeQueueHead" 'standing object
+                      `((waiting :waiting ,(lambda (v) (agent-repl-wire--decode-roster-merge-queue-span
+                                                        "RosterMergeQueueHeadWaiting" v '(queuedAtMs))))
+                        (merging :merging agent-repl-wire-decode-roster-merge-queue-head-merging)
+                        (failed :failed agent-repl-wire-decode-roster-merge-queue-head-failed)))))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-waiting (value)
+  "Decode VALUE as `RosterMergeQueueWaiting'.
+A plist `(:subject SUBJECT :queued-at-ms MS :placed-at-front BOOL)'."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueWaiting" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueWaiting" object '(subject queuedAtMs placedAtFront))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueWaiting"
+     (list :subject (agent-repl-wire--decode-message
+                     "RosterMergeQueueWaiting" 'subject object #'agent-repl-wire-decode-roster-merge-queue-subject)
+           :queued-at-ms (agent-repl-wire--decode-int64 "RosterMergeQueueWaiting" 'queuedAtMs object)
+           :placed-at-front (agent-repl-wire--decode-bool "RosterMergeQueueWaiting" 'placedAtFront object)))))
 
 (defun agent-repl-wire-decode-roster-repo-merge-queue (value)
-  "Decode VALUE as `RosterRepoMergeQueue', a plist `(:rows QUEUE-ROWS)'.
-The repository's merges in line, front first, which the webview lists in
-the section's place while the open section shows the merge queues.  Emacs
-draws nothing from it, but the codec refuses unknown fields, so it is
-decoded and validated whole."
-  (agent-repl-wire--decode-row-list "RosterRepoMergeQueue" value
-                                    #'agent-repl-wire-decode-roster-merge-queue-row))
+  "Decode VALUE as `RosterRepoMergeQueue'.
+A plist `(:head HEAD :waiting WAITING :paused PAUSED)': the merge at the
+head (nil when none stands), the merges waiting behind it, and t while the
+queue is paused."
+  (let ((object (agent-repl-wire--object "RosterRepoMergeQueue" value)))
+    (agent-repl-wire--check-keys "RosterRepoMergeQueue" object '(head waiting paused))
+    (agent-repl-wire--decoded
+     "RosterRepoMergeQueue"
+     (list :head (agent-repl-wire--decode-optional-message
+                  "RosterRepoMergeQueue" 'head object #'agent-repl-wire-decode-roster-merge-queue-head)
+           :waiting (agent-repl-wire--decode-repeated
+                     "RosterRepoMergeQueue" 'waiting object #'agent-repl-wire-decode-roster-merge-queue-waiting)
+           :paused (and (agent-repl-wire--present-p object 'paused)
+                        (progn (agent-repl-wire--decode-empty
+                                "RosterMergeQueuePaused" (agent-repl-wire--raw object 'paused))
+                               t))))))
 
 (defun agent-repl-wire-decode-roster-repo-shows-workspaces (value)
   "Decode VALUE as the empty message `RosterRepoShowsWorkspaces'."
