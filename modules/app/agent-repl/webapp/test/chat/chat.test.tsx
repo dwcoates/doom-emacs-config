@@ -13,9 +13,10 @@ import { SwitchChatSiblingResponseSchema, type SwitchChatSiblingRequest } from "
 import { WatchChatResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_chat_pb";
 import { ChatViewSchema, type ChatView } from "../../../proto/gen/ts/frontend/v1/chat_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { mountChat, SIGHTING_BATCH_MS, type ChatHandle } from "../../src/chat/chat.js";
+import { mountChat, pendingQuestionOf, SIGHTING_BATCH_MS, type ChatHandle } from "../../src/chat/chat.js";
 import { HIGHLIGHT_CLASS, QUOTE_MARK_CLASS } from "../../src/chat/chat-view.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
+import { log } from "../../src/log.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { testAppContext } from "../rpc/app-context.js";
 import { fakeTicker, SINK } from "../sidebar/harness.js";
@@ -335,5 +336,106 @@ describe("the chat's gestures", () => {
 
     // Assert
     expect(d.sightings).toHaveLength(0);
+  });
+});
+
+/** A pending question, waiting for its answer. */
+function pending(question: string, quote?: string): unknown {
+  return {
+    question: { text: { text: question }, quote: quote === undefined ? undefined : { text: quote } },
+    answer: { progress: { case: "waiting", value: {} } },
+  };
+}
+
+describe("pendingQuestionOf", () => {
+  it("is null for the empty thread", () => {
+    expect(pendingQuestionOf(create(ChatViewSchema, { state: { case: "empty", value: { hint: { text: "h" } } } }))).toBeNull();
+  });
+
+  it("is null for a conversation with no question in flight", () => {
+    expect(pendingQuestionOf(create(ChatViewSchema, conversation([exchange("n1", "q", "a")]) as never))).toBeNull();
+  });
+
+  it("tells two questions of the same text apart by their quote", () => {
+    const of = (quote?: string) => pendingQuestionOf(create(ChatViewSchema, conversation([], pending("why?", quote)) as never));
+    expect(new Set([of(), of("these words"), of("other words")]).size).toBe(3);
+  });
+
+  it("is the same for the same question pushed again", () => {
+    const of = () => pendingQuestionOf(create(ChatViewSchema, conversation([], pending("why?", "w")) as never));
+    expect(of()).toBe(of());
+  });
+});
+
+/**
+ * A QUESTION JUST ASKED LANDS THE CHAT AT ITS END (owner request, 2026-10-25),
+ * wherever the reader was. The scroll box is a reader scrolled up a long chat.
+ */
+describe("the chat's end after a question is asked", () => {
+  let top: number;
+  let moves: unknown[];
+
+  beforeEach(() => {
+    top = 0;
+    Object.defineProperty(scroll, "scrollHeight", { configurable: true, get: () => 1000 });
+    Object.defineProperty(scroll, "clientHeight", { configurable: true, get: () => 100 });
+    Object.defineProperty(scroll, "scrollTop", { configurable: true, get: () => top, set: (v: number) => (top = v) });
+    moves = [];
+    vi.spyOn(log, "info").mockImplementation((message, fields) => {
+      if (fields?.operation === "scroll.chat-moved") moves.push(fields.context);
+    });
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  /** Push VIEW, wait until QUESTION is the pending question drawn. */
+  async function pushPending(d: ReturnType<typeof daemon>, view: ViewInit, question: string): Promise<void> {
+    d.push(view);
+    await vi.waitFor(() => expect(host.querySelector("[data-chat-pending] [data-chat-question]")?.textContent).toBe(question));
+  }
+
+  it("lands at the end when a question goes in flight", async () => {
+    const d = daemon();
+    mount(d);
+    d.push(conversation([exchange("n1", "q", "a")]));
+    await drawn('[data-chat-answer="n1"]');
+
+    await pushPending(d, conversation([exchange("n1", "q", "a")], pending("why?")), "why?");
+
+    expect([top, moves]).toEqual([1000, [{ cause: "promptSent", from: 0, to: 1000 }]]);
+  });
+
+  it("lands at the end when a different question replaces the one in flight", async () => {
+    const d = daemon();
+    mount(d);
+    await pushPending(d, conversation([], pending("first?")), "first?");
+
+    await pushPending(d, conversation([], pending("second?")), "second?");
+
+    expect(moves).toEqual([{ cause: "promptSent", from: 0, to: 1000 }]);
+  });
+
+  it("leaves a reader scrolled up where they are while the same question's answer arrives", async () => {
+    const d = daemon();
+    mount(d);
+    d.push(conversation([]));
+    await vi.waitFor(() => expect(host.querySelector(".chat-col")).not.toBeNull());
+    await pushPending(d, conversation([], pending("why?")), "why?");
+    top = 0;
+    moves = [];
+
+    d.push(conversation([], { ...(pending("why?") as object), answer: { progress: { case: "streaming", value: { markdown: { text: "because" } } } } }));
+    await drawn("[data-chat-streaming]");
+
+    expect([top, moves]).toEqual([0, []]);
+  });
+
+  it("does not count the thread's first view as a question asked", async () => {
+    const d = daemon();
+    mount(d);
+
+    await pushPending(d, conversation([], pending("why?")), "why?");
+
+    expect([top, moves]).toEqual([0, []]);
   });
 });
