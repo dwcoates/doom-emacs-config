@@ -41,6 +41,7 @@ import (
 //	                         disable-racing | enable-racing | subscribe | unsubscribe
 //	agent-repld editor       eval
 //	agent-repld runtime      deploy-hold | roll-out-landing | health | prune-storage
+//	                         reap-worktrees
 //	agent-repld test         run (testcli.go)
 //
 // EVERY COMMAND IS ONE RPC (a `set` with several flags is one rpc per flag,
@@ -176,6 +177,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"roll-out-landing": {usage: "roll-out-landing [-deploy LEDGER]", run: runtimeRollOutLanding},
 		"health":           {usage: "health", run: runtimeHealth},
 		"prune-storage":    {usage: "prune-storage [-preview]", run: runtimePruneStorage},
+		"reap-worktrees":   {usage: "reap-worktrees [-preview] [-force]", run: runtimeReapWorktrees},
 	},
 }
 
@@ -1498,6 +1500,29 @@ func runtimePruneStorage(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.PruneStorage(c.ctx, connect.NewRequest(&agentreplv1.PruneStorageRequest{DryRun: *preview}))
+	return answer(c, resp, err)
+}
+
+// runtimeReapWorktrees runs the daemon's landed-worktree reaper now. -preview
+// asks the reaper to judge and answer what it would do, changing nothing (it
+// is not -dry-run, which stops the request from being sent at all); -force
+// takes closed workspaces' worktrees without waiting out the reaper's idle and
+// expiry windows.
+func runtimeReapWorktrees(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	preview := fs.Bool("preview", false, "answer what the reaper would do, changing nothing")
+	force := fs.Bool("force", false, "take closed workspaces' worktrees without waiting out the idle and expiry windows")
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(positionals) != 0 {
+		return c.usageFailed("nothing is positional")
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	resp, err := c.client.ReapWorktrees(c.ctx, connect.NewRequest(&agentreplv1.ReapWorktreesRequest{DryRun: *preview, Force: *force}))
 	return answer(c, resp, err)
 }
 

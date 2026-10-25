@@ -1547,6 +1547,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			HiddenKeepalives:  cacheKeeper,
 			NewsDigest:        digest,
 			Storage:           storageSweep,
+			Worktrees:         reaper,
 			ClassifierPrompt:  classifierPrompt,
 			EditorInstances:   editors,
 			Opens:             opens,

@@ -2924,6 +2924,27 @@ what it holds never landed. A failed preservation keeps the tree
 (`remove_failed`). Recover a reaped tree with `git worktree add <dir>
 <preserved ref>` (the snapshot commit) or by checking out its kept branch.
 
+**Leftovers** (`leftovers.go`). After its worktrees, each repository's
+worktrees directory (`workspace.WorktreeParent`: a main worktree's sibling
+`<repo>-worktrees`) is read, and every directory in it that git did NOT list
+and that holds NOTHING BUT LOG LINKS -- symlinks named `*.log` directly in
+`.claude/emacs` -- is removed (`os.RemoveAll`, which deletes the links and
+never their targets under the state root). That is what a runtime re-making
+its log link inside a worktree mid-removal left behind (eight under
+`~/.config/doom-worktrees` on 2026-10-25). A directory holding anything else,
+holding nothing, or named by an OPEN workspace is kept (`not_only_log_links`,
+`open_workspace`). INFO `daemon.worktreereap.leftover` per removal.
+
+**On request** (`ReapWorktrees`, `agent-repld runtime reap-worktrees
+[-preview] [-force]`): `SweepWith` runs one sweep now under the same guard
+(`already_running`, `held_elsewhere`). A DRY RUN (`-preview`) judges exactly
+as a sweep does and removes, prunes, preserves and deletes nothing. FORCE
+skips the idle gate and the expiry window for the worktree of a CLOSED
+workspace: landed, it is removed and its branch deleted at once; unlanded,
+it is preserved and removed at once (listed `forced`, branch kept). An open
+workspace's worktree and a worktree no workspace names are judged exactly as
+without it.
+
 **Records.** INFO `daemon.worktreereap.expire` per expiry (worktree, branch,
 head, `unlanded_reason`, `born`, `repo_active_since`, `expiry_age`,
 `expire_after`, `preserved_ref`, `preserved_sha`); INFO `daemon.worktreereap.remove` per removal (worktree, branch,
@@ -2933,7 +2954,8 @@ deleted branch; ERROR for any step that fails (`daemon.worktreereap.repo`,
 `.judge`, `.remove`, `.branch`, `.prune`, `.expire`), after which the sweep goes on with
 the next worktree or repository; INFO `daemon.worktreereap.sweep` for the
 start and the summary (repositories, worktrees judged, removed and their dirs,
-expired and their dirs, branches deleted, pruned, kept by reason, failures). A git the daemon's own
+expired and their dirs, forced and their dirs, leftovers and their dirs,
+branches deleted, pruned, kept by reason, failures, `dry_run`). A git the daemon's own
 exit cancelled is INFO, never a failure. A registered repository whose main
 worktree is gone is INFO and skipped.
 

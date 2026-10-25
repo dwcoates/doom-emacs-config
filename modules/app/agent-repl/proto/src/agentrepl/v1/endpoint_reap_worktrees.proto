@@ -1,0 +1,154 @@
+// endpoint_reap_worktrees.proto — ReapWorktrees: run the daemon's
+// landed-worktree reaper now, judge one without changing anything, or take a
+// closed workspace's worktree without waiting out the reaper's windows.
+// RUNTIME section.
+//
+// The reaper (daemon/internal/worktreereap) removes every linked worktree
+// whose changes have landed on its repository's default branch once it has
+// been idle a day, and deletes its branch; it preserves under
+// refs/agent-repl/reaped/ and removes a worktree that never landed once it
+// has existed a week of unbroken repository activity; it prunes stale
+// worktree registrations; and it removes the LEFTOVERS beside the worktrees,
+// directories git no longer lists that hold nothing but `.claude/emacs/*.log`
+// links. It runs on its own once a day; this asks for one now.
+//
+// A DRY RUN JUDGES EXACTLY AS A SWEEP DOES and changes nothing, so what it
+// answers is what a sweep at that instant would do.
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReapWorktreesRequest {
+  // Judge only: change nothing and answer what a sweep would do.
+  bool dry_run = 1;
+  // Skip the idle and expiry windows for the worktree of a CLOSED workspace:
+  // landed, it is removed at once; unlanded, it is preserved and removed at
+  // once. An open workspace's worktree, and one no workspace names, are
+  // judged exactly as without it.
+  bool force = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReapWorktreesResponse {
+  oneof result {
+    ReapWorktreesSuccess success = 1;
+    ReapWorktreesError error = 2;
+  }
+}
+
+// The sweep ran to its end. Steps it failed on are counted in `failures` and
+// recorded in the daemon's log; the sweep goes on past each.
+message ReapWorktreesSuccess {
+  // Nothing was changed: everything below is what a sweep would do.
+  bool dry_run = 1;
+  // How many repositories were swept to the end.
+  uint32 repositories = 2;
+  // How many linked worktrees were judged.
+  uint32 worktrees = 3;
+  // Every removal, in the order made.
+  repeated ReapWorktreesRemoval removed = 4;
+  // How many branches were deleted after their worktree's removal.
+  uint32 branches_deleted = 5;
+  // How many repositories had their stale registrations pruned.
+  uint32 pruned = 6;
+  // What was left alone, one count per reason.
+  repeated ReapWorktreesKept kept = 7;
+  // How many steps failed.
+  uint32 failures = 8;
+}
+
+// One removed directory.
+message ReapWorktreesRemoval {
+  // The absolute directory removed.
+  string path = 1;
+  // The rule that removed it. Never UNSPECIFIED.
+  ReapWorktreesReason reason = 2;
+}
+
+// Why a directory was removed.
+enum ReapWorktreesReason {
+  REAP_WORKTREES_REASON_UNSPECIFIED = 0;
+  // A worktree whose changes have landed on the default branch; its branch
+  // was deleted with it.
+  REAP_WORKTREES_REASON_LANDED = 1;
+  // A worktree that never landed and existed past the expiry window; its
+  // content was preserved under refs/agent-repl/reaped/ and its branch kept.
+  REAP_WORKTREES_REASON_EXPIRED = 2;
+  // A closed workspace's worktree that never landed, taken by a forced sweep
+  // before the expiry window ran out; preserved and branch kept, as EXPIRED.
+  REAP_WORKTREES_REASON_FORCED = 3;
+  // A directory beside the worktrees that git no longer listed and that held
+  // nothing but log links.
+  REAP_WORKTREES_REASON_LEFTOVER = 4;
+}
+
+// How many entries were left alone for one reason.
+message ReapWorktreesKept {
+  // Never UNSPECIFIED.
+  ReapWorktreesKeepReason reason = 1;
+  uint32 count = 2;
+}
+
+// Why an entry was left alone.
+enum ReapWorktreesKeepReason {
+  REAP_WORKTREES_KEEP_REASON_UNSPECIFIED = 0;
+  // The repository's main worktree.
+  REAP_WORKTREES_KEEP_REASON_MAIN_WORKTREE = 1;
+  // A bare worktree.
+  REAP_WORKTREES_KEEP_REASON_BARE = 2;
+  // A locked worktree.
+  REAP_WORKTREES_KEEP_REASON_LOCKED = 3;
+  // A registration git reports prunable (pruned, not removed).
+  REAP_WORKTREES_KEEP_REASON_PRUNABLE = 4;
+  // An open workspace's directory.
+  REAP_WORKTREES_KEEP_REASON_OPEN_WORKSPACE = 5;
+  // A workspace with a live session.
+  REAP_WORKTREES_KEEP_REASON_LIVE_SESSION = 6;
+  // The branch an open workspace is parented on.
+  REAP_WORKTREES_KEEP_REASON_PARENT_OF_OPEN_WORKSPACE = 7;
+  // A worktree on the default branch itself.
+  REAP_WORKTREES_KEEP_REASON_ON_DEFAULT_BRANCH = 8;
+  // A registered worktree whose directory is gone.
+  REAP_WORKTREES_KEEP_REASON_DIRECTORY_MISSING = 9;
+  // A worktree whose HEAD names no commit.
+  REAP_WORKTREES_KEEP_REASON_NO_COMMIT = 10;
+  // A worktree active within the idle window.
+  REAP_WORKTREES_KEEP_REASON_RECENTLY_ACTIVE = 11;
+  // An unlanded worktree with uncommitted changes, inside the expiry window.
+  REAP_WORKTREES_KEEP_REASON_DIRTY = 12;
+  // An unlanded worktree whose merge conflicts, inside the expiry window.
+  REAP_WORKTREES_KEEP_REASON_MERGE_CONFLICTS = 13;
+  // An unlanded worktree, inside the expiry window.
+  REAP_WORKTREES_KEEP_REASON_UNLANDED = 14;
+  // A directory beside the worktrees holding more than log links, or none.
+  REAP_WORKTREES_KEEP_REASON_NOT_ONLY_LOG_LINKS = 15;
+  // A removal that failed (recorded at ERROR).
+  REAP_WORKTREES_KEEP_REASON_REMOVE_FAILED = 16;
+  // A preservation that failed, so the worktree was not removed (recorded at
+  // ERROR).
+  REAP_WORKTREES_KEEP_REASON_PRESERVE_FAILED = 17;
+}
+
+message ReapWorktreesError {
+  oneof cause {
+    // A sweep is already running in this daemon.
+    ReapWorktreesAlreadyRunning already_running = 1;
+    // Another daemon (a handover's other half) holds the sweep's lock.
+    ReapWorktreesHeldElsewhere held_elsewhere = 2;
+    // The sweep could not run or ended early.
+    ReapWorktreesFailed failed = 3;
+  }
+}
+
+// Empty: nothing more is known.
+message ReapWorktreesAlreadyRunning {}
+
+// Empty: nothing more is known.
+message ReapWorktreesHeldElsewhere {}
+
+message ReapWorktreesFailed {
+  // What ended the sweep.
+  string detail = 1;
+}

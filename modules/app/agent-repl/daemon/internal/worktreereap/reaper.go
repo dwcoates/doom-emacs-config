@@ -202,6 +202,15 @@ const (
 	reasonPreserveFail = "preserve_failed"
 )
 
+// KeepReasons is every reason a sweep leaves an entry alone for: the keys of
+// Report.Kept, in the order the ReapWorktrees contract draws them.
+var KeepReasons = []string{
+	keepMain, keepBare, keepLocked, keepPrunable, keepOpenWorkspace,
+	keepLiveSession, keepParentBranch, keepDefaultBranch, keepMissing,
+	keepNoCommit, keepActive, keepDirty, keepConflicts, keepUnlanded,
+	keepNotLeftover, reasonRemoveFailed, reasonPreserveFail,
+}
+
 // Report is one sweep's account.
 type Report struct {
 	// DryRun says nothing was done: every list below is what a sweep would do.

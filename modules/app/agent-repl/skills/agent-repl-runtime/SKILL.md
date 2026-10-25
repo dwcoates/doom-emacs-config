@@ -41,6 +41,7 @@ Runs agent-repl's build, bounce, deploy, hot-reload, health and daemon-request o
     | "switch to / select workspace WS" | `agent-repld workspace select WS` | Makes it current; Emacs and the webapp follow. |
     | "is the daemon healthy" | `call DaemonHealth` | Prints the daemon's health and identity. |
     | "prune agent-repl's storage" / "free up agent-repl's disk" | `agent-repld runtime prune-storage [-preview]` | Runs the storage sweep now and prints what it deleted; `-preview` deletes nothing. |
+    | "prune / clean up the worktrees" / "reap landed worktrees" | `agent-repld runtime reap-worktrees [-preview] [-force]` | Runs the landed-worktree reaper now and prints what it removed; `-preview` changes nothing; `-force` takes closed workspaces' worktrees without waiting. |
     | "hot reload" / "reload the lisp" | `hot-reload FILE.el...` | Loads the changed non-test `.el` files into the running Emacs. |
     | "reload the page" / "reload the webview" | *(no argument)* | The user's own key is `SPC o l`; suggest it, do not act. |
 
@@ -93,6 +94,16 @@ the usage.
   shim state, the transcript backups of workspaces closed over thirty days,
   and month-old profiling sessions and test-reuse records, and prints what
   went. `-preview` prints what a sweep would delete and deletes nothing.
+- `runtime reap-worktrees [-preview] [-force]` runs the daemon's
+  landed-worktree reaper now (it also runs once a day): it removes worktrees
+  whose changes have landed on the default branch (and their branches),
+  preserves and removes worktrees that never landed after a week of
+  repository activity, prunes stale registrations, and removes leftover
+  directories beside the worktrees that hold nothing but log links, then
+  prints what went. `-preview` prints what a sweep would do and changes
+  nothing. `-force` takes a CLOSED workspace's worktree at once, landed or
+  not (an unlanded one is preserved first and its branch kept); an open
+  workspace's worktree is never touched.
 
 ## Evaluating elisp in the running Emacs (`editor eval`)
 
