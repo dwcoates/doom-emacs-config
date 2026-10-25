@@ -300,7 +300,7 @@ describe("removing old whole copies", () => {
   it("does not throw, and warns, when the directory cannot be listed", () => {
     const records = recordsOf(() => removeLegacyCopies(path.join(scratch(), "absent"), "v-1"));
 
-    expect(records).toEqual([expect.objectContaining({ level: "warn", vendor_session_id: "v-1" })]);
+    expect(records).toEqual([expect.objectContaining({ level: "warn", vendor_session_id: "v-1", step: "list" })]);
   });
 
   it("keeps going past a copy it cannot remove, and warns about it", () => {
@@ -316,7 +316,7 @@ describe("removing old whole copies", () => {
     // Assert.
     expect([readdirSync(dir), records.filter((r) => r.level === "warn")]).toEqual([
       ["v-1-1.jsonl"],
-      [expect.objectContaining({ removed: "v-1-1.jsonl" })],
+      [expect.objectContaining({ removed: "v-1-1.jsonl", step: "remove" })],
     ]);
   });
 });

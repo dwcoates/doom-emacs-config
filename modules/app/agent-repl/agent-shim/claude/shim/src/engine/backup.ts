@@ -210,11 +210,7 @@ export function removeLegacyCopies(directory: string, vendorSessionId: string): 
   try {
     names = readdirSync(directory);
   } catch (err) {
-    // warn: a defect because the old copies could not be listed to remove them.
-    LOGGER.warn(
-      { directory, vendor_session_id: vendorSessionId, cause: err instanceof Error ? err.message : String(err) },
-      "could not list the transcript backup directory to remove its old whole copies",
-    );
+    legacyCopyStayed({ directory, vendor_session_id: vendorSessionId, step: "list" }, err);
     return;
   }
   for (const name of names.filter((n) => isLegacyCopy(n, vendorSessionId))) {
@@ -222,11 +218,16 @@ export function removeLegacyCopies(directory: string, vendorSessionId: string): 
       rmSync(path.join(directory, name));
       LOGGER.debug({ directory, removed: name }, "removed an old whole transcript copy");
     } catch (err) {
-      // warn: a defect because an old whole copy stayed on disk.
-      LOGGER.warn(
-        { directory, removed: name, cause: err instanceof Error ? err.message : String(err) },
-        "could not remove an old whole transcript copy",
-      );
+      legacyCopyStayed({ directory, vendor_session_id: vendorSessionId, step: "remove", removed: name }, err);
     }
   }
+}
+
+/** Record that old whole copies stayed on disk, at the step that failed. */
+function legacyCopyStayed(fields: { readonly [field: string]: string }, err: unknown): void {
+  // warn: a defect because an old whole transcript copy stayed on disk.
+  LOGGER.warn(
+    { ...fields, cause: err instanceof Error ? err.message : String(err) },
+    "could not remove the old whole transcript copies",
+  );
 }
