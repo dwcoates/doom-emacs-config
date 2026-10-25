@@ -9484,16 +9484,24 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 
 /* ── The chat (src/chat/): a zettel thread's page, drawn as a chat stream ──
    As the design mock draws it (docs/knowledge-graph/chat-mock.html): questions
-   are right-aligned user bubbles, a question with siblings is a stack of cards
-   with a "2 of 3" control, answers are full-width cards on the answer fill. */
+   are user bubbles on the right rail, a question with siblings is a stack of
+   cards with a "2 of 3" control, answers are cards on the answer fill on the
+   left rail.
+   THE COLUMN IS THE FOOTER'S (owner request, 2026-10-25): `--agent-bubble-cap`
+   of the feed, centered, the same width and rails as `.pfooter` and the agent
+   feed's centered cards. A `width` rather than a `max-width`, because an auto
+   margin in `#feed`'s flex column turns off the stretch and would shrink the
+   column to its content. An answer fits its text up to the whole column and
+   hugs the left rail; a question fits its text up to 60% of the column and
+   hugs the right rail. */
 .chat-col {
-  max-width: 760px; margin: 0 auto; padding: 28px 24px 48px;
+  width: var(--agent-bubble-cap); margin: 0 auto; padding: 28px 0 48px;
   display: flex; flex-direction: column; gap: 18px;
 }
 .chat-empty { color: var(--muted); text-align: center; margin-top: 18vh; line-height: 1.7; }
 .chat-exchange { display: flex; flex-direction: column; gap: 18px; }
 .chat-q-wrap {
-  align-self: flex-end; max-width: 78%; display: flex; flex-direction: column;
+  align-self: flex-end; max-width: 60%; display: flex; flex-direction: column;
   align-items: flex-end; gap: 6px;
 }
 .chat-q {
@@ -9524,6 +9532,7 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 }
 .chat-siblings ar-button:hover { background: var(--card); color: var(--fg); }
 .chat-a {
+  align-self: flex-start; max-width: 100%;
   background: var(--assistant); border-radius: 8px; box-shadow: var(--bubble-shadow);
   padding: 14px 18px; line-height: 1.6; overflow-wrap: anywhere;
 }
