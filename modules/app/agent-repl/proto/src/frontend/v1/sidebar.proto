@@ -121,8 +121,9 @@ message WorkspaceRoster {
   // WHAT IS ON SCREEN: a selected chat thread shows Chat, any other
   // selection shows Workspaces. Always set.
   RosterAppSwitcher app_switcher = 16;
-  // THE CHAT APP'S BODY: every chat thread, the most recently interacted
-  // with first, and the new-thread button. Drawn in place of the open,
+  // THE CHAT APP'S BODY: every chat thread, every open one first and then
+  // every archived one, each the most recently interacted with first, and the
+  // new-thread button. Drawn in place of the open,
   // hidden and recently-merged sections while Chat is shown. Threads appear
   // nowhere else in the roster: no repository section, band or tab holds
   // one. Always set, whichever app is shown, because Emacs reads it to pick
@@ -220,7 +221,27 @@ message RosterThreadRow {
   optional RosterThreadSummary summary = 3;
   // Drawn highlighted: this thread is the one selected.
   optional RosterThreadCurrent current = 4;
+  // Whether the thread is open or archived. Always set: the set arm decides
+  // where the row is drawn and which verbs its menu offers.
+  RosterThreadStanding standing = 5;
 }
+
+// Where a thread stands. The set arm IS the standing.
+message RosterThreadStanding {
+  oneof standing {
+    // Open: listed with the threads, its session kept.
+    RosterThreadOpen open = 1;
+    // Archived (the thread's workspace is closed): listed after every open
+    // thread, under "Archived". Restoring it opens the workspace again.
+    RosterThreadArchived archived = 2;
+  }
+}
+
+// The thread is open. Empty: the arm is the fact.
+message RosterThreadOpen {}
+
+// The thread is archived. Empty: the arm is the fact.
+message RosterThreadArchived {}
 
 // A thread's name.
 message RosterThreadName {

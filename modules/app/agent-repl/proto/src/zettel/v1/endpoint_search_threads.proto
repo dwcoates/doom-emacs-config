@@ -1,0 +1,80 @@
+// endpoint_search_threads.proto — SearchThreads: which threads say these words.
+
+syntax = "proto3";
+
+package zettel.v1;
+
+import "zettel/v1/zettel.proto";
+
+option go_package = "agentrepl/proto/zettel/v1;zettelv1";
+
+// Searches every node's question and answer for QUERY's words. A node
+// matches when it holds every word, each as a word or the start of one,
+// case-insensitively, in any order; punctuation and search syntax in the
+// query are words like any other, never operators. Each matching thread is
+// answered ONCE, by its best-matching node.
+message SearchThreadsRequest {
+  // The words searched for, as typed. Required: blank is refused.
+  string query = 1;
+}
+
+// The outcome of SearchThreads.
+message SearchThreadsResponse {
+  // Success carries every matching thread; failure says why none could be.
+  oneof result {
+    SearchThreadsSuccess success = 1;
+    SearchThreadsFailure failure = 2;
+  }
+}
+
+// Every thread that matched, the best match first. Empty is an answer: no
+// thread says those words.
+message SearchThreadsSuccess {
+  repeated SearchThreadsMatch matches = 1;
+}
+
+// One thread that matched, through its best-matching node.
+message SearchThreadsMatch {
+  // The thread.
+  ThreadId thread = 1;
+  // The node whose question or answer matched best.
+  NodeId node = 2;
+  // The words around the match in that node, the matched words marked.
+  Snippet snippet = 3;
+}
+
+// The words around a match: the parts in reading order, each plain or a
+// match. Concatenated, they are the excerpt.
+message Snippet {
+  repeated SnippetPart parts = 1;
+}
+
+// One run of a snippet. The set arm is whether the run matched.
+message SnippetPart {
+  oneof part {
+    // Words around the match.
+    string plain = 1;
+    // Words the query matched.
+    string hit = 2;
+  }
+}
+
+// No search was answered.
+message SearchThreadsFailure {
+  // A one-line human-readable account of the failure, for the log.
+  string detail = 1;
+  // Which failure it was.
+  oneof kind {
+    SearchThreadsStorageFailure storage_failure = 2;
+    SearchThreadsInvalidRequest invalid_request = 3;
+  }
+}
+
+// The database could not be read.
+message SearchThreadsStorageFailure {}
+
+// A required field was missing or empty.
+message SearchThreadsInvalidRequest {
+  // The field at fault, by its proto name.
+  string field = 1;
+}

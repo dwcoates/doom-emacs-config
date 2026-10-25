@@ -1,0 +1,54 @@
+// endpoint_delete_thread.proto — DeleteThread: a thread's graph is destroyed.
+
+syntax = "proto3";
+
+package zettel.v1;
+
+import "zettel/v1/zettel.proto";
+
+option go_package = "agentrepl/proto/zettel/v1;zettelv1";
+
+// Destroys every node of one thread, with their revisions and sightings, in
+// one transaction: all of it or none. A thread zettel holds no node of (its
+// first answer never landed) deletes to nothing, which is a success: the
+// graph the caller asked to be gone is gone.
+message DeleteThreadRequest {
+  // The thread to delete.
+  ThreadId thread = 1;
+}
+
+// The outcome of DeleteThread.
+message DeleteThreadResponse {
+  // Success means the thread's graph is gone; failure means none of it was
+  // deleted.
+  oneof result {
+    DeleteThreadSuccess success = 1;
+    DeleteThreadFailure failure = 2;
+  }
+}
+
+// The thread's graph is gone.
+message DeleteThreadSuccess {
+  // How many nodes were deleted; zero for a thread zettel held nothing of.
+  uint32 nodes_deleted = 1;
+}
+
+// Nothing was deleted.
+message DeleteThreadFailure {
+  // A one-line human-readable account of the failure, for the log.
+  string detail = 1;
+  // Which failure it was.
+  oneof kind {
+    DeleteThreadStorageFailure storage_failure = 2;
+    DeleteThreadInvalidRequest invalid_request = 3;
+  }
+}
+
+// The database could not be written.
+message DeleteThreadStorageFailure {}
+
+// A required field was missing or empty.
+message DeleteThreadInvalidRequest {
+  // The field at fault, by its proto name.
+  string field = 1;
+}

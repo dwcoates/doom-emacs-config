@@ -123,6 +123,7 @@ import "agentrepl/v1/endpoint_watch_chat.proto";
 import "agentrepl/v1/endpoint_switch_chat_sibling.proto";
 import "agentrepl/v1/endpoint_report_chat_sightings.proto";
 import "agentrepl/v1/endpoint_select_chat_text.proto";
+import "agentrepl/v1/endpoint_search_chats.proto";
 import "agentrepl/v1/endpoint_show_sidebar_app.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -355,6 +356,8 @@ service AgentRepl {
   rpc ReportChatSightings(ReportChatSightingsRequest) returns (ReportChatSightingsResponse);
   // Hold or clear the thread's highlight.
   rpc SelectChatText(SelectChatTextRequest) returns (SelectChatTextResponse);
+  // The threads whose chats say the sidebar search's words.
+  rpc SearchChats(SearchChatsRequest) returns (SearchChatsResponse);
 
   // ---- TOPBAR ----
 

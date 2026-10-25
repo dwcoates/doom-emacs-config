@@ -31,29 +31,39 @@ var File_zettel_v1_service_proto protoreflect.FileDescriptor
 
 const file_zettel_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x17zettel/v1/service.proto\x12\tzettel.v1\x1a#zettel/v1/endpoint_get_thread.proto\x1a(zettel/v1/endpoint_record_exchange.proto\x1a)zettel/v1/endpoint_record_sightings.proto2\x81\x02\n" +
+	"\x17zettel/v1/service.proto\x12\tzettel.v1\x1a&zettel/v1/endpoint_delete_thread.proto\x1a#zettel/v1/endpoint_get_thread.proto\x1a(zettel/v1/endpoint_record_exchange.proto\x1a)zettel/v1/endpoint_record_sightings.proto\x1a'zettel/v1/endpoint_search_threads.proto2\xa6\x03\n" +
 	"\x06Zettel\x12U\n" +
 	"\x0eRecordExchange\x12 .zettel.v1.RecordExchangeRequest\x1a!.zettel.v1.RecordExchangeResponse\x12F\n" +
-	"\tGetThread\x12\x1b.zettel.v1.GetThreadRequest\x1a\x1c.zettel.v1.GetThreadResponse\x12X\n" +
-	"\x0fRecordSightings\x12!.zettel.v1.RecordSightingsRequest\x1a\".zettel.v1.RecordSightingsResponseB$Z\"agentrepl/proto/zettel/v1;zettelv1b\x06proto3"
+	"\tGetThread\x12\x1b.zettel.v1.GetThreadRequest\x1a\x1c.zettel.v1.GetThreadResponse\x12R\n" +
+	"\rSearchThreads\x12\x1f.zettel.v1.SearchThreadsRequest\x1a .zettel.v1.SearchThreadsResponse\x12X\n" +
+	"\x0fRecordSightings\x12!.zettel.v1.RecordSightingsRequest\x1a\".zettel.v1.RecordSightingsResponse\x12O\n" +
+	"\fDeleteThread\x12\x1e.zettel.v1.DeleteThreadRequest\x1a\x1f.zettel.v1.DeleteThreadResponseB$Z\"agentrepl/proto/zettel/v1;zettelv1b\x06proto3"
 
 var file_zettel_v1_service_proto_goTypes = []any{
 	(*RecordExchangeRequest)(nil),   // 0: zettel.v1.RecordExchangeRequest
 	(*GetThreadRequest)(nil),        // 1: zettel.v1.GetThreadRequest
-	(*RecordSightingsRequest)(nil),  // 2: zettel.v1.RecordSightingsRequest
-	(*RecordExchangeResponse)(nil),  // 3: zettel.v1.RecordExchangeResponse
-	(*GetThreadResponse)(nil),       // 4: zettel.v1.GetThreadResponse
-	(*RecordSightingsResponse)(nil), // 5: zettel.v1.RecordSightingsResponse
+	(*SearchThreadsRequest)(nil),    // 2: zettel.v1.SearchThreadsRequest
+	(*RecordSightingsRequest)(nil),  // 3: zettel.v1.RecordSightingsRequest
+	(*DeleteThreadRequest)(nil),     // 4: zettel.v1.DeleteThreadRequest
+	(*RecordExchangeResponse)(nil),  // 5: zettel.v1.RecordExchangeResponse
+	(*GetThreadResponse)(nil),       // 6: zettel.v1.GetThreadResponse
+	(*SearchThreadsResponse)(nil),   // 7: zettel.v1.SearchThreadsResponse
+	(*RecordSightingsResponse)(nil), // 8: zettel.v1.RecordSightingsResponse
+	(*DeleteThreadResponse)(nil),    // 9: zettel.v1.DeleteThreadResponse
 }
 var file_zettel_v1_service_proto_depIdxs = []int32{
 	0, // 0: zettel.v1.Zettel.RecordExchange:input_type -> zettel.v1.RecordExchangeRequest
 	1, // 1: zettel.v1.Zettel.GetThread:input_type -> zettel.v1.GetThreadRequest
-	2, // 2: zettel.v1.Zettel.RecordSightings:input_type -> zettel.v1.RecordSightingsRequest
-	3, // 3: zettel.v1.Zettel.RecordExchange:output_type -> zettel.v1.RecordExchangeResponse
-	4, // 4: zettel.v1.Zettel.GetThread:output_type -> zettel.v1.GetThreadResponse
-	5, // 5: zettel.v1.Zettel.RecordSightings:output_type -> zettel.v1.RecordSightingsResponse
-	3, // [3:6] is the sub-list for method output_type
-	0, // [0:3] is the sub-list for method input_type
+	2, // 2: zettel.v1.Zettel.SearchThreads:input_type -> zettel.v1.SearchThreadsRequest
+	3, // 3: zettel.v1.Zettel.RecordSightings:input_type -> zettel.v1.RecordSightingsRequest
+	4, // 4: zettel.v1.Zettel.DeleteThread:input_type -> zettel.v1.DeleteThreadRequest
+	5, // 5: zettel.v1.Zettel.RecordExchange:output_type -> zettel.v1.RecordExchangeResponse
+	6, // 6: zettel.v1.Zettel.GetThread:output_type -> zettel.v1.GetThreadResponse
+	7, // 7: zettel.v1.Zettel.SearchThreads:output_type -> zettel.v1.SearchThreadsResponse
+	8, // 8: zettel.v1.Zettel.RecordSightings:output_type -> zettel.v1.RecordSightingsResponse
+	9, // 9: zettel.v1.Zettel.DeleteThread:output_type -> zettel.v1.DeleteThreadResponse
+	5, // [5:10] is the sub-list for method output_type
+	0, // [0:5] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -64,9 +74,11 @@ func file_zettel_v1_service_proto_init() {
 	if File_zettel_v1_service_proto != nil {
 		return
 	}
+	file_zettel_v1_endpoint_delete_thread_proto_init()
 	file_zettel_v1_endpoint_get_thread_proto_init()
 	file_zettel_v1_endpoint_record_exchange_proto_init()
 	file_zettel_v1_endpoint_record_sightings_proto_init()
+	file_zettel_v1_endpoint_search_threads_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

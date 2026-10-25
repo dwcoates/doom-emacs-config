@@ -44,8 +44,12 @@ const (
 	ZettelRecordExchangeProcedure = "/zettel.v1.Zettel/RecordExchange"
 	// ZettelGetThreadProcedure is the fully-qualified name of the Zettel's GetThread RPC.
 	ZettelGetThreadProcedure = "/zettel.v1.Zettel/GetThread"
+	// ZettelSearchThreadsProcedure is the fully-qualified name of the Zettel's SearchThreads RPC.
+	ZettelSearchThreadsProcedure = "/zettel.v1.Zettel/SearchThreads"
 	// ZettelRecordSightingsProcedure is the fully-qualified name of the Zettel's RecordSightings RPC.
 	ZettelRecordSightingsProcedure = "/zettel.v1.Zettel/RecordSightings"
+	// ZettelDeleteThreadProcedure is the fully-qualified name of the Zettel's DeleteThread RPC.
+	ZettelDeleteThreadProcedure = "/zettel.v1.Zettel/DeleteThread"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
@@ -53,7 +57,9 @@ var (
 	zettelServiceDescriptor               = v1.File_zettel_v1_service_proto.Services().ByName("Zettel")
 	zettelRecordExchangeMethodDescriptor  = zettelServiceDescriptor.Methods().ByName("RecordExchange")
 	zettelGetThreadMethodDescriptor       = zettelServiceDescriptor.Methods().ByName("GetThread")
+	zettelSearchThreadsMethodDescriptor   = zettelServiceDescriptor.Methods().ByName("SearchThreads")
 	zettelRecordSightingsMethodDescriptor = zettelServiceDescriptor.Methods().ByName("RecordSightings")
+	zettelDeleteThreadMethodDescriptor    = zettelServiceDescriptor.Methods().ByName("DeleteThread")
 )
 
 // ZettelClient is a client for the zettel.v1.Zettel service.
@@ -62,8 +68,12 @@ type ZettelClient interface {
 	RecordExchange(context.Context, *connect.Request[v1.RecordExchangeRequest]) (*connect.Response[v1.RecordExchangeResponse], error)
 	// One thread whole: its nodes and its exchanges in flight.
 	GetThread(context.Context, *connect.Request[v1.GetThreadRequest]) (*connect.Response[v1.GetThreadResponse], error)
+	// The threads whose questions or answers say the query's words.
+	SearchThreads(context.Context, *connect.Request[v1.SearchThreadsRequest]) (*connect.Response[v1.SearchThreadsResponse], error)
 	// Count one sighting per named node.
 	RecordSightings(context.Context, *connect.Request[v1.RecordSightingsRequest]) (*connect.Response[v1.RecordSightingsResponse], error)
+	// Destroy one thread's nodes, revisions and sightings (the thread is deleted).
+	DeleteThread(context.Context, *connect.Request[v1.DeleteThreadRequest]) (*connect.Response[v1.DeleteThreadResponse], error)
 }
 
 // NewZettelClient constructs a client for the zettel.v1.Zettel service. By default, it uses the
@@ -88,10 +98,22 @@ func NewZettelClient(httpClient connect.HTTPClient, baseURL string, opts ...conn
 			connect.WithSchema(zettelGetThreadMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		searchThreads: connect.NewClient[v1.SearchThreadsRequest, v1.SearchThreadsResponse](
+			httpClient,
+			baseURL+ZettelSearchThreadsProcedure,
+			connect.WithSchema(zettelSearchThreadsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		recordSightings: connect.NewClient[v1.RecordSightingsRequest, v1.RecordSightingsResponse](
 			httpClient,
 			baseURL+ZettelRecordSightingsProcedure,
 			connect.WithSchema(zettelRecordSightingsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		deleteThread: connect.NewClient[v1.DeleteThreadRequest, v1.DeleteThreadResponse](
+			httpClient,
+			baseURL+ZettelDeleteThreadProcedure,
+			connect.WithSchema(zettelDeleteThreadMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -101,7 +123,9 @@ func NewZettelClient(httpClient connect.HTTPClient, baseURL string, opts ...conn
 type zettelClient struct {
 	recordExchange  *connect.Client[v1.RecordExchangeRequest, v1.RecordExchangeResponse]
 	getThread       *connect.Client[v1.GetThreadRequest, v1.GetThreadResponse]
+	searchThreads   *connect.Client[v1.SearchThreadsRequest, v1.SearchThreadsResponse]
 	recordSightings *connect.Client[v1.RecordSightingsRequest, v1.RecordSightingsResponse]
+	deleteThread    *connect.Client[v1.DeleteThreadRequest, v1.DeleteThreadResponse]
 }
 
 // RecordExchange calls zettel.v1.Zettel.RecordExchange.
@@ -114,9 +138,19 @@ func (c *zettelClient) GetThread(ctx context.Context, req *connect.Request[v1.Ge
 	return c.getThread.CallUnary(ctx, req)
 }
 
+// SearchThreads calls zettel.v1.Zettel.SearchThreads.
+func (c *zettelClient) SearchThreads(ctx context.Context, req *connect.Request[v1.SearchThreadsRequest]) (*connect.Response[v1.SearchThreadsResponse], error) {
+	return c.searchThreads.CallUnary(ctx, req)
+}
+
 // RecordSightings calls zettel.v1.Zettel.RecordSightings.
 func (c *zettelClient) RecordSightings(ctx context.Context, req *connect.Request[v1.RecordSightingsRequest]) (*connect.Response[v1.RecordSightingsResponse], error) {
 	return c.recordSightings.CallUnary(ctx, req)
+}
+
+// DeleteThread calls zettel.v1.Zettel.DeleteThread.
+func (c *zettelClient) DeleteThread(ctx context.Context, req *connect.Request[v1.DeleteThreadRequest]) (*connect.Response[v1.DeleteThreadResponse], error) {
+	return c.deleteThread.CallUnary(ctx, req)
 }
 
 // ZettelHandler is an implementation of the zettel.v1.Zettel service.
@@ -125,8 +159,12 @@ type ZettelHandler interface {
 	RecordExchange(context.Context, *connect.Request[v1.RecordExchangeRequest]) (*connect.Response[v1.RecordExchangeResponse], error)
 	// One thread whole: its nodes and its exchanges in flight.
 	GetThread(context.Context, *connect.Request[v1.GetThreadRequest]) (*connect.Response[v1.GetThreadResponse], error)
+	// The threads whose questions or answers say the query's words.
+	SearchThreads(context.Context, *connect.Request[v1.SearchThreadsRequest]) (*connect.Response[v1.SearchThreadsResponse], error)
 	// Count one sighting per named node.
 	RecordSightings(context.Context, *connect.Request[v1.RecordSightingsRequest]) (*connect.Response[v1.RecordSightingsResponse], error)
+	// Destroy one thread's nodes, revisions and sightings (the thread is deleted).
+	DeleteThread(context.Context, *connect.Request[v1.DeleteThreadRequest]) (*connect.Response[v1.DeleteThreadResponse], error)
 }
 
 // NewZettelHandler builds an HTTP handler from the service implementation. It returns the path on
@@ -147,10 +185,22 @@ func NewZettelHandler(svc ZettelHandler, opts ...connect.HandlerOption) (string,
 		connect.WithSchema(zettelGetThreadMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	zettelSearchThreadsHandler := connect.NewUnaryHandler(
+		ZettelSearchThreadsProcedure,
+		svc.SearchThreads,
+		connect.WithSchema(zettelSearchThreadsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	zettelRecordSightingsHandler := connect.NewUnaryHandler(
 		ZettelRecordSightingsProcedure,
 		svc.RecordSightings,
 		connect.WithSchema(zettelRecordSightingsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	zettelDeleteThreadHandler := connect.NewUnaryHandler(
+		ZettelDeleteThreadProcedure,
+		svc.DeleteThread,
+		connect.WithSchema(zettelDeleteThreadMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/zettel.v1.Zettel/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -159,8 +209,12 @@ func NewZettelHandler(svc ZettelHandler, opts ...connect.HandlerOption) (string,
 			zettelRecordExchangeHandler.ServeHTTP(w, r)
 		case ZettelGetThreadProcedure:
 			zettelGetThreadHandler.ServeHTTP(w, r)
+		case ZettelSearchThreadsProcedure:
+			zettelSearchThreadsHandler.ServeHTTP(w, r)
 		case ZettelRecordSightingsProcedure:
 			zettelRecordSightingsHandler.ServeHTTP(w, r)
+		case ZettelDeleteThreadProcedure:
+			zettelDeleteThreadHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -178,6 +232,14 @@ func (UnimplementedZettelHandler) GetThread(context.Context, *connect.Request[v1
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zettel.v1.Zettel.GetThread is not implemented"))
 }
 
+func (UnimplementedZettelHandler) SearchThreads(context.Context, *connect.Request[v1.SearchThreadsRequest]) (*connect.Response[v1.SearchThreadsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zettel.v1.Zettel.SearchThreads is not implemented"))
+}
+
 func (UnimplementedZettelHandler) RecordSightings(context.Context, *connect.Request[v1.RecordSightingsRequest]) (*connect.Response[v1.RecordSightingsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zettel.v1.Zettel.RecordSightings is not implemented"))
+}
+
+func (UnimplementedZettelHandler) DeleteThread(context.Context, *connect.Request[v1.DeleteThreadRequest]) (*connect.Response[v1.DeleteThreadResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zettel.v1.Zettel.DeleteThread is not implemented"))
 }

@@ -9,9 +9,11 @@ syntax = "proto3";
 
 package zettel.v1;
 
+import "zettel/v1/endpoint_delete_thread.proto";
 import "zettel/v1/endpoint_get_thread.proto";
 import "zettel/v1/endpoint_record_exchange.proto";
 import "zettel/v1/endpoint_record_sightings.proto";
+import "zettel/v1/endpoint_search_threads.proto";
 
 option go_package = "agentrepl/proto/zettel/v1;zettelv1";
 
@@ -26,8 +28,16 @@ service Zettel {
   // One thread whole: its nodes and its exchanges in flight.
   rpc GetThread(GetThreadRequest) returns (GetThreadResponse);
 
+  // The threads whose questions or answers say the query's words.
+  rpc SearchThreads(SearchThreadsRequest) returns (SearchThreadsResponse);
+
   // ---- Sightings: what consumer UIs have shown ----
 
   // Count one sighting per named node.
   rpc RecordSightings(RecordSightingsRequest) returns (RecordSightingsResponse);
+
+  // ---- Deletion: a thread's graph destroyed ----
+
+  // Destroy one thread's nodes, revisions and sightings (the thread is deleted).
+  rpc DeleteThread(DeleteThreadRequest) returns (DeleteThreadResponse);
 }

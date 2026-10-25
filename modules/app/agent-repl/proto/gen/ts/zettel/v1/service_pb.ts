@@ -11,18 +11,22 @@
 
 import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { DeleteThreadRequestSchema, DeleteThreadResponseSchema } from "./endpoint_delete_thread_pb";
+import { file_zettel_v1_endpoint_delete_thread } from "./endpoint_delete_thread_pb";
 import type { GetThreadRequestSchema, GetThreadResponseSchema } from "./endpoint_get_thread_pb";
 import { file_zettel_v1_endpoint_get_thread } from "./endpoint_get_thread_pb";
 import type { RecordExchangeRequestSchema, RecordExchangeResponseSchema } from "./endpoint_record_exchange_pb";
 import { file_zettel_v1_endpoint_record_exchange } from "./endpoint_record_exchange_pb";
 import type { RecordSightingsRequestSchema, RecordSightingsResponseSchema } from "./endpoint_record_sightings_pb";
 import { file_zettel_v1_endpoint_record_sightings } from "./endpoint_record_sightings_pb";
+import type { SearchThreadsRequestSchema, SearchThreadsResponseSchema } from "./endpoint_search_threads_pb";
+import { file_zettel_v1_endpoint_search_threads } from "./endpoint_search_threads_pb";
 
 /**
  * Describes the file zettel/v1/service.proto.
  */
 export const file_zettel_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("Chd6ZXR0ZWwvdjEvc2VydmljZS5wcm90bxIJemV0dGVsLnYxMoECCgZaZXR0ZWwSVQoOUmVjb3JkRXhjaGFuZ2USIC56ZXR0ZWwudjEuUmVjb3JkRXhjaGFuZ2VSZXF1ZXN0GiEuemV0dGVsLnYxLlJlY29yZEV4Y2hhbmdlUmVzcG9uc2USRgoJR2V0VGhyZWFkEhsuemV0dGVsLnYxLkdldFRocmVhZFJlcXVlc3QaHC56ZXR0ZWwudjEuR2V0VGhyZWFkUmVzcG9uc2USWAoPUmVjb3JkU2lnaHRpbmdzEiEuemV0dGVsLnYxLlJlY29yZFNpZ2h0aW5nc1JlcXVlc3QaIi56ZXR0ZWwudjEuUmVjb3JkU2lnaHRpbmdzUmVzcG9uc2VCJFoiYWdlbnRyZXBsL3Byb3RvL3pldHRlbC92MTt6ZXR0ZWx2MWIGcHJvdG8z", [file_zettel_v1_endpoint_get_thread, file_zettel_v1_endpoint_record_exchange, file_zettel_v1_endpoint_record_sightings]);
+  fileDesc("Chd6ZXR0ZWwvdjEvc2VydmljZS5wcm90bxIJemV0dGVsLnYxMqYDCgZaZXR0ZWwSVQoOUmVjb3JkRXhjaGFuZ2USIC56ZXR0ZWwudjEuUmVjb3JkRXhjaGFuZ2VSZXF1ZXN0GiEuemV0dGVsLnYxLlJlY29yZEV4Y2hhbmdlUmVzcG9uc2USRgoJR2V0VGhyZWFkEhsuemV0dGVsLnYxLkdldFRocmVhZFJlcXVlc3QaHC56ZXR0ZWwudjEuR2V0VGhyZWFkUmVzcG9uc2USUgoNU2VhcmNoVGhyZWFkcxIfLnpldHRlbC52MS5TZWFyY2hUaHJlYWRzUmVxdWVzdBogLnpldHRlbC52MS5TZWFyY2hUaHJlYWRzUmVzcG9uc2USWAoPUmVjb3JkU2lnaHRpbmdzEiEuemV0dGVsLnYxLlJlY29yZFNpZ2h0aW5nc1JlcXVlc3QaIi56ZXR0ZWwudjEuUmVjb3JkU2lnaHRpbmdzUmVzcG9uc2USTwoMRGVsZXRlVGhyZWFkEh4uemV0dGVsLnYxLkRlbGV0ZVRocmVhZFJlcXVlc3QaHy56ZXR0ZWwudjEuRGVsZXRlVGhyZWFkUmVzcG9uc2VCJFoiYWdlbnRyZXBsL3Byb3RvL3pldHRlbC92MTt6ZXR0ZWx2MWIGcHJvdG8z", [file_zettel_v1_endpoint_delete_thread, file_zettel_v1_endpoint_get_thread, file_zettel_v1_endpoint_record_exchange, file_zettel_v1_endpoint_record_sightings, file_zettel_v1_endpoint_search_threads]);
 
 /**
  * ---- Exchanges: an answered question becoming a node ----
@@ -51,6 +55,16 @@ export const Zettel: GenService<{
     output: typeof GetThreadResponseSchema;
   },
   /**
+   * The threads whose questions or answers say the query's words.
+   *
+   * @generated from rpc zettel.v1.Zettel.SearchThreads
+   */
+  searchThreads: {
+    methodKind: "unary";
+    input: typeof SearchThreadsRequestSchema;
+    output: typeof SearchThreadsResponseSchema;
+  },
+  /**
    * Count one sighting per named node.
    *
    * @generated from rpc zettel.v1.Zettel.RecordSightings
@@ -59,6 +73,16 @@ export const Zettel: GenService<{
     methodKind: "unary";
     input: typeof RecordSightingsRequestSchema;
     output: typeof RecordSightingsResponseSchema;
+  },
+  /**
+   * Destroy one thread's nodes, revisions and sightings (the thread is deleted).
+   *
+   * @generated from rpc zettel.v1.Zettel.DeleteThread
+   */
+  deleteThread: {
+    methodKind: "unary";
+    input: typeof DeleteThreadRequestSchema;
+    output: typeof DeleteThreadResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_zettel_v1_service, 0);

@@ -202,6 +202,8 @@ const (
 	// AgentReplSelectChatTextProcedure is the fully-qualified name of the AgentRepl's SelectChatText
 	// RPC.
 	AgentReplSelectChatTextProcedure = "/agentrepl.v1.AgentRepl/SelectChatText"
+	// AgentReplSearchChatsProcedure is the fully-qualified name of the AgentRepl's SearchChats RPC.
+	AgentReplSearchChatsProcedure = "/agentrepl.v1.AgentRepl/SearchChats"
 	// AgentReplWatchTopbarProcedure is the fully-qualified name of the AgentRepl's WatchTopbar RPC.
 	AgentReplWatchTopbarProcedure = "/agentrepl.v1.AgentRepl/WatchTopbar"
 	// AgentReplSetModelProcedure is the fully-qualified name of the AgentRepl's SetModel RPC.
@@ -415,6 +417,7 @@ var (
 	agentReplSwitchChatSiblingMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SwitchChatSibling")
 	agentReplReportChatSightingsMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportChatSightings")
 	agentReplSelectChatTextMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SelectChatText")
+	agentReplSearchChatsMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SearchChats")
 	agentReplWatchTopbarMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchTopbar")
 	agentReplSetModelMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("SetModel")
 	agentReplSetEffortMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("SetEffort")
@@ -656,6 +659,8 @@ type AgentReplClient interface {
 	ReportChatSightings(context.Context, *connect.Request[v1.ReportChatSightingsRequest]) (*connect.Response[v1.ReportChatSightingsResponse], error)
 	// Hold or clear the thread's highlight.
 	SelectChatText(context.Context, *connect.Request[v1.SelectChatTextRequest]) (*connect.Response[v1.SelectChatTextResponse], error)
+	// The threads whose chats say the sidebar search's words.
+	SearchChats(context.Context, *connect.Request[v1.SearchChatsRequest]) (*connect.Response[v1.SearchChatsResponse], error)
 	// The topbar's stream: the view, whole (the token-breakdown menu inside).
 	WatchTopbar(context.Context, *connect.Request[v1.WatchTopbarRequest]) (*connect.ServerStreamForClient[v1.WatchTopbarResponse], error)
 	// The selector's pick: the typed echo token handed back. See
@@ -1205,6 +1210,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSelectChatTextMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		searchChats: connect.NewClient[v1.SearchChatsRequest, v1.SearchChatsResponse](
+			httpClient,
+			baseURL+AgentReplSearchChatsProcedure,
+			connect.WithSchema(agentReplSearchChatsMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		watchTopbar: connect.NewClient[v1.WatchTopbarRequest, v1.WatchTopbarResponse](
 			httpClient,
 			baseURL+AgentReplWatchTopbarProcedure,
@@ -1610,6 +1621,7 @@ type agentReplClient struct {
 	switchChatSibling          *connect.Client[v1.SwitchChatSiblingRequest, v1.SwitchChatSiblingResponse]
 	reportChatSightings        *connect.Client[v1.ReportChatSightingsRequest, v1.ReportChatSightingsResponse]
 	selectChatText             *connect.Client[v1.SelectChatTextRequest, v1.SelectChatTextResponse]
+	searchChats                *connect.Client[v1.SearchChatsRequest, v1.SearchChatsResponse]
 	watchTopbar                *connect.Client[v1.WatchTopbarRequest, v1.WatchTopbarResponse]
 	setModel                   *connect.Client[v1.SetModelRequest, v1.SetModelResponse]
 	setEffort                  *connect.Client[v1.SetEffortRequest, v1.SetEffortResponse]
@@ -1961,6 +1973,11 @@ func (c *agentReplClient) ReportChatSightings(ctx context.Context, req *connect.
 // SelectChatText calls agentrepl.v1.AgentRepl.SelectChatText.
 func (c *agentReplClient) SelectChatText(ctx context.Context, req *connect.Request[v1.SelectChatTextRequest]) (*connect.Response[v1.SelectChatTextResponse], error) {
 	return c.selectChatText.CallUnary(ctx, req)
+}
+
+// SearchChats calls agentrepl.v1.AgentRepl.SearchChats.
+func (c *agentReplClient) SearchChats(ctx context.Context, req *connect.Request[v1.SearchChatsRequest]) (*connect.Response[v1.SearchChatsResponse], error) {
+	return c.searchChats.CallUnary(ctx, req)
 }
 
 // WatchTopbar calls agentrepl.v1.AgentRepl.WatchTopbar.
@@ -2426,6 +2443,8 @@ type AgentReplHandler interface {
 	ReportChatSightings(context.Context, *connect.Request[v1.ReportChatSightingsRequest]) (*connect.Response[v1.ReportChatSightingsResponse], error)
 	// Hold or clear the thread's highlight.
 	SelectChatText(context.Context, *connect.Request[v1.SelectChatTextRequest]) (*connect.Response[v1.SelectChatTextResponse], error)
+	// The threads whose chats say the sidebar search's words.
+	SearchChats(context.Context, *connect.Request[v1.SearchChatsRequest]) (*connect.Response[v1.SearchChatsResponse], error)
 	// The topbar's stream: the view, whole (the token-breakdown menu inside).
 	WatchTopbar(context.Context, *connect.Request[v1.WatchTopbarRequest], *connect.ServerStream[v1.WatchTopbarResponse]) error
 	// The selector's pick: the typed echo token handed back. See
@@ -2971,6 +2990,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSelectChatTextMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplSearchChatsHandler := connect.NewUnaryHandler(
+		AgentReplSearchChatsProcedure,
+		svc.SearchChats,
+		connect.WithSchema(agentReplSearchChatsMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplWatchTopbarHandler := connect.NewServerStreamHandler(
 		AgentReplWatchTopbarProcedure,
 		svc.WatchTopbar,
@@ -3432,6 +3457,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplReportChatSightingsHandler.ServeHTTP(w, r)
 		case AgentReplSelectChatTextProcedure:
 			agentReplSelectChatTextHandler.ServeHTTP(w, r)
+		case AgentReplSearchChatsProcedure:
+			agentReplSearchChatsHandler.ServeHTTP(w, r)
 		case AgentReplWatchTopbarProcedure:
 			agentReplWatchTopbarHandler.ServeHTTP(w, r)
 		case AgentReplSetModelProcedure:
@@ -3787,6 +3814,10 @@ func (UnimplementedAgentReplHandler) ReportChatSightings(context.Context, *conne
 
 func (UnimplementedAgentReplHandler) SelectChatText(context.Context, *connect.Request[v1.SelectChatTextRequest]) (*connect.Response[v1.SelectChatTextResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectChatText is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SearchChats(context.Context, *connect.Request[v1.SearchChatsRequest]) (*connect.Response[v1.SearchChatsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SearchChats is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) WatchTopbar(context.Context, *connect.Request[v1.WatchTopbarRequest], *connect.ServerStream[v1.WatchTopbarResponse]) error {
