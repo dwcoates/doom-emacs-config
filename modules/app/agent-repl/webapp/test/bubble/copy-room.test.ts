@@ -3,7 +3,7 @@
  * copy-room — a bubble's copy control, and the ghost that opens its first line
  * of text so the bubble widens by the control's room.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,6 +17,7 @@ import {
 import { createBubbleBody, markdownSlot, paintBody } from "../../src/bubble/body.js";
 import { COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE, boundCopyText } from "../../src/copy-control.js";
 import { plainProse } from "../prose.js";
+import { filesUnder } from "../files-under.js";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -180,11 +181,7 @@ describe("every bubble copy control's draw", () => {
   /** Every source file under src/, by its path from src/. */
   function sources(): { file: string; code: string }[] {
     const src = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src");
-    const walk = (dir: string): string[] =>
-      readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
-        entry.isDirectory() ? walk(path.join(dir, entry.name)) : entry.name.endsWith(".ts") ? [path.join(dir, entry.name)] : [],
-      );
-    return walk(src).map((file) => ({ file: path.relative(src, file), code: readFileSync(file, "utf8") }));
+    return filesUnder(src).map((file) => ({ file: path.relative(src, file), code: readFileSync(file, "utf8") }));
   }
 
   it("leaves its room through reserveCopyRoom, wherever a copy control goes in a bubble's corner", () => {

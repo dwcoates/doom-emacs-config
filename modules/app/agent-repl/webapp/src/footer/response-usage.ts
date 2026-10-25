@@ -55,7 +55,7 @@ export function drawResponseUsageActivity(usage: ResponseUsage, ticker: Ticker):
  * draws exactly once. A strip with none, or with more than one, is a defect.
  */
 export function overlayResponseUsage(strip: HTMLElement, usage: ResponseUsage, ticker: Ticker): void {
-  const cells = strip.querySelectorAll(`:scope > .${ACTIVITY_CELL_CLASS}`);
+  const cells = [...strip.children].filter((cell) => cell.classList.contains(ACTIVITY_CELL_CLASS));
   if (cells.length !== 1) {
     log.error("the hovered response's usage found no single activity cell to stand in", {
       operation: "footer.response-usage.no-cell",

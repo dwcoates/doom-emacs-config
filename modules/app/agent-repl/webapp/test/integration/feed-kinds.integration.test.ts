@@ -140,6 +140,18 @@ afterEach(async () => {
  * Boot with one row on the tail and hand back its element, its title typed
  * out whole: the cases read what the row says, not how it arrived.
  */
+/**
+ * The footer's activity line while the pointer is on ROW's bubble: where a
+ * response's usage stamp is drawn (src/footer/response-usage.ts).
+ */
+async function hoveredUsageLine(row: HTMLElement): Promise<string> {
+  const bubble = row.querySelector(".bubble");
+  if (bubble === null) throw new Error("the row drew no bubble to hover");
+  bubble.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  await harness.settle();
+  return document.querySelector('[data-component="footer"] .footer-activity')?.textContent ?? "";
+}
+
 async function drawRow(row: FeedRow): Promise<HTMLElement> {
   harness = await startHarness();
   await harness.fake.awaitStream("watchFeed");
@@ -354,11 +366,13 @@ describe.each(RESPONSE_STATES)("a %s response", (state) => {
     expect(row.dataset.state).toBe(state);
   });
 
-  it("draws the usage stamp verbatim", async () => {
-    // Arrange / Act
+  it("draws the usage stamp verbatim in the footer while the bubble is hovered", async () => {
+    // Arrange
     const row = await drawRow(activityRow(responseUnit(state, "prose", "9.9k in / 1 out")));
+    // Act
+    const line = await hoveredUsageLine(row);
     // Assert
-    expect(row.textContent).toContain("9.9k in / 1 out");
+    expect(line).toContain("9.9k in / 1 out");
   });
 });
 
@@ -1863,11 +1877,11 @@ describe("token formatting across surfaces", () => {
     expect(drawn).toBe(expected);
   });
 
-  it("draws the daemon's own usage stamp verbatim, whatever its scale", async () => {
+  it("draws the daemon's own usage stamp verbatim in the footer, whatever its scale", async () => {
     // Arrange / Act: the feed never reformats what the daemon composed.
     const row = await drawRow(activityRow(responseUnit("success", "prose", "1.2M in / 3.4k out")));
     // Assert
-    expect(row.textContent).toContain("1.2M in / 3.4k out");
+    expect(await hoveredUsageLine(row)).toContain("1.2M in / 3.4k out");
   });
 
   it("does not rescale a daemon usage stamp into its own convention", async () => {
@@ -1876,14 +1890,14 @@ describe("token formatting across surfaces", () => {
     // is the daemon's to fix.
     const row = await drawRow(activityRow(responseUnit("success", "prose", "1234.6k in")));
     // Assert
-    expect(row.textContent).toContain("1234.6k in");
+    expect(await hoveredUsageLine(row)).toContain("1234.6k in");
   });
 
   it("carries the call site's own suffix, not the formatter's", async () => {
     // Arrange / Act
     const row = await drawRow(activityRow(responseUnit("success", "prose", "182k tok")));
     // Assert
-    expect(row.textContent).toContain("182k tok");
+    expect(await hoveredUsageLine(row)).toContain("182k tok");
   });
 });
 
