@@ -1,0 +1,3 @@
+Opening this file in Emacs opens agent-repl's most recent chat thread.
+Gippity.app opens it (bin/install-gippity.sh); threads.el's
+agent-repl-threads-launch-mode does the rest and closes this buffer.
