@@ -3,9 +3,11 @@
 ;;; Commentary:
 
 ;; THE COMPOSER'S HEADER LINE ENDS IN ONE HELP BUTTON, on its far right.
-;; Clicking it drops a menu of topics ("Sending prompts", "Prompt history",
-;; ...) at the click, and picking one opens the shared agent-repl popup
-;; (popup.el) listing that topic's keys and the features that go with them.
+;; Clicking it drops a menu of topic groups (Composer, Feed, Workspaces,
+;; ...) at the click, each a submenu of topics, and picking one opens the
+;; shared agent-repl popup (popup.el) listing that topic's keys and the
+;; features that go with them.  The topics cover every binding agent-repl
+;; sets, not only the composer's.
 ;; `agent-repl-input-help' opens the same popups from the keyboard.
 ;;
 ;; THE KEYS SHOWN ARE READ FROM THE LIVE KEYMAPS, never written down here.
@@ -37,10 +39,25 @@
   "The log scope every composer-help record is filed under.")
 
 (defconst agent-repl-input-help-topics
-  '((:id sending
+  '(;; ---- Composer ----
+    (:id writing
+     :group "Composer"
+     :title "Writing prompts"
+     :keymaps (agent-repl-input-mode-map)
+     :bindings ((newline "Insert a newline instead of sending.")
+                (agent-repl-prompt-entries-open-below
+                 "Open a line below. On an entry line, start the next entry with its label.")
+                (agent-repl-prompt-entries-open-above
+                 "Open a line above. On an entry line, start the previous entry with its label.")
+                (agent-repl-discard-input "Save the composer to history, then clear it."))
+     :features ("A word starting with / completes against the workspace's commands, and a known one turns purple."
+                "A word that begins an open workspace's name completes to that name."
+                "Only TAB takes a completion: RET closes the completion popup and sends."))
+    (:id sending
+     :group "Composer"
      :title "Sending prompts"
+     :keymaps (agent-repl-input-mode-map)
      :bindings ((agent-repl-send "Send the composer's contents.")
-                (newline "Insert a newline instead of sending.")
                 (agent-repl-input-control-return
                  "Send with the send postfix appended. With a multi-select standing and an empty composer, confirm its ticks instead."
                  :variables (agent-repl-send-postfix))
@@ -49,57 +66,241 @@
                 (agent-repl-queue-deferred-prompt "Defer the prompt until the current turn ends.")
                 (agent-repl-interrupt-turn "Interrupt the running turn."))
      :features ("Prompts sent while the daemon is away wait, counted in the mode line, and go out once it is back."))
+    (:id editing
+     :group "Composer"
+     :title "Edit sent prompts"
+     :keymaps (agent-repl-input-mode-map agent-repl-input-selection-mode-map)
+     :bindings ((agent-repl-turn-boundary-select-next "Select the next (newer) prompt or final response.")
+                (agent-repl-turn-boundary-select-prev "Select the previous (older) prompt or final response.")
+                (agent-repl-input-selection-return
+                 "On a selected prompt, roll back to it: an empty composer gets the prompt back to edit, words in the composer resend it edited. On a selected response, reply quoting it.")
+                (agent-repl-rollback-keep-files "Roll back to before the selected prompt, keeping files.")
+                (agent-repl-rollback-restore-files "Roll back to before the selected prompt, restoring files.")
+                (agent-repl-input-selection-escape "Clear the feed selection."))
+     :features ("With no prompt selected, a rollback cancels the latest prompt."
+                "A rollback asks before it acts."
+                "Restoring files restores only the files the agent's edit tools changed."))
     (:id history
+     :group "Composer"
      :title "Prompt history"
-     :bindings ((agent-repl-discard-input "Save the composer to history, then clear it.")
-                (agent-repl--history-prev "Show the previous (older) history entry.")
+     :keymaps (agent-repl-input-mode-map)
+     :bindings ((agent-repl--history-prev "Show the previous (older) history entry.")
                 (agent-repl--history-next "Show the next (newer) history entry.")
                 (agent-repl-history-search "Search the whole history and pick an entry."))
      :features ("Every sent prompt is saved to the workspace's history, which survives restarts."
                 "Walking past the newest entry restores the draft you were typing."))
     (:id images
+     :group "Composer"
      :title "Images"
+     :keymaps (agent-repl-input-mode-map agent-repl--image-marker-map)
      :bindings ((agent-repl-attach-clipboard-image "Attach the clipboard's image, even when text rides beside it.")
                 (agent-repl-input-yank "Paste the clipboard's image, or yank as usual.")
                 (agent-repl-input-evil-paste-after "Evil's p: the clipboard's image, or paste after.")
-                (agent-repl-input-evil-paste-before "Evil's P: the clipboard's image, or paste before."))
-     :features ("An image is one character of the prompt: delete, kill or yank it like text."
-                "Clicking an image in the composer opens it large over the feed."))
+                (agent-repl-input-evil-paste-before "Evil's P: the clipboard's image, or paste before.")
+                (agent-repl-input-open-image-at-mouse "Open the clicked image large over the feed."))
+     :features ("An image is one character of the prompt: delete, kill or yank it like text."))
     (:id answering
+     :group "Composer"
      :title "Answering cards"
+     :keymaps (agent-repl-input-mode-map)
      :bindings ((agent-repl-input-digit "Pick the standing card's numbered choice.")
                 (agent-repl-input-control-return "Confirm a multi-select's ticked choices.")
                 (agent-repl-input-insert-escape "Close a standing news digest and leave insert mode."))
      :features ("A digit answers only in an empty composer; anywhere else it is typed as usual."
                 "On a multi-select a digit toggles its choice's tick instead of answering."))
-    (:id rollback
-     :title "Rollback"
-     :bindings ((agent-repl-turn-boundary-select-next "Select the next (newer) prompt or final response.")
-                (agent-repl-turn-boundary-select-prev "Select the previous (older) prompt or final response.")
-                (agent-repl-input-selection-escape "Clear the feed selection.")
-                (agent-repl-rollback-keep-files "Roll back to before the selected prompt, keeping files.")
-                (agent-repl-rollback-restore-files "Roll back to before the selected prompt, restoring files."))
-     :features ("With no prompt selected, a rollback cancels the latest prompt."
-                "A rollback asks before it acts."
-                "Restoring files restores only the files the agent's edit tools changed."))
-    (:id completion
-     :title "Completion"
-     :bindings ()
-     :features ("A word starting with / completes against the workspace's commands, and a known one turns purple."
-                "A word that begins an open workspace's name completes to that name."
-                "Only TAB takes a completion: RET closes the completion popup and sends."))
-    (:id zoom
-     :title "Feed zoom"
-     :bindings ((agent-repl-feed-text-scale-increase "Make the feed's text larger.")
-                (agent-repl-feed-text-scale-decrease "Make the feed's text smaller."))
-     :features ("The zoom changes the feed's text only, never Emacs's own font.")))
-  "The composer's help topics, in header-line order.
-Each is a plist: `:id' (a symbol), `:title' (the menu item's label and the
-popup's heading), `:bindings' and `:features'.  A binding is
-\(COMMAND DESCRIPTION [:variables (VARIABLE ...)]): its keys are read from
-the live keymaps when the popup opens, and each VARIABLE whose value
-shapes what COMMAND does is shown with its current value.  `:features'
-are lines describing what goes with those keys.")
+    ;; ---- Feed ----
+    (:id feed
+     :group "Feed"
+     :title "Reading the feed"
+     :keymaps (agent-repl-frontend-webview-mode-map agent-repl-input-mode-map
+               agent-repl-input-selection-mode-map)
+     :bindings ((agent-repl-frontend-copy-selection "Copy the feed's highlighted text.")
+                (agent-repl-response-search-buffer "Search the selected bubble's text.")
+                (agent-repl-response-search-forward "Search the selected bubble's text forward.")
+                (agent-repl-response-search-backward "Search the selected bubble's text backward.")
+                (agent-repl-feed-text-scale-increase "Make the feed's text larger.")
+                (agent-repl-feed-text-scale-decrease "Make the feed's text smaller.")
+                (agent-repl-frontend-reload-webview "Reload the feed's page, after a rebuilt bundle.")
+                (agent-repl-frontend-rescue-webview "Bring a page that navigated away back to the feed."))
+     :features ("The zoom changes the feed's text only, never Emacs's own font, and is saved by the daemon."
+                "The bubble search keys work while a bubble is selected (Edit sent prompts)."))
+    ;; ---- Workspaces ----
+    (:id switching
+     :group "Workspaces"
+     :title "Switching workspaces"
+     :keymaps (agent-repl-workspace-numerals-mode-map)
+     :bindings (((agent-repl-switch-to-workspace-1 agent-repl-switch-to-workspace-2
+                  agent-repl-switch-to-workspace-3 agent-repl-switch-to-workspace-4
+                  agent-repl-switch-to-workspace-5 agent-repl-switch-to-workspace-6
+                  agent-repl-switch-to-workspace-7 agent-repl-switch-to-workspace-8
+                  agent-repl-switch-to-workspace-9)
+                 "Switch to tab 1 to 9 on the bar, counting from the left; 9 is the last when there are fewer.")
+                (agent-repl-switch-to-last-workspace "Switch to the last tab on the bar.")
+                (agent-repl-switch-left "Switch to the tab on the left, wrapping.")
+                (agent-repl-switch-right "Switch to the tab on the right, wrapping.")
+                (agent-repl-switch-older "Go back to the workspace viewed before this one.")
+                (agent-repl-switch-newer "Go forward to the workspace viewed after this one.")
+                (agent-repl-switch-to-previous-workspace "Switch to the workspace selected before this one.")
+                (agent-repl-switch-to-last-finished-workspace "Switch to the workspace that most recently finished its turn.")
+                (agent-repl-open-most-recent-workspace "Switch to the most recently selected workspace not yet visited this cycle.")
+                (agent-repl-switch-to-project "Switch to a current or recent workspace, or to a project.")
+                (agent-repl-switch-to-any-workspace "Switch to any known workspace, opening it first when needed.")))
+    (:id creating
+     :group "Workspaces"
+     :title "Creating workspaces"
+     :bindings ((agent-repl-create-workspace "New workspace, from a prompt.")
+                (agent-repl-create-workspace-static "New named workspace, with no prompt.")
+                (agent-repl-create-oneshot "New one-shot workspace, from a commission.")
+                (agent-repl-create-oneshot-for-current-workspace "New one-shot that fixes something wrong with this workspace.")
+                (agent-repl-create-explanation-engine-oneshot "New one-shot in the explanation-engine repository.")
+                (agent-repl-fork-workspace "Fork this conversation into a child workspace that merges back here.")
+                (agent-repl-fork-workspace-static "Fork into a named child workspace, with no prompt.")
+                (agent-repl-fork-workspace-into-primary "Fork this conversation into a workspace off the main branch.")
+                (agent-repl-fork-workspace-into-primary-static "Fork into a named workspace off the main branch, with no prompt.")
+                (agent-repl-add-project-workspace "Add a project from a directory.")
+                (agent-repl-register-repository "Register the repository a picked file is inside.")
+                (agent-repl-open-workspace "Re-open a closed workspace.")))
+    (:id managing
+     :group "Workspaces"
+     :title "Managing workspaces"
+     :bindings ((agent-repl-finish-workspace "Finish this workspace: deploy its work, and close it once deployed.")
+                (agent-repl-hide-workspace "Hide this workspace from the tab bar.")
+                (agent-repl-show-hidden-workspace "Show a hidden workspace again and switch to it.")
+                (agent-repl-workspace-swap "Swap this workspace with the tab at a digit (0 is 10).")
+                (agent-repl-workspace-move "Move this workspace onto the tab at a digit (0 is 10).")
+                (agent-repl-set-priority "Set or clear this workspace's priority.")
+                (agent-repl-bind-conversation "Point this workspace at another of its conversations.")
+                (agent-repl-restart-workspace "Restart this workspace's session and page.")
+                (agent-repl-close-workspace "Close this workspace's view.")
+                (agent-repl-kill-workspace "Kill this workspace's session by force.")
+                (agent-repl-nuke-workspace "Destroy this workspace, its worktree and its branch.")
+                (agent-repl-copy-workspace-name "Copy this workspace's name.")
+                (agent-repl-notes-open "Open this workspace's notes.")))
+    (:id panels
+     :group "Workspaces"
+     :title "Panels and windows"
+     :keymaps (evil-motion-state-map agent-repl-popup-mode-map agent-repl-open-progress-mode-map)
+     :bindings ((agent-repl "Hide the agent panels and lower the workspace's priority.")
+                (agent-repl-simple "Show or hide the agent panels.")
+                (agent-repl-focus-input "Focus the composer, or go back to the feed from it.")
+                (agent-repl-fullscreen-and-focus "Focus the composer, or maximize a window that is not an agent's.")
+                (agent-repl-copy-reference "Copy the current file and line as a reference.")
+                (agent-repl-popup-quit "Close an agent-repl popup, like this one.")
+                (quit-window "Close the workspace-opening progress buffer.")))
+    ;; ---- Agent commands ----
+    (:id explain
+     :group "Agent commands"
+     :title "Explain"
+     :bindings ((agent-repl-explain "Explain the current line, region or hunk.")
+                (agent-repl-explain-prompt "Ask about the current line, region or hunk, with your own words.")
+                (agent-repl-explain-diff-branch "Explain the branch's changes.")
+                (agent-repl-explain-diff-head "Explain the last commit.")
+                (agent-repl-explain-diff-staged "Explain the staged changes.")
+                (agent-repl-explain-diff-uncommitted "Explain all uncommitted changes.")
+                (agent-repl-explain-diff-worktree "Explain the unstaged changes.")))
+    (:id tests
+     :group "Agent commands"
+     :title "Tests and lint"
+     :bindings ((agent-repl-run-tests-branch "Run tests for the branch's changes.")
+                (agent-repl-run-tests-head "Run tests for the last commit.")
+                (agent-repl-run-tests-staged "Run tests for the staged changes.")
+                (agent-repl-run-tests-uncommitted "Run tests for all uncommitted changes.")
+                (agent-repl-run-tests-worktree "Run tests for the unstaged changes.")
+                (agent-repl-run-lint-branch "Run lint for the branch's changes.")
+                (agent-repl-run-lint-head "Run lint for the last commit.")
+                (agent-repl-run-lint-staged "Run lint for the staged changes.")
+                (agent-repl-run-lint-uncommitted "Run lint for all uncommitted changes.")
+                (agent-repl-run-lint-worktree "Run lint for the unstaged changes.")
+                (agent-repl-run-all-branch "Run lint and tests for the branch's changes.")
+                (agent-repl-run-all-head "Run lint and tests for the last commit.")
+                (agent-repl-run-all-staged "Run lint and tests for the staged changes.")
+                (agent-repl-run-all-uncommitted "Run lint and tests for all uncommitted changes.")
+                (agent-repl-run-all-worktree "Run lint and tests for the unstaged changes.")
+                (agent-repl-test-coverage-branch "Analyze test coverage of the branch's changes.")
+                (agent-repl-test-coverage-head "Analyze test coverage of the last commit.")
+                (agent-repl-test-coverage-staged "Analyze test coverage of the staged changes.")
+                (agent-repl-test-coverage-uncommitted "Analyze test coverage of all uncommitted changes.")
+                (agent-repl-test-coverage-worktree "Analyze test coverage of the unstaged changes.")
+                (agent-repl-test-quality-branch "Analyze test quality of the branch's changes.")
+                (agent-repl-test-quality-head "Analyze test quality of the last commit.")
+                (agent-repl-test-quality-staged "Analyze test quality of the staged changes.")
+                (agent-repl-test-quality-uncommitted "Analyze test quality of all uncommitted changes.")
+                (agent-repl-test-quality-worktree "Analyze test quality of the unstaged changes.")))
+    (:id prs
+     :group "Agent commands"
+     :title "Pull requests and releases"
+     :bindings ((agent-repl-rebase-onto-origin-master "Fetch, then ask the agent to rebase onto origin/master.")
+                (agent-repl-create-or-update-pr "Ask the agent to create or update the PR.")
+                (agent-repl-create-or-update-pr-no-self-certified "Ask the agent to create or update the PR, without self-certifying.")
+                (agent-repl-create-or-update-pr-paste "Insert the create-or-update-PR prompt instead of sending it.")
+                (agent-repl-create-or-update-pr-no-self-certified-paste
+                 "Insert the create-or-update-PR prompt, without self-certifying, instead of sending it.")
+                (agent-repl-update-pr "Ask the agent to update the PR's description.")
+                (agent-repl-open-workspace-pr-in-browser "Open this workspace's PR in the browser.")
+                (agent-repl-push-release "Push master to origin as a release.")))
+    ;; ---- Git ----
+    (:id magit
+     :group "Git"
+     :title "Magit"
+     :requires (magit magit-diff)
+     :keymaps (magit-status-mode-map magit-mode-map magit-file-section-map magit-hunk-section-map
+               magit-diff-section-map)
+     :bindings ((agent-repl-magit-status-workspace "Open magit for this workspace's worktree.")
+                (agent-repl-magit-status-main-worktree "Open magit for the repository's main worktree.")
+                (agent-repl-magit-status-quit "Close magit and restore the windows it replaced.")
+                (agent-repl-magit-open-commit-in-github "Open the commit at point on GitHub.")
+                (agent-repl-magit-copy-commit-link "Copy a GitHub link to the commit at point.")
+                (magit-jump-to-unpushed-to-upstream "Jump to the recent commits.")
+                (magit-diff-visit-worktree-file "Visit the file at point, in the worktree.")
+                (magit-diff-visit-file "Visit the file at point, at its revision.")
+                (magit-diff-visit-file-other-window "Visit the file at point in another window.")))
+    ;; ---- Daemon ----
+    (:id merge-queue
+     :group "Daemon"
+     :title "Merge queue"
+     :bindings ((agent-repl-merge-queue-evict "Take this workspace's merge off the queue.")
+                (agent-repl-merge-queue-pause "Pause this repository's queue.")
+                (agent-repl-merge-queue-resume "Resume this repository's queue.")))
+    (:id daemon
+     :group "Daemon"
+     :title "Daemon and health"
+     :bindings ((agent-repl-daemon-health "Show the daemon's health.")
+                (agent-repl-session-health "Show this workspace's session health.")
+                (agent-repl-daemon-shutdown-schedule "Schedule the daemon to drain and exit.")
+                (agent-repl-daemon-shutdown-cancel "Cancel a scheduled drain.")
+                (agent-repl-daemon-shutdown-now "Stop the daemon now.")
+                (agent-repl-send-hidden-keepalives "Send a keep-alive to every hidden workspace.")
+                (agent-repl-persistent-wifi-mode-toggle "Turn persistent wifi mode, for lid-closed operation, on or off.")))
+    (:id config
+     :group "Daemon"
+     :title "Logging and config"
+     :bindings ((agent-repl-set-log-file-level "Set the log file's level.")
+                (agent-repl-toggle-debug "Show or hide debug logging in *Messages*.")
+                (agent-repl-toggle-verbose-to-disk "Write verbose logging to the log file, or stop.")
+                (agent-repl-reload-config "Reload agent-repl's config.")
+                (agent-repl-revert-and-eval-buffer "Revert this buffer from disk, then evaluate it as Elisp."))))
+  "Every topic of agent-repl's help, in menu order.
+Each is a plist: `:id' (a symbol), `:group' (the menu's submenu),
+`:title' (the menu item's label and the popup's heading), `:keymaps' (the
+keymap variables its keys are read from beside the global and leader
+maps, by default none), `:requires' (features loaded before they are
+read), `:bindings' and `:features'.  A binding is
+\(COMMAND DESCRIPTION [:variables (VARIABLE ...)]), COMMAND one command or
+a list of commands sharing one row: its keys are read from the live
+keymaps when the popup opens, and each VARIABLE whose value shapes what
+COMMAND does is shown with its current value.  `:features' are lines
+describing what goes with those keys.
+
+Every binding agent-repl sets is in a topic, or in
+`agent-repl-input-help-unlisted-commands': test-input-help.el scans every
+binding form of the module and every one of its keymaps.")
+
+(defconst agent-repl-input-help-unlisted-commands
+  '((ignore . "the Help button's press, which only keeps a click from dragging the header line")
+    (agent-repl-input-help-click . "the Help button itself")
+    (agent-repl-input-company-return . "RET in the completion popup, described under Writing prompts")
+    (company-complete-selection . "TAB in the completion popup, described under Writing prompts"))
+  "Commands agent-repl binds that no help topic lists, each with why.")
 
 (defconst agent-repl-input-help-bar-background "#111110"
   "The help bar's ground: the webapp sidebar's dark `--sidebar-bg'.
@@ -180,15 +381,29 @@ say) remaps `header-line' to."
 
 ;;;; ---- The topic menu -------------------------------------------------
 
+(defun agent-repl--input-help-groups ()
+  "Return the topics' groups, each (GROUP TOPIC ...), in table order."
+  (let (groups)
+    (dolist (topic agent-repl-input-help-topics)
+      (let ((group (assoc (plist-get topic :group) groups)))
+        (if group
+            (setcdr group (append (cdr group) (list topic)))
+          (push (list (plist-get topic :group) topic) groups))))
+    (nreverse groups)))
+
 (defun agent-repl--input-help-menu ()
-  "Return the help button's menu: one item per topic, in table order.
-Choosing an item shows that topic (`agent-repl-input-help-show')."
-  (let ((menu (make-sparse-keymap "Composer help")))
-    (dolist (topic (reverse agent-repl-input-help-topics))
-      (let ((id (plist-get topic :id)))
-        (define-key menu (vector id)
-                    `(menu-item ,(plist-get topic :title)
-                                ,(lambda () (interactive) (agent-repl-input-help-show id))))))
+  "Return the help button's menu: a submenu per group, an item per topic.
+Both in table order.  Choosing an item shows that topic
+\(`agent-repl-input-help-show')."
+  (let ((menu (make-sparse-keymap "agent-repl help")))
+    (pcase-dolist (`(,group . ,topics) (reverse (agent-repl--input-help-groups)))
+      (let ((submenu (make-sparse-keymap group)))
+        (dolist (topic (reverse topics))
+          (let ((id (plist-get topic :id)))
+            (define-key submenu (vector id)
+                        `(menu-item ,(plist-get topic :title)
+                                    ,(lambda () (interactive) (agent-repl-input-help-show id))))))
+        (define-key menu (vector (intern group)) `(menu-item ,group ,submenu))))
     menu))
 
 ;; EVERY COMPOSER'S HEADER LINE IS THIS ONE VARIABLE, never a copy of it.
@@ -222,18 +437,38 @@ older load gave it, so each load points every one at the variable."
 
 ;;;; ---- Finding a command's keys ---------------------------------------
 
-(defun agent-repl--input-help-binding-context ()
-  "Return the live keymaps a help popup reads keys from.
-`:composer' is the composer's mode map (its Evil state maps ride inside
-it), `:global' the (STATE . MAP) pairs a `[remap ...]' entry resolves
-through (STATE nil for any state), `:leader' Doom's leader map, and
-`:leader-key' the key that opens it."
-  (list :composer agent-repl-input-mode-map
+(defun agent-repl--input-help-binding-context (topic)
+  "Return the live keymaps TOPIC's popup reads keys from.
+`:maps' are TOPIC's `:keymaps' (an Evil state map rides inside each),
+loaded first through its `:requires'; `:global' the (STATE . MAP) pairs a
+`[remap ...]' entry resolves through, and that are searched themselves
+\(STATE nil for any state); `:leader' Doom's leader map, and `:leader-key'
+the key that opens it.  A keymap variable still unbound once its topic's
+features are loaded is a broken table, and is fatal."
+  (dolist (feature (plist-get topic :requires))
+    (require feature))
+  (list :maps (mapcar (lambda (variable)
+                        (unless (and (boundp variable) (keymapp (symbol-value variable)))
+                          (agent-repl--fatal agent-repl-input-help--log-scope
+                                             "elisp.input-help.context: unbound keymap=%s topic=%s"
+                                             variable (plist-get topic :id)))
+                        (symbol-value variable))
+                      (plist-get topic :keymaps))
         :global (list (cons "insert" evil-insert-state-map)
                       (cons "normal" evil-normal-state-map)
                       (cons nil (current-global-map)))
         :leader doom-leader-map
         :leader-key doom-leader-key))
+
+(defun agent-repl--input-help-canonical-key (description)
+  "Return DESCRIPTION, a `key-description', with each key under one name.
+`<return>' and `<tab>' are the function keys Emacs reads RET and TAB as
+in a graphical frame, so a map binding both shows each once, as RET and
+TAB."
+  (replace-regexp-in-string
+   "<\\(return\\|tab\\)>"
+   (lambda (match) (if (equal match "<return>") "RET" "TAB"))
+   description t t))
 
 (defun agent-repl--input-help-state-key (key)
   "Split KEY, a key vector from the composer's map, into (STATE . REST).
@@ -247,18 +482,30 @@ prefix event, so STATE is that state's name, or nil for a plain binding."
 
 (defun agent-repl--input-help-raw-keys (command context)
   "Return COMMAND's keys in CONTEXT as (DESCRIPTION . STATE) pairs.
-STATE is the Evil state name a key is bound in, or nil for any state."
+STATE is the Evil state name a key is bound in, or nil for any state.
+Each map of `:maps' is searched, a `[remap X]' entry standing for X's
+keys in the global maps; then the global maps and the leader themselves."
   (let (found)
-    (dolist (key (where-is-internal command (plist-get context :composer) nil t t))
-      (if (eq (aref key 0) 'remap)
-          (pcase-dolist (`(,state . ,map) (plist-get context :global))
-            (dolist (global (where-is-internal (aref key 1) map nil t))
-              (push (cons (key-description global) state) found)))
-        (pcase-let ((`(,state . ,rest) (agent-repl--input-help-state-key key)))
-          (push (cons (key-description rest) state) found))))
-    (dolist (key (where-is-internal command (plist-get context :leader) nil t))
-      (push (cons (concat (plist-get context :leader-key) " " (key-description key)) nil)
-            found))
+    (cl-flet ((add (key state)
+                (push (cons (agent-repl--input-help-canonical-key (key-description key)) state)
+                      found)))
+      (dolist (map (plist-get context :maps))
+        (dolist (key (where-is-internal command map nil t t))
+          (if (eq (aref key 0) 'remap)
+              (pcase-dolist (`(,state . ,global) (plist-get context :global))
+                (dolist (target (where-is-internal (aref key 1) global nil t))
+                  (add target state)))
+            (pcase-let ((`(,state . ,rest) (agent-repl--input-help-state-key key)))
+              (add rest state)))))
+      (pcase-dolist (`(,state . ,global) (plist-get context :global))
+        (dolist (key (where-is-internal command global nil t t))
+          (unless (eq (aref key 0) 'remap)
+            (add key state))))
+      (dolist (key (where-is-internal command (plist-get context :leader) nil t))
+        (push (cons (concat (plist-get context :leader-key) " "
+                            (agent-repl--input-help-canonical-key (key-description key)))
+                    nil)
+              found)))
     (nreverse found)))
 
 (defun agent-repl--input-help-state-label (states)
@@ -275,40 +522,63 @@ both command and insert mode needs no annotation."
                (sort (delete-dups (copy-sequence states)) #'string<)
                ", ")))
 
+(defun agent-repl--input-help-digit-key (key)
+  "Return KEY as (PREFIX . DIGIT) when it ends in a lone digit, else nil.
+The digit stands alone, or follows a modifier's dash or a space, so M-3
+and SPC TAB 3 are digit keys and F13 is not."
+  (when (string-match "\\`\\(\\(?:.*[- ]\\)?\\)\\([0-9]\\)\\'" key)
+    (cons (match-string 1 key) (string-to-number (match-string 2 key)))))
+
 (defun agent-repl--input-help-collapse-digits (keys)
-  "Return KEYS with each run of consecutive single digits as one range key.
-KEYS are (KEY . ANNOTATION) pairs; a run is digits each one more than the
-last, sharing an annotation, so 1 2 ... 9 reads as \"1-9\"."
-  (let (out)
-    (dolist (key keys)
-      (let ((prev (car out)))
-        (if (and prev
-                 (string-match-p "\\`[0-9]\\'" (car key))
-                 (string-match "\\`\\([0-9]\\)\\(?:-\\([0-9]\\)\\)?\\'" (car prev))
-                 (equal (cdr prev) (cdr key))
-                 (= (string-to-number (car key))
-                    (1+ (string-to-number (or (match-string 2 (car prev))
-                                              (match-string 1 (car prev)))))))
-            (setcar out (cons (concat (match-string 1 (car prev)) "-" (car key)) (cdr key)))
-          (push key out))))
+  "Return KEYS with each run of consecutive digit keys as one range key.
+KEYS are (KEY . ANNOTATION) pairs.  A run is keys sharing a prefix and an
+annotation whose digits climb by one, so M-1 M-2 ... M-9 reads as
+\"M-1 … M-9\"; a run of two or more is collapsed."
+  (let (out run)
+    (cl-flet ((flush ()
+                (when run
+                  (pcase-let ((`(,prefix ,first ,last ,annotation) run))
+                    (push (cons (if (= first last)
+                                    (format "%s%d" prefix first)
+                                  (format "%s%d … %s%d" prefix first prefix last))
+                                annotation)
+                          out))
+                  (setq run nil))))
+      (dolist (key keys)
+        (let ((digit (agent-repl--input-help-digit-key (car key))))
+          (cond ((and digit run
+                      (equal (car digit) (nth 0 run))
+                      (equal (cdr key) (nth 3 run))
+                      (= (cdr digit) (1+ (nth 2 run))))
+                 (setf (nth 2 run) (cdr digit)))
+                (digit
+                 (flush)
+                 (setq run (list (car digit) (cdr digit) (cdr digit) (cdr key))))
+                (t
+                 (flush)
+                 (push key out)))))
+      (flush))
     (nreverse out)))
 
 (defun agent-repl--input-help-keys (command context)
   "Return the keys that run COMMAND in CONTEXT, as (KEY . ANNOTATION) pairs.
+COMMAND is one command or a list of commands sharing a row; each must be
+bound.
 Shortest first, then alphabetically: a keymap's own order is the reverse
 of its definitions, which says nothing to a reader.  A key bound in
 several states is one pair, annotated with its states
 (`agent-repl--input-help-state-label', nil for none), and
 a run of digits is one range (`agent-repl--input-help-collapse-digits').
 A command no map binds is a broken help table, and is fatal."
-  (let ((raw (agent-repl--input-help-raw-keys command context))
+  (let ((raw (mapcan (lambda (one)
+                       (or (agent-repl--input-help-raw-keys one context)
+                           (agent-repl--fatal agent-repl-input-help--log-scope
+                                              "elisp.input-help.keys: unbound command=%s" one)))
+                     (if (listp command) (copy-sequence command) (list command))))
         order)
     (dolist (pair raw)
       (unless (member (car pair) order)
         (push (car pair) order)))
-    (unless order
-      (agent-repl--fatal agent-repl-input-help--log-scope
-                         "elisp.input-help.keys: unbound command=%s" command))
     (agent-repl--input-help-collapse-digits
      (mapcar (lambda (description)
                (cons description
@@ -419,7 +689,7 @@ Its lines wrap at word boundaries, each under its own column."
 (defun agent-repl-input-help-show (id)
   "Show help topic ID's keys and features in the shared agent-repl popup."
   (let* ((topic (agent-repl--input-help-topic :id id))
-         (buf (agent-repl--input-help-buffer topic (agent-repl--input-help-binding-context))))
+         (buf (agent-repl--input-help-buffer topic (agent-repl--input-help-binding-context topic))))
     (agent-repl--log agent-repl-input-help--log-scope "elisp.input-help.show: id=%s buffer=%s"
                      id (buffer-name buf))
     (agent-repl-popup-show buf)))
@@ -431,14 +701,22 @@ Choosing a topic shows it; dismissing the menu does nothing."
   (agent-repl--log agent-repl-input-help--log-scope "elisp.input-help.click: menu")
   (popup-menu (agent-repl--input-help-menu) event))
 
-(defun agent-repl-input-help (title)
-  "Show the composer help topic named TITLE, read with completion."
+(defun agent-repl--input-help-choice (topic)
+  "Return TOPIC's name in `agent-repl-input-help''s completion: GROUP: TITLE."
+  (concat (plist-get topic :group) ": " (plist-get topic :title)))
+
+(defun agent-repl-input-help (choice)
+  "Show the help topic CHOICE names, read with completion as GROUP: TITLE."
   (interactive
-   (list (completing-read "Composer help: "
-                          (mapcar (lambda (topic) (plist-get topic :title))
-                                  agent-repl-input-help-topics)
+   (list (completing-read "agent-repl help: "
+                          (mapcar #'agent-repl--input-help-choice agent-repl-input-help-topics)
                           nil t)))
-  (agent-repl-input-help-show (plist-get (agent-repl--input-help-topic :title title) :id)))
+  (agent-repl-input-help-show
+   (plist-get (or (seq-find (lambda (topic) (equal (agent-repl--input-help-choice topic) choice))
+                            agent-repl-input-help-topics)
+                  (agent-repl--fatal agent-repl-input-help--log-scope
+                                     "elisp.input-help: unknown choice=%S" choice))
+              :id)))
 
 (agent-repl--input-help-install-in-composers)
 
