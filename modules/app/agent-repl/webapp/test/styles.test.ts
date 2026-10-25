@@ -3695,9 +3695,11 @@ describe("the one bubble rule set", () => {
             // THE BLUE PROMPT'S CODE (owner request, 2026-10-19): the user
             // prompt feeds the two code fills their darker blue; the suite
             // "code in a blue prompt bubble" pins both.
+            // A held prompt's code sits on its own darker blue (owner request,
+            // 2026-10-25); the same suite pins it.
             !(
               (prop === "--code-bg" || prop === "--code-block-bg") &&
-              isOwnRule(rule, '.bubble[data-variant="user"]')
+              (isOwnRule(rule, '.bubble[data-variant="user"]') || isOwnRule(rule, '.bubble[data-variant="held"]'))
             ) &&
             !(prop.startsWith("--usage-") && rule.selectors.includes(".usage-corner")),
         ),
@@ -3976,40 +3978,43 @@ function rgbOf(block: string, token: string): [number, number, number] {
 }
 
 /**
- * THE HELD PROMPT SHARES THE RESPONSE BUBBLE'S FILL (owner ruling,
- * 2026-10-08, superseding 2026-09-23's grey-blue tint and 2026-09-27's 5%
- * mix of it): a held prompt's background must be the SAME as a response
- * bubble's, through one shared token rather than a copied hex value, in
- * both themes.
+ * THE HELD PROMPT'S FILL IS A DARKER BLUE (owner request, 2026-10-25,
+ * superseding 2026-10-08's response grey): a held prompt looks like the user
+ * prompt it becomes, on a blue markedly darker than the user prompt's --user,
+ * through one token per theme.
  */
-describe("the held prompt's fill: the response bubble's own token", () => {
-  it("feeds --bubble-bg from --assistant, exactly as the response role does", () => {
+describe("the held prompt's fill: a markedly darker blue than the user prompt's", () => {
+  it("feeds --bubble-bg from --held-prompt-bg", () => {
     // Arrange / Act
     const held = declarationsOf('.bubble[data-variant="held"]') ?? "";
-    const response = declarationsOf('.bubble[data-role="response"]') ?? "";
     // Assert
-    expect(held).toMatch(/--bubble-bg:\s*var\(--assistant\)\s*;/);
-    expect(response).toMatch(/--bubble-bg:\s*var\(--assistant\)\s*;/);
+    expect(held).toMatch(/--bubble-bg:\s*var\(--held-prompt-bg\)\s*;/);
   });
 
-  it("hardcodes no fill color of its own", () => {
+  it("hardcodes no fill color on the variant's rule", () => {
     // Arrange / Act
     const rule = declarationsOf('.bubble[data-variant="held"]') ?? "";
     // Assert
     expect(rule).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/);
   });
 
-  it("retires the old --held-prompt-bg tint token entirely", () => {
-    // Arrange / Act / Assert
-    expect(stylesheet).not.toMatch(/--held-prompt-bg\s*:/);
+  it.each(THEME_BLOCKS)("sits markedly darker than --user in the %s theme", (_theme, block) => {
+    // Arrange
+    const lightness = (rgb: [number, number, number]): number => {
+      const y = luminance(rgb);
+      return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
+    };
+    // Act
+    const step = lightness(themeRgbOf(block(), "--user")) - lightness(themeRgbOf(block(), "--held-prompt-bg"));
+    // Assert
+    expect(step).toBeGreaterThan(10);
   });
 
-  it.each(THEME_BLOCKS)("resolves to the same RGB as --assistant in the %s theme", (_theme, block) => {
+  it.each(THEME_BLOCKS)("is still a blue in the %s theme", (_theme, block) => {
     // Arrange / Act
-    const assistant = themeRgbOf(block(), "--assistant");
-    // Assert — the held fill IS --assistant, so they are the same color by
-    // construction; this pins that --assistant itself still resolves.
-    expect(assistant).toHaveLength(3);
+    const [r, g, b] = themeRgbOf(block(), "--held-prompt-bg");
+    // Assert
+    expect(b > r && b > g).toBe(true);
   });
 
   it("leaves the held variant at the one bubble width every prompt takes", () => {
@@ -4020,6 +4025,13 @@ describe("the held prompt's fill: the response bubble's own token", () => {
     );
     // Assert
     expect(held.filter((rule) => /(?:^|;)\s*(?:max-)?width\s*:/.test(rule.declarations))).toEqual([]);
+  });
+
+  it.each([".prompt-block-quote", ".known-command"])("styles a held prompt's %s exactly as a user prompt's", (part) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(`.bubble[data-variant="user"] ${part}`));
+    // Assert
+    expect(rule?.selectors).toContain(`.bubble[data-variant="held"] ${part}`);
   });
 });
 
@@ -4382,9 +4394,9 @@ describe("a link in a prompt bubble (owner request, 2026-10-19)", () => {
     expect(block).not.toMatch(/--prompt-link:/);
   });
 
-  it("colors links in every prompt but a held one", () => {
+  it("colors links in every prompt, a held one included", () => {
     // Arrange / Act
-    const rule = declarationsOf('.bubble[data-role="prompt"]:not([data-variant="held"]) a') ?? "";
+    const rule = declarationsOf('.bubble[data-role="prompt"] a') ?? "";
     // Assert
     expect(rule).toMatch(/color:\s*var\(--prompt-link\)/);
   });
@@ -4420,7 +4432,28 @@ describe("code in a blue prompt bubble (owner request, 2026-10-19)", () => {
     expect(decls).toMatch(new RegExp(`${token}:\\s*var\\(--prompt-code-bg\\)`));
   });
 
-  it.each(['.bubble[data-variant="held"]', '.bubble[data-variant="agent"]', '.bubble[data-variant="peer"]'])(
+  it.each(["held", "user"])("sits the %s prompt's code clearly darker than its fill in both themes", (variant) => {
+    // Arrange
+    const [fill, code] = variant === "held" ? ["--held-prompt-bg", "--held-prompt-code-bg"] : ["--user", "--prompt-code-bg"];
+    // Act
+    const steps = [declarationsOf(":root") ?? "", darkThemeBlock()].map(
+      (block) => lightness(themeRgbOf(block, fill)) - lightness(themeRgbOf(block, code)),
+    );
+    // Assert
+    expect(steps.every((step) => step > 6)).toBe(true);
+  });
+
+  it.each(["--code-bg", "--code-block-bg"])("feeds %s from --held-prompt-code-bg on the held prompt", (token) => {
+    // Arrange / Act
+    const decls = rulesOf(stylesheet)
+      .filter((r) => isOwnRule(r, '.bubble[data-variant="held"]'))
+      .map((r) => r.declarations)
+      .join(";");
+    // Assert
+    expect(decls).toMatch(new RegExp(`${token}:\\s*var\\(--held-prompt-code-bg\\)`));
+  });
+
+  it.each(['.bubble[data-variant="agent"]', '.bubble[data-variant="peer"]'])(
     "leaves %s on the shared code washes",
     (selector) => {
       // Arrange / Act
@@ -4979,8 +5012,7 @@ const variantSelector = (variant: string): string => `.bubble[data-variant="${va
 const PAD_LADDER: readonly { selectors: readonly string[]; props: readonly string[] }[] = [
   { selectors: [variantSelector("response")], props: ["--bubble-pad-y"] },
   { selectors: ["agent", "peer"].map(variantSelector), props: ["--bubble-pad-y", "--bubble-pad-x"] },
-  { selectors: [variantSelector("held")], props: ["--bubble-pad-y", "--bubble-pad-x"] },
-  { selectors: [variantSelector("user")], props: ["--bubble-pad-y", "--bubble-pad-x"] },
+  { selectors: ["user", "held"].map(variantSelector), props: ["--bubble-pad-y", "--bubble-pad-x"] },
   { selectors: [`${variantSelector("response")}.interim-response`], props: ["--bubble-pad-y", "--bubble-pad-x"] },
   { selectors: [`${variantSelector("response")}.final-response`], props: ["--bubble-pad-y"] },
   { selectors: [variantSelector("thinking")], props: ["--bubble-pad-y"] },
@@ -5886,14 +5918,14 @@ describe("the stylesheet's real-height contract", () => {
  * compaction summary keep the base. An interim's gap then shrinks on every side
  * by as much as its narrower text did (owner request, 2026-10-14). Only a
  * prompt's and an interim's rungs move the horizontal token, so no other
- * bubble's sides move with the vertical ladder. Every prompt but a held one,
- * and the green answer, then sit 30% wider top and bottom (owner request,
- * 2026-10-17), and 10% wider again (owner request, 2026-10-20).
+ * bubble's sides move with the vertical ladder. Every prompt, and the green
+ * answer, then sit 30% wider top and bottom (owner request, 2026-10-17), and
+ * 10% wider again (owner request, 2026-10-20). A held prompt shares the user
+ * prompt's rung (owner request, 2026-10-25).
  */
 describe("the padding ladder", () => {
   const RESPONSE = "calc(var(--bubble-pad-y-base)*0.7)";
   const PROMPT_Y = "calc(var(--bubble-pad-y-base)*0.49*1.3*1.1)";
-  const HELD_Y = "calc(var(--bubble-pad-y-base)*0.49)";
   const THINKING = "calc(var(--bubble-pad-y-base)*0.35)";
   const BASE = "var(--bubble-pad-y-base)";
   const PROMPT_X = "calc(var(--bubble-pad-x-base)*0.7)";
@@ -5918,7 +5950,7 @@ describe("the padding ladder", () => {
     { variant: "user", y: USER_Y, x: USER_X },
     { variant: "agent", y: PROMPT_Y, x: PROMPT_X },
     { variant: "peer", y: PROMPT_Y, x: PROMPT_X },
-    { variant: "held", y: HELD_Y, x: PROMPT_X },
+    { variant: "held", y: USER_Y, x: USER_X },
     { variant: "thinking", y: THINKING, x: BASE_X },
     { variant: "agentic", y: BASE, x: BASE_X },
     { variant: "compaction", y: BASE, x: BASE_X },
@@ -5948,12 +5980,12 @@ describe("the padding ladder", () => {
     expect(got).toEqual([USER_Y, USER_X, PROMPT_Y, PROMPT_X]);
   });
 
-  it("leaves a held prompt out of the wider top and bottom the other prompts got", () => {
+  it("pads a held prompt exactly as a user prompt on every side", () => {
     // Arrange / Act
-    const got = [tokenOf("--bubble-pad-y", "held"), tokenOf("--bubble-pad-y", "agent")];
+    const got = [tokenOf("--bubble-pad-y", "held"), tokenOf("--bubble-pad-x", "held")];
 
     // Assert
-    expect(got).toEqual([HELD_Y, PROMPT_Y]);
+    expect(got).toEqual([tokenOf("--bubble-pad-y", "user"), tokenOf("--bubble-pad-x", "user")]);
   });
 
   it("gives the green answer 1.25 then 1.3 then 1.1 times a plain response's top and bottom", () => {

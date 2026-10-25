@@ -6,7 +6,7 @@
  * durable held-prompt ingress, and is in no queue until a daemon accepts it.
  * Without a card it would be drawn nowhere, and a person who sees nothing sends
  * it again (2026-10-20). So it is drawn exactly as a held prompt is (the one
- * bubble, `held` variant, the prompt rail), with ONE badge saying why it waits
+ * bubble, `held` variant, the user prompt's look), with ONE badge saying why it waits
  * and its queued age, and NO controls: nothing can force, cancel, edit or fold
  * a prompt no queue holds.
  *
@@ -22,14 +22,14 @@ import type {
   HeldIngressPrompt,
   HeldIngressPromptBadge,
 } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
-import { BUBBLE_MORE_ELLIPSIS, ELLIPSIS_CAP_LINES, drawBubble } from "../bubble/draw.js";
+import { USER_PROMPT_CAP_LINES, drawBubble } from "../bubble/draw.js";
 import { log } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage } from "../rpc/strict.js";
 import type { HeldContext } from "./context.js";
 import type { EditorIngressEntry } from "./editor-ingress.js";
 import { drawHeldBadgePill, drawQueuedAge, drawUserSaid, type HeldBadgeTone } from "./held-prompt.js";
-import { drawFeedUserPromptBody } from "../feed/rows/user-prompt.js";
+import { userPromptLook, type HeldPromptLook } from "../feed/rows/user-prompt.js";
 
 /** The attribute an ingress card carries: who drew it, `daemon` or `editor`. */
 export const INGRESS_SOURCE_ATTRIBUTE = "data-held-ingress";
@@ -60,11 +60,12 @@ export const DAEMON_UNREACHABLE_LABEL = "waiting for the daemon";
 interface IngressCard {
   readonly source: "daemon" | "editor";
   /**
-   * What the card draws: the daemon's resolved body for its own item, or the
-   * editor's raw said for an entry the editor holds while the daemon is out
-   * of reach (no daemon resolved it).
+   * What the card draws: the user prompt's look over the daemon's resolved
+   * body for its own item, or the editor's raw said for an entry the editor
+   * holds while the daemon is out of reach (no daemon resolved it, so it has
+   * no drawn blocks to copy).
    */
-  readonly content: HTMLElement[];
+  readonly look: HeldPromptLook;
   readonly queuedAtMs: number;
   readonly label: string;
   readonly detail: string | null;
@@ -86,7 +87,7 @@ export function drawHeldIngressPrompt(u: HeldIngressPrompt, tc: HeldContext, pre
   return drawIngressCard(
     {
       source: "daemon",
-      content: drawFeedUserPromptBody(requireMessage(u.body, `${path}.body`), `${path}.body`),
+      look: userPromptLook(requireMessage(u.body, `${path}.body`), `${path}.body`),
       queuedAtMs: msOf(requireMessage(u.queuedAt, `${path}.queued_at`).atMs, `${path}.queued_at.at_ms`),
       label: badge.label,
       detail: badge.detail ?? null,
@@ -103,7 +104,7 @@ export function drawEditorIngressEntry(entry: EditorIngressEntry, tc: HeldContex
   return drawIngressCard(
     {
       source: "editor",
-      content: drawUserSaid(entry.said, "EditorIngressEntry.said"),
+      look: { content: drawUserSaid(entry.said, "EditorIngressEntry.said"), capLines: USER_PROMPT_CAP_LINES },
       queuedAtMs: entry.queuedAtMs,
       label: DAEMON_UNREACHABLE_LABEL,
       detail: null,
@@ -123,8 +124,7 @@ function drawIngressCard(card: IngressCard, tc: HeldContext, path: string, previ
   });
   const head = document.createElement("div");
   head.className = "queued-head";
-  const pill = drawHeldBadgePill(card.label, INGRESS_STATUS_BADGES[card.status], card.status);
-  if (card.detail !== null) pill.title = card.detail;
+  const pill = drawHeldBadgePill(card.label, INGRESS_STATUS_BADGES[card.status], card.status, [card.detail]);
   head.append(pill, drawQueuedAge(card.queuedAtMs, tc, `${path}.queued_at`));
   const element = drawBubble(
     {
@@ -133,9 +133,7 @@ function drawIngressCard(card: IngressCard, tc: HeldContext, path: string, previ
       hooks: ["held-right"],
       waving: false,
       strip: [head],
-      content: card.content,
-      capLines: ELLIPSIS_CAP_LINES,
-      more: BUBBLE_MORE_ELLIPSIS,
+      ...card.look,
     },
     previous,
   ).bubble;

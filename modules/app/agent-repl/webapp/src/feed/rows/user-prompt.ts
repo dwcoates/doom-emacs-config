@@ -62,9 +62,7 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
           variant: "user",
           hooks: ["user"],
           waving: promptWaves(msg),
-          corner: [drawPromptCopyControl(body.blocks, `${PATH}.success.body.blocks`)],
-          content: drawFeedUserPromptBody(body, `${PATH}.success.body`, knownCommandsMark(msg)),
-          capLines: USER_PROMPT_CAP_LINES,
+          ...userPromptLook(body, `${PATH}.success.body`, knownCommandsMark(msg)),
         },
         previous,
       ).bubble;
@@ -72,6 +70,38 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
     default:
       return unreachableArm(`${PATH}.result`, result.case);
   }
+}
+
+/** The parts of a bubble that draw what a person typed as a user prompt does. */
+export interface UserPromptLook {
+  /** The copy control, floated at the bubble's top right. */
+  corner: HTMLElement[];
+  /** The blocks the person composed, through the one body pipeline. */
+  content: HTMLElement[];
+  /** The unbounded fold: folded, the whole prompt shows. */
+  capLines: typeof USER_PROMPT_CAP_LINES;
+}
+
+/**
+ * The look of a held card, which draws a person's words as `userPromptLook`
+ * does, or something with no drawn blocks to copy (a held session act, an
+ * editor's own ingress entry) with no copy control.
+ */
+export type HeldPromptLook = Omit<UserPromptLook, "corner"> & Partial<Pick<UserPromptLook, "corner">>;
+
+/**
+ * THE USER PROMPT'S LOOK, the one source of it (owner request, 2026-10-25):
+ * every bubble showing words a person typed — the feed's user prompt, a held
+ * prompt and an ingress prompt (src/held) — draws BODY's blocks, the copy
+ * control over them, and the unbounded fold from here, so the kinds differ
+ * only in their fill, their header strip and their footer.
+ */
+export function userPromptLook(body: FeedUserPromptBody, path: string, mark?: SlotMark): UserPromptLook {
+  return {
+    corner: [drawPromptCopyControl(body.blocks, `${path}.blocks`)],
+    content: drawFeedUserPromptBody(body, path, mark),
+    capLines: USER_PROMPT_CAP_LINES,
+  };
 }
 
 /**

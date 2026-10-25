@@ -10,8 +10,8 @@
  *     thinking/pear/green ladder, the compaction divider's own color, a
  *     user prompt's permanent purple, an agent-to-agent prompt's amber, an
  *     ended turn's red, and a held prompt's NONE) — the exceptions are the
- *     backgrounds the owner names: the held prompt's, 5% of its grey-blue
- *     tint over the feed, and a thinking or interim response's, the page's
+ *     backgrounds the owner names: the held prompt's darker blue
+ *     (2026-10-25), and a thinking or interim response's, the page's
  *     own `--bg` (2026-10-08), and a selected bubble's grey (2026-10-11);
  *   - its HEADER STRIP: the elements above the scroll box (a prompt's address
  *     and delivery line, a peer's label, a notice heading, a held prompt's
@@ -23,7 +23,7 @@
  *   - its MORE SIGNAL, how a collapsed bubble says there is more: the shared
  *     bottom fade, or the one-line ELLIPSIS (`BUBBLE_MORE_ELLIPSIS`);
  *   - its EXPAND-ONLY chrome: what the reader sees only once the bubble is
- *     opened (a held prompt's details and actions), hidden while collapsed;
+ *     opened, hidden while collapsed;
  *   - the WORKING wave, which only a prompt can carry: the spec types make a
  *     waving response unrepresentable rather than merely unlikely.
  *
@@ -53,7 +53,7 @@ export type BubbleRole = "prompt" | "response";
 /** The response kinds: purple, left rail. */
 export type ResponseVariant = "response" | "thinking" | "agentic" | "compaction";
 
-/** The prompt kinds: blue (a held prompt grey-blue), right rail. */
+/** The prompt kinds: blue (a held prompt a darker blue), right rail. */
 export type PromptVariant = "user" | "agent" | "peer" | "held";
 
 /** Every bubble variant, for the suite to hold the stylesheet's rules to. */
@@ -70,8 +70,8 @@ export const BUBBLE_VARIANTS = {
 
 /**
  * A CAPPED bubble's collapsed line limit: the shared feed cap, no limit at all
- * (`BUBBLE_FOLD_UNBOUNDED`: a user or subagent prompt), one line (a held
- * prompt), or none past the header strip (a peer message). Each kind states
+ * (`BUBBLE_FOLD_UNBOUNDED`: a user, held or subagent prompt), one line (a
+ * thinking or interim response), or none past the header strip (a peer message). Each kind states
  * its limit itself, never through another kind's constant, so changing one
  * kind's cap never moves another's. A closed set, because the stylesheet maps
  * each value to its line count, or lifts the cap for the unbounded fold

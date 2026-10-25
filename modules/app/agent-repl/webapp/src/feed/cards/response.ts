@@ -362,8 +362,8 @@ export function responseCapLines(u: FeedResponse): BubbleCapLines {
 /**
  * The bubble's cap: its collapsed line limit (`responseCapLines`) and its more
  * signal. A thinking or interim bubble is one line, which says "more" with the
- * one bubble's ellipsis (`BUBBLE_MORE_ELLIPSIS`), the held prompt's own
- * mechanism; every other response is uncapped.
+ * one bubble's ellipsis (`BUBBLE_MORE_ELLIPSIS`); every other response is
+ * uncapped.
  */
 export function responseCap(u: FeedResponse): BubbleCapSpec {
   if (u.thinking) return { capLines: THINKING_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS };
