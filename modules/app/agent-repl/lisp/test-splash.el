@@ -135,7 +135,7 @@ Redraws are recorded in `reloads'; centering pads to the width as Doom's does."
   (let (logged)
     (agent-repl-test-splash--with-dashboard "agent-repl-test-splash-no-such-buffer"
       (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+                 (agent-repl-test--record-into logged)))
         (agent-repl-splash-install))
       (should-not reloads))
     (should (string-match-p "elisp.splash.install: width=[0-9]+ dashboard=nil" (car logged)))))
