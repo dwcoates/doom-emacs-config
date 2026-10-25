@@ -221,6 +221,10 @@
   - State what the memory would say, so the user rules on its content and not only its existence.
 - Write the memory only after the user approves that specific change.
   - Approval of one memory change never extends to another.
+- A proposed memory change I leave unanswered is rejected.
+  - My next message not answering the proposal is the rejection, whatever else that message addresses.
+  - Never raise that same proposal again.
+  - A different memory change may still be proposed on its own merits.
 
 ## Subagents
 
