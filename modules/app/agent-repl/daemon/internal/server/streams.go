@@ -772,6 +772,7 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 		delete(s.webSeen, ws)
 	}
 	hostLive, webLive, webHop := s.participantHopsLocked(ws)
+	moving := s.movedAway[ws]
 	s.mu.Unlock()
 
 	// THE EDITOR'S HOST STREAM IS THE HELD-PROMPT EDIT'S SCOPE. The last one
@@ -792,9 +793,17 @@ func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 	if host {
 		stream = "host"
 	}
-	s.log.Info("daemon.server.participants", "a per-workspace stream edge moved the participant set",
-		dlog.Context{"workspace": string(ws), "stream": stream, "delta": delta,
-			"host_stream": hostLive, "web_stream": webLive, "web_hop": webHop})
+	fields := dlog.Context{"workspace": string(ws), "stream": stream, "delta": delta,
+		"host_stream": hostLive, "web_stream": webLive, "web_hop": webHop}
+	// A WORKSPACE MOVING TO ITS SUCCESSOR keeps the hops it had: its streams
+	// leave because the transfer notice sent them on, and the status this
+	// daemon still serves to the roster is the workspace's last true one.
+	if moving {
+		s.log.Info("daemon.server.participants", "a per-workspace stream edge of a workspace moving to its successor; its hops stand as they were",
+			fields)
+		return
+	}
+	s.log.Info("daemon.server.participants", "a per-workspace stream edge moved the participant set", fields)
 	s.publishParticipants(ws, hostLive, webHop)
 }
 
@@ -817,10 +826,13 @@ func (s *server) ReportPageUnloading(
 	s.mu.Lock()
 	delete(s.webSeen, ws)
 	hostLive, webLive, webHop := s.participantHopsLocked(ws)
+	moving := s.movedAway[ws]
 	s.mu.Unlock()
 	subject.Log.Info("daemon.server.participants", "Emacs is unloading the workspace's page; its web hop is awaited until a page connects again",
-		dlog.Context{"workspace": string(ws), "host_stream": hostLive, "web_stream": webLive, "web_hop": webHop})
-	s.publishParticipants(ws, hostLive, webHop)
+		dlog.Context{"workspace": string(ws), "host_stream": hostLive, "web_stream": webLive, "web_hop": webHop, "moving": moving})
+	if !moving {
+		s.publishParticipants(ws, hostLive, webHop)
+	}
 	resp.Result = &agentreplv1.ReportPageUnloadingResponse_Success{
 		Success: &agentreplv1.ReportPageUnloadingSuccess{},
 	}

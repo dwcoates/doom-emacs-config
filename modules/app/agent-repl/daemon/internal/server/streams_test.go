@@ -16,6 +16,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/workspace"
 )
 
@@ -1274,5 +1275,164 @@ func TestAnEmacsStreamStatingNoProcessMeasuresNoEmacs(t *testing.T) {
 	// Assert
 	if got := h.Emacs.all(); len(got) != 0 {
 		t.Fatalf("measured %v, want nothing for an Emacs stating no process", got)
+	}
+}
+
+// participantRecords is a logger that also hands every participant record to
+// a channel, so a test can wait on an edge the server records but, for a
+// moving workspace, does not publish.
+type participantRecords struct {
+	recordingLogger
+	edges chan logRecord
+}
+
+func (l *participantRecords) Info(op, msg string, c dlog.Context) {
+	l.recordingLogger.Info(op, msg, c)
+	if op == "daemon.server.participants" {
+		l.edges <- logRecord{Level: "INFO", Operation: op, Message: msg, Context: c}
+	}
+}
+
+func (l *participantRecords) With(dlog.Context) dlog.Logger { return l }
+
+// awaitEdge waits for the next participant record of STREAM.
+func (l *participantRecords) awaitEdge(t *testing.T, stream string) logRecord {
+	t.Helper()
+	for {
+		select {
+		case rec := <-l.edges:
+			if rec.Context["stream"] == stream {
+				return rec
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no participant record for the %s stream", stream)
+		}
+	}
+}
+
+func movingHarness(t *testing.T) (*harness, *participantRecords) {
+	t.Helper()
+	log := &participantRecords{edges: make(chan logRecord, 64)}
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	return h, log
+}
+
+// TestAMovingWorkspacesStreamClosingStatesNoHop pins the handover's silence:
+// once the transfer notice is pushed, a stream leaving is the workspace moving
+// to its successor, and stating it as a hop down painted every roster row
+// severed on every handover (2026-10-24).
+func TestAMovingWorkspacesStreamClosingStatesNoHop(t *testing.T) {
+	tests := []struct {
+		name string
+		open func(t *testing.T, h *harness, ctx context.Context)
+		hop  string
+	}{
+		{name: "the host stream", open: func(t *testing.T, h *harness, ctx context.Context) { openHostStream(t, h, ctx) }, hop: "host"},
+		{name: "the web stream", open: func(t *testing.T, h *harness, ctx context.Context) { openWebStream(t, h, ctx) }, hop: "web"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h, log := movingHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			tt.open(t, h, ctx)
+			log.awaitEdge(t, tt.hop)
+			h.Footer.AwaitEdge(t)
+			h.Topbar.AwaitEdge(t)
+			footerBefore, topbarBefore := len(h.Footer.Participants()), len(h.Topbar.Participants())
+			h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+
+			// Act
+			cancel()
+			rec := log.awaitEdge(t, tt.hop)
+
+			// Assert
+			if rec.Message != "a per-workspace stream edge of a workspace moving to its successor; its hops stand as they were" {
+				t.Fatalf("close record = %q, want the moving workspace's", rec.Message)
+			}
+			if got := len(h.Footer.Participants()); got != footerBefore {
+				t.Fatalf("footer edges = %d, want %d: a moving workspace's close states no hop", got, footerBefore)
+			}
+			if got := len(h.Topbar.Participants()); got != topbarBefore {
+				t.Fatalf("topbar edges = %d, want %d: a moving workspace's close states no hop", got, topbarBefore)
+			}
+		})
+	}
+}
+
+// TestATakenBackWorkspaceStatesItsHopsAsTheyAre pins the take-back's other
+// half: the edges counted while it was moving were never stated, so the
+// retraction states the hops as they stand now.
+func TestATakenBackWorkspaceStatesItsHopsAsTheyAre(t *testing.T) {
+	// Arrange: the host stream left while the workspace was moving.
+	h, log := movingHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	openHostStream(t, h, ctx)
+	log.awaitEdge(t, "host")
+	h.Footer.AwaitEdge(t)
+	h.Topbar.AwaitEdge(t)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+	cancel()
+	log.awaitEdge(t, "host")
+
+	// Act
+	h.Server.RetractTransferred(testWorkspaceID)
+
+	// Assert
+	if edge := h.Footer.AwaitEdge(t); edge.Host || edge.WS != testWorkspaceID {
+		t.Fatalf("footer edge = %+v, want the host hop stated down as it is now", edge)
+	}
+	if edge := h.Topbar.AwaitEdge(t); edge.Host || edge.WS != testWorkspaceID {
+		t.Fatalf("topbar edge = %+v, want the host hop stated down as it is now", edge)
+	}
+}
+
+// TestAWorkspaceServedAgainStatesItsEdgesOnceMore pins that the silence ends
+// with the move: after the take-back, a stream edge is stated as ever.
+func TestAWorkspaceServedAgainStatesItsEdgesOnceMore(t *testing.T) {
+	// Arrange
+	h, log := movingHarness(t)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+	h.Server.RetractTransferred(testWorkspaceID)
+	h.Footer.AwaitEdge(t) // the retraction's own statement
+
+	// Act
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	openHostStream(t, h, ctx)
+
+	// Assert
+	if rec := log.awaitEdge(t, "host"); rec.Message != "a per-workspace stream edge moved the participant set" {
+		t.Fatalf("open record = %q, want an ordinary edge", rec.Message)
+	}
+	if edge := h.Footer.AwaitEdge(t); !edge.Host {
+		t.Fatalf("footer edge = %+v, want the host hop stated live", edge)
+	}
+}
+
+// TestAMovingWorkspacesPageUnloadStatesNoHop pins the same silence on the
+// page-unload edge.
+func TestAMovingWorkspacesPageUnloadStatesNoHop(t *testing.T) {
+	// Arrange
+	h, log := movingHarness(t)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+	before := len(h.Footer.Participants())
+
+	// Act
+	reportPageUnloading(t, h)
+
+	// Assert
+	if got := len(h.Footer.Participants()); got != before {
+		t.Fatalf("footer edges = %d, want %d: a moving workspace's unload states no hop", got, before)
+	}
+	found := false
+	for _, rec := range log.at("INFO") {
+		if rec.Operation == "daemon.server.participants" && rec.Context["moving"] == true {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no participant record naming the move among %v", log.at("INFO"))
 	}
 }

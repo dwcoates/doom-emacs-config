@@ -332,6 +332,11 @@ type server struct {
 	// (participantHops). Scoped to the host stream: the last host close
 	// forgets it.
 	webSeen map[ids.WorkspaceID]bool
+	// movedAway is every workspace whose transfer notice this daemon pushed
+	// and has not retracted. Its stream edges from then on are the move, not
+	// its connectivity: they are counted, never published (holdParticipant).
+	// Guarded by mu.
+	movedAway map[ids.WorkspaceID]bool
 	// evals correlates the evaluations pushed to editors with their answers
 	// (evaluate.go).
 	evals *editorEvals
@@ -564,6 +569,7 @@ func New(deps Deps) (Server, error) {
 		evalDeadline:        evaluationDeadline,
 		webHeld:             make(map[ids.WorkspaceID]int),
 		webSeen:             make(map[ids.WorkspaceID]bool),
+		movedAway:           make(map[ids.WorkspaceID]bool),
 		watchTokens:         make(map[string]tokenTarget),
 		pages:               make(map[string]*pageStream),
 		hostIdentityAwaited: make(map[ids.WorkspaceID]time.Time),
@@ -785,6 +791,13 @@ func (s *server) pushSelectRequested(ws ids.WorkspaceID) int {
 // record, a window that expired could not say whether anyone was told
 // (2026-10-12).
 func (s *server) PushTransferred(ws ids.WorkspaceID, successorAddress string) {
+	// THE MARK PRECEDES THE NOTICE, so every stream edge the notice causes
+	// finds it: the participants leaving now are the workspace moving to its
+	// successor, and drawing them as a hop down painted every row severed on
+	// every handover (2026-10-24).
+	s.mu.Lock()
+	s.movedAway[ws] = true
+	s.mu.Unlock()
 	live := s.Participants(ws)
 	s.log.Info("daemon.server.transferred", "announced the workspace's transfer",
 		dlog.Context{
@@ -821,8 +834,17 @@ func (s *server) RetractTransferred(ws ids.WorkspaceID) {
 	web := s.webTopic(ws).ClearIf(func(push *agentreplv1.WatchWebWorkspaceResponse) bool {
 		return push.GetTransferred() != nil
 	})
+	// SERVED HERE AGAIN, ITS HOPS ARE STATED AGAIN: the edges counted while it
+	// was moving were never published, so the resolvers still hold the hops
+	// from before the notice.
+	s.mu.Lock()
+	delete(s.movedAway, ws)
+	hostLive, webLive, webHop := s.participantHopsLocked(ws)
+	s.mu.Unlock()
 	s.log.Info("daemon.server.transfer_retracted", "withdrew the workspace's transfer notice; it is served here again",
-		dlog.Context{"workspace": string(ws), "host_retracted": host, "web_retracted": web})
+		dlog.Context{"workspace": string(ws), "host_retracted": host, "web_retracted": web,
+			"host_stream": hostLive, "web_stream": webLive, "web_hop": webHop})
+	s.publishParticipants(ws, hostLive, webHop)
 }
 
 // Participants reports which of a workspace's two per-workspace streams are
