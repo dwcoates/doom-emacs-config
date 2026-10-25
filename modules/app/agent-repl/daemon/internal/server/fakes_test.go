@@ -2281,8 +2281,10 @@ func (f *fakeOpenWorld) deps() opentabs.Deps {
 			return &frontendv1.RosterRow{Workspace: &frontendv1.RosterRowWorkspace{
 				Workspace: &workspacev1.WorkspaceRef{Id: string(ws)}}}, 1, true
 		},
-		Now: time.Now,
-		Log: dlog.NewTestLogger(),
+		// Every workspace has a row, so none is listed as a thread.
+		Thread: func(ids.WorkspaceID) (uint64, bool) { return 0, false },
+		Now:    time.Now,
+		Log:    dlog.NewTestLogger(),
 	}
 }
 
