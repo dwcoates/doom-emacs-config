@@ -65,7 +65,7 @@ async function click(control: Element | null): Promise<void> {
 describe("the app switcher", () => {
   it.each([
     ["Workspaces", false],
-    ["Chat", true],
+    ["Chats", true],
   ])("titles the rail %s and marks it in the menu", async (title, chat) => {
     // Arrange / Act
     const host = mount([chat ? roster({ chat: [] }) : roster()]);
@@ -91,7 +91,7 @@ describe("the app switcher", () => {
     // Act
     await click(host.querySelector("[data-app-title]"));
     const opened = menu?.hidden === false;
-    await click(host.querySelector('[data-app-option="Chat"]'));
+    await click(host.querySelector('[data-app-option="Chats"]'));
 
     // Assert
     expect(opened).toBe(true);

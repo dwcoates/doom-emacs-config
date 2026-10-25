@@ -1560,9 +1560,6 @@ fields."
   "Decode `RosterAppSwitcherOption''s `label' field VALUE as its text."
   (agent-repl-wire-decode-roster-text "RosterAppSwitcherOptionLabel" value))
 
-(defun agent-repl-wire-decode-roster-app-switcher-option-hint (value)
-  "Decode `RosterAppSwitcherOption''s `hint' field VALUE as its text."
-  (agent-repl-wire-decode-roster-text "RosterAppSwitcherOptionHint" value))
 
 (defun agent-repl-wire-decode-roster-app-switcher-option-shown (value)
   "Decode VALUE as the empty `RosterAppSwitcherOptionShown' and return t."
@@ -1570,17 +1567,14 @@ fields."
   t)
 
 (defun agent-repl-wire-decode-roster-app-switcher-option (value)
-  "Decode VALUE as `RosterAppSwitcherOption', `(:label :hint :app :shown)'."
+  "Decode VALUE as `RosterAppSwitcherOption', `(:label :app :shown)'."
   (let ((object (agent-repl-wire--object "RosterAppSwitcherOption" value)))
-    (agent-repl-wire--check-keys "RosterAppSwitcherOption" object '(label hint app shown))
+    (agent-repl-wire--check-keys "RosterAppSwitcherOption" object '(label app shown))
     (agent-repl-wire--decoded
      "RosterAppSwitcherOption"
      (list :label (agent-repl-wire--decode-message
                    "RosterAppSwitcherOption" 'label object
                    #'agent-repl-wire-decode-roster-app-switcher-option-label)
-           :hint (agent-repl-wire--decode-message
-                  "RosterAppSwitcherOption" 'hint object
-                  #'agent-repl-wire-decode-roster-app-switcher-option-hint)
            :app (agent-repl-wire--decode-message
                  "RosterAppSwitcherOption" 'app object #'agent-repl-wire-decode-sidebar-app)
            :shown (agent-repl-wire--decode-optional-message

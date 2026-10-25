@@ -40,9 +40,14 @@ import { drawThreadMenu, type VerbTarget } from "./verbs.js";
 
 /** The switcher drawn in the rail's head. */
 export interface AppSwitcher {
-  /** The title button, which stands where the title did. */
+  /**
+   * The title's anchor, which stands where the title did: the title button
+   * and the apps menu hung centered under it (styles.css).
+   */
+  element: HTMLElement;
+  /** The title button. */
   title: HTMLElement;
-  /** The apps menu, hung under the head. */
+  /** The apps menu. */
   menu: HTMLElement;
   /** Draw the roster's switcher: the title, and the menu's options. */
   update(switcher: RosterAppSwitcher): void;
@@ -73,6 +78,9 @@ export function createAppSwitcher(ctx: DaemonContext, dropdowns: Dropdowns): App
   menu.className = "sb-apps-menu";
   menu.setAttribute("data-apps-menu", "");
   menu.hidden = true;
+  const anchor = document.createElement("span");
+  anchor.className = "sb-title-anchor";
+  anchor.append(title, menu);
 
   const close = (): void => {
     menu.hidden = true;
@@ -101,6 +109,7 @@ export function createAppSwitcher(ctx: DaemonContext, dropdowns: Dropdowns): App
   };
 
   return {
+    element: anchor,
     title,
     menu,
     update(switcher) {
@@ -115,10 +124,7 @@ export function createAppSwitcher(ctx: DaemonContext, dropdowns: Dropdowns): App
         check.textContent = option.shown === undefined ? "" : "✓";
         const text = document.createElement("span");
         text.textContent = label;
-        const hint = document.createElement("span");
-        hint.className = "sb-app-hint";
-        hint.textContent = requireMessage(option.hint, `RosterAppSwitcher.options[${i}].hint`).text;
-        button.append(check, text, hint);
+        button.append(check, text);
         button.addEventListener("click", () => show(app, label));
         return button;
       });

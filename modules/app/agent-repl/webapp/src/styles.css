@@ -49,6 +49,10 @@
      BELOW --card so the row-hover and detail-panel washes (both --card) still
      read as a further lift over the rail instead of inverting against it. */
   --sidebar-bg: #ffffff;
+  /* The rail's dropdowns (the apps menu): a shade off the rail so the menu
+     reads as its own surface, kept BELOW --card so an option's hover wash
+     still lifts off it. */
+  --sidebar-menu-bg: #f7f8fa;
   /* The lift under the floating workspaces rail (#ws-sidebar): a soft,
      low-opacity drop shadow that reads as the rail hovering above the feed
      rather than sharing its plane. color-mix keeps it theme-tunable — the
@@ -530,6 +534,8 @@
     /* Claude's sidebar, darker than the feed, so the rail recedes behind the
        conversation while its --card hover/detail washes lift off it. */
     --sidebar-bg: #111110;
+    /* A little lighter than the rail, and below --card's hover wash. */
+    --sidebar-menu-bg: #1b1b1a;
     /* Deeper than the light theme's shadow: a faint drop shadow reads as
        nothing against the dark feed, so the rail's lift needs a heavier black
        to still register. */
@@ -9566,9 +9572,15 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 #ws-sidebar:not(.sb-hover-suspended) ar-button.sb-title:hover, #ws-sidebar ar-button.sb-title.open { background: var(--card); }
 #ws-sidebar .sb-title-caret { color: var(--muted); font-size: 0.75em; transition: transform .15s; }
 #ws-sidebar ar-button.sb-title.open .sb-title-caret { transform: rotate(180deg); }
+/* THE MENU HANGS FROM THE TITLE'S ANCHOR, centered under it whatever the
+   title's width. The anchor is centered in the head (align-items), so its
+   top is half the head less half its own height, and the menu's top keeps
+   the menu 6px above the head's bottom rule. */
+#ws-sidebar .sb-title-anchor { position: relative; display: inline-flex; }
 #ws-sidebar .sb-apps-menu {
-  position: absolute; top: calc(var(--topbar-h) - 6px); left: 34px; min-width: 200px;
-  background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: 8px;
+  position: absolute; top: calc(50% + var(--topbar-h) / 2 - 6px); left: 50%;
+  transform: translateX(-50%); width: max-content; white-space: nowrap;
+  background: var(--sidebar-menu-bg); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: var(--sidebar-shadow); padding: 4px; z-index: 5;
 }
 #ws-sidebar .sb-apps-menu ar-button {
@@ -9578,7 +9590,6 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 }
 #ws-sidebar:not(.sb-hover-suspended) .sb-apps-menu ar-button:hover { background: var(--card); }
 #ws-sidebar .sb-app-check { width: 12px; color: var(--muted); }
-#ws-sidebar .sb-app-hint { margin-left: auto; font-size: 11px; color: var(--muted); }
 #ws-sidebar .sb-threads { display: flex; flex-direction: column; padding: 4px 0 12px; }
 #ws-sidebar .sb-new-thread {
   margin: 4px 12px 10px; display: flex; align-items: center; gap: 8px;

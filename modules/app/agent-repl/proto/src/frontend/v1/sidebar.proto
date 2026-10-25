@@ -161,16 +161,20 @@ message RosterAppSwitcher {
 
 // The rail title's text.
 message RosterAppSwitcherTitle {
-  // The text, verbatim ("Workspaces", "Chat").
+  // The text, verbatim ("Workspaces", "Chats").
   string text = 1;
 }
 
 // One app in the switcher's dropdown.
+//
+// `hint` (field 2) is RETIRED and reserved: the dim line naming the app's
+// system beside its name was dropped (owner request, 2026-10-25), so an
+// option draws its name alone.
 message RosterAppSwitcherOption {
+  reserved 2;
+  reserved "hint";
   // The app's name, drawn as the option.
   RosterAppSwitcherOptionLabel label = 1;
-  // The system the app belongs to, drawn dim beside the name.
-  RosterAppSwitcherOptionHint hint = 2;
   // The app, handed back by agentrepl.v1.ShowSidebarApp when picked.
   SidebarApp app = 3;
   // Drawn with a check mark: this is the app shown.
@@ -180,12 +184,6 @@ message RosterAppSwitcherOption {
 // An option's name.
 message RosterAppSwitcherOptionLabel {
   // The name, verbatim.
-  string text = 1;
-}
-
-// An option's dim hint.
-message RosterAppSwitcherOptionHint {
-  // The hint, verbatim ("agent-repl", "zettel").
   string text = 1;
 }
 

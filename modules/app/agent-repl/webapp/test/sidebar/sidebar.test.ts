@@ -212,8 +212,14 @@ function railHead(): ReturnType<typeof drawRailHead> {
 describe("the rail's header", () => {
   it("draws the search toggle immediately left of the title", () => {
     const head = railHead();
-    const title = head.element.querySelector(".sb-title") as Element;
-    expect(title.previousElementSibling?.hasAttribute("data-search-toggle")).toBe(true);
+    const anchor = head.element.querySelector(".sb-title-anchor") as Element;
+    expect(anchor.previousElementSibling?.hasAttribute("data-search-toggle")).toBe(true);
+  });
+
+  it("hangs the apps menu from the title's anchor, so it centers under the title", () => {
+    const head = railHead();
+    const anchor = head.element.querySelector(".sb-title-anchor") as Element;
+    expect(Array.from(anchor.children, (c) => c.className)).toEqual(["sb-title", "sb-apps-menu"]);
   });
 
   it("draws the version last, right of the title", () => {
@@ -221,7 +227,7 @@ describe("the rail's header", () => {
     head.showVersion(create(RosterVersionSchema, { text: "0.129.0" }));
     const version = head.element.lastElementChild as HTMLElement;
     expect(version.className).toBe("sb-version");
-    expect(version.previousElementSibling?.className).toBe("sb-title");
+    expect(version.previousElementSibling?.className).toBe("sb-title-anchor");
   });
 
   it("hides the version until the daemon states one", () => {
