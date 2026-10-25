@@ -403,6 +403,11 @@ type Verbs interface {
 	// SetPrincipalLink records the workspace's principal link, which the
 	// topbar's summary opens, or clears it with nil.
 	SetPrincipalLink(ctx context.Context, ws ids.WorkspaceID, link *string) error
+	// SetName renames the workspace (agentrepl.v1.SetWorkspaceName): its name
+	// only, never its branch or its worktree directory. It answers the name
+	// the workspace now has, with the workspace-name prefix applied, and
+	// republishes every surface that draws the name.
+	SetName(ctx context.Context, ws ids.WorkspaceID, name string) (string, error)
 	// SetHidden moves the workspace into the roster's hidden section, or back
 	// out of it, and republishes the roster.
 	SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error
