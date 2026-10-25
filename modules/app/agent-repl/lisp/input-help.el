@@ -440,12 +440,14 @@ older load gave it, so each load points every one at the variable."
 
 (defun agent-repl--input-help-binding-context (topic)
   "Return the live keymaps TOPIC's popup reads keys from.
-`:maps' are TOPIC's `:keymaps' (an Evil state map rides inside each),
-loaded first through its `:requires'; `:global' the (STATE . MAP) pairs a
-`[remap ...]' entry resolves through, and that are searched themselves
-\(STATE nil for any state); `:leader' Doom's leader map, and `:leader-key'
-the key that opens it.  A keymap variable still unbound once its topic's
-features are loaded is a broken table, and is fatal."
+`:maps' are TOPIC's `:keymaps' as (VARIABLE . MAP) pairs (an Evil state
+map rides inside each), loaded first through its `:requires'; `:global'
+the (STATE VARIABLE . MAP) triples a `[remap ...]' entry resolves
+through, and that are searched themselves (STATE nil for any state);
+`:leader' Doom's leader map, and `:leader-key' the key that opens it.
+Each map travels with its variable, so a key found in it can be named,
+saved and changed (settings.el).  A keymap variable still unbound once
+its topic's features are loaded is a broken table, and is fatal."
   (dolist (feature (plist-get topic :requires))
     (require feature))
   (list :maps (mapcar (lambda (variable)
@@ -453,11 +455,11 @@ features are loaded is a broken table, and is fatal."
                           (agent-repl--fatal agent-repl-input-help--log-scope
                                              "elisp.input-help.context: unbound keymap=%s topic=%s"
                                              variable (plist-get topic :id)))
-                        (symbol-value variable))
+                        (cons variable (symbol-value variable)))
                       (plist-get topic :keymaps))
-        :global (list (cons "insert" evil-insert-state-map)
-                      (cons "normal" evil-normal-state-map)
-                      (cons nil (current-global-map)))
+        :global (list (cons "insert" (cons 'evil-insert-state-map evil-insert-state-map))
+                      (cons "normal" (cons 'evil-normal-state-map evil-normal-state-map))
+                      (cons nil (cons 'global-map global-map)))
         :leader doom-leader-map
         :leader-key doom-leader-key))
 
@@ -481,33 +483,47 @@ prefix event, so STATE is that state's name, or nil for a plain binding."
         (cons (match-string 1 (symbol-name first)) (seq-subseq key 1))
       (cons nil key))))
 
-(defun agent-repl--input-help-raw-keys (command context)
-  "Return COMMAND's keys in CONTEXT as (DESCRIPTION . STATE) pairs.
-STATE is the Evil state name a key is bound in, or nil for any state.
+(defun agent-repl--input-help-key-sources (command context)
+  "Return where COMMAND's keys in CONTEXT come from, one plist per key.
+Each is (:description D :state S :keymap VARIABLE :vector V): D the key
+as shown, S the Evil state it is bound in (nil for any), and VARIABLE and
+V the keymap variable and the key vector in it whose binding puts it
+there, so `(define-key (symbol-value VARIABLE) V nil)' takes it away.
 Each map of `:maps' is searched, a `[remap X]' entry standing for X's
-keys in the global maps; then the global maps and the leader themselves."
+keys in the global maps (its V is the remap entry, which every one of
+those keys shares); then the global maps and the leader themselves."
   (let (found)
-    (cl-flet ((add (key state)
-                (push (cons (agent-repl--input-help-canonical-key (key-description key)) state)
+    (cl-flet ((add (description state variable vector)
+                (push (list :description description :state state
+                            :keymap variable :vector vector)
                       found)))
-      (dolist (map (plist-get context :maps))
+      (pcase-dolist (`(,variable . ,map) (plist-get context :maps))
         (dolist (key (where-is-internal command map nil t t))
           (if (eq (aref key 0) 'remap)
-              (pcase-dolist (`(,state . ,global) (plist-get context :global))
+              (pcase-dolist (`(,state ,_ . ,global) (plist-get context :global))
                 (dolist (target (where-is-internal (aref key 1) global nil t))
-                  (add target state)))
+                  (add (agent-repl--input-help-canonical-key (key-description target))
+                       state variable key)))
             (pcase-let ((`(,state . ,rest) (agent-repl--input-help-state-key key)))
-              (add rest state)))))
-      (pcase-dolist (`(,state . ,global) (plist-get context :global))
+              (add (agent-repl--input-help-canonical-key (key-description rest))
+                   state variable key)))))
+      (pcase-dolist (`(,state ,variable . ,global) (plist-get context :global))
         (dolist (key (where-is-internal command global nil t t))
           (unless (eq (aref key 0) 'remap)
-            (add key state))))
+            (add (agent-repl--input-help-canonical-key (key-description key))
+                 state variable key))))
       (dolist (key (where-is-internal command (plist-get context :leader) nil t))
-        (push (cons (concat (plist-get context :leader-key) " "
-                            (agent-repl--input-help-canonical-key (key-description key)))
-                    nil)
-              found)))
+        (add (concat (plist-get context :leader-key) " "
+                     (agent-repl--input-help-canonical-key (key-description key)))
+             nil 'doom-leader-map key)))
     (nreverse found)))
+
+(defun agent-repl--input-help-raw-keys (command context)
+  "Return COMMAND's keys in CONTEXT as (DESCRIPTION . STATE) pairs.
+STATE is the Evil state name a key is bound in, or nil for any state
+\(`agent-repl--input-help-key-sources')."
+  (mapcar (lambda (source) (cons (plist-get source :description) (plist-get source :state)))
+          (agent-repl--input-help-key-sources command context)))
 
 (defun agent-repl--input-help-state-label (states)
   "Return the annotation for a key bound in STATES, or nil for none.
