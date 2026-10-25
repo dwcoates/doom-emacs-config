@@ -1090,7 +1090,7 @@ describe("mountFooter: a switch to the workspace", () => {
     const record = await forwardedRecord(capture, "footer.arrival-redraw-undecodable");
     expect([h.sink.reported, record.context]).toEqual([
       ["frameUndecodable"],
-      expect.objectContaining({ path: expect.any(String), cause: expect.any(String) }),
+      expect.objectContaining({ path: expect.any(String) as unknown, cause: expect.any(String) as unknown }),
     ]);
   });
 
