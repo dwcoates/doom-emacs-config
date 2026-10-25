@@ -786,6 +786,11 @@ func (f *fakeFleet) Install(_ context.Context, ws ids.WorkspaceID, c shimclient.
 	return nil
 }
 
+func (f *fakeFleet) HoldStarts(ws ids.WorkspaceID) func() {
+	f.order.record("hold_starts")
+	return func() { f.order.record("release_starts") }
+}
+
 func (f *fakeFleet) Adopt(_ context.Context, ws ids.WorkspaceID) (shimclient.Client, error) {
 	f.order.record("adopt")
 	if f.onAdopt != nil {
@@ -1503,6 +1508,17 @@ func indexOf(taken []string, step string) int {
 		}
 	}
 	return -1
+}
+
+// countOf is how many times one step was taken in a recorded sequence.
+func countOf(taken []string, step string) int {
+	n := 0
+	for _, s := range taken {
+		if s == step {
+			n++
+		}
+	}
+	return n
 }
 
 // writeFile replaces a file's whole content, for the tests that corrupt one.

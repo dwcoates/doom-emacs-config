@@ -418,6 +418,52 @@ func TestEveryFailedRelaunchReleasesTheRestartHold(t *testing.T) {
 	}
 }
 
+// TestTheRelaunchHoldsStartsFromTheStandDownThroughTheResume pins the window
+// no other start may enter: from the stand-down, through the install of the
+// sessionless replacement, to the resume that starts its session.
+func TestTheRelaunchHoldsStartsFromTheStandDownThroughTheResume(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	if err := runRelaunch(t, h, ws, ReasonRestartVerb); err != nil {
+		t.Fatalf("bounce: %v", err)
+	}
+
+	// Assert
+	taken := h.order.Taken()
+	hold, kill := indexOf(taken, "hold_starts"), indexOf(taken, "kill_session")
+	install, resume := indexOf(taken, "install"), indexOf(taken, "resume")
+	release := indexOf(taken, "release_starts")
+	if hold < 0 || release < 0 || !(hold < kill && kill < install && install < resume && resume < release) {
+		t.Fatalf("steps = %v, want starts held before the stand-down and released after the resume", taken)
+	}
+}
+
+func TestEveryFailedRelaunchReleasesTheStartHold(t *testing.T) {
+	for _, tt := range failedRelaunches {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			tt.arrange(t, h, ws)
+
+			// Act
+			err := bounceAndWait(t, h, ws, ReasonRestartVerb, false)
+
+			// Assert
+			if err == nil {
+				t.Fatal("the bounce succeeded; the case is a failure path")
+			}
+			taken := h.order.Taken()
+			if holds, releases := countOf(taken, "hold_starts"), countOf(taken, "release_starts"); holds == 0 || holds != releases {
+				t.Fatalf("steps = %v, want every start hold released", taken)
+			}
+		})
+	}
+}
+
 func TestTheNewShimsPidIsRecordedForTheNextManifest(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

@@ -217,6 +217,17 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 		}
 	}
 
+	// NO OTHER START REACHES THE WORKSPACE FROM THE STAND-DOWN TO THE RESUME.
+	// Once the old shim is down and the replacement is installed, the fleet
+	// holds a shim with no session, and any start -- an announcement reviving
+	// the recorded conversation, a prompt's revival -- would start the session
+	// on it. The resume then found the conversation taken and the bounce
+	// failed `conversation_owned` (2026-10-25, emacs-window-focus-bar: Emacs
+	// re-registered it at the handover's link-up between the install and the
+	// resume). Held here, a start waits and then finds the resumed session.
+	release := c.deps.Shims.HoldStarts(ws)
+	defer release()
+
 	if hasOld {
 		// THE STAND-DOWN IS THE POINT OF NO RETURN, so a replacement that
 		// is already dead stops the bounce here, with the old shim still

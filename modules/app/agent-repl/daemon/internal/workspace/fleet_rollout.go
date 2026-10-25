@@ -417,6 +417,17 @@ func (f *Fleet) freshSocketPath(ws ids.WorkspaceID) string {
 	return path
 }
 
+// HoldStarts takes the workspace's start gate, the one every start takes
+// (Fleet.start), and answers its release. A start asked while it is held waits
+// for the release, then re-reads liveness and finds the session the holder
+// brought up. The gate is not reentrant: the holder never starts the
+// workspace itself while holding it.
+func (f *Fleet) HoldStarts(ws ids.WorkspaceID) (release func()) {
+	gate := f.startGate(ws)
+	gate.Lock()
+	return gate.Unlock
+}
+
 // ErrInstallDeadShim is Install's refusal of a client whose process is gone.
 var ErrInstallDeadShim = errors.New("the shim to install has already exited")
 
