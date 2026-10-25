@@ -194,6 +194,34 @@ func TestABusyWaitingMergeIsSkippedAndSaysSo(t *testing.T) {
 	w.finish(t)
 }
 
+func TestAWaitingMergeHeldByAnotherLeaseIsSkippedAtInfo(t *testing.T) {
+	// Arrange: a shim restart holds C's workspace.
+	w := newWaitingWorld(t, "ws-c")
+	restart, err := w.h.db.AcquireLease(context.Background(), "ws-c", wsm.HolderRestart, wsm.PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+
+	// Act
+	w.land(t)
+	w.awaitPass(t)
+
+	// Assert
+	if got := w.git.tree("b-ws-c"); got != "base+w1" {
+		t.Fatalf("the held merge holds %s, want its base kept (base+w1)", got)
+	}
+	if !w.recorded("info", "daemon.merge.rebase_waiting", "a waiting merge's workspace is held by another lease") {
+		t.Fatal("the skip was not recorded at INFO")
+	}
+	if w.recorded("error", "daemon.merge.rebase_waiting", "") {
+		t.Fatal("the skip was recorded at ERROR")
+	}
+	if err := w.h.db.ReleaseLease(context.Background(), restart.ID); err != nil {
+		t.Fatalf("ReleaseLease: %v", err)
+	}
+	w.finish(t)
+}
+
 func TestAWaitingMergesRebaseKeepsItsPlaceInLine(t *testing.T) {
 	// Arrange
 	w := newWaitingWorld(t, "ws-c")
