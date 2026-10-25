@@ -1,6 +1,6 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), set its principal link (the url its topbar summary opens), hide or show a workspace, set its priority, retarget its parent, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended (mark it a one-shot); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a link supplied in the conversation best reflects this workspace''s task (set its principal link, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), set its principal link (the url its topbar summary opens), hide or show a workspace, set its priority, retarget its parent, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a link supplied in the conversation best reflects this workspace''s task (set its principal link, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
 argument-hint: "create | async-merge | prompt | status | list | set | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
@@ -132,11 +132,16 @@ Choose the combination from what the work needs:
 ## Marking this workspace (`workspace set`)
 
 - **ONE-SHOT.** When this workspace commits to finishing the REST of its work
-  unattended (the user said "land it when done", or the remaining work needs
-  no further input), run `workspace set here -one-shot`. The answer carries
-  the daemon's completion directive: follow it when the work is done.
-  `-not-one-shot` takes the mark back when the user re-engages. A child its
-  owner lands cannot be marked.
+  unattended, run `workspace set here -one-shot` at once, without asking. That
+  means the user told it to one-shot itself, to make this a one-shot, or to
+  land it when done, or the remaining work needs no further input. The answer
+  carries the daemon's completion directive: follow it when the work is done.
+  A child its owner lands cannot be marked.
+- **BACK FROM A ONE-SHOT.** When a workspace marked one-shot is reopened,
+  restored, or prompted for more work after it finished, or the user steps in
+  to steer it, run `workspace set here -not-one-shot` at once, without asking,
+  before doing the new work. A workspace that keeps the mark would finish
+  itself again, unattended, when the user meant to keep working in it.
 - **AWAITING CORRESPONDENCE.** When this workspace ends a turn to wait for
   another workspace W to answer (you prompted W, or W is finishing something
   this work needs), run `workspace set here -await W` before ending the turn.
