@@ -171,6 +171,79 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
                              (agent-repl--ws-get "alpha" :page-unloading))
                        '(((kept changed)) nil nil)))))))
 
+;;;; ---- Every page drop is announced ----
+
+(defconst agent-repl-test-pu--page-drops
+  '(agent-repl-webhost-remove agent-repl--frontend-detach-webview)
+  "The calls that drop a workspace's page.")
+
+(defconst agent-repl-test-pu--unannounced-drops
+  '((agent-repl--frontend-detach-webview . "the drop primitive itself; its callers announce")
+    (agent-repl--frontend-release-workspace-webview . "the workspace is ending: the daemon ended it first"))
+  "The definitions that may drop a page unannounced, each with why.")
+
+(defun agent-repl-test-pu--unannounced-drop-p (form)
+  "Non-nil when FORM calls a page drop outside `agent-repl-page-drop-announced'."
+  (cond
+   ((not (consp form)) nil)
+   ((eq (car form) 'agent-repl-page-drop-announced) nil)
+   ((memq (car form) '(declare-function quote function))
+    (and (eq (car form) 'function) (memq (cadr form) agent-repl-test-pu--page-drops)))
+   ((memq (car form) agent-repl-test-pu--page-drops) t)
+   (t (let ((found nil) (rest form))
+        (while (and (consp rest) (not found))
+          (setq found (agent-repl-test-pu--unannounced-drop-p (car rest))
+                rest (cdr rest)))
+        found))))
+
+(defun agent-repl-test-pu--unannounced-droppers (forms)
+  "The names of the definitions among FORMS that drop a page unannounced."
+  (let (out)
+    (dolist (form forms (nreverse out))
+      (when (and (consp form) (memq (car form) '(defun defmacro cl-defun))
+                 (agent-repl-test-pu--unannounced-drop-p (cdddr form)))
+        (push (cadr form) out)))))
+
+(defun agent-repl-test-pu--source-forms ()
+  "Every top-level form of agent-repl's elisp sources, tests excluded."
+  (let ((dir (file-name-directory (or load-file-name buffer-file-name
+                                      (locate-library "test-page-unload"))))
+        forms)
+    (dolist (file (directory-files dir t "\\`[^.].*\\.el\\'") forms)
+      (unless (string-prefix-p "test-" (file-name-nondirectory file))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (goto-char (point-min))
+          (condition-case nil
+              (while t (push (read (current-buffer)) forms))
+            (end-of-file nil)))))))
+
+(defvar agent-repl-test-pu--source-forms (agent-repl-test-pu--source-forms)
+  "The sources' forms, read once when this file loads.")
+
+(ert-deftest agent-repl-test-pu-every-page-drop-is-announced ()
+  "Only the named exceptions drop a page without telling the daemon first."
+  ;; Act
+  (let ((droppers (agent-repl-test-pu--unannounced-droppers agent-repl-test-pu--source-forms)))
+    ;; Assert
+    (should (equal (sort (mapcar #'symbol-name droppers) #'string<)
+                   (sort (mapcar (lambda (e) (symbol-name (car e)))
+                                 agent-repl-test-pu--unannounced-drops)
+                         #'string<)))))
+
+(ert-deftest agent-repl-test-pu-the-drop-scan-catches-a-hand-rolled-drop ()
+  "A definition that drops a page itself is found; one through the helper is not."
+  ;; Arrange
+  (let ((forms '((defun hand-rolled (ws buf) (when buf (agent-repl--frontend-detach-webview ws buf)))
+                 (defun by-symbol (ws) (mapc #'agent-repl-webhost-remove (list ws)))
+                 (defun announced (ws)
+                   (agent-repl-page-drop-announced
+                    ws #'always (lambda () (agent-repl-webhost-remove ws)) #'ignore)))))
+    ;; Act
+    (let ((droppers (agent-repl-test-pu--unannounced-droppers forms)))
+      ;; Assert
+      (should (equal droppers '(hand-rolled by-symbol))))))
+
 ;;;; ---- What counts as a look ----
 
 (ert-deftest agent-repl-test-pu-a-page-shown-past-the-dwell-is-looked-at ()

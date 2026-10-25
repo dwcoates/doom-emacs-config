@@ -52,6 +52,7 @@
 (declare-function agent-repl--ensure-input-buffer "panels" (ws))
 (declare-function agent-repl--frontend-precreate-webview "frontend" (ws))
 (declare-function agent-repl--frontend-detach-webview "frontend" (ws buf))
+(declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
 (declare-function agent-repl-open-progress-note-loaded "open-progress" (ws))
 (declare-function agent-repl-rpc-open-tabs "rpc" (conn workspaces on-push on-close))
 (declare-function agent-repl-link-primary "daemon-link" ())
@@ -301,13 +302,28 @@ Outside a walk the order is re-derived at once; a walk derives it itself."
     (agent-repl-roster-refresh-order)))
 
 (defun agent-repl-open-tabs--hide (row)
-  "Drop open ROW's page, now that it is hidden: it shows nothing."
+  "Drop open ROW's page, now that it is hidden: it shows nothing.
+The tab goes dormant at once; the page goes once the daemon is told
+\(`agent-repl-page-drop-announced'), so the workspace, which stays open
+and may be running a turn, is never drawn severed.  A row shown again
+while the report was in flight keeps its page."
   (let* ((name (plist-get row :name))
+         (id (plist-get row :id))
          (buf (agent-repl--ws-get name :frontend-buffer)))
-    (agent-repl-open-tabs--dormant (plist-get row :id))
+    (agent-repl-open-tabs--dormant id)
     (agent-repl--info name "elisp.open-tabs.hidden ws=%s page=%s" name (buffer-live-p buf))
     (when (buffer-live-p buf)
-      (agent-repl--frontend-detach-webview name buf))))
+      (agent-repl-page-drop-announced
+       name
+       (lambda ()
+         (and (eq (gethash id agent-repl-open-tabs--state) 'dormant)
+              (eq (agent-repl--ws-get name :frontend-buffer) buf)
+              (buffer-live-p buf)))
+       (lambda ()
+         (agent-repl--frontend-detach-webview name buf)
+         (agent-repl--info name "elisp.open-tabs.page-dropped ws=%s" name))
+       (lambda (why)
+         (agent-repl--info name "elisp.open-tabs.page-kept ws=%s why=%s" name why))))))
 
 (defun agent-repl-open-tabs-reconcile (rows)
   "Bring every open in line with the roster walk's ROWS, then ask for the owed.

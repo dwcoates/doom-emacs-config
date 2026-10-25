@@ -996,18 +996,54 @@ must be rejected before the daemon is ever contacted."
 
 ;;;; ---- close-panel ------------------------------------------------------------------
 
+(defmacro agent-repl-test-frontend--closing-panel (answer &rest body)
+  "Run BODY with ws1 current, holding live webview `buf', the daemon answering ANSWER.
+ANSWER is `reported' or `refused'.  `events' collects (report WS) and
+(drop WS), oldest first."
+  (declare (indent 1))
+  `(agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+     (let ((buf (generate-new-buffer "*fake-webview*"))
+           (events nil))
+       (agent-repl--ws-put "ws1" :frontend-buffer buf)
+       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                 ((symbol-function 'agent-repl-host-report-page-unloading)
+                  (lambda (ws on-reported on-not-reported)
+                    (setq events (append events (list (list 'report ws))))
+                    (if (eq ,answer 'reported) (funcall on-reported) (funcall on-not-reported))))
+                 ((symbol-function 'agent-repl-webhost-remove)
+                  (lambda (ws) (setq events (append events (list (list 'drop ws)))))))
+         (unwind-protect (progn ,@body)
+           (when (buffer-live-p buf) (kill-buffer buf)))))))
+
 (ert-deftest agent-repl-test-frontend-close-panel-kills-and-clears ()
   "close-panel kills the webview and clears its plist key."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*fake-webview*")))
-      (agent-repl--ws-put "ws1" :frontend-buffer buf)
-      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
+  (agent-repl-test-frontend--closing-panel 'reported
+    ;; Act
+    (agent-repl-frontend-close-panel)
+    ;; Assert
+    (should-not (buffer-live-p buf))
+    (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))))
+
+(ert-deftest agent-repl-test-frontend-close-panel-tells-the-daemon-first ()
+  "close-panel reports the page unloading before it drops the page."
+  (agent-repl-test-frontend--closing-panel 'reported
+    ;; Act
+    (agent-repl-frontend-close-panel)
+    ;; Assert
+    (should (equal events '((report "ws1") (drop "ws1"))))))
+
+(ert-deftest agent-repl-test-frontend-close-panel-whose-report-did-not-land-keeps-the-webview ()
+  "A report the daemon did not take keeps the webview, and records why."
+  (agent-repl-test-frontend--closing-panel 'refused
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into logged)))
         ;; Act
         (agent-repl-frontend-close-panel)
         ;; Assert
-        (should-not (buffer-live-p buf))
-        (should (null (agent-repl--ws-get "ws1" :frontend-buffer)))))))
+        (should (equal (list (buffer-live-p buf) (eq (agent-repl--ws-get "ws1" :frontend-buffer) buf) events)
+                       '(t t ((report "ws1")))))
+        (should (seq-some (lambda (text) (string-search "elisp.frontend.close-panel-kept ws=ws1 why=not-reported" text))
+                          logged))))))
 
 (ert-deftest agent-repl-test-frontend-detach-webview-kills-and-clears ()
   "Detaching a webview both kills the buffer and clears the plist key.

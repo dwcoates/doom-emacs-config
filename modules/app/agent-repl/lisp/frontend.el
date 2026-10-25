@@ -131,6 +131,7 @@
 (declare-function agent-repl-page-unload-note-mounted "page-unload" (ws))
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-remove "webhost" (ws))
+(declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
 (declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
 (declare-function agent-repl-webhost-reload-page "webhost" (ws))
 (declare-function agent-repl-webhost-show "webhost" (ws))
@@ -362,7 +363,9 @@ would hand a dead buffer to the next mount, and a cleared key over a live
 buffer would leak a WKWebView holding an open WebSocket.  Every site that
 takes a workspace\='s webview down for a later remount — close-panel, the
 bundle remount, the restart verb\='s bounce — goes through here so neither
-half can be forgotten at one of them.
+half can be forgotten at one of them.  The workspace stays open, so every
+such site calls this only once the daemon is told
+\(`agent-repl-page-drop-announced').
 
 The kill path deliberately does NOT: tombstoning nils the plist keys
 itself, and the put would resurrect the record."
@@ -1551,8 +1554,21 @@ workspace kill path (`agent-repl-ws-del-hook')."
       (agent-repl--log ws "close-panel: rejected=no-live-webview")
       (user-error "agent-repl: no webview open for workspace %s" ws))
     (agent-repl--log ws "close-panel: killing buf=%s" (buffer-name buf))
-    (agent-repl--frontend-detach-webview ws buf)
-    (agent-repl--user-message ws "webview closed (session kept)" nil)))
+    ;; THE WORKSPACE STAYS OPEN, so the daemon is told before its page goes.
+    (agent-repl-page-drop-announced
+     ws
+     (lambda () (eq (agent-repl--ws-get ws :frontend-buffer) buf))
+     (lambda ()
+       (agent-repl--frontend-detach-webview ws buf)
+       (agent-repl--user-message ws "webview closed (session kept)" nil))
+     (lambda (why)
+       (agent-repl--info ws "elisp.frontend.close-panel-kept ws=%s why=%s" ws why)
+       (agent-repl--user-message
+        ws (pcase why
+             ('not-reported "webview kept: the daemon was not told it was closing")
+             ('changed "webview kept: it was remounted while closing")
+             (_ (error "Unknown kept reason %S" why)))
+        nil)))))
 
 ;;;; ---- Workspace teardown -----------------------------------------------------
 
