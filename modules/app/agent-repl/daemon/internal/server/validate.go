@@ -1142,6 +1142,9 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 	if req.GetAction() == nil {
 		return invalid("action", "a merge-queue action arm is required")
 	}
+	if err := validateWorkspaceRequester("requester", req.GetRequester()); err != nil {
+		return err
+	}
 	if pause := req.GetPause(); pause != nil && pause.Repository != nil {
 		return validateRepositoryRef("pause.repository", pause.GetRepository())
 	}

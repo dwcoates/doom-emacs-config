@@ -68,7 +68,7 @@ func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackI
 	})
 
 	// Act (Bug 2): B, taken back but not resumed, is evicted on the successor.
-	resp, err := successor.UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	resp, err := successor.UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: b.ws}},
 	}))
 	requireRPCSuccess(t, "UpdateMergeQueue(evict beta)", resp, err)

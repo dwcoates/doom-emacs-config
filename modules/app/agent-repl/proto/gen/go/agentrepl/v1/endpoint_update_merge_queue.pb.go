@@ -41,7 +41,13 @@ type UpdateMergeQueueRequest struct {
 	//	*UpdateMergeQueueRequest_MoveDown
 	//	*UpdateMergeQueueRequest_DisableRacing
 	//	*UpdateMergeQueueRequest_EnableRacing
-	Action        isUpdateMergeQueueRequest_Action `protobuf_oneof:"action"`
+	Action isUpdateMergeQueueRequest_Action `protobuf_oneof:"action"`
+	// WHO ASKED. REQUIRED: the user (the editor, the webapp) or a workspace's
+	// agent (`agent-repld`'s command line). Every action on a queue is recorded
+	// with it, so a merge that leaves the queue is never unaccounted for: an
+	// eviction recorded only as "the operator" could not be told from a loss
+	// (2026-10-24). (Added 2026-10-24.)
+	Requester     *WorkspaceRequester `protobuf:"bytes,13,opt,name=requester,proto3" json:"requester,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -142,6 +148,13 @@ func (x *UpdateMergeQueueRequest) GetEnableRacing() *UpdateMergeQueueEnableRacin
 		if x, ok := x.Action.(*UpdateMergeQueueRequest_EnableRacing); ok {
 			return x.EnableRacing
 		}
+	}
+	return nil
+}
+
+func (x *UpdateMergeQueueRequest) GetRequester() *WorkspaceRequester {
+	if x != nil {
+		return x.Requester
 	}
 	return nil
 }
@@ -1246,7 +1259,7 @@ var File_agentrepl_v1_endpoint_update_merge_queue_proto protoreflect.FileDescrip
 
 const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\n" +
-	".agentrepl/v1/endpoint_update_merge_queue.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xec\x04\n" +
+	".agentrepl/v1/endpoint_update_merge_queue.proto\x12\fagentrepl.v1\x1a%agentrepl/v1/workspace_topology.proto\x1a\x1cworkspace/v1/workspace.proto\"\xac\x05\n" +
 	"\x17UpdateMergeQueueRequest\x12;\n" +
 	"\x05pause\x18\x01 \x01(\v2#.agentrepl.v1.UpdateMergeQueuePauseH\x00R\x05pause\x12>\n" +
 	"\x06resume\x18\x02 \x01(\v2$.agentrepl.v1.UpdateMergeQueueResumeH\x00R\x06resume\x12;\n" +
@@ -1255,7 +1268,8 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\tmove_down\x18\b \x01(\v2&.agentrepl.v1.UpdateMergeQueueMoveDownH\x00R\bmoveDown\x12T\n" +
 	"\x0edisable_racing\x18\t \x01(\v2+.agentrepl.v1.UpdateMergeQueueDisableRacingH\x00R\rdisableRacing\x12Q\n" +
 	"\renable_racing\x18\n" +
-	" \x01(\v2*.agentrepl.v1.UpdateMergeQueueEnableRacingH\x00R\fenableRacingB\b\n" +
+	" \x01(\v2*.agentrepl.v1.UpdateMergeQueueEnableRacingH\x00R\fenableRacing\x12>\n" +
+	"\trequester\x18\r \x01(\v2 .agentrepl.v1.WorkspaceRequesterR\trequesterB\b\n" +
 	"\x06actionJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\v\x10\fJ\x04\b\f\x10\rR\x05frontR\rhold_rolloutsR\x10release_rolloutsR\tsubscribeR\vunsubscribe\"h\n" +
 	"\x15UpdateMergeQueuePause\x12@\n" +
 	"\n" +
@@ -1343,8 +1357,9 @@ var file_agentrepl_v1_endpoint_update_merge_queue_proto_goTypes = []any{
 	(*UpdateMergeQueueUnknownRepository)(nil),     // 18: agentrepl.v1.UpdateMergeQueueUnknownRepository
 	(*UpdateMergeQueueRacingAlreadyDisabled)(nil), // 19: agentrepl.v1.UpdateMergeQueueRacingAlreadyDisabled
 	(*UpdateMergeQueueRacingNotDisabled)(nil),     // 20: agentrepl.v1.UpdateMergeQueueRacingNotDisabled
-	(*v1.RepositoryRef)(nil),                      // 21: workspace.v1.RepositoryRef
-	(*v1.WorkspaceRef)(nil),                       // 22: workspace.v1.WorkspaceRef
+	(*WorkspaceRequester)(nil),                    // 21: agentrepl.v1.WorkspaceRequester
+	(*v1.RepositoryRef)(nil),                      // 22: workspace.v1.RepositoryRef
+	(*v1.WorkspaceRef)(nil),                       // 23: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_update_merge_queue_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.UpdateMergeQueueRequest.pause:type_name -> agentrepl.v1.UpdateMergeQueuePause
@@ -1354,28 +1369,29 @@ var file_agentrepl_v1_endpoint_update_merge_queue_proto_depIdxs = []int32{
 	7,  // 4: agentrepl.v1.UpdateMergeQueueRequest.move_down:type_name -> agentrepl.v1.UpdateMergeQueueMoveDown
 	4,  // 5: agentrepl.v1.UpdateMergeQueueRequest.disable_racing:type_name -> agentrepl.v1.UpdateMergeQueueDisableRacing
 	5,  // 6: agentrepl.v1.UpdateMergeQueueRequest.enable_racing:type_name -> agentrepl.v1.UpdateMergeQueueEnableRacing
-	21, // 7: agentrepl.v1.UpdateMergeQueuePause.repository:type_name -> workspace.v1.RepositoryRef
-	21, // 8: agentrepl.v1.UpdateMergeQueueResume.repository:type_name -> workspace.v1.RepositoryRef
-	22, // 9: agentrepl.v1.UpdateMergeQueueEvict.workspace:type_name -> workspace.v1.WorkspaceRef
-	22, // 10: agentrepl.v1.UpdateMergeQueueMoveUp.workspace:type_name -> workspace.v1.WorkspaceRef
-	22, // 11: agentrepl.v1.UpdateMergeQueueMoveDown.workspace:type_name -> workspace.v1.WorkspaceRef
-	9,  // 12: agentrepl.v1.UpdateMergeQueueResponse.success:type_name -> agentrepl.v1.UpdateMergeQueueSuccess
-	10, // 13: agentrepl.v1.UpdateMergeQueueResponse.error:type_name -> agentrepl.v1.UpdateMergeQueueError
-	11, // 14: agentrepl.v1.UpdateMergeQueueError.unknown_workspace:type_name -> agentrepl.v1.UpdateMergeQueueUnknownWorkspace
-	12, // 15: agentrepl.v1.UpdateMergeQueueError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
-	13, // 16: agentrepl.v1.UpdateMergeQueueError.transferring_away:type_name -> agentrepl.v1.UpdateMergeQueueTransferringAway
-	14, // 17: agentrepl.v1.UpdateMergeQueueError.not_yet_adopted:type_name -> agentrepl.v1.UpdateMergeQueueNotYetAdopted
-	15, // 18: agentrepl.v1.UpdateMergeQueueError.already_paused:type_name -> agentrepl.v1.UpdateMergeQueueAlreadyPaused
-	16, // 19: agentrepl.v1.UpdateMergeQueueError.not_paused:type_name -> agentrepl.v1.UpdateMergeQueueNotPaused
-	17, // 20: agentrepl.v1.UpdateMergeQueueError.no_such_queued_merge:type_name -> agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
-	18, // 21: agentrepl.v1.UpdateMergeQueueError.unknown_repository:type_name -> agentrepl.v1.UpdateMergeQueueUnknownRepository
-	19, // 22: agentrepl.v1.UpdateMergeQueueError.racing_already_disabled:type_name -> agentrepl.v1.UpdateMergeQueueRacingAlreadyDisabled
-	20, // 23: agentrepl.v1.UpdateMergeQueueError.racing_not_disabled:type_name -> agentrepl.v1.UpdateMergeQueueRacingNotDisabled
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	21, // 7: agentrepl.v1.UpdateMergeQueueRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
+	22, // 8: agentrepl.v1.UpdateMergeQueuePause.repository:type_name -> workspace.v1.RepositoryRef
+	22, // 9: agentrepl.v1.UpdateMergeQueueResume.repository:type_name -> workspace.v1.RepositoryRef
+	23, // 10: agentrepl.v1.UpdateMergeQueueEvict.workspace:type_name -> workspace.v1.WorkspaceRef
+	23, // 11: agentrepl.v1.UpdateMergeQueueMoveUp.workspace:type_name -> workspace.v1.WorkspaceRef
+	23, // 12: agentrepl.v1.UpdateMergeQueueMoveDown.workspace:type_name -> workspace.v1.WorkspaceRef
+	9,  // 13: agentrepl.v1.UpdateMergeQueueResponse.success:type_name -> agentrepl.v1.UpdateMergeQueueSuccess
+	10, // 14: agentrepl.v1.UpdateMergeQueueResponse.error:type_name -> agentrepl.v1.UpdateMergeQueueError
+	11, // 15: agentrepl.v1.UpdateMergeQueueError.unknown_workspace:type_name -> agentrepl.v1.UpdateMergeQueueUnknownWorkspace
+	12, // 16: agentrepl.v1.UpdateMergeQueueError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
+	13, // 17: agentrepl.v1.UpdateMergeQueueError.transferring_away:type_name -> agentrepl.v1.UpdateMergeQueueTransferringAway
+	14, // 18: agentrepl.v1.UpdateMergeQueueError.not_yet_adopted:type_name -> agentrepl.v1.UpdateMergeQueueNotYetAdopted
+	15, // 19: agentrepl.v1.UpdateMergeQueueError.already_paused:type_name -> agentrepl.v1.UpdateMergeQueueAlreadyPaused
+	16, // 20: agentrepl.v1.UpdateMergeQueueError.not_paused:type_name -> agentrepl.v1.UpdateMergeQueueNotPaused
+	17, // 21: agentrepl.v1.UpdateMergeQueueError.no_such_queued_merge:type_name -> agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
+	18, // 22: agentrepl.v1.UpdateMergeQueueError.unknown_repository:type_name -> agentrepl.v1.UpdateMergeQueueUnknownRepository
+	19, // 23: agentrepl.v1.UpdateMergeQueueError.racing_already_disabled:type_name -> agentrepl.v1.UpdateMergeQueueRacingAlreadyDisabled
+	20, // 24: agentrepl.v1.UpdateMergeQueueError.racing_not_disabled:type_name -> agentrepl.v1.UpdateMergeQueueRacingNotDisabled
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_merge_queue_proto_init() }
@@ -1383,6 +1399,7 @@ func file_agentrepl_v1_endpoint_update_merge_queue_proto_init() {
 	if File_agentrepl_v1_endpoint_update_merge_queue_proto != nil {
 		return
 	}
+	file_agentrepl_v1_workspace_topology_proto_init()
 	file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[0].OneofWrappers = []any{
 		(*UpdateMergeQueueRequest_Pause)(nil),
 		(*UpdateMergeQueueRequest_Resume)(nil),

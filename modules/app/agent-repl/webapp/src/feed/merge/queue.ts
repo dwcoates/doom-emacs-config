@@ -311,7 +311,13 @@ export async function moveInQueue(
     const response = await callUnary(
       rc.ctx,
       "UpdateMergeQueue",
-      (client) => client.updateMergeQueue({ action: moveAction(workspace, move) }),
+      // The webapp acts on the queue for the user alone, and says so: every
+      // queue action names who asked.
+      (client) =>
+        client.updateMergeQueue({
+          action: moveAction(workspace, move),
+          requester: { asker: { case: "user", value: {} } },
+        }),
       UpdateMergeQueueResponseSchema,
     );
     const result = requireCase(response.result, "UpdateMergeQueueResponse.result");

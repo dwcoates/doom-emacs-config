@@ -1530,11 +1530,11 @@ wire."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize
                     (agent-repl-wire-encode-update-merge-queue-request
-                     (list :action
+                     (list :requester '(:arm :user) :action
                            (list :arm :pause
                                  :value (list :repository
                                               agent-repl-test-wire-verbs--repo)))))
-                   (concat "{\"pause\":{\"repository\":"
+                   (concat "{\"requester\":{\"user\":{}},\"pause\":{\"repository\":"
                            "{\"id\":\"repo-1\",\"dir\":\"/r/one\"}}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-resume-names-its-repository ()
@@ -1542,11 +1542,11 @@ wire."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize
                     (agent-repl-wire-encode-update-merge-queue-request
-                     (list :action
+                     (list :requester '(:arm :user) :action
                            (list :arm :resume
                                  :value (list :repository
                                               agent-repl-test-wire-verbs--repo)))))
-                   (concat "{\"resume\":{\"repository\":"
+                   (concat "{\"requester\":{\"user\":{}},\"resume\":{\"repository\":"
                            "{\"id\":\"repo-1\",\"dir\":\"/r/one\"}}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-pause ()
@@ -1554,31 +1554,31 @@ wire."
 never sent as an empty ref, because unset is what means every queue."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
-                                    '(:action (:arm :pause :value nil))))
-                   "{\"pause\":{}}"))))
+                                    '(:requester (:arm :user) :action (:arm :pause :value nil))))
+                   "{\"requester\":{\"user\":{}},\"pause\":{}}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-resume ()
   "Resume with no repository is the daemon-wide switch, field omitted."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
-                                    '(:action (:arm :resume :value nil))))
-                   "{\"resume\":{}}"))))
+                                    '(:requester (:arm :user) :action (:arm :resume :value nil))))
+                   "{\"requester\":{\"user\":{}},\"resume\":{}}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-evict ()
   "An eviction names whose merge to take off the queue."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize
                     (agent-repl-wire-encode-update-merge-queue-request
-                     (list :action (list :arm :evict
+                     (list :requester '(:arm :user) :action (list :arm :evict
                                          :value (list :workspace
                                                       agent-repl-test-wire-verbs--ref)))))
-                   "{\"evict\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
+                   "{\"requester\":{\"user\":{}},\"evict\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-evict-without-workspace ()
   "An eviction with no workspace is incomplete and errors before send."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-update-merge-queue-request
-                   '(:action (:arm :evict :value nil)))
+                   '(:requester (:arm :user) :action (:arm :evict :value nil)))
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-move-up ()
@@ -1586,16 +1586,16 @@ never sent as an empty ref, because unset is what means every queue."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize
                     (agent-repl-wire-encode-update-merge-queue-request
-                     (list :action (list :arm :move-up
+                     (list :requester '(:arm :user) :action (list :arm :move-up
                                          :value (list :workspace
                                                       agent-repl-test-wire-verbs--ref)))))
-                   "{\"moveUp\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
+                   "{\"requester\":{\"user\":{}},\"moveUp\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-move-up-without-workspace ()
   "A move-up request with no workspace is incomplete and errors before send."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-update-merge-queue-request
-                   '(:action (:arm :move-up :value nil)))
+                   '(:requester (:arm :user) :action (:arm :move-up :value nil)))
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-move-down ()
@@ -1603,31 +1603,31 @@ never sent as an empty ref, because unset is what means every queue."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize
                     (agent-repl-wire-encode-update-merge-queue-request
-                     (list :action (list :arm :move-down
+                     (list :requester '(:arm :user) :action (list :arm :move-down
                                          :value (list :workspace
                                                       agent-repl-test-wire-verbs--ref)))))
-                   "{\"moveDown\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
+                   "{\"requester\":{\"user\":{}},\"moveDown\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-move-down-without-workspace ()
   "A move-down request with no workspace is incomplete and errors before send."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-update-merge-queue-request
-                   '(:action (:arm :move-down :value nil)))
+                   '(:requester (:arm :user) :action (:arm :move-down :value nil)))
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-disable-racing ()
   "A disable of racing is daemon-wide, so its message is empty."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
-                                    '(:action (:arm :disable-racing :value nil))))
-                   "{\"disableRacing\":{}}"))))
+                                    '(:requester (:arm :user) :action (:arm :disable-racing :value nil))))
+                   "{\"requester\":{\"user\":{}},\"disableRacing\":{}}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-enable-racing ()
   "An enable of racing is daemon-wide, so its message is empty."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
-                                    '(:action (:arm :enable-racing :value nil))))
-                   "{\"enableRacing\":{}}"))))
+                                    '(:requester (:arm :user) :action (:arm :enable-racing :value nil))))
+                   "{\"requester\":{\"user\":{}},\"enableRacing\":{}}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-workspace-arm-encodes-the-ref ()
   "The shared workspace-arm encoder hands the required ref to its use site."
@@ -1669,6 +1669,23 @@ helper, so a hand-rolled arm cannot drift from the others."
                    '(:arm :error
                      :value (:cause (:arm :already-paused :value nil)))))))
 
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-without-requester ()
+  "A queue action that names no requester is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-merge-queue-request
+                   '(:action (:arm :pause :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-names-an-asking-workspace ()
+  "A queue action a workspace asks for names that workspace."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-merge-queue-request
+                     (list :requester (list :arm :workspace :value agent-repl-test-wire-verbs--ref)
+                           :action '(:arm :pause :value nil))))
+                   (concat "{\"requester\":{\"workspace\":{\"workspace\":"
+                           "{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}},\"pause\":{}}")))))
 
 ;;;; ---- DaemonHealth ----------------------------------------------------
 

@@ -1300,8 +1300,20 @@ func queueDequeue(c *cliCall, args []string) int {
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
-	resp, err := c.client.UpdateMergeQueue(c.ctx, connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
-		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ref}}}))
+	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ref}}})
+}
+
+// updateMergeQueue sends one merge-queue action, naming the calling workspace
+// as its requester: the one way every queue verb asks, so none can act on a
+// queue without the daemon recording who asked.
+func (c *cliCall) updateMergeQueue(req *agentreplv1.UpdateMergeQueueRequest) int {
+	requester, ok := c.requester(false)
+	if !ok {
+		return exitFailure
+	}
+	req.Requester = requester
+	resp, err := c.client.UpdateMergeQueue(c.ctx, connect.NewRequest(req))
 	return answer(c, resp, err)
 }
 
@@ -1316,8 +1328,7 @@ func queueMove(up bool) func(c *cliCall, args []string) int {
 		if up {
 			req.Action = &agentreplv1.UpdateMergeQueueRequest_MoveUp{MoveUp: &agentreplv1.UpdateMergeQueueMoveUp{Workspace: ref}}
 		}
-		resp, err := c.client.UpdateMergeQueue(c.ctx, connect.NewRequest(req))
-		return answer(c, resp, err)
+		return c.updateMergeQueue(req)
 	}
 }
 
@@ -1336,8 +1347,7 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 		if pause {
 			req.Action = &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: scope}}
 		}
-		resp, err := c.client.UpdateMergeQueue(c.ctx, connect.NewRequest(req))
-		return answer(c, resp, err)
+		return c.updateMergeQueue(req)
 	}
 }
 
@@ -1351,8 +1361,7 @@ func queueRacing(enable bool) func(c *cliCall, args []string) int {
 		if enable {
 			req.Action = &agentreplv1.UpdateMergeQueueRequest_EnableRacing{EnableRacing: &agentreplv1.UpdateMergeQueueEnableRacing{}}
 		}
-		resp, err := c.client.UpdateMergeQueue(c.ctx, connect.NewRequest(req))
-		return answer(c, resp, err)
+		return c.updateMergeQueue(req)
 	}
 }
 

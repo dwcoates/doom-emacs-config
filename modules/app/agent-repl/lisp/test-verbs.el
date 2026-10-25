@@ -4964,3 +4964,18 @@ and the create is sent once then."
     ;; Assert
     (should (agent-repl-test-verbs--messaged-p
              "workspace creation FAILED: the daemon is standing down and created nothing; create it again once it is back"))))
+
+;;;; ---- agent-repl-verb-merge-queue: the user is who asks ----
+
+(ert-deftest agent-repl-verbs-merge-queue-names-the-user-as-its-requester ()
+  "Every queue action Emacs sends names the user as who asked."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (let (sent)
+      (cl-letf (((symbol-function 'agent-repl-verbs--conn) (lambda () 'conn))
+                ((symbol-function 'agent-repl-verbs--send)
+                 (lambda (_rpc _conn request &rest _) (setq sent request))))
+        ;; Act.
+        (agent-repl-verb-merge-queue '(:arm :pause :repository nil))
+        ;; Assert.
+        (should (equal (plist-get sent :requester) '(:arm :user)))))))

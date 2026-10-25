@@ -13,7 +13,7 @@ import (
 // switchRacing asks d to disable, or (enable) to enable, the queue's racing.
 func switchRacing(t *testing.T, d *harness.Daemon, enable bool) *agentreplv1.UpdateMergeQueueResponse {
 	t.Helper()
-	req := &agentreplv1.UpdateMergeQueueRequest{
+	req := &agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_DisableRacing{DisableRacing: &agentreplv1.UpdateMergeQueueDisableRacing{}},
 	}
 	if enable {

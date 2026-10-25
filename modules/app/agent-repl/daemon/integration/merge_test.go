@@ -120,7 +120,7 @@ func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *tes
 	repoRef := mergeRepositoryRef(t, d, repo)
 
 	// Act: pause.
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: repoRef}},
 	}))
 
@@ -128,7 +128,7 @@ func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *tes
 	requireRPCSuccess(t, "UpdateMergeQueue(pause)", resp, err)
 
 	// Act: pause again.
-	resp2, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	resp2, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: repoRef}},
 	}))
 	if err != nil {
@@ -139,13 +139,13 @@ func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *tes
 	}
 
 	// Act: resume.
-	resp3, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	resp3, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Resume{Resume: &agentreplv1.UpdateMergeQueueResume{Repository: repoRef}},
 	}))
 	requireRPCSuccess(t, "UpdateMergeQueue(resume)", resp3, err)
 
 	// Act: resume again.
-	resp4, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	resp4, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Resume{Resume: &agentreplv1.UpdateMergeQueueResume{Repository: repoRef}},
 	}))
 	if err != nil {
@@ -168,7 +168,7 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	})
 
 	// Act
-	resp, err := behind.d.Client().UpdateMergeQueue(behind.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	resp, err := behind.d.Client().UpdateMergeQueue(behind.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: behind.ws}},
 	}))
 	requireRPCSuccess(t, "UpdateMergeQueue(evict)", resp, err)
@@ -182,7 +182,7 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	}
 
 	// Act / Assert: evicting again finds nothing queued.
-	resp2, err := behind.d.Client().UpdateMergeQueue(behind.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	resp2, err := behind.d.Client().UpdateMergeQueue(behind.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: behind.ws}},
 	}))
 	if err != nil {
@@ -1013,7 +1013,7 @@ func TestUpdateMergeQueuePauseWithNoRepositoryPausesEveryRepositoryWithAQueue(t 
 	_, _, _, repoRefB := mergeBlockedRepoOn(t, d, "repob")
 
 	// Act: pause with NO repository named.
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{}},
 	}))
 	requireRPCSuccess(t, "UpdateMergeQueue(pause, no repository)", resp, err)
@@ -1021,7 +1021,7 @@ func TestUpdateMergeQueuePauseWithNoRepositoryPausesEveryRepositoryWithAQueue(t 
 	// Assert: BOTH repositories' queues are now paused — proven by each one
 	// individually refusing a further pause as already_paused.
 	for _, ref := range []*workspacev1.RepositoryRef{repoRefA, repoRefB} {
-		again, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		again, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 			Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: ref}},
 		}))
 		if err != nil {
@@ -1042,7 +1042,7 @@ func TestUpdateMergeQueueOnAnUnknownRepositoryIsRefused(t *testing.T) {
 	bogus := &workspacev1.RepositoryRef{Dir: "/nowhere/this/repo/does/not/exist"}
 
 	// Act
-	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: bogus}},
 	}))
 
@@ -1305,7 +1305,7 @@ func TestAQueuedMergeWhoseSessionParksAtItsColdGateLeavesTheQueue(t *testing.T) 
 	expectSessionKillRecords(d)
 	// PAUSED, so nothing the restart cuts can let behind run before its
 	// session comes up: a paused queue advances nothing.
-	if resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	if resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{}},
 	})); err != nil || resp.Msg.GetError() != nil {
 		t.Fatalf("UpdateMergeQueue(pause) = %v, %v, want the queue paused", resp, err)

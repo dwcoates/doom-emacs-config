@@ -8,6 +8,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/workspace_topology.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -39,6 +40,12 @@ message UpdateMergeQueueRequest {
     // racing it at once.
     UpdateMergeQueueEnableRacing enable_racing = 10;
   }
+  // WHO ASKED. REQUIRED: the user (the editor, the webapp) or a workspace's
+  // agent (`agent-repld`'s command line). Every action on a queue is recorded
+  // with it, so a merge that leaves the queue is never unaccounted for: an
+  // eviction recorded only as "the operator" could not be told from a loss
+  // (2026-10-24). (Added 2026-10-24.)
+  WorkspaceRequester requester = 13;
   // The retired move-to-front action (2026-10-12): one-place moves replaced it.
   reserved 4;
   reserved "front";

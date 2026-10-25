@@ -3573,8 +3573,14 @@ required: an arm without one is incomplete and errors before send."
   (agent-repl-wire-encode-update-merge-queue-enable-racing value))
 
 (defun agent-repl-wire-encode-update-merge-queue-request (request)
-  "Encode UpdateMergeQueueRequest from plist REQUEST (:action ONEOF)."
-  (list (agent-repl-wire-verbs--encode-oneof
+  "Encode UpdateMergeQueueRequest from plist REQUEST.
+REQUEST is (:action ONEOF :requester REQUESTER), both required: every
+queue action names who asked, so the daemon records it."
+  (list (cons 'requester
+              (agent-repl-wire-encode-workspace-requester
+               (agent-repl-wire-verbs--require "UpdateMergeQueueRequest" "requester"
+                                                (plist-get request :requester))))
+        (agent-repl-wire-verbs--encode-oneof
          "UpdateMergeQueueRequest" "action" (plist-get request :action)
          (list (list :pause 'pause #'agent-repl-wire-encode-update-merge-queue-request-pause)
                (list :resume 'resume #'agent-repl-wire-encode-update-merge-queue-request-resume)

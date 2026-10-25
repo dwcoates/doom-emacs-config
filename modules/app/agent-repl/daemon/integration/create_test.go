@@ -363,7 +363,7 @@ func TestCreateWorkspaceOneShotTakesNoFinishActionOnCompletion(t *testing.T) {
 	// reading the merge queue past this point is race-free rather than a
 	// timing guess — and no merge was ever enqueued.
 	d.AwaitWorkspaceLogOperation(ws.GetDir(), harness.OpTurnEnded)
-	evict, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	evict, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: harness.User(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ws}},
 	}))
 	if err != nil {

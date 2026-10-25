@@ -690,6 +690,13 @@ describe("a chevron asks UpdateMergeQueue to move its row's merge one place", ()
     expect(movesOf(s)).toEqual([["moveUp", "after", "/w/after"]]);
   });
 
+  it("names the user as who asked", async () => {
+    const { el, s } = drawMove();
+    moveControl(el, "behind", "up")?.click();
+    await settle();
+    expect(s.moves.map((m) => m.requester?.asker.case)).toEqual(["user"]);
+  });
+
   it("asks move_down for the ref the queue served, verbatim", async () => {
     const { el, s } = drawMove();
     moveControl(el, "current", "down")?.click();

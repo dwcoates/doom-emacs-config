@@ -77,6 +77,7 @@ func (s *server) UpdateMergeQueue(
 		return nil, err
 	}
 	resp := &agentreplv1.UpdateMergeQueueResponse{}
+	s.recordMergeQueueAsk(req.Msg)
 
 	if evict := req.Msg.GetEvict(); evict != nil {
 		return s.actOnQueuedMerge(ctx, rpc, evict.GetWorkspace(), resp, func(ws ids.WorkspaceID) error {
@@ -158,6 +159,56 @@ func (s *server) daemonWideMergeAction(req *agentreplv1.UpdateMergeQueueRequest)
 		return "enable_racing", s.deps.Merge.EnableRacing, true
 	}
 	return "", nil, false
+}
+
+// recordMergeQueueAsk records WHO asked for a merge-queue action, and what,
+// before it is acted on: the one record that names the asker of every
+// eviction, move, pause and racing switch. A merge that leaves the queue is
+// never unaccounted for: an eviction the store records only as "the operator"
+// could not be told from a loss (2026-10-24).
+func (s *server) recordMergeQueueAsk(req *agentreplv1.UpdateMergeQueueRequest) {
+	by, asker := askerOf(req.GetRequester())
+	fields := dlog.Context{"action": mergeQueueActionName(req), "requested_by": by.String()}
+	if asker != "" {
+		fields["asker"] = string(asker)
+	}
+	if target := mergeQueueTarget(req); target != nil {
+		fields["target"] = target.GetId()
+	}
+	s.log.Info("daemon.server.update_merge_queue", "asked to act on a merge queue", fields)
+}
+
+// mergeQueueActionName names an UpdateMergeQueue arm for the record.
+func mergeQueueActionName(req *agentreplv1.UpdateMergeQueueRequest) string {
+	switch req.GetAction().(type) {
+	case *agentreplv1.UpdateMergeQueueRequest_Pause:
+		return "pause"
+	case *agentreplv1.UpdateMergeQueueRequest_Resume:
+		return "resume"
+	case *agentreplv1.UpdateMergeQueueRequest_Evict:
+		return "evict"
+	case *agentreplv1.UpdateMergeQueueRequest_MoveUp:
+		return "move_up"
+	case *agentreplv1.UpdateMergeQueueRequest_MoveDown:
+		return "move_down"
+	case *agentreplv1.UpdateMergeQueueRequest_DisableRacing:
+		return "disable_racing"
+	case *agentreplv1.UpdateMergeQueueRequest_EnableRacing:
+		return "enable_racing"
+	}
+	panic(fmt.Sprintf("server: UpdateMergeQueue arm %T past validation has no name", req.GetAction()))
+}
+
+// mergeQueueTarget is the workspace whose merge an arm acts on, nil for a
+// queue-wide or daemon-wide arm.
+func mergeQueueTarget(req *agentreplv1.UpdateMergeQueueRequest) *workspacev1.WorkspaceRef {
+	if evict := req.GetEvict(); evict != nil {
+		return evict.GetWorkspace()
+	}
+	if ref, _, ok := mergeMoveOf(req); ok {
+		return ref
+	}
+	return nil
 }
 
 // mergeMoveOf reads a move_up or move_down arm as the workspace it names and

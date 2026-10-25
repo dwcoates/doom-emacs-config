@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"reflect"
 	"testing"
 	"time"
 
@@ -112,7 +113,7 @@ func TestUnsetRepositoryPausesEveryQueue(t *testing.T) {
 
 	// Act.
 	if _, err := h.Client.UpdateMergeQueue(context.Background(),
-		connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
 			Action: &agentreplv1.UpdateMergeQueueRequest_Pause{
 				Pause: &agentreplv1.UpdateMergeQueuePause{},
 			},
@@ -134,7 +135,7 @@ func TestSetRepositoryScopesThePause(t *testing.T) {
 
 	// Act.
 	if _, err := h.Client.UpdateMergeQueue(context.Background(),
-		connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
 			Action: &agentreplv1.UpdateMergeQueueRequest_Pause{
 				Pause: &agentreplv1.UpdateMergeQueuePause{
 					Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
@@ -161,7 +162,7 @@ func TestUnknownRepositoryIsAnAnswer(t *testing.T) {
 
 	// Act.
 	resp, err := h.Client.UpdateMergeQueue(context.Background(),
-		connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
 			Action: &agentreplv1.UpdateMergeQueueRequest_Pause{
 				Pause: &agentreplv1.UpdateMergeQueuePause{
 					Repository: &workspacev1.RepositoryRef{Id: "repo-nope"},
@@ -190,9 +191,9 @@ func moveRequests() []struct {
 		req  *agentreplv1.UpdateMergeQueueRequest
 		move wsm.MergeMove
 	}{
-		{name: "up", move: wsm.MergeMoveUp, req: &agentreplv1.UpdateMergeQueueRequest{
+		{name: "up", move: wsm.MergeMoveUp, req: &agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
 			Action: &agentreplv1.UpdateMergeQueueRequest_MoveUp{MoveUp: &agentreplv1.UpdateMergeQueueMoveUp{Workspace: ref()}}}},
-		{name: "down", move: wsm.MergeMoveDown, req: &agentreplv1.UpdateMergeQueueRequest{
+		{name: "down", move: wsm.MergeMoveDown, req: &agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
 			Action: &agentreplv1.UpdateMergeQueueRequest_MoveDown{MoveDown: &agentreplv1.UpdateMergeQueueMoveDown{Workspace: ref()}}}},
 	}
 }
@@ -253,9 +254,9 @@ func TestMoveWithNoWorkspaceIsInvalid(t *testing.T) {
 		name string
 		req  *agentreplv1.UpdateMergeQueueRequest
 	}{
-		{name: "up", req: &agentreplv1.UpdateMergeQueueRequest{
+		{name: "up", req: &agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
 			Action: &agentreplv1.UpdateMergeQueueRequest_MoveUp{MoveUp: &agentreplv1.UpdateMergeQueueMoveUp{}}}},
-		{name: "down", req: &agentreplv1.UpdateMergeQueueRequest{
+		{name: "down", req: &agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
 			Action: &agentreplv1.UpdateMergeQueueRequest_MoveDown{MoveDown: &agentreplv1.UpdateMergeQueueMoveDown{}}}},
 	}
 	for _, tt := range tests {
@@ -680,13 +681,13 @@ func TestEveryQueuedMergeArmSharesOneAnswer(t *testing.T) {
 		req  func(ref *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest
 	}{
 		{name: "evict", req: func(ref *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
-			return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ref}}}
+			return &agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(), Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ref}}}
 		}},
 		{name: "move_up", req: func(ref *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
-			return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_MoveUp{MoveUp: &agentreplv1.UpdateMergeQueueMoveUp{Workspace: ref}}}
+			return &agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(), Action: &agentreplv1.UpdateMergeQueueRequest_MoveUp{MoveUp: &agentreplv1.UpdateMergeQueueMoveUp{Workspace: ref}}}
 		}},
 		{name: "move_down", req: func(ref *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
-			return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_MoveDown{MoveDown: &agentreplv1.UpdateMergeQueueMoveDown{Workspace: ref}}}
+			return &agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(), Action: &agentreplv1.UpdateMergeQueueRequest_MoveDown{MoveDown: &agentreplv1.UpdateMergeQueueMoveDown{Workspace: ref}}}
 		}},
 	}
 	cases := []struct {
@@ -754,5 +755,75 @@ func TestClientLogFilesAWebhostRecordCentrally(t *testing.T) {
 	}
 	if got := h.Surfaces.centralRecords[0]; got.ClientKind != dlog.RuntimeWebapp || got.Operation != "sidebar.roster" {
 		t.Fatalf("record = %+v, want the webapp's sidebar.roster record", got)
+	}
+}
+
+// TestUpdateMergeQueueRefusesAnUnnamedRequester pins the requester as
+// required: an action that names nobody is refused before the queue is touched.
+func TestUpdateMergeQueueRefusesAnUnnamedRequester(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ref()}}}))
+
+	// Assert.
+	if got := connectCode(t, err); got != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument for a request naming no requester", got)
+	}
+}
+
+// TestUpdateMergeQueueRecordsWhoAsked pins the one record naming the asker of
+// every queue action: an eviction recorded only as "the operator" could not be
+// told from a loss (2026-10-24).
+func TestUpdateMergeQueueRecordsWhoAsked(t *testing.T) {
+	tests := []struct {
+		name      string
+		requester *agentreplv1.WorkspaceRequester
+		action    func() *agentreplv1.UpdateMergeQueueRequest
+		want      dlog.Context
+	}{
+		{
+			name:      "a workspace's agent evicting a merge",
+			requester: agent(),
+			action: func() *agentreplv1.UpdateMergeQueueRequest {
+				return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ref()}}}
+			},
+			want: dlog.Context{"action": "evict", "requested_by": merge.RequestedByAgent.String(), "asker": "ws-asker", "target": ref().GetId()},
+		},
+		{
+			name:      "the user pausing every queue",
+			requester: userRequester(),
+			action: func() *agentreplv1.UpdateMergeQueueRequest {
+				return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{}}}
+			},
+			want: dlog.Context{"action": "pause", "requested_by": merge.RequestedByUser.String()},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log} })
+			req := tt.action()
+			req.Requester = tt.requester
+
+			// Act.
+			if _, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(req)); err != nil {
+				t.Fatalf("UpdateMergeQueue: %v", err)
+			}
+
+			// Assert.
+			for _, rec := range log.at("INFO") {
+				if rec.Operation == "daemon.server.update_merge_queue" && rec.Message == "asked to act on a merge queue" {
+					if !reflect.DeepEqual(rec.Context, tt.want) {
+						t.Fatalf("record context = %+v, want %+v", rec.Context, tt.want)
+					}
+					return
+				}
+			}
+			t.Fatalf("no record of who asked among %+v", log.at("INFO"))
+		})
 	}
 }

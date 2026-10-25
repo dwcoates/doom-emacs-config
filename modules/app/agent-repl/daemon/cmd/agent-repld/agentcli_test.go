@@ -1212,3 +1212,37 @@ func TestCreateRefusedStandingDownIsNotResent(t *testing.T) {
 		t.Fatalf("exit %d after dialing %v, want refused with no resend", code, f.dialed)
 	}
 }
+
+// TestEveryQueueVerbNamesTheCallingWorkspaceAsWhoAsked pins the one sender
+// (cliCall.updateMergeQueue): every queue action the command line sends names
+// the calling workspace, so the daemon records who acted on the queue.
+func TestEveryQueueVerbNamesTheCallingWorkspaceAsWhoAsked(t *testing.T) {
+	tests := []struct {
+		verb string
+		args []string
+	}{
+		{verb: "dequeue", args: []string{"here"}},
+		{verb: "move-up", args: []string{"here"}},
+		{verb: "move-down", args: []string{"here"}},
+		{verb: "pause", args: []string{"-repository", "here"}},
+		{verb: "resume", args: []string{"-repository", "here"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.verb, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, append([]string{tt.verb}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			req := only[*agentreplv1.UpdateMergeQueueRequest](t, f)
+			if got := req.GetRequester().GetWorkspace().GetWorkspace().GetId(); got != "ws-caller" {
+				t.Fatalf("requester = %v, want the calling workspace", req.GetRequester())
+			}
+		})
+	}
+}

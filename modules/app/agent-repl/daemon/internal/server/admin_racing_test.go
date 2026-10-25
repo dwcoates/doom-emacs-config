@@ -17,11 +17,11 @@ import (
 // disable_racing, or (enable) enable_racing.
 func racingRequest(enable bool) *connect.Request[agentreplv1.UpdateMergeQueueRequest] {
 	if enable {
-		return connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		return connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
 			Action: &agentreplv1.UpdateMergeQueueRequest_EnableRacing{EnableRacing: &agentreplv1.UpdateMergeQueueEnableRacing{}},
 		})
 	}
-	return connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+	return connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
 		Action: &agentreplv1.UpdateMergeQueueRequest_DisableRacing{DisableRacing: &agentreplv1.UpdateMergeQueueDisableRacing{}},
 	})
 }

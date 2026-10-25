@@ -1695,10 +1695,11 @@ arm-generic reporting by answering nil."
   "Send ACTION to UpdateMergeQueue.
 ACTION is spelled FLAT: `(:arm :pause :repository REF)', `(:arm :resume
 :repository REF)' or `(:arm :evict :workspace REF)'.  A nil `repository'
-is the daemon-wide switch and is omitted from the encoding."
+is the daemon-wide switch and is omitted from the encoding.  The user
+asks: Emacs acts on the queue for nobody else."
   (agent-repl-verbs--send
    #'agent-repl-rpc-update-merge-queue (agent-repl-verbs--conn)
-   (list :action (agent-repl-verbs--arm action))
+   (list :action (agent-repl-verbs--arm action) :requester '(:arm :user))
    :op "merge-queue"
    :on-success
    (lambda (_) (message "agent-repl: merge queue %s" (plist-get action :arm)))
