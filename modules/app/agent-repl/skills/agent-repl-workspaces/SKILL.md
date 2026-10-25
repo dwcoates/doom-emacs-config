@@ -1,6 +1,6 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), set its principal link (the url its topbar summary opens), hide or show a workspace, set its priority, retarget its parent, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a link supplied in the conversation best reflects this workspace''s task (set its principal link, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), set its principal link (the url its topbar summary opens), rename a workspace, hide or show a workspace, set its priority, retarget its parent, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a link supplied in the conversation best reflects this workspace''s task (set its principal link, without asking); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
 argument-hint: "create | async-merge | prompt | status | list | set | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
@@ -163,6 +163,18 @@ Choose the combination from what the work needs:
   - `-no-principal-link` clears it, when no link reflects the task any more.
   - Only http and https urls are accepted; anything else is refused
     `invalid_link` with the reason.
+- **RENAME.** `workspace set here -name NAME` renames this workspace: its
+  name only. Its branch and its worktree directory keep the names they were
+  created with.
+  - Rename it PROACTIVELY, WITHOUT asking, when its task has clearly moved
+    away from the name it has. A one-off detour is not a reason to rename.
+  - NAME follows the same rule as `create -name`: a lowercase hyphenated slug,
+    with an optional prefix such as `ABC/`. A name another workspace holds as
+    its name or its branch is refused `name_taken`, and a malformed one
+    `invalid_name`.
+  - The old name stops resolving at once. Name the workspace by its new name
+    from then on, and read its branch from `workspace status`, never from
+    its name.
 - `-hidden` / `-shown`, `-priority`, and `-parent WS` / `-top-level` (a
   retarget, which re-applies the landing rules) set the rest.
 
