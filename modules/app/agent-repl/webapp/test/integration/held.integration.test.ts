@@ -144,11 +144,12 @@ const CLASSIFICATION_TEXT: Record<HoldClassificationArm, string> = {
 describe("classification detail", () => {
   it.each(
     HOLD_CLASSIFICATION_ARMS.filter((arm) => CLASSIFICATION_TEXT[arm] !== ""),
-  )("draws the %s rationale verbatim", async (classification) => {
+  )("titles the badge with the %s rationale verbatim", async (classification) => {
     // Arrange / Act
     await withTray({ items: [heldPromptItem({ classification })] });
-    // Assert
-    expect(harness.$(`[data-held-turn="${HELD_TURN_ID}"]`)?.textContent).toContain(
+    // Assert: the reason is the colored badge's hover title, never drawn
+    // beside the words (owner request, 2026-10-25).
+    expect(harness.$(`[data-held-turn="${HELD_TURN_ID}"] .queued-head > .held-badge`)?.title).toContain(
       CLASSIFICATION_TEXT[classification],
     );
   });
