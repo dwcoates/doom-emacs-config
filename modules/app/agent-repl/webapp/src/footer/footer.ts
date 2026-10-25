@@ -31,6 +31,12 @@
  * one re-render at its expiry instant (`expiry.ts`), and every draw cancels the
  * last one's first — a newer push replaces it, never stacks beside it.
  *
+ * THE HOVERED RESPONSE'S USAGE STANDS IN FOR THE ACTIVITY LINE (owner request,
+ * 2026-10-25). While the pointer is on a response bubble the feed hands its
+ * usage stamp over (`showResponseUsage`), and every draw puts it in the
+ * activity cell (src/footer/response-usage.ts) until it is handed null. It is
+ * the reader's, like the open panel, and never reaches the daemon.
+ *
  * `onStatus` EXISTS FOR THE COMPOSERS. R7 disables a bubble composer while the
  * footer reads merging, closing or disconnected, and the footer's stream is the
  * one place that fact arrives — so the status ARM is published to subscribers
@@ -46,6 +52,7 @@ import {
   type WatchFooterResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { ResponseUsage } from "../feed/response-usage.js";
 import type { FooterExpanded, FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { Handle } from "../failure/local.js";
 import { frameUndecodable } from "../failure/sink.js";
@@ -78,6 +85,7 @@ import {
   footerStatusActivity,
 } from "./strip.js";
 import { createStopControls } from "./stop.js";
+import { overlayResponseUsage } from "./response-usage.js";
 
 /** Where the open panel is remembered, per workspace. */
 export function panelStorageKey(workspaceId: string): string {
@@ -99,6 +107,11 @@ export interface FooterHandle extends Handle {
   onStatus(
     fn: (statusCase: string, substatusCase?: string) => void,
   ): () => void;
+  /**
+   * Show the hovered response's USAGE in the activity cell, or give the cell
+   * back to the daemon's activity line (null).
+   */
+  showResponseUsage(usage: ResponseUsage | null): void;
 }
 
 /** The stream's request: the workspace, echoed from the page's one ref. */
@@ -169,6 +182,9 @@ export function mountFooter(
   const expiry = createTransientExpiry(ctx.ticker, () => {
     redraw("footer.expiry-redraw-undecodable");
   });
+  // THE FIFTH: the hovered response's usage, standing in for the activity
+  // line while the pointer is on its bubble (`showResponseUsage`).
+  let hoveredUsage: ResponseUsage | null = null;
 
   // THE CLIENT'S OWN VERDICT OVERLAYS THE DAEMON'S (owner ruling, 2026-09-13).
   // Subscribing here rather than polling in `draw` is what makes a verdict
@@ -205,6 +221,10 @@ export function mountFooter(
       return () => {
         statusListeners.delete(fn);
       };
+    },
+    showResponseUsage(usage: ResponseUsage | null): void {
+      hoveredUsage = usage;
+      redraw("footer.response-usage-redraw-undecodable");
     },
     dispose(): void {
       if (disposed) return;
@@ -316,6 +336,7 @@ export function mountFooter(
             strip,
             deps: stripDeps,
           });
+    if (hoveredUsage !== null) overlayResponseUsage(stripEl, hoveredUsage, ctx.ticker);
 
     const target = dock ?? createDock();
     if (verdict !== null)

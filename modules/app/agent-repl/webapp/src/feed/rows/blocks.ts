@@ -19,7 +19,7 @@ import { log } from "../../log.js";
 import { markdownSlot, proseCharacters, proseSource, type SlotMark } from "../../bubble/body.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../bubble/quote.js";
 import { codeBlockHtml } from "../../code-block.js";
-import { boundCopyControl } from "../../copy-control.js";
+import { bubbleCopyControl } from "../../bubble/copy-room.js";
 import { armName } from "../renderers.js";
 import type {
   FeedImageBlock,
@@ -216,18 +216,15 @@ export function promptBlockCopyText(arm: PromptBlockArm, path: string): string {
   }
 }
 
-/** The class a prompt bubble's copy control wears, which places it in the bubble. */
-export const PROMPT_COPY_CLASS = "prompt-copy";
-
 /**
  * A PROMPT BUBBLE'S COPY CONTROL (owner request, 2026-10-20): the one copy
  * control (copy-control.ts), of kind `prompt`, copying the whole prompt, its
- * BLOCKS' copy text in order, a blank line apart. The bubble floats it at its
- * top right (the spec's `corner`), and the stylesheet shows it on every prompt
- * bubble, folded or opened, selected or not. BLOCKS are either prompt kind's body blocks,
- * and PATH names their field.
+ * BLOCKS' copy text in order, a blank line apart. It is a bubble's copy
+ * control (src/bubble/copy-room.ts), at the bubble's top right on the first
+ * line of text, shown on every prompt bubble, folded or opened, selected or
+ * not. BLOCKS are either prompt kind's body blocks, and PATH names their field.
  */
 export function drawPromptCopyControl(blocks: readonly { block: PromptBlockArm }[], path: string): HTMLElement {
   const text = blocks.map(({ block }, index) => promptBlockCopyText(block, `${path}[${index}].block`)).join("\n\n");
-  return boundCopyControl("prompt", PROMPT_COPY_CLASS, "Copy prompt", text);
+  return bubbleCopyControl("prompt", "Copy prompt", text);
 }

@@ -125,11 +125,11 @@ export const HAS_MORE_UNMEASURABLE = "feed.has-more.unmeasurable";
  * STRUCTURAL, NOT A PIXEL READING (owner ruling, 2026-09-23). This used to be
  * the box's own `scrollHeight > clientHeight`, and `scrollHeight` is the box's
  * SCROLLABLE OVERFLOW: every descendant's border box, not only its lines. The
- * response's usage corner (styles.css `.usage-corner`) floats inside the box
- * with a `0.4rem` vertical padding cancelled by `-0.4rem` margins — a hit area
- * that is cancelled in LAYOUT (its margin box is one line) but not in the
- * overflow, so its border box hangs `0.4rem` above the box's top and `0.4rem`
- * below its first line. On a one-line answer ("?") that bottom edge sat a few
+ * response's usage corner (since retired: the footer shows a hovered
+ * response's usage) floated inside the box with a `0.4rem` vertical padding
+ * cancelled by `-0.4rem` margins — a hit area that is cancelled in LAYOUT (its
+ * margin box is one line) but not in the overflow, so its border box hung
+ * `0.4rem` above the box's top and `0.4rem` below its first line. On a one-line answer ("?") that bottom edge sat a few
  * px below the body's one line, `scrollHeight` beat `clientHeight`, and a
  * bubble with nothing hidden drew "more below". The body holds exactly the
  * rendered lines and nothing floated beside them, so the comparison is lines
@@ -141,7 +141,7 @@ export const HAS_MORE_UNMEASURABLE = "feed.has-more.unmeasurable";
  * one line whatever it holds, and its `offsetHeight` can no longer say what
  * it hides. Its rendered lines are then its `scrollHeight`: the lines past the
  * clamp are still laid out, only clipped, and the body holds nothing but those
- * lines (the usage corner floats in the box, beside it, never in it).
+ * lines (a copy control sits in the box, beside it, never in it).
  *
  * A REPLY'S QUOTE NEVER COUNTS (owner ruling, 2026-10-14). The collapsed
  * bubble does not draw a quote at all (src/bubble/quote.ts), so the body's
@@ -276,7 +276,7 @@ export function bubbleBodyOf(scroll: HTMLElement): Element | null {
  * synchronous refresh still keeps it correct across a click. REFRESH is what a
  * resize runs, `refreshHasMore` unless the caller wraps it (title-fold.ts adds
  * its orphan check). CONTENT names the child whose growth moves the answer —
- * a bubble's box passes `bubbleBodyOf`, since a response's usage corner sits
+ * a bubble's box passes `bubbleBodyOf`, since a bubble's copy control sits
  * BEFORE its body and a first-child reading followed the corner instead, so a
  * body growing past a cap the box had already reached was never re-measured.
  */
@@ -311,11 +311,11 @@ export function installHasMore(
   // streaming response re-measures only on resize, as before.
   //
   // ONLY THE CLAMP'S OWN TEXT MOVES THE `…`. A change elsewhere in the box
-  // (the usage corner's ticking age, rewritten every second) leaves the
+  // (a ticking age, rewritten every second) leaves the
   // clamp's line as it was, and re-measuring it a character at a time on
   // every tick of every bubble was the largest share of an idle page's
-  // callback time (busy-probe census, 2026-10-16). A size change the corner
-  // makes reaches the ResizeObserver above.
+  // callback time (busy-probe census, 2026-10-16). A size change elsewhere
+  // reaches the ResizeObserver above.
   const mutated = (records: readonly MutationRecord[]): void => {
     retarget();
     const clamp = kindOf(scroll)?.clamp(scroll) ?? null;

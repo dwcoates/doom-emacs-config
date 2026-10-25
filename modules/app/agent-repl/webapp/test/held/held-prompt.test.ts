@@ -2,7 +2,7 @@
 import { drawnBodyOf, servedSrcOf } from "./drawn-body.js";
 import { FeedUserPromptBodySchema, FeedUserPromptSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawFeedUserPrompt } from "../../src/feed/rows/user-prompt.js";
-import { PROMPT_COPY_CLASS } from "../../src/feed/rows/blocks.js";
+import { BUBBLE_COPY_CLASS } from "../../src/bubble/copy-room.js";
 import { boundCopyText } from "../../src/copy-control.js";
 import { type Control } from "../../src/control.js";
 import { readFileSync } from "node:fs";
@@ -1156,7 +1156,7 @@ describe("the held prompt's spec: a user prompt's look on the held fill", () => 
 
   it("draws the user prompt's copy control, copying the words", () => {
     const { tc } = trayContext();
-    const copy = drawHeldPrompt(saying("fix the test"), tc).querySelector(`.${PROMPT_COPY_CLASS}`);
+    const copy = drawHeldPrompt(saying("fix the test"), tc).querySelector(`.${BUBBLE_COPY_CLASS}`);
     expect(copy === null ? null : boundCopyText(copy).text).toBe("fix the test");
   });
 
@@ -1164,7 +1164,7 @@ describe("the held prompt's spec: a user prompt's look on the held fill", () => 
     const { tc } = trayContext();
     const u = heldPrompt();
     u.act = create(HeldSessionActSchema, { act: { case: "model", value: { model: "m" } } });
-    expect(drawHeldPrompt(u, tc).querySelector(`.${PROMPT_COPY_CLASS}`)).toBeNull();
+    expect(drawHeldPrompt(u, tc).querySelector(`.${BUBBLE_COPY_CLASS}`)).toBeNull();
   });
 
   it("draws its words exactly as the user prompt it becomes draws them", () => {

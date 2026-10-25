@@ -449,10 +449,10 @@ describe("installHasMore: a box that writes an ellipsis follows its text", () =>
   });
 
   it("leaves an ellipsis bubble unmeasured when only text outside its clamp changed", async () => {
-    // Arrange -- a ticking age in the box's usage corner, outside the body.
+    // Arrange -- a ticking age in the box's corner chrome, outside the body.
     const scroll = clampedBox(BUBBLE_MORE_ELLIPSIS, 3);
     const corner = document.createElement("span");
-    corner.className = "usage-ago";
+    corner.className = "corner-age";
     corner.textContent = "5s ago";
     scroll.prepend(corner);
     const seen: HTMLElement[] = [];

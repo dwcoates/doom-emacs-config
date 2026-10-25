@@ -23,6 +23,7 @@ import type {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { SlotMark } from "../../bubble/body.js";
 import { drawPromptBlockArm, drawPromptCopyControl } from "./blocks.js";
+import { reserveCopyRoom } from "../../bubble/copy-room.js";
 import { markKnownCommands } from "./known-commands.js";
 
 /** The path prefix every refusal from this file is reported under. */
@@ -74,7 +75,7 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
 
 /** The parts of a bubble that draw what a person typed as a user prompt does. */
 export interface UserPromptLook {
-  /** The copy control, floated at the bubble's top right. */
+  /** The copy control, at the bubble's top right on its first line of text. */
   corner: HTMLElement[];
   /** The blocks the person composed, through the one body pipeline. */
   content: HTMLElement[];
@@ -97,9 +98,11 @@ export type HeldPromptLook = Omit<UserPromptLook, "corner"> & Partial<Pick<UserP
  * only in their fill, their header strip and their footer.
  */
 export function userPromptLook(body: FeedUserPromptBody, path: string, mark?: SlotMark): UserPromptLook {
+  const content = drawFeedUserPromptBody(body, path, mark);
+  reserveCopyRoom(content);
   return {
     corner: [drawPromptCopyControl(body.blocks, `${path}.blocks`)],
-    content: drawFeedUserPromptBody(body, path, mark),
+    content,
     capLines: USER_PROMPT_CAP_LINES,
   };
 }

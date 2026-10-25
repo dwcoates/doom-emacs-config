@@ -356,7 +356,7 @@ describe("drawBubble: the structure every kind shares", () => {
 
   it("floats the corner inside the scroll box, before the body", () => {
     // Arrange
-    const corner = el("usage-corner");
+    const corner = el("corner-chrome");
     // Act
     const { body } = drawBubble(spec("response", { corner: [corner] }));
     // Assert
@@ -548,15 +548,15 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
 
   it("keeps a corner whose stated words did not change, whatever its clock shows", () => {
     // Arrange
-    const corner = el("usage-corner", "1.2k");
+    const corner = el("corner-chrome", "1.2k");
     corner.setAttribute(SAYS_ATTRIBUTE, "1.2k|0");
     const first = drawBubble(spec("response", { corner: [corner] })).bubble;
-    const again = el("usage-corner", "1.2k (ticked)");
+    const again = el("corner-chrome", "1.2k (ticked)");
     again.setAttribute(SAYS_ATTRIBUTE, "1.2k|0");
     // Act
     drawBubble(spec("response", { corner: [again] }), first);
     // Assert
-    expect(first.querySelector(".usage-corner")).toBe(corner);
+    expect(first.querySelector(".corner-chrome")).toBe(corner);
   });
 
   it("drops a footer element the new spec does not draw", () => {

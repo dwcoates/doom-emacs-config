@@ -8,6 +8,8 @@ import {
   BODY_INVARIANT,
   BUBBLE_BODY_TAG,
   MARKDOWN_SLOT_ATTRIBUTE,
+  addSlotMark,
+  isMarkdownSlot,
   TREE_WIDTH_UNMEASURABLE,
   createBubbleBody,
   isBubbleBody,
@@ -880,5 +882,76 @@ describe("observeContainingBlock: the one observer of a bubble's column", () => 
     expect(observe).toThrow();
     const record = await forwardedRecord(capture, TREE_WIDTH_UNMEASURABLE);
     expect(record.level.case).toBe("error");
+  });
+});
+
+describe("isMarkdownSlot", () => {
+  it.each([
+    ["a markdown slot", () => markdownSlot("prose", plainProse("hi")), true],
+    ["an element that only wears the slot attribute", () => {
+      const el = document.createElement("div");
+      el.setAttribute(MARKDOWN_SLOT_ATTRIBUTE, "");
+      return el;
+    }, false],
+    ["a text node", () => document.createTextNode("hi"), false],
+    ["nothing", () => undefined, false],
+  ])("answers %s", (_name, make, want) => {
+    // Act / Assert
+    expect(isMarkdownSlot(make())).toBe(want);
+  });
+});
+
+describe("addSlotMark", () => {
+  /** Paint SLOT alone into a fresh body, answering the live slot. */
+  function paintAlone(slot: HTMLElement): HTMLElement {
+    const body = createBubbleBody();
+    document.body.append(body);
+    return paintBody(body, [slot])[0] as HTMLElement;
+  }
+
+  it("marks every paint of a slot that had no mark", () => {
+    // Arrange
+    const slot = markdownSlot("prose", plainProse("hi"));
+    addSlotMark(slot, (rendered) => rendered.querySelector("p")?.setAttribute("data-added", ""));
+    // Act
+    const live = paintAlone(slot);
+    // Assert
+    expect(live.querySelector("p")?.hasAttribute("data-added")).toBe(true);
+  });
+
+  it("runs after the slot kind's own mark, keeping both", () => {
+    // Arrange
+    const order: string[] = [];
+    const slot = markdownSlot("prose", plainProse("hi"), () => order.push("own"));
+    addSlotMark(slot, () => order.push("added"));
+    // Act
+    paintAlone(slot);
+    // Assert
+    expect(order).toEqual(["own", "added"]);
+  });
+
+  it("is carried to the live slot by a repaint in place", () => {
+    // Arrange
+    const body = createBubbleBody();
+    document.body.append(body);
+    const [live] = paintBody(body, [markdownSlot("prose", plainProse("before"))]);
+    const next = markdownSlot("prose", plainProse("after"));
+    addSlotMark(next, (rendered) => rendered.querySelector("p")?.setAttribute("data-added", ""));
+    // Act
+    const [repainted] = paintBody(body, [next]);
+    // Assert
+    expect([repainted === live, (repainted as HTMLElement).querySelector("p")?.hasAttribute("data-added")]).toEqual([true, true]);
+  });
+
+  it("refuses an element that is not a markdown slot, recording it through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const el = document.createElement("div");
+    el.className = "not-a-slot";
+    // Act
+    expect(() => addSlotMark(el, () => undefined)).toThrow(/bubble body invariant/);
+    // Assert
+    const record = await forwardedRecord(capture, BODY_INVARIANT);
+    expect([record.level.case, record.context?.slot]).toEqual(["error", "not-a-slot"]);
   });
 });

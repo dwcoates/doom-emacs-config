@@ -12,7 +12,7 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import { receivedFrom, receivedFromWorkspace, sentTo, sentToWorkspace } from "../addresses.js";
 import { PEER_ARROW_CLASS } from "../../../src/feed/rows/peer-arrow.js";
 import { drawFeedAgentPrompt } from "../../../src/feed/rows/agent-prompt.js";
-import { PROMPT_COPY_CLASS } from "../../../src/feed/rows/blocks.js";
+import { BUBBLE_COPY_CLASS, COPY_ROOM_CLASS } from "../../../src/bubble/copy-room.js";
 import { boundCopyText } from "../../../src/copy-control.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import {
@@ -234,15 +234,25 @@ describe("drawFeedAgentPrompt: the copy control", () => {
       ]),
     );
     // Assert
-    const control = el.querySelector(`.${PROMPT_COPY_CLASS}`);
+    const control = el.querySelector(`.${BUBBLE_COPY_CLASS}`);
     expect(control === null ? null : boundCopyText(control).text).toBe("first\n\nsecond");
+  });
+
+  it("opens the prompt's first line of text with its room, never the address", () => {
+    // Act
+    const el = drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [{ block: { case: "text", value: { prose: servedProse("go") } } }]));
+    document.body.append(el);
+    // Assert
+    const ghosts = [...el.querySelectorAll(`.${COPY_ROOM_CLASS}`)];
+    el.remove();
+    expect(ghosts.map((g) => [g.parentElement?.tagName, g.parentElement?.textContent])).toEqual([["P", "go"]]);
   });
 
   it("leaves the address out of what it copies", () => {
     // Act
     const el = drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [{ block: { case: "text", value: { prose: servedProse("go") } } }]));
     // Assert
-    const control = el.querySelector(`.${PROMPT_COPY_CLASS}`);
+    const control = el.querySelector(`.${BUBBLE_COPY_CLASS}`);
     expect(control === null ? null : boundCopyText(control).text).toBe("go");
   });
 });

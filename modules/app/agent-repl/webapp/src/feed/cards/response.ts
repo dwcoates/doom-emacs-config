@@ -42,11 +42,14 @@
  * bubble, unchanged. The client holds NO notice vocabulary: the heading is
  * composed by the daemon and drawn verbatim.
  *
- * THE USAGE STAMP RIDES EVERY STATE. It is meaningful while arriving (the vendor
- * states usage when a response opens and restates it as it grows), final once
- * settled, and the last observed figure on a broken bubble — so the corner is
- * drawn from presence alone, in every arm. Absent means NO STAMP, never a zero:
- * "we were not told what it cost" and "it cost nothing" are different claims.
+ * THE USAGE STAMP RIDES EVERY STATE, AND IS READ IN THE FOOTER. It is
+ * meaningful while arriving (the vendor states usage when a response opens and
+ * restates it as it grows), final once settled, and the last observed figure
+ * on a broken bubble. The bubble draws none of it (owner request, 2026-10-25):
+ * every draw records the stamp for the bubble (src/feed/response-usage.ts),
+ * and hovering the bubble shows it in the footer's activity cell. Absent means
+ * NO STAMP, never a zero: "we were not told what it cost" and "it cost
+ * nothing" are different claims.
  *
  * THE TYPE-OUT FOLLOWS THE ARRIVALS WITHIN THE DAEMON'S PACE, and it RESUMES
  * ACROSS PUSHES. Every live draw carries the daemon's reveal pace (the
@@ -66,29 +69,23 @@
  * as its raw syntax. Both attributes count rendered characters.
  */
 import type { ParsedProse } from "../../../../proto/gen/ts/frontend/v1/prose_pb";
-import { cssString, fitsReserve, reserveLabels, reserveLabelsCss } from "../../width-reserve.js";
 import type {
   FeedResponse,
   FeedResponseError,
   FeedResponseNotice,
   FeedResponseProse,
   FeedResponseSuccess,
-  FeedResponseUsageStamp,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawSignInAction } from "../../login/request.js";
-import { pageResizeObserver } from "../../dom.js";
 import { log } from "../../log.js";
 import {
-  BUBBLE_CLASS,
   BUBBLE_MORE_ELLIPSIS,
   BUBBLE_UNCAPPED,
   ELLIPSIS_CAP_LINES,
-  SAYS_ATTRIBUTE,
   drawBubble,
   type BubbleCapLines,
   type BubbleCapSpec,
 } from "../../bubble/draw.js";
-import { formatAge } from "../../duration.js";
 import {
   markdownSlot,
   proseCharacters,
@@ -99,18 +96,17 @@ import {
   whenSlotPainted,
   type BubbleBody,
 } from "../../bubble/body.js";
-import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
+import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { revealPaceOf, type RevealPace } from "../../reveal-pace.js";
 import { typeOut } from "../../type-out.js";
-import { onDiscard, tickWhileShown } from "../ticking.js";
 import { shouldShowMore } from "../bubble-more.js";
-import { heatColor } from "../../heat.js";
 import type { RowContext } from "./context.js";
 import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 import { easeIntoLook, readBubbleLook } from "../../bubble/collapse-motion.js";
 import { drawOutcomeCard } from "../marker.js";
 import { linkAnswers } from "../entries.js";
-import { boundCopyControl } from "../../copy-control.js";
+import { bubbleCopyControl, reserveCopyRoom } from "../../bubble/copy-room.js";
+import { readResponseUsage, setResponseUsage } from "../response-usage.js";
 import { markComposerEntry } from "../composer-entry.js";
 import { markRevealedNode } from "../revealed-node.js";
 
@@ -162,9 +158,6 @@ export const INTERIM_RESPONSE_CLASS = "interim-response";
  */
 const RESPONSE_PROSE_BLOCKS = 1;
 
-/** The class a final response's copy control wears (styles.css places it under the usage corner). */
-export const RESPONSE_COPY_CLASS = "response-copy";
-
 /** The class of the one markdown slot a response's prose is painted into. */
 export const RESPONSE_PROSE_CLASS = "response-prose";
 
@@ -197,13 +190,9 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
 
   if (result.case === "error") hooks.push("response-cut-short");
 
-  // FIRST-LINE-ONLY RESERVATION VIA A ONE-LINE FLOAT (owner ruling, 2026-09-15).
-  // The cost corner rides INSIDE the scroll box, before the body, floated
-  // top-right, so the prose's FIRST line wraps around it and every later line
-  // runs the full width (see `.usage-corner`).
-  const interim = isInterimResponse(u);
-  const corner =
-    u.usage === undefined ? undefined : drawFeedResponseUsageStamp(u.usage, rc, `${path}.usage`, interim);
+  // The usage stamp is read before anything is drawn too, so a stamp the
+  // wire got wrong refuses the row here rather than at the hover.
+  const usage = u.usage === undefined ? undefined : readResponseUsage(u.usage, `${path}.usage`);
 
   // The arm is read BEFORE anything is drawn, so an arm a newer daemon set
   // reaches the refusal that names it rather than half a bubble.
@@ -260,11 +249,12 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // paint of the prose (entries.ts).
   const answers = u.answers;
   // A FINAL RESPONSE CARRIES A COPY CONTROL for its whole text (owner request,
-  // 2026-10-24), under the usage corner at the top right: the response's
-  // markdown as the daemon served it, never what it renders as.
+  // 2026-10-24): the response's markdown as the daemon served it, never what
+  // it renders as, at the bubble's top right on its first line of text
+  // (src/bubble/copy-room.ts).
   const copy =
     u.finalAnswer && !u.thinking && result.case === "success"
-      ? boundCopyControl("response", RESPONSE_COPY_CLASS, "Copy response", proseSource(served))
+      ? bubbleCopyControl("response", "Copy response", proseSource(served))
       : undefined;
   // THE SUBTREE THE COMPOSER IS ANSWERING is boxed on every paint too
   // (composer-entry.ts).
@@ -274,6 +264,7 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     markComposerEntry(rendered, rowId);
     markRevealedNode(rendered, rowId);
   });
+  if (copy !== undefined) reserveCopyRoom([prose]);
 
   // A RE-PUSH UPDATES THE BUBBLE IN PLACE (owner rule, 2026-09-23: the user
   // owns the scroll). The daemon re-pushes the whole row on every fragment of an
@@ -288,22 +279,17 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       variant: u.thinking ? "thinking" : "response",
       state: result.case,
       hooks,
-      corner: [...(corner === undefined ? [] : [corner]), ...(copy === undefined ? [] : [copy])],
+      corner: copy === undefined ? [] : [copy],
       content: [prose],
       footer: result.case === "error" ? cutShortFooter(result.value) : [],
       ...responseCap(u),
     },
     rc.previous,
   );
-  // THE SIZING GHOST'S TEXT (styles.css "THE SIZING GHOST"): the widest
-  // duration labels the corner reserves, handed to the ghost that widens the
-  // bubble by the corner's footprint. Set only while the bubble has a corner.
-  if (corner === undefined) bubble.style.removeProperty(USAGE_RESERVE_LABELS_PROPERTY);
-  else bubble.style.setProperty(USAGE_RESERVE_LABELS_PROPERTY, usageReserveLabelsCss());
-  // AN OPEN INTERIM'S GHOST IS ITS RESTING CORNER, the token alone (styles.css
-  // "AN INTERIM RESPONSE'S CORNER GROWS ITS BUBBLE"), so it reads the figure.
-  if (corner === undefined || !interim) bubble.style.removeProperty(USAGE_TOKEN_TEXT_PROPERTY);
-  else bubble.style.setProperty(USAGE_TOKEN_TEXT_PROPERTY, cssString(requireMessage(u.usage, `${path}.usage`).text));
+  // THE STAMP IS READ IN THE FOOTER while the bubble is hovered
+  // (response-usage.ts), restated on every draw so a hovered bubble's footer
+  // line follows its figure.
+  setResponseUsage(bubble, usage);
   if (turningInterim !== undefined && turningInterim.height > 0 && bubble !== rc.previous) {
     easeIntoLook(bubble, turningInterim);
   }
@@ -475,211 +461,6 @@ export function drawFeedResponseNotice(u: FeedResponseNotice, words: string, rc:
     context: { path, length: words.length },
   });
   return drawOutcomeCard(requireMessage(u.marker, `${path}.marker`), { ctx: rc.ctx }, `${path}.marker`, [words]);
-}
-
-/** The class the corner wears while its timestamp is revealed. */
-export const USAGE_REVEALED_CLASS = "usage-corner--revealed";
-
-/**
- * One instant per shape `formatAge` writes, each at the widest figures that
- * shape reaches: two-level and one-level days (to 999), hours and minutes,
- * and seconds alone.
- */
-const USAGE_AGE_WIDEST_MS: readonly number[] = [
-  (999 * 86_400 + 23 * 3_600) * 1000,
-  999 * 86_400 * 1000,
-  (23 * 3_600 + 59 * 60) * 1000,
-  23 * 3_600 * 1000,
-  (59 * 60 + 59) * 1000,
-  59 * 60 * 1000,
-  59 * 1000,
-];
-
-/** The duration's label for an age, as the corner draws it. */
-function usageAgeLabel(ageMs: number): string {
-  return `${formatAge(ageMs)} ago`;
-}
-
-/**
- * THE DURATION'S WIDTH RESERVE: the widest label of every shape the age
- * formatter writes, figures zeroed. The corner stacks them in one grid cell,
- * so the reserve is exactly as wide as the widest label the clock can tick to.
- * Derived from `formatAge` itself, so a formatter that changes its shapes
- * changes the reserve with it.
- */
-export const USAGE_AGE_RESERVE_LABELS: readonly string[] = reserveLabels(USAGE_AGE_WIDEST_MS, usageAgeLabel);
-
-/** The custom property the sizing ghost (styles.css) reads its reserved labels from. */
-export const USAGE_RESERVE_LABELS_PROPERTY = "--usage-reserve-labels";
-
-/** The custom property an open interim's ghost (styles.css) reads the token's text from. */
-export const USAGE_TOKEN_TEXT_PROPERTY = "--usage-token-text";
-
-/** The custom property an interim bubble's hover growth (styles.css) reads the duration's drawn width from. */
-export const USAGE_AGO_WIDTH_PROPERTY = "--usage-ago-w";
-
-/**
- * The reserve labels as one CSS string, one label per line (`\A`), for the
- * sizing ghost's `content`: drawn `white-space: pre`, its box is as wide as
- * the widest label, exactly as the corner's one-cell reserve grid is.
- */
-export function usageReserveLabelsCss(): string {
-  return reserveLabelsCss(USAGE_AGE_RESERVE_LABELS);
-}
-
-/**
- * Whether LABEL fits the reserve: some reserved label has its shape (the same
- * units in the same order) and at least as many figures. In tabular figures
- * that is "no wider". An age of a thousand days or more does not fit.
- */
-export function usageAgeWithinReserve(label: string): boolean {
-  return fitsReserve(label, USAGE_AGE_RESERVE_LABELS);
-}
-
-/**
- * The cost corner: the token figure, drawn verbatim, and — once the response
- * has SETTLED — the relative timestamp it reveals when hovered or focused.
- *
- * THE MARKUP (the stylesheet's `.usage-corner` comment has the mechanism):
- *
- *   span.usage-corner[data-tokens=<token text>]   ::before reserves the token's slot
- *     span.usage-reserve[aria-hidden]             reserves the gap + widest duration
- *       span.usage-reserve-label × N              one per age shape, stacked
- *     span.usage-slider                           out of flow; phase B moves it
- *       span.usage-stamp  <token text>            out of flow, at the slider's left
- *       span.usage-ago    "5m 30s ago"            the slider's only in-flow content;
- *                                                 phase A moves it
- *
- * The corner's in-flow content is the two reserves, so its float is the whole
- * HOVERED footprint from the first draw, arriving or settled, and the first
- * prose line that wraps around it never reflows on the reveal, the tick or the
- * settle. The stylesheet owns the two-phase slide; `prefers-reduced-motion`
- * drops it. A state class is toggled here too, so a keyboard focus reveals the
- * same timestamp a hover does.
- *
- * THE TIMESTAMP IS A LIVE CLOCK: it reads `formatAge(now - at_ms)` and repaints
- * once per shared tick, so "5m 30s ago" stays current while it is on screen.
- * The subscription is taken through `tickWhileShown`, a PRESENT clock: the
- * finished turn's backstop leaves it counting (an age stays true after the
- * turn ends), and the feed's teardown of the bubble unsubscribes it with no
- * disposer to remember here. A label the reserve cannot hold (an age of a thousand days or more)
- * would widen past it, so it is logged at ERROR, once per corner.
- *
- * NO TIMESTAMP WHILE ARRIVING: `at_ms` is zero until the response settles, and
- * a corner with no settled instant has an empty slider, marked
- * `data-arriving`, so the token sits at the right edge and nothing slides.
- *
- * AN INTERIM'S CORNER MEASURES ITS DURATION (INTERIM): its bubble opens to the
- * right by the duration's drawn width on hover (`measureUsageAgo`).
- */
-export function drawFeedResponseUsageStamp(
-  u: FeedResponseUsageStamp,
-  rc: RowContext,
-  path: string,
-  interim: boolean,
-): HTMLElement {
-  const atMs = u.atMs === 0n ? 0 : msOf(u.atMs, `${path}.at_ms`);
-  log.debug("drawing a response usage stamp", {
-    operation: "feed.cards.response.usage-stamp",
-    context: { path, settled: atMs > 0 },
-  });
-
-  const corner = document.createElement("span");
-  corner.className = "usage-corner";
-  corner.dataset.tokens = u.text;
-  // What it says includes whether it measures (INTERIM), so a redraw never
-  // keeps a corner that does not measure in a bubble that needs it.
-  corner.setAttribute(SAYS_ATTRIBUTE, `${u.text}|${String(atMs)}|${interim ? "interim" : "whole"}`);
-
-  const reserve = document.createElement("span");
-  reserve.className = "usage-reserve";
-  reserve.setAttribute("aria-hidden", "true");
-  for (const text of USAGE_AGE_RESERVE_LABELS) {
-    const label = document.createElement("span");
-    label.className = "usage-reserve-label";
-    label.textContent = text;
-    reserve.appendChild(label);
-  }
-  corner.appendChild(reserve);
-
-  const slider = document.createElement("span");
-  slider.className = "usage-slider";
-  corner.appendChild(slider);
-
-  const stamp = document.createElement("span");
-  stamp.className = "usage-stamp";
-  stamp.textContent = u.text;
-  // THE FIGURE WEARS ITS HEAT, by the one rule the footer's tokens cell uses.
-  const heat = requireMessage(u.heat, `${path}.heat`);
-  stamp.style.color = heatColor(heat.position, `${path}.heat.position`);
-  slider.appendChild(stamp);
-
-  // The reserve is drawn either way; an arriving corner marks itself so its
-  // empty slider never slides out.
-  corner.toggleAttribute("data-arriving", atMs === 0);
-  if (atMs > 0) {
-    const ago = document.createElement("span");
-    ago.className = "usage-ago";
-    let overflowReported = false;
-    tickWhileShown(ago, rc.ctx.ticker, (nowMs) => {
-      const label = usageAgeLabel(nowMs - atMs);
-      ago.textContent = label;
-      if (overflowReported || usageAgeWithinReserve(label)) return;
-      overflowReported = true;
-      log.error("the usage corner's duration outgrew its reserved width", {
-        operation: "feed.cards.response.usage-reserve-exceeded",
-        context: { path, label, reserve: USAGE_AGE_RESERVE_LABELS },
-      });
-    });
-    slider.appendChild(ago);
-    if (interim) measureUsageAgo(ago, path);
-
-    // A focusable hover target: focus reveals the same timestamp a hover does.
-    corner.tabIndex = 0;
-    const reveal = (): void => corner.classList.add(USAGE_REVEALED_CLASS);
-    const hide = (): void => corner.classList.remove(USAGE_REVEALED_CLASS);
-    corner.addEventListener("mouseenter", reveal);
-    corner.addEventListener("mouseleave", hide);
-    corner.addEventListener("focusin", reveal);
-    corner.addEventListener("focusout", hide);
-  }
-
-  return corner;
-}
-
-/**
- * Keep AGO's drawn width on its bubble, as `--usage-ago-w`, for an interim
- * bubble's hover growth (styles.css "AN INTERIM RESPONSE'S CORNER GROWS ITS
- * BUBBLE"): the bubble opens by exactly the duration, and a tick that changes
- * the label's width changes the opening with it. A `ResizeObserver` watches the
- * duration and is torn down with it through `onDiscard`. A corner only ever
- * hangs in the bubble it was drawn into (a redraw keeps it only inside the
- * bubble it already hangs in, and discards it otherwise), so the bubble is read
- * when a size lands, and a duration that hangs in none is a defect.
- */
-function measureUsageAgo(ago: HTMLElement, path: string): void {
-  const Observer = pageResizeObserver(ago);
-  if (Observer === null) {
-    log.error("an interim's usage corner cannot measure its duration: the page has no ResizeObserver", {
-      operation: "feed.cards.response.usage-ago-unmeasured",
-      context: { path },
-    });
-    return;
-  }
-  const observer = new Observer(() => {
-    const bubble = ago.closest<HTMLElement>(`.${BUBBLE_CLASS}`);
-    if (bubble === null) {
-      log.error("a measured usage duration hangs in no bubble", {
-        operation: "feed.cards.response.usage-ago-orphaned",
-        context: { path, label: ago.textContent },
-      });
-      throw new Error(`${path}: a measured usage duration hangs in no bubble`);
-    }
-    const width = ago.getBoundingClientRect().width;
-    bubble.style.setProperty(USAGE_AGO_WIDTH_PROPERTY, `${String(width)}px`);
-  });
-  observer.observe(ago);
-  onDiscard(ago, () => observer.disconnect());
 }
 
 /** Record the shown length, so the next draw of this row resumes from it. */

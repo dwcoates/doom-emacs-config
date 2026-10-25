@@ -23,7 +23,7 @@ import {
 } from "../../../src/bubble/draw.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
 import { KNOWN_COMMAND_CLASS } from "../../../src/feed/rows/known-commands.js";
-import { PROMPT_COPY_CLASS } from "../../../src/feed/rows/blocks.js";
+import { BUBBLE_COPY_CLASS, COPY_ROOM_CLASS } from "../../../src/bubble/copy-room.js";
 import { boundCopyText } from "../../../src/copy-control.js";
 import { SELECTED_ENTRY_CLASS } from "../../../src/feed/selected-entry.js";
 import { cascadedValue, installStylesheet } from "../../stylesheet.js";
@@ -411,7 +411,7 @@ describe("drawFeedUserPrompt: the copy control", () => {
   /** The prompt bubble drawn from BLOCKS, and its copy control. */
   function copyControlOf(blocks: unknown[]): { el: HTMLElement; control: HTMLElement } {
     const el = drawFeedUserPrompt(prompt(blocks));
-    const control = el.querySelector<HTMLElement>(`.${PROMPT_COPY_CLASS}`);
+    const control = el.querySelector<HTMLElement>(`.${BUBBLE_COPY_CLASS}`);
     if (control === null) throw new Error("the prompt drew no copy control");
     return { el, control };
   }
@@ -424,6 +424,27 @@ describe("drawFeedUserPrompt: the copy control", () => {
       true,
       "bubble-body",
     ]);
+  });
+
+  it("opens the prompt's first line of text with its room", () => {
+    // Act
+    const { el } = copyControlOf([{ block: { case: "text", value: { prose: servedProse("hi\n\nlater") } } }]);
+    document.body.append(el);
+    // Assert
+    const ghosts = [...el.querySelectorAll(`.${COPY_ROOM_CLASS}`)];
+    el.remove();
+    expect(ghosts.map((g) => [g.parentElement?.tagName, g.parentElement?.textContent])).toEqual([["P", "hi"]]);
+  });
+
+  it("opens a reply's quote heading with its room, the quote being the first line", () => {
+    // Act
+    const { el } = copyControlOf([
+      { block: { case: "quote", value: { heading: "⟢ Replying", quoted: "Paris.", closing: "⟢ My message" } } },
+      { block: { case: "text", value: { prose: servedProse("and Rome?") } } },
+    ]);
+    // Assert
+    const ghosts = [...el.querySelectorAll(`.${COPY_ROOM_CLASS}`)];
+    expect(ghosts.map((g) => g.parentElement?.textContent)).toEqual(["⟢ Replying:"]);
   });
 
   it("copies the whole prompt, quote and words", () => {
@@ -442,7 +463,7 @@ describe("drawFeedUserPrompt: the copy control", () => {
     // Act
     const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("new") } } }]), first);
     // Assert
-    const controls = el.querySelectorAll(`.${PROMPT_COPY_CLASS}`);
+    const controls = el.querySelectorAll(`.${BUBBLE_COPY_CLASS}`);
     expect([controls.length, boundCopyText(controls[0]).text]).toEqual([1, "new"]);
   });
 
@@ -486,7 +507,7 @@ describe("userPromptLook: the one source of the user prompt's look", () => {
     // Arrange / Act
     const look = userPromptLook(body, "Body");
     // Assert
-    expect(look.corner.map((el) => [el.classList.contains(PROMPT_COPY_CLASS), boundCopyText(el).text])).toEqual([
+    expect(look.corner.map((el) => [el.classList.contains(BUBBLE_COPY_CLASS), boundCopyText(el).text])).toEqual([
       [true, "fix **the** test"],
     ]);
   });

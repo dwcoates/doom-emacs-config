@@ -1,7 +1,7 @@
 /**
  * heat — the ONE green-to-red gradient a figure takes by how hot it is. A token
  * figure takes it by its frontend.v1.TokenHeat (the footer's tokens cell and a
- * response bubble's corner figure draw it alike), and a hidden workspace's
+ * hovered response's figure in the activity cell draw it alike), and a hidden workspace's
  * cache countdown by how near its lapse is, so every heated figure reads on
  * the same gradient wherever it is drawn.
  */

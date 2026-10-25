@@ -11,6 +11,7 @@ import {
   type FooterView,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { TICKING_ATTRIBUTE } from "../../src/feed/ticking.js";
+import type { ResponseUsage } from "../../src/feed/response-usage.js";
 import { compactionProgress } from "../../src/footer/progress.js";
 import { TOOLTIP_DELAY_MS } from "../../src/tooltip.js";
 import {
@@ -2020,5 +2021,91 @@ describe("mountFooter: the status the strip draws is recorded", () => {
     expect(records.at(-1)).toEqual(
       expect.objectContaining({ arm: "disconnected", substatus: "unary_transport", source: "client_verdict" }),
     );
+  });
+});
+
+/** A read response usage with figure TEXT, settled 30 seconds ago. */
+function hoveredUsage(text: string): ResponseUsage {
+  return { text, color: "rgb(1, 2, 3)", settledAtMs: NOW - 30_000 };
+}
+
+describe("mountFooter: the hovered response's usage stands in for the activity line", () => {
+  afterEach(() => {
+    clearClientFailures();
+  });
+
+  it("draws the usage in the activity cell", async () => {
+    // Arrange
+    const { host, h, footer } = mount();
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    // Act
+    footer.showResponseUsage(hoveredUsage("2.1k"));
+    // Assert
+    expect([tierOf(host), host.querySelector(".footer-activity")?.textContent]).toEqual(["hover", "2.1k tokens · 30s ago"]);
+  });
+
+  it("gives the cell back to the daemon's line once the usage is withdrawn", async () => {
+    // Arrange
+    const { host, h, footer } = mount();
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    const daemon = tierOf(host);
+    footer.showResponseUsage(hoveredUsage("2.1k"));
+    // Act
+    footer.showResponseUsage(null);
+    // Assert
+    expect([daemon !== "hover", tierOf(host)]).toEqual([true, daemon]);
+  });
+
+  it("keeps the usage across a push, until it is withdrawn", async () => {
+    // Arrange
+    const { host, h, footer } = mount();
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    footer.showResponseUsage(hoveredUsage("2.1k"));
+    // Act
+    h.tail.push(pushView(footerView()));
+    await settle();
+    // Assert
+    expect(tierOf(host)).toBe("hover");
+  });
+
+  it("draws one activity cell, never the daemon's line beside the usage", async () => {
+    // Arrange
+    const { host, h, footer } = mount();
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    // Act
+    footer.showResponseUsage(hoveredUsage("2.1k"));
+    // Assert
+    expect(host.querySelectorAll(".footer-activity")).toHaveLength(1);
+  });
+
+  it("stands in for the client's own verdict's line too", async () => {
+    // Arrange
+    const { host, h, footer } = mount();
+    await settle();
+    h.tail.push(pushView(footerView()));
+    await settle();
+    reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
+    // Act
+    footer.showResponseUsage(hoveredUsage("2.1k"));
+    // Assert
+    expect([host.querySelector(".footer-status")?.textContent, tierOf(host)]).toEqual(["disconnected", "hover"]);
+  });
+
+  it("draws nothing before the first push", async () => {
+    // Arrange
+    const { host, footer } = mount();
+    await settle();
+    // Act
+    footer.showResponseUsage(hoveredUsage("2.1k"));
+    // Assert
+    expect(host.querySelector(".footer-activity")).toBeNull();
   });
 });
