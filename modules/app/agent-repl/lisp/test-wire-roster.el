@@ -1869,9 +1869,37 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                           "\"standing\":{\"archived\":{}}}]}"))
                  '(:new-thread "New thread"
                    :rows ((:thread (:id "t2" :dir "/z/b") :name "b" :summary "light" :current t
-                           :standing (:arm :open :value nil))
+                           :standing (:arm :open :value nil) :outline nil)
                           (:thread (:id "t1" :dir "/z/a") :name "a" :summary nil :current nil
-                           :standing (:arm :archived :value nil)))))))
+                           :standing (:arm :archived :value nil) :outline nil))))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-a-threads-outline ()
+  "A thread's outline decodes its breadcrumb and each row's place and counts."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-thread-outline
+                  (concat "{\"breadcrumb\":{\"whole\":{\"crumbs\":[{\"node\":{\"id\":\"n1\"},\"label\":{\"text\":\"why?\"}}]}},"
+                          "\"rows\":[{\"node\":{\"id\":\"n2\"},\"label\":{\"text\":\"and?\"},\"turns\":3,"
+                          "\"place\":{\"onPath\":{}}},"
+                          "{\"node\":{\"id\":\"n5\"},\"label\":{\"text\":\"deep\"},\"depth\":3,\"turns\":1,"
+                          "\"folded\":{\"runs\":4},\"place\":{\"shown\":{}}}]}"))
+                 '(:breadcrumb (:arm :whole :value ((:node "n1" :label "why?")))
+                   :rows ((:node "n2" :label "and?" :depth 0 :turns 3 :folded nil :place :on-path)
+                          (:node "n5" :label "deep" :depth 3 :turns 1 :folded 4 :place :shown))))))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-an-elided-breadcrumb ()
+  "An elided breadcrumb names its oldest and newest runs and counts the rest."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-thread-outline-breadcrumb
+                  (concat "{\"elided\":{\"first\":{\"node\":{\"id\":\"n1\"},\"label\":{\"text\":\"a\"}},"
+                          "\"omitted\":5,\"last\":{\"node\":{\"id\":\"n9\"},\"label\":{\"text\":\"z\"}}}}"))
+                 '(:arm :elided :value (:first (:node "n1" :label "a") :omitted 5 :last (:node "n9" :label "z"))))))
+
+(ert-deftest agent-repl-test-wire-roster-an-outline-row-with-no-place-is-a-breach ()
+  "Where a run stands against the shown path is never unset on the wire."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-thread-outline-row
+                  "{\"node\":{\"id\":\"n2\"},\"label\":{\"text\":\"and?\"},\"turns\":1}")
+                 '("RosterThreadOutlineRow" place "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-thread-row-without-a-standing-is-a-breach ()
   "Whether a thread is open or archived is never unset on the wire."
