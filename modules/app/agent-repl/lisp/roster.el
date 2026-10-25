@@ -623,7 +623,8 @@ a name the roster opened no workspace under, nil included, is no thread."
   (concat agent-repl-roster-thread-prefix (plist-get row :name)))
 
 (defun agent-repl-roster-desired-threads (roster)
-  "Return the workspaces ROSTER's threads ask for, as `agent-repl-roster-desired-tabs' does.
+  "Return the workspaces ROSTER's threads ask for.
+Shaped as `agent-repl-roster-desired-tabs' returns them.
 Each carries `:thread' t and is never `:collapsed': its page loads and its
 session runs, it is only never drawn."
   (mapcar (lambda (row)

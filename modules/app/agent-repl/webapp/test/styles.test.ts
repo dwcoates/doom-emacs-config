@@ -4872,6 +4872,27 @@ describe("the tool card's command grey", () => {
     );
     expect(tint).toEqual([0x18, 0x18, 0x17]);
   });
+
+  // The Settings page (lisp/settings.el, agent-repl-settings--colors) wears the
+  // dark theme's ink, muted ink, card, border and selected-entry accent.
+  // Neither suite may read the other's file, so lisp/test-settings.el pins
+  // these colors too.
+  it.each([
+    ["--fg", [0xf1, 0xef, 0xe9]],
+    ["--muted", [0x89, 0x87, 0x82]],
+    ["--card", [0x23, 0x23, 0x22]],
+    ["--border", [0x2c, 0x2c, 0x2b]],
+    ["--selected-entry", [0x8b, 0xbe, 0xff]],
+  ] as const)("defines the dark theme's %s as the Settings page's", (token, want) => {
+    // Arrange
+    const block = darkThemeBlock();
+
+    // Act
+    const got = rgbOf(block, token);
+
+    // Assert
+    expect(got).toEqual(want);
+  });
 });
 
 /**

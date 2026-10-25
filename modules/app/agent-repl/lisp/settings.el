@@ -42,6 +42,8 @@
 (declare-function agent-repl-refill-keymap "core" (map fill))
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
 (declare-function agent-repl-popup-show "popup" (buffer))
+(declare-function agent-repl-popup-quit "popup" ())
+(declare-function agent-repl--set-buffer-background "core" (color))
 (declare-function agent-repl--input-help-binding-context "input-help" (topic))
 (declare-function agent-repl--input-help-key-sources "input-help" (command context))
 (declare-function agent-repl--input-help-insert-row "input-help" (cell description lines column))
@@ -289,37 +291,51 @@ prefix, cannot be bound at all.  Each refusal is a `user-error'."
   "The ids of the sections this page shows open.")
 
 (defun agent-repl-settings--keycap (command group topic)
-  "Return GROUP's key as a button that changes or removes it for COMMAND.
+  "Return GROUP's key as a keycap button that changes or removes it for COMMAND.
 GROUP is (DESCRIPTION . SOURCES): one key, bound in every one of SOURCES
 \(`agent-repl--input-help-group-sources'), so the button acts on all."
-  (concat (make-text-button (car group) nil
-                            'face 'help-key-binding
+  (concat (make-text-button (concat " " (car group) " ") nil
+                            'face 'agent-repl-settings-keycap
+                            'mouse-face 'agent-repl-settings-hover
                             'help-echo "mouse-1, RET: change or remove this key"
                             'action (lambda (_) (agent-repl-settings-edit-key topic command group)))
           (let ((label (agent-repl--input-help-group-label (cdr group))))
-            (and label (propertize (concat " " label) 'face 'agent-repl-input-help-annotation)))))
+            (and label (propertize (concat " " label) 'face 'agent-repl-settings-muted)))))
 
-(defun agent-repl-settings--button (label echo action)
-  "Return a button labeled LABEL, explained by ECHO, that runs ACTION."
-  (make-text-button label nil 'face 'agent-repl-settings-button 'help-echo echo
+(defun agent-repl-settings--button (label echo action &optional face)
+  "Return a button labeled LABEL, explained by ECHO, that runs ACTION.
+FACE is its face, the raised settings button by default."
+  (make-text-button label nil 'face (or face 'agent-repl-settings-button)
+                    'mouse-face 'agent-repl-settings-hover 'help-echo echo
                     'action (lambda (_) (funcall action))))
 
 (defun agent-repl-settings--cell (topic command context)
-  "Return COMMAND's keys in CONTEXT as keycap buttons, then the add button."
-  (concat (mapconcat (lambda (group) (agent-repl-settings--keycap command group topic))
+  "Return COMMAND's row cell: the add button, then its keys as keycaps.
+The add button comes first, so every row's sits in one column."
+  (concat (agent-repl-settings--button "+" (format "Add a key for %s" command)
+                                       (lambda () (agent-repl-settings-add-key topic command))
+                                       'agent-repl-settings-add)
+          "  "
+          (mapconcat (lambda (group) (agent-repl-settings--keycap command group topic))
                      (agent-repl--input-help-group-sources
                       (agent-repl--input-help-key-sources command context))
-                     "  ")
-          "  "
-          (agent-repl-settings--button "+" "Add a key"
-                                       (lambda () (agent-repl-settings-add-key topic command)))))
+                     " ")))
 
 (defun agent-repl-settings--variable-line (variable)
   "Return VARIABLE's line: its name and value, then a button to edit it."
-  (concat (propertize (symbol-name variable) 'face 'agent-repl-input-help-variable)
-          ": " (agent-repl--input-help-variable-value variable)
+  (concat (propertize (concat "↳ " (symbol-name variable)) 'face 'agent-repl-settings-muted)
+          "  " (agent-repl--input-help-variable-value variable)
           "  " (agent-repl-settings--button "edit" (concat "Edit " (symbol-name variable))
-                                            (lambda () (agent-repl-settings-edit-variable variable)))))
+                                            (lambda () (agent-repl-settings-edit-variable variable))
+                                            'agent-repl-settings-link)))
+
+(defun agent-repl-settings--changed-note (changed)
+  "Return the note a row with the CHANGED overrides carries, a reset button in it."
+  (concat "  " (propertize "● changed" 'face 'agent-repl-settings-changed) "  "
+          (agent-repl-settings--button "reset" "Put this command's keys back"
+                                       (lambda () (agent-repl-settings--reset changed)
+                                         (agent-repl-settings--redraw))
+                                       'agent-repl-settings-link)))
 
 (defun agent-repl-settings--rows (topic context)
   "Return TOPIC's rows as (CELL DESCRIPTION LINES), one per command.
@@ -330,15 +346,11 @@ command's own first docstring line."
               (mapcar (lambda (one)
                         (let ((changed (agent-repl-settings--overrides-of (list one))))
                           (list (agent-repl-settings--cell topic one context)
-                                (concat (if (listp command)
-                                            (car (split-string (documentation one) "\n"))
-                                          description)
-                                        (and changed
-                                             (concat "  " (propertize "changed" 'face 'warning) " "
-                                                     (agent-repl-settings--button
-                                                      "reset" "Put this command's keys back"
-                                                      (lambda () (agent-repl-settings--reset changed)
-                                                        (agent-repl-settings--redraw))))))
+                                (concat (propertize (if (listp command)
+                                                        (car (split-string (documentation one) "\n"))
+                                                      description)
+                                                    'face 'agent-repl-settings-text)
+                                        (and changed (agent-repl-settings--changed-note changed)))
                                 (mapcar #'agent-repl-settings--variable-line
                                         (plist-get props :variables)))))
                       (if (listp command) command (list command)))))
@@ -352,43 +364,57 @@ command's own first docstring line."
           (plist-get topic :bindings)))
 
 (defun agent-repl-settings--heading (topic open)
-  "Return TOPIC's section heading, a button folding it, OPEN or shut."
+  "Return TOPIC's section heading band, a button folding it, OPEN or shut.
+The command count sits at the band's right edge."
   (let* ((commands (agent-repl-settings--commands topic))
-         (changed (length (agent-repl-settings--overrides-of commands))))
-    (concat (make-text-button (concat (if open "▾ " "▸ ") (plist-get topic :title)) nil
-                              'face 'agent-repl-settings-section
+         (changed (length (agent-repl-settings--overrides-of commands)))
+         (face (if open 'agent-repl-settings-section-open 'agent-repl-settings-section))
+         (count (format "%d %s%s  " (length commands)
+                        (if (= 1 (length commands)) "command" "commands")
+                        (if (> changed 0) (format " · %d changed" changed) ""))))
+    (concat (make-text-button (concat "  " (if open "▾" "▸") "  " (plist-get topic :title)) nil
+                              'face face
+                              'mouse-face 'agent-repl-settings-hover
                               'agent-repl-settings-topic (plist-get topic :id)
                               'help-echo "mouse-1, RET, TAB: open or shut"
                               'action (lambda (_) (agent-repl-settings-toggle (plist-get topic :id))))
-            (propertize (format "   %d %s%s" (length commands)
-                                (if (= 1 (length commands)) "command" "commands")
-                                (if (> changed 0) (format " · %d changed" changed) ""))
-                        'face 'agent-repl-input-help-annotation))))
+            (propertize " " 'face face 'display `(space :align-to (- right ,(1+ (string-width count)))))
+            (propertize count 'face (list (if (> changed 0) 'agent-repl-settings-changed
+                                            'agent-repl-settings-muted)
+                                          face))
+            (propertize "\n" 'face face))))
 
 (defun agent-repl-settings--insert (contexts)
   "Insert the page, each open section's keys read from CONTEXTS.
 CONTEXTS maps a topic id to its binding context."
-  (insert (propertize "Settings" 'face 'agent-repl-input-help-title) "\n"
-          (propertize (format "Click a key to change or remove it, + to add one.  Saved in %s."
-                              (abbreviate-file-name (agent-repl-settings-file)))
-                      'face 'agent-repl-input-help-annotation)
-          "  "
-          (agent-repl-settings--button "Reset all" "Put every key and value back"
+  (insert "\n  " (propertize "Settings" 'face 'agent-repl-settings-title) "\n"
+          "  " (propertize (format "Every key ZETTEL binds, by feature · saved in %s"
+                                   (abbreviate-file-name (agent-repl-settings-file)))
+                           'face 'agent-repl-settings-muted)
+          "\n\n  "
+          (agent-repl-settings--button "  Reset all  " "Put every key and value back"
                                        (lambda ()
                                          (agent-repl-settings--reset (copy-sequence agent-repl-settings-overrides))
                                          (agent-repl-settings--redraw)))
+          "   "
+          (propertize "+ adds a key  ·  click a key to change or remove it  ·  TAB folds  ·  q closes"
+                      'face 'agent-repl-settings-muted)
           "\n")
   (pcase-dolist (`(,group . ,topics) (agent-repl--input-help-groups))
-    (insert "\n" (propertize (upcase group) 'face 'agent-repl-input-help-section) "\n")
+    (insert "\n  " (propertize (upcase group) 'face 'agent-repl-settings-group) "\n"
+            (propertize " " 'face 'agent-repl-settings-rule 'display '(space :align-to right))
+            "\n")
     (dolist (topic topics)
       (let ((open (memq (plist-get topic :id) agent-repl-settings--open)))
-        (insert " " (agent-repl-settings--heading topic open) "\n")
+        (insert (agent-repl-settings--heading topic open))
         (when open
           (let* ((rows (agent-repl-settings--rows topic (alist-get (plist-get topic :id) contexts)))
-                 (column (agent-repl--input-help-key-column (mapcar #'car rows))))
+                 (column (+ 2 (agent-repl--input-help-key-column (mapcar #'car rows)))))
+            (insert "\n")
             (pcase-dolist (`(,cell ,description ,lines) rows)
               (insert "  ")
-              (agent-repl--input-help-insert-row cell description lines column))))))))
+              (agent-repl--input-help-insert-row cell description lines column))
+            (insert "\n")))))))
 
 (defun agent-repl-settings--contexts (open)
   "Return each of the OPEN topic ids with its binding context."
@@ -482,13 +508,77 @@ every one of SOURCES."
 
 ;;;; ---- The mode -------------------------------------------------------
 
+(defconst agent-repl-settings--colors
+  '((ground . "#111110") (band . "#181817") (card . "#232322") (border . "#2c2c2b")
+    (keycap-edge . "#3a3a38") (text . "#f1efe9") (muted . "#898782") (accent . "#8bbeff"))
+  "The page's colors, the webapp's dark theme's own (webapp/src/styles.css).
+`ground' is the sidebar's `--sidebar-bg', `band' its selected row's tint,
+`card' `--card', `border' `--border', `text' `--fg', `muted' `--muted' and
+`accent' `--selected-entry'; `keycap-edge' sits between `border' and
+`muted', so a keycap's edge reads on a `card' fill.  Pinned on both sides:
+test-settings.el here, webapp/test/styles.test.ts there.")
+
+(defun agent-repl-settings--color (name)
+  "Return the page color NAME from `agent-repl-settings--colors'."
+  (or (alist-get name agent-repl-settings--colors)
+      (agent-repl--fatal agent-repl-settings--log-scope "elisp.settings.color: unknown name=%s" name)))
+
+(agent-repl-defface 'agent-repl-settings-text
+  `((t :foreground ,(agent-repl-settings--color 'text)))
+  "Face of the Settings page's ordinary text.")
+
+(agent-repl-defface 'agent-repl-settings-muted
+  `((t :foreground ,(agent-repl-settings--color 'muted)))
+  "Face of the Settings page's quieter text: notes, counts, variable names.")
+
+(agent-repl-defface 'agent-repl-settings-title
+  `((t :foreground ,(agent-repl-settings--color 'text) :weight bold :height 1.6))
+  "Face of the Settings page's title.")
+
+(agent-repl-defface 'agent-repl-settings-group
+  `((t :foreground ,(agent-repl-settings--color 'muted) :weight bold :height 0.85))
+  "Face of a group's label, upper case as the webapp's sidebar heads are.")
+
+(agent-repl-defface 'agent-repl-settings-rule
+  `((t :underline (:color ,(agent-repl-settings--color 'border))))
+  "Face of the thin rule under a group's label.")
+
 (agent-repl-defface 'agent-repl-settings-section
-  '((t :inherit bold))
-  "Face of a section heading on the Settings page.")
+  `((t :foreground ,(agent-repl-settings--color 'text)
+       :background ,(agent-repl-settings--color 'band) :extend t))
+  "Face of a shut section's heading band.")
+
+(agent-repl-defface 'agent-repl-settings-section-open
+  `((t :foreground ,(agent-repl-settings--color 'text) :weight bold
+       :background ,(agent-repl-settings--color 'card) :extend t))
+  "Face of an open section's heading band, lifted to the webapp's card.")
+
+(agent-repl-defface 'agent-repl-settings-keycap
+  `((t :foreground ,(agent-repl-settings--color 'text)
+       :background ,(agent-repl-settings--color 'card)
+       :box (:line-width (1 . -1) :color ,(agent-repl-settings--color 'keycap-edge))))
+  "Face of a key on the Settings page: a keycap on the webapp's card.")
+
+(agent-repl-defface 'agent-repl-settings-add
+  `((t :foreground ,(agent-repl-settings--color 'muted) :weight bold))
+  "Face of a row's add button, quiet until pointed at.")
+
+(agent-repl-defface 'agent-repl-settings-link
+  `((t :foreground ,(agent-repl-settings--color 'accent) :underline t))
+  "Face of a small text action (edit, reset), in the webapp's accent.")
+
+(agent-repl-defface 'agent-repl-settings-changed
+  `((t :foreground ,(agent-repl-settings--color 'accent)))
+  "Face of a changed command's mark and its section's count.")
+
+(agent-repl-defface 'agent-repl-settings-hover
+  `((t :foreground ,(agent-repl-settings--color 'accent)
+       :background ,(agent-repl-settings--color 'border)))
+  "Face of whatever on the page the mouse points at.")
 
 (agent-repl-defface 'agent-repl-settings-button
   '((t :inherit agent-repl-input-help-button))
-  "Face of a button on the Settings page.")
+  "Face of a raised button on the Settings page.")
 
 (defun agent-repl-settings-refresh ()
   "Draw the Settings page again, reading every key afresh."
@@ -500,9 +590,12 @@ every one of SOURCES."
 
 (defun agent-repl-settings--fill-map (map)
   "Bind the Settings page's keys in MAP, in every Evil state too.
-TAB folds the section at point; g draws the page again."
+TAB folds the section at point, g draws the page again, and q or ESC
+closes it."
   (dolist (binding '(("TAB" . agent-repl-settings-toggle-section)
-                     ("g" . agent-repl-settings-refresh)))
+                     ("g" . agent-repl-settings-refresh)
+                     ("q" . agent-repl-popup-quit)
+                     ("<escape>" . agent-repl-popup-quit)))
     (define-key map (kbd (car binding)) (cdr binding))
     (when (fboundp 'evil-define-key*)
       (evil-define-key* '(normal motion) map (kbd (car binding)) (cdr binding)))))
@@ -512,7 +605,9 @@ TAB folds the section at point; g draws the page again."
   (agent-repl-settings--fill-map agent-repl-settings-mode-map))
 
 (define-derived-mode agent-repl-settings-mode special-mode "Settings"
-  "Major mode of the Settings page."
+  "Major mode of the Settings page, on the webapp sidebar's dark ground."
+  (agent-repl--set-buffer-background (agent-repl-settings--color 'ground))
+  (face-remap-add-relative 'default :foreground (agent-repl-settings--color 'text))
   (setq-local truncate-lines nil)
   (setq-local line-spacing 0.2)
   (visual-line-mode 1))

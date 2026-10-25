@@ -322,8 +322,8 @@
   "The page shows each group, and each section shut with its count."
   (agent-repl-test-settings--with-page
     (let ((page (agent-repl-test-settings--page)))
-      (should (string-match-p "^Settings\n" page))
-      (should (string-match-p "\nG\n ▸ Topic one   2 commands\n" page))
+      (should (string-match-p "^  Settings\n" page))
+      (should (string-match-p "\n  G\n \n  ▸  Topic one 2 commands  \n" page))
       (should-not (string-match-p "Does a\\." page)))))
 
 (ert-deftest agent-repl-test-settings-page-open-section-shows-rows ()
@@ -333,9 +333,9 @@
     (define-key agent-repl-test-settings--map (kbd "C-c b") #'agent-repl-test-settings--b)
     (agent-repl-settings-toggle 't1)
     (let ((page (agent-repl-test-settings--page)))
-      (should (string-match-p "▾ Topic one" page))
-      (should (string-match-p "C-c a  \\+ Does a\\." page))
-      (should (string-match-p "agent-repl-send-prefix: \"prefix: \"  edit" page)))))
+      (should (string-match-p "▾  Topic one" page))
+      (should (string-match-p "  \\+   C-c a  Does a\\." page))
+      (should (string-match-p "↳ agent-repl-send-prefix  \"prefix: \"  edit" page)))))
 
 (ert-deftest agent-repl-test-settings-page-marks-a-changed-command ()
   "A changed command shows changed and a reset button; its section counts it."
@@ -345,7 +345,7 @@
     (agent-repl-settings-toggle 't1)
     (let ((page (agent-repl-test-settings--page)))
       (should (string-match-p "2 commands · 1 changed" page))
-      (should (string-match-p "Does a\\.  changed reset" page)))))
+      (should (string-match-p "Does a\\.  ● changed  reset" page)))))
 
 (ert-deftest agent-repl-test-settings-toggle-opens-then-shuts ()
   "Toggling a section opens it, and toggling again shuts it."
@@ -390,7 +390,7 @@
     (let ((keycap (substring-no-properties
                    (agent-repl-settings--keycap 'c (list "K" (list :description "K" :state state)) '(:id x))))
           (label (agent-repl--input-help-state-label (list state))))
-      (should (equal keycap (if label (concat "K " label) "K"))))))
+      (should (equal keycap (if label (concat " K  " label) " K "))))))
 
 (ert-deftest agent-repl-test-settings-page-shows-one-keycap-per-key ()
   "A key bound in several modes is one keycap, unannotated when in both."
@@ -401,7 +401,7 @@
     (define-key agent-repl-test-settings--map (kbd "C-c b") #'agent-repl-test-settings--b)
     (agent-repl-settings-toggle 't1)
     (let ((page (agent-repl-test-settings--page)))
-      (should (string-match-p "  C-c a  \\+ Does a\\." page)))))
+      (should (string-match-p "  \\+   C-c a  Does a\\." page)))))
 
 (ert-deftest agent-repl-test-settings-edit-key-remove-takes-it-from-every-place ()
   "Removing a key bound in several modes unbinds it in each of them."
@@ -418,6 +418,46 @@
     (should-not (lookup-key agent-repl-test-settings--map (kbd "C-c a")))
     (should-not (lookup-key agent-repl-test-settings--map (vconcat [normal-state] (kbd "C-c a"))))
     (should (= (length agent-repl-settings-overrides) 2))))
+
+(ert-deftest agent-repl-test-settings-add-button-leads-every-row ()
+  "Every row starts with its add button, so the buttons share one column."
+  (agent-repl-test-settings--with-page
+    (define-key agent-repl-test-settings--map (kbd "C-c a") #'agent-repl-test-settings--a)
+    (define-key agent-repl-test-settings--map (kbd "C-c long b") #'agent-repl-test-settings--b)
+    (agent-repl-settings-toggle 't1)
+    (let ((columns nil))
+      (with-current-buffer (agent-repl-settings--buffer)
+        (goto-char (point-min))
+        (while (re-search-forward "^ *\\+ " nil t)
+          (push (- (match-end 0) 2 (line-beginning-position)) columns)))
+      (should (= (length columns) 2))
+      (should (apply #'= columns)))))
+
+(ert-deftest agent-repl-test-settings-page-wears-the-webapp-ground ()
+  "The page's ground and text are the webapp's dark sidebar and ink."
+  (agent-repl-test-settings--with-page
+    (with-current-buffer (agent-repl-settings--buffer)
+      (should (member '(:background "#111110") (cdr (assq 'default face-remapping-alist))))
+      (should (member '(:foreground "#f1efe9") (cdr (assq 'default face-remapping-alist)))))))
+
+(ert-deftest agent-repl-test-settings-colors-are-the-webapp-tokens ()
+  "The page's colors are the webapp dark theme's, pinned by styles.test.ts too."
+  (should (equal agent-repl-settings--colors
+                 '((ground . "#111110") (band . "#181817") (card . "#232322") (border . "#2c2c2b")
+                   (keycap-edge . "#3a3a38") (text . "#f1efe9") (muted . "#898782") (accent . "#8bbeff")))))
+
+(ert-deftest agent-repl-test-settings-color-unknown-name-is-fatal ()
+  "Asking for a color the page does not have signals, naming it."
+  (agent-repl-test-settings--with
+    (should-error (agent-repl-settings--color 'nope))
+    (should (equal agent-repl-test-settings--fatals '("elisp.settings.color: unknown name=nope")))))
+
+(ert-deftest agent-repl-test-settings-open-heading-is-a-lifted-band ()
+  "An open section's heading wears the card band, a shut one the quieter band."
+  (should (eq (get-text-property 0 'face (agent-repl-settings--heading agent-repl-test-settings--topic t))
+              'agent-repl-settings-section-open))
+  (should (eq (get-text-property 0 'face (agent-repl-settings--heading agent-repl-test-settings--topic nil))
+              'agent-repl-settings-section)))
 
 ;;;; ---- The page's commands ----
 
@@ -489,6 +529,11 @@
   "TAB folds the section at point and g draws the page again."
   (should (eq (lookup-key agent-repl-settings-mode-map (kbd "TAB")) #'agent-repl-settings-toggle-section))
   (should (eq (lookup-key agent-repl-settings-mode-map (kbd "g")) #'agent-repl-settings-refresh)))
+
+(ert-deftest agent-repl-test-settings-mode-map-closes-on-q-and-escape ()
+  "q and ESC close the Settings popup."
+  (should (eq (lookup-key agent-repl-settings-mode-map (kbd "q")) #'agent-repl-popup-quit))
+  (should (eq (lookup-key agent-repl-settings-mode-map (kbd "<escape>")) #'agent-repl-popup-quit)))
 
 (provide 'test-settings)
 

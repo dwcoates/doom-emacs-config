@@ -543,7 +543,7 @@ Compared in description order: a keymap's own order says nothing."
          (value (agent-repl--input-help-variable-value 'agent-repl-send-prefix)))
     (dolist (line (list (agent-repl--input-help-variable-line 'agent-repl-send-prefix)
                         (agent-repl-settings--variable-line 'agent-repl-send-prefix)))
-      (should (string-search (concat "agent-repl-send-prefix: " value) (substring-no-properties line))))))
+      (should (string-search value (substring-no-properties line))))))
 
 (ert-deftest agent-repl-test-input-help-variable-line-name-describes-the-variable ()
   "Pushing the variable's name describes it."

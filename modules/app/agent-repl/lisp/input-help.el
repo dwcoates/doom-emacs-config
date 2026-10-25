@@ -292,7 +292,8 @@
      :title "Settings page"
      :keymaps (agent-repl-settings-mode-map)
      :bindings ((agent-repl-settings-toggle-section "Open or shut the section at point.")
-                (agent-repl-settings-refresh "Draw the page again, reading every key afresh."))
+                (agent-repl-settings-refresh "Draw the page again, reading every key afresh.")
+                (agent-repl-popup-quit "Close the page."))
      :features ("Click a key to change or remove it, and + to add one; a key is any sequence of keys, ended by ESC."
                 "A changed command shows changed, and reset puts its keys back."
                 "Changes are saved in ~/zettel/settings.eld and laid over the defaults at every start.")))
