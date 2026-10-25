@@ -207,6 +207,8 @@ var layout3Undo = map[int][]string{
 		`ALTER TABLE workspaces DROP COLUMN kind`,
 		`ALTER TABLE repositories DROP COLUMN kind`,
 	},
+	// Layout 79 drops stored rows and changes no shape: nothing to undo.
+	79: {},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by
