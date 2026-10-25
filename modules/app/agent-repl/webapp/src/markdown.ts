@@ -225,6 +225,25 @@ md.core.ruler.after("code-span-file-link", "file-link-label", (state) => {
   return true;
 });
 
+/** The class of the bold words that open a list item (`- **Term**: …`). */
+export const LEAD_CLASS = "md-lead";
+
+// BOLD WORDS THAT OPEN A LIST ITEM ARE ITS LEAD: a `strong` that is the very
+// first thing in the item's first paragraph carries LEAD_CLASS, so a page
+// can draw an item's lead apart from bold words later in its text, which CSS
+// alone cannot tell apart (`:first-child` passes over text before it).
+md.core.ruler.after("file-link-label", "list-item-lead", (state) => {
+  state.tokens.forEach((token, index) => {
+    if (token.type !== "list_item_open") return;
+    const first = state.tokens[index + 1]?.type === "paragraph_open" ? state.tokens[index + 2] : undefined;
+    if (first?.type !== "inline") return;
+    // markdown-it leaves an empty text token before a leading `**`.
+    const opener = first.children?.find((child) => child.type !== "text" || child.content !== "");
+    if (opener?.type === "strong_open") opener.attrJoin("class", LEAD_CLASS);
+  });
+  return true;
+});
+
 // Every emitted link opens in a new tab, safely.
 const defaultLinkOpen =
   md.renderer.rules.link_open ??

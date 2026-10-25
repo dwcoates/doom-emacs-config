@@ -9221,6 +9221,13 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   width: 22px; height: 22px; border-radius: 5px; font-size: 14px; line-height: 1;
 }
 .chat-siblings ar-button:hover { background: var(--card); color: var(--fg); }
+/* THE CHAT'S MARKDOWN EMPHASIS IS QUIETER (owner request, 2026-10-25): a
+   heading is drawn a slight shade greyer than the answer's text, and a list
+   item's lead (markdown.ts LEAD_CLASS, bold words that open the item) a
+   shade greyer still than the text but less than a heading. Subtle: each is
+   the text's own color mixed a little toward --muted. */
+.chat-a :is(h1, h2, h3, h4, h5, h6) { color: color-mix(in srgb, currentColor 80%, var(--muted)); }
+.chat-a strong.md-lead { color: color-mix(in srgb, currentColor 90%, var(--muted)); }
 .chat-a { align-self: flex-start; max-width: 100%; line-height: 1.6; overflow-wrap: anywhere; }
 .chat-a > :first-child { margin-top: 0; }
 .chat-a > :last-child { margin-bottom: 0; }

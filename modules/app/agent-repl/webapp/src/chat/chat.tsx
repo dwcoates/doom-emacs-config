@@ -82,6 +82,23 @@ export function pendingQuestionOf(view: ChatView): string | null {
   return JSON.stringify([question.quote?.text ?? null, requireMessage(question.text, "ChatQuestion.text").text]);
 }
 
+/** The node ids of VIEW's shown path, oldest first; none for an empty thread. */
+export function shownPathOf(view: ChatView): string[] {
+  if (view.state.case !== "conversation") return [];
+  return view.state.value.exchanges.map((ex, i) => requireMessage(ex.node, `ChatConversation.exchanges[${i}].node`).id);
+}
+
+/**
+ * Whether NEXT's shown path swaps an exchange PREV showed for another (a
+ * sibling switch) rather than only adding to PREV's: the two differ at an
+ * index both hold.
+ */
+export function pathSwapped(prev: readonly string[], next: readonly string[]): boolean {
+  const n = Math.min(prev.length, next.length);
+  for (let i = 0; i < n; i++) if (prev[i] !== next[i]) return true;
+  return false;
+}
+
 /** Mount the chat into HOST. */
 export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): ChatHandle {
   log.info("mounting the chat", { operation: "chat.mount" });
@@ -183,6 +200,8 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
   // The pending question of the last view drawn: undefined before the first
   // view, null while none is in flight.
   let lastAsked: string | null | undefined = undefined;
+  // The shown path of the last view drawn.
+  let lastPath: string[] = [];
   const draw = (view: ChatView): void => {
     // THE END STAYS IN VIEW while it was in view, so an answer arriving is
     // followed; a reader scrolled up is left where they are. A QUESTION JUST
@@ -194,8 +213,20 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
     const asked = pendingQuestionOf(view);
     const sent = lastAsked !== undefined && asked !== null && asked !== lastAsked;
     lastAsked = asked;
+    // A SIBLING SWITCH MOVES NOTHING (owner request, 2026-10-25): the view
+    // that swaps an exchange for its sibling keeps the scroll exactly where
+    // it was, neither following the end nor letting a shorter branch pull
+    // the page up. The column keeps the height it had (its min-height) until
+    // a view that is not a switch, so the browser has nothing to clamp.
+    const path = shownPathOf(view);
+    const switched = !sent && pathSwapped(lastPath, path);
+    lastPath = path;
+    const top = scroll.scrollTop;
+    const height = host.offsetHeight;
+    host.style.minHeight = switched ? `${height}px` : "";
     flushSync(() => root.render(<ChatStream view={view} actions={actions} />));
     if (sent) landChatAtEnd(scroll, "promptSent");
+    else if (switched) scroll.scrollTop = top;
     else if (atEnd) landChatAtEnd(scroll, "chatAnswerFollowed");
     // THE THREAD'S FIRST VIEW IS ITS CONVERSATION DRAWN, as the feed's opening
     // page is the feed's: the daemon opens the thread's tab (OpenTabs) only

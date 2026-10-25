@@ -13,7 +13,7 @@ import { SwitchChatSiblingResponseSchema, type SwitchChatSiblingRequest } from "
 import { WatchChatResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_chat_pb";
 import { ChatViewSchema, type ChatView } from "../../../proto/gen/ts/frontend/v1/chat_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { mountChat, pendingQuestionOf, SIGHTING_BATCH_MS, type ChatHandle } from "../../src/chat/chat.js";
+import { mountChat, pathSwapped, pendingQuestionOf, shownPathOf, SIGHTING_BATCH_MS, type ChatHandle } from "../../src/chat/chat.js";
 import { HIGHLIGHT_CLASS, QUOTE_MARK_CLASS } from "../../src/chat/chat-view.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { log } from "../../src/log.js";
@@ -437,5 +437,90 @@ describe("the chat's end after a question is asked", () => {
     await pushPending(d, conversation([], pending("why?")), "why?");
 
     expect([top, moves]).toEqual([0, []]);
+  });
+});
+
+describe("pathSwapped", () => {
+  it.each([
+    ["an exchange swapped for its sibling", ["n1", "n2"], ["n1", "n3"], true],
+    ["a swap that shortens the path", ["n1", "n2", "n4"], ["n1", "n3"], true],
+    ["an exchange added", ["n1"], ["n1", "n2"], false],
+    ["the same path", ["n1", "n2"], ["n1", "n2"], false],
+    ["the first view", [], ["n1"], false],
+  ])("%s: %s", (_name, prev, next, want) => {
+    expect(pathSwapped(prev, next)).toBe(want);
+  });
+});
+
+describe("shownPathOf", () => {
+  it("is the exchanges' nodes, oldest first", () => {
+    const view = create(ChatViewSchema, conversation([exchange("n1", "q", "a"), exchange("n2", "q2", "a2")]));
+    expect(shownPathOf(view)).toEqual(["n1", "n2"]);
+  });
+
+  it("is empty for the empty thread", () => {
+    expect(shownPathOf(create(ChatViewSchema, { state: { case: "empty", value: { hint: { text: "ask" } } } }))).toEqual([]);
+  });
+});
+
+/**
+ * A SIBLING SWITCH MOVES NOTHING (owner request, 2026-10-25). The scroll box
+ * is a reader at the END of a long chat, the case that otherwise followed the
+ * end; the column measures 800px before the switch.
+ */
+describe("the chat's scroll across a sibling switch", () => {
+  let top: number;
+  let moves: unknown[];
+
+  beforeEach(() => {
+    top = 900;
+    Object.defineProperty(scroll, "scrollHeight", { configurable: true, get: () => 1000 });
+    Object.defineProperty(scroll, "clientHeight", { configurable: true, get: () => 100 });
+    Object.defineProperty(scroll, "scrollTop", { configurable: true, get: () => top, set: (v: number) => (top = v) });
+    Object.defineProperty(host, "offsetHeight", { configurable: true, get: () => 800 });
+    moves = [];
+    vi.spyOn(log, "info").mockImplementation((_message, fields) => {
+      if (fields?.operation === "scroll.chat-moved") moves.push(fields.context);
+    });
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  async function switchedTo(d: ReturnType<typeof daemon>): Promise<void> {
+    d.push(conversation([exchange("n1", "q", "a"), exchange("n2", "q2", "a2"), exchange("n4", "q4", "a4")]));
+    await drawn('[data-chat-answer="n4"]');
+    top = 900; // the reader at the end, as the opening view left them
+    moves = [];
+    d.push(conversation([exchange("n1", "q", "a"), exchange("n3", "q3", "a3")]));
+    await drawn('[data-chat-answer="n3"]');
+  }
+
+  it("leaves the scroll exactly where it was, following no end", async () => {
+    const d = daemon();
+    mount(d);
+
+    await switchedTo(d);
+
+    expect([top, moves]).toEqual([900, []]);
+  });
+
+  it("holds the column's height, so a shorter branch cannot pull the page up", async () => {
+    const d = daemon();
+    mount(d);
+
+    await switchedTo(d);
+
+    expect(host.style.minHeight).toBe("800px");
+  });
+
+  it("lets the held height go with the next view that is not a switch", async () => {
+    const d = daemon();
+    mount(d);
+    await switchedTo(d);
+
+    d.push(conversation([exchange("n1", "q", "a"), exchange("n3", "q3", "a3"), exchange("n5", "q5", "a5")]));
+    await drawn('[data-chat-answer="n5"]');
+
+    expect(host.style.minHeight).toBe("");
   });
 });
