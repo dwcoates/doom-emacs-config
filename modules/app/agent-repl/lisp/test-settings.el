@@ -388,9 +388,36 @@
   "A keycap's mode note is the help's own state label, so the two read alike."
   (dolist (state '(nil "normal" "insert"))
     (let ((keycap (substring-no-properties
-                   (agent-repl-settings--keycap 'c (list :description "K" :state state) '(:id x))))
+                   (agent-repl-settings--keycap 'c (list "K" (list :description "K" :state state)) '(:id x))))
           (label (agent-repl--input-help-state-label (list state))))
       (should (equal keycap (if label (concat "K " label) "K"))))))
+
+(ert-deftest agent-repl-test-settings-page-shows-one-keycap-per-key ()
+  "A key bound in several modes is one keycap, unannotated when in both."
+  (agent-repl-test-settings--with-page
+    (define-key agent-repl-test-settings--map (kbd "C-c a") #'agent-repl-test-settings--a)
+    (define-key agent-repl-test-settings--map (vconcat [normal-state] (kbd "C-c a")) #'agent-repl-test-settings--a)
+    (define-key agent-repl-test-settings--map (vconcat [insert-state] (kbd "C-c a")) #'agent-repl-test-settings--a)
+    (define-key agent-repl-test-settings--map (kbd "C-c b") #'agent-repl-test-settings--b)
+    (agent-repl-settings-toggle 't1)
+    (let ((page (agent-repl-test-settings--page)))
+      (should (string-match-p "  C-c a  \\+ Does a\\." page)))))
+
+(ert-deftest agent-repl-test-settings-edit-key-remove-takes-it-from-every-place ()
+  "Removing a key bound in several modes unbinds it in each of them."
+  (agent-repl-test-settings--with-page
+    (define-key agent-repl-test-settings--map (kbd "C-c a") #'agent-repl-test-settings--a)
+    (define-key agent-repl-test-settings--map (vconcat [normal-state] (kbd "C-c a")) #'agent-repl-test-settings--a)
+    (cl-letf (((symbol-function 'read-multiple-choice) (lambda (&rest _) '(?r "remove"))))
+      (agent-repl-settings-edit-key
+       agent-repl-test-settings--topic #'agent-repl-test-settings--a
+       (list "C-c a"
+             (list :description "C-c a" :keymap 'agent-repl-test-settings--map :vector (kbd "C-c a"))
+             (list :description "C-c a" :state "normal" :keymap 'agent-repl-test-settings--map
+                   :vector (vconcat [normal-state] (kbd "C-c a"))))))
+    (should-not (lookup-key agent-repl-test-settings--map (kbd "C-c a")))
+    (should-not (lookup-key agent-repl-test-settings--map (vconcat [normal-state] (kbd "C-c a"))))
+    (should (= (length agent-repl-settings-overrides) 2))))
 
 ;;;; ---- The page's commands ----
 
@@ -411,8 +438,8 @@
     (define-key agent-repl-test-settings--map (kbd "C-c a") #'agent-repl-test-settings--a)
     (cl-letf (((symbol-function 'read-multiple-choice) (lambda (&rest _) '(?r "remove"))))
       (agent-repl-settings-edit-key agent-repl-test-settings--topic #'agent-repl-test-settings--a
-                                    (list :description "C-c a" :keymap 'agent-repl-test-settings--map
-                                          :vector (kbd "C-c a"))))
+                                    (list "C-c a" (list :description "C-c a" :keymap 'agent-repl-test-settings--map
+                                                         :vector (kbd "C-c a")))))
     (should-not (lookup-key agent-repl-test-settings--map (kbd "C-c a")))
     (should (equal agent-repl-settings-overrides
                    '((:keymap agent-repl-test-settings--map :key "C-c a"
@@ -426,8 +453,8 @@
               ((symbol-function 'read-key) (agent-repl-test-settings--keys ?\C-c ?n 'escape))
               ((symbol-function 'completing-read) (lambda (&rest _) "every mode")))
       (agent-repl-settings-edit-key agent-repl-test-settings--topic #'agent-repl-test-settings--a
-                                    (list :description "C-c a" :keymap 'agent-repl-test-settings--map
-                                          :vector (kbd "C-c a"))))
+                                    (list "C-c a" (list :description "C-c a" :keymap 'agent-repl-test-settings--map
+                                                         :vector (kbd "C-c a")))))
     (should-not (lookup-key agent-repl-test-settings--map (kbd "C-c a")))
     (should (eq (lookup-key agent-repl-test-settings--map (kbd "C-c n")) #'agent-repl-test-settings--a))))
 
@@ -442,8 +469,8 @@
               ((symbol-function 'y-or-n-p) (lambda (&rest _) nil)))
       (should-error (agent-repl-settings-edit-key
                      agent-repl-test-settings--topic #'agent-repl-test-settings--a
-                     (list :description "C-c a" :keymap 'agent-repl-test-settings--map
-                           :vector (kbd "C-c a")))
+                     (list "C-c a" (list :description "C-c a" :keymap 'agent-repl-test-settings--map
+                                         :vector (kbd "C-c a"))))
                     :type 'user-error))
     (should (eq (lookup-key agent-repl-test-settings--map (kbd "C-c a")) #'agent-repl-test-settings--a))
     (should-not agent-repl-settings-overrides)))

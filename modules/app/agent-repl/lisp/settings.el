@@ -47,7 +47,8 @@
 (declare-function agent-repl--input-help-insert-row "input-help" (cell description lines column))
 (declare-function agent-repl--input-help-key-column "input-help" (cells))
 (declare-function agent-repl--input-help-groups "input-help" ())
-(declare-function agent-repl--input-help-state-label "input-help" (states))
+(declare-function agent-repl--input-help-group-sources "input-help" (sources))
+(declare-function agent-repl--input-help-group-label "input-help" (sources))
 (declare-function agent-repl--input-help-variable-value "input-help" (variable))
 (declare-function agent-repl--input-help-topic "input-help" (key value))
 (defvar agent-repl-input-help-topics)
@@ -287,13 +288,15 @@ prefix, cannot be bound at all.  Each refusal is a `user-error'."
 (defvar-local agent-repl-settings--open nil
   "The ids of the sections this page shows open.")
 
-(defun agent-repl-settings--keycap (command source topic)
-  "Return SOURCE's key as a button that changes or removes it for COMMAND."
-  (concat (make-text-button (plist-get source :description) nil
+(defun agent-repl-settings--keycap (command group topic)
+  "Return GROUP's key as a button that changes or removes it for COMMAND.
+GROUP is (DESCRIPTION . SOURCES): one key, bound in every one of SOURCES
+\(`agent-repl--input-help-group-sources'), so the button acts on all."
+  (concat (make-text-button (car group) nil
                             'face 'help-key-binding
                             'help-echo "mouse-1, RET: change or remove this key"
-                            'action (lambda (_) (agent-repl-settings-edit-key topic command source)))
-          (let ((label (agent-repl--input-help-state-label (list (plist-get source :state)))))
+                            'action (lambda (_) (agent-repl-settings-edit-key topic command group)))
+          (let ((label (agent-repl--input-help-group-label (cdr group))))
             (and label (propertize (concat " " label) 'face 'agent-repl-input-help-annotation)))))
 
 (defun agent-repl-settings--button (label echo action)
@@ -303,8 +306,10 @@ prefix, cannot be bound at all.  Each refusal is a `user-error'."
 
 (defun agent-repl-settings--cell (topic command context)
   "Return COMMAND's keys in CONTEXT as keycap buttons, then the add button."
-  (concat (mapconcat (lambda (source) (agent-repl-settings--keycap command source topic))
-                     (agent-repl--input-help-key-sources command context) "  ")
+  (concat (mapconcat (lambda (group) (agent-repl-settings--keycap command group topic))
+                     (agent-repl--input-help-group-sources
+                      (agent-repl--input-help-key-sources command context))
+                     "  ")
           "  "
           (agent-repl-settings--button "+" "Add a key"
                                        (lambda () (agent-repl-settings-add-key topic command)))))
@@ -444,21 +449,29 @@ CONTEXTS maps a topic id to its binding context."
     (agent-repl-settings--set-key (car target) (cdr target) command)
     (agent-repl-settings--redraw)))
 
-(defun agent-repl-settings-edit-key (topic command source)
-  "Change or remove SOURCE's key for COMMAND, as the user chooses."
+(defun agent-repl-settings--unbind-group (group)
+  "Unbind GROUP's key everywhere it is bound, each place once."
+  (dolist (place (delete-dups (mapcar (lambda (source)
+                                        (cons (plist-get source :keymap)
+                                              (key-description (plist-get source :vector))))
+                                      (cdr group))))
+    (agent-repl-settings--set-key (car place) (cdr place) nil)))
+
+(defun agent-repl-settings-edit-key (topic command group)
+  "Change or remove GROUP's key for COMMAND, as the user chooses.
+GROUP is (DESCRIPTION . SOURCES), and the edit takes the key away from
+every one of SOURCES."
   (pcase (car (read-multiple-choice
-               (format "%s runs %s" (plist-get source :description) command)
+               (format "%s runs %s" (car group) command)
                '((?c "change" "Enter a new key in its place")
                  (?r "remove" "Take this key away")
                  (?q "quit" "Leave it as it is"))))
     (?c (let ((keys (agent-repl-settings-read-keys (format "New key for %s" command))))
           (let ((target (agent-repl-settings--target topic keys)))
             (agent-repl-settings--check-free (car target) (cdr target) command)
-            (agent-repl-settings--set-key (plist-get source :keymap)
-                                          (key-description (plist-get source :vector)) nil)
+            (agent-repl-settings--unbind-group group)
             (agent-repl-settings--set-key (car target) (cdr target) command))))
-    (?r (agent-repl-settings--set-key (plist-get source :keymap)
-                                      (key-description (plist-get source :vector)) nil)))
+    (?r (agent-repl-settings--unbind-group group)))
   (agent-repl-settings--redraw))
 
 (defun agent-repl-settings-edit-variable (variable)
