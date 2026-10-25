@@ -933,8 +933,11 @@ export type SelectionShape =
   | { prompt: string; viewport?: RowViewport }
   | { bubble: string; viewport?: RowViewport };
 
-/** What the viewport does about a newly selected row; `{ reveal }` names the entry to flash. */
-type RowViewport = "center" | "hold" | { reveal: string };
+/**
+ * What the viewport does about a newly selected row; `{ reveal }` names the
+ * entry to flash, `{ revealNode }` the response node to box.
+ */
+type RowViewport = "center" | "hold" | { reveal: string } | { revealNode: string };
 
 /** The daemon's `FeedSelection` for SHAPE. */
 export function selectionOf(shape: SelectionShape): FeedSelection {
@@ -950,7 +953,9 @@ export function selectionOf(shape: SelectionShape): FeedSelection {
         ? { case: "center", value: {} }
         : asked === "hold"
           ? { case: "hold", value: {} }
-          : { case: "reveal", value: { entryLabel: asked.reveal } },
+          : "reveal" in asked
+            ? { case: "reveal", value: { entryLabel: asked.reveal } }
+            : { case: "revealNode", value: { label: asked.revealNode } },
   });
   if ("response" in shape) {
     return create(FeedSelectionSchema, {

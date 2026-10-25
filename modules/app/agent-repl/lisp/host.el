@@ -93,7 +93,7 @@
 
 (declare-function agent-repl--notification-activate "notifications" (ws))
 (declare-function agent-repl-input-focus-for-reply "input" (ws))
-(declare-function agent-repl-input-edit-entry "input" (ws row label text))
+(declare-function agent-repl-input-compose-entry "input" (ws label))
 
 ;; W2-B's surfaces.  NAMED HERE, NEVER DEFINED HERE: status.el owns the
 ;; blink (whose cadence is frontend.v1 `RosterRowAttention''s), frontend.el
@@ -1267,7 +1267,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:selection (agent-repl-host--apply-selection ws value))
     (:final-response-clicked (agent-repl-host--final-response-clicked ws))
     (:select-requested (agent-repl-host--select-requested ws))
-    (:prompt-entry-clicked (agent-repl-host--prompt-entry-clicked ws value))
+    (:compose-entry (agent-repl-host--compose-entry ws value))
     (:transferred (agent-repl-host--transferred ws value))
     (:reload-webapp (agent-repl-host--reload-webapp ws value))
     (:open-in-editor (agent-repl-host--open-in-editor ws value))
@@ -1390,18 +1390,16 @@ switches."
   (agent-repl--info ws "elisp.host.select-requested ws=%s" ws)
   (agent-repl-host-request-switch ws 'sidebar))
 
-;;;; ---- The prompt-entry click ----
+;;;; ---- The branch click ----
 
-(defun agent-repl-host--prompt-entry-clicked (ws value)
-  "Fill WS's composer with the entry the reader clicked in its webview.
-VALUE is (:row FEEDID :label LABEL :text TEXT): the click selected the
-prompt ROW, and the composer is filled with TEXT to edit its entry
-answering LABEL (`agent-repl-input-edit-entry').  An event, never
-replayed, so a reconnect never refills the composer."
-  (agent-repl--info ws "elisp.host.prompt-entry-clicked ws=%s row=%S label=%s"
-                    ws (plist-get (plist-get value :row) :value) (plist-get value :label))
-  (agent-repl-input-edit-entry ws (plist-get value :row) (plist-get value :label)
-                               (plist-get value :text)))
+(defun agent-repl-host--compose-entry (ws value)
+  "Open a blank entry in WS's composer for the branch the reader clicked.
+VALUE is (:label LABEL): the click on a response's node selected the
+response, and the composer opens an entry answering LABEL
+\(`agent-repl-input-compose-entry').  An event, never replayed, so a
+reconnect never opens another."
+  (agent-repl--info ws "elisp.host.compose-entry ws=%s label=%s" ws (plist-get value :label))
+  (agent-repl-input-compose-entry ws (plist-get value :label)))
 
 ;;;; ---- The notification click ----
 

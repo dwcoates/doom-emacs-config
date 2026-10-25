@@ -11,7 +11,6 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -20,7 +19,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
-	"agent-repld/internal/prose"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -161,18 +159,8 @@ func (s *server) RollBack(
 	// the whole call while the conversation is still whole.
 	var resend *agentreplv1.SubmitPromptRequest
 	if r := req.Msg.Resend; r != nil {
-		said, ok := resendSaid(r, planned.row, replyquote.Words(planned.said))
-		if !ok {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, refusal{
-				Arm: "entry_not_found",
-				Reason: fmt.Sprintf("the rolled-back prompt %q holds no entry answering %q that the resend edits (it edits prompt %q)",
-					planned.row.GetValue(), r.GetEntry().GetLabel(), r.GetEntry().GetRow().GetValue()),
-				Fields: map[string]any{"label": r.GetEntry().GetLabel()},
-				Info:   true,
-			}))
-		}
 		resend = &agentreplv1.SubmitPromptRequest{
-			Workspace: req.Msg.GetWorkspace(), Said: said, IdempotencyKey: r.GetIdempotencyKey(), Origin: r.GetOrigin(),
+			Workspace: req.Msg.GetWorkspace(), Said: r.GetWhole().GetSaid(), IdempotencyKey: r.GetIdempotencyKey(), Origin: r.GetOrigin(),
 		}
 		if err := validateSubmitPromptRequest(resend); err != nil {
 			return nil, err
@@ -217,34 +205,8 @@ func (s *server) RollBack(
 	return connect.NewResponse(resp), nil
 }
 
-// resendSaid composes what a rollback's resend R sends: its whole prompt, or
-// WORDS (the rolled-back prompt ROW, as the person said it) with the entry R
-// names saying R's text instead. ok is false when an entry edit was made for
-// a prompt other than ROW, or WORDS holds no entry answering its label.
-func resendSaid(r *agentreplv1.RollBackResend, row *frontendv1.FeedId, words *conversationv1.UserSaid) (*conversationv1.UserSaid, bool) {
-	if whole := r.GetWhole(); whole != nil {
-		return whole.GetSaid(), true
-	}
-	edit := r.GetEntry()
-	if edit.GetRow().GetValue() != row.GetValue() {
-		return nil, false
-	}
-	said := proto.Clone(words).(*conversationv1.UserSaid)
-	for _, block := range said.GetContent().GetBlocks() {
-		text := block.GetText()
-		if text == nil {
-			continue
-		}
-		if replaced, ok := prose.ReplaceEntry(text.GetText(), edit.GetLabel(), edit.GetText()); ok {
-			text.Text = replaced
-			return said, true
-		}
-	}
-	return nil, false
-}
-
 // validateRollBackResend requires a resend, when one is carried, to name its
-// key, its origin and its edit, and an entry edit to name its label.
+// key, its origin and its whole prompt.
 func validateRollBackResend(r *agentreplv1.RollBackResend) *connect.Error {
 	if r == nil {
 		return nil
@@ -258,11 +220,6 @@ func validateRollBackResend(r *agentreplv1.RollBackResend) *connect.Error {
 	switch edit := r.GetEdit().(type) {
 	case *agentreplv1.RollBackResend_Whole:
 		return validateUserSaid("resend.whole.said", edit.Whole.GetSaid())
-	case *agentreplv1.RollBackResend_Entry:
-		if edit.Entry.GetLabel() == "" {
-			return invalid("resend.entry.label", "an entry edit names the entry's label")
-		}
-		return validateFeedID("resend.entry.row", edit.Entry.GetRow())
 	}
 	return invalid("resend.edit", "a resend's edit is required")
 }

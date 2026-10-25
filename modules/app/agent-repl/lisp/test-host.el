@@ -313,9 +313,8 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (ws) (push (cons :activate ws) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-input-focus-for-reply)
                 (lambda (ws) (push (cons :focus-for-reply ws) agent-repl-test-host--effects)))
-               ((symbol-function 'agent-repl-input-edit-entry)
-                (lambda (ws row label text)
-                  (push (list :edit-entry ws (plist-get row :value) label text) agent-repl-test-host--effects)))
+               ((symbol-function 'agent-repl-input-compose-entry)
+                (lambda (ws label) (push (list :compose-entry ws label) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-roster-apply-current)
                 (lambda () (cl-incf agent-repl-test-host--reapplied)))
                ((symbol-function 'agent-repl-frontend-reload-webapp)
@@ -2256,29 +2255,27 @@ answers `:unknown' and records the breach rather than opening."
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.final-response-clicked ws=ws-1"))))
 
-;;;; ---- The prompt-entry click ----
+;;;; ---- The branch click ----
 
-(ert-deftest agent-repl-test-host-prompt-entry-click-fills-this-workspaces-composer ()
-  "A `prompt_entry_clicked' push fills the composer of its stream's workspace with the entry."
+(ert-deftest agent-repl-test-host-compose-entry-opens-an-entry-in-this-workspaces-composer ()
+  "A `compose_entry' push opens an entry in the composer of its stream's workspace."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :prompt-entry-clicked
-                                              :value '(:row (:value "p1") :label "3.1" :text "yes")))
+    (agent-repl-test-host--push "ws-1" (list :arm :compose-entry :value '(:label "3.1")))
     ;; Assert
-    (should (equal (car agent-repl-test-host--effects) '(:edit-entry "ws-1" "p1" "3.1" "yes")))))
+    (should (equal (car agent-repl-test-host--effects) '(:compose-entry "ws-1" "3.1")))))
 
-(ert-deftest agent-repl-test-host-prompt-entry-click-is-logged ()
-  "The entry click reaching Emacs leaves an INFO record naming the row and the label."
+(ert-deftest agent-repl-test-host-compose-entry-is-logged ()
+  "The branch click reaching Emacs leaves an INFO record naming the label."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :prompt-entry-clicked
-                                              :value '(:row (:value "p1") :label "3.1" :text "yes")))
+    (agent-repl-test-host--push "ws-1" (list :arm :compose-entry :value '(:label "3.1")))
     ;; Assert
-    (should (agent-repl-test-host--logged-p :info "elisp.host.prompt-entry-clicked ws=ws-1 row=\"p1\" label=3.1"))))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.compose-entry ws=ws-1 label=3.1"))))
 
 ;;;; ---- The handover ----
 

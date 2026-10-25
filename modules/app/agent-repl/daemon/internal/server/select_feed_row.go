@@ -79,7 +79,15 @@ func (s *server) SelectFeedRow(
 		success, selectable, err = s.selectEntry(subject.Log, ws, row, label)
 		if err == nil && !selectable {
 			return answer(resp, s.refuse(subject.Log, rpc, resp,
-				notSelectable(row, fmt.Sprintf("is not a selectable prompt of this workspace's root feed holding an entry answering %q", label))))
+				notSelectable(row, fmt.Sprintf("is not a prompt of this workspace's root feed whose entry answering %q answers a selectable response", label))))
+		}
+	case *agentreplv1.SelectFeedRowRequest_Branch:
+		row, label := move.Branch.GetRow(), move.Branch.GetLabel()
+		var selectable bool
+		success, selectable, err = s.selectBranch(subject.Log, ws, row, label)
+		if err == nil && !selectable {
+			return answer(resp, s.refuse(subject.Log, rpc, resp,
+				notSelectable(row, fmt.Sprintf("is not a selectable response of this workspace's root feed whose tree holds %q", label))))
 		}
 	}
 	if err != nil {
@@ -311,16 +319,32 @@ func (s *server) selectBubble(log dlog.Logger, ws ids.WorkspaceID, row *frontend
 	if indexOfFeedID(s.deps.Feed.FinalResponses(ws), row) >= 0 {
 		kind = selectionResponse
 	}
-	sel := selectionOf(kind, row, holdUnderClick())
+	return s.selectClicked(ws, kind, row, holdUnderClick(), func() {
+		log.Info(opSelectFeedRow, "selected a clicked bubble", dlog.Context{"kind": kind.String(), "row": row.GetValue()})
+		if kind == selectionResponse {
+			s.finalResponseClicked(log, ws, row)
+		}
+	})
+}
+
+// selectClicked sets ROW's selection as KIND with VIEWPORT, the one way a
+// click selects, then runs THEN while still holding the selection lock, so
+// what the click asks of the host follows the selection it made. It answers
+// the move's success, that ROW was selectable, and any failure to set it.
+func (s *server) selectClicked(
+	ws ids.WorkspaceID,
+	kind selectionKind,
+	row *frontendv1.FeedId,
+	viewport *frontendv1.FeedSelectionRowViewport,
+	then func(),
+) (*agentreplv1.SelectFeedRowSuccess, bool, error) {
+	sel := selectionOf(kind, row, viewport)
 	s.selectionMu.Lock()
 	defer s.selectionMu.Unlock()
 	if err := s.setRowSelection(ws, sel); err != nil {
 		return nil, true, err
 	}
-	log.Info(opSelectFeedRow, "selected a clicked bubble", dlog.Context{"kind": kind.String(), "row": row.GetValue()})
-	if kind == selectionResponse {
-		s.finalResponseClicked(log, ws, row)
-	}
+	then()
 	return selectedSuccess(sel), true, nil
 }
 
@@ -354,14 +378,9 @@ func (s *server) selectAnswer(log dlog.Logger, ws ids.WorkspaceID, row *frontend
 		return nil, false, nil
 	}
 	kind := s.promptKind(ws, row)
-	sel := selectionOf(kind, row, revealEntry(label))
-	s.selectionMu.Lock()
-	defer s.selectionMu.Unlock()
-	if err := s.setRowSelection(ws, sel); err != nil {
-		return nil, true, err
-	}
-	log.Info(opSelectFeedRow, "selected the prompt a linked label answers", dlog.Context{"kind": kind.String(), "row": row.GetValue(), "label": label})
-	return selectedSuccess(sel), true, nil
+	return s.selectClicked(ws, kind, row, revealEntry(label), func() {
+		log.Info(opSelectFeedRow, "selected the prompt a linked label answers", dlog.Context{"kind": kind.String(), "row": row.GetValue(), "label": label})
+	})
 }
 
 // revealEntry is the viewport of a selection a linked label made: center the
@@ -371,36 +390,71 @@ func revealEntry(label string) *frontendv1.FeedSelectionRowViewport {
 		Reveal: &frontendv1.FeedSelectionRowViewportReveal{EntryLabel: label}}}
 }
 
-// selectEntry selects ROW, the prompt whose entry answering LABEL the reader
-// clicked, as a click does (holdUnderClick, never toggling), and asks the
-// host to fill the composer with what the entry says. selectable is false
-// (and nothing changes) for a row that is not a selectable prompt holding
-// such an entry.
+// selectEntry selects the response the entry answering LABEL of the prompt ROW
+// answers (feed.Resolver.EntryTarget), centered, naming the node the webapp
+// boxes in it while the selection stands (revealNode). It never toggles: the
+// click was on the prompt, not on the response, and it asks nothing of the
+// host. selectable is false (and nothing changes) when the entry answers no
+// selectable response.
 func (s *server) selectEntry(log dlog.Logger, ws ids.WorkspaceID, row *frontendv1.FeedId, label string) (*agentreplv1.SelectFeedRowSuccess, bool, error) {
-	text, ok := s.deps.Feed.PromptEntry(ws, row, label)
+	target, ok := s.deps.Feed.EntryTarget(ws, row, label)
 	if !ok {
-		log.Info(opSelectFeedRow, "a clicked entry is not one a selectable prompt holds", dlog.Context{"row": row.GetValue(), "label": label})
+		log.Info(opSelectFeedRow, "a clicked entry answers no response", dlog.Context{"row": row.GetValue(), "label": label})
 		return nil, false, nil
 	}
-	if selectable, ok := s.deps.Feed.SelectableText(ws, row); !ok || !selectable.Prompt {
-		log.Info(opSelectFeedRow, "a clicked entry's prompt is not selectable", dlog.Context{"row": row.GetValue(), "label": label})
+	if text, ok := s.deps.Feed.SelectableText(ws, target); !ok || text.Prompt {
+		log.Info(opSelectFeedRow, "a clicked entry's response is not selectable",
+			dlog.Context{"row": row.GetValue(), "label": label, "response": target.GetValue()})
 		return nil, false, nil
 	}
-	kind := s.promptKind(ws, row)
-	sel := selectionOf(kind, row, holdUnderClick())
-	s.selectionMu.Lock()
-	defer s.selectionMu.Unlock()
-	if err := s.setRowSelection(ws, sel); err != nil {
-		return nil, true, err
-	}
-	log.Info(opSelectFeedRow, "selected the prompt whose entry was clicked; asked the host to fill the composer with it",
-		dlog.Context{"kind": kind.String(), "row": row.GetValue(), "label": label, "characters": len(text)})
-	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
-		Push: &agentreplv1.WatchHostWorkspaceResponse_PromptEntryClicked{
-			PromptEntryClicked: &agentreplv1.HostWorkspacePromptEntryClicked{Row: row, Label: label, Text: text},
-		},
+	kind := s.responseKind(ws, target)
+	return s.selectClicked(ws, kind, target, revealNode(label), func() {
+		log.Info(opSelectFeedRow, "selected the response a clicked entry answers, revealing its node",
+			dlog.Context{"kind": kind.String(), "row": row.GetValue(), "label": label, "response": target.GetValue()})
 	})
-	return selectedSuccess(sel), true, nil
+}
+
+// revealNode is the viewport of a selection a prompt's entry made: center the
+// response and box its node labelled LABEL, with the node's subtree.
+func revealNode(label string) *frontendv1.FeedSelectionRowViewport {
+	return &frontendv1.FeedSelectionRowViewport{Viewport: &frontendv1.FeedSelectionRowViewport_RevealNode{
+		RevealNode: &frontendv1.FeedSelectionRowViewportRevealNode{Label: label}}}
+}
+
+// responseKind is the arm a selected response ROW takes: `response` when it
+// is a final response, else `bubble`.
+func (s *server) responseKind(ws ids.WorkspaceID, row *frontendv1.FeedId) selectionKind {
+	if indexOfFeedID(s.deps.Feed.FinalResponses(ws), row) >= 0 {
+		return selectionResponse
+	}
+	return selectionBubble
+}
+
+// selectBranch selects ROW, the response whose tree node LABEL the reader
+// clicked, as a click does (holdUnderClick, never toggling: the click answers
+// the node, so the response stays the one replied to), and asks the host to
+// open an entry answering LABEL in the composer. A final response is a
+// `response` selection, any other a `bubble`. selectable is false (and
+// nothing changes) for a row that is no selectable response holding the node.
+func (s *server) selectBranch(log dlog.Logger, ws ids.WorkspaceID, row *frontendv1.FeedId, label string) (*agentreplv1.SelectFeedRowSuccess, bool, error) {
+	if !s.deps.Feed.ResponseNode(ws, row, label) {
+		log.Info(opSelectFeedRow, "a clicked branch is not a node of a response's tree", dlog.Context{"row": row.GetValue(), "label": label})
+		return nil, false, nil
+	}
+	if text, ok := s.deps.Feed.SelectableText(ws, row); !ok || text.Prompt {
+		log.Info(opSelectFeedRow, "a clicked branch's response is not selectable", dlog.Context{"row": row.GetValue(), "label": label})
+		return nil, false, nil
+	}
+	kind := s.responseKind(ws, row)
+	return s.selectClicked(ws, kind, row, holdUnderClick(), func() {
+		log.Info(opSelectFeedRow, "selected the response whose branch was clicked; asked the host to open an entry answering it",
+			dlog.Context{"kind": kind.String(), "row": row.GetValue(), "label": label})
+		s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+			Push: &agentreplv1.WatchHostWorkspaceResponse_ComposeEntry{
+				ComposeEntry: &agentreplv1.HostWorkspaceComposeEntry{Label: label},
+			},
+		})
+	})
 }
 
 // finalResponseClicked pushes final_response_clicked onto the workspace's host

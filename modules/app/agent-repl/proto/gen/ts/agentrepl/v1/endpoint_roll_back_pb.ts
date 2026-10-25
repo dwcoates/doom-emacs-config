@@ -26,15 +26,13 @@ import type { SubmitPromptResponse } from "./endpoint_submit_prompt_pb";
 import { file_agentrepl_v1_endpoint_submit_prompt } from "./endpoint_submit_prompt_pb";
 import type { PromptOrigin } from "../../conversation/v1/prompt_origin_pb";
 import { file_conversation_v1_prompt_origin } from "../../conversation/v1/prompt_origin_pb";
-import type { FeedId } from "../../frontend/v1/feed_pb";
-import { file_frontend_v1_feed } from "../../frontend/v1/feed_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_roll_back.proto.
  */
 export const file_agentrepl_v1_endpoint_roll_back: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcm9sbF9iYWNrLnByb3RvEgxhZ2VudHJlcGwudjEiqgEKD1JvbGxCYWNrUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEioKBXRva2VuGAIgASgLMhsuYWdlbnRyZXBsLnYxLlJvbGxiYWNrVG9rZW4SMQoGcmVzZW5kGAMgASgLMhwuYWdlbnRyZXBsLnYxLlJvbGxCYWNrUmVzZW5kSACIAQFCCQoHX3Jlc2VuZCLIAQoOUm9sbEJhY2tSZXNlbmQSFwoPaWRlbXBvdGVuY3lfa2V5GAEgASgJEi0KBm9yaWdpbhgCIAEoDjIdLmNvbnZlcnNhdGlvbi52MS5Qcm9tcHRPcmlnaW4SMgoFd2hvbGUYAyABKAsyIS5hZ2VudHJlcGwudjEuUm9sbEJhY2tSZXNlbmRXaG9sZUgAEjIKBWVudHJ5GAQgASgLMiEuYWdlbnRyZXBsLnYxLlJvbGxCYWNrUmVzZW5kRW50cnlIAEIGCgRlZGl0Ij4KE1JvbGxCYWNrUmVzZW5kV2hvbGUSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZCJUChNSb2xsQmFja1Jlc2VuZEVudHJ5Eg0KBWxhYmVsGAEgASgJEgwKBHRleHQYAiABKAkSIAoDcm93GAMgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkInwKEFJvbGxCYWNrUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLmFnZW50cmVwbC52MS5Sb2xsQmFja1N1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLmFnZW50cmVwbC52MS5Sb2xsQmFja0Vycm9ySABCCAoGcmVzdWx0ItUBCg9Sb2xsQmFja1N1Y2Nlc3MSKQoGcHJvbXB0GAEgASgLMhkuY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkEkAKDmZpbGVzX3Jlc3RvcmVkGAIgASgLMiMuYWdlbnRyZXBsLnYxLlJvbGxCYWNrRmlsZXNSZXN0b3JlZEgAiAEBEjcKBnJlc2VuZBgDIAEoCzIiLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRSZXNwb25zZUgBiAEBQhEKD19maWxlc19yZXN0b3JlZEIJCgdfcmVzZW5kIiYKFVJvbGxCYWNrRmlsZXNSZXN0b3JlZBINCgVmaWxlcxgBIAEoDUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_conversation_v1_user, file_agentrepl_v1_rollback, file_agentrepl_v1_endpoint_submit_prompt, file_conversation_v1_prompt_origin, file_frontend_v1_feed]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcm9sbF9iYWNrLnByb3RvEgxhZ2VudHJlcGwudjEiqgEKD1JvbGxCYWNrUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEioKBXRva2VuGAIgASgLMhsuYWdlbnRyZXBsLnYxLlJvbGxiYWNrVG9rZW4SMQoGcmVzZW5kGAMgASgLMhwuYWdlbnRyZXBsLnYxLlJvbGxCYWNrUmVzZW5kSACIAQFCCQoHX3Jlc2VuZCKhAQoOUm9sbEJhY2tSZXNlbmQSFwoPaWRlbXBvdGVuY3lfa2V5GAEgASgJEi0KBm9yaWdpbhgCIAEoDjIdLmNvbnZlcnNhdGlvbi52MS5Qcm9tcHRPcmlnaW4SMgoFd2hvbGUYAyABKAsyIS5hZ2VudHJlcGwudjEuUm9sbEJhY2tSZXNlbmRXaG9sZUgAQgYKBGVkaXRKBAgEEAVSBWVudHJ5Ij4KE1JvbGxCYWNrUmVzZW5kV2hvbGUSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZCJ8ChBSb2xsQmFja1Jlc3BvbnNlEjAKB3N1Y2Nlc3MYASABKAsyHS5hZ2VudHJlcGwudjEuUm9sbEJhY2tTdWNjZXNzSAASLAoFZXJyb3IYAiABKAsyGy5hZ2VudHJlcGwudjEuUm9sbEJhY2tFcnJvckgAQggKBnJlc3VsdCLVAQoPUm9sbEJhY2tTdWNjZXNzEikKBnByb21wdBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBJACg5maWxlc19yZXN0b3JlZBgCIAEoCzIjLmFnZW50cmVwbC52MS5Sb2xsQmFja0ZpbGVzUmVzdG9yZWRIAIgBARI3CgZyZXNlbmQYAyABKAsyIi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0UmVzcG9uc2VIAYgBAUIRCg9fZmlsZXNfcmVzdG9yZWRCCQoHX3Jlc2VuZCImChVSb2xsQmFja0ZpbGVzUmVzdG9yZWQSDQoFZmlsZXMYASABKA1CKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_conversation_v1_user, file_agentrepl_v1_rollback, file_agentrepl_v1_endpoint_submit_prompt, file_conversation_v1_prompt_origin]);
 
 /**
  * @generated from message agentrepl.v1.RollBackRequest
@@ -59,9 +57,7 @@ export type RollBackRequest = Message<"agentrepl.v1.RollBackRequest"> & {
    * rolled back, edited. It is submitted once the conversation is cut, as
    * SubmitPrompt submits a prompt, and its answer rides
    * RollBackSuccess.resend. UNSET = only roll back: the composer holds the
-   * rolled-back prompt again. An `entry` edit naming a label the prompt holds
-   * no entry for is refused (`entry_not_found`) before anything is rolled
-   * back.
+   * rolled-back prompt again.
    *
    * @generated from field: optional agentrepl.v1.RollBackResend resend = 3;
    */
@@ -109,15 +105,6 @@ export type RollBackResend = Message<"agentrepl.v1.RollBackResend"> & {
      */
     value: RollBackResendWhole;
     case: "whole";
-  } | {
-    /**
-     * The rolled-back prompt with one entry's words replaced: the entry the
-     * reader clicked, as the composer then held it.
-     *
-     * @generated from field: agentrepl.v1.RollBackResendEntry entry = 4;
-     */
-    value: RollBackResendEntry;
-    case: "entry";
   } | { case: undefined; value?: undefined };
 };
 
@@ -150,46 +137,6 @@ export const RollBackResendWholeSchema: GenMessage<RollBackResendWhole> = /*@__P
   messageDesc(file_agentrepl_v1_endpoint_roll_back, 2);
 
 /**
- * The rolled-back prompt sent again with the entry answering LABEL saying
- * TEXT instead: its label and separator kept, every other word unchanged.
- *
- * @generated from message agentrepl.v1.RollBackResendEntry
- */
-export type RollBackResendEntry = Message<"agentrepl.v1.RollBackResendEntry"> & {
-  /**
-   * The label of the entry to replace, as a frontend.v1.ProseEntryTreeNode answer carries it.
-   *
-   * @generated from field: string label = 1;
-   */
-  label: string;
-
-  /**
-   * What the entry says now.
-   *
-   * @generated from field: string text = 2;
-   */
-  text: string;
-
-  /**
-   * The prompt row whose entry was clicked (HostWorkspacePromptEntryClicked).
-   * A rollback planned to any other prompt refuses the resend
-   * (`entry_not_found`) before anything is rolled back, so an edit made for
-   * one prompt can never be applied to another that happens to hold the
-   * same label.
-   *
-   * @generated from field: frontend.v1.FeedId row = 3;
-   */
-  row?: FeedId | undefined;
-};
-
-/**
- * Describes the message agentrepl.v1.RollBackResendEntry.
- * Use `create(RollBackResendEntrySchema)` to create a new message.
- */
-export const RollBackResendEntrySchema: GenMessage<RollBackResendEntry> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_roll_back, 3);
-
-/**
  * THE ARM IS THE OUTCOME.
  *
  * @generated from message agentrepl.v1.RollBackResponse
@@ -218,7 +165,7 @@ export type RollBackResponse = Message<"agentrepl.v1.RollBackResponse"> & {
  * Use `create(RollBackResponseSchema)` to create a new message.
  */
 export const RollBackResponseSchema: GenMessage<RollBackResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_roll_back, 4);
+  messageDesc(file_agentrepl_v1_endpoint_roll_back, 3);
 
 /**
  * The conversation now ends just before the prompt.
@@ -260,7 +207,7 @@ export type RollBackSuccess = Message<"agentrepl.v1.RollBackSuccess"> & {
  * Use `create(RollBackSuccessSchema)` to create a new message.
  */
 export const RollBackSuccessSchema: GenMessage<RollBackSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_roll_back, 5);
+  messageDesc(file_agentrepl_v1_endpoint_roll_back, 4);
 
 /**
  * The files a restore changed back.
@@ -281,5 +228,5 @@ export type RollBackFilesRestored = Message<"agentrepl.v1.RollBackFilesRestored"
  * Use `create(RollBackFilesRestoredSchema)` to create a new message.
  */
 export const RollBackFilesRestoredSchema: GenMessage<RollBackFilesRestored> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_roll_back, 6);
+  messageDesc(file_agentrepl_v1_endpoint_roll_back, 5);
 

@@ -942,6 +942,9 @@ interface NodeLines {
 /** The class every drawn tree line wears. */
 export const TREE_LINE_CLASS = "mp-line";
 
+/** The class the container a whole tree is drawn in wears (bubble/body.ts). */
+export const TREE_CLASS = "mp-tree";
+
 /**
  * The attribute every line of a node carries (its head line and its wrap
  * lines alike): the node's label, so a stylesheet can address one node's

@@ -44,7 +44,7 @@ export const ENTRY_CLASS = "mp-entry";
 /** The attribute naming the label an entry's lines answer. */
 export const ENTRY_ATTRIBUTE = "data-entry-label";
 
-/** The class an entry's label wears: the click target that edits the entry. */
+/** The class an entry's label wears: the click target that reveals the response node it answers. */
 export const ENTRY_LABEL_CLASS = "mp-entry-label";
 
 /** The class an entry wears while it flashes, revealed by a linked label. */

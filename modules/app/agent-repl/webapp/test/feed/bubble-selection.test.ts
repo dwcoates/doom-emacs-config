@@ -148,7 +148,11 @@ describe("stampSelection", () => {
   });
 });
 
-/** A root feed with a governed selectable row r1 holding a sub-feed row n1, and a governed row r2 not yet landed. */
+/**
+ * A root feed with a governed selectable prompt-like row r1 holding a sub-feed
+ * row n1, a governed row r2 not yet landed, a selectable response r3 drawing a
+ * tree, and a response r4 drawing a tree that has not landed.
+ */
 function feed() {
   const host = document.createElement("main");
   host.innerHTML = `
@@ -161,6 +165,14 @@ function feed() {
     </article>
     <article data-feed-row="r2" data-selection-governed><div class="bubble"><p id="streaming">...</p>
       <div class="mp-entry" data-entry-label="2"><span class="mp-entry-label" id="entry-unlanded">2</span></div></div></article>
+    <article data-feed-row="r3" data-unit="response" data-selection-governed data-selectable>
+      <div class="bubble"><p id="response-prose">said</p><div class="mp-tree">
+        <div class="mp-line" data-node="2"><span class="mp-prefix"><span class="mp-label" data-label="2" id="branch-label">2</span> </span><span class="mp-content" id="branch">a point</span></div>
+        <div class="mp-line" data-node="2.1"><span class="mp-prefix">└── <span class="mp-label mp-label-linked" data-label="2.1" data-answer-prompt="p8" id="branch-linked">2.1</span> </span><span class="mp-content" id="branch-child">a finer point</span></div>
+      </div></div>
+    </article>
+    <article data-feed-row="r4" data-unit="response" data-selection-governed><div class="mp-tree">
+      <div class="mp-line" data-node="1"><span class="mp-content" id="branch-unlanded">arriving</span></div></div></article>
     <article data-feed-row="t1"><div class="tool-card" id="tool">tool</div></article>`;
   document.body.replaceChildren(host);
   const at = (selector: string): Element => {
@@ -198,6 +210,12 @@ describe("bubbleClick", () => {
     ["an entry's label", "#entry", "", { case: "entry", row: "r1", label: "3.1" }],
     ["an entry's words, which select its bubble", "#entry-text", "", { case: "select", row: "r1" }],
     ["an entry of a bubble that has not landed", "#entry-unlanded", "", { case: "ignore", reason: "not-landed" }],
+    ["a response branch's words", "#branch", "", { case: "branch", row: "r3", label: "2" }],
+    ["a response branch's label", "#branch-label", "", { case: "branch", row: "r3", label: "2" }],
+    ["a response's prose outside its tree", "#response-prose", "", { case: "select", row: "r3" }],
+    ["a linked label on a response branch", "#branch-linked", "", { case: "answer", prompt: "p8", label: "2.1" }],
+    ["a response branch ending a text highlight", "#branch", "a point", { case: "ignore", reason: "text-selection" }],
+    ["a branch of a response that has not landed", "#branch-unlanded", "", { case: "ignore", reason: "not-landed" }],
   ] as const)("decides %s", (_name, selector, selectedText, want) => {
     // Arrange
     const f = feed();
@@ -275,6 +293,29 @@ describe("installBubbleSelect", () => {
     expect(
       a.h.calls.selectFeedRow.map((r) => (r.move.case === "entry" ? [r.move.value.row?.value, r.move.value.label] : r.move.case)),
     ).toEqual([["r1", "3.1"]]);
+  });
+
+  it("asks the daemon to select a clicked branch's response to answer the node", async () => {
+    // Arrange
+    const a = armed();
+    // Act
+    click(a.at("#branch-child"));
+    await settle();
+    // Assert
+    expect(
+      a.h.calls.selectFeedRow.map((r) => (r.move.case === "branch" ? [r.move.value.row?.value, r.move.value.label] : r.move.case)),
+    ).toEqual([["r3", "2.1"]]);
+  });
+
+  it("logs a branch's click at info naming the row and the label", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const a = armed();
+    // Act
+    click(a.at("#branch"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.branch-click");
+    expect([record.level.case, record.context]).toEqual(["info", expect.objectContaining({ row: "r3", label: "2" })]);
   });
 
   it("logs a linked label's click at info naming the prompt and the label", async () => {

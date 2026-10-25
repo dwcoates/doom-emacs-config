@@ -4019,13 +4019,13 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-move-arms-pinned ()
   "SelectFeedRowRequest's move oneof has exactly the arms the schema declares.
 Emacs spells two of them; `leftView', `bubble' (a click), `answer' (a
-click on a linked label) and `entry' (a click on a prompt's entry) are the
-webapp's alone."
+click on a linked label), `entry' (a click on a prompt's entry) and
+`branch' (a click on a response's branch) are the webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_select_feed_row.pb.go"
                         "SelectFeedRowRequest")
                        #'string<)
-                 '("answer" "bubble" "clear" "entry" "leftView" "turnBoundary"))))
+                 '("answer" "branch" "bubble" "clear" "entry" "leftView" "turnBoundary"))))
 
 (ert-deftest agent-repl-test-wire-verbs-select-feed-row-answer-and-entry-have-no-spelling ()
   "The webapp's label and entry clicks are never sent from Emacs, so each is refused."
@@ -4270,7 +4270,7 @@ webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "frontend/v1/feed.pb.go" "FeedSelectionRowViewport")
                        #'string<)
-                 '("center" "hold" "reveal"))))
+                 '("center" "hold" "reveal" "revealNode"))))
 
 (ert-deftest agent-repl-test-wire-verbs-feed-selection-row-viewport-reveal-names-its-entry ()
   "A selected prompt a linked label revealed decodes `:reveal' with its entry label."
@@ -4554,14 +4554,6 @@ webapp's alone."
                             :token)
           :resend (list :idempotency-key "k-1" :origin :user-sent :edit edit)))))
 
-(ert-deftest agent-repl-test-wire-verbs-roll-back-resend-entry-shape ()
-  "An entry edit carries its key, origin, label, words and the prompt it edits."
-  (agent-repl-test-wire-verbs--with-common
-    (should (string-match-p
-             (regexp-quote "\"resend\":{\"idempotencyKey\":\"k-1\",\"origin\":\"ORIGIN::user-sent\",\"entry\":{\"label\":\"3.1\",\"text\":\"new\",\"row\":{\"value\":\"p1\"}}}")
-             (agent-repl-test-wire-verbs--roll-back-with
-              '(:arm :entry :value (:row (:value "p1") :label "3.1" :text "new")))))))
-
 (ert-deftest agent-repl-test-wire-verbs-roll-back-resend-whole-shape ()
   "A whole resend carries the composer's prompt."
   (agent-repl-test-wire-verbs--with-common
@@ -4581,13 +4573,6 @@ webapp's alone."
                          :token (plist-get (agent-repl-test-wire-verbs--plan
                                             agent-repl-test-wire-verbs--minimal-plan)
                                            :token))))))))
-
-(ert-deftest agent-repl-test-wire-verbs-roll-back-resend-entry-without-a-row-refused ()
-  "An entry edit naming no prompt is refused before anything is sent."
-  (agent-repl-test-wire-verbs--with-common
-    (should-error (agent-repl-test-wire-verbs--roll-back-with
-                   '(:arm :entry :value (:label "3.1" :text "new")))
-                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-roll-back-resend-unknown-edit-refused ()
   "An edit arm the schema does not declare is refused before anything is sent."
@@ -4609,7 +4594,7 @@ webapp's alone."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_roll_back.pb.go" "RollBackResend")
                        #'string<)
-                 '("entry" "whole"))))
+                 '("whole"))))
 
 (ert-deftest agent-repl-test-wire-verbs-roll-back-missing-token-refused ()
   "The token is REQUIRED."
@@ -4670,9 +4655,7 @@ webapp's alone."
                     ("{\"firstPrompt\":{}}" (:arm :first-prompt :value nil))
                     ("{\"unseenPrompt\":{}}" (:arm :unseen-prompt :value nil))
                     ("{\"filesNotRestorable\":{\"vendorMessage\":\"gone\"}}"
-                     (:arm :files-not-restorable :value (:vendor-message "gone")))
-                    ("{\"entryNotFound\":{\"label\":\"3.1\"}}"
-                     (:arm :entry-not-found :value (:label "3.1")))))
+                     (:arm :files-not-restorable :value (:vendor-message "gone")))))
       (should (equal (agent-repl-wire-decode-roll-back-response
                       (agent-repl-test-wire-verbs--parse
                        (concat "{\"error\":" (car case) "}")))
@@ -4692,7 +4675,7 @@ webapp's alone."
                        #'string<)
                  (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway"
                              "notYetAdopted" "planStale" "noSession" "promptNotRecorded"
-                             "firstPrompt" "unseenPrompt" "filesNotRestorable" "entryNotFound")
+                             "firstPrompt" "unseenPrompt" "filesNotRestorable")
                        #'string<))))
 
 ;;;; ---- EditHeldPrompt ------------------------------------------------------
@@ -4935,6 +4918,21 @@ encoder reads: the common codec owns the real encoding.")
     (should-error (agent-repl-wire-decode-report-latencies-response
                    '((success . ((recorded . ((recorded . 1) (extra . 2)))))))
                   :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-feed-selection-row-viewport-reveal-node-names-its-node ()
+  "A selected response a prompt's entry revealed decodes `:reveal-node' with its node's label."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-feed-selection-row-viewport
+                    (agent-repl-test-wire-verbs--parse "{\"revealNode\":{\"label\":\"3.1\"}}"))
+                   '(:viewport (:arm :reveal-node :value (:label "3.1")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-feed-selection-row-viewport-reveal-node-refuses-a-bad-message ()
+  "A revealed node with an empty label, or a field it does not declare, is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (json '("{\"revealNode\":{}}" "{\"revealNode\":{\"label\":\"3.1\",\"extra\":1}}"))
+      (should-error (agent-repl-wire-decode-feed-selection-row-viewport
+                     (agent-repl-test-wire-verbs--parse json))
+                    :type 'agent-repl-wire-error))))
 
 (provide 'test-wire-verbs)
 
@@ -5524,6 +5522,24 @@ instead diverges from it unseen."
                     (agent-repl-wire-encode-find-entry-neighbor-request
                      (list :workspace agent-repl-test-wire-verbs--ref :label "3.1" :direction '(:arm :previous))))
                    "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"label\":\"3.1\",\"direction\":{\"previous\":{}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-find-entry-neighbor-encodes-every-way ()
+  "Each way the composer asks for is its own arm of the direction."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case '((:next "next") (:previous "previous") (:first-child "firstChild")))
+      (should (equal (json-serialize
+                      (cdr (assq 'direction
+                                 (agent-repl-wire-encode-find-entry-neighbor-request
+                                  (list :workspace agent-repl-test-wire-verbs--ref :label "3.1"
+                                        :direction (list :arm (car case)))))))
+                     (format "{\"%s\":{}}" (cadr case)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-entry-neighbor-direction-arms-pinned ()
+  "EntryNeighborDirection's way oneof has exactly the arms encoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_find_entry_neighbor.pb.go" "EntryNeighborDirection")
+                       #'string<)
+                 '("firstChild" "next" "previous"))))
 
 (ert-deftest agent-repl-test-wire-verbs-find-entry-neighbor-refuses-a-missing-direction ()
   "The direction is REQUIRED."

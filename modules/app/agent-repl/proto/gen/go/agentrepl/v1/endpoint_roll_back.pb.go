@@ -20,7 +20,6 @@ package agentreplv1
 
 import (
 	v11 "agentrepl/proto/conversation/v1"
-	v12 "agentrepl/proto/frontend/v1"
 	v1 "agentrepl/proto/workspace/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -46,9 +45,7 @@ type RollBackRequest struct {
 	// rolled back, edited. It is submitted once the conversation is cut, as
 	// SubmitPrompt submits a prompt, and its answer rides
 	// RollBackSuccess.resend. UNSET = only roll back: the composer holds the
-	// rolled-back prompt again. An `entry` edit naming a label the prompt holds
-	// no entry for is refused (`entry_not_found`) before anything is rolled
-	// back.
+	// rolled-back prompt again.
 	Resend        *RollBackResend `protobuf:"bytes,3,opt,name=resend,proto3,oneof" json:"resend,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -118,7 +115,6 @@ type RollBackResend struct {
 	// Types that are valid to be assigned to Edit:
 	//
 	//	*RollBackResend_Whole
-	//	*RollBackResend_Entry
 	Edit          isRollBackResend_Edit `protobuf_oneof:"edit"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -184,15 +180,6 @@ func (x *RollBackResend) GetWhole() *RollBackResendWhole {
 	return nil
 }
 
-func (x *RollBackResend) GetEntry() *RollBackResendEntry {
-	if x != nil {
-		if x, ok := x.Edit.(*RollBackResend_Entry); ok {
-			return x.Entry
-		}
-	}
-	return nil
-}
-
 type isRollBackResend_Edit interface {
 	isRollBackResend_Edit()
 }
@@ -202,15 +189,7 @@ type RollBackResend_Whole struct {
 	Whole *RollBackResendWhole `protobuf:"bytes,3,opt,name=whole,proto3,oneof"`
 }
 
-type RollBackResend_Entry struct {
-	// The rolled-back prompt with one entry's words replaced: the entry the
-	// reader clicked, as the composer then held it.
-	Entry *RollBackResendEntry `protobuf:"bytes,4,opt,name=entry,proto3,oneof"`
-}
-
 func (*RollBackResend_Whole) isRollBackResend_Edit() {}
-
-func (*RollBackResend_Entry) isRollBackResend_Edit() {}
 
 // A whole new prompt sent in the rolled-back one's place.
 type RollBackResendWhole struct {
@@ -258,75 +237,6 @@ func (x *RollBackResendWhole) GetSaid() *v11.UserSaid {
 	return nil
 }
 
-// The rolled-back prompt sent again with the entry answering LABEL saying
-// TEXT instead: its label and separator kept, every other word unchanged.
-type RollBackResendEntry struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The label of the entry to replace, as a frontend.v1.ProseEntryTreeNode answer carries it.
-	Label string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
-	// What the entry says now.
-	Text string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
-	// The prompt row whose entry was clicked (HostWorkspacePromptEntryClicked).
-	// A rollback planned to any other prompt refuses the resend
-	// (`entry_not_found`) before anything is rolled back, so an edit made for
-	// one prompt can never be applied to another that happens to hold the
-	// same label.
-	Row           *v12.FeedId `protobuf:"bytes,3,opt,name=row,proto3" json:"row,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RollBackResendEntry) Reset() {
-	*x = RollBackResendEntry{}
-	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RollBackResendEntry) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RollBackResendEntry) ProtoMessage() {}
-
-func (x *RollBackResendEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RollBackResendEntry.ProtoReflect.Descriptor instead.
-func (*RollBackResendEntry) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_roll_back_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *RollBackResendEntry) GetLabel() string {
-	if x != nil {
-		return x.Label
-	}
-	return ""
-}
-
-func (x *RollBackResendEntry) GetText() string {
-	if x != nil {
-		return x.Text
-	}
-	return ""
-}
-
-func (x *RollBackResendEntry) GetRow() *v12.FeedId {
-	if x != nil {
-		return x.Row
-	}
-	return nil
-}
-
 // THE ARM IS THE OUTCOME.
 type RollBackResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -341,7 +251,7 @@ type RollBackResponse struct {
 
 func (x *RollBackResponse) Reset() {
 	*x = RollBackResponse{}
-	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -353,7 +263,7 @@ func (x *RollBackResponse) String() string {
 func (*RollBackResponse) ProtoMessage() {}
 
 func (x *RollBackResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -366,7 +276,7 @@ func (x *RollBackResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackResponse.ProtoReflect.Descriptor instead.
 func (*RollBackResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_roll_back_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_roll_back_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *RollBackResponse) GetResult() isRollBackResponse_Result {
@@ -432,7 +342,7 @@ type RollBackSuccess struct {
 
 func (x *RollBackSuccess) Reset() {
 	*x = RollBackSuccess{}
-	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -444,7 +354,7 @@ func (x *RollBackSuccess) String() string {
 func (*RollBackSuccess) ProtoMessage() {}
 
 func (x *RollBackSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -457,7 +367,7 @@ func (x *RollBackSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackSuccess.ProtoReflect.Descriptor instead.
 func (*RollBackSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_roll_back_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_roll_back_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *RollBackSuccess) GetPrompt() *v11.UserSaid {
@@ -492,7 +402,7 @@ type RollBackFilesRestored struct {
 
 func (x *RollBackFilesRestored) Reset() {
 	*x = RollBackFilesRestored{}
-	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -504,7 +414,7 @@ func (x *RollBackFilesRestored) String() string {
 func (*RollBackFilesRestored) ProtoMessage() {}
 
 func (x *RollBackFilesRestored) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -517,7 +427,7 @@ func (x *RollBackFilesRestored) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollBackFilesRestored.ProtoReflect.Descriptor instead.
 func (*RollBackFilesRestored) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_roll_back_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_roll_back_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RollBackFilesRestored) GetFiles() uint32 {
@@ -531,24 +441,19 @@ var File_agentrepl_v1_endpoint_roll_back_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_roll_back_proto_rawDesc = "" +
 	"\n" +
-	"%agentrepl/v1/endpoint_roll_back.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1aconversation/v1/user.proto\x1a\x1bagentrepl/v1/rollback.proto\x1a)agentrepl/v1/endpoint_submit_prompt.proto\x1a#conversation/v1/prompt_origin.proto\x1a\x16frontend/v1/feed.proto\"\xc4\x01\n" +
+	"%agentrepl/v1/endpoint_roll_back.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1aconversation/v1/user.proto\x1a\x1bagentrepl/v1/rollback.proto\x1a)agentrepl/v1/endpoint_submit_prompt.proto\x1a#conversation/v1/prompt_origin.proto\"\xc4\x01\n" +
 	"\x0fRollBackRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x121\n" +
 	"\x05token\x18\x02 \x01(\v2\x1b.agentrepl.v1.RollbackTokenR\x05token\x129\n" +
 	"\x06resend\x18\x03 \x01(\v2\x1c.agentrepl.v1.RollBackResendH\x00R\x06resend\x88\x01\x01B\t\n" +
-	"\a_resend\"\xee\x01\n" +
+	"\a_resend\"\xc0\x01\n" +
 	"\x0eRollBackResend\x12'\n" +
 	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x125\n" +
 	"\x06origin\x18\x02 \x01(\x0e2\x1d.conversation.v1.PromptOriginR\x06origin\x129\n" +
-	"\x05whole\x18\x03 \x01(\v2!.agentrepl.v1.RollBackResendWholeH\x00R\x05whole\x129\n" +
-	"\x05entry\x18\x04 \x01(\v2!.agentrepl.v1.RollBackResendEntryH\x00R\x05entryB\x06\n" +
-	"\x04edit\"D\n" +
+	"\x05whole\x18\x03 \x01(\v2!.agentrepl.v1.RollBackResendWholeH\x00R\x05wholeB\x06\n" +
+	"\x04editJ\x04\b\x04\x10\x05R\x05entry\"D\n" +
 	"\x13RollBackResendWhole\x12-\n" +
-	"\x04said\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\"f\n" +
-	"\x13RollBackResendEntry\x12\x14\n" +
-	"\x05label\x18\x01 \x01(\tR\x05label\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\x12%\n" +
-	"\x03row\x18\x03 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\"\x8c\x01\n" +
+	"\x04said\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\"\x8c\x01\n" +
 	"\x10RollBackResponse\x129\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1d.agentrepl.v1.RollBackSuccessH\x00R\asuccess\x123\n" +
 	"\x05error\x18\x02 \x01(\v2\x1b.agentrepl.v1.RollBackErrorH\x00R\x05errorB\b\n" +
@@ -574,42 +479,38 @@ func file_agentrepl_v1_endpoint_roll_back_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_roll_back_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_roll_back_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_agentrepl_v1_endpoint_roll_back_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_agentrepl_v1_endpoint_roll_back_proto_goTypes = []any{
 	(*RollBackRequest)(nil),       // 0: agentrepl.v1.RollBackRequest
 	(*RollBackResend)(nil),        // 1: agentrepl.v1.RollBackResend
 	(*RollBackResendWhole)(nil),   // 2: agentrepl.v1.RollBackResendWhole
-	(*RollBackResendEntry)(nil),   // 3: agentrepl.v1.RollBackResendEntry
-	(*RollBackResponse)(nil),      // 4: agentrepl.v1.RollBackResponse
-	(*RollBackSuccess)(nil),       // 5: agentrepl.v1.RollBackSuccess
-	(*RollBackFilesRestored)(nil), // 6: agentrepl.v1.RollBackFilesRestored
-	(*v1.WorkspaceRef)(nil),       // 7: workspace.v1.WorkspaceRef
-	(*RollbackToken)(nil),         // 8: agentrepl.v1.RollbackToken
-	(v11.PromptOrigin)(0),         // 9: conversation.v1.PromptOrigin
-	(*v11.UserSaid)(nil),          // 10: conversation.v1.UserSaid
-	(*v12.FeedId)(nil),            // 11: frontend.v1.FeedId
-	(*RollBackError)(nil),         // 12: agentrepl.v1.RollBackError
-	(*SubmitPromptResponse)(nil),  // 13: agentrepl.v1.SubmitPromptResponse
+	(*RollBackResponse)(nil),      // 3: agentrepl.v1.RollBackResponse
+	(*RollBackSuccess)(nil),       // 4: agentrepl.v1.RollBackSuccess
+	(*RollBackFilesRestored)(nil), // 5: agentrepl.v1.RollBackFilesRestored
+	(*v1.WorkspaceRef)(nil),       // 6: workspace.v1.WorkspaceRef
+	(*RollbackToken)(nil),         // 7: agentrepl.v1.RollbackToken
+	(v11.PromptOrigin)(0),         // 8: conversation.v1.PromptOrigin
+	(*v11.UserSaid)(nil),          // 9: conversation.v1.UserSaid
+	(*RollBackError)(nil),         // 10: agentrepl.v1.RollBackError
+	(*SubmitPromptResponse)(nil),  // 11: agentrepl.v1.SubmitPromptResponse
 }
 var file_agentrepl_v1_endpoint_roll_back_proto_depIdxs = []int32{
-	7,  // 0: agentrepl.v1.RollBackRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	8,  // 1: agentrepl.v1.RollBackRequest.token:type_name -> agentrepl.v1.RollbackToken
+	6,  // 0: agentrepl.v1.RollBackRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	7,  // 1: agentrepl.v1.RollBackRequest.token:type_name -> agentrepl.v1.RollbackToken
 	1,  // 2: agentrepl.v1.RollBackRequest.resend:type_name -> agentrepl.v1.RollBackResend
-	9,  // 3: agentrepl.v1.RollBackResend.origin:type_name -> conversation.v1.PromptOrigin
+	8,  // 3: agentrepl.v1.RollBackResend.origin:type_name -> conversation.v1.PromptOrigin
 	2,  // 4: agentrepl.v1.RollBackResend.whole:type_name -> agentrepl.v1.RollBackResendWhole
-	3,  // 5: agentrepl.v1.RollBackResend.entry:type_name -> agentrepl.v1.RollBackResendEntry
-	10, // 6: agentrepl.v1.RollBackResendWhole.said:type_name -> conversation.v1.UserSaid
-	11, // 7: agentrepl.v1.RollBackResendEntry.row:type_name -> frontend.v1.FeedId
-	5,  // 8: agentrepl.v1.RollBackResponse.success:type_name -> agentrepl.v1.RollBackSuccess
-	12, // 9: agentrepl.v1.RollBackResponse.error:type_name -> agentrepl.v1.RollBackError
-	10, // 10: agentrepl.v1.RollBackSuccess.prompt:type_name -> conversation.v1.UserSaid
-	6,  // 11: agentrepl.v1.RollBackSuccess.files_restored:type_name -> agentrepl.v1.RollBackFilesRestored
-	13, // 12: agentrepl.v1.RollBackSuccess.resend:type_name -> agentrepl.v1.SubmitPromptResponse
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	9,  // 5: agentrepl.v1.RollBackResendWhole.said:type_name -> conversation.v1.UserSaid
+	4,  // 6: agentrepl.v1.RollBackResponse.success:type_name -> agentrepl.v1.RollBackSuccess
+	10, // 7: agentrepl.v1.RollBackResponse.error:type_name -> agentrepl.v1.RollBackError
+	9,  // 8: agentrepl.v1.RollBackSuccess.prompt:type_name -> conversation.v1.UserSaid
+	5,  // 9: agentrepl.v1.RollBackSuccess.files_restored:type_name -> agentrepl.v1.RollBackFilesRestored
+	11, // 10: agentrepl.v1.RollBackSuccess.resend:type_name -> agentrepl.v1.SubmitPromptResponse
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_roll_back_proto_init() }
@@ -622,20 +523,19 @@ func file_agentrepl_v1_endpoint_roll_back_proto_init() {
 	file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[1].OneofWrappers = []any{
 		(*RollBackResend_Whole)(nil),
-		(*RollBackResend_Entry)(nil),
 	}
-	file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[4].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[3].OneofWrappers = []any{
 		(*RollBackResponse_Success)(nil),
 		(*RollBackResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[5].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_roll_back_proto_msgTypes[4].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_roll_back_proto_rawDesc), len(file_agentrepl_v1_endpoint_roll_back_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

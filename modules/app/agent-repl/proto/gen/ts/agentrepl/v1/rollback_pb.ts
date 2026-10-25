@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/rollback.proto.
  */
 export const file_agentrepl_v1_rollback: GenFile = /*@__PURE__*/
-  fileDesc("ChthZ2VudHJlcGwvdjEvcm9sbGJhY2sucHJvdG8SDGFnZW50cmVwbC52MSIeCg1Sb2xsYmFja1Rva2VuEg0KBXZhbHVlGAEgASgJIv4FCg1Sb2xsQmFja0Vycm9yEkMKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJvbGxCYWNrVW5rbm93bldvcmtzcGFjZUgAEkwKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyKi5hZ2VudHJlcGwudjEuUm9sbEJhY2tXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkMKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiYuYWdlbnRyZXBsLnYxLlJvbGxCYWNrVHJhbnNmZXJyaW5nQXdheUgAEj4KD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIjLmFnZW50cmVwbC52MS5Sb2xsQmFja05vdFlldEFkb3B0ZWRIABI1CgpwbGFuX3N0YWxlGAUgASgLMh8uYWdlbnRyZXBsLnYxLlJvbGxCYWNrUGxhblN0YWxlSAASNQoKbm9fc2Vzc2lvbhgGIAEoCzIfLmFnZW50cmVwbC52MS5Sb2xsQmFja05vU2Vzc2lvbkgAEkYKE3Byb21wdF9ub3RfcmVjb3JkZWQYByABKAsyJy5hZ2VudHJlcGwudjEuUm9sbEJhY2tQcm9tcHROb3RSZWNvcmRlZEgAEjkKDGZpcnN0X3Byb21wdBgIIAEoCzIhLmFnZW50cmVwbC52MS5Sb2xsQmFja0ZpcnN0UHJvbXB0SAASOwoNdW5zZWVuX3Byb21wdBgJIAEoCzIiLmFnZW50cmVwbC52MS5Sb2xsQmFja1Vuc2VlblByb21wdEgAEkgKFGZpbGVzX25vdF9yZXN0b3JhYmxlGAsgASgLMiguYWdlbnRyZXBsLnYxLlJvbGxCYWNrRmlsZXNOb3RSZXN0b3JhYmxlSAASPgoPZW50cnlfbm90X2ZvdW5kGAwgASgLMiMuYWdlbnRyZXBsLnYxLlJvbGxCYWNrRW50cnlOb3RGb3VuZEgAQgcKBWNhdXNlSgQIChALUg52ZW5kb3JfcmVmdXNlZCImChVSb2xsQmFja0VudHJ5Tm90Rm91bmQSDQoFbGFiZWwYASABKAkiGgoYUm9sbEJhY2tVbmtub3duV29ya3NwYWNlIjQKHFJvbGxCYWNrV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIisKGFJvbGxCYWNrVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhcKFVJvbGxCYWNrTm90WWV0QWRvcHRlZCITChFSb2xsQmFja1BsYW5TdGFsZSITChFSb2xsQmFja05vU2Vzc2lvbiIbChlSb2xsQmFja1Byb21wdE5vdFJlY29yZGVkIhUKE1JvbGxCYWNrRmlyc3RQcm9tcHQiFgoUUm9sbEJhY2tVbnNlZW5Qcm9tcHQiNAoaUm9sbEJhY2tGaWxlc05vdFJlc3RvcmFibGUSFgoOdmVuZG9yX21lc3NhZ2UYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z");
+  fileDesc("ChthZ2VudHJlcGwvdjEvcm9sbGJhY2sucHJvdG8SDGFnZW50cmVwbC52MSIeCg1Sb2xsYmFja1Rva2VuEg0KBXZhbHVlGAEgASgJItUFCg1Sb2xsQmFja0Vycm9yEkMKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiYuYWdlbnRyZXBsLnYxLlJvbGxCYWNrVW5rbm93bldvcmtzcGFjZUgAEkwKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyKi5hZ2VudHJlcGwudjEuUm9sbEJhY2tXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkMKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiYuYWdlbnRyZXBsLnYxLlJvbGxCYWNrVHJhbnNmZXJyaW5nQXdheUgAEj4KD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIjLmFnZW50cmVwbC52MS5Sb2xsQmFja05vdFlldEFkb3B0ZWRIABI1CgpwbGFuX3N0YWxlGAUgASgLMh8uYWdlbnRyZXBsLnYxLlJvbGxCYWNrUGxhblN0YWxlSAASNQoKbm9fc2Vzc2lvbhgGIAEoCzIfLmFnZW50cmVwbC52MS5Sb2xsQmFja05vU2Vzc2lvbkgAEkYKE3Byb21wdF9ub3RfcmVjb3JkZWQYByABKAsyJy5hZ2VudHJlcGwudjEuUm9sbEJhY2tQcm9tcHROb3RSZWNvcmRlZEgAEjkKDGZpcnN0X3Byb21wdBgIIAEoCzIhLmFnZW50cmVwbC52MS5Sb2xsQmFja0ZpcnN0UHJvbXB0SAASOwoNdW5zZWVuX3Byb21wdBgJIAEoCzIiLmFnZW50cmVwbC52MS5Sb2xsQmFja1Vuc2VlblByb21wdEgAEkgKFGZpbGVzX25vdF9yZXN0b3JhYmxlGAsgASgLMiguYWdlbnRyZXBsLnYxLlJvbGxCYWNrRmlsZXNOb3RSZXN0b3JhYmxlSABCBwoFY2F1c2VKBAgKEAtKBAgMEA1SDnZlbmRvcl9yZWZ1c2VkUg9lbnRyeV9ub3RfZm91bmQiGgoYUm9sbEJhY2tVbmtub3duV29ya3NwYWNlIjQKHFJvbGxCYWNrV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIisKGFJvbGxCYWNrVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhcKFVJvbGxCYWNrTm90WWV0QWRvcHRlZCITChFSb2xsQmFja1BsYW5TdGFsZSITChFSb2xsQmFja05vU2Vzc2lvbiIbChlSb2xsQmFja1Byb21wdE5vdFJlY29yZGVkIhUKE1JvbGxCYWNrRmlyc3RQcm9tcHQiFgoUUm9sbEJhY2tVbnNlZW5Qcm9tcHQiNAoaUm9sbEJhY2tGaWxlc05vdFJlc3RvcmFibGUSFgoOdmVuZG9yX21lc3NhZ2UYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z");
 
 /**
  * THE PLAN THE USER CONFIRMED, as the daemon minted it (PlanRollback) and
@@ -138,20 +138,13 @@ export type RollBackError = Message<"agentrepl.v1.RollBackError"> & {
      * The files cannot be restored to that prompt (it was sent before file
      * checkpointing was on, or its checkpoint is gone). Nothing was changed.
      *
+     * 12 (entry_not_found) is reserved: it refused a resend's entry edit,
+     * retired with the edit (endpoint_roll_back.proto).
+     *
      * @generated from field: agentrepl.v1.RollBackFilesNotRestorable files_not_restorable = 11;
      */
     value: RollBackFilesNotRestorable;
     case: "filesNotRestorable";
-  } | {
-    /**
-     * The resend edits an entry the rolled-back prompt does not hold: the
-     * edit was made for another prompt, or no entry of this one answers the
-     * label it named. Nothing was rolled back.
-     *
-     * @generated from field: agentrepl.v1.RollBackEntryNotFound entry_not_found = 12;
-     */
-    value: RollBackEntryNotFound;
-    case: "entryNotFound";
   } | { case: undefined; value?: undefined };
 };
 
@@ -161,27 +154,6 @@ export type RollBackError = Message<"agentrepl.v1.RollBackError"> & {
  */
 export const RollBackErrorSchema: GenMessage<RollBackError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_rollback, 1);
-
-/**
- * No entry of the rolled-back prompt answers the label a resend named.
- *
- * @generated from message agentrepl.v1.RollBackEntryNotFound
- */
-export type RollBackEntryNotFound = Message<"agentrepl.v1.RollBackEntryNotFound"> & {
-  /**
-   * The label the resend named.
-   *
-   * @generated from field: string label = 1;
-   */
-  label: string;
-};
-
-/**
- * Describes the message agentrepl.v1.RollBackEntryNotFound.
- * Use `create(RollBackEntryNotFoundSchema)` to create a new message.
- */
-export const RollBackEntryNotFoundSchema: GenMessage<RollBackEntryNotFound> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 2);
 
 /**
  * The workspace id is not in the daemon's registry.
@@ -196,7 +168,7 @@ export type RollBackUnknownWorkspace = Message<"agentrepl.v1.RollBackUnknownWork
  * Use `create(RollBackUnknownWorkspaceSchema)` to create a new message.
  */
 export const RollBackUnknownWorkspaceSchema: GenMessage<RollBackUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 3);
+  messageDesc(file_agentrepl_v1_rollback, 2);
 
 /**
  * The echoed dir disagrees with the registry's dir for this id.
@@ -217,7 +189,7 @@ export type RollBackWorkspaceRefMismatch = Message<"agentrepl.v1.RollBackWorkspa
  * Use `create(RollBackWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const RollBackWorkspaceRefMismatchSchema: GenMessage<RollBackWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 4);
+  messageDesc(file_agentrepl_v1_rollback, 3);
 
 /**
  * This daemon released the workspace to a successor.
@@ -238,7 +210,7 @@ export type RollBackTransferringAway = Message<"agentrepl.v1.RollBackTransferrin
  * Use `create(RollBackTransferringAwaySchema)` to create a new message.
  */
 export const RollBackTransferringAwaySchema: GenMessage<RollBackTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 5);
+  messageDesc(file_agentrepl_v1_rollback, 4);
 
 /**
  * A joining daemon has not finished adopting this workspace yet.
@@ -253,7 +225,7 @@ export type RollBackNotYetAdopted = Message<"agentrepl.v1.RollBackNotYetAdopted"
  * Use `create(RollBackNotYetAdoptedSchema)` to create a new message.
  */
 export const RollBackNotYetAdoptedSchema: GenMessage<RollBackNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 6);
+  messageDesc(file_agentrepl_v1_rollback, 5);
 
 /**
  * The plan no longer describes what would happen.
@@ -268,7 +240,7 @@ export type RollBackPlanStale = Message<"agentrepl.v1.RollBackPlanStale"> & {
  * Use `create(RollBackPlanStaleSchema)` to create a new message.
  */
 export const RollBackPlanStaleSchema: GenMessage<RollBackPlanStale> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 7);
+  messageDesc(file_agentrepl_v1_rollback, 6);
 
 /**
  * No running session.
@@ -283,7 +255,7 @@ export type RollBackNoSession = Message<"agentrepl.v1.RollBackNoSession"> & {
  * Use `create(RollBackNoSessionSchema)` to create a new message.
  */
 export const RollBackNoSessionSchema: GenMessage<RollBackNoSession> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 8);
+  messageDesc(file_agentrepl_v1_rollback, 7);
 
 /**
  * The prompt has no record in the vendor transcript.
@@ -298,7 +270,7 @@ export type RollBackPromptNotRecorded = Message<"agentrepl.v1.RollBackPromptNotR
  * Use `create(RollBackPromptNotRecordedSchema)` to create a new message.
  */
 export const RollBackPromptNotRecordedSchema: GenMessage<RollBackPromptNotRecorded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 9);
+  messageDesc(file_agentrepl_v1_rollback, 8);
 
 /**
  * The prompt is its conversation's first.
@@ -313,7 +285,7 @@ export type RollBackFirstPrompt = Message<"agentrepl.v1.RollBackFirstPrompt"> & 
  * Use `create(RollBackFirstPromptSchema)` to create a new message.
  */
 export const RollBackFirstPromptSchema: GenMessage<RollBackFirstPrompt> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 10);
+  messageDesc(file_agentrepl_v1_rollback, 9);
 
 /**
  * An unseen prompt follows the cut point.
@@ -328,7 +300,7 @@ export type RollBackUnseenPrompt = Message<"agentrepl.v1.RollBackUnseenPrompt"> 
  * Use `create(RollBackUnseenPromptSchema)` to create a new message.
  */
 export const RollBackUnseenPromptSchema: GenMessage<RollBackUnseenPrompt> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 11);
+  messageDesc(file_agentrepl_v1_rollback, 10);
 
 /**
  * The files cannot be restored.
@@ -349,5 +321,5 @@ export type RollBackFilesNotRestorable = Message<"agentrepl.v1.RollBackFilesNotR
  * Use `create(RollBackFilesNotRestorableSchema)` to create a new message.
  */
 export const RollBackFilesNotRestorableSchema: GenMessage<RollBackFilesNotRestorable> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_rollback, 12);
+  messageDesc(file_agentrepl_v1_rollback, 11);
 

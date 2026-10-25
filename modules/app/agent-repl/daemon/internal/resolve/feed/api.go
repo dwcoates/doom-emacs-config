@@ -361,21 +361,25 @@ type Resolver interface {
 	// deem selectable — the submit path and the selection refuse it rather
 	// than using an empty text.
 	SelectableText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool)
-	// PromptEntry answers what the entry answering LABEL of the root-feed user
-	// prompt row ID says (its entry tree's answer node), as last published. A
-	// miss is a row that is not such a prompt, or holds no entry answering
-	// LABEL.
-	PromptEntry(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) (string, bool)
+	// EntryTarget answers the root-feed response row the entry answering
+	// LABEL of the user prompt row ID answers, by the rule a sent prompt's
+	// entries are bound by. A miss is a row that is no such prompt, holds no
+	// entry answering LABEL, or whose entry answers no response (answers.go).
+	EntryTarget(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) (*frontendv1.FeedId, bool)
 	// ComposerTargets answers, for each of LABELS in order, the response row
 	// an entry answering it targets in a prompt not yet sent that replies to
 	// REPLY (nil for none), or nil where it targets nothing: the rule a sent
 	// prompt's entries are bound by (composer.go).
 	ComposerTargets(ws ids.WorkspaceID, reply *frontendv1.FeedId, labels []string) []*frontendv1.FeedId
-	// EntryNeighbor answers the label a line opened beside the entry
-	// answering LABEL answers, in the tree that entry targets: the next node
-	// (NEXT) or the previous one. ok is false when it targets no response or
-	// its node has no neighbor that way (composer.go).
-	EntryNeighbor(ws ids.WorkspaceID, reply *frontendv1.FeedId, label string, next bool) (string, bool)
+	// ResponseNode answers whether the root-feed response row ID's tree holds
+	// a node labelled LABEL, as last published: false for a row that is no
+	// such response, or holds no such node (composer.go).
+	ResponseNode(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) bool
+	// EntryNeighbor answers the label of the node WAY from the entry
+	// answering LABEL, in the tree that entry targets: the next node, the
+	// previous one, or the node's first child. ok is false when it targets no
+	// response or its node has no neighbor that way (composer.go).
+	EntryNeighbor(ws ids.WorkspaceID, reply *frontendv1.FeedId, label string, way NeighborWay) (string, bool)
 	// WatchLabelChanges yields every workspace whose root feed changed what
 	// a composer's entry can target, from this call on, until ctx is
 	// cancelled. Every emission follows the change it announces.

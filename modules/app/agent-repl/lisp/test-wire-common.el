@@ -52,6 +52,49 @@ does not write to the durable sink."
   "Serialize ALIST and parse it back, the way the daemon would see it."
   (agent-repl-test-wire-common--parse (json-serialize alist)))
 
+;;;; ---- Required strings ----
+
+(ert-deftest agent-repl-test-wire-common-require-string-answers-or-refuses ()
+  "A required string is answered as is; unset and empty are breaches naming the field."
+  (dolist (case '(("x" nil)
+                  (nil ("M" f "required field is unset"))
+                  (7 ("M" f "required field is unset"))
+                  ("" ("M" f "required string is empty"))))
+    (should (equal (agent-repl-test-wire-common--breach
+                    (lambda () (agent-repl-wire--require-string "M" 'f (car case))))
+                   (cadr case)))
+    (unless (cadr case)
+      (should (equal (agent-repl-wire--require-string "M" 'f (car case)) (car case))))))
+
+(ert-deftest agent-repl-test-wire-common-decode-required-string-refuses-absent-and-empty ()
+  "A required string field decodes as is; absent or empty is refused as empty."
+  (dolist (case '(("{\"f\":\"x\"}" nil)
+                  ("{}" ("M" f "required string is empty"))
+                  ("{\"f\":\"\"}" ("M" f "required string is empty"))
+                  ("{\"f\":1}" ("M" f "expected a string"))))
+    (should (equal (agent-repl-test-wire-common--breach
+                    (lambda () (agent-repl-wire--decode-required-string
+                                "M" 'f (agent-repl-test-wire-common--parse (car case)))))
+                   (cadr case))))
+  (should (equal (agent-repl-test-wire-common--decode
+                  (lambda (v) (agent-repl-wire--decode-required-string "M" 'f v))
+                  "{\"f\":\"x\"}")
+                 "x")))
+
+(ert-deftest agent-repl-test-wire-common-every-required-string-is-checked-by-the-helper ()
+  "No codec file hand-rolls the empty-string breach: only the helpers raise it."
+  (dolist (file '("wire-host.el" "wire-common.el"))
+    (let ((source (with-temp-buffer
+                    (insert-file-contents (expand-file-name file agent-repl-test--module-dir))
+                    (buffer-string))))
+      (should (equal (list file (cl-count-if (lambda (_) t)
+                                             (let (hits (start 0))
+                                               (while (string-match "\"required string is empty\"" source start)
+                                                 (push (match-beginning 0) hits)
+                                                 (setq start (match-end 0)))
+                                               hits)))
+                     (list file (if (equal file "wire-common.el") 1 0)))))))
+
 ;;;; ---- WorkspaceRef ----
 
 (ert-deftest agent-repl-test-wire-common-inside-temporary-directory-decodes-both-fields ()

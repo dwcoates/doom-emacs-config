@@ -20,8 +20,8 @@ message RollbackToken {
 // feed, the held prompts and the files as they were, except that a running
 // turn may already have been interrupted.
 message RollBackError {
-  reserved 10;
-  reserved "vendor_refused";
+  reserved 10, 12;
+  reserved "vendor_refused", "entry_not_found";
   oneof cause {
     // The workspace id is not in the daemon's registry.
     RollBackUnknownWorkspace unknown_workspace = 1;
@@ -52,16 +52,9 @@ message RollBackError {
     // The files cannot be restored to that prompt (it was sent before file
     // checkpointing was on, or its checkpoint is gone). Nothing was changed.
     RollBackFilesNotRestorable files_not_restorable = 11;
-    // The resend edits an entry the rolled-back prompt does not hold: the
-    // edit was made for another prompt, or no entry of this one answers the
-    // label it named. Nothing was rolled back.
-    RollBackEntryNotFound entry_not_found = 12;
+    // 12 (entry_not_found) is reserved: it refused a resend's entry edit,
+    // retired with the edit (endpoint_roll_back.proto).
   }
-}
-// No entry of the rolled-back prompt answers the label a resend named.
-message RollBackEntryNotFound {
-  // The label the resend named.
-  string label = 1;
 }
 // The workspace id is not in the daemon's registry.
 message RollBackUnknownWorkspace {}

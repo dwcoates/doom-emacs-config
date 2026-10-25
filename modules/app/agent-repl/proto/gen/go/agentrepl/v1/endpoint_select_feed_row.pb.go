@@ -112,6 +112,7 @@ type SelectFeedRowRequest struct {
 	//	*SelectFeedRowRequest_Bubble
 	//	*SelectFeedRowRequest_Answer
 	//	*SelectFeedRowRequest_Entry
+	//	*SelectFeedRowRequest_Branch
 	Move          isSelectFeedRowRequest_Move `protobuf_oneof:"move"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -215,6 +216,15 @@ func (x *SelectFeedRowRequest) GetEntry() *SelectFeedRowEntry {
 	return nil
 }
 
+func (x *SelectFeedRowRequest) GetBranch() *SelectFeedRowBranch {
+	if x != nil {
+		if x, ok := x.Move.(*SelectFeedRowRequest_Branch); ok {
+			return x.Branch
+		}
+	}
+	return nil
+}
+
 type isSelectFeedRowRequest_Move interface {
 	isSelectFeedRowRequest_Move()
 }
@@ -266,11 +276,26 @@ type SelectFeedRowRequest_Answer struct {
 }
 
 type SelectFeedRowRequest_Entry struct {
-	// The reader clicked an entry of a prompt: select that prompt as a click
-	// does (frontend.v1.FeedSelectionRowViewportHold), and tell Emacs to fill
-	// the composer with the entry (HostWorkspacePromptEntryClicked), so the
-	// next send rolls the prompt back and resends it with that entry edited.
+	// The reader clicked an entry of a prompt (owner ruling, 2026-10-24):
+	// select the response the entry answers, by the rule the prompt's entries
+	// are bound by, CENTERED, and name the node the webapp boxes in it, with
+	// its subtree, while that selection stands
+	// (frontend.v1.FeedSelectionRowViewportRevealNode). It never toggles, and
+	// asks nothing of Emacs. An entry of no prompt the feed holds, one that
+	// answers no response, or one whose response is not selectable, is
+	// refused as not selectable, echoing the prompt's row.
 	Entry *SelectFeedRowEntry `protobuf:"bytes,9,opt,name=entry,proto3,oneof"`
+}
+
+type SelectFeedRowRequest_Branch struct {
+	// The reader clicked a node of a response's tree (owner request,
+	// 2026-10-24): select that response as the reply's target, as a click
+	// does but never toggling (frontend.v1.FeedSelectionRowViewportHold), and
+	// tell Emacs to open an entry answering the node (HostWorkspaceComposeEntry),
+	// so the reader answers a point straight from the feed. A row that is no
+	// selectable response, or whose tree holds no such node, is refused as not
+	// selectable.
+	Branch *SelectFeedRowBranch `protobuf:"bytes,10,opt,name=branch,proto3,oneof"`
 }
 
 func (*SelectFeedRowRequest_TurnBoundary) isSelectFeedRowRequest_Move() {}
@@ -285,6 +310,63 @@ func (*SelectFeedRowRequest_Answer) isSelectFeedRowRequest_Move() {}
 
 func (*SelectFeedRowRequest_Entry) isSelectFeedRowRequest_Move() {}
 
+func (*SelectFeedRowRequest_Branch) isSelectFeedRowRequest_Move() {}
+
+// The node of a response's tree the reader clicked.
+type SelectFeedRowBranch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The response's row.
+	Row *v11.FeedId `protobuf:"bytes,1,opt,name=row,proto3" json:"row,omitempty"`
+	// The node's label, as the response's tree carries it. Never empty.
+	Label         string `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SelectFeedRowBranch) Reset() {
+	*x = SelectFeedRowBranch{}
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SelectFeedRowBranch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SelectFeedRowBranch) ProtoMessage() {}
+
+func (x *SelectFeedRowBranch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SelectFeedRowBranch.ProtoReflect.Descriptor instead.
+func (*SelectFeedRowBranch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SelectFeedRowBranch) GetRow() *v11.FeedId {
+	if x != nil {
+		return x.Row
+	}
+	return nil
+}
+
+func (x *SelectFeedRowBranch) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
 // The prompt a response's linked label names, and the label.
 type SelectFeedRowAnswer struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -298,7 +380,7 @@ type SelectFeedRowAnswer struct {
 
 func (x *SelectFeedRowAnswer) Reset() {
 	*x = SelectFeedRowAnswer{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -310,7 +392,7 @@ func (x *SelectFeedRowAnswer) String() string {
 func (*SelectFeedRowAnswer) ProtoMessage() {}
 
 func (x *SelectFeedRowAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -323,7 +405,7 @@ func (x *SelectFeedRowAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowAnswer.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowAnswer) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SelectFeedRowAnswer) GetRow() *v11.FeedId {
@@ -341,6 +423,7 @@ func (x *SelectFeedRowAnswer) GetLabel() string {
 }
 
 // The prompt entry the reader clicked.
+// The entry of a prompt the reader clicked.
 type SelectFeedRowEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The prompt's row.
@@ -353,7 +436,7 @@ type SelectFeedRowEntry struct {
 
 func (x *SelectFeedRowEntry) Reset() {
 	*x = SelectFeedRowEntry{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -365,7 +448,7 @@ func (x *SelectFeedRowEntry) String() string {
 func (*SelectFeedRowEntry) ProtoMessage() {}
 
 func (x *SelectFeedRowEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -378,7 +461,7 @@ func (x *SelectFeedRowEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowEntry.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowEntry) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SelectFeedRowEntry) GetRow() *v11.FeedId {
@@ -406,7 +489,7 @@ type SelectFeedRowBubble struct {
 
 func (x *SelectFeedRowBubble) Reset() {
 	*x = SelectFeedRowBubble{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +501,7 @@ func (x *SelectFeedRowBubble) String() string {
 func (*SelectFeedRowBubble) ProtoMessage() {}
 
 func (x *SelectFeedRowBubble) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +514,7 @@ func (x *SelectFeedRowBubble) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowBubble.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowBubble) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SelectFeedRowBubble) GetRow() *v11.FeedId {
@@ -452,7 +535,7 @@ type SelectFeedRowStep struct {
 
 func (x *SelectFeedRowStep) Reset() {
 	*x = SelectFeedRowStep{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -464,7 +547,7 @@ func (x *SelectFeedRowStep) String() string {
 func (*SelectFeedRowStep) ProtoMessage() {}
 
 func (x *SelectFeedRowStep) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -477,7 +560,7 @@ func (x *SelectFeedRowStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowStep.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowStep) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SelectFeedRowStep) GetDirection() SelectFeedRowDirection {
@@ -496,7 +579,7 @@ type SelectFeedRowClear struct {
 
 func (x *SelectFeedRowClear) Reset() {
 	*x = SelectFeedRowClear{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -508,7 +591,7 @@ func (x *SelectFeedRowClear) String() string {
 func (*SelectFeedRowClear) ProtoMessage() {}
 
 func (x *SelectFeedRowClear) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -521,7 +604,7 @@ func (x *SelectFeedRowClear) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowClear.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowClear) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{6}
 }
 
 // The selected row is no longer visible in the webapp.
@@ -535,7 +618,7 @@ type SelectFeedRowLeftView struct {
 
 func (x *SelectFeedRowLeftView) Reset() {
 	*x = SelectFeedRowLeftView{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -547,7 +630,7 @@ func (x *SelectFeedRowLeftView) String() string {
 func (*SelectFeedRowLeftView) ProtoMessage() {}
 
 func (x *SelectFeedRowLeftView) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -560,7 +643,7 @@ func (x *SelectFeedRowLeftView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowLeftView.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowLeftView) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SelectFeedRowLeftView) GetRow() *v11.FeedId {
@@ -584,7 +667,7 @@ type SelectFeedRowResponse struct {
 
 func (x *SelectFeedRowResponse) Reset() {
 	*x = SelectFeedRowResponse{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -596,7 +679,7 @@ func (x *SelectFeedRowResponse) String() string {
 func (*SelectFeedRowResponse) ProtoMessage() {}
 
 func (x *SelectFeedRowResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -609,7 +692,7 @@ func (x *SelectFeedRowResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowResponse.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SelectFeedRowResponse) GetResult() isSelectFeedRowResponse_Result {
@@ -671,7 +754,7 @@ type SelectFeedRowSuccess struct {
 
 func (x *SelectFeedRowSuccess) Reset() {
 	*x = SelectFeedRowSuccess{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -683,7 +766,7 @@ func (x *SelectFeedRowSuccess) String() string {
 func (*SelectFeedRowSuccess) ProtoMessage() {}
 
 func (x *SelectFeedRowSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -696,7 +779,7 @@ func (x *SelectFeedRowSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowSuccess.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SelectFeedRowSuccess) GetOutcome() isSelectFeedRowSuccess_Outcome {
@@ -772,7 +855,7 @@ type SelectFeedRowSuccessSelected struct {
 
 func (x *SelectFeedRowSuccessSelected) Reset() {
 	*x = SelectFeedRowSuccessSelected{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -784,7 +867,7 @@ func (x *SelectFeedRowSuccessSelected) String() string {
 func (*SelectFeedRowSuccessSelected) ProtoMessage() {}
 
 func (x *SelectFeedRowSuccessSelected) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -797,7 +880,7 @@ func (x *SelectFeedRowSuccessSelected) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowSuccessSelected.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowSuccessSelected) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SelectFeedRowSuccessSelected) GetSelection() *v11.FeedSelection {
@@ -816,7 +899,7 @@ type SelectFeedRowSuccessNothingSelectable struct {
 
 func (x *SelectFeedRowSuccessNothingSelectable) Reset() {
 	*x = SelectFeedRowSuccessNothingSelectable{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -828,7 +911,7 @@ func (x *SelectFeedRowSuccessNothingSelectable) String() string {
 func (*SelectFeedRowSuccessNothingSelectable) ProtoMessage() {}
 
 func (x *SelectFeedRowSuccessNothingSelectable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -841,7 +924,7 @@ func (x *SelectFeedRowSuccessNothingSelectable) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use SelectFeedRowSuccessNothingSelectable.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowSuccessNothingSelectable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{11}
 }
 
 // Nothing is selected after the move.
@@ -853,7 +936,7 @@ type SelectFeedRowSuccessNone struct {
 
 func (x *SelectFeedRowSuccessNone) Reset() {
 	*x = SelectFeedRowSuccessNone{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -865,7 +948,7 @@ func (x *SelectFeedRowSuccessNone) String() string {
 func (*SelectFeedRowSuccessNone) ProtoMessage() {}
 
 func (x *SelectFeedRowSuccessNone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -878,7 +961,7 @@ func (x *SelectFeedRowSuccessNone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowSuccessNone.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowSuccessNone) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{12}
 }
 
 // Arms derived from the daemon's refusal sites, mirroring SelectWorkspace.
@@ -900,7 +983,7 @@ type SelectFeedRowError struct {
 
 func (x *SelectFeedRowError) Reset() {
 	*x = SelectFeedRowError{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -912,7 +995,7 @@ func (x *SelectFeedRowError) String() string {
 func (*SelectFeedRowError) ProtoMessage() {}
 
 func (x *SelectFeedRowError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -925,7 +1008,7 @@ func (x *SelectFeedRowError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowError.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SelectFeedRowError) GetCause() isSelectFeedRowError_Cause {
@@ -1032,7 +1115,7 @@ type SelectFeedRowNotSelectable struct {
 
 func (x *SelectFeedRowNotSelectable) Reset() {
 	*x = SelectFeedRowNotSelectable{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1044,7 +1127,7 @@ func (x *SelectFeedRowNotSelectable) String() string {
 func (*SelectFeedRowNotSelectable) ProtoMessage() {}
 
 func (x *SelectFeedRowNotSelectable) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1057,7 +1140,7 @@ func (x *SelectFeedRowNotSelectable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowNotSelectable.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowNotSelectable) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SelectFeedRowNotSelectable) GetRow() *v11.FeedId {
@@ -1076,7 +1159,7 @@ type SelectFeedRowUnknownWorkspace struct {
 
 func (x *SelectFeedRowUnknownWorkspace) Reset() {
 	*x = SelectFeedRowUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1088,7 +1171,7 @@ func (x *SelectFeedRowUnknownWorkspace) String() string {
 func (*SelectFeedRowUnknownWorkspace) ProtoMessage() {}
 
 func (x *SelectFeedRowUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1101,7 +1184,7 @@ func (x *SelectFeedRowUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{15}
 }
 
 // The echoed dir disagrees with the registry's dir for this id.
@@ -1115,7 +1198,7 @@ type SelectFeedRowWorkspaceRefMismatch struct {
 
 func (x *SelectFeedRowWorkspaceRefMismatch) Reset() {
 	*x = SelectFeedRowWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1127,7 +1210,7 @@ func (x *SelectFeedRowWorkspaceRefMismatch) String() string {
 func (*SelectFeedRowWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *SelectFeedRowWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1140,7 +1223,7 @@ func (x *SelectFeedRowWorkspaceRefMismatch) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use SelectFeedRowWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SelectFeedRowWorkspaceRefMismatch) GetRegistryDir() string {
@@ -1161,7 +1244,7 @@ type SelectFeedRowTransferringAway struct {
 
 func (x *SelectFeedRowTransferringAway) Reset() {
 	*x = SelectFeedRowTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1173,7 +1256,7 @@ func (x *SelectFeedRowTransferringAway) String() string {
 func (*SelectFeedRowTransferringAway) ProtoMessage() {}
 
 func (x *SelectFeedRowTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1186,7 +1269,7 @@ func (x *SelectFeedRowTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowTransferringAway.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SelectFeedRowTransferringAway) GetAddress() string {
@@ -1205,7 +1288,7 @@ type SelectFeedRowNotYetAdopted struct {
 
 func (x *SelectFeedRowNotYetAdopted) Reset() {
 	*x = SelectFeedRowNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1217,7 +1300,7 @@ func (x *SelectFeedRowNotYetAdopted) String() string {
 func (*SelectFeedRowNotYetAdopted) ProtoMessage() {}
 
 func (x *SelectFeedRowNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1230,14 +1313,14 @@ func (x *SelectFeedRowNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectFeedRowNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SelectFeedRowNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP(), []int{18}
 }
 
 var File_agentrepl_v1_endpoint_select_feed_row_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_select_feed_row_proto_rawDesc = "" +
 	"\n" +
-	"+agentrepl/v1/endpoint_select_feed_row.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\"\xf0\x03\n" +
+	"+agentrepl/v1/endpoint_select_feed_row.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x16frontend/v1/feed.proto\"\xad\x04\n" +
 	"\x14SelectFeedRowRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12F\n" +
 	"\rturn_boundary\x18\a \x01(\v2\x1f.agentrepl.v1.SelectFeedRowStepH\x00R\fturnBoundary\x128\n" +
@@ -1245,8 +1328,13 @@ const file_agentrepl_v1_endpoint_select_feed_row_proto_rawDesc = "" +
 	"\tleft_view\x18\x05 \x01(\v2#.agentrepl.v1.SelectFeedRowLeftViewH\x00R\bleftView\x12;\n" +
 	"\x06bubble\x18\x06 \x01(\v2!.agentrepl.v1.SelectFeedRowBubbleH\x00R\x06bubble\x12;\n" +
 	"\x06answer\x18\b \x01(\v2!.agentrepl.v1.SelectFeedRowAnswerH\x00R\x06answer\x128\n" +
-	"\x05entry\x18\t \x01(\v2 .agentrepl.v1.SelectFeedRowEntryH\x00R\x05entryB\x06\n" +
+	"\x05entry\x18\t \x01(\v2 .agentrepl.v1.SelectFeedRowEntryH\x00R\x05entry\x12;\n" +
+	"\x06branch\x18\n" +
+	" \x01(\v2!.agentrepl.v1.SelectFeedRowBranchH\x00R\x06branchB\x06\n" +
 	"\x04moveJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\bresponseR\x06prompt\"R\n" +
+	"\x13SelectFeedRowBranch\x12%\n" +
+	"\x03row\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\x12\x14\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label\"R\n" +
 	"\x13SelectFeedRowAnswer\x12%\n" +
 	"\x03row\x18\x01 \x01(\v2\x13.frontend.v1.FeedIdR\x03row\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\"Q\n" +
@@ -1306,61 +1394,64 @@ func file_agentrepl_v1_endpoint_select_feed_row_proto_rawDescGZIP() []byte {
 }
 
 var file_agentrepl_v1_endpoint_select_feed_row_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_agentrepl_v1_endpoint_select_feed_row_proto_goTypes = []any{
 	(SelectFeedRowDirection)(0),                   // 0: agentrepl.v1.SelectFeedRowDirection
 	(*SelectFeedRowRequest)(nil),                  // 1: agentrepl.v1.SelectFeedRowRequest
-	(*SelectFeedRowAnswer)(nil),                   // 2: agentrepl.v1.SelectFeedRowAnswer
-	(*SelectFeedRowEntry)(nil),                    // 3: agentrepl.v1.SelectFeedRowEntry
-	(*SelectFeedRowBubble)(nil),                   // 4: agentrepl.v1.SelectFeedRowBubble
-	(*SelectFeedRowStep)(nil),                     // 5: agentrepl.v1.SelectFeedRowStep
-	(*SelectFeedRowClear)(nil),                    // 6: agentrepl.v1.SelectFeedRowClear
-	(*SelectFeedRowLeftView)(nil),                 // 7: agentrepl.v1.SelectFeedRowLeftView
-	(*SelectFeedRowResponse)(nil),                 // 8: agentrepl.v1.SelectFeedRowResponse
-	(*SelectFeedRowSuccess)(nil),                  // 9: agentrepl.v1.SelectFeedRowSuccess
-	(*SelectFeedRowSuccessSelected)(nil),          // 10: agentrepl.v1.SelectFeedRowSuccessSelected
-	(*SelectFeedRowSuccessNothingSelectable)(nil), // 11: agentrepl.v1.SelectFeedRowSuccessNothingSelectable
-	(*SelectFeedRowSuccessNone)(nil),              // 12: agentrepl.v1.SelectFeedRowSuccessNone
-	(*SelectFeedRowError)(nil),                    // 13: agentrepl.v1.SelectFeedRowError
-	(*SelectFeedRowNotSelectable)(nil),            // 14: agentrepl.v1.SelectFeedRowNotSelectable
-	(*SelectFeedRowUnknownWorkspace)(nil),         // 15: agentrepl.v1.SelectFeedRowUnknownWorkspace
-	(*SelectFeedRowWorkspaceRefMismatch)(nil),     // 16: agentrepl.v1.SelectFeedRowWorkspaceRefMismatch
-	(*SelectFeedRowTransferringAway)(nil),         // 17: agentrepl.v1.SelectFeedRowTransferringAway
-	(*SelectFeedRowNotYetAdopted)(nil),            // 18: agentrepl.v1.SelectFeedRowNotYetAdopted
-	(*v1.WorkspaceRef)(nil),                       // 19: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),                            // 20: frontend.v1.FeedId
-	(*v11.FeedSelection)(nil),                     // 21: frontend.v1.FeedSelection
+	(*SelectFeedRowBranch)(nil),                   // 2: agentrepl.v1.SelectFeedRowBranch
+	(*SelectFeedRowAnswer)(nil),                   // 3: agentrepl.v1.SelectFeedRowAnswer
+	(*SelectFeedRowEntry)(nil),                    // 4: agentrepl.v1.SelectFeedRowEntry
+	(*SelectFeedRowBubble)(nil),                   // 5: agentrepl.v1.SelectFeedRowBubble
+	(*SelectFeedRowStep)(nil),                     // 6: agentrepl.v1.SelectFeedRowStep
+	(*SelectFeedRowClear)(nil),                    // 7: agentrepl.v1.SelectFeedRowClear
+	(*SelectFeedRowLeftView)(nil),                 // 8: agentrepl.v1.SelectFeedRowLeftView
+	(*SelectFeedRowResponse)(nil),                 // 9: agentrepl.v1.SelectFeedRowResponse
+	(*SelectFeedRowSuccess)(nil),                  // 10: agentrepl.v1.SelectFeedRowSuccess
+	(*SelectFeedRowSuccessSelected)(nil),          // 11: agentrepl.v1.SelectFeedRowSuccessSelected
+	(*SelectFeedRowSuccessNothingSelectable)(nil), // 12: agentrepl.v1.SelectFeedRowSuccessNothingSelectable
+	(*SelectFeedRowSuccessNone)(nil),              // 13: agentrepl.v1.SelectFeedRowSuccessNone
+	(*SelectFeedRowError)(nil),                    // 14: agentrepl.v1.SelectFeedRowError
+	(*SelectFeedRowNotSelectable)(nil),            // 15: agentrepl.v1.SelectFeedRowNotSelectable
+	(*SelectFeedRowUnknownWorkspace)(nil),         // 16: agentrepl.v1.SelectFeedRowUnknownWorkspace
+	(*SelectFeedRowWorkspaceRefMismatch)(nil),     // 17: agentrepl.v1.SelectFeedRowWorkspaceRefMismatch
+	(*SelectFeedRowTransferringAway)(nil),         // 18: agentrepl.v1.SelectFeedRowTransferringAway
+	(*SelectFeedRowNotYetAdopted)(nil),            // 19: agentrepl.v1.SelectFeedRowNotYetAdopted
+	(*v1.WorkspaceRef)(nil),                       // 20: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                            // 21: frontend.v1.FeedId
+	(*v11.FeedSelection)(nil),                     // 22: frontend.v1.FeedSelection
 }
 var file_agentrepl_v1_endpoint_select_feed_row_proto_depIdxs = []int32{
-	19, // 0: agentrepl.v1.SelectFeedRowRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	5,  // 1: agentrepl.v1.SelectFeedRowRequest.turn_boundary:type_name -> agentrepl.v1.SelectFeedRowStep
-	6,  // 2: agentrepl.v1.SelectFeedRowRequest.clear:type_name -> agentrepl.v1.SelectFeedRowClear
-	7,  // 3: agentrepl.v1.SelectFeedRowRequest.left_view:type_name -> agentrepl.v1.SelectFeedRowLeftView
-	4,  // 4: agentrepl.v1.SelectFeedRowRequest.bubble:type_name -> agentrepl.v1.SelectFeedRowBubble
-	2,  // 5: agentrepl.v1.SelectFeedRowRequest.answer:type_name -> agentrepl.v1.SelectFeedRowAnswer
-	3,  // 6: agentrepl.v1.SelectFeedRowRequest.entry:type_name -> agentrepl.v1.SelectFeedRowEntry
-	20, // 7: agentrepl.v1.SelectFeedRowAnswer.row:type_name -> frontend.v1.FeedId
-	20, // 8: agentrepl.v1.SelectFeedRowEntry.row:type_name -> frontend.v1.FeedId
-	20, // 9: agentrepl.v1.SelectFeedRowBubble.row:type_name -> frontend.v1.FeedId
-	0,  // 10: agentrepl.v1.SelectFeedRowStep.direction:type_name -> agentrepl.v1.SelectFeedRowDirection
-	20, // 11: agentrepl.v1.SelectFeedRowLeftView.row:type_name -> frontend.v1.FeedId
-	9,  // 12: agentrepl.v1.SelectFeedRowResponse.success:type_name -> agentrepl.v1.SelectFeedRowSuccess
-	13, // 13: agentrepl.v1.SelectFeedRowResponse.error:type_name -> agentrepl.v1.SelectFeedRowError
-	10, // 14: agentrepl.v1.SelectFeedRowSuccess.selected:type_name -> agentrepl.v1.SelectFeedRowSuccessSelected
-	11, // 15: agentrepl.v1.SelectFeedRowSuccess.nothing_selectable:type_name -> agentrepl.v1.SelectFeedRowSuccessNothingSelectable
-	12, // 16: agentrepl.v1.SelectFeedRowSuccess.none:type_name -> agentrepl.v1.SelectFeedRowSuccessNone
-	21, // 17: agentrepl.v1.SelectFeedRowSuccessSelected.selection:type_name -> frontend.v1.FeedSelection
-	15, // 18: agentrepl.v1.SelectFeedRowError.unknown_workspace:type_name -> agentrepl.v1.SelectFeedRowUnknownWorkspace
-	16, // 19: agentrepl.v1.SelectFeedRowError.workspace_ref_mismatch:type_name -> agentrepl.v1.SelectFeedRowWorkspaceRefMismatch
-	17, // 20: agentrepl.v1.SelectFeedRowError.transferring_away:type_name -> agentrepl.v1.SelectFeedRowTransferringAway
-	18, // 21: agentrepl.v1.SelectFeedRowError.not_yet_adopted:type_name -> agentrepl.v1.SelectFeedRowNotYetAdopted
-	14, // 22: agentrepl.v1.SelectFeedRowError.not_selectable:type_name -> agentrepl.v1.SelectFeedRowNotSelectable
-	20, // 23: agentrepl.v1.SelectFeedRowNotSelectable.row:type_name -> frontend.v1.FeedId
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	20, // 0: agentrepl.v1.SelectFeedRowRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	6,  // 1: agentrepl.v1.SelectFeedRowRequest.turn_boundary:type_name -> agentrepl.v1.SelectFeedRowStep
+	7,  // 2: agentrepl.v1.SelectFeedRowRequest.clear:type_name -> agentrepl.v1.SelectFeedRowClear
+	8,  // 3: agentrepl.v1.SelectFeedRowRequest.left_view:type_name -> agentrepl.v1.SelectFeedRowLeftView
+	5,  // 4: agentrepl.v1.SelectFeedRowRequest.bubble:type_name -> agentrepl.v1.SelectFeedRowBubble
+	3,  // 5: agentrepl.v1.SelectFeedRowRequest.answer:type_name -> agentrepl.v1.SelectFeedRowAnswer
+	4,  // 6: agentrepl.v1.SelectFeedRowRequest.entry:type_name -> agentrepl.v1.SelectFeedRowEntry
+	2,  // 7: agentrepl.v1.SelectFeedRowRequest.branch:type_name -> agentrepl.v1.SelectFeedRowBranch
+	21, // 8: agentrepl.v1.SelectFeedRowBranch.row:type_name -> frontend.v1.FeedId
+	21, // 9: agentrepl.v1.SelectFeedRowAnswer.row:type_name -> frontend.v1.FeedId
+	21, // 10: agentrepl.v1.SelectFeedRowEntry.row:type_name -> frontend.v1.FeedId
+	21, // 11: agentrepl.v1.SelectFeedRowBubble.row:type_name -> frontend.v1.FeedId
+	0,  // 12: agentrepl.v1.SelectFeedRowStep.direction:type_name -> agentrepl.v1.SelectFeedRowDirection
+	21, // 13: agentrepl.v1.SelectFeedRowLeftView.row:type_name -> frontend.v1.FeedId
+	10, // 14: agentrepl.v1.SelectFeedRowResponse.success:type_name -> agentrepl.v1.SelectFeedRowSuccess
+	14, // 15: agentrepl.v1.SelectFeedRowResponse.error:type_name -> agentrepl.v1.SelectFeedRowError
+	11, // 16: agentrepl.v1.SelectFeedRowSuccess.selected:type_name -> agentrepl.v1.SelectFeedRowSuccessSelected
+	12, // 17: agentrepl.v1.SelectFeedRowSuccess.nothing_selectable:type_name -> agentrepl.v1.SelectFeedRowSuccessNothingSelectable
+	13, // 18: agentrepl.v1.SelectFeedRowSuccess.none:type_name -> agentrepl.v1.SelectFeedRowSuccessNone
+	22, // 19: agentrepl.v1.SelectFeedRowSuccessSelected.selection:type_name -> frontend.v1.FeedSelection
+	16, // 20: agentrepl.v1.SelectFeedRowError.unknown_workspace:type_name -> agentrepl.v1.SelectFeedRowUnknownWorkspace
+	17, // 21: agentrepl.v1.SelectFeedRowError.workspace_ref_mismatch:type_name -> agentrepl.v1.SelectFeedRowWorkspaceRefMismatch
+	18, // 22: agentrepl.v1.SelectFeedRowError.transferring_away:type_name -> agentrepl.v1.SelectFeedRowTransferringAway
+	19, // 23: agentrepl.v1.SelectFeedRowError.not_yet_adopted:type_name -> agentrepl.v1.SelectFeedRowNotYetAdopted
+	15, // 24: agentrepl.v1.SelectFeedRowError.not_selectable:type_name -> agentrepl.v1.SelectFeedRowNotSelectable
+	21, // 25: agentrepl.v1.SelectFeedRowNotSelectable.row:type_name -> frontend.v1.FeedId
+	26, // [26:26] is the sub-list for method output_type
+	26, // [26:26] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_select_feed_row_proto_init() }
@@ -1375,17 +1466,18 @@ func file_agentrepl_v1_endpoint_select_feed_row_proto_init() {
 		(*SelectFeedRowRequest_Bubble)(nil),
 		(*SelectFeedRowRequest_Answer)(nil),
 		(*SelectFeedRowRequest_Entry)(nil),
+		(*SelectFeedRowRequest_Branch)(nil),
 	}
-	file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[7].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[8].OneofWrappers = []any{
 		(*SelectFeedRowResponse_Success)(nil),
 		(*SelectFeedRowResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[8].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[9].OneofWrappers = []any{
 		(*SelectFeedRowSuccess_Selected)(nil),
 		(*SelectFeedRowSuccess_NothingSelectable)(nil),
 		(*SelectFeedRowSuccess_None)(nil),
 	}
-	file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[12].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_select_feed_row_proto_msgTypes[13].OneofWrappers = []any{
 		(*SelectFeedRowError_UnknownWorkspace)(nil),
 		(*SelectFeedRowError_WorkspaceRefMismatch)(nil),
 		(*SelectFeedRowError_TransferringAway)(nil),
@@ -1398,7 +1490,7 @@ func file_agentrepl_v1_endpoint_select_feed_row_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_select_feed_row_proto_rawDesc), len(file_agentrepl_v1_endpoint_select_feed_row_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

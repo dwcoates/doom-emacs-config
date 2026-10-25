@@ -94,20 +94,24 @@ message WatchHostWorkspaceResponse {
     // as a key. An event, not state: never replayed to a late subscriber,
     // because a click belongs to the moment it was made.
     HostWorkspaceSelectRequested select_requested = 12;
-    // THE READER CLICKED AN ENTRY OF A PROMPT IN THE WEBVIEW
-    // (SelectFeedRow's `entry` move), selecting the prompt: Emacs fills the
-    // composer with what the entry says and puts the keyboard there, in
-    // insert state, so the next send rolls the prompt back and resends it
-    // with the entry as the composer then holds it. An event, not state:
-    // never replayed to a late subscriber; the selection itself rides
+    // THE READER CLICKED A NODE OF A RESPONSE'S TREE IN THE WEBVIEW
+    // (SelectFeedRow's `branch` move), selecting the response: Emacs opens a
+    // blank entry answering the node at the end of the composer (`LABEL - `),
+    // and puts the keyboard right after it, in insert state. An event, not
+    // state: never replayed to a late subscriber; the selection itself rides
     // `selection`.
-    HostWorkspacePromptEntryClicked prompt_entry_clicked = 13;
+    HostWorkspaceComposeEntry compose_entry = 14;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
   // marker (frontend.v1.RosterRowAttention).
   reserved 2;
   reserved "notification";
+  // Retired (owner ruling, 2026-10-24): a click on a prompt's entry no longer
+  // fills the composer. It reveals the response node the entry answers
+  // (SelectFeedRow's `entry` move), which is the webview's alone.
+  reserved 13;
+  reserved "prompt_entry_clicked";
 }
 
 // The relayed click's target, verbatim from the request.
@@ -153,15 +157,11 @@ message HostWorkspaceFinalResponseClicked {}
 // it rides names the workspace, and requesting the switch to it is the whole
 // of Emacs's obligation.
 message HostWorkspaceSelectRequested {}
-// The prompt entry the reader clicked in this workspace's webview.
-message HostWorkspacePromptEntryClicked {
-  // The prompt's row, now the selection.
-  frontend.v1.FeedId row = 1;
-  // The entry's label, as a frontend.v1.ProseEntryTreeNode answer carries it.
-  string label = 2;
-  // What the entry says, as a frontend.v1.ProseEntryTreeNode answer carries it: what the
-  // composer is filled with.
-  string text = 3;
+// The node of a response's tree the reader clicked, which the composer opens
+// an entry answering.
+message HostWorkspaceComposeEntry {
+  // The node's label. Never empty.
+  string label = 1;
 }
 
 // The host-facing state of one workspace: what Emacs needs to correlate

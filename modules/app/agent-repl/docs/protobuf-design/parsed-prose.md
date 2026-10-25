@@ -256,3 +256,63 @@ wrong labels). That needs one parse, in one place, that every program reads.
     never belong to a different line.
   - **The webapp draws the highlight as one stylesheet rule** over the node's lines
     (`webapp/src/feed/composer-entry.ts`), so a repaint of the response cannot drop it.
+
+### 7. Answering a response's branch from the feed
+
+- **What:**
+  - `SelectFeedRowRequest.move` gained `branch` (`SelectFeedRowBranch`: a response's
+    row and one node's label, tag 10).
+  - `WatchHostWorkspaceResponse` gained the event `compose_entry`
+    (`HostWorkspaceComposeEntry`: the label, tag 14).
+  - `feed.Resolver.ResponseNode` answers whether a response's tree holds a node.
+- **Why:** the owner's ask of 2026-10-24.
+  - A response's branch is boxed while the pointer is on it, drawn as the composer's
+    box is (`webapp/src/feed/subtree-box.ts`).
+  - A click on it selects the response, opens a blank `LABEL - ` entry on a line of
+    its own at the composer's end, and puts the keyboard there in insert state with
+    point right after it.
+- **Decisions inside the shape:**
+  - **The click never toggles.** It answers the node, so the response stays the one
+    replied to, as a click on a prompt's entry keeps its prompt.
+  - **The click names the node, not its text.** Emacs opens the entry itself
+    (`agent-repl-prompt-entries-opening`, the words `o` and `O` open with), so the
+    event carries only the label.
+  - **The hover is the webapp's alone.** It is drawn from the pointer and changes no
+    state, so no daemon round trip sits under the pointer.
+
+### 8. A prompt's entry reveals the response node it answers
+
+- **What:**
+  - `SelectFeedRowEntry` now selects the response the entry answers, by the one target
+    rule (`feed.Resolver.EntryTarget`), and never the prompt.
+  - `frontend.v1.FeedSelectionRowViewport` gained `reveal_node`
+    (`FeedSelectionRowViewportRevealNode.label`, tag 4).
+  - `WatchHostWorkspaceResponse.prompt_entry_clicked` (section 5) is retired: tag 13 and
+    its name are reserved, and `HostWorkspacePromptEntryClicked` is gone.
+- **Why:** the owner's ruling of 2026-10-24. A click on a prompt's entry should not
+  fill the composer at all. It should highlight the branch the entry answers, with
+  its subtree, in that response.
+- **Decisions inside the shape:**
+  - **The click selects the response**, centered as a linked label's click centers
+    its prompt, so a collapsed response opens and the node is in view.
+  - **The box is the selection's**: it stands while the selection naming the node
+    does, and the next selection push takes it down
+    (`webapp/src/feed/revealed-node.ts`).
+  - **The click asks nothing of Emacs.** RET on a selected prompt still resends the
+    composer's words whole.
+  - **The entry edit is retired with it** (owner ruling, 2026-10-24):
+    `RollBackResend.edit.entry` (tag 4) and `RollBackError.cause.entry_not_found`
+    (tag 12) are reserved, since only the click ever made an entry edit.
+
+### 9. `C-o` descends an entry to its node's first child
+
+- **What:** `EntryNeighborDirection` gained `first_child` (tag 3), and the daemon's
+  `feed.NeighborWay` replaced the next-or-previous flag.
+- **Why:** the owner's ask of 2026-10-24. On an entry line in the composer, filled
+  or not, `C-o` relabels the entry to answer its node's first child: `3.2 - `
+  becomes `3.2.1 - `.
+- **Decisions inside the shape:**
+  - **The entry keeps its words**, and point keeps its place after the label.
+  - **Off an entry line `C-o` is what it was** (Evil's own binding), through a
+    conditional binding (`agent-repl-prompt-entries--descend-binding`).
+  - **A node with no first child keeps its label**, and the composer flashes why.

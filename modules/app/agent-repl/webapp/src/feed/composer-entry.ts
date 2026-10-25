@@ -5,30 +5,16 @@
  * The daemon pushes, on the root feed's watch, the node of a response's tree
  * that the composer's entry at point answers (frontend.v1.FeedComposerEntry),
  * and says so again whenever it moves. The highlight is ONE BOX over that
- * node's subtree (owner ruling, 2026-10-24):
- *   - its rows are the node's lines and every line of each node beneath it
- *     (a response tree's labels are its nodes' places, as the daemon repairs
- *     them, so the subtree of `3.1` is `3.1` and every label opening on
- *     `3.1.`);
- *   - its left edge is the column the node's label starts at, so the
- *     connector leading to the node is outside it and its descendants' rails
- *     are inside;
- *   - its right edge is the nearest column covering every highlighted line's
- *     text.
- * A tree is drawn in a monospace face with every wide character boxed to two
- * columns (metaprompt-tree.ts), so a column is one `ch`.
+ * node's subtree, drawn as every highlight of a response's node is
+ * (subtree-box.ts).
  *
- * THE BOX IS RESTATED ON EVERY PAINT: a response's prose is repainted whenever
- * it re-wraps or re-arrives, so the response's prose slot marks it each time
- * it paints (`markComposerEntry`), from the node this module holds standing,
- * and a push re-marks whatever is drawn now.
+ * The box stands over the node until the next push moves it, restated on
+ * every paint of the response's prose (`markComposerEntry`, subtree-box.ts).
  */
 import type { FeedComposerEntry } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { queryAll } from "../dom.js";
 import { log } from "../log.js";
-import { TREE_LABEL_CLASS, TREE_LINE_CLASS, TREE_NODE_ATTRIBUTE, textWidth } from "../metaprompt-tree.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { FEED_ROW_SELECTOR, feedRowId } from "./row-id.js";
+import { standingBox, type BoxedNode } from "./subtree-box.js";
 
 /** The class every line inside the box wears. */
 export const COMPOSER_ENTRY_CLASS = "mp-line-composing";
@@ -39,17 +25,8 @@ export const COMPOSER_LEFT_PROPERTY = "--composer-left";
 /** The property naming the box's right edge, in `ch`, on each line inside it. */
 export const COMPOSER_RIGHT_PROPERTY = "--composer-right";
 
-/** The node the composer answers, as the last push named it: its row and label. */
-interface StandingNode {
-  readonly row: string;
-  readonly label: string;
-}
-
-/** The page's standing node, or undefined while the composer answers none. */
-let standing: StandingNode | undefined;
-
 /** The node ENTRY names, or undefined for none. A push with no state, or a node naming no row, is refused. */
-function nodeOf(entry: FeedComposerEntry): StandingNode | undefined {
+function nodeOf(entry: FeedComposerEntry): BoxedNode | undefined {
   const at = requireCase(entry.at, "FeedComposerEntry.at");
   switch (at.case) {
     case "none":
@@ -63,52 +40,20 @@ function nodeOf(entry: FeedComposerEntry): StandingNode | undefined {
   }
 }
 
-/** Whether NODE (a line's node label) is LABEL or beneath it. */
-function inSubtree(node: string | null, label: string): boolean {
-  return node !== null && (node === label || node.startsWith(`${label}.`));
-}
-
-/** The column LINE's own label starts at: the width of its prefix before the label. */
-function labelColumn(line: HTMLElement): number {
-  let text = "";
-  for (const child of line.querySelector(".mp-prefix")?.childNodes ?? []) {
-    if (child instanceof HTMLElement && child.classList.contains(TREE_LABEL_CLASS)) break;
-    text += child.textContent ?? "";
-  }
-  return textWidth(text);
-}
-
-/** Take the box off LINE. */
-function unmark(line: HTMLElement): void {
-  line.classList.remove(COMPOSER_ENTRY_CLASS);
-  line.style.removeProperty(COMPOSER_LEFT_PROPERTY);
-  line.style.removeProperty(COMPOSER_RIGHT_PROPERTY);
-}
+/** The composer's box (subtree-box.ts), standing over the node the composer answers. */
+const composerBox = standingBox({
+  className: COMPOSER_ENTRY_CLASS,
+  leftProperty: COMPOSER_LEFT_PROPERTY,
+  rightProperty: COMPOSER_RIGHT_PROPERTY,
+});
 
 /**
  * Box, in RENDERED (the drawn prose of the response row ROW), the subtree of
- * the node the composer answers, and take any box off every other line. Each
- * tree in RENDERED holding the node is boxed on its own. Run on every paint of
- * a response's prose, and over every drawn row on a push.
+ * the node the composer answers, and take any box off every other line. Run
+ * on every paint of a response's prose.
  */
 export function markComposerEntry(rendered: HTMLElement, row: string): void {
-  for (const line of queryAll<HTMLElement>(rendered, `.${COMPOSER_ENTRY_CLASS}`)) unmark(line);
-  const node = standing;
-  if (node === undefined || node.row !== row) return;
-  for (const tree of queryAll<HTMLElement>(rendered, ".mp-tree")) {
-    const lines = queryAll<HTMLElement>(tree, `.${TREE_LINE_CLASS}`).filter((l) =>
-      inSubtree(l.getAttribute(TREE_NODE_ATTRIBUTE), node.label),
-    );
-    const head = lines.find((l) => l.getAttribute(TREE_NODE_ATTRIBUTE) === node.label);
-    if (head === undefined) continue;
-    const left = labelColumn(head);
-    const right = Math.max(...lines.map((l) => textWidth((l.textContent ?? "").trimEnd())));
-    for (const line of lines) {
-      line.classList.add(COMPOSER_ENTRY_CLASS);
-      line.style.setProperty(COMPOSER_LEFT_PROPERTY, `${left}ch`);
-      line.style.setProperty(COMPOSER_RIGHT_PROPERTY, `${right}ch`);
-    }
-  }
+  composerBox.mark(rendered, row);
 }
 
 /** The highlight of one page: `apply` draws each pushed state. */
@@ -121,13 +66,7 @@ export function createComposerEntryHighlight(doc: Document): ComposerEntryHighli
   return {
     apply(entry: FeedComposerEntry): void {
       const node = nodeOf(entry);
-      standing = node;
-      for (const line of queryAll<HTMLElement>(doc.body, `.${COMPOSER_ENTRY_CLASS}`)) unmark(line);
-      if (node !== undefined) {
-        for (const row of queryAll<HTMLElement>(doc.body, FEED_ROW_SELECTOR)) {
-          if (feedRowId(row) === node.row) markComposerEntry(row, node.row);
-        }
-      }
+      composerBox.stand(doc, node);
       log.info(node === undefined ? "the composer answers no node; nothing is highlighted" : "highlighted the subtree the composer answers", {
         operation: "feed.composer-entry.applied",
         context: { row: node?.row ?? "none", label: node?.label ?? "none" },

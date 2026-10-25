@@ -228,7 +228,8 @@ export type ProseEntryTreeNode = Message<"frontend.v1.ProseEntryTreeNode"> & {
    */
   kind: {
     /**
-     * An entry the person wrote: a click target that edits it.
+     * An entry the person wrote: a click target that reveals the response
+     * node it answers (agentrepl.v1.SelectFeedRowEntry).
      *
      * @generated from field: frontend.v1.ProseEntryTreeNodeAnswer answer = 5;
      */

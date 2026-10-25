@@ -2817,19 +2817,27 @@ html[data-page-unshown] *::after {
 .mp-entry { border-radius: 4px; }
 .mp-entry-label { color: var(--accent); cursor: pointer; }
 .mp-entry-path .mp-label { opacity: 0.55; }
-/* THE SUBTREE THE COMPOSER IS ANSWERING is one box (feed/composer-entry.ts):
-   each line inside it is painted from its left edge, the column the node's
-   label starts at, to its right edge, the widest line's text, with the
-   accent's bar on the left. */
-.mp-line.mp-line-composing {
+/* A RESPONSE NODE'S SUBTREE IS ONE BOX (feed/subtree-box.ts): each line
+   inside it is painted from its left edge, the column the node's label starts
+   at, to its right edge, the widest line's text, with the accent's bar on the
+   left. The composer's box (feed/composer-entry.ts), the node a prompt's
+   entry reveals (feed/revealed-node.ts) and the pointer's
+   (feed/branch-hover.ts) are drawn alike, each from its own edges; the
+   pointer's is drawn over the others while it is there. */
+.mp-line.mp-line-composing,
+.mp-line.mp-line-revealed,
+.mp-line.mp-line-hovered {
   background: linear-gradient(to right,
-    transparent var(--composer-left),
-    var(--accent) var(--composer-left),
-    var(--accent) calc(var(--composer-left) + 2px),
-    var(--composer-entry-bg) calc(var(--composer-left) + 2px),
-    var(--composer-entry-bg) var(--composer-right),
-    transparent var(--composer-right));
+    transparent var(--box-left),
+    var(--accent) var(--box-left),
+    var(--accent) calc(var(--box-left) + 2px),
+    var(--composer-entry-bg) calc(var(--box-left) + 2px),
+    var(--composer-entry-bg) var(--box-right),
+    transparent var(--box-right));
 }
+.mp-line.mp-line-composing { --box-left: var(--composer-left); --box-right: var(--composer-right); }
+.mp-line.mp-line-revealed { --box-left: var(--reveal-left); --box-right: var(--reveal-right); }
+.mp-line.mp-line-hovered { --box-left: var(--hover-left); --box-right: var(--hover-right); cursor: pointer; }
 /* The entry a linked label revealed flashes once, as a coalesced held card does. */
 .mp-entry-flash { animation: mp-entry-flash 1.2s ease-out; }
 @keyframes mp-entry-flash {

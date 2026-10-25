@@ -4530,11 +4530,12 @@ it.  An incomplete request errors here rather than reaching the wire."
 (defun agent-repl-wire-decode-feed-selection-row-viewport (json)
   "Decode FeedSelectionRowViewport from JSON into (:viewport VP).
 VP is (:arm ARM :value V), and ARM is `:center' (a step from Emacs),
-`:hold' (a click in the webapp) or `:reveal' (a click on a label a prompt
-answers, V being (:entry-label LABEL)); exactly one is set.  `:center'
-and `:hold' carry a nil V."
+`:hold' (a click in the webapp), `:reveal' (a click on a label a prompt
+answers, V being (:entry-label LABEL)) or `:reveal-node' (a click on a
+prompt's entry, V being (:label LABEL), the response node it answers);
+exactly one is set.  `:center' and `:hold' carry a nil V."
   (let ((message "FeedSelectionRowViewport"))
-    (agent-repl-wire-verbs--check-keys message json '(center hold reveal))
+    (agent-repl-wire-verbs--check-keys message json '(center hold reveal revealNode))
     (list :viewport
           (agent-repl-wire-verbs--decode-oneof
            message "viewport" json
@@ -4543,13 +4544,22 @@ and `:hold' carry a nil V."
                  (list 'hold :hold
                        (agent-repl-wire-verbs--empty-arm "FeedSelectionRowViewportHold"))
                  (list 'reveal :reveal
-                       #'agent-repl-wire-decode-feed-selection-row-viewport-reveal))))))
+                       #'agent-repl-wire-decode-feed-selection-row-viewport-reveal)
+                 (list 'revealNode :reveal-node
+                       #'agent-repl-wire-decode-feed-selection-row-viewport-reveal-node))))))
 
 (defun agent-repl-wire-decode-feed-selection-row-viewport-reveal (json)
   "Decode FeedSelectionRowViewportReveal from JSON into (:entry-label LABEL)."
   (let ((message "FeedSelectionRowViewportReveal"))
     (agent-repl-wire-verbs--check-keys message json '(entryLabel))
     (list :entry-label (agent-repl-wire-verbs--decode-string message 'entryLabel json))))
+
+(defun agent-repl-wire-decode-feed-selection-row-viewport-reveal-node (json)
+  "Decode FeedSelectionRowViewportRevealNode from JSON into (:label LABEL).
+The label is never empty."
+  (let ((message "FeedSelectionRowViewportRevealNode"))
+    (agent-repl-wire-verbs--check-keys message json '(label))
+    (list :label (agent-repl-wire-verbs--decode-required-string message 'label json))))
 
 (defun agent-repl-wire-decode-feed-selection-row (message json)
   "Decode the selected-row MESSAGE from JSON into (:row FEEDID :viewport VP).
@@ -4755,8 +4765,9 @@ The success is empty; the error is one of the four handover arms."
 (defun agent-repl-wire-encode-find-entry-neighbor-request (request)
   "Encode FindEntryNeighborRequest from plist REQUEST.
 \(:workspace REF :label LABEL :direction DIRECTION): DIRECTION (:arm :next)
-for the node below (`o') or (:arm :previous) for the node above (`O').
-All three are required."
+for the node below (`o'), (:arm :previous) for the node above (`O') or
+\(:arm :first-child) for the node's first child (`C-o').  All three are
+required."
   (let ((message "FindEntryNeighborRequest"))
     (list (cons 'workspace
                 (agent-repl-wire-encode-workspace-ref
@@ -4767,7 +4778,8 @@ All three are required."
                        "EntryNeighborDirection" "way"
                        (agent-repl-wire-verbs--require message "direction" (plist-get request :direction))
                        (list (list :next 'next #'ignore)
-                             (list :previous 'previous #'ignore))))))))
+                             (list :previous 'previous #'ignore)
+                             (list :first-child 'firstChild #'ignore))))))))
 
 (defun agent-repl-wire-decode-find-entry-neighbor-response (json)
   "Decode FindEntryNeighborResponse from JSON into (:arm ARM :value V).
@@ -5058,9 +5070,7 @@ ENTRIES are newest first, possibly none."
 (defun agent-repl-wire-encode-roll-back-resend (resend)
   "Encode RollBackResend from plist RESEND.
 RESEND is (:idempotency-key KEY :origin KEYWORD :edit EDIT), all required.
-EDIT is (:arm :whole :value (:said SAID)) for a whole new prompt, or (:arm
-:entry :value (:row FEEDID :label LABEL :text TEXT)) for the rolled-back
-prompt ROW with the entry answering LABEL saying TEXT instead."
+EDIT is (:arm :whole :value (:said SAID)), the whole new prompt."
   (let* ((message "RollBackResend")
          (edit (agent-repl-wire-verbs--require message "edit" (plist-get resend :edit)))
          (value (plist-get edit :value)))
@@ -5076,15 +5086,6 @@ prompt ROW with the entry answering LABEL saying TEXT instead."
                                       (agent-repl-wire-encode-user-said
                                        (agent-repl-wire-verbs--require
                                         "RollBackResendWhole" "said" (plist-get value :said)))))))
-            (:entry (cons 'entry
-                          (list (cons 'label
-                                      (agent-repl-wire-verbs--require
-                                       "RollBackResendEntry" "label" (plist-get value :label)))
-                                (cons 'text (or (plist-get value :text) ""))
-                                (cons 'row
-                                      (agent-repl-wire-encode-feed-id
-                                       (agent-repl-wire-verbs--require
-                                        "RollBackResendEntry" "row" (plist-get value :row)))))))
             (other (agent-repl-wire-verbs--fail message "edit" (format "unknown edit arm %S" other)))))))
 
 (defun agent-repl-wire-encode-roll-back-request (request)
@@ -5128,12 +5129,6 @@ request carried a resend."
                    message 'resend json
                    #'agent-repl-wire-decode-submit-prompt-response))))
 
-(defun agent-repl-wire-decode-roll-back-entry-not-found (json)
-  "Decode RollBackEntryNotFound from JSON into (:label LABEL)."
-  (let ((message "RollBackEntryNotFound"))
-    (agent-repl-wire-verbs--check-keys message json '(label))
-    (list :label (agent-repl-wire-verbs--decode-string message 'label json))))
-
 (defconst agent-repl-wire-roll-back-error-own-arms
   '((planStale :plan-stale "RollBackPlanStale")
     (noSession :no-session "RollBackNoSession")
@@ -5151,7 +5146,7 @@ is judged after the answer, and the daemon draws the prompts back."
     (agent-repl-wire-verbs--check-keys
      message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
                     planStale noSession promptNotRecorded firstPrompt unseenPrompt
-                    filesNotRestorable entryNotFound))
+                    filesNotRestorable))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -5163,9 +5158,7 @@ is judged after the answer, and the daemon draws the prompts back."
                     agent-repl-wire-roll-back-error-own-arms)
             (list (list 'filesNotRestorable :files-not-restorable
                         (lambda (v) (agent-repl-wire-verbs--decode-vendor-message
-                                     "RollBackFilesNotRestorable" v)))
-                  (list 'entryNotFound :entry-not-found
-                        #'agent-repl-wire-decode-roll-back-entry-not-found)))))))
+                                     "RollBackFilesNotRestorable" v)))))))))
 
 (defun agent-repl-wire-decode-roll-back-response (json)
   "Decode RollBackResponse from JSON into (:arm ARM :value V)."

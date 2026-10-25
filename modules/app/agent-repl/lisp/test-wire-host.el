@@ -349,8 +349,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
                       (list "{\"selectRequested\":{}}" :select-requested)
-                      (list "{\"promptEntryClicked\":{\"row\":{\"value\":\"p1\"},\"label\":\"3.1\",\"text\":\"yes\"}}"
-                            :prompt-entry-clicked)))
+                      (list "{\"composeEntry\":{\"label\":\"3.1\"}}" :compose-entry)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
                                #'agent-repl-wire-decode-watch-host-workspace-response
                                (nth 0 case))
@@ -647,21 +646,22 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   "{\"workspace\":\"w\"}")
                  '("HostWorkspaceSelectRequested" workspace "unknown field"))))
 
-;;;; ---- The prompt-entry click push ----
+;;;; ---- The branch click push ----
 
-(ert-deftest agent-repl-test-wire-host-prompt-entry-clicked-decodes-its-row-label-and-text ()
-  "The entry click decodes to the prompt's row, the entry's label and its words."
+(ert-deftest agent-repl-test-wire-host-compose-entry-decodes-its-label ()
+  "The branch click decodes to the node's label."
   (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-host-workspace-prompt-entry-clicked
-                  "{\"row\":{\"value\":\"p1\"},\"label\":\"3.1\",\"text\":\"yes\"}")
-                 '(:row (:value "p1") :label "3.1" :text "yes"))))
+                  #'agent-repl-wire-decode-host-workspace-compose-entry
+                  "{\"label\":\"3.1\"}")
+                 '(:label "3.1"))))
 
-(ert-deftest agent-repl-test-wire-host-prompt-entry-clicked-refuses-an-unknown-field ()
-  "A field the entry click does not declare is refused, not ignored."
-  (should (equal (agent-repl-test-wire-host--breach
-                  #'agent-repl-wire-decode-host-workspace-prompt-entry-clicked
-                  "{\"row\":{\"value\":\"p1\"},\"label\":\"3.1\",\"text\":\"yes\",\"extra\":1}")
-                 '("HostWorkspacePromptEntryClicked" extra "unknown field"))))
+(ert-deftest agent-repl-test-wire-host-compose-entry-refuses-a-bad-message ()
+  "An empty label, or a field the branch click does not declare, is refused."
+  (dolist (case '(("{}" ("HostWorkspaceComposeEntry" label "required string is empty"))
+                  ("{\"label\":\"3.1\",\"extra\":1}" ("HostWorkspaceComposeEntry" extra "unknown field"))))
+    (should (equal (agent-repl-test-wire-host--breach
+                    #'agent-repl-wire-decode-host-workspace-compose-entry (car case))
+                   (cadr case)))))
 
 ;;;; ---- The notification click push ----
 
@@ -1562,7 +1562,7 @@ opens are OpenTabs streams."
                        #'string<)
                  (sort (list "evaluate" "host" "transferred" "reloadWebapp"
                              "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection"
-                             "finalResponseClicked" "selectRequested" "promptEntryClicked")
+                             "finalResponseClicked" "selectRequested" "composeEntry")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()

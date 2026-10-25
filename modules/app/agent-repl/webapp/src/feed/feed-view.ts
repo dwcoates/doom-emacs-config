@@ -123,6 +123,7 @@ import { promptWaves, setPromptWave } from "../breathing.js";
 import { childrenMatching, queryAll } from "../dom.js";
 import { flashEntryOncePainted } from "./entries.js";
 import { FEED_ROW_ATTRIBUTE, feedRowId } from "./row-id.js";
+import { applyRevealedNode } from "./revealed-node.js";
 
 /** The row a new row is inserted above, sampled before the insert. */
 interface InsertSample {
@@ -1078,6 +1079,9 @@ export function createFeedController(
    * on a re-open, the same row pushed again -- moves nothing.
    */
   function applySelection(selection: FeedSelection): void {
+    // THE NODE A PROMPT'S ENTRY REVEALS stands boxed while its selection does
+    // (revealed-node.ts).
+    applyRevealedNode(document, selection);
     const arm = requireCase(selection.selection, "FeedSelection.selection");
     const was = selectedRow;
     switch (arm.case) {
@@ -1152,6 +1156,9 @@ export function createFeedController(
           case "reveal":
             centerOnRow(row);
             revealEntry(row, viewport.value.entryLabel);
+            return;
+          case "revealNode":
+            centerOnRow(row);
             return;
           case "hold":
             return;

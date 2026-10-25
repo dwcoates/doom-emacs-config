@@ -152,22 +152,30 @@ func (r *resolver) restateAnswers(s *wsState, addr feedid.Feed, why string) {
 		dlog.Context{"feed": f.key, "why": why, "responses": len(responses)})
 }
 
-// promptEntryText answers what ROW's entry answering LABEL says, when ROW is a
-// user prompt holding one: the first such entry.
-func promptEntryText(row *frontendv1.FeedRow, label string) (string, bool) {
-	for _, entry := range promptEntries(row) {
-		if entry.GetLabel().GetText() == label {
-			return entry.GetAnswer().GetText().GetMarkdown(), true
-		}
+// EntryTarget answers the root-feed response row the entry answering LABEL of
+// the user prompt row ID answers, by the rule its entries are bound by
+// (entryTarget), as last published. ok is false when the feed holds no such
+// prompt, the prompt holds no entry answering LABEL, or the entry answers no
+// response.
+func (r *resolver) EntryTarget(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) (*frontendv1.FeedId, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	f := r.rootFeedState(ws)
+	if f == nil {
+		return nil, false
 	}
-	return "", false
-}
-
-// PromptEntry answers what the entry answering LABEL of the root-feed user
-// prompt row ID says, as last published.
-func (r *resolver) PromptEntry(ws ids.WorkspaceID, id *frontendv1.FeedId, label string) (string, bool) {
-	text, ok := r.rootRowText(ws, id, func(row *frontendv1.FeedRow) (string, bool) {
-		return promptEntryText(row, label)
-	})
-	return text.Markdown, ok
+	at := f.indexOf(id.GetValue())
+	if at < 0 {
+		return nil, false
+	}
+	prompt := f.rows[f.order[at]]
+	if !slices.Contains(promptEntryLabels(prompt), label) {
+		return nil, false
+	}
+	labelsAt := func(i int) map[string]bool { return responseLabels(f.rows[f.order[i]]) }
+	target := entryTarget(f, at, promptQuotedRow(prompt), label, labelsAt)
+	if target == "" {
+		return nil, false
+	}
+	return f.rows[target].GetId(), true
 }

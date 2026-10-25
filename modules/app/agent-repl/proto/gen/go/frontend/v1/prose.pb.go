@@ -468,7 +468,8 @@ type isProseEntryTreeNode_Kind interface {
 }
 
 type ProseEntryTreeNode_Answer struct {
-	// An entry the person wrote: a click target that edits it.
+	// An entry the person wrote: a click target that reveals the response
+	// node it answers (agentrepl.v1.SelectFeedRowEntry).
 	Answer *ProseEntryTreeNodeAnswer `protobuf:"bytes,5,opt,name=answer,proto3,oneof"`
 }
 

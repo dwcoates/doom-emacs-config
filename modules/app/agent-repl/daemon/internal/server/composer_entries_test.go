@@ -267,32 +267,36 @@ func TestReportComposerEntriesOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 }
 
 // neighborRequest is a FindEntryNeighbor of LABEL, NEXT or previous.
-func neighborRequest(label string, next bool) *agentreplv1.FindEntryNeighborRequest {
-	way := &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Previous{Previous: &agentreplv1.EntryNeighborPrevious{}}}
-	if next {
-		way = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Next{Next: &agentreplv1.EntryNeighborNext{}}}
-	}
+func neighborRequest(label string, way *agentreplv1.EntryNeighborDirection) *agentreplv1.FindEntryNeighborRequest {
 	return &agentreplv1.FindEntryNeighborRequest{Workspace: ref(), Label: label, Direction: way}
 }
+
+// Each direction FindEntryNeighbor is asked for.
+var (
+	wayNext       = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Next{Next: &agentreplv1.EntryNeighborNext{}}}
+	wayPrevious   = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Previous{Previous: &agentreplv1.EntryNeighborPrevious{}}}
+	wayFirstChild = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_FirstChild{FirstChild: &agentreplv1.EntryNeighborFirstChild{}}}
+)
 
 func TestFindEntryNeighborAnswersTheFeedsNeighbor(t *testing.T) {
 	tests := []struct {
 		name  string
-		next  bool
+		way   *agentreplv1.EntryNeighborDirection
 		want  string
 		found bool
 	}{
-		{"the next node", true, "3.2", true},
-		{"the previous node", false, "3", true},
+		{"the next node", wayNext, "3.2", true},
+		{"the previous node", wayPrevious, "3", true},
+		{"the first child", wayFirstChild, "3.1.1", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
-			h.Feed.neighbors = map[string]string{"3.1\x00next": "3.2", "3.1\x00previous": "3"}
+			h.Feed.neighbors = map[string]string{"3.1\x00next": "3.2", "3.1\x00previous": "3", "3.1\x00first_child": "3.1.1"}
 
 			// Act
-			resp, err := h.Client.FindEntryNeighbor(context.Background(), connect.NewRequest(neighborRequest("3.1", tc.next)))
+			resp, err := h.Client.FindEntryNeighbor(context.Background(), connect.NewRequest(neighborRequest("3.1", tc.way)))
 
 			// Assert
 			if err != nil || resp.Msg.GetSuccess().GetFound().GetLabel() != tc.want {
@@ -307,7 +311,7 @@ func TestFindEntryNeighborAnswersNoneWhereThereIsNone(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	resp, err := h.Client.FindEntryNeighbor(context.Background(), connect.NewRequest(neighborRequest("9.9", true)))
+	resp, err := h.Client.FindEntryNeighbor(context.Background(), connect.NewRequest(neighborRequest("9.9", wayNext)))
 
 	// Assert
 	if err != nil || resp.Msg.GetSuccess().GetNone() == nil {
@@ -323,7 +327,7 @@ func TestFindEntryNeighborWhileAPromptIsSelectedAnswersNone(t *testing.T) {
 	h.selectResponse(t, "p1")
 
 	// Act
-	resp, err := h.Client.FindEntryNeighbor(context.Background(), connect.NewRequest(neighborRequest("3.1", true)))
+	resp, err := h.Client.FindEntryNeighbor(context.Background(), connect.NewRequest(neighborRequest("3.1", wayNext)))
 
 	// Assert
 	if err != nil || resp.Msg.GetSuccess().GetNone() == nil {
@@ -336,9 +340,9 @@ func TestFindEntryNeighborRefusesAMalformedRequest(t *testing.T) {
 		name string
 		req  *agentreplv1.FindEntryNeighborRequest
 	}{
-		{"no label", neighborRequest("", true)},
+		{"no label", neighborRequest("", wayNext)},
 		{"no direction", &agentreplv1.FindEntryNeighborRequest{Workspace: ref(), Label: "3.1"}},
-		{"no workspace", &agentreplv1.FindEntryNeighborRequest{Label: "3.1", Direction: neighborRequest("3.1", true).GetDirection()}},
+		{"no workspace", &agentreplv1.FindEntryNeighborRequest{Label: "3.1", Direction: neighborRequest("3.1", wayNext).GetDirection()}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -360,7 +364,7 @@ func TestFindEntryNeighborRefusesAMalformedRequest(t *testing.T) {
 func TestFindEntryNeighborOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	req := neighborRequest("3.1", true)
+	req := neighborRequest("3.1", wayNext)
 	req.Workspace = &workspacev1.WorkspaceRef{Id: "ws-nope"}
 
 	// Act

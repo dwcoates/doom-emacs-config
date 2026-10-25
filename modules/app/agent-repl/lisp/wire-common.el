@@ -175,6 +175,22 @@ An absent field is the proto3 default, which protojson omits."
           ((stringp raw) raw)
           (t (agent-repl-wire--fail message-name field "expected a string")))))
 
+(defun agent-repl-wire--require-string (message-name field value)
+  "Return VALUE as MESSAGE-NAME's required non-empty string FIELD, or fail.
+A non-string is unset, and an empty string is empty: both are breaches."
+  (cond ((not (stringp value))
+         (agent-repl-wire--fail message-name field "required field is unset"))
+        ((string-empty-p value)
+         (agent-repl-wire--fail message-name field "required string is empty"))
+        (t value)))
+
+(defun agent-repl-wire--decode-required-string (message-name field object)
+  "Decode OBJECT's required string FIELD of MESSAGE-NAME; empty is a breach.
+An absent field decodes empty, as protojson omits the proto3 default, so
+it is refused as empty."
+  (agent-repl-wire--require-string
+   message-name field (agent-repl-wire--decode-string message-name field object)))
+
 (defun agent-repl-wire--decode-optional-string (message-name field object)
   "Decode OBJECT's optional string FIELD of MESSAGE-NAME, nil when absent."
   (let ((raw (agent-repl-wire--raw object field)))

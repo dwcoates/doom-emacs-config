@@ -165,6 +165,10 @@ message FeedSelectionRowViewport {
     // (agentrepl.v1.SelectFeedRowAnswer): center the row, as a step does, and
     // flash the entry answering the label so the reader sees which one.
     FeedSelectionRowViewportReveal reveal = 3;
+    // The reader clicked a prompt's entry answering a node of this response's
+    // tree (agentrepl.v1.SelectFeedRowEntry): center the row, as a step does,
+    // and box the node with its subtree for as long as this selection stands.
+    FeedSelectionRowViewportRevealNode reveal_node = 4;
   }
 }
 // Center the newly selected row: the selection was stepped from Emacs.
@@ -175,6 +179,12 @@ message FeedSelectionRowViewportHold {}
 message FeedSelectionRowViewportReveal {
   // The label whose entry to flash, as a frontend.v1.ProseEntryTreeNode answer carries it.
   string entry_label = 1;
+}
+// Center the newly selected response and box one node of its tree, with the
+// node's subtree, while the selection stands.
+message FeedSelectionRowViewportRevealNode {
+  // The node's label, as the response's tree carries it. Never empty.
+  string label = 1;
 }
 
 // A selected final response: the next prompt sent is a reply to it, and the
