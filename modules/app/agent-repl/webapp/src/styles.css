@@ -860,8 +860,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 /* THE RAIL'S BARE GLYPH CONTROLS: no visible button around the glyph --
    no fill, no border, and no focus ring, which WebKit otherwise draws as a
    grey bevelled box around the focused control. Every rail control drawn as
-   a glyph floating on the background takes its bare look from here. */
-#ws-sidebar .sb-search-btn {
+   a glyph floating on the background takes its bare look from here: the
+   search magnifier, and the merge-queue toggle (owner request, 2026-10-25),
+   whose glyph alone shows white or purple on the background. */
+#ws-sidebar .sb-search-btn,
+#ws-sidebar .repo-head > .sb-merge-queue-toggle {
   background: none;
   border: none;
   outline: none;
@@ -1029,7 +1032,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    sections show their workspaces, and in the canonical purple of a merge in
    progress (--blocked, .tone-purple's) while they show their merge queues.
    It takes the click in the area around the glyph, as a triangle does, and
-   keeps the header's weight and case out of the glyph. */
+   keeps the header's weight and case out of the glyph, bare as the rail's
+   glyph controls are. */
 #ws-sidebar .repo-head > .sb-merge-queue-toggle {
   margin-left: auto;
   padding: 0.3rem 0.35rem;
