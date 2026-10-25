@@ -240,8 +240,15 @@ class RootWatch {
       );
       this.onChange(dir);
     };
+    // EVERY EVENT IS RECORDED AS IT ARRIVES, before it is judged, so the log
+    // tells a change the platform never reported from one that was reported
+    // and not counted.
+    const seen = (name: string | null): void => {
+      LOGGER.debug({ skills_dir: this.root, watched: dir, entry: name ?? "" }, "a watch on the vendor's skills saw an event");
+      onEvent(name);
+    };
     try {
-      return this.fsys.watchDir(dir, onEvent, (err) => failed(err, "after it began"));
+      return this.fsys.watchDir(dir, seen, (err) => failed(err, "after it began"));
     } catch (err) {
       failed(err instanceof Error ? err : new Error(String(err)), "at its start");
       return undefined;

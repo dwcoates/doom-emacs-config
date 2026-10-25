@@ -2265,6 +2265,26 @@ describe("WatchAgent before the session's first turn", () => {
  * point. Real directories, the real kernel watch, the mocked vendor.
  */
 describe("a skill installed mid-session", () => {
+  /** The test's shim, whose skill-watch records a failure prints. */
+  let shimOfTest: Awaited<ReturnType<typeof spawnShim>> | undefined;
+
+  // A FAILURE SAYS WHAT THE WATCH SAW. These tests wait on the platform's
+  // directory notification, and a wait that times out says nothing of why:
+  // the shim's skill-watch records (each watch armed, each event that
+  // arrived, each change counted) are printed before the file-level cleanup
+  // removes the shim's log.
+  afterEach((context) => {
+    const shim = shimOfTest;
+    shimOfTest = undefined;
+    if (shim === undefined || context.task.result?.state !== "fail") return;
+    const records = shim.log
+      .records()
+      .filter((r) => r.operation === "shim.engine.skill_watch" || r.message.includes("skill set changed"));
+    process.stderr.write(
+      `${context.task.name}: the shim's skill-watch records (${records.length}):\n${records.map((r) => JSON.stringify(r)).join("\n")}\n`,
+    );
+  });
+
   /** Read the watch until a skills-changed statement arrives, answering its paths. */
   async function awaitSkillsChanged(watch: ReturnType<typeof watchSession>): Promise<string[]> {
     for (;;) {
@@ -2282,6 +2302,7 @@ describe("a skill installed mid-session", () => {
 
   test("into the account's skills directory is stated as a stale skill set", async () => {
     const shim = await spawnShim();
+    shimOfTest = shim;
     mkdirSync(join(shim.dirs.configDir, "skills"), { recursive: true });
     await shim.clients.h1.startSession(freshSession());
     const watch = watchSession(shim);
@@ -2295,6 +2316,7 @@ describe("a skill installed mid-session", () => {
 
   test("into a worktree skills directory that did not exist at the start is stated too", async () => {
     const shim = await spawnShim();
+    shimOfTest = shim;
     await shim.clients.h1.startSession(freshSession());
     const watch = watchSession(shim);
 
