@@ -2100,7 +2100,7 @@ one place where a decoration failing may not cost the user a page."
     (unwind-protect
         (agent-repl-test-frontend--with-webview buf "*agent-frontend-old-ws*" "new-ws"
           (cl-letf (((symbol-function 'agent-repl--error)
-                     (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+                     (agent-repl-test--record-into errors)))
             ;; Act
             (should (null (agent-repl--frontend-rename-webview "new-ws"))))
           ;; Assert
