@@ -76,6 +76,7 @@ import type {
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { FeedChessBoard } from "../../../proto/gen/ts/frontend/v1/chess_board_pb";
 import type { RowArrival, RowContext } from "./cards/context.js";
+import { FEED_ROW_SELECTOR } from "./row-id.js";
 
 export type { Handle };
 // THE ONE ROW CONTEXT is declared in cards/context.ts; the feed core's
@@ -330,7 +331,7 @@ export function arrangeSubfeedRows(
   // did not put back is stopped, below. Grouped members sit inside their group's
   // panel, still descendants of the host, so this descendant query still finds
   // them and a member merely regrouped is never mistaken for a dropped one.
-  const before = [...queryAll(host, "[data-feed-row]")];
+  const before = [...queryAll(host, FEED_ROW_SELECTOR)];
   // Every nesting slot drawn before this pass is re-placed at the end, empty if
   // nothing lands in it now, so a row that stopped being in the feed (deletion
   // is ROW OMISSION on the next push) cannot linger inside a container that is

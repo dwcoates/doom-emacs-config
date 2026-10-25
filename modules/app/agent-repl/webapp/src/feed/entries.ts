@@ -36,6 +36,7 @@ import {
 } from "../metaprompt-tree.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, whenSlotPainted } from "../bubble/body.js";
+import { feedRowId } from "./row-id.js";
 
 /** The class every line of an entry wears, its label in `ENTRY_ATTRIBUTE`. */
 export const ENTRY_CLASS = "mp-entry";
@@ -140,7 +141,7 @@ export function flashEntry(row: HTMLElement, label: string): void {
   if (lines.length === 0) {
     log.warn("a revealed prompt draws no entry answering the label", {
       operation: "feed.entries.flash-absent",
-      context: { row: row.getAttribute("data-feed-row") ?? "unset", label },
+      context: { row: feedRowId(row) ?? "unset", label },
     });
     return;
   }
@@ -153,7 +154,7 @@ export function flashEntry(row: HTMLElement, label: string): void {
   }
   log.info("a revealed prompt's entry flashed", {
     operation: "feed.entries.flashed",
-    context: { row: row.getAttribute("data-feed-row") ?? "unset", label, lines: lines.length },
+    context: { row: feedRowId(row) ?? "unset", label, lines: lines.length },
   });
 }
 

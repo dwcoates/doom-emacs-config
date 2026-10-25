@@ -33,6 +33,7 @@
  */
 import { log } from "../log.js";
 import { createLeftViewWatch } from "./left-view.js";
+import { feedRowId } from "./row-id.js";
 
 /** The act that opened a watched entry (see the module comment). */
 export type OutOfViewCause = "jump" | "ownClick";
@@ -129,5 +130,5 @@ export function createOutOfViewCollapse(box: HTMLElement): OutOfViewCollapse | n
 
 /** A row's name in a record: the FeedId its element carries. */
 function rowName(row: HTMLElement): string {
-  return row.getAttribute("data-feed-row") ?? "unset";
+  return feedRowId(row) ?? "unset";
 }

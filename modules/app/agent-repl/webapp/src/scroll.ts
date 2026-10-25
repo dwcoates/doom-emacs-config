@@ -36,6 +36,7 @@
 import { ancestorMatching, nodeLabel, pageMutationObserver } from "./dom.js";
 import { log } from "./log.js";
 import { nextFrame } from "./frame.js";
+import { feedRowId, feedRowOf } from "./feed/row-id.js";
 
 /** Slack below which a downward gesture still counts as arriving at the tail. */
 const PIN_PX = 40;
@@ -350,17 +351,17 @@ type AnchorTrigger = "resize" | "scroll" | "measured";
 
 /** A row's name in a record: its FeedId where it carries one. */
 function rowName(row: Element): string {
-  return row.getAttribute("data-feed-row") ?? row.tagName.toLowerCase();
+  return feedRowId(row) ?? row.tagName.toLowerCase();
 }
 
 /**
  * THE ENTRY A CLICK ON TARGET LANDED IN: the innermost feed row
- * (`[data-feed-row]`) holding TARGET inside its root row ROW, or ROW itself
+ * (`feedRowOf`) holding TARGET inside its root row ROW, or ROW itself
  * when nothing inside ROW holds it (a group's own tab strip, a row that is one
  * entry).
  */
 export function entryOf(target: Element, row: Element): Element {
-  const entry = target.closest("[data-feed-row]");
+  const entry = feedRowOf(target);
   return entry !== null && row.contains(entry) ? entry : row;
 }
 

@@ -3,6 +3,7 @@
  * cost to a page's size states it: its element count and its feed rows.
  */
 import { queryAll } from "./dom.js";
+import { FEED_ROW_SELECTOR } from "./feed/row-id.js";
 
 /** One document's size. */
 export interface PageSize {
@@ -14,6 +15,6 @@ export interface PageSize {
 export function pageSize(doc: Document): PageSize {
   return {
     dom_nodes: doc.getElementsByTagName("*").length,
-    feed_rows: queryAll(doc, "[data-feed-row]").length,
+    feed_rows: queryAll(doc, FEED_ROW_SELECTOR).length,
   };
 }

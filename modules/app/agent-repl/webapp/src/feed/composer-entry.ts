@@ -28,6 +28,7 @@ import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { TREE_LABEL_CLASS, TREE_LINE_CLASS, TREE_NODE_ATTRIBUTE, textWidth } from "../metaprompt-tree.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+import { FEED_ROW_SELECTOR, feedRowId } from "./row-id.js";
 
 /** The class every line inside the box wears. */
 export const COMPOSER_ENTRY_CLASS = "mp-line-composing";
@@ -123,8 +124,8 @@ export function createComposerEntryHighlight(doc: Document): ComposerEntryHighli
       standing = node;
       for (const line of queryAll<HTMLElement>(doc.body, `.${COMPOSER_ENTRY_CLASS}`)) unmark(line);
       if (node !== undefined) {
-        for (const row of queryAll<HTMLElement>(doc.body, "[data-feed-row]")) {
-          if (row.getAttribute("data-feed-row") === node.row) markComposerEntry(row, node.row);
+        for (const row of queryAll<HTMLElement>(doc.body, FEED_ROW_SELECTOR)) {
+          if (feedRowId(row) === node.row) markComposerEntry(row, node.row);
         }
       }
       log.info(node === undefined ? "the composer answers no node; nothing is highlighted" : "highlighted the subtree the composer answers", {
