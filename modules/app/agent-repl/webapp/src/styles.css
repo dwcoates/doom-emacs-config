@@ -6453,6 +6453,9 @@ bubble-body.bubble-body { display: block; }
    card's own. The badges are
    the card's headline, so `.queued-head` wraps a row of them rather than
    widening the card. */
+/* THE HELD STATUS IS ITS WORDS ALONE (owner request, 2026-10-25): no
+   outline, and no side padding, so its text starts at the strip's edge. */
+.badge.held-badge { border: none; padding-left: 0; padding-right: 0; }
 .badge.held-badge.amber { color: var(--merge-border); }
 .badge.held-badge.teal { color: var(--hibernated); }
 /* A classifier still deciding: a slow breath, which is how every other

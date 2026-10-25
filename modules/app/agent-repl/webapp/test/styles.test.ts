@@ -4031,6 +4031,25 @@ describe("the held prompt's fill: a markedly darker blue than the user prompt's"
     expect(held.filter((rule) => /(?:^|;)\s*(?:max-)?width\s*:/.test(rule.declarations))).toEqual([]);
   });
 
+  it.each([
+    ["border", "none"],
+    ["padding-left", "0"],
+    ["padding-right", "0"],
+  ])("draws the held status badge as its words alone (%s %s)", (property, value) => {
+    // Arrange / Act
+    const got = valueOf(allDeclarationsOf(".badge.held-badge"), property);
+    // Assert
+    expect(got).toBe(value);
+  });
+
+  it("keeps the outline on every other badge, a further fact's quiet note pill among them", () => {
+    // Arrange / Act / Assert
+    expect([valueOf(allDeclarationsOf(".badge"), "border"), allDeclarationsOf(".badge.queued-status-note")]).toEqual([
+      "1px solid var(--border)",
+      expect.not.stringMatching(/border/),
+    ]);
+  });
+
   it.each([".prompt-block-quote", ".known-command"])("styles a held prompt's %s exactly as a user prompt's", (part) => {
     // Arrange / Act
     const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(`.bubble[data-variant="user"] ${part}`));
