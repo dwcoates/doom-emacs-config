@@ -148,6 +148,14 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 		log.Info(opWithheld, "the workspace was shown or reopened before its session was stood down; it keeps running", fields)
 		return withheldSettled
 	}
+	// A FOLD NEVER STANDS DOWN WHAT IT SPARES (owner ruling, 2026-10-25),
+	// read afresh here too: a workspace a fold held back while it was busy may
+	// have become a one-shot, or queued a merge, by the time it falls free.
+	if spare, spared := record.FoldSpare(); spared {
+		log.Info(opWithheld, "the folded workspace is spared; its session keeps running",
+			dlog.Merge(fields, dlog.Context{"spare": string(spare)}))
+		return withheldSettled
+	}
 	session, found, err := c.deps.DB.Session(ctx, ws)
 	if err != nil {
 		log.Error(opWithheld, "could not read a withheld workspace's session; its stand-down is dropped", dlog.WithCause(fields, err))

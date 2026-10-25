@@ -421,3 +421,137 @@ func TestAnEdgeDuringARunningAttemptRunsOneMore(t *testing.T) {
 		t.Fatalf("kills = %+v, want the stand-down taken", killed)
 	}
 }
+
+// collapsed registers one workspace with a live, free session, and folds its
+// repository's section.
+func (h *harness) collapsed(t *testing.T) ids.WorkspaceID {
+	t.Helper()
+	ws := h.workspace(t, instant)
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if err := h.db.SetRepositoryFolded(context.Background(), record.Repo, true); err != nil {
+		t.Fatalf("SetRepositoryFolded: %v", err)
+	}
+	return ws
+}
+
+// oneShot marks ws a one-shot, as a create with -one-shot records it.
+func (h *harness) oneShot(t *testing.T, ws ids.WorkspaceID) {
+	t.Helper()
+	if err := h.db.PutCreationJob(context.Background(), wsm.CreationJob{Workspace: ws, OneShot: true, CreatedAt: instant}); err != nil {
+		t.Fatalf("PutCreationJob: %v", err)
+	}
+}
+
+// mergePending records a merge request for ws in its own repository's queue.
+func (h *harness) mergePending(t *testing.T, ws ids.WorkspaceID) {
+	t.Helper()
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if err := h.db.RequestMerge(context.Background(), wsm.RepoKey(record.Dir+"/.git"), ws, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, instant); err != nil {
+		t.Fatalf("RequestMerge: %v", err)
+	}
+}
+
+func TestAFoldSparesWhatTheRecordSpares(t *testing.T) {
+	tests := []struct {
+		name  string
+		spare func(h *harness, t *testing.T, ws ids.WorkspaceID)
+		want  wsm.FoldSpare
+	}{
+		{"a one-shot", (*harness).oneShot, wsm.FoldSpareOneShot},
+		{"a merge pending", (*harness).mergePending, wsm.FoldSpareMergePending},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := h.collapsed(t)
+			tt.spare(h, t, ws)
+
+			// Act
+			h.c.StandDownWithheld(ws)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want none for a spared workspace", killed)
+			}
+			if term := h.terminal(t, ws); term != nil {
+				t.Fatalf("terminal = %+v, want the session left as it stood", term)
+			}
+			if h.pending(ws) {
+				t.Fatal("a spared workspace's stand-down stayed pending")
+			}
+			named := false
+			for _, rec := range records(h.log, opWithheld) {
+				if rec.Level == "info" && rec.Context["spare"] == string(tt.want) {
+					named = true
+				}
+			}
+			if !named {
+				t.Fatalf("no %s record named the spare %q", opWithheld, tt.want)
+			}
+		})
+	}
+}
+
+func TestAHiddenOneShotIsStillStoodDown(t *testing.T) {
+	// Arrange: the user hid it, which no fold spare reaches.
+	h := newHarness(t)
+	ws := h.hidden(t)
+	h.oneShot(t, ws)
+
+	// Act
+	h.c.StandDownWithheld(ws)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 1 {
+		t.Fatalf("kills = %+v, want the hidden one-shot stood down", killed)
+	}
+}
+
+func TestAFoldedWorkspaceHeldBackWhileBusyIsStoodDownOnceFree(t *testing.T) {
+	// Arrange: busy at the fold, it falls free with nothing in flight and
+	// nothing queued, its repository still folded.
+	h := newHarness(t)
+	ws := h.collapsed(t)
+	h.freeness.SetFree(ws, false)
+	h.c.StandDownWithheld(ws)
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("kills = %+v, want none while busy", killed)
+	}
+	h.freeness.SetFree(ws, true)
+
+	// Act
+	h.c.RetryWithheld(ws)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 1 {
+		t.Fatalf("kills = %+v, want the stand-down taken on the free edge", killed)
+	}
+}
+
+func TestAFoldedWorkspaceThatQueuedAMergeWhileBusyIsSparedOnceFree(t *testing.T) {
+	// Arrange: busy at the fold, it finished its turn by queueing a merge.
+	h := newHarness(t)
+	ws := h.collapsed(t)
+	h.freeness.SetFree(ws, false)
+	h.c.StandDownWithheld(ws)
+	h.mergePending(t, ws)
+	h.freeness.SetFree(ws, true)
+
+	// Act
+	h.c.RetryWithheld(ws)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("kills = %+v, want none once a merge is pending", killed)
+	}
+	if h.pending(ws) {
+		t.Fatal("a spared workspace's stand-down stayed pending")
+	}
+}
