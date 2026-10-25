@@ -2786,7 +2786,8 @@ Every figure is ONE agent's fresh input, never its subagents':
   turn reset at `SetTurn`, the edge that raises `working · submitting`), and a
   relaunched daemon restates it from the main agent's opening history page
   (owner ruling 2026-10-08, `docs/protobuf-design/footer-last-turn-tokens.md`);
-- a response bubble's cost corner (`frontend.v1.FeedResponseUsageStamp`) is
+- a response bubble's usage stamp (`frontend.v1.FeedResponseUsageStamp`),
+  shown in the footer's activity cell while the bubble is hovered, is
   the fresh input its agent added since that agent's previous bubble landed,
   frozen when it lands, so a turn's bubbles partition the footer's figure; the
   green final-answer bubble carries the turn's whole figure;

@@ -307,7 +307,7 @@ Clicking a link to a file (not a web address) in a prompt or response bubble ope
   - The question quotes the bubble you clicked in, as a reply to a selected bubble does.
   - The agent is also asked to propose an agent-repl change that avoids such links or teaches the resolver a further fallback.
 
-## Copying a code block or a prompt
+## Copying a code block, a prompt or a final response
 
 Every code block in the feed has a small copy icon at its top right.
 
@@ -315,9 +315,20 @@ Every code block in the feed has a small copy icon at its top right.
   - The icon turns into a green check mark for a moment.
   - The click never selects, expands or folds the bubble the block sits in.
 - **The icon adds no text to the block, so a drag-select across the block copies only its code.**
-- **A selected prompt bubble has the same icon at its top right, which copies the whole prompt.**
-  - The icon shows only while the prompt is selected.
+- **Every prompt bubble has the same icon at its top right, which copies the whole prompt.**
+  - The icon shows on every prompt, folded or opened.
   - It copies the markdown you wrote, with a reply's quote ahead of it.
+- **The turn's final response has the same icon at its top right, which copies the whole response.**
+- **A bubble's icon sits on its first line of text, never on a line of its own.**
+  - A short first line widens the bubble just enough to fit the icon beside it.
+  - A first line as wide as the bubble can be wraps short of the icon.
+
+## A response's tokens and age
+
+- **Hovering a response bubble shows its figures in the footer's activity line.**
+  - The line reads the tokens the response added, e.g. "12.3k tokens".
+  - Once the response has landed, it adds how long ago that was, e.g. "· 5m 30s ago".
+  - Moving the pointer off the bubble gives the line back to the workspace's activity.
 
 ## Background work in the expanded footer
 
