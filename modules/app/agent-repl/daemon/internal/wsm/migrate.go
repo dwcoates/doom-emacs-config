@@ -173,6 +173,9 @@ var migrations = []migration{
 	{To: 74, Name: "merge_queue_behind", Kind: MigrationAdditive, DDL: mergeQueueBehindDDL},
 	{To: 75, Name: "merge_queue_lookup_indexes", Kind: MigrationAdditive, DDL: mergeQueueLookupIndexesDDL},
 	{To: 76, Name: "sidebar_view_open_shows", Kind: MigrationAdditive, DDL: openShowsDDL},
+	// IT IS ADDITIVE: the build before it already reads and writes only the
+	// successors, so a rewritten row is the shape it draws (retiredshapes.go).
+	{To: 77, Name: "durable_rows_retired_shapes", Kind: MigrationAdditive, Rewrite: rewriteRetiredShapeRows},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
