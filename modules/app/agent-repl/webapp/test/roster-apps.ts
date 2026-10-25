@@ -13,6 +13,8 @@ export interface TestThread {
   name: string;
   summary?: string;
   current?: boolean;
+  /** The thread is archived; open unless said. */
+  archived?: boolean;
 }
 
 type RosterInit = MessageInitShape<typeof WorkspaceRosterSchema>;
@@ -40,6 +42,7 @@ export function rosterApps(chat?: TestThread[]): Pick<RosterInit, "appSwitcher" 
         name: { text: t.name },
         summary: t.summary === undefined ? undefined : { text: t.summary },
         current: t.current === true ? {} : undefined,
+        standing: { standing: t.archived === true ? { case: "archived", value: {} } : { case: "open", value: {} } },
       })),
     },
   };

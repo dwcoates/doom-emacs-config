@@ -1468,6 +1468,7 @@ describe("the row menu toggle", () => {
     sc: sidebarContext(),
     workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w/one" }),
     name: "one",
+    kind: "workspace" as const,
   };
 
   it("reveals the menu the row owns", () => {

@@ -9558,3 +9558,16 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   margin: -2px 0 4px; padding: 0 1.4rem; font-size: 12px; color: var(--info-agents);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* The archived threads: listed under their heading, after every open thread,
+   receded as the rail's other settled lists are. */
+#ws-sidebar .sb-threads-heading {
+  margin: 12px 12px 4px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--muted);
+}
+#ws-sidebar .sb-thread-archived > .row .name { color: var(--muted); }
+/* A content match's words around the match, under the row (chat-search.ts). */
+#ws-sidebar .sb-thread-snippet {
+  margin: -2px 0 4px; padding: 0 1.4rem; font-size: 12px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#ws-sidebar .sb-thread-snippet mark { background: none; color: var(--fg); font-weight: 600; }

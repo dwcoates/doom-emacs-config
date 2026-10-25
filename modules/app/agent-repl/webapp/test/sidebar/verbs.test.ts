@@ -63,6 +63,8 @@ import {
   drawNukeConfirm,
   closeWorkspaceRefusal,
   drawRowMenu,
+  drawThreadMenu,
+  verbLabel,
   finishWorkspaceRefusal,
   nukeWorkspaceRefusal,
   lockHolderHowText,
@@ -80,7 +82,7 @@ const TARGET_WS = create(WorkspaceRefSchema, { id: "ws-7", dir: "/w/seven" });
 
 function target(impl = {}) {
   const sc = sidebarContext(appContext(impl));
-  return { sc, workspace: TARGET_WS, name: "seven" };
+  return { sc, workspace: TARGET_WS, name: "seven", kind: "workspace" as const };
 }
 
 /** Click a control and let the verb's promise settle. */
@@ -1037,5 +1039,37 @@ describe("restartWorkspaceRefusal", () => {
     expect(
       restartWorkspaceRefusal({ case: "relaunchFailed", value: { detail: "the prelaunched shim died" } } as never),
     ).toBe("the restart failed: the prelaunched shim died");
+  });
+});
+
+describe("a chat thread's verbs", () => {
+  const thread = () => ({ ...target(), kind: "thread" as const });
+
+  it.each([
+    ["open", "Restore"],
+    ["close", "Archive"],
+    ["nuke", "Delete"],
+    ["kill", "Kill"],
+  ] as const)("calls %s %s", (verb, label) => {
+    expect(verbLabel(verb, "thread")).toBe(label);
+  });
+
+  it("keeps the workspace names on a workspace row", () => {
+    expect(["open", "close", "nuke"].map((v) => verbLabel(v as "open" | "close" | "nuke", "workspace"))).toEqual(["Open", "Close", "Nuke"]);
+  });
+
+  it.each([
+    [false, "close"],
+    [true, "open"],
+  ])("offers archived=%s its one standing verb and delete", (archived, verb) => {
+    const menu = drawThreadMenu(thread(), archived);
+    const verbs = [...menu.querySelectorAll("[data-verb]")].map((el) => el.getAttribute("data-verb"));
+    expect(verbs).toEqual([verb, "nuke"]);
+    expect(menu.hidden).toBe(true);
+  });
+
+  it("says what deleting a thread destroys", () => {
+    const note = drawNukeConfirm(thread()).querySelector(".sb-confirm-note")?.textContent;
+    expect(note).toBe('Deletes the thread and everything asked in it. Type "seven" to confirm.');
   });
 });

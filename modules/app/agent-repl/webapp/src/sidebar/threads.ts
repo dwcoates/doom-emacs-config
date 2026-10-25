@@ -10,10 +10,12 @@
  *
  * With Chat shown, the body is the thread list: the new-thread button
  * (RequestNewThread: the daemon asks Emacs to open its new-thread prompt,
- * since the webapp takes no typed input), then one row per thread, the one
- * last interacted with first. A row is drawn in the rail's row shape
- * (`[data-roster-row]` holding `.row > .name`), so the rail's search narrows
- * threads as it narrows workspaces.
+ * since the webapp takes no typed input), then one row per open thread, the
+ * one last interacted with first, then every archived thread under
+ * "Archived". A row is drawn in the rail's row shape (`[data-roster-row]`
+ * holding `.row > .name`), so the rail's search narrows threads as it narrows
+ * workspaces, and its "⋯" opens the workspace verbs a thread shares under
+ * the thread's names for them (`verbs.ts`): archive or restore, and delete.
  */
 import { RequestNewThreadResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_request_new_thread_pb.js";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb.js";
@@ -27,9 +29,13 @@ import type {
 import { log } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
 import { noteRefusedArm } from "../rpc/refusal.js";
-import { requireCase, requireMessage } from "../rpc/strict.js";
+import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
+import type { RailContext, SidebarContext } from "./context.js";
+import { openScope, type DrawScope } from "./scope.js";
 import type { Dropdowns } from "./dropdowns.js";
+import { drawMenuControl } from "./row.js";
+import { drawThreadMenu, type VerbTarget } from "./verbs.js";
 
 /** The switcher drawn in the rail's head. */
 export interface AppSwitcher {
@@ -122,8 +128,36 @@ export function createAppSwitcher(ctx: DaemonContext, dropdowns: Dropdowns): App
   };
 }
 
+/**
+ * THE THREAD LIST IS DRAWN THROUGH A SCOPE (scope.ts), as every section of the
+ * workspace roster is, so what its rows register (their menus' dropdowns)
+ * lives exactly as long as the drawing: each draw disposes the last one's.
+ */
+const drawnLists = new WeakMap<RailContext, { scope: DrawScope; root: HTMLElement }>();
+
+/** Draw the thread list into RAIL, replacing (and disposing) the last one. */
+export function drawThreadList(section: RosterThreadSection, rail: RailContext): HTMLElement {
+  disposeThreadList(rail);
+  const scope = openScope(rail);
+  const root = drawThreadSection(section, scope.context);
+  drawnLists.set(rail, { scope, root });
+  return root;
+}
+
+/** Tear down RAIL's thread list, when there is one. */
+export function disposeThreadList(rail: RailContext): void {
+  const drawn = drawnLists.get(rail);
+  if (drawn === undefined) return;
+  drawn.scope.dispose(drawn.root);
+  drawnLists.delete(rail);
+}
+
+/** The heading the archived threads are listed under. */
+export const ARCHIVED_HEADING = "Archived";
+
 /** The Chat app's body: the new-thread button and the thread rows. */
-export function drawThreadSection(section: RosterThreadSection, ctx: DaemonContext): HTMLElement {
+export function drawThreadSection(section: RosterThreadSection, sc: SidebarContext): HTMLElement {
+  const ctx = sc.ctx;
   const box = document.createElement("div");
   box.className = "sb-threads";
   box.setAttribute("data-thread-section", "");
@@ -150,18 +184,43 @@ export function drawThreadSection(section: RosterThreadSection, ctx: DaemonConte
     );
   });
 
-  const rows = document.createElement("div");
-  rows.className = "rows";
-  rows.append(...section.rows.map((row, i) => drawThreadRow(row, ctx, `RosterThreadSection.rows[${i}]`)));
-  box.append(button, note, rows);
+  const open = document.createElement("div");
+  open.className = "rows";
+  const archived = document.createElement("div");
+  archived.className = "rows sb-threads-archived";
+  section.rows.forEach((row, i) => {
+    const path = `RosterThreadSection.rows[${i}]`;
+    const standing = requireCase(requireMessage(row.standing, `${path}.standing`).standing, `${path}.standing.standing`);
+    switch (standing.case) {
+      case "open":
+        open.append(drawThreadRow(row, sc, path, false));
+        return;
+      case "archived":
+        archived.append(drawThreadRow(row, sc, path, true));
+        return;
+      default: {
+        const other: { case: string } = standing;
+        unreachableArm(`${path}.standing.standing`, other.case);
+      }
+    }
+  });
+  box.append(button, note, open);
+  if (archived.childElementCount > 0) {
+    const heading = document.createElement("div");
+    heading.className = "sb-threads-heading";
+    heading.textContent = ARCHIVED_HEADING;
+    box.append(heading, archived);
+  }
   return box;
 }
 
-/** One thread's row. */
-function drawThreadRow(row: RosterThreadRow, ctx: DaemonContext, path: string): HTMLElement {
+/** One thread's row; an ARCHIVED one is drawn receded and offers restoring. */
+function drawThreadRow(row: RosterThreadRow, sc: SidebarContext, path: string, archived: boolean): HTMLElement {
+  const ctx = sc.ctx;
   const thread = requireMessage(row.thread, `${path}.thread`);
   const ws = document.createElement("div");
   ws.className = row.current === undefined ? "ws sb-thread" : "ws sb-thread current";
+  if (archived) ws.classList.add("sb-thread-archived");
   ws.setAttribute("data-roster-row", thread.id);
   if (row.current !== undefined) ws.setAttribute("data-current", "true");
   const line = document.createElement("div");
@@ -169,7 +228,8 @@ function drawThreadRow(row: RosterThreadRow, ctx: DaemonContext, path: string): 
   const name = document.createElement("span");
   name.className = "name";
   name.textContent = requireMessage(row.name, `${path}.name`).text;
-  line.append(name);
+  const target: VerbTarget = { sc, workspace: thread, name: name.textContent, kind: "thread" };
+  line.append(name, drawMenuControl(ws, target));
   ws.append(line);
   if (row.summary !== undefined) {
     const summary = document.createElement("div");
@@ -177,6 +237,7 @@ function drawThreadRow(row: RosterThreadRow, ctx: DaemonContext, path: string): 
     summary.textContent = row.summary.text;
     ws.append(summary);
   }
+  ws.append(drawThreadMenu(target, archived));
   line.addEventListener("click", () => {
     log.info("selecting a thread from the rail", { operation: "sidebar.thread.select", context: { thread: thread.id } });
     callUnary(ctx, "SelectWorkspace", (client) => client.selectWorkspace({ workspace: thread }), SelectWorkspaceResponseSchema).then(

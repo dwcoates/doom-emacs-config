@@ -27,7 +27,7 @@ import type { AppContext, DaemonContext } from "../rpc/context.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
-import { AttentionRegistry, type BlinkTimers } from "./attention.js";
+import { AttentionRegistry, WINDOW_TIMERS, type BlinkTimers } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
 import { createRowHover } from "./row-hover.js";
 import { installTransients } from "./transients.js";
@@ -40,8 +40,9 @@ import { createRowReveal } from "./reveal.js";
 import { guardMalformedNow } from "../rpc/guard.js";
 import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
-import { createAppSwitcher, drawThreadSection, showsChat, type AppSwitcher } from "./threads.js";
+import { createAppSwitcher, disposeThreadList, drawThreadList, showsChat, type AppSwitcher } from "./threads.js";
 import { applySearch, createRailSearch, type RailSearch } from "./search.js";
+import { createChatSearch } from "./chat-search.js";
 import { createSelectionEdge } from "./selection-edge.js";
 import { installWallPhase, type WallPhaseEnv } from "./wall-phase.js";
 import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
@@ -222,6 +223,8 @@ function mountSidebarIn(
   // run again over the rail.
   const reveal = createRowReveal(() => {
     applySearch(body, search.query());
+    chatSearch.changed(search.query(), chatShown);
+    chatSearch.apply(body);
     placeOpenRowDetails(body);
   });
   const body = document.createElement("div");
@@ -253,8 +256,19 @@ function mountSidebarIn(
   // THE SEARCH NARROWS THE DRAWN ROWS (search.ts): on every keystroke, and
   // again after every push and every row drawn as it came into view, since
   // either draws rows the query has not narrowed.
+  // WHETHER CHAT IS SHOWN is the last drawn roster's, and decides whether
+  // the search also asks the chats (chat-search.ts).
+  let chatShown = false;
+  const chatSearch = createChatSearch({
+    ctx,
+    timers: deps.timers ?? WINDOW_TIMERS,
+    root: () => body,
+    applied: () => bandFit.refit(),
+  });
   const search = createRailSearch((query) => {
     const outcome = applySearch(body, query);
+    chatSearch.changed(query, chatShown);
+    chatSearch.apply(body);
     log.debug("narrowed the rail to the search", {
       operation: "sidebar.search",
       context: { query, ...outcome },
@@ -376,9 +390,14 @@ function mountSidebarIn(
     // (threads.ts): a thread on screen shows Chat.
     const switcher = requireMessage(roster.appSwitcher, "WorkspaceRoster.app_switcher");
     head.switcher.update(switcher);
-    const drawn = showsChat(switcher)
-      ? drawThreadSection(requireMessage(roster.threads, "WorkspaceRoster.threads"), ctx)
-      : drawWorkspaceRoster(roster, rail);
+    let drawn: HTMLElement;
+    chatShown = showsChat(switcher);
+    if (chatShown) {
+      drawn = drawThreadList(requireMessage(roster.threads, "WorkspaceRoster.threads"), rail);
+    } else {
+      disposeThreadList(rail);
+      drawn = drawWorkspaceRoster(roster, rail);
+    }
     attention.endPass();
     head.showVersion(roster.version);
     mark("build");
@@ -442,6 +461,8 @@ function mountSidebarIn(
       transients.dispose();
       rail.rowHover.dispose();
       disposeWorkspaceRoster(rail);
+      disposeThreadList(rail);
+      chatSearch.dispose();
       reveal.dispose();
       attention.dispose();
       host.replaceChildren();

@@ -254,7 +254,7 @@ export function drawRosterRow(
   });
   line.addEventListener("contextmenu", (event) => {
     event.preventDefault();
-    toggleRowMenu(ws, { sc, workspace, name });
+    toggleRowMenu(ws, { sc, workspace, name, kind: "workspace" });
   });
 
   // THE BANDS DRAW NO STATUS MARK (owner requests, 2026-10-02 and
@@ -331,7 +331,7 @@ export function drawRosterRow(
   if (merged && when.shown.case === "merged") {
     tickMergedToday(line, sc, drawRosterRowWhenMerged(when.shown.value, `${path}.when.merged`));
   }
-  const target: VerbTarget = { sc, workspace, name };
+  const target: VerbTarget = { sc, workspace, name, kind: "workspace" };
   line.appendChild(drawMenuControl(ws, target));
   ws.appendChild(line);
   // THE MENU IS ALWAYS DRAWN, hidden until it is asked for. Building it lazily
@@ -939,12 +939,12 @@ export function placeOpenRowDetails(root: ParentNode): void {
   for (const ws of queryAll<HTMLElement>(root, ".ws.open")) placeRowDetail(ws);
 }
 
-/** The "…" control that opens the verb menu, and the right-click's twin. */
-function drawMenuControl(ws: HTMLElement, target: VerbTarget): HTMLElement {
+/** The "…" control that opens a row's verb menu, and the right-click's twin. */
+export function drawMenuControl(ws: HTMLElement, target: VerbTarget): HTMLElement {
   const more = createControl();
   more.className = "sb-more";
   more.textContent = "⋯";
-  more.title = "workspace actions";
+  more.title = `${target.kind} actions`;
   more.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
