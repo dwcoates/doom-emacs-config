@@ -527,12 +527,8 @@ var otherRepo = wsm.Repository{ID: "repo-2", Dir: "/repos/two", Name: "beta", De
 
 // hasRecord reports whether any captured record was at LEVEL under operation.
 func hasRecord(records []dlog.Record, level, operation string) bool {
-	for _, rec := range records {
-		if rec.Level == level && rec.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(records, dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 // ptr answers a pointer to V.

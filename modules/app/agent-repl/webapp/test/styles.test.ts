@@ -6577,7 +6577,7 @@ describe("the sidebar's merge queue view", () => {
     ];
 
     // Act
-    const alone = rulesOf(stylesheet).filter((r) => r.selectors.length === 1 && own.includes(r.selectors[0] ?? ""));
+    const alone = rulesOf(stylesheet).filter((r) => own.some((selector) => isOwnRule(r, selector)));
 
     // Assert
     expect(alone).toEqual([]);

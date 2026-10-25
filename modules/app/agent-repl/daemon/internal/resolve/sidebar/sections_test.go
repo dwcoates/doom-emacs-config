@@ -1107,7 +1107,7 @@ func TestOpenSectionMarksAPausedMergeQueue(t *testing.T) {
 		repo  wsm.RepoKey
 		queue sidebar.MergeQueue
 	}
-	running := sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: []ids.WorkspaceID{"w1"}}
+	running := sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")}
 	tests := []struct {
 		name       string
 		steps      []queueStep
