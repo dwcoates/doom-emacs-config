@@ -30,6 +30,7 @@ func TestNewRefusesAnIncompleteDependencySet(t *testing.T) {
 		{name: "no rollout trigger", drop: func(d *Deps) { d.Rollout = nil }, want: "Rollout"},
 		{name: "no state root", drop: func(d *Deps) { d.StateDir = "" }, want: "StateDir"},
 		{name: "no hook runner", drop: func(d *Deps) { d.HookRunner = nil }, want: "HookRunner"},
+		{name: "no address of its own", drop: func(d *Deps) { d.SelfAddress = "" }, want: "SelfAddress"},
 		{name: "no test command", drop: func(d *Deps) { d.TestCommand = nil }, want: "TestCommand"},
 	}
 	for _, tc := range tests {

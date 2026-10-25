@@ -1219,6 +1219,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		TestMetricsRoot: p.Metrics.Root(),
 		TestRunner:      scripts,
 		HookRunner:      scripts,
+		SelfAddress:     p.Claim.Address(),
 		Governor:        gateGovernor,
 		Painter:         painter,
 		StartSession:    fleet.Start,

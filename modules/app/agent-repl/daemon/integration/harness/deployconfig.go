@@ -1,11 +1,13 @@
 package harness
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"testing"
 
 	"agent-repld/internal/deployconfig"
-	"agent-repld/internal/shellword"
 )
 
 // EVERY FIXTURE REPOSITORY STATES ITS DEPLOY. A repository with no
@@ -55,25 +57,51 @@ func (r *Repo) RemoveDeployConfig() {
 }
 
 // DeploysAsAgentRepl makes the repository deploy as agent-repl's own does
-// (AgentReplDeploy), with a deploy hook that calls back into the daemon under
-// test exactly as agent-repl's bin/deploy-landing.sh calls the deployed
-// build's front door: the hook inherits the daemon's AGENT_REPL_STATE_DIR, so
-// the CLI dials that daemon.
+// (AgentReplDeploy), with agent-repl's REAL deploy hook, bin/deploy-landing.sh,
+// copied in verbatim: the front door it execs is linked to the daemon binary
+// under test, and the hook inherits the daemon's AGENT_REPL_STATE_DIR and the
+// deploy's environment, so it calls back the daemon exactly as in production.
 func (r *Repo) DeploysAsAgentRepl() {
 	r.t.Helper()
 	r.WriteDeployConfig(AgentReplDeploy)
-	writeExecutable(r.t, filepath.Join(r.Dir, DeployLandingScript), deployLandingScript(DaemonBinary(r.t)))
+	source := filepath.Join(RepoRoot(r.t), DeployLandingScript)
+	script, err := os.ReadFile(source)
+	if err != nil {
+		r.t.Fatalf("harness: read %s: %v", source, err)
+	}
+	writeExecutable(r.t, filepath.Join(r.Dir, DeployLandingScript), string(script))
+	if err := linkFrontDoor(filepath.Join(r.Dir, frontDoorOf(r.t, string(script))), DaemonBinary(r.t)); err != nil {
+		r.t.Fatalf("harness: %v", err)
+	}
 }
 
-// deployLandingScript is the fixture's deploy hook body, calling the daemon
-// binary at BINARY.
-func deployLandingScript(binary string) string {
-	cli := shellword.Quote(binary)
-	return `#!/bin/sh
-set -eu
-if [ -n "${AGENT_REPL_DEPLOY_LEDGER:-}" ]; then
-  exec ` + cli + ` runtime roll-out-landing -deploy "$AGENT_REPL_DEPLOY_LEDGER"
-fi
-exec ` + cli + ` runtime roll-out-landing
-`
+// linkFrontDoor links DOOR to BINARY. A test restating its repository's deploy
+// (a fresh daemon on the same repository) calls DeploysAsAgentRepl again, so
+// a door already linked to BINARY is left as it is; a door that is anything
+// else is no door this harness made, and is refused.
+func linkFrontDoor(door, binary string) error {
+	if err := os.MkdirAll(filepath.Dir(door), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(door), err)
+	}
+	if target, err := os.Readlink(door); err == nil && target == binary {
+		return nil
+	}
+	if err := os.Symlink(binary, door); err != nil {
+		return fmt.Errorf("link the front door %s: %w", door, err)
+	}
+	return nil
+}
+
+// frontDoorOf answers the path, relative to the repository root, SCRIPT's
+// `FRONT_DOOR=` line names: read off the script, so the harness never restates
+// it.
+func frontDoorOf(t testing.TB, script string) string {
+	t.Helper()
+	for _, line := range strings.Split(script, "\n") {
+		if value, ok := strings.CutPrefix(line, "FRONT_DOOR="); ok {
+			return strings.Trim(value, `"`)
+		}
+	}
+	t.Fatalf("harness: %s names no FRONT_DOOR", DeployLandingScript)
+	return ""
 }

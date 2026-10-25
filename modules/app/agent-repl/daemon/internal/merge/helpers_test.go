@@ -2455,6 +2455,9 @@ type hookRun struct {
 	env  []string
 }
 
+// harnessSelfAddress is the address the harness's daemon serves on.
+const harnessSelfAddress = "127.0.0.1:4242"
+
 // fakeHookRunner is the scripted runner of a deploy's script hooks. A script
 // answers the exit and the timeout scripted for its path (0 and no timeout
 // otherwise), and writes the lines scripted for it. A script whose path ends
@@ -2678,6 +2681,7 @@ func (h *harness) deps() Deps {
 		Sidebar: h.sidebar, Asks: h.asks, Banners: h.banners, PromptsDir: "prompts",
 		DeployConfig: harnessConfig{h: h},
 		HookRunner:   h.hooks,
+		SelfAddress:  harnessSelfAddress,
 		Briefs:       h.loadBrief,
 		StateDir:     h.stateDir,
 		TestCommand: func(tree, _ string) []string {

@@ -562,6 +562,10 @@ type Deps struct {
 	// DeployConfig reads a repository's `.agent-repl/deploy.yaml`, at every
 	// deploy. nil means the real filesystem (deployconfig.OnDisk).
 	DeployConfig deployconfig.Files
+	// SelfAddress is the address this daemon serves on: a deploy's script
+	// hooks are told it (EnvDeployDaemon) so they call back the daemon that
+	// runs their deploy.
+	SelfAddress string
 	// HookRunner runs a deploy's script hooks. Injected so a hook is
 	// exercised against a scripted runner: nothing in a test spawns the
 	// repository's real scripts.
