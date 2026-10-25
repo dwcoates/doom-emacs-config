@@ -239,6 +239,15 @@
 - Effort stays at `medium` for every tier.
   - Effort above `medium` is reserved for dispatches the user explicitly asks to run deeper.
 
+## One-shot workspaces
+
+### A workspace told to one-shot itself marks itself one-shot
+
+- When I tell a workspace to one-shot itself, to make itself a one-shot, or to land its work when done, it runs `agent-repld workspace set here -one-shot` at once, without asking.
+  - The answer carries the daemon's completion directive, which the workspace follows when its work is done.
+  - The verb and its flags are `/agent-repl-workspaces`'.
+- The daemon clears the mark itself when I take the workspace back, so no workspace unmarks itself.
+
 ## Tool rejections
 
 ### A rejected tool call stops that call, never the work it served
