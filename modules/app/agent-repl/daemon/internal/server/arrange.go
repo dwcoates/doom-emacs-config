@@ -216,6 +216,11 @@ func (s *server) GetSidebarArrangement(
 			Name:       repo.Repository.Name,
 		}
 		for _, entry := range repo.Entries {
+			if entry.OneShot != nil {
+				out.Entries = append(out.Entries, &agentreplv1.ArrangedEntry{Entry: &agentreplv1.ArrangedEntry_OneShot{
+					OneShot: &agentreplv1.ArrangedOneShot{Workspaces: arrangedWorkspaces(entry.OneShot)}}})
+				continue
+			}
 			if entry.Subsection == nil {
 				out.Entries = append(out.Entries, &agentreplv1.ArrangedEntry{Entry: &agentreplv1.ArrangedEntry_Workspace{
 					Workspace: arrangedWorkspaces([]sidebar.ArrangedWorkspace{entry.Workspace})[0]}})

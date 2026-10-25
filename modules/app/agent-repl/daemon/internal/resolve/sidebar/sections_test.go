@@ -1259,3 +1259,31 @@ func TestTwoQueuesOfOneRepositoryAreRecordedAndBothDrawn(t *testing.T) {
 		t.Fatal("two queues of one repository were not recorded at error")
 	}
 }
+
+func TestTheOneShotSubsectionIsKeylessCountedAndNeverCollapses(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	reg := registry(marked(placed(workspace("w1", "one"), 1)), marked(placed(workspace("w2", "two"), 2)))
+
+	// Act
+	r.SetRegistry(reg)
+
+	// Assert
+	subs := rosterwalk.Subsections(latest(t, r).GetRepository().GetSections()[0])
+	if len(subs) != 1 {
+		t.Fatalf("subsections = %d, want the one-shot subsection alone", len(subs))
+	}
+	sub := subs[0]
+	if sub.GetOneShot() == nil || sub.GetNamed() != nil {
+		t.Errorf("kind = %v, want the one-shot arm, with no key", sub.GetKind())
+	}
+	if got := sub.GetHeader().GetLabel().GetText(); got != sidebar.OneShotSubsectionTitle {
+		t.Errorf("label = %q, want %q", got, sidebar.OneShotSubsectionTitle)
+	}
+	if got := sub.GetHeader().GetCount().GetWorkspaces(); got != 2 {
+		t.Errorf("count = %d, want 2", got)
+	}
+	if sub.GetExpanded().GetNeverCollapses() == nil {
+		t.Errorf("fold = %v, want expanded and never collapsing", sub.GetFold())
+	}
+}

@@ -312,8 +312,73 @@ func TestASubsectionMovedBeforeAWorkspaceTakesItsTabsThere(t *testing.T) {
 	// bar walks its workspace there.
 	awaitRoster(t, d, roster, "the subsection between the first two rows", func(r *frontendv1.WorkspaceRoster) bool {
 		entries := r.GetRepository().GetSections()[0].GetEntries()
-		return len(entries) == 4 && entries[1].GetSubsection().GetKey().GetSubsectionId() == created.GetId() &&
+		return len(entries) == 4 && entries[1].GetSubsection().GetNamed().GetKey().GetSubsectionId() == created.GetId() &&
 			sameOrder(tabBarIDs(r), []string{order[0], order[3], order[1], order[2]})
+	})
+}
+
+// oneShotRows is the names of the rows R's first repository draws in its
+// one-shot subsection, nil when it draws none.
+func oneShotRows(r *frontendv1.WorkspaceRoster) []string {
+	sections := r.GetRepository().GetSections()
+	if len(sections) == 0 {
+		return nil
+	}
+	for _, sub := range rosterwalk.Subsections(sections[0]) {
+		if sub.GetOneShot() == nil {
+			continue
+		}
+		var names []string
+		for _, open := range sub.GetOpenRows().GetRows() {
+			names = append(names, open.GetRow().GetWorkspace().GetWorkspace().GetId())
+		}
+		return names
+	}
+	return nil
+}
+
+func TestAOneShotIsDrawnInTheOneShotSubsectionUntilItIsPlaced(t *testing.T) {
+	t.Parallel()
+	// Arrange: a one-shot beside a registered workspace.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	roster := d.WatchRoster()
+	harness.Register(t, d, worktreeOf(t, repo, "a"))
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository:    createRepositoryRef(t, d, repo),
+		Requester:     harness.User(),
+		ContextOrigin: harness.Fresh(),
+		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+			Topology: harness.Primary(),
+			Prompt:   said("ship the fix"),
+		}},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(one_shot) = (%v, %v), want a success", resp, err)
+	}
+	oneShot := resp.Msg.GetSuccess().GetWorkspace()
+	awaitRoster(t, d, roster, "the one-shot in the one-shot subsection, last", func(r *frontendv1.WorkspaceRoster) bool {
+		entries := r.GetRepository().GetSections()
+		if len(entries) == 0 {
+			return false
+		}
+		all := entries[0].GetEntries()
+		return sameOrder(oneShotRows(r), []string{oneShot.GetId()}) && all[len(all)-1].GetSubsection().GetOneShot() != nil
+	})
+
+	// Act: the one-shot dragged out, to the bottom of the unsectioned rows.
+	arrange(t, d, &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{
+		PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
+			Workspace: oneShot,
+			Into:      &agentreplv1.ArrangePlaceWorkspace_NoSubsection{NoSubsection: &agentreplv1.ArrangeNoSubsection{}},
+			At:        &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
+		}}})
+
+	// Assert: the placement cleared the mark, so the subsection is gone and
+	// the row is the last unsectioned one.
+	awaitRoster(t, d, roster, "no one-shot subsection", func(r *frontendv1.WorkspaceRoster) bool {
+		rows := rosterwalk.UnsectionedRows(r.GetRepository().GetSections()[0])
+		return oneShotRows(r) == nil && len(rows) > 0 && rows[len(rows)-1].GetRow().GetWorkspace().GetWorkspace().GetId() == oneShot.GetId()
 	})
 }
 

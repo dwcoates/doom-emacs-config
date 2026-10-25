@@ -86,7 +86,7 @@ func TestASubsectionCarriesItsKeyAndCount(t *testing.T) {
 
 	// Assert
 	later := rosterwalk.Subsections(latest(t, r).GetRepository().GetSections()[0])[1]
-	if got := later.GetKey().GetSubsectionId(); got != "sub-later" {
+	if got := later.GetNamed().GetKey().GetSubsectionId(); got != "sub-later" {
 		t.Fatalf("key = %q, want sub-later", got)
 	}
 	if got := later.GetHeader().GetCount().GetWorkspaces(); got != 1 {
@@ -320,6 +320,14 @@ func arrangedShape(repo sidebar.ArrangedRepository) []string {
 	}
 	var out []string
 	for _, entry := range repo.Entries {
+		if entry.OneShot != nil {
+			parts := []string{"one-shot:"}
+			for _, ws := range entry.OneShot {
+				parts = append(parts, family(ws))
+			}
+			out = append(out, "<"+strings.Join(parts, " ")+">")
+			continue
+		}
 		if entry.Subsection == nil {
 			out = append(out, family(entry.Workspace))
 			continue
@@ -467,5 +475,157 @@ func TestAClosedRowsHoistedChildrenStandWhereItStood(t *testing.T) {
 	section := latest(t, r).GetRepository().GetSections()[0]
 	if got, want := entryShape(section), []string{"child", "[foo: d]", "b"}; !equal(got, want) {
 		t.Fatalf("entries = %v, want %v", got, want)
+	}
+}
+
+// marked is WS marked a one-shot.
+func marked(ws wsm.Workspace) wsm.Workspace {
+	ws.OneShot = true
+	return ws
+}
+
+// closedWorkspace is WS closed.
+func closedWorkspace(ws wsm.Workspace) wsm.Workspace {
+	ws.Closed = true
+	return ws
+}
+
+// childOf records PARENT as WS's parent.
+func childOf(ws, parent wsm.Workspace) wsm.Workspace {
+	ws.Parent = &parent.ID
+	return ws
+}
+
+func TestTheOneShotSubsection(t *testing.T) {
+	later := subsection("sub-later", "later", 1)
+	cases := []struct {
+		name       string
+		workspaces []wsm.Workspace
+		want       []string
+	}{
+		{
+			name:       "no marked workspace draws no one-shot subsection",
+			workspaces: []wsm.Workspace{placed(workspace("w1", "one"), 1), in(placed(workspace("w2", "two"), 2), later)},
+			want:       []string{"one", "[later: two]"},
+		},
+		{
+			name:       "a boot reading a marked workspace draws it in the one-shot subsection, after every named subsection",
+			workspaces: []wsm.Workspace{marked(placed(workspace("w1", "one"), 1)), in(placed(workspace("w2", "two"), 2), later)},
+			want:       []string{"[later: two]", "<one-shot: one>"},
+		},
+		{
+			name:       "a marked workspace leaves its named subsection while marked",
+			workspaces: []wsm.Workspace{placed(workspace("w1", "one"), 1), marked(in(placed(workspace("w2", "two"), 2), later))},
+			want:       []string{"one", "[later:]", "<one-shot: two>"},
+		},
+		{
+			name: "the one-shot subsection's rows keep their roster order",
+			workspaces: []wsm.Workspace{
+				marked(placed(workspace("w3", "three"), 3)), marked(placed(workspace("w1", "one"), 1)), placed(workspace("w2", "two"), 2),
+			},
+			want: []string{"two", "[later:]", "<one-shot: one three>"},
+		},
+		{
+			name: "a marked child brings its whole family, nested under its parent",
+			workspaces: []wsm.Workspace{
+				placed(workspace("w-p", "parent"), 1), childOf(marked(placed(workspace("w-k", "child"), 2)), workspace("w-p", "parent")), placed(workspace("w-b", "bystander"), 3),
+			},
+			want: []string{"bystander", "[later:]", "<one-shot: parent>"},
+		},
+		{
+			name: "a closed member's mark draws its family nowhere",
+			workspaces: []wsm.Workspace{
+				placed(workspace("w-p", "parent"), 1), closedWorkspace(childOf(marked(placed(workspace("w-k", "done"), 2)), workspace("w-p", "parent"))),
+			},
+			want: []string{"parent", "[later:]"},
+		},
+		{
+			name:       "a hidden member's mark draws its family nowhere",
+			workspaces: []wsm.Workspace{placed(workspace("w1", "one"), 1), marked(placed(hiddenWorkspace("w-h", "hidden"), 2))},
+			want:       []string{"one", "[later:]"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			reg := registry(tc.workspaces...)
+			reg.Subsections = []wsm.Subsection{later}
+
+			// Act
+			r.SetRegistry(reg)
+
+			// Assert
+			if got := entryShape(latest(t, r).GetRepository().GetSections()[0]); !equal(got, tc.want) {
+				t.Fatalf("entries = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSettingAndClearingTheMarkMovesTheRow(t *testing.T) {
+	// Arrange -- the mark is the only fact: each registry read redraws.
+	later := subsection("sub-later", "later", 1)
+	unmarked := in(placed(workspace("w1", "one"), 1), later)
+	at := func(ws wsm.Workspace) sidebar.Registry {
+		reg := registry(ws, placed(workspace("w2", "two"), 2))
+		reg.Subsections = []wsm.Subsection{later}
+		return reg
+	}
+	r, _ := newResolver(t)
+	r.SetRegistry(at(unmarked))
+
+	steps := []struct {
+		name string
+		reg  sidebar.Registry
+		want []string
+	}{
+		{name: "setting the mark creates the one-shot subsection holding the row", reg: at(marked(unmarked)), want: []string{"two", "[later:]", "<one-shot: one>"}},
+		{name: "clearing the mark returns the row to its subsection and removes the one-shot subsection", reg: at(unmarked), want: []string{"two", "[later: one]"}},
+	}
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			// Act
+			r.SetRegistry(step.reg)
+
+			// Assert
+			if got := entryShape(latest(t, r).GetRepository().GetSections()[0]); !equal(got, step.want) {
+				t.Fatalf("entries = %v, want %v", got, step.want)
+			}
+		})
+	}
+}
+
+func TestTheTabBarWalksTheOneShotSubsectionLast(t *testing.T) {
+	// Arrange
+	later := subsection("sub-later", "later", 1)
+	reg := registry(marked(placed(workspace("w1", "one"), 1)), in(placed(workspace("w2", "two"), 2), later), placed(workspace("w3", "three"), 3))
+	reg.Subsections = []wsm.Subsection{later}
+
+	// Act
+	got := sidebar.Tabs(reg, dlog.NewTestLogger())
+
+	// Assert
+	var order []string
+	for _, tab := range got {
+		order = append(order, string(tab.Workspace.ID))
+	}
+	if !equal(order, []string{"w3", "w2", "w1"}) {
+		t.Fatalf("tabs = %v, want [w3 w2 w1]", order)
+	}
+}
+
+func TestArrangedListsTheOneShotSubsectionLast(t *testing.T) {
+	// Arrange
+	later := subsection("sub-later", "later", 1)
+	reg := registry(marked(placed(workspace("w1", "one"), 1)), in(placed(workspace("w2", "two"), 2), later))
+	reg.Subsections = []wsm.Subsection{later}
+
+	// Act
+	got := sidebar.Arranged(reg, dlog.NewTestLogger())
+
+	// Assert
+	if shape, want := arrangedShape(got[0]), []string{"[sub-later: w2]", "<one-shot: w1>"}; !equal(shape, want) {
+		t.Fatalf("entries = %v, want %v", shape, want)
 	}
 }
