@@ -1018,6 +1018,28 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .repo-head .sb-open-count,
 #ws-sidebar .repo.hidden-section > .repo-head .sb-count { color: var(--muted); }
 #ws-sidebar .repo.folded > .repo-head .sb-today-count { display: none; }
+/* THE MERGE-QUEUE TOGGLE on the OPEN header line (owner request, 2026-10-24;
+   src/sidebar/merge-queue-view.ts): the feed's merge glyph at the line's
+   right end, in the expanded repository names' colour while the repository
+   sections show their workspaces, and in the canonical purple of a merge in
+   progress (--blocked, .tone-purple's) while they show their merge queues.
+   It takes the click in the area around the glyph, as a triangle does, and
+   keeps the header's weight and case out of the glyph. */
+#ws-sidebar .repo-head > .sb-merge-queue-toggle {
+  margin-left: auto;
+  padding: 0.3rem 0.35rem;
+  margin-top: -0.3rem;
+  margin-bottom: -0.3rem;
+  margin-right: -0.35rem;
+  font-size: 1.05rem;
+  line-height: 1;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  color: var(--repo-head-expanded);
+}
+#ws-sidebar .repo-head > .sb-merge-queue-toggle[data-shows="merge-queues"] { color: var(--blocked); }
 /* A folded open workspaces section folds away every grouping section it
    holds, headers included; only its own header stays. */
 #ws-sidebar .repo.open-section.folded > .sb-sections { display: none; }

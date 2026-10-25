@@ -73,3 +73,62 @@ func TestTheSidebarViewSurvivesADaemonRestart(t *testing.T) {
 		t.Fatalf("band fold after restart = %v, want collapsed", got.GetRecentlyMerged().GetFold())
 	}
 }
+
+func showOpenMergeQueues() *agentreplv1.UpdateSidebarViewRequest {
+	return &agentreplv1.UpdateSidebarViewRequest{
+		Change: &agentreplv1.UpdateSidebarViewRequest_ShowOpen{ShowOpen: &agentreplv1.SidebarViewShowOpen{
+			Shows: &agentreplv1.SidebarViewShowOpen_MergeQueues{MergeQueues: &agentreplv1.SidebarViewShowMergeQueues{}}}},
+	}
+}
+
+// showsMergeQueues reports whether the open section, and every repository
+// section under it, shows the merge queues.
+func showsMergeQueues(r *frontendv1.WorkspaceRoster) bool {
+	if r.GetOpen().GetMergeQueues() == nil {
+		return false
+	}
+	for _, section := range r.GetRepository().GetSections() {
+		if section.GetMergeQueue() == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func TestTheOpenSectionShowsItsWorkspacesUntilAskedForTheMergeQueues(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	first := harness.AwaitNext(t, f.d.Ctx(), roster, "the opening roster")
+	if first.GetOpen().GetWorkspaces() == nil {
+		t.Fatalf("the open section before anyone toggled it shows %v, want the workspaces", first.GetOpen().GetShows())
+	}
+
+	// Act
+	resp := updateSidebarView(t, f, showOpenMergeQueues())
+
+	// Assert
+	if resp.GetSuccess() == nil {
+		t.Fatalf("UpdateSidebarView = %v, want success", resp.GetResult())
+	}
+	awaitRoster(t, f.d, roster, "every section showing its merge queue", showsMergeQueues)
+}
+
+func TestWhatTheOpenSectionShowsSurvivesADaemonRestart(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newRegistered(t, harness.Opts{DurableState: true})
+	roster := f.d.WatchRoster()
+	updateSidebarView(t, f, showOpenMergeQueues())
+	awaitRoster(t, f.d, roster, "the merge queues, before the restart", showsMergeQueues)
+
+	// Act
+	nd := promptRestartDaemon(t, f)
+
+	// Assert
+	got := harness.AwaitNext(t, nd.Ctx(), nd.WatchRoster(), "the roster after the restart")
+	if !showsMergeQueues(got) {
+		t.Fatalf("open section after restart shows %v, want the merge queues", got.GetOpen().GetShows())
+	}
+}

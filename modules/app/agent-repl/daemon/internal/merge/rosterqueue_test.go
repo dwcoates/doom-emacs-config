@@ -337,3 +337,171 @@ func TestAFailedPauseWriteTellsTheRosterNothing(t *testing.T) {
 		t.Fatalf("the roster was told %d queues after a failed pause write, want none", told)
 	}
 }
+
+func TestTheRosterQueueStatesTheLineFrontFirst(t *testing.T) {
+	// Arrange: the running merge, a waiting one, and one only requested.
+	h := newHarness(t)
+	h.register("ws-run", "run")
+	h.register("ws-wait", "wait")
+	h.register("ws-asked", "asked")
+	h.db.mu.Lock()
+	h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{
+		{Repo: h.repoKey(), Workspace: "ws-run", State: wsm.MergeAdmitted, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
+		{Repo: h.repoKey(), Workspace: "ws-asked", State: wsm.MergeRequested, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
+		{Repo: h.repoKey(), Workspace: "ws-wait", State: wsm.MergeQueued, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}},
+	}
+	h.db.mu.Unlock()
+
+	// Act
+	h.o.publishRosterQueue(context.Background(), h.repoKey())
+
+	// Assert
+	got := h.sidebar.queueOf(h.repoKey())
+	if want := []ids.WorkspaceID{"ws-run", "ws-wait"}; !slices.Equal(got.Line, want) {
+		t.Fatalf("roster line = %v, want %v", got.Line, want)
+	}
+	if want := []ids.WorkspaceID{"ws-run", "ws-asked", "ws-wait"}; !slices.Equal(got.Workspaces, want) {
+		t.Fatalf("roster workspaces = %v, want every row %v", got.Workspaces, want)
+	}
+}
+
+func TestEveryWriteThatChangesTheLineRepublishesTheRosterQueue(t *testing.T) {
+	own := wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
+	tests := []struct {
+		name  string
+		queue []wsm.MergeQueueEntry
+		lease bool
+		write func(h *harness, db wsm.DB) error
+		want  []ids.WorkspaceID
+	}{
+		{
+			name:  "a requested merge put in line",
+			queue: []wsm.MergeQueueEntry{{Workspace: "ws-a", State: wsm.MergeQueued, Source: own}, {Workspace: "ws-b", State: wsm.MergeRequested, Source: own}},
+			write: func(h *harness, db wsm.DB) error {
+				_, err := db.QueueMerge(context.Background(), h.repoKey(), "ws-b", "lease-b")
+				return err
+			},
+			want: []ids.WorkspaceID{"ws-a", "ws-b"},
+		},
+		{
+			name:  "a waiting merge moved up",
+			queue: []wsm.MergeQueueEntry{{Workspace: "ws-a", State: wsm.MergeQueued, Source: own}, {Workspace: "ws-b", State: wsm.MergeQueued, Source: own}},
+			write: func(h *harness, db wsm.DB) error {
+				_, err := db.MoveMerge(context.Background(), h.repoKey(), "ws-b", wsm.MergeMoveUp)
+				return err
+			},
+			want: []ids.WorkspaceID{"ws-b", "ws-a"},
+		},
+		{
+			name:  "a waiting merge put at the front",
+			queue: []wsm.MergeQueueEntry{{Workspace: "ws-a", State: wsm.MergeQueued, Source: own}, {Workspace: "ws-b", State: wsm.MergeQueued, Source: own}},
+			write: func(h *harness, db wsm.DB) error {
+				_, err := db.PrioritizeMerge(context.Background(), h.repoKey(), "ws-b")
+				return err
+			},
+			want: []ids.WorkspaceID{"ws-b", "ws-a"},
+		},
+		{
+			name:  "the head yielded to the race's winner",
+			queue: []wsm.MergeQueueEntry{{Workspace: "ws-a", State: wsm.MergeAdmitted, Source: own}, {Workspace: "ws-b", State: wsm.MergeAdmitted, Source: own}},
+			write: func(h *harness, db wsm.DB) error {
+				return db.YieldMergeHead(context.Background(), h.repoKey(), "ws-a", "ws-b")
+			},
+			want: []ids.WorkspaceID{"ws-b", "ws-a"},
+		},
+		{
+			name:  "an admitted merge dropped",
+			queue: []wsm.MergeQueueEntry{{Workspace: "ws-a", State: wsm.MergeAdmitted, Source: own}, {Workspace: "ws-b", State: wsm.MergeQueued, Source: own}},
+			lease: true,
+			write: func(h *harness, db wsm.DB) error {
+				return db.DropAdmittedMerge(context.Background(), h.repoKey(), "ws-a", "lease-a", "test")
+			},
+			want: []ids.WorkspaceID{"ws-b"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.register("ws-a", "a")
+			h.register("ws-b", "b")
+			h.db.mu.Lock()
+			for i := range tc.queue {
+				tc.queue[i].Repo = h.repoKey()
+			}
+			h.db.queues[h.repoKey()] = tc.queue
+			if tc.lease {
+				h.db.leases["ws-a"] = wsm.Lease{ID: "lease-a", Holder: wsm.HolderMerge}
+			}
+			h.db.mu.Unlock()
+
+			// Act
+			if err := tc.write(h, h.o.deps.DB); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+
+			// Assert
+			if told := h.sidebar.toldCount(); told != 1 {
+				t.Fatalf("the roster was told %d queues, want exactly one", told)
+			}
+			if got := h.sidebar.queueOf(h.repoKey()).Line; !slices.Equal(got, tc.want) {
+				t.Fatalf("roster line = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAMoveThatMovedNothingTellsTheRosterNothing(t *testing.T) {
+	tests := []struct {
+		name  string
+		write func(h *harness, db wsm.DB) (bool, error)
+	}{
+		{"a move up from the front", func(h *harness, db wsm.DB) (bool, error) {
+			return db.MoveMerge(context.Background(), h.repoKey(), "ws-a", wsm.MergeMoveUp)
+		}},
+		{"a prioritize of the front", func(h *harness, db wsm.DB) (bool, error) {
+			return db.PrioritizeMerge(context.Background(), h.repoKey(), "ws-a")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.register("ws-a", "a")
+			h.db.mu.Lock()
+			h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{{Repo: h.repoKey(), Workspace: "ws-a", State: wsm.MergeQueued,
+				Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}}
+			h.db.mu.Unlock()
+
+			// Act
+			moved, err := tc.write(h, h.o.deps.DB)
+
+			// Assert
+			if err != nil || moved {
+				t.Fatalf("write = %v, %v; want nothing moved", moved, err)
+			}
+			if told := h.sidebar.toldCount(); told != 0 {
+				t.Fatalf("the roster was told %d queues, want none", told)
+			}
+		})
+	}
+}
+
+func TestAFailedLineWriteTellsTheRosterNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.moveErr = errors.New("database is read-only")
+	h.db.mu.Unlock()
+
+	// Act
+	_, err := h.o.deps.DB.MoveMerge(context.Background(), h.repoKey(), theWorkspace, wsm.MergeMoveUp)
+
+	// Assert
+	if err == nil {
+		t.Fatal("MoveMerge = nil, want the fake's refusal")
+	}
+	if told := h.sidebar.toldCount(); told != 0 {
+		t.Fatalf("the roster was told %d queues after a failed write, want none", told)
+	}
+}

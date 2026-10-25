@@ -68,6 +68,19 @@ const openFoldedDDL = `
 ALTER TABLE sidebar_view ADD COLUMN open_folded INTEGER NOT NULL DEFAULT 0;
 `
 
+// openShowsDDL is the layout-76 addition: what the open-workspaces section's
+// repository sections show (frontend.v1.RosterOpenSection.shows), on the
+// sidebar_view singleton beside the open section's fold. 0 is their open
+// workspaces, 1 their merge queues (owner request, 2026-10-24); every
+// existing view shows the workspaces until someone toggles it.
+//
+// Like the other column-add steps it is an ALTER, applied after sidebar_view
+// on a fresh file and as its own step on a migrated one. IT IS ADDITIVE: the
+// previous build names no such column.
+const openShowsDDL = `
+ALTER TABLE sidebar_view ADD COLUMN open_shows_merge_queues INTEGER NOT NULL DEFAULT 0;
+`
+
 // hiddenAndDweltAtDDL is the layout-43 addition (owner requests, 2026-10-13):
 //
 //   - workspaces.hidden_at, when the workspace was moved into the hidden
@@ -118,6 +131,10 @@ type SidebarView struct {
 	HiddenFolded bool
 	// OpenFolded is whether the open-workspaces section is collapsed.
 	OpenFolded bool
+	// OpenShowsMergeQueues is whether the open-workspaces section's
+	// repository sections show their merge queues rather than their open
+	// workspaces.
+	OpenShowsMergeQueues bool
 }
 
 // DefaultSidebarView is the view nobody has changed: the recently-merged band
@@ -146,6 +163,14 @@ func (s *store) SetOpenSectionFolded(ctx context.Context, folded bool) error {
 		`UPDATE sidebar_view SET open_folded = ? WHERE id = 1`, folded)
 }
 
+// SetOpenShowsMergeQueues records whether the open-workspaces section's
+// repository sections show their merge queues (true) or their open
+// workspaces (false), leaving the rest of the view as it stands.
+func (s *store) SetOpenShowsMergeQueues(ctx context.Context, mergeQueues bool) error {
+	return s.updateSidebarView(ctx, "daemon.wsm.set_open_shows_merge_queues", dlog.Context{"merge_queues": mergeQueues},
+		`UPDATE sidebar_view SET open_shows_merge_queues = ? WHERE id = 1`, mergeQueues)
+}
+
 // updateSidebarView writes one column of the singleton, first minting the row
 // at DefaultSidebarView when nobody has changed the view yet, in the same
 // transaction, so the columns this write leaves alone keep their defaults.
@@ -168,8 +193,8 @@ func (s *store) SidebarView(ctx context.Context) (SidebarView, error) {
 	view := DefaultSidebarView
 	err := s.read(ctx, "daemon.wsm.sidebar_view", dlog.Context{}, func(ctx context.Context) error {
 		var read SidebarView
-		err := s.q(ctx).QueryRowContext(ctx, `SELECT merged_folded, hidden_folded, open_folded FROM sidebar_view WHERE id = 1`).
-			Scan(&read.MergedFolded, &read.HiddenFolded, &read.OpenFolded)
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT merged_folded, hidden_folded, open_folded, open_shows_merge_queues FROM sidebar_view WHERE id = 1`).
+			Scan(&read.MergedFolded, &read.HiddenFolded, &read.OpenFolded, &read.OpenShowsMergeQueues)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

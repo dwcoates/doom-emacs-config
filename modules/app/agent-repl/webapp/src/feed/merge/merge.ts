@@ -39,6 +39,7 @@ import { renderMergeCommitLink } from "../../link.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { FEED_MERGE_HEAD_GLYPH } from "../../vocab.js";
+import { MERGE_GLYPH, MERGE_GLYPH_NAMES } from "../../merge-glyph.js";
 import { asHeadClock } from "../cards/tool-head.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
@@ -65,11 +66,6 @@ export const WAITING_STAGE = "waiting";
 /** The pill a live merge on a paused queue draws beside its badge. */
 export const PAUSED_WORD = "paused";
 
-/** The character each vocabulary glyph name draws as. */
-const GLYPHS: Readonly<Record<string, string>> = { merge: "⇄" };
-
-/** What the generic (unknown-name) glyph draws as. */
-const GENERIC_GLYPH = "⇄";
 
 /** The head line. */
 export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
@@ -190,14 +186,14 @@ export function drawFeedMergeGlyph(glyph: FeedMergeGlyph): HTMLElement {
   el.className = "merge-glyph";
   el.setAttribute("aria-hidden", "true");
   el.setAttribute("data-glyph", glyph.icon);
-  const known = GLYPHS[glyph.icon];
+  const known = MERGE_GLYPH_NAMES[glyph.icon];
   if (known === undefined) {
     log.warn(`merge glyph '${glyph.icon}' is not one this build draws; using the generic one`, {
       operation: "merge.unknown-glyph",
       context: { icon: glyph.icon, known: FEED_MERGE_HEAD_GLYPH },
       dedupKey: `merge.glyph:${glyph.icon}`,
     });
-    el.textContent = GENERIC_GLYPH;
+    el.textContent = MERGE_GLYPH;
     return el;
   }
   el.textContent = known;

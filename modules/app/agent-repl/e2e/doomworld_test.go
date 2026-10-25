@@ -305,10 +305,13 @@ func rosterJSON(repoDir string, rows []map[string]any, current string) json.RawM
 				"entries":    open,
 				"divergence": map[string]any{"pending": map[string]any{}},
 				"expanded":   collapse,
+				// What the sidebar draws as the body, as the daemon draws a view
+				// nobody has toggled (frontend.v1.RosterRepoSection.shows).
+				"workspaces": map[string]any{},
 			}},
 			"openCount": map[string]any{"workspaces": len(rows)},
 		},
-		"open":           map[string]any{"label": map[string]any{"text": "Open"}, "expanded": map[string]any{}},
+		"open":           map[string]any{"label": map[string]any{"text": "Open"}, "expanded": map[string]any{}, "workspaces": map[string]any{}},
 		"hidden":         map[string]any{"header": map[string]any{"label": map[string]any{"text": "Hidden"}, "count": map[string]any{"workspaces": 0}}, "hiddenRows": map[string]any{"rows": []any{}}, "expanded": map[string]any{}},
 		"recentlyMerged": map[string]any{"header": map[string]any{"label": map[string]any{"text": "recently merged"}, "count": map[string]any{"workspaces": 0}}, "groups": []any{}, "collapsed": map[string]any{}},
 		"closed":         map[string]any{"rows": []any{}},

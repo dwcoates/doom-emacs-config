@@ -427,7 +427,7 @@ func (r *resolver) SetMerge(ws ids.WorkspaceID, facts footer.MergeFacts) {
 func (r *resolver) SetMergeQueue(repo wsm.RepoKey, queue MergeQueue) {
 	r.mutate("daemon.sidebar.set_merge_queue", "the roster took a repository's merge queue",
 		dlog.Context{"repo": string(repo), "paused": queue.Paused,
-			"workspaces": ids.Strings(queue.Workspaces), "async_requesters": ids.Strings(queue.AsyncRequesters)},
+			"workspaces": ids.Strings(queue.Workspaces), "line": ids.Strings(queue.Line), "async_requesters": ids.Strings(queue.AsyncRequesters)},
 		r.log.Global(),
 		func() {
 			q := newMergeQueue(queue)

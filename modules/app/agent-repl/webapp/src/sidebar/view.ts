@@ -6,7 +6,9 @@
  * Every workspace has its own page, and each page draws the view the roster
  * push carries — a section's fold (`RosterRepoSection.fold`,
  * `RosterMergedSection.fold`, `RosterHiddenSection.fold`,
- * `RosterOpenSection.fold`) — so a change asked for in one page reaches every
+ * `RosterOpenSection.fold`), and whether the open section's repository
+ * sections show their merge queues (`RosterOpenSection.shows`,
+ * `merge-queue-view.ts`) — so a change asked for in one page reaches every
  * page on the same push.
  *
  * THE GESTURE IS INSTANT. A change the user asks for is painted on this page
@@ -27,7 +29,7 @@
 import { log } from "../log.js";
 import { childrenMatching } from "../dom.js";
 
-/** A piece of view state's value: a fold, collapsed or not. */
+/** A piece of view state's value: a fold, collapsed or not, or the merge queues, shown or not. */
 export type ViewValue = boolean;
 
 /** Paint one copy of a piece of view state. */

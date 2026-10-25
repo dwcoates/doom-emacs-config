@@ -293,6 +293,11 @@ export function repoSection(init: {
    * just before the row BEFORE names, or after every row unless said.
    */
   subsections?: Array<{ id: string; label?: string; rows?: RosterRow[]; collapsed?: boolean; holdsCurrent?: boolean; before?: string }>;
+  /**
+   * The repository's merge queue, front first, when the section shows it;
+   * unless said, the section shows its workspaces.
+   */
+  mergeQueue?: RosterRow[];
 }): RosterRepoSection {
   const rows = init.rows ?? [];
   const entries = rowEntries(rows);
@@ -318,6 +323,10 @@ export function repoSection(init: {
     fold: sectionFold(init.collapsed, init.holdsCurrent),
     divergence: init.divergence ?? { state: { case: "pending", value: {} } },
     entries,
+    shows:
+      init.mergeQueue === undefined
+        ? { case: "workspaces", value: {} }
+        : { case: "mergeQueue", value: { rows: init.mergeQueue.map((row) => ({ row })) } },
   });
 }
 
@@ -402,12 +411,15 @@ export function hiddenSection(
 
 /**
  * The open-workspaces section. Its daemon-held fold is EXPANDED unless said,
- * as the daemon draws a section nobody has folded.
+ * as the daemon draws a section nobody has folded, and its repository
+ * sections show their WORKSPACES unless said, as the daemon draws a view
+ * nobody has toggled.
  */
-export function openSection(collapsed: boolean = false): RosterOpenSection {
+export function openSection(collapsed: boolean = false, mergeQueues: boolean = false): RosterOpenSection {
   return create(RosterOpenSectionSchema, {
     label: { text: "Open" },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+    shows: mergeQueues ? { case: "mergeQueues", value: {} } : { case: "workspaces", value: {} },
   });
 }
 

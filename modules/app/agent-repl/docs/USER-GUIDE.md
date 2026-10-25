@@ -611,6 +611,13 @@ The top bar's effort selector sits between the model selector and the permission
     - Unfolding it always works.
 - **"OPEN" shows how many workspaces it lists, folded or not.**
   - The number counts every row, children of other workspaces included, and the rows of a folded repository too.
+- **The ⇄ at the right of the "OPEN" heading shows each repository's merge queue.**
+  - Click it, and every repository under "OPEN" lists its merge queue in place of its workspaces.
+    - The running merge comes first, then each waiting merge in the order it will run.
+    - Each merge reads as a workspace row, so clicking it selects that workspace.
+    - A repository's count then counts its queue.
+  - The ⇄ turns purple while the queues show; click it again for the workspaces.
+  - Every workspace's page shows the same view, and it holds after a restart.
 - **The time at the right of an open workspace's row is its running turn's duration.**
   - It reads the same number as the footer's turn clock.
   - A workspace with no turn running reads `0s`.

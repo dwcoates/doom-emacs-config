@@ -81,6 +81,7 @@ import { liveElapsedClock } from "../elapsed-clock.js";
 import { frameUndecodable } from "../failure/sink.js";
 import { stopTicking } from "../feed/ticking.js";
 import { log } from "../log.js";
+import { MERGE_GLYPH } from "../merge-glyph.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -944,7 +945,7 @@ export function drawFooterMergeRow(
   path: string,
 ): HTMLElement {
   const row = jumpRow("merges", u.work, u.jump, deps, path);
-  row.appendChild(glyph("merges", "⇄"));
+  row.appendChild(glyph("merges", MERGE_GLYPH));
   row.appendChild(drawFooterMergeRowLabel(requireMessage(u.label, `${path}.label`)));
   if (u.step !== undefined) row.appendChild(drawFooterMergeRowStep(u.step));
   if (u.waitingOnUser !== undefined) row.appendChild(drawFooterMergeRowWaitingOnUser());

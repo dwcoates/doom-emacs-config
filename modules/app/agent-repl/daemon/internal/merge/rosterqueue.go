@@ -13,7 +13,9 @@ import (
 
 // This file tells the roster each repository's merge queue as the sidebar
 // draws it (sidebar.MergeQueue): whether the queue is paused, the workspaces
-// with a row on it, and the requesters whose own branches merge ASYNC on it.
+// with a row on it, the merges in line front first (which a repository
+// section showing its merge queue lists), and the requesters whose own
+// branches merge ASYNC on it.
 // An async requester's row carries the `async_merging` marker beside its own
 // status while its footer stays as it is (owner request, 2026-10-13), and a
 // row whose merge is on a paused queue carries the `merge_paused` marker
@@ -28,16 +30,19 @@ import (
 // roster's whole, so no merge or pause can linger in it after the queue
 // stopped saying so.
 //
-// EVERY CHANGE OF A QUEUE'S ROWS OR OF ITS PAUSE REPUBLISHES IT, because the
-// orchestrator's DB is wrapped (rosterQueueDB) so that each of the five writes
-// that add or remove a row or change the pause republishes its repository's
-// queue once it has committed. No call site can forget to: there is no
+// EVERY CHANGE OF A QUEUE'S ROWS, OF ITS LINE OR OF ITS PAUSE REPUBLISHES IT,
+// because the orchestrator's DB is wrapped (rosterQueueDB) so that each write
+// that adds or removes a row, puts a requested merge in line, reorders the
+// line or changes the pause republishes its repository's queue once it has
+// committed. No call site can forget to: there is no
 // unwrapped path to those writes. The boot's and an adoption's republishQueue
 // publish it too, for the queues this daemon did not write.
 
 // rosterQueueDB is the orchestrator's DB, with every write that adds a row to
-// or removes one from a merge queue, or pauses or resumes one, followed by
-// that repository's roster queue.
+// or removes one from a merge queue, changes its line, or pauses or resumes
+// one, followed by that repository's roster queue. AdmitMerge is not
+// wrapped: starting the head merge changes neither the rows nor the line,
+// and the row's own merge facts carry it to the roster.
 type rosterQueueDB struct {
 	wsm.DB
 	o *orchestrator
@@ -65,6 +70,39 @@ func (d rosterQueueDB) RemoveMergeQueueEntry(ctx context.Context, repo wsm.RepoK
 	return d.republished(ctx, repo, d.DB.RemoveMergeQueueEntry(ctx, repo, id, cause))
 }
 
+// QueueMerge puts a requested merge in line and republishes its repository's
+// queue.
+func (d rosterQueueDB) QueueMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, ledger wsm.LeaseID) (int, error) {
+	place, err := d.DB.QueueMerge(ctx, repo, id, ledger)
+	return place, d.republished(ctx, repo, err)
+}
+
+// DropAdmittedMerge drops an admitted merge and republishes its repository's
+// queue.
+func (d rosterQueueDB) DropAdmittedMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, lease wsm.LeaseID, cause string) error {
+	return d.republished(ctx, repo, d.DB.DropAdmittedMerge(ctx, repo, id, lease, cause))
+}
+
+// MoveMerge moves a waiting merge and republishes its repository's queue when
+// it moved.
+func (d rosterQueueDB) MoveMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, move wsm.MergeMove) (bool, error) {
+	moved, err := d.DB.MoveMerge(ctx, repo, id, move)
+	return moved, d.republishedIf(ctx, repo, moved, err)
+}
+
+// PrioritizeMerge moves a waiting merge to the front of the waiting and
+// republishes its repository's queue when it moved.
+func (d rosterQueueDB) PrioritizeMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID) (bool, error) {
+	moved, err := d.DB.PrioritizeMerge(ctx, repo, id)
+	return moved, d.republishedIf(ctx, repo, moved, err)
+}
+
+// YieldMergeHead gives the head's place to the race's winner and republishes
+// its repository's queue.
+func (d rosterQueueDB) YieldMergeHead(ctx context.Context, repo wsm.RepoKey, loser, winner wsm.WorkspaceID) error {
+	return d.republished(ctx, repo, d.DB.YieldMergeHead(ctx, repo, loser, winner))
+}
+
 // SetMergeQueuePaused pauses or resumes a queue and republishes it, so the
 // roster's merge indicators follow the pause at once.
 func (d rosterQueueDB) SetMergeQueuePaused(ctx context.Context, repo wsm.RepoKey, paused bool) error {
@@ -80,6 +118,15 @@ func (d rosterQueueDB) republished(ctx context.Context, repo wsm.RepoKey, err er
 	}
 	d.o.publishRosterQueue(ctx, repo)
 	return nil
+}
+
+// republishedIf is republished for a write that may change nothing: it
+// republishes only when CHANGED says the write moved something.
+func (d rosterQueueDB) republishedIf(ctx context.Context, repo wsm.RepoKey, changed bool, err error) error {
+	if err != nil || !changed {
+		return err
+	}
+	return d.republished(ctx, repo, nil)
 }
 
 // rosterQueuePublisher serializes the read and the publication of every
@@ -123,8 +170,11 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 	for _, entry := range entries {
 		queue.Workspaces = append(queue.Workspaces, entry.Workspace)
 	}
+	for _, entry := range inLine(entries) {
+		queue.Line = append(queue.Line, entry.Workspace)
+	}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue",
-		dlog.Context{"repo": string(repo), "entries": len(entries), "paused": paused, "requesters": ids.Strings(requesters)})
+		dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.Line), "paused": paused, "requesters": ids.Strings(requesters)})
 	o.deps.Sidebar.SetMergeQueue(repo, queue)
 }
 

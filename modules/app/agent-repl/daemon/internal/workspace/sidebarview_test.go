@@ -150,6 +150,56 @@ func TestFoldOpenSectionSurfacesAFailedWriteAtError(t *testing.T) {
 	}
 }
 
+func TestShowOpenMergeQueuesRecordsTheViewAndRepublishesTheRoster(t *testing.T) {
+	tests := []struct {
+		name        string
+		mergeQueues bool
+	}{{"merge queues", true}, {"workspaces", false}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			prior := wsm.DefaultSidebarView
+			prior.OpenShowsMergeQueues = !tt.mergeQueues
+			f.db.view = &prior
+
+			// Act
+			err := f.verbs.ShowOpenMergeQueues(context.Background(), tt.mergeQueues)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ShowOpenMergeQueues: %v", err)
+			}
+			if len(f.sidebar.registries) != 1 {
+				t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+			}
+			if got := f.sidebar.registries[0].View.OpenShowsMergeQueues; got != tt.mergeQueues {
+				t.Fatalf("republished open shows merge queues = %v, want %v", got, tt.mergeQueues)
+			}
+		})
+	}
+}
+
+func TestShowOpenMergeQueuesSurfacesAFailedWriteAtError(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.setOpenShowsErr = errors.New("disk I/O error")
+
+	// Act
+	err := f.verbs.ShowOpenMergeQueues(context.Background(), true)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a failed view write was answered as success")
+	}
+	if !loggedAtError(f, opShowOpenSection) {
+		t.Fatal("the failed write was not recorded at error")
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none for a failed view change", len(f.sidebar.registries))
+	}
+}
+
 func TestFoldHiddenSectionSurfacesAFailedWriteAtError(t *testing.T) {
 	// Arrange
 	f := newFixture(t)

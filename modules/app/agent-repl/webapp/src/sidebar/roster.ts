@@ -84,6 +84,7 @@ import {
   type RosterSectionFold,
 } from "./section-fold.js";
 import { openScope, type DrawScope } from "./scope.js";
+import { drawMergeQueueToggle, drawRosterMergeQueue, drawRosterOpenSectionShows, drawRosterRepoShows } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
   drawRosterRowDetailCommits,
@@ -333,11 +334,15 @@ interface DrawnRepoSection extends Drawn {
 }
 
 /**
- * Whether two repository sections differ in their rows at most: the same
- * entries in the same order (each row the same workspace, each subsection
- * the same one under the same header), only the rows' drawings changed.
+ * Whether two repository sections differ in their rows at most: both showing
+ * their workspaces, the same entries in the same order (each row the same
+ * workspace, each subsection the same one under the same header), only the
+ * rows' drawings changed.
  */
 function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
+  // A SECTION SHOWING ITS MERGE QUEUE draws no keyed rows to patch: it is
+  // kept whole or drawn anew.
+  if (a.shows.case !== "workspaces" || b.shows.case !== "workspaces") return false;
   const shape = (section: RosterRepoSection): string[] =>
     repoEntries(section, "RosterRepoSection").map((entry) =>
       entry.case === "row" ? `row:${entry.row.row?.workspace?.workspace?.id ?? ""}` : "subsection",
@@ -362,13 +367,16 @@ function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
 }
 
 /**
- * Say on a drawn repository section ELEMENT, and on each of its subsections,
- * whether the wire U says it holds the current workspace. A drawn section
+ * Say on a drawn repository section ELEMENT, and on each of its subsections
+ * while it shows its workspaces, whether the wire U says it holds the current
+ * workspace. A drawn section
  * whose subsections differ from U's is a broken invariant: a section whose
  * subsections changed is drawn anew, never patched.
  */
 export function paintRepoHoldsCurrent(element: HTMLElement, u: RosterRepoSection, path: string): void {
   paintHoldsCurrent(element, drawRosterHoldsCurrent(u.fold, `${path}.fold`));
+  // A SECTION SHOWING ITS MERGE QUEUE draws no subsection to paint.
+  if (drawRosterRepoShows(u, path).case === "mergeQueue") return;
   const drawn = queryAll<HTMLElement>(element, `.${SUBSECTION_CLASS}`);
   const wire = sectionSubsections(u, path);
   if (drawn.length !== wire.length) {
@@ -463,6 +471,9 @@ export function drawRosterOpenSection(
   count.className = OPEN_COUNT_CLASS;
   count.textContent = `(${view.openCount})`;
   header.appendChild(count);
+  // THE MERGE-QUEUE TOGGLE (merge-queue-view.ts, owner request 2026-10-24):
+  // what every repository section below shows, the daemon's like the fold.
+  header.appendChild(drawMergeQueueToggle(sc, drawRosterOpenSectionShows(u, path)));
   section.appendChild(header);
   section.appendChild(view.body);
   return section;
@@ -518,6 +529,10 @@ export function drawRosterRepoSection(
       },
     },
     () => {
+      // A SECTION SHOWING ITS MERGE QUEUE lists the queue in place of its
+      // entries (merge-queue-view.ts); its entries' rows are not drawn.
+      const shows = drawRosterRepoShows(u, path);
+      if (shows.case === "mergeQueue") return drawRosterMergeQueue(shows.queue, sc, `${path}.merge_queue`);
       const body = document.createElement("div");
       body.className = "rows";
       body.setAttribute(BUCKET_ATTRIBUTE, "");

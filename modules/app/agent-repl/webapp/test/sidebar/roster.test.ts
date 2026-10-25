@@ -40,6 +40,7 @@ import {
   todaysMerges,
 } from "../../src/sidebar/roster.js";
 import { HOLDS_CURRENT_ATTRIBUTE } from "../../src/sidebar/section-fold.js";
+import { MERGE_QUEUE_TOGGLE_CLASS, SHOWS_ATTRIBUTE } from "../../src/sidebar/merge-queue-view.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
@@ -1614,6 +1615,122 @@ describe("the open workspaces section", () => {
     const bare = roster();
     bare.open!.fold = { case: undefined };
     expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
+  });
+});
+
+describe("the open section's merge-queue toggle", () => {
+  const openHead = (drawn: HTMLElement): HTMLElement =>
+    pane(drawn).querySelector<HTMLElement>(`:scope > .${OPEN_SECTION_CLASS} > .repo-head`)!;
+  const toggleIn = (drawn: HTMLElement): HTMLElement => openHead(drawn).querySelector<HTMLElement>(`:scope > .${MERGE_QUEUE_TOGGLE_CLASS}`)!;
+  const drawnRowIds = (drawn: HTMLElement): string[] =>
+    [...drawn.querySelectorAll(".repo-section [data-roster-row]")].map((el) => el.getAttribute("data-roster-row")!);
+
+  it("stands on the OPEN header line after its count", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(openHead(drawn).lastElementChild?.classList.contains(MERGE_QUEUE_TOGGLE_CLASS)).toBe(true);
+  });
+
+  it.each([
+    { name: "the workspaces", mergeQueues: false, shows: "workspaces" },
+    { name: "the merge queues", mergeQueues: true, shows: "merge-queues" },
+  ])("is drawn as the daemon says while the sections show $name", ({ mergeQueues, shows }) => {
+    const drawn = drawWorkspaceRoster(roster({ open: openSection(false, mergeQueues) }), sidebarContext());
+    expect(toggleIn(drawn).getAttribute(SHOWS_ATTRIBUTE)).toBe(shows);
+  });
+
+  it.each([
+    { name: "the expanded repository names' colour while the workspaces show", mergeQueues: false, want: "var(--repo-head-expanded)" },
+    { name: "the canonical purple while the merge queues show", mergeQueues: true, want: "var(--blocked)" },
+  ])("draws the glyph in $name", ({ mergeQueues, want }) => {
+    const drawn = drawWorkspaceRoster(roster({ open: openSection(false, mergeQueues) }), sidebarContext());
+    expect(inRail(drawn, () => cascadedValue(toggleIn(drawn), "color"))).toBe(want);
+  });
+
+  it("keeps the header's case and weight out of the glyph", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(inRail(drawn, () => [cascadedValue(toggleIn(drawn), "text-transform"), cascadedValue(toggleIn(drawn), "font-weight")])).toEqual([
+      "none",
+      "400",
+    ]);
+  });
+
+  it("asks the daemon for the merge queues without folding the section", async () => {
+    // Arrange
+    const { asked, sc } = viewDaemon();
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sc);
+
+    // Act
+    await click(toggleIn(drawn));
+
+    // Assert
+    expect(asked.map((r) => r.change.case)).toEqual(["showOpen"]);
+    expect(pane(drawn).querySelector(`.${OPEN_SECTION_CLASS}`)?.classList.contains("folded")).toBe(false);
+  });
+
+  it("lists a repository's merge queue in place of its workspaces", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({
+        open: openSection(false, true),
+        repos: [repoSection({ id: "repo-1", rows: [row({ id: "w1" }), row({ id: "w2" })], mergeQueue: [row({ id: "w2" }), row({ id: "w-merge" })] })],
+      }),
+      sidebarContext(),
+    );
+    expect(drawnRowIds(drawn)).toEqual(["w2", "w-merge"]);
+  });
+
+  it("draws a section showing its merge queue that holds the current workspace among subsections", () => {
+    // Arrange, Act
+    const drawn = drawWorkspaceRoster(
+      roster({
+        open: openSection(false, true),
+        repos: [repoSection({ id: "repo-1", holdsCurrent: true, subsections: [{ id: "s1", rows: [row({ id: "w1" })] }], mergeQueue: [] })],
+      }),
+      sidebarContext(),
+    );
+
+    // Assert
+    const section = drawn.querySelector<HTMLElement>(".repo-section")!;
+    expect([section.hasAttribute(HOLDS_CURRENT_ATTRIBUTE), section.querySelectorAll(".sb-subsection").length]).toEqual([true, 0]);
+  });
+
+  it("redraws a section the push turns to its merge queue, and back to its workspaces", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const rows = [row({ id: "w1" }), row({ id: "w2" })];
+    const workspaces = roster({ repos: [repoSection({ id: "a", rows })] });
+    const queues = roster({ open: openSection(false, true), repos: [repoSection({ id: "a", rows, mergeQueue: [row({ id: "w2" })] })] });
+
+    // Act
+    const shown = [workspaces, queues, workspaces].map((u) => drawnRowIds(drawer.draw(u)));
+
+    // Assert
+    expect(shown).toEqual([["w1", "w2"], ["w2"], ["w1", "w2"]]);
+  });
+
+  it("redraws a queue whose row the push changed", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const at = (name: string) =>
+      roster({ open: openSection(false, true), repos: [repoSection({ id: "a", mergeQueue: [row({ id: "w1", name })] })] });
+    drawer.draw(at("before"));
+
+    // Act
+    const drawn = drawer.draw(at("after"));
+
+    // Assert
+    expect(drawn.querySelector(".repo-section [data-roster-row='w1'] .name")?.textContent).toBe("after");
+  });
+
+  it("refuses an open section with no shows arm as a malformed view", () => {
+    const bare = roster();
+    bare.open!.shows = { case: undefined };
+    expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("refuses a repository section with no shows arm as a malformed view", () => {
+    const section = repoSection({ id: "repo-1" });
+    section.shows = { case: undefined };
+    expect(() => drawWorkspaceRoster(roster({ repos: [section] }), sidebarContext())).toThrow(MalformedView);
   });
 });
 

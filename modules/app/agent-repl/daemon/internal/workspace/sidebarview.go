@@ -12,6 +12,7 @@ const (
 	opFoldMergedSection = "daemon.workspace.fold_merged_section"
 	opFoldHiddenSection = "daemon.workspace.fold_hidden_section"
 	opFoldOpenSection   = "daemon.workspace.fold_open_section"
+	opShowOpenSection   = "daemon.workspace.show_open_section"
 )
 
 // FoldMergedSection records whether the recently-merged band is collapsed,
@@ -35,17 +36,34 @@ func (v *verbs) FoldOpenSection(ctx context.Context, folded bool) error {
 	return v.foldSingletonSection(ctx, opFoldOpenSection, "open section", v.deps.DB.SetOpenSectionFolded, folded)
 }
 
+// ShowOpenMergeQueues records whether the open-workspaces section's
+// repository sections show their merge queues (true) or their open
+// workspaces (false), then republishes the roster to every page. There is
+// nothing to refuse: the roster carries exactly one open section.
+func (v *verbs) ShowOpenMergeQueues(ctx context.Context, mergeQueues bool) error {
+	return v.recordView(ctx, opShowOpenSection, "what the open section shows", dlog.Context{"merge_queues": mergeQueues},
+		func(ctx context.Context) error { return v.deps.DB.SetOpenShowsMergeQueues(ctx, mergeQueues) })
+}
+
 // foldSingletonSection records the fold of a section the roster carries
 // exactly one of (no key, so nothing to refuse), then republishes the roster
-// to every page. A failed write is recorded at error under OP, naming
-// SECTION, and nothing is republished.
+// to every page (recordView).
 func (v *verbs) foldSingletonSection(ctx context.Context, op, section string, write func(context.Context, bool) error, folded bool) error {
-	log := v.deps.Log.Global().With(dlog.Context{"folded": folded, "section": section})
-	if err := write(ctx, folded); err != nil {
-		log.Error(op, "could not record the "+section+"'s fold", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("fold the %s: %w", section, err)
+	return v.recordView(ctx, op, "the "+section+"'s fold", dlog.Context{"folded": folded, "section": section},
+		func(ctx context.Context) error { return write(ctx, folded) })
+}
+
+// recordView records one piece of the sidebar's view state that belongs to
+// no keyed section, WHAT naming it, then republishes the roster to every
+// page. A failed write is recorded at error under OP with FIELDS, and
+// nothing is republished.
+func (v *verbs) recordView(ctx context.Context, op, what string, fields dlog.Context, write func(context.Context) error) error {
+	log := v.deps.Log.Global().With(fields)
+	if err := write(ctx); err != nil {
+		log.Error(op, "could not record "+what, dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("record %s: %w", what, err)
 	}
-	log.Info(op, "recorded the "+section+"'s fold", nil)
+	log.Info(op, "recorded "+what, nil)
 	v.republishRegistry(ctx, log, op)
 	return nil
 }
