@@ -177,8 +177,9 @@ export function bubbleClick(opts: { row: HTMLElement; target: Element; selectedT
     const entry = opts.target.closest<HTMLElement>(`.${ENTRY_CLASS}`);
     return { case: "entry", row, label: entry?.getAttribute(ENTRY_ATTRIBUTE) ?? "" };
   }
-  // A RESPONSE'S BRANCH IS ANSWERED: the response is selected, and Emacs opens
-  // a blank entry answering the node in the composer (branch-hover.ts).
+  // A RESPONSE'S BRANCH IS ANSWERED: Emacs opens a blank entry answering the
+  // node in the composer, and the bubble is never selected by the click
+  // (branch-hover.ts).
   const branch = branchAt(opts.row, opts.target);
   if (branch !== null) return { case: "branch", row, label: branch.label };
   return { case: "select", row };
@@ -235,7 +236,7 @@ export function installBubbleSelect(
         );
         return;
       case "branch":
-        log.info("a click on a response's branch selects the response to answer the node", {
+        log.info("a click on a response's branch asks for an entry answering the node", {
           operation: "feed.branch-click",
           context: { row: click.row, label: click.label },
         });

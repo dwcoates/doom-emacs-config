@@ -3,8 +3,8 @@
  * the composer's is while the person types its entry (owner ruling,
  * 2026-10-24): the box over the hovered node's subtree (subtree-box.ts) says
  * which node a click answers. The click itself is bubble-selection's
- * (`branchAt`): it selects the response and asks Emacs to open a blank entry
- * answering the node in the composer.
+ * (`branchAt`): it asks Emacs to open a blank entry answering the node in the
+ * composer, and never selects the bubble.
  *
  * The box has its own class and edges, so it never moves the composer's box
  * over the same lines, and the stylesheet draws it over the composer's while

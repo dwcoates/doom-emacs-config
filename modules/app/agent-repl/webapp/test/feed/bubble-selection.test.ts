@@ -295,7 +295,7 @@ describe("installBubbleSelect", () => {
     ).toEqual([["r1", "3.1"]]);
   });
 
-  it("asks the daemon to select a clicked branch's response to answer the node", async () => {
+  it("asks the daemon for an entry answering a clicked branch's node", async () => {
     // Arrange
     const a = armed();
     // Act
