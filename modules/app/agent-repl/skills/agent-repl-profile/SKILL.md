@@ -185,6 +185,15 @@ which every runtime stops by itself.
 - **Status / next step**: open; the sidebar fix above cuts most of it.
 - **Flagged by**: found by profiling, 2026-10-12.
 
+### Web view memory
+- **Interaction**: none directly; every workspace page shares one WebKit web content process, and while its footprint stands above WebKit's threshold a memory-pressure relief (a full garbage collection) runs on the main thread every 30s, a stall on whatever the user is doing.
+- **Budget**: below WebKit's memory-pressure threshold, so no relief ever runs (no `daemon.webprocess.stall_beat`).
+- **Measured**: 2026-10-25, 18 pages: footprint 1.34GB (`footprint`): WebKit malloc 849MB, graphics 409MB, JIT code 48MB. `heap -s`: 18,058 16KB blocks (289MB, likely the JS heap), 650MB of untyped allocations in all, and 5,280 live CSS animations (`WebCore::CSSAnimation`, each with a `KeyframeEffect`). The pages hold only 34,104 DOM elements together (`page.census`), so the DOM is not the cost. Every page reports `visibility: visible`, the unshown ones included. Metrics: 0.9 to 2.0GB over 12h, no steady climb (`agentrepl_process_footprint_bytes{process="webkit_webcontent"}`). `stall_beat` 22 of 33 stalls on the beat in 10 minutes.
+- **Code paths**: webapp host (`host/host.ts` `applyShown`: an unshown frame is only resized and unmarked, so it stays rendered), `host/unshown-animations.ts` (pauses, but keeps, an unshown page's animations), each page's feed state.
+- **Contributors**: measured: unshown pages stay rendered, keeping their layers (the graphics share); thousands of live animations. Suspected: per-page JS state (feed rows, stores) at roughly 45MB a page.
+- **Status / next step**: open. The census now counts each page's animations by name (`page.census` `animations`, `animation_names`); read it after it deploys, then stop rendering unshown pages and end animations that outlive their purpose, and take a JS heap snapshot of one page through Web Inspector.
+- **Flagged by**: the owner, 2026-10-25 ("we're using way too much").
+
 ### Daemon resident memory
 - **Interaction**: none; memory pressure and battery.
 - **Budget**: unknown; it looked large for the workload.
