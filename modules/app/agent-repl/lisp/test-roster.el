@@ -201,7 +201,15 @@ whose calls are the observation."
                   (lambda (ws) (push ws agent-repl-test-roster--unsubscribed) ws))
                  ((symbol-function 'agent-repl-link-primary)
                   (lambda () 'fake-conn)))
-         ,@body))))
+         ;; A tab's arrival opens its composer, and a rename renames it, so
+         ;; a buffer left live names a LATER test's rename target taken.
+         (let ((agent-repl-test-roster--buffers-before (buffer-list)))
+           (unwind-protect
+               (progn ,@body)
+             (let ((kill-buffer-query-functions nil))
+               (dolist (buf (buffer-list))
+                 (unless (memq buf agent-repl-test-roster--buffers-before)
+                   (kill-buffer buf))))))))))
 
 (defun agent-repl-test-roster--tabs ()
   "Return the live roster-owned workspace names, in tab order."
