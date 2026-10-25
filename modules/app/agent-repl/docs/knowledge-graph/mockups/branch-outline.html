@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chat rail: showing a thread's branches</title>
+<!--
+  MOCKUP (2026-10-25): five ways the Chats rail could draw a thread's
+  branching structure, side by side, on ONE extreme thread: a long linear
+  run, a six-way fan-out, and a rabbit hole of branch points nested ten
+  deep. Static and self-contained; nothing here is wired to agent-repl.
+  Rows are clickable where the idea has a click (re-root, drill-down).
+-->
+<style>
+  :root {
+    --bg: #151514; --fg: #f1efe9; --muted: #898782; --card: #232322;
+    --sidebar-bg: #111110; --border: #2c2c2a; --accent: #6aa7ff;
+    --rail-w: 272px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px; background: var(--bg); color: var(--fg);
+    font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 22px; max-width: 900px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start; }
+  .card { width: var(--rail-w); }
+  .card h2 { font-size: 13px; margin: 0 0 2px; }
+  .card .verdict { font-size: 11px; margin: 0 0 8px; color: var(--muted); min-height: 30px; }
+  .verdict b.ok { color: #7fd18b; } .verdict b.no { color: #e48a7a; }
+  .rail {
+    width: var(--rail-w); height: 640px; background: var(--sidebar-bg);
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .rail-head {
+    height: 40px; flex: none; display: flex; align-items: center; padding: 0 12px;
+    border-bottom: 1px solid var(--border); font-weight: 600; gap: 6px;
+  }
+  .rail-head .caret { color: var(--muted); font-size: 10px; }
+  .rail-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px 0 12px; }
+  .rail-body.clip-x { overflow-x: hidden; }
+  .thread {
+    padding: 6px 12px; color: var(--fg); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; border-radius: 6px; margin: 0 6px;
+  }
+  .thread.other { color: var(--muted); }
+  .thread.current { background: var(--card); font-weight: 600; }
+  .row {
+    position: relative; display: flex; align-items: center; gap: 6px;
+    height: 24px; margin: 0 6px; padding-right: 8px; border-radius: 5px;
+    white-space: nowrap; color: color-mix(in srgb, var(--fg) 82%, var(--muted));
+    cursor: default;
+  }
+  .row.click { cursor: pointer; }
+  .row.click:hover { background: color-mix(in srgb, var(--card) 70%, transparent); }
+  .row.on-path { color: var(--fg); }
+  .row.shown { background: var(--card); color: var(--fg); }
+  .row .label { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .row .meta { color: var(--muted); font-size: 11px; flex: none; }
+  .row .badge {
+    flex: none; font-size: 10px; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 999px; padding: 0 5px; line-height: 15px;
+  }
+  .row .dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
+  .row.on-path .dot, .row.shown .dot { background: var(--accent); }
+  .guide { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); }
+  /* Overflow made visible: a row whose text starts past the rail's edge. */
+  .row.overflow { background: repeating-linear-gradient(135deg, #3a1d1a 0 6px, transparent 6px 12px); }
+  .crumb {
+    margin: 2px 6px 4px; padding: 3px 8px; font-size: 11px; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    border-left: 2px solid var(--border);
+  }
+  .crumb span.c { cursor: pointer; } .crumb span.c:hover { color: var(--fg); }
+  .back { color: var(--muted); }
+  .col-title { margin: 4px 12px 6px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  svg.lanes { flex: none; overflow: visible; }
+  .note { margin-top: 30px; color: var(--muted); max-width: 900px; }
+  .note code { color: var(--fg); }
+</style>
+</head>
+<body>
+<h1>Chats rail: drawing a thread's branches</h1>
+<p class="lede">
+  Every variant draws the same extreme thread in a 272px rail (the real rail's width).
+  The thread has a 9-turn linear opening, a 6-way fan-out, a 4-way split, and a "rabbit hole"
+  of branch points nested 10 deep. The <span style="color:#6aa7ff">blue dots</span> mark the shown path
+  (what the chat page is displaying). Striped rows are indented so far that less than 90px is left for their text, which is where a row stops being readable.
+  Click rows in "Re-root" and "Drill-down" to move around.
+</p>
+<div class="grid" id="grid"></div>
+<p class="note">
+  Recommendation from the discussion: chain collapsing (2.1) plus re-rooting (2.2), which is the
+  "Re-root" panel. Its indent can never pass 3 levels, so it cannot overflow at any depth.
+  The baseline panel shows what one-indent-per-turn does today, which motivated all of this.
+</p>
+<script>
+// ---- The thread: a tree of questions ----
+let nextId = 0;
+const n = (q, ...children) => ({ id: "n" + nextId++, q, children });
+const chain = (labels, tail) => {
+  // a linear run of LABELS ending in TAIL's children
+  let node = tail ?? null;
+  for (let i = labels.length - 1; i >= 0; i--) node = node ? n(labels[i], node) : n(labels[i]);
+  return node;
+};
+// The rabbit hole: branch points nested DEPTH deep, each with a short side branch.
+const rabbitHole = (depth) => {
+  if (depth === 0) return chain(["So that's the whole picture?", "Thanks, summarize it"]);
+  return n(`Go one level deeper (${11 - depth})`,
+    chain([`Depth ${11 - depth}: why exactly?`, "Show the math"], rabbitHole(depth - 1)),
+    chain([`Side note at depth ${11 - depth}`, "Is that common?"]));
+};
+const planets = ["Venus", "Jupiter", "Titan", "Neptune", "Uranus", "Pluto"].map((p) =>
+  chain([`What color is ${p}'s sky?`, `Why does ${p} differ from Earth?`]));
+const tree = chain([
+  "Why is the sky blue?",
+  "And at sunset?",
+  "Why red specifically?",
+  "Is it the same everywhere on Earth?",
+  "What about at high altitude?",
+  "Does pollution change it?",
+  "What about volcanic eruptions?",
+  "How long do those effects last?",
+  "OK, and other planets?",
+], n("Compare a few planets for me",
+  ...planets,
+  chain(["“Rayleigh scattering”: explain that", "Give me the formula", "Derive the λ⁻⁴"],
+    n("Which part should we unpack?",
+      chain(["Dipole radiation, intuitively", "Why does the dipole re-radiate?"]),
+      chain(["Why the 4th power?", "Dimensional analysis version"]),
+      chain(["Check the units", "Where does the volume factor come from?"]),
+      chain(["Compare with Mie scattering", "So clouds are white because…?"], rabbitHole(10)),
+    )),
+));
+
+// Parents, for walking up.
+const parent = new Map();
+(function link(node) { for (const c of node.children) { parent.set(c.id, node); link(c); } })(tree);
+const byId = new Map();
+(function index(node) { byId.set(node.id, node); node.children.forEach(index); })(tree);
+
+// The shown path: the LAST child at each branch point, down to the rabbit
+// hole's floor (whose main line is its FIRST child).
+const shownPath = new Set([tree.id]);
+let shownLeaf = tree;
+for (let node = tree; ; ) {
+  // the rabbit hole's main line is its FIRST child, so follow that once we are in it
+  const next = node.children.length > 1 && node.q.startsWith("Go one level") ? node.children[0] : node.children.at(-1);
+  if (!next) break; shownPath.add(next.id); node = next; shownLeaf = node;
+}
+
+// ---- Chain collapsing: a run of single-child nodes becomes one segment ----
+// A segment is {head, nodes, children: segments}.
+function segment(node) {
+  const nodes = [node];
+  while (node.children.length === 1) { node = node.children[0]; nodes.push(node); }
+  return { head: nodes[0], nodes, last: node, children: node.children.map(segment) };
+}
+const segRoot = segment(tree);
+const segOnPath = (s) => s.nodes.some((x) => shownPath.has(x.id));
+
+// ---- Shared drawing ----
+const RAIL_TEXT_W = 272 - 12 - 16; // the room a row's text has
+const MIN_TEXT_W = 90; // less than this left for the label reads as overflow
+function railCard(title, verdict, draw) {
+  const card = document.createElement("div"); card.className = "card";
+  card.innerHTML = `<h2>${title}</h2><p class="verdict">${verdict}</p>`;
+  const rail = document.createElement("div"); rail.className = "rail";
+  rail.innerHTML = `<div class="rail-head">Chats <span class="caret">▾</span></div>`;
+  const body = document.createElement("div"); body.className = "rail-body";
+  rail.append(body); card.append(rail);
+  document.getElementById("grid").append(card);
+  const redraw = () => {
+    body.replaceChildren();
+    for (const t of ["Rust lifetimes, again", "Sourdough hydration"]) body.append(threadRow(t, "other"));
+    body.append(threadRow("Why is the sky blue?", "current"));
+    draw(body, redraw);
+    for (const t of ["Tax brackets in 2026", "Is P = NP likely?", "Kafka vs NATS", "Best chess openings"])
+      body.append(threadRow(t, "other"));
+  };
+  redraw();
+}
+function threadRow(name, kind) {
+  const el = document.createElement("div"); el.className = `thread ${kind}`; el.textContent = name; return el;
+}
+function row({ indent = 0, label, meta, badge, onPath, shown, onClick, guides = [], lead }) {
+  const el = document.createElement("div");
+  el.className = "row" + (onPath ? " on-path" : "") + (shown ? " shown" : "") + (onClick ? " click" : "");
+  const pad = 14 + indent;
+  el.style.paddingLeft = pad + "px";
+  if (pad > RAIL_TEXT_W - MIN_TEXT_W) el.classList.add("overflow");
+  for (const g of guides) { const line = document.createElement("div"); line.className = "guide"; line.style.left = g + "px"; el.append(line); }
+  if (lead) el.append(lead); else { const dot = document.createElement("span"); dot.className = "dot"; el.append(dot); }
+  const text = document.createElement("span"); text.className = "label"; text.textContent = label; el.append(text);
+  if (badge) { const b = document.createElement("span"); b.className = "badge"; b.textContent = badge; el.append(b); }
+  if (meta) { const m = document.createElement("span"); m.className = "meta"; m.textContent = meta; el.append(m); }
+  if (onClick) el.addEventListener("click", onClick);
+  return el;
+}
+const STEP = 14; // px per indent level
+
+// ---- 0. Baseline: one indent per turn ----
+railCard("Baseline: one indent per turn",
+  '<b class="no">Overflows</b> after about 13 turns, even with no branching at all.',
+  (body) => {
+    (function walk(node, depth) {
+      body.append(row({ indent: depth * STEP, label: node.q, onPath: shownPath.has(node.id), shown: node === shownLeaf,
+        guides: Array.from({ length: depth }, (_, i) => 14 + i * STEP + 2) }));
+      node.children.forEach((c) => walk(c, depth + 1));
+    })(tree, 0);
+  });
+
+// ---- 2.1 Chain collapsing ----
+railCard("2.1 Collapse linear chains",
+  '<b class="ok">Fits most threads.</b> <b class="no">Still overflows</b> here, because the rabbit hole nests 10 branch points.',
+  (body) => {
+    (function walk(s, depth) {
+      body.append(row({ indent: depth * STEP, label: s.head.q, meta: s.nodes.length > 1 ? `${s.nodes.length} turns` : "",
+        onPath: segOnPath(s), shown: s.nodes.includes(shownLeaf),
+        guides: Array.from({ length: depth }, (_, i) => 14 + i * STEP + 2) }));
+      s.children.forEach((c) => walk(c, depth + 1));
+    })(segRoot, 0);
+  });
+
+// ---- 2.2 Re-root (on collapsed chains) ----
+// Focus = the deepest shown segment's ancestor 1 level up, so its siblings show too.
+const segParent = new Map();
+(function link(s) { for (const c of s.children) { segParent.set(c, s); link(c); } })(segRoot);
+let segShown = segRoot;
+(function find(s) { if (s.nodes.includes(shownLeaf)) segShown = s; s.children.forEach(find); })(segRoot);
+// Focus three segments above the shown one, so the window shows its branches.
+let focus = segShown;
+for (let i = 0; i < 3 && segParent.get(focus); i++) focus = segParent.get(focus);
+const WINDOW = 3; // indent levels drawn below the focus
+railCard("2.2 Re-root around the shown path (with 2.1)",
+  '<b class="ok">Cannot overflow:</b> ancestors fold into the breadcrumb, and at most 3 levels draw below it.',
+  (body, redraw) => {
+    const up = []; for (let s = segParent.get(focus); s; s = segParent.get(s)) up.unshift(s);
+    if (up.length) {
+      const crumb = document.createElement("div"); crumb.className = "crumb";
+      const shownCrumbs = up.length > 2 ? [up[0], null, up.at(-1)] : up;
+      shownCrumbs.forEach((s, i) => {
+        if (i) crumb.append(" › ");
+        if (s === null) { crumb.append(`… ${up.length - 2} more`); return; }
+        const c = document.createElement("span"); c.className = "c"; c.textContent = s.head.q.slice(0, 18) + (s.head.q.length > 18 ? "…" : "");
+        c.addEventListener("click", () => { focus = s; redraw(); }); crumb.append(c);
+      });
+      body.append(crumb);
+    }
+    (function walk(s, depth) {
+      const hidden = depth === WINDOW && s.children.length ? countSegs(s) - 1 : 0;
+      body.append(row({ indent: depth * STEP, label: s.head.q, meta: s.nodes.length > 1 ? `${s.nodes.length}` : "",
+        badge: hidden ? `+${hidden} below` : "", onPath: segOnPath(s), shown: s.nodes.includes(shownLeaf),
+        guides: Array.from({ length: depth }, (_, i) => 14 + i * STEP + 2),
+        onClick: s === focus ? undefined : () => { focus = s; redraw(); } }));
+      if (depth < WINDOW) s.children.forEach((c) => walk(c, depth + 1));
+    })(focus, 0);
+  });
+function countSegs(s) { return 1 + s.children.reduce((a, c) => a + countSegs(c), 0); }
+
+// ---- 2.3 Clamp with a depth badge ----
+const CLAMP = 4;
+railCard("2.3 Clamp the indent, badge the depth",
+  '<b class="ok">Cannot overflow.</b> <b class="no">But</b> past level 4, rows lose which row is their parent.',
+  (body) => {
+    (function walk(s, depth) {
+      const shownDepth = Math.min(depth, CLAMP);
+      body.append(row({ indent: shownDepth * STEP, label: s.head.q, meta: s.nodes.length > 1 ? `${s.nodes.length}` : "",
+        badge: depth > CLAMP ? `↳${depth}` : "", onPath: segOnPath(s), shown: s.nodes.includes(shownLeaf),
+        guides: Array.from({ length: shownDepth }, (_, i) => 14 + i * STEP + 2) }));
+      s.children.forEach((c) => walk(c, depth + 1));
+    })(segRoot, 0);
+  });
+
+// ---- 2.4 Git-graph lanes ----
+// Rows in depth-first order. A segment's LAST child continues its lane (drawn
+// last, so the lane's line runs down past the earlier children); every earlier
+// child takes the leftmost lane free of lines. At most MAX_LANES draw; a row
+// in a lane past them sits in the last one with a "+n" badge.
+const MAX_LANES = 4, LANE_W = 10;
+railCard("2.4 Git-graph lanes",
+  '<b class="ok">Width grows with open branches, not depth.</b> <b class="no">But</b> the fan-out and the hole need a lane cap ("+n").',
+  (body) => {
+    const rows = [];
+    (function walk(s, lane, through) {
+      rows.push({ s, lane, through });
+      const kids = s.children;
+      kids.forEach((c, i) => {
+        if (i === kids.length - 1) { walk(c, lane, through); return; }
+        const busy = new Set([...through, lane]);
+        let free = 0; while (busy.has(free)) free++;
+        walk(c, free, [...through, lane]);
+      });
+    })(segRoot, 0, []);
+    const x = (l) => Math.min(l, MAX_LANES - 1) * LANE_W + 4;
+    for (const r of rows) {
+      const on = segOnPath(r.s);
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "lanes"); svg.setAttribute("width", MAX_LANES * LANE_W); svg.setAttribute("height", 24);
+      let art = "";
+      for (const l of r.through) art += `<line x1="${x(l)}" y1="0" x2="${x(l)}" y2="24" stroke="#3a3a37"/>`;
+      art += `<line x1="${x(r.lane)}" y1="${r.s === segRoot ? 12 : 0}" x2="${x(r.lane)}" y2="${r.s.children.length ? 24 : 12}" stroke="${on ? "#6aa7ff" : "#3a3a37"}"/>`;
+      art += `<circle cx="${x(r.lane)}" cy="12" r="3.5" fill="${on ? "#6aa7ff" : "#898782"}"/>`;
+      svg.innerHTML = art;
+      body.append(row({ lead: svg, label: r.s.head.q, onPath: on, shown: r.s.nodes.includes(shownLeaf),
+        badge: r.lane >= MAX_LANES ? `+${r.lane - MAX_LANES + 1}` : "", meta: r.s.nodes.length > 1 ? `${r.s.nodes.length}` : "" }));
+    }
+  });
+
+// ---- 2.5 Drill-down columns ----
+let drill = segRoot;
+railCard("2.5 Drill-down, one level at a time",
+  '<b class="ok">Width never grows.</b> <b class="no">But</b> you can only see one level of the thread at a time.',
+  (body, redraw) => {
+    const up = segParent.get(drill);
+    if (up) body.append(row({ label: "‹ Back to “" + up.head.q + "”", onClick: () => { drill = up; redraw(); } }));
+    body.lastChild?.classList.add("back");
+    const title = document.createElement("div"); title.className = "col-title";
+    title.textContent = drill === segRoot ? "The thread" : `In “${drill.head.q}”`;
+    body.append(title);
+    body.append(row({ label: drill.head.q, meta: drill.nodes.length > 1 ? `${drill.nodes.length} turns` : "",
+      onPath: segOnPath(drill), shown: drill.nodes.includes(shownLeaf) }));
+    for (const c of drill.children)
+      body.append(row({ indent: STEP, label: c.head.q, meta: c.children.length ? `${c.children.length} branches ›` : (c.nodes.length > 1 ? `${c.nodes.length} turns` : ""),
+        onPath: segOnPath(c), shown: c.nodes.includes(shownLeaf),
+        onClick: c.children.length ? () => { drill = c; redraw(); } : undefined }));
+  });
+</script>
+</body>
+</html>
