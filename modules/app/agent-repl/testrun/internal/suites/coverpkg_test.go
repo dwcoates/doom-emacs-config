@@ -91,7 +91,6 @@ func TestSystemModulesMapsEveryGoCoverageSystem(t *testing.T) {
 	want := map[string]string{
 		"agent-repld": "daemon", "agentrepl/shim-claude-sidecar": "sidecar", "agentrepl/shim-store": "store",
 		"agentrepl/shim-lock": "lock", "agentrepl/logging": "logging", "agentrepl/protohelpers": "protohelpers",
-		"agentrepl/zettel": "zettel",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("SystemModules = %v\nwant %v", got, want)
