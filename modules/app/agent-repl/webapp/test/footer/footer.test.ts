@@ -44,7 +44,7 @@ import {
 import STYLESHEET from "../../src/styles.css?raw";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { enduringLine } from "./enduring-line.js";
-import { pagePresence } from "../../src/presence.js";
+import { createPresence, pagePresence, type Presence, type PresenceSource } from "../../src/presence.js";
 
 const NOW = FOOTER_TEST_NOW;
 
@@ -74,11 +74,13 @@ async function settle(): Promise<void> {
 function mount(
   h: Harness = harness(),
   selectDetachedWork: () => Promise<boolean> = async () => true,
+  presence: Pick<Presence, "shown" | "onChange" | "embedded"> = pagePresence(),
 ) {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
   const footer = mountFooter(host, h.ctx, {
     selectDetachedWork,
+    presence,
   });
   mounted.push(footer);
   return { host, h, footer };
@@ -846,6 +848,263 @@ describe("mountFooter: the daemon's focus", () => {
 
     // Assert
     expect(h.sink.reported).toContain("frameUndecodable");
+  });
+});
+
+// A SWITCH TO THE WORKSPACE (owner ruling, 2026-10-24): the host showing the
+// page lands on an expanded footer exactly when a chip has entries.
+describe("mountFooter: a switch to the workspace", () => {
+  /** A page in the host, hidden behind another workspace's. */
+  function hiddenInHost(): PresenceSource {
+    const presence = createPresence(document, true);
+    presences.push(presence);
+    return presence;
+  }
+  const presences: PresenceSource[] = [];
+  afterEach(() => {
+    while (presences.length > 0) presences.pop()?.dispose();
+  });
+
+  /** Mount a hidden page in the host and push VIEW to it. */
+  async function mountHidden(view: FooterView, presence = hiddenInHost()) {
+    const m = mount(harness(), async () => true, presence);
+    await settle();
+    m.h.tail.push(pushView(view));
+    await settle();
+    return { ...m, presence };
+  }
+
+  it("opens a closed section on the first live chip panel", async () => {
+    // Arrange
+    const { host, presence } = await mountHidden(withShells());
+    expect(openPanel(host), "the arrangement opened the section").toBeNull();
+
+    // Act
+    presence.setShown(true);
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("shells");
+  });
+
+  it("keeps the remembered chip panel it was left on", async () => {
+    // Arrange
+    window.localStorage.setItem(panelStorageKey("ws-1"), "shells");
+    const both = withShells();
+    both.strip = strip({ liveWork: { agents: { count: 1 }, shells: { count: 1 } } });
+    both.expanded = expanded({ agents: [AGENT_ROW], shells: [SHELL_ROW] });
+    const { host, presence } = await mountHidden(both);
+
+    // Act
+    presence.setShown(true);
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("shells");
+  });
+
+  it("collapses the open tokens sheet when no chip has entries", async () => {
+    // Arrange
+    window.localStorage.setItem(panelStorageKey("ws-1"), "tokens");
+    const { host, presence } = await mountHidden(footerView());
+    expect(openPanel(host), "the arrangement did not open the tokens sheet").toBe("tokens");
+
+    // Act
+    presence.setShown(true);
+    await settle();
+
+    // Assert
+    expect([openPanel(host), host.querySelector(".footer-divider")]).toEqual([null, null]);
+  });
+
+  it("forgets the panel it collapsed, so a reload stays collapsed", async () => {
+    // Arrange
+    window.localStorage.setItem(panelStorageKey("ws-1"), "tokens");
+    const { presence } = await mountHidden(footerView());
+
+    // Act
+    presence.setShown(true);
+    await settle();
+
+    // Assert
+    expect(window.localStorage.getItem(panelStorageKey("ws-1"))).toBeNull();
+  });
+
+  it("remembers the panel it opened as a click's would be", async () => {
+    // Arrange
+    const { presence } = await mountHidden(withShells());
+
+    // Act
+    presence.setShown(true);
+    await settle();
+
+    // Assert
+    expect(window.localStorage.getItem(panelStorageKey("ws-1"))).toBe("shells");
+  });
+
+  it("leaves a reader's close standing across the pushes after the switch", async () => {
+    // Arrange
+    const { host, h, presence } = await mountHidden(withShells());
+    presence.setShown(true);
+    await settle();
+    host.querySelector<HTMLElement>('[data-chip="shells"]')?.dispatchEvent(new MouseEvent("click"));
+
+    // Act
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("applies again on the next switch after a hide", async () => {
+    // Arrange
+    const { host, presence } = await mountHidden(withShells());
+    presence.setShown(true);
+    await settle();
+    host.querySelector<HTMLElement>('[data-chip="shells"]')?.dispatchEvent(new MouseEvent("click"));
+    presence.setShown(false);
+    await settle();
+    expect(openPanel(host), "the hide reopened the section").toBeNull();
+
+    // Act
+    presence.setShown(true);
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("shells");
+  });
+
+  it("waits for the first push when the switch lands before any view", async () => {
+    // Arrange
+    const presence = hiddenInHost();
+    const { host, h } = mount(harness(), async () => true, presence);
+    await settle();
+    presence.setShown(true);
+    await settle();
+
+    // Act
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("shells");
+  });
+
+  it("arrives on the first push of a page the host showed before the footer mounted", async () => {
+    // Arrange
+    const presence = hiddenInHost();
+    presence.setShown(true);
+    const { host, h } = mount(harness(), async () => true, presence);
+    await settle();
+
+    // Act
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBe("shells");
+  });
+
+  it("applies once per switch, so later pushes leave the section to the reader", async () => {
+    // Arrange: switched to a quiet workspace, then a shell starts.
+    const { host, h, presence } = await mountHidden(footerView());
+    presence.setShown(true);
+    await settle();
+
+    // Act
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("does not open the section of a page in no host, which is never switched to", async () => {
+    // Arrange
+    const { host, h } = mount();
+    await settle();
+
+    // Act
+    h.tail.push(pushView(withShells()));
+    await settle();
+
+    // Assert
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("ignores the document's own visibility, which is Emacs on screen and not a switch", async () => {
+    // Arrange
+    const { host, presence } = await mountHidden(withShells());
+
+    // Act
+    document.dispatchEvent(new Event("visibilitychange"));
+    await settle();
+
+    // Assert
+    expect([presence.shown(), openPanel(host)]).toEqual([false, null]);
+  });
+
+  it("records the panel the switch wants", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { presence } = await mountHidden(withShells());
+
+    // Act
+    presence.setShown(true);
+    await settle();
+
+    // Assert
+    const record = await forwardedRecord(capture, "footer.arrival");
+    expect(record.context).toMatchObject({ wanted: "shells", previous: null });
+  });
+
+  it("files an unreadable last view rather than throwing at the host's show", async () => {
+    // Arrange: a push whose status sets no arm, skipped at the push and left
+    // behind as the view the switch redraws.
+    const capture = captureLogRecords();
+    const presence = hiddenInHost();
+    const { h } = mount(harness(), async () => true, presence);
+    await settle();
+    h.tail.push(
+      create(WatchFooterResponseSchema, {
+        footer: {
+          strip: create(FooterStripSchema, {
+            status: {},
+            clock: {},
+            tokens: { input: { text: "0 in" } },
+            liveWork: {},
+          }),
+          expanded: expanded(),
+        },
+      }),
+    );
+    await settle();
+    h.sink.reported.length = 0;
+
+    // Act
+    presence.setShown(true);
+    await settle();
+
+    // Assert
+    const record = await forwardedRecord(capture, "footer.arrival-redraw-undecodable");
+    expect([h.sink.reported, record.context]).toEqual([
+      ["frameUndecodable"],
+      expect.objectContaining({ path: expect.any(String), cause: expect.any(String) }),
+    ]);
+  });
+
+  it("stops listening for switches once disposed", async () => {
+    // Arrange
+    const { host, footer, presence } = await mountHidden(withShells());
+    footer.dispose();
+
+    // Act
+    presence.setShown(true);
+    await settle();
+
+    // Assert
+    expect([host.childElementCount, window.localStorage.getItem(panelStorageKey("ws-1"))]).toEqual([0, null]);
   });
 });
 

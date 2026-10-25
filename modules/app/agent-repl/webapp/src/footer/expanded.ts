@@ -260,6 +260,35 @@ export function shownPanel(
 ): FooterPanel | null {
   if (wanted === null) return null;
   if (panelHasEntries(u, wanted, stops)) return wanted;
+  return firstLiveChipPanel(u, stops);
+}
+
+/**
+ * The panel the reader WANTS on arriving at the workspace: the host showing
+ * its page, which is what a switch to it is.
+ *
+ * A SWITCH LANDS ON AN EXPANDED FOOTER EXACTLY WHEN A CHIP HAS ENTRIES (owner
+ * ruling, 2026-10-24). With no chip panel carrying entries the section is
+ * collapsed, whatever was wanted before, the tokens sheet included. With one,
+ * the section is open: a wanted panel stands (`shownPanel` falls back from an
+ * empty one), and a closed section opens on the first chip panel in
+ * `CHIP_PANELS` that has entries. Between switches the reader's clicks stand.
+ */
+export function arrivalPanel(
+  u: FooterExpanded,
+  wanted: FooterPanel | null,
+  stops: StopControls,
+): FooterPanel | null {
+  const live = firstLiveChipPanel(u, stops);
+  if (live === null) return null;
+  return wanted ?? live;
+}
+
+/**
+ * The first chip panel in `CHIP_PANELS` with entries in U, or null when none
+ * has any: the one lookup both `shownPanel` and `arrivalPanel` fall back on.
+ */
+export function firstLiveChipPanel(u: FooterExpanded, stops: StopControls): FooterChipPanel | null {
   return CHIP_PANELS.find((panel) => panelHasEntries(u, panel, stops)) ?? null;
 }
 

@@ -15,6 +15,8 @@ import {
   FOOTER_PANELS,
   panelHasEntries,
   shownPanel,
+  arrivalPanel,
+  firstLiveChipPanel,
   countdownClock,
   createJumpNotices,
   rowFigures,
@@ -341,6 +343,79 @@ describe("shownPanel: the panel an open section shows", () => {
   it("keeps the emptied agents panel while its fan-wide stop holds an answer", () => {
     const h = harness();
     expect(shownPanel(expanded({ shells: [SHELL_ROW] }), "agents", stopsHoldingAnswer(h))).toBe("agents");
+  });
+});
+
+describe("arrivalPanel: the panel a switch to the workspace wants", () => {
+  const arrived = (wanted: FooterPanel | null, init: ExpandedInit) => {
+    const h = harness();
+    return arrivalPanel(expanded(init), wanted, createStopControls(h.ctx, () => undefined));
+  };
+
+  it("opens a closed section on the first chip panel with entries", () => {
+    expect(arrived(null, { monitors: [MONITOR_ROW], crons: [CRON_ROW] })).toBe("monitors");
+  });
+
+  it("keeps the wanted chip panel while it has entries", () => {
+    expect(arrived("crons", { agents: [AGENT_ROW], crons: [CRON_ROW] })).toBe("crons");
+  });
+
+  it("keeps an emptied wanted panel for the shown one to fall back from", () => {
+    expect(arrived("agents", { shells: [SHELL_ROW] })).toBe("agents");
+  });
+
+  it("keeps the wanted tokens sheet while a chip panel has entries", () => {
+    expect(arrived("tokens", { tasks: [TASK_ROW] })).toBe("tokens");
+  });
+
+  it.each([null, "tokens", "shells"] as const)(
+    "collapses the section wanting %s when no chip panel has entries",
+    (wanted) => {
+      expect(arrived(wanted, {})).toBeNull();
+    },
+  );
+
+  it("opens on the agents panel while only its fan-wide stop holds an answer", () => {
+    const h = harness();
+    expect(arrivalPanel(expanded({}), null, stopsHoldingAnswer(h))).toBe("agents");
+  });
+
+  it("answers the same wanted panel shownPanel then resolves to a drawn one", () => {
+    // The two resolvers share panelHasEntries: whatever arrives open, shows.
+    const h = harness();
+    const stops = createStopControls(h.ctx, () => undefined);
+    const u = expanded({ merges: [MERGE_ROW] });
+    expect(shownPanel(u, arrivalPanel(u, "agents", stops), stops)).toBe("merges");
+  });
+});
+
+describe("firstLiveChipPanel: the first chip panel with entries", () => {
+  const first = (init: ExpandedInit) => {
+    const h = harness();
+    return firstLiveChipPanel(expanded(init), createStopControls(h.ctx, () => undefined));
+  };
+
+  it("answers null when no chip panel has entries", () => {
+    expect(first({})).toBeNull();
+  });
+
+  it("never answers the tokens panel, whose lines are always set", () => {
+    expect(first({ crons: [CRON_ROW] })).toBe("crons");
+  });
+
+  it("answers the earliest live panel in CHIP_PANELS order", () => {
+    expect(first({ merges: [MERGE_ROW], tasks: [TASK_ROW], monitors: [MONITOR_ROW] })).toBe("tasks");
+  });
+
+  it("counts the agents panel live while its fan-wide stop holds an answer", () => {
+    const h = harness();
+    expect(firstLiveChipPanel(expanded({ shells: [SHELL_ROW] }), stopsHoldingAnswer(h))).toBe("agents");
+  });
+
+  it("is the one place the chip panels are searched for entries", () => {
+    // A resolver hand-rolling its own search would drift from the others.
+    const searches = withoutBlockComments(expandedSource).match(/CHIP_PANELS\.(find|some|filter)\(/g) ?? [];
+    expect(searches).toHaveLength(1);
   });
 });
 

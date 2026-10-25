@@ -667,6 +667,7 @@ async function mountApp(
 
   const footer = mountFooter(shell.footer, ctx, {
     selectDetachedWork: (id: FeedId) => feed.selectDetachedWork(id),
+    presence: pagePresence(),
   });
   handles.push(footer);
   // PROSE LINKS ROUTE as the boot routes them (main.ts hangs the same one
