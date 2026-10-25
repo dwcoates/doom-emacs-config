@@ -3294,7 +3294,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       stateDir: deps.env.stateDir,
       workspaceKey,
       vendorSessionId: previous,
-      atMs: deps.nowMs(),
     });
   }
 
@@ -3710,7 +3709,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         stateDir: deps.env.stateDir,
         workspaceKey,
         vendorSessionId: identity.vendorSessionId,
-        atMs: deps.nowMs(),
       });
       // THE STOP KEY PARSES ONLY THE TURN IT STOPS: the transcript's index
       // takes in this turn now, while nobody waits on it.

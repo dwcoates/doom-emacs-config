@@ -23,7 +23,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { shimv1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
 import { workspaceLockKey } from "../../src/locks.js";
-import { BACKUP_KEEP, backupDir } from "../../src/engine/backup.js";
+import { backupDir, backupName } from "../../src/engine/backup.js";
 import { agentIdPath, vendorLinkPath } from "../../src/engine/identity.js";
 import {
   freshSession,
@@ -1115,20 +1115,24 @@ describe("the transcript backup", () => {
     stream.close();
   });
 
-  test("the copies are BOUNDED by the keep constant", async () => {
+  test("a conversation keeps ONE copy however many turns it takes", async () => {
     // An unbounded backup of a growing file eventually costs more than it
-    // protects. The bound is read from the producer's own constant rather than
-    // spelled again here.
+    // protects, so each turn appends to the conversation's one copy rather
+    // than taking another; the copy stays byte-equal to the transcript.
     const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const stream = await openAgentStream(shim);
 
-    for (let turn = 0; turn <= BACKUP_KEEP + 2; turn += 1) {
+    for (let turn = 0; turn < 4; turn += 1) {
       await runTurn(shim, stream, `t${String(turn)}`, "!md");
     }
 
     const directory = backupDir(shim.dirs.stateDir, keyOf(shim));
-    expect(readdirSync(directory).length).toBeLessThanOrEqual(BACKUP_KEEP);
+    const original = readFileSync(sessionTranscriptPath(shim.dirs, started.vendorSessionId));
+    expect([
+      readdirSync(directory),
+      readFileSync(join(directory, backupName(started.vendorSessionId))).equals(original),
+    ]).toEqual([[backupName(started.vendorSessionId)], true]);
     stream.close();
   });
 });
