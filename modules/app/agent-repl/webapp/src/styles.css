@@ -9510,8 +9510,10 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   align-self: flex-end; max-width: 60%; display: flex; flex-direction: column;
   align-items: flex-end; gap: 6px;
 }
+/* THE QUESTION IS THE ONE BUBBLE (owner request, 2026-10-25): a plain grey,
+   not the feed prompt's blue, and the answer below it has no ground at all. */
 .chat-q {
-  position: relative; background: var(--user); color: var(--fg);
+  position: relative; background: var(--card); color: var(--fg);
   padding: 10px 14px; border-radius: 8px; box-shadow: var(--bubble-shadow);
   line-height: 1.5; z-index: 1; white-space: pre-wrap; overflow-wrap: anywhere;
 }
@@ -9519,7 +9521,7 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 .chat-q-stacked { margin-bottom: 10px; }
 .chat-q-stacked::before, .chat-q-stacked::after {
   content: ""; position: absolute; left: 6px; right: 6px; height: 100%;
-  border-radius: 8px; background: var(--user); z-index: -1; box-shadow: var(--bubble-shadow);
+  border-radius: 8px; background: var(--card); z-index: -1; box-shadow: var(--bubble-shadow);
 }
 .chat-q-stacked::before { top: 5px; opacity: .55; }
 .chat-q-stacked::after { top: 10px; left: 12px; right: 12px; opacity: .3; }
@@ -9537,11 +9539,7 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   width: 22px; height: 22px; border-radius: 5px; font-size: 14px; line-height: 1;
 }
 .chat-siblings ar-button:hover { background: var(--card); color: var(--fg); }
-.chat-a {
-  align-self: flex-start; max-width: 100%;
-  background: var(--assistant); border-radius: 8px; box-shadow: var(--bubble-shadow);
-  padding: 14px 18px; line-height: 1.6; overflow-wrap: anywhere;
-}
+.chat-a { align-self: flex-start; max-width: 100%; line-height: 1.6; overflow-wrap: anywhere; }
 .chat-a > :first-child { margin-top: 0; }
 .chat-a > :last-child { margin-bottom: 0; }
 .chat-a mark.chat-quote-mark {
