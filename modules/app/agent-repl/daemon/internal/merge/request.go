@@ -230,7 +230,9 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 				arm = ArmAlreadyMerging
 			}
 			refusal := refuse(arm, ws, "the merge already stands %s in its repository's queue", queued.State)
-			log.Warn(op, "refused a duplicate merge request", withField(fields, "repo", string(repo)))
+			// A TYPED REFUSAL THE CALLER ACTS ON, not a condition to remediate:
+			// the merge it asked for already stands, and the answer says so.
+			log.Info(op, "refused a duplicate merge request", withField(fields, "repo", string(repo)))
 			return Enqueued{}, refusal
 		}
 		if wsm.IsFamilyRefusal(err) {
