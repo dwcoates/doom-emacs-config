@@ -210,12 +210,12 @@ func (s *store) releaseOwnedLeases(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			n, err := res.RowsAffected()
+			touched, err := touchedRow(res)
 			if err != nil {
 				return err
 			}
 			entry := string(l.ID) + " " + string(l.Workspace) + " " + l.Holder.String()
-			if n == 0 {
+			if !touched {
 				gone = append(gone, entry)
 				continue
 			}

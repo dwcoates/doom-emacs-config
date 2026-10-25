@@ -597,11 +597,11 @@ func subsectionRow(ctx context.Context, tx *sql.Tx, id SubsectionID) (Subsection
 // requireSubsectionRow refuses a write that touched no subsection with
 // ErrUnknownSubsection.
 func requireSubsectionRow(res sql.Result, id SubsectionID) error {
-	n, err := res.RowsAffected()
+	touched, err := touchedRow(res)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
+	if !touched {
 		return &UnknownSubsectionError{ID: id}
 	}
 	return nil

@@ -193,8 +193,7 @@ func (s *store) UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceI
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		ended = n > 0
+		ended, err = touchedRow(res)
 		return err
 	})
 	return ended, err

@@ -577,14 +577,22 @@ func updateWorkspaceColumns(ctx context.Context, tx *sql.Tx, id WorkspaceID, col
 // requireOneRow turns "no rows affected" into a refusal. A write that matched
 // nothing is an unknown id, never a success.
 func requireOneRow(res sql.Result, what string) error {
-	n, err := res.RowsAffected()
+	touched, err := touchedRow(res)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
+	if !touched {
 		return fmt.Errorf("%s: %w", what, ErrNotFound)
 	}
 	return nil
+}
+
+// touchedRow answers whether RES's statement changed a row: THE ONE READ of
+// whether a write found what it named, which every "did it touch anything"
+// question in the store asks.
+func touchedRow(res sql.Result) (bool, error) {
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // MarkClosed records that a workspace's editor state is torn down, and, in the
@@ -996,12 +1004,6 @@ func expandFoldsHolding(ctx context.Context, tx *sql.Tx, id WorkspaceID) (expand
 		return out, fmt.Errorf("wsm: expand the subsection of %s: %w", id, err)
 	}
 	return out, nil
-}
-
-// touchedRow answers whether RES's statement changed a row.
-func touchedRow(res sql.Result) (bool, error) {
-	n, err := res.RowsAffected()
-	return n > 0, err
 }
 
 // Current reports the currently selected workspace, nil when none is.

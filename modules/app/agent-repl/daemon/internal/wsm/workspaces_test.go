@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -1879,5 +1881,72 @@ func TestSelectingAWorkspaceIsAtomicWithItsExpansion(t *testing.T) {
 				t.Fatalf("the failed selection was not logged at error: %v", log.Records())
 			}
 		})
+	}
+}
+
+// affected is a sql.Result answering N rows affected, or ERR.
+type affected struct {
+	n   int64
+	err error
+}
+
+func (affected) LastInsertId() (int64, error)   { return 0, errors.New("not asked") }
+func (a affected) RowsAffected() (int64, error) { return a.n, a.err }
+
+func TestTouchedRow(t *testing.T) {
+	failed := errors.New("rows affected unreadable")
+	tests := []struct {
+		name    string
+		res     affected
+		want    bool
+		wantErr error
+	}{
+		{"no row is untouched", affected{n: 0}, false, nil},
+		{"one row is touched", affected{n: 1}, true, nil},
+		{"many rows are touched", affected{n: 3}, true, nil},
+		{"an unreadable count is the error", affected{err: failed}, false, failed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := touchedRow(tt.res)
+
+			// Assert
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("touchedRow err = %v, want %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("touchedRow = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryTouchedQuestionAsksTouchedRow pins that no store write hand-rolls
+// "did it touch a row" off RowsAffected: a count compared with zero is
+// touchedRow's one question.
+func TestEveryTouchedQuestionAsksTouchedRow(t *testing.T) {
+	// Arrange
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	handRolled := regexp.MustCompile(`n, err :?= res\.RowsAffected\(\)(?s:.{0,200}?)\bn (>|==|!=) 0\b`)
+
+	for _, path := range sources {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		// Act
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		src := strings.Replace(string(raw), "func touchedRow(res sql.Result) (bool, error) {\n\tn, err := res.RowsAffected()\n\treturn n > 0, err", "", 1)
+
+		// Assert
+		if loc := handRolled.FindStringIndex(src); loc != nil {
+			t.Errorf("%s hand-rolls touchedRow: %q", path, src[loc[0]:loc[1]])
+		}
 	}
 }

@@ -39,8 +39,7 @@ func (s *store) TakeCloseWhenTurnEnds(ctx context.Context, id WorkspaceID) (bool
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		taken = n > 0
+		taken, err = touchedRow(res)
 		return err
 	})
 	return taken, err
