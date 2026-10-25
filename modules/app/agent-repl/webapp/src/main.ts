@@ -32,6 +32,7 @@
  * it did not, which is the documented exception to "no direct console".
  */
 import { installGateDock } from "./feed/gate-dock.js";
+import { installAskTray } from "./feed/ask-tray.js";
 import "./styles.css";
 // The chat's serif (styles.css, `.chat-col`), bundled so every machine draws
 // the same face: the optical-size axis, upright and italic.
@@ -362,6 +363,9 @@ export async function boot(): Promise<void> {
     // A STANDING GATE DOCKS AT THE BOTTOM EDGE while Emacs hides the input
     // window over it; both read the daemon's one cold-gate standing.
     installGateDock(shell.feed, shell.gateDock);
+    // AN OPEN QUESTION OR PERMISSION IS DRAWN BELOW THE HELD PROMPTS, the
+    // scroll zone's last region.
+    installAskTray(shell.feed, shell.askTray);
 
     // PROSE LINKS ROUTE LIKE STRUCTURED ONES. A markdown anchor in a bubble or
     // the held section would otherwise navigate the webview away from the

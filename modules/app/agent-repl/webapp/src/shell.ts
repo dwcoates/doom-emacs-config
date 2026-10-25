@@ -29,6 +29,8 @@ export interface ShellElements {
   feed: HTMLElement;
   /** The held-prompt tray at the feed's tail, inside the scroll zone. */
   holdTray: HTMLElement;
+  /** The open asks' tray, after the hold tray. Ships hidden. */
+  askTray: HTMLElement;
   /** The jump-to-tail control's slot, between the scroll zone and the footer. */
   feedJump: HTMLElement;
   /** The status footer, docked below the scroll zone. */
@@ -58,6 +60,7 @@ const SHELL_IDS: ReadonlyArray<readonly [keyof ShellElements, string]> = [
   ["feedScroll", "feed-scroll"],
   ["feed", "feed"],
   ["holdTray", "hold-tray"],
+  ["askTray", "ask-tray"],
   ["feedJump", "feed-jump"],
   ["footer", "footer"],
   ["gateDock", "gate-dock"],

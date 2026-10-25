@@ -5,6 +5,7 @@ import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 // The docks built on the helper, read as text so the suite can hold them to it.
 import gateDockSource from "../../src/feed/gate-dock.ts?raw";
+import askTraySource from "../../src/feed/ask-tray.ts?raw";
 
 /** MutationObserver delivers on a microtask; this lets it run. */
 async function settle(): Promise<void> {
@@ -277,6 +278,7 @@ describe("installCardDock", () => {
 describe("the docks built on installCardDock", () => {
   it.each([
     ["gate-dock.ts", gateDockSource],
+    ["ask-tray.ts", askTraySource],
   ])("%s docks through the shared helper and moves no card itself", (_name, source) => {
     // Arrange / Act
     const usesHelper = source.includes("installCardDock(");
