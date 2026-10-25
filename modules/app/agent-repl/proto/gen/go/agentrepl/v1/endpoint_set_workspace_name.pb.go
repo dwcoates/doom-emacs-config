@@ -192,9 +192,16 @@ type SetWorkspaceNameSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The name the workspace now has, with the prefix applied: what the
 	// sidebar draws and what every later CLI call names the workspace by.
-	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// The revision of the roster the daemon resolved after the rename
+	// (frontend.v1.WorkspaceRoster.revision): every roster at or above it
+	// carries the new name. A sidebar that renamed a row holds its drawing
+	// until a push at or above it arrives, as it does for
+	// ArrangeSidebarSuccess.roster_revision. 0 when the daemon has resolved no
+	// roster yet.
+	RosterRevision uint64 `protobuf:"varint,2,opt,name=roster_revision,json=rosterRevision,proto3" json:"roster_revision,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SetWorkspaceNameSuccess) Reset() {
@@ -232,6 +239,13 @@ func (x *SetWorkspaceNameSuccess) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *SetWorkspaceNameSuccess) GetRosterRevision() uint64 {
+	if x != nil {
+		return x.RosterRevision
+	}
+	return 0
 }
 
 // The daemon's refusals; nothing was recorded and the workspace keeps its
@@ -895,9 +909,10 @@ const file_agentrepl_v1_endpoint_set_workspace_name_proto_rawDesc = "" +
 	"\x18SetWorkspaceNameResponse\x12A\n" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.SetWorkspaceNameSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.SetWorkspaceNameErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"-\n" +
+	"\x06result\"V\n" +
 	"\x17SetWorkspaceNameSuccess\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\xb7\x04\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
+	"\x0froster_revision\x18\x02 \x01(\x04R\x0erosterRevision\"\xb7\x04\n" +
 	"\x15SetWorkspaceNameError\x12]\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.SetWorkspaceNameUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.SetWorkspaceNameWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +

@@ -54,6 +54,13 @@ message SetWorkspaceNameSuccess {
   // The name the workspace now has, with the prefix applied: what the
   // sidebar draws and what every later CLI call names the workspace by.
   string name = 1;
+  // The revision of the roster the daemon resolved after the rename
+  // (frontend.v1.WorkspaceRoster.revision): every roster at or above it
+  // carries the new name. A sidebar that renamed a row holds its drawing
+  // until a push at or above it arrives, as it does for
+  // ArrangeSidebarSuccess.roster_revision. 0 when the daemon has resolved no
+  // roster yet.
+  uint64 roster_revision = 2;
 }
 
 // The daemon's refusals; nothing was recorded and the workspace keeps its

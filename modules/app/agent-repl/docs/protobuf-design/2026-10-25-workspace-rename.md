@@ -77,6 +77,18 @@ this record is written without per-increment selections.
       renamed one;
     - the merge queue's labels of the renamed workspace's repository.
 
+### `agentrepl.v1.SetWorkspaceNameSuccess.roster_revision` (new field)
+
+- WHAT: `uint64 roster_revision = 2`, the revision of the roster the daemon
+  resolved after the rename.
+- WHY: the sidebar renames a row from a popup and holds its drawing until
+  the push that carries the change arrives (`sendHeld`). That is how it
+  treats `ArrangeSidebarSuccess.roster_revision` and
+  `SetWorkspaceOneShotSuccess.roster_revision`, so the popup's rename never
+  draws the old name after the popup closes.
+- Consequences: the server fills it from `sidebar.Resolver.Revision()`, as
+  `SetWorkspaceOneShot` does.
+
 ## Places that read the name, checked against the principle
 
 The audit read every `.Name` read of a `wsm.Workspace` in the daemon
