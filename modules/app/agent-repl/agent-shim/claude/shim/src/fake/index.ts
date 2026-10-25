@@ -595,11 +595,28 @@ export function createFakeQuery(
       ? judgeTruncatingResume(transcriptPath(configDir, cwd, opts.resume), opts.resumeSessionAt, opts.resumeDropsTurn)
       : undefined;
   const bootRefusal = truncating?.kind === "refused" ? truncating.message : undefined;
-  /** A control call answered by a booted vendor, or failed by one whose boot refused. */
+  /**
+   * WHY THE VENDOR'S PROCESS IS GONE AT BOOT, when it is: a refused truncating
+   * resume, and the three `start-*` refusals, each of which writes what it
+   * writes and ends its stream before serving a control request.
+   */
+  const exitedAtBoot =
+    bootRefusal ??
+    (refuse.has("start-error-result") || refuse.has("start-auth-error") || refuse.has("start-eof")
+      ? "it refused the session's opening"
+      : undefined);
+  /**
+   * A control call answered by a booted vendor, or failed by one gone at boot.
+   * THE FAILURE COMES AFTER THE GONE PROCESS'S OUTPUT, as a real child's exit
+   * is seen only after the output it wrote before exiting: one turn of the
+   * event loop, in which every message the stream already holds is readable.
+   */
   const control = <T>(answer: () => T): Promise<T> =>
-    bootRefusal === undefined
+    exitedAtBoot === undefined
       ? Promise.resolve(answer())
-      : Promise.reject(new Error(`the mocked vendor exited at boot: ${bootRefusal}`));
+      : new Promise((_, reject) =>
+          setImmediate(() => reject(new Error(`the mocked vendor exited at boot: ${exitedAtBoot}`))),
+        );
 
   // The session uuid every message currently reports. MUTABLE because the
   // vendor mutates it: a `/clear` retires the transcript identity mid-stream

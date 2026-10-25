@@ -5816,6 +5816,21 @@ describe("the teardown's waits are bounded", () => {
     ]).toEqual([false, true]);
   });
 
+  it("still reads a message the vendor sent before the shim let the query go", async () => {
+    // Arrange: a message is already on its way when the teardown begins.
+    const h = harness({ closeLeavesStreamOpen: true, watcherConclusionBudgetMs: 5 });
+    await started(h);
+    const query = (await untilQuery(h, 0)).query;
+    const before = h.fold.seen.length;
+    query.emit(hookResponse({ uuid: "00000000-0000-4000-8000-00000000000c" }));
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    expect(h.fold.seen.length).toBe(before + 1);
+  });
+
   it("names where the message loop was parked when it outlives its budget after the close", async () => {
     // Arrange: the loop is held by the store writer's backpressure, which the
     // close does not end.
