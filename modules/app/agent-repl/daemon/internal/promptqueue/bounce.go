@@ -957,9 +957,13 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 		// THE WORKSPACE STAYS DRAINING for the stage behind this one, whether
 		// this one finished or failed: a move asked of the workspace (a
 		// handover's transfer) is owed whatever became of its replacement.
-		if runErr != nil {
+		if bounce.OutcomeOf(runErr) == bounce.OutcomeFailed {
 			log.Error(opBounce, "a stage of the bounce failed; the workspace stays draining for the stage after it", dlog.Context{
 				"reason": req.Reason, "next": next.req.Reason, "cause": runErr.Error(),
+			})
+		} else if runErr != nil {
+			log.Info(opBounce, "a stage of the bounce ended unperformed; the workspace stays draining for the stage after it", dlog.Context{
+				"reason": req.Reason, "next": next.req.Reason, "outcome": runErr.Error(),
 			})
 		} else {
 			log.Info(opBounce, "a stage of the bounce finished; the workspace stays draining for the stage after it", dlog.Context{
@@ -974,6 +978,13 @@ func (q *queue) finishStage(ws ids.WorkspaceID, stage *bounceStage, runErr error
 	}
 
 	switch {
+	case runErr != nil && bounce.OutcomeOf(runErr) != bounce.OutcomeFailed:
+		// AN OUTCOME, NOT A FAILURE (bounce.OutcomeOf): the bounce was dropped
+		// unrun because nothing is left to replace -- the workspace closed, or
+		// its shim departed -- or a move carried it to the next daemon.
+		log.Info(opBounce, "the bounce ended unperformed; dispatch resumes on what serves the workspace", dlog.Context{
+			"reason": req.Reason, "outcome": runErr.Error(), "state": "draining", "before": true, "after": false,
+		})
 	case runErr != nil:
 		// THE WORKSPACE IS SERVED AS IT WAS. A bounce that failed replaced
 		// nothing it could not put back, so dispatch resumes on whatever serves

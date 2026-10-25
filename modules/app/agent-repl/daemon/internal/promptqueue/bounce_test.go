@@ -425,6 +425,41 @@ func TestAFailedBounceResumesDispatchAndSaysSo(t *testing.T) {
 	}
 }
 
+func TestABounceDroppedUnrunResumesDispatchAtInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "nothing is left to replace", err: fmt.Errorf("the workspace is closed: %w", bounce.ErrUnregistered)},
+		{name: "a move carried it across", err: fmt.Errorf("moved: %w", bounce.ErrHandedAcross)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			heldPrompt(t, h, "queued", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+			h.watcher.idle()
+			g := newGate()
+			if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.request("build_stale", false)); err != nil {
+				t.Fatalf("RequestBounce: %v", err)
+			}
+			g.awaitStart(t)
+
+			// Act
+			g.finish(h, tt.err)
+
+			// Assert
+			<-g.done
+			if !logged(h.log.Records(), "info", opBounce, "the bounce ended unperformed; dispatch resumes on what serves the workspace") {
+				t.Fatalf("records = %+v, want the unperformed end at INFO", h.log.Records())
+			}
+			if logged(h.log.Records(), "error", opBounce, "the bounce failed") {
+				t.Fatalf("records = %+v, want no failure recorded", h.log.Records())
+			}
+		})
+	}
+}
+
 func TestAKeepDrainingBounceLeavesTheWorkspaceDrained(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
