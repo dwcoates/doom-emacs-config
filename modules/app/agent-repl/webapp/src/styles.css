@@ -9559,9 +9559,13 @@ ar-button.merge-queue-move[aria-disabled="true"] {
    column to its content. An answer fits its text up to the whole column and
    hugs the left rail; a question fits its text up to 60% of the column and
    hugs the right rail. */
+/* THE CHAT'S TEXT IS A SHADE GREYER than the theme's foreground (owner
+   request, 2026-10-25): mixed a fifth of the way toward --muted, so either
+   theme's pair carries it. */
 .chat-col {
   width: var(--agent-bubble-cap); margin: 0 auto; padding: 28px 0 48px;
   display: flex; flex-direction: column; gap: 18px;
+  color: color-mix(in srgb, var(--fg) 80%, var(--muted));
 }
 .chat-empty { color: var(--muted); text-align: center; margin-top: 18vh; line-height: 1.7; }
 .chat-exchange { display: flex; flex-direction: column; gap: 18px; }
@@ -9572,7 +9576,7 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 /* THE QUESTION IS THE ONE BUBBLE (owner request, 2026-10-25): a plain grey,
    not the feed prompt's blue, and the answer below it has no ground at all. */
 .chat-q {
-  position: relative; background: var(--card); color: var(--fg);
+  position: relative; background: var(--card); color: inherit;
   padding: 10px 14px; border-radius: 8px; box-shadow: var(--bubble-shadow);
   line-height: 1.5; z-index: 1; white-space: pre-wrap; overflow-wrap: anywhere;
 }
