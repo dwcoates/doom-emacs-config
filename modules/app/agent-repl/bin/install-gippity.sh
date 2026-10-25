@@ -24,8 +24,9 @@ if [[ -n "$icon" && ! -f "$icon" ]]; then
   exit 1
 fi
 
-script="$(mktemp -t gippity).applescript"
-trap 'rm -f "$script"' EXIT
+work="$(mktemp -d "${TMPDIR:-/tmp}/gippity.XXXXXX")"
+trap 'rm -rf "$work"' EXIT
+script="$work/gippity.applescript"
 cat > "$script" <<APPLESCRIPT
 do shell script "open -a Emacs " & quoted form of "$launch_file"
 APPLESCRIPT
