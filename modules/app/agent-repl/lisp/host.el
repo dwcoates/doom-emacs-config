@@ -1265,8 +1265,8 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:host (agent-repl-host--apply-state ws value))
     (:notification-clicked (agent-repl-host--notification-clicked ws))
     (:selection (agent-repl-host--apply-selection ws value))
-    (:final-response-clicked (agent-repl-host--final-response-clicked ws))
-    (:chat-text-highlighted (agent-repl-host--chat-text-highlighted ws))
+    (:final-response-clicked (agent-repl-host--reply-target-picked ws "final-response-clicked"))
+    (:chat-text-highlighted (agent-repl-host--reply-target-picked ws "chat-text-highlighted"))
     (:select-requested (agent-repl-host--select-requested ws))
     (:compose-entry (agent-repl-host--compose-entry ws value))
     (:transferred (agent-repl-host--transferred ws value))
@@ -1366,26 +1366,17 @@ nothing selected."
 Nil exactly while nothing is selected (or no push has arrived yet)."
   (plist-get (agent-repl-host--entry ws) :selection-markdown))
 
-;;;; ---- The final-response click ----
+;;;; ---- The reply target picked in the webview ----
 
-(defun agent-repl-host--final-response-clicked (ws)
-  "Focus WS's composer: the reader clicked a final response in its webview.
-The click selected the response, so the next prompt replies to it; the
-keyboard is still in the webview, and the composer takes it in insert
-state (`agent-repl-input-focus-for-reply').  An event, never replayed, so
-a reconnect never moves the keyboard."
-  (agent-repl--info ws "elisp.host.final-response-clicked ws=%s" ws)
-  (agent-repl-input-focus-for-reply ws))
-
-;;;; ---- The chat highlight ----
-
-(defun agent-repl-host--chat-text-highlighted (ws)
-  "Focus WS's composer: the reader selected words in its chat answer.
-The next question is asked of the highlighted words, so the composer
-takes the keyboard in insert state (`agent-repl-input-focus-for-reply'),
-as for a final response's click.  An event, never replayed, so a
-reconnect never moves the keyboard."
-  (agent-repl--info ws "elisp.host.chat-text-highlighted ws=%s" ws)
+(defun agent-repl-host--reply-target-picked (ws event)
+  "Focus WS's composer: the reader picked in its webview what to reply to.
+EVENT names the push, recorded as `elisp.host.EVENT': a final response's
+click (`final-response-clicked') or words highlighted in a chat answer
+\(`chat-text-highlighted').  Either way the next prompt answers the pick
+and the keyboard is still in the webview, so the composer takes it in
+insert state (`agent-repl-input-focus-for-reply').  Both are events,
+never replayed, so a reconnect never moves the keyboard."
+  (agent-repl--info ws "elisp.host.%s ws=%s" event ws)
   (agent-repl-input-focus-for-reply ws))
 
 ;;;; ---- The rail's row click ----

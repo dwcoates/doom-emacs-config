@@ -2277,6 +2277,21 @@ answers `:unknown' and records the breach rather than opening."
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.chat-text-highlighted ws=ws-1"))))
 
+(ert-deftest agent-repl-test-host-both-reply-picks-share-one-handler ()
+  "A final response's click and a chat highlight both go through one handler."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let (picked)
+      (cl-letf (((symbol-function 'agent-repl-host--reply-target-picked)
+                 (lambda (ws event) (push (cons ws event) picked))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :final-response-clicked :value nil))
+        (agent-repl-test-host--push "ws-1" (list :arm :chat-text-highlighted :value nil)))
+      ;; Assert
+      (should (equal (nreverse picked)
+                     '(("ws-1" . "final-response-clicked") ("ws-1" . "chat-text-highlighted")))))))
+
 ;;;; ---- The branch click ----
 
 (ert-deftest agent-repl-test-host-compose-entry-opens-an-entry-in-this-workspaces-composer ()
