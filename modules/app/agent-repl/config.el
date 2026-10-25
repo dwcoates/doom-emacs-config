@@ -442,6 +442,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; file never triggers that module's panel close: the panels belong to the
 ;; workspace the file is being routed INTO.
 (agent-repl--load-module "find-file-workspace")
+;; WHY: settings.el lays the user's key binding edits over every binding
+;; the modules above made, so it loads after all of them; its sections are
+;; input-help.el's topics.
+(agent-repl--load-module "settings")
 ;; WHY: splash.el dresses Doom's dashboard as ZETTEL.  Its shortcuts name
 ;; commands from keybindings.el, worktree.el and input-help.el, and its mode
 ;; line reads the release out of roster.el's view, all loaded above.

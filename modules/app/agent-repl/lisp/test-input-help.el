@@ -34,10 +34,7 @@
   (declare (indent 0))
   `(let ((agent-repl-test-input-help--fatals nil))
      (cl-letf (((symbol-function 'agent-repl--fatal)
-                (lambda (_ws fmt &rest args)
-                  (let ((text (apply #'format fmt args)))
-                    (push text agent-repl-test-input-help--fatals)
-                    (error "%s" text)))))
+                (agent-repl-test--fatal-into agent-repl-test-input-help--fatals)))
        ,@body)))
 
 (defun agent-repl-test-input-help--context (&rest bindings)
@@ -51,10 +48,10 @@ for that map.  A `:composer' KEY-VECTOR may start with an Evil
                 (pcase-dolist (`(,key . ,command) pairs)
                   (define-key map key command))
                 map)))
-    (list :maps (list (map-of (plist-get bindings :composer)))
-          :global (list (cons "insert" (map-of (plist-get bindings :insert)))
-                        (cons "normal" (map-of (plist-get bindings :normal)))
-                        (cons nil (map-of (plist-get bindings :global))))
+    (list :maps (list (cons 'composer-map (map-of (plist-get bindings :composer))))
+          :global (list (cons "insert" (cons 'insert-map (map-of (plist-get bindings :insert))))
+                        (cons "normal" (cons 'normal-map (map-of (plist-get bindings :normal))))
+                        (cons nil (cons 'global-map (map-of (plist-get bindings :global)))))
           :leader (map-of (plist-get bindings :leader))
           :leader-key "SPC")))
 
@@ -145,19 +142,36 @@ map's `[intercept-state] all'."
 
 ;;;; ---- The header line ----
 
-(ert-deftest agent-repl-test-input-help-header-line-is-one-help-button ()
-  "The header line's only text, apart from the bar, is the Help button."
+(ert-deftest agent-repl-test-input-help-header-line-is-settings-then-help ()
+  "The header line's only words, apart from the bar, are its two buttons."
   (let ((line (agent-repl--input-help-header-line-text)))
-    (should (equal (string-trim (substring-no-properties line)) "Help"))
-    (should (eq (get-text-property (string-search "Help" line) 'face line)
-                'agent-repl-input-help-button))))
+    (should (equal (split-string (substring-no-properties line)) '("Settings" "Help")))
+    (dolist (word '("Settings" "Help"))
+      (should (eq (get-text-property (string-search word line) 'face line)
+                  'agent-repl-input-help-button)))))
 
-(ert-deftest agent-repl-test-input-help-button-click-runs-the-click-command ()
-  "The button's `mouse-1' in the header line runs `agent-repl-input-help-click'."
-  (let ((button (agent-repl--input-help-button)))
-    (should (eq (lookup-key (get-text-property 1 'local-map button) [header-line mouse-1])
-                #'agent-repl-input-help-click))
-    (should (eq (get-text-property 1 'mouse-face button) 'mode-line-highlight))))
+(ert-deftest agent-repl-test-input-help-help-button-click-runs-the-menu ()
+  "The Help button's `mouse-1' in the header line drops the topic menu."
+  (let ((line (agent-repl--input-help-header-line-text)))
+    (should (eq (lookup-key (get-text-property (string-search "Help" line) 'local-map line)
+                            [header-line mouse-1])
+                #'agent-repl-input-help-click))))
+
+(ert-deftest agent-repl-test-input-help-settings-button-click-opens-settings ()
+  "The Settings button's `mouse-1' in the header line opens the Settings page."
+  (let ((line (agent-repl--input-help-header-line-text)))
+    (should (eq (lookup-key (get-text-property (string-search "Settings" line) 'local-map line)
+                            [header-line mouse-1])
+                #'agent-repl-settings))))
+
+(ert-deftest agent-repl-test-input-help-button-is-raised-and-highlights ()
+  "A bar button wears the button face, highlights under the mouse, and clicks through its map."
+  (let* ((map (make-sparse-keymap))
+         (button (agent-repl--input-help-button "  X  " "echo" map)))
+    (should (eq (get-text-property 1 'face button) 'agent-repl-input-help-button))
+    (should (eq (get-text-property 1 'mouse-face button) 'mode-line-highlight))
+    (should (eq (get-text-property 1 'local-map button) map))
+    (should (equal (get-text-property 1 'help-echo button) "echo"))))
 
 ;;;; ---- The bar's colors ----
 
@@ -187,18 +201,19 @@ webapp/test/styles.test.ts."
                  agent-repl-input-help-button-background)))
 
 (ert-deftest agent-repl-test-input-help-header-line-grounds-every-gap-with-the-bar ()
-  "Every character outside the button carries the bar's face."
+  "Every character outside the buttons carries the bar's face."
   (let ((line (agent-repl--input-help-header-line-text)))
     (dotimes (i (length line))
       (unless (eq (get-text-property i 'face line) 'agent-repl-input-help-button)
         (should (eq (get-text-property i 'face line) 'agent-repl-input-help-bar))))))
 
-(ert-deftest agent-repl-test-input-help-header-line-puts-the-button-at-the-right-edge ()
-  "The bar stretches to just short of the right edge, where the button sits."
-  (let ((line (agent-repl--input-help-header-line-text)))
+(ert-deftest agent-repl-test-input-help-header-line-puts-the-buttons-at-the-right-edge ()
+  "The bar stretches to just short of the right edge, where the buttons sit."
+  (let* ((line (agent-repl--input-help-header-line-text))
+         (buttons (substring-no-properties line 1 (1- (length line)))))
     (should (equal (get-text-property 0 'display line)
-                   `(space :align-to (- right ,(1+ (string-width agent-repl-input-help--button-label))))))
-    (should (equal (substring-no-properties line 1) (concat agent-repl-input-help--button-label " ")))))
+                   `(space :align-to (- right ,(1+ (string-width buttons))))))
+    (should (equal buttons "  Settings     Help  "))))
 
 ;;;; ---- Installing the header line ----
 
@@ -316,11 +331,12 @@ webapp/test/styles.test.ts."
     (let ((context (agent-repl--input-help-binding-context
                     '(:id x :keymaps (agent-repl-input-mode-map agent-repl-input-selection-mode-map)))))
       (should (equal (plist-get context :maps)
-                     (list agent-repl-input-mode-map agent-repl-input-selection-mode-map)))
+                     (list (cons 'agent-repl-input-mode-map agent-repl-input-mode-map)
+                           (cons 'agent-repl-input-selection-mode-map agent-repl-input-selection-mode-map))))
       (should (equal (plist-get context :global)
-                     (list (cons "insert" evil-insert-state-map)
-                           (cons "normal" evil-normal-state-map)
-                           (cons nil (current-global-map)))))
+                     (list (cons "insert" (cons 'evil-insert-state-map evil-insert-state-map))
+                           (cons "normal" (cons 'evil-normal-state-map evil-normal-state-map))
+                           (cons nil (cons 'global-map global-map)))))
       (should (eq (plist-get context :leader) doom-leader-map))
       (should (equal (plist-get context :leader-key) "SPC")))))
 
@@ -368,6 +384,32 @@ webapp/test/styles.test.ts."
                                  :composer `((,(kbd "M-1") . a)))))
     (should (equal agent-repl-test-input-help--fatals
                    '("elisp.input-help.keys: unbound command=nowhere")))))
+
+(ert-deftest agent-repl-test-input-help-key-sources-name-each-keys-map-and-vector ()
+  "Each key names the keymap variable and vector that bind it.
+Compared in description order: a keymap's own order says nothing."
+  (should (equal (sort (agent-repl--input-help-key-sources
+                  'cmd (agent-repl-test-input-help--context
+                        :composer `((,(kbd "C-c C-c") . cmd) ([normal-state up] . cmd))
+                        :leader `((,(kbd "j RET") . cmd))))
+                       (lambda (x y) (string< (plist-get x :description) (plist-get y :description))))
+                 `((:description "<up>" :state "normal" :keymap composer-map :vector [normal-state up])
+                   (:description "C-c C-c" :state nil :keymap composer-map :vector ,(vconcat (kbd "C-c C-c")))
+                   (:description "SPC j RET" :state nil :keymap doom-leader-map :vector ,(vconcat (kbd "j RET")))))))
+
+(ert-deftest agent-repl-test-input-help-key-sources-name-a-remap-by-its-entry ()
+  "A key reached through `[remap X]' names the remap entry, which it shares."
+  (should (equal (agent-repl--input-help-key-sources
+                  'cmd (agent-repl-test-input-help--context
+                        :composer '(([remap target] . cmd))
+                        :insert '(([S-s-return] . target))))
+                 '((:description "S-s-RET" :state "insert" :keymap composer-map :vector [remap target])))))
+
+(ert-deftest agent-repl-test-input-help-key-sources-name-a-global-map ()
+  "A key bound in a global map names that map's variable."
+  (should (equal (agent-repl--input-help-key-sources
+                  'cmd (agent-repl-test-input-help--context :normal `((,(kbd "s-[") . cmd))))
+                 `((:description "s-[" :state "normal" :keymap normal-map :vector ,(vconcat (kbd "s-[")))))))
 
 (ert-deftest agent-repl-test-input-help-canonical-key-cases ()
   "RET and TAB read the same whichever event names them."
@@ -438,6 +480,21 @@ webapp/test/styles.test.ts."
     (should (equal (substring-no-properties
                     (agent-repl--input-help-variable-line 'agent-repl-send-postfix))
                    "agent-repl-send-postfix: \"\\n be brief\""))))
+
+(ert-deftest agent-repl-test-input-help-variable-value-escapes-newlines ()
+  "A value is printed with its newlines escaped, in the string face."
+  (let* ((agent-repl-send-postfix "\n be brief")
+         (value (agent-repl--input-help-variable-value 'agent-repl-send-postfix)))
+    (should (equal (substring-no-properties value) "\"\\n be brief\""))
+    (should (eq (get-text-property 0 'face value) 'font-lock-string-face))))
+
+(ert-deftest agent-repl-test-input-help-variable-value-is-shared-by-help-and-settings ()
+  "The help and the Settings page show a variable's value the same way."
+  (let* ((agent-repl-send-prefix "p: ")
+         (value (agent-repl--input-help-variable-value 'agent-repl-send-prefix)))
+    (dolist (line (list (agent-repl--input-help-variable-line 'agent-repl-send-prefix)
+                        (agent-repl-settings--variable-line 'agent-repl-send-prefix)))
+      (should (string-search (concat "agent-repl-send-prefix: " value) (substring-no-properties line))))))
 
 (ert-deftest agent-repl-test-input-help-variable-line-name-describes-the-variable ()
   "Pushing the variable's name describes it."
@@ -606,7 +663,7 @@ webapp/test/styles.test.ts."
 
 (ert-deftest agent-repl-test-input-help-click-drops-the-menu-at-the-click ()
   "Clicking the button pops the topic menu at the click's event."
-  (let ((event (agent-repl-test-input-help--click-event agent-repl-input-help--button-label 2))
+  (let ((event (agent-repl-test-input-help--click-event "  Help  " 2))
         popped)
     (cl-letf (((symbol-function 'popup-menu) (lambda (menu position) (push (list menu position) popped))))
       (agent-repl-input-help-click event))

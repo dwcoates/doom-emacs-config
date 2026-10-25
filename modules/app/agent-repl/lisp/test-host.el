@@ -2774,15 +2774,16 @@ would adopt onto a connection the link has let go of."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
-    (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
-              ((symbol-function 'agent-repl--fatal)
-               (lambda (_ws fmt &rest args) (error (apply #'format fmt args)))))
-      ;; Act / Assert
-      (should (string-match-p
-               "elisp.host.evaluate-no-connection ws=ws-1 token=t-1"
-               (cadr (should-error (agent-repl-test-host--evaluate "ws-1" "1")))))
-      (should-not (cl-find "AnswerEditorEvaluation" agent-repl-test-host--calls
-                           :key #'car :test #'equal)))))
+    (let (fatals)
+      (cl-letf (((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--fatal)
+                 (agent-repl-test--fatal-into fatals)))
+        ;; Act / Assert
+        (should (string-match-p
+                 "elisp.host.evaluate-no-connection ws=ws-1 token=t-1"
+                 (cadr (should-error (agent-repl-test-host--evaluate "ws-1" "1")))))
+        (should-not (cl-find "AnswerEditorEvaluation" agent-repl-test-host--calls
+                             :key #'car :test #'equal))))))
 
 (ert-deftest agent-repl-test-host-unknown-push-arm-is-an-error ()
   "An arm nobody knows is a contract breach, never a silent drop."

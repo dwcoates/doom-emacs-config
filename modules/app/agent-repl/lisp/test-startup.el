@@ -134,11 +134,12 @@ rebinds `agent-repl-test-startup--spawned'."
 (ert-deftest agent-repl-test-startup-an-end-before-any-link-up-is-fatal ()
   "A startup that ended naming no daemon is an invariant violation, raised loudly."
   (agent-repl-test-startup--with-milestones
-    (cl-letf (((symbol-function 'agent-repl--fatal)
-               (lambda (_ws fmt &rest args) (error (apply #'format fmt args)))))
-      ;; Act / Assert
-      (should-error (agent-repl-startup-ended))
-      (should-not agent-repl-test-startup--queued))))
+    (let (fatals)
+      (cl-letf (((symbol-function 'agent-repl--fatal)
+                 (agent-repl-test--fatal-into fatals)))
+        ;; Act / Assert
+        (should-error (agent-repl-startup-ended))
+        (should-not agent-repl-test-startup--queued)))))
 
 ;;;; ---- Doom's one-time setup at idle ----
 

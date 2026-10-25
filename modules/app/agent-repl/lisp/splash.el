@@ -14,6 +14,9 @@
 ;;     keymaps.
 ;;   - `+doom-dashboard--width' is the banner's width, so Doom centers the
 ;;     banner and the menu on one column.
+;;   - `+doom-dashboard-functions' gains `agent-repl-splash-widget-settings'
+;;     right under the banner: one Settings button, centered over the menu,
+;;     since it opens a page rather than running a key's command.
 ;;
 ;; THE MODE LINE READS "DOOM vX ZETTEL vY".  The dashboard's `mode-name' is
 ;; Doom's "DOOM vX"; `agent-repl-splash-install-mode-name' makes it an
@@ -30,11 +33,14 @@
 (require 'seq)
 
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--fatal "core" (ws fmt &rest args))
 (declare-function +doom-dashboard--center "ext:doom-dashboard" (len s))
 (declare-function +doom-dashboard-reload "ext:doom-dashboard" (&optional force))
 (declare-function nerd-icons-octicon "ext:nerd-icons" (name &rest args))
+(declare-function agent-repl-settings "settings" ())
 (defvar +doom-dashboard-ascii-banner-fn)
 (defvar +doom-dashboard-menu-sections)
+(defvar +doom-dashboard-functions)
 (defvar +doom-dashboard--width)
 (defvar +doom-dashboard-name)
 (defvar +doom-dashboard-mode-hook)
@@ -102,6 +108,30 @@ one block, as Doom's own banner does."
   "The splash's shortcuts, in `+doom-dashboard-menu-sections''s shape.
 Doom shows each with the key that runs its `:action'.")
 
+(defun agent-repl-splash-widget-settings ()
+  "Insert the splash's Settings button, centered under the banner."
+  (insert (+doom-dashboard--center
+           +doom-dashboard--width
+           (make-text-button "  Settings  " nil
+                             'face 'agent-repl-input-help-button
+                             'mouse-face 'highlight
+                             'help-echo "Change any key binding"
+                             'follow-link t
+                             'action (lambda (_) (agent-repl-settings))))
+          "\n"))
+
+(defun agent-repl-splash--with-settings (functions)
+  "Return Doom's dashboard widget FUNCTIONS with Settings after the banner."
+  (if (memq #'agent-repl-splash-widget-settings functions)
+      functions
+    (let ((banner (memq 'doom-dashboard-widget-banner functions)))
+      (unless banner
+        (agent-repl--fatal agent-repl-splash--log-scope
+                           "elisp.splash.widgets: no banner widget functions=%S" functions))
+      (append (seq-take functions (1+ (- (length functions) (length banner))))
+              (list #'agent-repl-splash-widget-settings)
+              (cdr banner)))))
+
 (defun agent-repl-splash-release ()
   "Return the agent-repl release the daemon last pushed, or nil before one."
   (plist-get (plist-get agent-repl-roster-view :version) :text))
@@ -132,7 +162,8 @@ An `:eval', so the release appears once the roster brings it."
   "Dress Doom's dashboard as ZETTEL, and redraw it when one is open."
   (setq +doom-dashboard-ascii-banner-fn #'agent-repl-splash-draw-banner
         +doom-dashboard-menu-sections agent-repl-splash-menu-sections
-        +doom-dashboard--width (agent-repl-splash-banner-width))
+        +doom-dashboard--width (agent-repl-splash-banner-width)
+        +doom-dashboard-functions (agent-repl-splash--with-settings +doom-dashboard-functions))
   (add-hook '+doom-dashboard-mode-hook #'agent-repl-splash-install-mode-name)
   (add-hook 'agent-repl-roster-update-functions #'agent-repl-splash--roster-updated)
   (let ((dashboard (agent-repl-splash--dashboard)))

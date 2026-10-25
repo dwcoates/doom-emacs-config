@@ -644,6 +644,34 @@ A site that hand-rolls `delete-process' on a subprocess orphans its children."
     ;; Assert
     (should (equal records '("second s=x" "first n=1")))))
 
+(ert-deftest agent-repl-test-helpers-fatal-into-records-then-signals ()
+  "The fatal stand-in keeps the record's text, then signals it."
+  ;; Arrange
+  (let ((records nil))
+    (cl-letf (((symbol-function 'agent-repl--fatal) (agent-repl-test--fatal-into records)))
+      ;; Act
+      (let ((err (should-error (agent-repl--fatal "ws-1" "broken n=%d" 1))))
+        ;; Assert
+        (should (equal (cadr err) "broken n=1"))))
+    (should (equal records '("broken n=1")))))
+
+(ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-fatal-stand-in ()
+  "Every suite stubs `agent-repl--fatal' with `agent-repl-test--fatal-into'.
+test-spell.el records each rung with its level, a different shape, and
+stubs every rung alike."
+  ;; Arrange
+  (let ((dir agent-repl-test-helpers--dir)
+        (hand-rolled nil))
+    ;; Act
+    (dolist (file (directory-files dir t "\\`test-.*\\.el\\'"))
+      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (when (re-search-forward "(symbol-function 'agent-repl--fatal)[ \t\n]*(lambda (_" nil t)
+            (push (file-name-nondirectory file) hand-rolled)))))
+    ;; Assert
+    (should-not hand-rolled)))
+
 (ert-deftest agent-repl-test-helpers-no-suite-hand-rolls-the-recorder ()
   "Every suite records a logging rung through `agent-repl-test--record-into'."
   ;; Arrange

@@ -100,6 +100,14 @@ load (BATCH-P nil) is already inert and is never refused."
            nil ,(if noerror noerror t))))
 
 ;; Doom workspace API
+;; Doom's dashboard module, which splash.el dresses as ZETTEL: its widget
+;; list as Doom defines it (agent-repl loads after every Doom module, so
+;; the variable is always bound there).
+(defvar +doom-dashboard-functions
+  '(doom-dashboard-widget-banner doom-dashboard-widget-shortmenu
+    doom-dashboard-widget-loaded doom-dashboard-widget-footer)
+  "Stub: Doom's dashboard widgets, in Doom's order.")
+
 (unless (fboundp '+workspace-current-name)
   (defun +workspace-current-name ()
     "Stub: return test workspace name."
@@ -1032,6 +1040,17 @@ Stub a rung with it: ((symbol-function \='agent-repl--error)
 \(agent-repl-test--record-into errors)).  THE ONE such recorder every suite
 uses (test-test-helpers.el holds every suite to it)."
   `(lambda (_scope fmt &rest args) (push (apply #'format fmt args) ,place)))
+
+(defmacro agent-repl-test--fatal-into (place)
+  "A stand-in for `agent-repl--fatal' that records into PLACE, then signals.
+Like `agent-repl-test--record-into', it pushes each record's text onto
+PLACE, newest first; then it signals an `error' carrying that text, as
+the real rung aborts its caller.  THE ONE such stand-in every suite uses
+\(test-test-helpers.el holds every suite to it)."
+  `(lambda (_scope fmt &rest args)
+     (let ((text (apply #'format fmt args)))
+       (push text ,place)
+       (error "%s" text))))
 
 (defvar agent-repl-test--popups-shown nil
   "Buffers handed to `agent-repl-popup-show' inside
