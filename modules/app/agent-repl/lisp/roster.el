@@ -84,6 +84,7 @@
 (declare-function agent-repl--panels-arm-arrivals "panels" ())
 (declare-function agent-repl-host-subscribe "host" (conn ws ref))
 (declare-function agent-repl-host-rename "host" (old new))
+(declare-function agent-repl--frontend-rename-webview "frontend" (ws))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (defvar agent-repl-host-reselect-pending)
 (defvar agent-repl-link-up-functions)
@@ -720,6 +721,10 @@ second tab."
     (agent-repl--ws-rename-persp old new)
     (agent-repl--ws-put new :ref ref)
     (agent-repl--ws-put new :dir (plist-get ref :dir))
+    ;; The webview's NAME is a panel key too: left on OLD, the window sweep
+    ;; deletes it as another workspace's orphan and the layout shows it
+    ;; again, a loop that pins Emacs.
+    (agent-repl--frontend-rename-webview new)
     (agent-repl--info new "elisp.roster.tab-rename: old=%s new=%s id=%s"
                       old new (plist-get ref :id))
     new))

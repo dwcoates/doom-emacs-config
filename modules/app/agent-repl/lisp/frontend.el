@@ -486,6 +486,35 @@ unowned workspace webview unrepresentable rather than merely unlikely."
                         name err))))
   buf)
 
+(defun agent-repl--frontend-rename-webview (ws)
+  "Give WS's webview the name and owner of WS, and return the buffer.
+A renamed workspace keeps its webview, which still wears the OLD name and
+owner.  Every panel predicate reads the workspace out of a panel's name
+\(`agent-repl--extract-panel-id'), so the window-change sweep took the
+current workspace's own webview for another workspace's orphan and
+deleted it, the layout reconciler showed it again, and the two looped
+forever.  Nil when WS has no live webview.  A name another buffer already
+holds is an error, logged, and the webview keeps its name: a uniquified
+name matches no panel pattern."
+  (let ((buf (agent-repl--ws-get ws :frontend-buffer))
+        (name (agent-repl--frontend-webview-buffer-name ws)))
+    (cond
+     ((not (buffer-live-p buf)) nil)
+     ((equal (buffer-name buf) name) buf)
+     ((get-buffer name)
+      (agent-repl--error ws "elisp.frontend.webview-rename-target-taken ws=%s buffer=%s target=%s"
+                         ws (buffer-name buf) name)
+      nil)
+     (t
+      (let ((old (buffer-name buf)))
+        (with-current-buffer buf
+          (setq-local agent-repl--owning-workspace ws)
+          (setq-local xwidget-webkit-buffer-name-format name)
+          (rename-buffer name))
+        (agent-repl--info ws "elisp.frontend.webview-renamed ws=%s from=%s to=%s"
+                          ws old name)
+        buf)))))
+
 (defun agent-repl--frontend-remap-stock-reload ()
   "Point this webview buffer's stock reload keys at our own reload command.
 
