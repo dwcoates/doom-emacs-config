@@ -54,6 +54,10 @@ type Deps struct {
 	// Row answers the workspace's roster row as the roster last resolved it,
 	// with that roster's revision (sidebar.Resolver.Row), for the answer.
 	Row func(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool)
+	// Thread reports whether the roster last resolved lists the workspace as
+	// a zettel chat thread, with that roster's revision
+	// (sidebar.Resolver.Thread): a thread has no row, and is answered so.
+	Thread func(ws ids.WorkspaceID) (uint64, bool)
 	// Now stamps every frame.
 	Now func() time.Time
 	// Log is the global logger: an open is the editor's, no workspace's.
@@ -126,6 +130,8 @@ func New(deps Deps) (*Coordinator, error) {
 		return nil, errors.New("opentabs: the owed-resumption read is required")
 	case deps.Row == nil:
 		return nil, errors.New("opentabs: the roster row is required")
+	case deps.Thread == nil:
+		return nil, errors.New("opentabs: the roster's thread listing is required")
 	case deps.Now == nil:
 		return nil, errors.New("opentabs: a clock is required")
 	case deps.Log == nil:
@@ -835,40 +841,56 @@ func (c *Coordinator) answerIfOpen(out *sender, sl *slot) {
 	// with that roster's revision, taken together.
 	sl.answered = true
 	c.lower(ws)
-	row, revision := c.answerRow(ws)
+	row, thread, revision := c.answerListing(ws)
 	fields["roster_revision"] = revision
+	fields["thread"] = thread
 	if reason != "" {
 		sl.failedWith = reason
 		fields["reason"] = reason
 		c.deps.Log.Info(op, "a workspace's open failed; its tab shows the fault", fields)
+		failed := &agentreplv1.OpenTabsOpenedFailed{Reason: reason, RosterRevision: revision}
+		switch {
+		case thread:
+			failed.Listing = &agentreplv1.OpenTabsOpenedFailed_Thread{Thread: &agentreplv1.OpenTabsOpenedThread{}}
+		case row != nil:
+			failed.Listing = &agentreplv1.OpenTabsOpenedFailed_Row{Row: row}
+		}
 		out.opened(ref, func(o *agentreplv1.OpenTabsOpened) {
-			o.Outcome = &agentreplv1.OpenTabsOpened_Failed{Failed: &agentreplv1.OpenTabsOpenedFailed{
-				Reason: reason, Row: row, RosterRevision: revision}}
+			o.Outcome = &agentreplv1.OpenTabsOpened_Failed{Failed: failed}
 		})
 		return
 	}
 	sl.ready = true
 	c.deps.Log.Info(op, "a workspace is open; its tab may show", fields)
+	ready := &agentreplv1.OpenTabsOpenedReady{RosterRevision: revision}
+	switch {
+	case thread:
+		ready.Listing = &agentreplv1.OpenTabsOpenedReady_Thread{Thread: &agentreplv1.OpenTabsOpenedThread{}}
+	case row != nil:
+		ready.Listing = &agentreplv1.OpenTabsOpenedReady_Row{Row: row}
+	}
 	out.opened(ref, func(o *agentreplv1.OpenTabsOpened) {
-		o.Outcome = &agentreplv1.OpenTabsOpened_Ready{Ready: &agentreplv1.OpenTabsOpenedReady{
-			Row: row, RosterRevision: revision}}
+		o.Outcome = &agentreplv1.OpenTabsOpened_Ready{Ready: ready}
 	})
 }
 
-// answerRow takes the workspace's roster row and its roster's revision for an
-// answer. A roster that carries no row of it is an invariant violation (an
-// open names only registered workspaces): it is recorded, and the answer goes
-// without a row rather than never.
-func (c *Coordinator) answerRow(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64) {
-	row, revision, ok := c.deps.Row(ws)
-	if !ok {
-		c.deps.Log.Error(op, "the roster carries no row of a workspace being answered open; the answer carries none", dlog.Context{
-			dlog.KeyWorkspaceID:   string(ws),
-			"invariant_violation": "every workspace an open answers is registered, so the roster resolves its row",
-		})
-		return nil, 0
+// answerListing takes how the roster lists the workspace for an answer, with
+// that roster's revision: its row, or (THREAD) a chat thread, which has none.
+// A roster that lists it neither way is an invariant violation (an open names
+// only registered workspaces): it is recorded, and the answer goes without a
+// listing rather than never.
+func (c *Coordinator) answerListing(ws ids.WorkspaceID) (*frontendv1.RosterRow, bool, uint64) {
+	if row, revision, ok := c.deps.Row(ws); ok {
+		return row, false, revision
 	}
-	return row, revision
+	if revision, ok := c.deps.Thread(ws); ok {
+		return nil, true, revision
+	}
+	c.deps.Log.Error(op, "the roster lists a workspace being answered open neither as a row nor as a thread; the answer carries no listing", dlog.Context{
+		dlog.KeyWorkspaceID:   string(ws),
+		"invariant_violation": "every workspace an open answers is registered, so the roster lists it",
+	})
+	return nil, false, 0
 }
 
 // allAnswered reports whether every workspace has had its `opened`.

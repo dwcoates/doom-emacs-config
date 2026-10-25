@@ -64,6 +64,25 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 		global.Error(opRegister, "the announced directory cannot be normalized", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", dir, err)
 	}
+	// A DIRECTORY THE REGISTRY HOLDS AS ANOTHER KIND IS ANSWERED AS ITSELF.
+	// Registration is idempotent by dir, and Emacs re-announces every
+	// workspace it holds when its daemon changes (a handover, an outage),
+	// chat threads included. A thread's directory is no git worktree and
+	// never was: what it is was settled when it was made (CreateThread), so
+	// its re-announcement re-opens and re-admits the row it already is, and
+	// git is asked about nothing. Only a repository workspace's facts are
+	// git's to say.
+	switch held, err := v.deps.DB.WorkspaceByDir(ctx, normalized); {
+	case err == nil && held.Kind != wsm.WorkspaceKindRepository:
+		global.Debug(opRegister, "the announced directory is a workspace of a kind git does not describe", dlog.Context{
+			"workspace": string(held.ID), "kind": string(held.Kind),
+		})
+		record, err := v.settleRegistered(ctx, global, normalized, held, false, facts)
+		return record, false, err
+	case err != nil && !errors.Is(err, wsm.ErrNotFound):
+		global.Error(opRegister, "could not look up the announced directory's workspace", dlog.Context{"cause": err.Error()})
+		return wsm.Workspace{}, false, fmt.Errorf("register %q: look up the held workspace: %w", normalized, err)
+	}
 	if !IsWorktree(normalized) {
 		// THE RPC IS THE CALLER'S TO NAME. This body serves two of them, so
 		// it raises the refusal unnamed and each verb stamps its own through
@@ -154,12 +173,24 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 		global.Error(opRegister, "could not record the workspace", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
 	}
+	record, err = v.settleRegistered(ctx, global, normalized, record, created, facts)
+	if err != nil {
+		return wsm.Workspace{}, false, err
+	}
+	return record, created, nil
+}
+
+// settleRegistered is a registered row's whole settling, whichever path
+// found it: recorded on the workspace's own sink, re-opened if the
+// announcement means to hold it, and admitted. CREATED says the
+// registration minted the row. Every failure is recorded here, once.
+func (v *verbs) settleRegistered(ctx context.Context, global dlog.Logger, normalized string, record wsm.Workspace, created bool, facts wsm.RegisterFacts) (wsm.Workspace, error) {
 	log, err := v.deps.Log.Workspace(normalized)
 	if err != nil {
 		global.Error(opRegister, "could not resolve the workspace log sink", dlog.Context{
 			"workspace": string(record.ID), "cause": err.Error(),
 		})
-		return wsm.Workspace{}, false, fmt.Errorf("register %q: resolve log sink: %w", normalized, err)
+		return wsm.Workspace{}, fmt.Errorf("register %q: resolve log sink: %w", normalized, err)
 	}
 	if created {
 		log.Info(opRegister, "registered a new workspace", dlog.Context{
@@ -197,12 +228,12 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 			// A CLOSED CHILD OF A PARENT THAT IS NOT OPEN STAYS CLOSED
 			// (wsm/family.go): the announcement is refused parent_not_open.
 			if refusedByFamily(log, opRegister, err) {
-				return wsm.Workspace{}, false, err
+				return wsm.Workspace{}, err
 			}
 			log.Error(opRegister, "could not re-open the announced workspace", dlog.Context{
 				"workspace": string(record.ID), "cause": err.Error(),
 			})
-			return wsm.Workspace{}, false, fmt.Errorf("register %q: re-open the closed workspace: %w", normalized, err)
+			return wsm.Workspace{}, fmt.Errorf("register %q: re-open the closed workspace: %w", normalized, err)
 		}
 		record.Closed = false
 		log.Info(opRegister, "the announcement re-opened a closed workspace", dlog.Context{
@@ -210,9 +241,9 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 		})
 	}
 	if err := v.admit(ctx, log, record, created); err != nil {
-		return wsm.Workspace{}, false, fmt.Errorf("register %q: %w", normalized, err)
+		return wsm.Workspace{}, fmt.Errorf("register %q: %w", normalized, err)
 	}
-	return record, created, nil
+	return record, nil
 }
 
 // admit makes a registered workspace one this daemon serves: its directory

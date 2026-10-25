@@ -55,6 +55,9 @@ type world struct {
 	revision uint64
 	// owedReads counts the owed-resumption reads.
 	owedReads int
+	// threads are the workspaces the fake roster lists as chat threads, with
+	// no row.
+	threads map[ids.WorkspaceID]bool
 }
 
 func newWorld(t *testing.T) *world {
@@ -108,10 +111,18 @@ func newWorld(t *testing.T) *world {
 		Row: func(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool) {
 			w.mu.Lock()
 			defer w.mu.Unlock()
+			if w.threads[ws] {
+				return nil, 0, false
+			}
 			return &frontendv1.RosterRow{
 				Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: string(ws)}},
 				Name:      &frontendv1.RosterRowName{Text: fmt.Sprintf("%s@%d", ws, w.revision)},
 			}, w.revision, true
+		},
+		Thread: func(ws ids.WorkspaceID) (uint64, bool) {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			return w.revision, w.threads[ws]
 		},
 		Now: func() time.Time { return time.Unix(100, 0) },
 		Log: w.log,
@@ -276,6 +287,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			ReadConversation: func(context.Context, ids.WorkspaceID) error { return nil },
 			Owed:             func(context.Context, ids.WorkspaceID) (bool, error) { return false, nil },
 			Row:              func(ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool) { return nil, 0, false },
+			Thread:           func(ids.WorkspaceID) (uint64, bool) { return 0, false },
 			Now:              time.Now,
 			Log:              dlog.NewTestLogger(),
 		}
@@ -290,6 +302,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{"conversation read", func(d *Deps) { d.ReadConversation = nil }},
 		{"owed read", func(d *Deps) { d.Owed = nil }},
 		{"roster row", func(d *Deps) { d.Row = nil }},
+		{"roster thread listing", func(d *Deps) { d.Thread = nil }},
 		{"clock", func(d *Deps) { d.Now = nil }},
 		{"logger", func(d *Deps) { d.Log = nil }},
 	}
@@ -1035,6 +1048,25 @@ func TestReadyCarriesTheWorkspacesRosterRow(t *testing.T) {
 	// Assert
 	if got := opened.GetReady().GetRow().GetWorkspace().GetWorkspace().GetId(); got != "a" {
 		t.Fatalf("ready row workspace = %q, want a", got)
+	}
+}
+
+func TestAThreadIsAnsweredReadyAsAThread(t *testing.T) {
+	// Arrange: the roster lists "t" in its thread section, with no row.
+	w := newWorld(t)
+	w.mu.Lock()
+	w.threads = map[ids.WorkspaceID]bool{"t": true}
+	w.mu.Unlock()
+	w.setLive("t")
+	w.start(none("t"))
+	w.expect(t, "t served", "t conversation_read")
+
+	// Act
+	opened := w.nextOpened(t)
+
+	// Assert
+	if opened.GetReady().GetThread() == nil || opened.GetReady().GetRow() != nil {
+		t.Fatalf("ready = %v, want the thread listing and no row", opened.GetReady())
 	}
 }
 

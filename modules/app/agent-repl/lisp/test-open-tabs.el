@@ -982,7 +982,7 @@ leaves the tab open."
     ;; Arrange
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
     ;; Act
-    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready '(:row (:name "a"))))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready '(:listing (:arm :row :value (:name "a")))))
     ;; Assert
     (should (equal agent-repl-test-open-tabs--rows-noted '((:name "a"))))))
 
@@ -993,7 +993,7 @@ leaves the tab open."
     (setq agent-repl-open-tabs--startup 'done)
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
     ;; Act
-    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready '(:row (:name "a"))))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready '(:listing (:arm :row :value (:name "a")))))
     ;; Assert
     (should (equal (car agent-repl-test-open-tabs--noted-at-show) '((:name "a"))))))
 
@@ -1004,9 +1004,21 @@ leaves the tab open."
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
     ;; Act
     (agent-repl-test-open-tabs--frame
-     (agent-repl-test-open-tabs--opened "a" :failed '(:reason "x" :row (:name "a"))))
+     (agent-repl-test-open-tabs--opened "a" :failed '(:reason "x" :listing (:arm :row :value (:name "a")))))
     ;; Assert
     (should (equal agent-repl-test-open-tabs--rows-noted '((:name "a"))))))
+
+(ert-deftest agent-repl-test-open-tabs-a-thread-answer-draws-and-indexes-no-row ()
+  "A chat thread's ready answer releases its tab and indexes no row: it has none."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame
+     (agent-repl-test-open-tabs--opened "a" :ready '(:listing (:arm :thread :value nil))))
+    ;; Assert
+    (should (equal (list (agent-repl-open-tabs-holds-p "a") agent-repl-test-open-tabs--rows-noted)
+                   '(nil nil)))))
 
 (ert-deftest agent-repl-test-open-tabs-a-hidden-answer-indexes-no-row ()
   "A hidden answer carries no row and indexes none."

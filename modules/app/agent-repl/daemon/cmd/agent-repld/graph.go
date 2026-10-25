@@ -720,9 +720,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			owed, err := p.DB.OwedTurns(ctx, ws)
 			return len(owed) > 0, err
 		},
-		Row: sidebarResolver.Row,
-		Now: time.Now,
-		Log: log,
+		Row:    sidebarResolver.Row,
+		Thread: sidebarResolver.Thread,
+		Now:    time.Now,
+		Log:    log,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the editor's opens: %w", err)
@@ -1280,7 +1281,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	verbs, err := workspace.New(workspace.Deps{
-		Instance:     p.Instance,
+		Instance: p.Instance,
 		// A NUKED THREAD'S GRAPH is deleted through the chat service, which
 		// also forgets what it held of the thread.
 		Threads:      chatService,
