@@ -7,6 +7,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedmarker"
 )
 
 // A VENDOR NOTICE AND THE FAULT IT REPORTS ARE ONE CARD. The vendor's tooling
@@ -27,7 +28,7 @@ import (
 
 // The notice card's label, and its detail for each classified subject.
 const (
-	noticeLabel                = "vendor notice"
+	noticeLabel                = feedmarker.VendorNoticeLabel
 	noticeDetailUsageLimit     = "allowance exhausted"
 	noticeDetailUsageTransit   = "allowance window changed"
 	noticeDetailUsageWarning   = "approaching an allowance limit"
