@@ -402,6 +402,7 @@ func (d Deps) validate() error {
 	check(d.Names != nil, "Names")
 	check(d.InterruptTurn != nil, "InterruptTurn")
 	check(d.Briefs != nil, "Briefs")
+	check(d.SelfAddress != "", "SelfAddress")
 	check(d.Painter != nil, "Painter")
 	check(d.TestRunner != nil, "TestRunner")
 	check(d.Governor != nil, "Governor")

@@ -174,7 +174,7 @@ var cliNouns = map[string]map[string]cliCommand{
 	},
 	runtimeNoun: {
 		"deploy-hold":      {usage: "deploy-hold hold|release -repository here|DIR", run: runtimeDeployHold},
-		"roll-out-landing": {usage: "roll-out-landing [-deploy LEDGER]", run: runtimeRollOutLanding},
+		"roll-out-landing": {usage: "roll-out-landing [-deploy LEDGER] [-daemon ADDRESS]", run: runtimeRollOutLanding},
 		"health":           {usage: "health", run: runtimeHealth},
 		"prune-storage":    {usage: "prune-storage [-preview]", run: runtimePruneStorage},
 		"reap-worktrees":   {usage: "reap-worktrees [-preview] [-force]", run: runtimeReapWorktrees},
@@ -250,12 +250,17 @@ func (c *cliCall) dial(stateDir string) bool {
 	if err != nil {
 		return c.failed("%v", err)
 	}
+	c.dialAddress(address)
+	return true
+}
+
+// dialAddress makes the command's client for the daemon at ADDRESS.
+func (c *cliCall) dialAddress(address string) {
 	var options []connect.ClientOption
 	if c.dryRun != nil && *c.dryRun {
 		options = append(options, connect.WithInterceptors(dryRunInterceptor(c.out)))
 	}
 	c.client = c.deps.client(address, options...)
-	return true
 }
 
 // noted tells the caller what the command did on its behalf that the answer
@@ -1526,9 +1531,14 @@ func runtimeReapWorktrees(c *cliCall, args []string) int {
 	return answer(c, resp, err)
 }
 
+// runtimeRollOutLanding is a deploy hook's call. -daemon dials the daemon
+// running the deploy (AGENT_REPL_DEPLOY_DAEMON) rather than the one the
+// address file names, which a handover can make the other one; a ledger is
+// known only to the daemon that runs it.
 func runtimeRollOutLanding(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	deploy := fs.String("deploy", "", "the deploy's ledger, as AGENT_REPL_DEPLOY_LEDGER names it; unset starts the rollout at once")
+	daemon := fs.String("daemon", "", "the address of the daemon running the deploy, as AGENT_REPL_DEPLOY_DAEMON names it; unset dials the serving daemon")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
 		return exitFailure
@@ -1536,7 +1546,9 @@ func runtimeRollOutLanding(c *cliCall, args []string) int {
 	if len(positionals) != 0 {
 		return c.usageFailed("nothing is positional")
 	}
-	if !c.dial(*stateDir) {
+	if *daemon != "" {
+		c.dialAddress(*daemon)
+	} else if !c.dial(*stateDir) {
 		return exitFailure
 	}
 	req := &agentreplv1.RollOutLandingRequest{}

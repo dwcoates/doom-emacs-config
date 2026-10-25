@@ -56,7 +56,7 @@ func TestAScriptHookRunsFromTheRepositoryRootWithItsEnvironment(t *testing.T) {
 	if got.dir != h.targetD || !slices.Equal(got.argv, []string{"bash", h.scriptAt(checkScript)}) {
 		t.Fatalf("ran %v in %s, want bash and the script, in the repository root %s", got.argv, got.dir, h.targetD)
 	}
-	for _, want := range []string{EnvCallingWorkspace + "=" + h.sourceD, EnvDeployStage + "=pre_deploy"} {
+	for _, want := range []string{EnvCallingWorkspace + "=" + h.sourceD, EnvDeployStage + "=pre_deploy", EnvDeployDaemon + "=" + harnessSelfAddress} {
 		if !slices.Contains(got.env, want) {
 			t.Errorf("env = %v, want %s", got.env, want)
 		}

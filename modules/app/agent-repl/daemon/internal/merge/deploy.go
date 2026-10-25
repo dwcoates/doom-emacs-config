@@ -68,6 +68,14 @@ const (
 	// EnvDeployLedger is the deploy's ledger (agentrepl.v1.DeployLedger), which
 	// a script names when it calls back into the daemon about this deploy.
 	EnvDeployLedger = "AGENT_REPL_DEPLOY_LEDGER"
+	// EnvDeployDaemon is the address of the daemon running the deploy, which a
+	// script dials when it calls back about this deploy. A handover can leave
+	// the address file naming the OTHER daemon for the length of a hook, and
+	// a ledger is known only to the daemon that runs it: on 2026-10-25 a
+	// landing's roll-out-landing reached the outgoing daemon, which refused
+	// "a deploy this daemon is not running", and the landed change was never
+	// deployed.
+	EnvDeployDaemon = "AGENT_REPL_DEPLOY_DAEMON"
 	// EnvDeployStage is the stage the hook runs in.
 	EnvDeployStage = "AGENT_REPL_DEPLOY_STAGE"
 )
@@ -451,7 +459,10 @@ func (r *run) runScriptHook(ctx context.Context, stage stageOf, i int, script *r
 		}
 		r.upsert(round, hookScriptTab(round.live(), view))
 	}
-	env := []string{EnvCallingWorkspace + "=" + r.subject.dir, EnvDeployLedger + "=" + string(r.lease.ID), EnvDeployStage + "=" + stage.env}
+	env := []string{
+		EnvCallingWorkspace + "=" + r.subject.dir, EnvDeployLedger + "=" + string(r.lease.ID),
+		EnvDeployDaemon + "=" + r.o.deps.SelfAddress, EnvDeployStage + "=" + stage.env,
+	}
 	argv := []string{"bash", filepath.Join(r.target.repoRoot, script.GetPath())}
 	r.o.log(ctx, r.ws).Info(op, "a script hook started", fields)
 	run, err := r.o.deps.HookRunner.RunLinesWith(ctx, r.target.repoRoot, argv,

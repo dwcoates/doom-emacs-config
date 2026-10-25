@@ -802,6 +802,31 @@ func TestReapWorktreesAsksForASweepAPreviewOrAForce(t *testing.T) {
 	}
 }
 
+func TestRollOutLandingDialsTheDaemonItIsNamed(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "the deploy's daemon", args: []string{"-deploy", "0011aabb", "-daemon", "127.0.0.1:4242"}, want: "127.0.0.1:4242"},
+		{name: "the serving daemon when none is named", args: []string{"-deploy", "0011aabb"}, want: "127.0.0.1:1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(runtimeNoun, append([]string{"roll-out-landing"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess || !slices.Equal(f.dialed, []string{tt.want}) {
+				t.Fatalf("exit %d dialed %v, want %s", code, f.dialed, tt.want)
+			}
+		})
+	}
+}
+
 func TestRollOutLandingNamesItsDeployWhenGivenOne(t *testing.T) {
 	tests := []struct {
 		name string
