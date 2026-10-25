@@ -137,7 +137,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"create":      {usage: "create -repository here|DIR -topology primary|child [-origin-master] [-owner WS] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-as-user]", run: workspaceCreate},
 		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":      {usage: "prompt WS TEXT", run: workspacePrompt},
-		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-principal-link URL|-no-principal-link] [-as-user]", run: workspaceSet},
+		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-principal-link URL|-no-principal-link] [-name NAME] [-as-user]", run: workspaceSet},
 		"finished":    {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":        {usage: "open WS", run: workspaceOpen},
 		"close":       {usage: "close WS [-as-user]", run: workspaceClose},
@@ -761,6 +761,7 @@ func workspaceSet(c *cliCall, args []string) int {
 	notAwaiting := fs.Bool("not-awaiting", false, "clear what the workspace awaits")
 	principalLink := fs.String("principal-link", "", "the url the topbar's summary opens")
 	noPrincipalLink := fs.Bool("no-principal-link", false, "clear the workspace's principal link")
+	name := fs.String("name", "", "rename the workspace: its name only, never its branch or directory")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok {
@@ -815,6 +816,12 @@ func workspaceSet(c *cliCall, args []string) int {
 	if req := principalLinkRequest(ref, *principalLink, *noPrincipalLink); req != nil {
 		calls = append(calls, func() int {
 			resp, err := c.client.SetWorkspacePrincipalLink(c.ctx, connect.NewRequest(req))
+			return answer(c, resp, err)
+		})
+	}
+	if *name != "" {
+		calls = append(calls, func() int {
+			resp, err := c.client.SetWorkspaceName(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceNameRequest{Workspace: ref, Name: *name}))
 			return answer(c, resp, err)
 		})
 	}
