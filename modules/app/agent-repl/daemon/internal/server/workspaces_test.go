@@ -2489,3 +2489,20 @@ func TestSetWorkspaceNameMapsTheVerbsRefusals(t *testing.T) {
 		})
 	}
 }
+
+// TestSetWorkspaceNameAnswersTheRosterRevisionThatCarriesTheName pins the
+// revision a sidebar that renamed a row holds its drawing until.
+func TestSetWorkspaceNameAnswersTheRosterRevisionThatCarriesTheName(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Deps.Sidebar.(*fakeSidebar).revision = 42
+
+	// Act
+	resp, err := h.Client.SetWorkspaceName(context.Background(),
+		connect.NewRequest(&agentreplv1.SetWorkspaceNameRequest{Workspace: ref(), Name: "better-name"}))
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess().GetRosterRevision() != 42 {
+		t.Fatalf("SetWorkspaceName = %v, %v; want success at the sidebar's revision 42", resp, err)
+	}
+}

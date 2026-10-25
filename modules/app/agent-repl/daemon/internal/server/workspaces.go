@@ -1049,7 +1049,7 @@ func (s *server) SetWorkspaceName(
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	resp.Result = &agentreplv1.SetWorkspaceNameResponse_Success{
-		Success: &agentreplv1.SetWorkspaceNameSuccess{Name: name},
+		Success: &agentreplv1.SetWorkspaceNameSuccess{Name: name, RosterRevision: s.deps.Sidebar.Revision()},
 	}
 	return connect.NewResponse(resp), nil
 }
