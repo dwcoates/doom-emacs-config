@@ -2094,3 +2094,38 @@ func TestRunTagRefusesANameThatIsAlreadyATag(t *testing.T) {
 		t.Fatalf("tag = %+v, tags = %+v; want the existing tag kept and the create refused", got, repo.Tags)
 	}
 }
+
+func TestRerereRemainingAnswersEveryConflictedPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		conflicted []string
+		want       string
+	}{
+		{name: "no conflict leaves nothing", want: ""},
+		{name: "every conflicted path remains", conflicted: []string{"a.txt", "b.txt"}, want: "a.txt\nb.txt\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			wt := &Worktree{Conflicted: tt.conflicted}
+
+			// Act
+			got := rerere(wt, []string{"rerere", "remaining"})
+
+			// Assert
+			if got.Exit != 0 || got.Stdout != tt.want {
+				t.Fatalf("rerere remaining = %+v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRerereRefusesWhatItDoesNotModel(t *testing.T) {
+	// Act
+	got := rerere(&Worktree{}, []string{"rerere", "status"})
+
+	// Assert
+	if got.Exit == 0 {
+		t.Fatalf("rerere status = %+v, want a refusal", got)
+	}
+}

@@ -26,9 +26,10 @@ import (
 
 // RebaseStep is where a rebase stands after one of its commands. Exactly one
 // of four things is true: Done (every commit is replayed and the branch has
-// moved), Conflicted (the current commit stopped on conflicts, which are
-// listed), Resolved (the current commit stopped on conflicts that rerere
-// resolved and staged from a recorded resolution, so the rebase only waits to
+// moved), Conflicted (the current commit stopped on conflicts rerere could not
+// resolve, which are listed; any it did resolve are staged and listed in
+// Resolved), Resolved alone (the current commit stopped on conflicts rerere
+// resolved from recorded resolutions, now staged, so the rebase only waits to
 // be continued), or none (the current commit replayed cleanly and the rebase
 // stopped at the break after it, waiting to be continued).
 type RebaseStep struct {
@@ -38,7 +39,7 @@ type RebaseStep struct {
 	// it replayed cleanly.
 	Conflicted []string
 	// Resolved lists the paths whose conflicts rerere resolved from a
-	// recorded resolution, nil when none conflicted.
+	// recorded resolution, staged by the client, nil when it resolved none.
 	Resolved []string
 }
 
@@ -51,15 +52,23 @@ type RebaseStep struct {
 // rebases a branch more than once onto commits carrying the same conflicting
 // hunks (a chained rebase onto the merge ahead, a restack when that merge's tip
 // moves, the landing rebase onto the target), so rerere records each
-// resolution the session made on `rebase --continue` and replays it, staged
-// (autoUpdate), the next time the same conflict is met. It is set through
-// git's environment configuration, which is scoped to this one command and
-// never written into the repository's own config.
+// resolution the session made on `rebase --continue` and replays it into the
+// worktree the next time the same conflict is met. It is set through git's
+// environment configuration, which is scoped to this one command and never
+// written into the repository's own config.
+//
+// A REPLAYED RESOLUTION IS LEFT UNSTAGED (autoUpdate off), and the client
+// stages it (rebaseCommand). Staged by rerere itself, the path left the
+// unmerged set and rerere stopped listing it, so nothing told a replayed
+// resolution from a failed pick: on 2026-10-25 a re-landed branch whose
+// conflicts an earlier attempt had resolved failed "without leaving
+// conflicts". Unstaged, the conflicted paths are the unmerged set and
+// `rerere remaining` names the ones rerere did not resolve, both exactly.
 var rebaseEnv = []string{
 	"GIT_EDITOR=true",
 	"GIT_CONFIG_COUNT=2",
 	"GIT_CONFIG_KEY_0=rerere.enabled", "GIT_CONFIG_VALUE_0=true",
-	"GIT_CONFIG_KEY_1=rerere.autoUpdate", "GIT_CONFIG_VALUE_1=true",
+	"GIT_CONFIG_KEY_1=rerere.autoUpdate", "GIT_CONFIG_VALUE_1=false",
 }
 
 // CommitsBetween lists the commits reachable from tip and not from base,
@@ -140,31 +149,65 @@ func (c *client) rebaseCommand(ctx context.Context, operation, dir string, env [
 		return RebaseStep{}, err
 	}
 	if len(conflicted) == 0 {
-		resolved, err := c.rerereResolved(ctx, dir)
-		if err != nil {
-			return RebaseStep{}, err
-		}
-		if len(resolved) > 0 {
-			c.log.Global().Info(operation, "the rebase stopped on conflicts rerere resolved from recorded resolutions; it waits to be continued", dlog.Context{
-				"dir":       dir,
-				"exit_code": in.exitCode,
-				"resolved":  resolved,
-				"stdout":    in.stdout,
-				"stderr":    in.stderr,
-			})
-			return RebaseStep{Resolved: resolved}, nil
-		}
 		c.log.Global().Error(operation, "the rebase failed without leaving conflicts", c.stopEvidence(ctx, dir, in.logContext()))
 		return RebaseStep{}, in.fail()
 	}
-	c.log.Global().Info(operation, "the rebase stopped on conflicts; it is left in progress for their resolution", dlog.Context{
-		"dir":        dir,
-		"exit_code":  in.exitCode,
-		"conflicted": conflicted,
-		"stdout":     in.stdout,
-		"stderr":     in.stderr,
-	})
-	return RebaseStep{Conflicted: conflicted}, nil
+	// WHAT RERERE RESOLVED IS STAGED HERE; what it did not is the conflict.
+	remaining, err := c.rerereRemaining(ctx, dir)
+	if err != nil {
+		return RebaseStep{}, err
+	}
+	resolved := without(conflicted, remaining)
+	if len(resolved) > 0 {
+		if _, err := c.run(ctx, "daemon.gitclient.stage_rerere_resolution", dir, append([]string{"add", "--"}, resolved...)...); err != nil {
+			return RebaseStep{}, err
+		}
+	}
+	fields := dlog.Context{
+		"dir":       dir,
+		"exit_code": in.exitCode,
+		"resolved":  resolved,
+		"stdout":    in.stdout,
+		"stderr":    in.stderr,
+	}
+	if len(remaining) == 0 {
+		c.log.Global().Info(operation, "the rebase stopped on conflicts rerere resolved from recorded resolutions; they are staged and it waits to be continued", fields)
+		return RebaseStep{Resolved: resolved}, nil
+	}
+	fields["conflicted"] = remaining
+	c.log.Global().Info(operation, "the rebase stopped on conflicts; it is left in progress for their resolution", fields)
+	return RebaseStep{Conflicted: remaining, Resolved: resolved}, nil
+}
+
+// rerereRemaining answers the conflicted paths rerere did not resolve from a
+// recorded resolution, every path it cannot track included.
+func (c *client) rerereRemaining(ctx context.Context, dir string) ([]string, error) {
+	out, err := c.runWithEnv(ctx, "daemon.gitclient.rerere_remaining", dir, rebaseEnv, "rerere", "remaining")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		if path := strings.TrimSpace(line); path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths, nil
+}
+
+// without answers the paths of ALL that are not in SOME, in ALL's order.
+func without(all, some []string) []string {
+	drop := make(map[string]bool, len(some))
+	for _, path := range some {
+		drop[path] = true
+	}
+	var kept []string
+	for _, path := range all {
+		if !drop[path] {
+			kept = append(kept, path)
+		}
+	}
+	return kept
 }
 
 // stopEvidence adds to FIELDS what the worktree held when a rebase stopped in
@@ -193,30 +236,6 @@ func (c *client) stopEvidence(ctx context.Context, dir string, fields dlog.Conte
 		fields[read.key] = out
 	}
 	return fields
-}
-
-// rerereResolved answers the paths of the stopped commit whose conflicts
-// rerere resolved: a rebase still stands, nothing is left unmerged, and rerere
-// tracks the paths it resolved for the resolution it will record. Anything
-// else is no rerere resolution, and the caller reads the stop as the failure
-// it is.
-func (c *client) rerereResolved(ctx context.Context, dir string) ([]string, error) {
-	const operation = "daemon.gitclient.rerere_status"
-	standing, err := c.RebaseInProgress(ctx, dir)
-	if err != nil || !standing {
-		return nil, err
-	}
-	out, err := c.runWithEnv(ctx, operation, dir, rebaseEnv, "rerere", "status")
-	if err != nil {
-		return nil, err
-	}
-	var paths []string
-	for _, line := range strings.Split(out, "\n") {
-		if path := strings.TrimSpace(line); path != "" {
-			paths = append(paths, path)
-		}
-	}
-	return paths, nil
 }
 
 // RebaseInProgress reports whether an interactive rebase stands in dir's

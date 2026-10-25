@@ -1,6 +1,7 @@
 package gitclient
 
 import (
+	"agent-repld/internal/dlog"
 	"context"
 	"errors"
 	"os"
@@ -177,7 +178,7 @@ func TestRebaseCommandsAnswerWhereTheRebaseStands(t *testing.T) {
 			if tt.exit == 0 {
 				fixtures = append(fixtures, rebaseDirFixture(t, tt.inProgress))
 			} else {
-				fixtures = append(fixtures, ok(tt.conflicted, "diff"))
+				fixtures = append(fixtures, ok(tt.conflicted, "diff"), ok("a.go\nb.go\n", "rerere", "remaining"))
 			}
 			newFakeGit(t, fixtures...)
 
@@ -324,22 +325,93 @@ func TestARebaseStopEvidenceNamesAReadThatFailed(t *testing.T) {
 	}
 }
 
-func TestARebaseStopRerereResolvedAnswersTheResolvedPaths(t *testing.T) {
-	// Arrange: the commit conflicted, and rerere staged its recorded
-	// resolution of both paths.
-	git, _ := newTestClient(t)
-	newFakeGit(t, fails(1, "Staged 'a.go' using previous resolution.\n", "rebase"),
-		ok("", "diff"), rebaseDirFixture(t, true), ok("a.go\nb.go\n", "rerere", "status"))
-
-	// Act.
-	got, err := git.ContinueRebase(context.Background(), "/wt")
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("ContinueRebase: %v", err)
+// stagedPaths answers the paths every recorded `git add --` staged, in order.
+func stagedPaths(fake *fakeGit) []string {
+	var paths []string
+	for _, call := range fake.calls() {
+		for i, arg := range call.Args {
+			if arg == "add" && i+1 < len(call.Args) && call.Args[i+1] == "--" {
+				paths = append(paths, call.Args[i+2:]...)
+			}
+		}
 	}
-	if want := (RebaseStep{Resolved: []string{"a.go", "b.go"}}); !reflect.DeepEqual(got, want) {
-		t.Fatalf("ContinueRebase = %+v, want %+v", got, want)
+	return paths
+}
+
+func TestARebaseStopRerereResolved(t *testing.T) {
+	tests := []struct {
+		name       string
+		remaining  string
+		want       RebaseStep
+		wantStaged []string
+	}{
+		{
+			// The commit conflicted, and rerere wrote its recorded resolution of
+			// both paths into the worktree, leaving them unmerged.
+			name: "every conflict resolved is staged and waits to be continued", remaining: "",
+			want: RebaseStep{Resolved: []string{"a.go", "b.go"}}, wantStaged: []string{"a.go", "b.go"},
+		},
+		{
+			name: "a conflict rerere could not resolve is the conflict, the rest staged", remaining: "b.go\n",
+			want: RebaseStep{Conflicted: []string{"b.go"}, Resolved: []string{"a.go"}}, wantStaged: []string{"a.go"},
+		},
+		{
+			name: "no conflict resolved stages nothing", remaining: "a.go\nb.go\n",
+			want: RebaseStep{Conflicted: []string{"a.go", "b.go"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			git, _ := newTestClient(t)
+			fake := newFakeGit(t, fails(1, "Resolved 'a.go' using previous resolution.\n", "rebase"),
+				ok("a.go\x00b.go\x00", "diff"), ok(tt.remaining, "rerere", "remaining"), ok("", "add"))
+
+			// Act.
+			got, err := git.ContinueRebase(context.Background(), "/wt")
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ContinueRebase: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("ContinueRebase = %+v, want %+v", got, tt.want)
+			}
+			if staged := stagedPaths(fake); !reflect.DeepEqual(staged, tt.wantStaged) {
+				t.Fatalf("staged %v, want %v", staged, tt.wantStaged)
+			}
+		})
+	}
+}
+
+func TestARebaseStopFailsWhenItsResolutionCannotBeRead(t *testing.T) {
+	tests := []struct {
+		name     string
+		fixtures []gitFixture
+	}{
+		{name: "rerere cannot list what remains", fixtures: []gitFixture{
+			fails(1, "CONFLICT\n", "rebase"), ok("a.go\x00", "diff"), fails(128, "fatal: rerere broke\n", "rerere", "remaining")}},
+		{name: "the resolution cannot be staged", fixtures: []gitFixture{
+			fails(1, "CONFLICT\n", "rebase"), ok("a.go\x00", "diff"), ok("", "rerere", "remaining"), fails(128, "fatal: index locked\n", "add")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			newFakeGit(t, tt.fixtures...)
+
+			// Act.
+			_, err := git.ContinueRebase(context.Background(), "/wt")
+
+			// Assert.
+			var failure *Error
+			if !errors.As(err, &failure) {
+				t.Fatalf("ContinueRebase error = %v, want git's own evidence", err)
+			}
+			if _, found := dlog.FindRecord(surfaces.records(), dlog.RecordQuery{Level: "error"}); !found {
+				t.Fatalf("the failed read was not logged at ERROR: %+v", surfaces.records())
+			}
+		})
 	}
 }
 
@@ -371,7 +443,7 @@ func TestEveryRebaseCommandReusesRecordedResolutions(t *testing.T) {
 			// Assert.
 			env := fake.call(0).Env
 			want := []string{"GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=rerere.enabled", "GIT_CONFIG_VALUE_0=true",
-				"GIT_CONFIG_KEY_1=rerere.autoUpdate", "GIT_CONFIG_VALUE_1=true"}
+				"GIT_CONFIG_KEY_1=rerere.autoUpdate", "GIT_CONFIG_VALUE_1=false"}
 			for _, binding := range want {
 				name, _, _ := strings.Cut(binding, "=")
 				if got := envValues(env, name); !reflect.DeepEqual(got, []string{binding}) {
@@ -385,7 +457,7 @@ func TestEveryRebaseCommandReusesRecordedResolutions(t *testing.T) {
 func TestARebaseConflictIsAnOutcomeLoggedAtInfo(t *testing.T) {
 	// Arrange.
 	git, surfaces := newTestClient(t)
-	newFakeGit(t, fails(1, "CONFLICT\n", "rebase"), ok("a.go\x00", "diff"))
+	newFakeGit(t, fails(1, "CONFLICT\n", "rebase"), ok("a.go\x00", "diff"), ok("a.go\n", "rerere", "remaining"))
 
 	// Act.
 	if _, err := git.ContinueRebase(context.Background(), "/wt"); err != nil {
@@ -405,7 +477,7 @@ func TestARebaseConflictIsAnOutcomeLoggedAtInfo(t *testing.T) {
 func TestARebaseConflictIsNeverAborted(t *testing.T) {
 	// Arrange: a conflicted rebase is left in progress for its resolution.
 	git, _ := newTestClient(t)
-	fake := newFakeGit(t, fails(1, "CONFLICT\n", "rebase"), ok("a.go\x00", "diff"))
+	fake := newFakeGit(t, fails(1, "CONFLICT\n", "rebase"), ok("a.go\x00", "diff"), ok("a.go\n", "rerere", "remaining"))
 
 	// Act.
 	if _, err := git.ContinueRebase(context.Background(), "/wt"); err != nil {

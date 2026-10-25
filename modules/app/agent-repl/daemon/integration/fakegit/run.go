@@ -131,6 +131,8 @@ func answer(s *State, cwd string, args []string) Result {
 		return commitTree(s, repo, wt, subject)
 	case "rebase":
 		return rebase(s, repo, wt, subject)
+	case "rerere":
+		return rerere(wt, subject)
 	case "fetch":
 		return fetch(repo, subject)
 	case "for-each-ref":
@@ -1441,6 +1443,24 @@ func fetch(repo *Repo, subject []string) Result {
 		return Result{Stderr: "fatal: fakegit: only `fetch origin` is modeled\n", Exit: 128}
 	}
 	return Result{}
+}
+
+// rerere implements `rerere remaining`: the conflicted paths rerere did not
+// resolve. The fake records no resolutions, so it resolved none, and every
+// conflicted path remains; a conflict met once is gone on its next replay
+// instead (Conflict.Met).
+func rerere(wt *Worktree, subject []string) Result {
+	if len(subject) != 2 || subject[1] != "remaining" {
+		return Result{Stderr: "fatal: fakegit: only `rerere remaining` is modeled\n", Exit: 128}
+	}
+	if wt == nil {
+		return Result{Stderr: "fatal: not a working tree\n", Exit: 128}
+	}
+	var out strings.Builder
+	for _, path := range wt.Conflicted {
+		out.WriteString(path + "\n")
+	}
+	return Result{Stdout: out.String()}
 }
 
 // rebase implements the merge queue's rebase: `rebase -i --empty=drop <onto>`
