@@ -18,6 +18,7 @@
  * far left edge.
  */
 import { log } from "../log.js";
+import { feedRowId } from "./row-id.js";
 
 /** The class the selected entry's CARD wears; the stylesheet rings a card and greys a bubble's fill. */
 export const SELECTED_ENTRY_CLASS = "entry-selected";
@@ -52,7 +53,7 @@ export function syncSelectedEntry(row: HTMLElement): void {
     if (selected) {
       log.debug("a selected row draws no card; there is nothing to mark", {
         operation: "feed.selected-entry-no-card",
-        context: { row: row.getAttribute("data-feed-row") ?? "unset" },
+        context: { row: feedRowId(row) ?? "unset" },
       });
     }
     return;

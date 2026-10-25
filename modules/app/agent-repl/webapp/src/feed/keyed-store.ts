@@ -20,8 +20,12 @@ export interface Disposable {
 export interface KeyedStore<T extends Disposable> {
   /** The entry for KEY, created by CREATE the first time KEY is used. */
   use(key: string, create: () => T): T;
-  /** Dispose and forget every entry not `use`d since the previous prune. */
-  prune(): void;
+  /**
+   * Dispose and forget every entry not `use`d since the previous prune. A
+   * property rather than a method, so a caller may hand it on unbound: it
+   * reads no `this`.
+   */
+  prune: () => void;
 }
 
 /** Build an empty keyed store. */

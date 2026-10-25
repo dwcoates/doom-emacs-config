@@ -59,6 +59,7 @@ import {
 } from "./rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "./rpc/strict.js";
 import { callUnary } from "./rpc/unary.js";
+import { feedRowId, feedRowOf } from "./feed/row-id.js";
 
 /** Only these two schemes are a hyperlink; everything else is text. */
 const LINKABLE_SCHEME = /^https?:\/\//i;
@@ -332,7 +333,8 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
     // A PATH OR BARE FILE NAME: the daemon resolves it, relative to the
     // worktree and the module, and needs the row the link sits in so an
     // unresolved one can quote the bubble. The innermost feed row holds it.
-    const row = anchor.closest("[data-feed-row]")?.getAttribute("data-feed-row") ?? null;
+    const found = feedRowOf(anchor);
+    const row = found === null ? null : feedRowId(found);
     if (row === null) {
       log.warn("a prose link sits in no feed row, so it names no source row; not opened", {
         operation: "link.feed-link-no-row",

@@ -122,6 +122,7 @@ import { isOwnTurn } from "../composer/own-turns.js";
 import { promptWaves, setPromptWave } from "../breathing.js";
 import { childrenMatching, queryAll } from "../dom.js";
 import { flashEntryOncePainted } from "./entries.js";
+import { FEED_ROW_ATTRIBUTE, feedRowId } from "./row-id.js";
 
 /** The row a new row is inserted above, sampled before the insert. */
 interface InsertSample {
@@ -1180,7 +1181,7 @@ export function createFeedController(
         `.${BUBBLE_CLASS} > .${BUBBLE_SCROLL_CLASS}`,
       );
       if (box === null) continue;
-      const open = state.element.getAttribute("data-feed-row") === selected;
+      const open = feedRowId(state.element) === selected;
       if (open === isExpanded(box)) continue;
       if (open) expandSection(box, opts.onSelectionExpand);
       else collapseSection(box, opts.onSelectionExpand);
@@ -1711,7 +1712,7 @@ export function createFeedController(
    */
   function applyRowAttributes(el: HTMLElement, row: FeedRow): void {
     el.setAttribute(
-      "data-feed-row",
+      FEED_ROW_ATTRIBUTE,
       requireMessage(row.id, "FeedRow.id").value,
     );
     el.setAttribute("data-row-kind", row.row.case ?? "malformed");

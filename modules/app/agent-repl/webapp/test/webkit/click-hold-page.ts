@@ -23,6 +23,9 @@ const ROWS = 30;
 const ROW_PX = 120;
 /** The tail card's height before an answer shrinks it. */
 const CARD_PX = 400;
+/** The two final responses of the run `selectInRun` ends the feed on. */
+const RUN_FIRST_PX = 400;
+const RUN_SECOND_PX = 200;
 /** The gate dock's height: the input window's, as Emacs tells it. */
 export const DOCK_PX = 210;
 
@@ -50,6 +53,14 @@ export interface ClickHoldPage {
    * FRAMES frames after each.
    */
   answerDockedGate(frames: number): Promise<number>;
+  /**
+   * The feed ends on a run of two final responses drawn as one row. The
+   * reader clicks the second, and the selection's push a task later closes
+   * the first, PX shorter, as selecting one bubble closes the one selected
+   * before it. Answers the largest painted move of the clicked response's top
+   * across FRAMES frames.
+   */
+  selectInRun(px: number, frames: number): Promise<number>;
   /** Every record the page's logger has written so far, as `level operation`. */
   records(): string[];
 }
@@ -113,11 +124,11 @@ const later = (change: () => void): Promise<void> =>
     }, 0),
   );
 
-/** The largest painted move of the tail card's top from BEFORE across FRAMES frames. */
-async function worstMove(before: number, frames: number): Promise<number> {
+/** The largest painted move of the top of WATCHED (the tail card's row) from BEFORE across FRAMES frames. */
+async function worstMove(before: number, frames: number, watched: Element = tailRow): Promise<number> {
   let worst = 0;
   for (let i = 0; i < frames; i++) {
-    const at = await frame(() => tailRow.getBoundingClientRect().top);
+    const at = await frame(() => watched.getBoundingClientRect().top);
     worst = Math.max(worst, Math.abs(at - before));
   }
   return worst;
@@ -167,6 +178,32 @@ window.clickHold = {
       document.body.style.height = `calc(100vh - ${DOCK_PX.toString()}px)`;
     });
     return Math.max(hidden, await worstMove(before, frames));
+  },
+  async selectInRun(px, frames) {
+    const run = document.createElement("article");
+    run.className = "feed-item response-run-item";
+    const entries = [RUN_FIRST_PX, RUN_SECOND_PX].map((height, i) => {
+      const entry = document.createElement("div");
+      entry.dataset.feedRow = `run${i.toString()}`;
+      entry.style.height = `${height.toString()}px`;
+      run.append(entry);
+      return entry;
+    });
+    const [first, second] = entries;
+    const bubble = document.createElement("p");
+    bubble.textContent = "the second answer";
+    second.append(bubble);
+    host.append(run);
+    await this.park();
+    const before = await frame(() => {
+      const at = second.getBoundingClientRect().top;
+      bubble.click();
+      return at;
+    });
+    await later(() => {
+      first.style.height = `${(RUN_FIRST_PX - px).toString()}px`;
+    });
+    return worstMove(before, frames, second);
   },
   records,
 };

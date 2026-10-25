@@ -38,6 +38,7 @@ import {
   type MoveWitnessReport,
   type RevealGeometry,
   heldRowName,
+  entryOf,
 } from "../src/scroll.js";
 import { captureLogRecords, forwardedRecord, type LogCapture } from "./log-capture.js";
 import { tailTriggers, type TailTriggers } from "./tail-triggers.js";
@@ -1589,7 +1590,7 @@ describe("no scroll write outside scroll.ts", () => {
     // Assert
     expect(writes).toEqual([
       "this.box.scrollTop = this.box.scrollHeight;",
-      "if (delta !== 0) this.box.scrollTop += delta;",
+      "if (delta !== 0) this.box.scrollTop = to;",
       "feed.scrollTop += delta;",
       "section.scrollTop = 0;",
       "scroller.scrollTop += step;",
@@ -3045,6 +3046,186 @@ describe("TailFollow's click hold anchors on the clicked row", () => {
   });
 });
 
+/**
+ * A feed of root rows of HEIGHTS whose row GROUP is a group of entries of
+ * ENTRIES (`g0`, `g1`, ...), stacked inside it as a run of final responses is:
+ * the group's height is its entries'. The box's viewport top is at 0, and the
+ * box does not clamp.
+ */
+function groupedFeed(heights: number[], group: number, entries: number[], scrollTop: number) {
+  const host = document.createElement("div");
+  const h = [...heights];
+  const e = [...entries];
+  heights.forEach((_, i) => {
+    const el = document.createElement("div");
+    if (i !== group) el.dataset.feedRow = `r${i.toString()}`;
+    host.append(el);
+  });
+  const groupRow = host.children[group];
+  e.forEach((_, i) => {
+    const entry = document.createElement("div");
+    entry.dataset.feedRow = `g${i.toString()}`;
+    entry.append(document.createElement("span"));
+    groupRow.append(entry);
+  });
+  const height = (i: number): number => (i === group ? e.reduce((sum, x) => sum + x, 0) : (h[i] ?? 0));
+  const rootTop = (i: number): number => Array.from({ length: i }, (_, j) => height(j)).reduce((sum, x) => sum + x, 0);
+  let top = scrollTop;
+  const box = {
+    get scrollTop() {
+      return top;
+    },
+    set scrollTop(next: number) {
+      top = next;
+    },
+    clientHeight: 300,
+    get scrollHeight() {
+      return rootTop(h.length);
+    },
+  };
+  const rows: AnchorRows = {
+    host,
+    viewportTop: () => 0,
+    edges: (el) => {
+      const root = [...host.children].indexOf(el);
+      if (root >= 0) return { top: rootTop(root) - box.scrollTop, bottom: rootTop(root) + height(root) - box.scrollTop };
+      const i = [...groupRow.children].indexOf(el);
+      if (i < 0) return null;
+      const at = rootTop(group) + e.slice(0, i).reduce((sum, x) => sum + x, 0) - box.scrollTop;
+      return { top: at, bottom: at + (e[i] ?? 0) };
+    },
+  };
+  const tail = new TailFollow(box, () => null, rows);
+  const triggers = tailTriggers(tail);
+  return {
+    box,
+    e,
+    groupRow,
+    tail,
+    scroll: triggers.scroll,
+    resize: triggers.resize,
+    /** The reader clicks inside the group's entry I. */
+    click: (i: number) => {
+      const inner = groupRow.children[i].firstElementChild;
+      if (inner === null) throw new Error("the entry drew no child");
+      tail.readerClicked(inner);
+    },
+  };
+}
+
+describe("TailFollow's click hold anchors on the clicked entry inside a group", () => {
+  // Root rows r0 (400px) and a group at content top 400 holding g0 (400px) and
+  // g1 (200px) at content tops 400 and 800; the reader at 500 sees g1 whole.
+  function clickedInLast() {
+    const f = groupedFeed([400, 0], 1, [400, 200], 500);
+    f.scroll();
+    f.click(1);
+    return f;
+  }
+
+  it("holds the clicked entry still while the entry above it in its group shrinks", () => {
+    // Arrange
+    const f = clickedInLast();
+    // Act -- selecting g1 closes g0, selected before it.
+    f.e[0] = 100;
+    f.resize();
+    // Assert -- g1's content top moved from 800 to 500, and the view with it.
+    expect(f.box.scrollTop).toBe(200);
+  });
+
+  it("holds the clicked entry still while the entry above it in its group grows", () => {
+    // Arrange
+    const f = clickedInLast();
+    // Act
+    f.e[0] = 600;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(700);
+  });
+
+  it("holds the view while the clicked entry itself grows below its top", () => {
+    // Arrange
+    const f = clickedInLast();
+    // Act
+    f.e[1] = 900;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(500);
+  });
+
+  it("holds the group row still once a redraw takes the clicked entry away", () => {
+    // Arrange
+    const f = clickedInLast();
+    f.groupRow.children[1].remove();
+    // Act -- g0 shrinks, which moves nothing above the group's own top.
+    f.e[0] = 100;
+    f.resize();
+    // Assert
+    expect(f.box.scrollTop).toBe(500);
+  });
+
+  it("records the entry it holds beside its root row", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    // Act
+    clickedInLast();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.click-held");
+    expect(record.context).toMatchObject({ by: "click", row: "div", entry: "g1" });
+  });
+});
+
+describe("entryOf", () => {
+  /** A root row holding a group entry holding a nested entry holding a span. */
+  function nested() {
+    const row = document.createElement("article");
+    const entry = document.createElement("div");
+    entry.dataset.feedRow = "g1";
+    const inner = document.createElement("div");
+    inner.dataset.feedRow = "g1.c0";
+    const span = document.createElement("span");
+    inner.append(span);
+    entry.append(inner);
+    row.append(entry);
+    return { row, entry, inner, span };
+  }
+
+  it("answers the innermost feed row holding the target", () => {
+    // Arrange
+    const n = nested();
+    // Act / Assert
+    expect(entryOf(n.span, n.row)).toBe(n.inner);
+  });
+
+  it("answers the target itself when it is a feed row", () => {
+    // Arrange
+    const n = nested();
+    // Act / Assert
+    expect(entryOf(n.entry, n.row)).toBe(n.entry);
+  });
+
+  it("answers the root row when no feed row inside it holds the target", () => {
+    // Arrange
+    const n = nested();
+    const strip = document.createElement("div");
+    n.row.append(strip);
+    // Act / Assert
+    expect(entryOf(strip, n.row)).toBe(n.row);
+  });
+
+  it("answers the root row when the nearest feed row lies outside it", () => {
+    // Arrange
+    const outer = document.createElement("div");
+    outer.dataset.feedRow = "r0";
+    const row = document.createElement("article");
+    const span = document.createElement("span");
+    row.append(span);
+    outer.append(row);
+    // Act / Assert
+    expect(entryOf(span, row)).toBe(row);
+  });
+});
+
 describe("TailFollow's scroll anchoring", () => {
   // Rows at content tops 0, 400, 800, 1200; the reader at 500 sees r1's tail
   // and r2 from its top, so r2 is the anchor.
@@ -3454,7 +3635,7 @@ describe("MoveWitness", () => {
  */
 describe("TailFollow: the scroll floor under a click-held view", () => {
   /** A clamping box over CONTENT px, a 300px viewport at TOP, with a fake floor. */
-  function floored(top: number, content = 1000) {
+  function floored(top: number, content = 1000, opts: { clampOnRead?: boolean } = {}) {
     const state: { content: number; floorTop: number | null; top: number; clientHeight: number } = {
       content,
       floorTop: null,
@@ -3472,6 +3653,9 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
         return scrollHeight();
       },
       get scrollTop() {
+        // A real box lays out before it answers, so a lowered floor has
+        // clamped the position by the time it is read.
+        if (opts.clampOnRead === true) state.top = Math.max(0, Math.min(state.top, scrollHeight() - state.clientHeight));
         return state.top;
       },
       set scrollTop(v: number) {
@@ -3514,6 +3698,18 @@ describe("TailFollow: the scroll floor under a click-held view", () => {
       },
     };
   }
+
+  it("lands a correction under the held view at its target when lowering the floor clamps the box first", () => {
+    // Arrange -- at the tail: 700 + 300 is the whole content.
+    const f = floored(700, 1000, { clampOnRead: true });
+    f.tail.readerClicked(document.createElement("div"));
+    f.state.content = 800;
+    // Act -- the 200px above the reader closed; lowering the floor to 500
+    // clamps the box to 500 before the correction writes.
+    f.tail.prependCompensation(-200);
+    // Assert -- a relative write would have landed at 300.
+    expect(f.box.scrollTop).toBe(500);
+  });
 
   it("arms the floor at the held view's bottom when the reader clicks", () => {
     // Arrange

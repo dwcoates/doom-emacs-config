@@ -57,6 +57,7 @@ import { placeChildren } from "../dom.js";
 import { createKeyedStore } from "./keyed-store.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import type { FeedRow, FeedToolCardClock } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { feedRowId, feedRowOf } from "./row-id.js";
 
 /** The class the group container wears; it draws no bubble of its own. */
 export const FEED_GROUP_CLASS = "feed-group";
@@ -244,8 +245,8 @@ const activators = new WeakMap<HTMLElement, (id: string) => void>();
 export function activateGroupedMember(element: HTMLElement): void {
   const group = element.closest(`.${FEED_GROUP_CLASS}`);
   if (!(group instanceof HTMLElement)) return;
-  const member = element.closest("[data-feed-row]");
-  const id = member instanceof HTMLElement ? member.getAttribute("data-feed-row") : null;
+  const member = feedRowOf(element);
+  const id = member instanceof HTMLElement ? feedRowId(member) : null;
   if (id === null) return;
   activators.get(group)?.(id);
 }

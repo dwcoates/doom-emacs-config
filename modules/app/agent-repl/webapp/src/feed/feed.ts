@@ -116,6 +116,7 @@ import {
 import { tick, stopTicking } from "./ticking.js";
 import { REVEAL_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
 import { queryAll } from "../dom.js";
+import { FEED_ROW_SELECTOR } from "./row-id.js";
 
 /** How long a revealed row wears the highlight that says "here". */
 export const REVEAL_HIGHLIGHT_MS = 1000;
@@ -1208,9 +1209,6 @@ export function rootRows(host: Element): Element {
 
 /** The hosts whose missing row list was already reported. */
 const missingRootRows = new WeakSet<Element>();
-
-/** Every feed row's element, at whatever depth of sub-feed it is drawn. */
-const FEED_ROW_SELECTOR = "[data-feed-row]";
 
 /**
  * The capped sections ROW owns itself: every one whose nearest feed row is

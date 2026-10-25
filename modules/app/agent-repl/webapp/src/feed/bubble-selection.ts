@@ -53,6 +53,7 @@ import {
   LABEL_LINK_CLASS,
 } from "./entries.js";
 import { TREE_LABEL_ATTRIBUTE } from "../metaprompt-tree.js";
+import { feedRowId, feedRowOf } from "./row-id.js";
 
 /** The attribute a root-feed row wears while the selection owns its bubble's expansion. */
 export const SELECTION_GOVERNED_ATTRIBUTE = "data-selection-governed";
@@ -121,7 +122,7 @@ export function stampSelection(el: HTMLElement, row: FeedRow, root: boolean): vo
  */
 export function governedRowAt(target: EventTarget | null, host: HTMLElement): HTMLElement | null {
   if (!(target instanceof Element) || !host.contains(target)) return null;
-  const row = target.closest<HTMLElement>("[data-feed-row]");
+  const row = feedRowOf<HTMLElement>(target);
   if (row === null || !host.contains(row)) return null;
   return row.hasAttribute(SELECTION_GOVERNED_ATTRIBUTE) ? row : null;
 }
@@ -154,7 +155,7 @@ export function bubbleClick(opts: { row: HTMLElement; target: Element; selectedT
     };
   }
   if (!opts.row.hasAttribute(SELECTABLE_ATTRIBUTE)) return { case: "ignore", reason: "not-landed" };
-  const row = opts.row.getAttribute("data-feed-row") ?? "";
+  const row = feedRowId(opts.row) ?? "";
   // AN ENTRY'S LABEL EDITS THAT ENTRY: the prompt is selected, and Emacs fills
   // the composer with what the entry says (entries.ts).
   if (opts.target.closest(`.${ENTRY_LABEL_CLASS}`) !== null) {
@@ -178,7 +179,7 @@ export function installBubbleSelect(
       case "ignore":
         log.debug("a click on a governed bubble selects nothing", {
           operation: "feed.bubble-click-ignored",
-          context: { row: row.getAttribute("data-feed-row") ?? "unset", reason: click.reason },
+          context: { row: feedRowId(row) ?? "unset", reason: click.reason },
         });
         return;
       case "select":

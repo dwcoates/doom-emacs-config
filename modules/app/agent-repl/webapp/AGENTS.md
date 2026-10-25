@@ -627,7 +627,10 @@ hand any more:
   the feed (`FeedDeps.clickZones`: the gate dock), so no click site asks for
   it. `TailFollow.readerClicked` ends the follow, the latest-visible latch
   waits for the reader's next input, and until then the anchoring holds the
-  clicked root row still, wherever its top sits. THE ONE EXCEPTION (owner
+  clicked ENTRY still, wherever its top sits: the innermost feed row holding
+  the click (`entryOf`), not merely its root row, since a root row can be a
+  group (a run of final responses) whose other entries change height on the
+  click, and its root row once a redraw takes the entry away. THE ONE EXCEPTION (owner
   requests, 2026-10-17): the reader's fold of a ROOT bubble whose row is the
   feed's last row that draws a box parks the feed at its tail
   (`TailFollow.lastBubbleFolded`): under `lastBubbleExpanded` once the open
