@@ -21,6 +21,8 @@ import { bootPage, pageAssets } from "./boot-page";
 const SHRINK_PX = 300;
 /** How much shorter a swapped card lays out for one layout, as a merge tab swap did (2026-10-17). */
 const SWAP_DIP_PX = 217;
+/** How much shorter the response selected before the clicked one closes. */
+const RUN_CLOSE_PX = 300;
 /** Painted frames measured after each change: a correction settles well inside it. */
 const FRAMES = 6;
 /** A painted deviation at or under this is subpixel rounding, not a jump. */
@@ -48,6 +50,8 @@ describe("a click in the feed holds its view, in WebKit", () => {
   let swappedRecords: string[];
   let docked: number;
   let dockedRecords: string[];
+  let selected: number;
+  let selectedRecords: string[];
 
   beforeAll(async () => {
     assets = await pageAssets("click-hold-page.ts", "clickHoldPage");
@@ -72,6 +76,12 @@ describe("a click in the feed holds its view, in WebKit", () => {
     const gate = await freshPage();
     docked = await gate.evaluate((frames) => window.clickHold.answerDockedGate(frames), FRAMES);
     dockedRecords = await recordsOf(gate);
+    const run = await freshPage();
+    selected = await run.evaluate(
+      ([px, frames]) => window.clickHold.selectInRun(px, frames),
+      [RUN_CLOSE_PX, FRAMES] as const,
+    );
+    selectedRecords = await recordsOf(run);
   });
 
   afterAll(async () => {
@@ -94,6 +104,16 @@ describe("a click in the feed holds its view, in WebKit", () => {
     expect(swapped).toBeLessThanOrEqual(TOLERANCE_PX);
   });
 
+  it("holds a clicked response still when the response above it in its run closes", () => {
+    expect(selected).toBeLessThanOrEqual(TOLERANCE_PX);
+  });
+
+  it("owes the run's stillness to moving the view with the closing response, not to an unchanged layout", () => {
+    // A still pass with no correction would mean the closing response never
+    // moved the clicked one: a vacuous pass.
+    expect(selectedRecords).toContain("info scroll.feed-moved");
+  });
+
   it("owes the docked gate's stillness to the floor, not to an unchanged box", () => {
     // A still pass with no resize would mean the dock's height never reached
     // the feed's box: a vacuous pass.
@@ -101,10 +121,10 @@ describe("a click in the feed holds its view, in WebKit", () => {
   });
 
   it("never takes a held view to a new position, so no clamp reached it", () => {
-    expect([...clickedRecords, ...swappedRecords, ...dockedRecords].filter((r) => r.endsWith("scroll.click-hold-moved"))).toEqual([]);
+    expect([...clickedRecords, ...swappedRecords, ...dockedRecords, ...selectedRecords].filter((r) => r.endsWith("scroll.click-hold-moved"))).toEqual([]);
   });
 
   it("writes no error through any answer", () => {
-    expect([...clickedRecords, ...swappedRecords, ...dockedRecords].filter((r) => r.startsWith("error "))).toEqual([]);
+    expect([...clickedRecords, ...swappedRecords, ...dockedRecords, ...selectedRecords].filter((r) => r.startsWith("error "))).toEqual([]);
   });
 });

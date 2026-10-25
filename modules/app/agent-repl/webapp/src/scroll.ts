@@ -353,6 +353,17 @@ function rowName(row: Element): string {
   return row.getAttribute("data-feed-row") ?? row.tagName.toLowerCase();
 }
 
+/**
+ * THE ENTRY A CLICK ON TARGET LANDED IN: the innermost feed row
+ * (`[data-feed-row]`) holding TARGET inside its root row ROW, or ROW itself
+ * when nothing inside ROW holds it (a group's own tab strip, a row that is one
+ * entry).
+ */
+export function entryOf(target: Element, row: Element): Element {
+  const entry = target.closest("[data-feed-row]");
+  return entry !== null && row.contains(entry) ? entry : row;
+}
+
 /** The click hold's row in a record: its name (`rowName`), or "none" when the click landed outside every row. */
 export function heldRowName(row: Element | null): string {
   return row === null ? "none" : rowName(row);
@@ -453,6 +464,13 @@ export class TailFollow {
    * merge bubble), where the first row in view already holds everything still.
    */
   private clickedRow: Element | null = null;
+  /**
+   * The ENTRY the reader's click holds still while `clickHeld` stands: the
+   * innermost feed row holding the click (`entryOf`), which is `clickedRow`
+   * itself unless that root row is a group holding the clicked entry among
+   * others (a run of final responses, a subagent's sub-feed).
+   */
+  private clickedEntry: Element | null = null;
   /** The row the anchoring holds, and its top in the box's content coordinates. */
   private anchor: { row: Element; at: number; starts: boolean } | null = null;
   /** Where the next anchor search starts: the last anchor, kept across a follow. */
@@ -647,8 +665,11 @@ export class TailFollow {
    * redraws, and whatever height that takes or gives, the view holds. So the
    * follow ends, the
    * latest-visible latch is held off until the reader's NEXT input
-   * (`onInput`), and until then the anchoring holds TARGET's root row still
-   * (`takeAnchor`): its top stays where the reader sees it, and its own growth
+   * (`onInput`), and until then the anchoring holds TARGET's ENTRY still
+   * (`takeAnchor`): the innermost feed row holding TARGET (`entryOf`), not
+   * merely its root row, since a root row may be a group whose other entries
+   * change height on the click (a run of final responses, where selecting one
+   * closes the one selected above it). Its top stays where the reader sees it, and its own growth
    * or shrinking runs downward from there, however long it takes to land (a
    * sub-feed drawn later, a redraw). Content shrinking below the held view,
    * even for one layout pass of a redraw, or the box growing under it, would
@@ -723,6 +744,7 @@ export class TailFollow {
     // as uncaused rather than taken for a scroll away from the tail.
     this.touched = false;
     this.clickedRow = target === null ? null : this.rootRowOf(target);
+    this.clickedEntry = target === null || this.clickedRow === null ? null : entryOf(target, this.clickedRow);
     this.heldTop = this.box.scrollTop;
     this.setFloor(this.heldTop);
     this.takeAnchor();
@@ -732,6 +754,7 @@ export class TailFollow {
         by,
         at: this.box.scrollTop,
         row: heldRowName(this.clickedRow),
+        entry: heldRowName(this.clickedEntry),
         target: target === null ? "none" : nodeLabel(target),
         floor_top: this.floorTop,
       },
@@ -808,6 +831,7 @@ export class TailFollow {
     if (this.clickHeld) this.recordHoldEnded(kind);
     this.clickHeld = false;
     this.clickedRow = null;
+    this.clickedEntry = null;
   }
 
   /**
@@ -847,6 +871,7 @@ export class TailFollow {
     if (this.clickHeld) this.recordHoldEnded(by);
     this.clickHeld = false;
     this.clickedRow = null;
+    this.clickedEntry = null;
     this.setFloor(null);
   }
 
@@ -1097,11 +1122,10 @@ export class TailFollow {
     this.anchor = null;
     if (this.rows === null || this.following) return;
     const viewTop = this.rows.viewportTop();
-    const clicked = this.clickHeld ? this.clickedRow : null;
-    const clickedEdges = clicked === null || clicked.parentElement !== this.rows.host ? null : this.rows.edges(clicked);
-    if (clicked !== null && clickedEdges !== null) {
-      this.anchorHint = clicked;
-      this.anchor = { row: clicked, at: clickedEdges.top - viewTop + this.box.scrollTop, starts: true };
+    const clicked = this.clickHeld ? this.clickedHold() : null;
+    if (clicked !== null) {
+      this.anchorHint = clicked.row;
+      this.anchor = { row: clicked.held, at: clicked.top - viewTop + this.box.scrollTop, starts: true };
       return;
     }
     const found = findAnchor(this.rows, this.anchorHint, viewTop);
@@ -1110,9 +1134,30 @@ export class TailFollow {
     this.anchor = { row: found.row, at: found.top - viewTop + this.box.scrollTop, starts: found.starts };
   }
 
-  /** ROW's top in the box's content coordinates, or null when it is no longer a drawn row. */
+  /**
+   * What the reader's click holds still, while it is drawn: the clicked entry
+   * (`clickedEntry`), or its root row once a redraw took the entry away, with
+   * the root row and the held element's top on screen. Null when neither is
+   * drawn in the feed.
+   */
+  private clickedHold(): { held: Element; row: Element; top: number } | null {
+    const row = this.clickedRow;
+    if (this.rows === null || row === null || row.parentElement !== this.rows.host) return null;
+    for (const held of [this.clickedEntry, row]) {
+      if (held === null || !row.contains(held)) continue;
+      const edges = this.rows.edges(held);
+      if (edges !== null) return { held, row, top: edges.top };
+    }
+    return null;
+  }
+
+  /**
+   * ROW's top in the box's content coordinates, or null when it is no longer
+   * drawn in the feed. ROW is a root row, or the clicked entry inside one
+   * (`clickedHold`).
+   */
   private anchorTop(row: Element): number | null {
-    if (this.rows === null || row.parentElement !== this.rows.host) return null;
+    if (this.rows === null || row === this.rows.host || !this.rows.host.contains(row)) return null;
     const edges = this.rows.edges(row);
     if (edges === null) return null;
     return edges.top - this.rows.viewportTop() + this.box.scrollTop;
