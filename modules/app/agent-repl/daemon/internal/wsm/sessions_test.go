@@ -726,3 +726,31 @@ func TestSessionsByWorkspaceSurfacesAFailedRead(t *testing.T) {
 		t.Fatalf("SessionsByWorkspace = %+v beside a failure, want nil", got)
 	}
 }
+
+func TestSessionsFailsWholeOnAHalfWrittenTerminal(t *testing.T) {
+	// Arrange: one good row beside one corrupt row.
+	s, log := testStore(t)
+	good := testWorkspace(t, s)
+	bad := testWorkspaceNamed(t, s, "second")
+	for _, ws := range []Workspace{good, bad} {
+		if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, HostSessionID: "host-1", StartedAt: instant, LastEngagementAt: instant}); err != nil {
+			t.Fatalf("PutSession: %v", err)
+		}
+	}
+	corrupt(t, s, `UPDATE sessions SET terminal_at = 1 WHERE workspace_id = ?`, bad.ID)
+
+	// Act
+	got, err := s.Sessions(context.Background())
+
+	// Assert
+	var refusal *DecodeError
+	if !errors.As(err, &refusal) || refusal.Table != "sessions" || refusal.Field != "terminal" || refusal.Row != string(bad.ID) {
+		t.Fatalf("Sessions = %v, want a *DecodeError naming sessions.terminal on %s", err, bad.ID)
+	}
+	if got != nil {
+		t.Fatalf("Sessions = %+v alongside the refusal, want nothing", got)
+	}
+	if !loggedOperation(log, "daemon.wsm.sessions", "error") {
+		t.Fatalf("the decode failure was not logged at error: %v", log.Records())
+	}
+}
