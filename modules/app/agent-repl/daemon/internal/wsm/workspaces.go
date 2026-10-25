@@ -655,8 +655,16 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 //
 // A RE-OPEN MOVES NOTHING: the workspace returns to the place it held in the
 // registry when it was closed (place.go). Re-opening touches only the flag,
-// the record and a merge's settlement, because the bring-up claims serving
-// itself.
+// the record, a merge's settlement and the serving ownership.
+//
+// A REOPENED WORKSPACE IS SERVED BY THE DAEMON REOPENING IT, claimed in the
+// same update that clears the flag: the mirror of MarkClosed's release. The
+// claim used to be left to the bring-up, and a close leaves the session
+// alone, so a workspace reopened while its shim still ran brought nothing up
+// and stood open with no owner. Its live shim was then handed over only
+// because the handover reclaims such a row at ERROR (2026-10-25: six
+// workspaces the daemon closed when their worktrees were deleted, reopened
+// once the worktrees were restored). An empty serving instance is refused.
 //
 // AN OPEN WORKSPACE IS NEVER MERGED. Re-opening a merged workspace is the user
 // taking it back to revise what it landed, so the same statement retires the
@@ -674,9 +682,15 @@ func (s *store) MarkClosed(ctx context.Context, id WorkspaceID, closure Closure)
 // A REOPENED WORKSPACE KEEPS ITS CACHE WARM AGAIN, so the same statement
 // clears the projected cache lapse its close left (cachelapse.Keeper), unless
 // the row is still hidden, whose projection is the hide's.
-func (s *store) Reopen(ctx context.Context, id WorkspaceID) error {
-	fields := dlog.Context{"workspace": string(id)}
-	return s.write(ctx, "daemon.wsm.reopen", fields, func(ctx context.Context, tx *sql.Tx) error {
+func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) error {
+	const op = "daemon.wsm.reopen"
+	fields := dlog.Context{"workspace": string(id), "instance": string(serving)}
+	if serving == "" {
+		err := errors.New("wsm: empty daemon instance id")
+		s.log.Error(op, "refused a re-open with no instance to serve it", withError(fields, err))
+		return err
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var merged sql.NullInt64
 		var mergeOf sql.NullString
 		var hidden, closed bool
@@ -696,6 +710,7 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID) error {
 			{name: "closed", value: false},
 			{name: "closure_at", value: nil},
 			{name: "closure_by", value: nil},
+			{name: "serving_instance", value: string(serving)},
 		}
 		if !hidden {
 			columns = append(columns,

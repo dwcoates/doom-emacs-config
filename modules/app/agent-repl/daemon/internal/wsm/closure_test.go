@@ -128,6 +128,9 @@ func TestMarkClosedRefusesAnUndeclaredCause(t *testing.T) {
 	}
 }
 
+// testServing is the daemon instance the tests' re-opens claim serving for.
+const testServing InstanceID = "instance-reopening"
+
 func TestReopenClearsTheCloseRecord(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
@@ -138,7 +141,7 @@ func TestReopenClearsTheCloseRecord(t *testing.T) {
 	}
 
 	// Act
-	if err := s.Reopen(ctx, ws.ID); err != nil {
+	if err := s.Reopen(ctx, ws.ID, testServing); err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
 
@@ -196,7 +199,7 @@ func TestReopenRetiresAMergesSettlement(t *testing.T) {
 			mergedAndClosed(t, s, ws)
 
 			// Act
-			if err := s.Reopen(context.Background(), ws.ID); err != nil {
+			if err := s.Reopen(context.Background(), ws.ID, testServing); err != nil {
 				t.Fatalf("Reopen: %v", err)
 			}
 
@@ -215,7 +218,7 @@ func TestReopenOpensAMergedWorkspace(t *testing.T) {
 	mergedAndClosed(t, s, ws)
 
 	// Act
-	if err := s.Reopen(context.Background(), ws.ID); err != nil {
+	if err := s.Reopen(context.Background(), ws.ID, testServing); err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
 
@@ -237,7 +240,7 @@ func TestReopenRevealsAMergedMergeWorkspace(t *testing.T) {
 	mergedAndClosed(t, s, ws)
 
 	// Act
-	if err := s.Reopen(context.Background(), ws.ID); err != nil {
+	if err := s.Reopen(context.Background(), ws.ID, testServing); err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
 
@@ -265,7 +268,7 @@ func TestReopenKeepsTheLandingOfAWorkspaceThatIsNotMerged(t *testing.T) {
 	}
 
 	// Act
-	if err := s.Reopen(context.Background(), ws.ID); err != nil {
+	if err := s.Reopen(context.Background(), ws.ID, testServing); err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
 
@@ -291,7 +294,7 @@ func TestReopenKeepsTheLiveCountOfAWorkspaceThatIsNotMerged(t *testing.T) {
 	}
 
 	// Act
-	if err := s.Reopen(context.Background(), ws.ID); err != nil {
+	if err := s.Reopen(context.Background(), ws.ID, testServing); err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
 
@@ -306,7 +309,7 @@ func TestReopenRefusesAnUnknownWorkspace(t *testing.T) {
 	s, _ := testStore(t)
 
 	// Act
-	err := s.Reopen(context.Background(), WorkspaceID("absent"))
+	err := s.Reopen(context.Background(), WorkspaceID("absent"), testServing)
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {

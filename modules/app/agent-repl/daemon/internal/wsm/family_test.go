@@ -319,7 +319,7 @@ func TestReopenRefusesAChildWhoseParentIsNotOpen(t *testing.T) {
 			tt.setUp(t, f)
 
 			// Act
-			err := f.s.Reopen(context.Background(), f.child.ID)
+			err := f.s.Reopen(context.Background(), f.child.ID, testServing)
 
 			// Assert
 			requireParentNotOpen(t, err, f.parent, tt.state)
@@ -336,7 +336,7 @@ func TestReopenOfAnOpenLegacyChildIsNoReopen(t *testing.T) {
 	mustClose(t, f.s, f.parent.ID, CloseByDaemon)
 
 	// Act
-	err := f.s.Reopen(context.Background(), f.child.ID)
+	err := f.s.Reopen(context.Background(), f.child.ID, testServing)
 
 	// Assert
 	if err != nil {

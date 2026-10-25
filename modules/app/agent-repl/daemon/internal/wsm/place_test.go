@@ -351,7 +351,7 @@ func TestReopeningAClosedWorkspaceRestoresItsPlace(t *testing.T) {
 	before := orderedNames(t, s)
 
 	// Act.
-	if err := s.Reopen(context.Background(), b.ID); err != nil {
+	if err := s.Reopen(context.Background(), b.ID, testServing); err != nil {
 		t.Fatalf("Reopen: %v", err)
 	}
 
@@ -369,7 +369,7 @@ func TestReopeningAnUnknownWorkspaceIsNotFound(t *testing.T) {
 	s, _ := testStore(t)
 
 	// Act.
-	err := s.Reopen(context.Background(), "ws-missing")
+	err := s.Reopen(context.Background(), "ws-missing", testServing)
 
 	// Assert.
 	if !errors.Is(err, ErrNotFound) {

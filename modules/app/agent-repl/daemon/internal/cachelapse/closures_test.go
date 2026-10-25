@@ -23,7 +23,7 @@ func (c *closingDB) MarkClosed(_ context.Context, id wsm.WorkspaceID, _ wsm.Clos
 	return c.err
 }
 
-func (c *closingDB) Reopen(_ context.Context, id wsm.WorkspaceID) error {
+func (c *closingDB) Reopen(_ context.Context, id wsm.WorkspaceID, _ wsm.InstanceID) error {
 	c.wrote = append(c.wrote, "reopen "+string(id))
 	return c.err
 }
@@ -42,7 +42,7 @@ func TestObserveClosures(t *testing.T) {
 			return db.MarkClosed(context.Background(), theWorkspace, wsm.Closure{At: now, By: wsm.CloseByUser})
 		}, wrote: "close " + string(theWorkspace)},
 		{name: "a reopen", write: func(db wsm.DB) error {
-			return db.Reopen(context.Background(), theWorkspace)
+			return db.Reopen(context.Background(), theWorkspace, "instance-a")
 		}, wrote: "reopen " + string(theWorkspace)},
 	}
 	refused := errors.New("database is locked")

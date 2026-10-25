@@ -545,22 +545,37 @@ func TestMarkClosedRefusesAnUnknownWorkspace(t *testing.T) {
 }
 
 func TestCloseAndReopenOwnership(t *testing.T) {
+	claimed := NewInstanceID()
 	tests := []struct {
-		name  string
-		write func(ctx context.Context, s *store, id WorkspaceID) error
-		want  bool // whether serving and the spawned pid survive the write
+		name      string
+		write     func(ctx context.Context, s *store, id WorkspaceID) error
+		wantOwner *InstanceID // the serving owner the write leaves
+		wantPID   bool        // whether the spawned shim pid survives the write
 	}{
 		{
 			name: "a close releases serving and clears the spawned shim pid",
 			write: func(ctx context.Context, s *store, id WorkspaceID) error {
 				return s.MarkClosed(ctx, id, Closure{At: time.Now(), By: CloseByUser})
 			},
-			want: false,
+			wantOwner: nil,
+			wantPID:   false,
 		},
 		{
-			name:  "a reopen leaves serving and the spawned shim pid untouched",
-			write: func(ctx context.Context, s *store, id WorkspaceID) error { return s.Reopen(ctx, id) },
-			want:  true,
+			name:      "a reopen of an open row claims serving for the reopener and keeps the spawned shim pid",
+			write:     func(ctx context.Context, s *store, id WorkspaceID) error { return s.Reopen(ctx, id, testServing) },
+			wantOwner: ptr(testServing),
+			wantPID:   true,
+		},
+		{
+			name: "a reopen of a closed row claims back the serving its close released",
+			write: func(ctx context.Context, s *store, id WorkspaceID) error {
+				if err := s.MarkClosed(ctx, id, Closure{At: time.Now(), By: CloseByDaemon}); err != nil {
+					return err
+				}
+				return s.Reopen(ctx, id, testServing)
+			},
+			wantOwner: ptr(testServing),
+			wantPID:   false,
 		},
 	}
 	for _, tt := range tests {
@@ -569,7 +584,7 @@ func TestCloseAndReopenOwnership(t *testing.T) {
 			ctx := context.Background()
 			s, _ := testStore(t)
 			ws := testWorkspace(t, s)
-			if err := s.ClaimServing(ctx, ws.ID, NewInstanceID()); err != nil {
+			if err := s.ClaimServing(ctx, ws.ID, claimed); err != nil {
 				t.Fatalf("ClaimServing: %v", err)
 			}
 			pid := 63777
@@ -591,13 +606,49 @@ func TestCloseAndReopenOwnership(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Workspace: %v", err)
 			}
-			if (owner != nil) != tt.want {
-				t.Fatalf("serving owner = %v, want present=%v", owner, tt.want)
+			if describeOwner(owner) != describeOwner(tt.wantOwner) {
+				t.Fatalf("serving owner = %s, want %s", describeOwner(owner), describeOwner(tt.wantOwner))
 			}
-			if (got.SpawnedShimPID != nil) != tt.want {
-				t.Fatalf("spawned shim pid = %v, want present=%v", got.SpawnedShimPID, tt.want)
+			if (got.SpawnedShimPID != nil) != tt.wantPID {
+				t.Fatalf("spawned shim pid = %v, want present=%v", got.SpawnedShimPID, tt.wantPID)
 			}
 		})
+	}
+}
+
+// describeOwner spells a serving owner for a comparison and its failure.
+func describeOwner(owner *InstanceID) string {
+	if owner == nil {
+		return "none"
+	}
+	return string(*owner)
+}
+
+func TestReopenRefusesAnEmptyServingInstance(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.MarkClosed(ctx, ws.ID, Closure{At: firstClose, By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+
+	// Act
+	err := s.Reopen(ctx, ws.ID, "")
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Reopen with no instance succeeded, want a refusal")
+	}
+	if !loggedOperation(log, "daemon.wsm.reopen", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+	got, err := s.Workspace(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if !got.Closed {
+		t.Fatalf("the refused re-open opened the row")
 	}
 }
 

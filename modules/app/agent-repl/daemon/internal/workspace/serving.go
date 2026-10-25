@@ -17,7 +17,10 @@ const opServing = "daemon.workspace.serving"
 // `hold` (every bring-up: the boot's, a lazy revival's, a re-open's, a
 // resume's) and `Install` (the boot's adoption of a survivor, the handover
 // successor's adoption, a relaunch's rotation) -- and from nowhere else,
-// because those two writes ARE the fleet beginning to serve a shim.
+// because those two writes ARE the fleet beginning to serve a shim. Outside
+// the fleet, registration claims an announced workspace and wsm.Reopen claims
+// a re-opened one in the same update that opens it, because a close leaves the
+// session alone and a re-open of a live one brings nothing up to claim it.
 //
 // WHY IT IS HERE, not at each caller. The serving row is what a handover
 // hands over (rollout's `served`): a workspace nobody claimed is transferred

@@ -604,10 +604,10 @@ type DerivedReporter interface {
 
 // Deps are the verbs' collaborators.
 type Deps struct {
-	// Instance is THIS DAEMON's identity. Registration claims serving
-	// ownership of every workspace under it, which is what a handover hands
-	// over: without a claim the outgoing daemon serves nothing as far as the
-	// durable record is concerned, and transfers nothing.
+	// Instance is THIS DAEMON's identity. Registration and every re-open
+	// claim serving ownership of the workspace under it, which is what a
+	// handover hands over: without a claim the outgoing daemon serves nothing
+	// as far as the durable record is concerned, and transfers nothing.
 	Instance ids.InstanceID
 	DB       wsm.DB
 	Git      gitclient.Git
@@ -971,6 +971,8 @@ type Sessions interface {
 func New(deps Deps) (Verbs, error) {
 	missing := func(what string) error { return fmt.Errorf("workspace: %s is required", what) }
 	switch {
+	case deps.Instance == "":
+		return nil, missing("this daemon's instance id")
 	case deps.DB == nil:
 		return nil, missing("a state client")
 	case deps.Derived == nil:

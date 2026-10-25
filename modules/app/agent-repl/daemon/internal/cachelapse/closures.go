@@ -42,8 +42,8 @@ func (o *closureObservedDB) MarkClosed(ctx context.Context, id wsm.WorkspaceID, 
 }
 
 // Reopen records the reopen, then tells the sink.
-func (o *closureObservedDB) Reopen(ctx context.Context, id wsm.WorkspaceID) error {
-	if err := o.DB.Reopen(ctx, id); err != nil {
+func (o *closureObservedDB) Reopen(ctx context.Context, id wsm.WorkspaceID, serving wsm.InstanceID) error {
+	if err := o.DB.Reopen(ctx, id, serving); err != nil {
 		return err
 	}
 	o.sink.ClosureChanged(id)

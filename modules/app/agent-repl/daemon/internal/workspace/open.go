@@ -129,7 +129,7 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 	// one, and an open workspace is never merged (wsm.Reopen).
 	if record.Closed || record.MergedAt != nil {
 		reportOpenStage(progress, OpenStageClearingClosed)
-		if err := v.deps.DB.Reopen(ctx, ws); err != nil {
+		if err := v.deps.DB.Reopen(ctx, ws, v.deps.Instance); err != nil {
 			if refusedByFamily(log, opOpen, err) {
 				return err
 			}

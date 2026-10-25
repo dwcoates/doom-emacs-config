@@ -282,7 +282,7 @@ func TestReopeningAWorkspaceDoesNotRestoreItsSubscriptions(t *testing.T) {
 	}
 
 	// Act
-	err := s.Reopen(context.Background(), ws.ID)
+	err := s.Reopen(context.Background(), ws.ID, testServing)
 
 	// Assert
 	if err != nil {

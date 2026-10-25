@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +69,40 @@ func TestOpenClearsTheClosedFlag(t *testing.T) {
 	// Assert.
 	if closed, ok := f.db.closedFlags["w1"]; !ok || closed {
 		t.Fatalf("closed flag = (%v, %v), want it cleared", closed, ok)
+	}
+}
+
+func TestOpenOfAClosedWorkspaceClaimsServingInTheReopen(t *testing.T) {
+	tests := []struct {
+		name string
+		live bool
+	}{
+		// THE LIVE CASE IS THE ONE THE CLAIM EXISTS FOR: a close leaves the
+		// session alone, so the open brings nothing up and only the reopen
+		// can claim the row back (2026-10-25).
+		{name: "its session still live", live: true},
+		{name: "its session down", live: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			ws := f.workspace("w1", t.TempDir())
+			ws.Closed = true
+			f.db.with(ws)
+			f.fleet.live["w1"] = tt.live
+
+			// Act.
+			if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+
+			// Assert.
+			want := []servingClaim{{ws: "w1", instance: fixtureInstance}}
+			if !reflect.DeepEqual(f.db.reopenClaims, want) {
+				t.Fatalf("reopen claims = %+v, want %+v", f.db.reopenClaims, want)
+			}
+		})
 	}
 }
 

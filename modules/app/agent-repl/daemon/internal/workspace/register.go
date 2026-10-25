@@ -193,7 +193,7 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 	// daemon's own guarantee that the main worktree exists, never Emacs
 	// meaning to hold it.
 	if !created && record.Closed && facts.Closure == nil {
-		if err := v.deps.DB.Reopen(ctx, record.ID); err != nil {
+		if err := v.deps.DB.Reopen(ctx, record.ID, v.deps.Instance); err != nil {
 			// A CLOSED CHILD OF A PARENT THAT IS NOT OPEN STAYS CLOSED
 			// (wsm/family.go): the announcement is refused parent_not_open.
 			if refusedByFamily(log, opRegister, err) {
@@ -239,7 +239,7 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 	// incumbent's; a workspace nobody claimed is transferred by nobody. A
 	// closed workspace is served by nobody (MarkClosed releases the claim), so
 	// one born closed claims nothing.
-	if v.deps.Instance != "" && !record.Closed {
+	if !record.Closed {
 		if err := v.deps.DB.ClaimServing(ctx, record.ID, v.deps.Instance); err != nil {
 			log.Error(opRegister, "could not claim the workspace's serving ownership", dlog.Context{
 				"workspace": string(record.ID), "instance": string(v.deps.Instance), "cause": err.Error(),

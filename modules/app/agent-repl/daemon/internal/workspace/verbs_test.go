@@ -28,6 +28,7 @@ func TestNewRefusesEveryMissingCollaborator(t *testing.T) {
 		name  string
 		strip func(*Deps)
 	}{
+		{name: "no instance id", strip: func(d *Deps) { d.Instance = "" }},
 		{name: "no state client", strip: func(d *Deps) { d.DB = nil }},
 		{name: "no git client", strip: func(d *Deps) { d.Git = nil }},
 		{name: "no create gate", strip: func(d *Deps) { d.Creates = nil }},

@@ -244,6 +244,9 @@ type fakeDB struct {
 	// write, which the fake's own slice cannot.
 	claims   []servingClaim
 	claimErr error
+	// reopenClaims records the serving instance every Reopen claimed for, in
+	// order.
+	reopenClaims []servingClaim
 
 	// coldMu guards the cold read payments, which a detached re-open writes
 	// off the test's goroutine. coldPayments is each workspace's standing
@@ -682,12 +685,13 @@ func (d *fakeDB) MarkClosed(_ context.Context, id ids.WorkspaceID, closure wsm.C
 	return nil
 }
 
-func (d *fakeDB) Reopen(_ context.Context, id ids.WorkspaceID) error {
+func (d *fakeDB) Reopen(_ context.Context, id ids.WorkspaceID, serving ids.InstanceID) error {
 	if d.setClosedErr != nil {
 		return d.setClosedErr
 	}
 	d.closedFlags[id] = false
 	d.reopened = append(d.reopened, id)
+	d.reopenClaims = append(d.reopenClaims, servingClaim{ws: id, instance: serving})
 	return nil
 }
 
@@ -2807,7 +2811,8 @@ func newFixture(t *testing.T) *fixture {
 	f.hasSession = true
 
 	verbs, err := New(Deps{
-		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
+		Instance: fixtureInstance,
+		DB:       f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, principalLinks: &f.topbarPrincipalLinks}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet,
 		Headless:   f.headless,

@@ -165,7 +165,7 @@ func TestRetireRepositoryRefusesWhileLiveStateRemains(t *testing.T) {
 		{
 			name: "an open workspace",
 			arrange: func(t *testing.T, s *store, ws Workspace) {
-				if err := s.Reopen(context.Background(), ws.ID); err != nil {
+				if err := s.Reopen(context.Background(), ws.ID, testServing); err != nil {
 					t.Fatalf("Reopen: %v", err)
 				}
 			},

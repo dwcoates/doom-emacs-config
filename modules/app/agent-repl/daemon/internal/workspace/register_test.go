@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -673,6 +674,30 @@ func TestRegisterReopensAClosedWorkspace(t *testing.T) {
 	// Assert.
 	if again.Closed {
 		t.Fatalf("Register answered workspace %v still closed; announcing a directory must re-open it", again.ID)
+	}
+}
+
+func TestRegisterReopenClaimsServingForThisDaemon(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	first, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("first Register: %v", err)
+	}
+	closed := first
+	closed.Closed = true
+	f.db.with(closed)
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("second Register: %v", err)
+	}
+
+	// Assert.
+	want := []servingClaim{{ws: first.ID, instance: fixtureInstance}}
+	if !reflect.DeepEqual(f.db.reopenClaims, want) {
+		t.Fatalf("reopen claims = %+v, want %+v", f.db.reopenClaims, want)
 	}
 }
 

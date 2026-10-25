@@ -242,7 +242,7 @@ func TestReopenClearsAClosedWorkspacesCacheLapse(t *testing.T) {
 			}
 
 			// Act
-			if err := s.Reopen(context.Background(), ws.ID); err != nil {
+			if err := s.Reopen(context.Background(), ws.ID, testServing); err != nil {
 				t.Fatalf("Reopen: %v", err)
 			}
 

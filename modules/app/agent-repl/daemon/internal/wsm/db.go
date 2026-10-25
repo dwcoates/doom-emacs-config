@@ -64,8 +64,9 @@ type DB interface {
 	// with an open descendant, nil when none has (family.go).
 	RequireNoOpenChildren(ctx context.Context, ids ...WorkspaceID) error
 	// Reopen records that a workspace's editor state stands again, clearing
-	// its close record and, for a merged workspace, the merge's settlement.
-	Reopen(ctx context.Context, id WorkspaceID) error
+	// its close record and, for a merged workspace, the merge's settlement,
+	// and records SERVING as the daemon serving it.
+	Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) error
 	// SetCurrent records the user's selection of a workspace at an instant.
 	SetCurrent(ctx context.Context, id WorkspaceID, at time.Time) error
 	// SetCurrentKeepingLastSelected records a workspace as current and leaves
