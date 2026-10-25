@@ -87,12 +87,23 @@ func (o *orchestrator) chainRepos() []wsm.RepoKey {
 
 // beyondWindow answers the workspace of every chain member the window in
 // force no longer holds, in a stable order.
+//
+// THE WINDOW IS EACH CHAIN'S OWN (windowFor): a chain whose head runs
+// concurrent stages holds every deploy in line, whatever the power source or
+// the racing switch, so none of its members is ever beyond it.
 func (o *orchestrator) beyondWindow() []ids.WorkspaceID {
-	window := o.queueWindow()
 	o.mu.Lock()
-	defer o.mu.Unlock()
-	var out []ids.WorkspaceID
+	chains := make([][]*run, 0, len(o.chains))
 	for _, chain := range o.chains {
+		chains = append(chains, append([]*run(nil), chain...))
+	}
+	o.mu.Unlock()
+	var out []ids.WorkspaceID
+	for _, chain := range chains {
+		if len(chain) == 0 {
+			continue
+		}
+		window := o.windowFor(chain[0])
 		for i, member := range chain {
 			if i >= window {
 				out = append(out, member.ws)

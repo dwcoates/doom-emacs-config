@@ -468,7 +468,8 @@ The input window underlines misspelled words as you type.
 - It asks for the commission alone, and the daemon names the workspace.
   - `SPC u SPC TAB o` asks for the model too.
 - It is cut from the repository's primary branch and merges back into it.
-- What happens when the work is done is the repository's own policy, in `.agent-repl/prompts/` at its main checkout.
+- What happens when the work is done is the repository's own deploy, in `.agent-repl/deploy.yaml` at its main checkout.
+  - agent-repl's deploy tests the branch, lands it on master one deploy at a time, and rolls out what landed.
 
 ## A one-shot that fixes the current workspace
 
@@ -493,8 +494,13 @@ The input window underlines misspelled words as you type.
   - It must be on the roster. If it is not, the command says so. Add it with `SPC TAB C-n`.
 - Otherwise it is an ordinary `SPC TAB o` one-shot.
   - `SPC u SPC TAB O` asks for the model too.
-- What happens when the work is done is explanation-engine's own policy, in `.agent-repl/prompts/` at its main checkout.
-  - The policy merges the one-shot through the merge queue, then runs `/create-or-update-pr --add-to-merge-queue` once the merge lands.
+- What happens when the work is done is explanation-engine's own deploy, in `.agent-repl/deploy.yaml` at its main checkout.
+  - Its deploy hook is a prompt to the one-shot: open a pull request, and wait for it to merge on GitHub.
+  - Its post-deploy hook then updates the main checkout.
+- explanation-engine's deploys run their pre-deploy and deploy stages concurrently.
+  - Several one-shots can each wait on their own pull request at once, so one slow review holds no other one-shot back.
+  - The post-deploy stage still runs one deploy at a time, in the order the one-shots finished.
+  - A one-shot whose pull request merged first waits for the ones ahead of it, and its footer reads `awaiting turn: N ahead`.
 - Re-opening a closed workspace is `SPC TAB C-r`.
 
 ## One-shot commissions across a crash

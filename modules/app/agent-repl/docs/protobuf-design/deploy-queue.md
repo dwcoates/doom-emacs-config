@@ -114,13 +114,15 @@ origin) is the next repository to be described this way, and is deferred.
 
 - **Principle.** Three stages, `pre_deploy`, `deploy` and `post_deploy`.
   Concurrent stages may only come before or after one unbroken run of
-  one-at-a-time stages, so the queue keeps holding at most one deploy per
-  repository.
-- **Consequences.** This landing has no concurrency setting at all: every
-  stage of every repository runs one at a time, inside the queue, which is the
-  queue as it is. The setting arrives with explanation-engine's port, whose
-  `pre_deploy` and `deploy` run concurrently and whose `post_deploy` runs one
-  at a time.
+  one-at-a-time stages, so at most one deploy per repository is ever inside a
+  one-at-a-time stage, and those stages are entered in queue order.
+- **Consequences.** `repoconfig.v1.DeployConfig.concurrent` (change 11) names
+  a LEADING run only, so the concurrent stages always come before the
+  one-at-a-time run. A trailing concurrent run would need a deploy to leave
+  the queue's head before its owner closes, and no repository needs one yet.
+  explanation-engine's `pre_deploy` and `deploy` run concurrently and its
+  `post_deploy` runs one at a time. Unset, every stage runs one at a time,
+  which is how agent-repl's own config runs.
 
 ## Landed changes
 
@@ -261,6 +263,35 @@ origin) is the next repository to be described this way, and is deferred.
   `workspace_file` must lie inside the worktree, and a `merge_test_log` token
   names a tests round. Promising a click the contract cannot carry would be a
   name the design reasons wrongly from.
+
+### 11. A deploy config's leading stages may run concurrently
+
+- **What.** `repoconfig.v1.DeployConfig.concurrent`
+  (`repoconfig.v1.DeployConcurrentStages`) is a oneof whose arm is the stage
+  the concurrent run goes through: `through_pre_deploy` or `through_deploy`.
+  `deployconfig.check()` refuses it set with no arm, and refuses it beside
+  `pre_deploy.local_merge` (`deploy_config_invalid`, naming the field).
+  `frontend.v1.FooterStatusMerging.awaiting_turn`
+  (`frontend.v1.FooterSubStatusMergingAwaitingTurn.ahead`) draws a deploy
+  that finished its concurrent stages and waits for the deploys ahead of it,
+  as `awaiting turn: N ahead`.
+- **How the queue runs it.** A queue whose head's config has concurrent
+  stages chains every deploy in line behind the head, with no window: a
+  concurrent stage runs hooks, never the tests a racing window rations. Each
+  member runs its concurrent stages as a speculative run does, and waits at
+  its first one-at-a-time stage (`agent-repld.internal.merge.awaitTurnFor()`)
+  on the chain's own signal. Only the pump promotes, and only the chain's
+  front once its entry stands first in line, so queue order is structural:
+  no retry, poll or sleep decides it.
+- **Why only a leading run, and never with a local merge.** A local merge
+  lands on the target, which only one deploy at a time may move, so it cannot
+  run concurrently. The oneof expresses only a leading run, so a concurrent
+  stage between two one-at-a-time stages cannot be written.
+- **Found on the way.** A prompt deploy hook
+  (`conversation.v1.PromptOrigin.PROMPT_ORIGIN_DEPLOY_HOOK`) was missing from
+  the lease's merge origins, so the deploy's own lease held its deploy hook
+  until the deploy ended, which never happened. It now passes the lease as
+  the pre- and post-deploy prompt hooks always did.
 
 ## Open gaps
 

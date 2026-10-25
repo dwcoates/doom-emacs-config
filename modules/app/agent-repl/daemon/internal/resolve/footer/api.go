@@ -54,6 +54,10 @@ type MergeFacts struct {
 	// worked on is not counted) and how many are waiting, this one included.
 	QueuePlace   int
 	QueueWaiting int
+	// Ahead is "awaiting turn": how many deploys queued ahead of this one
+	// still have their one-at-a-time stages to run. Set for StepAwaitingTurn
+	// alone.
+	Ahead int
 	// Replayed and Total are "rebasing k/n": commits replayed onto the
 	// target's tip, and commits to replay in all.
 	Replayed int
@@ -100,6 +104,10 @@ const (
 	StepCommitting         MergeStep = "committing"
 	StepDeploying          MergeStep = "deploying"
 	StepPostDeploy         MergeStep = "post_deploy"
+	// StepAwaitingTurn is a deploy that finished its concurrent stages
+	// (repoconfig.v1.DeployConfig.concurrent) and waits for the deploys queued
+	// ahead of it to finish their one-at-a-time stages.
+	StepAwaitingTurn MergeStep = "awaiting_turn"
 )
 
 // Words is the step in the footer's plain words, as a person reads it: the
@@ -114,6 +122,8 @@ func (s MergeStep) Words() string {
 		return "post-deploy"
 	case StepAwaitingFree:
 		return "waiting for the workspace to be free"
+	case StepAwaitingTurn:
+		return "waiting for the deploys ahead"
 	}
 	return string(s)
 }

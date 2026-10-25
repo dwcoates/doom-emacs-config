@@ -899,6 +899,10 @@ message FooterStatusMerging {
     FooterSubStatusMergingDeploying deploying = 24;
     // A `post_deploy` hook is running.
     FooterSubStatusMergingPostDeploy post_deploy = 25;
+    // The deploy finished the stages its repository runs concurrently
+    // (repoconfig.v1.DeployConfig.concurrent) and waits for the deploys queued
+    // ahead of it to finish their one-at-a-time stages.
+    FooterSubStatusMergingAwaitingTurn awaiting_turn = 26;
     // Conflict resolution or fixing is held on the user: this workspace's
     // session has a permission ask or a question batch open. It stands until
     // every such ask is answered or withdrawn, and the step's own substatus
@@ -948,6 +952,15 @@ message FooterSubStatusMergingAwaitingFree {
   // workspace whose worktree the merge rebases in. Empty when the merge waits
   // on the requester itself.
   string other_workspace = 6;
+}
+
+// Waiting for the deploys ahead, drawn "awaiting turn: 2 ahead". The deploy
+// has run its concurrent stages; the activity line names the deploy right
+// ahead of it and that deploy's step.
+message FooterSubStatusMergingAwaitingTurn {
+  // How many deploys queued ahead of this one still have their one-at-a-time
+  // stages to run. At least 1: a deploy with none ahead takes its turn.
+  uint32 ahead = 1;
 }
 
 // Waiting in the queue, drawn "enqueued 2/5".

@@ -105,6 +105,9 @@ func TestParseRefusesUnusableConfigs(t *testing.T) {
 		{name: "an absolute script path", doc: "pre_deploy:\n  hooks:\n    - hook:\n        script:\n          path: /bin/x\n          timeout_seconds: 5\n      runs_for:\n        main: {}\n", want: "must be relative"},
 		{name: "a script with no timeout", doc: "pre_deploy: {}\npost_deploy:\n  - hook:\n      script:\n        path: x.sh\n    runs_for:\n      main: {}\n", want: "post_deploy[0].hook.script.timeout_seconds is required"},
 		{name: "a blank prompt", doc: "pre_deploy: {}\npost_deploy:\n  - hook:\n      prompt:\n        text: \"  \"\n    runs_for:\n      any_target: {}\n", want: "never blank"},
+		{name: "concurrent naming no stage", doc: "pre_deploy: {}\nconcurrent: {}\n", want: "concurrent names no stage"},
+		{name: "concurrent with a local merge", doc: "pre_deploy:\n  local_merge:\n    tests:\n      agent_repl_suites:\n        script_path: t.sh\nconcurrent:\n  through_pre_deploy: {}\n", want: "cannot be set with pre_deploy.local_merge"},
+		{name: "concurrent through a stage the schema does not name", doc: "pre_deploy: {}\nconcurrent:\n  through_post_deploy: {}\n", want: "through_post_deploy"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -203,6 +206,76 @@ func repoRoot(t *testing.T) string {
 // repository before deploys were configured: rebase, agent-repl's suites, the
 // merge commit and the version tag, then the runtime's redeploy on landings
 // into master, and no hook besides.
+func TestParseAcceptsConcurrentStages(t *testing.T) {
+	// Arrange: explanation-engine's shape, a pull request in the deploy stage
+	// run concurrently and the main checkout's update one at a time.
+	doc := `
+pre_deploy: {}
+concurrent:
+  through_deploy: {}
+deploy:
+  hook:
+    prompt:
+      text: open the pull request and wait for it to merge
+  runs_for:
+    main: {}
+post_deploy:
+  - hook:
+      script:
+        path: .agent-repl/hooks/update-master-from-origin.sh
+        timeout_seconds: 120
+    runs_for:
+      main: {}
+`
+	// Act
+	cfg, err := Parse("deploy.yaml", []byte(doc))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Parse = %v", err)
+	}
+	if cfg.GetConcurrent().GetThroughDeploy() == nil {
+		t.Fatalf("concurrent = %v, want through_deploy", cfg.GetConcurrent())
+	}
+}
+
+func TestConcurrent(t *testing.T) {
+	through := func(arm string) *repoconfigv1.DeployConfig {
+		cfg := &repoconfigv1.DeployConfig{PreDeploy: &repoconfigv1.DeployPreDeployStage{}}
+		switch arm {
+		case "pre_deploy":
+			cfg.Concurrent = &repoconfigv1.DeployConcurrentStages{Through: &repoconfigv1.DeployConcurrentStages_ThroughPreDeploy{ThroughPreDeploy: &repoconfigv1.DeployConcurrentThroughPreDeploy{}}}
+		case "deploy":
+			cfg.Concurrent = &repoconfigv1.DeployConcurrentStages{Through: &repoconfigv1.DeployConcurrentStages_ThroughDeploy{ThroughDeploy: &repoconfigv1.DeployConcurrentThroughDeploy{}}}
+		}
+		return cfg
+	}
+	tests := []struct {
+		name    string
+		through string
+		want    [3]bool
+		any     bool
+	}{
+		{name: "unset: every stage one at a time", through: "", want: [3]bool{false, false, false}, any: false},
+		{name: "through pre_deploy", through: "pre_deploy", want: [3]bool{true, false, false}, any: true},
+		{name: "through deploy", through: "deploy", want: [3]bool{true, true, false}, any: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			cfg := through(tt.through)
+
+			// Act
+			got := [3]bool{Concurrent(cfg, StagePreDeploy), Concurrent(cfg, StageDeploy), Concurrent(cfg, StagePostDeploy)}
+
+			// Assert
+			if got != tt.want || AnyConcurrent(cfg) != tt.any {
+				t.Fatalf("concurrent = %v (any %v), want %v (any %v)", got, AnyConcurrent(cfg), tt.want, tt.any)
+			}
+		})
+	}
+}
+
 func TestAgentReplsOwnConfigIsTodaysPipeline(t *testing.T) {
 	// Arrange
 	root := repoRoot(t)
@@ -221,6 +294,9 @@ func TestAgentReplsOwnConfigIsTodaysPipeline(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, script)); err != nil {
 		t.Fatalf("the test script %s: %v", script, err)
+	}
+	if cfg.Concurrent != nil {
+		t.Fatalf("concurrent = %v, want unset: every stage of agent-repl's deploy runs one at a time", cfg.GetConcurrent())
 	}
 	if len(cfg.GetPreDeploy().GetHooks()) != 0 || len(cfg.GetPostDeploy()) != 0 {
 		t.Fatalf("hooks = %v / %v, want none: agent-repl's merges ran no configured prompts", cfg.GetPreDeploy().GetHooks(), cfg.GetPostDeploy())

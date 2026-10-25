@@ -981,7 +981,7 @@ type fakeGit struct {
 	onTip []gitclient.Commit
 	// holds parks one named call until its release closes, announcing the
 	// call on entered: a git command still running when the daemon exits.
-	holds map[string]gitHold
+	holds holdSet
 	// seq stamps every call with the harness's shared sequence, so an ordering
 	// between a git call and a feed push is asserted on the real order rather
 	// than inferred.
@@ -1123,32 +1123,16 @@ func (g *fakeGit) record(call string) {
 	if _, seen := g.at[call]; !seen {
 		g.at[call] = at
 	}
-	hold, held := g.holds[call]
-	delete(g.holds, call)
 	g.mu.Unlock()
-	if held {
-		close(hold.entered)
-		<-hold.release
+	if hold, held := g.holds.claim(call); held {
+		hold.parkUncancelled()
 	}
-}
-
-// gitHold is one parked git call.
-type gitHold struct {
-	entered chan struct{}
-	release chan struct{}
 }
 
 // hold parks the next call of one name until release closes; entered closes
 // once the call is in flight.
 func (g *fakeGit) hold(call string) (entered, release chan struct{}) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.holds == nil {
-		g.holds = map[string]gitHold{}
-	}
-	h := gitHold{entered: make(chan struct{}), release: make(chan struct{})}
-	g.holds[call] = h
-	return h.entered, h.release
+	return g.holds.arm(call)
 }
 
 func (g *fakeGit) DefaultBranch(context.Context, string) (string, error) {
@@ -2466,6 +2450,29 @@ type fakeHookRunner struct {
 	timeouts map[string]bool
 	lines    map[string][]string
 	err      error
+	// holds parks the next run of a script for one calling workspace, keyed
+	// by holdKey, until its release or the run's end.
+	holds holdSet
+}
+
+// holdKey keys a hold by the script and the worktree of the deploy that runs
+// it (EnvCallingWorkspace).
+func holdKey(script, worktree string) string { return script + "\x00" + worktree }
+
+// hold parks the next run of SCRIPT by the deploy whose worktree is WORKTREE,
+// answering when it started and the release that lets it go on.
+func (f *fakeHookRunner) hold(script, worktree string) (entered, release chan struct{}) {
+	return f.holds.arm(holdKey(script, worktree))
+}
+
+// callingWorkspace is the deploy owner's worktree a hook run was given.
+func callingWorkspace(env []string) string {
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, EnvCallingWorkspace+"="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 func (f *fakeHookRunner) RunLinesWith(ctx context.Context, dir string, argv []string, opts scriptrunner.Options, onLine func(string)) (scriptrunner.Run, error) {
@@ -2474,6 +2481,9 @@ func (f *fakeHookRunner) RunLinesWith(ctx context.Context, dir string, argv []st
 	script := argv[len(argv)-1]
 	exit, timedOut, lines, err := f.exits[script], f.timeouts[script], f.lines[script], f.err
 	f.mu.Unlock()
+	if hold, held := f.holds.claim(holdKey(script, callingWorkspace(opts.Env))); held && !hold.park(ctx) {
+		return scriptrunner.Run{}, context.Cause(ctx)
+	}
 	if err != nil {
 		return scriptrunner.Run{}, err
 	}
@@ -2626,11 +2636,9 @@ func newHarness(t *testing.T) *harness {
 	// NOTHING THE ORCHESTRATOR STARTED OUTLIVES ITS TEST; this waits, bounded,
 	// for every goroutine it counted to be gone.
 	t.Cleanup(func() {
-		gone := make(chan struct{})
-		go func() { o.live.Wait(); close(gone) }()
 		select {
-		case <-gone:
-		case <-time.After(5 * time.Second):
+		case <-liveGone(o):
+		case <-time.After(waitBound):
 			// THE STACKS ARE THE EVIDENCE: which run, parked where.
 			var stacks strings.Builder
 			if err := pprof.Lookup("goroutine").WriteTo(&stacks, 1); err != nil {

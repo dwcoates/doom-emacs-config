@@ -467,6 +467,9 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 		arm.Substatus = &frontendv1.FooterStatusMerging_Deploying{Deploying: &frontendv1.FooterSubStatusMergingDeploying{}}
 	case StepPostDeploy:
 		arm.Substatus = &frontendv1.FooterStatusMerging_PostDeploy{PostDeploy: &frontendv1.FooterSubStatusMergingPostDeploy{}}
+	case StepAwaitingTurn:
+		arm.Substatus = &frontendv1.FooterStatusMerging_AwaitingTurn{AwaitingTurn: &frontendv1.FooterSubStatusMergingAwaitingTurn{
+			Ahead: uint32(m.Ahead)}}
 	default:
 		log.Error("daemon.footer.merge_step", "a merge in flight names no step the footer draws; it is drawn with no substatus",
 			dlog.Context{
