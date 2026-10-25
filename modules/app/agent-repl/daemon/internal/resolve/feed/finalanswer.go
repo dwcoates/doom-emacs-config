@@ -5,6 +5,8 @@ import (
 	"sort"
 	"time"
 
+	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -103,6 +105,46 @@ type answerFaultState struct {
 type stallState struct {
 	timer Timer
 	seq   uint64
+}
+
+// answerOnUnloadedPage answers whether TURN's terminal is being replayed by a
+// reader's load while the turn's earlier steps -- its answering response
+// among them -- stand on an older page the walk has not loaded: the load drew
+// the turn's prompt from the page's turn heads with an earlier-steps row under
+// it, and no load has met the prompt itself since (heads.go). The newest page
+// is loaded first, so a turn cut by a page bound is exactly this, and on every
+// boot it recorded an answer that had landed as one that had not
+// (2026-10-25, `remove-analyze-position-skill`, 15:44:34).
+func (r *resolver) answerOnUnloadedPage(s *wsState, turn string) bool {
+	if !s.replaying || s.load == nil {
+		return false
+	}
+	_, gap := s.load.book.gaps[ids.TurnID(turn)]
+	return gap
+}
+
+// holdPendingAnswer holds UNIT, the answer TURN's replayed terminal named, until
+// the walk draws its row (landPendingAnswer).
+func (r *resolver) holdPendingAnswer(s *wsState, turn, unit string) {
+	s.pendingAnswers[unit] = turn
+	r.logger(s.id).Info("daemon.feed.final_answer_pending",
+		"the turn's answer stands with its earlier steps on an older page the walk has not loaded; it is stamped final when that page draws it",
+		dlog.Context{"turn": turn, "unit": unit, "plane": s.plane.String()})
+}
+
+// landPendingAnswer records the row ID just drawn for UNIT as its turn's final
+// answer when a replayed terminal held UNIT pending, so the draw that follows
+// carries the green border (drawResponse stamps every recorded answer).
+func (r *resolver) landPendingAnswer(s *wsState, id *frontendv1.FeedId, unit string) {
+	turn, pending := s.pendingAnswers[unit]
+	if !pending {
+		return
+	}
+	delete(s.pendingAnswers, unit)
+	r.recordFinalAnswer(s, id, unit)
+	r.logger(s.id).Info("daemon.feed.final_answer_landed_late",
+		"the walk drew a held answer from an older page; it is recorded as its turn's final answer",
+		dlog.Context{"turn": turn, "unit": unit, "row": id.GetValue()})
 }
 
 // answerFaultLine is the TERSE line the footer's fault chip draws beside the

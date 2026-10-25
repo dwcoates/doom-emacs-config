@@ -257,6 +257,14 @@ func (r *resolver) concludedOutcome(s *wsState, turn string, success *conversati
 				r.recordFinalAnswer(s, id, answer)
 				break
 			}
+			// NOT YET LOADED is not NOT LANDED: a reader's newest page can
+			// hold a turn's terminal while its answer stands with the turn's
+			// earlier steps on an older page (heads.go's gap). The answer is
+			// held and stamped when the walk draws it (answerOnUnloadedPage).
+			if r.answerOnUnloadedPage(s, turn) {
+				r.holdPendingAnswer(s, turn, answer)
+				break
+			}
 			// NOT LANDED (b): the producer named an answer this resolver
 			// resolves to no drawn response row.
 			r.raiseAnswerFault(s, turn, answer, whyAnswerRowUnresolved,

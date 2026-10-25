@@ -372,6 +372,11 @@ type wsState struct {
 	// answerRows maps a response activity id to the row it drew, so the turn's
 	// conclusion can name its answering row.
 	answerRows map[string]*frontendv1.FeedId
+	// pendingAnswers are the answers a replayed terminal named whose turn's
+	// earlier steps stand on an older page the walk has not loaded
+	// (finalanswer.go, answerOnUnloadedPage), by answering unit, each with its
+	// turn. The row is stamped final the moment the walk draws it.
+	pendingAnswers map[string]string
 
 	// finalAnswers is the ORDERED list of this workspace's root-feed
 	// final-response rows — the rows a concluded turn named as its answer, the
@@ -749,6 +754,7 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		unknownTurnsReported: map[ids.TurnID]bool{},
 		directiveUnits:       map[string]bool{},
 		answerRows:           map[string]*frontendv1.FeedId{},
+		pendingAnswers:       map[string]string{},
 		finalAnswerSeen:      map[string]bool{},
 		rolledBack:           map[ids.TurnID]bool{},
 		rollingBack:          map[ids.TurnID]bool{},
