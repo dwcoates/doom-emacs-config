@@ -411,6 +411,11 @@ type MergeMover interface {
 	// AdoptWorkspace takes every merge of a workspace this daemon now serves
 	// from its durable rows, resuming an admitted one at its recorded step.
 	AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error
+	// ReviewQueues reads every repository's merge queue again from its
+	// durable rows and offers each to this daemon's pump. The takeover asks
+	// it once the outgoing daemon is gone: a queue change that daemon made
+	// while both served (a resume) reached only its own pump.
+	ReviewQueues(ctx context.Context) error
 }
 
 // BounceRegistry is the prompt queue's bounce registry, as the rollout asks it.

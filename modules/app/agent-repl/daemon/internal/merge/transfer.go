@@ -391,3 +391,26 @@ func (o *orchestrator) isTakenAwayLocked(ws ids.WorkspaceID) bool {
 	_, away := o.takenAway[ws]
 	return away
 }
+
+// ReviewQueues offers every repository with a merge queue to this daemon's
+// pump, which judges each from its durable rows: its pause flag, the merges a
+// restart or a transfer suspended, and its line. The takeover asks it once
+// the outgoing daemon is gone (rollout.MergeMover).
+func (o *orchestrator) ReviewQueues(ctx context.Context) error {
+	const op = "daemon.merge.review"
+	queues, err := o.deps.DB.AllMergeQueues(ctx)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read the merge queues to review them", dlog.Context{"error": err.Error()})
+		return fmt.Errorf("merge: review the queues: %w", err)
+	}
+	repos := make([]string, 0, len(queues))
+	for repo := range queues {
+		repos = append(repos, string(repo))
+	}
+	sort.Strings(repos)
+	for _, repo := range repos {
+		o.kick(wsm.RepoKey(repo))
+	}
+	o.deps.Log.Global().Info(op, "offered every merge queue to this daemon's pump", dlog.Context{"repos": repos})
+	return nil
+}

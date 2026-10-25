@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1735,8 +1736,16 @@ func TestAnAdoptionTakesTheWorkspacesMerges(t *testing.T) {
 	arm(t, h, ws, Participants{})
 
 	// Assert
-	if calls := h.merges.called(); len(calls) != 1 || calls[0] != "adopt "+string(ws) {
-		t.Fatalf("merge calls = %v, want the adopted workspace's merges taken", calls)
+	// THE TAKEOVER THAT FOLLOWS also reviews the queues; only the adoptions
+	// are this test's.
+	var adoptions []string
+	for _, call := range h.merges.called() {
+		if strings.HasPrefix(call, "adopt ") {
+			adoptions = append(adoptions, call)
+		}
+	}
+	if !slices.Equal(adoptions, []string{"adopt " + string(ws)}) {
+		t.Fatalf("merge adoptions = %v, want the adopted workspace's merges taken", adoptions)
 	}
 	taken := h.order.Taken()
 	if drain, merges := indexOf(taken, "drain_intake"), indexOf(taken, "adopt_merges"); drain < 0 || merges < drain {
@@ -2013,5 +2022,38 @@ func TestConcurrentBootClaimWaitersTakeOverOnce(t *testing.T) {
 	}
 	if ran != 1 {
 		t.Fatalf("takeovers run = %d, want 1", ran)
+	}
+}
+
+func TestTheTakeoverReviewsTheMergeQueues(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if calls := h.merges.called(); !slices.Contains(calls, "review") {
+		t.Fatalf("merge calls = %v, want the queues reviewed at the takeover", calls)
+	}
+}
+
+func TestATakeoverWhoseQueueReviewFailsSaysSoAndGoesOn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.merges.mu.Lock()
+	h.merges.reviewErr = errors.New("database is locked")
+	h.merges.mu.Unlock()
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if _, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opAdopt,
+		Message: "the merge queues could not be read again at the takeover; a queue change the outgoing daemon made waits for its queue's next change"}); !found {
+		t.Fatalf("the failed review was not recorded at ERROR: %+v", h.log.Records())
+	}
+	if paid := h.reports.payments(); len(paid) != 1 {
+		t.Fatalf("payments = %+v, want the takeover to go on past the failed review", paid)
 	}
 }

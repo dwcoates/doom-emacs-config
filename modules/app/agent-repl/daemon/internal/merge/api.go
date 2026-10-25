@@ -233,6 +233,9 @@ type Orchestrator interface {
 	// AdoptWorkspace takes every merge of a workspace this daemon now serves
 	// from its durable rows, resuming an admitted one at its recorded step.
 	AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID) error
+	// ReviewQueues offers every repository with a merge queue to this
+	// daemon's pump, judged from its durable rows (rollout.MergeMover).
+	ReviewQueues(ctx context.Context) error
 	// SuspendForRestart brings a workspace's merge to a stopping point for a
 	// RestartWorkspace, exactly as a transfer does, and stops this daemon
 	// admitting any merge of it until ResumeAfterRestart. A merge that is

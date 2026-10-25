@@ -518,6 +518,14 @@ func (f *mergeForwarder) AdoptWorkspace(ctx context.Context, ws ids.WorkspaceID)
 	return m.AdoptWorkspace(ctx, ws)
 }
 
+func (f *mergeForwarder) ReviewQueues(ctx context.Context) error {
+	m, err := f.mover()
+	if err != nil {
+		return err
+	}
+	return m.ReviewQueues(ctx)
+}
+
 func (f *mergeForwarder) Drain(ctx context.Context) {
 	m, err := f.mover()
 	if err != nil {

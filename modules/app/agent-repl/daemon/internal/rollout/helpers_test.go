@@ -1621,6 +1621,7 @@ type fakeMerges struct {
 	calls      []string
 	suspendErr error
 	adoptErr   error
+	reviewErr  error
 }
 
 func (f *fakeMerges) SuspendForTransfer(_ context.Context, ws ids.WorkspaceID) error {
@@ -1637,6 +1638,14 @@ func (f *fakeMerges) AdoptWorkspace(_ context.Context, ws ids.WorkspaceID) error
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "adopt "+string(ws))
 	return f.adoptErr
+}
+
+func (f *fakeMerges) ReviewQueues(context.Context) error {
+	f.order.record("review_queues")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "review")
+	return f.reviewErr
 }
 
 // called reports the merge mover's calls.

@@ -308,6 +308,11 @@ func (m *recordingMover) AdoptWorkspace(_ context.Context, ws ids.WorkspaceID) e
 	return nil
 }
 
+func (m *recordingMover) ReviewQueues(context.Context) error {
+	m.calls = append(m.calls, "review")
+	return nil
+}
+
 func (m *recordingMover) Drain(context.Context) {
 	m.calls = append(m.calls, "drain")
 }
@@ -724,3 +729,28 @@ func TestHoldsForwarderRefusesASupersessionBeforeTheQueue(t *testing.T) {
 type discardDeploys struct{}
 
 func (discardDeploys) DeployEnded(merge.DeployEnd) {}
+
+func TestABoundMergeForwarderCarriesAQueueReview(t *testing.T) {
+	// Arrange.
+	f := &mergeForwarder{}
+	target := &recordingMover{}
+	f.bind(target)
+
+	// Act.
+	err := f.ReviewQueues(context.Background())
+
+	// Assert.
+	if err != nil || !reflect.DeepEqual(target.calls, []string{"review"}) {
+		t.Fatalf("ReviewQueues = %v, calls %v; want the review carried", err, target.calls)
+	}
+}
+
+func TestAnUnboundMergeForwarderRefusesAQueueReview(t *testing.T) {
+	// Act.
+	err := (&mergeForwarder{}).ReviewQueues(context.Background())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("an unbound forwarder carried a review to nobody")
+	}
+}

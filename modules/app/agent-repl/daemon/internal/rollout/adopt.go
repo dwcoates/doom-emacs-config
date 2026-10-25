@@ -1107,6 +1107,16 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 		c.recoverOrphans(fields)
 	}
 	c.bounceStaleAdopted(fields)
+	// THE QUEUES ARE READ AGAIN NOW THAT ONE DAEMON WRITES THEM. While both
+	// daemons served, the outgoing one took queue actions too, and a resume it
+	// applied kicked only its own pump: this daemon had recovered a merge
+	// suspended under the pause and waited for a resume it never heard, so the
+	// queue stood still until someone paused and resumed it again (2026-10-25,
+	// unexpected-page-waits-land). Offered to this daemon's pump, each queue is
+	// judged from its durable rows, whichever daemon wrote them.
+	if err := c.deps.Merges.ReviewQueues(c.lifetime(context.Background())); err != nil {
+		c.log.Error(opAdopt, "the merge queues could not be read again at the takeover; a queue change the outgoing daemon made waits for its queue's next change", dlog.WithCause(fields, err))
+	}
 	// THE LANDING REPORTS THE HANDOVER'S DEPLOY COVERED ARE PAID NOW, after
 	// every adopted shim was judged: a stale one is bounced, or registered to
 	// be once its work ends, and the prompt queue takes a registered bounce

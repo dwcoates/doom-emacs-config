@@ -7,6 +7,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -2012,5 +2013,48 @@ func TestHeldByAnother(t *testing.T) {
 				t.Fatalf("heldByAnother(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestReviewQueuesOffersEveryQueueToThePump(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	other := wsm.RepoKey("/other/.git")
+	h.db.mu.Lock()
+	h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{{Workspace: theWorkspace, State: wsm.MergeQueued}}
+	h.db.queues[other] = []wsm.MergeQueueEntry{{Workspace: "ws-other", State: wsm.MergeQueued}}
+	h.db.mu.Unlock()
+	var kicked []wsm.RepoKey
+	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+
+	// Act
+	err := h.o.ReviewQueues(context.Background())
+
+	// Assert
+	want := []wsm.RepoKey{h.repoKey(), other}
+	sort.Slice(want, func(i, j int) bool { return want[i] < want[j] })
+	if err != nil || !reflect.DeepEqual(kicked, want) {
+		t.Fatalf("ReviewQueues = %v, kicks %v; want every queue offered, %v", err, kicked, want)
+	}
+}
+
+func TestReviewQueuesSurfacesAnUnreadableQueue(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.allQueuesErr = errors.New("database is locked")
+	h.db.mu.Unlock()
+	var kicked []wsm.RepoKey
+	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+
+	// Act
+	err := h.o.ReviewQueues(context.Background())
+
+	// Assert
+	if err == nil || len(kicked) != 0 {
+		t.Fatalf("ReviewQueues = %v, kicks %v; want the read's failure and no kick", err, kicked)
+	}
+	if _, found := h.recordFor("error", "daemon.merge.review"); !found {
+		t.Fatalf("the failure was not recorded at ERROR: %+v", h.logs.Records())
 	}
 }
