@@ -154,7 +154,7 @@ func (c *client) rebaseCommand(ctx context.Context, operation, dir string, env [
 			})
 			return RebaseStep{Resolved: resolved}, nil
 		}
-		c.log.Global().Error(operation, "the rebase failed without leaving conflicts", in.logContext())
+		c.log.Global().Error(operation, "the rebase failed without leaving conflicts", c.stopEvidence(ctx, dir, in.logContext()))
 		return RebaseStep{}, in.fail()
 	}
 	c.log.Global().Info(operation, "the rebase stopped on conflicts; it is left in progress for their resolution", dlog.Context{
@@ -165,6 +165,34 @@ func (c *client) rebaseCommand(ctx context.Context, operation, dir string, env [
 		"stderr":     in.stderr,
 	})
 	return RebaseStep{Conflicted: conflicted}, nil
+}
+
+// stopEvidence adds to FIELDS what the worktree held when a rebase stopped in
+// a way this client read as a failure: its unmerged index entries, its
+// tracked changes, and the paths rerere tracks. On 2026-10-25 a stop whose
+// stderr recorded rerere preimages for two conflicted paths was read as no
+// conflict at all, and by the time anyone looked the paths were staged with
+// no markers: only the state at the stop itself can say which read was wrong.
+// A read that fails names its error in place of its answer.
+func (c *client) stopEvidence(ctx context.Context, dir string, fields dlog.Context) dlog.Context {
+	reads := []struct {
+		key  string
+		env  []string
+		args []string
+	}{
+		{key: "unmerged", args: []string{"ls-files", "-u"}},
+		{key: "status", args: []string{"status", "--porcelain", "--untracked-files=no"}},
+		{key: "rerere_status", env: rebaseEnv, args: []string{"rerere", "status"}},
+	}
+	for _, read := range reads {
+		out, err := c.runWithEnv(ctx, "daemon.gitclient.rebase_stop_evidence", dir, read.env, read.args...)
+		if err != nil {
+			fields[read.key+"_error"] = err.Error()
+			continue
+		}
+		fields[read.key] = out
+	}
+	return fields
 }
 
 // rerereResolved answers the paths of the stopped commit whose conflicts

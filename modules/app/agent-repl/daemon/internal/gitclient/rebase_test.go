@@ -279,6 +279,51 @@ func TestARebaseStopThatRerereTracksNothingIsAFailure(t *testing.T) {
 	}
 }
 
+func TestARebaseStopReadAsAFailureRecordsTheWorktreeAtTheStop(t *testing.T) {
+	// Arrange: the stop reads as no conflict, and the evidence reads answer.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(1, "Recorded preimage for 'a.go'\n", "rebase"),
+		ok("", "diff"), rebaseDirFixture(t, true), ok("", "rerere", "status"),
+		ok("100644 abc 2\ta.go\n", "ls-files", "-u"), ok("M  a.go\n", "status"))
+
+	// Act.
+	_, err := git.ContinueRebase(context.Background(), "/wt")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ContinueRebase succeeded, want the stop read as a failure")
+	}
+	record, found := recordFor(surfaces.records(), "error", "daemon.gitclient.continue_rebase")
+	if !found {
+		t.Fatalf("the failure was not logged at ERROR: %+v", surfaces.records())
+	}
+	got := []any{record.Context["unmerged"], record.Context["status"], record.Context["rerere_status"]}
+	want := []any{"100644 abc 2\ta.go", "M  a.go", ""}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("evidence = %q, want %q", got, want)
+	}
+}
+
+func TestARebaseStopEvidenceNamesAReadThatFailed(t *testing.T) {
+	// Arrange: the status read fails.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(1, "error: could not apply\n", "rebase"),
+		ok("", "diff"), rebaseDirFixture(t, true), ok("", "rerere", "status"),
+		ok("", "ls-files", "-u"), fails(128, "fatal: index file corrupt\n", "status"))
+
+	// Act.
+	_, _ = git.ContinueRebase(context.Background(), "/wt")
+
+	// Assert.
+	record, found := recordFor(surfaces.records(), "error", "daemon.gitclient.continue_rebase")
+	if !found {
+		t.Fatalf("the failure was not logged at ERROR: %+v", surfaces.records())
+	}
+	if cause, _ := record.Context["status_error"].(string); !strings.Contains(cause, "index file corrupt") {
+		t.Fatalf("status_error = %v, want the failed read's cause", record.Context["status_error"])
+	}
+}
+
 func TestARebaseStopRerereResolvedAnswersTheResolvedPaths(t *testing.T) {
 	// Arrange: the commit conflicted, and rerere staged its recorded
 	// resolution of both paths.
