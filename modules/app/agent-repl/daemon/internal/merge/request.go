@@ -70,20 +70,20 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	}
 	if req.Detached == nil {
 		if err := checkAsker(record, req.Asker); err != nil {
-			log.Warn(op, "refused a merge its asker may not ask for", withField(fields, "error", err.Error()))
+			logRefusal(log, op, "refused a merge its asker may not ask for", fields, err)
 			return Enqueued{}, err
 		}
 	}
 	source, err := o.checkSource(ctx, record, req.Source)
 	if err != nil {
-		log.Warn(op, "refused a merge request", withField(fields, "error", err.Error()))
+		logRefusal(log, op, "refused a merge request", fields, err)
 		return Enqueued{}, err
 	}
 	if req.PlaceBehind != "" {
 		fields["place_behind"] = req.PlaceBehind
 		if source.Behind, err = o.placeBehind(ctx, record, req); err != nil {
 			if _, refused := Refused(err); refused {
-				log.Warn(op, "refused a merge placed behind a merge not in its queue", withField(fields, "error", err.Error()))
+				logRefusal(log, op, "refused a merge placed behind a merge not in its queue", fields, err)
 			} else {
 				log.Error(op, "could not read the queue a merge is placed in", withField(fields, "error", err.Error()))
 			}
@@ -99,7 +99,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	deploy, err := o.requestDeploy(ctx, record, req)
 	if err != nil {
 		if _, refused := Refused(err); refused {
-			log.Warn(op, "refused a deploy request for its repository's deploy config", withField(fields, "error", err.Error()))
+			logRefusal(log, op, "refused a deploy request for its repository's deploy config", fields, err)
 		} else {
 			log.Error(op, "could not read the repository's deploy config", withField(fields, "error", err.Error()))
 		}
@@ -108,7 +108,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	// A DEPLOY ONTO A VERSIONED REPOSITORY'S MAIN BRANCH MOVES ITS VERSION, and
 	// no other deploy does (checkVersion).
 	if err := checkVersion(ws, req, deploy); err != nil {
-		log.Warn(op, "refused a deploy request for its version increment", withField(fields, "error", err.Error()))
+		logRefusal(log, op, "refused a deploy request for its version increment", fields, err)
 		return Enqueued{}, err
 	}
 	// releaseName lets go of an async request's name claim; a no-op for every
@@ -126,7 +126,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 			return Enqueued{}, err
 		}
 		if source, err = o.checkAsync(ctx, record, source, req.Detached); err != nil {
-			log.Warn(op, "refused an async merge request", withField(fields, "error", err.Error()))
+			logRefusal(log, op, "refused an async merge request", fields, err)
 			return Enqueued{}, err
 		}
 		// THE NAME IS CLAIMED BEFORE THE REQUEST IS RECORDED, and the record is
@@ -141,7 +141,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 		if taken {
 			refusal := refuse(ArmNameTaken, ws, "the async merge's name %q resolves to %s, which is already a workspace, a branch, an occupied worktree directory or another merge's reservation", req.Detached.Name, branch)
 			refusal.Fields = map[string]any{"branch": branch}
-			log.Warn(op, "refused an async merge whose name is taken", withField(fields, "error", refusal.Error()))
+			logRefusal(log, op, "refused an async merge whose name is taken", fields, refusal)
 			return Enqueued{}, refusal
 		}
 		releaseName = release
@@ -174,7 +174,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	// the guarantee. The refusal is the answer, has_open_children.
 	if err := o.deps.DB.RequireNoOpenChildren(ctx, source.Closes(ws, record.MergeOf)...); err != nil {
 		if wsm.IsFamilyRefusal(err) {
-			log.Info(op, "refused a merge that would close a workspace with open children", withField(fields, "error", err.Error()))
+			logRefusal(log, op, "refused a merge that would close a workspace with open children", fields, err)
 			return Enqueued{}, err
 		}
 		log.Error(op, "could not read whether the merge closes a workspace with open children", withField(fields, "error", err.Error()))
@@ -187,7 +187,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	}
 	if found && session.Terminal != nil && session.Terminal.Kind == "deleted" {
 		err := refuse(ArmSessionDeleted, ws, "the session was deleted, so the merge's prompts and repairs can never run")
-		log.Warn(op, "refused a merge for a deleted session", withField(fields, "error", err.Error()))
+		logRefusal(log, op, "refused a merge for a deleted session", fields, err)
 		return Enqueued{}, err
 	}
 	repo, err := o.repoKeyFor(ctx, record.Dir)
@@ -197,7 +197,7 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 	}
 	if _, running := o.runFor(ws); running {
 		err := refuse(ArmAlreadyMerging, ws, "this workspace's merge is already in flight")
-		log.Warn(op, "refused a merge request while the workspace's merge runs", withField(fields, "error", err.Error()))
+		logRefusal(log, op, "refused a merge request while the workspace's merge runs", fields, err)
 		return Enqueued{}, err
 	}
 	// AN IN-PLACE MERGE THE AGENT'S TURN ASKED FOR FLUSHES THE HELD QUEUE
@@ -232,11 +232,11 @@ func (o *orchestrator) Enqueue(ctx context.Context, req Request) (Enqueued, erro
 			refusal := refuse(arm, ws, "the merge already stands %s in its repository's queue", queued.State)
 			// A TYPED REFUSAL THE CALLER ACTS ON, not a condition to remediate:
 			// the merge it asked for already stands, and the answer says so.
-			log.Info(op, "refused a duplicate merge request", withField(fields, "repo", string(repo)))
+			logRefusal(log, op, "refused a duplicate merge request", withField(fields, "repo", string(repo)), refusal)
 			return Enqueued{}, refusal
 		}
 		if wsm.IsFamilyRefusal(err) {
-			log.Info(op, "refused a merge that would close a workspace with open children", withField(fields, "error", err.Error()))
+			logRefusal(log, op, "refused a merge that would close a workspace with open children", fields, err)
 			return Enqueued{}, err
 		}
 		log.Error(op, "could not record the merge request", withField(fields, "error", err.Error()))

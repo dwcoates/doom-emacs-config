@@ -273,7 +273,7 @@ func TestAnAsyncRequestWhoseNameIsTakenIsRefusedWithTheBranch(t *testing.T) {
 	if _, ok := h.entryOf(theWorkspace); ok {
 		t.Fatal("a request whose name is taken was recorded")
 	}
-	if _, ok := h.recordFor(dlog.LevelWarn, "daemon.merge.enqueue"); !ok {
+	if _, ok := h.recordFor(dlog.LevelInfo, "daemon.merge.enqueue"); !ok {
 		t.Fatal("the refusal was not recorded")
 	}
 }

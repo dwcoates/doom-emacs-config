@@ -332,7 +332,7 @@ func TestEnqueueRefusesARepositoryWithNoUsableConfig(t *testing.T) {
 			if _, recorded := h.entryState(); recorded {
 				t.Fatal("a refused request was recorded")
 			}
-			if _, logged := h.recordFor(dlog.LevelWarn, "daemon.merge.enqueue"); !logged {
+			if _, logged := h.recordFor(dlog.LevelInfo, "daemon.merge.enqueue"); !logged {
 				t.Fatal("the refusal was not recorded in the merge log")
 			}
 		})

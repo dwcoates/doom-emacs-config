@@ -178,7 +178,7 @@ func TestAMergeTabInterruptNamingNoLiveAgenticTabIsRefused(t *testing.T) {
 			if interrupted != 0 {
 				t.Fatal("a refused interrupt stopped a turn")
 			}
-			if _, ok := h.recordFor(dlog.LevelWarn, "daemon.merge.interrupt_tab"); !ok {
+			if _, ok := h.recordFor(dlog.LevelInfo, "daemon.merge.interrupt_tab"); !ok {
 				t.Fatal("the refusal was not recorded")
 			}
 		})

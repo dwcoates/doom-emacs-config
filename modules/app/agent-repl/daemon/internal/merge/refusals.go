@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"agent-repld/internal/dlog"
 	"errors"
 	"fmt"
 
@@ -150,4 +151,14 @@ func Refused(err error) (*RefusalError, bool) {
 		return r, true
 	}
 	return nil, false
+}
+
+// logRefusal records a typed refusal answered to its caller, at INFO. THE
+// CALLER ACTS ON THE ARM, so a refusal is an outcome of the request and not a
+// condition to remediate: recorded at WARN, an agent retrying with
+// `-version-part`, or picking another merge name, put a warning in the logs
+// for every ordinary answer (2026-10-25). An invariant a request breaks is
+// not a refusal, and stays an ERROR at its site.
+func logRefusal(log dlog.Logger, op, message string, fields dlog.Context, refusal error) {
+	log.Info(op, message, withField(fields, "error", refusal.Error()))
 }
