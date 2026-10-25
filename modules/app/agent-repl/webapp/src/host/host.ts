@@ -398,8 +398,24 @@ export function createHost(env: HostEnv): Host {
    * its next page. Shared by a removed page and a re-pointed one, which both
    * end the page now in the frame.
    */
-  const retire = (frame: Frame): void => {
+  /**
+   * THE WINDOWS OF PAGES THIS HOST REMOVED. A page's message can be on its way
+   * when its iframe goes -- a replacement swapped in, a reload retiring every
+   * page -- and it then arrives from a window no frame names any more. Such a
+   * message is the page's last word, read as that at info; a message from a
+   * window that never was a page here is still the warning it was.
+   */
+  const removedWindows = new WeakSet<MessageEventSource>();
+
+  /** Take FRAME's iframe out of the document, remembering its window. */
+  const removeFrame = (frame: Frame): void => {
+    const removed = frame.iframe.contentWindow;
+    if (removed !== null) removedWindows.add(removed);
     frame.iframe.remove();
+  };
+
+  const retire = (frame: Frame): void => {
+    removeFrame(frame);
     unqueue(frame.id);
     finishTurn(frame.id);
   };
@@ -434,7 +450,7 @@ export function createHost(env: HostEnv): Host {
     if (waiting === undefined) return;
     win.clearTimeout(waiting.bound);
     incoming.delete(id);
-    waiting.fresh.iframe.remove();
+    removeFrame(waiting.fresh);
   };
 
   /** ID's replacement takes the old page's place, on screen if it is shown. */
@@ -480,6 +496,10 @@ export function createHost(env: HostEnv): Host {
     if (!onHostChannel(event.data)) return;
     const frame = frameOf(event.source);
     if (frame === null) {
+      if (event.source !== null && removedWindows.has(event.source)) {
+        note("info", `a page this host already removed sent its last host message; it was dropped: ${JSON.stringify(event.data)}`);
+        return;
+      }
       note("warn", `a message on the host channel came from no workspace page: ${JSON.stringify(event.data)}`);
       return;
     }
