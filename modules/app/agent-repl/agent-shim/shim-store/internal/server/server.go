@@ -549,7 +549,7 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 	}
 	through := entry.pinSeq
 	for _, line := range replay {
-		if err := s.send(log, stream, line); err != nil {
+		if err := s.send(ctx, log, stream.Send, line); err != nil {
 			return err
 		}
 		through = max(through, line.WriteSeq)
@@ -592,14 +592,19 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a write the replay already delivered or superseded")
 				continue
 			}
-			if err := s.send(log, stream, line); err != nil {
+			if err := s.send(ctx, log, stream.Send, line); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func (s *Server) send(log *logging.Logger, stream *connect.ServerStream[storev1.WatchAgentSessionResponse], line LineWritten) error {
+// send delivers one line to a watcher through deliver (the stream's Send).
+// A delivery that fails because the watcher's own context ended is the
+// caller going away, the same end as the watch loop's ctx.Done arm, and is
+// no failure: a watcher that hangs up while a line is in flight (a stopping
+// daemon's) races the loop to notice.
+func (s *Server) send(ctx context.Context, log *logging.Logger, deliver func(*storev1.WatchAgentSessionResponse) error, line LineWritten) error {
 	// THE ARM IS WHAT HAPPENED TO THE LINE: a retired row goes out on
 	// `retired`, carrying the line as it was last served, so the watcher
 	// withdraws what it drew rather than drawing it again.
@@ -609,7 +614,12 @@ func (s *Server) send(log *logging.Logger, stream *connect.ServerStream[storev1.
 		response = &storev1.WatchAgentSessionResponse{Frame: &storev1.WatchAgentSessionResponse_Retired{Retired: line.Line}}
 		what = "retirement"
 	}
-	if err := stream.Send(response); err != nil {
+	if err := deliver(response); err != nil {
+		if ctx.Err() != nil {
+			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq},
+				"watch ended: the caller went away while a %s was sent: %v", what, err)
+			return nil
+		}
 		log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", Level: "warn", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()},
 			"sending a %s to the watcher failed: %v", what, err)
 		return err
