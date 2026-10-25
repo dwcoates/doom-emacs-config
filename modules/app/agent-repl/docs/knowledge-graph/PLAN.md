@@ -347,12 +347,36 @@ What landed, by system. The contract decisions are in
   owner's own `zettel.sock`. A chat e2e area needs a real zettel in the world,
   as the store and the sidecar have; it is not built yet.
 
+### Added after phase 1 landed (2026-10-25)
+
+- Archiving, restoring and deleting threads, through the workspace verbs
+  every kind shares (owner ruling: these are not repository-specific):
+  - archive is CloseWorkspace and restore is OpenWorkspace; an archived
+    thread is listed under "Archived" in the Chat app, and Emacs opens no
+    workspace for it;
+  - delete is NukeWorkspace, which destroys what a workspace keeps by its
+    kind: a git workspace's worktree and branch, a thread's zettel graph
+    (DeleteThread) and directory.
+- Searching chat contents: zettel indexes every node's question and newest
+  answer (FTS5, layout 2); the rail's search, with Chat shown, also keeps
+  each thread whose chat says the typed words (SearchChats), drawing the
+  words around the match.
+- The tab bar stays on screen while a thread is shown (owner ruling), in
+  Emacs's tab-bar row rule.
+- E2E: a chat world runs the real zettel; one Go test and one Emacs test
+  pack a thread's whole life.
+
 ### Deferred from phase 1
 
-- Deleting, renaming and archiving threads (the repository verbs refuse a
-  thread, since it has no repository).
-- Answer revisions beyond the first.
-- Searching chat contents.
+- Renaming a workspace of any kind: no workspace can be renamed today, and a
+  workspace's name is fixed for its session's life. Waiting on the owner's
+  ruling on what a rename does to a git workspace's branch.
+- Answer revisions beyond the first: the graph stores them (a node's
+  `revision` rows) and every question records the revision it was asked of,
+  but nothing writes revision 2 yet (regenerating an answer, or the user
+  correcting it).
+- ForgetWorkspace of a thread forgets its record and leaves its graph in
+  zettel; delete (NukeWorkspace) is the verb that removes both.
 
 ## Proposed, not yet settled
 
