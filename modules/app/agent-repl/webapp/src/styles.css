@@ -2643,10 +2643,11 @@ html[data-page-unshown] *::after {
 /* A code block's copy control floats right ahead of the code, so the code's
    first lines wrap around it rather than running under it. */
 .md pre.md-code > .md-code-copy { float: right; margin: -0.3em -0.5em 0.2em 0.6em; }
-/* A selectable prompt's copy control (src/feed/rows/blocks.ts) copies the
+/* A prompt's copy control (src/feed/rows/blocks.ts) copies the
    whole prompt. It sits at the bubble's top right, in the prompt's own text
-   color, and shows only while the bubble is the selected entry (owner
-   request, 2026-10-20).
+   color, on every prompt bubble, folded or opened, selected or not (owner
+   request, 2026-10-24: it showed only on the selected entry, and selecting a
+   prompt opens it, so a folded prompt never had one).
    ONE GAP FROM THE TOP AND RIGHT EDGES, INSIDE THE BUBBLE ALWAYS (owner
    request, 2026-10-24: it was often off the bubble's right-hand side). It
    used to float in the scroll box with a negative right margin, but that
@@ -2671,14 +2672,12 @@ html[data-page-unshown] *::after {
   --prompt-copy-text-gap: 0.6em;
 }
 .prompt-copy {
-  display: none;
   position: absolute;
   top: var(--prompt-copy-gap);
   right: var(--prompt-copy-gap);
   color: inherit;
 }
-.bubble.entry-selected > * > .prompt-copy { display: inline-flex; }
-.bubble.entry-selected > :has(> .prompt-copy)::before {
+.bubble[data-role="prompt"] > :has(> .prompt-copy)::before {
   content: "";
   float: right;
   width: calc(var(--prompt-copy-gap) + var(--copy-control-box) + var(--prompt-copy-text-gap) - var(--bubble-scroll-gap));
