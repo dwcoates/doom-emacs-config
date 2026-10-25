@@ -2788,6 +2788,13 @@ describe("no bubble content scrolls horizontally", () => {
     expect(rule).toMatch(/white-space:\s*pre-wrap/);
   });
 
+  it("wraps a wide display formula between its pieces rather than holding its line whole", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".md eqn .katex-display > .katex") ?? "";
+    // Assert
+    expect(rule).toMatch(/white-space:\s*normal/);
+  });
+
   it("breaks an unsplittable word in bubble prose rather than letting it run off", () => {
     // Arrange / Act
     const rule = declarationsOf(".bubble-body") ?? "";

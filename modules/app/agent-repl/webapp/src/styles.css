@@ -2751,11 +2751,15 @@ html[data-page-unshown] *::after {
 /* TeX (markdown.ts, KaTeX through markdown-it-texmath): typeset in the
    text's own color on no ground, as if it were the prose around it (owner
    request, 2026-10-25). An inline formula (`eq`) sits in its line; a display
-   formula (`section > eqn`) is centered on its own, and a wide one scrolls
-   sideways inside the bubble rather than widening it. */
+   formula (`section > eqn`) is centered on its own. A wide one WRAPS, as
+   bubble prose does (no bubble content scrolls sideways): KaTeX's display
+   holds its line whole (`.katex-display > .katex`, nowrap), so that is
+   lifted, and the line breaks between KaTeX's pieces (`.base`, each an
+   inline block), as an inline formula's already does. */
 .md eq { display: inline; }
 .md section:has(> eqn) { margin: 0.6em 0; }
-.md eqn { display: block; text-align: center; overflow-x: auto; overflow-y: hidden; }
+.md eqn { display: block; text-align: center; }
+.md eqn .katex-display > .katex { white-space: normal; }
 .md .katex { color: inherit; background: none; }
 .md code, .q-text code, .q-opt code { background: var(--code-bg); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
 .md pre.md-code { background: var(--code-block-bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; clear: right; }
