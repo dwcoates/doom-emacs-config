@@ -176,6 +176,22 @@
 - When surfacing a decision, present the correct design as the recommendation and justify any alternative on merit alone.
   - Do not offer the user a "quick option" as a kindness; it is a false economy that spends their design budget to save an implementation cost that does not exist.
 
+## Noticed deficiencies
+
+### Every deficiency the current work leaves unaddressed is recorded in the todo table
+
+- When I notice a deficiency in agent-repl's code or in the agent harness that the current work does not address, I add a row for it to the table in agent-repl's `modules/app/agent-repl/org/todo.md`.
+  - Deficiencies include an aspect of the architecture or code organization that could be improved, a missing test or log, a stale or contradictory instruction, and any other flaw I would fix if it were in scope.
+  - The harness is the metaprompt, every `AGENTS.md` and `CLAUDE.md`, every skill, and the daemon's prompt briefs.
+- I add the row proactively, without asking for permission and without waiting for the work to finish.
+  - When `org/todo.md` or its table does not exist yet, I create it.
+  - A deficiency already in the table gets its existing row updated rather than a second row.
+- The row is written in my workspace's own worktree copy and committed on its branch, so it reaches master through the merge queue with the rest of the work.
+  - Master's copy is `~/.config/doom/modules/app/agent-repl/org/todo.md`, and it is never edited directly.
+  - The row commit is its own commit, separate from the functional change that revealed the deficiency.
+- Recording a deficiency never replaces fixing what the current work owns.
+  - A defect inside the current work's scope, a consolidation candidate, or a failing tracked test is fixed per the rules above, never parked in the table.
+
 ## Process execution
 
 ### Never background a process without a foreground process alongside it
