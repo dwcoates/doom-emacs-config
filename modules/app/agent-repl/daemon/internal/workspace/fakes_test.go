@@ -2086,6 +2086,8 @@ type fakeSessions struct {
 	live     map[ids.WorkspaceID]bool
 	started  []ids.WorkspaceID
 	startErr error
+	// standingDown is what StandingDown answers: the supervisor's latch.
+	standingDown bool
 	// onStop runs at the top of Stop; see Stop.
 	onStop func()
 	// startCtxErr records what the context handed to Start already said, so a
@@ -2251,6 +2253,8 @@ func (s *fakeSessions) Stop(_ context.Context, ws ids.WorkspaceID, force bool) e
 }
 
 func (s *fakeSessions) Live(ws ids.WorkspaceID) bool { return s.live[ws] }
+
+func (s *fakeSessions) StandingDown() bool { return s.standingDown }
 
 // Held answers a live session's shim, or a shim held with no session (held).
 func (s *fakeSessions) Held(ws ids.WorkspaceID) bool { return s.live[ws] || s.held[ws] }

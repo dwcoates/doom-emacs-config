@@ -24,7 +24,7 @@ import (
 //  2. THEN, IF THE WORKSPACE HAS NO SESSION, THE REVIVAL. Switching to a
 //     workspace is looking at it, and an open workspace the user is looking
 //     at is never session-less (owner rulings, 2026-09-13 and 2026-10-02).
-//     `reviveIfSessionless` is a no-op for a live or closed workspace, so a
+//     `startRevival` is a no-op for a live or closed workspace, so a
 //     select on a live workspace changes nothing but the selection.
 //
 // THE SELECTION NEVER WAITS ON THE REVIVAL (owner ruling, 2026-09-19). A
@@ -37,10 +37,15 @@ import (
 // re-stamps anything. While the revival runs the row carries the REVIVING
 // marker.
 //
-// A REVIVAL THAT FAILS STILL FAILS THE SELECT, because a selected workspace
-// with no session is exactly the state the revival exists to abolish and
-// answering success would hide it. The selection it already made stands: the
-// user did switch, and the error says what did not come up.
+// THE ANSWER DOES NOT WAIT ON THE REVIVAL EITHER (2026-10-25). It used to,
+// so that a failed bring-up failed the select, and the answer was as slow as
+// the vendor: Emacs timed SelectWorkspace out at 10s with the selection long
+// recorded (`fold-spares-busy`, 14:53:08). SelectWorkspace answers that the
+// workspace is selected; the bring-up it occasions runs detached
+// (`startRevival`) and states its own outcome -- its record, at ERROR for a
+// bring-up that failed, and the REVIVING marker lowered either way -- so
+// nothing that failed is hidden. Only a daemon standing down, which starts no
+// session at all, is still refused up front.
 func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID, history SelectionHistory) error {
 	_, log, err := v.owned(ctx, "SelectWorkspace", ws)
 	if err != nil {
@@ -55,7 +60,7 @@ func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID, history Selectio
 // reviveSelected brings a just-selected workspace's parked session back up, as
 // every selection does.
 func (v *verbs) reviveSelected(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
-	if _, err := v.reviveIfSessionless(ctx, log, opSelect, ws); err != nil {
+	if err := v.startRevival(ctx, log, opSelect, ws); err != nil {
 		// A DAEMON THAT IS LEAVING ANSWERS `standing_down`. The selection
 		// above already stands; only the revival was not attempted, because
 		// this daemon starts no session for a workspace it is about to stop

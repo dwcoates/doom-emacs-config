@@ -99,15 +99,11 @@ func TestUnparkLiftsTheParkFromBothSessionScopedViews(t *testing.T) {
 
 // ---- Single flight: at most one revival in flight per workspace -----------
 
-// reviveAsync runs reviveIfSessionless on its own goroutine and answers its
-// outcome.
+// reviveAsync runs startRevival on its own goroutine and answers its answer.
 func reviveAsync(f *fixture, ctx context.Context, ws ids.WorkspaceID) <-chan error {
 	done := make(chan error, 1)
 	v := f.verbs.(*verbs)
-	go func() {
-		_, err := v.reviveIfSessionless(ctx, f.log.logger, opSelect, ws)
-		done <- err
-	}()
+	go func() { done <- v.startRevival(ctx, f.log.logger, opSelect, ws) }()
 	return done
 }
 
@@ -143,7 +139,7 @@ func TestARevivalIsAPlainResumeAndNeverARebind(t *testing.T) {
 	// Act.
 	close(release)
 	if err := receive(t, outcomes[0], "the revival's answer"); err != nil {
-		t.Fatalf("reviveIfSessionless: %v", err)
+		t.Fatalf("startRevival: %v", err)
 	}
 
 	// Assert.
@@ -161,7 +157,7 @@ func TestConcurrentRevivalsOfOneWorkspaceStartOneSession(t *testing.T) {
 	close(release)
 	for _, outcome := range outcomes {
 		if err := receive(t, outcome, "a revival's answer"); err != nil {
-			t.Fatalf("reviveIfSessionless: %v", err)
+			t.Fatalf("startRevival: %v", err)
 		}
 	}
 
@@ -171,38 +167,20 @@ func TestConcurrentRevivalsOfOneWorkspaceStartOneSession(t *testing.T) {
 	}
 }
 
-func TestAJoinerAnswersTheLeadersFailure(t *testing.T) {
-	// Arrange.
+func TestAJoinerIsCarriedByTheFlightAndAnswersAtOnce(t *testing.T) {
+	// Arrange: the leader's bring-up is held at the gate, and will fail.
 	f := newFixture(t)
 	f.fleet.startErr = errFake
 	release, outcomes := arrangeJoinedFlight(t, f, 1, context.Background())
 
-	// Act.
-	close(release)
-	receive(t, outcomes[0], "the leader's answer")
-	err := receive(t, outcomes[1], "the joiner's answer")
-
-	// Assert: a failure reaches every caller that waited on it.
-	if !errors.Is(err, errFake) {
-		t.Fatalf("joiner answered %v, want the leader's failure", err)
-	}
-}
-
-func TestAJoinerWhoseContextEndsStopsWaiting(t *testing.T) {
-	// Arrange: the joiner's caller goes away while the leader still runs.
-	f := newFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	release, outcomes := arrangeJoinedFlight(t, f, 1, ctx)
-
-	// Act.
-	cancel()
+	// Act: the joiner answers while the leader is still held.
 	err := receive(t, outcomes[1], "the joiner's answer")
 	close(release)
 	receive(t, outcomes[0], "the leader's answer")
 
-	// Assert.
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("joiner answered %v, want its own cancellation", err)
+	// Assert: the flight in progress starts the session; the joiner waits on nothing.
+	if err != nil {
+		t.Fatalf("joiner answered %v, want nil: the flight carries it", err)
 	}
 }
 
@@ -212,12 +190,12 @@ func TestARevivalAfterTheFlightEndedLeadsAFreshOne(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 	f.hibernate("w1")
 	v := f.verbs.(*verbs)
-	if _, err := v.reviveIfSessionless(context.Background(), f.log.logger, opSelect, "w1"); err != nil {
+	if err := v.startRevival(context.Background(), f.log.logger, opSelect, "w1"); err != nil {
 		t.Fatalf("first revival: %v", err)
 	}
 
 	// Act.
-	if _, err := v.reviveIfSessionless(context.Background(), f.log.logger, opSelect, "w1"); err != nil {
+	if err := v.startRevival(context.Background(), f.log.logger, opSelect, "w1"); err != nil {
 		t.Fatalf("second revival: %v", err)
 	}
 
@@ -289,9 +267,25 @@ func TestStartEndedByDaemonTellsTheDaemonLeavingFromAFailure(t *testing.T) {
 
 // ---- A look starts any open workspace with no session behind it -----------
 
-// lookAt runs reviveIfSessionless on the caller's goroutine.
-func lookAt(f *fixture, ws ids.WorkspaceID) (bool, error) {
-	return f.verbs.(*verbs).reviveIfSessionless(context.Background(), f.log.logger, opSelect, ws)
+// look is one look's outcome: what startRevival answered, and how the
+// flight it led finished (the fake fleet's detached start runs synchronously,
+// so the flight has finished when startRevival returns).
+type look struct {
+	answer   error
+	finished bool
+	revived  bool
+	flight   error
+}
+
+// lookAt runs startRevival on the caller's goroutine.
+func lookAt(f *fixture, ws ids.WorkspaceID) look {
+	var got look
+	v := f.verbs.(*verbs)
+	v.revivals.observeFinish = func(_ ids.WorkspaceID, revived bool, err error) {
+		got.finished, got.revived, got.flight = true, revived, err
+	}
+	got.answer = v.startRevival(context.Background(), f.log.logger, opSelect, ws)
+	return got
 }
 
 func TestALookStartsAnOpenWorkspaceWithNoSession(t *testing.T) {
@@ -300,11 +294,11 @@ func TestALookStartsAnOpenWorkspaceWithNoSession(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act
-	revived, err := lookAt(f, "w1")
+	got := lookAt(f, "w1")
 
 	// Assert
-	if err != nil || !revived {
-		t.Fatalf("reviveIfSessionless = (%v, %v), want (true, nil)", revived, err)
+	if got.answer != nil || !got.revived {
+		t.Fatalf("look = %+v, want answered nil and revived", got)
 	}
 	if !slices.Equal(f.fleet.started, []ids.WorkspaceID{"w1"}) {
 		t.Fatalf("started = %v, want [w1]", f.fleet.started)
@@ -319,11 +313,11 @@ func TestALookStartsNothingForAClosedWorkspace(t *testing.T) {
 	f.db.with(ws)
 
 	// Act
-	revived, err := lookAt(f, "w1")
+	got := lookAt(f, "w1")
 
 	// Assert
-	if err != nil || revived {
-		t.Fatalf("reviveIfSessionless = (%v, %v), want (false, nil)", revived, err)
+	if got.answer != nil || got.revived || !got.finished {
+		t.Fatalf("look = %+v, want answered nil, finished, not revived", got)
 	}
 	if len(f.fleet.startCalls) != 0 {
 		t.Fatalf("start calls = %v, want none for a closed workspace", f.fleet.startCalls)
@@ -336,8 +330,8 @@ func TestALookAtAnUnparkedWorkspaceRaisesNoRevivingMarker(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act
-	if _, err := lookAt(f, "w1"); err != nil {
-		t.Fatalf("reviveIfSessionless: %v", err)
+	if got := lookAt(f, "w1"); got.answer != nil {
+		t.Fatalf("startRevival: %v", got.answer)
 	}
 
 	// Assert
@@ -346,38 +340,71 @@ func TestALookAtAnUnparkedWorkspaceRaisesNoRevivingMarker(t *testing.T) {
 	}
 }
 
-func TestALookWhoseStartFailsAnswersTheFailure(t *testing.T) {
+func TestALookWhoseStartFailsRecordsTheFailureWithoutAnsweringIt(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.fleet.startErr = errors.New("boom")
 
 	// Act
-	revived, err := lookAt(f, "w1")
+	got := lookAt(f, "w1")
 
-	// Assert
-	if err == nil || revived {
-		t.Fatalf("reviveIfSessionless = (%v, %v), want the start's failure", revived, err)
+	// Assert: the detached start's failure is the flight's, recorded loudly.
+	if got.answer != nil || got.revived || got.flight == nil {
+		t.Fatalf("look = %+v, want answered nil and a failed flight", got)
 	}
-	if got := recordLevel(f, "the looked-at workspace's session did not come up"); got != "error" {
-		t.Fatalf("failure record level = %q, want error", got)
+	if level := recordLevel(f, "the looked-at workspace's session did not come up"); level != "error" {
+		t.Fatalf("failure record level = %q, want error", level)
 	}
 }
 
 func TestALookWhoseStartTheDaemonEndedRecordsNoError(t *testing.T) {
-	// Arrange
+	// Arrange: the latch flipped after the look's check, under the start.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.fleet.startErr = fmt.Errorf("start: %w", shimclient.ErrStandingDown)
 
 	// Act
-	if _, err := lookAt(f, "w1"); err == nil {
-		t.Fatalf("reviveIfSessionless answered no error for a start that did not run")
-	}
+	got := lookAt(f, "w1")
 
 	// Assert
-	if got := recordLevel(f, "the looked-at workspace's start stopped because this daemon is standing down"); got != "info" {
-		t.Fatalf("record level = %q, want info", got)
+	if got.flight == nil {
+		t.Fatalf("look = %+v, want the flight ended by the start that did not run", got)
+	}
+	if level := recordLevel(f, "the looked-at workspace's start stopped because this daemon is standing down"); level != "info" {
+		t.Fatalf("record level = %q, want info", level)
+	}
+}
+
+func TestALookOnADaemonStandingDownIsRefusedBeforeAnyStart(t *testing.T) {
+	tests := []struct {
+		name   string
+		parked bool
+	}{
+		{name: "an open workspace with no session"},
+		{name: "a hibernated workspace", parked: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			if tt.parked {
+				f.hibernate("w1")
+			}
+			f.fleet.standingDown = true
+
+			// Act
+			got := lookAt(f, "w1")
+
+			// Assert
+			if !errors.Is(got.answer, shimclient.ErrStandingDown) || !got.finished {
+				t.Fatalf("look = %+v, want ErrStandingDown answered and the flight finished", got)
+			}
+			if len(f.fleet.startCalls) != 0 {
+				t.Fatalf("start calls = %v, want none", f.fleet.startCalls)
+			}
+		})
 	}
 }
 
@@ -386,14 +413,14 @@ func TestALookAtAnUnreadableWorkspaceFails(t *testing.T) {
 	f := newFixture(t)
 
 	// Act
-	revived, err := lookAt(f, "ghost")
+	got := lookAt(f, "ghost")
 
 	// Assert
-	if err == nil || revived {
-		t.Fatalf("reviveIfSessionless = (%v, %v), want the read's failure", revived, err)
+	if got.answer == nil || got.revived {
+		t.Fatalf("look = %+v, want the read's failure answered", got)
 	}
-	if got := recordLevel(f, "could not read the workspace looked at with no session behind it"); got != "error" {
-		t.Fatalf("failure record level = %q, want error", got)
+	if level := recordLevel(f, "could not read the workspace looked at with no session behind it"); level != "error" {
+		t.Fatalf("failure record level = %q, want error", level)
 	}
 	if len(f.fleet.startCalls) != 0 {
 		t.Fatalf("start calls = %v, want none for an unreadable workspace", f.fleet.startCalls)

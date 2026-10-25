@@ -14,7 +14,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
-	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -359,20 +358,20 @@ func TestSelectStartsNothingForALiveWorkspace(t *testing.T) {
 	}
 }
 
-func TestSelectFailsWhenTheRevivalFails(t *testing.T) {
+func TestSelectRecordsAFailedRevivalAtError(t *testing.T) {
 	// Arrange: a selected workspace with no session is the state the revival
-	// exists to abolish, so answering success would hide it.
+	// exists to abolish, so its failure is loud though no answer carries it.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.hibernate("w1")
 	f.fleet.startErr = errors.New("boom")
 
 	// Act.
-	err := f.verbs.Select(context.Background(), "w1", RecordSelection)
+	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
 
 	// Assert.
-	if err == nil {
-		t.Fatal("Select() answered no error for a failed revival")
+	if errs := errorRecords(f); len(errs) != 1 || errs[0].Message != "the hibernated workspace's session did not come back up" {
+		t.Fatalf("errors = %+v, want the failed bring-up at ERROR once", errs)
 	}
 }
 
@@ -704,9 +703,9 @@ func TestSelectLowersTheRevivingMarkerWhenTheRevivalFails(t *testing.T) {
 	}
 }
 
-func TestSelectAnswersTheRevivalFailureToTheCaller(t *testing.T) {
-	// Arrange: the selection is pushed before the revival, and the failure
-	// must still reach whoever asked.
+func TestSelectAnswersTheSelectionNotTheRevival(t *testing.T) {
+	// Arrange: SelectWorkspace answers that the workspace is selected; the
+	// revival it occasions reports its own outcome.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.hibernate("w1")
@@ -716,8 +715,8 @@ func TestSelectAnswersTheRevivalFailureToTheCaller(t *testing.T) {
 	err := f.verbs.Select(context.Background(), "w1", RecordSelection)
 
 	// Assert.
-	if !errors.Is(err, errFake) {
-		t.Fatalf("Select() = %v, want the revival's failure", err)
+	if err != nil {
+		t.Fatalf("Select() = %v, want the selection answered whatever the revival did", err)
 	}
 }
 
@@ -847,22 +846,21 @@ func TestConcurrentSelectsOfAParkedWorkspaceStartOneSession(t *testing.T) {
 
 // ---- a select's revival outlives the select ----
 
-// arrangeCancelledSelect selects parked "w1", holds its DETACHED revival until
-// the select's caller has left, and answers the select's error. The revival is
-// then released, and the call returns once its flight has finished.
-func arrangeCancelledSelect(t *testing.T, f *fixture, startErr error) error {
+// arrangeDetachedSelect selects parked "w1" with its DETACHED revival held,
+// and answers the select's error, received while the revival is still held.
+// The revival is then released, and the call returns once its flight has
+// finished.
+func arrangeDetachedSelect(t *testing.T, f *fixture, startErr error) error {
 	t.Helper()
 	f.workspace("w1", t.TempDir())
 	f.hibernate("w1")
 	f.fleet.startErr = startErr
 	f.fleet.detachEntered, f.fleet.detachHold = make(chan struct{}), make(chan struct{})
 	finished := make(chan ids.WorkspaceID, 1)
-	f.verbs.(*verbs).revivals.observeFinish = func(ws ids.WorkspaceID) { finished <- ws }
-	ctx, cancel := context.WithCancel(context.Background())
-	done := f.selectAsync(ctx, "w1")
+	f.verbs.(*verbs).revivals.observeFinish = func(ws ids.WorkspaceID, _ bool, _ error) { finished <- ws }
+	done := f.selectAsync(context.Background(), "w1")
+	err := receive(t, done, "the select's answer, its revival still held")
 	receive(t, f.fleet.detachEntered, "the detached revival")
-	cancel()
-	err := receive(t, done, "the cancelled select's answer")
 	close(f.fleet.detachHold)
 	receive(t, finished, "the revival's finish")
 	return err
@@ -879,18 +877,28 @@ func errorRecords(f *fixture) []dlog.Record {
 	return out
 }
 
-// TestASelectCancelledMidRevivalLeavesTheWorkspaceRevived is the 18:28:56
-// switch: the user moved on while the parked workspace was coming back, and
-// the bring-up was torn in half at its session record's write.
-func TestASelectCancelledMidRevivalLeavesTheWorkspaceRevived(t *testing.T) {
+// TestASelectAnswersBeforeItsRevivalFinishes is the 2026-10-25T14:53:08
+// switch: Emacs timed SelectWorkspace out at 10s while the bring-up it
+// occasioned ran on, the selection long recorded.
+func TestASelectAnswersBeforeItsRevivalFinishes(t *testing.T) {
 	// Arrange, Act.
 	f := newFixture(t)
-	err := arrangeCancelledSelect(t, f, nil)
+	err := arrangeDetachedSelect(t, f, nil)
 
 	// Assert.
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("Select() = %v, want the caller's own cancellation", err)
+	if err != nil {
+		t.Fatalf("Select() = %v, want the selection answered while its revival was held", err)
 	}
+}
+
+// TestASelectsRevivalLandsWholeAfterTheAnswer pins that the bring-up the
+// answer did not wait for still lands, on the fleet's own live context.
+func TestASelectsRevivalLandsWholeAfterTheAnswer(t *testing.T) {
+	// Arrange, Act.
+	f := newFixture(t)
+	_ = arrangeDetachedSelect(t, f, nil)
+
+	// Assert.
 	if !slices.Equal(f.fleet.started, []ids.WorkspaceID{"w1"}) || f.fleet.startCtxErr != nil {
 		t.Fatalf("started = %v (ctx err %v), want w1 started whole on a live context", f.fleet.started, f.fleet.startCtxErr)
 	}
@@ -899,25 +907,12 @@ func TestASelectCancelledMidRevivalLeavesTheWorkspaceRevived(t *testing.T) {
 	}
 }
 
-// TestASelectCancelledMidRevivalRecordsNoError pins that a caller leaving is
-// not a failure.
-func TestASelectCancelledMidRevivalRecordsNoError(t *testing.T) {
-	// Arrange, Act.
-	f := newFixture(t)
-	_ = arrangeCancelledSelect(t, f, nil)
-
-	// Assert.
-	if errs := errorRecords(f); len(errs) != 0 {
-		t.Fatalf("errors = %+v, want none for a caller that left", errs)
-	}
-}
-
 // TestADetachedRevivalEndedByTheDaemonsExitRecordsNoError covers the fleet's
 // lifetime ending under the revival: the daemon leaving, not a failure.
 func TestADetachedRevivalEndedByTheDaemonsExitRecordsNoError(t *testing.T) {
 	// Arrange, Act.
 	f := newFixture(t)
-	_ = arrangeCancelledSelect(t, f, context.Canceled)
+	_ = arrangeDetachedSelect(t, f, context.Canceled)
 
 	// Assert.
 	if errs := errorRecords(f); len(errs) != 0 {
@@ -930,7 +925,7 @@ func TestADetachedRevivalEndedByTheDaemonsExitRecordsNoError(t *testing.T) {
 func TestADetachedRevivalThatFailsIsStillAnError(t *testing.T) {
 	// Arrange, Act.
 	f := newFixture(t)
-	_ = arrangeCancelledSelect(t, f, errFake)
+	_ = arrangeDetachedSelect(t, f, errFake)
 
 	// Assert.
 	if errs := errorRecords(f); len(errs) != 1 || errs[0].Message != "the hibernated workspace's session did not come back up" {
@@ -993,19 +988,12 @@ func TestSelectStartsAnOpenWorkspaceWithNoSession(t *testing.T) {
 	}
 }
 
-// standingDownStart is the error a revival meets on a daemon standing down,
-// spelled as the bring-up spells it: the sentinel wrapped beside the OPEN's
-// spawn_failed refusal.
-func standingDownStart() error {
-	return fmt.Errorf("%w: %w", shimclient.ErrStandingDown, &Refusal{Rpc: "OpenWorkspace", Arm: ArmSpawnFailed})
-}
-
 func TestSelectOnADaemonStandingDownAnswersTheStandingDownArm(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.hibernate("w1")
-	f.fleet.startErr = standingDownStart()
+	f.fleet.standingDown = true
 
 	// Act.
 	err := f.verbs.Select(context.Background(), "w1", RecordSelection)
@@ -1014,12 +1002,44 @@ func TestSelectOnADaemonStandingDownAnswersTheStandingDownArm(t *testing.T) {
 	asRefusal(t, err, ArmStandingDown)
 }
 
+func TestSelectOnADaemonStandingDownStartsNothing(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+	f.fleet.standingDown = true
+
+	// Act.
+	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
+
+	// Assert: the refusal comes before anything is detached.
+	if len(f.fleet.startCalls) != 0 {
+		t.Fatalf("starts = %v, want none on a daemon standing down", f.fleet.startCalls)
+	}
+}
+
+func TestSelectOfALiveWorkspaceOnADaemonStandingDownSucceeds(t *testing.T) {
+	// Arrange: nothing is owed a start, so nothing is refused.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.fleet.live["w1"] = true
+	f.fleet.standingDown = true
+
+	// Act.
+	err := f.verbs.Select(context.Background(), "w1", RecordSelection)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Select() = %v, want success for a live workspace", err)
+	}
+}
+
 func TestSelectOnADaemonStandingDownLeavesTheSelectionStanding(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.hibernate("w1")
-	f.fleet.startErr = standingDownStart()
+	f.fleet.standingDown = true
 
 	// Act.
 	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)

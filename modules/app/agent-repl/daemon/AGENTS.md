@@ -2411,21 +2411,27 @@ in a fixed order, and the order is the contract:
    ran first, the sidebar lagged every switch by the bring-up (~0.75s each,
    serialized), and concurrent selects stamped current in the order their
    revivals finished, overwriting the user's last switch.
-2. **Then, if parked, the revival** (`reviveIfParked`, internal/workspace/
-   revive.go), with the roster row's `RosterRowReviving` marker raised for the
-   duration of `Sessions.Start` and lowered however Start returned. A failed
-   revival still fails the select: the error reaches the rpc caller, and the
-   selection it already made stands.
+2. **Then, for a workspace with no session behind it, the revival, NOT
+   WAITED ON** (`startRevival`, internal/workspace/revive.go). A hibernated
+   workspace's bring-up raises the roster row's `RosterRowReviving` marker for
+   the duration of the start and lowers it however the start ended. The
+   decision -- parked, live, closed -- is read synchronously and only the
+   bring-up is detached (`Sessions.StartDetached`), so `SelectWorkspace`
+   answers that the workspace is selected without waiting for the vendor
+   (2026-10-25: Emacs timed a select out at 10s while the bring-up ran on).
+   A bring-up that fails records its failure at ERROR; it no longer fails the
+   select. A daemon standing down is the one refusal still answered: it
+   starts no session, `Sessions.StandingDown` says so before anything is
+   detached, and the select answers `standing_down` so the client asks the
+   daemon that serves next.
 
-**INVARIANT: AT MOST ONE RESTART IN FLIGHT PER WORKSPACE.** `reviveIfParked` is
-single-flight keyed by workspace (`revivalFlights`): the park check and the
-start run in the leader only, and every caller arriving while a revival is in
-flight JOINS it and answers the leader's outcome, a failure included, without
-calling `Sessions.Start` itself. A joiner whose own context ends stops waiting
-with that error; the leader carries on. A caller arriving after the flight
-retired leads a fresh one, which re-reads the park. Any new revive caller goes
-through `reviveIfParked` and inherits this; nothing in the verbs calls
-`Sessions.Start` for a parked workspace any other way. Covered by
+**INVARIANT: AT MOST ONE RESTART IN FLIGHT PER WORKSPACE.** `startRevival` is
+single-flight keyed by workspace (`revivalFlights`): the decision and the
+start run in the leader only, and every look arriving while a revival is in
+flight is carried by it and answers at once without calling `Sessions.Start`
+itself. A look arriving after the flight retired leads a fresh one, which
+re-reads the park. Nothing in the verbs starts a looked-at workspace's
+session any other way. Covered by
 `TestConcurrentRevivalsOfOneWorkspaceStartOneSession` and
 `TestConcurrentSelectsOfAParkedWorkspaceStartOneSession` (a gated fake Start,
 N callers, exactly one Start), and the request-order landing by

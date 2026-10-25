@@ -113,6 +113,12 @@ func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	f.selectWorkspace()
+	// THE FIRST SELECT STARTS THE SESSION-LESS WORKSPACE DETACHED and answers
+	// before it is up, so the bring-up's own pushes are waited out here: the
+	// window below is the re-selection's alone.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the first select's bring-up landing", func(r harness.LogRecord) bool {
+		return r.Message == "started the session of the looked-at workspace"
+	})
 	roster := f.d.WatchRoster()
 	awaitRoster(t, f.d, roster, "the latest roster", func(r *frontendv1.WorkspaceRoster) bool {
 		return r.GetCurrent().GetWorkspace().GetId() == f.ws.GetId()

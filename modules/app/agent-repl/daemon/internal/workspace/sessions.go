@@ -415,6 +415,10 @@ func (f *Fleet) StartDetached(ws ids.WorkspaceID, done func(error)) {
 		})
 }
 
+// StandingDown implements Sessions: the supervisor's latch, which refuses
+// every spawn once this daemon has begun standing down.
+func (f *Fleet) StandingDown() bool { return f.deps.Supervisor.StandingDown() }
+
 // ResumeColdDetached re-opens a parked session with the answered remediation
 // OFF the caller's goroutine, reporting the outcome to `done` with the
 // fleet's own context when it settles. An answered cold gate is ACKNOWLEDGED
