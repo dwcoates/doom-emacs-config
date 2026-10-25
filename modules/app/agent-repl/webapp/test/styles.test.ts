@@ -5904,3 +5904,14 @@ describe("the sidebar's merge queue view", () => {
     expect(alone).toEqual([]);
   });
 });
+
+describe("the chat's quieter emphasis", () => {
+  it("draws a chat answer's TeX in the same grey as a list item's lead, through one rule", () => {
+    // Arrange / Act
+    const lead = declarationsOf(".chat-a strong.md-lead");
+    const tex = [declarationsOf(".chat-a eq"), declarationsOf(".chat-a eqn")];
+    // Assert
+    expect(lead).toMatch(/color:\s*color-mix\(in srgb, currentColor 90%, var\(--muted\)\)/);
+    expect(tex).toEqual([lead, lead]);
+  });
+});
