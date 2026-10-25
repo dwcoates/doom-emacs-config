@@ -2058,3 +2058,85 @@ func TestReviewQueuesSurfacesAnUnreadableQueue(t *testing.T) {
 		t.Fatalf("the failure was not recorded at ERROR: %+v", h.logs.Records())
 	}
 }
+
+// renameInHarness renames WS in the harness's registry, as wsm.SetName does.
+func renameInHarness(h *harness, ws wsm.WorkspaceID, name string) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	record := h.db.workspaces[ws]
+	record.Name = name
+	h.db.workspaces[ws] = record
+}
+
+// TestRelabelRepublishesTheQueueARenamedWorkspaceStandsIn covers a rename of a
+// workspace waiting in line: the front's bubble shows the new name for it.
+func TestRelabelRepublishesTheQueueARenamedWorkspaceStandsIn(t *testing.T) {
+	// Arrange: the front started and is held inside its gate, ws-2 waits.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	inGate, release := holdTheGate(h)
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "two")
+	done := admitAsync(h, context.Background())
+	<-inGate
+	renameInHarness(h, "ws-2", "renamed-two")
+
+	// Act.
+	err := h.o.Relabel(context.Background(), "ws-2")
+	got := lastQueueTabOf(t, h, theWorkspace).GetQueue().GetBehind()[0].GetLabel().GetText()
+	close(release)
+	<-done
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Relabel: %v", err)
+	}
+	if got != "renamed-two" {
+		t.Fatalf("ws-2's label after its rename = %q, want %q", got, "renamed-two")
+	}
+}
+
+func TestRelabelOfAWorkspaceOnNoQueueRepublishesNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+	h.registerOther("ws-idle", "idle", "b-idle")
+	before := len(h.logs.Records())
+
+	// Act.
+	err := h.o.Relabel(context.Background(), "ws-idle")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Relabel: %v", err)
+	}
+	for _, rec := range h.logs.Records()[before:] {
+		if rec.Operation == "daemon.merge.relabel" {
+			t.Fatalf("a workspace on no queue republished a queue: %+v", rec)
+		}
+	}
+}
+
+func TestRelabelFailsLoudlyWhenTheQueuesCannotBeRead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+	h.db.mu.Lock()
+	h.db.allQueuesErr = errors.New("the store is closed")
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Relabel(context.Background(), theWorkspace)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the store is closed") {
+		t.Fatalf("Relabel = %v, want the read's error", err)
+	}
+	for _, rec := range h.logs.Records() {
+		if rec.Level == "error" && rec.Operation == "daemon.merge.relabel" && rec.Context["workspace"] == string(theWorkspace) {
+			return
+		}
+	}
+	t.Fatalf("no ERROR record of daemon.merge.relabel names the workspace: %+v", h.logs.Records())
+}

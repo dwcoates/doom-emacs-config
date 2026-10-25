@@ -159,6 +159,10 @@ type Orchestrator interface {
 	// LeaseChanged is told each lease change of a workspace: a queue front
 	// that waited for that workspace's lease is offered to its queue again.
 	LeaseChanged(ws ids.WorkspaceID)
+	// Relabel is told WS was renamed: every queue WS stands in is
+	// republished, so its entry's label and the line naming the merge ahead
+	// read the new name. A workspace on no queue is no change.
+	Relabel(ctx context.Context, ws ids.WorkspaceID) error
 	// ReportDeploy tells the subscribers of CHECKOUT's queue that a deploy of
 	// it ended (QueueChangeDeployed).
 	ReportDeploy(ctx context.Context, checkout string, end DeployEnd)
