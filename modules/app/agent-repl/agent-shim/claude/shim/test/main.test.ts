@@ -1717,6 +1717,7 @@ describe("queryFactory hands the mocked vendor the per-task stop declaration", (
     await factory(true, env, cwd)({
       profile: { kind: "chat", systemPrompt: "Answer questions." },
       binding: { kind: "fresh", sessionId: "session-1" },
+      workspaceName: "why-sky",
       permissionMode: "default",
       canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
       abortController: new AbortController(),
