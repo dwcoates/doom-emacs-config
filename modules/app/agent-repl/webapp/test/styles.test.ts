@@ -5099,25 +5099,84 @@ describe("the rail's mark column", () => {
  * mark draws at the dot's size, a breath shrinks a mark 30% less far than it once
  * did, and one breath takes exactly as long as one turn of a spinning glyph.
  */
+/** The selectors every rail glyph control wearing the bare look carries. */
+const BARE_GLYPH_CONTROLS = ["#ws-sidebar .sb-search-btn", "#ws-sidebar .repo-head > .sb-merge-queue-toggle"];
+
 /**
- * THE SEARCH TOGGLE IS A FLOATING PURPLE MAGNIFIER (owner request,
- * 2026-10-13): no fill, border or focus ring around it, the bands' purple on
- * the glyph, and the same padded click square.
+ * The one rule the rail's bare glyph controls share (styles.css "THE RAIL'S
+ * BARE GLYPH CONTROLS"): the rule that strips the search and merge-queue
+ * toggles' button look.
  */
-describe("the rail's search toggle", () => {
+function isBareGlyphRule(rule: CssRule): boolean {
+  return rule.selectors.includes("#ws-sidebar .sb-search-btn") && /appearance:\s*none/.test(rule.declarations);
+}
+
+function bareGlyphRule(): CssRule | undefined {
+  return rulesOf(stylesheet).find(isBareGlyphRule);
+}
+
+/** Whether DECLARATIONS declare PROPERTY as WANT. */
+function declares(declarations: string, property: string, want: string): boolean {
+  return new RegExp(`(?:^|;)\\s*${property}:\\s*${want.replace(/[()]/g, "\\$&")}\\s*;`).test(declarations);
+}
+
+/**
+ * THE RAIL'S BARE GLYPH CONTROLS: no fill, border, focus ring or native
+ * button look around the glyph, declared once for every such control.
+ */
+describe("the rail's bare glyph controls", () => {
   it.each([
     { name: "draws no fill", property: "background", want: "none" },
     { name: "draws no border", property: "border", want: "none" },
     { name: "draws no focus ring", property: "outline", want: "none" },
     { name: "draws no native button look", property: "appearance", want: "none" },
+  ])("$name", ({ property, want }) => {
+    // Arrange / Act
+    const rule = bareGlyphRule()?.declarations ?? "";
+
+    // Assert
+    expect(declares(rule, property, want)).toBe(true);
+  });
+
+  it("is shared by every bare glyph control", () => {
+    // Arrange / Act
+    const rule = bareGlyphRule();
+
+    // Assert
+    expect(rule?.selectors).toEqual(BARE_GLYPH_CONTROLS);
+  });
+
+  it("is declared by no bare glyph control on its own", () => {
+    // Arrange / Act
+    const divergent = rulesOf(stylesheet).filter(
+      (rule) =>
+        !isBareGlyphRule(rule) &&
+        rule.selectors.some((sel) => BARE_GLYPH_CONTROLS.includes(sel)) &&
+        /(?:^|;)\s*(?:background|border|outline|appearance):/.test(rule.declarations),
+    );
+
+    // Assert
+    expect(divergent).toEqual([]);
+  });
+});
+
+/**
+ * THE SEARCH TOGGLE IS A FLOATING PURPLE MAGNIFIER (owner request,
+ * 2026-10-13): bare as the rail's glyph controls are, the bands' purple on
+ * the glyph, and the same padded click square.
+ */
+describe("the rail's search toggle", () => {
+  it.each([
     { name: "wears the bands' header purple", property: "color", want: "var(--blocked)" },
     { name: "keeps its padded click square", property: "padding", want: "0.1rem" },
   ])("$name", ({ property, want }) => {
     // Arrange / Act
-    const rule = declarationsOf("#ws-sidebar .sb-search-btn") ?? "";
+    const rule = rulesOf(stylesheet).find(
+      (r) => r.selectors.includes("#ws-sidebar .sb-search-btn") && !isBareGlyphRule(r),
+    )?.declarations ?? "";
 
     // Assert
-    expect(rule).toMatch(new RegExp(`(?:^|;)\\s*${property}:\\s*${want.replace(/[()]/g, "\\$&")}\\s*;`));
+    expect(declares(rule, property, want)).toBe(true);
   });
 
   it("brightens to full on hover, keyboard focus and while open", () => {
