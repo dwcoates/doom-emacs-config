@@ -769,7 +769,7 @@ export function createHost(env: HostEnv): Host {
       }
       frames.clear();
       shownId = null;
-      note("info", `retired ${pages} page(s) for the reload Emacs is about to make`);
+      note("info", `retired ${pages} page(s); the reload Emacs asked for follows`);
       endPage();
       return answer("retireAll", null, "retired", { pages });
     },
