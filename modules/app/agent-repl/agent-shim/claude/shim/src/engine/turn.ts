@@ -101,12 +101,16 @@ export interface OpenTurn {
 }
 
 /**
- * The prompt origins of turns no user attends: a merge queue's remediation of
- * its own rebase conflicts and failing tests, which the whole queue waits on.
+ * The prompt origins of turns no user attends, each one a turn the whole merge
+ * queue waits on: a merge's remediation of its own rebase conflicts and failing
+ * tests, and a deploy's prompt hooks before and after it lands (owner ruling,
+ * 2026-10-25: a hook never asks either).
  */
 export const UNATTENDED_ORIGINS: ReadonlySet<conversationv1.PromptOrigin> = new Set([
   conversationv1.PromptOrigin.MERGE_CONFLICT_REPAIR,
   conversationv1.PromptOrigin.MERGE_TEST_REPAIR,
+  conversationv1.PromptOrigin.MERGE_BEFORE_ACTION,
+  conversationv1.PromptOrigin.MERGE_AFTER_ACTION,
 ]);
 
 /** What the turn verbs need from the session that owns them. */

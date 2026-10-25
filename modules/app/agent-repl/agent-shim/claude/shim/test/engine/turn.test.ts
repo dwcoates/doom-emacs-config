@@ -4242,7 +4242,9 @@ describe("a turn no user attends", () => {
     ["a merge's conflict repair", true, conversationv1.PromptOrigin.MERGE_CONFLICT_REPAIR],
     ["a merge's test repair", true, conversationv1.PromptOrigin.MERGE_TEST_REPAIR],
     ["the user's own prompt", false, conversationv1.PromptOrigin.USER_SENT],
-    ["a deploy's prompt hook", false, conversationv1.PromptOrigin.MERGE_BEFORE_ACTION],
+    ["a deploy's prompt hook before it lands", true, conversationv1.PromptOrigin.MERGE_BEFORE_ACTION],
+    ["a deploy's prompt hook after it lands", true, conversationv1.PromptOrigin.MERGE_AFTER_ACTION],
+    ["a displaced turn's resume", false, conversationv1.PromptOrigin.MERGE_DISPLACED_TURN_RESUME],
   ])("opens %s marked unattended: %s", async (_name, unattended, origin) => {
     // Arrange
     const h = await harness();
