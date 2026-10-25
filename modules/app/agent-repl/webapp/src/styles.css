@@ -5392,11 +5392,19 @@ body.draining #composer-input::placeholder {
    the newest row does. It pays no layout at all while nothing is held. Below the
    last held item the gap is the feed's one bottom gap (#feed-scroll::after),
    never a second copy here. */
-#hold-tray {
+#hold-tray,
+#ask-tray {
   padding: 0.5rem 1rem 0;
   font-size: calc(1em * var(--feed-text-scale));
 }
 #hold-tray:empty { display: none; }
+
+/* The OPEN ASKS (src/feed/ask-tray.ts): the scroll zone's last region, after
+   the held section, laid out in the feed's own rhythm as that section is. Each
+   card sits in a row wrapper of its own, so it is placed as it was in the
+   feed; its emptied home row there takes no slot. */
+#ask-tray[hidden] { display: none; }
+.feed-item.ask-docked-row { display: none; }
 
 /* The composer ships hidden: production runs composer-less, since the root
    composer is host-native (Emacs), and only the dev-mode boot reveals it. */
@@ -5700,7 +5708,8 @@ bubble-body.bubble-body { display: block; }
 
 /* The rows a body renderer laid out, in the same column rhythm #feed uses. */
 .feed-body,
-.feed-rows {
+.feed-rows,
+#ask-tray {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
