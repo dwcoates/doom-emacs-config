@@ -201,7 +201,15 @@ whose calls are the observation."
                   (lambda (ws) (push ws agent-repl-test-roster--unsubscribed) ws))
                  ((symbol-function 'agent-repl-link-primary)
                   (lambda () 'fake-conn)))
-         ,@body))))
+         ;; A tab's arrival opens its composer, and a rename renames it, so
+         ;; a buffer left live names a LATER test's rename target taken.
+         (let ((agent-repl-test-roster--buffers-before (buffer-list)))
+           (unwind-protect
+               (progn ,@body)
+             (let ((kill-buffer-query-functions nil))
+               (dolist (buf (buffer-list))
+                 (unless (memq buf agent-repl-test-roster--buffers-before)
+                   (kill-buffer buf))))))))))
 
 (defun agent-repl-test-roster--tabs ()
   "Return the live roster-owned workspace names, in tab order."
@@ -1146,6 +1154,28 @@ that follows must not care which of the two got there first."
                                "repo" (list (agent-repl-test-roster--row "a" "new-name" :ready))))))
             ;; Assert
             (should (equal (buffer-name buf) "*agent-frontend-new-name*")))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-roster-a-rename-renames-the-composer ()
+  "The composer's name is a panel key, so a rename moves it to the new name."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-host--by-name (make-hash-table :test 'equal))
+          (buf (generate-new-buffer "*agent-panel-input-old-name*")))
+      (unwind-protect
+          (progn
+            (agent-repl-roster-apply
+             (agent-repl-test-roster--roster
+              :sections (list (agent-repl-test-roster--section
+                               "repo" (list (agent-repl-test-roster--row "a" "old-name" :ready))))))
+            (agent-repl--ws-put "old-name" :input-buffer buf)
+            ;; Act
+            (agent-repl-roster-apply
+             (agent-repl-test-roster--roster
+              :sections (list (agent-repl-test-roster--section
+                               "repo" (list (agent-repl-test-roster--row "a" "new-name" :ready))))))
+            ;; Assert
+            (should (equal (agent-repl--extract-panel-id (buffer-name buf)) "new-name")))
         (kill-buffer buf)))))
 
 (ert-deftest agent-repl-test-roster-a-rename-onto-a-tombstone-keeps-the-old-tab ()
