@@ -93,6 +93,7 @@
 (declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-selection-recency-order "agent-repl-roster" (names))
 (declare-function agent-repl-roster-threads "agent-repl-roster" (&optional roster))
+(declare-function agent-repl-roster-thread-row-ws "agent-repl-roster" (row))
 (declare-function agent-repl-roster-last-finished-name "agent-repl-roster" (names))
 (declare-function agent-repl-roster-last-turn-ended-ms "agent-repl-roster" (ws))
 (declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
@@ -1168,9 +1169,7 @@ A row whose workspace Emacs has not opened yet names none, so it is left out."
 (defun agent-repl--open-thread-names ()
   "Return the open chat threads' workspace names, the last interacted with first.
 A thread whose workspace Emacs has not opened yet names none, so it is left out."
-  (delq nil (mapcar (lambda (row)
-                      (agent-repl--ws-by-ref-id (plist-get (plist-get row :thread) :id)))
-                    (agent-repl-roster-threads))))
+  (delq nil (mapcar #'agent-repl-roster-thread-row-ws (agent-repl-roster-threads))))
 
 (defun agent-repl--roster-recent-names ()
   "Return open workspace names, most recently selected first.

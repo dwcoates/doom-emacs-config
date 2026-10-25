@@ -619,6 +619,11 @@ The roster states it on every reconcile (`agent-repl-roster--reconcile-row');
 a name the roster opened no workspace under, nil included, is no thread."
   (and ws (agent-repl--ws-get ws :thread)))
 
+(defun agent-repl-roster-thread-row-ws (row)
+  "Return the name of the workspace Emacs opened for the thread ROW, or nil.
+Nil while the thread's workspace is not open yet."
+  (agent-repl--ws-by-ref-id (plist-get (plist-get row :thread) :id)))
+
 (defun agent-repl-roster-thread-workspace-name (row)
   "Return the workspace name a thread ROW is opened under."
   (concat agent-repl-roster-thread-prefix (plist-get row :name)))
