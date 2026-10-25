@@ -7,6 +7,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedmarker"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/ladder"
 	"agent-repld/internal/resolve/turnfault"
@@ -36,17 +37,10 @@ const (
 	compactionFailedType = "compaction_failed"
 )
 
-// neutralMarker is a marker of the user's own act or a hook's. It carries no
-// expansion: the neutral family has none to carry.
+// neutralMarker is a marker of the user's own act or a hook's
+// (feedmarker.Neutral, the one spelling the store's layout steps share).
 func neutralMarker(label, detail string) *frontendv1.FeedOutcomeMarker {
-	m := &frontendv1.FeedOutcomeMarker{
-		Label:  &frontendv1.FeedOutcomeMarkerLabel{Text: label},
-		Family: &frontendv1.FeedOutcomeMarker_Neutral{Neutral: &frontendv1.FeedOutcomeMarkerNeutral{}},
-	}
-	if detail != "" {
-		m.Detail = &frontendv1.FeedOutcomeMarkerDetail{Text: detail}
-	}
-	return m
+	return feedmarker.Neutral(label, detail)
 }
 
 // interruptedMarker is the stop's neutral marker.
