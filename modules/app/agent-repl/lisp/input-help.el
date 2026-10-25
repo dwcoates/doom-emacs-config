@@ -177,6 +177,12 @@
                 (agent-repl-nuke-workspace "Destroy this workspace, its worktree and its branch.")
                 (agent-repl-copy-workspace-name "Copy this workspace's name.")
                 (agent-repl-notes-open "Open this workspace's notes.")))
+    (:id threads
+     :group "Workspaces"
+     :title "Chat threads"
+     :bindings ((agent-repl-thread-new "New chat thread, from its first question.")
+                (agent-repl-thread-recent "Open the chat thread last interacted with.")
+                (agent-repl-thread-pick "Open a chat thread picked by name.")))
     (:id panels
      :group "Workspaces"
      :title "Panels and windows"

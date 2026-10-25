@@ -2573,8 +2573,16 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_nuke_workspace.pb.go" "NukeWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "gitFailed" "hasOpenChildren")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "gitFailed" "hasOpenChildren"
+                             "threadDeleteFailed")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-nuke-error-thread-delete-failed-arm ()
+  "NukeWorkspaceError's `thread_delete_failed' arm decodes with its detail."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-nuke-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"threadDeleteFailed\":{\"detail\":\"zettel down\"}}"))
+                   '(:cause (:arm :thread-delete-failed :value (:detail "zettel down")))))))
 
 ;;;; ---- FinishWorkspaceRequest ---------------------------------------
 

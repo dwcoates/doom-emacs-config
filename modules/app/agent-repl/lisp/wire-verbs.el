@@ -1683,6 +1683,11 @@ not finished adopting this workspace yet."
 A git operation failed mid-delete."
   (agent-repl-wire-verbs--decode-detail "NukeWorkspaceGitFailed" json))
 
+(defun agent-repl-wire-decode-nuke-workspace-thread-delete-failed (json)
+  "Decode NukeWorkspaceThreadDeleteFailed from JSON into a plist (`:detail').
+A chat thread's graph or directory could not be deleted."
+  (agent-repl-wire-verbs--decode-detail "NukeWorkspaceThreadDeleteFailed" json))
+
 (defun agent-repl-wire-decode-nuke-workspace-error-unknown-workspace (json)
   "Decode NukeWorkspaceError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-nuke-workspace-unknown-workspace json))
@@ -1703,12 +1708,16 @@ A git operation failed mid-delete."
   "Decode NukeWorkspaceError's `git_failed' cause arm from JSON."
   (agent-repl-wire-decode-nuke-workspace-git-failed json))
 
+(defun agent-repl-wire-decode-nuke-workspace-error-thread-delete-failed (json)
+  "Decode NukeWorkspaceError's `thread_delete_failed' cause arm from JSON."
+  (agent-repl-wire-decode-nuke-workspace-thread-delete-failed json))
+
 (defun agent-repl-wire-decode-nuke-workspace-error (json)
   "Decode NukeWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "NukeWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted gitFailed hasOpenChildren))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted gitFailed hasOpenChildren threadDeleteFailed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -1717,6 +1726,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'transferringAway :transferring-away #'agent-repl-wire-decode-nuke-workspace-error-transferring-away)
          (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-nuke-workspace-error-not-yet-adopted)
          (list 'gitFailed :git-failed #'agent-repl-wire-decode-nuke-workspace-error-git-failed)
+         (list 'threadDeleteFailed :thread-delete-failed
+               #'agent-repl-wire-decode-nuke-workspace-error-thread-delete-failed)
          agent-repl-wire-verbs--has-open-children-arm)))))
 
 (defun agent-repl-wire-decode-nuke-workspace-response-success (json)
