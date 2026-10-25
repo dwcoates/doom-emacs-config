@@ -564,3 +564,28 @@ func TestTheRoutingBriefRoutesAClarificationAfterTheToolCall(t *testing.T) {
 		t.Fatalf("queue-routing-classifier does not say %q", phrase)
 	}
 }
+
+func TestTheRoutingBriefRoutesAnUrgentMessageAfterTheToolCall(t *testing.T) {
+	// Arrange: a prompt marking itself urgent ("asap") is an important
+	// addendum to the last one sent, so the routing brief passes it through
+	// the gate after the tool call (joining the running turn, or folding into
+	// a queued prompt ahead of it) and never holds it, nor interrupts on the
+	// urgency alone.
+	want := []string{
+		"A new message that marks itself URGENT always answers {{token_after_tool_call}}",
+		`"asap"`,
+		"so it never waits for the turn to finish ({{token_hold}})",
+		"The urgency alone does not make the running work wrong",
+	}
+
+	// Act.
+	got, err := Load(repoPromptsDir, "queue-routing-classifier")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if phrase, missing := unsaid(got.Body, want); missing {
+		t.Fatalf("queue-routing-classifier does not say %q", phrase)
+	}
+}
