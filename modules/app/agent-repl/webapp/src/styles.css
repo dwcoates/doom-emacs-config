@@ -29,14 +29,15 @@
      near-white #f9fafb, so a card lifts off the feed instead of melting into
      it, while staying above the composer well (--composer-bg) below it. */
   --card: #eef1f4;
-  /* The fill the response bubble (--assistant), the merge bubble and its tab
-     chrome, and the footer dock share. It is --card itself in this theme; the
+  /* The fill the response bubble (--assistant) and the footer dock share. It is --card itself in this theme; the
      dark theme sets its own (owner ruling, 2026-09-27). */
   --panel-bg: var(--card);
-  /* The tool card's fill (Bash, Skill, Question, ...). It is --panel-bg in
-     this theme; the dark theme takes it its own step darker (owner request,
-     2026-10-14). */
-  --tool-card-bg: var(--panel-bg);
+  /* The fill of every card with a tool-card title (Bash, Skill, Question, a
+     subagent or merge bubble, ...): --panel-bg moved 40% of the way to the
+     feed's --bg (owner request, 2026-10-24), here #eef1f4 toward #ffffff, so
+     the cards sit quieter than the response bubble. The dark theme moves its
+     own --panel-bg the same 40%. */
+  --tool-card-bg: #f5f7f8;
   /* The workspaces rail's fill: a touch LIGHTER than the feed (--bg), so the
      sidebar reads as a lifted dock rather than the same sheet the
      conversation scrolls on. In the light theme --bg is already pure white —
@@ -510,9 +511,10 @@
     /* The shared panel fill, Claude's code block. The response bubble's
        --assistant is this same fill (owner ruling, 2026-10-11). */
     --panel-bg: #1a1a19;
-    /* The tool card, Claude's code block too, so it shares --panel-bg's
-       fill and still lifts off the feed. */
-    --tool-card-bg: #1a1a19;
+    /* The tool card: --panel-bg (Claude's code block) moved 40% of the way
+       to --bg (owner request, 2026-10-24), #1a1a19 toward #151514, so it
+       still lifts off the feed, just less. */
+    --tool-card-bg: #181817;
     /* Claude's sidebar, darker than the feed, so the rail recedes behind the
        conversation while its --card hover/detail washes lift off it. */
     --sidebar-bg: #111110;
@@ -2805,8 +2807,13 @@ html[data-page-unshown] *::after {
    relaying it must be able to drag across it. */
 .thinking summary { cursor: pointer; user-select: text; }
 
+/* A TOOL CARD DRAWS NO GREY BORDER (owner request, 2026-10-24: "they should
+   also lose their white border"). The 1px stays reserved and transparent, so a
+   state that colors it (a blocked hook, a paused merge, the merge amber)
+   recolors a laid-out edge rather than reflowing the card, and the tool
+   group's tabline inset keeps its 1px. */
 .tool-card {
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 8px;
   background: var(--tool-card-bg);
   padding: 0.5rem 0.75rem;
@@ -3087,12 +3094,6 @@ html[data-page-unshown] *::after {
    ceiling. */
 .tool-card.bubble-fold[data-merge-bubble][data-expanded="true"] {
   max-height: calc(var(--feed-item-max-h) * 0.45);
-}
-/* A MERGE BUBBLE KEEPS THE SHARED PANEL FILL (owner request, 2026-10-14):
-   it wears the tool-card shell, but when the dark theme's tool cards stepped
-   darker the merge bubble stayed on --panel-bg with the response bubble. */
-.tool-card.bubble-fold[data-merge-bubble] {
-  background: var(--panel-bg);
 }
 .bubble-fold[data-expanded="true"] > .bubble-head { flex: 0 0 auto; }
 .bubble-fold[data-expanded="true"] > .bubble-subfeed {
@@ -8566,7 +8567,8 @@ bubble-body.bubble-body { display: block; }
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--panel-bg);
+  /* The merge bubble's own fill, so the pinned strip reads as part of it. */
+  background: var(--tool-card-bg);
 }
 .merge-tab {
   display: inline-flex;

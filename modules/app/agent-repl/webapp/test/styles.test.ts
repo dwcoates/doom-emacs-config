@@ -3850,15 +3850,15 @@ describe("the response bubble's fill", () => {
     expect(decls).not.toMatch(/--assistant:/);
   });
 
-  it("matches the tool card's fill in the light theme", () => {
+  it.each(THEME_BLOCKS)("paints the %s theme's tool card --panel-bg moved 40%% of the way to --bg (owner request, 2026-10-24)", (_theme, block) => {
     // Arrange
-    const css = declarationsOf(":root") ?? "";
+    const css = block();
 
     // Act
-    const [response, card] = [themeRgbOf(css, "--assistant"), themeRgbOf(css, "--tool-card-bg")];
+    const [panel, bg, card] = ["--panel-bg", "--bg", "--tool-card-bg"].map((token) => themeRgbOf(css, token));
 
     // Assert
-    expect(response).toEqual(card);
+    expect(card).toEqual(panel.map((channel, i) => Math.round(channel + (bg[i] - channel) * 0.4)));
   });
 
   it("paints the dark theme's response Claude's code-block fill (owner ruling, 2026-10-17)", () => {
@@ -4234,17 +4234,6 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(12);
   });
 
-  it("gives the tool card the shared panel fill, as Claude's code block (owner ruling, 2026-10-17)", () => {
-    // Arrange
-    const block = darkThemeBlock();
-
-    // Act
-    const card = rgbOf(block, "--tool-card-bg");
-
-    // Assert
-    expect(card).toEqual(rgbOf(block, "--panel-bg"));
-  });
-
   it("dims an expanded repository header below --fg, still above the collapsed grey (owner request, 2026-10-24)", () => {
     // Arrange
     const block = darkThemeBlock();
@@ -4272,8 +4261,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
   it.each([
     [".tool-card", "--tool-card-bg"],
     [".pfooter", "--panel-bg"],
-    [".tool-card.bubble-fold[data-merge-bubble]", "--panel-bg"],
-    [".merge-strip", "--panel-bg"],
+    [".merge-strip", "--tool-card-bg"],
   ])("fills %s with %s", (selector, token) => {
     // Arrange / Act
     const rule = rulesOf(stylesheet).find(
@@ -4281,6 +4269,23 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     );
     // Assert
     expect(rule?.declarations).toMatch(new RegExp(`background:\\s*var\\(${token}\\)`));
+  });
+  it("gives a merge bubble no fill of its own, so it wears the tool card's (owner request, 2026-10-24)", () => {
+    // Arrange / Act
+    const painting = rulesOf(stylesheet).filter(
+      (r) => r.selectors.some((sel) => sel.includes("[data-merge-bubble]")) && /(^|;)\s*background:/.test(r.declarations),
+    );
+
+    // Assert
+    expect(painting.map((r) => r.selectors)).toEqual([]);
+  });
+
+  it("draws a tool card's border transparent (owner request, 2026-10-24)", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".tool-card") && /(^|;)\s*border:/.test(r.declarations));
+
+    // Assert
+    expect(rule?.declarations).toMatch(/border:\s*1px solid transparent/);
   });
 });
 
