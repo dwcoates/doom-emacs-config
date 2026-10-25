@@ -72,6 +72,16 @@ function refused(rpc: string, result: { case?: string | undefined; value?: unkno
   noteRefusedArm(rpc, "chat.gesture-refused", result);
 }
 
+/**
+ * The question VIEW has in flight, as one string standing for its quote and
+ * its text, or null when none is.
+ */
+export function pendingQuestionOf(view: ChatView): string | null {
+  if (view.state.case !== "conversation" || view.state.value.pending === undefined) return null;
+  const question = requireMessage(view.state.value.pending.question, "ChatPending.question");
+  return JSON.stringify([question.quote?.text ?? null, requireMessage(question.text, "ChatQuestion.text").text]);
+}
+
 /** Mount the chat into HOST. */
 export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): ChatHandle {
   log.info("mounting the chat", { operation: "chat.mount" });
@@ -170,13 +180,23 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
     },
   };
 
+  // The pending question of the last view drawn: undefined before the first
+  // view, null while none is in flight.
+  let lastAsked: string | null | undefined = undefined;
   const draw = (view: ChatView): void => {
     // THE END STAYS IN VIEW while it was in view, so an answer arriving is
-    // followed; a reader scrolled up is left where they are.
+    // followed; a reader scrolled up is left where they are. A QUESTION JUST
+    // ASKED lands the chat at its end wherever the reader was (owner request,
+    // 2026-10-25), as a sent prompt parks the agent feed at its tail. The
+    // first view is the thread's opening, not a question asked.
     const scroll = deps.scroll;
     const atEnd = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24;
+    const asked = pendingQuestionOf(view);
+    const sent = lastAsked !== undefined && asked !== null && asked !== lastAsked;
+    lastAsked = asked;
     flushSync(() => root.render(<ChatStream view={view} actions={actions} />));
-    if (atEnd) landChatAtEnd(scroll, "chatAnswerFollowed");
+    if (sent) landChatAtEnd(scroll, "promptSent");
+    else if (atEnd) landChatAtEnd(scroll, "chatAnswerFollowed");
     // THE THREAD'S FIRST VIEW IS ITS CONVERSATION DRAWN, as the feed's opening
     // page is the feed's: the daemon opens the thread's tab (OpenTabs) only
     // once its page says so (page-drawn-report.ts), and the frame follows the

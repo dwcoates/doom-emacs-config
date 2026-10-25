@@ -6513,3 +6513,33 @@ describe("the row indent", () => {
     expect([declarationsOf("#ws-sidebar .kids .row"), declarationsOf("#ws-sidebar .kids .ws.current > .row")]).toEqual([undefined, undefined]);
   });
 });
+
+/**
+ * THE CHAT COLUMN (owner request, 2026-10-25): a zettel chat thread's stream
+ * is the footer's column, an answer fits its text up to that whole column on
+ * the left rail, and a question fits its text up to 60% of it on the right.
+ */
+describe("the chat column", () => {
+  it("is the footer's width: the one bubble cap, centered", () => {
+    expect([declarationsOf(".chat-col"), declarationsOf(".pfooter")]).toEqual([
+      expect.stringMatching(/(?:^|[\s;])width:\s*var\(--agent-bubble-cap\);[\s\S]*margin:\s*0 auto/),
+      expect.stringMatching(/max-width:\s*var\(--agent-bubble-cap\);[\s\S]*margin:\s*0 auto/),
+    ]);
+  });
+
+  it("carries no fixed max-width of its own", () => {
+    expect(declarationsOf(".chat-col")).not.toMatch(/max-width/);
+  });
+
+  it("insets nothing at its sides, so its edges are the footer's", () => {
+    expect(declarationsOf(".chat-col")).toMatch(/padding:\s*\S+ 0 \S+;/);
+  });
+
+  it("hangs an answer on the left rail, up to the whole column", () => {
+    expect(declarationsOf(".chat-a")).toMatch(/align-self:\s*flex-start;\s*max-width:\s*100%/);
+  });
+
+  it("hangs a question on the right rail, up to 60% of the column", () => {
+    expect(declarationsOf(".chat-q-wrap")).toMatch(/align-self:\s*flex-end;\s*max-width:\s*60%/);
+  });
+});

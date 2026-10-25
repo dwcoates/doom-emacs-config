@@ -68,7 +68,8 @@ export interface ScrollPosition {
  * reasons, and for no other:
  *
  * - `promptSent`: a prompt this client sent was drawn; the feed parks at its
- *   tail and follows until the reader scrolls away.
+ *   tail and follows until the reader scrolls away. In a chat thread, a
+ *   question newly in flight lands the chat at its end (`landChatAtEnd`).
  * - `promptHeld`: a held prompt's card was drawn in the hold tray for the FIRST
  *   time (one this client just sent that the daemon held included); the feed
  *   parks at its tail and follows, exactly as for `promptSent`. A re-push of a
@@ -1964,11 +1965,15 @@ function pinToNewest(content: HTMLElement): boolean {
 
 /**
  * Land a chat thread's scroll box at its end, under CAUSE: the thread was
- * switched to (`workspaceSelected`), or its answer grew while the reader was
- * at the end (`chatAnswerFollowed`). The chat has no tail-follow of its own,
- * so this is its one scroll write, recorded as every caused move is.
+ * switched to (`workspaceSelected`), a question was just asked in it
+ * (`promptSent`), or its answer grew while the reader was at the end
+ * (`chatAnswerFollowed`). The chat has no tail-follow of its own, so this is
+ * its one scroll write, recorded as every caused move is.
  */
-export function landChatAtEnd(box: HTMLElement, cause: Extract<ScrollCause, "workspaceSelected" | "chatAnswerFollowed">): void {
+export function landChatAtEnd(
+  box: HTMLElement,
+  cause: Extract<ScrollCause, "workspaceSelected" | "promptSent" | "chatAnswerFollowed">,
+): void {
   const from = box.scrollTop;
   box.scrollTop = box.scrollHeight;
   log.info("the chat moved to its end", {
