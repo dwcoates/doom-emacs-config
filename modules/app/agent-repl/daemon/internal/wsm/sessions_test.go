@@ -660,3 +660,69 @@ func TestSessionsSurfacesAFailedRead(t *testing.T) {
 		t.Fatalf("no ERROR daemon.wsm.sessions record; records = %+v", log.Records())
 	}
 }
+
+// sessionsStub answers Sessions alone; every other DB method is the nil
+// embedded interface, so a helper that reached past Sessions would panic.
+type sessionsStub struct {
+	DB
+	sessions []Session
+	err      error
+	reads    int
+}
+
+func (s *sessionsStub) Sessions(context.Context) ([]Session, error) {
+	s.reads++
+	return s.sessions, s.err
+}
+
+func TestSessionsByWorkspace(t *testing.T) {
+	tests := []struct {
+		name     string
+		sessions []Session
+		want     map[WorkspaceID]Session
+	}{
+		{name: "no sessions", sessions: nil, want: map[WorkspaceID]Session{}},
+		{
+			name:     "each session under its own workspace",
+			sessions: []Session{{Workspace: "a", VendorSessionID: "va"}, {Workspace: "b", VendorSessionID: "vb"}},
+			want:     map[WorkspaceID]Session{"a": {Workspace: "a", VendorSessionID: "va"}, "b": {Workspace: "b", VendorSessionID: "vb"}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			db := &sessionsStub{sessions: tc.sessions}
+
+			// Act
+			got, err := SessionsByWorkspace(context.Background(), db)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SessionsByWorkspace: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("SessionsByWorkspace = %+v, want %+v", got, tc.want)
+			}
+			if db.reads != 1 {
+				t.Fatalf("bulk reads = %d, want exactly one", db.reads)
+			}
+		})
+	}
+}
+
+func TestSessionsByWorkspaceSurfacesAFailedRead(t *testing.T) {
+	// Arrange
+	cause := errors.New("disk gone")
+	db := &sessionsStub{err: cause}
+
+	// Act
+	got, err := SessionsByWorkspace(context.Background(), db)
+
+	// Assert
+	if !errors.Is(err, cause) {
+		t.Fatalf("SessionsByWorkspace err = %v, want it to wrap %v", err, cause)
+	}
+	if got != nil {
+		t.Fatalf("SessionsByWorkspace = %+v beside a failure, want nil", got)
+	}
+}

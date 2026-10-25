@@ -161,13 +161,9 @@ func withoutGoneRepositories(log dlog.Logger, arrangement wsm.Arrangement, sessi
 // waiting on it (2026-10-24). Records of workspaces outside the list are left
 // out, and the list's order is kept.
 func sessionRecords(ctx context.Context, db wsm.DB, workspaces []wsm.Workspace) ([]wsm.Session, error) {
-	all, err := db.Sessions(ctx)
+	byWorkspace, err := wsm.SessionsByWorkspace(ctx, db)
 	if err != nil {
 		return nil, fmt.Errorf("read the session records: %w", err)
-	}
-	byWorkspace := make(map[ids.WorkspaceID]wsm.Session, len(all))
-	for _, session := range all {
-		byWorkspace[session.Workspace] = session
 	}
 	sessions := make([]wsm.Session, 0, len(workspaces))
 	for _, ws := range workspaces {

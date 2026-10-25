@@ -199,6 +199,24 @@ func (s *store) Sessions(ctx context.Context) ([]Session, error) {
 	return out, nil
 }
 
+// SessionsByWorkspace indexes every session by its workspace, from ONE read.
+//
+// It is the one way a pass over many workspaces reads their sessions: the
+// roster, the idle sweep and the handover manifest each used to read one per
+// workspace, and on this store's one connection every such read queued
+// behind every other reader.
+func SessionsByWorkspace(ctx context.Context, db DB) (map[WorkspaceID]Session, error) {
+	all, err := db.Sessions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("wsm: read every session: %w", err)
+	}
+	out := make(map[WorkspaceID]Session, len(all))
+	for _, session := range all {
+		out[session.Workspace] = session
+	}
+	return out, nil
+}
+
 // SetSessionTerminal records a session's death with its cause. A session
 // already deleted takes no further terminal — its cause of death is final.
 func (s *store) SetSessionTerminal(ctx context.Context, id WorkspaceID, t SessionTerminal) error {
