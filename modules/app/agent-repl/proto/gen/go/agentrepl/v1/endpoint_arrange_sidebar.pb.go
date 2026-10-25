@@ -598,6 +598,11 @@ func (*ArrangeMoveRepository_End) isArrangeMoveRepository_To() {}
 // (owner request, 2026-10-20): the workspace named stands for its family's
 // root, so placing a parent takes its descendants and placing a child takes
 // its ancestors (and so their every descendant).
+//
+// PLACING A FAMILY TAKES IT OUT OF THE ONE-SHOT SUBSECTION: every member's
+// one-shot mark is cleared in the same write, so the family is drawn where it
+// was placed (frontend.v1.RosterSubsectionOneShot). A family enters the
+// one-shot subsection by a mark (SetWorkspaceOneShot), never by a placement.
 type ArrangePlaceWorkspace struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Workspace *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
@@ -767,6 +772,8 @@ func (*ArrangePlaceWorkspace_BeforeSubsection) isArrangePlaceWorkspace_At() {}
 // Put several workspaces' FAMILIES of one repository, in the order given,
 // into a subsection of it (or into none) as one block at a place among the roots
 // already there: ArrangePlaceWorkspace for many, applied whole or not at all.
+// Each placed family leaves the one-shot subsection, as ArrangePlaceWorkspace
+// says.
 // The bulk form an agent files a batch of workspaces with.
 type ArrangePlaceWorkspaces struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
