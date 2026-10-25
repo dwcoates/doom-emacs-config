@@ -180,6 +180,11 @@ describe("drawFooterStatus: the activity cell every arm carries", () => {
     const { row } = drawStrip();
     expect(row.querySelector(".footer-activity")?.classList.contains("pfooter-grow")).toBe(true);
   });
+
+  it("draws no drag notch in the activity cell, the dock having nothing to drag", () => {
+    const { row } = drawStrip();
+    expect(row.querySelector(".footer-activity")?.querySelector(".pfooter-grab")).toBeNull();
+  });
 });
 
 describe("footerStatusActivity", () => {
@@ -798,6 +803,11 @@ describe("an arm this build has no case for", () => {
 });
 
 describe("drawClientDisconnectedStrip: the one strip this client composes", () => {
+  it("draws no drag notch in the activity cell", () => {
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
+    expect(row.querySelector(".footer-activity")?.querySelector(".pfooter-grab")).toBeNull();
+  });
+
   it("draws the status word disconnected", () => {
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
     expect(row.querySelector(".footer-status")?.textContent).toBe("disconnected");
