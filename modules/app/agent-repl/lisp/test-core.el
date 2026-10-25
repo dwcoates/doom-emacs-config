@@ -6345,6 +6345,87 @@ the theft would land in a file no reader opens."
                             (file-attributes canonical)))))
         (delete-directory project t)))))
 
+;;;; ---- A departing workspace's sink is detached from its worktree ----
+
+(ert-deftest agent-repl-test-a-workspace-this-editor-ordered-away-is-detached ()
+  "An ordered departure detaches the workspace's sink."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--log-note-workspace-departing "ws")
+    (unwind-protect
+        ;; Act / Assert
+        (should (agent-repl--log-workspace-detached-p "ws"))
+      (agent-repl--log-forget-workspace-departure "ws"))))
+
+(ert-deftest agent-repl-test-a-workspace-a-merge-is-taking-is-detached ()
+  "A merge the daemon reported taking the workspace detaches its sink."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--log-workspace-merge-departing-p)
+               (lambda (ws) (equal ws "ws"))))
+      ;; Act / Assert
+      (should (agent-repl--log-workspace-detached-p "ws")))))
+
+(ert-deftest agent-repl-test-a-workspace-nothing-is-taking-is-attached ()
+  "A workspace with no departure ordered or merge under way is not detached."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--log-workspace-merge-departing-p) #'ignore))
+      ;; Act / Assert
+      (should-not (agent-repl--log-workspace-detached-p "ws")))))
+
+(ert-deftest agent-repl-test-a-detached-workspace-reuse-leaves-a-deleted-link-deleted ()
+  "A merge's removal deleting the link is not undone by the next record."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-dir project "agent-repl-detached-reuse-"
+      (let ((agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+            (merging nil))
+        (cl-letf (((symbol-function 'agent-repl--log-workspace-merge-departing-p)
+                   (lambda (_ws) merging)))
+          ;; Arrange
+          (agent-repl--ws-put "ws" :project-dir project)
+          (let ((target (agent-repl--workspace-emacs-log-target "ws"))
+                (canonical (agent-repl--workspace-emacs-log-path project)))
+            (setq merging t)
+            (delete-file canonical)
+            ;; Act
+            (let ((answered (agent-repl--workspace-emacs-log-target "ws")))
+              ;; Assert
+              (should (equal answered target))
+              (should-not (file-symlink-p canonical)))))))))
+
+(ert-deftest agent-repl-test-a-detached-workspace-first-sink-writes-nothing-in-the-worktree ()
+  "A detached workspace's first record mints a target and creates no `.claude' tree."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-dir project "agent-repl-detached-first-"
+      (let ((agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'agent-repl--log-workspace-merge-departing-p) #'always))
+          ;; Arrange
+          (agent-repl--ws-put "ws" :project-dir project)
+          ;; Act
+          (let ((target (agent-repl--workspace-emacs-log-target "ws")))
+            (unwind-protect
+                ;; Assert
+                (progn
+                  (should-not (file-exists-p (expand-file-name ".claude" project)))
+                  (should (file-regular-p target))
+                  (should (agent-repl--emacs-log-owned-target-p target)))
+              (delete-file target))))))))
+
+(ert-deftest agent-repl-test-a-detached-workspace-first-sink-joins-the-standing-target ()
+  "A detached workspace's first record appends to the target its link already names."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-dir project "agent-repl-detached-standing-"
+      (let ((agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+            (merging nil))
+        (cl-letf (((symbol-function 'agent-repl--log-workspace-merge-departing-p)
+                   (lambda (_ws) merging)))
+          ;; Arrange
+          (agent-repl--ws-put "ws" :project-dir project)
+          (let ((standing (agent-repl--workspace-emacs-log-target "ws")))
+            (clrhash agent-repl--workspace-log-targets)
+            (setq merging t)
+            ;; Act / Assert
+            (should (equal (agent-repl--workspace-emacs-log-target "ws") standing))))))))
+
 (ert-deftest agent-repl-test-log-link-current-p-rejects-a-plain-file ()
   "A canonical path that is a regular file is not a current link."
   ;; Arrange

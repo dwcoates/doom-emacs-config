@@ -1493,6 +1493,21 @@ when they are loaded; core.el is below both."
       (and (fboundp 'agent-repl-host--live-composer-arm)
            (eq (agent-repl-host--live-composer-arm ws) :merging))))
 
+(defun agent-repl--log-workspace-detached-p (ws)
+  "Return non-nil when WS's worktree is leaving, so its sink touches nothing in it.
+WS is DETACHED once this editor ordered its departure
+\(`agent-repl--log-workspace-departing-p') or the daemon reported a merge
+taking it (`agent-repl--log-workspace-merge-departing-p').  A detached
+workspace's records keep landing in its own target under
+`agent-repl--emacs-log-target-directory', but its sink creates and
+re-points nothing inside the worktree: re-making `.claude/emacs/emacs.log'
+while `git worktree remove' deletes the tree put the link back into a
+directory being emptied, and the removal failed with \"Directory not
+empty\" on every landing (2026-10-25).  The daemon detaches its own sinks
+the same way before it removes a worktree."
+  (or (agent-repl--log-workspace-departing-p ws)
+      (agent-repl--log-workspace-merge-departing-p ws)))
+
 (defun agent-repl--central-log-fallback-class (ws)
   "Classify WHY WS's records fall back to the central sink.
 
@@ -2024,53 +2039,65 @@ the day of invisible records that keying by name cost."
           ;; Emacs runtime registering the same directory, a `.claude' tree
           ;; restored from a backup, a stray `rm'.  Re-establishing it on the
           ;; reuse path is what makes "written" and "findable" the same fact.
-          (unless (agent-repl--workspace-log-link-current-p
-                   (agent-repl--workspace-emacs-log-path
-                    (plist-get identity :project-dir))
-                   target)
+          (unless (or (agent-repl--log-workspace-detached-p ws)
+                      (agent-repl--workspace-log-link-current-p
+                       (agent-repl--workspace-emacs-log-path
+                        (plist-get identity :project-dir))
+                       target))
             (agent-repl--install-workspace-log-link
              (agent-repl--workspace-emacs-log-path (plist-get identity :project-dir))
              target))
           target)
       (let* ((project-dir (plist-get identity :project-dir))
              (canonical (agent-repl--workspace-emacs-log-path project-dir)))
-        ;; The workspace path stays untrusted across runtimes: the standing
-        ;; target is joined ONLY when the canonical path is a symlink naming a
-        ;; regular file this module could have minted and under the cap, so a
-        ;; regular file or foreign symlink a workspace plants there is still
-        ;; displaced rather than written into.
-        (agent-repl--ensure-real-log-directory (expand-file-name ".claude" project-dir))
-        (agent-repl--ensure-real-log-directory (file-name-directory canonical))
-        (when (file-directory-p canonical)
-          (error "agent-repl log routing invariant violated: canonical log path is a directory: %s" canonical))
-        ;; Target creation happens only after both workspace-controlled
-        ;; directory components are proven real, so a hostile parent leaves no
-        ;; runtime-owned temporary artifact behind.
-        (let ((standing (agent-repl--emacs-log-standing-target canonical)))
-          (if standing
-              ;; THE STANDING TARGET IS JOINED, NOT DISPLACED: the link keeps
-              ;; naming the file the previous instance wrote, so one file spans
-              ;; instances, a reader that resolved the link before this
-              ;; instance started still reads this instance's records, and a
-              ;; bounce loop cannot evict history by restarting.
-              (progn
-                (puthash key (append (list :target standing) identity)
-                         agent-repl--workspace-log-targets)
-                (agent-repl--note-sink-opened ws standing "standing_canonical_link" identity)
-                standing)
-            (let ((target (agent-repl--emacs-log-mint-target identity))
-                  (installed nil))
-              (unwind-protect
-                  (progn
-                    (agent-repl--install-workspace-log-link canonical target)
-                    (puthash key (append (list :target target) identity)
-                             agent-repl--workspace-log-targets)
-                    (setq installed t)
-                    (agent-repl--note-sink-opened ws target "minted_target" identity)
-                    target)
-                (unless installed
-                  (when (file-exists-p target)
-                    (delete-file target)))))))))))
+        (if (agent-repl--log-workspace-detached-p ws)
+            ;; A DETACHED WORKSPACE'S FIRST RECORD opens a sink that writes only
+            ;; under the state root: the standing target the link already names
+            ;; is joined (reading the link creates nothing), else a target is
+            ;; minted with no link (`agent-repl--log-workspace-detached-p').
+            (let ((target (or (agent-repl--emacs-log-standing-target canonical)
+                              (agent-repl--emacs-log-mint-target identity))))
+              (puthash key (append (list :target target) identity)
+                       agent-repl--workspace-log-targets)
+              (agent-repl--note-sink-opened ws target "detached_workspace" identity)
+              target)
+          ;; The workspace path stays untrusted across runtimes: the standing
+          ;; target is joined ONLY when the canonical path is a symlink naming a
+          ;; regular file this module could have minted and under the cap, so a
+          ;; regular file or foreign symlink a workspace plants there is still
+          ;; displaced rather than written into.
+          (agent-repl--ensure-real-log-directory (expand-file-name ".claude" project-dir))
+          (agent-repl--ensure-real-log-directory (file-name-directory canonical))
+          (when (file-directory-p canonical)
+            (error "agent-repl log routing invariant violated: canonical log path is a directory: %s" canonical))
+          ;; Target creation happens only after both workspace-controlled
+          ;; directory components are proven real, so a hostile parent leaves no
+          ;; runtime-owned temporary artifact behind.
+          (let ((standing (agent-repl--emacs-log-standing-target canonical)))
+            (if standing
+                ;; THE STANDING TARGET IS JOINED, NOT DISPLACED: the link keeps
+                ;; naming the file the previous instance wrote, so one file spans
+                ;; instances, a reader that resolved the link before this
+                ;; instance started still reads this instance's records, and a
+                ;; bounce loop cannot evict history by restarting.
+                (progn
+                  (puthash key (append (list :target standing) identity)
+                           agent-repl--workspace-log-targets)
+                  (agent-repl--note-sink-opened ws standing "standing_canonical_link" identity)
+                  standing)
+              (let ((target (agent-repl--emacs-log-mint-target identity))
+                    (installed nil))
+                (unwind-protect
+                    (progn
+                      (agent-repl--install-workspace-log-link canonical target)
+                      (puthash key (append (list :target target) identity)
+                               agent-repl--workspace-log-targets)
+                      (setq installed t)
+                      (agent-repl--note-sink-opened ws target "minted_target" identity)
+                      target)
+                  (unless installed
+                    (when (file-exists-p target)
+                      (delete-file target))))))))))))
 
 ;;; Log retention sweep
 
