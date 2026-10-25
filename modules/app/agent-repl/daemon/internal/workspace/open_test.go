@@ -106,6 +106,55 @@ func TestOpenOfAClosedWorkspaceClaimsServingInTheReopen(t *testing.T) {
 	}
 }
 
+func TestOpenTakesAOneShotBack(t *testing.T) {
+	tests := []struct {
+		name   string
+		closed bool
+		want   bool
+	}{
+		{name: "reopening a closed one-shot clears its mark", closed: true, want: false},
+		{name: "opening an open one-shot keeps its mark", closed: false, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			ws := f.workspace("w1", t.TempDir())
+			ws.Closed = tt.closed
+			ws.OneShot = true
+			f.db.with(ws)
+			f.db.jobs["w1"] = wsm.CreationJob{Workspace: "w1", OneShot: true}
+			oneShotBriefs(f)
+
+			// Act
+			err := f.verbs.Open(context.Background(), "w1", nil)
+
+			// Assert
+			if err != nil || f.db.jobs["w1"].OneShot != tt.want {
+				t.Fatalf("Open = %v, one-shot %v; want %v", err, f.db.jobs["w1"].OneShot, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenSurfacesAOneShotThatCannotBeTakenBack(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir())
+	ws.Closed, ws.OneShot = true, true
+	f.db.with(ws)
+	f.db.jobs["w1"] = wsm.CreationJob{Workspace: "w1", OneShot: true}
+	f.db.setOneShotErr = errors.New("db gone")
+
+	// Act
+	err := f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Open succeeded, want the failed take-back surfaced")
+	}
+}
+
 func TestOpenRetiresAStandingCloseRefusal(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

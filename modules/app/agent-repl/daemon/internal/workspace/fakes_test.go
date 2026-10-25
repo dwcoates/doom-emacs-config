@@ -693,6 +693,11 @@ func (d *fakeDB) Reopen(_ context.Context, id ids.WorkspaceID, serving ids.Insta
 	d.closedFlags[id] = false
 	d.reopened = append(d.reopened, id)
 	d.reopenClaims = append(d.reopenClaims, servingClaim{ws: id, instance: serving})
+	// The record reads open from here on, as the store's does.
+	if ws, ok := d.workspaces[id]; ok {
+		ws.Closed = false
+		d.workspaces[id] = ws
+	}
 	return nil
 }
 

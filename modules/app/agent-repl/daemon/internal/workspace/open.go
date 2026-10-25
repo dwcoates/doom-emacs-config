@@ -175,6 +175,15 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 		log.Debug(opOpen, "the shim runs the installed build", nil)
 	}
 
+	// A CLOSED ONE-SHOT REOPENED IS THE USER'S AGAIN: it no longer finishes
+	// unattended, so its mark goes. Cleared once the row is open, because a
+	// closed workspace's standing is not asked about.
+	if record.Closed {
+		if err := v.TakeBackOneShot(ctx, ws, TakenBackByReopen); err != nil {
+			return fmt.Errorf("open %q: %w", ws, err)
+		}
+	}
+
 	log.Info(opOpen, "opened the workspace", dlog.Context{"dir": record.Dir})
 	v.republishRegistry(ctx, log, opOpen)
 	return nil

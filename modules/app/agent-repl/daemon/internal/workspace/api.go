@@ -333,6 +333,9 @@ type Verbs interface {
 	// (nil for the user) asks, answering the completion directive a marked
 	// workspace follows (standings.go).
 	SetOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, oneShot bool) (string, error)
+	// TakeBackOneShot clears a marked workspace's one-shot mark because the
+	// user took it back, as BY says (standings.go).
+	TakeBackOneShot(ctx context.Context, ws ids.WorkspaceID, by OneShotTakeBack) error
 	// SetCorrespondence marks a workspace awaiting another, or clears the mark
 	// with nil, as the asker (nil for the user) asks (standings.go).
 	SetCorrespondence(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, awaited *ids.WorkspaceID) error
