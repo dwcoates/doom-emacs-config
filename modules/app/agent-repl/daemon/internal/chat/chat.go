@@ -98,6 +98,10 @@ type Deps struct {
 	Go func(func())
 	// Context bounds every job: the daemon's lifetime.
 	Context context.Context
+	// Outline is told a thread's outline whenever it changes, nil once the
+	// thread has none (the roster draws it under the current thread's row).
+	// Called under the service's lock, in the order the outlines change.
+	Outline func(ids.WorkspaceID, *frontendv1.RosterThreadOutline)
 }
 
 // Service is the chat service.
@@ -109,8 +113,8 @@ type Service struct {
 
 // New builds the service.
 func New(deps Deps) *Service {
-	if deps.Zettel == nil || deps.Turns == nil || deps.Log == nil || deps.Context == nil {
-		panic("chat: Zettel, Turns, Log and Context are required")
+	if deps.Zettel == nil || deps.Turns == nil || deps.Log == nil || deps.Context == nil || deps.Outline == nil {
+		panic("chat: Zettel, Turns, Log, Context and Outline are required")
 	}
 	if deps.Go == nil {
 		deps.Go = func(f func()) { go f() }
@@ -144,6 +148,12 @@ type thread struct {
 	ended    map[ids.TurnID]bool
 	// path is the shown path as last composed, root first.
 	path []NodeID
+	// handed is the outline last handed to Deps.Outline.
+	handed *frontendv1.RosterThreadOutline
+	// reveal is the node last asked to be seen (Show), and revealSequence
+	// how many asks there have been.
+	reveal         NodeID
+	revealSequence uint64
 }
 
 // answeredTurn is a turn whose answer is being recorded. It holds the turn's
@@ -486,6 +496,9 @@ func (s *Service) Delete(ctx context.Context, id ids.WorkspaceID) error {
 		return err
 	}
 	s.mu.Lock()
+	if t, ok := s.threads[id]; ok && t.handed != nil {
+		s.deps.Outline(id, nil)
+	}
 	delete(s.threads, id)
 	s.mu.Unlock()
 	log.Info("daemon.chat.deleted", "the thread's graph was deleted", dlog.Context{"thread": string(id), "nodes_deleted": deleted})

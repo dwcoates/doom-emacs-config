@@ -40,7 +40,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/chat.proto.
  */
 export const file_frontend_v1_chat: GenFile = /*@__PURE__*/
-  fileDesc("ChZmcm9udGVuZC92MS9jaGF0LnByb3RvEgtmcm9udGVuZC52MSJ7CghDaGF0VmlldxIrCgVlbXB0eRgBIAEoCzIaLmZyb250ZW5kLnYxLkNoYXRWaWV3RW1wdHlIABI5Cgxjb252ZXJzYXRpb24YAiABKAsyIS5mcm9udGVuZC52MS5DaGF0Vmlld0NvbnZlcnNhdGlvbkgAQgcKBXN0YXRlIj0KDUNoYXRWaWV3RW1wdHkSLAoEaGludBgBIAEoCzIeLmZyb250ZW5kLnYxLkNoYXRWaWV3RW1wdHlIaW50IiEKEUNoYXRWaWV3RW1wdHlIaW50EgwKBHRleHQYASABKAkigAEKFENoYXRWaWV3Q29udmVyc2F0aW9uEiwKCWV4Y2hhbmdlcxgBIAMoCzIZLmZyb250ZW5kLnYxLkNoYXRFeGNoYW5nZRIuCgdwZW5kaW5nGAIgASgLMhguZnJvbnRlbmQudjEuQ2hhdFBlbmRpbmdIAIgBAUIKCghfcGVuZGluZyLEAQoMQ2hhdEV4Y2hhbmdlEh8KBG5vZGUYASABKAsyES56ZXR0ZWwudjEuTm9kZUlkEisKCHF1ZXN0aW9uGAIgASgLMhkuZnJvbnRlbmQudjEuQ2hhdFF1ZXN0aW9uEjAKCHNpYmxpbmdzGAMgASgLMhkuZnJvbnRlbmQudjEuQ2hhdFNpYmxpbmdzSACIAQESJwoGYW5zd2VyGAQgASgLMhcuZnJvbnRlbmQudjEuQ2hhdEFuc3dlckILCglfc2libGluZ3MieQoMQ2hhdFF1ZXN0aW9uEisKBHRleHQYASABKAsyHS5mcm9udGVuZC52MS5DaGF0UXVlc3Rpb25UZXh0EjIKBXF1b3RlGAIgASgLMh4uZnJvbnRlbmQudjEuQ2hhdFF1ZXN0aW9uUXVvdGVIAIgBAUIICgZfcXVvdGUiIAoQQ2hhdFF1ZXN0aW9uVGV4dBIMCgR0ZXh0GAEgASgJIiEKEUNoYXRRdWVzdGlvblF1b3RlEgwKBHRleHQYASABKAkiQwoMQ2hhdFNpYmxpbmdzEjMKCHBvc2l0aW9uGAEgASgLMiEuZnJvbnRlbmQudjEuQ2hhdFNpYmxpbmdzUG9zaXRpb24iJQoUQ2hhdFNpYmxpbmdzUG9zaXRpb24SDQoFbGFiZWwYASABKAkivgEKCkNoYXRBbnN3ZXISMQoIbWFya2Rvd24YASABKAsyHy5mcm9udGVuZC52MS5DaGF0QW5zd2VyTWFya2Rvd24SNQoLcXVvdGVfbWFya3MYAiADKAsyIC5mcm9udGVuZC52MS5DaGF0QW5zd2VyUXVvdGVNYXJrEjgKCWhpZ2hsaWdodBgDIAEoCzIgLmZyb250ZW5kLnYxLkNoYXRBbnN3ZXJIaWdobGlnaHRIAIgBAUIMCgpfaGlnaGxpZ2h0IiIKEkNoYXRBbnN3ZXJNYXJrZG93bhIMCgR0ZXh0GAEgASgJIiMKE0NoYXRBbnN3ZXJRdW90ZU1hcmsSDAoEdGV4dBgBIAEoCSIjChNDaGF0QW5zd2VySGlnaGxpZ2h0EgwKBHRleHQYASABKAkiagoLQ2hhdFBlbmRpbmcSKwoIcXVlc3Rpb24YASABKAsyGS5mcm9udGVuZC52MS5DaGF0UXVlc3Rpb24SLgoGYW5zd2VyGAIgASgLMh4uZnJvbnRlbmQudjEuQ2hhdFBlbmRpbmdBbnN3ZXIilwEKEUNoYXRQZW5kaW5nQW5zd2VyEjgKB3dhaXRpbmcYASABKAsyJS5mcm9udGVuZC52MS5DaGF0UGVuZGluZ0Fuc3dlcldhaXRpbmdIABI8CglzdHJlYW1pbmcYAiABKAsyJy5mcm9udGVuZC52MS5DaGF0UGVuZGluZ0Fuc3dlclN0cmVhbWluZ0gAQgoKCHByb2dyZXNzIhoKGENoYXRQZW5kaW5nQW5zd2VyV2FpdGluZyJPChpDaGF0UGVuZGluZ0Fuc3dlclN0cmVhbWluZxIxCghtYXJrZG93bhgBIAEoCzIfLmZyb250ZW5kLnYxLkNoYXRBbnN3ZXJNYXJrZG93bkIoWiZhZ2VudHJlcGwvcHJvdG8vZnJvbnRlbmQvdjE7ZnJvbnRlbmR2MWIGcHJvdG8z", [file_zettel_v1_zettel]);
+  fileDesc("ChZmcm9udGVuZC92MS9jaGF0LnByb3RvEgtmcm9udGVuZC52MSJ7CghDaGF0VmlldxIrCgVlbXB0eRgBIAEoCzIaLmZyb250ZW5kLnYxLkNoYXRWaWV3RW1wdHlIABI5Cgxjb252ZXJzYXRpb24YAiABKAsyIS5mcm9udGVuZC52MS5DaGF0Vmlld0NvbnZlcnNhdGlvbkgAQgcKBXN0YXRlIj0KDUNoYXRWaWV3RW1wdHkSLAoEaGludBgBIAEoCzIeLmZyb250ZW5kLnYxLkNoYXRWaWV3RW1wdHlIaW50IiEKEUNoYXRWaWV3RW1wdHlIaW50EgwKBHRleHQYASABKAkiuQEKFENoYXRWaWV3Q29udmVyc2F0aW9uEiwKCWV4Y2hhbmdlcxgBIAMoCzIZLmZyb250ZW5kLnYxLkNoYXRFeGNoYW5nZRIuCgdwZW5kaW5nGAIgASgLMhguZnJvbnRlbmQudjEuQ2hhdFBlbmRpbmdIAIgBARIsCgZyZXZlYWwYAyABKAsyFy5mcm9udGVuZC52MS5DaGF0UmV2ZWFsSAGIAQFCCgoIX3BlbmRpbmdCCQoHX3JldmVhbCI/CgpDaGF0UmV2ZWFsEh8KBG5vZGUYASABKAsyES56ZXR0ZWwudjEuTm9kZUlkEhAKCHNlcXVlbmNlGAIgASgEIsQBCgxDaGF0RXhjaGFuZ2USHwoEbm9kZRgBIAEoCzIRLnpldHRlbC52MS5Ob2RlSWQSKwoIcXVlc3Rpb24YAiABKAsyGS5mcm9udGVuZC52MS5DaGF0UXVlc3Rpb24SMAoIc2libGluZ3MYAyABKAsyGS5mcm9udGVuZC52MS5DaGF0U2libGluZ3NIAIgBARInCgZhbnN3ZXIYBCABKAsyFy5mcm9udGVuZC52MS5DaGF0QW5zd2VyQgsKCV9zaWJsaW5ncyJ5CgxDaGF0UXVlc3Rpb24SKwoEdGV4dBgBIAEoCzIdLmZyb250ZW5kLnYxLkNoYXRRdWVzdGlvblRleHQSMgoFcXVvdGUYAiABKAsyHi5mcm9udGVuZC52MS5DaGF0UXVlc3Rpb25RdW90ZUgAiAEBQggKBl9xdW90ZSIgChBDaGF0UXVlc3Rpb25UZXh0EgwKBHRleHQYASABKAkiIQoRQ2hhdFF1ZXN0aW9uUXVvdGUSDAoEdGV4dBgBIAEoCSJDCgxDaGF0U2libGluZ3MSMwoIcG9zaXRpb24YASABKAsyIS5mcm9udGVuZC52MS5DaGF0U2libGluZ3NQb3NpdGlvbiIlChRDaGF0U2libGluZ3NQb3NpdGlvbhINCgVsYWJlbBgBIAEoCSK+AQoKQ2hhdEFuc3dlchIxCghtYXJrZG93bhgBIAEoCzIfLmZyb250ZW5kLnYxLkNoYXRBbnN3ZXJNYXJrZG93bhI1CgtxdW90ZV9tYXJrcxgCIAMoCzIgLmZyb250ZW5kLnYxLkNoYXRBbnN3ZXJRdW90ZU1hcmsSOAoJaGlnaGxpZ2h0GAMgASgLMiAuZnJvbnRlbmQudjEuQ2hhdEFuc3dlckhpZ2hsaWdodEgAiAEBQgwKCl9oaWdobGlnaHQiIgoSQ2hhdEFuc3dlck1hcmtkb3duEgwKBHRleHQYASABKAkiIwoTQ2hhdEFuc3dlclF1b3RlTWFyaxIMCgR0ZXh0GAEgASgJIiMKE0NoYXRBbnN3ZXJIaWdobGlnaHQSDAoEdGV4dBgBIAEoCSJqCgtDaGF0UGVuZGluZxIrCghxdWVzdGlvbhgBIAEoCzIZLmZyb250ZW5kLnYxLkNoYXRRdWVzdGlvbhIuCgZhbnN3ZXIYAiABKAsyHi5mcm9udGVuZC52MS5DaGF0UGVuZGluZ0Fuc3dlciKXAQoRQ2hhdFBlbmRpbmdBbnN3ZXISOAoHd2FpdGluZxgBIAEoCzIlLmZyb250ZW5kLnYxLkNoYXRQZW5kaW5nQW5zd2VyV2FpdGluZ0gAEjwKCXN0cmVhbWluZxgCIAEoCzInLmZyb250ZW5kLnYxLkNoYXRQZW5kaW5nQW5zd2VyU3RyZWFtaW5nSABCCgoIcHJvZ3Jlc3MiGgoYQ2hhdFBlbmRpbmdBbnN3ZXJXYWl0aW5nIk8KGkNoYXRQZW5kaW5nQW5zd2VyU3RyZWFtaW5nEjEKCG1hcmtkb3duGAEgASgLMh8uZnJvbnRlbmQudjEuQ2hhdEFuc3dlck1hcmtkb3duQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_zettel_v1_zettel]);
 
 /**
  * The whole chat view of one thread.
@@ -140,6 +140,15 @@ export type ChatViewConversation = Message<"frontend.v1.ChatViewConversation"> &
    * @generated from field: optional frontend.v1.ChatPending pending = 2;
    */
   pending?: ChatPending | undefined;
+
+  /**
+   * The node the user last asked to see (agentrepl.v1.ShowChatNode), which
+   * the page brings into view when the sequence is one it has not acted on.
+   * UNSET until the thread's first such ask.
+   *
+   * @generated from field: optional frontend.v1.ChatReveal reveal = 3;
+   */
+  reveal?: ChatReveal | undefined;
 };
 
 /**
@@ -148,6 +157,36 @@ export type ChatViewConversation = Message<"frontend.v1.ChatViewConversation"> &
  */
 export const ChatViewConversationSchema: GenMessage<ChatViewConversation> = /*@__PURE__*/
   messageDesc(file_frontend_v1_chat, 3);
+
+/**
+ * A node to bring into view. A value in a whole-replaced view, so its
+ * sequence tells a new ask from the one already acted on: a page acts on a
+ * sequence above the last it saw, and a page's first view only records it.
+ *
+ * @generated from message frontend.v1.ChatReveal
+ */
+export type ChatReveal = Message<"frontend.v1.ChatReveal"> & {
+  /**
+   * The node, on the shown path.
+   *
+   * @generated from field: zettel.v1.NodeId node = 1;
+   */
+  node?: NodeId | undefined;
+
+  /**
+   * Raised by one on every ask, from 1.
+   *
+   * @generated from field: uint64 sequence = 2;
+   */
+  sequence: bigint;
+};
+
+/**
+ * Describes the message frontend.v1.ChatReveal.
+ * Use `create(ChatRevealSchema)` to create a new message.
+ */
+export const ChatRevealSchema: GenMessage<ChatReveal> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_chat, 4);
 
 /**
  * One node on the shown path: its question bubble, its sibling control and
@@ -192,7 +231,7 @@ export type ChatExchange = Message<"frontend.v1.ChatExchange"> & {
  * Use `create(ChatExchangeSchema)` to create a new message.
  */
 export const ChatExchangeSchema: GenMessage<ChatExchange> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 4);
+  messageDesc(file_frontend_v1_chat, 5);
 
 /**
  * A question bubble: the user's words, with the quote they were asked about.
@@ -221,7 +260,7 @@ export type ChatQuestion = Message<"frontend.v1.ChatQuestion"> & {
  * Use `create(ChatQuestionSchema)` to create a new message.
  */
 export const ChatQuestionSchema: GenMessage<ChatQuestion> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 5);
+  messageDesc(file_frontend_v1_chat, 6);
 
 /**
  * A question's text.
@@ -242,7 +281,7 @@ export type ChatQuestionText = Message<"frontend.v1.ChatQuestionText"> & {
  * Use `create(ChatQuestionTextSchema)` to create a new message.
  */
 export const ChatQuestionTextSchema: GenMessage<ChatQuestionText> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 6);
+  messageDesc(file_frontend_v1_chat, 7);
 
 /**
  * The words a question quoted.
@@ -263,7 +302,7 @@ export type ChatQuestionQuote = Message<"frontend.v1.ChatQuestionQuote"> & {
  * Use `create(ChatQuestionQuoteSchema)` to create a new message.
  */
 export const ChatQuestionQuoteSchema: GenMessage<ChatQuestionQuote> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 7);
+  messageDesc(file_frontend_v1_chat, 8);
 
 /**
  * The sibling stack under a question: the node has siblings, drawn as cards
@@ -285,7 +324,7 @@ export type ChatSiblings = Message<"frontend.v1.ChatSiblings"> & {
  * Use `create(ChatSiblingsSchema)` to create a new message.
  */
 export const ChatSiblingsSchema: GenMessage<ChatSiblings> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 8);
+  messageDesc(file_frontend_v1_chat, 9);
 
 /**
  * The sibling control's label.
@@ -306,7 +345,7 @@ export type ChatSiblingsPosition = Message<"frontend.v1.ChatSiblingsPosition"> &
  * Use `create(ChatSiblingsPositionSchema)` to create a new message.
  */
 export const ChatSiblingsPositionSchema: GenMessage<ChatSiblingsPosition> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 9);
+  messageDesc(file_frontend_v1_chat, 10);
 
 /**
  * An answer bubble.
@@ -345,7 +384,7 @@ export type ChatAnswer = Message<"frontend.v1.ChatAnswer"> & {
  * Use `create(ChatAnswerSchema)` to create a new message.
  */
 export const ChatAnswerSchema: GenMessage<ChatAnswer> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 10);
+  messageDesc(file_frontend_v1_chat, 11);
 
 /**
  * An answer's markdown.
@@ -366,7 +405,7 @@ export type ChatAnswerMarkdown = Message<"frontend.v1.ChatAnswerMarkdown"> & {
  * Use `create(ChatAnswerMarkdownSchema)` to create a new message.
  */
 export const ChatAnswerMarkdownSchema: GenMessage<ChatAnswerMarkdown> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 11);
+  messageDesc(file_frontend_v1_chat, 12);
 
 /**
  * Words of an answer that a child question quoted.
@@ -387,7 +426,7 @@ export type ChatAnswerQuoteMark = Message<"frontend.v1.ChatAnswerQuoteMark"> & {
  * Use `create(ChatAnswerQuoteMarkSchema)` to create a new message.
  */
 export const ChatAnswerQuoteMarkSchema: GenMessage<ChatAnswerQuoteMark> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 12);
+  messageDesc(file_frontend_v1_chat, 13);
 
 /**
  * The highlight held in an answer.
@@ -408,7 +447,7 @@ export type ChatAnswerHighlight = Message<"frontend.v1.ChatAnswerHighlight"> & {
  * Use `create(ChatAnswerHighlightSchema)` to create a new message.
  */
 export const ChatAnswerHighlightSchema: GenMessage<ChatAnswerHighlight> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 13);
+  messageDesc(file_frontend_v1_chat, 14);
 
 /**
  * The question in flight and its answer so far.
@@ -436,7 +475,7 @@ export type ChatPending = Message<"frontend.v1.ChatPending"> & {
  * Use `create(ChatPendingSchema)` to create a new message.
  */
 export const ChatPendingSchema: GenMessage<ChatPending> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 14);
+  messageDesc(file_frontend_v1_chat, 15);
 
 /**
  * An answer in progress. The set arm IS how far it has come.
@@ -469,7 +508,7 @@ export type ChatPendingAnswer = Message<"frontend.v1.ChatPendingAnswer"> & {
  * Use `create(ChatPendingAnswerSchema)` to create a new message.
  */
 export const ChatPendingAnswerSchema: GenMessage<ChatPendingAnswer> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 15);
+  messageDesc(file_frontend_v1_chat, 16);
 
 /**
  * No answer text has arrived yet; a working indicator is drawn.
@@ -484,7 +523,7 @@ export type ChatPendingAnswerWaiting = Message<"frontend.v1.ChatPendingAnswerWai
  * Use `create(ChatPendingAnswerWaitingSchema)` to create a new message.
  */
 export const ChatPendingAnswerWaitingSchema: GenMessage<ChatPendingAnswerWaiting> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 16);
+  messageDesc(file_frontend_v1_chat, 17);
 
 /**
  * Answer text is arriving.
@@ -505,5 +544,5 @@ export type ChatPendingAnswerStreaming = Message<"frontend.v1.ChatPendingAnswerS
  * Use `create(ChatPendingAnswerStreamingSchema)` to create a new message.
  */
 export const ChatPendingAnswerStreamingSchema: GenMessage<ChatPendingAnswerStreaming> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_chat, 17);
+  messageDesc(file_frontend_v1_chat, 18);
 

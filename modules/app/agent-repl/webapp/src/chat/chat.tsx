@@ -20,14 +20,14 @@ import { WatchChatResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endp
 import { SwitchChatSiblingResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_switch_chat_sibling_pb.js";
 import { SelectChatTextResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_chat_text_pb.js";
 import { ReportChatSightingsResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_report_chat_sightings_pb.js";
-import type { ChatView } from "../../../proto/gen/ts/frontend/v1/chat_pb.js";
+import type { ChatReveal, ChatView } from "../../../proto/gen/ts/frontend/v1/chat_pb.js";
 import { log } from "../log.js";
-import { landChatAtEnd } from "../scroll.js";
+import { CHAT_LEEWAY_FRACTION, chatEndTop, landChatAtEnd, revealChatExchange } from "../scroll.js";
+import { installChatOverscroll } from "./overscroll.js";
 import type { AppContext } from "../rpc/context.js";
-import { noteRefusedArm } from "../rpc/refusal.js";
-import { requireCase, requireMessage } from "../rpc/strict.js";
+import { sendGesture } from "../rpc/gesture.js";
+import { requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
-import { callUnary } from "../rpc/unary.js";
 import { ChatStream, type ChatActions } from "./chat-view.js";
 import { markConversationDrawn } from "../feed/conversation-drawn.js";
 
@@ -67,10 +67,8 @@ function intersectionObserver(onSeen: (element: Element) => void): AnswerObserve
   );
 }
 
-/** A refused gesture, recorded at INFO: the next view is the answer. */
-function refused(rpc: string, result: { case?: string | undefined; value?: unknown }): void {
-  noteRefusedArm(rpc, "chat.gesture-refused", result);
-}
+/** The operation every refused chat gesture is recorded under: the next view is the answer. */
+const GESTURE_REFUSED = "chat.gesture-refused";
 
 /**
  * The question VIEW has in flight, as one string standing for its quote and
@@ -99,11 +97,32 @@ export function pathSwapped(prev: readonly string[], next: readonly string[]): b
   return false;
 }
 
+/**
+ * The drawn exchange of REVEAL's node. The daemon names only a node on the
+ * shown path, which the view just drawn holds, so a missing one is a defect.
+ */
+function revealedExchange(host: HTMLElement, reveal: ChatReveal): HTMLElement {
+  const node = requireMessage(reveal.node, "ChatReveal.node").id;
+  const exchange = [...host.querySelectorAll<HTMLElement>("[data-chat-node]")].find(
+    (el) => el.getAttribute("data-chat-node") === node,
+  );
+  if (exchange === undefined) {
+    log.error("the chat was asked to reveal a node it did not draw", { operation: "chat.reveal-missing", context: { node } });
+    throw new Error(`the chat drew no exchange for revealed node ${node}`);
+  }
+  return exchange;
+}
+
 /** Mount the chat into HOST. */
 export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): ChatHandle {
   log.info("mounting the chat", { operation: "chat.mount" });
   const root: Root = createRoot(host);
   const thread = ctx.workspace;
+  // THE LEEWAY IS THE CHAT'S OWN BOTTOM PADDING, in `cqh` of the scroll box
+  // (#feed-scroll's size container), so the box can never scroll further
+  // than a quarter page past the last answer (scroll.ts CHAT_LEEWAY_FRACTION).
+  host.style.paddingBottom = `${CHAT_LEEWAY_FRACTION * 100}cqh`;
+  const releaseOverscroll = installChatOverscroll(deps.scroll, host);
 
   // ---- sightings ----
   const nodeOf = new Map<Element, string>();
@@ -115,14 +134,12 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
     const nodes = seen;
     seen = [];
     if (nodes.length === 0) return;
-    callUnary(
+    void sendGesture(
       ctx,
       "ReportChatSightings",
+      GESTURE_REFUSED,
       (client) => client.reportChatSightings({ thread, nodes: nodes.map((id) => ({ id })) }),
       ReportChatSightingsResponseSchema,
-    ).then(
-      (response) => refused("ReportChatSightings", requireCase(response.result, "ReportChatSightingsResponse.result")),
-      () => undefined, // the transport failure is callUnary's to record
     );
   };
   const observer = (deps.observe ?? intersectionObserver)((element) => {
@@ -135,9 +152,10 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
   const actions: ChatActions = {
     switchSibling(node, way) {
       log.info("switching a chat sibling", { operation: "chat.switch-sibling", context: { node, way } });
-      callUnary(
+      void sendGesture(
         ctx,
         "SwitchChatSibling",
+        GESTURE_REFUSED,
         (client) =>
           client.switchChatSibling({
             thread,
@@ -145,16 +163,14 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
             direction: { way: way === "next" ? { case: "next", value: {} } : { case: "previous", value: {} } },
           }),
         SwitchChatSiblingResponseSchema,
-      ).then(
-        (response) => refused("SwitchChatSibling", requireCase(response.result, "SwitchChatSiblingResponse.result")),
-        () => undefined,
       );
     },
     select(node, words, context) {
       log.info("holding a chat highlight", { operation: "chat.select", context: { node, words: words.length } });
-      callUnary(
+      void sendGesture(
         ctx,
         "SelectChatText",
+        GESTURE_REFUSED,
         (client) =>
           client.selectChatText({
             thread,
@@ -166,21 +182,16 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
             },
           }),
         SelectChatTextResponseSchema,
-      ).then(
-        (response) => refused("SelectChatText", requireCase(response.result, "SelectChatTextResponse.result")),
-        () => undefined,
       );
     },
     clearSelection() {
       log.info("letting the chat highlight go", { operation: "chat.clear-selection" });
-      callUnary(
+      void sendGesture(
         ctx,
         "SelectChatText",
+        GESTURE_REFUSED,
         (client) => client.selectChatText({ thread, selection: { state: { case: "cleared", value: {} } } }),
         SelectChatTextResponseSchema,
-      ).then(
-        (response) => refused("SelectChatText", requireCase(response.result, "SelectChatTextResponse.result")),
-        () => undefined,
       );
     },
     observeAnswer(node, element) {
@@ -202,6 +213,9 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
   let lastAsked: string | null | undefined = undefined;
   // The shown path of the last view drawn.
   let lastPath: string[] = [];
+  // The reveal sequence of the last view drawn: undefined before the first
+  // view, whose reveal (an ask made before this page) is only recorded.
+  let lastReveal: bigint | undefined = undefined;
   const draw = (view: ChatView): void => {
     // THE END STAYS IN VIEW while it was in view, so an answer arriving is
     // followed; a reader scrolled up is left where they are. A QUESTION JUST
@@ -209,23 +223,27 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
     // 2026-10-25), as a sent prompt parks the agent feed at its tail. The
     // first view is the thread's opening, not a question asked.
     const scroll = deps.scroll;
-    const atEnd = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 24;
+    const atEnd = scroll.scrollTop >= chatEndTop(scroll) - 24;
     const asked = pendingQuestionOf(view);
     const sent = lastAsked !== undefined && asked !== null && asked !== lastAsked;
     lastAsked = asked;
     // A SIBLING SWITCH MOVES NOTHING (owner request, 2026-10-25): the view
-    // that swaps an exchange for its sibling keeps the scroll exactly where
-    // it was, neither following the end nor letting a shorter branch pull
-    // the page up. The column keeps the height it had (its min-height) until
-    // a view that is not a switch, so the browser has nothing to clamp.
+    // that swaps an exchange for its sibling keeps the scroll where it was,
+    // never following the end. Only a shorter branch can move it, and only
+    // as far as its own end plus the leeway: the chat never stands past that.
     const path = shownPathOf(view);
     const switched = !sent && pathSwapped(lastPath, path);
     lastPath = path;
     const top = scroll.scrollTop;
-    const height = host.offsetHeight;
-    host.style.minHeight = switched ? `${height}px` : "";
+    // A NODE THE USER ASKED TO SEE (the sidebar's outline) is brought into
+    // view, whatever else the view changed.
+    const reveal = view.state.case === "conversation" ? view.state.value.reveal : undefined;
+    const sequence = reveal?.sequence ?? 0n;
+    const revealed = lastReveal !== undefined && sequence > lastReveal ? reveal : undefined;
+    lastReveal = sequence;
     flushSync(() => root.render(<ChatStream view={view} actions={actions} />));
     if (sent) landChatAtEnd(scroll, "promptSent");
+    else if (revealed !== undefined) revealChatExchange(scroll, revealedExchange(host, revealed));
     else if (switched) scroll.scrollTop = top;
     else if (atEnd) landChatAtEnd(scroll, "chatAnswerFollowed");
     // THE THREAD'S FIRST VIEW IS ITS CONVERSATION DRAWN, as the feed's opening
@@ -248,6 +266,8 @@ export function mountChat(host: HTMLElement, ctx: AppContext, deps: ChatDeps): C
       stream.cancel();
       observer.disconnect();
       window.clearTimeout(flushTimer);
+      releaseOverscroll();
+      host.style.paddingBottom = "";
       root.unmount();
     },
   };

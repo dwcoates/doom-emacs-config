@@ -3,6 +3,8 @@ package chat
 import (
 	"slices"
 
+	"google.golang.org/protobuf/proto"
+
 	frontendv1 "agentrepl/proto/frontend/v1"
 	zettelv1 "agentrepl/proto/zettel/v1"
 
@@ -36,6 +38,7 @@ func (s *Service) publish(t *thread) {
 		}
 	}
 	t.path = t.walk(stop)
+	s.handOutline(t)
 	if len(t.path) == 0 && !inFlight {
 		t.topic.Publish(&frontendv1.ChatView{State: &frontendv1.ChatView_Empty{Empty: &frontendv1.ChatViewEmpty{
 			Hint: &frontendv1.ChatViewEmptyHint{Text: EmptyHint},
@@ -49,7 +52,21 @@ func (s *Service) publish(t *thread) {
 	if inFlight {
 		conversation.Pending = &frontendv1.ChatPending{Question: question(pending.text, pending.parent), Answer: pending.answer}
 	}
+	if t.revealSequence > 0 && slices.Contains(t.path, t.reveal) {
+		conversation.Reveal = &frontendv1.ChatReveal{Node: &zettelv1.NodeId{Id: string(t.reveal)}, Sequence: t.revealSequence}
+	}
 	t.topic.Publish(&frontendv1.ChatView{State: &frontendv1.ChatView_Conversation{Conversation: conversation}})
+}
+
+// handOutline hands the thread's outline to the roster when it changed.
+// Called under s.mu.
+func (s *Service) handOutline(t *thread) {
+	next := t.outline()
+	if proto.Equal(next, t.handed) {
+		return
+	}
+	t.handed = next
+	s.deps.Outline(t.id, next)
 }
 
 // pending answers the thread's question in flight: the oldest turn in flight

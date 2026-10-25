@@ -5847,10 +5847,8 @@ describe("the row indent", () => {
     expect(declarationsOf("#ws-sidebar .kids::before")).toMatch(/left:\s*calc\(var\(--row-indent-parent\) \+ 1\.55rem\)/);
   });
 
-  it("keeps the current row's gutter bar at the left edge, its padding carrying the indent", () => {
-    expect(declarationsOf("#ws-sidebar .ws.current > .row")).toMatch(
-      /padding-left:\s*calc\(0\.9rem - var\(--row-gutter-w\) \+ var\(--row-indent\)\)/,
-    );
+  it("pads the current row as every row, the indent included", () => {
+    expect(declarationsOf("#ws-sidebar .ws.current > .row")).not.toMatch(/padding/);
   });
 
   it("leaves no rule indenting a nested row's box or line by itself", () => {

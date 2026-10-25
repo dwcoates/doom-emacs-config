@@ -137,12 +137,14 @@ describe("noteRefusedArm", () => {
   it.each([
     ["src/chat/chat.tsx", "chat.gesture-refused"],
     ["src/sidebar/threads.ts", "sidebar.app-refused"],
-  ])("is how %s records a refusal the next view answers", (file, operation) => {
+  ])("is how %s records a refusal the next view answers, through sendGesture", (file, operation) => {
     // Arrange
     const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../..", file), "utf8");
 
-    // Assert
-    expect(source).toContain(`noteRefusedArm(rpc, "${operation}", result)`);
+    // Assert: every gesture goes through rpc/gesture.ts's sendGesture, which
+    // is noteRefusedArm's one caller there (test/rpc/gesture.test.ts).
+    expect(source).toContain(`const GESTURE_REFUSED = "${operation}";`);
+    expect(source).toContain("sendGesture(");
     expect(source).not.toMatch(/was refused: \$\{cause\}/);
   });
 });

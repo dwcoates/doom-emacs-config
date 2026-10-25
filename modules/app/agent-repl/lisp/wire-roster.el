@@ -1761,13 +1761,120 @@ THE ARM IS THE STANDING, so an unset one is a contract breach."
       '((open :open agent-repl-wire-decode-roster-thread-open)
         (archived :archived agent-repl-wire-decode-roster-thread-archived))))))
 
+;;;; ---- A thread's outline ----
+;;
+;; The webapp's rail draws it; Emacs reads it whole, so a roster carrying it
+;; is a roster this codec reads.
+
+(defun agent-repl-wire-decode-zettel-node-id (value)
+  "Decode VALUE as `zettel.v1.NodeId', the node's id string."
+  (let ((object (agent-repl-wire--object "NodeId" value)))
+    (agent-repl-wire--check-keys "NodeId" object '(id))
+    (agent-repl-wire--decode-string "NodeId" 'id object)))
+
+(defun agent-repl-wire-decode-roster-thread-outline-label (value)
+  "Decode `RosterThreadOutlineLabel' VALUE as its text."
+  (agent-repl-wire-decode-roster-text "RosterThreadOutlineLabel" value))
+
+(defun agent-repl-wire-decode-roster-thread-outline-crumb (value)
+  "Decode VALUE as `RosterThreadOutlineCrumb', `(:node ID :label S)'."
+  (let ((object (agent-repl-wire--object "RosterThreadOutlineCrumb" value)))
+    (agent-repl-wire--check-keys "RosterThreadOutlineCrumb" object '(node label))
+    (list :node (agent-repl-wire--decode-message
+                 "RosterThreadOutlineCrumb" 'node object #'agent-repl-wire-decode-zettel-node-id)
+          :label (agent-repl-wire--decode-message
+                  "RosterThreadOutlineCrumb" 'label object
+                  #'agent-repl-wire-decode-roster-thread-outline-label))))
+
+(defun agent-repl-wire-decode-roster-thread-outline-breadcrumb-whole (value)
+  "Decode VALUE as `RosterThreadOutlineBreadcrumbWhole', its crumbs."
+  (let ((object (agent-repl-wire--object "RosterThreadOutlineBreadcrumbWhole" value)))
+    (agent-repl-wire--check-keys "RosterThreadOutlineBreadcrumbWhole" object '(crumbs))
+    (agent-repl-wire--decode-repeated "RosterThreadOutlineBreadcrumbWhole" 'crumbs object
+                                      #'agent-repl-wire-decode-roster-thread-outline-crumb)))
+
+(defun agent-repl-wire-decode-roster-thread-outline-breadcrumb-elided (value)
+  "Decode VALUE as `RosterThreadOutlineBreadcrumbElided', `(:first C :omitted N :last C)'."
+  (let ((object (agent-repl-wire--object "RosterThreadOutlineBreadcrumbElided" value)))
+    (agent-repl-wire--check-keys "RosterThreadOutlineBreadcrumbElided" object '(first omitted last))
+    (list :first (agent-repl-wire--decode-message
+                  "RosterThreadOutlineBreadcrumbElided" 'first object
+                  #'agent-repl-wire-decode-roster-thread-outline-crumb)
+          :omitted (agent-repl-wire--decode-uint32 "RosterThreadOutlineBreadcrumbElided" 'omitted object)
+          :last (agent-repl-wire--decode-message
+                 "RosterThreadOutlineBreadcrumbElided" 'last object
+                 #'agent-repl-wire-decode-roster-thread-outline-crumb))))
+
+(defconst agent-repl-wire-roster-thread-outline-breadcrumb-arms
+  '((whole :whole agent-repl-wire-decode-roster-thread-outline-breadcrumb-whole)
+    (elided :elided agent-repl-wire-decode-roster-thread-outline-breadcrumb-elided))
+  "`RosterThreadOutlineBreadcrumb.extent''s arms: (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-roster-thread-outline-breadcrumb (value)
+  "Decode VALUE as `RosterThreadOutlineBreadcrumb', its extent oneof."
+  (let ((object (agent-repl-wire--object "RosterThreadOutlineBreadcrumb" value)))
+    (agent-repl-wire--check-keys
+     "RosterThreadOutlineBreadcrumb" object
+     (mapcar #'car agent-repl-wire-roster-thread-outline-breadcrumb-arms))
+    (agent-repl-wire--decode-oneof "RosterThreadOutlineBreadcrumb" 'extent object
+                                   agent-repl-wire-roster-thread-outline-breadcrumb-arms)))
+
+(defun agent-repl-wire-decode-roster-thread-outline-folded (value)
+  "Decode VALUE as `RosterThreadOutlineFolded', the folded runs' count."
+  (let ((object (agent-repl-wire--object "RosterThreadOutlineFolded" value)))
+    (agent-repl-wire--check-keys "RosterThreadOutlineFolded" object '(runs))
+    (agent-repl-wire--decode-uint32 "RosterThreadOutlineFolded" 'runs object)))
+
+(defconst agent-repl-wire-roster-thread-outline-place-arms
+  '((off :off (lambda (v) (agent-repl-wire--decode-empty "RosterThreadOutlineOff" v)))
+    (onPath :on-path (lambda (v) (agent-repl-wire--decode-empty "RosterThreadOutlineOnPath" v)))
+    (shown :shown (lambda (v) (agent-repl-wire--decode-empty "RosterThreadOutlineShown" v))))
+  "`RosterThreadOutlinePlace.place''s arms: (WIRE-KEY ARM-KEYWORD DECODER).")
+
+(defun agent-repl-wire-decode-roster-thread-outline-place (value)
+  "Decode VALUE as `RosterThreadOutlinePlace', its place arm's keyword."
+  (let ((object (agent-repl-wire--object "RosterThreadOutlinePlace" value)))
+    (agent-repl-wire--check-keys
+     "RosterThreadOutlinePlace" object (mapcar #'car agent-repl-wire-roster-thread-outline-place-arms))
+    (plist-get (agent-repl-wire--decode-oneof "RosterThreadOutlinePlace" 'place object
+                                              agent-repl-wire-roster-thread-outline-place-arms)
+               :arm)))
+
+(defun agent-repl-wire-decode-roster-thread-outline-row (value)
+  "Decode VALUE as `RosterThreadOutlineRow',
+`(:node ID :label S :depth N :turns N :folded N :place P)', FOLDED nil
+when nothing folds below the row."
+  (let ((object (agent-repl-wire--object "RosterThreadOutlineRow" value)))
+    (agent-repl-wire--check-keys "RosterThreadOutlineRow" object '(node label depth turns folded place))
+    (list :node (agent-repl-wire--decode-message
+                 "RosterThreadOutlineRow" 'node object #'agent-repl-wire-decode-zettel-node-id)
+          :label (agent-repl-wire--decode-message
+                  "RosterThreadOutlineRow" 'label object #'agent-repl-wire-decode-roster-thread-outline-label)
+          :depth (agent-repl-wire--decode-uint32 "RosterThreadOutlineRow" 'depth object)
+          :turns (agent-repl-wire--decode-uint32 "RosterThreadOutlineRow" 'turns object)
+          :folded (agent-repl-wire--decode-optional-message
+                   "RosterThreadOutlineRow" 'folded object #'agent-repl-wire-decode-roster-thread-outline-folded)
+          :place (agent-repl-wire--decode-message
+                  "RosterThreadOutlineRow" 'place object #'agent-repl-wire-decode-roster-thread-outline-place))))
+
+(defun agent-repl-wire-decode-roster-thread-outline (value)
+  "Decode VALUE as `RosterThreadOutline', `(:breadcrumb B :rows ROWS)'."
+  (let ((object (agent-repl-wire--object "RosterThreadOutline" value)))
+    (agent-repl-wire--check-keys "RosterThreadOutline" object '(breadcrumb rows))
+    (list :breadcrumb (agent-repl-wire--decode-optional-message
+                       "RosterThreadOutline" 'breadcrumb object
+                       #'agent-repl-wire-decode-roster-thread-outline-breadcrumb)
+          :rows (agent-repl-wire--decode-repeated "RosterThreadOutline" 'rows object
+                                                  #'agent-repl-wire-decode-roster-thread-outline-row))))
+
 (defun agent-repl-wire-decode-roster-thread-row (value)
   "Decode VALUE as `RosterThreadRow',
-`(:thread REF :name :summary :current :standing S)'.
+`(:thread REF :name :summary :current :standing S :outline O)'.
 SUMMARY is nil when none is set; CURRENT is t on the selected thread;
-STANDING is `agent-repl-wire-decode-roster-thread-standing''s."
+STANDING is `agent-repl-wire-decode-roster-thread-standing''s; OUTLINE is
+nil on every row but the current thread's."
   (let ((object (agent-repl-wire--object "RosterThreadRow" value)))
-    (agent-repl-wire--check-keys "RosterThreadRow" object '(thread name summary current standing))
+    (agent-repl-wire--check-keys "RosterThreadRow" object '(thread name summary current standing outline))
     (agent-repl-wire--decoded
      "RosterThreadRow"
      (list :thread (agent-repl-wire--decode-message
@@ -1782,7 +1889,10 @@ STANDING is `agent-repl-wire-decode-roster-thread-standing''s."
                      #'agent-repl-wire-decode-roster-thread-current)
            :standing (agent-repl-wire--decode-message
                       "RosterThreadRow" 'standing object
-                      #'agent-repl-wire-decode-roster-thread-standing)))))
+                      #'agent-repl-wire-decode-roster-thread-standing)
+           :outline (agent-repl-wire--decode-optional-message
+                     "RosterThreadRow" 'outline object
+                     #'agent-repl-wire-decode-roster-thread-outline)))))
 
 (defun agent-repl-wire-decode-roster-thread-section (value)
   "Decode VALUE as `RosterThreadSection', `(:new-thread LABEL :rows ROWS)'.

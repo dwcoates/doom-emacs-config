@@ -541,6 +541,13 @@ func (r *resolver) SetOpening(ws ids.WorkspaceID, opening bool) {
 		dlog.Context{"opening": opening}, func(s *wsState) { s.opening = opening })
 }
 
+// SetThreadOutline installs a chat thread's outline, nil once it has none.
+func (r *resolver) SetThreadOutline(ws ids.WorkspaceID, outline *frontendv1.RosterThreadOutline) {
+	r.mutateWorkspace(ws, "daemon.sidebar.set_thread_outline",
+		"the roster took a chat thread's outline",
+		dlog.Context{"rows": len(outline.GetRows())}, func(s *wsState) { s.outline = outline })
+}
+
 // SetVendorStart installs where the vendor-start run stands.
 func (r *resolver) SetVendorStart(ws ids.WorkspaceID, state VendorStart) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_vendor_start",

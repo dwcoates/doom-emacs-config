@@ -895,6 +895,13 @@ func (s *requestLoggingServer) SwitchChatSibling(
 	return serveUnary(s, ctx, "SwitchChatSibling", req, s.server.SwitchChatSibling)
 }
 
+func (s *requestLoggingServer) ShowChatNode(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ShowChatNodeRequest],
+) (*connect.Response[agentreplv1.ShowChatNodeResponse], error) {
+	return serveUnary(s, ctx, "ShowChatNode", req, s.server.ShowChatNode)
+}
+
 func (s *requestLoggingServer) ReportChatSightings(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ReportChatSightingsRequest],

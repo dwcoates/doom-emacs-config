@@ -47,7 +47,8 @@ import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
-import { AttentionRegistry, type BlinkTimers } from "../../src/sidebar/attention.js";
+import { AttentionRegistry } from "../../src/sidebar/attention.js";
+import type { Timers } from "../../src/timers.js";
 import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { createSidebarView, type DrawnView, type SidebarView } from "../../src/sidebar/view.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
@@ -102,7 +103,7 @@ export function fakeTicker(now: number = NOW): Ticker & {
 }
 
 /** Timers a suite advances by hand, for the blink cadence. */
-export function fakeTimers(): BlinkTimers & { run(): boolean } {
+export function fakeTimers(): Timers & { run(): boolean } {
   let next = 1;
   const pending = new Map<number, () => void>();
   return {
@@ -180,7 +181,7 @@ export function manualReveal(): RowReveal & { waiting(): Element[]; show(target:
  */
 export function sidebarContext(
   ctx: AppContext = appContext(),
-  timers: BlinkTimers = fakeTimers(),
+  timers: Timers = fakeTimers(),
   view: SidebarView = createSidebarView(),
   openDetails: Set<string> = new Set(),
   reveal: RowReveal = drawsAtOnce,

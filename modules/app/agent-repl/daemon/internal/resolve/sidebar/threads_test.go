@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	frontendv1 "agentrepl/proto/frontend/v1"
+
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
@@ -175,5 +177,48 @@ func TestThreadAnswersFalseBeforeAnyRegistry(t *testing.T) {
 	// Assert
 	if ok {
 		t.Fatal("Thread answered before any roster was resolved")
+	}
+}
+
+func TestTheCurrentThreadsRowCarriesItsOutline(t *testing.T) {
+	cases := []struct {
+		name     string
+		selected string
+		want     bool
+	}{
+		{name: "the thread on screen carries it", selected: "t-1", want: true},
+		{name: "a thread not on screen does not", selected: "w-a", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r, _ := newResolver(t)
+			r.SetRegistrySelected(withThreads(thread("t-1", "why", nil)), ids.WorkspaceID(tc.selected))
+			outline := &frontendv1.RosterThreadOutline{Rows: []*frontendv1.RosterThreadOutlineRow{{Label: &frontendv1.RosterThreadOutlineLabel{Text: "why"}}}}
+
+			// Act
+			r.SetThreadOutline("t-1", outline)
+
+			// Assert
+			row := latest(t, r).GetThreads().GetRows()[0]
+			if got := row.Outline != nil; got != tc.want {
+				t.Fatalf("outline carried = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestATakenBackOutlineLeavesTheRow(t *testing.T) {
+	// Arrange
+	r, _ := newResolver(t)
+	r.SetRegistrySelected(withThreads(thread("t-1", "why", nil)), "t-1")
+	r.SetThreadOutline("t-1", &frontendv1.RosterThreadOutline{Rows: []*frontendv1.RosterThreadOutlineRow{{}}})
+
+	// Act
+	r.SetThreadOutline("t-1", nil)
+
+	// Assert
+	if row := latest(t, r).GetThreads().GetRows()[0]; row.Outline != nil {
+		t.Fatalf("outline = %v, want none", row.Outline)
 	}
 }

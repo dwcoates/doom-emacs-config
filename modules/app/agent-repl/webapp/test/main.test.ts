@@ -619,7 +619,6 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
 
     expect(page.mounts.chat.mock.calls[0]?.[0]).toBe(document.getElementById("feed"));
     expect(page.mounts.feed).not.toHaveBeenCalled();
-    expect(page.order.indexOf("chat")).toBeLessThan(page.order.indexOf("footer"));
   });
 
   test("mounts the feed, and no chat, on an agent workspace's page", async () => {
@@ -629,13 +628,18 @@ describe("the boot", { timeout: BOOT_TIMEOUT_MS }, () => {
     expect(page.mounts.chat).not.toHaveBeenCalled();
   });
 
-  test("a footer jump row reaching a chat thread is a refused defect", async () => {
+  test("mounts no footer on a chat thread's page, and hides its box", async () => {
     page.adopt = async () => ({ outcome: "no-transfer", page: "thread" });
+
     await bootMain();
 
-    await expect(
-      (page.footerSelectDetachedWork as unknown as (id: { value: string }) => Promise<boolean>)({ value: "row-1" }),
-    ).rejects.toThrow("a chat thread has no feed row row-1");
+    expect([page.mounts.footer.mock.calls.length, document.getElementById("footer")?.hidden]).toEqual([0, true]);
+  });
+
+  test("mounts the footer on an agent workspace's page", async () => {
+    await bootMain();
+
+    expect([page.mounts.footer.mock.calls.length, document.getElementById("footer")?.hidden]).toEqual([1, false]);
   });
 
   test("a reveal_row ask reaching a chat thread is a refused defect", async () => {

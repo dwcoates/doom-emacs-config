@@ -19,7 +19,7 @@ import type { DaemonContext } from "../rpc/context.js";
 import { noteRefusedArm } from "../rpc/refusal.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
-import type { BlinkTimers } from "./attention.js";
+import type { Timers } from "../timers.js";
 import { SEARCH_MISS_CLASS } from "./search.js";
 
 /** How long the typing must pause before the query is asked. */
@@ -45,7 +45,7 @@ export interface ChatSearch {
 /** What a chat search draws onto, and is told through. */
 export interface ChatSearchDeps {
   ctx: DaemonContext;
-  timers: BlinkTimers;
+  timers: Timers;
   /** The rail's drawn body, which matches are applied to when they arrive. */
   root(): ParentNode;
   /** Told once a new answer's matches are drawn, so the rail can refit. */

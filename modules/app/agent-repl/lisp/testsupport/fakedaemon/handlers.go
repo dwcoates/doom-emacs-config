@@ -601,6 +601,10 @@ func (s *fakeServer) SwitchChatSibling(ctx context.Context, req *connect.Request
 	return handleUnary[v1.SwitchChatSiblingRequest, v1.SwitchChatSiblingResponse](ctx, s, "SwitchChatSibling", req.Msg)
 }
 
+func (s *fakeServer) ShowChatNode(ctx context.Context, req *connect.Request[v1.ShowChatNodeRequest]) (*connect.Response[v1.ShowChatNodeResponse], error) {
+	return handleUnary[v1.ShowChatNodeRequest, v1.ShowChatNodeResponse](ctx, s, "ShowChatNode", req.Msg)
+}
+
 func (s *fakeServer) ReportChatSightings(ctx context.Context, req *connect.Request[v1.ReportChatSightingsRequest]) (*connect.Response[v1.ReportChatSightingsResponse], error) {
 	return handleUnary[v1.ReportChatSightingsRequest, v1.ReportChatSightingsResponse](ctx, s, "ReportChatSightings", req.Msg)
 }

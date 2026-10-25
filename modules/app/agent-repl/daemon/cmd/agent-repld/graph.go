@@ -583,6 +583,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Zettel:  zettelclient.New(p.Opts.zettelSocket),
 		Turns:   p.DB,
 		Context: ctx,
+		// THE OUTLINE IS THE ROSTER'S to draw, under the current thread's row.
+		Outline: sidebarResolver.SetThreadOutline,
 		// A THREAD'S RECORDS GO TO ITS OWN SINK, as every workspace's do; a
 		// workspace the registry cannot name is recorded centrally, with the
 		// failed read beside it.

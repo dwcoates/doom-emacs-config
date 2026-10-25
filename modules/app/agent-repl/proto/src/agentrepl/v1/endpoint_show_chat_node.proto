@@ -1,0 +1,78 @@
+// endpoint_show_chat_node.proto — ShowChatNode: put a node on a thread's shown path and reveal it. CHAT section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "zettel/v1/zettel.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// ShowChatNode: the user clicked a row of a thread's outline in the sidebar
+// (frontend.v1.RosterThreadOutline), or one of its breadcrumbs. The daemon
+// moves the thread's shown path through that node (each ancestor showing the
+// child on the way to it; below it, the path continues as it would) and
+// pushes the new chat view, its `reveal` naming the node so the chat page
+// brings it into view.
+message ShowChatNodeRequest {
+  // The thread the node is in.
+  workspace.v1.WorkspaceRef thread = 1;
+  // The node to show, echoed from the outline.
+  zettel.v1.NodeId node = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message ShowChatNodeResponse {
+  // Success or the refusal; exactly one is set.
+  oneof result {
+    ShowChatNodeSuccess success = 1;
+    ShowChatNodeError error = 2;
+  }
+}
+
+// The shown path moved; the chat view carries it.
+message ShowChatNodeSuccess {}
+
+// Why the request was refused. Validation failures (an unset field, a blank string) are Connect InvalidArgument, never an arm.
+message ShowChatNodeError {
+  // The cause of the refusal.
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ShowChatNodeUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ShowChatNodeWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    ShowChatNodeTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    ShowChatNodeNotYetAdopted not_yet_adopted = 4;
+    // The workspace is an agent workspace, not a chat thread.
+    ShowChatNodeNotAThread not_a_thread = 5;
+    // The node is not in this thread.
+    ShowChatNodeUnknownNode unknown_node = 6;
+  }
+}
+
+// The workspace id is not in the daemon's registry.
+message ShowChatNodeUnknownWorkspace {}
+
+// The echoed dir disagrees with the registry's dir for this id.
+message ShowChatNodeWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor; dial `address`.
+message ShowChatNodeTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting this workspace yet.
+message ShowChatNodeNotYetAdopted {}
+
+// The workspace is an agent workspace, not a chat thread.
+message ShowChatNodeNotAThread {}
+
+// The node is not in this thread.
+message ShowChatNodeUnknownNode {}

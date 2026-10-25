@@ -100,6 +100,9 @@ func (r *resolver) threadSection(threads []wsm.Workspace) *frontendv1.RosterThre
 		}
 		if r.state.selected != nil && *r.state.selected == ws.ID {
 			row.Current = &frontendv1.RosterThreadCurrent{}
+			if s, ok := r.state.workspaces[ws.ID]; ok && s.outline != nil {
+				row.Outline = s.outline
+			}
 		}
 		out.Rows = append(out.Rows, row)
 	}

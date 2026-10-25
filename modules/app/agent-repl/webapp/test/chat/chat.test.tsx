@@ -402,7 +402,8 @@ describe("the chat's end after a question is asked", () => {
 
     await pushPending(d, conversation([exchange("n1", "q", "a")], pending("why?")), "why?");
 
-    expect([top, moves]).toEqual([1000, [{ cause: "promptSent", from: 0, to: 1000 }]]);
+    // The end is the last answer's, short of the quarter-page leeway: 1000 - 100 * 1.25.
+    expect([top, moves]).toEqual([875, [{ cause: "promptSent", from: 0, to: 875 }]]);
   });
 
   it("lands at the end when a different question replaces the one in flight", async () => {
@@ -412,7 +413,7 @@ describe("the chat's end after a question is asked", () => {
 
     await pushPending(d, conversation([], pending("second?")), "second?");
 
-    expect(moves).toEqual([{ cause: "promptSent", from: 0, to: 1000 }]);
+    expect(moves).toEqual([{ cause: "promptSent", from: 0, to: 875 }]);
   });
 
   it("leaves a reader scrolled up where they are while the same question's answer arrives", async () => {
@@ -465,8 +466,8 @@ describe("shownPathOf", () => {
 
 /**
  * A SIBLING SWITCH MOVES NOTHING (owner request, 2026-10-25). The scroll box
- * is a reader at the END of a long chat, the case that otherwise followed the
- * end; the column measures 800px before the switch.
+ * is a reader at the very bottom of a long chat, the case that otherwise
+ * followed the end.
  */
 describe("the chat's scroll across a sibling switch", () => {
   let top: number;
@@ -504,23 +505,101 @@ describe("the chat's scroll across a sibling switch", () => {
     expect([top, moves]).toEqual([900, []]);
   });
 
-  it("holds the column's height, so a shorter branch cannot pull the page up", async () => {
+  it("holds no height of its own, so the chat never stands past its end and leeway", async () => {
     const d = daemon();
     mount(d);
 
     await switchedTo(d);
-
-    expect(host.style.minHeight).toBe("800px");
-  });
-
-  it("lets the held height go with the next view that is not a switch", async () => {
-    const d = daemon();
-    mount(d);
-    await switchedTo(d);
-
-    d.push(conversation([exchange("n1", "q", "a"), exchange("n3", "q3", "a3"), exchange("n5", "q5", "a5")]));
-    await drawn('[data-chat-answer="n5"]');
 
     expect(host.style.minHeight).toBe("");
+  });
+});
+
+describe("the chat's leeway past its end", () => {
+  it("is the chat's own bottom padding, a quarter of the scroll box", async () => {
+    const d = daemon();
+    mount(d);
+    d.push(conversation([exchange("n1", "q", "a")]));
+    await drawn('[data-chat-answer="n1"]');
+
+    expect(host.style.paddingBottom).toBe("25cqh");
+  });
+});
+
+/**
+ * A NODE THE USER ASKED TO SEE IS BROUGHT INTO VIEW (the sidebar's outline,
+ * ShowChatNode): once per new reveal sequence, never for the one the page's
+ * first view carried.
+ */
+describe("the chat's reveal of an asked-for node", () => {
+  let moves: unknown[];
+
+  beforeEach(() => {
+    moves = [];
+    vi.spyOn(log, "info").mockImplementation((_message, fields) => {
+      if (fields?.operation === "scroll.chat-moved") moves.push((fields.context as { cause: string }).cause);
+    });
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  /** Three exchanges, revealing NODE at SEQUENCE when given. */
+  function revealing(node?: string, sequence?: number): ViewInit {
+    const view = conversation([exchange("n1", "q1", "a1"), exchange("n2", "q2", "a2"), exchange("n3", "q3", "a3")]);
+    if (node !== undefined && view.state?.case === "conversation") {
+      view.state.value.reveal = { node: { id: node }, sequence: BigInt(sequence ?? 1) };
+    }
+    return view;
+  }
+
+  it("brings a newly revealed node into view", async () => {
+    const d = daemon();
+    mount(d);
+    d.push(revealing());
+    await drawn('[data-chat-answer="n3"]');
+    moves = [];
+
+    d.push(revealing("n2", 1));
+    await vi.waitFor(() => expect(moves).toEqual(["chatNodeRevealed"]));
+  });
+
+  it("records a reveal of a node it did not draw as the defect it is", async () => {
+    const errors: unknown[] = [];
+    vi.spyOn(log, "error").mockImplementation((_message, fields) => void errors.push(fields?.operation));
+    const d = daemon();
+    mount(d);
+    d.push(revealing());
+    await drawn('[data-chat-answer="n3"]');
+
+    d.push(revealing("n9", 1));
+
+    await vi.waitFor(() => expect(errors).toContain("chat.reveal-missing"));
+    expect(moves).not.toContain("chatNodeRevealed");
+  });
+
+  it("does not act on the reveal the page's first view carries", async () => {
+    const d = daemon();
+    mount(d);
+
+    d.push(revealing("n2", 4));
+    await drawn('[data-chat-answer="n3"]');
+
+    expect(moves).not.toContain("chatNodeRevealed");
+  });
+
+  it("acts on a reveal once, not again when the view is pushed unchanged", async () => {
+    const d = daemon();
+    mount(d);
+    d.push(revealing());
+    await drawn('[data-chat-answer="n3"]');
+    d.push(revealing("n2", 1));
+    await vi.waitFor(() => expect(moves).toContain("chatNodeRevealed"));
+    moves = [];
+
+    d.push(revealing("n2", 1));
+    d.push(conversation([exchange("n1", "q1", "a1"), exchange("n2", "q2", "a2"), exchange("n3", "q3", "a3"), exchange("n4", "q4", "a4")]));
+    await drawn('[data-chat-answer="n4"]');
+
+    expect(moves).not.toContain("chatNodeRevealed");
   });
 });

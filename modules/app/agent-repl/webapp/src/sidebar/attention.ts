@@ -25,6 +25,7 @@
  * together, off the one phase.
  */
 import { log } from "../log.js";
+import { WINDOW_TIMERS, type Timers } from "../timers.js";
 
 /** One blink phase, per `frontend.v1.RosterRowAttention`. */
 export const ATTENTION_PHASE_MS = 500;
@@ -35,17 +36,6 @@ export const ATTENTION_BLINKS = 2;
 /** The phases the cadence walks before going steady: on, off, on, off. */
 export const ATTENTION_PHASES = ATTENTION_BLINKS * 2;
 
-/** The timer seam, so a suite can drive the cadence without a real clock. */
-export interface BlinkTimers {
-  setTimeout(fn: () => void, ms: number): number;
-  clearTimeout(handle: number): void;
-}
-
-/** The page's own timers, which is what production always uses. */
-export const WINDOW_TIMERS: BlinkTimers = {
-  setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms) as unknown as number,
-  clearTimeout: (handle) => globalThis.clearTimeout(handle),
-};
 
 /**
  * What `data-blink` says.
@@ -79,7 +69,7 @@ interface Entry {
 export class AttentionRegistry {
   private readonly entries = new Map<string, Entry>();
 
-  constructor(private readonly timers: BlinkTimers = WINDOW_TIMERS) {}
+  constructor(private readonly timers: Timers = WINDOW_TIMERS) {}
 
   /** Open a pass: every entry is unseen and holds no elements until marked. */
   beginPass(): void {

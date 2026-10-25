@@ -5,9 +5,9 @@ import {
   ATTENTION_PHASES,
   ATTENTION_PHASE_MS,
   AttentionRegistry,
-  WINDOW_TIMERS,
   blinkState,
 } from "../../src/sidebar/attention.js";
+import { WINDOW_TIMERS } from "../../src/timers.js";
 import { fakeTimers } from "./harness.js";
 
 /** One element standing in for a row drawn by a pass. */

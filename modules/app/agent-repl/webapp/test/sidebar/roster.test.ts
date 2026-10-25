@@ -1384,12 +1384,9 @@ describe("recently merged rows", () => {
     expect(css).not.toContain("--merged-row-pad-y");
   });
 
-  it("draws the selection's bar and the merge-today bar at the shared width", () => {
-    const bar = (selector: string): string | undefined =>
-      css.split(`${selector} {\n`)[1]?.split("}")[0];
-    expect([bar("#ws-sidebar .ws.current > .row"), bar("#ws-sidebar .row.merged-today")].map((b) =>
-      b?.includes("border-left: var(--row-gutter-w) solid") && b.includes("padding-left: calc(0.9rem - var(--row-gutter-w)"),
-    )).toEqual([true, true]);
+  it("draws the merge-today bar at the gutter width", () => {
+    const bar = css.split("#ws-sidebar .row.merged-today {\n")[1]?.split("}")[0];
+    expect(bar?.includes("border-left: var(--row-gutter-w) solid") && bar.includes("padding-left: calc(0.9rem - var(--row-gutter-w)")).toBe(true);
   });
 
   it("no longer colours a name merged today", () => {

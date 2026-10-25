@@ -45,6 +45,7 @@ package frontend.v1;
 
 import "frontend/v1/feed.proto";
 import "workspace/v1/workspace.proto";
+import "zettel/v1/zettel.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
@@ -223,7 +224,107 @@ message RosterThreadRow {
   // Whether the thread is open or archived. Always set: the set arm decides
   // where the row is drawn and which verbs its menu offers.
   RosterThreadStanding standing = 5;
+  // The thread's branches, drawn under its row. Set on the CURRENT thread's
+  // row once the daemon holds its graph; UNSET on every other row.
+  optional RosterThreadOutline outline = 6;
 }
+
+// A THREAD'S BRANCHES AROUND ITS SHOWN PATH (owner ruling, 2026-10-25:
+// chain collapsing with re-rooting). A run of questions each followed by
+// exactly one more is ONE row; the rows start a few levels above the run
+// holding the shown question, every level above them folds into the
+// breadcrumb, and no row is deeper than RosterThreadOutlineRow.depth's
+// ceiling, so a thread of any depth fits the rail.
+message RosterThreadOutline {
+  // The levels above the rows, oldest first. UNSET when the rows start at
+  // the thread's first question.
+  optional RosterThreadOutlineBreadcrumb breadcrumb = 1;
+  // The rows in reading order: depth first, each branch's children oldest
+  // first. Never empty.
+  repeated RosterThreadOutlineRow rows = 2;
+}
+
+// The folded levels above the rows. The set arm is whether all are named.
+message RosterThreadOutlineBreadcrumb {
+  oneof extent {
+    // Few enough to name them all.
+    RosterThreadOutlineBreadcrumbWhole whole = 1;
+    // Too many: the oldest and the newest are named, the rest counted.
+    RosterThreadOutlineBreadcrumbElided elided = 2;
+  }
+}
+
+// Every folded level, oldest first. Never empty.
+message RosterThreadOutlineBreadcrumbWhole {
+  repeated RosterThreadOutlineCrumb crumbs = 1;
+}
+
+// The oldest and newest folded levels, and how many lie between.
+message RosterThreadOutlineBreadcrumbElided {
+  // The thread's first run.
+  RosterThreadOutlineCrumb first = 1;
+  // How many runs lie between `first` and `last`. Never zero.
+  uint32 omitted = 2;
+  // The run just above the rows.
+  RosterThreadOutlineCrumb last = 3;
+}
+
+// One folded level: a run above the rows. A click shows its first question.
+message RosterThreadOutlineCrumb {
+  // The run's first question, handed back to agentrepl.v1.ShowChatNode.
+  zettel.v1.NodeId node = 1;
+  // The run's first question's text.
+  RosterThreadOutlineLabel label = 2;
+}
+
+// A run's label: its first question's text, verbatim.
+message RosterThreadOutlineLabel {
+  string text = 1;
+}
+
+// One run of the outline. A click shows its first question.
+message RosterThreadOutlineRow {
+  // The run's first question, handed back to agentrepl.v1.ShowChatNode.
+  zettel.v1.NodeId node = 1;
+  // The run's first question's text.
+  RosterThreadOutlineLabel label = 2;
+  // How many levels below the first row's this run sits: 0 to 3.
+  uint32 depth = 3;
+  // How many questions the run holds. Never zero.
+  uint32 turns = 4;
+  // The runs below this one that are folded away, set on a row at the
+  // deepest level whose run has branches below it.
+  optional RosterThreadOutlineFolded folded = 5;
+  // Where the run stands against the shown path. Always set.
+  RosterThreadOutlinePlace place = 6;
+}
+
+// The runs folded below a row.
+message RosterThreadOutlineFolded {
+  // How many. Never zero.
+  uint32 runs = 1;
+}
+
+// Where a run stands against the shown path. The set arm IS the place.
+message RosterThreadOutlinePlace {
+  oneof place {
+    // Off the shown path.
+    RosterThreadOutlineOff off = 1;
+    // On the shown path, above the shown question.
+    RosterThreadOutlineOnPath on_path = 2;
+    // Holds the shown path's last question: the one on screen at its end.
+    RosterThreadOutlineShown shown = 3;
+  }
+}
+
+// Off the shown path. Empty: the arm is the fact.
+message RosterThreadOutlineOff {}
+
+// On the shown path. Empty: the arm is the fact.
+message RosterThreadOutlineOnPath {}
+
+// Holds the shown path's end. Empty: the arm is the fact.
+message RosterThreadOutlineShown {}
 
 // Where a thread stands. The set arm IS the standing.
 message RosterThreadStanding {

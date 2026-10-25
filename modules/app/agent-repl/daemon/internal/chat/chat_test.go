@@ -153,6 +153,8 @@ type fixture struct {
 	svc    *Service
 	// jobs are the background jobs deferJobs held back, oldest first.
 	jobs []func()
+	// outlines are the outlines handed to the roster, oldest first.
+	outlines []*frontendv1.RosterThreadOutline
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -162,6 +164,9 @@ func newFixture(t *testing.T) *fixture {
 		Zettel: f.zettel, Turns: f.turns, Context: context.Background(),
 		Log: func(ids.WorkspaceID) dlog.Logger { return f.log },
 		Go:  func(job func()) { job() },
+		Outline: func(_ ids.WorkspaceID, o *frontendv1.RosterThreadOutline) {
+			f.outlines = append(f.outlines, o)
+		},
 	})
 	return f
 }
