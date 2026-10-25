@@ -299,7 +299,8 @@ binding form of the module and every one of its keymaps.")
   '((ignore . "the Help button's press, which only keeps a click from dragging the header line")
     (agent-repl-input-help-click . "the Help button itself")
     (agent-repl-input-company-return . "RET in the completion popup, described under Writing prompts")
-    (company-complete-selection . "TAB in the completion popup, described under Writing prompts"))
+    (company-complete-selection . "TAB in the completion popup, described under Writing prompts")
+    (isearch-backward . "C-r in a creation prompt's minibuffer, not the composer, described in USER-GUIDE.md"))
   "Commands agent-repl binds that no help topic lists, each with why.")
 
 (defconst agent-repl-input-help-bar-background "#111110"

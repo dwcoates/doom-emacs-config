@@ -77,6 +77,7 @@
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-log-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-require-known "agent-repl-workspace" (ws context))
+(declare-function agent-repl-refill-keymap "agent-repl-core" (map fill))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
@@ -2295,16 +2296,17 @@ Either way `C-r' searches that history backward
           (agent-repl-verbs--read-string-persisted prompt-text initial history-file)
         (read-string prompt-text initial)))))
 
-(defvar agent-repl-verbs--prompt-history-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-r") #'isearch-backward)
-    map)
+(defvar agent-repl-verbs--prompt-history-map (make-sparse-keymap)
   "Keys a creation prompt's minibuffer adds over its own local map.
 `C-r' searches the prompt's history backward, as a shell's `C-r' does:
 the minibuffer's isearch walks past the text being typed into the history
 entries (`minibuffer-history-isearch-setup').  Doom's evil bindings put
 `evil-paste-from-register' on `C-r' in every minibuffer map, so without
 this map the search is unreachable.")
+
+(agent-repl-refill-keymap
+ agent-repl-verbs--prompt-history-map
+ (lambda (map) (define-key map (kbd "C-r") #'isearch-backward)))
 
 (defun agent-repl-verbs--install-prompt-history-map ()
   "Put `agent-repl-verbs--prompt-history-map' over the minibuffer's local map.
