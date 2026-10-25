@@ -5,6 +5,7 @@
  * and each site says only what the reading reads.
  */
 import type { Ticker } from "../clock.js";
+import { formatTickedAge } from "../duration.js";
 import { tick } from "../feed/ticking.js";
 
 /** What a clock span counts, stamped as `data-countdown` or `data-age`. */
@@ -25,4 +26,14 @@ export function footerClockSpan(
   span.setAttribute(`data-${clock}`, "");
   tick(span, ticker, (nowMs) => paint(span, nowMs));
   return span;
+}
+
+/**
+ * The age of AT_MS, " · 2m ago", ticking off TICKER: how every line in the
+ * activity cell ends that says how long ago its instant was.
+ */
+export function footerAgeSpan(ticker: Ticker, atMs: number): HTMLElement {
+  return footerClockSpan(ticker, "age", "footer-activity-age", (span, nowMs) => {
+    span.textContent = ` · ${formatTickedAge(nowMs - atMs)} ago`;
+  });
 }

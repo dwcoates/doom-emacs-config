@@ -104,7 +104,7 @@ import type {
   FooterStatusQuestionSalient,
   FooterMoney,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
-import { formatAge, formatCountdown, formatTickedAge } from "../duration.js";
+import { formatAge, formatCountdown } from "../duration.js";
 import type { Ticker } from "../clock.js";
 import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
@@ -116,7 +116,7 @@ import {
   unreachableArm,
 } from "../rpc/strict.js";
 import type { TransientExpirySchedule } from "./expiry.js";
-import { footerClockSpan } from "./clock-span.js";
+import { footerAgeSpan, footerClockSpan } from "./clock-span.js";
 import { drawFooterStatusActivityMergeStep } from "./merge-step.js";
 import { coldGateFiguredLine, statusWords, textLine } from "./parts.js";
 import { pressurePercentColor } from "../pressure-color.js";
@@ -1566,15 +1566,7 @@ export function drawFooterStatusActivityAt(
   deps: AllowanceDeps,
   path: string,
 ): HTMLElement {
-  const atMs = msOf(u.atMs, `${path}.at_ms`);
-  return footerClockSpan(
-    deps.ctx.ticker,
-    "age",
-    "footer-activity-age",
-    (span, nowMs) => {
-      span.textContent = ` · ${formatTickedAge(nowMs - atMs)} ago`;
-    },
-  );
+  return footerAgeSpan(deps.ctx.ticker, msOf(u.atMs, `${path}.at_ms`));
 }
 
 /**
