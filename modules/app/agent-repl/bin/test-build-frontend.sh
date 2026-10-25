@@ -1117,12 +1117,12 @@ t_build_records_the_source_tree_stamp() {
 # VCS stamping embeds the commit and dirty flag, so without the flag every
 # commit would change every binary and bounce every service for nothing.
 
-# go_builds_all_pass_buildvcs_false LOG — true when LOG records at least one go
-# build and every one of them carried -buildvcs=false.
-go_builds_all_pass_buildvcs_false() {
-    local log="$1"
+# go_builds_all_pass FLAG LOG — true when LOG records at least one go build and
+# every one of them carried FLAG.
+go_builds_all_pass() {
+    local flag="$1" log="$2"
     grep -q '^go build' "$log" || return 1
-    ! grep '^go build' "$log" | grep -v -- ' -buildvcs=false ' >/dev/null
+    ! grep '^go build' "$log" | grep -v -- " $flag " >/dev/null
 }
 
 t_in_place_go_builds_pass_buildvcs_false() {
@@ -1131,7 +1131,7 @@ t_in_place_go_builds_pass_buildvcs_false() {
     : > "$root/stub.log"
     run_script "$root" daemon store sidecar lock >/dev/null
     if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
-           go_builds_all_pass_buildvcs_false "$root/stub.log"; then
+           go_builds_all_pass -buildvcs=false "$root/stub.log"; then
         pass "buildvcs: every in-place go build passes -buildvcs=false"
     else
         fail "buildvcs: every in-place go build passes -buildvcs=false" \
@@ -1295,7 +1295,7 @@ t_out_go_builds_pass_buildvcs_false() {
     local root; root="$(new_staging_root)"
     run_script "$root" --out "$root/staging" daemon store sidecar lock >/dev/null
     if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
-           go_builds_all_pass_buildvcs_false "$root/stub.log"; then
+           go_builds_all_pass -buildvcs=false "$root/stub.log"; then
         pass "buildvcs: every staged go build passes -buildvcs=false"
     else
         fail "buildvcs: every staged go build passes -buildvcs=false" \
