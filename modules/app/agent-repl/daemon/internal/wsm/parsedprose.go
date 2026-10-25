@@ -3,7 +3,6 @@ package wsm
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -73,13 +72,8 @@ func upgradeTextBlocks(log dlog.Logger, msg protoreflect.Message) (bool, error) 
 // its `prose`, parsed as a prompt. A block carrying both is refused: no build
 // wrote both, so the row is not one this rewrite understands.
 func upgradeTextBlock(log dlog.Logger, block *frontendv1.FeedTextBlock) (bool, error) {
-	if block.GetProse() != nil && hasUnknown(block.ProtoReflect(), retiredTextTag) {
-		return false, fmt.Errorf("a text block carries both its retired raw text and its parsed prose")
-	}
-	text, found, err := takeUnknown(block.ProtoReflect(), retiredTextTag)
-	if err != nil || !found {
-		return false, err
-	}
-	block.Prose = prose.ParsePrompt(log, string(text))
-	return true, nil
+	return carryUnknown(block.ProtoReflect(), retiredTextTag, block.GetProse() != nil, func(text []byte) error {
+		block.Prose = prose.ParsePrompt(log, string(text))
+		return nil
+	})
 }

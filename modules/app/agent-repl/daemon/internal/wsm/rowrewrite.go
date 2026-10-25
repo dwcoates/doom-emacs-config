@@ -103,57 +103,89 @@ func walkMessages(msg protoreflect.Message, visit func(protoreflect.Message) (bo
 	return changed, walkErr
 }
 
-// takeUnknown removes MSG's retired field NUM from its unknown fields and
-// answers its bytes and whether it was there. The field is length-delimited
-// (a string or a message), as every retired field a step carries is; one of
-// another wire type is refused.
-func takeUnknown(msg protoreflect.Message, num protowire.Number) ([]byte, bool, error) {
+// eachUnknown hands VISIT each of MSG's unknown fields in order: its number,
+// its wire type, the length of its tag and its whole encoding, tag included.
+// Unknown bytes that do not parse are an error, never read as absent.
+func eachUnknown(msg protoreflect.Message, visit func(num protowire.Number, typ protowire.Type, tagLen int, field []byte)) error {
 	unknown := msg.GetUnknown()
-	var kept []byte
-	var value []byte
-	found := false
 	for len(unknown) > 0 {
-		n, typ, l := protowire.ConsumeTag(unknown)
+		num, typ, l := protowire.ConsumeTag(unknown)
 		if l < 0 {
-			return nil, false, protowire.ParseError(l)
+			return fmt.Errorf("%s's unknown fields do not parse: %w", msg.Descriptor().FullName(), protowire.ParseError(l))
 		}
-		m := protowire.ConsumeFieldValue(n, typ, unknown[l:])
+		m := protowire.ConsumeFieldValue(num, typ, unknown[l:])
 		if m < 0 {
-			return nil, false, protowire.ParseError(m)
+			return fmt.Errorf("%s's unknown field %d does not parse: %w", msg.Descriptor().FullName(), num, protowire.ParseError(m))
 		}
-		if n == num {
-			if typ != protowire.BytesType {
-				return nil, false, fmt.Errorf("%s's retired field %d has wire type %d, not length-delimited", msg.Descriptor().FullName(), num, typ)
-			}
-			value, _ = protowire.ConsumeBytes(unknown[l:])
-			found = true
-		} else {
-			kept = append(kept, unknown[:l+m]...)
-		}
+		visit(num, typ, l, unknown[:l+m])
 		unknown = unknown[l+m:]
 	}
-	if found {
-		msg.SetUnknown(kept)
+	return nil
+}
+
+// peekUnknown answers the bytes of MSG's retired field NUM and whether it is
+// there, changing nothing. The field is length-delimited (a string or a
+// message), as every retired field a step carries is; one of another wire
+// type is refused.
+func peekUnknown(msg protoreflect.Message, num protowire.Number) ([]byte, bool, error) {
+	var value []byte
+	found := false
+	wrongType := false
+	err := eachUnknown(msg, func(n protowire.Number, typ protowire.Type, tagLen int, field []byte) {
+		if n != num {
+			return
+		}
+		if typ != protowire.BytesType {
+			wrongType = true
+			return
+		}
+		value, _ = protowire.ConsumeBytes(field[tagLen:])
+		found = true
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if wrongType {
+		return nil, false, fmt.Errorf("%s's retired field %d is not length-delimited", msg.Descriptor().FullName(), num)
 	}
 	return value, found, nil
 }
 
-// hasUnknown reports whether MSG carries the unknown field NUM, leaving it.
-func hasUnknown(msg protoreflect.Message, num protowire.Number) bool {
-	unknown := msg.GetUnknown()
-	for len(unknown) > 0 {
-		n, typ, l := protowire.ConsumeTag(unknown)
-		if l < 0 {
-			return false
-		}
+// dropUnknown removes MSG's retired field NUM, of whatever wire type, and
+// answers whether it was there.
+func dropUnknown(msg protoreflect.Message, num protowire.Number) (bool, error) {
+	var kept []byte
+	found := false
+	err := eachUnknown(msg, func(n protowire.Number, _ protowire.Type, _ int, field []byte) {
 		if n == num {
-			return true
+			found = true
+			return
 		}
-		m := protowire.ConsumeFieldValue(n, typ, unknown[l:])
-		if m < 0 {
-			return false
-		}
-		unknown = unknown[l+m:]
+		kept = append(kept, field...)
+	})
+	if err != nil || !found {
+		return false, err
 	}
-	return false
+	msg.SetUnknown(kept)
+	return true, nil
+}
+
+// carryUnknown carries MSG's retired length-delimited field NUM onto its
+// successor: CARRY is handed the field's bytes, and only once it has written
+// the successor is the field removed, so a carry that refuses leaves MSG as
+// it was. A field beside its already-set SUCCESSOR is refused: no build wrote
+// both, so the row is not one a step understands. It answers whether the
+// field was carried.
+func carryUnknown(msg protoreflect.Message, num protowire.Number, successor bool, carry func([]byte) error) (bool, error) {
+	value, found, err := peekUnknown(msg, num)
+	if err != nil || !found {
+		return false, err
+	}
+	if successor {
+		return false, fmt.Errorf("a %s carries both its retired field %d and its successor", msg.Descriptor().FullName(), num)
+	}
+	if err := carry(value); err != nil {
+		return false, err
+	}
+	return dropUnknown(msg, num)
 }

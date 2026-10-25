@@ -1,6 +1,7 @@
 package wsm
 
 import (
+	"errors"
 	"regexp"
 	"testing"
 
@@ -24,16 +25,22 @@ func bytesField(num protowire.Number, value string) []byte {
 	return protowire.AppendString(b, value)
 }
 
-func TestTakeUnknown(t *testing.T) {
+func varintField(num protowire.Number, value uint64) []byte {
+	return protowire.AppendVarint(protowire.AppendTag(nil, num, protowire.VarintType), value)
+}
+
+func TestPeekUnknown(t *testing.T) {
 	tests := []struct {
 		name      string
 		raw       []byte
 		wantValue string
 		wantFound bool
-		wantKept  []byte
+		wantErr   bool
 	}{
-		{name: "an absent field is not found and nothing changes", raw: bytesField(7, "other"), wantKept: bytesField(7, "other")},
-		{name: "the field is taken and the rest kept", raw: append(bytesField(1, "retired"), bytesField(7, "other")...), wantValue: "retired", wantFound: true, wantKept: bytesField(7, "other")},
+		{name: "an absent field is not found", raw: bytesField(7, "other")},
+		{name: "a present field is answered", raw: append(bytesField(7, "other"), bytesField(1, "retired")...), wantValue: "retired", wantFound: true},
+		{name: "a field of another wire type is refused", raw: varintField(1, 5), wantErr: true},
+		{name: "unknown bytes that do not parse are refused", raw: []byte{0x0a, 0x09}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -41,43 +48,106 @@ func TestTakeUnknown(t *testing.T) {
 			m := withUnknown(&frontendv1.FeedResponseProse{}, tt.raw)
 
 			// Act
-			value, found, err := takeUnknown(m, 1)
+			value, found, err := peekUnknown(m, 1)
 
 			// Assert
-			if err != nil {
-				t.Fatalf("takeUnknown: %v", err)
+			if (err != nil) != tt.wantErr || string(value) != tt.wantValue || found != tt.wantFound {
+				t.Fatalf("peekUnknown = (%q, %v, %v), want (%q, %v, error %v)", value, found, err, tt.wantValue, tt.wantFound, tt.wantErr)
 			}
-			if string(value) != tt.wantValue || found != tt.wantFound || string(m.GetUnknown()) != string(tt.wantKept) {
-				t.Fatalf("takeUnknown = (%q, %v), unknown left %x; want (%q, %v), %x", value, found, m.GetUnknown(), tt.wantValue, tt.wantFound, tt.wantKept)
+			if string(m.GetUnknown()) != string(tt.raw) {
+				t.Fatalf("peekUnknown changed the unknown fields to %x", m.GetUnknown())
 			}
 		})
 	}
 }
 
-func TestTakeUnknownRefusesAFieldOfAnotherWireType(t *testing.T) {
-	// Arrange: field 1 as a varint.
-	raw := protowire.AppendVarint(protowire.AppendTag(nil, 1, protowire.VarintType), 5)
-	m := withUnknown(&frontendv1.FeedResponseProse{}, raw)
+func TestDropUnknown(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       []byte
+		wantFound bool
+		wantKept  []byte
+	}{
+		{name: "an absent field changes nothing", raw: bytesField(7, "other"), wantKept: bytesField(7, "other")},
+		{name: "a length-delimited field is dropped and the rest kept", raw: append(bytesField(1, "retired"), bytesField(7, "other")...), wantFound: true, wantKept: bytesField(7, "other")},
+		{name: "a varint field is dropped too", raw: append(varintField(1, 5), bytesField(7, "other")...), wantFound: true, wantKept: bytesField(7, "other")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			m := withUnknown(&frontendv1.FeedResponseProse{}, tt.raw)
 
-	// Act
-	_, _, err := takeUnknown(m, 1)
+			// Act
+			found, err := dropUnknown(m, 1)
 
-	// Assert
-	if err == nil {
-		t.Fatal("takeUnknown took a varint field as a retired length-delimited one")
+			// Assert
+			if err != nil || found != tt.wantFound || string(m.GetUnknown()) != string(tt.wantKept) {
+				t.Fatalf("dropUnknown = (%v, %v), unknown left %x; want (%v, nil), %x", found, err, m.GetUnknown(), tt.wantFound, tt.wantKept)
+			}
+		})
 	}
 }
 
-func TestHasUnknown(t *testing.T) {
-	// Arrange
-	m := withUnknown(&frontendv1.FeedResponseProse{}, bytesField(1, "retired"))
-
-	// Act / Assert
-	if !hasUnknown(m, 1) || hasUnknown(m, 2) {
-		t.Fatalf("hasUnknown(1), hasUnknown(2) = %v, %v; want true, false", hasUnknown(m, 1), hasUnknown(m, 2))
+func TestCarryUnknown(t *testing.T) {
+	refused := errors.New("not a shape this step carries")
+	tests := []struct {
+		name        string
+		raw         []byte
+		successor   bool
+		carryErr    error
+		wantChanged bool
+		wantErr     bool
+		wantCarried string
+		wantKept    []byte
+	}{
+		{name: "an absent field carries nothing", raw: bytesField(7, "other"), wantKept: bytesField(7, "other")},
+		{name: "a field is carried and removed", raw: append(bytesField(1, "retired"), bytesField(7, "other")...), wantChanged: true, wantCarried: "retired", wantKept: bytesField(7, "other")},
+		{name: "a field beside its successor is refused untouched", raw: bytesField(1, "retired"), successor: true, wantErr: true, wantKept: bytesField(1, "retired")},
+		{name: "a carry that refuses leaves the field", raw: bytesField(1, "retired"), carryErr: refused, wantErr: true, wantCarried: "retired", wantKept: bytesField(1, "retired")},
 	}
-	if len(m.GetUnknown()) == 0 {
-		t.Fatal("hasUnknown removed the field it was asked about")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			m := withUnknown(&frontendv1.FeedResponseProse{}, tt.raw)
+			var carried string
+
+			// Act
+			changed, err := carryUnknown(m, 1, tt.successor, func(v []byte) error {
+				carried = string(v)
+				return tt.carryErr
+			})
+
+			// Assert
+			if changed != tt.wantChanged || (err != nil) != tt.wantErr || carried != tt.wantCarried {
+				t.Fatalf("carryUnknown = (%v, %v) carrying %q, want (%v, error %v) carrying %q", changed, err, carried, tt.wantChanged, tt.wantErr, tt.wantCarried)
+			}
+			if string(m.GetUnknown()) != string(tt.wantKept) {
+				t.Fatalf("unknown left %x, want %x", m.GetUnknown(), tt.wantKept)
+			}
+		})
+	}
+}
+
+// TestRetiredFieldsAreCarriedThroughCarryUnknown keeps every step's carry of
+// a retired field on the one helper, which removes the field only after its
+// successor is written: a hand-rolled peek-then-take is a second copy to
+// drift, and the one this replaced stripped the field from a row it then
+// refused.
+func TestRetiredFieldsAreCarriedThroughCarryUnknown(t *testing.T) {
+	// Arrange
+	handRolled := regexp.MustCompile(`peekUnknown\(`)
+
+	// Act
+	var offenders []string
+	for _, file := range sourcescan.Production(t) {
+		if file.Name != "rowrewrite.go" && handRolled.Match(file.Source) {
+			offenders = append(offenders, file.Name)
+		}
+	}
+
+	// Assert
+	if len(offenders) != 0 {
+		t.Fatalf("%v peek a retired field themselves; carry it through carryUnknown", offenders)
 	}
 }
 
