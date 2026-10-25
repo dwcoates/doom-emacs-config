@@ -2042,6 +2042,73 @@ one place where a decoration failing may not cost the user a page."
                          "ws-1")))
       (kill-buffer buf))))
 
+;;;; ---- Renaming a workspace's webview ----
+
+(defmacro agent-repl-test-frontend--with-webview (var name ws &rest body)
+  "Run BODY with VAR a webview buffer called NAME recorded as WS's."
+  (declare (indent 3))
+  `(let ((,var (generate-new-buffer ,name))
+         (agent-repl--workspaces (make-hash-table :test 'equal)))
+     (unwind-protect
+         (progn
+           (agent-repl--ws-put ,ws :frontend-buffer ,var)
+           ,@body)
+       (kill-buffer ,var))))
+
+(ert-deftest agent-repl-test-frontend-rename-webview-takes-the-workspaces-name ()
+  "A renamed workspace's webview is named for the new workspace."
+  ;; Arrange
+  (agent-repl-test-frontend--with-webview buf "*agent-frontend-old-ws*" "new-ws"
+    ;; Act
+    (agent-repl--frontend-rename-webview "new-ws")
+    ;; Assert
+    (should (equal (buffer-name buf) "*agent-frontend-new-ws*"))))
+
+(ert-deftest agent-repl-test-frontend-rename-webview-takes-the-workspaces-owner ()
+  "A renamed workspace's webview is owned by the new workspace."
+  ;; Arrange
+  (agent-repl-test-frontend--with-webview buf "*agent-frontend-old-ws*" "new-ws"
+    (with-current-buffer buf (setq-local agent-repl--owning-workspace "old-ws"))
+    ;; Act
+    (agent-repl--frontend-rename-webview "new-ws")
+    ;; Assert
+    (should (equal (buffer-local-value 'agent-repl--owning-workspace buf) "new-ws"))))
+
+(ert-deftest agent-repl-test-frontend-rename-webview-pins-the-new-name ()
+  "The webview's pinned name format is the new name, so a page title cannot undo it."
+  ;; Arrange
+  (agent-repl-test-frontend--with-webview buf "*agent-frontend-old-ws*" "new-ws"
+    ;; Act
+    (agent-repl--frontend-rename-webview "new-ws")
+    ;; Assert
+    (should (equal (buffer-local-value 'xwidget-webkit-buffer-name-format buf)
+                   "*agent-frontend-new-ws*"))))
+
+(ert-deftest agent-repl-test-frontend-rename-webview-without-a-webview-is-nil ()
+  "A workspace with no live webview has nothing to rename."
+  ;; Arrange
+  (let ((agent-repl--workspaces (make-hash-table :test 'equal)))
+    (agent-repl--ws-put "new-ws" :project-dir "/w/x")
+    ;; Act / Assert
+    (should (null (agent-repl--frontend-rename-webview "new-ws")))))
+
+(ert-deftest agent-repl-test-frontend-rename-webview-onto-a-taken-name-is-an-error ()
+  "A target name another buffer holds is logged as an error and the webview keeps its name."
+  ;; Arrange
+  (let ((taken (generate-new-buffer "*agent-frontend-new-ws*"))
+        errors)
+    (unwind-protect
+        (agent-repl-test-frontend--with-webview buf "*agent-frontend-old-ws*" "new-ws"
+          (cl-letf (((symbol-function 'agent-repl--error)
+                     (lambda (_ws fmt &rest args) (push (apply #'format fmt args) errors))))
+            ;; Act
+            (should (null (agent-repl--frontend-rename-webview "new-ws"))))
+          ;; Assert
+          (should (equal (buffer-name buf) "*agent-frontend-old-ws*"))
+          (should (equal errors
+                         '("elisp.frontend.webview-rename-target-taken ws=new-ws buffer=*agent-frontend-old-ws* target=*agent-frontend-new-ws*"))))
+      (kill-buffer taken))))
+
 (ert-deftest agent-repl-test-frontend-adopt-hook-failure-uses-the-explicit-owner ()
   "A failed webview decoration is attributed to the adopted workspace."
   ;; Arrange

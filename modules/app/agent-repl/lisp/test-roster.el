@@ -1127,6 +1127,27 @@ that follows must not care which of the two got there first."
       ;; Assert
       (should (null (agent-repl-host-ref "old-name"))))))
 
+(ert-deftest agent-repl-test-roster-a-rename-renames-the-webview ()
+  "The webview's name is a panel key, so a rename moves it to the new name."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((buf (generate-new-buffer "*agent-frontend-old-name*")))
+      (unwind-protect
+          (progn
+            (agent-repl-roster-apply
+             (agent-repl-test-roster--roster
+              :sections (list (agent-repl-test-roster--section
+                               "repo" (list (agent-repl-test-roster--row "a" "old-name" :ready))))))
+            (agent-repl--ws-put "old-name" :frontend-buffer buf)
+            ;; Act
+            (agent-repl-roster-apply
+             (agent-repl-test-roster--roster
+              :sections (list (agent-repl-test-roster--section
+                               "repo" (list (agent-repl-test-roster--row "a" "new-name" :ready))))))
+            ;; Assert
+            (should (equal (buffer-name buf) "*agent-frontend-new-name*")))
+        (kill-buffer buf)))))
+
 (ert-deftest agent-repl-test-roster-a-rename-onto-a-tombstone-keeps-the-old-tab ()
   "A collision with a tombstoned name is refused whole: the tab keeps its name."
   ;; Arrange
