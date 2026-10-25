@@ -247,6 +247,10 @@ const (
 	// ArmGitFailed is a NukeWorkspace whose destruction of the worktree and
 	// branch failed in git. It carries git's OWN account as `detail`.
 	ArmGitFailed = "git_failed"
+	// ArmThreadDeleteFailed is a NukeWorkspace of a zettel chat thread whose
+	// graph or directory could not be deleted. It carries the failure's own
+	// account as `detail`.
+	ArmThreadDeleteFailed = "thread_delete_failed"
 	// ArmNotClosed is a ForgetWorkspace on a workspace that is still open.
 	// Forget is a registry act with no way to tear editor state down, and the
 	// close verb owns the quiet requirement it would otherwise have to

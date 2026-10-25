@@ -642,6 +642,9 @@ type Deps struct {
 	// Sessions brings sessions up and down; injected so the verbs do not own
 	// the shim fleet.
 	Sessions Sessions
+	// Threads holds the zettel chat threads' graphs, which a nuke deletes as
+	// it deletes a git workspace's worktree and branch.
+	Threads ThreadGraphs
 	// Browser opens a clicked link in the pinned external browser.
 	Browser externalbrowser.Opener
 	// Headless is the daemon's own one-shot vendor run. A create that supplies
@@ -1016,6 +1019,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a desktop notifier")
 	case deps.Sessions == nil:
 		return nil, missing("a session fleet")
+	case deps.Threads == nil:
+		return nil, missing("the threads' graphs")
 	case deps.Shim == nil:
 		return nil, missing("a shim resolver")
 	case deps.Freeness == nil:
@@ -1068,6 +1073,14 @@ func New(deps Deps) (Verbs, error) {
 		worktreeBound = DefaultWorktreeBound
 	}
 	return &verbs{deps: deps, load: load, splice: splice, now: now, restartStopBound: stopBound, worktreeBound: worktreeBound}, nil
+}
+
+// ThreadGraphs is where the zettel chat threads' graphs live (the chat
+// service, over zettel).
+type ThreadGraphs interface {
+	// Delete destroys one thread's graph and forgets what is held of it,
+	// recording its own failure.
+	Delete(ctx context.Context, thread ids.WorkspaceID) error
 }
 
 // SelectionHistory says what a select does to the durable selection history

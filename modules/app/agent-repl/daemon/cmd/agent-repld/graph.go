@@ -1281,6 +1281,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	verbs, err := workspace.New(workspace.Deps{
 		Instance:     p.Instance,
+		// A NUKED THREAD'S GRAPH is deleted through the chat service, which
+		// also forgets what it held of the thread.
+		Threads:      chatService,
 		Creates:      creates,
 		Derived:      derivedNotices,
 		DB:           p.DB,

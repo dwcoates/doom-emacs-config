@@ -27,6 +27,10 @@ type fakeZettel struct {
 	sightErr  error
 	sighted   [][]string
 	now       int64
+	deleteErr error
+	deleted   []ids.WorkspaceID
+	matches   []*zettelv1.SearchThreadsMatch
+	searchErr error
 }
 
 func (f *fakeZettel) RecordExchange(_ context.Context, thread ids.WorkspaceID, turn ids.TurnID, q wsm.ThreadQuestion, answer string) (*zettelv1.Node, error) {
@@ -66,6 +70,20 @@ func (f *fakeZettel) RecordSightings(_ context.Context, nodes []*zettelv1.NodeId
 	}
 	f.sighted = append(f.sighted, named)
 	return nil
+}
+
+func (f *fakeZettel) SearchThreads(_ context.Context, _ string) ([]*zettelv1.SearchThreadsMatch, error) {
+	return f.matches, f.searchErr
+}
+
+func (f *fakeZettel) DeleteThread(_ context.Context, thread ids.WorkspaceID) (uint32, error) {
+	if f.deleteErr != nil {
+		return 0, f.deleteErr
+	}
+	f.deleted = append(f.deleted, thread)
+	n := uint32(len(f.nodes))
+	f.nodes = nil
+	return n, nil
 }
 
 // seed adds a node asked of parent ("" for the root) with sightings seen.
@@ -688,5 +706,65 @@ func TestAnAnswerMarksTheWordsItsChildrenQuotedAndTheHighlight(t *testing.T) {
 	}
 	if got := f.exchange("n2").GetQuestion().GetQuote().GetText(); got != "quoted words" {
 		t.Fatalf("question quote = %q", got)
+	}
+}
+
+func TestDeleteDestroysTheGraphAndForgetsTheThread(t *testing.T) {
+	// Arrange: an opened thread whose view is held.
+	f := newFixture(t)
+	f.zettel.seed("", 0)
+	f.open()
+	held := f.svc.Topic(thr)
+
+	// Act
+	err := f.svc.Delete(context.Background(), thr)
+
+	// Assert
+	if err != nil || len(f.zettel.deleted) != 1 || f.zettel.deleted[0] != thr {
+		t.Fatalf("Delete = %v, deleted = %v; want the thread's graph deleted", err, f.zettel.deleted)
+	}
+	if f.svc.Topic(thr) == held {
+		t.Fatal("the thread's state outlived its delete")
+	}
+	if f.records("info", "daemon.chat.deleted") != 1 {
+		t.Fatalf("records = %+v, want the delete at info", f.log.Records())
+	}
+}
+
+func TestAFailedDeleteForgetsNothingAndIsRecorded(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.zettel.seed("", 0)
+	f.open()
+	held := f.svc.Topic(thr)
+	f.zettel.deleteErr = errors.New("zettelclient: DeleteThread: unavailable")
+
+	// Act
+	err := f.svc.Delete(context.Background(), thr)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Delete = nil, want zettel's failure")
+	}
+	if f.svc.Topic(thr) != held {
+		t.Fatal("a failed delete forgot the thread")
+	}
+	if f.records("error", "daemon.chat.delete_failed") != 1 {
+		t.Fatalf("records = %+v, want the failure at error", f.log.Records())
+	}
+}
+
+func TestSearchAnswersWhatZettelAnswers(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.zettel.matches = []*zettelv1.SearchThreadsMatch{{Thread: &zettelv1.ThreadId{Id: "t1"}}}
+	f.zettel.searchErr = errors.New("down")
+
+	// Act
+	got, err := f.svc.Search(context.Background(), "sky")
+
+	// Assert
+	if len(got) != 1 || err == nil || err.Error() != "down" {
+		t.Fatalf("Search = %v, %v; want zettel's answer passed through", got, err)
 	}
 }

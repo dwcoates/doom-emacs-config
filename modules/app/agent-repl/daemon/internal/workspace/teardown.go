@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -189,22 +190,8 @@ func (v *verbs) nuke(ctx context.Context, log dlog.Logger, record wsm.Workspace)
 		log.Debug(opNuke, "no live session to kill before the nuke", nil)
 	}
 
-	repo, err := v.repoDirOf(ctx, record)
-	if err != nil {
-		log.Error(opNuke, "could not resolve the repository to nuke from", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("nuke %q: %w", ws, err)
-	}
-	if err := v.deps.Git.Nuke(ctx, repo, record.Dir, record.Branch); err != nil {
-		// A GIT FAILURE HERE IS AN ANSWER, not an internal error: the contract
-		// spells NukeWorkspaceError.git_failed for exactly this, and it carries
-		// git's own account so the caller learns WHAT would not be destroyed
-		// rather than only that something did not work. The record has not been
-		// forgotten, so nothing is half-nuked.
-		log.Debug(opNuke, "git refused to destroy the worktree and branch", dlog.Context{
-			"repo": repo, "dir": record.Dir, "branch": record.Branch, "cause": err.Error(),
-		})
-		return refuse(log, "NukeWorkspace", ArmGitFailed,
-			fmt.Sprintf("destroying %q: %v", record.Dir, err), false)
+	if err := v.destroyStorage(ctx, log, record); err != nil {
+		return err
 	}
 
 	report, err := v.deps.DB.Forget(ctx, ws)
@@ -219,6 +206,49 @@ func (v *verbs) nuke(ctx context.Context, log dlog.Logger, record wsm.Workspace)
 	})
 	v.republishRegistry(ctx, log, opNuke)
 	return nil
+}
+
+// destroyStorage destroys what a workspace keeps, as its kind keeps it: a git
+// workspace's worktree and branch, a zettel chat thread's graph and directory.
+// A failure is the kind's typed refusal, and the record is kept, so nothing is
+// half-nuked and a nuke tried again picks up where this one stopped.
+func (v *verbs) destroyStorage(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
+	switch record.Kind {
+	case wsm.WorkspaceKindRepository:
+		repo, err := v.repoDirOf(ctx, record)
+		if err != nil {
+			log.Error(opNuke, "could not resolve the repository to nuke from", dlog.Context{"cause": err.Error()})
+			return fmt.Errorf("nuke %q: %w", record.ID, err)
+		}
+		if err := v.deps.Git.Nuke(ctx, repo, record.Dir, record.Branch); err != nil {
+			// A GIT FAILURE HERE IS AN ANSWER, not an internal error: the
+			// contract spells NukeWorkspaceError.git_failed for exactly this,
+			// and it carries git's own account so the caller learns WHAT would
+			// not be destroyed rather than only that something did not work.
+			log.Debug(opNuke, "git refused to destroy the worktree and branch", dlog.Context{
+				"repo": repo, "dir": record.Dir, "branch": record.Branch, "cause": err.Error(),
+			})
+			return refuse(log, "NukeWorkspace", ArmGitFailed,
+				fmt.Sprintf("destroying %q: %v", record.Dir, err), false)
+		}
+		return nil
+	case wsm.WorkspaceKindThread:
+		// THE GRAPH GOES FIRST: it is the thread's only copy of its
+		// conversation's shape, and a directory without its graph is the
+		// state a retried nuke can finish from, never the reverse.
+		if err := v.deps.Threads.Delete(ctx, record.ID); err != nil {
+			return refuse(log, "NukeWorkspace", ArmThreadDeleteFailed,
+				fmt.Sprintf("deleting the thread's graph: %v", err), false)
+		}
+		if err := os.RemoveAll(record.Dir); err != nil {
+			log.Error(opNuke, "could not delete the thread's directory", dlog.Context{"dir": record.Dir, "cause": err.Error()})
+			return refuse(log, "NukeWorkspace", ArmThreadDeleteFailed,
+				fmt.Sprintf("deleting %q: %v", record.Dir, err), false)
+		}
+		return nil
+	default:
+		panic(fmt.Sprintf("workspace: nuke of %q, whose kind %q this build does not know", record.ID, record.Kind))
+	}
 }
 
 // repoDirOf answers the repository directory a workspace belongs to, from the

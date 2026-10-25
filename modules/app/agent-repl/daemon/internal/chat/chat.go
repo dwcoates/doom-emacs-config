@@ -457,6 +457,32 @@ func (s *Service) Select(ctx context.Context, id ids.WorkspaceID, h *Highlight) 
 	return nil
 }
 
+// Delete destroys a thread's graph in zettel and forgets every view and
+// question in flight held of it (workspace.ThreadGraphs). A thread zettel
+// holds nothing of deletes to nothing.
+func (s *Service) Delete(ctx context.Context, id ids.WorkspaceID) error {
+	log := s.deps.Log(id)
+	deleted, err := s.deps.Zettel.DeleteThread(ctx, id)
+	if err != nil {
+		log.Error("daemon.chat.delete_failed", "the thread's graph could not be deleted in zettel; nothing of it was forgotten", dlog.Context{
+			"thread": string(id), "cause": err.Error(),
+		})
+		return err
+	}
+	s.mu.Lock()
+	delete(s.threads, id)
+	s.mu.Unlock()
+	log.Info("daemon.chat.deleted", "the thread's graph was deleted", dlog.Context{"thread": string(id), "nodes_deleted": deleted})
+	return nil
+}
+
+// Search answers every thread whose questions or answers say QUERY's words,
+// the best match first, as zettel answers it. A failure is the caller's to
+// record, with the request it was serving.
+func (s *Service) Search(ctx context.Context, query string) ([]*zettelv1.SearchThreadsMatch, error) {
+	return s.deps.Zettel.SearchThreads(ctx, query)
+}
+
 // Sightings counts one sighting per named node, all or nothing.
 func (s *Service) Sightings(ctx context.Context, id ids.WorkspaceID, nodes []NodeID) error {
 	if err := s.ensureLoaded(ctx, id); err != nil {
