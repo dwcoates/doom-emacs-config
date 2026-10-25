@@ -88,9 +88,18 @@ func TestEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
 	awaitAnswered(t, e.DaemonAddr(), thread, "echo: Why is the sky blue?")
 
 	// ---- The tab bar stays while the thread is on screen ----
+	// The wait reads each input of the rule (status.el,
+	// agent-repl--tabbar-target-rows), so a miss names the one that is wrong.
 	e.AwaitEvalFor(emacsVerbBound, "the tab bar kept over the thread's webview",
-		`(and (agent-repl--tabbar-webview-shown-p (selected-frame))
-              (> (or (frame-parameter nil 'tab-bar-lines) 0) 0))`, truthy)
+		`(vector (and (agent-repl--tabbar-webview-shown-p (selected-frame)) t)
+                 (and (agent-repl-roster-thread-p (agent-repl--ws-frame-name (selected-frame))) t)
+                 (or (frame-parameter nil 'tab-bar-lines) 0))`,
+		func(raw json.RawMessage) bool {
+			// [webview shown, frame's workspace a thread, tab-bar rows]
+			var got []any
+			return json.Unmarshal(raw, &got) == nil && len(got) == 3 &&
+				got[0] == true && got[1] == true && got[2] != float64(0)
+		})
 
 	// ---- SPC TAB . offers it by name ----
 	e.Eval(`(cl-letf (((symbol-function 'completing-read)
