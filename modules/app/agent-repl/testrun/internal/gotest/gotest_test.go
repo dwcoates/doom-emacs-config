@@ -1,6 +1,7 @@
 package gotest
 
 import (
+	"agentrepl/testrun/internal/testdir"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -9,7 +10,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -93,11 +93,7 @@ func TestResultLineReadsOutcomeNameAndSeconds(t *testing.T) {
 // test-func check would drift from these.
 func TestNoOtherFileReimplementsTheseConventions(t *testing.T) {
 	// Arrange
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller could not locate this file")
-	}
-	module := filepath.Clean(filepath.Join(filepath.Dir(self), "..", ".."))
+	module := filepath.Join(testdir.ModuleRoot(t), "testrun")
 	shapes := map[string]*regexp.Regexp{
 		"a -v result-line regexp":      regexp.MustCompile("--- \\(PASS\\|FAIL"),
 		"a -test.run alternation":      regexp.MustCompile(`"\^\(" \+ strings\.Join`),

@@ -1,10 +1,10 @@
 package roster
 
 import (
+	"agentrepl/testrun/internal/testdir"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -79,12 +79,7 @@ func claudeHarnesses(repo string) ([]string, error) {
 
 func TestEveryHarnessScriptIsRosteredOrExcluded(t *testing.T) {
 	// Arrange
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller could not locate this file")
-	}
-	module := filepath.Clean(filepath.Join(filepath.Dir(self), "..", ".."))
-	repo := filepath.Clean(filepath.Join(module, "..", "..", ".."))
+	module, repo := testdir.ModuleRoot(t), testdir.RepoRoot(t)
 	scripts := harnessScripts(t, module, repo)
 	if len(scripts) == 0 {
 		t.Fatal("found no harness scripts: the layout this test assumes moved")
@@ -111,12 +106,7 @@ func TestEveryHarnessScriptIsRosteredOrExcluded(t *testing.T) {
 
 func TestEveryExclusionNamesAScriptThatExists(t *testing.T) {
 	// Arrange
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller could not locate this file")
-	}
-	module := filepath.Clean(filepath.Join(filepath.Dir(self), "..", ".."))
-	repo := filepath.Clean(filepath.Join(module, "..", "..", ".."))
+	module, repo := testdir.ModuleRoot(t), testdir.RepoRoot(t)
 	scripts := harnessScripts(t, module, repo)
 
 	// Act / Assert

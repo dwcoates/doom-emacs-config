@@ -24,6 +24,14 @@
 //
 // The parallelism lives in the scheduler, which can see every suite at once,
 // never inside a suite, which can only see itself.
+//
+// EVERY GO BUILD IS TRIMMED (GOFLAGS -trimpath). Without it the go command
+// keys each compiled package on its absolute directory, so every worktree's
+// runs cached their own copy of every package of the repository, and the
+// shared build cache reached 172GB across ~100 worktrees (2026-10-24). With
+// it, every worktree shares one cache entry per package. A test finds its
+// files from its working directory, which is its package's directory, never
+// from a compiled-in source path, which -trimpath removes.
 package suites
 
 import (
@@ -108,8 +116,17 @@ const UnitSlotsEnv = "AGENT_REPL_UNIT_SLOTS"
 // PinnedEnv is the environment every unit adds to its own: the pins the
 // package comment promises, plus the GOFLAGS the caller already had.
 func PinnedEnv() []string {
-	flags := strings.TrimSpace(os.Getenv("GOFLAGS") + " -p=1")
-	return []string{"GOFLAGS=" + flags, "GOMAXPROCS=2"}
+	return []string{GoFlagsEnv(), "GOMAXPROCS=2"}
+}
+
+// GoFlagsEnv is the GOFLAGS binding every go command a unit runs carries: the
+// caller's own flags, then extra, then the pins the package comment promises.
+// A unit that needs flags of its own passes them here rather than setting
+// GOFLAGS itself, which would drop the pins.
+func GoFlagsEnv(extra ...string) string {
+	parts := append([]string{os.Getenv("GOFLAGS")}, extra...)
+	parts = append(parts, "-p=1", "-trimpath")
+	return "GOFLAGS=" + strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
 }
 
 func spec(id, suite, dir string, argv []string, env ...string) run.Spec {

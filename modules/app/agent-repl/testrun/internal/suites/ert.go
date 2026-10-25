@@ -52,7 +52,7 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 	build := spec(s.Name+":fakedaemon", s.Name, fakeDir,
 		// -buildvcs=false: a test build never asks git to stamp the binary
 		// (no test runs real git, owner rule).
-		[]string{"go", "build", "-buildvcs=false", "-o", fake, "."}, "GOPROXY=off", "GOFLAGS=-mod=mod -p=1")
+		[]string{"go", "build", "-buildvcs=false", "-o", fake, "."}, "GOPROXY=off", GoFlagsEnv("-mod=mod"))
 	driver := filepath.Join(l.Module, "testrun", "ert", "driver.el")
 	rosterForm := lispList(files)
 	named := func(id string, items []string, names []string) run.Spec {

@@ -299,7 +299,12 @@ LOCK_TREE_STAMP="$CACHE_BIN/.shim-lock.source-tree"
 # binary, and Go's default VCS stamping embeds the commit and the dirty flag
 # into the binary, so every commit would change every binary's hash and bounce
 # every service for nothing. Nothing in this repo reads the VCS build info.
-GO_BUILD_FLAGS=(-buildvcs=false)
+#
+# -trimpath: without it Go keys each compiled package on its absolute
+# directory, so every worktree caches its own copy of every package; with it
+# every worktree shares one cache entry. The daemon names the checkout it was
+# built from by a link-time stamp instead (agent-repld/internal/checkout).
+GO_BUILD_FLAGS=(-buildvcs=false -trimpath)
 
 # Default set, in dependency-agnostic order. `gc` is never implicit: it is
 # either asked for, or triggered by a run that minted an entry.
@@ -639,7 +644,9 @@ build_daemon() {
     require_bin go "install the Go toolchain"
     echo "[build-frontend] daemon: building..."
     mkdir -p "$DAEMON_BIN"
-    ( cd "$DAEMON_DIR" && go build "${GO_BUILD_FLAGS[@]}" -o "$DAEMON_ARTIFACT" ./cmd/agent-repld )
+    ( cd "$DAEMON_DIR" && go build "${GO_BUILD_FLAGS[@]}" \
+        -ldflags "-X agent-repld/internal/checkout.builtFrom=$ROOT" \
+        -o "$DAEMON_ARTIFACT" ./cmd/agent-repld )
     write_built_sha "$DAEMON_SHA_STAMP" "$ROOT"
     stamp_source_tree daemon "$DAEMON_TREE_STAMP"
     echo "[build-frontend] daemon: done"

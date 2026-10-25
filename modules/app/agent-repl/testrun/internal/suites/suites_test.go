@@ -26,14 +26,42 @@ func write(t *testing.T, path, body string, mode os.FileMode) {
 	}
 }
 
+func TestGoFlagsEnvKeepsThePinsBehindEveryFlag(t *testing.T) {
+	tests := []struct {
+		name    string
+		goflags string
+		extra   []string
+		want    string
+	}{
+		{"nothing added", "", nil, "GOFLAGS=-p=1 -trimpath"},
+		{"a unit's own flags", "", []string{"-mod=mod"}, "GOFLAGS=-mod=mod -p=1 -trimpath"},
+		{"the caller's flags, then the unit's", "-race", []string{"-mod=mod"}, "GOFLAGS=-race -mod=mod -p=1 -trimpath"},
+		{"stray spaces collapse", "  -race  ", []string{" -mod=mod "}, "GOFLAGS=-race -mod=mod -p=1 -trimpath"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			t.Setenv("GOFLAGS", tt.goflags)
+
+			// Act
+			got := GoFlagsEnv(tt.extra...)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("GoFlagsEnv(%q) = %q, want %q", tt.extra, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPinnedEnvBoundsEveryUnitsParallelism(t *testing.T) {
 	tests := []struct {
 		name    string
 		goflags string
 		want    []string
 	}{
-		{"no caller flags", "", []string{"GOFLAGS=-p=1", "GOMAXPROCS=2"}},
-		{"caller flags are kept ahead of the pin", "-mod=mod", []string{"GOFLAGS=-mod=mod -p=1", "GOMAXPROCS=2"}},
+		{"no caller flags", "", []string{"GOFLAGS=-p=1 -trimpath", "GOMAXPROCS=2"}},
+		{"caller flags are kept ahead of the pin", "-mod=mod", []string{"GOFLAGS=-mod=mod -p=1 -trimpath", "GOMAXPROCS=2"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

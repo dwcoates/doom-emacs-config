@@ -6,8 +6,8 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -33,11 +33,12 @@ var sanctionedLoggingWrites = map[string]map[string]bool{
 
 func TestProductionHasNoLoggingBypasses(t *testing.T) {
 	// Arrange.
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller could not locate the lint test")
+	// A test runs in its package's directory (runtime.Caller's file carries
+	// no absolute path under -trimpath).
+	root, wdErr := os.Getwd()
+	if wdErr != nil {
+		t.Fatalf("the working directory, which is this package's: %v", wdErr)
 	}
-	root := filepath.Dir(thisFile)
 
 	// Act.
 	var bypasses []loggingBypass

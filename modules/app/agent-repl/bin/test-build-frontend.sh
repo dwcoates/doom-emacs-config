@@ -1117,12 +1117,12 @@ t_build_records_the_source_tree_stamp() {
 # VCS stamping embeds the commit and dirty flag, so without the flag every
 # commit would change every binary and bounce every service for nothing.
 
-# go_builds_all_pass_buildvcs_false LOG — true when LOG records at least one go
-# build and every one of them carried -buildvcs=false.
-go_builds_all_pass_buildvcs_false() {
-    local log="$1"
+# go_builds_all_pass FLAG LOG — true when LOG records at least one go build and
+# every one of them carried FLAG.
+go_builds_all_pass() {
+    local flag="$1" log="$2"
     grep -q '^go build' "$log" || return 1
-    ! grep '^go build' "$log" | grep -v -- ' -buildvcs=false ' >/dev/null
+    ! grep '^go build' "$log" | grep -v -- " $flag " >/dev/null
 }
 
 t_in_place_go_builds_pass_buildvcs_false() {
@@ -1131,11 +1131,55 @@ t_in_place_go_builds_pass_buildvcs_false() {
     : > "$root/stub.log"
     run_script "$root" daemon store sidecar lock >/dev/null
     if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
-           go_builds_all_pass_buildvcs_false "$root/stub.log"; then
+           go_builds_all_pass -buildvcs=false "$root/stub.log"; then
         pass "buildvcs: every in-place go build passes -buildvcs=false"
     else
         fail "buildvcs: every in-place go build passes -buildvcs=false" \
              "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# --- -trimpath on every go build, and the daemon's checkout stamp -------------
+# Without -trimpath Go keys each compiled package on its absolute directory, so
+# every worktree caches its own copy of every package. -trimpath removes the
+# source paths the daemon once found its checkout by, so its build stamps the
+# checkout instead, under the symbol agent-repld/internal/checkout declares.
+
+t_in_place_go_builds_pass_trimpath() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"
+    : > "$root/stub.log"
+    run_script "$root" daemon store sidecar lock >/dev/null
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
+           go_builds_all_pass -trimpath "$root/stub.log"; then
+        pass "trimpath: every in-place go build passes -trimpath"
+    else
+        fail "trimpath: every in-place go build passes -trimpath" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+# checkout_stamp_symbol — the linker symbol the daemon's checkout package
+# declares for its stamp, read from the real source.
+checkout_stamp_symbol() {
+    sed -n 's/^const builtFromSymbol = "\(.*\)"$/\1/p' \
+        "$THIS_DIR/../daemon/internal/checkout/checkout.go"
+}
+
+t_daemon_build_stamps_its_checkout() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"
+    : > "$root/stub.log"
+    run_script "$root" daemon >/dev/null
+    local symbol; symbol="$(checkout_stamp_symbol)"
+    if [ -n "$symbol" ] &&
+           grep '^go build' "$root/stub.log" | grep -F -- "-X $symbol=$root " >/dev/null; then
+        pass "trimpath: the daemon build stamps the checkout it was built from"
+    else
+        fail "trimpath: the daemon build stamps the checkout it was built from" \
+             "symbol=$symbol stub.log: $(cat "$root/stub.log")"
     fi
     rm -rf "$root"
 }
@@ -1291,11 +1335,24 @@ t_out_builds_fresh_targets_unconditionally() {
     rm -rf "$root"
 }
 
+t_out_go_builds_pass_trimpath() {
+    local root; root="$(new_staging_root)"
+    run_script "$root" --out "$root/staging" daemon store sidecar lock >/dev/null
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
+           go_builds_all_pass -trimpath "$root/stub.log"; then
+        pass "trimpath: every staged go build passes -trimpath"
+    else
+        fail "trimpath: every staged go build passes -trimpath" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
 t_out_go_builds_pass_buildvcs_false() {
     local root; root="$(new_staging_root)"
     run_script "$root" --out "$root/staging" daemon store sidecar lock >/dev/null
     if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
-           go_builds_all_pass_buildvcs_false "$root/stub.log"; then
+           go_builds_all_pass -buildvcs=false "$root/stub.log"; then
         pass "buildvcs: every staged go build passes -buildvcs=false"
     else
         fail "buildvcs: every staged go build passes -buildvcs=false" \
@@ -1896,6 +1953,8 @@ build_group_revision_staleness() {
     t_change_outside_the_pathspec_leaves_the_system_fresh
     t_build_records_the_source_tree_stamp
     t_in_place_go_builds_pass_buildvcs_false
+    t_in_place_go_builds_pass_trimpath
+    t_daemon_build_stamps_its_checkout
 }
 
 build_group_healing() {
@@ -1940,6 +1999,7 @@ build_group_staging() {
     t_in_place_fresh_fixture_builds_nothing
     t_out_builds_fresh_targets_unconditionally
     t_out_go_builds_pass_buildvcs_false
+    t_out_go_builds_pass_trimpath
     t_out_refuses_a_relative_dir
     t_out_creates_an_absent_dir
 }
