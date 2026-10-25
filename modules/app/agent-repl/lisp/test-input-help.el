@@ -34,10 +34,7 @@
   (declare (indent 0))
   `(let ((agent-repl-test-input-help--fatals nil))
      (cl-letf (((symbol-function 'agent-repl--fatal)
-                (lambda (_ws fmt &rest args)
-                  (let ((text (apply #'format fmt args)))
-                    (push text agent-repl-test-input-help--fatals)
-                    (error "%s" text)))))
+                (agent-repl-test--fatal-into agent-repl-test-input-help--fatals)))
        ,@body)))
 
 (defun agent-repl-test-input-help--context (&rest bindings)

@@ -1041,6 +1041,17 @@ Stub a rung with it: ((symbol-function \='agent-repl--error)
 uses (test-test-helpers.el holds every suite to it)."
   `(lambda (_scope fmt &rest args) (push (apply #'format fmt args) ,place)))
 
+(defmacro agent-repl-test--fatal-into (place)
+  "A stand-in for `agent-repl--fatal' that records into PLACE, then signals.
+Like `agent-repl-test--record-into', it pushes each record's text onto
+PLACE, newest first; then it signals an `error' carrying that text, as
+the real rung aborts its caller.  THE ONE such stand-in every suite uses
+\(test-test-helpers.el holds every suite to it)."
+  `(lambda (_scope fmt &rest args)
+     (let ((text (apply #'format fmt args)))
+       (push text ,place)
+       (error "%s" text))))
+
 (defvar agent-repl-test--popups-shown nil
   "Buffers handed to `agent-repl-popup-show' inside
 `agent-repl-test--recording-popups', newest first.")

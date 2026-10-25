@@ -134,7 +134,7 @@ Redraws are recorded in `reloads'; centering pads to the width as Doom's does."
   "Doom's widgets with no banner to follow signal, naming the list."
   (let (fatals)
     (cl-letf (((symbol-function 'agent-repl--fatal)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) fatals) (error "fatal"))))
+               (agent-repl-test--fatal-into fatals)))
       (should-error (agent-repl-splash--with-settings '(doom-dashboard-widget-footer))))
     (should (equal fatals '("elisp.splash.widgets: no banner widget functions=(doom-dashboard-widget-footer)")))))
 
