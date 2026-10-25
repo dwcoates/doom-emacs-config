@@ -67,25 +67,33 @@ export interface BandScroll {
   to: number;
 }
 
+/** The class of the rail's body, which the Chat app's thread list scrolls in. */
+export const RAIL_BODY_CLASS = "sb-scroll";
+
 /**
- * Scroll LINE's section viewport so LINE shows whole, centered when it has to
- * move. Answers how it moved, or null when LINE already showed whole.
+ * The element LINE scrolls in: a band row's section rows region, or, for a
+ * chat thread's row, the rail's body, as the Chat app's list is no band.
+ */
+function scrollerOf(line: HTMLElement): HTMLElement {
+  const thread = line.closest("[data-thread-section]") !== null;
+  const scroller = line.closest<HTMLElement>(thread ? `.${RAIL_BODY_CLASS}` : REGION_SELECTOR);
+  if (scroller === null) {
+    log.error(thread ? "a chat thread's row hangs outside the rail's body" : "a rail row hangs in no section's rows region", {
+      operation: "sidebar.selection-scroll.orphan-row",
+      context: { workspace: line.parentElement?.getAttribute("data-roster-row") ?? null, thread },
+    });
+    throw new Error(`sidebar selection scroll: a row hangs in no ${thread ? "rail body" : "section's rows region"}`);
+  }
+  return scroller;
+}
+
+/**
+ * Scroll LINE's section viewport (the rail's body, for a chat thread's row) so
+ * LINE shows whole, centered when it has to move. Answers how it moved, or
+ * null when LINE already showed whole.
  */
 export function scrollLineIntoBand(line: HTMLElement): BandScroll | null {
-  // A CHAT THREAD'S ROW is in the Chat app's list, which is no band: the rail
-  // itself scrolls it, so it is brought into view there.
-  if (line.closest("[data-thread-section]") !== null) {
-    line.scrollIntoView({ block: "nearest" });
-    return null;
-  }
-  const region = line.closest<HTMLElement>(REGION_SELECTOR);
-  if (region === null) {
-    log.error("a rail row hangs in no section's rows region", {
-      operation: "sidebar.selection-scroll.orphan-row",
-      context: { workspace: line.parentElement?.getAttribute("data-roster-row") ?? null },
-    });
-    throw new Error("sidebar selection scroll: a row hangs in no section's rows region");
-  }
+  const region = scrollerOf(line);
   const box = region.getBoundingClientRect();
   const viewTop = box.top + region.clientTop;
   const viewBottom = viewTop + region.clientHeight;

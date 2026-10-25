@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetLoggingForTests } from "../../src/log.js";
-import { createSelectionScroll, scrollLineIntoBand } from "../../src/sidebar/selection-scroll.js";
+import { createSelectionScroll, RAIL_BODY_CLASS, scrollLineIntoBand } from "../../src/sidebar/selection-scroll.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { boxRect } from "../dom-rect.js";
 
@@ -24,10 +24,12 @@ interface BandSpec {
   current?: string[];
   cls?: string;
   regionClass?: string;
+  /** The rows are chat threads: their list sits in the rail's body, the scroller. */
+  thread?: boolean;
 }
 
 /** A laid-out band as SPEC says: its root, its rows region, and each row's line. */
-function band({ lines, view, current = [], cls = "open-section", regionClass = "sb-sections" }: BandSpec): {
+function band({ lines, view, current = [], cls = "open-section", regionClass = "sb-sections", thread = false }: BandSpec): {
   root: HTMLElement;
   region: HTMLElement;
   line: (id: string) => HTMLElement;
@@ -36,9 +38,14 @@ function band({ lines, view, current = [], cls = "open-section", regionClass = "
   const section = document.createElement("div");
   section.className = `repo ${cls}`;
   const region = document.createElement("div");
-  region.className = regionClass;
+  region.className = thread ? RAIL_BODY_CLASS : regionClass;
   section.appendChild(region);
   root.appendChild(section);
+  const list = thread ? document.createElement("div") : region;
+  if (thread) {
+    list.setAttribute("data-thread-section", "");
+    region.appendChild(list);
+  }
   let top = 0;
   Object.defineProperty(region, "scrollTop", {
     configurable: true,
@@ -59,7 +66,7 @@ function band({ lines, view, current = [], cls = "open-section", regionClass = "
     line.className = "row";
     line.getBoundingClientRect = () => rect(i * ROW - region.scrollTop, ROW);
     ws.appendChild(line);
-    region.appendChild(ws);
+    list.appendChild(ws);
   }
   const line = (id: string): HTMLElement => {
     const found = root.querySelector<HTMLElement>(`[data-roster-row='${id}'] > .row`);
@@ -81,27 +88,22 @@ afterEach(() => {
 });
 
 describe("scrollLineIntoBand", () => {
-  it("brings a chat thread's row into view through the rail, as no band holds it", () => {
+  it("centers a chat thread's line below the view by scrolling the rail's body, as no band holds it", () => {
     // Arrange
-    const section = document.createElement("div");
-    section.setAttribute("data-thread-section", "");
-    const ws = document.createElement("div");
-    ws.setAttribute("data-roster-row", "t-1");
-    const line = document.createElement("div");
-    line.className = "row";
-    ws.append(line);
-    section.append(ws);
-    document.body.append(section);
-    const scrolled = vi.fn();
-    line.scrollIntoView = scrolled;
-
+    const b = band({ lines: 10, view: 3, thread: true });
     // Act
-    const moved = scrollLineIntoBand(line);
-
+    const moved = scrollLineIntoBand(b.line("ws-6"));
     // Assert
-    expect(moved).toBeNull();
-    expect(scrolled).toHaveBeenCalledWith({ block: "nearest" });
-    section.remove();
+    expect([moved, b.region.scrollTop]).toEqual([{ from: 0, to: 5 * ROW }, 5 * ROW]);
+  });
+
+  it("leaves a chat thread's line that already shows whole where it is", () => {
+    // Arrange
+    const b = band({ lines: 10, view: 3, thread: true });
+    // Act
+    const moved = scrollLineIntoBand(b.line("ws-1"));
+    // Assert
+    expect([moved, b.region.scrollTop]).toEqual([null, 0]);
   });
 
   it("leaves a line that already shows whole where it is", () => {
@@ -166,6 +168,26 @@ describe("scrollLineIntoBand", () => {
     const record = await forwardedRecord(capture, "sidebar.selection-scroll.orphan-row");
     expect(record.level.case).toBe("error");
     expect(record.context).toMatchObject({ workspace: "stray" });
+  });
+
+  it("refuses a chat thread's row outside the rail's body, logging it at ERROR", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const list = document.createElement("div");
+    list.setAttribute("data-thread-section", "");
+    const ws = document.createElement("div");
+    ws.setAttribute("data-roster-row", "stray-thread");
+    const line = document.createElement("div");
+    line.className = "row";
+    ws.appendChild(line);
+    list.appendChild(ws);
+    // Act
+    const act = (): unknown => scrollLineIntoBand(line);
+    // Assert
+    expect(act).toThrow(/hangs in no rail body/);
+    const record = await forwardedRecord(capture, "sidebar.selection-scroll.orphan-row");
+    expect(record.level.case).toBe("error");
+    expect(record.context).toMatchObject({ workspace: "stray-thread", thread: true });
   });
 });
 
