@@ -309,6 +309,17 @@ func (d *Daemon) WatchRosterOn(client rosterClient) *Stream[*frontendv1.Workspac
 		})
 }
 
+// WatchChat opens a zettel chat thread's chat view stream, each push the
+// thread's whole view.
+func (d *Daemon) WatchChat(thread *workspacev1.WorkspaceRef) *Stream[*frontendv1.ChatView] {
+	d.t.Helper()
+	return runStream(d.t, d.ctx,
+		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchChatResponse], error) {
+			return d.Client().WatchChat(ctx, connect.NewRequest(&agentreplv1.WatchChatRequest{Thread: thread}))
+		},
+		func(r *agentreplv1.WatchChatResponse) *frontendv1.ChatView { return r.GetView() })
+}
+
 // WatchRosterFramesOn opens a roster stream on an explicit client and carries
 // every frame whole, the planned ending included.
 func (d *Daemon) WatchRosterFramesOn(client rosterClient) *Stream[*agentreplv1.WatchWorkspaceRosterResponse] {

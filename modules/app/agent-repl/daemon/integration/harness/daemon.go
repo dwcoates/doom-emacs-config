@@ -272,12 +272,16 @@ type ServiceBinaries struct {
 	Store, Sidecar string
 }
 
+// ZettelSocketEnv is the variable a daemon reads its zettel socket from, for a
+// launcher that runs a real zettel and points the daemon at it.
+const ZettelSocketEnv = zettelclient.EnvSocket
+
 // UnservedZettelEnv is the environment entry pointing a daemon's zettel
 // socket at an unserved path under dir: no world runs a real zettel, so a
 // daemon's zettel calls fail there, and never reach the owner's own
 // zettel.sock. Every launcher of a test daemon states it.
 func UnservedZettelEnv(dir string) string {
-	return zettelclient.EnvSocket + "=" + filepath.Join(dir, "unused-zettel.sock")
+	return ZettelSocketEnv + "=" + filepath.Join(dir, "unused-zettel.sock")
 }
 
 // LockDirFor is the kernel-lock and build-report directory StartDaemon

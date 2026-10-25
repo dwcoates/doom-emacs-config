@@ -103,6 +103,7 @@ type layout struct {
 	storeDir   string // .../modules/app/agent-repl/agent-shim/shim-store
 	lockDir    string // .../modules/app/agent-repl/agent-shim/shim-lock
 	sidecarDir string // .../modules/app/agent-repl/agent-shim/claude/shim-sidecar
+	zettelDir  string // .../modules/app/agent-repl/zettel
 	// fakeDaemonDir is the Doom tier's fake daemon module.
 	fakeDaemonDir string // .../modules/app/agent-repl/lisp/testsupport/fakedaemon
 }
@@ -123,6 +124,7 @@ func resolveLayout() (layout, error) {
 	l.storeDir = filepath.Join(l.repoDir, "agent-shim", "shim-store")
 	l.lockDir = filepath.Join(l.repoDir, "agent-shim", "shim-lock")
 	l.sidecarDir = filepath.Join(l.repoDir, "agent-shim", "claude", "shim-sidecar")
+	l.zettelDir = filepath.Join(l.repoDir, "zettel")
 	l.fakeDaemonDir = filepath.Join(l.repoDir, "lisp", "testsupport", "fakedaemon")
 	for name, dir := range map[string]string{
 		"daemon module":  l.daemonDir,

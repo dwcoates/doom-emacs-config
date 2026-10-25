@@ -107,6 +107,8 @@ type World struct {
 	*harness.Daemon
 	Store   *Store
 	Sidecar *Sidecar
+	// Zettel is the world's real zettel (WorldOpts.Zettel), or nil.
+	Zettel *Zettel
 }
 
 // WorldOpts configures one World. DaemonOpts is forwarded to
@@ -143,6 +145,12 @@ type WorldOpts struct {
 	// NewWorldWithSidecarStaleness rather than by hand, so the reason a
 	// world runs with a short window is stated at its construction site.
 	SidecarStaleness SidecarStaleness
+
+	// Zettel runs a REAL zettel beside the daemon, on a socket and a graph of
+	// the world's own, for a test of the chat threads. Unset, the daemon's
+	// zettel socket is an unserved path (harness.UnservedZettelEnv), as every
+	// other world's is.
+	Zettel bool
 }
 
 // SidecarStaleness is the sidecar's LOST-policy window set, as this suite
@@ -263,6 +271,14 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	spoolRoot := t.TempDir()
 
 	daemonOpts := opts.DaemonOpts
+	var zettel *Zettel
+	if opts.Zettel {
+		zettel = startZettel(t, shortSocketPath(t, "zettel"), filepath.Join(t.TempDir(), "zettel.db"),
+			filepath.Join(logsDir, "zettel.log"), lockDir)
+		// Appended to the caller's ExtraEnv, which harness.StartDaemon appends
+		// after its own unserved zettel socket, so this one is the daemon's.
+		daemonOpts.ExtraEnv = append(append([]string{}, daemonOpts.ExtraEnv...), harness.ZettelSocketEnv+"="+zettel.Socket)
+	}
 	daemonOpts.ShimNode = node
 	daemonOpts.ShimMain = shimMain
 	daemonOpts.StoreSocket = store.Socket
@@ -309,7 +325,7 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 
 	assertOneSpoolRoot(t, daemonOpts.ExtraEnv, sidecar)
 
-	w := &World{Daemon: d, Store: store, Sidecar: sidecar}
+	w := &World{Daemon: d, Store: store, Sidecar: sidecar, Zettel: zettel}
 
 	// Registered LAST, so t.Cleanup's LIFO unwind runs this FIRST — before
 	// the store/sidecar/daemon Stop cleanups above ever touch the
@@ -320,7 +336,12 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	// Store.StartSameDB) records the exit as INTENTIONAL by setting
 	// Store.stopped; this assertion is the only reader of that bit that
 	// treats it as authoritative.
-	t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar) })
+	t.Cleanup(func() {
+		requireServicesOutlivedTheTest(t, store, sidecar)
+		if zettel != nil {
+			requireZettelOutlivedTheTest(t, zettel)
+		}
+	})
 
 	return w
 }
