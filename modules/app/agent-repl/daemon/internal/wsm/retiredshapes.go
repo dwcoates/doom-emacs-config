@@ -27,8 +27,8 @@ import (
 //
 // THE RETIRED MERGE TAB KINDS ARE NOT THIS STEP'S. A stored `conflicts` (5)
 // or `fixes` (7) tab has no arm of today's oneof to land in without deciding
-// how a merge bubble recorded before the nested tabs is drawn, so those rows
-// are left as they are (224 of the 1001 on the 2026-10-24 store).
+// how a merge bubble recorded before the nested tabs is drawn; layout 79
+// drops them (224 of the 1001 on the 2026-10-24 store).
 
 // The retired fields this step carries or drops, by message.
 const (
