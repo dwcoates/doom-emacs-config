@@ -23,6 +23,7 @@ func systemTree(t *testing.T) Layout {
 		"agent-shim/shim-lock":           "module agentrepl/shim-lock\n",
 		"agent-shim/logging/go":          "module agentrepl/logging\n",
 		"proto/helpers/go":               "module agentrepl/protohelpers\n",
+		"zettel":                         "module agentrepl/zettel\n",
 	}
 	for dir, body := range mods {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
@@ -90,6 +91,7 @@ func TestSystemModulesMapsEveryGoCoverageSystem(t *testing.T) {
 	want := map[string]string{
 		"agent-repld": "daemon", "agentrepl/shim-claude-sidecar": "sidecar", "agentrepl/shim-store": "store",
 		"agentrepl/shim-lock": "lock", "agentrepl/logging": "logging", "agentrepl/protohelpers": "protohelpers",
+		"agentrepl/zettel": "zettel",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("SystemModules = %v\nwant %v", got, want)
