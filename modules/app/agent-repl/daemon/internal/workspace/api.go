@@ -502,6 +502,10 @@ type Verbs interface {
 	// SetHidden moves the workspace into the roster's hidden section, or back
 	// out of it, and republishes the roster.
 	SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) error
+	// BacklogColdGate moves a shown workspace whose cold gate, lapsed at
+	// gateLapsedAt, has stood too long into the hidden section, once per gate
+	// (coldbacklog.Sweeper), and republishes the roster.
+	BacklogColdGate(ctx context.Context, ws ids.WorkspaceID, gateLapsedAt time.Time) error
 	// SetParent retargets the workspace's merge to parent's checkout (nil:
 	// the repository's main checkout), records parent as its roster parent,
 	// and republishes the roster. It tells the workspace's session NOTHING:

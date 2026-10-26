@@ -171,6 +171,10 @@ type fakeDB struct {
 	workspaceErr error
 	// setHiddenErr fails the hidden-flag write.
 	setHiddenErr error
+	// backlogErr fails the cold-gate backlog write; backlogs records the
+	// gate each backlog was asked for.
+	backlogErr error
+	backlogs   []time.Time
 	// setParentChange is what SetParent answers on success; setParentErr
 	// fails it. parentWrites records each retarget asked for.
 	setParentChange wsm.ParentChange
@@ -1045,6 +1049,26 @@ func (d *fakeDB) SetHidden(_ context.Context, id ids.WorkspaceID, hidden bool, a
 	}
 	d.workspaces[id] = ws
 	return nil
+}
+
+// BacklogColdGate judges as the store does: a selected, hidden or closed
+// workspace, or one already backlogged for the gate, is left as it is.
+func (d *fakeDB) BacklogColdGate(_ context.Context, id ids.WorkspaceID, gateLapsedAt, at time.Time) (bool, error) {
+	d.backlogs = append(d.backlogs, gateLapsedAt)
+	if d.backlogErr != nil {
+		return false, d.backlogErr
+	}
+	ws, ok := d.workspaces[id]
+	if !ok {
+		return false, wsm.ErrNotFound
+	}
+	if ws.Hidden || ws.Closed || ws.Current || ws.BackloggedGateAt != nil && ws.BackloggedGateAt.Equal(gateLapsedAt) {
+		return false, nil
+	}
+	stamped, gate := at, gateLapsedAt
+	ws.Hidden, ws.HiddenAt, ws.BackloggedGateAt = true, &stamped, &gate
+	d.workspaces[id] = ws
+	return true, nil
 }
 
 func (d *fakeDB) SetPriority(_ context.Context, id ids.WorkspaceID, p *wsm.Priority) error {
