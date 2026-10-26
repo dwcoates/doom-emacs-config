@@ -18,6 +18,7 @@
  * phase) reads this instead, because inside the host every page's document is
  * visible whenever the host is, shown or not.
  */
+import { perDocument } from "./per-document.js";
 
 /** What changed when a listener is told. */
 export type PresenceCause = "visibility" | "host";
@@ -107,7 +108,7 @@ export function createPresence(doc: Document, embedded: boolean): PresenceSource
 }
 
 /** The presence of each page, keyed by its document: one per page. */
-const pageSources = new WeakMap<Document, PresenceSource>();
+const presenceOf = perDocument((doc) => createPresence(doc, pageIsEmbedded(window)));
 
 /** Whether this page runs inside another page's iframe (the host's). */
 export function pageIsEmbedded(win: Window): boolean {
@@ -116,10 +117,5 @@ export function pageIsEmbedded(win: Window): boolean {
 
 /** The presence of this page: one per page (per document), made on first use. */
 export function pagePresence(): PresenceSource {
-  let source = pageSources.get(document);
-  if (source === undefined) {
-    source = createPresence(document, pageIsEmbedded(window));
-    pageSources.set(document, source);
-  }
-  return source;
+  return presenceOf(document);
 }

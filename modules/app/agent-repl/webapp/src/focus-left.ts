@@ -16,6 +16,7 @@
  *     see this one for itself.
  */
 import { log } from "./log.js";
+import { perDocument } from "./per-document.js";
 import { pagePresence, type Presence } from "./presence.js";
 
 /** Told why the focus left the page. */
@@ -71,14 +72,9 @@ export function createFocusLeft(win: Window, presence: Presence): FocusLeftSourc
 }
 
 /** The focus-left signal of each page, keyed by its document: one per page. */
-const pageSources = new WeakMap<Document, FocusLeftSource>();
+const focusLeftOf = perDocument(() => createFocusLeft(window, pagePresence()));
 
 /** The focus-left signal of this page: one per page (per document), made on first use. */
 export function pageFocusLeft(): FocusLeftSource {
-  let source = pageSources.get(document);
-  if (source === undefined) {
-    source = createFocusLeft(window, pagePresence());
-    pageSources.set(document, source);
-  }
-  return source;
+  return focusLeftOf(document);
 }
