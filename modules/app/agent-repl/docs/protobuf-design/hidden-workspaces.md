@@ -8,6 +8,17 @@ section already uses. The section itself is not drawn when nothing is hidden.
 still draws. Clicking a row in the hidden section shows it again, and so does
 `SPC TAB H`, which picks a hidden workspace in Emacs and switches to it.
 
+The section is drawn as the BACKLOG (owner request, 2026-10-26), and the
+daemon moves workspaces into it on its own: a shown workspace whose cold gate
+has stood for over a day of weekday time (weekends never count) is moved in as
+a hide would move it (`coldbacklog.Sweeper`, `workspace.Verbs.BacklogColdGate`),
+once per gate. The row records the gate it was moved for
+(`workspaces.cold_gate_backlogged_at`, layout 80), so a workspace the user
+shows again stays shown until a new conversation goes cold into a new gate.
+The workspace the user is looking at is never moved from under them; the first
+sweep after they move off it moves it. Answering the gate shows it again, as
+it does for any hidden workspace.
+
 The owner asked for the work to be planned and executed without waiting on
 design rounds, so the shapes below were settled by following the nearest
 precedents (`frontend.v1.RosterMergedSection`, `agentrepl.v1.SetWorkspacePriority`,
