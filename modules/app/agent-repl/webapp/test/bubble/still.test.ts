@@ -1,21 +1,13 @@
 // @vitest-environment jsdom
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { filesUnder } from "../files-under.js";
 import { isStill } from "./still.js";
 
 const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-/** Every TypeScript file under DIR, recursively. */
-function sources(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return sources(full);
-    return entry.name.endsWith(".ts") ? [full] : [];
-  });
-}
 
 describe("isStill", () => {
   it.each([
@@ -37,7 +29,7 @@ describe("isStill", () => {
     const here = fileURLToPath(import.meta.url);
     const helper = path.join(path.dirname(here), "still.ts");
     // Act
-    const handRolled = sources(TEST_ROOT)
+    const handRolled = filesUnder(TEST_ROOT)
       .filter((file) => file !== here && file !== helper)
       .filter((file) => readFileSync(file, "utf8").includes('hasAttribute("data-wave")'));
     // Assert
