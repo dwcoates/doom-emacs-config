@@ -127,13 +127,18 @@ export function governedRowAt(target: EventTarget | null, host: HTMLElement): HT
   return row.hasAttribute(SELECTION_GOVERNED_ATTRIBUTE) ? row : null;
 }
 
+/** Whether ROW draws a response, the one unit whose tree a hover boxes and a click answers. */
+export function isResponseRow(row: HTMLElement): boolean {
+  return row.getAttribute("data-unit") === "response";
+}
+
 /**
  * The node of a response's tree TARGET is on, inside the governed ROW, or
  * null: a line drawing a node, in a drawn tree, of a response the daemon says
  * can be selected. What a hover boxes (branch-hover.ts) and a click answers.
  */
 export function branchAt(row: HTMLElement, target: Element): { line: HTMLElement; label: string } | null {
-  if (row.getAttribute("data-unit") !== "response" || !row.hasAttribute(SELECTABLE_ATTRIBUTE)) return null;
+  if (!isResponseRow(row) || !row.hasAttribute(SELECTABLE_ATTRIBUTE)) return null;
   const line = target.closest<HTMLElement>(`.${TREE_CLASS} .${TREE_LINE_CLASS}[${TREE_NODE_ATTRIBUTE}]`);
   if (line === null || !row.contains(line)) return null;
   const label = line.getAttribute(TREE_NODE_ATTRIBUTE);

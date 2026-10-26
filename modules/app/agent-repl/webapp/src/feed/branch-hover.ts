@@ -17,7 +17,7 @@
  * meanwhile.
  */
 import { log } from "../log.js";
-import { branchAt, governedRowAt } from "./bubble-selection.js";
+import { branchAt, governedRowAt, isResponseRow } from "./bubble-selection.js";
 import { TREE_CLASS, TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
 import { feedRowId } from "./row-id.js";
 import { boxSubtree, unboxAll, type SubtreeBox } from "./subtree-box.js";
@@ -59,7 +59,7 @@ const REFERENCE_BOX: SubtreeBox = {
  * a citation is a response's own cross-reference, so only a response's count.
  */
 export function citationAt(row: HTMLElement, target: Element): string | null {
-  if (row.getAttribute("data-unit") !== "response") return null;
+  if (!isResponseRow(row)) return null;
   const citation = target.closest<HTMLElement>(`.${TREE_CLASS} .${TREE_REFERENCE_CLASS}`);
   if (citation === null || !row.contains(citation)) return null;
   const label = citation.getAttribute(TREE_REFERENCE_ATTRIBUTE);
