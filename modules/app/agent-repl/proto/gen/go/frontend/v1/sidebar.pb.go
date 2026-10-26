@@ -1165,10 +1165,15 @@ func (x *RosterThreadOutlineCrumb) GetLabel() *RosterThreadOutlineLabel {
 	return nil
 }
 
-// A run's label: its first question's text, verbatim.
+// A run's label: its first question, abbreviated where the daemon has
+// minted an abbreviation (zettel.v1.NodeQuestion.abbreviation).
 type RosterThreadOutlineLabel struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What the row draws: the question's abbreviation, or the question
+	// verbatim while it has none.
+	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	// The question verbatim, for the row's tooltip.
+	Question      string `protobuf:"bytes,2,opt,name=question,proto3" json:"question,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1206,6 +1211,13 @@ func (*RosterThreadOutlineLabel) Descriptor() ([]byte, []int) {
 func (x *RosterThreadOutlineLabel) GetText() string {
 	if x != nil {
 		return x.Text
+	}
+	return ""
+}
+
+func (x *RosterThreadOutlineLabel) GetQuestion() string {
+	if x != nil {
+		return x.Question
 	}
 	return ""
 }
@@ -10742,9 +10754,10 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x04last\x18\x03 \x01(\v2%.frontend.v1.RosterThreadOutlineCrumbR\x04last\"~\n" +
 	"\x18RosterThreadOutlineCrumb\x12%\n" +
 	"\x04node\x18\x01 \x01(\v2\x11.zettel.v1.NodeIdR\x04node\x12;\n" +
-	"\x05label\x18\x02 \x01(\v2%.frontend.v1.RosterThreadOutlineLabelR\x05label\".\n" +
+	"\x05label\x18\x02 \x01(\v2%.frontend.v1.RosterThreadOutlineLabelR\x05label\"J\n" +
 	"\x18RosterThreadOutlineLabel\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\xb5\x02\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12\x1a\n" +
+	"\bquestion\x18\x02 \x01(\tR\bquestion\"\xb5\x02\n" +
 	"\x16RosterThreadOutlineRow\x12%\n" +
 	"\x04node\x18\x01 \x01(\v2\x11.zettel.v1.NodeIdR\x04node\x12;\n" +
 	"\x05label\x18\x02 \x01(\v2%.frontend.v1.RosterThreadOutlineLabelR\x05label\x12\x14\n" +

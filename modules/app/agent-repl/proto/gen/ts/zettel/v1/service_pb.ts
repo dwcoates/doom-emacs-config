@@ -21,12 +21,14 @@ import type { RecordSightingsRequestSchema, RecordSightingsResponseSchema } from
 import { file_zettel_v1_endpoint_record_sightings } from "./endpoint_record_sightings_pb";
 import type { SearchThreadsRequestSchema, SearchThreadsResponseSchema } from "./endpoint_search_threads_pb";
 import { file_zettel_v1_endpoint_search_threads } from "./endpoint_search_threads_pb";
+import type { SetQuestionAbbreviationRequestSchema, SetQuestionAbbreviationResponseSchema } from "./endpoint_set_question_abbreviation_pb";
+import { file_zettel_v1_endpoint_set_question_abbreviation } from "./endpoint_set_question_abbreviation_pb";
 
 /**
  * Describes the file zettel/v1/service.proto.
  */
 export const file_zettel_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("Chd6ZXR0ZWwvdjEvc2VydmljZS5wcm90bxIJemV0dGVsLnYxMqYDCgZaZXR0ZWwSVQoOUmVjb3JkRXhjaGFuZ2USIC56ZXR0ZWwudjEuUmVjb3JkRXhjaGFuZ2VSZXF1ZXN0GiEuemV0dGVsLnYxLlJlY29yZEV4Y2hhbmdlUmVzcG9uc2USRgoJR2V0VGhyZWFkEhsuemV0dGVsLnYxLkdldFRocmVhZFJlcXVlc3QaHC56ZXR0ZWwudjEuR2V0VGhyZWFkUmVzcG9uc2USUgoNU2VhcmNoVGhyZWFkcxIfLnpldHRlbC52MS5TZWFyY2hUaHJlYWRzUmVxdWVzdBogLnpldHRlbC52MS5TZWFyY2hUaHJlYWRzUmVzcG9uc2USWAoPUmVjb3JkU2lnaHRpbmdzEiEuemV0dGVsLnYxLlJlY29yZFNpZ2h0aW5nc1JlcXVlc3QaIi56ZXR0ZWwudjEuUmVjb3JkU2lnaHRpbmdzUmVzcG9uc2USTwoMRGVsZXRlVGhyZWFkEh4uemV0dGVsLnYxLkRlbGV0ZVRocmVhZFJlcXVlc3QaHy56ZXR0ZWwudjEuRGVsZXRlVGhyZWFkUmVzcG9uc2VCJFoiYWdlbnRyZXBsL3Byb3RvL3pldHRlbC92MTt6ZXR0ZWx2MWIGcHJvdG8z", [file_zettel_v1_endpoint_delete_thread, file_zettel_v1_endpoint_get_thread, file_zettel_v1_endpoint_record_exchange, file_zettel_v1_endpoint_record_sightings, file_zettel_v1_endpoint_search_threads]);
+  fileDesc("Chd6ZXR0ZWwvdjEvc2VydmljZS5wcm90bxIJemV0dGVsLnYxMpgECgZaZXR0ZWwSVQoOUmVjb3JkRXhjaGFuZ2USIC56ZXR0ZWwudjEuUmVjb3JkRXhjaGFuZ2VSZXF1ZXN0GiEuemV0dGVsLnYxLlJlY29yZEV4Y2hhbmdlUmVzcG9uc2USRgoJR2V0VGhyZWFkEhsuemV0dGVsLnYxLkdldFRocmVhZFJlcXVlc3QaHC56ZXR0ZWwudjEuR2V0VGhyZWFkUmVzcG9uc2USUgoNU2VhcmNoVGhyZWFkcxIfLnpldHRlbC52MS5TZWFyY2hUaHJlYWRzUmVxdWVzdBogLnpldHRlbC52MS5TZWFyY2hUaHJlYWRzUmVzcG9uc2USWAoPUmVjb3JkU2lnaHRpbmdzEiEuemV0dGVsLnYxLlJlY29yZFNpZ2h0aW5nc1JlcXVlc3QaIi56ZXR0ZWwudjEuUmVjb3JkU2lnaHRpbmdzUmVzcG9uc2UScAoXU2V0UXVlc3Rpb25BYmJyZXZpYXRpb24SKS56ZXR0ZWwudjEuU2V0UXVlc3Rpb25BYmJyZXZpYXRpb25SZXF1ZXN0GiouemV0dGVsLnYxLlNldFF1ZXN0aW9uQWJicmV2aWF0aW9uUmVzcG9uc2USTwoMRGVsZXRlVGhyZWFkEh4uemV0dGVsLnYxLkRlbGV0ZVRocmVhZFJlcXVlc3QaHy56ZXR0ZWwudjEuRGVsZXRlVGhyZWFkUmVzcG9uc2VCJFoiYWdlbnRyZXBsL3Byb3RvL3pldHRlbC92MTt6ZXR0ZWx2MWIGcHJvdG8z", [file_zettel_v1_endpoint_delete_thread, file_zettel_v1_endpoint_get_thread, file_zettel_v1_endpoint_record_exchange, file_zettel_v1_endpoint_record_sightings, file_zettel_v1_endpoint_search_threads, file_zettel_v1_endpoint_set_question_abbreviation]);
 
 /**
  * ---- Exchanges: an answered question becoming a node ----
@@ -73,6 +75,16 @@ export const Zettel: GenService<{
     methodKind: "unary";
     input: typeof RecordSightingsRequestSchema;
     output: typeof RecordSightingsResponseSchema;
+  },
+  /**
+   * Set one node's question abbreviation, minted after its node was recorded.
+   *
+   * @generated from rpc zettel.v1.Zettel.SetQuestionAbbreviation
+   */
+  setQuestionAbbreviation: {
+    methodKind: "unary";
+    input: typeof SetQuestionAbbreviationRequestSchema;
+    output: typeof SetQuestionAbbreviationResponseSchema;
   },
   /**
    * Destroy one thread's nodes, revisions and sightings (the thread is deleted).

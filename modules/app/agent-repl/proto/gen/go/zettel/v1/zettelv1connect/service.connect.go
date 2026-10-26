@@ -48,18 +48,22 @@ const (
 	ZettelSearchThreadsProcedure = "/zettel.v1.Zettel/SearchThreads"
 	// ZettelRecordSightingsProcedure is the fully-qualified name of the Zettel's RecordSightings RPC.
 	ZettelRecordSightingsProcedure = "/zettel.v1.Zettel/RecordSightings"
+	// ZettelSetQuestionAbbreviationProcedure is the fully-qualified name of the Zettel's
+	// SetQuestionAbbreviation RPC.
+	ZettelSetQuestionAbbreviationProcedure = "/zettel.v1.Zettel/SetQuestionAbbreviation"
 	// ZettelDeleteThreadProcedure is the fully-qualified name of the Zettel's DeleteThread RPC.
 	ZettelDeleteThreadProcedure = "/zettel.v1.Zettel/DeleteThread"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
-	zettelServiceDescriptor               = v1.File_zettel_v1_service_proto.Services().ByName("Zettel")
-	zettelRecordExchangeMethodDescriptor  = zettelServiceDescriptor.Methods().ByName("RecordExchange")
-	zettelGetThreadMethodDescriptor       = zettelServiceDescriptor.Methods().ByName("GetThread")
-	zettelSearchThreadsMethodDescriptor   = zettelServiceDescriptor.Methods().ByName("SearchThreads")
-	zettelRecordSightingsMethodDescriptor = zettelServiceDescriptor.Methods().ByName("RecordSightings")
-	zettelDeleteThreadMethodDescriptor    = zettelServiceDescriptor.Methods().ByName("DeleteThread")
+	zettelServiceDescriptor                       = v1.File_zettel_v1_service_proto.Services().ByName("Zettel")
+	zettelRecordExchangeMethodDescriptor          = zettelServiceDescriptor.Methods().ByName("RecordExchange")
+	zettelGetThreadMethodDescriptor               = zettelServiceDescriptor.Methods().ByName("GetThread")
+	zettelSearchThreadsMethodDescriptor           = zettelServiceDescriptor.Methods().ByName("SearchThreads")
+	zettelRecordSightingsMethodDescriptor         = zettelServiceDescriptor.Methods().ByName("RecordSightings")
+	zettelSetQuestionAbbreviationMethodDescriptor = zettelServiceDescriptor.Methods().ByName("SetQuestionAbbreviation")
+	zettelDeleteThreadMethodDescriptor            = zettelServiceDescriptor.Methods().ByName("DeleteThread")
 )
 
 // ZettelClient is a client for the zettel.v1.Zettel service.
@@ -72,6 +76,8 @@ type ZettelClient interface {
 	SearchThreads(context.Context, *connect.Request[v1.SearchThreadsRequest]) (*connect.Response[v1.SearchThreadsResponse], error)
 	// Count one sighting per named node.
 	RecordSightings(context.Context, *connect.Request[v1.RecordSightingsRequest]) (*connect.Response[v1.RecordSightingsResponse], error)
+	// Set one node's question abbreviation, minted after its node was recorded.
+	SetQuestionAbbreviation(context.Context, *connect.Request[v1.SetQuestionAbbreviationRequest]) (*connect.Response[v1.SetQuestionAbbreviationResponse], error)
 	// Destroy one thread's nodes, revisions and sightings (the thread is deleted).
 	DeleteThread(context.Context, *connect.Request[v1.DeleteThreadRequest]) (*connect.Response[v1.DeleteThreadResponse], error)
 }
@@ -110,6 +116,12 @@ func NewZettelClient(httpClient connect.HTTPClient, baseURL string, opts ...conn
 			connect.WithSchema(zettelRecordSightingsMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		setQuestionAbbreviation: connect.NewClient[v1.SetQuestionAbbreviationRequest, v1.SetQuestionAbbreviationResponse](
+			httpClient,
+			baseURL+ZettelSetQuestionAbbreviationProcedure,
+			connect.WithSchema(zettelSetQuestionAbbreviationMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		deleteThread: connect.NewClient[v1.DeleteThreadRequest, v1.DeleteThreadResponse](
 			httpClient,
 			baseURL+ZettelDeleteThreadProcedure,
@@ -121,11 +133,12 @@ func NewZettelClient(httpClient connect.HTTPClient, baseURL string, opts ...conn
 
 // zettelClient implements ZettelClient.
 type zettelClient struct {
-	recordExchange  *connect.Client[v1.RecordExchangeRequest, v1.RecordExchangeResponse]
-	getThread       *connect.Client[v1.GetThreadRequest, v1.GetThreadResponse]
-	searchThreads   *connect.Client[v1.SearchThreadsRequest, v1.SearchThreadsResponse]
-	recordSightings *connect.Client[v1.RecordSightingsRequest, v1.RecordSightingsResponse]
-	deleteThread    *connect.Client[v1.DeleteThreadRequest, v1.DeleteThreadResponse]
+	recordExchange          *connect.Client[v1.RecordExchangeRequest, v1.RecordExchangeResponse]
+	getThread               *connect.Client[v1.GetThreadRequest, v1.GetThreadResponse]
+	searchThreads           *connect.Client[v1.SearchThreadsRequest, v1.SearchThreadsResponse]
+	recordSightings         *connect.Client[v1.RecordSightingsRequest, v1.RecordSightingsResponse]
+	setQuestionAbbreviation *connect.Client[v1.SetQuestionAbbreviationRequest, v1.SetQuestionAbbreviationResponse]
+	deleteThread            *connect.Client[v1.DeleteThreadRequest, v1.DeleteThreadResponse]
 }
 
 // RecordExchange calls zettel.v1.Zettel.RecordExchange.
@@ -148,6 +161,11 @@ func (c *zettelClient) RecordSightings(ctx context.Context, req *connect.Request
 	return c.recordSightings.CallUnary(ctx, req)
 }
 
+// SetQuestionAbbreviation calls zettel.v1.Zettel.SetQuestionAbbreviation.
+func (c *zettelClient) SetQuestionAbbreviation(ctx context.Context, req *connect.Request[v1.SetQuestionAbbreviationRequest]) (*connect.Response[v1.SetQuestionAbbreviationResponse], error) {
+	return c.setQuestionAbbreviation.CallUnary(ctx, req)
+}
+
 // DeleteThread calls zettel.v1.Zettel.DeleteThread.
 func (c *zettelClient) DeleteThread(ctx context.Context, req *connect.Request[v1.DeleteThreadRequest]) (*connect.Response[v1.DeleteThreadResponse], error) {
 	return c.deleteThread.CallUnary(ctx, req)
@@ -163,6 +181,8 @@ type ZettelHandler interface {
 	SearchThreads(context.Context, *connect.Request[v1.SearchThreadsRequest]) (*connect.Response[v1.SearchThreadsResponse], error)
 	// Count one sighting per named node.
 	RecordSightings(context.Context, *connect.Request[v1.RecordSightingsRequest]) (*connect.Response[v1.RecordSightingsResponse], error)
+	// Set one node's question abbreviation, minted after its node was recorded.
+	SetQuestionAbbreviation(context.Context, *connect.Request[v1.SetQuestionAbbreviationRequest]) (*connect.Response[v1.SetQuestionAbbreviationResponse], error)
 	// Destroy one thread's nodes, revisions and sightings (the thread is deleted).
 	DeleteThread(context.Context, *connect.Request[v1.DeleteThreadRequest]) (*connect.Response[v1.DeleteThreadResponse], error)
 }
@@ -197,6 +217,12 @@ func NewZettelHandler(svc ZettelHandler, opts ...connect.HandlerOption) (string,
 		connect.WithSchema(zettelRecordSightingsMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	zettelSetQuestionAbbreviationHandler := connect.NewUnaryHandler(
+		ZettelSetQuestionAbbreviationProcedure,
+		svc.SetQuestionAbbreviation,
+		connect.WithSchema(zettelSetQuestionAbbreviationMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	zettelDeleteThreadHandler := connect.NewUnaryHandler(
 		ZettelDeleteThreadProcedure,
 		svc.DeleteThread,
@@ -213,6 +239,8 @@ func NewZettelHandler(svc ZettelHandler, opts ...connect.HandlerOption) (string,
 			zettelSearchThreadsHandler.ServeHTTP(w, r)
 		case ZettelRecordSightingsProcedure:
 			zettelRecordSightingsHandler.ServeHTTP(w, r)
+		case ZettelSetQuestionAbbreviationProcedure:
+			zettelSetQuestionAbbreviationHandler.ServeHTTP(w, r)
 		case ZettelDeleteThreadProcedure:
 			zettelDeleteThreadHandler.ServeHTTP(w, r)
 		default:
@@ -238,6 +266,10 @@ func (UnimplementedZettelHandler) SearchThreads(context.Context, *connect.Reques
 
 func (UnimplementedZettelHandler) RecordSightings(context.Context, *connect.Request[v1.RecordSightingsRequest]) (*connect.Response[v1.RecordSightingsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zettel.v1.Zettel.RecordSightings is not implemented"))
+}
+
+func (UnimplementedZettelHandler) SetQuestionAbbreviation(context.Context, *connect.Request[v1.SetQuestionAbbreviationRequest]) (*connect.Response[v1.SetQuestionAbbreviationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zettel.v1.Zettel.SetQuestionAbbreviation is not implemented"))
 }
 
 func (UnimplementedZettelHandler) DeleteThread(context.Context, *connect.Request[v1.DeleteThreadRequest]) (*connect.Response[v1.DeleteThreadResponse], error) {

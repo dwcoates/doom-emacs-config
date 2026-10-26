@@ -128,6 +128,11 @@ message NodeQuestion {
   // The question, verbatim as asked (the prompt the user typed, without any
   // quoted material the daemon added for the model).
   string text = 1;
+  // A few words standing for the question where its whole text would not
+  // fit (the sidebar's branch outline). The daemon mints it; UNSET until it
+  // has (SetQuestionAbbreviation), and on a question short enough to be its
+  // own.
+  optional string abbreviation = 2;
 }
 
 // One revision of a node's answer.
