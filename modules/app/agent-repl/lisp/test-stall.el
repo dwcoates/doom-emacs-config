@@ -215,6 +215,88 @@ Each element is what the input check answers on that run."
   (should (eq (cdr (assq :stall-sampler agent-repl--required-timer-keys))
               #'agent-repl--arm-stall-sampler)))
 
+(defmacro agent-repl-test-stall--with-debug-on-quit (&rest body)
+  "Run BODY with `debug-on-quit' nil as Lisp left it, and a recording log."
+  (declare (indent 0))
+  `(let ((debug-on-quit nil))
+     (let ((agent-repl-stall--debug-on-quit-lisp nil)
+           (agent-repl-test-stall--records nil))
+       (cl-letf (((symbol-function 'agent-repl--info)
+                  (agent-repl-test--record-into agent-repl-test-stall--records)))
+         ,@body))))
+
+(defun agent-repl-test-stall--write-from-c (value)
+  "Set `debug-on-quit' to VALUE without its watcher, as Emacs's SIGUSR2 handler does."
+  (remove-variable-watcher 'debug-on-quit #'agent-repl-stall--note-debug-on-quit)
+  (unwind-protect (setq debug-on-quit value)
+    (add-variable-watcher 'debug-on-quit #'agent-repl-stall--note-debug-on-quit)))
+
+(ert-deftest agent-repl-test-stall-a-lisp-set-of-debug-on-quit-is-recorded ()
+  "A Lisp `setq' of `debug-on-quit' is the value Lisp left."
+  (agent-repl-test-stall--with-debug-on-quit
+    ;; Act
+    (setq debug-on-quit t)
+    ;; Assert
+    (should (eq agent-repl-stall--debug-on-quit-lisp t))))
+
+(ert-deftest agent-repl-test-stall-a-let-of-debug-on-quit-is-recorded-while-it-holds ()
+  "Inside a let, the let's value is the one Lisp left."
+  (agent-repl-test-stall--with-debug-on-quit
+    ;; Act
+    (let ((debug-on-quit t))
+      ;; Assert
+      (should (eq agent-repl-stall--debug-on-quit-lisp t)))))
+
+(ert-deftest agent-repl-test-stall-unbinding-debug-on-quit-records-the-outer-value ()
+  "The end of a let leaves the outer value, and that is what is recorded."
+  (agent-repl-test-stall--with-debug-on-quit
+    ;; Arrange
+    (setq debug-on-quit t)
+    ;; Act
+    (let ((debug-on-quit nil))
+      (setq debug-on-quit nil))
+    ;; Assert
+    (should (eq agent-repl-stall--debug-on-quit-lisp t))))
+
+(ert-deftest agent-repl-test-stall-a-buffer-local-debug-on-quit-is-not-recorded ()
+  "A buffer-local set leaves the global value as it was."
+  (agent-repl-test-stall--with-debug-on-quit
+    ;; Act: the watcher is called directly, since making `debug-on-quit'
+    ;; buffer-local for real changes how Emacs reports every later let.
+    (agent-repl-stall--note-debug-on-quit 'debug-on-quit t 'set (current-buffer))
+    ;; Assert
+    (should-not agent-repl-stall--debug-on-quit-lisp)))
+
+(ert-deftest agent-repl-test-stall-a-write-from-c-is-put-back-and-logged ()
+  "SIGUSR2's write of `debug-on-quit' is undone as the debugger is entered."
+  (agent-repl-test-stall--with-debug-on-quit
+    ;; Arrange
+    (agent-repl-test-stall--write-from-c t)
+    ;; Act
+    (agent-repl-stall--restore-debug-on-quit 'error '(quit))
+    ;; Assert
+    (should-not debug-on-quit)
+    (should-not agent-repl-stall--debug-on-quit-lisp)
+    (should (equal agent-repl-test-stall--records
+                   (list (format "elisp.stall.debug-on-quit-restored from=t to=nil reason=set-outside-lisp event=%S"
+                                 debug-on-event))))))
+
+(ert-deftest agent-repl-test-stall-a-debug-on-quit-left-by-lisp-is-kept ()
+  "A `debug-on-quit' turned on from Lisp survives entering the debugger, unlogged."
+  (agent-repl-test-stall--with-debug-on-quit
+    ;; Arrange
+    (setq debug-on-quit t)
+    ;; Act
+    (agent-repl-stall--restore-debug-on-quit 'error '(quit))
+    ;; Assert
+    (should (eq debug-on-quit t))
+    (should-not agent-repl-test-stall--records)))
+
+(ert-deftest agent-repl-test-stall-the-debug-on-quit-guard-is-installed ()
+  "Loading stall.el watches `debug-on-quit' and checks it as `debug' is entered."
+  (should (memq #'agent-repl-stall--note-debug-on-quit (get-variable-watchers 'debug-on-quit)))
+  (should (advice-member-p #'agent-repl-stall--restore-debug-on-quit 'debug)))
+
 (provide 'test-stall)
 
 ;;; test-stall.el ends here
