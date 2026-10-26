@@ -8,10 +8,7 @@
 // box it styles:
 //
 //   - a section's fold: RosterRepoSection.fold, RosterMergedSection.fold,
-//     RosterHiddenSection.fold, RosterOpenSection.fold;
-//   - what the open section's repository sections show, their workspaces or
-//     their merge queues: RosterOpenSection.shows, restated on each
-//     RosterRepoSection.shows.
+//     RosterHiddenSection.fold, RosterOpenSection.fold.
 //
 // It is DURABLE: it survives a daemon restart.
 //
@@ -39,7 +36,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_sidebar_view.proto.
  */
 export const file_agentrepl_v1_endpoint_update_sidebar_view: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NpZGViYXJfdmlldy5wcm90bxIMYWdlbnRyZXBsLnYxIq8BChhVcGRhdGVTaWRlYmFyVmlld1JlcXVlc3QSPAoMZm9sZF9zZWN0aW9uGAEgASgLMiQuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3Rm9sZFNlY3Rpb25IABI2CglzaG93X29wZW4YAyABKAsyIS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdTaG93T3BlbkgAQggKBmNoYW5nZUoECAIQA1INc2hvd19ncm91cGluZyKfAQoTU2lkZWJhclZpZXdTaG93T3BlbhI9Cgp3b3Jrc3BhY2VzGAEgASgLMicuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3U2hvd1dvcmtzcGFjZXNIABJACgxtZXJnZV9xdWV1ZXMYAiABKAsyKC5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdTaG93TWVyZ2VRdWV1ZXNIAEIHCgVzaG93cyIbChlTaWRlYmFyVmlld1Nob3dXb3Jrc3BhY2VzIhwKGlNpZGViYXJWaWV3U2hvd01lcmdlUXVldWVzIssDChZTaWRlYmFyVmlld0ZvbGRTZWN0aW9uEjEKCnJlcG9zaXRvcnkYASABKAsyGy53b3Jrc3BhY2UudjEuUmVwb3NpdG9yeVJlZkgAEkIKD3JlY2VudGx5X21lcmdlZBgDIAEoCzInLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld1JlY2VudGx5TWVyZ2VkSAASMQoGaGlkZGVuGAcgASgLMh8uYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3SGlkZGVuSAASLQoEb3BlbhgJIAEoCzIdLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld09wZW5IABIxCgpzdWJzZWN0aW9uGAogASgLMhsuYWdlbnRyZXBsLnYxLlN1YnNlY3Rpb25SZWZIABIxCgZleHBhbmQYBCABKAsyHy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdFeHBhbmRIARI1Cghjb2xsYXBzZRgFIAEoCzIhLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0NvbGxhcHNlSAFCCQoHc2VjdGlvbkIGCgRmb2xkSgQIAhADSgQIBhAHSgQICBAJUgZ2aWV3ZWRSBHRhc2tSCG1hdHVyaXR5IhsKGVNpZGViYXJWaWV3UmVjZW50bHlNZXJnZWQiEwoRU2lkZWJhclZpZXdIaWRkZW4iEQoPU2lkZWJhclZpZXdPcGVuIhMKEVNpZGViYXJWaWV3RXhwYW5kIhUKE1NpZGViYXJWaWV3Q29sbGFwc2UilwEKGVVwZGF0ZVNpZGViYXJWaWV3UmVzcG9uc2USOQoHc3VjY2VzcxgBIAEoCzImLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld1N1Y2Nlc3NIABI1CgVlcnJvchgCIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld0Vycm9ySABCCAoGcmVzdWx0IhoKGFVwZGF0ZVNpZGViYXJWaWV3U3VjY2VzcyKbAgoWVXBkYXRlU2lkZWJhclZpZXdFcnJvchJOChJ1bmtub3duX3JlcG9zaXRvcnkYASABKAsyMC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdVbmtub3duUmVwb3NpdG9yeUgAEk4KEnVua25vd25fc3Vic2VjdGlvbhgDIAEoCzIwLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld1Vua25vd25TdWJzZWN0aW9uSAASRAoNaG9sZHNfY3VycmVudBgEIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVTaWRlYmFyVmlld0hvbGRzQ3VycmVudEgAQgcKBWNhdXNlSgQIAhADUgx1bmtub3duX3Rhc2siJAoiVXBkYXRlU2lkZWJhclZpZXdVbmtub3duU3Vic2VjdGlvbiIkCiJVcGRhdGVTaWRlYmFyVmlld1Vua25vd25SZXBvc2l0b3J5Ih8KHVVwZGF0ZVNpZGViYXJWaWV3SG9sZHNDdXJyZW50QipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NpZGViYXJfdmlldy5wcm90bxIMYWdlbnRyZXBsLnYxIogBChhVcGRhdGVTaWRlYmFyVmlld1JlcXVlc3QSPAoMZm9sZF9zZWN0aW9uGAEgASgLMiQuYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3Rm9sZFNlY3Rpb25IAEIICgZjaGFuZ2VKBAgCEANKBAgDEARSDXNob3dfZ3JvdXBpbmdSCXNob3dfb3BlbiLLAwoWU2lkZWJhclZpZXdGb2xkU2VjdGlvbhIxCgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIABJCCg9yZWNlbnRseV9tZXJnZWQYAyABKAsyJy5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdSZWNlbnRseU1lcmdlZEgAEjEKBmhpZGRlbhgHIAEoCzIfLmFnZW50cmVwbC52MS5TaWRlYmFyVmlld0hpZGRlbkgAEi0KBG9wZW4YCSABKAsyHS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdPcGVuSAASMQoKc3Vic2VjdGlvbhgKIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASMQoGZXhwYW5kGAQgASgLMh8uYWdlbnRyZXBsLnYxLlNpZGViYXJWaWV3RXhwYW5kSAESNQoIY29sbGFwc2UYBSABKAsyIS5hZ2VudHJlcGwudjEuU2lkZWJhclZpZXdDb2xsYXBzZUgBQgkKB3NlY3Rpb25CBgoEZm9sZEoECAIQA0oECAYQB0oECAgQCVIGdmlld2VkUgR0YXNrUghtYXR1cml0eSIbChlTaWRlYmFyVmlld1JlY2VudGx5TWVyZ2VkIhMKEVNpZGViYXJWaWV3SGlkZGVuIhEKD1NpZGViYXJWaWV3T3BlbiITChFTaWRlYmFyVmlld0V4cGFuZCIVChNTaWRlYmFyVmlld0NvbGxhcHNlIpcBChlVcGRhdGVTaWRlYmFyVmlld1Jlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdFcnJvckgAQggKBnJlc3VsdCIaChhVcGRhdGVTaWRlYmFyVmlld1N1Y2Nlc3MimwIKFlVwZGF0ZVNpZGViYXJWaWV3RXJyb3ISTgoSdW5rbm93bl9yZXBvc2l0b3J5GAEgASgLMjAuYWdlbnRyZXBsLnYxLlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blJlcG9zaXRvcnlIABJOChJ1bmtub3duX3N1YnNlY3Rpb24YAyABKAsyMC5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdVbmtub3duU3Vic2VjdGlvbkgAEkQKDWhvbGRzX2N1cnJlbnQYBCABKAsyKy5hZ2VudHJlcGwudjEuVXBkYXRlU2lkZWJhclZpZXdIb2xkc0N1cnJlbnRIAEIHCgVjYXVzZUoECAIQA1IMdW5rbm93bl90YXNrIiQKIlVwZGF0ZVNpZGViYXJWaWV3VW5rbm93blN1YnNlY3Rpb24iJAoiVXBkYXRlU2lkZWJhclZpZXdVbmtub3duUmVwb3NpdG9yeSIfCh1VcGRhdGVTaWRlYmFyVmlld0hvbGRzQ3VycmVudEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.UpdateSidebarViewRequest
@@ -59,15 +56,6 @@ export type UpdateSidebarViewRequest = Message<"agentrepl.v1.UpdateSidebarViewRe
      */
     value: SidebarViewFoldSection;
     case: "foldSection";
-  } | {
-    /**
-     * Show the open section's repository sections' workspaces, or their
-     * merge queues (frontend.v1.RosterOpenSection.shows).
-     *
-     * @generated from field: agentrepl.v1.SidebarViewShowOpen show_open = 3;
-     */
-    value: SidebarViewShowOpen;
-    case: "showOpen";
   } | { case: undefined; value?: undefined };
 };
 
@@ -77,74 +65,6 @@ export type UpdateSidebarViewRequest = Message<"agentrepl.v1.UpdateSidebarViewRe
  */
 export const UpdateSidebarViewRequestSchema: GenMessage<UpdateSidebarViewRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 0);
-
-/**
- * What the open section's repository sections show. There is nothing to
- * refuse: the roster carries exactly one open section.
- *
- * @generated from message agentrepl.v1.SidebarViewShowOpen
- */
-export type SidebarViewShowOpen = Message<"agentrepl.v1.SidebarViewShowOpen"> & {
-  /**
-   * THE ARM IS THE VIEW ASKED FOR. Unset is malformed.
-   *
-   * @generated from oneof agentrepl.v1.SidebarViewShowOpen.shows
-   */
-  shows: {
-    /**
-     * Each repository section shows its open workspaces.
-     *
-     * @generated from field: agentrepl.v1.SidebarViewShowWorkspaces workspaces = 1;
-     */
-    value: SidebarViewShowWorkspaces;
-    case: "workspaces";
-  } | {
-    /**
-     * Each repository section shows its merge queue.
-     *
-     * @generated from field: agentrepl.v1.SidebarViewShowMergeQueues merge_queues = 2;
-     */
-    value: SidebarViewShowMergeQueues;
-    case: "mergeQueues";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message agentrepl.v1.SidebarViewShowOpen.
- * Use `create(SidebarViewShowOpenSchema)` to create a new message.
- */
-export const SidebarViewShowOpenSchema: GenMessage<SidebarViewShowOpen> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 1);
-
-/**
- * The open workspaces. DELIBERATELY EMPTY: the arm is the view.
- *
- * @generated from message agentrepl.v1.SidebarViewShowWorkspaces
- */
-export type SidebarViewShowWorkspaces = Message<"agentrepl.v1.SidebarViewShowWorkspaces"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.SidebarViewShowWorkspaces.
- * Use `create(SidebarViewShowWorkspacesSchema)` to create a new message.
- */
-export const SidebarViewShowWorkspacesSchema: GenMessage<SidebarViewShowWorkspaces> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 2);
-
-/**
- * The merge queues. DELIBERATELY EMPTY: the arm is the view.
- *
- * @generated from message agentrepl.v1.SidebarViewShowMergeQueues
- */
-export type SidebarViewShowMergeQueues = Message<"agentrepl.v1.SidebarViewShowMergeQueues"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.SidebarViewShowMergeQueues.
- * Use `create(SidebarViewShowMergeQueuesSchema)` to create a new message.
- */
-export const SidebarViewShowMergeQueuesSchema: GenMessage<SidebarViewShowMergeQueues> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 3);
 
 /**
  * Fold or unfold one section.
@@ -178,7 +98,8 @@ export type SidebarViewFoldSection = Message<"agentrepl.v1.SidebarViewFoldSectio
     case: "repository";
   } | {
     /**
-     * The recently-merged band; the roster carries exactly one.
+     * The merge queue section (frontend.v1.RosterMergedSection); the roster
+     * carries exactly one.
      *
      * @generated from field: agentrepl.v1.SidebarViewRecentlyMerged recently_merged = 3;
      */
@@ -243,7 +164,7 @@ export type SidebarViewFoldSection = Message<"agentrepl.v1.SidebarViewFoldSectio
  * Use `create(SidebarViewFoldSectionSchema)` to create a new message.
  */
 export const SidebarViewFoldSectionSchema: GenMessage<SidebarViewFoldSection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 4);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 1);
 
 /**
  * The recently-merged band. DELIBERATELY EMPTY: the arm is the section.
@@ -258,7 +179,7 @@ export type SidebarViewRecentlyMerged = Message<"agentrepl.v1.SidebarViewRecentl
  * Use `create(SidebarViewRecentlyMergedSchema)` to create a new message.
  */
 export const SidebarViewRecentlyMergedSchema: GenMessage<SidebarViewRecentlyMerged> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 5);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 2);
 
 /**
  * The hidden-workspaces section. DELIBERATELY EMPTY: the arm is the section.
@@ -273,7 +194,7 @@ export type SidebarViewHidden = Message<"agentrepl.v1.SidebarViewHidden"> & {
  * Use `create(SidebarViewHiddenSchema)` to create a new message.
  */
 export const SidebarViewHiddenSchema: GenMessage<SidebarViewHidden> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 6);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 3);
 
 /**
  * The open-workspaces section. DELIBERATELY EMPTY: the arm is the section.
@@ -288,7 +209,7 @@ export type SidebarViewOpen = Message<"agentrepl.v1.SidebarViewOpen"> & {
  * Use `create(SidebarViewOpenSchema)` to create a new message.
  */
 export const SidebarViewOpenSchema: GenMessage<SidebarViewOpen> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 7);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 4);
 
 /**
  * Show the section's rows.
@@ -303,7 +224,7 @@ export type SidebarViewExpand = Message<"agentrepl.v1.SidebarViewExpand"> & {
  * Use `create(SidebarViewExpandSchema)` to create a new message.
  */
 export const SidebarViewExpandSchema: GenMessage<SidebarViewExpand> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 8);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 5);
 
 /**
  * Hide the section's rows.
@@ -318,7 +239,7 @@ export type SidebarViewCollapse = Message<"agentrepl.v1.SidebarViewCollapse"> & 
  * Use `create(SidebarViewCollapseSchema)` to create a new message.
  */
 export const SidebarViewCollapseSchema: GenMessage<SidebarViewCollapse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 9);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 6);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -349,7 +270,7 @@ export type UpdateSidebarViewResponse = Message<"agentrepl.v1.UpdateSidebarViewR
  * Use `create(UpdateSidebarViewResponseSchema)` to create a new message.
  */
 export const UpdateSidebarViewResponseSchema: GenMessage<UpdateSidebarViewResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 10);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 7);
 
 /**
  * Recorded; the roster push carries the change to every page.
@@ -364,7 +285,7 @@ export type UpdateSidebarViewSuccess = Message<"agentrepl.v1.UpdateSidebarViewSu
  * Use `create(UpdateSidebarViewSuccessSchema)` to create a new message.
  */
 export const UpdateSidebarViewSuccessSchema: GenMessage<UpdateSidebarViewSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 11);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 8);
 
 /**
  * Validation failures (an unset field or arm, a blank id) are Connect
@@ -414,7 +335,7 @@ export type UpdateSidebarViewError = Message<"agentrepl.v1.UpdateSidebarViewErro
  * Use `create(UpdateSidebarViewErrorSchema)` to create a new message.
  */
 export const UpdateSidebarViewErrorSchema: GenMessage<UpdateSidebarViewError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 12);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 9);
 
 /**
  * No subsection matches the ref. DELIBERATELY EMPTY: the arm is the cause,
@@ -430,7 +351,7 @@ export type UpdateSidebarViewUnknownSubsection = Message<"agentrepl.v1.UpdateSid
  * Use `create(UpdateSidebarViewUnknownSubsectionSchema)` to create a new message.
  */
 export const UpdateSidebarViewUnknownSubsectionSchema: GenMessage<UpdateSidebarViewUnknownSubsection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 13);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 10);
 
 /**
  * No registered repository matches the ref. DELIBERATELY EMPTY: the arm is
@@ -446,7 +367,7 @@ export type UpdateSidebarViewUnknownRepository = Message<"agentrepl.v1.UpdateSid
  * Use `create(UpdateSidebarViewUnknownRepositorySchema)` to create a new message.
  */
 export const UpdateSidebarViewUnknownRepositorySchema: GenMessage<UpdateSidebarViewUnknownRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 14);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 11);
 
 /**
  * A collapse asked of the repository or subsection the current workspace sits
@@ -469,5 +390,5 @@ export type UpdateSidebarViewHoldsCurrent = Message<"agentrepl.v1.UpdateSidebarV
  * Use `create(UpdateSidebarViewHoldsCurrentSchema)` to create a new message.
  */
 export const UpdateSidebarViewHoldsCurrentSchema: GenMessage<UpdateSidebarViewHoldsCurrent> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 15);
+  messageDesc(file_agentrepl_v1_endpoint_update_sidebar_view, 12);
 

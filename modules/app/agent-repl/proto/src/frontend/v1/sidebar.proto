@@ -30,11 +30,15 @@
 //   │   │ summary …  │                      │
 //   │   └────────────┘                      │
 //   │   ● closed-row  (grey dot)      5d    │  inactive arm · RosterRowClosed
-//   │ ▸ Recently Merged            (3)      │  RosterMergedSection (folded)
+//   │ ▾ Merge Queue                (2)      │  RosterMergedSection
+//   │     repo-name                         │    RosterMergeQueueRepoGroup
+//   │       ⟳ head-row  rebasing 3/7        │      RosterMergeQueueHead
+//   │       2 waiting-row                   │      RosterMergeQueueWaiting
+//   │     Recently Merged                   │    RosterMergedSection.merged_label
 //   │     repo-name                         │    RosterMergedRepoGroup
 //   └───────────────────────────────────────┘
 //
-// A repo section and the recently-merged section share one header shape
+// A repo section and the merge-queue section share one header shape
 // (label + fold).
 
 
@@ -83,8 +87,10 @@ message WorkspaceRoster {
   // exactly when it has a tab, its repository's fold aside, and tab N is
   // always the row drawn immediately before tab N+1.
   RosterRepositoryView repository = 1;
-  // Workspaces whose merge has settled and that are CLOSED, drawn below the
-  // other sections: that they are done is the interesting fact. Never open.
+  // THE MERGE QUEUE SECTION, drawn below the other sections: every
+  // repository's merge queue, and below it the workspaces whose merge has
+  // settled and that are CLOSED, since that they are done is the interesting
+  // fact. Its merged rows are never open.
   RosterMergedSection recently_merged = 3;
   // Workspaces the user has hidden (agentrepl.v1.SetWorkspaceHidden). A
   // hidden workspace may keep its session until it is gated, but it has NO
@@ -771,46 +777,16 @@ message RosterOpenSection {
     // The repository sections are folded away; the header and its count stay.
     RosterOpenSectionCollapsed collapsed = 3;
   }
-  // WHAT THE REPOSITORY SECTIONS SHOW, drawn as the merge-queue toggle on
-  // the section's header line: a merge glyph in the purple of a merge in
-  // progress (the amber of a paused queue while `merge_queue_paused` stands)
-  // while the sections show their workspaces, and in the expanded repository
-  // names' colour while they show their merge queues (owner requests,
-  // 2026-10-24 and 2026-10-25). DAEMON-HELD (agentrepl.v1.UpdateSidebarView show_open), so
-  // every page draws the same view, and every repository section states the
-  // same arm in its own `shows` (RosterRepoSection.shows). It changes the
-  // SIDEBAR only: the Emacs tab bar draws the open workspaces whichever arm
-  // is set. Never changed by anyone, it is WORKSPACES. Never unset on the
-  // wire.
-  oneof shows {
-    // Each repository section shows its open workspaces (its `entries`).
-    RosterOpenSectionShowsWorkspaces workspaces = 4;
-    // Each repository section shows its merge queue
-    // (RosterRepoSection.merge_queue).
-    RosterOpenSectionShowsMergeQueues merge_queues = 5;
-  }
-  // The MERGE-QUEUE-PAUSED marker: present exactly while the merge queue of
-  // at least one repository is paused, whether or not a merge is on it. See
-  // RosterOpenSectionMergeQueuePaused, which carries the marker's contract.
-  optional RosterOpenSectionMergeQueuePaused merge_queue_paused = 6;
+  // `workspaces` (4) and `merge_queues` (5), the `shows` oneof, and
+  // `merge_queue_paused` (6) are RETIRED and reserved: they drew a toggle on
+  // the section's header line between the repository sections' workspaces
+  // and their merge queues, and colored it while a queue was paused. The
+  // merge queues are drawn in the merge queue section instead
+  // (RosterMergedSection.queues, owner request 2026-10-26), whose header
+  // carries the pause (RosterMergedSection.merge_queue_paused).
+  reserved 4, 5, 6;
+  reserved "workspaces", "merge_queues", "merge_queue_paused";
 }
-
-// The MERGE-QUEUE-PAUSED marker of the open section: a repository's merge
-// queue is paused, so nothing it holds lands until it resumes. Empty:
-// presence is the fact. The sidebar draws the merge-queue toggle in
-// `render-colors.json#paused_merge_mark`'s ink while it stands and the
-// sections show their workspaces (owner request, 2026-10-25), so a paused
-// queue reads from the toggle even with no merge on it. The Emacs tab bar
-// draws nothing for it.
-message RosterOpenSectionMergeQueuePaused {}
-
-// The repository sections show their open workspaces. DELIBERATELY EMPTY: the
-// arm is the fact.
-message RosterOpenSectionShowsWorkspaces {}
-
-// The repository sections show their merge queues. DELIBERATELY EMPTY: the
-// arm is the fact.
-message RosterOpenSectionShowsMergeQueues {}
 
 // An expanded open-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
 message RosterOpenSectionExpanded {}
@@ -850,6 +826,13 @@ message RosterRepoSection {
   // subsection stands. The section's header count covers every entry's rows,
   // and its fold folds them all.
   repeated RosterRepoEntry entries = 9;
+  // `workspaces` (10) and `merge_queue` (11), the `shows` oneof, are RETIRED
+  // and reserved: the section's body was its entries or, while the retired
+  // toggle stood (RosterOpenSection), its merge queue. The body is always
+  // its entries, and the queue is drawn in the merge queue section
+  // (RosterMergedSection.queues, owner request 2026-10-26).
+  reserved 10, 11;
+  reserved "workspaces", "merge_queue";
   // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), because two
   // surfaces draw it: the sidebar hides a collapsed section's rows, and the
   // Emacs tab bar hides that repository's workspaces from its tabs, numbering
@@ -867,27 +850,11 @@ message RosterRepoSection {
   // startup and every five minutes after, so it may be up to that old. Always
   // set: a repository not yet measured carries the pending arm.
   RosterRepoDivergence divergence = 6;
-  // WHAT THE SECTION'S BODY SHOWS below its header, the open section's own
-  // arm restated on every repository section (RosterOpenSection.shows): the
-  // daemon resolves both from the one view it holds, so they never disagree.
-  // `entries` is carried under EITHER arm, because the Emacs tab bar walks
-  // it whatever the sidebar shows; under `merge_queue` the sidebar draws the
-  // queue in its place, and the header's count is the merges in line. Never
-  // unset on a wire section.
-  oneof shows {
-    // The body is `entries`.
-    RosterRepoShowsWorkspaces workspaces = 10;
-    // The body is the repository's merge queue.
-    RosterRepoMergeQueue merge_queue = 11;
-  }
 }
 
-// The section's body is its open workspaces. DELIBERATELY EMPTY: the arm is
-// the fact.
-message RosterRepoShowsWorkspaces {}
-
-// ONE REPOSITORY'S MERGE QUEUE as its section draws it (owner request,
-// 2026-10-25): a small merge bubble for the merge at the head of the line,
+// ONE REPOSITORY'S MERGE QUEUE as the merge queue section draws it (owner
+// requests, 2026-10-25 and 2026-10-26): a small merge bubble for the merge at
+// the head of the line,
 // then every merge waiting behind it, in the order it will run -- the same
 // line agentrepl.v1.MergeQueueStatus.entries reads. A merge only REQUESTED,
 // its asking turn still running, is in no line and is not listed.
@@ -898,9 +865,8 @@ message RosterRepoShowsWorkspaces {}
 // workspaces view (RosterRow.async_merging). A hidden merge workspace is never
 // named, drawn or selected here.
 //
-// A queue with no head and nothing waiting draws no body: its section is its
-// header alone, drawn in the folded header's faded grey whether it is folded
-// or not.
+// A queue with no head and nothing waiting is not drawn
+// (RosterMergedSection.queues).
 message RosterRepoMergeQueue {
   // Tag 1 (`rows`, every merge in line drawn as a workspace row) is RETIRED:
   // the queue is drawn as its head and its waiting merges.
@@ -1276,9 +1242,11 @@ message RosterRepoKey {
 // and expanding it puts the group back. The band's own fold still folds the
 // whole band.
 message RosterMergedSection {
-  // The band's label and the count it draws while folded: every row of the
-  // groups whose repository is EXPANDED (RosterMergedRepoGroupShown), so a
-  // collapsed repository's merges are never counted.
+  // The section's label, "Merge Queue", and its count: THE MERGES IN LINE,
+  // every head being worked on or waiting at the front and every merge
+  // waiting behind one, over every queue in `queues` (a failed head is in no
+  // line and is not counted). Drawn beside the label whether the section is
+  // folded or not (owner request, 2026-10-26).
   RosterSectionHeader header = 1;
   reserved 2;
   reserved "rows";
@@ -1293,6 +1261,21 @@ message RosterMergedSection {
   // workspace switcher) still sees every merged workspace; only the sidebar
   // leaves the group undrawn.
   repeated RosterMergedRepoGroup groups = 5;
+  // THE MERGE QUEUES, drawn at the top of the section above the merged
+  // groups (owner request, 2026-10-26): one group per repository whose queue
+  // has a head (RosterRepoMergeQueue.head) or merges waiting, in the
+  // repository sections' order. A repository whose queue holds nothing is
+  // not listed, paused or not: `merge_queue_paused` carries the pause. A queue group does NOT follow its
+  // repository's fold: a merge in flight is drawn whichever way its
+  // repository is folded.
+  repeated RosterMergeQueueRepoGroup queues = 6;
+  // The heading drawn over the merged groups, below the queues, while any
+  // group is drawn: "Recently Merged". Always set.
+  RosterLabel merged_label = 7;
+  // The MERGE-QUEUE-PAUSED marker: present exactly while the merge queue of
+  // at least one repository is paused, whether or not a merge is on it. See
+  // RosterMergedSectionMergeQueuePaused, which carries the marker's contract.
+  optional RosterMergedSectionMergeQueuePaused merge_queue_paused = 8;
   // WHETHER THE BAND IS FOLDED. DAEMON-HELD (UpdateSidebarView), because a
   // fold is no page's own: opening it in one workspace's page opens it in
   // every page (owner ruling, 2026-10-06). Never folded or unfolded by
@@ -1304,6 +1287,27 @@ message RosterMergedSection {
     // The merged rows are hidden; the header and its count stay.
     RosterMergedSectionCollapsed collapsed = 4;
   }
+}
+
+// The MERGE-QUEUE-PAUSED marker of the merge queue section: a repository's
+// merge queue is paused, so nothing it holds lands until it resumes. Empty:
+// presence is the fact. The sidebar draws the section's "Merge Queue" label
+// in the purple of a merge in progress, and in
+// `render-colors.json#paused_merge_mark`'s ink while the marker stands (owner
+// request, 2026-10-26), so a paused queue reads from the header even with no
+// merge on it and the section folded. The Emacs tab bar draws nothing for it.
+message RosterMergedSectionMergeQueuePaused {}
+
+// ONE REPOSITORY'S MERGE QUEUE inside the merge queue section: the
+// repository's label over its queue.
+message RosterMergeQueueRepoGroup {
+  // The repository's stable identity, the same key its RosterRepoSection
+  // carries.
+  RosterRepoKey key = 1;
+  // The group's header box: the repository's label, with no fold toggle.
+  RosterMergedRepoGroupHeader header = 2;
+  // The repository's queue.
+  RosterRepoMergeQueue queue = 3;
 }
 
 // An expanded recently-merged band. DELIBERATELY EMPTY: the arm is the fact.
@@ -1340,7 +1344,8 @@ message RosterMergedRepoGroup {
   }
 }
 
-// A merged group's header: the repository's label, and nothing to toggle.
+// A merged or queue group's header: the repository's label, and nothing to
+// toggle.
 message RosterMergedRepoGroupHeader {
   // The repository's display name, as its RosterRepoSection's header draws it.
   RosterLabel label = 1;
@@ -1401,17 +1406,15 @@ message RosterSectionHeader {
   // hides this resolved value by the section's fold; it never counts a
   // repository's rows itself. Always set.
   //
-  // THE RECENTLY MERGED BAND'S is every row of its drawn groups (a collapsed
-  // repository's group is never counted); a client that
-  // shows only the merges that FIT its rail (the webapp: no fixed cap, as many
-  // as fit without scrolling) draws the number it shows instead, from the one
-  // fit that hides the rest, since only it knows its height.
+  // THE MERGE QUEUE SECTION'S is the merges in line over every queue it
+  // lists (RosterMergedSection.header), drawn whether the section is folded
+  // or not.
   RosterSectionCount count = 2;
 }
 
 // A section's workspace count. A repository section's is every open row of
-// its rows regions, nested family rows included. The merged band's is the
-// row count of its drawn groups. Drawn smaller than the label, in the label's own color.
+// its rows regions, nested family rows included. The merge queue section's is
+// the merges in line. Drawn smaller than the label, in the label's own color.
 message RosterSectionCount {
   uint32 workspaces = 1;
 }

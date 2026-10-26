@@ -8,10 +8,7 @@
 // box it styles:
 //
 //   - a section's fold: RosterRepoSection.fold, RosterMergedSection.fold,
-//     RosterHiddenSection.fold, RosterOpenSection.fold;
-//   - what the open section's repository sections show, their workspaces or
-//     their merge queues: RosterOpenSection.shows, restated on each
-//     RosterRepoSection.shows.
+//     RosterHiddenSection.fold, RosterOpenSection.fold.
 //
 // It is DURABLE: it survives a daemon restart.
 //
@@ -37,34 +34,19 @@ message UpdateSidebarViewRequest {
   // by repository (owner ruling, 2026-10-15).
   reserved 2;
   reserved "show_grouping";
+  // `show_open` (3) is RETIRED and reserved: it switched the open section's
+  // repository sections between their workspaces and their merge queues,
+  // which are drawn in the merge queue section instead
+  // (frontend.v1.RosterMergedSection.queues, owner request 2026-10-26).
+  reserved 3;
+  reserved "show_open";
   // THE ARM IS THE CHANGE. Unset is a malformed request (Connect
   // InvalidArgument).
   oneof change {
     // Fold or unfold one section.
     SidebarViewFoldSection fold_section = 1;
-    // Show the open section's repository sections' workspaces, or their
-    // merge queues (frontend.v1.RosterOpenSection.shows).
-    SidebarViewShowOpen show_open = 3;
   }
 }
-
-// What the open section's repository sections show. There is nothing to
-// refuse: the roster carries exactly one open section.
-message SidebarViewShowOpen {
-  // THE ARM IS THE VIEW ASKED FOR. Unset is malformed.
-  oneof shows {
-    // Each repository section shows its open workspaces.
-    SidebarViewShowWorkspaces workspaces = 1;
-    // Each repository section shows its merge queue.
-    SidebarViewShowMergeQueues merge_queues = 2;
-  }
-}
-
-// The open workspaces. DELIBERATELY EMPTY: the arm is the view.
-message SidebarViewShowWorkspaces {}
-
-// The merge queues. DELIBERATELY EMPTY: the arm is the view.
-message SidebarViewShowMergeQueues {}
 
 // Fold or unfold one section.
 //
@@ -85,7 +67,8 @@ message SidebarViewFoldSection {
     // turn runs, once the running turn ends otherwise. EXPANDING starts
     // nothing by itself: the editor asks for the workspaces with OpenTabs.
     workspace.v1.RepositoryRef repository = 1;
-    // The recently-merged band; the roster carries exactly one.
+    // The merge queue section (frontend.v1.RosterMergedSection); the roster
+    // carries exactly one.
     SidebarViewRecentlyMerged recently_merged = 3;
     // The hidden-workspaces section; the roster carries exactly one. Its
     // fold hides rows in the sidebar only: a hidden workspace is off the
