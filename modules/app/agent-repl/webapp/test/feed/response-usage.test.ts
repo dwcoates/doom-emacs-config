@@ -16,6 +16,8 @@ import {
 import { heatColor } from "../../src/heat.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { FEED_ROW_ATTRIBUTE } from "../../src/feed/row-id.js";
+import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
+import { createPresence } from "../../src/presence.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 const uninstalls: (() => void)[] = [];
@@ -26,7 +28,7 @@ afterEach(() => {
 
 /** A read usage with figure TEXT. */
 function usage(text: string): ResponseUsage {
-  return { text, color: "red", settledAtMs: 1_000 };
+  return { text, color: "red", settledAtMs: 1_000, startedAtMs: 500 };
 }
 
 /** A bubble of ROLE in a feed row ROW, inside HOST. */
@@ -42,13 +44,33 @@ function bubble(host: HTMLElement, role = "response", row = "row-1"): HTMLElemen
   return el;
 }
 
-/** A feed host in the document with the hover installed, and what SHOW was called with. */
-function hovering(): { host: HTMLElement; shown: (ResponseUsage | null)[] } {
+/** A focus-left signal of the test's own, fired by hand. */
+function focusSource(): FocusLeftSource {
+  const presence = createPresence(document, false);
+  const focus = createFocusLeft(window, presence);
+  uninstalls.push(() => {
+    focus.dispose();
+    presence.dispose();
+  });
+  return focus;
+}
+
+/**
+ * A feed host in the document with the hover installed, what SHOW was called
+ * with, and the focus-left signal the hover listens to.
+ */
+function hovering(): { host: HTMLElement; shown: (ResponseUsage | null)[]; focus: FocusLeftSource } {
   const host = document.createElement("div");
   document.body.append(host);
   const shown: (ResponseUsage | null)[] = [];
-  uninstalls.push(installResponseUsageHover(host, (u) => shown.push(u)));
-  return { host, shown };
+  const focus = focusSource();
+  uninstalls.push(installResponseUsageHover(host, (u) => shown.push(u), focus));
+  return { host, shown, focus };
+}
+
+/** Move the pointer over EL to the window point (X, Y). */
+function moveTo(el: Element, x: number, y: number): void {
+  el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: x, clientY: y }));
 }
 
 /** Move the pointer onto EL. */
@@ -57,11 +79,21 @@ function over(el: Element): void {
 }
 
 describe("readResponseUsage", () => {
-  it("reads the figure, its heat's color and the settle instant", () => {
+  it("reads the figure, its heat's color, the settle instant and the span's start", () => {
     // Arrange
-    const stamp = create(FeedResponseUsageStampSchema, { text: "2.1k", atMs: 5_000n, heat: { position: 0.25 } });
+    const stamp = create(FeedResponseUsageStampSchema, {
+      text: "2.1k",
+      atMs: 5_000n,
+      startedAtMs: 2_000n,
+      heat: { position: 0.25 },
+    });
     // Act / Assert
-    expect(readResponseUsage(stamp, "p")).toEqual({ text: "2.1k", color: heatColor(0.25, "p"), settledAtMs: 5_000 });
+    expect(readResponseUsage(stamp, "p")).toEqual({
+      text: "2.1k",
+      color: heatColor(0.25, "p"),
+      settledAtMs: 5_000,
+      startedAtMs: 2_000,
+    });
   });
 
   it("reads an arriving stamp as not settled", () => {
@@ -69,6 +101,50 @@ describe("readResponseUsage", () => {
     const stamp = create(FeedResponseUsageStampSchema, { text: "2.1k", heat: { position: 0.25 } });
     // Act / Assert
     expect(readResponseUsage(stamp, "p").settledAtMs).toBeNull();
+  });
+
+  it("reads a stamp with no span start as having none", () => {
+    // Arrange
+    const stamp = create(FeedResponseUsageStampSchema, { text: "2.1k", atMs: 5_000n, heat: { position: 0.25 } });
+    // Act / Assert
+    expect(readResponseUsage(stamp, "p").startedAtMs).toBeNull();
+  });
+
+  it("reads a span that settled where it began", () => {
+    // Arrange
+    const stamp = create(FeedResponseUsageStampSchema, {
+      text: "2.1k",
+      atMs: 5_000n,
+      startedAtMs: 5_000n,
+      heat: { position: 0.25 },
+    });
+    // Act / Assert
+    expect(readResponseUsage(stamp, "p").startedAtMs).toBe(5_000);
+  });
+
+  it("refuses a span that settled before it began, naming its field", () => {
+    // Arrange
+    const stamp = create(FeedResponseUsageStampSchema, {
+      text: "2.1k",
+      atMs: 5_000n,
+      startedAtMs: 6_000n,
+      heat: { position: 0.25 },
+    });
+    // Act / Assert
+    expect(() => readResponseUsage(stamp, "FeedResponse.usage")).toThrow(
+      new MalformedView("FeedResponse.usage.started_at_ms", "the span began at 6000, after the response settled at 5000"),
+    );
+  });
+
+  it("refuses a span start beyond a safe integer", () => {
+    // Arrange
+    const stamp = create(FeedResponseUsageStampSchema, {
+      text: "2.1k",
+      startedAtMs: BigInt(Number.MAX_SAFE_INTEGER) + 1n,
+      heat: { position: 0.25 },
+    });
+    // Act / Assert
+    expect(() => readResponseUsage(stamp, "p")).toThrow(MalformedView);
   });
 
   it("refuses a stamp with no heat, naming its field", () => {
@@ -240,7 +316,7 @@ describe("installResponseUsageHover", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const show = vi.fn();
-    const uninstall = installResponseUsageHover(host, show);
+    const uninstall = installResponseUsageHover(host, show, focusSource());
     const el = bubble(host);
     setResponseUsage(el, usage("1k"));
     over(el);
@@ -263,5 +339,90 @@ describe("installResponseUsageHover", () => {
     // Assert
     const record = await forwardedRecord(capture, "feed.response-usage-hover");
     expect([record.context?.row, record.context?.tokens]).toEqual(["row-7", "1k"]);
+  });
+});
+
+describe("installResponseUsageHover, when the focus leaves the page", () => {
+  it("gives the cell back at once", () => {
+    // Arrange
+    const { host, shown, focus } = hovering();
+    const el = bubble(host);
+    setResponseUsage(el, usage("1k"));
+    over(el);
+    // Act
+    focus.left("Emacs moved its focus");
+    // Assert
+    expect(shown.map((u) => u?.text ?? null)).toEqual(["1k", null]);
+  });
+
+  it("shows nothing while the pointer rests, even when it is reported over a bubble again", () => {
+    // Arrange
+    const { host, shown, focus } = hovering();
+    const el = bubble(host);
+    setResponseUsage(el, usage("1k"));
+    moveTo(el, 10, 10);
+    over(el);
+    focus.left("the page lost focus");
+    // Act
+    over(el);
+    moveTo(el, 10, 10);
+    // Assert
+    expect(shown.map((u) => u?.text ?? null)).toEqual(["1k", null]);
+  });
+
+  it("answers again once the pointer moves, showing the bubble under it", () => {
+    // Arrange
+    const { host, shown, focus } = hovering();
+    const el = bubble(host);
+    setResponseUsage(el, usage("1k"));
+    moveTo(el, 10, 10);
+    over(el);
+    focus.left("the page lost focus");
+    // Act
+    moveTo(el, 11, 10);
+    // Assert
+    expect(shown.map((u) => u?.text ?? null)).toEqual(["1k", null, "1k"]);
+  });
+
+  it("ignores a restated stamp of the bubble it let go of", () => {
+    // Arrange
+    const { host, shown, focus } = hovering();
+    const el = bubble(host);
+    setResponseUsage(el, usage("1k"));
+    over(el);
+    focus.left("the page was hidden");
+    // Act
+    setResponseUsage(el, usage("2k"));
+    // Assert
+    expect(shown.map((u) => u?.text ?? null)).toEqual(["1k", null]);
+  });
+
+  it("records the letting go, naming why", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { host, focus } = hovering();
+    const el = bubble(host);
+    setResponseUsage(el, usage("1k"));
+    over(el);
+    // Act
+    focus.left("Emacs moved its focus");
+    // Assert
+    const record = await forwardedRecord(capture, "feed.response-usage-hover.focus-left");
+    expect([record.level.case, record.context?.why, record.context?.shown]).toEqual(["debug", "Emacs moved its focus", true]);
+  });
+
+  it("stops listening once uninstalled", () => {
+    // Arrange
+    const host = document.createElement("div");
+    document.body.append(host);
+    const show = vi.fn();
+    const focus = focusSource();
+    const uninstall = installResponseUsageHover(host, show, focus);
+    uninstall();
+    show.mockClear();
+    // Act
+    focus.left("Emacs moved its focus");
+    // Assert
+    expect(show).not.toHaveBeenCalled();
   });
 });

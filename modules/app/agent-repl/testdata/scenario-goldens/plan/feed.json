@@ -98,6 +98,7 @@
             "heat": {
               "position": 0.07186666666666668
             },
+            "startedAtMs": "${NOW}",
             "text": "6.5k"
           }
         }
@@ -137,6 +138,7 @@
             "heat": {
               "position": 0.14373333333333335
             },
+            "startedAtMs": "${NOW}",
             "text": "12.9k"
           }
         }

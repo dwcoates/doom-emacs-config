@@ -1196,6 +1196,20 @@ message FeedResponseUsageStamp {
   // How hot the figure is, which colors it: the SAME rule the footer's tokens
   // cell colors its figure by, over the same kind of figure (fresh input).
   TokenHeat heat = 3;
+
+  // When the span the figure counts BEGAN, epoch ms: the response's duration
+  // is at_ms minus this, which the client shows beside the figure while the
+  // bubble is hovered ("Response 2.1k tokens, 1m 30s"). It is the SAME span
+  // the figure's delta covers, so the two always describe one stretch of the
+  // agent's work: the later of the instant its agent's previous bubble
+  // settled and the instant the prompt that agent is answering arrived. The
+  // FINAL ANSWER, re-stamped with the turn's whole fresh input, is re-stamped
+  // with the turn's whole span too: the instant the turn's prompt arrived.
+  // Every instant is read off the conversation (a settle's own instant, a
+  // prompt's conversation place), so a replay serves the same span. UNSET
+  // (zero) when the daemon knows no start for the span; the client then
+  // states no duration, never one measured against its own clock.
+  int64 started_at_ms = 4;
 }
 
 // The grey tool-call bubble: one shared shell — head (name + badge), the

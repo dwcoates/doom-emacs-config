@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/figures"
 	"agent-repld/internal/freshinput"
+	"agent-repld/internal/ids"
 )
 
 // THE FEED'S TOKEN FIGURES ARE FRESH INPUT, ONE AGENT AT A TIME.
@@ -35,19 +36,56 @@ import (
 // bubbles partition its tally. The only later change is the final answer's:
 // at the turn's end the green bubble is re-stamped ONCE with the main agent's
 // whole turn tally (stampFinalAnswerTotal).
+//
+// A STAMP'S SPAN IS THE STRETCH ITS DELTA COVERS. Each account also keeps the
+// instant its current span began (accountSinceMs): the later of the instant
+// its previous bubble settled and the instant the prompt its agent is
+// answering arrived. A bubble takes that instant when it is first drawn,
+// exactly as it takes its base, so its figure and its duration describe one
+// stretch of work. The final answer's re-stamp takes the instant the account
+// OPENED (accountOpenedMs): the turn's prompt, the turn's whole span. Every
+// instant is read off the conversation, so a replay serves the same span.
 
 // usageAccount names the account an agent's usage is tallied in: the main
-// agent's current turn, or a subagent's lifetime. The two key spaces carry
-// distinct prefixes, so a turn id can never collide with an agent id.
+// agent's current turn, or a subagent's lifetime.
 func (s *wsState) usageAccount(agent *conversationv1.AgentId) string {
+	return s.accountOf(agent, s.rowTurn())
+}
+
+// accountOf names AGENT's account when TURN is the turn its rows belong to: the
+// main agent's TURN, or a subagent's lifetime. The two key spaces carry
+// distinct prefixes, so a turn id can never collide with an agent id.
+func (s *wsState) accountOf(agent *conversationv1.AgentId, turn *ids.TurnID) string {
 	if s.isMainAgent(agent) {
-		turn := ""
-		if t := s.rowTurn(); t != nil {
-			turn = string(*t)
+		named := ""
+		if turn != nil {
+			named = string(*turn)
 		}
-		return "turn\x00" + turn
+		return "turn\x00" + named
 	}
 	return "agent\x00" + agent.GetValue()
+}
+
+// promptArrived records that a prompt reached ACCOUNT's agent at AT (epoch ms,
+// the prompt's conversation place): the account's next bubble counts its span
+// from there, and the first such instant is where the account OPENED. An
+// unplaced prompt (AT zero) moves nothing, so a span it would have begun is
+// left unknown rather than measured from somewhere else.
+func (s *wsState) promptArrived(account string, at int64) {
+	if at <= 0 {
+		return
+	}
+	if _, opened := s.accountOpenedMs[account]; !opened {
+		s.accountOpenedMs[account] = at
+	}
+	s.advanceSince(account, at)
+}
+
+// advanceSince moves ACCOUNT's span start to AT when AT is later.
+func (s *wsState) advanceSince(account string, at int64) {
+	if at > s.accountSinceMs[account] {
+		s.accountSinceMs[account] = at
+	}
 }
 
 // isMainAgent reports whether AGENT's rows are the root feed's: the session's
@@ -101,22 +139,27 @@ func (s *wsState) accountStamp(account string, base uint64) (string, uint64) {
 }
 
 // usageStamp is a fold's drawn cost corner: its figure, colored by the one
-// token-heat rule, and the settled instant AT (zero while arriving).
+// token-heat rule, the settled instant AT (zero while arriving), and the
+// instant its span began (zero when unknown).
 func usageStamp(fold *proseState, at int64) *frontendv1.FeedResponseUsageStamp {
 	return &frontendv1.FeedResponseUsageStamp{
-		Text: fold.usage,
-		AtMs: at,
-		Heat: &frontendv1.TokenHeat{Position: figures.TokenHeat(fold.fresh)},
+		Text:        fold.usage,
+		AtMs:        at,
+		Heat:        &frontendv1.TokenHeat{Position: figures.TokenHeat(fold.fresh)},
+		StartedAtMs: fold.sinceMs,
 	}
 }
 
 // openStamp answers the stamp a response fold draws now. A fold learns its
-// account and its base on its first draw; a frozen fold keeps the figure it
-// landed with.
+// account and its base on its first draw, and its span start on the first
+// draw that finds one; a frozen fold keeps the figure it landed with.
 func (s *wsState) openStamp(fold *proseState, agent *conversationv1.AgentId) (string, uint64) {
 	if fold.account == "" {
 		fold.account = s.usageAccount(agent)
 		fold.base = s.accountLanded[fold.account]
+	}
+	if fold.sinceMs == 0 {
+		fold.sinceMs = s.accountSinceMs[fold.account]
 	}
 	if fold.frozen {
 		return fold.usage, fold.fresh
@@ -125,9 +168,10 @@ func (s *wsState) openStamp(fold *proseState, agent *conversationv1.AgentId) (st
 }
 
 // landStamp freezes a settling fold's stamp and moves its account's landed
-// mark to the tally, so the account's next bubble counts from here. A fold
-// lands ONCE: a settle restated by the other store plane keeps the figure the
-// first settle froze.
+// mark to the tally and its span start to the fold's settle instant, so the
+// account's next bubble counts from here. A fold lands ONCE: a settle restated
+// by the other store plane keeps the figure the first settle froze. The fold's
+// settle instant is stamped before it lands (stampSettled).
 func (s *wsState) landStamp(fold *proseState) {
 	if fold.frozen {
 		return
@@ -136,6 +180,7 @@ func (s *wsState) landStamp(fold *proseState) {
 	if tally := s.accountTally[fold.account]; tally > s.accountLanded[fold.account] {
 		s.accountLanded[fold.account] = tally
 	}
+	s.advanceSince(fold.account, fold.settledAtMs)
 }
 
 // restampOpenBubbles re-pushes every drawn, still-arriving response bubble of
@@ -157,8 +202,9 @@ func (r *resolver) restampOpenBubbles(s *wsState, account string) {
 
 // stampFinalAnswerTotal gives a concluded turn's final-answer fold the main
 // agent's whole turn tally — the footer cell's final figure — as its frozen
-// stamp, reporting whether the turn stated any usage to stamp. It is the one
-// change a landed bubble's figure ever sees.
+// stamp, and the turn's whole span (from the instant its account opened),
+// reporting whether the turn stated any usage to stamp. It is the one change
+// a landed bubble's figure ever sees.
 func (s *wsState) stampFinalAnswerTotal(fold *proseState) bool {
 	total, fresh := s.accountStamp(fold.account, 0)
 	if total == "" {
@@ -166,6 +212,7 @@ func (s *wsState) stampFinalAnswerTotal(fold *proseState) bool {
 	}
 	fold.frozen = true
 	fold.usage, fold.fresh = total, fresh
+	fold.sinceMs = s.accountOpenedMs[fold.account]
 	return true
 }
 

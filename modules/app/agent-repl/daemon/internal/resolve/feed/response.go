@@ -149,8 +149,8 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		// former daemon treefmt engine).
 		fold.markdown = state.Success.GetProse().GetMarkdown()
 		fold.settled = true
-		s.landStamp(fold)
 		r.stampSettled(fold, state.Success.GetSettledAt().GetAtMs())
+		s.landStamp(fold)
 		notice, isNotice := state.Success.GetAuthorship().(*conversationv1.AgentResponseSuccess_SynthesizedNotice)
 		// THE SETTLED WHOLE DECIDES AUTHORSHIP, so a later settle restating the
 		// block from the other store plane re-decides it rather than inheriting.
@@ -194,9 +194,9 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		}
 		fold.markdown = state.Failure.GetProse().GetMarkdown()
 		fold.settled = true
-		s.landStamp(fold)
 		fold.notice = false
 		r.stampSettled(fold, state.Failure.GetSettledAt().GetAtMs())
+		s.landStamp(fold)
 		resetPacing(fold)
 		broken := &frontendv1.FeedResponseError{
 			Prose: &frontendv1.FeedResponseProse{Prose: r.parsedProse(s, fold.markdown, prose.Settled)},

@@ -811,6 +811,13 @@ func TestTheAuthorLabelOfAVendorStartedTurnIsTheVendor(t *testing.T) {
 // boundary.
 func (h *harness) deliverFoldedPrompt(turn, into, text string) {
 	h.t.Helper()
+	h.deliverFoldedPromptAt(turn, into, text, nil)
+}
+
+// deliverFoldedPromptAt draws a prompt the vendor folded into INTO, its entry
+// sitting at PLACE (nil for an entry whose serving side stated none).
+func (h *harness) deliverFoldedPromptAt(turn, into, text string, place *conversationv1.ConversationPlace) {
+	h.t.Helper()
 	h.resolver.OnPrompt(testWorkspace, mainAgent(), &conversationv1.AgentPrompt{
 		Id:         &conversationv1.TurnId{Value: turn},
 		Agent:      mainAgent(),
@@ -819,7 +826,7 @@ func (h *harness) deliverFoldedPrompt(turn, into, text string) {
 		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
 			Blocks: []*conversationv1.UserContentBlock{textBlock(text)},
 		}},
-	}, nil)
+	}, place)
 }
 
 // promptRow is the user-prompt row keyed by TURN on the root feed.

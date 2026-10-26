@@ -6111,7 +6111,20 @@ type FeedResponseUsageStamp struct {
 	AtMs int64 `protobuf:"varint,2,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
 	// How hot the figure is, which colors it: the SAME rule the footer's tokens
 	// cell colors its figure by, over the same kind of figure (fresh input).
-	Heat          *TokenHeat `protobuf:"bytes,3,opt,name=heat,proto3" json:"heat,omitempty"`
+	Heat *TokenHeat `protobuf:"bytes,3,opt,name=heat,proto3" json:"heat,omitempty"`
+	// When the span the figure counts BEGAN, epoch ms: the response's duration
+	// is at_ms minus this, which the client shows beside the figure while the
+	// bubble is hovered ("Response 2.1k tokens, 1m 30s"). It is the SAME span
+	// the figure's delta covers, so the two always describe one stretch of the
+	// agent's work: the later of the instant its agent's previous bubble
+	// settled and the instant the prompt that agent is answering arrived. The
+	// FINAL ANSWER, re-stamped with the turn's whole fresh input, is re-stamped
+	// with the turn's whole span too: the instant the turn's prompt arrived.
+	// Every instant is read off the conversation (a settle's own instant, a
+	// prompt's conversation place), so a replay serves the same span. UNSET
+	// (zero) when the daemon knows no start for the span; the client then
+	// states no duration, never one measured against its own clock.
+	StartedAtMs   int64 `protobuf:"varint,4,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6165,6 +6178,13 @@ func (x *FeedResponseUsageStamp) GetHeat() *TokenHeat {
 		return x.Heat
 	}
 	return nil
+}
+
+func (x *FeedResponseUsageStamp) GetStartedAtMs() int64 {
+	if x != nil {
+		return x.StartedAtMs
+	}
+	return 0
 }
 
 // The grey tool-call bubble: one shared shell — head (name + badge), the
@@ -26960,11 +26980,12 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\n" +
 	"\b_sign_in\"S\n" +
 	"\x11FeedResponseProse\x12.\n" +
-	"\x05prose\x18\x02 \x01(\v2\x18.frontend.v1.ParsedProseR\x05proseJ\x04\b\x01\x10\x02R\bmarkdown\"m\n" +
+	"\x05prose\x18\x02 \x01(\v2\x18.frontend.v1.ParsedProseR\x05proseJ\x04\b\x01\x10\x02R\bmarkdown\"\x91\x01\n" +
 	"\x16FeedResponseUsageStamp\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x13\n" +
 	"\x05at_ms\x18\x02 \x01(\x03R\x04atMs\x12*\n" +
-	"\x04heat\x18\x03 \x01(\v2\x16.frontend.v1.TokenHeatR\x04heat\"\xcc\x03\n" +
+	"\x04heat\x18\x03 \x01(\v2\x16.frontend.v1.TokenHeatR\x04heat\x12\"\n" +
+	"\rstarted_at_ms\x18\x04 \x01(\x03R\vstartedAtMs\"\xcc\x03\n" +
 	"\x12FeedSimpleToolCall\x121\n" +
 	"\x04name\x18\x01 \x01(\v2\x1d.frontend.v1.FeedToolCallNameR\x04name\x124\n" +
 	"\x05input\x18\x02 \x01(\v2\x1e.frontend.v1.FeedToolCallInputR\x05input\x12<\n" +

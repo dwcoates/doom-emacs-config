@@ -254,6 +254,9 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 		// stream when the spawn detaches, and it repeats the same instant, so
 		// the clock never resets when work moves.
 		bubble.Runtime = &frontendv1.FeedSubagentRuntime{StartedAtMs: frame.Start.GetStartedAt().GetAtMs()}
+		// THE SPAWN IS THE SUBAGENT'S FIRST PROMPT: its account's span opens
+		// at the instant it was spawned (usage.go).
+		s.promptArrived(s.accountOf(state.created, nil), frame.Start.GetStartedAt().GetAtMs())
 		// A START AFTER A TERMINAL DOES NOT REOPEN. The same re-announcement
 		// the instant above is guarded against also replays the start of work
 		// that has ALREADY SETTLED, and taking it as live would un-settle a

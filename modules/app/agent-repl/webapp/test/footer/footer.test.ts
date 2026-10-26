@@ -2026,7 +2026,7 @@ describe("mountFooter: the status the strip draws is recorded", () => {
 
 /** A read response usage with figure TEXT, settled 30 seconds ago. */
 function hoveredUsage(text: string): ResponseUsage {
-  return { text, color: "rgb(1, 2, 3)", settledAtMs: NOW - 30_000 };
+  return { text, color: "rgb(1, 2, 3)", settledAtMs: NOW - 30_000, startedAtMs: NOW - 120_000 };
 }
 
 describe("mountFooter: the hovered response's usage stands in for the activity line", () => {
@@ -2043,7 +2043,7 @@ describe("mountFooter: the hovered response's usage stands in for the activity l
     // Act
     footer.showResponseUsage(hoveredUsage("2.1k"));
     // Assert
-    expect([tierOf(host), host.querySelector(".footer-activity")?.textContent]).toEqual(["hover", "2.1k tokens · 30s ago"]);
+    expect([tierOf(host), host.querySelector(".footer-activity")?.textContent]).toEqual(["hover", "Response 2.1k tokens, 1m 30s · 30s ago"]);
   });
 
   it("gives the cell back to the daemon's line once the usage is withdrawn", async () => {

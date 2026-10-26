@@ -19,6 +19,7 @@ import { LEVEL_WINDOW_OPERATION, log } from "../log.js";
 import type { AppliedLevel, LevelWindow, WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { closeStandingNewsDigest } from "../news-digest/news-digest.js";
 import type { PresenceSource } from "../presence.js";
+import type { FocusLeftSource } from "../focus-left.js";
 import type { WebhostFailureView } from "../failure/webhost.js";
 import { HOST_CHANNEL, onHostChannel, parseHostToPage, type HostToPage, type PageToHost } from "./protocol.js";
 import { pageMutationObserver } from "../dom.js";
@@ -63,7 +64,12 @@ export interface EmbedEnv {
   readonly levelWindow: LevelWindow;
   /** The editor's held-prompt ingress entries, which the host hands over (`heldIngress`). */
   readonly editorIngress: EditorIngressView;
+  /** The page's focus-left signal, which Emacs moving its focus fires (`focusMoved`). */
+  readonly focusLeft: FocusLeftSource;
 }
+
+/** Why the focus left the page when Emacs moved its own. */
+export const FOCUS_LEFT_EMACS = "Emacs moved its focus";
 
 /**
  * The class the page's root wears while the webhost draws the sidebar over the
@@ -83,7 +89,7 @@ function isTextField(element: Element | null): boolean {
 
 /** Connect the page in ENV to its host; null when the page is in no host. */
 export function connectToHost(env: EmbedEnv): HostLink | null {
-  const { doc, win, presence, webhostFailures, levelWindow, editorIngress } = env;
+  const { doc, win, presence, webhostFailures, levelWindow, editorIngress, focusLeft } = env;
   if (win.parent === win) return null;
   const host = win.parent;
   const send = (message: PageToHost): void => {
@@ -128,6 +134,9 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         return;
       case "logLevel":
         applyLogLevel(message.level, message.untilMs);
+        return;
+      case "focusMoved":
+        focusLeft.left(FOCUS_LEFT_EMACS);
         return;
       case "dismissDigest": {
         // Escape in Emacs's composer (or a sent prompt) closing the digest is

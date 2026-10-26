@@ -157,6 +157,11 @@ export interface Host {
   setHeldIngress(id: string, entries: unknown): string;
   /** Ask ID's page to close its standing news digest. */
   dismissDigest(id: string): string;
+  /**
+   * Tell every page Emacs moved its focus (the selected window changed, or
+   * the frame lost the focus), so each lets go of what the pointer raised.
+   */
+  focusMoved(): string;
   /** Whether ID's page has drawn its conversation. */
   drawn(id: string): string;
   /**
@@ -762,6 +767,10 @@ export function createHost(env: HostEnv): Host {
         post(frame, { channel: HOST_CHANNEL, kind: "dismissDigest" });
         return "sent";
       });
+    },
+    focusMoved() {
+      broadcast({ channel: HOST_CHANNEL, kind: "focusMoved" });
+      return answer("focusMoved", null, "sent");
     },
     retireAll() {
       // THE RELOAD'S TEARDOWN IS THE HOST'S OWN ACT, so it ends the pages

@@ -18,6 +18,7 @@
  * ones when the reader returns to the feed's tail or leaves the page (see
  * `AutoCollapse`). Both go through the one collapse, `collapseSection`.
  */
+import { perDocument } from "./per-document.js";
 import { createPresence, pagePresence, type Presence } from "./presence.js";
 import { CONTROL_SELECTOR } from "./control.js";
 import { ancestorMatching, queryAll } from "./dom.js";
@@ -529,7 +530,9 @@ function roleOf(section: HTMLElement): string | undefined {
 }
 
 /** The one owner per document. */
-const owners = new WeakMap<Document, AutoCollapse>();
+const ownerOf = perDocument(
+  (doc) => new AutoCollapse(doc, doc === document ? pagePresence() : createPresence(doc, false)),
+);
 
 /**
  * The page's one `AutoCollapse`, made on first use. The page's own document
@@ -537,12 +540,7 @@ const owners = new WeakMap<Document, AutoCollapse>();
  * visibility.
  */
 export function autoCollapseFor(doc: Document): AutoCollapse {
-  let owner = owners.get(doc);
-  if (owner === undefined) {
-    owner = new AutoCollapse(doc, doc === document ? pagePresence() : createPresence(doc, false));
-    owners.set(doc, owner);
-  }
-  return owner;
+  return ownerOf(doc);
 }
 
 /**

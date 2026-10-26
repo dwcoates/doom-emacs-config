@@ -48,6 +48,9 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		// that turn: stamped with it, working while it runs and settled by its
 		// terminal, and the turn the feed is running is left as it stands.
 		if joined := prompt.GetFoldedInto(); joined.GetValue() != "" {
+			// The bubble that answers it counts its span from here.
+			joinedTurn := ids.TurnID(joined.GetValue())
+			s.promptArrived(s.accountOf(recipient, &joinedTurn), s.entryPlace.GetAtMs())
 			if !placed {
 				return
 			}
@@ -75,6 +78,8 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			s.turnInFlight = &running
 			s.turnStamp = &running
 			s.knowTurn(running)
+			// THE TURN'S SPAN OPENS AT ITS PROMPT (usage.go).
+			s.promptArrived(s.accountOf(recipient, &running), s.entryPlace.GetAtMs())
 			// A replayed prompt is also the turn its page's next UNSTAMPED
 			// terminal ends, and the page has now drawn a prompt.
 			if s.plane.replayed() {
@@ -151,7 +156,9 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		return
 	}
 
-	// An agent-addressed prompt: the same content at both ends.
+	// An agent-addressed prompt: the same content at both ends. The
+	// recipient's next bubble counts its span from it (usage.go).
+	s.promptArrived(s.accountOf(recipient, nil), s.entryPlace.GetAtMs())
 	recipientFeed := feedid.Feed{Agent: recipient}
 	senderFeedKey := "root"
 	if head, ok := s.subFeeds[subFeedKey]; ok {
