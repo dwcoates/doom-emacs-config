@@ -717,6 +717,148 @@ test_uninstall_purges_legacy_hooks() {
   cleanup "$repo" "$home"
 }
 
+# ---------------------------------------------------------------------------
+# command_link: a command of the repository linked into the user's bin dir.
+# ---------------------------------------------------------------------------
+
+# add_command_link REPO: add the agent-repld command_link entry to the
+# manifest, with its source (a stub script) in the repository.
+add_command_link() {
+  local manifest="$1/modules/app/agent-repl/requirements.json" tmp
+  printf '#!/bin/sh\necho agent-repld\n' >"$1/modules/app/agent-repl/bin/agent-repld"
+  chmod +x "$1/modules/app/agent-repl/bin/agent-repld"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/manifest.XXXXXX")"
+  jq '.requirements += [{"id": "agent-repld-on-path", "kind": "command_link", "why": "the agent API by name", "profile": "run", "name": "agent-repld", "source": {"repo": "modules/app/agent-repl/bin/agent-repld"}}]' "$manifest" >"$tmp"
+  mv "$tmp" "$manifest"
+}
+
+# run_install_path REPO HOME BIN_DIR PATH_PREFIX [ACTION]: run_install with
+# AGENT_REPL_BIN_DIR set to BIN_DIR and PATH_PREFIX put ahead of PATH.
+run_install_path() {
+  local repo="$1" home="$2" bin="$3" prefix="$4" action="${5:-install}"
+  set +e
+  HOME="$home" FOO_SKILL_ROOT="$(cat "$repo/.foo-skill-root")" AGENT_REPL_BIN_DIR="$bin" PATH="$prefix:$PATH" \
+    bash "$repo/.claude/install.sh" "$action" >"$repo/.install.log" 2>&1
+  LAST_RC=$?
+  set -e
+}
+
+# command_source REPO: the physical main-worktree path the link must name.
+command_source() { printf '%s/modules/app/agent-repl/bin/agent-repld\n' "$(cd "$1" && pwd -P)"; }
+
+test_install_links_a_command_into_the_bin_dir_on_path() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  add_command_link "$repo"
+  run_install_path "$repo" "$home" "$home/.local/bin" "$home/.local/bin"
+  local actual; actual="$(readlink "$home/.local/bin/agent-repld" 2>/dev/null || echo MISSING)"
+  if [ "$LAST_RC" -eq 0 ] && [ "$actual" = "$(command_source "$repo")" ] \
+     && grep -q "ok          agent-repld-on-path: $home/.local/bin/agent-repld -> .*, on PATH" "$repo/.install.log"; then
+    pass "a command link is made in the bin dir and found on PATH"
+  else
+    fail "command link install" "rc: $LAST_RC" "actual: $actual" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+test_install_a_command_link_honors_the_bin_dir_override() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  add_command_link "$repo"
+  run_install_path "$repo" "$home" "$home/tools" "$home/tools"
+  if [ "$LAST_RC" -eq 0 ] && [ -L "$home/tools/agent-repld" ] && [ ! -e "$home/.local/bin/agent-repld" ]; then
+    pass "AGENT_REPL_BIN_DIR picks the dir a command is linked into"
+  else
+    fail "command link bin dir override" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+test_install_a_command_link_off_path_needs_the_user() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  add_command_link "$repo"
+  run_install_path "$repo" "$home" "$home/.local/bin" "$home/elsewhere"
+  if [ "$LAST_RC" -ne 0 ] && [ -L "$home/.local/bin/agent-repld" ] \
+     && grep -q "needs-user  agent-repld-on-path: .*$home/.local/bin is not on PATH" "$repo/.install.log" \
+     && grep -q "add export PATH=\"$home/.local/bin:\$PATH\" to your shell profile" "$repo/.install.log"; then
+    pass "a command linked into a dir off PATH needs the user, naming the profile line"
+  else
+    fail "command link off PATH" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+test_install_a_command_shadowed_on_path_needs_the_user() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  add_command_link "$repo"
+  mkdir -p "$home/shadow"
+  printf '#!/bin/sh\n' >"$home/shadow/agent-repld"; chmod +x "$home/shadow/agent-repld"
+  run_install_path "$repo" "$home" "$home/.local/bin" "$home/shadow:$home/.local/bin"
+  if [ "$LAST_RC" -ne 0 ] && grep -q "agent-repld is found at $home/shadow/agent-repld ahead of $home/.local/bin/agent-repld" "$repo/.install.log"; then
+    pass "a command shadowed earlier on PATH needs the user, naming the shadow"
+  else
+    fail "command link shadowed" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+test_install_preserves_a_users_file_at_the_commands_name() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  add_command_link "$repo"
+  mkdir -p "$home/.local/bin"; echo "user file" >"$home/.local/bin/agent-repld"
+  run_install_path "$repo" "$home" "$home/.local/bin" "$home/.local/bin"
+  if [ "$LAST_RC" -ne 0 ] && [ ! -L "$home/.local/bin/agent-repld" ] && grep -q "user file" "$home/.local/bin/agent-repld" \
+     && grep -q "$home/.local/bin/agent-repld is a file of yours" "$repo/.install.log"; then
+    pass "a file of the user's at the command's name is never overwritten"
+  else
+    fail "command link user file" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+test_install_relinks_a_stale_command_link() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  add_command_link "$repo"
+  mkdir -p "$home/.local/bin"; ln -s /some/stale/agent-repld "$home/.local/bin/agent-repld"
+  run_install_path "$repo" "$home" "$home/.local/bin" "$home/.local/bin"
+  if [ "$LAST_RC" -eq 0 ] && [ "$(readlink "$home/.local/bin/agent-repld")" = "$(command_source "$repo")" ] \
+     && grep -q "agent-repld-on-path is outdated" "$repo/.install.log"; then
+    pass "a stale command link is repaired"
+  else
+    fail "command link repair" "rc: $LAST_RC" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+test_uninstall_removes_the_command_link() {
+  local repo home; repo="$(mkfake_repo)"; home="$(mkfake_home)"
+  add_command_link "$repo"
+  run_install_path "$repo" "$home" "$home/.local/bin" "$home/.local/bin"
+  run_install_path "$repo" "$home" "$home/.local/bin" "$home/.local/bin" uninstall
+  if [ ! -e "$home/.local/bin/agent-repld" ] && [ ! -L "$home/.local/bin/agent-repld" ] \
+     && grep -q "uninstall: removed $home/.local/bin/agent-repld" "$repo/.install.log"; then
+    pass "uninstall removes the command link"
+  else
+    fail "command link uninstall" "$(cat "$repo/.install.log")"
+  fi
+  cleanup "$repo" "$home"
+}
+
+# Every link kind checks its link through the one check_link, so a link kind
+# with a hand-rolled check of its own fails here rather than drifting.
+test_every_link_kind_checks_through_check_link() {
+  local runner="$REPO_ROOT/modules/app/agent-repl/bin/requirements.sh" fn missing=""
+  for fn in check_skill_link_in check_command_link; do
+    if ! awk -v f="$fn" '$0 ~ "^"f"\\(\\)" {on=1} on && /^}/ {exit} on' "$runner" | grep -q 'check_link "\$name" "\$src" "\$dest"'; then
+      missing="$missing $fn"
+    fi
+  done
+  local refusals; refusals="$(grep -c 'is a file of yours, not a link' "$runner")"
+  if [ -z "$missing" ] && [ "$refusals" -eq 1 ]; then
+    pass "every link kind checks through check_link"
+  else
+    fail "shared link check" "not through check_link:$missing" "file-of-yours refusals: $refusals, want 1"
+  fi
+}
+
 echo "=== test-install.sh ==="
 test_install_fresh_symlinks_to_impl
 test_install_default_action_exits_zero
@@ -753,5 +895,13 @@ test_purge_covers_alternate_config_dirs
 test_purge_is_idempotent
 test_purge_refuses_malformed_settings
 test_uninstall_purges_legacy_hooks
+test_install_links_a_command_into_the_bin_dir_on_path
+test_install_a_command_link_honors_the_bin_dir_override
+test_install_a_command_link_off_path_needs_the_user
+test_install_a_command_shadowed_on_path_needs_the_user
+test_install_preserves_a_users_file_at_the_commands_name
+test_install_relinks_a_stale_command_link
+test_uninstall_removes_the_command_link
+test_every_link_kind_checks_through_check_link
 
 harness_finish

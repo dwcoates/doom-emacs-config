@@ -26,6 +26,9 @@
 #   skill_link               a Claude Code skill linked into the skills directory of
 #                            every Claude config root agent-repl runs sessions under
 #                            (`"retired": true`: our link is removed instead)
+#   command_link             a command of the repository linked into the user's
+#                            bin dir (AGENT_REPL_BIN_DIR, ~/.local/bin by
+#                            default), which must be on PATH
 #   git_hook                 a managed git hook in the repository's hooks dir
 #   launchd_service          a launchd user agent installed and running: its
 #                            program built here (`build_target` + `binary`) or
@@ -62,6 +65,8 @@ BUILD_FRONTEND="${AGENT_REPL_REQUIREMENTS_BUILD:-$MODULE_DIR/bin/build-frontend.
 LAUNCHCTL="${AGENT_REPL_LAUNCHCTL:-launchctl}"
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl"
 SKILLS_DIR="$HOME/.claude/skills"
+# BIN_DIR is where a command_link puts its command: the user's own bin dir.
+BIN_DIR="${AGENT_REPL_BIN_DIR:-$HOME/.local/bin}"
 
 # skills_dirs: every skills directory a skill link is kept in, one per line.
 # A session runs under ~/.claude, or, for a workspace under MULTI_REPO_ROOT,
@@ -168,6 +173,8 @@ validate_entries() {
        elif $e.kind == "env" then need($e; ["name", "doc"])
        elif $e.kind == "notification_permission" then need($e; ["command", "platforms"])
        elif $e.kind == "skill_link" then need($e; ["name", "source"])
+       elif $e.kind == "command_link" then need($e; ["name", "source"]),
+         (select($e.source != null and $e.source.repo == null) | "\($e._file): \($e.id): a command_link source is a path in the repository (\"repo\")")
        elif $e.kind == "git_hook" then need($e; ["hook", "source", "markers"])
        elif $e.kind == "launchd_service" then need($e; ["label", "plist", "platforms"]),
          (select((($e.command != null) and (($e.build_target != null) or ($e.binary != null)))
@@ -309,8 +316,8 @@ check_notification_permission() {
   fi
 }
 
-# link_source ENTRY: the canonical source path of a link entry, or empty when
-# its env root is unset.
+# link_source ENTRY: the canonical source path of a link entry (a skill link or
+# a command link), or empty when its env root is unset.
 link_source() {
   local e="$1" repo env path
   repo="$(field "$e" .source.repo)"
@@ -415,6 +422,30 @@ check_link() {
   else
     STATUS=missing; DETAIL="$dest is not linked"
   fi
+}
+
+# check_command_link ENTRY: the command linked into BIN_DIR, and BIN_DIR on
+# PATH ahead of any other command of that name, so a shell, an agent's tool
+# call and a skill all reach it by its bare name.
+check_command_link() {
+  local e="$1" name src dest found
+  name="$(field "$e" .name)"
+  dest="$BIN_DIR/$name"
+  src="$(link_source "$e")"
+  check_link "$name" "$src" "$dest"
+  [ "$STATUS" = ok ] || return 0
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *)
+      STATUS=needs-user; DETAIL="$dest is linked, but $BIN_DIR is not on PATH, so $name is not found by name"
+      FIX="add export PATH=\"$BIN_DIR:\$PATH\" to your shell profile, then run doom env"; return ;;
+  esac
+  found="$(command -v "$name" 2>/dev/null || true)"
+  if [ "$found" != "$dest" ]; then
+    STATUS=needs-user; DETAIL="$name is found at $found ahead of $dest on PATH"
+    FIX="move $BIN_DIR ahead of $(dirname "$found") on PATH in your shell profile, or remove $found"; return
+  fi
+  DETAIL="$dest -> $src, on PATH"
 }
 
 # hook_paths ENTRY: sets HOOK_SRC and HOOK_DEST for a git_hook entry.
@@ -597,6 +628,14 @@ install_skill_link() {
   done < <(skills_dirs)
 }
 
+install_command_link() {
+  local e="$1" src
+  src="$(link_source "$e")"
+  [ -n "$src" ] && [ -e "$src" ] || return 1
+  mkdir -p "$BIN_DIR"
+  ln -sfn "$src" "$BIN_DIR/$(field "$e" .name)"
+}
+
 install_git_hook() {
   local e="$1"
   hook_paths "$e"
@@ -693,6 +732,12 @@ uninstall_entry() {
           rm -f "$dest"; say "uninstall: removed $dest"
         fi
       done < <(skills_dirs) ;;
+    command_link)
+      src="$(link_source "$e")"
+      dest="$BIN_DIR/$(field "$e" .name)"
+      if [ -L "$dest" ] && [ -n "$src" ] && [ "$(readlink "$dest")" = "$src" ]; then
+        rm -f "$dest"; say "uninstall: removed $dest"
+      fi ;;
     git_hook)
       hook_paths "$e"
       if [ -e "$HOOK_DEST" ] && [ "$HOOK_SRC" -ef "$HOOK_DEST" ]; then

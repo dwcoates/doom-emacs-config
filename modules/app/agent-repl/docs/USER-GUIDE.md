@@ -9,7 +9,7 @@ user guide"). Controls that predate this guide are not all listed yet.
 Run `bash .claude/install.sh` from this repository, or ask an agent to run
 `/agent-repl-install`. It installs everything agent-repl needs that is missing:
 Emacs with xwidgets, the Go and Node toolchains, `terminal-notifier`,
-`hunspell` and the input window's spelling dictionary, the Claude Code skills, the git hook, and the store, sidecar and metrics-store (VictoriaMetrics) services. It then
+`hunspell` and the input window's spelling dictionary, the Claude Code skills, the `agent-repld` command on your `PATH`, the git hook, and the store, sidecar and metrics-store (VictoriaMetrics) services. It then
 lists what only you can provide. `bash .claude/install.sh check` reports the
 same thing without changing anything, and `doom doctor` reports it too.
 
@@ -28,6 +28,7 @@ and the daemon Emacs starts, see them.
 | A passwordless `sudo` grant for `pmset` | A file under `/etc/sudoers.d/` granting you `NOPASSWD` on exactly these invocations of `/usr/bin/pmset -a`: `disablesleep 1`, `disablesleep 0`, `networkoversleep 1`, `networkoversleep 0`, `womp 1`, `womp 0`, `powermode 1`, `powermode 2`. Edit it with `sudo visudo -f`. | Persistent-wifi mode, which disables sleep and switches to Low Power Mode when it turns on, and enables sleep and switches to High Power Mode when it turns off. | Without the sleep lines, turning the mode on or off fails with `power_settings_refused`. Without the `powermode` lines, the mode still changes and the energy step fails, naming the refusal. |
 | `MULTI_REPO_ROOT` | Optional. The directory holding your work repositories, including the `explanation-engine` checkout, in your shell profile. | The installer, which links the `/create-or-update-skill` skill from `$MULTI_REPO_ROOT/explanation-engine`, workspaces worked under the work account, and `SPC TAB O`, which makes its one-shot in `$MULTI_REPO_ROOT/explanation-engine`. | That skill is not linked, and the installer reports it. `SPC TAB O` refuses, naming the variable. |
 | `MULTI_REPO_CONFIG_DIR` | Optional. Your work account's Claude config dir (`~/.claude-chesscom` in the work account row above), in your shell profile. | The installer, which links every global agent-repl skill into its `skills/` as well as `~/.claude/skills`, and Emacs, which hands it to the daemon as the config root of workspaces under `$MULTI_REPO_ROOT`. | Sessions under `$MULTI_REPO_ROOT` have none of the global agent-repl skills, and their composers complete none of them. Emacs falls back to `~/.claude-chesscom`. |
+| Your bin dir on `PATH` | `~/.local/bin` on `PATH` in your shell profile (`export PATH="$HOME/.local/bin:$PATH"`), then `doom env`. `AGENT_REPL_BIN_DIR` names another dir instead. | The installer, which links `agent-repld` there, and every agent, skill and shell that calls `agent-repld` by name. | The installer reports `agent-repld-on-path` as needing you and prints the line to add. Calls of `agent-repld` by name fail with `command not found`. |
 | `AGENT_WORKSPACE_PREFIX` | Optional. A prefix for new workspace branches, such as your initials, in your shell profile. The older `CLAUDE_WORKSPACE_PREFIX` is still read when this one is unset. | Workspace creation, which names a branch `<prefix>/<name>`. | Branches get no prefix. |
 
 ## Selecting a bubble
