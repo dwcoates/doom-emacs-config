@@ -2223,3 +2223,25 @@ func TestCreateFailsARootWhoseSubsectionsCannotBeRead(t *testing.T) {
 		t.Fatal("the failed read was not logged at error")
 	}
 }
+
+func TestTheShippedSubsectionPlacementBriefNamesTheVerbs(t *testing.T) {
+	// Arrange.
+	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefSubsectionPlacement)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Act.
+	text, err := brief.Splice(nil)
+
+	// Assert: the verbs as `agent-repld workspace` spells them
+	// (cmd/agent-repld/agentcli.go).
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+	for _, want := range []string{"agent-repld workspace subsections here", "agent-repld workspace place here -subsection NAME"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("brief = %q, want it to name %q", text, want)
+		}
+	}
+}
