@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -89,6 +90,8 @@ type cliDeps struct {
 	getwd  func() (string, error)
 	// mintKey mints an idempotency key.
 	mintKey func(prefix string) (string, error)
+	// now is the current instant, which a relative time flag counts back from.
+	now func() time.Time
 }
 
 // productionCLIDeps reaches the real serving daemon.
@@ -105,6 +108,7 @@ func productionCLIDeps() cliDeps {
 		roster:  readRoster,
 		getwd:   os.Getwd,
 		mintKey: prompthandler.MintKey,
+		now:     time.Now,
 	}
 }
 
@@ -150,6 +154,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"compact":     {usage: "compact WS [-instructions TEXT] [-as-user]", run: workspaceCompact},
 		"status":      {usage: "status WS", run: workspaceStatus},
 		"list":        {usage: "list", run: workspaceList},
+		"find":        {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-standing open|closed|landed] [-text TEXT] [-limit N|-all]", run: workspaceFind},
 		"subscribe":   {usage: "subscribe WS -events turn_started,turn_ended,needs_input,landed,closed", run: workspaceSubscribe},
 		"unsubscribe": {usage: "unsubscribe WS", run: workspaceUnsubscribe},
 		"gate":        {usage: "gate WS pay|clear|compact|compact-and-resume [-model M -scope all|prompts|responses]", run: workspaceGate},
@@ -1088,6 +1093,108 @@ func workspaceStatus(c *cliCall, args []string) int {
 	}
 	resp, err := c.client.GetWorkspaceStatus(c.ctx, connect.NewRequest(&agentreplv1.GetWorkspaceStatusRequest{Workspace: ref}))
 	return answer(c, resp, err)
+}
+
+// defaultFindLimit is how many workspaces `workspace find` answers unless
+// -limit or -all says otherwise: enough to cover recent work, few enough that
+// an agent reads the answer whole.
+const defaultFindLimit = 50
+
+// workspaceFind prints the workspaces the daemon's registry holds, open or
+// closed, narrowed by the flags (agentrepl.v1.FindWorkspaces), each with its
+// name and its summary, the most recently active first.
+func workspaceFind(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	repository := fs.String("repository", "", "here, or a main checkout; unset is every repository")
+	since := fs.String("since", "", "only workspaces active at or after WHEN: an age (90m, 36h, 7d) or a date (2026-10-20, RFC 3339)")
+	until := fs.String("until", "", "only workspaces created at or before WHEN, spelled as -since is")
+	standing := fs.String("standing", "", "only workspaces open, closed (landed or not), or landed")
+	text := fs.String("text", "", "only workspaces whose name, branch or summary contains TEXT, case-insensitively")
+	limit := fs.Int("limit", defaultFindLimit, "answer at most N workspaces")
+	all := fs.Bool("all", false, "answer every match, with no limit")
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(positionals) != 0 {
+		return c.usageFailed("nothing is positional")
+	}
+	limited := false
+	fs.Visit(func(f *flag.Flag) { limited = limited || f.Name == "limit" })
+	if limited && *all {
+		return c.usageFailed("-limit and -all are exclusive")
+	}
+	req := &agentreplv1.FindWorkspacesRequest{}
+	if !*all {
+		if *limit < 1 {
+			return c.usageFailed("-limit is at least 1; -all answers every match")
+		}
+		n := uint32(*limit)
+		req.Limit = &n
+	}
+	window := &agentreplv1.FindWorkspacesWindow{}
+	for _, bound := range []struct {
+		flag, value string
+		into        **int64
+	}{{"since", *since, &window.SinceMs}, {"until", *until, &window.UntilMs}} {
+		if bound.value == "" {
+			continue
+		}
+		at, err := parseWhen(bound.value, c.deps.now())
+		if err != nil {
+			return c.usageFailed("-%s: %v", bound.flag, err)
+		}
+		ms := at.UnixMilli()
+		*bound.into = &ms
+	}
+	if window.SinceMs != nil || window.UntilMs != nil {
+		req.Window = window
+	}
+	switch *standing {
+	case "":
+	case "open":
+		req.Standing = &agentreplv1.FindWorkspacesStanding{Standing: &agentreplv1.FindWorkspacesStanding_Open{Open: &agentreplv1.FindWorkspacesStandingOpen{}}}
+	case "closed":
+		req.Standing = &agentreplv1.FindWorkspacesStanding{Standing: &agentreplv1.FindWorkspacesStanding_Closed{Closed: &agentreplv1.FindWorkspacesStandingClosed{}}}
+	case "landed":
+		req.Standing = &agentreplv1.FindWorkspacesStanding{Standing: &agentreplv1.FindWorkspacesStanding_Landed{Landed: &agentreplv1.FindWorkspacesStandingLanded{}}}
+	default:
+		return c.usageFailed("-standing is open, closed or landed, not %q", *standing)
+	}
+	if *text != "" {
+		req.Text = text
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	scope, ok := c.scopeFlag(*repository)
+	if !ok {
+		return exitFailure
+	}
+	req.Repository = scope
+	resp, err := c.client.FindWorkspaces(c.ctx, connect.NewRequest(req))
+	return answer(c, resp, err)
+}
+
+// parseWhen reads a time flag: an age counted back from NOW (a Go duration
+// such as 90m or 36h, or a whole number of days such as 7d), a date
+// (2006-01-02, local midnight), or an RFC 3339 instant.
+func parseWhen(value string, now time.Time) (time.Time, error) {
+	if days, ok := strings.CutSuffix(value, "d"); ok {
+		if n, err := strconv.Atoi(days); err == nil && n >= 0 {
+			return now.AddDate(0, 0, -n), nil
+		}
+	}
+	if age, err := time.ParseDuration(value); err == nil && age >= 0 {
+		return now.Add(-age), nil
+	}
+	if at, err := time.ParseInLocation("2006-01-02", value, time.Local); err == nil {
+		return at, nil
+	}
+	if at, err := time.Parse(time.RFC3339, value); err == nil {
+		return at, nil
+	}
+	return time.Time{}, fmt.Errorf("%q is no age (90m, 36h, 7d), date (2006-01-02) or RFC 3339 instant", value)
 }
 
 // workspaceSubsections prints the sidebar arrangement of the repository WS
