@@ -8,9 +8,11 @@ import { createTicker } from "../../src/clock.js";
 import type { ResponseUsage } from "../../src/feed/response-usage.js";
 import {
   RESPONSE_USAGE_ARM,
+  RESPONSE_USAGE_LABEL,
   RESPONSE_USAGE_TIER,
   drawResponseUsageActivity,
   overlayResponseUsage,
+  responseDuration,
 } from "../../src/footer/response-usage.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
@@ -24,9 +26,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** A usage settled SETTLED_AGO_MS before now, or arriving (null). */
-function usage(settledAgoMs: number | null): ResponseUsage {
-  return { text: "2.1k", color: "rgb(1, 2, 3)", settledAtMs: settledAgoMs === null ? null : NOW - settledAgoMs };
+/**
+ * A usage settled SETTLED_AGO_MS before now, or arriving (null), whose span
+ * took TOOK_MS, or has no known start (null).
+ */
+function usage(settledAgoMs: number | null, tookMs: number | null = null): ResponseUsage {
+  const settledAtMs = settledAgoMs === null ? null : NOW - settledAgoMs;
+  const startedAtMs = tookMs === null ? null : (settledAtMs ?? NOW) - tookMs;
+  return { text: "2.1k", color: "rgb(1, 2, 3)", settledAtMs, startedAtMs };
 }
 
 /** A strip holding the given cells' classes, in order. */
@@ -60,11 +67,32 @@ describe("drawResponseUsageActivity", () => {
     expect([tokens?.textContent, tokens?.style.color]).toEqual(["2.1k tokens", "rgb(1, 2, 3)"]);
   });
 
+  it("opens the line naming it a response", () => {
+    // Act
+    const line = drawResponseUsageActivity(usage(0), createTicker(1000)).querySelector(".footer-response-usage");
+    // Assert
+    expect(line?.firstChild?.textContent).toBe(RESPONSE_USAGE_LABEL);
+  });
+
   it("draws how long ago a settled response settled", () => {
     // Act
     const cell = drawResponseUsageActivity(usage(330_000), createTicker(1000));
     // Assert
-    expect(cell.textContent).toBe("2.1k tokens · 5m 30s ago");
+    expect(cell.textContent).toBe("Response 2.1k tokens · 5m 30s ago");
+  });
+
+  it("draws how long a settled response took, between its figure and its age", () => {
+    // Act
+    const cell = drawResponseUsageActivity(usage(330_000, 90_000), createTicker(1000));
+    // Assert
+    expect(cell.textContent).toBe("Response 2.1k tokens, 1m 30s · 5m 30s ago");
+  });
+
+  it("draws no duration for an arriving response, even with a known start", () => {
+    // Act
+    const cell = drawResponseUsageActivity(usage(null, 90_000), createTicker(1000));
+    // Assert
+    expect([cell.textContent, cell.querySelector(".footer-response-duration")]).toEqual(["Response 2.1k tokens", null]);
   });
 
   it("keeps the age current on the shared clock", () => {
@@ -80,7 +108,20 @@ describe("drawResponseUsageActivity", () => {
     // Act
     const cell = drawResponseUsageActivity(usage(null), createTicker(1000));
     // Assert
-    expect([cell.textContent, cell.querySelector("[data-age]")]).toEqual(["2.1k tokens", null]);
+    expect([cell.textContent, cell.querySelector("[data-age]")]).toEqual(["Response 2.1k tokens", null]);
+  });
+});
+
+describe("responseDuration", () => {
+  it.each([
+    ["a settled span", usage(0, 90_000), "1m 30s"],
+    ["a part second, rounded up", usage(0, 5_984), "6s"],
+    ["a span that settled where it began", usage(0, 0), "0s"],
+    ["an arriving response", usage(null, 90_000), null],
+    ["a span with no known start", usage(0), null],
+  ])("states %s", (_name, u, want) => {
+    // Act / Assert
+    expect(responseDuration(u)).toBe(want);
   });
 });
 

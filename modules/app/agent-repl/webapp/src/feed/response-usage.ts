@@ -2,7 +2,8 @@
  * response-usage — A RESPONSE'S COST IS READ IN THE FOOTER WHILE THE POINTER IS
  * ON IT (owner request, 2026-10-25). A response bubble draws no token figure or
  * duration of its own: hovering it shows its usage stamp (its figure and, once
- * it settled, how long ago) in the footer's activity cell, and the pointer
+ * it settled, how long it took and how long ago) in the footer's activity
+ * cell, and the pointer
  * leaving it gives the cell back to the daemon's activity line
  * (src/footer/response-usage.ts draws it).
  *
@@ -15,6 +16,7 @@ import type { FeedResponseUsageStamp } from "../../../proto/gen/ts/frontend/v1/f
 import { BUBBLE_CLASS, BUBBLE_ROLE_ATTRIBUTE } from "../bubble/draw.js";
 import { heatColor } from "../heat.js";
 import { log } from "../log.js";
+import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireMessage } from "../rpc/strict.js";
 import { feedRowId, feedRowOf } from "./row-id.js";
 
@@ -26,18 +28,33 @@ export interface ResponseUsage {
   readonly color: string;
   /** When the response settled, epoch ms, or null while it is arriving. */
   readonly settledAtMs: number | null;
+  /**
+   * When the span the figure counts began, epoch ms, or null when the daemon
+   * knows none: the response's duration runs from here to `settledAtMs`.
+   */
+  readonly startedAtMs: number | null;
 }
 
 /**
  * STAMP, read at the response's draw, so a stamp the wire got wrong (a settle
- * instant past a safe integer, a heat outside [0, 1]) refuses the row as a
- * malformed view there, before anything of it is drawn. PATH names its field.
+ * instant past a safe integer, a heat outside [0, 1], a span that settled
+ * before it began) refuses the row as a malformed view there, before anything
+ * of it is drawn. PATH names its field.
  */
 export function readResponseUsage(stamp: FeedResponseUsageStamp, path: string): ResponseUsage {
+  const settledAtMs = stamp.atMs === 0n ? null : msOf(stamp.atMs, `${path}.at_ms`);
+  const startedAtMs = stamp.startedAtMs === 0n ? null : msOf(stamp.startedAtMs, `${path}.started_at_ms`);
+  if (settledAtMs !== null && startedAtMs !== null && settledAtMs < startedAtMs) {
+    throw new MalformedView(
+      `${path}.started_at_ms`,
+      `the span began at ${String(startedAtMs)}, after the response settled at ${String(settledAtMs)}`,
+    );
+  }
   return {
     text: stamp.text,
     color: heatColor(requireMessage(stamp.heat, `${path}.heat`).position, `${path}.heat.position`),
-    settledAtMs: stamp.atMs === 0n ? null : msOf(stamp.atMs, `${path}.at_ms`),
+    settledAtMs,
+    startedAtMs,
   };
 }
 

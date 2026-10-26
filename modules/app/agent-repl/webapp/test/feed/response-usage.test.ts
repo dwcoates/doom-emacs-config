@@ -26,7 +26,7 @@ afterEach(() => {
 
 /** A read usage with figure TEXT. */
 function usage(text: string): ResponseUsage {
-  return { text, color: "red", settledAtMs: 1_000 };
+  return { text, color: "red", settledAtMs: 1_000, startedAtMs: 500 };
 }
 
 /** A bubble of ROLE in a feed row ROW, inside HOST. */
@@ -57,11 +57,21 @@ function over(el: Element): void {
 }
 
 describe("readResponseUsage", () => {
-  it("reads the figure, its heat's color and the settle instant", () => {
+  it("reads the figure, its heat's color, the settle instant and the span's start", () => {
     // Arrange
-    const stamp = create(FeedResponseUsageStampSchema, { text: "2.1k", atMs: 5_000n, heat: { position: 0.25 } });
+    const stamp = create(FeedResponseUsageStampSchema, {
+      text: "2.1k",
+      atMs: 5_000n,
+      startedAtMs: 2_000n,
+      heat: { position: 0.25 },
+    });
     // Act / Assert
-    expect(readResponseUsage(stamp, "p")).toEqual({ text: "2.1k", color: heatColor(0.25, "p"), settledAtMs: 5_000 });
+    expect(readResponseUsage(stamp, "p")).toEqual({
+      text: "2.1k",
+      color: heatColor(0.25, "p"),
+      settledAtMs: 5_000,
+      startedAtMs: 2_000,
+    });
   });
 
   it("reads an arriving stamp as not settled", () => {
@@ -69,6 +79,50 @@ describe("readResponseUsage", () => {
     const stamp = create(FeedResponseUsageStampSchema, { text: "2.1k", heat: { position: 0.25 } });
     // Act / Assert
     expect(readResponseUsage(stamp, "p").settledAtMs).toBeNull();
+  });
+
+  it("reads a stamp with no span start as having none", () => {
+    // Arrange
+    const stamp = create(FeedResponseUsageStampSchema, { text: "2.1k", atMs: 5_000n, heat: { position: 0.25 } });
+    // Act / Assert
+    expect(readResponseUsage(stamp, "p").startedAtMs).toBeNull();
+  });
+
+  it("reads a span that settled where it began", () => {
+    // Arrange
+    const stamp = create(FeedResponseUsageStampSchema, {
+      text: "2.1k",
+      atMs: 5_000n,
+      startedAtMs: 5_000n,
+      heat: { position: 0.25 },
+    });
+    // Act / Assert
+    expect(readResponseUsage(stamp, "p").startedAtMs).toBe(5_000);
+  });
+
+  it("refuses a span that settled before it began, naming its field", () => {
+    // Arrange
+    const stamp = create(FeedResponseUsageStampSchema, {
+      text: "2.1k",
+      atMs: 5_000n,
+      startedAtMs: 6_000n,
+      heat: { position: 0.25 },
+    });
+    // Act / Assert
+    expect(() => readResponseUsage(stamp, "FeedResponse.usage")).toThrow(
+      new MalformedView("FeedResponse.usage.started_at_ms", "the span began at 6000, after the response settled at 5000"),
+    );
+  });
+
+  it("refuses a span start beyond a safe integer", () => {
+    // Arrange
+    const stamp = create(FeedResponseUsageStampSchema, {
+      text: "2.1k",
+      startedAtMs: BigInt(Number.MAX_SAFE_INTEGER) + 1n,
+      heat: { position: 0.25 },
+    });
+    // Act / Assert
+    expect(() => readResponseUsage(stamp, "p")).toThrow(MalformedView);
   });
 
   it("refuses a stamp with no heat, naming its field", () => {

@@ -510,7 +510,7 @@ describe("the usage stamp", () => {
     // Act
     const el = drawFeedResponse(stamped(arm, { text: "2.1k", atMs: 1_000n, heat: { position: 0.5 } }), rowContext());
     // Assert
-    expect(responseUsageOf(el)).toEqual({ text: "2.1k", color: heatColor(0.5, "p"), settledAtMs: 1_000 });
+    expect(responseUsageOf(el)).toEqual({ text: "2.1k", color: heatColor(0.5, "p"), settledAtMs: 1_000, startedAtMs: null });
   });
 
   it("records an arriving stamp as not settled", () => {
