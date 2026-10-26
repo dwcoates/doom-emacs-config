@@ -29,6 +29,7 @@ import type { FailureSink } from "../failure/sink.js";
 import type { PageSeen } from "../page-seen.js";
 import { log } from "../log.js";
 import type { AgentReplClient } from "./client.js";
+import type { DaemonOrigin } from "./daemon-origin.js";
 import { startPageStreams, type PageStreams, type PageStreamContext } from "./page-streams.js";
 
 /**
@@ -76,6 +77,12 @@ export interface DaemonContext {
    * than a list every caller has to remember to keep.
    */
   onQuiesced(fn: () => void): () => void;
+  /**
+   * Run FN every time the daemon this context dials moves. See
+   * StreamContext.onDaemonMoved: only the web view host's daemon moves, and a
+   * context built without one (`DaemonContextInit.daemon`) never calls FN.
+   */
+  onDaemonMoved(fn: () => void): () => void;
   /**
    * Announce that a stream frame arrived and could be read.
    *
@@ -148,6 +155,13 @@ export interface DaemonContextInit {
    * passes the page's meter; a test that is not about the cost passes none.
    */
   costs?: StreamCostMeter;
+  /**
+   * The movable daemon origin the client's transport reads, set by the web
+   * view host's context alone (host/sidebar.ts): its moves reopen every
+   * standing stream at the daemon now named. Unset on every workspace page,
+   * whose daemon is its own origin for its whole life.
+   */
+  daemon?: DaemonOrigin;
 }
 
 /** What a workspace page's context is built from. */
@@ -227,6 +241,11 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
       return () => {
         restoredListeners.delete(fn);
       };
+    },
+    onDaemonMoved(fn: () => void): () => void {
+      // A PAGE'S DAEMON IS ITS OWN ORIGIN and never moves, so there is
+      // nothing to subscribe to.
+      return init.daemon?.onMoved(fn) ?? ((): void => undefined);
     },
     onQuiesced(fn: () => void): () => void {
       // A subscriber arriving AFTER the page went quiet is told at once, or a

@@ -9,6 +9,7 @@ import { testAppContext } from "./app-context.js";
 import { createAppContext, createDaemonContext } from "../../src/rpc/context.js";
 import { directPageStreams } from "./direct-page-streams.js";
 import { fakePageSeen } from "../page-seen-fake.js";
+import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 const client = () => createAgentReplClient(createRouterTransport(() => {}));
@@ -306,5 +307,62 @@ describe("createDaemonContext", () => {
 
     // Assert
     expect([app.workspace.id, app.isQuiesced()]).toEqual(["ws-1", true]);
+  });
+});
+
+describe("onDaemonMoved", () => {
+  /** A daemon context over a movable origin, as the web view host builds one. */
+  function hostContext(daemon = createDaemonOrigin("http://host.localhost:1")) {
+    const c = client();
+    return {
+      daemon,
+      context: createDaemonContext({
+        client: c,
+        ticker: createTicker(1000),
+        failures: SINK,
+        page: "webhost-page",
+        streams: directPageStreams(c),
+        daemon,
+      }),
+    };
+  }
+
+  it("tells a subscriber when the host's daemon moves", () => {
+    // Arrange
+    const { daemon, context } = hostContext();
+    const fn = vi.fn();
+    context.onDaemonMoved(fn);
+
+    // Act
+    daemon.set("http://host.localhost:2");
+
+    // Assert
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops telling a subscriber that unsubscribed", () => {
+    // Arrange
+    const { daemon, context } = hostContext();
+    const fn = vi.fn();
+    context.onDaemonMoved(fn)();
+
+    // Act
+    daemon.set("http://host.localhost:2");
+
+    // Assert
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("never tells a page's subscriber, whose daemon is its own origin", () => {
+    // Arrange
+    const context = ctx();
+    const fn = vi.fn();
+
+    // Act
+    const unsubscribe = context.onDaemonMoved(fn);
+    unsubscribe();
+
+    // Assert
+    expect(fn).not.toHaveBeenCalled();
   });
 });

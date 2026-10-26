@@ -23,6 +23,7 @@ import {
   standingClientFailure,
 } from "../../src/rpc/link.js";
 import { watchStream, type StreamEnd } from "../../src/rpc/streams.js";
+import { createDaemonOrigin, type DaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import { beginPage, endPage } from "../../src/page-teardown.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -846,6 +847,119 @@ function standingClient() {
   });
   return { client: createAgentReplClient(transport), state };
 }
+
+/** A context over CLIENT whose daemon is DAEMON, which a test moves. */
+function movableContextFor(client: AgentReplClient, failures: FailureSink, daemon: DaemonOrigin): AppContext {
+  return testAppContext({
+    client,
+    workspace: WORKSPACE,
+    ticker: createTicker(1000),
+    failures,
+    composerEnabled: false,
+    daemon,
+  });
+}
+
+describe("watchStream: the daemon moving", () => {
+  it("reopens at once, without waiting for the old daemon's stream to end", async () => {
+    // ARRANGE: run 1 STANDS, as a stream at a daemon that never leaves does.
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    const { client, state } = standingClient();
+    const handle = open(movableContextFor(client, new RecordingSink(), daemon), () => undefined);
+    await settle();
+    // ACT
+    daemon.set("http://host.localhost:2");
+    await settle();
+    handle.cancel();
+    // ASSERT: reopened with no clock advance.
+    expect(state.openCount).toBe(2);
+  });
+
+  it("files no unreachable card for the run the move ended", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    const { client } = standingClient();
+    const handle = open(movableContextFor(client, sink, daemon), () => undefined);
+    await settle();
+    // ACT
+    daemon.set("http://host.localhost:2");
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(sink.reported).not.toContain("daemonUnreachable");
+  });
+
+  it("logs the run the move ended at info", async () => {
+    // ARRANGE
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => "accepted", (level, line) => lines.push([level, line])));
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    const { client } = standingClient();
+    const handle = open(movableContextFor(client, new RecordingSink(), daemon), () => undefined);
+    await settle();
+    // ACT
+    daemon.set("http://host.localhost:2");
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(
+      lines.some(([level, line]) => level === "info" && line.includes("rpc.stream-ended-daemon-moved")),
+    ).toBe(true);
+  });
+
+  it("reopens at once when the move comes during a backoff", async () => {
+    // ARRANGE: run 1 ends unasked, so the loop is waiting out its backoff.
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    const { client, state } = scriptedClient([[], [], []]);
+    const handle = open(movableContextFor(client, new RecordingSink(), daemon), () => undefined);
+    await settle();
+    // ACT
+    daemon.set("http://host.localhost:2");
+    await settle();
+    handle.cancel();
+    // ASSERT: the second open came with no clock advance.
+    expect(state.openCount).toBe(2);
+  });
+
+  it("does not carry the move into the next run", async () => {
+    // ARRANGE: run 1 stands until the move; run 2 then ends cleanly, unasked.
+    const sink = new RecordingSink();
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    let opens = 0;
+    const transport = createRouterTransport(({ service }) => {
+      service(AgentRepl, {
+        watchFooter: async function* () {
+          opens += 1;
+          yield push();
+          if (opens === 1) await new Promise<never>(() => undefined);
+        },
+      });
+    });
+    const handle = open(movableContextFor(createAgentReplClient(transport), sink, daemon), () => undefined);
+    await settle();
+    // ACT
+    daemon.set("http://host.localhost:2");
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(sink.reported).toContain("daemonUnreachable");
+  });
+
+  it("does not reopen a stream that was cancelled before the move", async () => {
+    // ARRANGE
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    const { client, state } = standingClient();
+    const handle = open(movableContextFor(client, new RecordingSink(), daemon), () => undefined);
+    await settle();
+    handle.cancel();
+    // ACT
+    daemon.set("http://host.localhost:2");
+    await advance(10_000);
+    // ASSERT
+    expect(state.openCount).toBe(1);
+  });
+});
 
 describe("watchStream: the page going quiet", () => {
   it("stops the stream, since the workspace moved to a daemon this page never dials", async () => {

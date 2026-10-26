@@ -332,6 +332,15 @@ hand any more:
   its dedicated rpcs only; a page mux subscription is not given one (the
   `WatchPage` stream has no ending arm), so today the page's own end still
   reads as the failure.
+- **A DAEMON MOVE REOPENS EVERY STREAM AT ONCE.** The web view host's daemon
+  moves at a handover (`Host.setDaemon`, `src/rpc/daemon-origin.ts`), and its
+  context passes the move on (`DaemonContext.onDaemonMoved`). `watchStream`
+  ends the run and reopens it at the daemon now named, logged at info
+  (`rpc.stream-ended-daemon-moved`) with nothing filed. The page mux detaches
+  every subscription synchronously inside the move (`rpc.page-daemon-moved`),
+  so no reopen can subscribe on the generation being left. No stream waits for
+  the old daemon to end it: a handover that cannot finish leaves the old
+  daemon serving, and a roster read from it never moves again (2026-10-26).
 - **THE TOPBAR'S WARNING CHIP IS THE ONE PLACE AN ERROR IS SHOWN** (owner
   ruling, 2026-09-23). The chip and its dropdown (`src/topbar/warnings.ts`)
   are the canonical surface on which the webapp makes an error visible: no
