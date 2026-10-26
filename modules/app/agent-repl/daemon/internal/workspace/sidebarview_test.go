@@ -17,12 +17,8 @@ func loggedAtError(f *fixture, operation string) bool {
 
 // loggedAt reports whether OPERATION was recorded at LEVEL.
 func loggedAt(f *fixture, level, operation string) bool {
-	for _, r := range f.log.logger.Records() {
-		if r.Level == level && r.Operation == operation {
-			return true
-		}
-	}
-	return false
+	_, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: level, Operation: operation})
+	return ok
 }
 
 func TestFoldMergedSectionRecordsTheFoldAndRepublishesTheRoster(t *testing.T) {
