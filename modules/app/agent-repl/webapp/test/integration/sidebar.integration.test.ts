@@ -613,7 +613,7 @@ describe("roster ordering", () => {
       "Open",
       "zulu",
       "alpha",
-      "recently merged",
+      "merge queue",
     ]);
   });
 

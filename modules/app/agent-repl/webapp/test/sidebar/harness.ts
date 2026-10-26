@@ -18,6 +18,7 @@ import {
   RosterOpenSectionSchema,
   RosterMergedRepoGroupSchema,
   RosterMergedSectionSchema,
+  RosterMergeQueueRepoGroupSchema,
   RosterRepoEntrySchema,
   RosterMergeQueueHeadSchema,
   RosterMergeQueueSubjectSchema,
@@ -33,6 +34,7 @@ import {
   type RosterOpenSection,
   type RosterMergedRepoGroup,
   type RosterMergedSection,
+  type RosterMergeQueueRepoGroup,
   type RosterRepoSection,
   type RosterRow,
   type WorkspaceRoster,
@@ -302,11 +304,6 @@ export function repoSection(init: {
    * just before the row BEFORE names, or after every row unless said.
    */
   subsections?: Array<{ id: string; label?: string; rows?: RosterRow[]; collapsed?: boolean; holdsCurrent?: boolean; before?: string }>;
-  /**
-   * The repository's merge queue when the section shows it; unless said, the
-   * section shows its workspaces.
-   */
-  mergeQueue?: MessageInitShape<typeof RosterRepoMergeQueueSchema>;
   /** The rows of the repository's one-shot subsection, drawn last; none unless said. */
   oneShot?: RosterRow[];
 }): RosterRepoSection {
@@ -349,10 +346,6 @@ export function repoSection(init: {
     fold: sectionFold(init.collapsed, init.holdsCurrent),
     divergence: init.divergence ?? { state: { case: "pending", value: {} } },
     entries,
-    shows:
-      init.mergeQueue === undefined
-        ? { case: "workspaces", value: {} }
-        : { case: "mergeQueue", value: create(RosterRepoMergeQueueSchema, init.mergeQueue) },
   });
 }
 
@@ -373,27 +366,43 @@ function sectionFold(
 }
 
 /**
- * The recently-merged band. Its daemon-held fold is COLLAPSED unless said, as
- * the daemon draws a band nobody has unfolded.
+ * The Merge Queue section with no queue listed. Its daemon-held fold is
+ * COLLAPSED unless said, as the daemon draws a section nobody has unfolded.
  */
 export function mergedSection(
   rows: RosterRow[] = [],
-  count: number = rows.length,
+  count: number = 0,
   collapsed: boolean = true,
 ): RosterMergedSection {
   return mergedBand(rows.length === 0 ? [] : [mergedGroup({ id: "repo-1", rows })], count, collapsed);
 }
 
-/** The recently-merged band carrying GROUPS, its count and its fold stated. */
+/**
+ * The Merge Queue section carrying merged GROUPS, its header COUNT and its
+ * fold stated, and the QUEUES and PAUSED marker unless said none.
+ */
 export function mergedBand(
   groups: RosterMergedRepoGroup[],
-  count: number = groups.filter((g) => g.drawn.case === "shown").reduce((sum, g) => sum + (g.mergedRows?.rows.length ?? 0), 0),
+  count: number = 0,
   collapsed: boolean = true,
+  queues: { queues?: RosterMergeQueueRepoGroup[]; paused?: boolean } = {},
 ): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
-    header: { label: { text: "Recently Merged" }, count: { workspaces: count } },
+    header: { label: { text: "Merge Queue" }, count: { workspaces: count } },
     groups,
+    queues: queues.queues ?? [],
+    mergedLabel: { text: "Recently Merged" },
+    mergeQueuePaused: queues.paused === true ? {} : undefined,
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
+  });
+}
+
+/** One repository's queue group inside the Merge Queue section. */
+export function queueGroup(init: { id: string; label?: string; queue?: MessageInitShape<typeof RosterRepoMergeQueueSchema> }): RosterMergeQueueRepoGroup {
+  return create(RosterMergeQueueRepoGroupSchema, {
+    key: { repository: { id: init.id, dir: `/r/${init.id}` } },
+    header: { label: { text: init.label ?? init.id } },
+    queue: create(RosterRepoMergeQueueSchema, init.queue ?? {}),
   });
 }
 
@@ -437,16 +446,12 @@ export function hiddenSection(
 
 /**
  * The open-workspaces section. Its daemon-held fold is EXPANDED unless said,
- * as the daemon draws a section nobody has folded, and its repository
- * sections show their WORKSPACES unless said, as the daemon draws a view
- * nobody has toggled. No merge queue is paused unless said.
+ * as the daemon draws a section nobody has folded.
  */
-export function openSection(collapsed: boolean = false, mergeQueues: boolean = false, mergeQueuePaused: boolean = false): RosterOpenSection {
+export function openSection(collapsed: boolean = false): RosterOpenSection {
   return create(RosterOpenSectionSchema, {
     label: { text: "Open" },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
-    shows: mergeQueues ? { case: "mergeQueues", value: {} } : { case: "workspaces", value: {} },
-    mergeQueuePaused: mergeQueuePaused ? {} : undefined,
   });
 }
 

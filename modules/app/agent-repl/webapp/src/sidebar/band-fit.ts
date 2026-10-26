@@ -1,10 +1,10 @@
 /**
- * band-fit — how many lines of the Open, Hidden Workspaces and Recently Merged
+ * band-fit — how many lines of the Open, Hidden Workspaces and Merge Queue
  * sections the rail shows, each section scrolling through the rest.
  *
  * THE RAIL NEVER SCROLLS; ITS SECTIONS DO (owner request, 2026-10-18). The
- * daemon sends every row of every section (Recently Merged holds a week of
- * merges). Only this page knows its own height, so the split is decided here:
+ * daemon sends every row of every section (Merge Queue holds a week of
+ * merges below its queues). Only this page knows its own height, so the split is decided here:
  *
  *   - When every line of every section fits, every line shows and nothing
  *     scrolls.
@@ -12,22 +12,22 @@
  *     below it are left `BAND_FLOOR` lines each, and scrolls past that.
  *   - The bands SHARE those `2 * BAND_FLOOR` lines (six, owner request,
  *     2026-10-19): a band that needs fewer than `BAND_FLOOR` gives the rest
- *     to the other, so a Recently Merged of one merge today leaves Hidden
+ *     to the other, so a Merge Queue of one merge today leaves Hidden
  *     Workspaces five.
- *   - Recently Merged claims its share only for the lines that reach TODAY's
- *     merges. An older merge has no claim against the Open section: it shows
- *     only in room the Open section cannot use.
+ *   - Merge Queue claims its share only for the lines that reach its queues
+ *     and TODAY's merges. An older merge has no claim against the Open
+ *     section: it shows only in room the Open section cannot use.
  *   - NO ROOM IS LEFT UNUSED (owner request, 2026-10-19). Room the Open
  *     section leaves, whole or stopped short by a line taller than the room
  *     (a repository's header riding with its first row), fills Hidden
- *     Workspaces as far as its lines fit, then Recently Merged.
+ *     Workspaces as far as its lines fit, then Merge Queue.
  *   - A rail too short for the bands' share shrinks the bands, the longer one
- *     first, Recently Merged on a tie, and shows the Open section no lines.
+ *     first, Merge Queue on a tie, and shows the Open section no lines.
  *   - THE LOWEST OPEN SECTION REACHES THE RAIL'S FOOT (owner request,
  *     2026-10-19). Whatever room is left once every section shows its whole
  *     lines, less than one more line of any section, is added to the
- *     viewport of the lowest section not folded (Recently Merged, unless it
- *     is folded), so no strip of the rail is ever left under it. That
+ *     viewport of the lowest section not folded (Merge Queue, unless it is
+ *     folded), so no strip of the rail is ever left under it. That
  *     viewport may cut its last line through, scrolling it into view; the
  *     section's rows region stands that tall even when it holds fewer rows.
  *   - A LINE CUT AT THE FOOT FADES OUT (owner request, 2026-10-19). While the
@@ -38,20 +38,18 @@
  * A LINE IS ONE `.row`, a nested family member included, a folded
  * repository's header, or the header of a subsection that is folded or empty
  * (a subsection with no rows to show draws its header alone, so it is a line
- * as a folded repository's header is). While the repository sections show
- * their merge queues, a queue's head card and each waiting merge is a line,
- * and so is the header of a repository whose queue holds nothing, which draws
- * its header alone. A viewport of K lines is exactly as tall as the
- * first K lines are drawn, the header above a line (a repository section's,
- * a subsection's, a Recently Merged repository group's) riding with it, so no
+ * as a folded repository's header is), and in the Merge Queue section a
+ * queue's head card and each merge waiting behind it. A viewport of K lines is
+ * exactly as tall as the first K lines are drawn, the header above a line (a
+ * repository section's, a subsection's, a Merge Queue repository group's, the
+ * "Recently Merged" heading) riding with it, so no
  * line is cut through but the lowest section's last. A folded section shows no
  * lines and takes no room.
  *
- * THE COUNT IS THE DAEMON'S. Every row is reachable by scrolling, so the
- * folded "(N)" stays the number of rows the section holds.
+ * THE COUNT IS THE DAEMON'S. Every row is reachable by scrolling, so a
+ * section's "(N)" stays the daemon's count, whatever its viewport shows.
  *
- * TODAY IS THE LOCAL DATE, as the band's "(K today)" counts it
- * (`mergedToday`). The rail re-fits when the date turns over, so a merge stops
+ * TODAY IS THE LOCAL DATE, as a merged row's green reads it (`mergedToday`). The rail re-fits when the date turns over, so a merge stops
  * claiming room at midnight on the same tick its row stops reading as today's.
  *
  * THE FIT NEVER MOVES ITS OWN ROOM. The room is measured from layout the
@@ -71,7 +69,7 @@
 import { sameLocalDate, type Ticker } from "../clock.js";
 import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
-import { MERGE_QUEUE_EMPTY_CLASS, MERGE_QUEUE_HEAD_CLASS, MERGE_QUEUE_WAITING_CLASS } from "./merge-queue-view.js";
+import { MERGE_QUEUE_HEAD_CLASS, MERGE_QUEUE_WAITING_CLASS, MERGE_QUEUES_CLASS } from "./merge-queue-view.js";
 import { mergedToday } from "./row.js";
 
 /** The classes the three sections are drawn with. */
@@ -122,7 +120,6 @@ const LINE_SELECTOR = [
   `.sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head`,
   `.${MERGE_QUEUE_HEAD_CLASS}`,
   `.${MERGE_QUEUE_WAITING_CLASS}`,
-  `.repo.${MERGE_QUEUE_EMPTY_CLASS} > .repo-head`,
 ].join(", ");
 
 /** How many lines each section's viewport shows. */
@@ -144,7 +141,7 @@ export interface SectionStops {
   open: BandStops;
   hidden: BandStops;
   merged: BandStops;
-  /** How many of Recently Merged's first lines it takes to show every merge of today. */
+  /** How many of Merge Queue's first lines it takes to show its queues and every merge of today. */
   mergedToday: number;
 }
 
@@ -253,21 +250,26 @@ export function regionStops(region: HTMLElement, lines: readonly HTMLElement[] =
 }
 
 /**
- * How many of Recently Merged's first LINES it takes to show every merge that
- * landed on NOW_MS's local date: through the last line whose row carries a
- * merged instant of today. A line outside any stamped row is malformed.
+ * How many of Merge Queue's first LINES it takes to show its queues and every
+ * merge that landed on NOW_MS's local date: through the last line that is a
+ * queue's (inside `MERGE_QUEUES_CLASS`) or whose row carries a merged instant
+ * of today. Any other line outside a stamped row is malformed.
  */
 export function mergedTodayLines(lines: readonly HTMLElement[], nowMs: number): number {
   let through = 0;
   lines.forEach((line, i) => {
+    if (line.closest(`.${MERGE_QUEUES_CLASS}`) !== null) {
+      through = i + 1;
+      return;
+    }
     const stamped = line.closest<HTMLElement>(`[${MERGED_AT_ATTRIBUTE}]`);
     const atMs = stamped === null ? Number.NaN : Number(stamped.getAttribute(MERGED_AT_ATTRIBUTE));
     if (!Number.isFinite(atMs)) {
-      log.error("a sidebar band cannot be fitted: a Recently Merged line carries no merged instant", {
+      log.error("a sidebar band cannot be fitted: a Merge Queue line is no queue's and carries no merged instant", {
         operation: "sidebar.band-fit.unstamped",
         context: { line: i, merged_at: stamped?.getAttribute(MERGED_AT_ATTRIBUTE) ?? null },
       });
-      throw new Error(`band fit: Recently Merged line ${i} carries no merged instant`);
+      throw new Error(`band fit: Merge Queue line ${i} is no queue's and carries no merged instant`);
     }
     if (mergedToday(atMs, nowMs)) through = i + 1;
   });

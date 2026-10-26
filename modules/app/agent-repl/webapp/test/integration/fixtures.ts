@@ -2463,13 +2463,6 @@ export type RosterStatusArm = RosterStatusCase;
  * A repository section's `fold` arm. The wire never leaves the oneof unset
  * (`frontend.v1.RosterRepoSection.fold`), so every fixture section names one.
  */
-/**
- * What a fixture repository section shows: its workspaces, as the daemon
- * draws a view nobody has toggled (`frontend.v1.RosterRepoSection.shows`,
- * always set on the wire).
- */
-const SHOWS_WORKSPACES: MessageInitShape<typeof RosterRepoSectionSchema>["shows"] = { case: "workspaces", value: {} };
-
 function repositoryFold(collapsed: boolean): MessageInitShape<typeof RosterRepoSectionSchema>["fold"] {
   return collapsed
     ? { case: "collapsed", value: {} }
@@ -2573,7 +2566,6 @@ export function roster(init?: {
         entries: rowEntries(section.rows),
         fold: repositoryFold(section.collapsed === true),
         divergence: PENDING_DIVERGENCE,
-        shows: SHOWS_WORKSPACES,
       })) ?? [
         {
           key: { repository: repositoryRef() },
@@ -2581,22 +2573,19 @@ export function roster(init?: {
           entries: rowEntries(rows),
           fold: repositoryFold(false),
           divergence: PENDING_DIVERGENCE,
-          shows: SHOWS_WORKSPACES,
         },
       ],
       openCount: { workspaces: rows.length },
     },
-    open: { label: { text: "Open" }, fold: { case: "expanded", value: {} }, shows: { case: "workspaces", value: {} } },
+    open: { label: { text: "Open" }, fold: { case: "expanded", value: {} } },
     hidden: {
       header: { label: { text: "Hidden" }, count: { workspaces: (init?.hidden ?? []).length } },
       hiddenRows: { rows: (init?.hidden ?? []).map(hiddenRow) },
       fold: { case: "expanded", value: {} },
     },
     recentlyMerged: {
-      header: {
-        label: { text: "recently merged" },
-        count: { workspaces: init?.mergedRepositoryCollapsed === true ? 0 : (init?.merged ?? [0]).length },
-      },
+      header: { label: { text: "merge queue" }, count: { workspaces: 0 } },
+      mergedLabel: { text: "recently merged" },
       groups: [
         {
           key: { repository: repositoryRef() },

@@ -1,7 +1,7 @@
 /**
  * merge-glyph — THE ONE CHARACTER every merge mark in the webapp draws: the
  * feed's merge bubble head, the footer's merges chip and its rows, and the
- * sidebar's merge-queue toggle. One author, so the surfaces never drift to
+ * sidebar's merge queue heads. One author, so the surfaces never drift to
  * two different arrows for the same act.
  */
 
