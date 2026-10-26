@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
+import { isStill } from "../../bubble/still.js";
 import { create } from "@bufbuild/protobuf";
 import {
   FeedAgentPromptAddressSchema,
@@ -15,10 +16,6 @@ import { drawFeedAgentPrompt } from "../../../src/feed/rows/agent-prompt.js";
 import { BUBBLE_COPY_CLASS, COPY_ROOM_CLASS } from "../../../src/bubble/copy-room.js";
 import { boundCopyText } from "../../../src/copy-control.js";
 import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
-import {
-  PROMPT_WAVE_ATTRIBUTE,
-  PROMPT_WAVE_WORKING,
-} from "../../../src/breathing.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
   AGENT_PROMPT_CAP_LINES,
@@ -46,28 +43,16 @@ describe("drawFeedAgentPrompt", () => {
     expect(drawFeedAgentPrompt(agentPrompt()).classList.contains("prompt-agent")).toBe(true);
   });
 
-  it("waves when its row says the turn is working, like the user kind", () => {
-    expect(
-      drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [], true)).getAttribute(PROMPT_WAVE_ATTRIBUTE),
-    ).toBe(PROMPT_WAVE_WORKING);
-  });
+  it.each([
+    ["working", true, false],
+    ["working and awaiting the user", true, true],
+    ["at rest", false, false],
+  ] as const)("draws a %s prompt with no wave marker and no inline animation", (_label, working, awaitingUser) => {
+    // Arrange / Act
+    const el = drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [], working, awaitingUser));
 
-  it("does not wave when its row says the turn is not working", () => {
-    expect(
-      drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [], false)).hasAttribute(PROMPT_WAVE_ATTRIBUTE),
-    ).toBe(false);
-  });
-
-  it("does not wave while its row says the working turn awaits the user", () => {
-    expect(
-      drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [], true, true)).hasAttribute(PROMPT_WAVE_ATTRIBUTE),
-    ).toBe(false);
-  });
-
-  it("stamps the wave's phase inline, so a redraw does not jump it back", () => {
-    expect(drawFeedAgentPrompt(agentPrompt()).getAttribute("style")).toMatch(
-      /animation-delay:-\d+ms/,
-    );
+    // Assert
+    expect(isStill(el)).toBe(true);
   });
 
   it("draws the other end's name verbatim", () => {

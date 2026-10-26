@@ -13,7 +13,6 @@
  * with no body.
  */
 import { log } from "../../log.js";
-import { promptWaves } from "../../breathing.js";
 import { USER_PROMPT_CAP_LINES, drawBubble } from "../../bubble/draw.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
@@ -30,15 +29,8 @@ import { markKnownCommands } from "./known-commands.js";
 const PATH = "FeedUserPrompt";
 
 /**
- * The prompt bubble.
- *
- * IT WAVES EXACTLY WHILE ITS ROW SAYS ITS TURN IS WORKING AND NOT WAITING ON THE
- * USER (`msg.working`, `msg.awaitingUser`, the daemon's facts, read by
- * `promptWaves`). The one bubble stamps both halves of the signal: the mark
- * the `bubble-wave` rule keys on, drawn from that flag verbatim, and the
- * wave's PHASE as a negative inline `animation-delay` — the feed rebuilds a
- * row's body wholesale and a fresh node restarts a CSS animation at 0%, so
- * without the delay every redraw would jump the band back to the left edge.
+ * The prompt bubble. It is still: no animation runs on it, in flight or not
+ * (owner ruling, 2026-10-26).
  */
 export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement): HTMLElement {
   log.info("drawing a user prompt row", {
@@ -62,7 +54,6 @@ export function drawFeedUserPrompt(msg: FeedUserPrompt, previous?: HTMLElement):
           role: "prompt",
           variant: "user",
           hooks: ["user"],
-          waving: promptWaves(msg),
           ...userPromptLook(body, `${PATH}.success.body`, knownCommandsMark(msg)),
         },
         previous,

@@ -67,13 +67,13 @@ describe("installPageCensus", () => {
 describe("animationCensus", () => {
   it("counts the live animations by name, a script animation as script", () => {
     // Arrange
-    withAnimations(document, ["pulse", "pulse", "bubble-wave", undefined]);
+    withAnimations(document, ["pulse", "pulse", "pfooter-status-wave", undefined]);
 
     // Act
     const census = animationCensus(document);
 
     // Assert
-    expect(census).toEqual({ animations: 4, animation_names: { pulse: 2, "bubble-wave": 1, script: 1 } });
+    expect(census).toEqual({ animations: 4, animation_names: { pulse: 2, "pfooter-status-wave": 1, script: 1 } });
   });
 
   it("names only the most numerous names, though it counts every animation", () => {

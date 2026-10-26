@@ -81,7 +81,6 @@ import {
   BUBBLE_VARIANT_ATTRIBUTE,
   USER_PROMPT_CAP_LINES,
 } from "../../src/bubble/draw.js";
-import { PROMPT_WAVE_ATTRIBUTE } from "../../src/breathing.js";
 import {
   FITTING_TREE,
   WIDE_TREE,
@@ -1178,13 +1177,6 @@ describe("the held prompt's spec: a user prompt's look on the held fill", () => 
       }),
     ).querySelector(".bubble-scroll");
     expect(held?.innerHTML).toBe(user?.innerHTML);
-  });
-
-  it("never waves: a held prompt has no turn in flight", () => {
-    const { tc } = trayContext();
-    expect(
-      drawHeldPrompt(heldPrompt(), tc).hasAttribute(PROMPT_WAVE_ATTRIBUTE),
-    ).toBe(false);
   });
 
   it("puts its badges in the header strip", () => {

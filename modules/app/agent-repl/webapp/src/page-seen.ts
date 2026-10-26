@@ -11,7 +11,7 @@
  * WHAT "SEEN" MEANS. The page's presence (presence.ts) says whether the host
  * shows it and its document is visible. That alone is NOT it: Emacs's xwidget
  * reports "hidden" whenever Emacs is not the frontmost application, even for
- * the page on screen (prompt-wave-driver.ts), and that page must keep drawing
+ * the page on screen, and that page must keep drawing
  * for a reader glancing at it from another application. So a page is seen
  * while its presence says so, OR while the webhost shows it (the webhost shows
  * exactly the page of the workspace Emacs is standing in), OR, for a page on

@@ -265,7 +265,6 @@ export function drawHeldPrompt(
       role: "prompt",
       variant: "held",
       hooks: holdCardHooks(hold === null ? null : hold.case),
-      waving: false,
       strip: [head],
       ...look,
       footer: classifierForm === null ? [controls] : [controls, classifierForm.element],

@@ -35,7 +35,7 @@ describe("prefersReducedMotion", () => {
     expect(prefersReducedMotion(document)).toBe(false);
   });
 
-  it.each(["prompt-wave-driver.ts", "bubble/collapse-motion.ts"])("is how %s reads the reader's setting", (file) => {
+  it.each(["feed/send-glide.ts", "bubble/collapse-motion.ts"])("is how %s reads the reader's setting", (file) => {
     const source = readFileSync(path.join(SRC, file), "utf8");
     expect([source.includes("prefersReducedMotion("), source.includes("prefers-reduced-motion: reduce")]).toEqual([true, false]);
   });

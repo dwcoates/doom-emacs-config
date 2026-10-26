@@ -16305,8 +16305,7 @@ type FeedUserPrompt struct {
 	//
 	//	*FeedUserPrompt_Success
 	Result isFeedUserPrompt_Result `protobuf_oneof:"result"`
-	// SET while this prompt's TURN IS WORKING — the prompt bubble's "working"
-	// wave and border. A DAEMON FACT read off the daemon's own turn lifecycle,
+	// SET while this prompt's TURN IS WORKING. A DAEMON FACT read off the daemon's own turn lifecycle,
 	// never inferred by a client: set from the moment the row is first drawn
 	// (the queue's mirror of an accepted prompt, before the turn has even
 	// opened) until the turn's TERMINAL — the same terminal FeedRow.turn_ended
@@ -16317,9 +16316,10 @@ type FeedUserPrompt struct {
 	// later copy (a history replay, a reconnect's page) of a turn it has seen
 	// end UNSET. UNSET = the turn has ended, or the row names no turn, or the
 	// row is a prompt a fork inherited (settled in its parent). The client
-	// draws the wave from this flag and `awaiting_user` and from nothing else:
-	// the bubble waves exactly while `working` is set and `awaiting_user` is
-	// not.
+	// draws nothing from it (the prompt bubble is still, owner ruling
+	// 2026-10-26): it reads the flag only to tell a prompt the person just sent
+	// from a terminal re-push of one it never drew, and adopts a re-push that
+	// changes nothing but this flag and `awaiting_user` without a redraw.
 	Working bool `protobuf:"varint,3,opt,name=working,proto3" json:"working,omitempty"`
 	// THE KNOWN SLASH COMMANDS THE PROMPT'S TEXT NAMES, so the bubble marks
 	// them as the Emacs composer marks them while they are typed. One entry per
@@ -16339,10 +16339,9 @@ type FeedUserPrompt struct {
 	Commands []*FeedUserPromptCommand `protobuf:"bytes,4,rep,name=commands,proto3" json:"commands,omitempty"`
 	// SET while this prompt's turn is WORKING AND BLOCKED ON THE USER: a
 	// question (FeedQuestion) or a consent (FeedPermission) stamped with the
-	// same turn stands open. The wave PAUSES for exactly that span, because
-	// nothing is running while the turn waits on the person, and resumes when
-	// the last such ask settles, whichever way (answered, denied, expired,
-	// abandoned). A DAEMON FACT with two edges and no others: the daemon
+	// same turn stands open, from the first such ask opening until the last
+	// settles, whichever way (answered, denied, expired, abandoned). No client
+	// draws it since the prompt bubble's wave retired (2026-10-26). A DAEMON FACT with two edges and no others: the daemon
 	// RE-PUBLISHES the turn's prompt rows when one of the turn's asks OPENS
 	// and when its last open ask SETTLES. Kept APART from `working` because
 	// the turn is still in flight across the pause: `working` keeps its own
@@ -17003,7 +17002,7 @@ type FeedAgentPrompt struct {
 	Working bool `protobuf:"varint,6,opt,name=working,proto3" json:"working,omitempty"`
 	// SET while that turn is working and blocked on the user — the same daemon
 	// fact, the same edges and the same re-publication as
-	// FeedUserPrompt.awaiting_user. The wave pauses while it is set.
+	// FeedUserPrompt.awaiting_user.
 	AwaitingUser  bool `protobuf:"varint,7,opt,name=awaiting_user,json=awaitingUser,proto3" json:"awaiting_user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

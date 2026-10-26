@@ -23,9 +23,7 @@
  *   - its MORE SIGNAL, how a collapsed bubble says there is more: the shared
  *     bottom fade, or the one-line ELLIPSIS (`BUBBLE_MORE_ELLIPSIS`);
  *   - its EXPAND-ONLY chrome: what the reader sees only once the bubble is
- *     opened, hidden while collapsed;
- *   - the WORKING wave, which only a prompt can carry: the spec types make a
- *     waving response unrepresentable rather than merely unlikely.
+ *     opened, hidden while collapsed.
  *
  * Everything else — the element, its classes, the strip's placement, the scroll
  * box, the body element, the has-more measurer, the click-to-expand toggle
@@ -33,7 +31,6 @@
  * same for every kind. `test/bubble/consolidation.test.ts` fails any source
  * that builds a bubble, a scroll box or a body of its own.
  */
-import { armPromptWave, setPromptWave } from "../breathing.js";
 import { placeChildren } from "../dom.js";
 import { BUBBLE_EXPAND_ONLY_CLASS, BUBBLE_STRIP_CLASS } from "../expand.js";
 import { BUBBLE_MORE_ATTRIBUTE, BUBBLE_MORE_ELLIPSIS, BUBBLE_MORE_FADE } from "../feed/bubble-more.js";
@@ -221,19 +218,14 @@ interface UncappedSpec {
 /** A bubble's cap: its line limit, and how it signals what the limit hides. */
 export type BubbleCapSpec = FadeSpec | EllipsisSpec | UncappedSpec;
 
-/** A prompt bubble: right rail, blue, and the only role that can wave. */
+/** A prompt bubble: right rail, blue. */
 export type PromptBubbleSpec = BubbleSpecBase &
   BubbleCapSpec & {
     role: "prompt";
     variant: PromptVariant;
-    /**
-     * Whether the wave runs: the prompt's turn is working and not waiting on
-     * the user (`promptWaves`, the one reading of the row's two flags).
-     */
-    waving: boolean;
   };
 
-/** A response bubble: left rail, purple, never waving. */
+/** A response bubble: left rail, purple. */
 export type ResponseBubbleSpec = BubbleSpecBase &
   BubbleCapSpec & {
     role: "response";
@@ -269,8 +261,7 @@ const drawnHooks = new WeakMap<Element, readonly string[]>();
  * brought to the spec (a class the bubble did not get from a spec — the
  * controller's `entry-selected` — is left alone), a header, corner or footer
  * element that states the same `data-says` is kept (a replaced one's clock
- * stops), the
- * working wave keeps its phase, and the content is repainted in place
+ * stops), and the content is repainted in place
  * (`paintBody`). Nothing already in its place is moved (`placeChildren`).
  */
 export function drawBubble(spec: BubbleSpec, previous?: HTMLElement): DrawnBubble {
@@ -294,12 +285,6 @@ export function drawBubble(spec: BubbleSpec, previous?: HTMLElement): DrawnBubbl
   else bubble.removeAttribute(BUBBLE_MORE_ATTRIBUTE);
   if (spec.state === undefined) bubble.removeAttribute("data-state");
   else bubble.setAttribute("data-state", spec.state);
-  if (spec.role === "prompt") {
-    // A fresh bubble takes the wave's phase; a reused one keeps its own, so a
-    // push that flips nothing but the flag never jumps the band.
-    if (reused === null) armPromptWave(bubble, spec.waving);
-    else setPromptWave(bubble, spec.waving);
-  }
 
   const strip = keepSaid(liveChrome(bubble, "strip", scroll), spec.strip ?? []);
   for (const el of strip) el.classList.add(BUBBLE_STRIP_CLASS);

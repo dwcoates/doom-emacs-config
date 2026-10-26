@@ -1,26 +1,15 @@
 // @vitest-environment jsdom
 // The footer's breathing signal: a size oscillation that never resets, and a
 // color ramp that steps once per daemon-resolved progress view. Plus the
-// prompt bubble's thinking wave, which shares the footer's epoch mechanic.
-import { create } from "@bufbuild/protobuf";
+// status word's letter wave, which shares the breath's epoch mechanic.
 import { describe, expect, it } from "vitest";
-
-import { FeedAgentPromptSchema, FeedUserPromptSchema } from "../../proto/gen/ts/frontend/v1/feed_pb.js";
 
 import {
   AnimationEpoch,
   BREATH_PERIOD_MS,
   BREATH_SHADES,
-  BUBBLE_WAVE_FROM_PCT,
-  BUBBLE_WAVE_PERIOD_MS,
-  BUBBLE_WAVE_TO_PCT,
   BreathingTicker,
-  BubbleWave,
   breathColor,
-  bubbleWave,
-  bubbleWaveStyle,
-  PROMPT_WAVE_ATTRIBUTE,
-  PROMPT_WAVE_WORKING,
   STATUS_COLOR_CYCLE_MS,
   STATUS_COLOR_PERIOD_MS,
   STATUS_WAVE_CYCLE_MS,
@@ -28,17 +17,11 @@ import {
   STATUS_WAVE_PERIOD_MS,
   StatusWave,
   WAVING_STATUS_ARMS,
-  armPromptWave,
-  promptWaves,
-  setPromptWave,
   statusColorStyle,
   statusWaveStyle,
   statusWordWaves,
 } from "../src/breathing.js";
-import { drawFeedAgentPrompt } from "../src/feed/rows/agent-prompt.js";
-import { drawFeedUserPrompt } from "../src/feed/rows/user-prompt.js";
 import { FOOTER_STATUS_CASES } from "../src/footer/tones.js";
-import { sentTo } from "./feed/addresses.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
 
@@ -229,175 +212,6 @@ describe("BreathingTicker: the size oscillation never resets", () => {
   });
 });
 
-describe("BubbleWave: the prompt bubble's wave phase survives a rebuild", () => {
-  it("starts the pass where the page first painted a bubble", () => {
-    // Arrange
-    const wave = new BubbleWave();
-    // Act
-    const got = wave.delayMs(NOW);
-    // Assert — the epoch is the first read, so the first bubble seeks nowhere.
-    expect(got).toBe(0);
-  });
-
-  it("advances with the clock, against the epoch rather than the last read", () => {
-    // Arrange
-    const wave = new BubbleWave();
-    wave.delayMs(NOW);
-    wave.delayMs(NOW + 400);
-    // Act
-    const got = wave.delayMs(NOW + 1200);
-    // Assert
-    expect(got).toBe(1200);
-  });
-
-  it("gives two bubbles rendered at the same instant the same phase", () => {
-    // Arrange — one epoch for the whole page, so the feed waves in unison.
-    const wave = new BubbleWave();
-    wave.delayMs(NOW);
-    // Act
-    const first = wave.delayMs(NOW + 2000);
-    const second = wave.delayMs(NOW + 2000);
-    // Assert
-    expect(second).toBe(first);
-  });
-
-  it("wraps back to the start of the pass after a full period", () => {
-    // Arrange
-    const wave = new BubbleWave();
-    wave.delayMs(NOW);
-    // Act
-    const got = wave.delayMs(NOW + BUBBLE_WAVE_PERIOD_MS);
-    // Assert — a whole pass later is the same point in the pass.
-    expect(got).toBe(0);
-  });
-
-  it("keeps the phase inside one period however long the page has been open", () => {
-    // Arrange — hours of uptime must not emit an ever-growing delay.
-    const wave = new BubbleWave();
-    wave.delayMs(NOW);
-    // Act
-    const got = wave.delayMs(NOW + BUBBLE_WAVE_PERIOD_MS * 1000 + 137);
-    // Assert
-    expect(got).toBe(137);
-  });
-
-  it("separates a rebuild at t and one at t+delta by exactly delta", () => {
-    // Arrange — a rebuild is just another read of the same never-moved epoch.
-    const wave = new BubbleWave();
-    const delta = 1234;
-    const before = wave.delayMs(NOW);
-    // Act
-    const after = wave.delayMs(NOW + delta);
-    // Assert
-    expect((after - before + BUBBLE_WAVE_PERIOD_MS) % BUBBLE_WAVE_PERIOD_MS).toBe(delta);
-  });
-
-  it("separates rebuilds a period apart by delta modulo the period", () => {
-    // Arrange — the wrap must not break the rebuild-equals-elapsed property.
-    const wave = new BubbleWave();
-    const delta = BUBBLE_WAVE_PERIOD_MS + 900;
-    const before = wave.delayMs(NOW);
-    // Act
-    const after = wave.delayMs(NOW + delta);
-    // Assert
-    expect((after - before + BUBBLE_WAVE_PERIOD_MS) % BUBBLE_WAVE_PERIOD_MS).toBe(
-      delta % BUBBLE_WAVE_PERIOD_MS,
-    );
-  });
-
-  it("floors a clock that goes backwards at zero", () => {
-    // Arrange — a negative elapsed would emit a POSITIVE animation-delay and
-    // stall the wave at the bubble's left edge.
-    const wave = new BubbleWave();
-    wave.delayMs(NOW);
-    // Act
-    const got = wave.delayMs(NOW - 5000);
-    // Assert
-    expect(got).toBe(0);
-  });
-
-  it("never moves the epoch once stamped", () => {
-    // Arrange — the immovability IS the continuity guarantee.
-    const wave = new BubbleWave();
-    wave.delayMs(NOW);
-    wave.delayMs(NOW + 3000);
-    // Act — a later read still measures from the original epoch.
-    const got = wave.delayMs(NOW + 100);
-    // Assert
-    expect(got).toBe(100);
-  });
-});
-
-describe("BubbleWave.positionX: the band's spot for the hidden-page JS driver", () => {
-  it("sits at the pass's start at phase zero, where the keyframes begin", () => {
-    // Arrange — the first read stamps the epoch, so elapsed is zero.
-    const wave = new BubbleWave();
-    // Act
-    const got = wave.positionX(NOW);
-    // Assert — 200%, the band fully off the left edge.
-    expect(got).toBe(BUBBLE_WAVE_FROM_PCT);
-  });
-
-  it("reaches the pass's end just before one whole period elapses", () => {
-    // Arrange
-    const wave = new BubbleWave();
-    wave.positionX(NOW);
-    // Act — a hair short of the period, so it is near the end but not wrapped.
-    const got = wave.positionX(NOW + BUBBLE_WAVE_PERIOD_MS - 1);
-    // Assert — all but 1ms of the travel from 200% down to -100% is spent.
-    const travel = BUBBLE_WAVE_FROM_PCT - BUBBLE_WAVE_TO_PCT;
-    expect(got).toBeCloseTo(BUBBLE_WAVE_TO_PCT + travel / BUBBLE_WAVE_PERIOD_MS, 5);
-  });
-
-  it("wraps with the phase, so a long-open page keeps crossing", () => {
-    // Arrange — one whole period on is the same phase as the start.
-    const wave = new BubbleWave();
-    wave.positionX(NOW);
-    // Act
-    const got = wave.positionX(NOW + BUBBLE_WAVE_PERIOD_MS);
-    // Assert
-    expect(got).toBe(BUBBLE_WAVE_FROM_PCT);
-  });
-
-  it("reads the same epoch as delayMs, so the two channels never disagree", () => {
-    // Arrange — the compositor seeks by delayMs, the driver paints by
-    // positionX; both must describe one wave.
-    const wave = new BubbleWave();
-    const at = NOW + 1234;
-    // Act
-    const fraction = wave.delayMs(at) / BUBBLE_WAVE_PERIOD_MS;
-    const expected = BUBBLE_WAVE_FROM_PCT + (BUBBLE_WAVE_TO_PCT - BUBBLE_WAVE_FROM_PCT) * fraction;
-    // Assert
-    expect(wave.positionX(at)).toBeCloseTo(expected, 9);
-  });
-});
-
-describe("bubbleWaveStyle: what a render stamps on the bubble", () => {
-  it("emits a negative animation-delay, which is what seeks into the cycle", () => {
-    // Arrange / Act
-    const got = bubbleWaveStyle(Date.now());
-    // Assert — a positive delay would DEFER the wave rather than resume it.
-    expect(got).toMatch(/^animation-delay:-\d+ms$/);
-  });
-
-  it("emits the page-global wave's phase, not a fresh one per call", () => {
-    // Arrange — every bubble reads the one shared epoch.
-    const at = Date.now() + 777;
-    // Act
-    const got = bubbleWaveStyle(at);
-    // Assert
-    expect(got).toBe(`animation-delay:-${Math.round(bubbleWave.delayMs(at))}ms`);
-  });
-
-  it("stays within one period, so the attribute never grows without bound", () => {
-    // Arrange / Act — a page open for a very long time.
-    const got = bubbleWaveStyle(Date.now() + BUBBLE_WAVE_PERIOD_MS * 500);
-    const ms = Number(/-(\d+)ms$/.exec(got)?.[1]);
-    // Assert
-    expect(ms).toBeLessThan(BUBBLE_WAVE_PERIOD_MS);
-  });
-});
-
 describe("AnimationEpoch: one immovable start time", () => {
   it("stamps the epoch on its first read, so the first render seeks nowhere", () => {
     // Arrange
@@ -467,11 +281,11 @@ describe("AnimationEpoch: both animations really share it", () => {
       })(),
     },
     {
-      name: "the prompt bubble's wave",
+      name: "the footer status word's colour sweep",
       elapsedAt: (() => {
-        const wave = new BubbleWave();
-        // Reported modulo the period, so the table's deltas stay inside one pass.
-        return (at: number) => wave.delayMs(at);
+        const wave = new StatusWave();
+        // Reported modulo the cycle, so the table's deltas stay inside one cycle.
+        return (at: number) => wave.colorDelayMs(at);
       })(),
     },
   ];
@@ -505,110 +319,6 @@ describe("AnimationEpoch: both animations really share it", () => {
   }
 });
 
-
-describe("armPromptWave: a fresh prompt bubble waves iff its row says working", () => {
-  it("marks a working bubble, so the stylesheet's wave rule reaches it", () => {
-    // Arrange
-    const bubble = document.createElement("div");
-    // Act
-    armPromptWave(bubble, true, NOW);
-    // Assert
-    expect(bubble.getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
-  });
-
-  it("leaves a bubble whose row is not working unmarked", () => {
-    // Arrange
-    const bubble = document.createElement("div");
-    // Act
-    armPromptWave(bubble, false, NOW);
-    // Assert
-    expect(bubble.hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
-  });
-
-  it("stamps the page-global phase, so the rebuilt node does not jump back", () => {
-    // Arrange
-    const bubble = document.createElement("div");
-    // Act
-    armPromptWave(bubble, true, NOW);
-    // Assert
-    expect(bubble.getAttribute("style")).toBe(bubbleWaveStyle(NOW));
-  });
-});
-
-describe("promptWaves: a prompt waves while its turn works and does not await the user", () => {
-  const cases = [
-    { working: true, awaitingUser: false, waves: true },
-    { working: true, awaitingUser: true, waves: false },
-    { working: false, awaitingUser: false, waves: false },
-    { working: false, awaitingUser: true, waves: false },
-  ];
-  for (const { working, awaitingUser, waves } of cases) {
-    it(`working=${String(working)} awaitingUser=${String(awaitingUser)} waves=${String(waves)}`, () => {
-      // Arrange, Act
-      const got = promptWaves({ working, awaitingUser });
-      // Assert
-      expect(got).toBe(waves);
-    });
-  }
-
-  // THE RENDERERS SHARE THE ONE READING: a prompt renderer that read the two
-  // flags its own way would fail here rather than drift silently.
-  for (const { working, awaitingUser, waves } of cases) {
-    it(`both prompt renderers wave as promptWaves says for working=${String(working)} awaitingUser=${String(awaitingUser)}`, () => {
-      // Arrange
-      const user = create(FeedUserPromptSchema, {
-        author: { label: "You" },
-        result: { case: "success", value: { body: { blocks: [] } } },
-        working,
-        awaitingUser,
-      });
-      const agent = create(FeedAgentPromptSchema, {
-        address: sentTo("Explore"),
-        body: { blocks: [] },
-        working,
-        awaitingUser,
-      });
-      // Act
-      const drawn = [drawFeedUserPrompt(user), drawFeedAgentPrompt(agent)].map((el) =>
-        el.hasAttribute(PROMPT_WAVE_ATTRIBUTE),
-      );
-      // Assert
-      expect(drawn).toEqual([waves, waves]);
-    });
-  }
-});
-
-describe("setPromptWave: the flag moves the wave on a drawn bubble", () => {
-  it("takes the wave off when the flag falls", () => {
-    // Arrange
-    const bubble = document.createElement("div");
-    armPromptWave(bubble, true, NOW);
-    // Act
-    setPromptWave(bubble, false);
-    // Assert
-    expect(bubble.hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
-  });
-
-  it("puts the wave on when the flag rises", () => {
-    // Arrange
-    const bubble = document.createElement("div");
-    armPromptWave(bubble, false, NOW);
-    // Act
-    setPromptWave(bubble, true);
-    // Assert
-    expect(bubble.getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
-  });
-
-  it("leaves the phase as it stands", () => {
-    // Arrange
-    const bubble = document.createElement("div");
-    armPromptWave(bubble, true, NOW);
-    // Act
-    setPromptWave(bubble, false);
-    // Assert
-    expect(bubble.getAttribute("style")).toBe(bubbleWaveStyle(NOW));
-  });
-});
 
 describe("StatusWave: the footer status word's travelling letter bulge", () => {
   it("lags each letter behind the one before it by exactly one offset", () => {
@@ -744,9 +454,8 @@ describe("StatusWave: the footer status word's slower colour sweep", () => {
   });
 });
 
-describe("bubbleWaveStyle, statusColorStyle and statusWaveStyle: the inline delays", () => {
+describe("statusColorStyle and statusWaveStyle: the inline delays", () => {
   it.each([
-    ["the prompt bubble's wave", () => bubbleWaveStyle(NOW)],
     ["the colour sweep", () => statusColorStyle(NOW)],
     ["a letter's bulge", () => statusWaveStyle(3, NOW)],
   ])("renders %s as one whole-millisecond negative animation-delay", (_name, style) => {

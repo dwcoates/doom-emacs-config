@@ -131,7 +131,6 @@ function drawIngressCard(card: IngressCard, tc: HeldContext, path: string, previ
       role: "prompt",
       variant: "held",
       hooks: ["held-right"],
-      waving: false,
       strip: [head],
       ...card.look,
     },

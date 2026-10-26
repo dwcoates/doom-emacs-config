@@ -4,7 +4,7 @@
  *
  * WHY. A page not shown is `visibility: hidden` in the webhost (host.css), and
  * WebKit keeps running its CSS animations: every working workspace's spinner,
- * breathing footer word and prompt wave forced a style pass on its page every
+ * breathing footer word and status wave forced a style pass on its page every
  * frame, nobody seeing any of it. Most of the webhost's CPU is that rendering
  * update, and most of the update is style recalculation
  * (docs/investigations/2026-10-13-page-cost-by-component.md, addendum).
