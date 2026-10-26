@@ -42,7 +42,7 @@ const (
 	// NamingCauseInvalidAnswer is the naming refusal's cause when the model
 	// answered but no answer had the slug's shape. Every other cause is one
 	// of headless's own.
-	NamingCauseInvalidAnswer = "invalid_answer"
+	NamingCauseInvalidAnswer = headless.CauseInvalidAnswer
 	// CollisionSuffixLimit bounds the disambiguating -2/-3/... walk. A
 	// repository with this many workspaces of one name is a fault to surface,
 	// not a loop to keep spinning.

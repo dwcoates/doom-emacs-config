@@ -81,30 +81,18 @@ func (v *verbs) mintThreadTitle(ctx context.Context, log dlog.Logger, dir, quest
 	if v.deps.Accounts != nil {
 		configDir = v.deps.Accounts.ConfigDirFor(dir)
 	}
-	var last namingFailure
-	for attempt := 1; attempt <= NamingAttempts; attempt++ {
-		resp, err := v.deps.Headless.Run(ctx, headless.Request{
+	title, failure := headless.AskValidated(ctx, v.deps.Headless, headless.Ask{
+		Request: headless.Request{
 			Site: NamingSite, Model: headless.ModelHaiku, Format: headless.FormatJSON,
 			ConfigDir: configDir, Prompt: prompt, Timeout: NamingTimeout,
-		})
-		if err != nil {
-			last = namingFailure{Cause: headless.CauseOf(err), Detail: err.Error(), Attempts: uint32(attempt)}
-			log.Info(opThreadTitle, "the thread title call did not answer", dlog.Context{"cause": last.Cause, "detail": last.Detail, "attempt": attempt})
-			if last.Cause == headless.CauseGuardRefused {
-				break
-			}
-			continue
-		}
-		title, err := ValidateThreadTitle(resp.Text)
-		if err != nil {
-			last = namingFailure{Cause: NamingCauseInvalidAnswer, Detail: err.Error(), Attempts: uint32(attempt), Answer: resp.Text}
-			log.Info(opThreadTitle, "the thread title answer did not validate", dlog.Context{"answer": resp.Text, "reason": err.Error(), "attempt": attempt})
-			continue
-		}
-		log.Info(opThreadTitle, "the thread title call answered", dlog.Context{"title": title, "attempt": attempt, "duration_ms": resp.Duration.Milliseconds()})
-		return title, nil
+		},
+		Attempts: NamingAttempts,
+		Validate: ValidateThreadTitle,
+	}, log, opThreadTitle)
+	if failure != nil {
+		return "", &namingFailure{Cause: failure.Cause, Detail: failure.Detail, Attempts: failure.Attempts, Answer: failure.Answer}
 	}
-	return "", &last
+	return title, nil
 }
 
 // freeThreadNameLocked answers BASE, or BASE with the first " (2)", " (3)",
