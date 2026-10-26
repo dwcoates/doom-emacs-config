@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
@@ -42,12 +43,6 @@ const StoodDownCause = "the daemon stood down"
 // NoAnswerLine is the body of a completed turn that named no final answer.
 const NoAnswerLine = "The turn ended with no final answer."
 
-// ConfigDirs resolves the account a workspace's headless call bills, so the
-// summary is paid for by the account the workspace's session spends as.
-type ConfigDirs interface {
-	ConfigDirFor(ctx context.Context, ws ids.WorkspaceID) (string, error)
-}
-
 // Summarizer writes the completed-turn banner's body: a one-sentence Haiku
 // summary of the turn's final answer, asked as bare inference (no tools, no
 // system prompt), so the brief and the answer are all the model sees.
@@ -55,7 +50,7 @@ type Summarizer struct {
 	// Headless runs the model call.
 	Headless headless.Runner
 	// ConfigDirs bills the call to the workspace's account.
-	ConfigDirs ConfigDirs
+	ConfigDirs account.WorkspaceConfigDirs
 	// PromptsDir holds the brief, read at use time.
 	PromptsDir string
 	// Timeout bounds the call. Zero is DefaultSummaryTimeout.

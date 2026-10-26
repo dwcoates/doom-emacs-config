@@ -9,6 +9,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
@@ -102,20 +103,20 @@ func abbreviationBrief(string, string) (prompts.Prompt, error) {
 }
 
 func TestHeadlessAbbreviator(t *testing.T) {
-	account := configDirsFunc(func(context.Context, ids.WorkspaceID) (string, error) { return "/acct", nil })
+	acct := configDirsFunc(func(context.Context, ids.WorkspaceID) (string, error) { return "/acct", nil })
 	cases := []struct {
 		name      string
 		answers   []string
 		load      func(string, string) (prompts.Prompt, error)
-		dirs      ConfigDirs
+		dirs      account.WorkspaceConfigDirs
 		want      string
 		wantErr   string
 		wantCalls int
 	}{
-		{name: "a valid answer", answers: []string{"Fusion at iron"}, load: abbreviationBrief, dirs: account, want: "Fusion at iron", wantCalls: 1},
-		{name: "an invalid answer is asked again", answers: []string{strings.Repeat("word ", 9), "Fusion at iron"}, load: abbreviationBrief, dirs: account, want: "Fusion at iron", wantCalls: 2},
-		{name: "no valid answer", answers: []string{strings.Repeat("word ", 9)}, load: abbreviationBrief, dirs: account, wantErr: headless.CauseInvalidAnswer, wantCalls: 2},
-		{name: "an unreadable brief", load: func(string, string) (prompts.Prompt, error) { return prompts.Prompt{}, errors.New("gone") }, dirs: account, wantErr: "unreadable"},
+		{name: "a valid answer", answers: []string{"Fusion at iron"}, load: abbreviationBrief, dirs: acct, want: "Fusion at iron", wantCalls: 1},
+		{name: "an invalid answer is asked again", answers: []string{strings.Repeat("word ", 9), "Fusion at iron"}, load: abbreviationBrief, dirs: acct, want: "Fusion at iron", wantCalls: 2},
+		{name: "no valid answer", answers: []string{strings.Repeat("word ", 9)}, load: abbreviationBrief, dirs: acct, wantErr: headless.CauseInvalidAnswer, wantCalls: 2},
+		{name: "an unreadable brief", load: func(string, string) (prompts.Prompt, error) { return prompts.Prompt{}, errors.New("gone") }, dirs: acct, wantErr: "unreadable"},
 		{name: "no account root", load: abbreviationBrief, dirs: configDirsFunc(func(context.Context, ids.WorkspaceID) (string, error) { return "", errors.New("forgotten") }), wantErr: "no account root"},
 	}
 	for _, tc := range cases {

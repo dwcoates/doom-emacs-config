@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
@@ -88,17 +89,11 @@ type Abbreviator interface {
 	Abbreviate(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, question string) (string, error)
 }
 
-// ConfigDirs answers a workspace's account root, the config directory its
-// headless calls run under.
-type ConfigDirs interface {
-	ConfigDirFor(ctx context.Context, ws ids.WorkspaceID) (string, error)
-}
-
 // HeadlessAbbreviator is the production Abbreviator: the brief, asked of
 // Haiku through headless.AskValidated.
 type HeadlessAbbreviator struct {
 	Headless   headless.Runner
-	ConfigDirs ConfigDirs
+	ConfigDirs account.WorkspaceConfigDirs
 	PromptsDir string
 	// Load reads a brief; nil is prompts.Load.
 	Load func(dir, name string) (prompts.Prompt, error)

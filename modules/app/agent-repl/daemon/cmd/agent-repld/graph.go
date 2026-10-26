@@ -580,13 +580,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// EVERY HEADLESS CALL ABOUT A WORKSPACE runs under that workspace's
 	// account root: the chat's abbreviations, the topbar's titles and the
 	// turn banners' summaries.
-	configDirs := titleConfigDirs{workspaceDir: func(ctx context.Context, ws ids.WorkspaceID) (string, error) {
+	configDirs := account.WorkspaceRoots{Dir: func(ctx context.Context, ws ids.WorkspaceID) (string, error) {
 		record, err := p.DB.Workspace(ctx, ws)
 		if err != nil {
 			return "", err
 		}
 		return record.Dir, nil
-	}, accounts: accounts}
+	}, Accounts: accounts}
 
 	// THE CHAT SERVICE: each zettel chat thread's view, fed by the feed's
 	// answers below, and the recording of those answers in zettel.
