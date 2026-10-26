@@ -1138,8 +1138,8 @@ export const TREE_RAILS_CLASS = "mp-connectors";
 /** The class a wrap line's label pad wears (`LabelPad`). */
 export const TREE_LABEL_PAD_CLASS = "mp-label-pad";
 
-/** N in UNIT, as a CSS length. */
-function cssLength(n: number, unit: TreeMeasure["unit"]): string {
+/** N in UNIT, as a CSS length: the one spelling of every edge and pad width a tree line carries. */
+export function cssLength(n: number, unit: TreeMeasure["unit"]): string {
   return `${String(n)}${unit}`;
 }
 

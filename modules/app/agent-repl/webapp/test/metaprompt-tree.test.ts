@@ -18,6 +18,7 @@ import {
   TREE_TEXT_END_ATTRIBUTE,
   visibleWidth,
   columnMeasure,
+  cssLength,
   type TreeMeasure,
   type TreeMeasureItem,
 } from "../src/metaprompt-tree.js";
@@ -837,5 +838,16 @@ describe("renderTreeHtml wraps by its measure", () => {
     // Assert
     const record = await forwardedRecord(capture, "metaprompt-tree.measure");
     expect(record).toMatchObject({ level: { case: "error" }, context: { answered: 1 } });
+  });
+});
+
+describe("cssLength", () => {
+  it.each([
+    [4, "ch", "4ch"],
+    [88.5, "px", "88.5px"],
+    [0, "px", "0px"],
+  ] as const)("spells %s in %s as %s", (n, unit, want) => {
+    // Act + Assert
+    expect(cssLength(n, unit)).toBe(want);
   });
 });

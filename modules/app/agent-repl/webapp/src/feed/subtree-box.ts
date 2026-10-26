@@ -34,6 +34,8 @@ import {
   TREE_LINE_CLASS,
   TREE_NODE_ATTRIBUTE,
   TREE_TEXT_END_ATTRIBUTE,
+  cssLength,
+  type TreeMeasure,
 } from "../metaprompt-tree.js";
 
 /** One kind of box: the class its lines wear and the properties naming its edges, as CSS lengths. */
@@ -51,7 +53,7 @@ export function inSubtree(node: string | null, label: string): boolean {
 /** A drawn line's edge, as a CSS length, split into its number and its unit. */
 interface Edge {
   readonly n: number;
-  readonly unit: string;
+  readonly unit: TreeMeasure["unit"];
 }
 
 /** The edge LINE carries in ATTRIBUTE: every line the renderer drew carries it. */
@@ -65,17 +67,13 @@ function edgeOf(line: HTMLElement, attribute: string): Edge {
     });
     throw new Error(`subtree box: a tree line's ${attribute} is ${JSON.stringify(value)}`);
   }
-  return { n: Number(m[1]), unit: m[2] };
+  return { n: Number(m[1]), unit: m[2] as TreeMeasure["unit"] };
 }
 
 /** Where LINE's own label starts (a head line's), as a CSS length. */
 export function labelColumn(line: HTMLElement): string {
-  return cssEdge(edgeOf(line, TREE_LABEL_AT_ATTRIBUTE));
-}
-
-/** EDGE as a CSS length. */
-function cssEdge(edge: Edge): string {
-  return `${String(edge.n)}${edge.unit}`;
+  const edge = edgeOf(line, TREE_LABEL_AT_ATTRIBUTE);
+  return cssLength(edge.n, edge.unit);
 }
 
 /** Take BOX off every line in SCOPE. */
@@ -101,7 +99,7 @@ export function boxSubtree(scope: ParentNode, label: string, box: SubtreeBox): v
     if (head === undefined) continue;
     const left = labelColumn(head);
     const ends = lines.map((l) => edgeOf(l, TREE_TEXT_END_ATTRIBUTE));
-    const right = cssEdge({ n: Math.max(...ends.map((e) => e.n)), unit: ends[0].unit });
+    const right = cssLength(Math.max(...ends.map((e) => e.n)), ends[0].unit);
     for (const line of lines) {
       line.classList.add(box.className);
       line.style.setProperty(box.leftProperty, left);

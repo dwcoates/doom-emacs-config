@@ -118,6 +118,15 @@ describe("every highlight of a response's node", () => {
   });
 });
 
+describe("subtree-box's edges", () => {
+  it("are spelled by the tree's one cssLength, never by hand", () => {
+    // Arrange
+    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/feed/subtree-box.ts"), "utf8");
+    // Act + Assert
+    expect([source.includes("cssLength("), /`\$\{[^`]*\}\$\{[^`]*unit\}`/.test(source)]).toEqual([true, false]);
+  });
+});
+
 describe("standingBox", () => {
   it("boxes the stood node in its row and in no other", () => {
     // Arrange
