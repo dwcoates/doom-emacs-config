@@ -266,14 +266,13 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhostBu
   // SUBSCRIBED AFTER THE STREAM, and it does not matter: the detach is
   // synchronous and every stream's reopen after the move is not, so no
   // subscription reads a generation the move has ended.
-  const unsubscribeFromMove =
-    ctx.onDaemonMoved?.(() => {
-      log.info("the page's daemon moved; every subscription on it ends and reopens there", {
-        operation: "rpc.page-daemon-moved",
-        context: { page, subscriptions: subscriptions.size },
-      });
-      detach();
-    }) ?? ((): void => undefined);
+  const unsubscribeFromMove = ctx.onDaemonMoved(() => {
+    log.info("the page's daemon moved; every subscription on it ends and reopens there", {
+      operation: "rpc.page-daemon-moved",
+      context: { page, subscriptions: subscriptions.size },
+    });
+    detach();
+  });
 
   return {
     page,

@@ -89,10 +89,10 @@ export interface StreamContext {
   /**
    * Run FN every time the daemon this context's client dials MOVES (the web
    * view host's `setDaemon`), synchronously as it moves. Answers the
-   * unsubscribe. Optional: a workspace page's daemon is its own origin, which
-   * never moves, so its context carries none.
+   * unsubscribe. A workspace page's daemon is its own origin, which never
+   * moves, so its context never calls FN.
    */
-  onDaemonMoved?: (fn: () => void) => () => void;
+  onDaemonMoved(fn: () => void): () => void;
   /**
    * Publish that a frame arrived and was read, for the page-wide observers of
    * the link's health (the lifecycle's restarting notice). Optional so a unit
@@ -205,17 +205,16 @@ export function watchStream<Res extends Message>(
   // THE DAEMON MOVED: this run is talking to a daemon nobody names any more,
   // so it is ended now and reopened at the one named instead. The flag is set
   // before the abort, so however the run then ends, it ends as a move.
-  const unsubscribeFromMove =
-    ctx.onDaemonMoved?.(() => {
-      if (cancelled) return;
-      daemonMoved = true;
-      log.info(`${opts.name} is reopening: the daemon it dials moved`, {
-        operation: "rpc.stream-daemon-moved",
-        context: { rpc: opts.name },
-      });
-      controller.abort();
-      wakeFromBackoff?.();
-    }) ?? ((): void => undefined);
+  const unsubscribeFromMove = ctx.onDaemonMoved(() => {
+    if (cancelled) return;
+    daemonMoved = true;
+    log.info(`${opts.name} is reopening: the daemon it dials moved`, {
+      operation: "rpc.stream-daemon-moved",
+      context: { rpc: opts.name },
+    });
+    controller.abort();
+    wakeFromBackoff?.();
+  });
 
   /**
    * One push. A refusal — from the strict check or from the drawing — costs
