@@ -1,0 +1,166 @@
+// endpoint_find_workspaces.proto — FindWorkspaces: the workspaces the
+// daemon's registry holds, open or closed, narrowed by what the caller asks
+// for, each with its name and its summary. AGENT API section. A pull,
+// answered inside the caller's turn: for an agent looking for the workspace
+// that did some piece of work (which one fixed the footer last week? what ran
+// in this repository yesterday?), including workspaces closed long ago, which
+// the roster no longer shows.
+//
+// AGENT WORKSPACES ONLY. A zettel chat thread and a merge workspace (the
+// hidden workspace an async merge runs in) are registry rows too, but neither
+// is a piece of work an agent looks for: a thread is the Chat app's, and a
+// merge workspace carries another workspace's branch. Neither is answered.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// What to find. EVERY SET CRITERION MUST HOLD, and an unset one narrows
+// nothing: a request with nothing set answers every agent workspace.
+message FindWorkspacesRequest {
+  // Only workspaces of this repository. UNSET = every registered repository.
+  // A ref naming no registered repository is the unknown_repository answer.
+  optional workspace.v1.RepositoryRef repository = 1;
+  // Only workspaces whose life overlaps this window. UNSET = no window.
+  optional FindWorkspacesWindow window = 2;
+  // Only workspaces in this standing. UNSET = every standing.
+  optional FindWorkspacesStanding standing = 3;
+  // Only workspaces whose name, branch or summary contains this text,
+  // compared case-insensitively. UNSET = no text filter. A blank string is
+  // malformed (Connect InvalidArgument), never "match everything".
+  optional string text = 4;
+  // At most this many workspaces, the most recently active first. UNSET =
+  // every match. Zero is malformed (Connect InvalidArgument).
+  optional uint32 limit = 5;
+}
+
+// A window of time a workspace's life must overlap: the workspace was created
+// no later than its end, and was last active no earlier than its start. A
+// workspace's LAST ACTIVE instant is the latest of its creation, its last
+// turn's start or end, its close and its landing, so a workspace that was
+// working at any moment of the window is found, and one that merely existed
+// before or after it is not.
+message FindWorkspacesWindow {
+  // The window's start, unix milliseconds. UNSET = open-ended into the past.
+  optional int64 since_ms = 1;
+  // The window's end, unix milliseconds. UNSET = open-ended up to now. A
+  // window whose end precedes its start is malformed (Connect
+  // InvalidArgument).
+  optional int64 until_ms = 2;
+}
+
+// The standing to narrow to. THE ARM IS THE STANDING ASKED FOR. The arms
+// overlap by design: every landed workspace is also closed, and `closed`
+// finds it as well as `landed` does.
+message FindWorkspacesStanding {
+  oneof standing {
+    // Workspaces open now.
+    FindWorkspacesStandingOpen open = 1;
+    // Workspaces closed now, landed or not.
+    FindWorkspacesStandingClosed closed = 2;
+    // Workspaces whose branch landed (their merge completed).
+    FindWorkspacesStandingLanded landed = 3;
+  }
+}
+// Open workspaces. No fields.
+message FindWorkspacesStandingOpen {}
+// Closed workspaces, landed or not. No fields.
+message FindWorkspacesStandingClosed {}
+// Landed workspaces. No fields.
+message FindWorkspacesStandingLanded {}
+
+// THE ARM IS THE OUTCOME.
+message FindWorkspacesResponse {
+  oneof result {
+    FindWorkspacesSuccess success = 1;
+    FindWorkspacesError error = 2;
+  }
+}
+
+// The workspaces found. FINDING NONE IS AN ANSWER: it is a complete extent
+// with no workspaces, never an error.
+message FindWorkspacesSuccess {
+  // Whether every match was answered. THE ARM IS THE COMPLETENESS, so no
+  // caller compares counts to learn whether `limit` cut the answer short.
+  oneof extent {
+    FindWorkspacesSuccessComplete complete = 1;
+    FindWorkspacesSuccessPartial partial = 2;
+  }
+}
+// Every match, the most recently active first.
+message FindWorkspacesSuccessComplete {
+  repeated FoundWorkspace workspaces = 1;
+}
+// The `limit` most recently active matches, the most recently active first,
+// and how many more matched.
+message FindWorkspacesSuccessPartial {
+  repeated FoundWorkspace workspaces = 1;
+  // How many further workspaces matched and were left out by `limit`.
+  uint32 omitted = 2;
+}
+
+// One workspace found: what it is called, what it did, where and when.
+message FoundWorkspace {
+  // The workspace, as the registry holds it. Open or closed, it is the ref
+  // every other agent call takes (GetWorkspaceStatus, OpenWorkspace).
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The workspace's name, as the roster draws it.
+  string name = 2;
+  // The workspace's branch, as git spells it.
+  string branch = 3;
+  // The repository the workspace belongs to, by its registry id and its main
+  // checkout.
+  workspace.v1.RepositoryRef repository = 4;
+  // The workspace's summary: the one-sentence statement of its task the
+  // topbar draws as its title, as the daemon last distilled it from the
+  // user's prompts and kept across restarts and the workspace's close. UNSET
+  // while no summary was ever distilled (a workspace that never took a
+  // prompt, or one whose summary was dropped with its conversation).
+  optional string summary = 5;
+  // When the workspace was created, unix milliseconds.
+  int64 created_at_ms = 6;
+  // When the workspace was last active, unix milliseconds: the instant
+  // FindWorkspacesWindow is matched against and the answer is ordered by.
+  int64 last_active_at_ms = 7;
+  // The workspace's standing now.
+  FoundWorkspaceStanding standing = 8;
+}
+
+// Whether a found workspace is open, closed, or landed. THE ARM IS THE
+// STANDING, and exactly one holds: a landed workspace is answered as landed,
+// never also as closed.
+message FoundWorkspaceStanding {
+  oneof standing {
+    FoundWorkspaceStandingOpen open = 1;
+    FoundWorkspaceStandingClosed closed = 2;
+    FoundWorkspaceStandingLanded landed = 3;
+  }
+}
+// Open now. No fields.
+message FoundWorkspaceStandingOpen {}
+// Closed without its branch landing.
+message FoundWorkspaceStandingClosed {
+  // When it was closed, unix milliseconds. UNSET for a workspace whose close
+  // predates the daemon recording close instants.
+  optional int64 closed_at_ms = 1;
+}
+// Its branch landed, and the workspace is closed.
+message FoundWorkspaceStandingLanded {
+  // When its merge landed, unix milliseconds.
+  int64 landed_at_ms = 1;
+}
+
+// Validation failures (a blank text, a zero limit, a reversed window) are
+// Connect InvalidArgument, never an arm.
+message FindWorkspacesError {
+  oneof cause {
+    // `repository` names a RepositoryRef the daemon's registry does not hold.
+    FindWorkspacesUnknownRepository unknown_repository = 1;
+  }
+}
+// Empty: the echoed ref is the only identity involved.
+message FindWorkspacesUnknownRepository {}
