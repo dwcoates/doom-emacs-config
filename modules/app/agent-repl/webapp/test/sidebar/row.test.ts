@@ -285,7 +285,7 @@ describe("the highlight and the receded styling", () => {
     expect(row).toMatch(/border-radius:\s*5px/);
   });
 
-  it("fills the current row's line partway from --card toward the rail", () => {
+  it("fills the current row's line midway from --card toward the rail", () => {
     // Arrange / Act
     const declarations = currentRowDeclarations();
     const token = (name: string): string | undefined =>
@@ -295,9 +295,9 @@ describe("the highlight and the receded styling", () => {
         .find((value) => value !== undefined);
     // Assert
     expect([
-      declarations.some((d) => /background-color:\s*var\(--row-current-tint\)/.test(d)),
-      token("--row-current-tint"),
-    ]).toEqual([true, "color-mix(in srgb, var(--card) 38%, var(--sidebar-bg))"]);
+      declarations.some((d) => /background-color:\s*var\(--row-highlight-tint\)/.test(d)),
+      token("--row-highlight-tint"),
+    ]).toEqual([true, "color-mix(in srgb, var(--card) 69%, var(--sidebar-bg))"]);
   });
 
   it("paints the current row's tint through the cascade", () => {
@@ -306,7 +306,25 @@ describe("the highlight and the receded styling", () => {
     // Act
     const background = inRail(ws, () => cascadedValue(ws.querySelector(".row")!, "background-color"));
     // Assert
-    expect(background).toBe("var(--row-current-tint)");
+    expect(background).toBe("var(--row-highlight-tint)");
+  });
+
+  // THE HOVER AND SELECTED HIGHLIGHTS ARE ONE BRIGHTNESS (owner request,
+  // 2026-10-26), in the workspaces list and the chat list alike: every
+  // hovered and every selected row fill names the one tint.
+  it.each([
+    "#ws-sidebar:not(.sb-hover-suspended) .row:hover",
+    "#ws-sidebar:not(.sb-hover-suspended) .sb-outline-row:hover",
+    "#ws-sidebar .ws.current > .row",
+    "#ws-sidebar .sb-outline-row.shown",
+  ])("fills %s with the one highlight tint", (selector) => {
+    // Arrange / Act
+    const fill = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes(selector))
+      .map((rule) => /background(?:-color)?:\s*([^;]+);/.exec(rule.declarations)?.[1])
+      .filter((value) => value !== undefined);
+    // Assert
+    expect(fill).toEqual(["var(--row-highlight-tint)"]);
   });
 
   it("does not embolden the current row", () => {

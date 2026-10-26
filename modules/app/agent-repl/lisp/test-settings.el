@@ -443,7 +443,7 @@
 (ert-deftest agent-repl-test-settings-colors-are-the-webapp-tokens ()
   "The page's colors are the webapp dark theme's, pinned by styles.test.ts too."
   (should (equal agent-repl-settings--colors
-                 '((ground . "#111110") (band . "#181817") (card . "#232322") (border . "#2c2c2b")
+                 '((ground . "#111110") (band . "#1d1d1c") (card . "#232322") (border . "#2c2c2b")
                    (keycap-edge . "#3a3a38") (text . "#f1efe9") (muted . "#898782") (accent . "#8bbeff")))))
 
 (ert-deftest agent-repl-test-settings-color-unknown-name-is-fatal ()

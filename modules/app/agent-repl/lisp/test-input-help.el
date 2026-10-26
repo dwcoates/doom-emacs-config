@@ -187,10 +187,10 @@ pinned on both sides: here, and in webapp/test/styles.test.ts."
 
 (ert-deftest agent-repl-test-input-help-button-is-darker-than-the-selected-row ()
   "A button's fill sits between the bar's ground and the selected-row tint.
-The sidebar's selected row is #181817 in the dark theme, pinned by
+The sidebar's selected row is #1d1d1c in the dark theme, pinned by
 webapp/test/styles.test.ts."
   (let ((button (agent-repl-test-input-help--rgb agent-repl-input-help-button-background)))
-    (should (cl-every #'< button (agent-repl-test-input-help--rgb "#181817")))
+    (should (cl-every #'< button (agent-repl-test-input-help--rgb "#1d1d1c")))
     (should (cl-every #'> button (agent-repl-test-input-help--rgb agent-repl-input-help-bar-background)))))
 
 (ert-deftest agent-repl-test-input-help-faces-take-the-bar-colors ()
