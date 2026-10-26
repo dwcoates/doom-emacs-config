@@ -37,6 +37,7 @@ import (
 //
 //	agent-repld workspace    create | async-merge | prompt | set | finished | open | close | kill
 //	                         compact | status | list | subscribe | unsubscribe | gate
+//	                         subsections | place
 //	agent-repld merge-queue  status | dequeue | move-up | move-down | pause | resume
 //	                         disable-racing | enable-racing | subscribe | unsubscribe
 //	agent-repld editor       eval
@@ -152,6 +153,8 @@ var cliNouns = map[string]map[string]cliCommand{
 		"subscribe":   {usage: "subscribe WS -events turn_started,turn_ended,needs_input,landed,closed", run: workspaceSubscribe},
 		"unsubscribe": {usage: "unsubscribe WS", run: workspaceUnsubscribe},
 		"gate":        {usage: "gate WS pay|clear|compact|compact-and-resume [-model M -scope all|prompts|responses]", run: workspaceGate},
+		"subsections": {usage: "subsections WS", run: workspaceSubsections},
+		"place":       {usage: "place WS -subsection NAME", run: workspacePlace},
 	},
 	mergeQueueNoun: {
 		"status":         {usage: "status [-repository here|DIR]", run: queueStatus},
@@ -368,15 +371,40 @@ func (c *cliCall) repository(name string) (*workspacev1.RepositoryRef, bool) {
 	if !ok {
 		return nil, false
 	}
+	return c.repositoryOf(ref)
+}
+
+// repositoryOf answers the repository workspace REF sits in, off its status.
+func (c *cliCall) repositoryOf(ref *workspacev1.WorkspaceRef) (*workspacev1.RepositoryRef, bool) {
 	resp, err := c.client.GetWorkspaceStatus(c.ctx, connect.NewRequest(&agentreplv1.GetWorkspaceStatusRequest{Workspace: ref}))
 	if err != nil {
-		return nil, c.failed("read the calling workspace's status: %v", err)
+		return nil, c.failed("read the status of workspace %s: %v", ref.GetId(), err)
 	}
 	repository := resp.Msg.GetSuccess().GetStatus().GetRepository()
 	if repository.GetId() == "" {
-		return nil, c.failed("the daemon names no repository for the calling workspace: %v", resp.Msg.GetResult())
+		return nil, c.failed("the daemon names no repository for workspace %s: %v", ref.GetId(), resp.Msg.GetResult())
 	}
 	return repository, true
+}
+
+// arrangedRepositoryOf answers the sidebar arrangement of the repository
+// workspace REF sits in: its unsectioned families and its subsections, each
+// with the families in it, in drawn order.
+func (c *cliCall) arrangedRepositoryOf(ref *workspacev1.WorkspaceRef) (*agentreplv1.ArrangedRepository, bool) {
+	repository, ok := c.repositoryOf(ref)
+	if !ok {
+		return nil, false
+	}
+	resp, err := c.client.GetSidebarArrangement(c.ctx, connect.NewRequest(&agentreplv1.GetSidebarArrangementRequest{}))
+	if err != nil {
+		return nil, c.failed("read the sidebar arrangement: %v", err)
+	}
+	for _, arranged := range resp.Msg.GetRepositories() {
+		if arranged.GetRepository().GetId() == repository.GetId() {
+			return arranged, true
+		}
+	}
+	return nil, c.failed("the sidebar arrangement holds no repository %s (%s)", repository.GetId(), repository.GetDir())
 }
 
 // answer prints an rpc's answer and answers the command's exit.
@@ -393,17 +421,24 @@ func answer[Res any](c *cliCall, resp *connect.Response[Res], err error) int {
 		c.failed("the answer is a %T, no message", resp.Msg)
 		return exitFailure
 	}
-	text, err := protojson.MarshalOptions{Multiline: true}.Marshal(msg)
-	if err != nil {
-		c.failed("render the answer: %v", err)
+	if !c.print(msg) {
 		return exitFailure
 	}
-	fmt.Fprintln(c.out, string(text))
 	if refusedAnswer(msg) {
 		fmt.Fprintf(c.errOut, "agent-repld %s: the daemon refused\n", c.name)
 		return exitRefused
 	}
 	return exitSuccess
+}
+
+// print prints MSG as multiline protojson, every command's output.
+func (c *cliCall) print(msg proto.Message) bool {
+	text, err := protojson.MarshalOptions{Multiline: true}.Marshal(msg)
+	if err != nil {
+		return c.failed("render the answer: %v", err)
+	}
+	fmt.Fprintln(c.out, string(text))
+	return true
 }
 
 // refusedAnswer reports whether MSG set its `error` arm.
@@ -1053,6 +1088,93 @@ func workspaceStatus(c *cliCall, args []string) int {
 	}
 	resp, err := c.client.GetWorkspaceStatus(c.ctx, connect.NewRequest(&agentreplv1.GetWorkspaceStatusRequest{Workspace: ref}))
 	return answer(c, resp, err)
+}
+
+// workspaceSubsections prints the sidebar arrangement of the repository WS
+// sits in (agentrepl.v1.ArrangedRepository): its subsections by name, each
+// with the workspaces in it, and its unsectioned workspaces, in drawn order.
+// It is what a new workspace reads to choose the subsection it belongs in.
+func workspaceSubsections(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(rest) != 0 {
+		return c.usageFailed("the command names its workspace and nothing after it")
+	}
+	arranged, ok := c.arrangedRepositoryOf(ref)
+	if !ok || !c.print(arranged) {
+		return exitFailure
+	}
+	return exitSuccess
+}
+
+// workspacePlace files WS's family at the bottom of the subsection of its
+// repository named -subsection (ArrangeSidebar's place_workspace). The
+// placement KEEPS the family's one-shot marks (keep_one_shot): a workspace
+// filing itself is no drag, and a one-shot that unmarked itself by filing
+// itself would no longer finish unattended.
+func workspacePlace(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	name := fs.String("subsection", "", "the subsection's name, as `subsections` prints it")
+	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(rest) != 0 {
+		return c.usageFailed("the command names its workspace and nothing after it")
+	}
+	if strings.TrimSpace(*name) == "" {
+		return c.usageFailed("the command names the subsection, with -subsection NAME")
+	}
+	arranged, ok := c.arrangedRepositoryOf(ref)
+	if !ok {
+		return exitFailure
+	}
+	subsection, ok := c.subsectionNamed(arranged, *name)
+	if !ok {
+		return exitFailure
+	}
+	resp, err := c.client.ArrangeSidebar(c.ctx, connect.NewRequest(&agentreplv1.ArrangeSidebarRequest{
+		Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
+			Workspace:   ref,
+			Into:        &agentreplv1.ArrangePlaceWorkspace_Subsection{Subsection: subsection},
+			At:          &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
+			KeepOneShot: true,
+		}}}))
+	return answer(c, resp, err)
+}
+
+// subsectionNamed answers the ref of ARRANGED's one subsection named NAME,
+// compared after trimming as the daemon trims a subsection's name. No
+// subsection, or two, by that name is refused, naming the ones there are.
+func (c *cliCall) subsectionNamed(arranged *agentreplv1.ArrangedRepository, name string) (*agentreplv1.SubsectionRef, bool) {
+	name = strings.TrimSpace(name)
+	var (
+		found *agentreplv1.SubsectionRef
+		count int
+		names []string
+	)
+	for _, entry := range arranged.GetEntries() {
+		sub := entry.GetSubsection()
+		if sub == nil {
+			continue
+		}
+		names = append(names, strconv.Quote(sub.GetName()))
+		if sub.GetName() == name {
+			found = sub.GetSubsection()
+			count++
+		}
+	}
+	switch count {
+	case 0:
+		return nil, c.failed("repository %s has no subsection named %q; its subsections are [%s]",
+			arranged.GetName(), name, strings.Join(names, ", "))
+	case 1:
+		return found, true
+	}
+	return nil, c.failed("repository %s has %d subsections named %q; rename one so the name picks one", arranged.GetName(), count, name)
 }
 
 // listedWorkspace is one workspace as `workspace list` prints it.

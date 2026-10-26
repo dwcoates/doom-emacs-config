@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -33,6 +34,27 @@ type cliClient struct {
 	creates []*agentreplv1.CreateWorkspaceResponse
 	finish  *agentreplv1.FinishWorkspaceResponse
 	queues  *agentreplv1.GetMergeQueueStatusResponse
+	// arrangement answers GetSidebarArrangement; arrange answers
+	// ArrangeSidebar, a success when nil.
+	arrangement *agentreplv1.GetSidebarArrangementResponse
+	arrange     *agentreplv1.ArrangeSidebarResponse
+}
+
+func (c *cliClient) GetSidebarArrangement(_ context.Context, req *connect.Request[agentreplv1.GetSidebarArrangementRequest]) (*connect.Response[agentreplv1.GetSidebarArrangementResponse], error) {
+	if err := c.record(req.Msg); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(c.arrangement), nil
+}
+
+func (c *cliClient) ArrangeSidebar(_ context.Context, req *connect.Request[agentreplv1.ArrangeSidebarRequest]) (*connect.Response[agentreplv1.ArrangeSidebarResponse], error) {
+	if err := c.record(req.Msg); err != nil {
+		return nil, err
+	}
+	if c.arrange != nil {
+		return connect.NewResponse(c.arrange), nil
+	}
+	return connect.NewResponse(&agentreplv1.ArrangeSidebarResponse{Result: &agentreplv1.ArrangeSidebarResponse_Success{Success: &agentreplv1.ArrangeSidebarSuccess{}}}), nil
 }
 
 func (c *cliClient) record(req proto.Message) error {
@@ -1397,5 +1419,161 @@ func TestEveryMergeQueueDetailHasASpelling(t *testing.T) {
 		if !spelled || detail.ProtoReflect().WhichOneof(detail.ProtoReflect().Descriptor().Oneofs().ByName("level")).Name() != levels.Get(i).Name() {
 			t.Errorf("the detail %s has no -detail spelling that asks for it", name)
 		}
+	}
+}
+
+// arrangedSubsection is an arrangement entry: subsection ID named NAME.
+func arrangedSubsection(id, name string) *agentreplv1.ArrangedEntry {
+	return &agentreplv1.ArrangedEntry{Entry: &agentreplv1.ArrangedEntry_Subsection{Subsection: &agentreplv1.ArrangedSubsection{
+		Subsection: &agentreplv1.SubsectionRef{Id: id}, Name: name}}}
+}
+
+// subsectionsArrangement is the caller's repository "repo-1" with subsections
+// "later" and "twin" twice, after another repository with its own "later".
+func subsectionsArrangement() *agentreplv1.GetSidebarArrangementResponse {
+	return &agentreplv1.GetSidebarArrangementResponse{Repositories: []*agentreplv1.ArrangedRepository{
+		{Repository: &workspacev1.RepositoryRef{Id: "repo-other"}, Name: "other",
+			Entries: []*agentreplv1.ArrangedEntry{arrangedSubsection("sub-elsewhere", "later")}},
+		{Repository: &workspacev1.RepositoryRef{Id: "repo-1"}, Name: "doom", Entries: []*agentreplv1.ArrangedEntry{
+			{Entry: &agentreplv1.ArrangedEntry_Workspace{Workspace: &agentreplv1.ArrangedWorkspace{
+				Workspace: &workspacev1.WorkspaceRef{Id: "ws-caller"}, Name: "caller"}}},
+			arrangedSubsection("sub-later", "later"),
+			arrangedSubsection("sub-twin-1", "twin"),
+			arrangedSubsection("sub-twin-2", "twin"),
+		}},
+	}}
+}
+
+func TestSubsectionsPrintsTheArrangementOfTheWorkspacesRepository(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.arrangement = subsectionsArrangement()
+
+	// Act
+	code := f.run(workspaceNoun, "subsections", "here")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q; want success", code, f.errOut.String())
+	}
+	var printed agentreplv1.ArrangedRepository
+	if err := protojson.Unmarshal(f.out.Bytes(), &printed); err != nil {
+		t.Fatalf("the output is no ArrangedRepository: %v\n%s", err, f.out.String())
+	}
+	if !proto.Equal(&printed, f.client.arrangement.GetRepositories()[1]) {
+		t.Fatalf("printed %v, want the caller's repository", &printed)
+	}
+	if status := only[*agentreplv1.GetWorkspaceStatusRequest](t, f); status.GetWorkspace().GetId() != "ws-caller" {
+		t.Fatalf("status read of %v, want the caller's", status.GetWorkspace())
+	}
+}
+
+func TestSubsectionsFailsARepositoryTheArrangementDoesNotHold(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.arrangement = &agentreplv1.GetSidebarArrangementResponse{}
+
+	// Act
+	code := f.run(workspaceNoun, "subsections", "here")
+
+	// Assert
+	if code != exitFailure || !strings.Contains(f.errOut.String(), "holds no repository repo-1") {
+		t.Fatalf("exit %d, stderr %q; want the missing repository named", code, f.errOut.String())
+	}
+}
+
+func TestSubsectionsReadsANamedWorkspacesRepository(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.arrangement = subsectionsArrangement()
+
+	// Act
+	code := f.run(workspaceNoun, "subsections", "peer")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q; want success", code, f.errOut.String())
+	}
+	if status := only[*agentreplv1.GetWorkspaceStatusRequest](t, f); status.GetWorkspace().GetId() != "ws-peer" {
+		t.Fatalf("status read of %v, want the peer's", status.GetWorkspace())
+	}
+}
+
+func TestPlaceFilesTheWorkspaceKeepingItsOneShotMarks(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.arrangement = subsectionsArrangement()
+
+	// Act
+	code := f.run(workspaceNoun, "place", "here", "-subsection", " later ")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q; want success", code, f.errOut.String())
+	}
+	place := only[*agentreplv1.ArrangeSidebarRequest](t, f).GetPlaceWorkspace()
+	want := &agentreplv1.ArrangePlaceWorkspace{
+		Workspace:   &workspacev1.WorkspaceRef{Id: "ws-caller", Dir: "/wt/caller"},
+		Into:        &agentreplv1.ArrangePlaceWorkspace_Subsection{Subsection: &agentreplv1.SubsectionRef{Id: "sub-later"}},
+		At:          &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
+		KeepOneShot: true,
+	}
+	if !proto.Equal(place, want) {
+		t.Fatalf("placement = %v, want %v", place, want)
+	}
+}
+
+func TestPlaceRefusesASubsectionItCannotPick(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{name: "no subsection named", args: []string{"place", "here"}, wantErr: "-subsection NAME"},
+		{name: "a blank subsection", args: []string{"place", "here", "-subsection", "  "}, wantErr: "-subsection NAME"},
+		{name: "an unknown subsection", args: []string{"place", "here", "-subsection", "sooner"},
+			wantErr: `no subsection named "sooner"; its subsections are ["later", "twin", "twin"]`},
+		{name: "another repository's subsection", args: []string{"place", "here", "-subsection", "sub-elsewhere"},
+			wantErr: `no subsection named "sub-elsewhere"`},
+		{name: "an ambiguous subsection", args: []string{"place", "here", "-subsection", "twin"},
+			wantErr: `2 subsections named "twin"`},
+		{name: "a positional after the workspace", args: []string{"place", "here", "later"},
+			wantErr: "nothing after it"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.arrangement = subsectionsArrangement()
+
+			// Act
+			code := f.run(workspaceNoun, tt.args...)
+
+			// Assert
+			if code != exitFailure || !strings.Contains(f.errOut.String(), tt.wantErr) {
+				t.Fatalf("exit %d, stderr %q; want a failure saying %q", code, f.errOut.String(), tt.wantErr)
+			}
+			for _, req := range f.client.requests {
+				if _, ok := req.(*agentreplv1.ArrangeSidebarRequest); ok {
+					t.Fatalf("requests = %v, want no placement sent", f.client.requests)
+				}
+			}
+		})
+	}
+}
+
+func TestPlaceExitsRefusedOnTheDaemonsRefusal(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.arrangement = subsectionsArrangement()
+	f.client.arrange = &agentreplv1.ArrangeSidebarResponse{Result: &agentreplv1.ArrangeSidebarResponse_Error{Error: &agentreplv1.ArrangeSidebarError{
+		Cause: &agentreplv1.ArrangeSidebarError_UnknownSubsection{UnknownSubsection: &agentreplv1.ArrangeSidebarUnknownSubsection{}}}}}
+
+	// Act
+	code := f.run(workspaceNoun, "place", "here", "-subsection", "later")
+
+	// Assert
+	if code != exitRefused {
+		t.Fatalf("exit %d, stderr %q; want refused", code, f.errOut.String())
 	}
 }

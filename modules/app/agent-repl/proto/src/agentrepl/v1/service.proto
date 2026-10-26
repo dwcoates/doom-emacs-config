@@ -335,7 +335,10 @@ service AgentRepl {
   rpc ArrangeSidebar(ArrangeSidebarRequest) returns (ArrangeSidebarResponse);
   // Read the repository grouping's arrangement, for an agent organizing it.
   // See endpoint_get_sidebar_arrangement.proto.
-  rpc GetSidebarArrangement(GetSidebarArrangementRequest) returns (GetSidebarArrangementResponse);
+  rpc GetSidebarArrangement(GetSidebarArrangementRequest) returns (GetSidebarArrangementResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // A new user task; the roster's task view renders it. See
   // endpoint_create_task.proto.
