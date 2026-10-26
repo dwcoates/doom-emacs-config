@@ -17,6 +17,7 @@ import { BUBBLE_CLASS, BUBBLE_ROLE_ATTRIBUTE } from "../bubble/draw.js";
 import type { FocusLeft } from "../focus-left.js";
 import { heatColor } from "../heat.js";
 import { log } from "../log.js";
+import { createPointerRest } from "../pointer-rest.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireMessage } from "../rpc/strict.js";
 import { feedRowId, feedRowOf } from "./row-id.js";
@@ -83,12 +84,6 @@ export function responseUsageOf(bubble: Element): ResponseUsage | null {
   return usages.get(bubble) ?? null;
 }
 
-/** Where the pointer was last seen, in the window's coordinates. */
-interface Point {
-  readonly x: number;
-  readonly y: number;
-}
-
 /**
  * Show the usage of the response bubble under the pointer in HOST through
  * SHOW, and null once the pointer is on none. SHOW is called only when what it
@@ -103,12 +98,8 @@ interface Point {
 export function installResponseUsageHover(host: HTMLElement, show: ShowResponseUsage, focus: FocusLeft): () => void {
   let hovered: Element | null = null;
   let shown: ResponseUsage | null = null;
-  /** The pointer's last position seen in HOST, or null before any. */
-  let lastPoint: Point | null = null;
-  /** Whether the focus left and the pointer has not moved since. */
-  let suspended = false;
-  /** Where the pointer was when the hover was suspended, or null when unseen. */
-  let suspendedAt: Point | null = null;
+  /** Whether the focus left and the pointer has not moved since (pointer-rest.ts). */
+  const rest = createPointerRest();
   const showFor = (bubble: Element | null): void => {
     hovered = bubble;
     const usage = bubble === null ? null : responseUsageOf(bubble);
@@ -125,15 +116,11 @@ export function installResponseUsageHover(host: HTMLElement, show: ShowResponseU
     return bubble !== null && host.contains(bubble) ? bubble : null;
   };
   const onOver = (event: MouseEvent): void => {
-    if (suspended) return;
+    if (rest.suspended()) return;
     showFor(bubbleAt(event.target));
   };
   const onMove = (event: MouseEvent): void => {
-    const point = { x: event.clientX, y: event.clientY };
-    lastPoint = point;
-    if (!suspended) return;
-    if (suspendedAt !== null && suspendedAt.x === point.x && suspendedAt.y === point.y) return;
-    suspended = false;
+    if (!rest.moved(event.clientX, event.clientY)) return;
     log.debug("the pointer moved after the focus left; the hover answers again", {
       operation: "feed.response-usage-hover.resume",
       context: {},
@@ -142,8 +129,7 @@ export function installResponseUsageHover(host: HTMLElement, show: ShowResponseU
   };
   const onLeave = (): void => showFor(null);
   const onFocusLeft = (why: string): void => {
-    suspended = true;
-    suspendedAt = lastPoint;
+    rest.suspend();
     log.debug("the focus left the page; the footer lets go of the hovered response", {
       operation: "feed.response-usage-hover.focus-left",
       context: { why, shown: shown !== null },

@@ -30,6 +30,7 @@
  * open while the pointer travels.
  */
 import { log } from "../log.js";
+import { createPointerRest } from "../pointer-rest.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./row-hover.js";
 
@@ -51,34 +52,21 @@ export interface Transients {
   dispose(): void;
 }
 
-/** Where the pointer was last seen, in the window's coordinates. */
-interface Point {
-  x: number;
-  y: number;
-}
-
 /** Install the transients' dismissal on the rail HOST. */
 export function installTransients(host: HTMLElement, deps: TransientsDeps): Transients {
   const { dropdowns, rowHover, win } = deps;
   const doc = win.document;
   let selection: string | null = null;
-  /** The pointer's last position seen in the rail, or null before any. */
-  let lastPoint: Point | null = null;
-  /** Whether the hover highlight is suspended. */
-  let suspended = false;
-  /** Where the pointer was when the highlight was suspended, or null when unseen. */
-  let suspendedAt: Point | null = null;
+  /** Whether the hover highlight is suspended, and until when (pointer-rest.ts). */
+  const rest = createPointerRest();
 
   const suspend = (): void => {
-    if (suspended) return;
-    suspended = true;
-    suspendedAt = lastPoint;
+    if (!rest.suspend()) return;
     host.classList.add(HOVER_SUSPENDED_CLASS);
   };
 
-  const resume = (via: string): void => {
-    if (!suspended) return;
-    suspended = false;
+  /** The suspension ended, VIA the pointer or a key. */
+  const resumed = (via: string): void => {
     host.classList.remove(HOVER_SUSPENDED_CLASS);
     log.debug("the user is back in the rail; hover answers again", {
       operation: "sidebar.transients.resume",
@@ -98,19 +86,16 @@ export function installTransients(host: HTMLElement, deps: TransientsDeps): Tran
   };
 
   const moved = (event: MouseEvent): void => {
-    const point = { x: event.clientX, y: event.clientY };
-    lastPoint = point;
+    const back = rest.moved(event.clientX, event.clientY);
     rowHover.pointerAt(event.target);
-    if (!suspended) return;
-    if (suspendedAt !== null && suspendedAt.x === point.x && suspendedAt.y === point.y) return;
-    resume("pointer");
+    if (back) resumed("pointer");
   };
   const left = (): void => {
     rowHover.pointerAt(null);
     suspend();
   };
   const keyed = (): void => {
-    resume("key");
+    if (rest.resume()) resumed("key");
   };
   const blurred = (): void => {
     dismiss("the page lost focus");
