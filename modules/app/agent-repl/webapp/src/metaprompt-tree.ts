@@ -1021,8 +1021,10 @@ export function renderTreeHtml(
     throw new RangeError(`metaprompt tree: budget must be a positive integer, got ${String(width)}`);
   }
   const rows = layoutTree(tree, { rootGap: options.rootGap });
+  const labels = new Set(rows.flatMap((row) => (row.kind === "branch" ? [row.branch.label.trimEnd()] : [])));
+  const marked: InlineMarkup = (escaped) => markReferences(inline(escaped), labels);
   const items: TreeMeasureItem[] = [SPACE_ITEM];
-  for (const row of rows) if (row.kind === "branch") items.push(...branchItems(row.branch, inline));
+  for (const row of rows) if (row.kind === "branch") items.push(...branchItems(row.branch, marked));
   const widthOf = measuredWidths(measure, items);
   const measured = { widthOf, space: widthOf(SPACE_ITEM.kind, SPACE_ITEM.html) };
   const parts: string[] = [];
@@ -1034,14 +1036,14 @@ export function renderTreeHtml(
       continue;
     }
     if (row.kind === "raw") {
-      parts.push(renderRawLine({ prefix: "", body: inline(escapeHtml(row.text)), raw: true }));
+      parts.push(renderRawLine({ prefix: "", body: marked(escapeHtml(row.text)), raw: true }));
       continue;
     }
     let lines: RenderLine[];
     let bodyWidths: number[];
     try {
       if (unwrapped) throw new TreeOverflowError("an earlier branch could not be wrapped");
-      const wrapped = wrapBranch(row.branch, width, row.hasChildren, inline, measured);
+      const wrapped = wrapBranch(row.branch, width, row.hasChildren, marked, measured);
       lines = wrapped.lines;
       bodyWidths = wrapped.bodyWidths;
       overflowCount += wrapped.overflows.length;
@@ -1055,7 +1057,7 @@ export function renderTreeHtml(
         });
       }
       unwrapped = true;
-      const body = branchBody(row.branch, inline);
+      const body = branchBody(row.branch, marked);
       lines = [{ prefix: row.branch.prefix, label: row.branch.label, body, raw: false }];
       bodyWidths = [widthOf("text", pieceHtml(body))];
     }
@@ -1200,6 +1202,51 @@ function labelHtml(label: string | undefined, extraClass?: string): string {
   const text = label.trimEnd();
   const classes = extraClass === undefined ? TREE_LABEL_CLASS : `${TREE_LABEL_CLASS} ${extraClass}`;
   return `<span class="${classes}" ${TREE_LABEL_ATTRIBUTE}="${escapeHtml(text)}">${escapeHtml(text)}</span>${escapeHtml(label.slice(text.length))}`;
+}
+
+/** The class a citation of another node of the same tree wears, the cited label in `TREE_REFERENCE_ATTRIBUTE`. */
+export const TREE_REFERENCE_CLASS = "mp-ref";
+
+/** The attribute naming the label a `TREE_REFERENCE_CLASS` element cites. */
+export const TREE_REFERENCE_ATTRIBUTE = "data-ref";
+
+/** A node label as a citation writes it: dotted whole numbers. */
+const CITED_LABEL = String.raw`\d+(?:\.\d+)*`;
+
+/** A citation: parentheses holding one or more labels, joined by commas or "and". */
+const CITATION_RE = new RegExp(String.raw`\(${CITED_LABEL}(?:\s*(?:,|and|&amp;)\s*${CITED_LABEL})*\)`, "gu");
+
+/** Elements whose text is never read as a citation: code is literal, a link is already a link. */
+const UNCITED_TAG_RE = /^<(\/?)(code|a)\b/iu;
+
+/**
+ * Mark every citation in HTML of a node of the tree, each cited label in
+ * LABELS wrapped in a `TREE_REFERENCE_CLASS` element naming it, so a hover
+ * on the citation can box the node it cites (feed/branch-hover.ts). A tree
+ * cites a node by its dotted label in parentheses (the metaprompt's
+ * cross-reference rule), so only a parenthesized label that names a node of
+ * this tree is marked. The mark is a tag, so it adds no width.
+ */
+export function markReferences(html: string, labels: ReadonlySet<string>): string {
+  let uncited = 0;
+  return html
+    .split(/(<[^>]*>)/u)
+    .map((part, i) => {
+      if (i % 2 === 1) {
+        const tag = UNCITED_TAG_RE.exec(part);
+        if (tag !== null) uncited += tag[1] === "" ? 1 : -1;
+        return part;
+      }
+      if (uncited > 0) return part;
+      return part.replace(CITATION_RE, (citation) =>
+        citation.replace(new RegExp(CITED_LABEL, "gu"), (label) =>
+          labels.has(label)
+            ? `<span class="${TREE_REFERENCE_CLASS}" ${TREE_REFERENCE_ATTRIBUTE}="${label}">${label}</span>`
+            : label,
+        ),
+      );
+    })
+    .join("");
 }
 
 /**

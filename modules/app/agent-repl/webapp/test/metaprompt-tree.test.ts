@@ -7,6 +7,7 @@ import {
   formatTree,
   layoutTree,
   lineText,
+  markReferences,
   renderTreeHtml,
   TreeOverflowError,
   TREE_LABEL_ATTRIBUTE,
@@ -16,6 +17,8 @@ import {
   TREE_LABEL_PAD_CLASS,
   TREE_RAILS_CLASS,
   TREE_TEXT_END_ATTRIBUTE,
+  TREE_REFERENCE_ATTRIBUTE,
+  TREE_REFERENCE_CLASS,
   visibleWidth,
   columnMeasure,
   cssLength,
@@ -554,6 +557,73 @@ describe("renderTreeHtml", () => {
     // Assert — the tag is escaped inside the code block, not rendered.
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img src=x&gt;");
+  });
+});
+
+/** LABEL as markReferences marks a citation of it. */
+const cited = (label: string): string =>
+  `<span class="${TREE_REFERENCE_CLASS}" ${TREE_REFERENCE_ATTRIBUTE}="${label}">${label}</span>`;
+
+describe("markReferences", () => {
+  const labels = new Set(["1", "1.2", "1.3.1"]);
+
+  it.each([
+    ["a parenthesized label of the tree", "the fix (1.3.1) holds", `the fix (${cited("1.3.1")}) holds`],
+    ["a root's label", "see (1)", `see (${cited("1")})`],
+    ["each label of a comma-joined citation", "(1.2, 1.3.1)", `(${cited("1.2")}, ${cited("1.3.1")})`],
+    ["each label of an and-joined citation", "(1.2 and 1)", `(${cited("1.2")} and ${cited("1")})`],
+    ["only the labels of a citation the tree holds", "(1.2, 4.5)", `(${cited("1.2")}, 4.5)`],
+  ])("marks %s", (_name, html, marked) => {
+    // Act + Assert
+    expect(markReferences(html, labels)).toBe(marked);
+  });
+
+  it.each([
+    ["a label the tree does not hold", "(4.5)"],
+    ["a label outside parentheses", "1.2 is fine"],
+    ["parentheses holding more than labels", "(see 1.2)"],
+    ["a citation inside code", "<code>(1.2)</code>"],
+    ["a citation inside a link", `<a href="x">(1.2)</a>`],
+    ["a label inside a tag's attribute", `<span title="(1.2)">x</span>`],
+  ])("leaves %s unmarked", (_name, html) => {
+    // Act + Assert
+    expect(markReferences(html, labels)).toBe(html);
+  });
+
+  it("marks a citation after a closed code span", () => {
+    // Act + Assert
+    expect(markReferences("<code>x</code> (1.2)", labels)).toBe(`<code>x</code> (${cited("1.2")})`);
+  });
+});
+
+/** A root 1 with children 1.1 and 1.2, 1.2's text TEXT. */
+const citing = (text: string): ProseTree =>
+  graph([
+    { label: "1", text: "Root" },
+    { parent: 0, label: "1.1", text: "Detail" },
+    { parent: 0, label: "1.2", text },
+  ]);
+
+describe("renderTreeHtml's citations", () => {
+  it("marks a citation of another node of the tree", () => {
+    // Act
+    const html = renderTreeHtml(citing("see (1.1)"), identity, columnMeasure(100));
+    // Assert
+    expect(html).toContain(`see (${cited("1.1")})`);
+  });
+
+  it("marks a citation after the inline pass, so a code span stays literal", () => {
+    // Act
+    const html = renderTreeHtml(citing("`(1.1)` and (1.1)"), inline, columnMeasure(100));
+    // Assert
+    expect(html.match(new RegExp(TREE_REFERENCE_CLASS, "g"))?.length).toBe(1);
+  });
+
+  it("marks a citation on a wrapped line without widening it", () => {
+    // Act
+    const html = renderTreeHtml(citing("aaaa bbbb (1.1)"), identity, columnMeasure(16));
+    // Assert
+    expect([html.includes(cited("1.1")), html.split(`${TREE_NODE_ATTRIBUTE}="1.2"`).length - 1]).toEqual([true, 3]);
   });
 });
 

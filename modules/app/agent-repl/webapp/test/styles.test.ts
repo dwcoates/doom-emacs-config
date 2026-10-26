@@ -5839,6 +5839,7 @@ describe("the response subtree box (feed/subtree-box.ts)", () => {
     [".mp-line.mp-line-composing", "--composer-entry-bg"],
     [".mp-line.mp-line-revealed", "--composer-entry-bg"],
     [".mp-line.mp-line-hovered", "--composer-entry-bg"],
+    [".mp-line.mp-line-referenced", "--reference-bg"],
   ])("%s paints the one shared box in %s, without the accent's left bar", (selector, fill) => {
     // Arrange / Act
     const rule = rulesOfSelector(selector);
@@ -5847,6 +5848,20 @@ describe("the response subtree box (feed/subtree-box.ts)", () => {
     expect(rule).toMatch(/var\(--box-bg\) var\(--box-left\)/);
     expect(rule).toContain(`--box-bg: var(${fill})`);
     expect(rule).not.toMatch(/--accent/);
+  });
+
+  // Owner request, 2026-10-26: every citation wears the subtle orange its
+  // cited node's box is drawn in, so it reads as hoverable.
+  it("draws every citation in the orange its cited node's box wears", () => {
+    // Arrange / Act
+    const citation = declarationsOf(".mp-ref") ?? "";
+    const fill = declarationsOf(":root") ?? "";
+
+    // Assert
+    expect([citation, fill]).toEqual([
+      expect.stringMatching(/color:\s*var\(--reference\)/),
+      expect.stringContaining("--reference-bg: color-mix(in srgb, var(--reference) 18%, transparent)"),
+    ]);
   });
 });
 
