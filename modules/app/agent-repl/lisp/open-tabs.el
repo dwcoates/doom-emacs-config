@@ -18,8 +18,12 @@
 ;;   - a HIDDEN workspace (hidden by the user, or in a collapsed repository
 ;;     section) is asked for too, and answered at once without starting
 ;;     anything; when it is shown again it is asked for again, and when an
-;;     open one is hidden its page is dropped (the daemon leaves its cache
-;;     to lapse, then stands its session down);
+;;     open one is hidden by the user its page is dropped (the daemon leaves
+;;     its cache to lapse, then stands its session down);
+;;   - A FOLD DROPS NO PAGE (owner ruling, 2026-10-26).  Folding a repository
+;;     section or a subsection takes its tabs off the bar and nothing else:
+;;     their pages are held, and age out on page-unload.el's clock like any
+;;     other page;
 ;;   - A DAEMON-ONLY RESTART NEVER CLOSES A TAB.  What is open is this
 ;;     process's own record, so a daemon that restarts finds every open tab
 ;;     still standing; only an open still in flight when its stream ends is
@@ -88,7 +92,9 @@ never been asked for, or its open's stream ended unanswered.  A defvar, so
 a hot reload keeps every open tab.")
 
 (defvar agent-repl-open-tabs--rows nil
-  "The last roster walk's rows: plists `(:id :name :ref :collapsed)'.")
+  "The last roster walk's rows: plists `(:id :name :ref :collapsed :hidden)'.
+`:collapsed' is a tab off the bar, folded or hidden; `:hidden' is only the
+user\='s hide.")
 
 (defvar agent-repl-open-tabs--startup 'expected
   "Where this process's first open stands.
@@ -113,20 +119,21 @@ Until it has, the frame has no workspace of the user's to move to."
   (and (agent-repl-open-tabs-starting-p) (null agent-repl-open-tabs--startup-selected)))
 
 (defun agent-repl-open-tabs-hidden-p (ws)
-  "Return non-nil when workspace WS is hidden or in a collapsed section.
+  "Return non-nil when the user hid workspace WS.
+A workspace in a collapsed section is not hidden: a fold withholds nothing.
 Read from the last roster walk; a workspace it did not meet is not hidden."
   (let* ((id (plist-get (agent-repl--ws-get ws :ref) :id))
          (row (and id (agent-repl-open-tabs--row id))))
-    (and row (plist-get row :collapsed) t)))
+    (and row (plist-get row :hidden) t)))
 
 (defun agent-repl-open-tabs-withheld-p (ws)
   "Return non-nil when workspace WS holds no page: hidden, and not looked at.
+Only the user\='s hide withholds a page; a fold never does.
 THE WORKSPACE THE USER IS LOOKING AT IS NEVER WITHHELD (owner ruling,
 2026-10-17), the daemon\='s own rule (`wsm.Workspace.Runs'): selecting a
-hidden workspace, or one in a collapsed repository section, revives its
-session, so its page is made too.  Without it a switch to one (the
-picker, a sidebar row) landed on a perspective with no page, and nothing
-ever made one.  Moving off it withholds it again, and the unload pass
+hidden workspace revives its session, so its page is made too.  Without
+it a switch to one (the picker, a sidebar row) landed on a perspective
+with no page, and nothing ever made one.  Moving off it withholds it again, and the unload pass
 drops its page (page-unload.el)."
   (and (agent-repl-open-tabs-hidden-p ws)
        (not (equal ws (agent-repl--ws-current-name)))))
@@ -195,13 +202,14 @@ Returns nil, sending nothing, when there is no daemon connection."
       (agent-repl-rpc-open-tabs conn workspaces on-frame on-close)
       t)))
 
-(defun agent-repl-open-tabs--page (name collapsed)
-  "Load workspace NAME's web page when it is visible; return the page arm.
+(defun agent-repl-open-tabs--page (name hidden)
+  "Load workspace NAME's web page unless it is HIDDEN; return the page arm.
 `:loading' when NAME has a live page now (made here, or already standing),
-`:none' when it is COLLAPSED or this Emacs makes it no page.  A page that
+`:none' when it is HIDDEN or this Emacs makes it no page.  A FOLDED one
+loads its page as a drawn one does: a fold withholds nothing.  A page that
 FAILS to load is recorded at ERROR and asked `:none', so the workspace
 still opens (its tab shows no page) and no other row's open is lost."
-  (unless collapsed
+  (unless hidden
     (condition-case err
         (progn
           (agent-repl--ensure-input-buffer name)
@@ -209,7 +217,7 @@ still opens (its tab shows no page) and no other row's open is lost."
       (error
        (agent-repl--error name "elisp.open-tabs.page-failed ws=%s error=%s"
                           name (error-message-string err)))))
-  (list :arm (if (and (not collapsed)
+  (list :arm (if (and (not hidden)
                       (buffer-live-p (agent-repl--ws-get name :frontend-buffer)))
                  :loading
                :none)))
@@ -224,7 +232,7 @@ left unasked, and the next link-up or roster walk asks again."
           (mapcar (lambda (row)
                     (list :workspace (plist-get row :ref)
                           :page (agent-repl-open-tabs--page (plist-get row :name)
-                                                            (plist-get row :collapsed))))
+                                                            (plist-get row :hidden))))
                   rows)))
     (dolist (id ids) (puthash id 'in-flight agent-repl-open-tabs--state))
     (agent-repl--info agent-repl-open-tabs--central
@@ -301,8 +309,20 @@ Outside a walk the order is re-derived at once; a walk derives it itself."
   (unless agent-repl-roster--walking
     (agent-repl-roster-refresh-order)))
 
+(defun agent-repl-open-tabs--withdraw (row)
+  "Take open ROW's tab off the bar, now that it is folded or hidden.
+A HIDDEN one drops its page (`agent-repl-open-tabs--hide').  A FOLDED one
+only goes dormant, its page held (owner ruling, 2026-10-26): its unfold
+asks for it again, and page-unload.el\='s clock alone unloads its page."
+  (if (plist-get row :hidden)
+      (agent-repl-open-tabs--hide row)
+    (let ((name (plist-get row :name)))
+      (agent-repl-open-tabs--dormant (plist-get row :id))
+      (agent-repl--info name "elisp.open-tabs.folded ws=%s page=%s" name
+                        (buffer-live-p (agent-repl--ws-get name :frontend-buffer))))))
+
 (defun agent-repl-open-tabs--hide (row)
-  "Drop open ROW's page, now that it is hidden: it shows nothing.
+  "Drop open ROW's page, now that the user hid it: it shows nothing.
 The tab goes dormant at once; the page goes once the daemon is told
 \(`agent-repl-page-drop-announced'), so the workspace, which stays open
 and may be running a turn, is never drawn severed.  A row shown again
@@ -329,8 +349,8 @@ while the report was in flight keeps its page."
   "Bring every open in line with the roster walk's ROWS, then ask for the owed.
 ROWS are plists `(:id :name :ref :collapsed)', every workspace the roster
 gives a tab, in tab order.  A workspace gone from them is forgotten; an
-open one now hidden drops its page; every one never asked for, or shown
-again, is asked for in ONE request."
+open one now off the bar is withdrawn (`agent-repl-open-tabs--withdraw');
+every one never asked for, or shown again, is asked for in ONE request."
   (let ((wanted (make-hash-table :test 'equal)))
     (dolist (row rows) (puthash (plist-get row :id) t wanted))
     (dolist (id (hash-table-keys agent-repl-open-tabs--state))
@@ -340,7 +360,7 @@ again, is asked for in ONE request."
   (dolist (row rows)
     (when (and (plist-get row :collapsed)
                (eq (gethash (plist-get row :id) agent-repl-open-tabs--state) 'open))
-      (agent-repl-open-tabs--hide row)))
+      (agent-repl-open-tabs--withdraw row)))
   (let ((owed (cl-remove-if-not #'agent-repl-open-tabs--owed-p rows)))
     (cond
      (owed (agent-repl-open-tabs--ask owed))
@@ -394,9 +414,9 @@ once a daemon is serving."
          ;; Closed while it opened: the walk already forgot it.
          (agent-repl--info ws "elisp.open-tabs.opened-gone ws=%s id=%s" ws id))
         ((plist-get row :collapsed)
-         ;; Hidden while it opened: the daemon stands it down once its cache
-         ;; lapses.
-         (agent-repl-open-tabs--hide row))
+         ;; Folded or hidden while it opened: off the bar, and a hidden one
+         ;; drops its page (the daemon stands it down once its cache lapses).
+         (agent-repl-open-tabs--withdraw row))
         (t
          ;; THE ROW RIDES THE ANSWER: indexed before the tab is drawn, so it
          ;; is drawn with the workspace's status as of the answer.  A chat

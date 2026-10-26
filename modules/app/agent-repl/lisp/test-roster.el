@@ -3057,6 +3057,24 @@ saying the roster had been asked for one and declined."
         ;; Assert
         (should (equal tabs '(("a") ("s" . t))))))))
 
+(ert-deftest agent-repl-test-roster-only-a-hidden-tab-is-hidden ()
+  "A folded tab is `:collapsed' but not `:hidden'; a hidden workspace's is both."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((roster (agent-repl-test-roster--roster
+                   :sections (list (agent-repl-test-roster--section
+                                    "shown" (list (agent-repl-test-roster--row "a" "a" :ready)))
+                                   (agent-repl-test-roster--with-subsections
+                                    (agent-repl-test-roster--section
+                                     "folded" (list (agent-repl-test-roster--row "f" "f" :ready)) t)))
+                   :hidden (list (agent-repl-test-roster--row "h" "h" :ready)))))
+      ;; Act
+      (let ((tabs (mapcar (lambda (tab) (list (plist-get tab :id) (plist-get tab :collapsed)
+                                              (plist-get tab :hidden)))
+                          (agent-repl-roster-desired-tabs roster))))
+        ;; Assert
+        (should (equal tabs '(("a" nil nil) ("f" t nil) ("h" t t))))))))
+
 (ert-deftest agent-repl-test-roster-a-misnumbered-push-is-dropped-at-error ()
   "A tab numbered out of its place is a broken roster: dropped whole, said loudly."
   ;; Arrange
