@@ -190,18 +190,3 @@ func containsText(f Found, text string) bool {
 	}
 	return false
 }
-
-// ResolveRepository answers the registered repository a ref names by ID, by
-// DIR, or by both (both must then agree); false when none matches.
-func ResolveRepository(repositories []wsm.Repository, id wsm.RepoID, dir string) (wsm.Repository, bool) {
-	for _, repo := range repositories {
-		if id != "" && repo.ID != id {
-			continue
-		}
-		if dir != "" && repo.Dir != dir {
-			continue
-		}
-		return repo, true
-	}
-	return wsm.Repository{}, false
-}

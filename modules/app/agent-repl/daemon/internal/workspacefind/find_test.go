@@ -213,30 +213,3 @@ func TestLastActiveAtIsTheLatestEdge(t *testing.T) {
 		})
 	}
 }
-
-func TestResolveRepository(t *testing.T) {
-	tests := []struct {
-		name   string
-		id     wsm.RepoID
-		dir    string
-		want   wsm.Repository
-		wantOK bool
-	}{
-		{name: "by id", id: other.ID, want: other, wantOK: true},
-		{name: "by dir", dir: doom.Dir, want: doom, wantOK: true},
-		{name: "by both agreeing", id: doom.ID, dir: doom.Dir, want: doom, wantOK: true},
-		{name: "by both disagreeing", id: doom.ID, dir: other.Dir},
-		{name: "an unknown dir", dir: "/src/nowhere"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got, ok := ResolveRepository([]wsm.Repository{doom, other}, tt.id, tt.dir)
-
-			// Assert
-			if ok != tt.wantOK || got != tt.want {
-				t.Fatalf("ResolveRepository = %v, %v, want %v, %v", got, ok, tt.want, tt.wantOK)
-			}
-		})
-	}
-}

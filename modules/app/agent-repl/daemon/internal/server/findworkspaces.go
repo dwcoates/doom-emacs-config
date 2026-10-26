@@ -34,7 +34,7 @@ func (s *server) FindWorkspaces(
 	}
 	query := findQueryOf(req.Msg)
 	if ref := req.Msg.Repository; ref != nil {
-		repo, ok := workspacefind.ResolveRepository(repositories, wsm.RepoID(ref.GetId()), ref.GetDir())
+		repo, ok := wsm.RepositoryNamed(repositories, wsm.RepoID(ref.GetId()), ref.GetDir())
 		if !ok {
 			return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
 				Arm: "unknown_repository", Reason: fmt.Sprintf("no registered repository is named by id %q dir %q", ref.GetId(), ref.GetDir()), Info: true,
