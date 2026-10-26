@@ -1,6 +1,6 @@
 ---
 name: agent-repl-tests
-description: Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or runs tests for a change: every run goes through `agent-repld test run`, naming only the tests needed. Holds the measured test-performance pitfalls and their fixes as a living list.
+description: Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage, and so every new or changed test obeys the host CPU governor. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or runs tests for a change: every run goes through `agent-repld test run`, naming only the tests needed. Holds the measured test-performance pitfalls and their fixes as a living list.
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
@@ -97,6 +97,43 @@ Example, run from `modules/app/agent-repl`:
 ~/.claude/skills/agent-repl-workspaces/agent-repld test redundancy go -module daemon -pkg ./internal/workspace -tests sessions_test.go -out /tmp/redundancy-sessions
 ~/.claude/skills/agent-repl-workspaces/agent-repld test redundancy vitest -package agent-shim/claude/shim -mutate 'src/**/*.ts,!src/fake/**' -out /tmp/redundancy-shim
 ```
+
+## Every test obeys the host CPU governor
+
+Owner ruling, 2026-10-26: tests together may only bring the host's TOTAL CPU
+use up to 65%. The governor (`testrun/internal/cores`, `cores.Governor`)
+only admits units: a unit starts once it holds its core seats, and while the
+host is at the cap no unit of any run starts ("waiting for CPU"). A running
+unit is never paused. The mechanics are in `modules/app/agent-repl/AGENTS.md`,
+"THE HOST'S TOTAL CPU IS CAPPED" and "A UNIT'S WIDTH MUST BE THE CORES IT
+USES"; read those for how it works, not restated here.
+
+A new or changed test or suite must do the following so the governor can
+hold it:
+
+1. **Run only as a testrun unit.** A new suite gets a roster entry
+   (`testrun/roster/roster.go`), never a script, hook or helper that runs
+   tests outside `agent-repld test run`. Work outside a unit holds no seat,
+   so the governor cannot count or hold it back.
+2. **Use exactly the cores its width says.** Pin it (Go: `GOMAXPROCS`, `-p`,
+   `-parallel`; vitest `--maxWorkers=1`), or give the roster entry the
+   measured width (`Slots`) and cap the unit to it on its own command line,
+   as `e2e-emacs` does with `docker --cpus`. The run summary's "it is not
+   pinned to its width" line names a unit that uses more; fix that before
+   landing. Measured 2026-10-26: `daemon:integration` units holding 2 seats
+   used up to 4.5 cores.
+3. **Keep all of its work inside its own process tree, and reap it.** A
+   daemon, VM or worker a test starts and leaves running, or reparents
+   away, uses CPU no seat accounts for.
+4. **Runner-side work that is test load must hold a seat too.** This
+   includes testrun's own planning, e.g. its `go list -deps ... -test ./...`,
+   which measured 109% CPU outside any unit. Adding more such work outside
+   units is refused. This is a known gap, recorded in `org/todo.md`.
+
+A test's own timeouts are unaffected by CPU waits, since the wait happens
+before the unit starts; a harness bound that spans a whole run must allow
+for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
+`cpu_wait_ended`).
 
 ## The rules this builds on
 
