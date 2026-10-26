@@ -666,8 +666,7 @@ Owner ruling 2026-10-26: a fold never unloads."
   "Folding an open workspace is one INFO record naming its held page."
   (agent-repl-test-open-tabs--with
     (let (infos)
-      (cl-letf (((symbol-function 'agent-repl--info)
-                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) infos))))
+      (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
         ;; Arrange
         (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
         (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
