@@ -603,3 +603,60 @@ func TestGovernorStoppedBeforeItGovernsLeavesTheRoleFree(t *testing.T) {
 		t.Fatalf("the next governor's first decision = %+v", d)
 	}
 }
+
+func TestAwaitLockHandsOverTheLockOrItsFailure(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		wantErr bool
+	}{
+		{name: "a held lock", err: nil},
+		{name: "a lock that failed", err: errors.New("flock: bad file"), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f, err := os.CreateTemp(t.TempDir(), "lock")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			r := <-awaitLock(func() (*os.File, error) {
+				if tc.err != nil {
+					return nil, tc.err
+				}
+				return f, nil
+			})
+
+			// Assert
+			if (r.err != nil) != tc.wantErr || (r.f != nil) == tc.wantErr {
+				t.Fatalf("awaitLock = %+v; want error %v", r, tc.wantErr)
+			}
+			f.Close()
+		})
+	}
+}
+
+func TestDropOnArrivalLetsTheLockGo(t *testing.T) {
+	// Arrange: the role is held elsewhere, so the wait for it is abandoned.
+	p := seats.Pool{Dir: t.TempDir(), Prefix: "core", N: 1, What: "core"}
+	holder, err := p.Exclusive("governor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	abandoned := awaitLock(func() (*os.File, error) { return p.Exclusive("governor") })
+	dropOnArrival(abandoned)
+
+	// Act
+	if err := holder.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: the abandoned wait got the role and let it go, so it is free.
+	next, err := p.Exclusive("governor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next.Close()
+}

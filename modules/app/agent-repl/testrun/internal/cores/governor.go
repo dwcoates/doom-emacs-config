@@ -183,34 +183,49 @@ type governing struct {
 	gate     *os.File
 	// pending is the turnstile the governor waits for while a taker
 	// gathers; a gather in progress cannot be interrupted.
-	pending  chan turnstileResult
+	pending  chan lockResult
 	waiting  bool
 	stated   bool
 	last     Decision
 	lastErrs map[string]string
 }
 
-type turnstileResult struct {
+// lockResult is a lock the governor waited for on another goroutine, since a
+// flock that waits cannot be interrupted.
+type lockResult struct {
 	f   *os.File
 	err error
 }
 
+// awaitLock holds the lock lock answers, on another goroutine, and hands it
+// over on the channel it answers.
+func awaitLock(lock func() (*os.File, error)) chan lockResult {
+	ch := make(chan lockResult, 1)
+	go func() {
+		f, err := lock()
+		ch <- lockResult{f, err}
+	}()
+	return ch
+}
+
+// dropOnArrival lets a lock the governor stopped waiting for go the moment it
+// arrives.
+func dropOnArrival(ch <-chan lockResult) {
+	go func() {
+		if r := <-ch; r.f != nil {
+			_ = r.f.Close()
+		}
+	}()
+}
+
 // Run governs the pool once it holds the governor role, until ctx ends.
 func (g *Governor) Run(ctx context.Context) {
-	role := make(chan turnstileResult, 1)
-	go func() {
-		f, err := g.Pool.Exclusive("governor")
-		role <- turnstileResult{f, err}
-	}()
-	var held turnstileResult
+	role := awaitLock(func() (*os.File, error) { return g.Pool.Exclusive("governor") })
+	var held lockResult
 	select {
 	case <-ctx.Done():
 		// The role arrives, if ever, after this run stopped asking.
-		go func() {
-			if r := <-role; r.f != nil {
-				_ = r.f.Close()
-			}
-		}()
+		dropOnArrival(role)
 		return
 	case held = <-role:
 	}
@@ -363,12 +378,7 @@ func (g *Governor) closeGate(s *governing) {
 		s.gate = f
 		return
 	}
-	pending := make(chan turnstileResult, 1)
-	s.pending = pending
-	go func() {
-		f, err := g.Pool.Turnstile()
-		pending <- turnstileResult{f, err}
-	}()
+	s.pending = awaitLock(g.Pool.Turnstile)
 }
 
 // openGate lets the turnstile go.
@@ -384,7 +394,7 @@ func (g *Governor) openGate(s *governing) {
 
 // arrived takes the turnstile the governor waited for: it keeps it while the
 // host is still at the cap, and lets it go at once otherwise.
-func (g *Governor) arrived(s *governing, r turnstileResult) {
+func (g *Governor) arrived(s *governing, r lockResult) {
 	if r.err != nil {
 		g.failed(s, "gate", "cannot hold the seats' turnstile", r.err)
 		return
@@ -438,12 +448,8 @@ func (g *Governor) recovered(s *governing, what string) {
 func (g *Governor) release(s *governing) {
 	g.openGate(s)
 	g.withhold(s, 0)
-	if pending := s.pending; pending != nil {
-		go func() {
-			if r := <-pending; r.f != nil {
-				_ = r.f.Close()
-			}
-		}()
+	if s.pending != nil {
+		dropOnArrival(s.pending)
 	}
 }
 
