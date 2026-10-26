@@ -1574,7 +1574,7 @@ func TestPlaceRefusesASubsectionItCannotPick(t *testing.T) {
 		{name: "a blank subsection", args: []string{"place", "here", "-subsection", "  "}, wantErr: "-subsection NAME or -new-subsection NAME"},
 		{name: "both destinations", args: []string{"place", "here", "-subsection", "later", "-new-subsection", "auth"},
 			wantErr: "-subsection NAME or -new-subsection NAME"},
-		{name: "no workspace", args: []string{"place", "-subsection", "later"}, wantErr: "names its workspaces"},
+		{name: "no workspace", args: []string{"place", "-subsection", "later"}, wantErr: "names its workspace"},
 		{name: "an unknown workspace", args: []string{"place", "here", "nobody", "-subsection", "later"}, wantErr: `no workspace named "nobody"`},
 		{name: "an unknown subsection", args: []string{"place", "here", "-subsection", "sooner"},
 			wantErr: `no subsection named "sooner"; its subsections are ["later", "twin", "twin"]`},

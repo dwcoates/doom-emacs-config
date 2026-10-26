@@ -1122,7 +1122,7 @@ func workspacePlace(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	name := fs.String("subsection", "", "the existing subsection's name, as `subsections` prints it")
 	newName := fs.String("new-subsection", "", "the name of a subsection to create for the workspaces")
-	positionals, ok := c.targetArgs(fs, stateDir, args, "workspaces")
+	first, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
@@ -1130,8 +1130,8 @@ func workspacePlace(c *cliCall, args []string) int {
 	if existing == created {
 		return c.usageFailed("the command names one destination, with -subsection NAME or -new-subsection NAME")
 	}
-	refs := make([]*workspacev1.WorkspaceRef, 0, len(positionals))
-	for _, positional := range positionals {
+	refs := []*workspacev1.WorkspaceRef{first}
+	for _, positional := range rest {
 		ref, ok := c.named(positional)
 		if !ok {
 			return exitFailure
