@@ -168,6 +168,20 @@ func TestFleetReadHistoryWithNoShimHasNoSource(t *testing.T) {
 	}
 }
 
+func TestFleetReadHistoryWithNoShimAsksForAParkedSessionBack(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	_, _ = f.fleet.ReadHistory(context.Background(), ws.ID, nil, nil)
+
+	// Assert.
+	if len(f.restoreAsked) != 1 || f.restoreAsked[0] != ws.ID {
+		t.Fatalf("restores asked = %v, want %v", f.restoreAsked, ws.ID)
+	}
+}
+
 func TestFleetReadHistoryReadsAColdGatedWorkspacesShim(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)

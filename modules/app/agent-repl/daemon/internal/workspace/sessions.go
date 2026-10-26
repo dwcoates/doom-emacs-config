@@ -115,6 +115,10 @@ type ShimBundle interface {
 
 // FleetDeps are what the session fleet needs to bring a session up.
 type FleetDeps struct {
+	// RestoreParked asks for a session the keep-alive cycle parked to be
+	// brought back (cachelapse.Keeper.RestoreParked): a reader asked for
+	// history that only a shim serves. Nil wires no keeper.
+	RestoreParked func(ws ids.WorkspaceID)
 	// StartSlots caps the vendor starts in flight. It is the SAME pool the
 	// bounce registry takes a shim restart's slot from, so a restart's resume
 	// is answered from the slot its restart holds. Nil gives the fleet a pool

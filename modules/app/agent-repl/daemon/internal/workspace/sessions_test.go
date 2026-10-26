@@ -589,6 +589,8 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
+	// restoreAsked are the parked sessions a history read asked back.
+	restoreAsked []ids.WorkspaceID
 	// restarts records every restart observation the fleet makes.
 	restarts restarttimingtest.Recorder
 	// chatPrompt and chatPromptErr answer the fleet's ChatSystemPrompt.
@@ -776,7 +778,8 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 	f.bundle = &fakeBundle{build: "installed-build"}
 
 	fleet, err := NewFleet(FleetDeps{
-		DB: f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
+		RestoreParked: func(ws ids.WorkspaceID) { f.restoreAsked = append(f.restoreAsked, ws) },
+		DB:            f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
 		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings, window: &f.topbarWindow}, Log: f.log,
 		Sinks: sessionwatcher.Sinks{
 			Lifecycle: &quietLifecycle{},

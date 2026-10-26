@@ -1357,6 +1357,37 @@ func TestABootWakesAHibernatedWorkspace(t *testing.T) {
 	}
 }
 
+func TestABootLeavesACycleParkedWorkspaceParked(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.cycleParked(t, ws)
+
+	// Act
+	_, _ = h.runAndBringUp(t)
+
+	// Assert
+	if len(h.started) != 0 {
+		t.Fatalf("started = %v, want the keep-alive cycle's parked session left parked", h.started)
+	}
+}
+
+func TestABootStillStartsTheOthersBesideACycleParkedOne(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	parked := h.register(t, t.TempDir(), sessionlock.StateFree)
+	h.cycleParked(t, parked)
+	other := h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act
+	_, _ = h.runAndBringUp(t)
+
+	// Assert
+	if len(h.started) != 1 || h.started[0] != other.ID {
+		t.Fatalf("started = %v, want only %v", h.started, other.ID)
+	}
+}
+
 func TestOneFailedBringUpDoesNotStopTheNext(t *testing.T) {
 	// Arrange: two client-less workspaces, the FIRST of which will not start.
 	h := newHarness(t)

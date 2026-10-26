@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -588,4 +589,56 @@ func TestTheGraphRegistersMergeTestLogsForRetention(t *testing.T) {
 	if registered != 1 {
 		t.Fatalf("the merge test logs directory is registered for retention %d times, want once", registered)
 	}
+}
+
+// sessionReader is a session record read answering SESSION, FOUND and ERR.
+type sessionReader struct {
+	session wsm.Session
+	found   bool
+	err     error
+}
+
+func (r sessionReader) Session(context.Context, wsm.WorkspaceID) (wsm.Session, bool, error) {
+	return r.session, r.found, r.err
+}
+
+func TestCycleParked(t *testing.T) {
+	tests := []struct {
+		name   string
+		reader sessionReader
+		want   bool
+	}{
+		{name: "a session the keep-alive cycle parked", reader: sessionReader{session: wsm.Session{Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle}}, found: true}, want: true},
+		{name: "a hibernated session", reader: sessionReader{session: wsm.Session{Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalHibernated}}, found: true}, want: false},
+		{name: "a live session", reader: sessionReader{found: true}, want: false},
+		{name: "no session", reader: sessionReader{}, want: false},
+		{name: "a record that cannot be read", reader: sessionReader{err: errors.New("database is locked")}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := cycleParked(tt.reader, dlog.NewTestLogger(), "ws-1")
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("cycleParked = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCycleParkedRecordsAnUnreadableRecordAtError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+
+	// Act
+	cycleParked(sessionReader{err: errors.New("database is locked")}, log, "ws-1")
+
+	// Assert
+	for _, r := range log.Records() {
+		if r.Level == dlog.LevelError {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the unreadable record at ERROR", log.Records())
 }

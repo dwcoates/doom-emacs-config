@@ -3,7 +3,6 @@ package cachelapse
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -16,7 +15,6 @@ import (
 	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/shimclient"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -39,6 +37,19 @@ type fakeDB struct {
 	// queuesErr fails the queues' read.
 	queued    []ids.WorkspaceID
 	queuesErr error
+	// sessions are the session records by workspace; sessionErr fails the read.
+	sessions   map[ids.WorkspaceID]wsm.Session
+	sessionErr error
+}
+
+func (f *fakeDB) Session(_ context.Context, id wsm.WorkspaceID) (wsm.Session, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sessionErr != nil {
+		return wsm.Session{}, false, f.sessionErr
+	}
+	s, ok := f.sessions[id]
+	return s, ok, nil
 }
 
 func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) { return nil, nil }
@@ -105,38 +116,24 @@ func (f *fakeDB) SetCacheLapse(_ context.Context, id wsm.WorkspaceID, lapse wsm.
 }
 
 type fakeShim struct {
-	mu      sync.Mutex
-	cadence []string
-	err     error
-	set     chan string
-
-	// answer and beatErr are what Beat answers; beats counts its calls.
+	mu sync.Mutex
+	// answer and beatErr are what Beat answers; beats counts its calls, and
+	// beaten, when set, is told of each one.
 	answer  *shimv1.SendKeepaliveSuccess
 	beatErr error
 	beats   int
-}
-
-func (f *fakeShim) Hold(context.Context) error { return f.note("hold") }
-func (f *fakeShim) Run(context.Context) error  { return f.note("run") }
-func (f *fakeShim) LastRound(context.Context) error {
-	return f.note("last_round")
+	beaten  chan struct{}
 }
 
 func (f *fakeShim) Beat(context.Context) (*shimv1.SendKeepaliveSuccess, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.beats++
-	return f.answer, f.beatErr
-}
-
-func (f *fakeShim) note(cadence string) error {
-	f.mu.Lock()
-	f.cadence = append(f.cadence, cadence)
+	answer, err, beaten := f.answer, f.beatErr, f.beaten
 	f.mu.Unlock()
-	if f.set != nil {
-		f.set <- cadence
+	if beaten != nil {
+		beaten <- struct{}{}
 	}
-	return f.err
+	return answer, err
 }
 
 type fakeStandDowns struct {
@@ -159,6 +156,20 @@ type harness struct {
 	publishes  int
 	clock      *clocktest.Scripted
 	log        *dlog.TestSurfaces
+	// cycled are the keep-alive cycle stand-downs asked for.
+	cycled []cycleCall
+	// restoring are the restores asked for, each with the done that ends it.
+	restoring []restoreCall
+}
+
+type cycleCall struct {
+	ws   ids.WorkspaceID
+	beat time.Time
+}
+
+type restoreCall struct {
+	ws   ids.WorkspaceID
+	done func(error)
 }
 
 func hidden() wsm.Workspace {
@@ -186,10 +197,18 @@ func selectedHidden() wsm.Workspace {
 	return rec
 }
 
+// liveSession is a live session engaged ten minutes before now.
+func liveSession(ws ids.WorkspaceID) wsm.Session {
+	return wsm.Session{Workspace: ws, StartedAt: now.Add(-2 * time.Hour), LastEngagementAt: now.Add(-10 * time.Minute)}
+}
+
 func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 	t.Helper()
 	h := &harness{
-		db:         &fakeDB{records: map[ids.WorkspaceID]wsm.Workspace{rec.ID: rec}},
+		db: &fakeDB{
+			records:  map[ids.WorkspaceID]wsm.Workspace{rec.ID: rec},
+			sessions: map[ids.WorkspaceID]wsm.Session{rec.ID: liveSession(rec.ID)},
+		},
 		shim:       &fakeShim{},
 		serving:    true,
 		standDowns: &fakeStandDowns{stood: make(chan ids.WorkspaceID, 4)},
@@ -213,8 +232,15 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		},
 		StandDowns:      h.standDowns,
 		PublishRegistry: func(context.Context) error { h.publishes++; return nil },
-		Clock:           h.clock,
-		Log:             h.log,
+		IdleCutoff:      6 * time.Hour,
+		CycleDown: func(ws ids.WorkspaceID, beat time.Time) {
+			h.cycled = append(h.cycled, cycleCall{ws: ws, beat: beat})
+		},
+		Restore: func(ws ids.WorkspaceID, done func(error)) {
+			h.restoring = append(h.restoring, restoreCall{ws: ws, done: done})
+		},
+		Clock: h.clock,
+		Log:   h.log,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -255,6 +281,8 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			ColdGate:        func(ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return nil, false },
 			StandDowns:      &fakeStandDowns{},
 			PublishRegistry: func(context.Context) error { return nil },
+			CycleDown:       func(ids.WorkspaceID, time.Time) {},
+			Restore:         func(ids.WorkspaceID, func(error)) {},
 			Clock:           clocktest.New(now),
 			Log:             dlog.NewTestSurfaces(),
 		}
@@ -268,6 +296,8 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "standing cold gates", strip: func(d *Deps) { d.ColdGate = nil }},
 		{name: "stand-downs", strip: func(d *Deps) { d.StandDowns = nil }},
 		{name: "republish", strip: func(d *Deps) { d.PublishRegistry = nil }},
+		{name: "keep-alive cycle's stand-down", strip: func(d *Deps) { d.CycleDown = nil }},
+		{name: "parked sessions' restore", strip: func(d *Deps) { d.Restore = nil }},
 		{name: "clock", strip: func(d *Deps) { d.Clock = nil }},
 		{name: "log", strip: func(d *Deps) { d.Log = nil }},
 	}
@@ -332,7 +362,7 @@ func TestRecordDropsAProjectionForAVisibleWorkspace(t *testing.T) {
 	if _, armed := h.keeper.deadlines[theWorkspace]; armed || h.publishes != 0 {
 		t.Fatalf("armed %v with %d publishes, want no deadline and no publish", armed, h.publishes)
 	}
-	if !h.found(dlog.RecordQuery{Level: "info", Operation: opProjection, Message: "a cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped"}) {
+	if !h.found(dlog.RecordQuery{Level: "debug", Operation: opProjection, Message: "a cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped"}) {
 		t.Fatalf("no record of the dropped projection: %v", h.log.Records())
 	}
 }
@@ -386,37 +416,48 @@ func TestRecordReadsAnUnnamedVerdictAsUngated(t *testing.T) {
 	}
 }
 
-func TestReconcileSetsTheCadenceToMatchTheVisibility(t *testing.T) {
+// beatable gives REC a turn that ended TURN_AGO before now, so its cache has
+// a clock to keep.
+func beatable(rec wsm.Workspace, turnAgo time.Duration) wsm.Workspace {
+	ended := now.Add(-turnAgo)
+	rec.LastTurnEndedAt = &ended
+	return rec
+}
+
+func TestReconcileArmsTheBeatToMatchTheVisibility(t *testing.T) {
 	merged := hidden()
 	mergedAt := now
 	merged.MergedAt = &mergedAt
 	closedHidden := hidden()
 	closedHidden.Closed = true
-	reopened := visible()
+	closedOwed := closed()
+	closedOwed.Closure = &wsm.Closure{At: now.Add(-time.Minute), By: wsm.CloseByUser}
+	closedSpent := closed()
+	closedSpent.Closure = &wsm.Closure{At: now.Add(-time.Hour), By: wsm.CloseByUser}
 	tests := []struct {
-		name string
-		rec  wsm.Workspace
-		want string
+		name  string
+		rec   wsm.Workspace
+		armed bool
 	}{
-		{name: "a hidden workspace holds", rec: hidden(), want: "hold"},
-		{name: "a visible workspace runs", rec: visible(), want: "run"},
-		{name: "a reopened merged workspace the user hid holds", rec: merged, want: "hold"},
-		{name: "a closed workspace gets its last round", rec: closed(), want: "last_round"},
-		{name: "a closed hidden workspace holds", rec: closedHidden, want: "hold"},
-		{name: "a reopened workspace runs", rec: reopened, want: "run"},
-		{name: "a hidden workspace the user is looking at runs", rec: selectedHidden(), want: "run"},
+		{name: "a hidden workspace beats no more", rec: hidden(), armed: false},
+		{name: "a visible workspace beats", rec: visible(), armed: true},
+		{name: "a reopened merged workspace the user hid beats no more", rec: merged, armed: false},
+		{name: "a closed workspace owed its last beat beats once more", rec: closedOwed, armed: true},
+		{name: "a closed workspace whose last beat is spent beats no more", rec: closedSpent, armed: false},
+		{name: "a closed hidden workspace beats no more", rec: closedHidden, armed: false},
+		{name: "a hidden workspace the user is looking at beats", rec: selectedHidden(), armed: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			h := newHarness(t, tt.rec)
+			h := newHarness(t, beatable(tt.rec, 10*time.Minute))
 
 			// Act
 			h.keeper.reconcile(context.Background(), theWorkspace, "test")
 
 			// Assert
-			if len(h.shim.cadence) != 1 || h.shim.cadence[0] != tt.want {
-				t.Fatalf("cadence = %v, want [%s]", h.shim.cadence, tt.want)
+			if _, armed := h.keeper.beats[theWorkspace]; armed != tt.armed {
+				t.Fatalf("beat armed = %v, want %v", armed, tt.armed)
 			}
 		})
 	}
@@ -450,46 +491,17 @@ func TestReconcileOfAVisibleWorkspaceDisarmsItsLapse(t *testing.T) {
 	}
 }
 
-func TestReconcileWithNoServedSessionSetsNothing(t *testing.T) {
+func TestReconcileWithNoServedSessionRecordsNoError(t *testing.T) {
 	// Arrange
-	h := newHarness(t, hidden())
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
 	h.serving = false
 
 	// Act
 	h.keeper.reconcile(context.Background(), theWorkspace, "test")
 
 	// Assert
-	if len(h.shim.cadence) != 0 || h.found(dlog.RecordQuery{Level: "error"}) {
-		t.Fatalf("cadence %v with records %v, want nothing set and no error", h.shim.cadence, h.log.Records())
-	}
-}
-
-func TestReconcileAnswersAShimFailure(t *testing.T) {
-	tests := []struct {
-		name  string
-		err   error
-		level string
-	}{
-		{name: "a shim with no session yet", err: ErrNoSession, level: "debug"},
-		{name: "a shim that died under the call", err: fmt.Errorf("%w: unavailable: unexpected EOF", shimclient.ErrShimDied), level: "info"},
-		{name: "a shim this daemon was standing down", err: fmt.Errorf("%w: unavailable: use of closed network connection", shimclient.ErrStandDownOrdered), level: "info"},
-		{name: "a shim that cannot be reached", err: errors.New("connection refused"), level: "error"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t, hidden())
-			h.shim.err = tt.err
-
-			// Act
-			h.keeper.reconcile(context.Background(), theWorkspace, "test")
-
-			// Assert
-			rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: tt.level, Operation: opCadence})
-			if !ok || rec.Context["cadence"] != "hold" {
-				t.Fatalf("%s record = %+v, %v; want one naming the cadence", tt.level, rec, ok)
-			}
-		})
+	if h.found(dlog.RecordQuery{Level: "error"}) {
+		t.Fatalf("records %v, want no error", h.log.Records())
 	}
 }
 
@@ -503,8 +515,8 @@ func TestReconcileLogsAVisibilityThatCannotBeRead(t *testing.T) {
 
 	// Assert
 	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opCadence})
-	if !ok || rec.Context["cause"] != "database is locked" || len(h.shim.cadence) != 0 {
-		t.Fatalf("error record = %+v, %v with cadence %v; want the cause and nothing set", rec, ok, h.shim.cadence)
+	if !ok || rec.Context["cause"] != "database is locked" {
+		t.Fatalf("error record = %+v, %v; want the cause", rec, ok)
 	}
 }
 
@@ -633,38 +645,49 @@ func TestRunTakesARecordedLapseWhenItComes(t *testing.T) {
 	}
 }
 
-func TestRunAppliesAQueuedEdge(t *testing.T) {
-	// Arrange
+// sent is a shim's answer that the keep-alive went out.
+func sent() *shimv1.SendKeepaliveSuccess {
+	return &shimv1.SendKeepaliveSuccess{Outcome: &shimv1.SendKeepaliveSuccess_Sent{Sent: &shimv1.SendKeepaliveSent{}}}
+}
+
+func TestRunSendsAKeepaliveAQueuedEdgeFindsDue(t *testing.T) {
+	// Arrange: shown again with its beat already due.
 	h := newHarness(t, hidden())
-	h.shim.set = make(chan string, 1)
+	h.shim.answer = sent()
+	h.shim.beaten = make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = h.keeper.Run(ctx) }()
+	h.db.mu.Lock()
+	h.db.records[theWorkspace] = beatable(visible(), KeepaliveInterval+time.Minute)
+	h.db.mu.Unlock()
 
 	// Act
 	h.keeper.VisibilityChanged(theWorkspace)
 
 	// Assert
-	if got := <-h.shim.set; got != "hold" {
-		t.Fatalf("cadence = %q, want hold", got)
-	}
+	<-h.shim.beaten
 }
 
-func TestRunAppliesAQueuedClosure(t *testing.T) {
+func TestRunSendsAClosedWorkspacesLastKeepalive(t *testing.T) {
 	// Arrange
-	h := newHarness(t, closed())
-	h.shim.set = make(chan string, 1)
+	rec := beatable(closed(), KeepaliveInterval+time.Minute)
+	rec.Closure = &wsm.Closure{At: now, By: wsm.CloseByUser}
+	h := newHarness(t, hidden())
+	h.shim.answer = sent()
+	h.shim.beaten = make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = h.keeper.Run(ctx) }()
+	h.db.mu.Lock()
+	h.db.records[theWorkspace] = rec
+	h.db.mu.Unlock()
 
 	// Act
 	h.keeper.ClosureChanged(theWorkspace)
 
 	// Assert
-	if got := <-h.shim.set; got != "last_round" {
-		t.Fatalf("cadence = %q, want last_round", got)
-	}
+	<-h.shim.beaten
 }
 
 func TestRunRefusesAListThatFails(t *testing.T) {
@@ -700,9 +723,11 @@ func TestAnOperationTheDaemonsExitCancelsIsRecordedAsLeaving(t *testing.T) {
 			h.db.readErr = context.Canceled
 			h.keeper.reconcile(ctx, theWorkspace, "test")
 		}},
-		{name: "setting a cadence", act: func(ctx context.Context, h *harness) {
-			h.shim.err = context.Canceled
-			h.keeper.reconcile(ctx, theWorkspace, "test")
+		{name: "sending a keep-alive", act: func(ctx context.Context, h *harness) {
+			h.db.records[theWorkspace] = beatable(visible(), KeepaliveInterval+time.Minute)
+			h.shim.beatErr = context.Canceled
+			h.keeper.beats[theWorkspace] = now
+			h.keeper.beatsDue(ctx)
 		}},
 		{name: "reading a lapsed workspace", act: func(ctx context.Context, h *harness) {
 			h.db.readErr = context.Canceled
@@ -936,12 +961,9 @@ func TestRunStandsDownAHiddenWorkspaceWhoseSessionParkedAtItsGate(t *testing.T) 
 	done := make(chan error, 1)
 	go func() { done <- h.keeper.Run(ctx) }()
 
-	// Act
+	// Act: the gate's lapse is already due, so it is taken at once, with no
+	// timer asked of the clock.
 	h.keeper.ColdGateRaised(theWorkspace)
-	if waited := <-h.clock.Asked; waited != 0 {
-		t.Fatalf("the keeper waited %v, want the gate's lapse due at once", waited)
-	}
-	h.clock.Fire <- now
 
 	// Assert
 	if got := <-h.standDowns.stood; got != theWorkspace {
@@ -977,28 +999,29 @@ func TestReconcileOfAMergeWorkspace(t *testing.T) {
 	selected := mergeWorkspace()
 	selected.Current = true
 	tests := []struct {
-		name        string
-		rec         wsm.Workspace
-		queued      []ids.WorkspaceID
-		wantStood   bool
-		wantCadence []string
+		name      string
+		rec       wsm.Workspace
+		queued    []ids.WorkspaceID
+		wantStood bool
+		wantArmed bool
 	}{
 		{name: "whose merge left every queue is stood down", rec: mergeWorkspace(), wantStood: true},
-		{name: "whose merge is queued keeps running", rec: mergeWorkspace(), queued: []ids.WorkspaceID{theWorkspace}, wantCadence: []string{"run"}},
-		{name: "the user is looking at keeps running", rec: selected, wantCadence: []string{"run"}},
+		{name: "whose merge is queued keeps beating", rec: mergeWorkspace(), queued: []ids.WorkspaceID{theWorkspace}, wantArmed: true},
+		{name: "the user is looking at keeps beating", rec: selected, wantArmed: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			h := newHarness(t, tt.rec)
+			h := newHarness(t, beatable(tt.rec, 10*time.Minute))
 			h.db.queued = tt.queued
 
 			// Act
 			h.keeper.reconcile(context.Background(), theWorkspace, "test")
 
 			// Assert
-			if got := h.stoodDown(); got != tt.wantStood || !slices.Equal(h.shim.cadence, tt.wantCadence) {
-				t.Fatalf("stood down %v with cadence %v, want %v with %v", got, h.shim.cadence, tt.wantStood, tt.wantCadence)
+			_, armed := h.keeper.beats[theWorkspace]
+			if got := h.stoodDown(); got != tt.wantStood || armed != tt.wantArmed {
+				t.Fatalf("stood down %v with a beat armed %v, want %v with %v", got, armed, tt.wantStood, tt.wantArmed)
 			}
 		})
 	}
@@ -1013,8 +1036,9 @@ func TestReconcileOfAMergeWorkspaceWhoseQueuesCannotBeReadIsAnError(t *testing.T
 	h.keeper.reconcile(context.Background(), theWorkspace, "test")
 
 	// Assert
-	if h.stoodDown() || len(h.shim.cadence) != 0 || !h.found(dlog.RecordQuery{Level: "error", Operation: opMergeEnded}) {
-		t.Fatalf("cadence %v with records %v, want nothing done and the read failure at error", h.shim.cadence, h.log.Records())
+	_, armed := h.keeper.beats[theWorkspace]
+	if h.stoodDown() || armed || !h.found(dlog.RecordQuery{Level: "error", Operation: opMergeEnded}) {
+		t.Fatalf("beat armed %v with records %v, want nothing done and the read failure at error", armed, h.log.Records())
 	}
 }
 

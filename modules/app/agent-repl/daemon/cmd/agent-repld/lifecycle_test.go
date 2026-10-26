@@ -811,9 +811,24 @@ func TestSessionUpBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
 }
 
 // fakeCaches records every session-up the sink told the cache keeper.
-type fakeCaches struct{ up []ids.WorkspaceID }
+type fakeCaches struct{ up, free []ids.WorkspaceID }
 
-func (c *fakeCaches) SessionUp(ws ids.WorkspaceID) { c.up = append(c.up, ws) }
+func (c *fakeCaches) SessionUp(ws ids.WorkspaceID)   { c.up = append(c.up, ws) }
+func (c *fakeCaches) SessionFree(ws ids.WorkspaceID) { c.free = append(c.free, ws) }
+
+func TestOnFreeTellsTheCacheKeeper(t *testing.T) {
+	// Arrange
+	caches := &fakeCaches{}
+	sink := &lifecycleSink{queue: &fakeFreeQueue{}, standDowns: &fakeRetrier{}, caches: caches, log: dlog.NewTestLogger()}
+
+	// Act
+	sink.OnFree("ws-1")
+
+	// Assert
+	if len(caches.free) != 1 || caches.free[0] != "ws-1" {
+		t.Fatalf("cache keeper frees = %v, want ws-1", caches.free)
+	}
+}
 
 func TestSessionUpTellsTheCacheKeeper(t *testing.T) {
 	// Arrange

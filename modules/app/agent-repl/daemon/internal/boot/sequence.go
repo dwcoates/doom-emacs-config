@@ -179,6 +179,15 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 			})
 			return Report{}, fmt.Errorf("boot: decide the bring-up: %w", err)
 		}
+		// A SESSION THE KEEP-ALIVE CYCLE PARKED STAYS PARKED (owner ruling,
+		// 2026-10-26): it is drawn live and idle, a look or a prompt revives
+		// it, and the cache keeper restores it a minute before its next beat,
+		// a few at a time. Waking it here would bring every parked shim up at
+		// once on every daemon start.
+		visible, err = s.leaveCycleParked(ctx, log, visible)
+		if err != nil {
+			return Report{}, err
+		}
 		report.PendingBringUp, report.WithheldBringUp = visible, withheld
 		if len(withheld) > 0 {
 			log.Info("daemon.boot.run", "hidden or collapsed workspaces are not brought up; each starts when shown", dlog.Context{
@@ -1074,4 +1083,32 @@ func (s *sequence) shimAlive(pid int) bool {
 		return s.deps.ShimAlive(pid)
 	}
 	return startingshim.Alive(pid)
+}
+
+// leaveCycleParked drops from PENDING every workspace whose session the
+// keep-alive cycle parked. A session record that cannot be read stops the
+// boot: reading it as live would wake a parked shim, and reading it as parked
+// would leave a live one down.
+func (s *sequence) leaveCycleParked(ctx context.Context, log dlog.Logger, pending []wsm.Workspace) ([]wsm.Workspace, error) {
+	sessions, err := wsm.SessionsByWorkspace(ctx, s.deps.DB)
+	if err != nil {
+		log.Error("daemon.boot.run", "could not read the sessions to leave the keep-alive cycle's parked ones parked; the boot stops", dlog.Context{
+			"error": err.Error(),
+		})
+		return nil, fmt.Errorf("boot: read the sessions: %w", err)
+	}
+	var run, parked []wsm.Workspace
+	for _, ws := range pending {
+		if session, found := sessions[ws.ID]; found && session.KeepaliveCycled() {
+			parked = append(parked, ws)
+			continue
+		}
+		run = append(run, ws)
+	}
+	if len(parked) > 0 {
+		log.Info("daemon.boot.run", "sessions the keep-alive cycle parked are left parked; each is restored before its next keep-alive", dlog.Context{
+			"workspaces": bringup.IDs(parked),
+		})
+	}
+	return run, nil
 }

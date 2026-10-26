@@ -40,6 +40,7 @@ type historyReader interface {
 func (f *Fleet) ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
 	client, ok := f.historyClient(ws)
 	if !ok {
+		f.restoreParked(ws)
 		return nil, feed.ErrNoHistorySource
 	}
 	page, err := readHistory(ctx, client, target, after)
@@ -79,6 +80,7 @@ func (f *Fleet) ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *con
 func (f *Fleet) ReadInherited(ctx context.Context, ws ids.WorkspaceID, book *conversationv1.AgentId, after *conversationv1.HistoryPointer, throughMs int64) (*conversationv1.HistoryPage, error) {
 	client, ok := f.historyClient(ws)
 	if !ok {
+		f.restoreParked(ws)
 		return nil, feed.ErrNoHistorySource
 	}
 	req := &shimv1.ReadHistoryRequest{Target: book}
@@ -192,5 +194,15 @@ func readHistoryArm(failure *shimv1.ReadHistoryFailure) string {
 		return "store_unavailable"
 	default:
 		return ArmShimUnspecified
+	}
+}
+
+// restoreParked asks for WS's session back when the keep-alive cycle parked it:
+// a reader wants history only a shim serves. The keeper judges whether it is
+// parked and brings it back a few at a time; the reader waits for the session
+// exactly as for a workspace with no shim.
+func (f *Fleet) restoreParked(ws ids.WorkspaceID) {
+	if f.deps.RestoreParked != nil {
+		f.deps.RestoreParked(ws)
 	}
 }

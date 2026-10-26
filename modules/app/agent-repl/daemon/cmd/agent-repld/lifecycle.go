@@ -48,9 +48,11 @@ type lifecycleSink struct {
 }
 
 // sessionUpNotifiee is the slice of the cache keeper the sink tells a session
-// coming up.
+// coming up, and a session falling free (its next keep-alive is timed from the
+// clock the turn moved).
 type sessionUpNotifiee interface {
 	SessionUp(ws ids.WorkspaceID)
+	SessionFree(ws ids.WorkspaceID)
 }
 
 // standDownsFunc adapts a function to the cache keeper's withheld
@@ -359,6 +361,13 @@ func (s *lifecycleSink) replaceShim(ws ids.WorkspaceID, reason rollout.RelaunchR
 func (s *lifecycleSink) OnFree(ws ids.WorkspaceID) {
 	s.queue.OnFree(ws)
 	s.retryWithheld(ws, "free")
+	if s.caches == nil {
+		s.log.Error("daemon.cmd.lifecycle", "a session fell free before the cache keeper was wired; its next keep-alive was not timed", dlog.Context{
+			"workspace": string(ws), "invariant_violation": "the cache keeper is bound before any session starts",
+		})
+		return
+	}
+	s.caches.SessionFree(ws)
 }
 
 // OnDeparted is the departure edge: a dead shim's registered bounce is decided

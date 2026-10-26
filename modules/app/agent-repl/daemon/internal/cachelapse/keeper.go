@@ -29,19 +29,29 @@
 // and owns the one deadline timer, so no two edges for one workspace race and
 // no deadline is armed twice.
 //
-// THE CADENCE IS RECONCILED, NEVER TOLD ONCE. On a hide, a show, a close, a
-// reopen, a selection moving onto or off the workspace, and every session
-// coming up, the loop reads the workspace's row afresh and sets the shim's
-// cadence to match (cadenceFor): held while hidden and not selected
-// (wsm.Workspace.KeepaliveHeld), a last round while closed, running
-// otherwise. A hide
-// that races a bring-up is caught either way, because the hide writes the row
-// before it queues the edge and the bring-up installs its client before
-// SessionUp queues its own, so whichever edge comes second sees both.
+// THE BEAT IS RECONCILED, NEVER TOLD ONCE. On a hide, a show, a close, a
+// reopen, a selection moving onto or off the workspace, every session coming
+// up and every session falling free, the loop reads the workspace's row afresh
+// and arms its next beat to match (beatDue): none while hidden and not
+// selected (wsm.Workspace.KeepaliveHeld), one last one while closed, every
+// cycle otherwise. A hide that races a bring-up is caught either way, because
+// the hide writes the row before it queues the edge and the bring-up installs
+// its client before SessionUp queues its own, so whichever edge comes second
+// sees both.
 //
 // THE DEADLINE OUTLIVES THE DAEMON AND THE SHIM. The projection lives on the
 // row, and Run re-arms every recorded one when it starts, so a lapse that
 // passes while the daemon is down is taken at once on the next start.
+//
+// THE DAEMON DRIVES EVERY KEEP-ALIVE (owner ruling, 2026-10-26; schedule.go).
+// A shim runs no keep-alive timer of its own: the Keeper asks it for each beat
+// (shim.v1.SendKeepalive), timed from the cache clock every workspace's turns
+// already keep durably (wsm.Workspace.LastTurnEndedAt, which keep-alive turns
+// move too). Once a beat has gone out a session nobody is using is stood down
+// (drain.Controller.CycleDown) and restored a minute before its next beat, at
+// most MaxRestores at once, so an idle workspace's ~350MB is free between
+// beats. A hidden workspace beats no more and its cache lapses as above; a
+// closed one gets the one beat it was owed, then lapses.
 package cachelapse
 
 import (
@@ -65,7 +75,9 @@ import (
 // The operations this package records under.
 const (
 	opProjection = "daemon.cachelapse.projection"
-	opCadence    = "daemon.cachelapse.cadence"
+	opCadence    = "daemon.cachelapse.reconcile"
+	opDrive      = "daemon.cachelapse.drive"
+	opRestore    = "daemon.cachelapse.restore"
 	opLapse      = "daemon.cachelapse.lapse"
 	opMergeEnded = "daemon.cachelapse.merge_ended"
 )
@@ -78,25 +90,21 @@ type DB interface {
 	ListWorkspaces(ctx context.Context) ([]wsm.Workspace, error)
 	Workspace(ctx context.Context, id wsm.WorkspaceID) (wsm.Workspace, error)
 	SetCacheLapse(ctx context.Context, id wsm.WorkspaceID, lapse wsm.CacheLapse) (bool, error)
+	// Session reads a workspace's session record: its engagement clock and
+	// its park.
+	Session(ctx context.Context, id wsm.WorkspaceID) (wsm.Session, bool, error)
 }
 
-// Keepalives is one serving shim's keep-alive cadence.
+// Keepalives is one serving shim's keep-alive.
 type Keepalives interface {
-	// Hold sends no keep-alive from now on; the shim states the lapse.
-	Hold(ctx context.Context) error
-	// Run keeps the cache warm again.
-	Run(ctx context.Context) error
-	// LastRound sends the one keep-alive already scheduled, then holds; the
-	// shim states the lapse once the round is spent.
-	LastRound(ctx context.Context) error
-	// Beat sends one keep-alive now, leaving the cadence as it is, and
-	// answers the shim's judgment of it. ErrNoSession when the shim holds no
-	// session; a *BeatSubmitFailed when the submission failed.
+	// Beat sends one keep-alive now and answers the shim's judgment of it.
+	// ErrNoSession when the shim holds no session; a *BeatSubmitFailed when
+	// the submission failed.
 	Beat(ctx context.Context) (*shimv1.SendKeepaliveSuccess, error)
 }
 
 // ErrNoSession is a shim's answer that it holds no session, so there is no
-// cadence to set. Not a fault: the session is not up yet, or already gone.
+// cache to keep. Not a fault: the session is not up yet, or already gone.
 var ErrNoSession = errors.New("cachelapse: the shim holds no session")
 
 // StandDowns stands a withheld workspace's session down as the idle sweep
@@ -120,15 +128,46 @@ type Deps struct {
 	// PublishRegistry republishes the roster's durable half, which is where
 	// a recorded projection and a lapse reach the hidden section.
 	PublishRegistry func(context.Context) error
-	Clock           clock.Clock
-	Log             dlog.Surfaces
+	// IdleCutoff is the idle sweep's cutoff (drain): no beat is sent for a
+	// workspace whose engagement is older than it by the time the beat comes
+	// due, since the sweep puts that session to sleep. Zero disables the
+	// sweep, and with it this limit.
+	IdleCutoff time.Duration
+	// CycleDown asks for WS's session to be stood down after the keep-alive
+	// asked at BEAT (drain.Controller.CycleDown).
+	CycleDown func(ws ids.WorkspaceID, beat time.Time)
+	// Restore brings a session the keep-alive cycle parked back up, calling
+	// DONE once with how its start ended. It returns at once.
+	Restore func(ws ids.WorkspaceID, done func(error))
+	Clock   clock.Clock
+	Log     dlog.Surfaces
 }
+
+// edgeKind is what one queued event is.
+type edgeKind int
+
+const (
+	// edgeReconcile re-reads the workspace and reconciles it (the default).
+	edgeReconcile edgeKind = iota
+	// edgeLapse records a projection the shim stated.
+	edgeLapse
+	// edgeFree is the session falling free: its cache clock may have moved,
+	// and a beat that waited on its work may now go out.
+	edgeFree
+	// edgeRestored is a parked session's restore ending.
+	edgeRestored
+	// edgeRestoreAsked is a restore asked for out of turn (RestoreParked).
+	edgeRestoreAsked
+)
 
 // edge is one queued event.
 type edge struct {
-	ws ids.WorkspaceID
-	// lapse is a projection the shim stated; nil for a reconcile.
+	ws   ids.WorkspaceID
+	kind edgeKind
+	// lapse is a projection the shim stated (edgeLapse).
 	lapse *conversationv1.SessionCacheLapse
+	// err is how a restore ended (edgeRestored).
+	err error
 	// why names the edge for the records.
 	why string
 }
@@ -145,6 +184,17 @@ type Keeper struct {
 
 	// deadlines is every armed lapse, owned by Run alone.
 	deadlines map[ids.WorkspaceID]time.Time
+	// beats is every armed keep-alive, owned by Run alone (schedule.go).
+	beats map[ids.WorkspaceID]time.Time
+	// restores is every parked session's armed restore, owned by Run alone.
+	restores map[ids.WorkspaceID]time.Time
+	// queued are the restores waiting for a slot, earliest beat first, and
+	// restoring the ones in flight; both owned by Run alone.
+	queued    []queuedRestore
+	restoring map[ids.WorkspaceID]bool
+	// lapsedAt is the cache clock at which the shim answered that the cache
+	// had lapsed: no beat goes out again until a turn moves the clock past it.
+	lapsedAt map[ids.WorkspaceID]time.Time
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -160,18 +210,44 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs the withheld stand-downs")
 	case deps.PublishRegistry == nil:
 		return nil, errors.New("cachelapse: the keeper needs the roster republish")
+	case deps.CycleDown == nil:
+		return nil, errors.New("cachelapse: the keeper needs the keep-alive cycle's stand-down")
+	case deps.Restore == nil:
+		return nil, errors.New("cachelapse: the keeper needs the parked sessions' restore")
 	case deps.Clock == nil:
 		return nil, errors.New("cachelapse: the keeper needs a clock")
 	case deps.Log == nil:
 		return nil, errors.New("cachelapse: the keeper needs log surfaces")
 	}
-	return &Keeper{deps: deps, wake: make(chan struct{}, 1), deadlines: map[ids.WorkspaceID]time.Time{}}, nil
+	return &Keeper{
+		deps: deps, wake: make(chan struct{}, 1),
+		deadlines: map[ids.WorkspaceID]time.Time{},
+		beats:     map[ids.WorkspaceID]time.Time{},
+		restores:  map[ids.WorkspaceID]time.Time{},
+		restoring: map[ids.WorkspaceID]bool{},
+		lapsedAt:  map[ids.WorkspaceID]time.Time{},
+	}, nil
 }
 
 // OnCacheLapse takes a projection a held shim stated
 // (sessionwatcher.CacheLapseSink). It never blocks.
 func (k *Keeper) OnCacheLapse(ws ids.WorkspaceID, lapse *conversationv1.SessionCacheLapse) {
-	k.enqueue(edge{ws: ws, lapse: lapse, why: "the shim stated its projected lapse"})
+	k.enqueue(edge{ws: ws, kind: edgeLapse, lapse: lapse, why: "the shim stated its projected lapse"})
+}
+
+// SessionFree is WS's session falling free (no turn, no live detached work):
+// its next beat is timed afresh from the cache clock its turns moved, and a
+// beat that waited on the work goes out. It never blocks.
+func (k *Keeper) SessionFree(ws ids.WorkspaceID) {
+	k.enqueue(edge{ws: ws, kind: edgeFree, why: "the session fell free"})
+}
+
+// RestoreParked asks for a session the keep-alive cycle parked to be brought
+// back now, through the same restore slots the beats use: a reader needs its
+// history, which only a shim serves. A workspace not parked is no change. It
+// never blocks.
+func (k *Keeper) RestoreParked(ws ids.WorkspaceID) {
+	k.enqueue(edge{ws: ws, kind: edgeRestoreAsked, why: "a reader asked for the parked session's history"})
 }
 
 // VisibilityChanged is a hide or a show of WS, or the selection moving onto
@@ -222,9 +298,21 @@ func (k *Keeper) Run(ctx context.Context) error {
 	}
 	for {
 		next, armed := k.earliest()
+		// A DEADLINE ALREADY DUE IS TAKEN AT ONCE, never through a timer: a
+		// beat a reconcile found overdue goes out now. Each due handler removes
+		// what it took or re-arms it later, so this never spins.
+		if armed && !next.After(k.deps.Clock.Now()) {
+			if ctx.Err() != nil {
+				return nil
+			}
+			k.lapseDue(ctx)
+			k.beatsDue(ctx)
+			k.restoresDue(ctx)
+			continue
+		}
 		var due <-chan time.Time
 		if armed {
-			due = k.deps.Clock.After(max(0, next.Sub(k.deps.Clock.Now())))
+			due = k.deps.Clock.After(next.Sub(k.deps.Clock.Now()))
 		}
 		select {
 		case <-ctx.Done():
@@ -235,6 +323,8 @@ func (k *Keeper) Run(ctx context.Context) error {
 			}
 		case <-due:
 			k.lapseDue(ctx)
+			k.beatsDue(ctx)
+			k.restoresDue(ctx)
 		}
 	}
 }
@@ -256,6 +346,10 @@ func (k *Keeper) restore(ctx context.Context) error {
 		}
 	}
 	log.Info(opLapse, "re-armed the hidden workspaces' recorded cache lapses", dlog.Context{"armed": len(k.deadlines)})
+	for _, ws := range workspaces {
+		k.schedule(ctx, ws.ID, "the daemon started")
+	}
+	log.Info(opDrive, "armed every workspace's next keep-alive", dlog.Context{"beats": len(k.beats), "restores": len(k.restores)})
 	return nil
 }
 
@@ -267,24 +361,33 @@ func (k *Keeper) take() []edge {
 	return queued
 }
 
-// earliest answers the first armed deadline.
+// earliest answers the first armed deadline: a lapse, a beat or a restore.
 func (k *Keeper) earliest() (time.Time, bool) {
 	var next time.Time
 	armed := false
-	for _, at := range k.deadlines {
-		if !armed || at.Before(next) {
-			next, armed = at, true
+	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.beats, k.restores} {
+		for _, at := range set {
+			if !armed || at.Before(next) {
+				next, armed = at, true
+			}
 		}
 	}
 	return next, armed
 }
 
 func (k *Keeper) apply(ctx context.Context, e edge) {
-	if e.lapse != nil {
+	switch e.kind {
+	case edgeLapse:
 		k.record(ctx, e.ws, e.lapse)
-		return
+	case edgeFree:
+		k.schedule(ctx, e.ws, e.why)
+	case edgeRestored:
+		k.restored(ctx, e.ws, e.err)
+	case edgeRestoreAsked:
+		k.restoreAsked(ctx, e.ws)
+	default:
+		k.reconcile(ctx, e.ws, e.why)
 	}
-	k.reconcile(ctx, e.ws, e.why)
 }
 
 // record stores a stated projection on a hidden or closed workspace's row and
@@ -319,7 +422,10 @@ func (k *Keeper) store(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID,
 		return false
 	}
 	if !recorded {
-		log.Info(opProjection, "a cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped", fields)
+		// DEBUG, NOT INFO: every shim states its projection on every anchor
+		// change now that the daemon drives the beats, and only a hidden or
+		// closed workspace's is kept.
+		log.Debug(opProjection, "a cache lapse arrived for a workspace that is neither hidden nor closed; it is dropped", fields)
 		delete(k.deadlines, ws)
 		return false
 	}
@@ -329,59 +435,23 @@ func (k *Keeper) store(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID,
 	return true
 }
 
-// cadence is the keep-alive cadence a workspace's row asks of its shim.
-type cadence string
-
-const (
-	cadenceHold      cadence = "hold"
-	cadenceLastRound cadence = "last_round"
-	cadenceRun       cadence = "run"
-)
-
-// cadenceFor answers the cadence RECORD asks for. THE HIDE WINS over the
-// close: a hidden workspace never beats, closed or not, so closing it grants
-// no last round. A hidden workspace the user is looking at runs
-// (wsm.Workspace.KeepaliveHeld).
-func cadenceFor(record wsm.Workspace) cadence {
-	switch {
-	case record.KeepaliveHeld():
-		return cadenceHold
-	case record.Closed:
-		return cadenceLastRound
-	default:
-		return cadenceRun
-	}
-}
-
-// set is the shim call that asks for C.
-func (c cadence) set(shim Keepalives) func(context.Context) error {
-	switch c {
-	case cadenceHold:
-		return shim.Hold
-	case cadenceLastRound:
-		return shim.LastRound
-	case cadenceRun:
-		return shim.Run
-	default:
-		panic(fmt.Sprintf("cachelapse: cadence %q names no shim call", string(c)))
-	}
-}
-
-// reconcile sets WS's cadence to match its row (cadenceFor). A workspace
-// whose cache is not left to lapse has no deadline.
+// reconcile re-reads WS's row after an edge: a workspace whose cache is not
+// left to lapse has no lapse deadline, a parked cold gate takes the gate's
+// lapse, a hidden merge workspace whose merge has ended is stood down, and the
+// next keep-alive is armed afresh (schedule).
 func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) {
 	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws), "edge": why})
 	record, err := k.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		if errors.Is(err, wsm.ErrNotFound) {
-			log.Info(opCadence, "the workspace is no longer registered; no cadence is set", nil)
-			delete(k.deadlines, ws)
+			log.Info(opCadence, "the workspace is no longer registered; nothing is kept for it", nil)
+			k.forget(ws)
 			return
 		}
 		if leaving(ctx, log, opCadence, "reading the workspace's visibility", err) {
 			return
 		}
-		log.Error(opCadence, "could not read the workspace's visibility; its keep-alive cadence is not set", dlog.Context{"cause": err.Error()})
+		log.Error(opCadence, "could not read the workspace's visibility; its keep-alives are left as they are", dlog.Context{"cause": err.Error()})
 		return
 	}
 	if !record.LetsCacheLapse() {
@@ -399,30 +469,19 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 		}
 	}
 	if k.mergeEnded(ctx, log, record) {
+		delete(k.beats, ws)
+		delete(k.restores, ws)
 		return
 	}
-	want := cadenceFor(record)
-	fields := dlog.Context{"cadence": string(want), "hidden": record.InHiddenSection(), "selected": record.Current, "closed": record.Closed}
-	shim, ok := k.deps.Shim(ws)
-	if !ok {
-		log.Debug(opCadence, "no session is served for the workspace; no cadence is set", fields)
-		return
-	}
-	if err := want.set(shim)(ctx); err != nil {
-		if errors.Is(err, ErrNoSession) {
-			log.Debug(opCadence, "the shim holds no session yet; the session's coming up sets its cadence", fields)
-			return
-		}
-		// The next session's coming up sets the cadence again.
-		shimCallFailed(ctx, log, opCadence, shimFailure{
-			doing:     "setting the shim's keep-alive cadence",
-			died:      "the shim died under the cadence call; the death is recorded by daemon.shimclient.exit, and the next session's coming up sets its cadence",
-			stoodDown: "the shim was being stood down by this daemon under the cadence call; the next session's coming up sets its cadence",
-			failed:    "could not set the shim's keep-alive cadence",
-		}, fields, err)
-		return
-	}
-	log.Info(opCadence, "set the shim's keep-alive cadence to match the workspace's row", fields)
+	k.schedule(ctx, ws, why)
+}
+
+// forget drops every deadline the Keeper holds for WS.
+func (k *Keeper) forget(ws ids.WorkspaceID) {
+	delete(k.deadlines, ws)
+	delete(k.beats, ws)
+	delete(k.restores, ws)
+	delete(k.lapsedAt, ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace

@@ -560,6 +560,22 @@ func (h *harness) hibernate(t *testing.T, ws wsm.Workspace) {
 	}
 }
 
+// cycleParked parks WS's session as the keep-alive cycle does.
+func (h *harness) cycleParked(t *testing.T, ws wsm.Workspace) {
+	t.Helper()
+	ctx := context.Background()
+	if err := h.db.PutSession(ctx, wsm.Session{
+		Workspace: ws.ID, HostSessionID: "host-" + string(ws.ID), StartedAt: instant,
+	}); err != nil {
+		t.Fatalf("PutSession(%s): %v", ws.ID, err)
+	}
+	if err := h.db.SetSessionTerminal(ctx, ws.ID, wsm.SessionTerminal{
+		Kind: wsm.TerminalKeepaliveCycle, Detail: "stood down between keep-alives", At: instant,
+	}); err != nil {
+		t.Fatalf("SetSessionTerminal(%s): %v", ws.ID, err)
+	}
+}
+
 // userSaid composes a one-block text submission.
 func userSaid(text string) *conversationv1.UserSaid {
 	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{

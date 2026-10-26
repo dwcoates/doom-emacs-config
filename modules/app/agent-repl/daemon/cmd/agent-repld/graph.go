@@ -727,7 +727,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// fleet takes, so they are built first; an open reaches the fleet only
 	// once the daemon serves, by which time the fleet below exists.
 	opens, err := opentabs.New(opentabs.Deps{
-		Live: func(ws ids.WorkspaceID) bool { return fleet.Live(ws) },
+		// A SESSION THE KEEP-ALIVE CYCLE PARKED IS SERVED (owner ruling,
+		// 2026-10-26): it is drawn live and idle, and the cache keeper brings
+		// it back before its next beat, so an open never wakes every parked
+		// shim at once.
+		Live: func(ws ids.WorkspaceID) bool { return fleet.Live(ws) || cycleParked(p.DB, log, ws) },
 		BringUp: func(pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
 			editorBringUp(fleet, p.DB, ownership, bringingUp, p.Metrics, log, pending, done)
 		},
@@ -761,14 +765,34 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// controller it drives, so it reaches both late-bound: every edge it takes
 	// is applied by its Run loop, which starts once the graph is built.
 	var drainController drain.Controller
+	// THE SAME CUTOFF THE IDLE SWEEP RESOLVES (drain.New): the keeper sends
+	// no beat a session will not live to need.
+	idleCutoff, err := drain.ResolveIdleCutoff(p.Opts.idleCutoff)
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: resolve the idle cutoff for the cache keeper: %w", err)
+	}
 	cacheKeeper, err := cachelapse.New(cachelapse.Deps{
 		DB:              p.DB,
 		Shim:            func(ws ids.WorkspaceID) (cachelapse.Keepalives, bool) { return fleet.Keepalives(ws) },
 		ColdGate:        func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },
 		StandDowns:      standDownsFunc(func(ws ids.WorkspaceID) { drainController.StandDownWithheld(ws) }),
 		PublishRegistry: verbsRef.publishRegistry("a hidden workspace's cache lapse moved"),
-		Clock:           clock.System{},
-		Log:             p.Surfaces,
+		IdleCutoff:      idleCutoff,
+		CycleDown:       func(ws ids.WorkspaceID, beat time.Time) { drainController.CycleDown(ws, beat) },
+		// A RESTORE IS THE FLEET'S OWN DETACHED START, which the session's
+		// bring-up retires the park's terminal under; the views' park is
+		// lifted once it is back, as a revival lifts it.
+		Restore: func(ws ids.WorkspaceID, done func(error)) {
+			fleet.StartDetached(ws, func(err error) {
+				if err == nil {
+					footerResolver.SetParked(ws, wsm.ParkNone)
+					topbarResolver.SetParked(ws, wsm.ParkNone)
+				}
+				done(err)
+			})
+		},
+		Clock: clock.System{},
+		Log:   p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)
@@ -790,12 +814,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	startSlots := startslots.New(startslots.DefaultSize())
 
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
-		StartSlots:  startSlots,
-		PublishHost: relay.PublishHostWorkspace,
-		DB:          p.DB,
-		Instance:    p.Instance,
-		Accounts:    accounts,
-		Supervisor:  supervisor,
+		RestoreParked: cacheKeeper.RestoreParked,
+		StartSlots:    startSlots,
+		PublishHost:   relay.PublishHostWorkspace,
+		DB:            p.DB,
+		Instance:      p.Instance,
+		Accounts:      accounts,
+		Supervisor:    supervisor,
 		Sinks: sessionwatcher.Sinks{
 			Feed:       feedResolver,
 			Footer:     footerResolver,
@@ -2226,4 +2251,20 @@ func freshBootSettle(joining bool, controller rollout.Controller) func(ctx conte
 		return nil
 	}
 	return controller.SettleBoot
+}
+
+// cycleParked reports whether WS's session is parked by the keep-alive cycle.
+// A record that cannot be read is recorded at ERROR and answers false, so the
+// open brings the session up rather than leaving it down unexplained.
+func cycleParked(db interface {
+	Session(context.Context, wsm.WorkspaceID) (wsm.Session, bool, error)
+}, log dlog.Logger, ws ids.WorkspaceID) bool {
+	session, found, err := db.Session(context.Background(), ws)
+	if err != nil {
+		log.Error("daemon.cmd.open", "could not read whether the keep-alive cycle parked the session; the open brings it up", dlog.Context{
+			"workspace": string(ws), "error": err.Error(),
+		})
+		return false
+	}
+	return found && session.KeepaliveCycled()
 }
