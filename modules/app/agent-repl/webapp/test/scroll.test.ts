@@ -5,7 +5,7 @@
 // a real `ResizeObserver` to the tail owner, and the subscription being wired
 // to THAT element is half of what the footer-occlusion cases assert.
 import scrollSource from "../src/scroll.ts?raw";
-import { CHAT_LEEWAY_FRACTION, chatEndTop, revealChatExchange } from "../src/scroll.js";
+import { chatEndTop, revealChatExchange } from "../src/scroll.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SCROLL_CAUSES,
@@ -4466,12 +4466,12 @@ describe("chatEndTop", () => {
     return el;
   };
 
-  it("is the extent less the box and its leeway", () => {
-    expect(chatEndTop(box(1000, 100))).toBe(1000 - 100 * (1 + CHAT_LEEWAY_FRACTION));
+  it("is the extent less the box, with no room past the last answer", () => {
+    expect(chatEndTop(box(1000, 100))).toBe(900);
   });
 
   it("is the top for a chat shorter than its box", () => {
-    expect(chatEndTop(box(110, 100))).toBe(0);
+    expect(chatEndTop(box(90, 100))).toBe(0);
   });
 });
 
