@@ -520,62 +520,80 @@ func TestLoadSharesParsesVerdict(t *testing.T) {
 	}
 }
 
-func TestTheRoutingBriefRoutesAnAddendumOpenerAfterTheToolCall(t *testing.T) {
-	// Arrange: a prompt opening "also, ..." appends to the request ahead of
-	// it, so the routing brief sends it after the tool call and never holds
-	// it. Against a queued prompt that verdict coalesces the two
-	// (promptqueue.settleQueued).
-	want := []string{
-		"A new message that OPENS as an addendum always answers {{token_after_tool_call}}",
-		`starting with "also", "also,"`,
-		"so it never waits for the turn to finish ({{token_hold}})",
+func TestTheRoutingBriefRoutesAMessageAfterTheToolCall(t *testing.T) {
+	// Each case is a kind of new message the routing brief passes through the
+	// gate after the tool call and never holds: joining the running turn, or,
+	// against a queued prompt, coalescing into it (promptqueue.settleQueued).
+	tests := []struct {
+		name string
+		want []string
+	}{
+		{
+			// A prompt opening "also, ..." appends to the request ahead of it.
+			name: "an addendum opener",
+			want: []string{
+				"A new message that ADDS TO the request the running turn is working on always answers {{token_after_tool_call}}",
+				`It may OPEN as an addendum, starting with "also", "also,"`,
+				"so it never waits for the turn to finish ({{token_hold}})",
+			},
+		},
+		{
+			// A prompt carrying its addition mid-sentence ("we should also do
+			// X") appends to the request ahead of it just as an opener does.
+			name: "an addendum inside the sentence",
+			want: []string{
+				"wherever in the message the addition shows and however it is phrased",
+				`"we should also do X", "and when doing X we should also do Y"`,
+				"ANYTHING that suggests the user is appending to, extending, or widening the request they already sent is an addendum",
+			},
+		},
+		{
+			// A prompt clarifying one the user already sent refines the request
+			// the running turn works on.
+			name: "a clarification",
+			want: []string{
+				"A new message that CLARIFIES a previous message always answers {{token_after_tool_call}}",
+				`"I meant the other file"`,
+				"Such a message refines the request the running turn is working on, not a new request, so it never waits for the turn to finish ({{token_hold}})",
+			},
+		},
+		{
+			// A prompt marking itself urgent ("asap") is an important addendum
+			// to the last one sent, and never interrupts on the urgency alone.
+			name: "an urgent message",
+			want: []string{
+				"A new message that marks itself URGENT always answers {{token_after_tool_call}}",
+				`"asap"`,
+				"so it never waits for the turn to finish ({{token_hold}})",
+				"The urgency alone does not make the running work wrong",
+			},
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got, err := Load(repoPromptsDir, "queue-routing-classifier")
 
-	// Act.
-	got, err := Load(repoPromptsDir, "queue-routing-classifier")
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if phrase, missing := unsaid(got.Body, want); missing {
-		t.Fatalf("queue-routing-classifier does not say %q", phrase)
+			// Assert.
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if phrase, missing := unsaid(got.Body, tt.want); missing {
+				t.Fatalf("queue-routing-classifier does not say %q", phrase)
+			}
+		})
 	}
 }
 
-func TestTheRoutingBriefRoutesAClarificationAfterTheToolCall(t *testing.T) {
-	// Arrange: a prompt clarifying one the user already sent refines the
-	// request the running turn works on, so the routing brief passes it
-	// through the gate after the tool call and never holds it.
+func TestTheRoutingBriefHoldsASeparateFollowUpTask(t *testing.T) {
+	// Arrange: a prompt lining up a self-contained task for afterwards
+	// ("after, let's make sure ...") changes nothing about the running work,
+	// so the routing brief holds it, and it is no turn-ending instruction.
 	want := []string{
-		"A new message that CLARIFIES a previous message always answers {{token_after_tool_call}}",
-		`"I meant the other file"`,
-		"Such a message refines the request the running turn is working on, not a new request, so it never waits for the turn to finish ({{token_hold}})",
-	}
-
-	// Act.
-	got, err := Load(repoPromptsDir, "queue-routing-classifier")
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if phrase, missing := unsaid(got.Body, want); missing {
-		t.Fatalf("queue-routing-classifier does not say %q", phrase)
-	}
-}
-
-func TestTheRoutingBriefRoutesAnUrgentMessageAfterTheToolCall(t *testing.T) {
-	// Arrange: a prompt marking itself urgent ("asap") is an important
-	// addendum to the last one sent, so the routing brief passes it through
-	// the gate after the tool call (joining the running turn, or folding into
-	// a queued prompt ahead of it) and never holds it, nor interrupts on the
-	// urgency alone.
-	want := []string{
-		"A new message that marks itself URGENT always answers {{token_after_tool_call}}",
-		`"asap"`,
-		"so it never waits for the turn to finish ({{token_hold}})",
-		"The urgency alone does not make the running work wrong",
+		"A new message that only lines up a SEPARATE FOLLOW-UP TASK for afterwards is NOT an addendum",
+		`"after, let's make sure ..."`,
+		"Such a message answers {{token_hold}}",
+		"such a task is not a step of the running turn's ending, so it holds under the follow-up rule above",
 	}
 
 	// Act.
