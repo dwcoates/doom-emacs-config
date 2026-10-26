@@ -307,9 +307,6 @@ type DB interface {
 	// it to tell a conversation that was never engaged from one that was, and
 	// a listing would make that answer cost the whole table.
 	HasTurns(ctx context.Context, id WorkspaceID) (bool, error)
-	// FirstThreadQuestion answers the words of the first question a chat
-	// thread's turns carry, and whether any does.
-	FirstThreadQuestion(ctx context.Context, id WorkspaceID) (string, bool, error)
 	// RecentConversationPrompts answers the most recent `limit` prompts of a
 	// workspace's conversation, oldest first: its own turns and, when those
 	// fall short, the turns it inherited through its fork lineage.

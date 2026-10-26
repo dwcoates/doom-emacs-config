@@ -627,13 +627,13 @@ Nil while the thread's workspace is not open yet."
 
 (defun agent-repl-roster-thread-workspace-name (row)
   "Return the workspace name a thread ROW is opened under: `chat/' and its ID.
-NEVER ITS TITLE.  A title is words with spaces (\"Fusion in the Sun\"),
+NEVER ITS DISPLAY NAME.  That is words with spaces (\"Why fusion stops at iron\"),
 and an input panel's name ends its workspace at the first space
-\(`agent-repl--extract-panel-id'), so a titled workspace's panels read as
+\(`agent-repl--extract-panel-id'), so a named thread's panels read as
 another workspace's orphans: the window sweep deleted them and the layout
 reconciler showed them again, forever.  The id has no space, is unique,
-and never changes, so the title arriving after the thread opened renames
-nothing in Emacs; the title is the roster's `:name', drawn wherever the
+and never changes, so the name arriving after the thread opened renames
+nothing in Emacs; the name is the roster's `:name', drawn wherever the
 user picks a thread (`agent-repl-thread-pick')."
   (concat agent-repl-roster-thread-prefix (plist-get (plist-get row :thread) :id)))
 

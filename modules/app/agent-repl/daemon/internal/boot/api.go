@@ -228,10 +228,11 @@ type Deps struct {
 	// repositories are retired, so only a repository still on disk is asked
 	// for one. Required.
 	EnsureMainWorktrees func(ctx context.Context) error
-	// ResumeThreadTitles titles every chat thread a stopped daemon left under
-	// its placeholder (workspace.Verbs.ResumeThreadTitles). It runs beside
+	// OpenThreads opens every chat thread in the chat service, naming each
+	// after its first question and abbreviating its questions
+	// (workspace.Verbs.OpenThreads). It runs beside
 	// EnsureMainWorktrees, on a daemon that serves the registry. Required.
-	ResumeThreadTitles func(ctx context.Context) error
+	OpenThreads func(ctx context.Context) error
 	// SettleMissingDirectory settles an open workspace whose directory is
 	// gone (workspace.Verbs.SettleMissingDirectory): recreated from its
 	// recorded branch, or closed by the daemon when there is nothing to
@@ -404,8 +405,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a view binder")
 	case deps.EnsureMainWorktrees == nil:
 		return nil, missing("a main-worktree ensurer")
-	case deps.ResumeThreadTitles == nil:
-		return nil, missing("a thread-title resumer")
+	case deps.OpenThreads == nil:
+		return nil, missing("a thread opener")
 	case deps.SettleMissingDirectory == nil:
 		return nil, missing("a missing-directory settler")
 	case deps.RunDir == "":

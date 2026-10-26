@@ -14,17 +14,12 @@ back to the model to shorten through `workspace-name-shorten.md`; if the
 shortened answer is still over, it is taken anyway. The rule itself lives in
 `daemon/internal/workspace/naming.go`.
 
-A chat thread is TITLED, not named, through `chat-title-from-question.md`: a
-two-to-five-word Title Case summary of its first question, checked on the
-answer (`daemon/internal/workspace/threadtitle.go`). The thread is opened at
-once under "Loading…" and renamed when its title arrives. The e2e suite's fake
-vendor recognizes that file by its first line, "Title the chat thread", so a
-reworded first line needs `daemon/integration/harness/fakes.go` to follow it.
-
 Each chat question longer than a few words is ABBREVIATED for the sidebar's
 branch outline through `chat-question-abbreviation.md`: one to six words in
 sentence case, checked on the answer (`daemon/internal/chat/abbreviate.go`).
-The outline draws the whole question until the abbreviation arrives. The fake
+The outline draws the whole question until the abbreviation arrives. A chat
+thread has no separate title: its NAME is its first question's abbreviation
+(`daemon/internal/chat/naming.go`), "Loading…" until that arrives. The fake
 vendor recognizes that file by its first line, "Abbreviate the chat question".
 
 **This directory is doom's own policy, not everyone's.** These files are the

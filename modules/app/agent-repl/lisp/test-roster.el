@@ -3827,11 +3827,11 @@ judged as any roster is."
     (should (member "chat/t1" agent-repl-test-roster--created))
     (should (equal (agent-repl-roster-drawn-tab-order) '("one")))))
 
-(ert-deftest agent-repl-test-roster-a-retitled-thread-keeps-its-workspace ()
-  "A thread's title arriving renames nothing in Emacs: its workspace is named by its id."
+(ert-deftest agent-repl-test-roster-a-renamed-thread-keeps-its-workspace ()
+  "A thread's name arriving renames nothing in Emacs: its workspace is named by its id."
   (agent-repl-test-roster--with-editor
     (agent-repl-roster-reconcile (agent-repl-test-roster--roster :threads '(("t1" . "Loading…"))))
-    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :threads '(("t1" . "Fusion in the Sun"))))
+    (agent-repl-roster-reconcile (agent-repl-test-roster--roster :threads '(("t1" . "Why fusion stops at iron"))))
     (should (equal (list (agent-repl--ws-by-ref-id "t1") agent-repl-test-roster--created)
                    '("chat/t1" ("chat/t1"))))))
 

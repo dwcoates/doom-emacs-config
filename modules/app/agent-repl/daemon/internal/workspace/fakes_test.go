@@ -51,8 +51,6 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
-	// firstQuestions are the threads' first questions (FirstThreadQuestion).
-	firstQuestions map[ids.WorkspaceID]string
 	// workspaceByDirErr fails WorkspaceByDir, at workspaceByDirErrAt alone
 	// when that is set.
 	workspaceByDirErr   error
@@ -1024,12 +1022,6 @@ func (d *fakeDB) BindSession(ctx context.Context, s wsm.Session) error {
 	delete(d.pendingForks, s.Workspace)
 	delete(d.lineage, s.Workspace)
 	return d.PutSession(ctx, s)
-}
-
-// FirstThreadQuestion answers the question seeded in firstQuestions.
-func (d *fakeDB) FirstThreadQuestion(_ context.Context, id ids.WorkspaceID) (string, bool, error) {
-	q, ok := d.firstQuestions[id]
-	return q, ok, nil
 }
 
 func (d *fakeDB) HeldPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.HeldPrompt, error) {
@@ -3004,6 +2996,17 @@ func (f *fixture) mutable(t *testing.T) *verbs {
 type fakeThreadGraphs struct {
 	deleted []ids.WorkspaceID
 	err     error
+	// opened is every thread Open was handed, in order; openErr fails Open.
+	mu      sync.Mutex
+	opened  []ids.WorkspaceID
+	openErr error
+}
+
+func (f *fakeThreadGraphs) Open(_ context.Context, thread ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.opened = append(f.opened, thread)
+	return f.openErr
 }
 
 func (f *fakeThreadGraphs) Delete(_ context.Context, thread ids.WorkspaceID) error {

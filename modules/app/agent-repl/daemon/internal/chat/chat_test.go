@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -194,11 +195,26 @@ func (a *fakeAbbreviator) Abbreviate(_ context.Context, _ dlog.Logger, _ ids.Wor
 	return "short: " + strings.Fields(question)[0], nil
 }
 
+// fakeNamer is Deps.Name: every name it is handed, in order, and err.
+type fakeNamer struct {
+	mu    sync.Mutex
+	names []string
+	err   error
+}
+
+func (n *fakeNamer) Name(_ context.Context, _ ids.WorkspaceID, name string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.names = append(n.names, name)
+	return n.err
+}
+
 // close closes every open turn, as the records say once the turn ends.
 func (f *fakeTurns) close() { f.open = nil }
 
 type fixture struct {
 	t      *testing.T
+	namer  *fakeNamer
 	abbrev *fakeAbbreviator
 	zettel *fakeZettel
 	turns  *fakeTurns
@@ -212,15 +228,16 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{t: t, abbrev: &fakeAbbreviator{}, zettel: &fakeZettel{}, turns: &fakeTurns{turns: map[ids.TurnID]wsm.Turn{}}, log: dlog.NewTestLogger()}
+	f := &fixture{t: t, namer: &fakeNamer{}, abbrev: &fakeAbbreviator{}, zettel: &fakeZettel{}, turns: &fakeTurns{turns: map[ids.TurnID]wsm.Turn{}}, log: dlog.NewTestLogger()}
 	f.svc = New(Deps{
-		Zettel: f.zettel, Turns: f.turns, Context: context.Background(), Abbreviator: f.abbrev,
+		Zettel: f.zettel, Turns: f.turns, Context: context.Background(), Abbreviator: f.abbrev, Name: f.namer.Name,
 		Log: func(ids.WorkspaceID) dlog.Logger { return f.log },
 		Go:  func(job func()) { job() },
 		Outline: func(_ ids.WorkspaceID, o *frontendv1.RosterThreadOutline) {
 			f.outlines = append(f.outlines, o)
 		},
 	})
+	t.Cleanup(f.svc.WaitNames)
 	return f
 }
 

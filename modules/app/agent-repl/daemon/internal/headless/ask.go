@@ -79,7 +79,7 @@ func AskValidated(ctx context.Context, r Runner, ask Ask, log dlog.Logger, op st
 	return "", &last
 }
 
-// Words is the shape of a short answer (a title, an abbreviation): one line
+// Words is the shape of a short answer (an abbreviation): one line
 // of MinWords to MaxWords words, at most MaxChars characters. Its Validate
 // is an Ask's Validate for every such answer.
 type Words struct {

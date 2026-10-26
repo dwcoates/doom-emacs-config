@@ -97,10 +97,10 @@ func TestAChatThreadLivesItsWholeLife(t *testing.T) {
 	if nodes := graphOf(t, w, thread); len(nodes) != 1 || nodes[0].GetQuestion().GetText() != "Why is the sky blue?" {
 		t.Fatalf("graph = %v, want the first question as its root", nodes)
 	}
-	harness.AwaitView(t, ctx, roster, "the thread listed open and current, under its title", func(r *frontendv1.WorkspaceRoster) bool {
+	harness.AwaitView(t, ctx, roster, "the thread listed open and current, under its first question", func(r *frontendv1.WorkspaceRoster) bool {
 		row := threadRow(r, thread)
 		return row != nil && row.GetStanding().GetOpen() != nil && row.GetCurrent() != nil &&
-			r.GetAppSwitcher().GetShown().GetChat() != nil && row.GetName().GetText() == harness.FakeClaudeMintedTitle
+			r.GetAppSwitcher().GetShown().GetChat() != nil && row.GetName().GetText() == "Why is the sky blue?"
 	})
 
 	// ---- A question typed in the composer is asked of the shown path ----
@@ -217,5 +217,18 @@ func TestAChatThreadLivesItsWholeLife(t *testing.T) {
 	}
 	harness.AwaitView(t, ctx, roster, "the thread gone from the list", func(r *frontendv1.WorkspaceRoster) bool {
 		return threadRow(r, thread) == nil
+	})
+
+	// ---- A thread started by a long question, watched by nothing, is named
+	// by the question's abbreviation ----
+	long, err := w.Client().CreateThread(ctx, connect.NewRequest(&agentreplv1.CreateThreadRequest{
+		Question: &agentreplv1.CreateThreadQuestion{Text: "Why does fusion in a star stop once it reaches iron?"},
+	}))
+	if err != nil || long.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateThread = %v, %v", long, err)
+	}
+	harness.AwaitView(t, ctx, roster, "the long-question thread named by its abbreviation", func(r *frontendv1.WorkspaceRoster) bool {
+		row := threadRow(r, long.Msg.GetSuccess().GetThread())
+		return row != nil && row.GetName().GetText() == harness.FakeClaudeMintedAbbreviation
 	})
 }

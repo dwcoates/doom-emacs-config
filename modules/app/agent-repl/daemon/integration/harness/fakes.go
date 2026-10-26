@@ -188,11 +188,6 @@ const FakeClaudeLoginMarker = "FAKE-CLAUDE-LOGIN-READY"
 // assert on the branch a nameless create produced.
 const FakeClaudeMintedName = "fake-minted-name"
 
-// FakeClaudeMintedTitle is the title the fake vendor answers a chat thread's
-// title call with (the chat-title-from-question brief, which it recognizes by
-// its first line): what a created thread is renamed to.
-const FakeClaudeMintedTitle = "Fake Minted Title"
-
 // FakeClaudeMintedAbbreviation is the abbreviation the fake vendor answers a
 // chat question's abbreviation call with (the chat-question-abbreviation
 // brief, which it recognizes by its first line).
@@ -210,7 +205,6 @@ for arg in "$@"; do
     question=$(cat)
     answer="` + FakeClaudeMintedName + `"
     case "$question" in
-      *"Title the chat thread"*) answer="` + FakeClaudeMintedTitle + `" ;;
       *"Abbreviate the chat question"*) answer="` + FakeClaudeMintedAbbreviation + `" ;;
     esac
     for fmt in "$@"; do

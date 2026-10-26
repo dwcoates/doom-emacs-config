@@ -167,6 +167,11 @@ func (s *Service) abbreviate(ctx context.Context, a abbreviation) {
 		log.Error(opAbbreviate, "the question could not be abbreviated; the outline draws it whole", dlog.Context{
 			"thread": string(a.thread), "turn": string(a.turn), "question_chars": utf8.RuneCountInString(a.question), "cause": err.Error(),
 		})
+		s.mu.Lock()
+		t := s.threads[a.thread]
+		t.unabbreviated[a.turn] = true
+		s.publish(t)
+		s.mu.Unlock()
 		return
 	}
 	s.mu.Lock()
@@ -174,6 +179,9 @@ func (s *Service) abbreviate(ctx context.Context, a abbreviation) {
 	node := t.nodeOfTurn(a.turn)
 	if node == nil {
 		t.minted[a.turn] = value
+		// THE THREAD'S NAME need not wait for the node: a first question's
+		// abbreviation names it as soon as it is minted.
+		s.publish(t)
 		s.mu.Unlock()
 		log.Debug(opAbbreviate, "the question was abbreviated before its node exists; the recording takes it", dlog.Context{
 			"thread": string(a.thread), "turn": string(a.turn), "abbreviation": value,
