@@ -607,3 +607,26 @@ func TestTheRoutingBriefHoldsASeparateFollowUpTask(t *testing.T) {
 		t.Fatalf("queue-routing-classifier does not say %q", phrase)
 	}
 }
+
+func TestTheRoutingBriefPassesAMessageThroughOnAnyDoubt(t *testing.T) {
+	// Arrange: passing a held prompt through after the tool call is the
+	// default, so the routing brief holds one only when it is certain the
+	// prompt is independent, and answers after the tool call on any doubt.
+	want := []string{
+		"Answer {{token_hold}} only when you are CERTAIN the new message is genuinely independent",
+		"PASSING THE MESSAGE THROUGH IS THE DEFAULT",
+		"If there is ANY doubt about the route, answer {{token_after_tool_call}}, never {{token_hold}}",
+		"Such a message answers {{token_hold}} only when it is clearly such a task",
+	}
+
+	// Act.
+	got, err := Load(repoPromptsDir, "queue-routing-classifier")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if phrase, missing := unsaid(got.Body, want); missing {
+		t.Fatalf("queue-routing-classifier does not say %q", phrase)
+	}
+}
