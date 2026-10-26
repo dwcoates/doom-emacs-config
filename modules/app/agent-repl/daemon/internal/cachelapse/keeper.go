@@ -204,6 +204,10 @@ type Keeper struct {
 	// record's own copy (wsm.Workspace.LastKeepaliveAt) held in memory too,
 	// so a write that failed cannot time the next beat from before it.
 	sent map[ids.WorkspaceID]time.Time
+	// freeSince is when each session last fell free (no turn, no live
+	// detached work), as this Keeper saw it. A beat stands a session down
+	// only once it has been free a whole interval (owner ruling, 2026-10-26).
+	freeSince map[ids.WorkspaceID]time.Time
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -236,6 +240,7 @@ func New(deps Deps) (*Keeper, error) {
 		restoring: map[ids.WorkspaceID]bool{},
 		lapsedAt:  map[ids.WorkspaceID]time.Time{},
 		sent:      map[ids.WorkspaceID]time.Time{},
+		freeSince: map[ids.WorkspaceID]time.Time{},
 	}, nil
 }
 
@@ -390,6 +395,7 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 	case edgeLapse:
 		k.record(ctx, e.ws, e.lapse)
 	case edgeFree:
+		k.freeSince[e.ws] = k.deps.Clock.Now()
 		k.schedule(ctx, e.ws, e.why)
 	case edgeRestored:
 		k.restored(ctx, e.ws, e.err)
@@ -493,6 +499,7 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.restores, ws)
 	delete(k.lapsedAt, ws)
 	delete(k.sent, ws)
+	delete(k.freeSince, ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace

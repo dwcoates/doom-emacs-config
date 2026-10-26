@@ -219,7 +219,17 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			log.Error(opDrive, "could not record the keep-alive that was sent; this daemon times the next beat from it, a successor from the turn before it",
 				dlog.WithCause(fields, err))
 		}
-		k.deps.CycleDown(ws, now)
+		// AN HOUR'S GRACE AFTER THE WORK, NOT ONLY AFTER THE TURN (owner
+		// ruling, 2026-10-26): the user prompts with no shim start for about
+		// an interval after the session last fell free. A beat that comes
+		// sooner, because detached work ended after the turn, goes out and
+		// leaves the shim up; the next one stands it down.
+		if free, ok := k.freeSince[ws]; ok && now.Sub(free) < KeepaliveInterval {
+			log.Info(opDrive, "the session fell free less than an interval ago; the shim stays up until the next keep-alive",
+				dlog.Merge(fields, dlog.Context{"free_since": free}))
+		} else {
+			k.deps.CycleDown(ws, now)
+		}
 		k.beats[ws] = now.Add(KeepaliveInterval)
 	case answer.GetSkipped().GetMainAgentBusy() != nil:
 		log.Info(opDrive, "the main agent is busy, which keeps the cache warm itself; the next beat is timed when it falls free",

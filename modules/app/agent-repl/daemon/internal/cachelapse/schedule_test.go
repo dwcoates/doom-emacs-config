@@ -242,6 +242,49 @@ func TestScheduleTimesTheBeatFromARecordedKeepalive(t *testing.T) {
 	}
 }
 
+func TestASentBeatSoonAfterTheSessionFellFreeLeavesTheShimUp(t *testing.T) {
+	// Arrange: detached work ended ten minutes ago, long after the turn.
+	h := dueHarness(t, sent())
+	h.keeper.freeSince[theWorkspace] = now.Add(-10 * time.Minute)
+	h.keeper.beats[theWorkspace] = now
+
+	// Act
+	h.keeper.beatsDue(context.Background())
+
+	// Assert
+	if len(h.cycled) != 0 {
+		t.Fatalf("cycle stand-downs = %+v, want none within an interval of falling free", h.cycled)
+	}
+}
+
+func TestASentBeatAnIntervalAfterTheSessionFellFreeStandsItDown(t *testing.T) {
+	// Arrange
+	h := dueHarness(t, sent())
+	h.keeper.freeSince[theWorkspace] = now.Add(-KeepaliveInterval)
+	h.keeper.beats[theWorkspace] = now
+
+	// Act
+	h.keeper.beatsDue(context.Background())
+
+	// Assert
+	if len(h.cycled) != 1 {
+		t.Fatalf("cycle stand-downs = %+v, want one an interval after falling free", h.cycled)
+	}
+}
+
+func TestTheFreeEdgeStampsWhenTheSessionFellFree(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+
+	// Act
+	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, why: "test"})
+
+	// Assert
+	if got := h.keeper.freeSince[theWorkspace]; !got.Equal(now) {
+		t.Fatalf("freeSince = %v, want %v", got, now)
+	}
+}
+
 func TestABeatThatATurnMovedIsRearmedNotSent(t *testing.T) {
 	// Arrange: the row's clock moved since the beat was armed.
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
@@ -282,6 +325,9 @@ func TestABeatTheShimSkippedIsNotCycledDown(t *testing.T) {
 	}
 }
 
+// The work just ended, so the beat goes out and leaves the shim up: a session
+// is stood down only an interval after it fell free (owner ruling,
+// 2026-10-26).
 func TestABeatSkippedForDetachedWorkIsSentWhenTheSessionFallsFree(t *testing.T) {
 	// Arrange
 	h := dueHarness(t, skipped(&shimv1.SendKeepaliveSkipped{Reason: &shimv1.SendKeepaliveSkipped_DetachedWorkLive{DetachedWorkLive: &shimv1.SendKeepaliveSkippedDetachedWorkLive{LiveItems: 1}}}))
@@ -294,8 +340,8 @@ func TestABeatSkippedForDetachedWorkIsSentWhenTheSessionFallsFree(t *testing.T) 
 	h.keeper.beatsDue(context.Background())
 
 	// Assert
-	if h.shim.beats != 2 || len(h.cycled) != 1 {
-		t.Fatalf("beats = %d with stand-downs %+v, want the beat sent once free", h.shim.beats, h.cycled)
+	if h.shim.beats != 2 || len(h.cycled) != 0 {
+		t.Fatalf("beats = %d with stand-downs %+v, want the beat sent once free and the shim left up", h.shim.beats, h.cycled)
 	}
 }
 
