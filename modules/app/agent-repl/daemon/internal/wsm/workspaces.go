@@ -52,7 +52,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, owner_lands, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, owner_lands, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
 	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -112,12 +112,13 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		kind          string
 		lastKeepalive sql.NullInt64
 		cacheCold     sql.NullInt64
+		backlogged    sql.NullInt64
 		landsInto     sql.NullString
 		// lacksContext is the stored owner_lands column, the context half
 		// of Workspace.OwnerLands (OwnerLands).
 		lacksContext bool
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &lacksContext, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &lacksContext, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto); err != nil {
 		return Workspace{}, err
 	}
 	switch WorkspaceKind(kind) {
@@ -234,6 +235,11 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		return Workspace{}, err
 	}
 	ws.CommitCount = count
+	gate, err := decodeColdGateBacklog(ws.ID, backlogged)
+	if err != nil {
+		return Workspace{}, err
+	}
+	ws.BackloggedGateAt = gate
 	return ws, nil
 }
 

@@ -108,6 +108,9 @@ type DB interface {
 	// SetHidden records whether a workspace sits in the roster's hidden
 	// section; an unknown workspace is ErrNotFound.
 	SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at time.Time) error
+	// BacklogColdGate moves a shown workspace whose cold gate stood too long
+	// into the hidden section, once per gate, and answers whether it moved it.
+	BacklogColdGate(ctx context.Context, id WorkspaceID, gateLapsedAt, at time.Time) (bool, error)
 	// SetCacheLapse records a hidden workspace's projected cache lapse, and
 	// answers whether it was recorded: a workspace not hidden takes none.
 	SetCacheLapse(ctx context.Context, id WorkspaceID, lapse CacheLapse) (bool, error)
