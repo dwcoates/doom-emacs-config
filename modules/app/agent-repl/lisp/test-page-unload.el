@@ -120,6 +120,10 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
      (lambda (why) (push (list 'kept why) outcomes)))
     (lambda () outcomes)))
 
+(ert-deftest agent-repl-test-pu-a-page-is-held-thirty-minutes-by-default ()
+  "An unlooked page is held for thirty minutes of use (owner ruling, 2026-10-26)."
+  (should (= (eval (car (get 'agent-repl-page-unload-after 'standard-value)) t) 1800)))
+
 (ert-deftest agent-repl-test-pu-an-announced-drop-reports-before-it-drops ()
   "The daemon is told first, and the drop runs once it answers."
   ;; Arrange

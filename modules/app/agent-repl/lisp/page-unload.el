@@ -90,8 +90,9 @@
   "Unloading the workspace pages nobody looks at."
   :group 'agent-repl)
 
-(defcustom agent-repl-page-unload-after 600
-  "Seconds of use a workspace's page is held after it was last looked at."
+(defcustom agent-repl-page-unload-after 1800
+  "Seconds of use a workspace's page is held after it was last looked at.
+Thirty minutes (owner ruling, 2026-10-26)."
   :type 'integer
   :group 'agent-repl-page-unload)
 
