@@ -86,6 +86,20 @@ func (s *server) ArrangeSidebar(
 		if answered {
 			return answer(resp, cerr)
 		}
+	case *agentreplv1.ArrangeSidebarRequest_CreateAgentSubsection:
+		create := change.CreateAgentSubsection
+		subjects, refused, done := s.resolveAllNaming(ctx, rpc, resp, append([]*workspacev1.WorkspaceRef{create.GetCreatedBy()}, create.GetWorkspaces()...))
+		if done {
+			return answer(resp, refused)
+		}
+		members := make([]ids.WorkspaceID, 0, len(subjects)-1)
+		for _, subject := range subjects[1:] {
+			members = append(members, subject.Record.ID)
+		}
+		var sub wsm.Subsection
+		if sub, err = s.deps.Verbs.CreateAgentSubsection(ctx, subjects[0].Record.ID, create.GetName(), members); err == nil {
+			created = &agentreplv1.SubsectionRef{Id: string(sub.ID)}
+		}
 	default:
 		// validateArrangeSidebarRequest refuses an unset arm, and every arm the
 		// contract names is a case above: reaching here is a validator that
@@ -237,12 +251,15 @@ func (s *server) GetSidebarArrangement(
 					Workspace: arrangedWorkspaces([]sidebar.ArrangedWorkspace{entry.Workspace})[0]}})
 				continue
 			}
-			out.Entries = append(out.Entries, &agentreplv1.ArrangedEntry{Entry: &agentreplv1.ArrangedEntry_Subsection{
-				Subsection: &agentreplv1.ArrangedSubsection{
-					Subsection: &agentreplv1.SubsectionRef{Id: string(entry.Subsection.Subsection.ID)},
-					Name:       entry.Subsection.Subsection.Name,
-					Workspaces: arrangedWorkspaces(entry.Subsection.Workspaces),
-				}}})
+			arranged := &agentreplv1.ArrangedSubsection{
+				Subsection: &agentreplv1.SubsectionRef{Id: string(entry.Subsection.Subsection.ID)},
+				Name:       entry.Subsection.Subsection.Name,
+				Workspaces: arrangedWorkspaces(entry.Subsection.Workspaces),
+			}
+			if by := entry.Subsection.Subsection.CreatedBy; by != nil {
+				arranged.CreatedBy = &workspacev1.WorkspaceRef{Id: string(*by)}
+			}
+			out.Entries = append(out.Entries, &agentreplv1.ArrangedEntry{Entry: &agentreplv1.ArrangedEntry_Subsection{Subsection: arranged}})
 		}
 		resp.Repositories = append(resp.Repositories, out)
 	}

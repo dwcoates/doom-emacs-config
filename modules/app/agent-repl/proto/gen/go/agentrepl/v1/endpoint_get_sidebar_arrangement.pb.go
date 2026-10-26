@@ -343,7 +343,12 @@ type ArrangedSubsection struct {
 	Subsection *SubsectionRef         `protobuf:"bytes,1,opt,name=subsection,proto3" json:"subsection,omitempty"`
 	Name       string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// The families in the subsection, root by root in drawn order.
-	Workspaces    []*ArrangedWorkspace `protobuf:"bytes,3,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
+	Workspaces []*ArrangedWorkspace `protobuf:"bytes,3,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
+	// The workspace whose agent created the subsection, present exactly when an
+	// agent did (ArrangeCreateAgentSubsection): such a subsection is deleted
+	// once it holds no open workspace. Absent for one the user created, which
+	// survives empty.
+	CreatedBy     *v1.WorkspaceRef `protobuf:"bytes,4,opt,name=created_by,json=createdBy,proto3,oneof" json:"created_by,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -395,6 +400,13 @@ func (x *ArrangedSubsection) GetName() string {
 func (x *ArrangedSubsection) GetWorkspaces() []*ArrangedWorkspace {
 	if x != nil {
 		return x.Workspaces
+	}
+	return nil
+}
+
+func (x *ArrangedSubsection) GetCreatedBy() *v1.WorkspaceRef {
+	if x != nil {
+		return x.CreatedBy
 	}
 	return nil
 }
@@ -521,7 +533,7 @@ const file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDesc = "" +
 	"\x0fArrangedOneShot\x12?\n" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2\x1f.agentrepl.v1.ArrangedWorkspaceR\n" +
-	"workspaces\"\xa6\x01\n" +
+	"workspaces\"\xf5\x01\n" +
 	"\x12ArrangedSubsection\x12;\n" +
 	"\n" +
 	"subsection\x18\x01 \x01(\v2\x1b.agentrepl.v1.SubsectionRefR\n" +
@@ -529,7 +541,10 @@ const file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_rawDesc = "" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12?\n" +
 	"\n" +
 	"workspaces\x18\x03 \x03(\v2\x1f.agentrepl.v1.ArrangedWorkspaceR\n" +
-	"workspaces\"\x92\x02\n" +
+	"workspaces\x12>\n" +
+	"\n" +
+	"created_by\x18\x04 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\tcreatedBy\x88\x01\x01B\r\n" +
+	"\v_created_by\"\x92\x02\n" +
 	"\x11ArrangedWorkspace\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -574,14 +589,15 @@ var file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_depIdxs = []int32{
 	6,  // 6: agentrepl.v1.ArrangedOneShot.workspaces:type_name -> agentrepl.v1.ArrangedWorkspace
 	8,  // 7: agentrepl.v1.ArrangedSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
 	6,  // 8: agentrepl.v1.ArrangedSubsection.workspaces:type_name -> agentrepl.v1.ArrangedWorkspace
-	9,  // 9: agentrepl.v1.ArrangedWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	6,  // 10: agentrepl.v1.ArrangedWorkspace.children:type_name -> agentrepl.v1.ArrangedWorkspace
-	9,  // 11: agentrepl.v1.ArrangedWorkspace.parent:type_name -> workspace.v1.WorkspaceRef
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	9,  // 9: agentrepl.v1.ArrangedSubsection.created_by:type_name -> workspace.v1.WorkspaceRef
+	9,  // 10: agentrepl.v1.ArrangedWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	6,  // 11: agentrepl.v1.ArrangedWorkspace.children:type_name -> agentrepl.v1.ArrangedWorkspace
+	9,  // 12: agentrepl.v1.ArrangedWorkspace.parent:type_name -> workspace.v1.WorkspaceRef
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_init() }
@@ -595,6 +611,7 @@ func file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_init() {
 		(*ArrangedEntry_Subsection)(nil),
 		(*ArrangedEntry_OneShot)(nil),
 	}
+	file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[5].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_get_sidebar_arrangement_proto_msgTypes[6].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

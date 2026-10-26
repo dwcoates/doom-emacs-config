@@ -962,3 +962,41 @@ func TestEveryRowAndLabelMoveIsValidatedThroughValidateRowLabel(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateDistinctWorkspaceRefs(t *testing.T) {
+	one := &workspacev1.WorkspaceRef{Id: "ws-1", Dir: "/w/1"}
+	two := &workspacev1.WorkspaceRef{Id: "ws-2", Dir: "/w/2"}
+	tests := []struct {
+		name      string
+		refs      []*workspacev1.WorkspaceRef
+		wantField string
+		wantSeen  []string
+	}{
+		{name: "distinct refs answer their ids", refs: []*workspacev1.WorkspaceRef{one, two}, wantSeen: []string{"ws-1", "ws-2"}},
+		{name: "no ref", refs: nil, wantField: "list"},
+		{name: "a malformed ref", refs: []*workspacev1.WorkspaceRef{one, {}}, wantField: "list[1]"},
+		{name: "one workspace twice", refs: []*workspacev1.WorkspaceRef{one, two, one}, wantField: "list[2]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			seen, err := validateDistinctWorkspaceRefs("list", tt.refs)
+
+			// Assert
+			if tt.wantField != "" {
+				if err == nil || err.Code() != connect.CodeInvalidArgument || !strings.Contains(err.Message(), tt.wantField) {
+					t.Fatalf("err = %v, want invalid argument naming %s", err, tt.wantField)
+				}
+				return
+			}
+			if err != nil || len(seen) != len(tt.wantSeen) {
+				t.Fatalf("seen = %v (%v), want %v", seen, err, tt.wantSeen)
+			}
+			for _, id := range tt.wantSeen {
+				if !seen[id] {
+					t.Fatalf("seen = %v, want %s", seen, id)
+				}
+			}
+		})
+	}
+}

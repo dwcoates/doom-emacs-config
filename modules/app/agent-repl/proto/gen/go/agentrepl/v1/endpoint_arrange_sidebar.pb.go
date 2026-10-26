@@ -60,6 +60,7 @@ type ArrangeSidebarRequest struct {
 	//	*ArrangeSidebarRequest_MoveRepository
 	//	*ArrangeSidebarRequest_PlaceWorkspace
 	//	*ArrangeSidebarRequest_PlaceWorkspaces
+	//	*ArrangeSidebarRequest_CreateAgentSubsection
 	Change        isArrangeSidebarRequest_Change `protobuf_oneof:"change"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -165,6 +166,15 @@ func (x *ArrangeSidebarRequest) GetPlaceWorkspaces() *ArrangePlaceWorkspaces {
 	return nil
 }
 
+func (x *ArrangeSidebarRequest) GetCreateAgentSubsection() *ArrangeCreateAgentSubsection {
+	if x != nil {
+		if x, ok := x.Change.(*ArrangeSidebarRequest_CreateAgentSubsection); ok {
+			return x.CreateAgentSubsection
+		}
+	}
+	return nil
+}
+
 type isArrangeSidebarRequest_Change interface {
 	isArrangeSidebarRequest_Change()
 }
@@ -205,6 +215,12 @@ type ArrangeSidebarRequest_PlaceWorkspaces struct {
 	PlaceWorkspaces *ArrangePlaceWorkspaces `protobuf:"bytes,7,opt,name=place_workspaces,json=placeWorkspaces,proto3,oneof"`
 }
 
+type ArrangeSidebarRequest_CreateAgentSubsection struct {
+	// Add a subsection a workspace's agent creates, with the workspaces it
+	// gathers, in one change.
+	CreateAgentSubsection *ArrangeCreateAgentSubsection `protobuf:"bytes,8,opt,name=create_agent_subsection,json=createAgentSubsection,proto3,oneof"`
+}
+
 func (*ArrangeSidebarRequest_CreateSubsection) isArrangeSidebarRequest_Change() {}
 
 func (*ArrangeSidebarRequest_RenameSubsection) isArrangeSidebarRequest_Change() {}
@@ -218,6 +234,89 @@ func (*ArrangeSidebarRequest_MoveRepository) isArrangeSidebarRequest_Change() {}
 func (*ArrangeSidebarRequest_PlaceWorkspace) isArrangeSidebarRequest_Change() {}
 
 func (*ArrangeSidebarRequest_PlaceWorkspaces) isArrangeSidebarRequest_Change() {}
+
+func (*ArrangeSidebarRequest_CreateAgentSubsection) isArrangeSidebarRequest_Change() {}
+
+// Add a subsection named `name`, CREATED BY workspace `created_by`'s agent,
+// at the bottom of its workspaces' repository, and put the families of
+// `workspaces` in it, in that order, as one change.
+//
+// AN AGENT-CREATED SUBSECTION LASTS ONLY WHILE IT HAS A CONSTITUENT (owner
+// request, 2026-10-26): the change that leaves it with no open workspace (a
+// close, a landing, a placement elsewhere) deletes it, its closed families
+// returning to no subsection. A subsection the user creates
+// (ArrangeCreateSubsection) survives empty. The placed families keep their
+// one-shot marks, as ArrangePlaceWorkspace.keep_one_shot says: an agent
+// filing workspaces is no drag.
+//
+// An agent creates one when a new workspace belongs in no existing
+// subsection but belongs with related workspaces in no subsection: it gathers
+// them, itself included.
+type ArrangeCreateAgentSubsection struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The workspace whose agent creates the subsection. Required.
+	CreatedBy *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	// The subsection's drawn label, refused and trimmed as
+	// ArrangeCreateSubsection.name is.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// At least one, no workspace twice (InvalidArgument otherwise), all of one
+	// repository (other_repository), at least one of them open
+	// (no_open_workspace). Each stands for its family's root.
+	Workspaces    []*v1.WorkspaceRef `protobuf:"bytes,3,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArrangeCreateAgentSubsection) Reset() {
+	*x = ArrangeCreateAgentSubsection{}
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArrangeCreateAgentSubsection) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArrangeCreateAgentSubsection) ProtoMessage() {}
+
+func (x *ArrangeCreateAgentSubsection) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArrangeCreateAgentSubsection.ProtoReflect.Descriptor instead.
+func (*ArrangeCreateAgentSubsection) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ArrangeCreateAgentSubsection) GetCreatedBy() *v1.WorkspaceRef {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return nil
+}
+
+func (x *ArrangeCreateAgentSubsection) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ArrangeCreateAgentSubsection) GetWorkspaces() []*v1.WorkspaceRef {
+	if x != nil {
+		return x.Workspaces
+	}
+	return nil
+}
 
 // Add a subsection named `name` at the bottom of the repository, after
 // every entry.
@@ -234,7 +333,7 @@ type ArrangeCreateSubsection struct {
 
 func (x *ArrangeCreateSubsection) Reset() {
 	*x = ArrangeCreateSubsection{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -246,7 +345,7 @@ func (x *ArrangeCreateSubsection) String() string {
 func (*ArrangeCreateSubsection) ProtoMessage() {}
 
 func (x *ArrangeCreateSubsection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -259,7 +358,7 @@ func (x *ArrangeCreateSubsection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeCreateSubsection.ProtoReflect.Descriptor instead.
 func (*ArrangeCreateSubsection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ArrangeCreateSubsection) GetRepository() *v1.RepositoryRef {
@@ -288,7 +387,7 @@ type ArrangeRenameSubsection struct {
 
 func (x *ArrangeRenameSubsection) Reset() {
 	*x = ArrangeRenameSubsection{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -300,7 +399,7 @@ func (x *ArrangeRenameSubsection) String() string {
 func (*ArrangeRenameSubsection) ProtoMessage() {}
 
 func (x *ArrangeRenameSubsection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -313,7 +412,7 @@ func (x *ArrangeRenameSubsection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeRenameSubsection.ProtoReflect.Descriptor instead.
 func (*ArrangeRenameSubsection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ArrangeRenameSubsection) GetSubsection() *SubsectionRef {
@@ -342,7 +441,7 @@ type ArrangeDeleteSubsection struct {
 
 func (x *ArrangeDeleteSubsection) Reset() {
 	*x = ArrangeDeleteSubsection{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -354,7 +453,7 @@ func (x *ArrangeDeleteSubsection) String() string {
 func (*ArrangeDeleteSubsection) ProtoMessage() {}
 
 func (x *ArrangeDeleteSubsection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -367,7 +466,7 @@ func (x *ArrangeDeleteSubsection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeDeleteSubsection.ProtoReflect.Descriptor instead.
 func (*ArrangeDeleteSubsection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ArrangeDeleteSubsection) GetSubsection() *SubsectionRef {
@@ -396,7 +495,7 @@ type ArrangeMoveSubsection struct {
 
 func (x *ArrangeMoveSubsection) Reset() {
 	*x = ArrangeMoveSubsection{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -408,7 +507,7 @@ func (x *ArrangeMoveSubsection) String() string {
 func (*ArrangeMoveSubsection) ProtoMessage() {}
 
 func (x *ArrangeMoveSubsection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -421,7 +520,7 @@ func (x *ArrangeMoveSubsection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeMoveSubsection.ProtoReflect.Descriptor instead.
 func (*ArrangeMoveSubsection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ArrangeMoveSubsection) GetSubsection() *SubsectionRef {
@@ -511,7 +610,7 @@ type ArrangeMoveRepository struct {
 
 func (x *ArrangeMoveRepository) Reset() {
 	*x = ArrangeMoveRepository{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -523,7 +622,7 @@ func (x *ArrangeMoveRepository) String() string {
 func (*ArrangeMoveRepository) ProtoMessage() {}
 
 func (x *ArrangeMoveRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -536,7 +635,7 @@ func (x *ArrangeMoveRepository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeMoveRepository.ProtoReflect.Descriptor instead.
 func (*ArrangeMoveRepository) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ArrangeMoveRepository) GetRepository() *v1.RepositoryRef {
@@ -638,7 +737,7 @@ type ArrangePlaceWorkspace struct {
 
 func (x *ArrangePlaceWorkspace) Reset() {
 	*x = ArrangePlaceWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -650,7 +749,7 @@ func (x *ArrangePlaceWorkspace) String() string {
 func (*ArrangePlaceWorkspace) ProtoMessage() {}
 
 func (x *ArrangePlaceWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -663,7 +762,7 @@ func (x *ArrangePlaceWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangePlaceWorkspace.ProtoReflect.Descriptor instead.
 func (*ArrangePlaceWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ArrangePlaceWorkspace) GetWorkspace() *v1.WorkspaceRef {
@@ -823,7 +922,7 @@ type ArrangePlaceWorkspaces struct {
 
 func (x *ArrangePlaceWorkspaces) Reset() {
 	*x = ArrangePlaceWorkspaces{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -835,7 +934,7 @@ func (x *ArrangePlaceWorkspaces) String() string {
 func (*ArrangePlaceWorkspaces) ProtoMessage() {}
 
 func (x *ArrangePlaceWorkspaces) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -848,7 +947,7 @@ func (x *ArrangePlaceWorkspaces) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangePlaceWorkspaces.ProtoReflect.Descriptor instead.
 func (*ArrangePlaceWorkspaces) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ArrangePlaceWorkspaces) GetWorkspaces() []*v1.WorkspaceRef {
@@ -977,7 +1076,7 @@ type ArrangeNoSubsection struct {
 
 func (x *ArrangeNoSubsection) Reset() {
 	*x = ArrangeNoSubsection{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -989,7 +1088,7 @@ func (x *ArrangeNoSubsection) String() string {
 func (*ArrangeNoSubsection) ProtoMessage() {}
 
 func (x *ArrangeNoSubsection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1002,7 +1101,7 @@ func (x *ArrangeNoSubsection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeNoSubsection.ProtoReflect.Descriptor instead.
 func (*ArrangeNoSubsection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{9}
 }
 
 // After every other item of the list. DELIBERATELY EMPTY: the arm is the
@@ -1015,7 +1114,7 @@ type ArrangeEnd struct {
 
 func (x *ArrangeEnd) Reset() {
 	*x = ArrangeEnd{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1027,7 +1126,7 @@ func (x *ArrangeEnd) String() string {
 func (*ArrangeEnd) ProtoMessage() {}
 
 func (x *ArrangeEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1040,7 +1139,7 @@ func (x *ArrangeEnd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeEnd.ProtoReflect.Descriptor instead.
 func (*ArrangeEnd) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{10}
 }
 
 // THE ARM IS THE OUTCOME.
@@ -1057,7 +1156,7 @@ type ArrangeSidebarResponse struct {
 
 func (x *ArrangeSidebarResponse) Reset() {
 	*x = ArrangeSidebarResponse{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1069,7 +1168,7 @@ func (x *ArrangeSidebarResponse) String() string {
 func (*ArrangeSidebarResponse) ProtoMessage() {}
 
 func (x *ArrangeSidebarResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1082,7 +1181,7 @@ func (x *ArrangeSidebarResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeSidebarResponse.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ArrangeSidebarResponse) GetResult() isArrangeSidebarResponse_Result {
@@ -1139,7 +1238,8 @@ type ArrangeSidebarSuccess struct {
 	// daemon has resolved no roster yet.
 	RosterRevision uint64 `protobuf:"varint,1,opt,name=roster_revision,json=rosterRevision,proto3" json:"roster_revision,omitempty"`
 	// THE SUBSECTION THE CHANGE CREATED, present exactly when the change was
-	// create_subsection: the ref later changes name it by.
+	// create_subsection or create_agent_subsection: the ref later changes name
+	// it by.
 	Created       *SubsectionRef `protobuf:"bytes,2,opt,name=created,proto3,oneof" json:"created,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1147,7 +1247,7 @@ type ArrangeSidebarSuccess struct {
 
 func (x *ArrangeSidebarSuccess) Reset() {
 	*x = ArrangeSidebarSuccess{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1159,7 +1259,7 @@ func (x *ArrangeSidebarSuccess) String() string {
 func (*ArrangeSidebarSuccess) ProtoMessage() {}
 
 func (x *ArrangeSidebarSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1172,7 +1272,7 @@ func (x *ArrangeSidebarSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeSidebarSuccess.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ArrangeSidebarSuccess) GetRosterRevision() uint64 {
@@ -1205,6 +1305,7 @@ type ArrangeSidebarError struct {
 	//	*ArrangeSidebarError_BlankName
 	//	*ArrangeSidebarError_OtherRepository
 	//	*ArrangeSidebarError_AnchorElsewhere
+	//	*ArrangeSidebarError_NoOpenWorkspace
 	Cause         isArrangeSidebarError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1212,7 +1313,7 @@ type ArrangeSidebarError struct {
 
 func (x *ArrangeSidebarError) Reset() {
 	*x = ArrangeSidebarError{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1224,7 +1325,7 @@ func (x *ArrangeSidebarError) String() string {
 func (*ArrangeSidebarError) ProtoMessage() {}
 
 func (x *ArrangeSidebarError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1237,7 +1338,7 @@ func (x *ArrangeSidebarError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeSidebarError.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ArrangeSidebarError) GetCause() isArrangeSidebarError_Cause {
@@ -1328,6 +1429,15 @@ func (x *ArrangeSidebarError) GetAnchorElsewhere() *ArrangeSidebarAnchorElsewher
 	return nil
 }
 
+func (x *ArrangeSidebarError) GetNoOpenWorkspace() *ArrangeSidebarNoOpenWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*ArrangeSidebarError_NoOpenWorkspace); ok {
+			return x.NoOpenWorkspace
+		}
+	}
+	return nil
+}
+
 type isArrangeSidebarError_Cause interface {
 	isArrangeSidebarError_Cause()
 }
@@ -1381,6 +1491,12 @@ type ArrangeSidebarError_AnchorElsewhere struct {
 	AnchorElsewhere *ArrangeSidebarAnchorElsewhere `protobuf:"bytes,9,opt,name=anchor_elsewhere,json=anchorElsewhere,proto3,oneof"`
 }
 
+type ArrangeSidebarError_NoOpenWorkspace struct {
+	// An agent-created subsection would hold no open workspace, so the change
+	// that created it would delete it.
+	NoOpenWorkspace *ArrangeSidebarNoOpenWorkspace `protobuf:"bytes,11,opt,name=no_open_workspace,json=noOpenWorkspace,proto3,oneof"`
+}
+
 func (*ArrangeSidebarError_UnknownRepository) isArrangeSidebarError_Cause() {}
 
 func (*ArrangeSidebarError_UnknownSubsection) isArrangeSidebarError_Cause() {}
@@ -1399,6 +1515,8 @@ func (*ArrangeSidebarError_OtherRepository) isArrangeSidebarError_Cause() {}
 
 func (*ArrangeSidebarError_AnchorElsewhere) isArrangeSidebarError_Cause() {}
 
+func (*ArrangeSidebarError_NoOpenWorkspace) isArrangeSidebarError_Cause() {}
+
 type ArrangeSidebarUnknownRepository struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1407,7 +1525,7 @@ type ArrangeSidebarUnknownRepository struct {
 
 func (x *ArrangeSidebarUnknownRepository) Reset() {
 	*x = ArrangeSidebarUnknownRepository{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1419,7 +1537,7 @@ func (x *ArrangeSidebarUnknownRepository) String() string {
 func (*ArrangeSidebarUnknownRepository) ProtoMessage() {}
 
 func (x *ArrangeSidebarUnknownRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1432,7 +1550,7 @@ func (x *ArrangeSidebarUnknownRepository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeSidebarUnknownRepository.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarUnknownRepository) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{14}
 }
 
 // Names the subsection ref no subsection matches.
@@ -1445,7 +1563,7 @@ type ArrangeSidebarUnknownSubsection struct {
 
 func (x *ArrangeSidebarUnknownSubsection) Reset() {
 	*x = ArrangeSidebarUnknownSubsection{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1457,7 +1575,7 @@ func (x *ArrangeSidebarUnknownSubsection) String() string {
 func (*ArrangeSidebarUnknownSubsection) ProtoMessage() {}
 
 func (x *ArrangeSidebarUnknownSubsection) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1470,7 +1588,7 @@ func (x *ArrangeSidebarUnknownSubsection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeSidebarUnknownSubsection.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarUnknownSubsection) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ArrangeSidebarUnknownSubsection) GetSubsection() *SubsectionRef {
@@ -1490,7 +1608,7 @@ type ArrangeSidebarUnknownWorkspace struct {
 
 func (x *ArrangeSidebarUnknownWorkspace) Reset() {
 	*x = ArrangeSidebarUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1502,7 +1620,7 @@ func (x *ArrangeSidebarUnknownWorkspace) String() string {
 func (*ArrangeSidebarUnknownWorkspace) ProtoMessage() {}
 
 func (x *ArrangeSidebarUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1515,7 +1633,7 @@ func (x *ArrangeSidebarUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeSidebarUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ArrangeSidebarUnknownWorkspace) GetWorkspace() *v1.WorkspaceRef {
@@ -1536,7 +1654,7 @@ type ArrangeSidebarWorkspaceRefMismatch struct {
 
 func (x *ArrangeSidebarWorkspaceRefMismatch) Reset() {
 	*x = ArrangeSidebarWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1548,7 +1666,7 @@ func (x *ArrangeSidebarWorkspaceRefMismatch) String() string {
 func (*ArrangeSidebarWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *ArrangeSidebarWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1561,7 +1679,7 @@ func (x *ArrangeSidebarWorkspaceRefMismatch) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ArrangeSidebarWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ArrangeSidebarWorkspaceRefMismatch) GetWorkspace() *v1.WorkspaceRef {
@@ -1588,7 +1706,7 @@ type ArrangeSidebarTransferringAway struct {
 
 func (x *ArrangeSidebarTransferringAway) Reset() {
 	*x = ArrangeSidebarTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1600,7 +1718,7 @@ func (x *ArrangeSidebarTransferringAway) String() string {
 func (*ArrangeSidebarTransferringAway) ProtoMessage() {}
 
 func (x *ArrangeSidebarTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1613,7 +1731,7 @@ func (x *ArrangeSidebarTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeSidebarTransferringAway.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ArrangeSidebarTransferringAway) GetAddress() string {
@@ -1632,7 +1750,7 @@ type ArrangeSidebarNotYetAdopted struct {
 
 func (x *ArrangeSidebarNotYetAdopted) Reset() {
 	*x = ArrangeSidebarNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1644,7 +1762,7 @@ func (x *ArrangeSidebarNotYetAdopted) String() string {
 func (*ArrangeSidebarNotYetAdopted) ProtoMessage() {}
 
 func (x *ArrangeSidebarNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1657,7 +1775,7 @@ func (x *ArrangeSidebarNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeSidebarNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{19}
 }
 
 // DELIBERATELY EMPTY: the arm is the fact.
@@ -1669,7 +1787,7 @@ type ArrangeSidebarBlankName struct {
 
 func (x *ArrangeSidebarBlankName) Reset() {
 	*x = ArrangeSidebarBlankName{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1681,7 +1799,7 @@ func (x *ArrangeSidebarBlankName) String() string {
 func (*ArrangeSidebarBlankName) ProtoMessage() {}
 
 func (x *ArrangeSidebarBlankName) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[19]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1694,7 +1812,7 @@ func (x *ArrangeSidebarBlankName) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeSidebarBlankName.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarBlankName) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{19}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{20}
 }
 
 // DELIBERATELY EMPTY: the arm is the fact.
@@ -1706,7 +1824,7 @@ type ArrangeSidebarOtherRepository struct {
 
 func (x *ArrangeSidebarOtherRepository) Reset() {
 	*x = ArrangeSidebarOtherRepository{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1718,7 +1836,7 @@ func (x *ArrangeSidebarOtherRepository) String() string {
 func (*ArrangeSidebarOtherRepository) ProtoMessage() {}
 
 func (x *ArrangeSidebarOtherRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[20]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1731,7 +1849,7 @@ func (x *ArrangeSidebarOtherRepository) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeSidebarOtherRepository.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarOtherRepository) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{20}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{21}
 }
 
 // DELIBERATELY EMPTY: the arm is the fact.
@@ -1743,7 +1861,7 @@ type ArrangeSidebarAnchorElsewhere struct {
 
 func (x *ArrangeSidebarAnchorElsewhere) Reset() {
 	*x = ArrangeSidebarAnchorElsewhere{}
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1755,7 +1873,7 @@ func (x *ArrangeSidebarAnchorElsewhere) String() string {
 func (*ArrangeSidebarAnchorElsewhere) ProtoMessage() {}
 
 func (x *ArrangeSidebarAnchorElsewhere) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[21]
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1768,14 +1886,51 @@ func (x *ArrangeSidebarAnchorElsewhere) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArrangeSidebarAnchorElsewhere.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarAnchorElsewhere) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{21}
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{22}
+}
+
+// DELIBERATELY EMPTY: the arm is the fact.
+type ArrangeSidebarNoOpenWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArrangeSidebarNoOpenWorkspace) Reset() {
+	*x = ArrangeSidebarNoOpenWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArrangeSidebarNoOpenWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArrangeSidebarNoOpenWorkspace) ProtoMessage() {}
+
+func (x *ArrangeSidebarNoOpenWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArrangeSidebarNoOpenWorkspace.ProtoReflect.Descriptor instead.
+func (*ArrangeSidebarNoOpenWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{23}
 }
 
 var File_agentrepl_v1_endpoint_arrange_sidebar_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc = "" +
 	"\n" +
-	"+agentrepl/v1/endpoint_arrange_sidebar.proto\x12\fagentrepl.v1\x1a\x1dagentrepl/v1/subsection.proto\x1a\x1cworkspace/v1/workspace.proto\"\xe6\x04\n" +
+	"+agentrepl/v1/endpoint_arrange_sidebar.proto\x12\fagentrepl.v1\x1a\x1dagentrepl/v1/subsection.proto\x1a\x1cworkspace/v1/workspace.proto\"\xcc\x05\n" +
 	"\x15ArrangeSidebarRequest\x12T\n" +
 	"\x11create_subsection\x18\x01 \x01(\v2%.agentrepl.v1.ArrangeCreateSubsectionH\x00R\x10createSubsection\x12T\n" +
 	"\x11rename_subsection\x18\x02 \x01(\v2%.agentrepl.v1.ArrangeRenameSubsectionH\x00R\x10renameSubsection\x12T\n" +
@@ -1783,8 +1938,16 @@ const file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc = "" +
 	"\x0fmove_subsection\x18\x04 \x01(\v2#.agentrepl.v1.ArrangeMoveSubsectionH\x00R\x0emoveSubsection\x12N\n" +
 	"\x0fmove_repository\x18\x05 \x01(\v2#.agentrepl.v1.ArrangeMoveRepositoryH\x00R\x0emoveRepository\x12N\n" +
 	"\x0fplace_workspace\x18\x06 \x01(\v2#.agentrepl.v1.ArrangePlaceWorkspaceH\x00R\x0eplaceWorkspace\x12Q\n" +
-	"\x10place_workspaces\x18\a \x01(\v2$.agentrepl.v1.ArrangePlaceWorkspacesH\x00R\x0fplaceWorkspacesB\b\n" +
-	"\x06change\"j\n" +
+	"\x10place_workspaces\x18\a \x01(\v2$.agentrepl.v1.ArrangePlaceWorkspacesH\x00R\x0fplaceWorkspaces\x12d\n" +
+	"\x17create_agent_subsection\x18\b \x01(\v2*.agentrepl.v1.ArrangeCreateAgentSubsectionH\x00R\x15createAgentSubsectionB\b\n" +
+	"\x06change\"\xa9\x01\n" +
+	"\x1cArrangeCreateAgentSubsection\x129\n" +
+	"\n" +
+	"created_by\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tcreatedBy\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12:\n" +
+	"\n" +
+	"workspaces\x18\x03 \x03(\v2\x1a.workspace.v1.WorkspaceRefR\n" +
+	"workspaces\"j\n" +
 	"\x17ArrangeCreateSubsection\x12;\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
@@ -1851,7 +2014,7 @@ const file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc = "" +
 	"\x0froster_revision\x18\x01 \x01(\x04R\x0erosterRevision\x12:\n" +
 	"\acreated\x18\x02 \x01(\v2\x1b.agentrepl.v1.SubsectionRefH\x00R\acreated\x88\x01\x01B\n" +
 	"\n" +
-	"\b_created\"\xe5\x06\n" +
+	"\b_created\"\xc0\a\n" +
 	"\x13ArrangeSidebarError\x12^\n" +
 	"\x12unknown_repository\x18\x01 \x01(\v2-.agentrepl.v1.ArrangeSidebarUnknownRepositoryH\x00R\x11unknownRepository\x12^\n" +
 	"\x12unknown_subsection\x18\x02 \x01(\v2-.agentrepl.v1.ArrangeSidebarUnknownSubsectionH\x00R\x11unknownSubsection\x12[\n" +
@@ -1862,7 +2025,8 @@ const file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc = "" +
 	"\n" +
 	"blank_name\x18\a \x01(\v2%.agentrepl.v1.ArrangeSidebarBlankNameH\x00R\tblankName\x12X\n" +
 	"\x10other_repository\x18\b \x01(\v2+.agentrepl.v1.ArrangeSidebarOtherRepositoryH\x00R\x0fotherRepository\x12X\n" +
-	"\x10anchor_elsewhere\x18\t \x01(\v2+.agentrepl.v1.ArrangeSidebarAnchorElsewhereH\x00R\x0fanchorElsewhereB\a\n" +
+	"\x10anchor_elsewhere\x18\t \x01(\v2+.agentrepl.v1.ArrangeSidebarAnchorElsewhereH\x00R\x0fanchorElsewhere\x12Y\n" +
+	"\x11no_open_workspace\x18\v \x01(\v2+.agentrepl.v1.ArrangeSidebarNoOpenWorkspaceH\x00R\x0fnoOpenWorkspaceB\a\n" +
 	"\x05causeJ\x04\b\n" +
 	"\x10\vR\n" +
 	"has_parent\"!\n" +
@@ -1881,7 +2045,8 @@ const file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc = "" +
 	"\x1bArrangeSidebarNotYetAdopted\"\x19\n" +
 	"\x17ArrangeSidebarBlankName\"\x1f\n" +
 	"\x1dArrangeSidebarOtherRepository\"\x1f\n" +
-	"\x1dArrangeSidebarAnchorElsewhereB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1dArrangeSidebarAnchorElsewhere\"\x1f\n" +
+	"\x1dArrangeSidebarNoOpenWorkspaceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescOnce sync.Once
@@ -1895,84 +2060,90 @@ func file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_agentrepl_v1_endpoint_arrange_sidebar_proto_goTypes = []any{
 	(*ArrangeSidebarRequest)(nil),              // 0: agentrepl.v1.ArrangeSidebarRequest
-	(*ArrangeCreateSubsection)(nil),            // 1: agentrepl.v1.ArrangeCreateSubsection
-	(*ArrangeRenameSubsection)(nil),            // 2: agentrepl.v1.ArrangeRenameSubsection
-	(*ArrangeDeleteSubsection)(nil),            // 3: agentrepl.v1.ArrangeDeleteSubsection
-	(*ArrangeMoveSubsection)(nil),              // 4: agentrepl.v1.ArrangeMoveSubsection
-	(*ArrangeMoveRepository)(nil),              // 5: agentrepl.v1.ArrangeMoveRepository
-	(*ArrangePlaceWorkspace)(nil),              // 6: agentrepl.v1.ArrangePlaceWorkspace
-	(*ArrangePlaceWorkspaces)(nil),             // 7: agentrepl.v1.ArrangePlaceWorkspaces
-	(*ArrangeNoSubsection)(nil),                // 8: agentrepl.v1.ArrangeNoSubsection
-	(*ArrangeEnd)(nil),                         // 9: agentrepl.v1.ArrangeEnd
-	(*ArrangeSidebarResponse)(nil),             // 10: agentrepl.v1.ArrangeSidebarResponse
-	(*ArrangeSidebarSuccess)(nil),              // 11: agentrepl.v1.ArrangeSidebarSuccess
-	(*ArrangeSidebarError)(nil),                // 12: agentrepl.v1.ArrangeSidebarError
-	(*ArrangeSidebarUnknownRepository)(nil),    // 13: agentrepl.v1.ArrangeSidebarUnknownRepository
-	(*ArrangeSidebarUnknownSubsection)(nil),    // 14: agentrepl.v1.ArrangeSidebarUnknownSubsection
-	(*ArrangeSidebarUnknownWorkspace)(nil),     // 15: agentrepl.v1.ArrangeSidebarUnknownWorkspace
-	(*ArrangeSidebarWorkspaceRefMismatch)(nil), // 16: agentrepl.v1.ArrangeSidebarWorkspaceRefMismatch
-	(*ArrangeSidebarTransferringAway)(nil),     // 17: agentrepl.v1.ArrangeSidebarTransferringAway
-	(*ArrangeSidebarNotYetAdopted)(nil),        // 18: agentrepl.v1.ArrangeSidebarNotYetAdopted
-	(*ArrangeSidebarBlankName)(nil),            // 19: agentrepl.v1.ArrangeSidebarBlankName
-	(*ArrangeSidebarOtherRepository)(nil),      // 20: agentrepl.v1.ArrangeSidebarOtherRepository
-	(*ArrangeSidebarAnchorElsewhere)(nil),      // 21: agentrepl.v1.ArrangeSidebarAnchorElsewhere
-	(*v1.RepositoryRef)(nil),                   // 22: workspace.v1.RepositoryRef
-	(*SubsectionRef)(nil),                      // 23: agentrepl.v1.SubsectionRef
+	(*ArrangeCreateAgentSubsection)(nil),       // 1: agentrepl.v1.ArrangeCreateAgentSubsection
+	(*ArrangeCreateSubsection)(nil),            // 2: agentrepl.v1.ArrangeCreateSubsection
+	(*ArrangeRenameSubsection)(nil),            // 3: agentrepl.v1.ArrangeRenameSubsection
+	(*ArrangeDeleteSubsection)(nil),            // 4: agentrepl.v1.ArrangeDeleteSubsection
+	(*ArrangeMoveSubsection)(nil),              // 5: agentrepl.v1.ArrangeMoveSubsection
+	(*ArrangeMoveRepository)(nil),              // 6: agentrepl.v1.ArrangeMoveRepository
+	(*ArrangePlaceWorkspace)(nil),              // 7: agentrepl.v1.ArrangePlaceWorkspace
+	(*ArrangePlaceWorkspaces)(nil),             // 8: agentrepl.v1.ArrangePlaceWorkspaces
+	(*ArrangeNoSubsection)(nil),                // 9: agentrepl.v1.ArrangeNoSubsection
+	(*ArrangeEnd)(nil),                         // 10: agentrepl.v1.ArrangeEnd
+	(*ArrangeSidebarResponse)(nil),             // 11: agentrepl.v1.ArrangeSidebarResponse
+	(*ArrangeSidebarSuccess)(nil),              // 12: agentrepl.v1.ArrangeSidebarSuccess
+	(*ArrangeSidebarError)(nil),                // 13: agentrepl.v1.ArrangeSidebarError
+	(*ArrangeSidebarUnknownRepository)(nil),    // 14: agentrepl.v1.ArrangeSidebarUnknownRepository
+	(*ArrangeSidebarUnknownSubsection)(nil),    // 15: agentrepl.v1.ArrangeSidebarUnknownSubsection
+	(*ArrangeSidebarUnknownWorkspace)(nil),     // 16: agentrepl.v1.ArrangeSidebarUnknownWorkspace
+	(*ArrangeSidebarWorkspaceRefMismatch)(nil), // 17: agentrepl.v1.ArrangeSidebarWorkspaceRefMismatch
+	(*ArrangeSidebarTransferringAway)(nil),     // 18: agentrepl.v1.ArrangeSidebarTransferringAway
+	(*ArrangeSidebarNotYetAdopted)(nil),        // 19: agentrepl.v1.ArrangeSidebarNotYetAdopted
+	(*ArrangeSidebarBlankName)(nil),            // 20: agentrepl.v1.ArrangeSidebarBlankName
+	(*ArrangeSidebarOtherRepository)(nil),      // 21: agentrepl.v1.ArrangeSidebarOtherRepository
+	(*ArrangeSidebarAnchorElsewhere)(nil),      // 22: agentrepl.v1.ArrangeSidebarAnchorElsewhere
+	(*ArrangeSidebarNoOpenWorkspace)(nil),      // 23: agentrepl.v1.ArrangeSidebarNoOpenWorkspace
 	(*v1.WorkspaceRef)(nil),                    // 24: workspace.v1.WorkspaceRef
+	(*v1.RepositoryRef)(nil),                   // 25: workspace.v1.RepositoryRef
+	(*SubsectionRef)(nil),                      // 26: agentrepl.v1.SubsectionRef
 }
 var file_agentrepl_v1_endpoint_arrange_sidebar_proto_depIdxs = []int32{
-	1,  // 0: agentrepl.v1.ArrangeSidebarRequest.create_subsection:type_name -> agentrepl.v1.ArrangeCreateSubsection
-	2,  // 1: agentrepl.v1.ArrangeSidebarRequest.rename_subsection:type_name -> agentrepl.v1.ArrangeRenameSubsection
-	3,  // 2: agentrepl.v1.ArrangeSidebarRequest.delete_subsection:type_name -> agentrepl.v1.ArrangeDeleteSubsection
-	4,  // 3: agentrepl.v1.ArrangeSidebarRequest.move_subsection:type_name -> agentrepl.v1.ArrangeMoveSubsection
-	5,  // 4: agentrepl.v1.ArrangeSidebarRequest.move_repository:type_name -> agentrepl.v1.ArrangeMoveRepository
-	6,  // 5: agentrepl.v1.ArrangeSidebarRequest.place_workspace:type_name -> agentrepl.v1.ArrangePlaceWorkspace
-	7,  // 6: agentrepl.v1.ArrangeSidebarRequest.place_workspaces:type_name -> agentrepl.v1.ArrangePlaceWorkspaces
-	22, // 7: agentrepl.v1.ArrangeCreateSubsection.repository:type_name -> workspace.v1.RepositoryRef
-	23, // 8: agentrepl.v1.ArrangeRenameSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
-	23, // 9: agentrepl.v1.ArrangeDeleteSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
-	23, // 10: agentrepl.v1.ArrangeMoveSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
-	23, // 11: agentrepl.v1.ArrangeMoveSubsection.before:type_name -> agentrepl.v1.SubsectionRef
-	9,  // 12: agentrepl.v1.ArrangeMoveSubsection.end:type_name -> agentrepl.v1.ArrangeEnd
-	24, // 13: agentrepl.v1.ArrangeMoveSubsection.before_workspace:type_name -> workspace.v1.WorkspaceRef
-	22, // 14: agentrepl.v1.ArrangeMoveRepository.repository:type_name -> workspace.v1.RepositoryRef
-	22, // 15: agentrepl.v1.ArrangeMoveRepository.before:type_name -> workspace.v1.RepositoryRef
-	9,  // 16: agentrepl.v1.ArrangeMoveRepository.end:type_name -> agentrepl.v1.ArrangeEnd
-	24, // 17: agentrepl.v1.ArrangePlaceWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	8,  // 18: agentrepl.v1.ArrangePlaceWorkspace.no_subsection:type_name -> agentrepl.v1.ArrangeNoSubsection
-	23, // 19: agentrepl.v1.ArrangePlaceWorkspace.subsection:type_name -> agentrepl.v1.SubsectionRef
-	24, // 20: agentrepl.v1.ArrangePlaceWorkspace.before:type_name -> workspace.v1.WorkspaceRef
-	9,  // 21: agentrepl.v1.ArrangePlaceWorkspace.end:type_name -> agentrepl.v1.ArrangeEnd
-	23, // 22: agentrepl.v1.ArrangePlaceWorkspace.before_subsection:type_name -> agentrepl.v1.SubsectionRef
-	24, // 23: agentrepl.v1.ArrangePlaceWorkspaces.workspaces:type_name -> workspace.v1.WorkspaceRef
-	8,  // 24: agentrepl.v1.ArrangePlaceWorkspaces.no_subsection:type_name -> agentrepl.v1.ArrangeNoSubsection
-	23, // 25: agentrepl.v1.ArrangePlaceWorkspaces.subsection:type_name -> agentrepl.v1.SubsectionRef
-	24, // 26: agentrepl.v1.ArrangePlaceWorkspaces.before:type_name -> workspace.v1.WorkspaceRef
-	9,  // 27: agentrepl.v1.ArrangePlaceWorkspaces.end:type_name -> agentrepl.v1.ArrangeEnd
-	23, // 28: agentrepl.v1.ArrangePlaceWorkspaces.before_subsection:type_name -> agentrepl.v1.SubsectionRef
-	11, // 29: agentrepl.v1.ArrangeSidebarResponse.success:type_name -> agentrepl.v1.ArrangeSidebarSuccess
-	12, // 30: agentrepl.v1.ArrangeSidebarResponse.error:type_name -> agentrepl.v1.ArrangeSidebarError
-	23, // 31: agentrepl.v1.ArrangeSidebarSuccess.created:type_name -> agentrepl.v1.SubsectionRef
-	13, // 32: agentrepl.v1.ArrangeSidebarError.unknown_repository:type_name -> agentrepl.v1.ArrangeSidebarUnknownRepository
-	14, // 33: agentrepl.v1.ArrangeSidebarError.unknown_subsection:type_name -> agentrepl.v1.ArrangeSidebarUnknownSubsection
-	15, // 34: agentrepl.v1.ArrangeSidebarError.unknown_workspace:type_name -> agentrepl.v1.ArrangeSidebarUnknownWorkspace
-	16, // 35: agentrepl.v1.ArrangeSidebarError.workspace_ref_mismatch:type_name -> agentrepl.v1.ArrangeSidebarWorkspaceRefMismatch
-	17, // 36: agentrepl.v1.ArrangeSidebarError.transferring_away:type_name -> agentrepl.v1.ArrangeSidebarTransferringAway
-	18, // 37: agentrepl.v1.ArrangeSidebarError.not_yet_adopted:type_name -> agentrepl.v1.ArrangeSidebarNotYetAdopted
-	19, // 38: agentrepl.v1.ArrangeSidebarError.blank_name:type_name -> agentrepl.v1.ArrangeSidebarBlankName
-	20, // 39: agentrepl.v1.ArrangeSidebarError.other_repository:type_name -> agentrepl.v1.ArrangeSidebarOtherRepository
-	21, // 40: agentrepl.v1.ArrangeSidebarError.anchor_elsewhere:type_name -> agentrepl.v1.ArrangeSidebarAnchorElsewhere
-	23, // 41: agentrepl.v1.ArrangeSidebarUnknownSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
-	24, // 42: agentrepl.v1.ArrangeSidebarUnknownWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	24, // 43: agentrepl.v1.ArrangeSidebarWorkspaceRefMismatch.workspace:type_name -> workspace.v1.WorkspaceRef
-	44, // [44:44] is the sub-list for method output_type
-	44, // [44:44] is the sub-list for method input_type
-	44, // [44:44] is the sub-list for extension type_name
-	44, // [44:44] is the sub-list for extension extendee
-	0,  // [0:44] is the sub-list for field type_name
+	2,  // 0: agentrepl.v1.ArrangeSidebarRequest.create_subsection:type_name -> agentrepl.v1.ArrangeCreateSubsection
+	3,  // 1: agentrepl.v1.ArrangeSidebarRequest.rename_subsection:type_name -> agentrepl.v1.ArrangeRenameSubsection
+	4,  // 2: agentrepl.v1.ArrangeSidebarRequest.delete_subsection:type_name -> agentrepl.v1.ArrangeDeleteSubsection
+	5,  // 3: agentrepl.v1.ArrangeSidebarRequest.move_subsection:type_name -> agentrepl.v1.ArrangeMoveSubsection
+	6,  // 4: agentrepl.v1.ArrangeSidebarRequest.move_repository:type_name -> agentrepl.v1.ArrangeMoveRepository
+	7,  // 5: agentrepl.v1.ArrangeSidebarRequest.place_workspace:type_name -> agentrepl.v1.ArrangePlaceWorkspace
+	8,  // 6: agentrepl.v1.ArrangeSidebarRequest.place_workspaces:type_name -> agentrepl.v1.ArrangePlaceWorkspaces
+	1,  // 7: agentrepl.v1.ArrangeSidebarRequest.create_agent_subsection:type_name -> agentrepl.v1.ArrangeCreateAgentSubsection
+	24, // 8: agentrepl.v1.ArrangeCreateAgentSubsection.created_by:type_name -> workspace.v1.WorkspaceRef
+	24, // 9: agentrepl.v1.ArrangeCreateAgentSubsection.workspaces:type_name -> workspace.v1.WorkspaceRef
+	25, // 10: agentrepl.v1.ArrangeCreateSubsection.repository:type_name -> workspace.v1.RepositoryRef
+	26, // 11: agentrepl.v1.ArrangeRenameSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
+	26, // 12: agentrepl.v1.ArrangeDeleteSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
+	26, // 13: agentrepl.v1.ArrangeMoveSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
+	26, // 14: agentrepl.v1.ArrangeMoveSubsection.before:type_name -> agentrepl.v1.SubsectionRef
+	10, // 15: agentrepl.v1.ArrangeMoveSubsection.end:type_name -> agentrepl.v1.ArrangeEnd
+	24, // 16: agentrepl.v1.ArrangeMoveSubsection.before_workspace:type_name -> workspace.v1.WorkspaceRef
+	25, // 17: agentrepl.v1.ArrangeMoveRepository.repository:type_name -> workspace.v1.RepositoryRef
+	25, // 18: agentrepl.v1.ArrangeMoveRepository.before:type_name -> workspace.v1.RepositoryRef
+	10, // 19: agentrepl.v1.ArrangeMoveRepository.end:type_name -> agentrepl.v1.ArrangeEnd
+	24, // 20: agentrepl.v1.ArrangePlaceWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	9,  // 21: agentrepl.v1.ArrangePlaceWorkspace.no_subsection:type_name -> agentrepl.v1.ArrangeNoSubsection
+	26, // 22: agentrepl.v1.ArrangePlaceWorkspace.subsection:type_name -> agentrepl.v1.SubsectionRef
+	24, // 23: agentrepl.v1.ArrangePlaceWorkspace.before:type_name -> workspace.v1.WorkspaceRef
+	10, // 24: agentrepl.v1.ArrangePlaceWorkspace.end:type_name -> agentrepl.v1.ArrangeEnd
+	26, // 25: agentrepl.v1.ArrangePlaceWorkspace.before_subsection:type_name -> agentrepl.v1.SubsectionRef
+	24, // 26: agentrepl.v1.ArrangePlaceWorkspaces.workspaces:type_name -> workspace.v1.WorkspaceRef
+	9,  // 27: agentrepl.v1.ArrangePlaceWorkspaces.no_subsection:type_name -> agentrepl.v1.ArrangeNoSubsection
+	26, // 28: agentrepl.v1.ArrangePlaceWorkspaces.subsection:type_name -> agentrepl.v1.SubsectionRef
+	24, // 29: agentrepl.v1.ArrangePlaceWorkspaces.before:type_name -> workspace.v1.WorkspaceRef
+	10, // 30: agentrepl.v1.ArrangePlaceWorkspaces.end:type_name -> agentrepl.v1.ArrangeEnd
+	26, // 31: agentrepl.v1.ArrangePlaceWorkspaces.before_subsection:type_name -> agentrepl.v1.SubsectionRef
+	12, // 32: agentrepl.v1.ArrangeSidebarResponse.success:type_name -> agentrepl.v1.ArrangeSidebarSuccess
+	13, // 33: agentrepl.v1.ArrangeSidebarResponse.error:type_name -> agentrepl.v1.ArrangeSidebarError
+	26, // 34: agentrepl.v1.ArrangeSidebarSuccess.created:type_name -> agentrepl.v1.SubsectionRef
+	14, // 35: agentrepl.v1.ArrangeSidebarError.unknown_repository:type_name -> agentrepl.v1.ArrangeSidebarUnknownRepository
+	15, // 36: agentrepl.v1.ArrangeSidebarError.unknown_subsection:type_name -> agentrepl.v1.ArrangeSidebarUnknownSubsection
+	16, // 37: agentrepl.v1.ArrangeSidebarError.unknown_workspace:type_name -> agentrepl.v1.ArrangeSidebarUnknownWorkspace
+	17, // 38: agentrepl.v1.ArrangeSidebarError.workspace_ref_mismatch:type_name -> agentrepl.v1.ArrangeSidebarWorkspaceRefMismatch
+	18, // 39: agentrepl.v1.ArrangeSidebarError.transferring_away:type_name -> agentrepl.v1.ArrangeSidebarTransferringAway
+	19, // 40: agentrepl.v1.ArrangeSidebarError.not_yet_adopted:type_name -> agentrepl.v1.ArrangeSidebarNotYetAdopted
+	20, // 41: agentrepl.v1.ArrangeSidebarError.blank_name:type_name -> agentrepl.v1.ArrangeSidebarBlankName
+	21, // 42: agentrepl.v1.ArrangeSidebarError.other_repository:type_name -> agentrepl.v1.ArrangeSidebarOtherRepository
+	22, // 43: agentrepl.v1.ArrangeSidebarError.anchor_elsewhere:type_name -> agentrepl.v1.ArrangeSidebarAnchorElsewhere
+	23, // 44: agentrepl.v1.ArrangeSidebarError.no_open_workspace:type_name -> agentrepl.v1.ArrangeSidebarNoOpenWorkspace
+	26, // 45: agentrepl.v1.ArrangeSidebarUnknownSubsection.subsection:type_name -> agentrepl.v1.SubsectionRef
+	24, // 46: agentrepl.v1.ArrangeSidebarUnknownWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	24, // 47: agentrepl.v1.ArrangeSidebarWorkspaceRefMismatch.workspace:type_name -> workspace.v1.WorkspaceRef
+	48, // [48:48] is the sub-list for method output_type
+	48, // [48:48] is the sub-list for method input_type
+	48, // [48:48] is the sub-list for extension type_name
+	48, // [48:48] is the sub-list for extension extendee
+	0,  // [0:48] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_arrange_sidebar_proto_init() }
@@ -1989,36 +2160,37 @@ func file_agentrepl_v1_endpoint_arrange_sidebar_proto_init() {
 		(*ArrangeSidebarRequest_MoveRepository)(nil),
 		(*ArrangeSidebarRequest_PlaceWorkspace)(nil),
 		(*ArrangeSidebarRequest_PlaceWorkspaces)(nil),
+		(*ArrangeSidebarRequest_CreateAgentSubsection)(nil),
 	}
-	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[4].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[5].OneofWrappers = []any{
 		(*ArrangeMoveSubsection_Before)(nil),
 		(*ArrangeMoveSubsection_End)(nil),
 		(*ArrangeMoveSubsection_BeforeWorkspace)(nil),
 	}
-	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[5].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[6].OneofWrappers = []any{
 		(*ArrangeMoveRepository_Before)(nil),
 		(*ArrangeMoveRepository_End)(nil),
 	}
-	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[6].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[7].OneofWrappers = []any{
 		(*ArrangePlaceWorkspace_NoSubsection)(nil),
 		(*ArrangePlaceWorkspace_Subsection)(nil),
 		(*ArrangePlaceWorkspace_Before)(nil),
 		(*ArrangePlaceWorkspace_End)(nil),
 		(*ArrangePlaceWorkspace_BeforeSubsection)(nil),
 	}
-	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[7].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[8].OneofWrappers = []any{
 		(*ArrangePlaceWorkspaces_NoSubsection)(nil),
 		(*ArrangePlaceWorkspaces_Subsection)(nil),
 		(*ArrangePlaceWorkspaces_Before)(nil),
 		(*ArrangePlaceWorkspaces_End)(nil),
 		(*ArrangePlaceWorkspaces_BeforeSubsection)(nil),
 	}
-	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[10].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[11].OneofWrappers = []any{
 		(*ArrangeSidebarResponse_Success)(nil),
 		(*ArrangeSidebarResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[11].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[12].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[12].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[13].OneofWrappers = []any{
 		(*ArrangeSidebarError_UnknownRepository)(nil),
 		(*ArrangeSidebarError_UnknownSubsection)(nil),
 		(*ArrangeSidebarError_UnknownWorkspace)(nil),
@@ -2028,6 +2200,7 @@ func file_agentrepl_v1_endpoint_arrange_sidebar_proto_init() {
 		(*ArrangeSidebarError_BlankName)(nil),
 		(*ArrangeSidebarError_OtherRepository)(nil),
 		(*ArrangeSidebarError_AnchorElsewhere)(nil),
+		(*ArrangeSidebarError_NoOpenWorkspace)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2035,7 +2208,7 @@ func file_agentrepl_v1_endpoint_arrange_sidebar_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc), len(file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

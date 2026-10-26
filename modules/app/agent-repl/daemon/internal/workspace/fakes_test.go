@@ -584,6 +584,11 @@ func (d *fakeDB) CreateSubsection(_ context.Context, repo ids.RepoID, name strin
 	return wsm.Subsection{ID: "sub-new", Repo: repo, Name: name, Place: 1}, d.arrange("CreateSubsection " + string(repo) + " " + name)
 }
 
+func (d *fakeDB) CreateAgentSubsection(_ context.Context, creator ids.WorkspaceID, name string, members []ids.WorkspaceID) (wsm.Subsection, error) {
+	return wsm.Subsection{ID: "sub-agent", Repo: "repo-1", Name: name, Place: 1, CreatedBy: &creator},
+		d.arrange(fmt.Sprintf("CreateAgentSubsection %s %s %v", creator, name, members))
+}
+
 func (d *fakeDB) RenameSubsection(_ context.Context, id ids.SubsectionID, name string) error {
 	return d.arrange("RenameSubsection " + string(id) + " " + name)
 }

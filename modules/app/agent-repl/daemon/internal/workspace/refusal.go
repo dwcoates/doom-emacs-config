@@ -72,6 +72,9 @@ const (
 	// ArmAnchorElsewhere is a workspace placed before one that does not sit
 	// in the destination (ArrangeSidebarError.anchor_elsewhere).
 	ArmAnchorElsewhere = "anchor_elsewhere"
+	// ArmNoOpenWorkspace is an agent-created subsection none of whose
+	// workspaces is open (ArrangeSidebarError.no_open_workspace).
+	ArmNoOpenWorkspace = "no_open_workspace"
 	// ArmNotSiblings is a move between two workspaces that are not siblings
 	// in the arrangement's walk (MoveWorkspaceError.not_siblings).
 	ArmNotSiblings = "not_siblings"

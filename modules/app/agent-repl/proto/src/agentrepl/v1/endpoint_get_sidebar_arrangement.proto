@@ -74,6 +74,11 @@ message ArrangedSubsection {
   string name = 2;
   // The families in the subsection, root by root in drawn order.
   repeated ArrangedWorkspace workspaces = 3;
+  // The workspace whose agent created the subsection, present exactly when an
+  // agent did (ArrangeCreateAgentSubsection): such a subsection is deleted
+  // once it holds no open workspace. Absent for one the user created, which
+  // survives empty.
+  optional workspace.v1.WorkspaceRef created_by = 4;
 }
 
 // One open workspace and its nested family. Only a ROOT (one with no

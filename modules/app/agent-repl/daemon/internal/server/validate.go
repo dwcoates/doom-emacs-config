@@ -918,8 +918,41 @@ func validateArrangeSidebarRequest(req *agentreplv1.ArrangeSidebarRequest) *conn
 		return validateArrangePlaceWorkspace(change.PlaceWorkspace)
 	case *agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces:
 		return validateArrangePlaceWorkspaces(change.PlaceWorkspaces)
+	case *agentreplv1.ArrangeSidebarRequest_CreateAgentSubsection:
+		return validateArrangeCreateAgentSubsection(change.CreateAgentSubsection)
 	}
 	return nil
+}
+
+// validateDistinctWorkspaceRefs refuses a list of workspace refs at FIELD
+// that is empty, holds a malformed ref, or names one workspace twice, and
+// answers the ids it holds: the one check every change placing several
+// workspaces at once makes.
+func validateDistinctWorkspaceRefs(field string, refs []*workspacev1.WorkspaceRef) (map[string]bool, *connect.Error) {
+	if len(refs) == 0 {
+		return nil, invalid(field, "at least one workspace is required")
+	}
+	seen := map[string]bool{}
+	for i, ref := range refs {
+		if err := validateWorkspaceRef(fmt.Sprintf("%s[%d]", field, i), ref); err != nil {
+			return nil, err
+		}
+		if seen[ref.GetId()] {
+			return nil, invalid(fmt.Sprintf("%s[%d]", field, i), "a workspace is placed once")
+		}
+		seen[ref.GetId()] = true
+	}
+	return seen, nil
+}
+
+// validateArrangeCreateAgentSubsection is ArrangeCreateAgentSubsection's base
+// function: a creator and at least one workspace, none twice.
+func validateArrangeCreateAgentSubsection(create *agentreplv1.ArrangeCreateAgentSubsection) *connect.Error {
+	if err := validateWorkspaceRef("create_agent_subsection.created_by", create.GetCreatedBy()); err != nil {
+		return err
+	}
+	_, err := validateDistinctWorkspaceRefs("create_agent_subsection.workspaces", create.GetWorkspaces())
+	return err
 }
 
 // validateArrangeMoveSubsection is ArrangeMoveSubsection's base function.
@@ -1003,18 +1036,9 @@ func validateBeforeSubsection(field string, ref, into *agentreplv1.SubsectionRef
 // least one workspace, none twice, a destination and a place, and an anchor
 // that is none of the placed workspaces.
 func validateArrangePlaceWorkspaces(place *agentreplv1.ArrangePlaceWorkspaces) *connect.Error {
-	if len(place.GetWorkspaces()) == 0 {
-		return invalid("place_workspaces.workspaces", "at least one workspace is required")
-	}
-	seen := map[string]bool{}
-	for i, ref := range place.GetWorkspaces() {
-		if err := validateWorkspaceRef(fmt.Sprintf("place_workspaces.workspaces[%d]", i), ref); err != nil {
-			return err
-		}
-		if seen[ref.GetId()] {
-			return invalid(fmt.Sprintf("place_workspaces.workspaces[%d]", i), "a workspace is placed once")
-		}
-		seen[ref.GetId()] = true
+	seen, err := validateDistinctWorkspaceRefs("place_workspaces.workspaces", place.GetWorkspaces())
+	if err != nil {
+		return err
 	}
 	switch into := place.GetInto().(type) {
 	case nil:

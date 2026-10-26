@@ -455,6 +455,10 @@ type Verbs interface {
 	// CreateSubsection adds a named subsection at the bottom of a
 	// repository's section and republishes the roster (arrange.go).
 	CreateSubsection(ctx context.Context, repo ids.RepoID, name string) (wsm.Subsection, error)
+	// CreateAgentSubsection adds a subsection a workspace's agent creates,
+	// with the workspaces it gathers, and republishes the roster; it is
+	// deleted once it holds no open workspace.
+	CreateAgentSubsection(ctx context.Context, creator ids.WorkspaceID, name string, members []ids.WorkspaceID) (wsm.Subsection, error)
 	// RenameSubsection relabels one subsection and republishes the roster.
 	RenameSubsection(ctx context.Context, id ids.SubsectionID, name string) error
 	// DeleteSubsection removes one subsection, its workspaces returning to

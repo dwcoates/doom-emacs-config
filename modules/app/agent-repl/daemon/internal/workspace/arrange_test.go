@@ -53,6 +53,11 @@ func TestTheArrangementVerbsWriteAndRepublish(t *testing.T) {
 			act: func(ctx context.Context, v Verbs) error {
 				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, nil, wsm.BeforeSubsection{ID: "sub-1"}, wsm.ClearOneShotMarks)
 			}},
+		{name: "create an agent's subsection", op: opCreateAgentSubsection, want: "CreateAgentSubsection w1 auth [w1 w2]",
+			act: func(ctx context.Context, v Verbs) error {
+				_, err := v.CreateAgentSubsection(ctx, "w1", "auth", []ids.WorkspaceID{"w1", "w2"})
+				return err
+			}},
 		{name: "place workspaces keeping their one-shot marks", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1] sub-1 end keep",
 			act: func(ctx context.Context, v Verbs) error {
 				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.AtEnd{}, wsm.KeepOneShotMarks)
@@ -97,6 +102,7 @@ func TestTheArrangementVerbsAnswerTheStoresRefusalsOnTheirArms(t *testing.T) {
 		{name: "a blank name", err: wsm.ErrBlankSubsectionName, arm: ArmBlankName},
 		{name: "two repositories", err: wsm.ErrOtherRepository, arm: ArmOtherRepository},
 		{name: "an anchor elsewhere", err: wsm.ErrAnchorElsewhere, arm: ArmAnchorElsewhere},
+		{name: "no open workspace", err: wsm.ErrNoOpenConstituent, arm: ArmNoOpenWorkspace},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -291,5 +297,49 @@ func TestSidebarArrangementSurfacesAnUnreadableRegistry(t *testing.T) {
 	}
 	if !loggedAtError(f, opSidebarArrangement) {
 		t.Fatal("the failed read was not logged at error")
+	}
+}
+
+func TestCreateAgentSubsectionRefusesAWorkspaceItCannotServe(t *testing.T) {
+	tests := []struct {
+		name    string
+		creator ids.WorkspaceID
+		members []ids.WorkspaceID
+	}{
+		{name: "an unknown creator", creator: "absent", members: []ids.WorkspaceID{"w1"}},
+		{name: "an unknown member", creator: "w1", members: []ids.WorkspaceID{"w1", "absent"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+
+			// Act
+			_, err := f.verbs.CreateAgentSubsection(context.Background(), tt.creator, "auth", tt.members)
+
+			// Assert
+			asRefusal(t, err, ArmUnknownWorkspace)
+			if len(f.db.arrangements) != 0 {
+				t.Fatalf("a refused creation wrote %v", f.db.arrangements)
+			}
+		})
+	}
+}
+
+func TestCreateAgentSubsectionAnswersTheSubsectionItCreated(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act
+	sub, err := f.verbs.CreateAgentSubsection(context.Background(), "w1", "auth", []ids.WorkspaceID{"w1"})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateAgentSubsection: %v", err)
+	}
+	if sub.ID != "sub-agent" || sub.CreatedBy == nil || *sub.CreatedBy != "w1" {
+		t.Fatalf("created = %+v, want the store's sub-agent created by w1", sub)
 	}
 }
