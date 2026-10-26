@@ -2104,10 +2104,16 @@ type faultSurfaces struct {
 	// onTopbar are the open faults raised on the topbar (and so told to
 	// Emacs), so a close retracts exactly those.
 	onTopbar map[ids.FaultID]bool
+	// onFeed are the open network faults told to the feed, so only their
+	// close reaches it. THE FEED CLOSES FAULTS OF ITS OWN WHILE HOLDING ITS
+	// LOCK (a turn start closes its edge's faults), so passing it every
+	// close would re-enter that lock; a network fault closes only on the
+	// shim diagnostics' edge, never from inside the feed.
+	onFeed map[ids.FaultID]bool
 }
 
 func newFaultSurfaces(f footer.Resolver, s sidebar.Resolver, t topbar.Resolver, loud *health.LoudFaults) *faultSurfaces {
-	return &faultSurfaces{footer: f, sidebar: s, topbar: t, loud: loud, onTopbar: map[ids.FaultID]bool{}}
+	return &faultSurfaces{footer: f, sidebar: s, topbar: t, loud: loud, onTopbar: map[ids.FaultID]bool{}, onFeed: map[ids.FaultID]bool{}}
 }
 
 // networkFaultFeed is the slice of the feed the network fault's edges reach
@@ -2155,7 +2161,11 @@ func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 	// vendor-start run).
 	if line.Cell.Status == health.FaultStatusNetworkFault && ws != "" {
 		f.sidebar.NetworkFaultOpened(ws, string(line.ID))
-		f.networkFeed().NetworkFaultOpened(ws, string(line.ID))
+		feed := f.networkFeed()
+		f.mu.Lock()
+		f.onFeed[line.ID] = true
+		f.mu.Unlock()
+		feed.NetworkFaultOpened(ws, string(line.ID))
 	}
 	// ONLY A DAEMON-SCOPED FAULT reaches the topbar: health.FaultTopbarLine
 	// states no line for any other.
@@ -2190,7 +2200,13 @@ func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	f.footer.CloseFault(ws, string(id))
 	if ws != "" {
 		f.sidebar.FaultClosed(ws, string(id))
-		f.networkFeed().NetworkFaultClosed(ws, string(id))
+		f.mu.Lock()
+		told := f.onFeed[id]
+		delete(f.onFeed, id)
+		f.mu.Unlock()
+		if told {
+			f.networkFeed().NetworkFaultClosed(ws, string(id))
+		}
 	}
 	f.mu.Lock()
 	raised := f.onTopbar[id]

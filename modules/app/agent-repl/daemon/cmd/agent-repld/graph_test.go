@@ -349,8 +349,13 @@ func TestTheFaultSinkPassesANetworkFaultsEdgesToTheFeed(t *testing.T) {
 	}{
 		{name: "a workspace's network fault opening reaches the feed",
 			act: func(sink *faultSurfaces) { sink.FaultOpened("ws-1", networkLine("f-1")) }, wantOpened: []string{"f-1"}},
-		{name: "a workspace fault closing reaches the feed, which keeps only its own",
-			act: func(sink *faultSurfaces) { sink.FaultClosed("ws-1", "f-1") }, wantClosed: []string{"f-1"}},
+		{name: "a workspace's network fault closing reaches the feed",
+			act: func(sink *faultSurfaces) {
+				sink.FaultOpened("ws-1", networkLine("f-1"))
+				sink.FaultClosed("ws-1", "f-1")
+			}, wantOpened: []string{"f-1"}, wantClosed: []string{"f-1"}},
+		{name: "another workspace fault closing does not: the feed closes those under its own lock",
+			act: func(sink *faultSurfaces) { sink.FaultClosed("ws-1", "f-4") }},
 		{name: "another domain's fault opening does not",
 			act: func(sink *faultSurfaces) {
 				sink.FaultOpened("ws-1", health.FaultLine{ID: "f-2", Kind: health.KindShimDied, Cell: health.FaultCell{Status: health.FaultStatusAgentReplFault, SubStatus: health.FaultSubStatusDead}})
