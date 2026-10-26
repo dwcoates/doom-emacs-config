@@ -899,6 +899,19 @@ the stream stays open."
            (agent-repl--error log-scope "elisp.connect.open-handler-error method=%S error=%S"
                               method err)))))))
 
+(defconst agent-repl-connect--handover-refusals '("transferring_away" "not_yet_adopted")
+  "The refusal arms of a handover, which a stream's owner walks as a handover.")
+
+(defun agent-repl-connect-refused-arm (detail)
+  "Return the arm a daemon's refused stream open named in DETAIL, or nil.
+A Watch* rpc has no `<Rpc>Error' message: its refusal IS the closed
+transport, whose message names the arm (the daemon's `TransportClosed':
+\"<rpc> closed the stream: <arm>: <reason>\")."
+  (let ((message (plist-get detail :message)))
+    (and (stringp message)
+         (string-match "closed the stream: \\([a-z_]+\\): " message)
+         (match-string 1 message))))
+
 (defun agent-repl-connect--close-stream (stream outcome)
   "Run STREAM's ON-CLOSE with OUTCOME once, and forget the stream.
 OUTCOME is `(:cancelled)', `(:ended)', or `(:error DETAIL)'."
@@ -913,8 +926,18 @@ OUTCOME is `(:cancelled)', `(:ended)', or `(:error DETAIL)'."
       (pcase (car outcome)
         (:cancelled (agent-repl--info log-scope "elisp.connect.stream-cancelled method=%S" method))
         (:ended (agent-repl--info log-scope "elisp.connect.stream-ended method=%S" method))
-        (:error (agent-repl--error log-scope "elisp.connect.stream-error method=%S detail=%S"
-                                   method (cadr outcome))))
+        (:error
+         (let ((arm (agent-repl-connect-refused-arm (cadr outcome))))
+           ;; A HANDOVER REFUSAL IS THE CONTRACT'S ANSWER, NOT A FAILURE: the
+           ;; stream's owner walks it onto the daemon that serves the
+           ;; workspace, and judges it there.  At ERROR here, every Emacs that
+           ;; started during a rollout wrote one per workspace (2026-10-26:
+           ;; 45 at one start).
+           (if (member arm agent-repl-connect--handover-refusals)
+               (agent-repl--info log-scope "elisp.connect.stream-refused-handover method=%S arm=%s detail=%S"
+                                 method arm (cadr outcome))
+             (agent-repl--error log-scope "elisp.connect.stream-error method=%S detail=%S"
+                                method (cadr outcome))))))
       (when (agent-repl-connect-stream-on-close stream)
         (condition-case err
             (funcall (agent-repl-connect-stream-on-close stream) outcome)

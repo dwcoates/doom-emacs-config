@@ -1063,6 +1063,64 @@ frames begin."
     ;; Assert
     (should (agent-repl-test-connect--logs-matching 'error "elisp\\.connect\\.stream-error"))))
 
+(defun agent-repl-test-connect--refuse (record arm)
+  "Close RECORD's stream as a daemon's refused open naming ARM."
+  (agent-repl-test-connect--feed
+   record (agent-repl-connect-envelope-encode
+           #x02 (format "{\"error\":{\"code\":\"failed_precondition\",\"message\":\"WatchHostWorkspace closed the stream: %s: workspace is elsewhere\"}}" arm)))
+  (agent-repl-test-connect--exit record))
+
+(ert-deftest agent-repl-test-connect-stream-refused-transferring-away-logs-no-error ()
+  "A `transferring_away' refusal is a handover, recorded at INFO, never ERROR."
+  ;; Arrange / Act
+  (agent-repl-test-connect--with-stream
+    (agent-repl-test-connect--refuse record "transferring_away")
+    ;; Assert
+    (should (null (agent-repl-test-connect--logs-matching 'error "elisp\\.connect")))
+    (should (agent-repl-test-connect--logs-matching 'info "elisp\\.connect\\.stream-refused-handover"))))
+
+(ert-deftest agent-repl-test-connect-stream-refused-not-yet-adopted-logs-no-error ()
+  "A `not_yet_adopted' refusal is a handover, recorded at INFO, never ERROR."
+  ;; Arrange / Act
+  (agent-repl-test-connect--with-stream
+    (agent-repl-test-connect--refuse record "not_yet_adopted")
+    ;; Assert
+    (should (null (agent-repl-test-connect--logs-matching 'error "elisp\\.connect")))
+    (should (agent-repl-test-connect--logs-matching 'info "elisp\\.connect\\.stream-refused-handover"))))
+
+(ert-deftest agent-repl-test-connect-stream-refused-other-arm-logs-error ()
+  "A refusal naming any other arm stays a stream error at ERROR."
+  ;; Arrange / Act
+  (agent-repl-test-connect--with-stream
+    (agent-repl-test-connect--refuse record "closing")
+    ;; Assert
+    (should (agent-repl-test-connect--logs-matching 'error "elisp\\.connect\\.stream-error"))))
+
+(ert-deftest agent-repl-test-connect-stream-refused-still-closes-as-error ()
+  "The transport hands a handover refusal to ON-CLOSE as `(:error DETAIL)'."
+  ;; Arrange / Act
+  (agent-repl-test-connect--with-stream
+    (agent-repl-test-connect--refuse record "transferring_away")
+    ;; Assert
+    (should (eq (car (car agent-repl-test-connect--closes)) :error))))
+
+(ert-deftest agent-repl-test-connect-refused-arm ()
+  "The arm is read off a refused open's message, and nothing else names one."
+  ;; Arrange
+  (let ((cases '(("WatchHostWorkspace closed the stream: transferring_away: handed on" . "transferring_away")
+                 ("WatchHostWorkspace closed the stream: not_yet_adopted: not yet" . "not_yet_adopted")
+                 ("boom" . nil))))
+    (dolist (case cases)
+      ;; Act
+      (let ((got (agent-repl-connect-refused-arm (list :message (car case)))))
+        ;; Assert
+        (should (equal got (cdr case)))))))
+
+(ert-deftest agent-repl-test-connect-refused-arm-without-a-message ()
+  "A detail with no message names no arm."
+  ;; Arrange / Act / Assert
+  (should (null (agent-repl-connect-refused-arm (list :kind :no-end-frame)))))
+
 (ert-deftest agent-repl-test-connect-stream-cancel-closes-as-cancelled ()
   "A client cancel is `(:cancelled)' — the graceful close, never a failure."
   ;; Arrange / Act
