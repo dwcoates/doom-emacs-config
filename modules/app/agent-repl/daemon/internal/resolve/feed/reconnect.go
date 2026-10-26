@@ -2,12 +2,10 @@ package feed
 
 import (
 	"context"
-	"fmt"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 )
 
@@ -92,38 +90,23 @@ func (r *resolver) NetworkFaultClosed(ws ids.WorkspaceID, id string) {
 			dlog.Context{"fault": id, "standing": len(s.networkFaults)})
 		return
 	}
-	var turns []ids.TurnID
-	r.eachStoredRow(s, func(_ feedid.Feed, _ *feedState, _ string, row *frontendv1.FeedRow) {
-		if turn := row.GetTurn().GetValue(); unreachableEnding(row) && turn != "" {
-			turns = append(turns, ids.TurnID(turn))
-		}
-	})
-	if len(turns) == 0 {
-		log.Debug(opReconnected, "the connection came back and no connection-failed card was drawn; nothing was retired",
-			dlog.Context{"fault": id})
-		return
+	answer := turnAnswer{
+		op:       opReconnected,
+		names:    unreachableEnding,
+		retires:  unreachableEnding,
+		into:     s.reconnected,
+		fields:   dlog.Context{"fault": id},
+		nothing:  "the connection came back and no connection-failed card was drawn; nothing was retired",
+		failed:   "the connection came back and its connection-failed cards were removed but could not be recorded; a daemon restart will draw them again",
+		warning:  "the answered connection failures could not be saved and will reappear after a daemon restart",
+		answered: "the connection came back; the connection-failed cards drawn before it were retired and recorded",
 	}
-	for _, turn := range turns {
-		s.reconnected[turn] = true
-	}
-	retired := 0
-	r.eachStoredRow(s, func(addr feedid.Feed, _ *feedState, rowID string, row *frontendv1.FeedRow) {
-		if s.reconnected[ids.TurnID(row.GetTurn().GetValue())] && unreachableEnding(row) && r.retire(s, addr, rowID) {
-			retired++
-		}
-	})
-	fields := dlog.Context{"fault": id, "turns": len(turns), "first": firstTurn(turns), "retired": retired}
 	if r.deps.Reconnected != nil {
-		if err := r.deps.Reconnected.RecordReconnectedTurns(context.Background(), ws, turns); err != nil {
-			fields["error"] = err.Error()
-			log.Error(opReconnected,
-				"the connection came back and its connection-failed cards were removed but could not be recorded; a daemon restart will draw them again", fields)
-			r.raiseWarning(s, opReconnected,
-				fmt.Sprintf("the answered connection failures could not be saved and will reappear after a daemon restart: %v", err))
-			return
-		}
+		answer.record = r.deps.Reconnected.RecordReconnectedTurns
 	}
-	log.Info(opReconnected, "the connection came back; the connection-failed cards drawn before it were retired and recorded", fields)
+	// The recording's failure is already logged and raised, and the fault
+	// sink this edge comes from has no caller to return it to.
+	_ = r.answerTurns(s, answer)
 }
 
 // restoreReconnected loads the workspace's reconnection-answered turns when a
