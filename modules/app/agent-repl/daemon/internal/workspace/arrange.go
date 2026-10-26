@@ -25,11 +25,11 @@ const (
 	// opCreateAgentSubsection is a workspace's agent creating a subsection
 	// with the workspaces it gathers.
 	opCreateAgentSubsection = "daemon.workspace.create_agent_subsection"
-	opRenameSubsection = "daemon.workspace.rename_subsection"
-	opDeleteSubsection = "daemon.workspace.delete_subsection"
-	opMoveSubsection   = "daemon.workspace.move_subsection"
-	opMoveRepository   = "daemon.workspace.move_repository"
-	opPlaceWorkspace   = "daemon.workspace.place_workspaces"
+	opRenameSubsection      = "daemon.workspace.rename_subsection"
+	opDeleteSubsection      = "daemon.workspace.delete_subsection"
+	opMoveSubsection        = "daemon.workspace.move_subsection"
+	opMoveRepository        = "daemon.workspace.move_repository"
+	opPlaceWorkspace        = "daemon.workspace.place_workspaces"
 	// opSidebarArrangement is the operation GetSidebarArrangement's reads carry.
 	opSidebarArrangement = "daemon.workspace.sidebar_arrangement"
 )

@@ -2336,7 +2336,7 @@ func TestCreateAsksToGatherOnlyWithEnoughUnsectionedWorkspaces(t *testing.T) {
 			placementBrief(f)
 			spec := standardSpec(t, f)
 			for i, shape := range tt.others {
-				ws := f.workspaceInRepo(t, ids.WorkspaceID("other-" + strconv.Itoa(i)), spec.RepoDir)
+				ws := f.workspaceInRepo(t, ids.WorkspaceID("other-"+strconv.Itoa(i)), spec.RepoDir)
 				if shape != nil {
 					shape(&ws)
 					f.db.with(ws)
