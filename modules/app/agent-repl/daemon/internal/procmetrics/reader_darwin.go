@@ -34,14 +34,6 @@ static int pm_fdbytes(pid_t pid) {
 	return proc_pidinfo(pid, PROC_PIDLISTFDS, 0, NULL, 0);
 }
 
-static int pm_cpuload(host_cpu_load_info_data_t *out) {
-	mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
-	mach_port_t host = mach_host_self();
-	kern_return_t kr = host_statistics(host, HOST_CPU_LOAD_INFO, (host_info_t)out, &count);
-	mach_port_deallocate(mach_task_self(), host);
-	return kr;
-}
-
 static int pm_vm(vm_statistics64_data_t *out, vm_size_t *page) {
 	mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
 	mach_port_t host = mach_host_self();
@@ -64,6 +56,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+
+	"agentrepl/logging/hostcpu"
 )
 
 // Kernel is the real Reader.
@@ -196,17 +190,11 @@ func (Kernel) Args(pid int) ([]string, error) {
 
 // Host implements Reader.
 func (Kernel) Host(path string) (Host, error) {
-	var load C.host_cpu_load_info_data_t
-	if kr := C.pm_cpuload(&load); kr != C.KERN_SUCCESS {
-		return Host{}, fmt.Errorf("procmetrics: host_statistics(HOST_CPU_LOAD_INFO) answered %d", int(kr))
+	load, err := hostcpu.Read()
+	if err != nil {
+		return Host{}, fmt.Errorf("procmetrics: %w", err)
 	}
-	const ticksPerSecond = 100 // CLK_TCK on macOS
-	cpu := map[string]float64{
-		"user":   float64(load.cpu_ticks[C.CPU_STATE_USER]) / ticksPerSecond,
-		"system": float64(load.cpu_ticks[C.CPU_STATE_SYSTEM]) / ticksPerSecond,
-		"idle":   float64(load.cpu_ticks[C.CPU_STATE_IDLE]) / ticksPerSecond,
-		"nice":   float64(load.cpu_ticks[C.CPU_STATE_NICE]) / ticksPerSecond,
-	}
+	cpu := map[string]float64{"user": load.User, "system": load.System, "idle": load.Idle, "nice": load.Nice}
 	var vm C.vm_statistics64_data_t
 	var page C.vm_size_t
 	if kr := C.pm_vm(&vm, &page); kr != C.KERN_SUCCESS {
