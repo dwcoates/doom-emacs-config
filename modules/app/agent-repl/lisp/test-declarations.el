@@ -59,46 +59,25 @@ package the module depends on, and is not this suite's business.")
     (cl-some (lambda (prefix) (string-prefix-p prefix name))
              agent-repl-test-declarations--own-prefixes)))
 
-(defconst agent-repl-test-declarations--lisp-dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The `lisp/' directory this suite lives in.
-Captured at LOAD time: `load-file-name' is unbound by the time ERT runs a
-test body, so resolving it there would answer nil and scan nothing.")
-
-(defun agent-repl-test-declarations--files ()
-  "Return every non-test elisp source in `lisp/'.
-
-Suites are out of scope, and not for convenience: a suite declares its own
-batch-only helpers (`agent-repl-itest--script' lives in
-test-integration-helpers.el, which only the integration suites load), so
-`fboundp' under THIS suite\='s load would call a perfectly-good declare
-broken.  A source, by contrast, is loaded in full by test-helpers.el, which
-is what makes `fboundp' the whole answer below."
-  (seq-remove (lambda (file)
-                (string-prefix-p "test-" (file-name-nondirectory file)))
-              (directory-files agent-repl-test-declarations--lisp-dir t "\\.el\\'")))
-
 (defun agent-repl-test-declarations--in-file (file)
   "Return `(SYMBOL . FILE)' for every `declare-function' form in FILE.
-Reads FILE as data rather than matching text, so a symbol split across
-lines or a form inside a comment-like string cannot fool the scan."
+Suites are out of scope (`agent-repl-test--module-sources'), and not for
+convenience: a suite declares its own batch-only helpers
+\(`agent-repl-itest--script' lives in test-integration-helpers.el, which only
+the integration suites load), so `fboundp' under THIS suite\='s load would
+call a perfectly-good declare broken.  A source, by contrast, is loaded in
+full by test-helpers.el, which is what makes `fboundp' the whole answer."
   (let ((found nil))
-    (with-temp-buffer
-      (insert-file-contents file)
-      (goto-char (point-min))
-      (condition-case nil
-          (while t
-            (let ((form (read (current-buffer))))
-              (when (and (consp form) (eq (car form) 'declare-function)
-                         (symbolp (cadr form)))
-                (push (cons (cadr form) (file-name-nondirectory file)) found))))
-        (end-of-file nil)))
+    (dolist (form (agent-repl-test--file-forms file))
+      (when (and (consp form) (eq (car form) 'declare-function)
+                 (symbolp (cadr form)))
+        (push (cons (cadr form) (file-name-nondirectory file)) found)))
     (nreverse found)))
 
 (defun agent-repl-test-declarations--all ()
   "Return `(SYMBOL . FILE)' for every `declare-function' in `lisp/'."
   (mapcan #'agent-repl-test-declarations--in-file
-          (agent-repl-test-declarations--files)))
+          (agent-repl-test--module-sources)))
 
 (ert-deftest agent-repl-test-declarations-scan-finds-the-declares ()
   "The scan reads real forms out of the tree, so an empty result is a bug.

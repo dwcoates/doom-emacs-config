@@ -5134,29 +5134,18 @@ module loaded, about jobs nothing owns any more."
     (should-error (agent-repl-refill-keymap '(not-a-keymap) (lambda (_) (setq called t))))
     (should-not called)))
 
-(defconst agent-repl-test-core--lisp-dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The lisp/ directory under test, resolved at load time.")
-
 (defun agent-repl-test-core--defvar-keymaps-built-inline ()
   "Return (FILE . VAR) for each top-level keymap `defvar' in lisp/ built inline.
 A `-map' `defvar' whose initializer is anything but `(make-sparse-keymap)'
 builds its bindings once per Emacs, so a reload never updates it."
-  (let ((dir agent-repl-test-core--lisp-dir)
-        found)
-    (dolist (file (directory-files dir t "\\`[^.].*\\.el\\'"))
-      (unless (string-prefix-p "test-" (file-name-nondirectory file))
-        (with-temp-buffer
-          (insert-file-contents file)
-          (condition-case nil
-              (while t
-                (let ((form (read (current-buffer))))
-                  (when (and (eq (car-safe form) 'defvar)
-                             (string-suffix-p "-map" (symbol-name (cadr form)))
-                             (cddr form)
-                             (not (equal (nth 2 form) '(make-sparse-keymap))))
-                    (push (cons (file-name-nondirectory file) (cadr form)) found))))
-            (end-of-file nil)))))
+  (let (found)
+    (dolist (file (agent-repl-test--module-sources))
+      (dolist (form (agent-repl-test--file-forms file))
+        (when (and (eq (car-safe form) 'defvar)
+                   (string-suffix-p "-map" (symbol-name (cadr form)))
+                   (cddr form)
+                   (not (equal (nth 2 form) '(make-sparse-keymap))))
+          (push (cons (file-name-nondirectory file) (cadr form)) found))))
     found))
 
 (ert-deftest agent-repl-test-refill-keymap-every-module-keymap-starts-empty ()

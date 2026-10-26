@@ -1099,6 +1099,27 @@ BODY exits.  THE ONE temporary-directory fixture every suite uses
      (unwind-protect (progn ,@body)
        (delete-directory ,var t))))
 
+(defun agent-repl-test--module-sources ()
+  "Every module source in `lisp/', suites (`test-*.el') aside.
+THE ONE list every source scan reads (test-test-helpers.el holds the scans
+to it).  Suites are out of scope by design: a suite declares and uses its
+own batch-only scaffolding, which no rule about module code governs."
+  (cl-remove-if (lambda (file) (string-prefix-p "test-" (file-name-nondirectory file)))
+                (directory-files agent-repl-test--module-dir t "\\`[^.].*\\.el\\'")))
+
+(defun agent-repl-test--file-forms (file)
+  "Every top-level form of FILE, read as data, in order.
+Reading rather than matching text means a comment or a docstring is never
+mistaken for code, and a form split across lines is still one form."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (goto-char (point-min))
+    (let (forms)
+      (condition-case nil
+          (while t (push (read (current-buffer)) forms))
+        (end-of-file nil))
+      (nreverse forms))))
+
 (defmacro agent-repl-test--with-temp-buffer (name &rest body)
   "Create (or reuse) buffer NAME, execute BODY, kill buffer only if we created it.
 If NAME already refers to a live buffer when the macro runs (e.g. `*scratch*',

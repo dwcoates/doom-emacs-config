@@ -31,10 +31,6 @@
 (defconst agent-repl-test-nti--forbidden '(while-no-input throw-on-input)
   "Symbols whose presence in a module's code makes stored input throw.")
 
-(defconst agent-repl-test-nti--dir
-  (file-name-directory (or load-file-name buffer-file-name))
-  "The `lisp/' directory this suite scans.")
-
 (defun agent-repl-test-nti--symbols-in (form)
   "Every forbidden symbol FORM contains, at any depth, in order of appearance."
   (let (found)
@@ -47,25 +43,15 @@
 
 (defun agent-repl-test-nti--uses-in-file (file)
   "Every forbidden symbol FILE's code uses, as (FILE . SYMBOL) pairs."
-  (with-temp-buffer
-    (insert-file-contents file)
-    (let (uses form)
-      (condition-case nil
-          (while (setq form (list (read (current-buffer))))
-            (dolist (sym (agent-repl-test-nti--symbols-in (car form)))
-              (push (cons (file-name-nondirectory file) sym) uses)))
-        (end-of-file nil))
-      (nreverse uses))))
-
-(defun agent-repl-test-nti--module-files ()
-  "Every module source under `lisp/', tests aside."
-  (cl-remove-if (lambda (f) (string-prefix-p "test-" (file-name-nondirectory f)))
-                (directory-files agent-repl-test-nti--dir t "\\.el\\'")))
+  (mapcan (lambda (form)
+            (mapcar (lambda (sym) (cons (file-name-nondirectory file) sym))
+                    (agent-repl-test-nti--symbols-in form)))
+          (agent-repl-test--file-forms file)))
 
 (ert-deftest agent-repl-test-nti-no-module-uses-while-no-input ()
   "No module's code names `while-no-input' or `throw-on-input'."
   ;; Arrange
-  (let ((files (agent-repl-test-nti--module-files)))
+  (let ((files (agent-repl-test--module-sources)))
     ;; Act
     (let ((uses (mapcan #'agent-repl-test-nti--uses-in-file files)))
       ;; Assert
