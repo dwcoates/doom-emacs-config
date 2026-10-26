@@ -217,9 +217,11 @@ the path as its FIRST line and again, with the exit status, as its LAST:
 ### One scheduled run: `bin/test-all.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
-and schedules it across the host's core budget: 50% of `runtime.NumCPU()`,
-rounded down (`cores.Budget`, `cores.Share`, owner rulings 2026-10-20, and 2026-10-23 for the 50%), a
-budget every test run on the host shares (below), and the whole run is at
+and schedules it across the host's core budget: at most 65% of
+`runtime.NumCPU()`, rounded down (`cores.Budget`, `cores.CapPercent`), and less
+whenever the rest of the host is busy, so the host's TOTAL CPU use stays under
+65% (owner rulings 2026-10-20, 2026-10-23 and 2026-10-26). The budget is
+shared by every test run on the host (below), and the whole run is at
 nice 19, so it always yields the CPU to the owner's live runtime, input
 handling and apps. A host too small to budget one whole core is refused. The planner chooses each suite's chunk count by simulating
 the run against EWMA unit timings in
@@ -331,6 +333,21 @@ memory; under it the merge queue's overlapping runs, 13 slots each on a
   is waiting for some (`seats.Pool.TakeN`'s lanes). So the head's units get
   cores first, then the merge behind it, then every ad-hoc run, and all of
   them yield the CPU to the owner's processes at 0.
+- THE HOST'S TOTAL CPU IS CAPPED (owner ruling, 2026-10-26). A fixed share
+  of the cores ignored everything else on the host: five runs overlapping
+  with busy agents drove it to 14 of 16 cores. `cores.Governor` reads the
+  host's CPU every second (`agentrepl/logging/hostcpu`) and lets the tests
+  take only what the rest of the host leaves under `cores.CapPercent`: it
+  holds back the seats the cap leaves no room for, and holds the seats'
+  turnstile while the host is at the cap, so no unit of any run starts
+  ("waiting for CPU") until the load drops. It errs low: the peak of the
+  last three reads, a one-core margin, and two cores per seat, counted again
+  for seats taken in the last three seconds, since units were measured using
+  up to 2.25 cores per seat. It admits and never pauses: a running unit runs
+  to its end. One run governs at a time (`seats.Pool.Exclusive`, the pool's
+  governor role) and the next takes over when it exits. A held-back unit says
+  so in the run log (`core seats: unit ... is waiting for CPU`) and on the
+  run's events (`waiting_for_cpu`, `cpu_wait_ended`).
 - A UNIT'S WIDTH MUST BE THE CORES IT USES. The budget counts widths, so a unit
   that uses more cores than it holds spends cores the budget never gave it.
   The run's summary names every such unit (`it is not pinned to its width`);
@@ -345,7 +362,11 @@ memory; under it the merge queue's overlapping runs, 13 slots each on a
 Do NOT gate on the load average instead. It is a decaying mean, so it keeps
 climbing for a minute after the work stops, and every waiter reads the same
 number and starts at the same instant — a thundering herd that recreates the
-overload. This was tried; it is what produced the 253.
+overload. This was tried; it is what produced the 253. The CPU governor is
+not that: it reads one second of the host's CPU, not a decaying mean, and it
+alone hands out seats, a bounded number per read, costing the ones it just
+handed out until the host's reads show them, so no crowd of waiters ever
+reads the same number and starts at once.
 
 Two standing rules follow from the same measurement for direct, focused suite
 runs outside `testrun`:
