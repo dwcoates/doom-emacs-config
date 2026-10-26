@@ -57,20 +57,12 @@ func (p Pool) Take(waiting func(held int)) (*os.File, int, error) {
 		return nil, 0, fmt.Errorf("the %s seat pool %s has %d seats; it needs at least one", p.What, p.Dir, p.N)
 	}
 	for i := range p.N {
-		f, err := p.Open(i)
+		f, err := p.TryTake(i)
 		if err != nil {
 			return nil, 0, err
 		}
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
+		if f != nil {
 			return f, i, nil
-		}
-		closeErr := f.Close()
-		if !errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, 0, errors.Join(fmt.Errorf("lock the %s seat %s: %w", p.What, p.Path(i), err), closeErr)
-		}
-		if closeErr != nil {
-			return nil, 0, fmt.Errorf("close the held %s seat %s: %w", p.What, p.Path(i), closeErr)
 		}
 	}
 	waiting(p.N)
@@ -255,20 +247,69 @@ func (p Pool) gather(n int, wait func()) (Held, error) {
 	return held, nil
 }
 
+// TryTake holds seat i if it is free right now, answering its open lock file
+// (which the caller closes to give it back), or nil when another holder has
+// it. It never waits.
+func (p Pool) TryTake(i int) (*os.File, error) {
+	f, err := p.Open(i)
+	if err != nil {
+		return nil, err
+	}
+	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if err == nil {
+		return f, nil
+	}
+	closeErr := f.Close()
+	if errors.Is(err, syscall.EWOULDBLOCK) {
+		if closeErr != nil {
+			return nil, fmt.Errorf("close the held %s seat %s: %w", p.What, p.Path(i), closeErr)
+		}
+		return nil, nil
+	}
+	return nil, errors.Join(fmt.Errorf("lock the %s seat %s: %w", p.What, p.Path(i), err), closeErr)
+}
+
+// TryTurnstile holds the pool's turnstile if nobody holds it right now,
+// answering its open lock file, or nil when a taker is gathering. While it is
+// held no taker of the pool can begin to gather: every TakeN waits for it.
+func (p Pool) TryTurnstile() (*os.File, error) {
+	if err := os.MkdirAll(p.Dir, 0o755); err != nil {
+		return nil, fmt.Errorf("make the %s seats directory: %w", p.What, err)
+	}
+	f, err := p.lock(p.turnstilePath(), syscall.LOCK_EX|syscall.LOCK_NB)
+	if errors.Is(err, syscall.EWOULDBLOCK) {
+		return nil, nil
+	}
+	return f, err
+}
+
+// Turnstile holds the pool's turnstile, waiting for a gather under way to end.
+func (p Pool) Turnstile() (*os.File, error) {
+	if err := os.MkdirAll(p.Dir, 0o755); err != nil {
+		return nil, fmt.Errorf("make the %s seats directory: %w", p.What, err)
+	}
+	return p.lock(p.turnstilePath(), syscall.LOCK_EX)
+}
+
+// Exclusive holds the lock <Dir>/<Prefix>.<name>, waiting for any other
+// holder: a role one process on the host plays at a time, handed to the next
+// waiter when its holder exits.
+func (p Pool) Exclusive(name string) (*os.File, error) {
+	if err := os.MkdirAll(p.Dir, 0o755); err != nil {
+		return nil, fmt.Errorf("make the %s seats directory: %w", p.What, err)
+	}
+	return p.lock(filepath.Join(p.Dir, p.Prefix+"."+name), syscall.LOCK_EX)
+}
+
 // Held reports whether seat i is held right now, by any taker on the host. It
 // probes with a lock it lets go at once, so it never holds the seat itself.
 func (p Pool) Held(i int) (bool, error) {
-	f, err := p.Open(i)
-	if err != nil {
-		return false, err
+	f, err := p.TryTake(i)
+	if err != nil || f == nil {
+		return f == nil && err == nil, err
 	}
-	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-	closeErr := f.Close()
-	if errors.Is(err, syscall.EWOULDBLOCK) {
-		return true, closeErr
+	if err := f.Close(); err != nil {
+		return false, fmt.Errorf("let the probed %s seat %s go: %w", p.What, p.Path(i), err)
 	}
-	if err != nil {
-		return false, errors.Join(fmt.Errorf("probe the %s seat %s: %w", p.What, p.Path(i), err), closeErr)
-	}
-	return false, closeErr
+	return false, nil
 }

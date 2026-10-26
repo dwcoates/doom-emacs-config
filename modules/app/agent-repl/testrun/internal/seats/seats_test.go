@@ -11,12 +11,9 @@ import (
 // hold locks seat i of p for the test, as another run would.
 func hold(t *testing.T, p Pool, i int) *os.File {
 	t.Helper()
-	f, err := p.Open(i)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		t.Fatalf("hold seat %d: %v", i, err)
+	f, err := p.TryTake(i)
+	if err != nil || f == nil {
+		t.Fatalf("hold seat %d: %v, %v", i, f, err)
 	}
 	return f
 }
@@ -233,10 +230,7 @@ func TestTakeNWaitsOnceForSeatsLetGo(t *testing.T) {
 func TestTakeNWaitsForTheGathererAhead(t *testing.T) {
 	// Arrange: another taker holds the turnstile, mid-gather.
 	p := Pool{Dir: t.TempDir(), Prefix: "core", N: 2, What: "test"}
-	if err := os.MkdirAll(p.Dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	turnstile, err := p.lock(p.turnstilePath(), syscall.LOCK_EX)
+	turnstile, err := p.Turnstile()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,5 +437,108 @@ func TestHeldSurfacesAnUnopenableSeat(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "open the test seat") {
 		t.Fatalf("Held = %v; want the open's failure", err)
+	}
+}
+
+func TestTryTake(t *testing.T) {
+	cases := []struct {
+		name        string
+		heldByOther bool
+		wantSeat    bool
+	}{
+		{name: "a free seat is taken", wantSeat: true},
+		{name: "a seat another holder has is not", heldByOther: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			p := Pool{Dir: t.TempDir(), Prefix: "seat", N: 1, What: "test"}
+			if tc.heldByOther {
+				defer hold(t, p, 0).Close()
+			}
+
+			// Act
+			f, err := p.TryTake(0)
+
+			// Assert
+			if err != nil || (f != nil) != tc.wantSeat {
+				t.Fatalf("TryTake = %v, %v; want a seat: %v", f, err, tc.wantSeat)
+			}
+			if f != nil {
+				if free(t, p, 0) {
+					t.Fatal("the taken seat reads as free")
+				}
+				f.Close()
+			}
+		})
+	}
+}
+
+func TestTryTakeSurfacesAnUnopenableSeat(t *testing.T) {
+	// Arrange: seat 0's path is a directory.
+	p := Pool{Dir: t.TempDir(), Prefix: "seat", N: 1, What: "test"}
+	if err := os.Mkdir(p.Path(0), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err := p.TryTake(0)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "open the test seat") {
+		t.Fatalf("TryTake = %v; want the open's failure", err)
+	}
+}
+
+func TestTryTurnstile(t *testing.T) {
+	// Arrange
+	p := Pool{Dir: filepath.Join(t.TempDir(), "seats"), Prefix: "core", N: 1, What: "test"}
+
+	// Act
+	first, err := p.TryTurnstile()
+	if err != nil || first == nil {
+		t.Fatalf("TryTurnstile on a free turnstile = %v, %v", first, err)
+	}
+	second, err := p.TryTurnstile()
+
+	// Assert
+	if err != nil || second != nil {
+		t.Fatalf("TryTurnstile on a held turnstile = %v, %v; want nil, nil", second, err)
+	}
+	first.Close()
+}
+
+func TestExclusiveHandsTheRoleToTheNextWaiter(t *testing.T) {
+	// Arrange
+	p := Pool{Dir: filepath.Join(t.TempDir(), "seats"), Prefix: "core", N: 1, What: "test"}
+	first, err := p.Exclusive("governor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan error, 1)
+
+	// Act
+	go func() {
+		f, err := p.Exclusive("governor")
+		if err == nil {
+			err = f.Close()
+		}
+		got <- err
+	}()
+
+	// Assert: the second waits until the first lets the role go.
+	select {
+	case err := <-got:
+		t.Fatalf("a second holder took the role while the first held it: %v", err)
+	default:
+	}
+	if _, err := os.Stat(filepath.Join(p.Dir, "core.governor")); err != nil {
+		t.Fatalf("the role's lock file: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-got; err != nil {
+		t.Fatalf("Exclusive after the first holder let go = %v", err)
 	}
 }
