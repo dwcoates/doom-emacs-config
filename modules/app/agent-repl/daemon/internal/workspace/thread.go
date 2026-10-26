@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"agent-repld/internal/chat"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/wsm"
@@ -43,14 +44,15 @@ func ChatSystemPrompt(dir string) func() (string, error) {
 }
 
 // CreateThread makes a new chat thread AT ONCE and brings its session up;
-// the thread is titled after its first question afterwards (startTitling).
+// the thread is named after its first question (threadname.go).
 // The question itself is NOT submitted here: the caller submits it through
 // the prompt handler, the one submission path, so it reaches the session
 // exactly as every later question does.
 //
-// A THREAD IS SWITCHED TO BEFORE IT HAS A TITLE (owner ruling, 2026-10-25):
-// it is registered under ThreadTitlePlaceholder, which every surface draws
-// until the title arrives and renames it. Its DIRECTORY is a fresh token,
+// A THREAD IS SWITCHED TO BEFORE IT HAS A NAME (owner ruling, 2026-10-25):
+// one whose first question needs abbreviating is registered under
+// ThreadTitlePlaceholder, which every surface draws until the abbreviation
+// arrives and renames it. Its DIRECTORY is a fresh token,
 // never its name, and never moves: the live session works in it and the
 // vendor keeps its transcript under its path, so a rename that moved it
 // would strand both.
@@ -66,14 +68,14 @@ func (v *verbs) CreateThread(ctx context.Context, question string) (wsm.Workspac
 		global.Error(opCreateThread, "could not make the thread's directory", dlog.Context{"dir": dir, "cause": err.Error()})
 		return wsm.Workspace{}, fmt.Errorf("create thread at %q: %w", dir, err)
 	}
-	// THE PLACEHOLDER IS CLAIMED AND REGISTERED under one naming lock, so
-	// two threads created together take "Loading…" and "Loading… (2)".
-	v.names.mu.Lock()
-	name, err := v.freeThreadNameLocked(ctx, ThreadTitlePlaceholder, "")
-	var record wsm.Workspace
-	if err == nil {
-		record, err = v.deps.DB.RegisterThread(ctx, dir, name)
+	// A FIRST QUESTION THAT IS ITS OWN ABBREVIATION names the thread at
+	// once; any other is named when the chat service mints it (NameThread).
+	name, own := chat.OwnName(question)
+	if !own {
+		name = ThreadTitlePlaceholder
 	}
+	v.names.mu.Lock()
+	record, err := v.deps.DB.RegisterThread(ctx, dir, name)
 	v.names.mu.Unlock()
 	if err != nil {
 		global.Error(opCreateThread, "could not register the thread", dlog.Context{"dir": dir, "cause": err.Error()})
@@ -110,7 +112,12 @@ func (v *verbs) CreateThread(ctx context.Context, question string) (wsm.Workspac
 	}
 	log.Info(opCreateThread, "created the thread", dlog.Context{"name": name, "dir": record.Dir})
 	v.republishRegistry(ctx, log, opCreateThread)
-	v.startTitling(ctx, log, record, question)
+	// THE CHAT SERVICE KEEPS THE THREAD CURRENT from here, watched or not,
+	// so its first question names it. A thread that will not open is
+	// recorded there, and opens again when it is watched.
+	if err := v.deps.Threads.Open(ctx, record.ID); err != nil {
+		log.Info(opCreateThread, "the chat service could not open the new thread yet; it is named once it opens", dlog.Context{"cause": err.Error()})
+	}
 	return record, nil
 }
 

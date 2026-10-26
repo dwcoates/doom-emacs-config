@@ -594,6 +594,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Zettel:  zettelclient.New(p.Opts.zettelSocket),
 		Turns:   p.DB,
 		Context: ctx,
+		// A THREAD IS NAMED after its first question by the workspace verbs,
+		// built below and reached through their forwarder.
+		Name: func(ctx context.Context, ws ids.WorkspaceID, name string) error {
+			verbs, err := verbsRef.bound("naming a chat thread")
+			if err != nil {
+				return err
+			}
+			return verbs.NameThread(ctx, ws, name)
+		},
 		// A LONG QUESTION IS ABBREVIATED for the outline by a headless call.
 		Abbreviator: chat.HeadlessAbbreviator{Headless: headlessClient, ConfigDirs: configDirs, PromptsDir: paths.PromptsDir},
 		// THE OUTLINE IS THE ROSTER'S to draw, under the current thread's row.
@@ -1573,7 +1582,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Restarts:               p.Metrics,
 			BindViews:              verbs.BindViews,
 			EnsureMainWorktrees:    verbs.EnsureMainWorktrees,
-			ResumeThreadTitles:     verbs.ResumeThreadTitles,
+			OpenThreads:            verbs.OpenThreads,
 			SettleMissingDirectory: verbs.SettleMissingDirectory,
 			Layout:                 p.Layout,
 			DB:                     p.DB,

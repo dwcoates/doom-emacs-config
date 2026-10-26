@@ -149,13 +149,14 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 			})
 			return Report{}, fmt.Errorf("boot: ensure the main worktrees: %w", err)
 		}
-		// EVERY THREAD A STOPPED DAEMON LEFT UNTITLED is titled now: its
-		// title arrives on its own goroutine, so the boot does not wait on it.
-		if err := s.deps.ResumeThreadTitles(ctx); err != nil {
-			log.Error("daemon.boot.run", "the untitled threads' titles could not be resumed", dlog.Context{
+		// EVERY THREAD IS OPENED in the chat service now, so each is named
+		// after its first question and its questions abbreviated; the opens
+		// run on their own goroutine, so the boot does not wait on them.
+		if err := s.deps.OpenThreads(ctx); err != nil {
+			log.Error("daemon.boot.run", "the chat threads could not be opened", dlog.Context{
 				"error": err.Error(),
 			})
-			return Report{}, fmt.Errorf("boot: resume the thread titles: %w", err)
+			return Report{}, fmt.Errorf("boot: open the chat threads: %w", err)
 		}
 		// What each taken-up carry leaves for after the drain: the re-judged
 		// verdicts and the carried shim replacements.

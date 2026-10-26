@@ -39,6 +39,7 @@ func (s *Service) publish(t *thread) {
 	}
 	t.path = t.walk(stop)
 	s.handOutline(t)
+	s.wantName(t)
 	if len(t.path) == 0 && !inFlight {
 		t.topic.Publish(&frontendv1.ChatView{State: &frontendv1.ChatView_Empty{Empty: &frontendv1.ChatViewEmpty{
 			Hint: &frontendv1.ChatViewEmptyHint{Text: EmptyHint},

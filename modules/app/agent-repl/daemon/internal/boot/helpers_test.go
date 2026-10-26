@@ -284,10 +284,10 @@ type harness struct {
 	// is what they answer.
 	mainEnsures   atomic.Int64
 	mainEnsureErr error
-	// titleResumes counts the boot's ResumeThreadTitles calls;
-	// titleResumeErr fails them.
-	titleResumes   atomic.Int64
-	titleResumeErr error
+	// threadOpens counts the boot's OpenThreads calls;
+	// threadOpenErr fails them.
+	threadOpens   atomic.Int64
+	threadOpenErr error
 	// reposAtMainEnsure is the registry's repositories as the last
 	// EnsureMainWorktrees call found them.
 	reposAtMainEnsure []wsm.Repository
@@ -425,9 +425,9 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 			h.binds.Add(1)
 			return h.bindErr
 		},
-		ResumeThreadTitles: func(context.Context) error {
-			h.titleResumes.Add(1)
-			return h.titleResumeErr
+		OpenThreads: func(context.Context) error {
+			h.threadOpens.Add(1)
+			return h.threadOpenErr
 		},
 		EnsureMainWorktrees: func(ctx context.Context) error {
 			h.mainEnsures.Add(1)

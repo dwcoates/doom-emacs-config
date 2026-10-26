@@ -279,10 +279,13 @@ type Verbs interface {
 	// The boot calls it once its gone repositories are retired: a repository
 	// is known exactly as long as its main worktree is a registered workspace.
 	EnsureMainWorktrees(ctx context.Context) error
-	// ResumeThreadTitles titles every chat thread a stopped daemon left under
-	// its placeholder name, from its first question; the titles arrive on
-	// their own goroutines.
-	ResumeThreadTitles(ctx context.Context) error
+	// OpenThreads has the chat service open every chat thread, naming each
+	// after its first question and abbreviating its questions; the threads
+	// open on their own goroutine.
+	OpenThreads(ctx context.Context) error
+	// NameThread names a chat thread after its first question (the chat
+	// service's Deps.Name).
+	NameThread(ctx context.Context, ws ids.WorkspaceID, name string) error
 	// SettleMissingDirectory settles an OPEN workspace whose directory a stat
 	// found gone (statErr): recreated from its recorded branch, as an open of
 	// it does, or closed by the daemon when there is nothing to restore from.
@@ -1098,6 +1101,10 @@ type ThreadGraphs interface {
 	// Delete destroys one thread's graph and forgets what is held of it,
 	// recording its own failure.
 	Delete(ctx context.Context, thread ids.WorkspaceID) error
+	// Open loads one thread and keeps it current, so it is named and its
+	// questions abbreviated whether or not anything watches it, recording
+	// its own failure.
+	Open(ctx context.Context, thread ids.WorkspaceID) error
 }
 
 // SelectionHistory says what a select does to the durable selection history

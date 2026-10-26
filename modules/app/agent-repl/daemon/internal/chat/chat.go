@@ -104,6 +104,10 @@ type Deps struct {
 	Outline func(ids.WorkspaceID, *frontendv1.RosterThreadOutline)
 	// Abbreviator mints each long question's abbreviation (abbreviate.go).
 	Abbreviator Abbreviator
+	// Name names a thread after its first question (naming.go). Called off
+	// the service's lock, one call per thread at a time, in the order the
+	// names were wanted.
+	Name func(ctx context.Context, ws ids.WorkspaceID, name string) error
 }
 
 // Service is the chat service.
@@ -113,12 +117,14 @@ type Service struct {
 	threads map[ids.WorkspaceID]*thread
 	// slots bounds the abbreviation calls running at once.
 	slots chan struct{}
+	// drains counts the name drains running (naming.go).
+	drains sync.WaitGroup
 }
 
 // New builds the service.
 func New(deps Deps) *Service {
-	if deps.Zettel == nil || deps.Turns == nil || deps.Log == nil || deps.Context == nil || deps.Outline == nil || deps.Abbreviator == nil {
-		panic("chat: Zettel, Turns, Log, Context, Outline and Abbreviator are required")
+	if deps.Zettel == nil || deps.Turns == nil || deps.Log == nil || deps.Context == nil || deps.Outline == nil || deps.Abbreviator == nil || deps.Name == nil {
+		panic("chat: Zettel, Turns, Log, Context, Outline, Abbreviator and Name are required")
 	}
 	if deps.Go == nil {
 		deps.Go = func(f func()) { go f() }
@@ -165,6 +171,13 @@ type thread struct {
 	// minted is an abbreviation that arrived before its turn's node existed,
 	// held until the node's recording takes it (record).
 	minted map[ids.TurnID]string
+	// unabbreviated is every turn whose abbreviation could not be minted in
+	// this daemon's life: its question names the thread as it was asked.
+	unabbreviated map[ids.TurnID]bool
+	// wantedName is the name the thread last called for, appliedName the
+	// one Deps.Name last took, and naming whether a drain runs (naming.go).
+	wantedName, appliedName string
+	naming                  bool
 }
 
 // answeredTurn is a turn whose answer is being recorded. It holds the turn's
@@ -185,7 +198,7 @@ func (s *Service) state(id ids.WorkspaceID) *thread {
 			id: id, topic: publish.NewLatestOnly[*frontendv1.ChatView](),
 			nodes: map[NodeID]*zettelv1.Node{}, picks: map[NodeID]NodeID{},
 			prose: map[ids.TurnID]string{}, answered: map[ids.TurnID]answeredTurn{}, ended: map[ids.TurnID]bool{},
-			abbreviating: map[ids.TurnID]bool{}, minted: map[ids.TurnID]string{},
+			abbreviating: map[ids.TurnID]bool{}, minted: map[ids.TurnID]string{}, unabbreviated: map[ids.TurnID]bool{},
 		}
 		s.threads[id] = t
 	}

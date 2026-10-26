@@ -71,12 +71,13 @@ func TestEmacsReachesAChatThreadOffTheTabBar(t *testing.T) {
                         (lambda (&rest _) "Why is the sky blue?")))
                (call-interactively #'agent-repl-thread-new)
                t)`)
-	// The fake vendor titles the thread at once; the row then carries the
-	// title, and its workspace (named by its id) is open and marked a thread.
+	// The question is its own abbreviation, so it names the thread at once;
+	// the row carries it, and its workspace (named by its id) is open and
+	// marked a thread.
 	var threadID string
-	e.AwaitEvalFor(emacsVerbBound, "the titled thread's workspace, marked a thread",
+	e.AwaitEvalFor(emacsVerbBound, "the named thread's workspace, marked a thread",
 		`(let ((row (car (agent-repl-roster-threads))))
-           (and row (equal (plist-get row :name) `+elispString(harness.FakeClaudeMintedTitle)+`)
+           (and row (equal (plist-get row :name) `+elispString("Why is the sky blue?")+`)
                 (agent-repl-roster-thread-p (agent-repl-roster-thread-workspace-name row))
                 (plist-get (plist-get row :thread) :id)))`,
 		func(raw json.RawMessage) bool {

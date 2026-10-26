@@ -187,7 +187,7 @@ func TestWordsValidatePanicsOnImpossibleBounds(t *testing.T) {
 // TestShortAnswersValidateThroughWords fails on a short-answer validator that
 // trims and counts words by hand instead of through Words.
 func TestShortAnswersValidateThroughWords(t *testing.T) {
-	for _, file := range []string{"../workspace/threadtitle.go", "../chat/abbreviate.go"} {
+	for _, file := range []string{"../chat/abbreviate.go"} {
 		t.Run(file, func(t *testing.T) {
 			body, err := os.ReadFile(file)
 			if err != nil {

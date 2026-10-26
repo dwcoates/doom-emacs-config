@@ -2792,7 +2792,7 @@ func TestTheZettelStepRunsBesideTheBringUp(t *testing.T) {
 	}
 }
 
-func TestTheBootResumesTheThreadTitlesOnce(t *testing.T) {
+func TestTheBootOpensTheThreadsOnce(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
@@ -2800,26 +2800,26 @@ func TestTheBootResumesTheThreadTitlesOnce(t *testing.T) {
 	_, err := h.seq.Run(context.Background())
 
 	// Assert
-	if err != nil || h.titleResumes.Load() != 1 {
-		t.Fatalf("Run = %v, ResumeThreadTitles calls = %d; want one", err, h.titleResumes.Load())
+	if err != nil || h.threadOpens.Load() != 1 {
+		t.Fatalf("Run = %v, OpenThreads calls = %d; want one", err, h.threadOpens.Load())
 	}
 }
 
-func TestAThreadTitleResumeFailureFailsTheBoot(t *testing.T) {
+func TestAThreadOpenFailureFailsTheBoot(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.titleResumeErr = errors.New("the registry could not be read")
+	h.threadOpenErr = errors.New("the registry could not be read")
 
 	// Act
 	_, err := h.seq.Run(context.Background())
 
 	// Assert
-	if !errors.Is(err, h.titleResumeErr) || !h.hasRecord("error", "daemon.boot.run") {
-		t.Fatalf("Run = %v, want the resume's failure, recorded at ERROR", err)
+	if !errors.Is(err, h.threadOpenErr) || !h.hasRecord("error", "daemon.boot.run") {
+		t.Fatalf("Run = %v, want the open's failure, recorded at ERROR", err)
 	}
 }
 
-func TestAJoiningDaemonResumesNoThreadTitle(t *testing.T) {
+func TestAJoiningDaemonOpensNoThread(t *testing.T) {
 	// Arrange
 	h := newHarness(t, func(d *Deps, _ *harness) { d.JoiningAddress = "127.0.0.1:41111" })
 
@@ -2829,7 +2829,7 @@ func TestAJoiningDaemonResumesNoThreadTitle(t *testing.T) {
 	}
 
 	// Assert
-	if got := h.titleResumes.Load(); got != 0 {
-		t.Fatalf("ResumeThreadTitles calls = %d on a joining daemon, want 0", got)
+	if got := h.threadOpens.Load(); got != 0 {
+		t.Fatalf("OpenThreads calls = %d on a joining daemon, want 0", got)
 	}
 }
