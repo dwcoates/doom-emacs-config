@@ -172,3 +172,50 @@ func TestABrokenStreamIsSaidOnceAndTheRunGoesOn(t *testing.T) {
 		t.Fatalf("writes = %d, errors = %q; want one attempt and one error", w.writes, errs.String())
 	}
 }
+
+func TestACPUWaitReadsBackAsItsTwoEvents(t *testing.T) {
+	// Arrange
+	var buf bytes.Buffer
+	e := New(&buf, &run.Log{Out: io.Discard, Err: io.Discard})
+
+	// Act
+	e.WaitingForCPU("u1", 71.5, 65)
+	e.CPUWaitEnded("u1", 2500*time.Millisecond)
+
+	// Assert
+	evs := readAll(t, &buf)
+	if len(evs) != 2 {
+		t.Fatalf("events = %v, want waiting_for_cpu then cpu_wait_ended", evs)
+	}
+	if w := evs[0].GetWaitingForCpu(); w.GetUnitId() != "u1" || w.GetBusyPercent() != 71.5 || w.GetCapPercent() != 65 {
+		t.Fatalf("waiting_for_cpu = %v", w)
+	}
+	if e := evs[1].GetCpuWaitEnded(); e.GetUnitId() != "u1" || e.GetWaitedMs() != 2500 {
+		t.Fatalf("cpu_wait_ended = %v", e)
+	}
+}
+
+func TestEventsWrittenFromTwoGoroutinesReadBackWhole(t *testing.T) {
+	// Arrange: a unit's CPU wait is stated beside the run's own loop.
+	var buf bytes.Buffer
+	e := New(&buf, &run.Log{Out: io.Discard, Err: io.Discard})
+	const each = 200
+	done := make(chan struct{})
+
+	// Act
+	go func() {
+		for range each {
+			e.WaitingForCPU("u1", 70, 65)
+		}
+		close(done)
+	}()
+	for range each {
+		e.Refused("x")
+	}
+	<-done
+
+	// Assert
+	if got := len(readAll(t, &buf)); got != 2*each {
+		t.Fatalf("read back %d events, want %d", got, 2*each)
+	}
+}

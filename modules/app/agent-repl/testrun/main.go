@@ -31,6 +31,8 @@ import (
 
 	testrunv1 "agentrepl/proto/testrun/v1"
 
+	"agentrepl/logging/hostcpu"
+
 	"agentrepl/testrun/internal/cli"
 	"agentrepl/testrun/internal/cores"
 	"agentrepl/testrun/internal/cover"
@@ -357,7 +359,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		log.Errorf("mark the run's units as holding core seats (%s): %v", cores.NestedEnv, err)
 		return 1
 	}
-	log.Infof("core budget: %d of the host's %d cores (%d%%), shared by every test run on the host through %s; this run ranks %d", slots, runtime.NumCPU(), cores.Share, cores.DefaultDir, rank)
+	log.Infof("core budget: up to %d of the host's %d cores (%d%%), shared by every test run on the host through %s and held back by the CPU governor while the host is busy; this run ranks %d", slots, runtime.NumCPU(), cores.CapPercent, cores.DefaultDir, rank)
 	reuseDeps, err := reuse.HostDeps(args.Module, self, work, log)
 	if err != nil {
 		log.Errorf("%v", err)
@@ -375,6 +377,20 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		defer stream.Close()
 		emitter = events.New(stream, log)
 	}
+	host := cores.NewHost(cores.DefaultDir, slots, rank, log)
+	if emitter != nil {
+		host.WaitingForCPU = func(id string, state cores.CPUState) {
+			emitter.WaitingForCPU(id, state.BusyPercent, state.CapPercent)
+		}
+		host.CPUWaitEnded = emitter.CPUWaitEnded
+	}
+	// THE CPU GOVERNOR (cores.Governor): every run offers to govern the
+	// host's tests, and the first to hold the role does until it exits.
+	ticker := time.NewTicker(cores.Tick)
+	defer ticker.Stop()
+	governorCtx, stopGovernor := context.WithCancel(ctx)
+	defer stopGovernor()
+	go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Ticks: ticker.C, Log: log}).Run(governorCtx)
 	return cli.Run(ctx, cli.Deps{
 		Events:            emitter,
 		Reuse:             reuse.Runner{Deps: reuseDeps, Files: func() ([]string, error) { return reuse.ExecRepoFiles(reuseDeps.Repo) }},
@@ -382,7 +398,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		Exec:              run.OSExec{Log: log, Grace: run.KillGrace, TmpParent: root, Prefix: prefix},
 		Clock:             run.WallClock{},
 		Slots:             slots,
-		Cores:             cores.NewHost(cores.DefaultDir, slots, rank, log),
+		Cores:             host,
 		HistoryPath:       histPath,
 		Build:             suites.Build,
 		Git:               gitinfo.Head,

@@ -1,7 +1,10 @@
 // Package cores is the host's test-CPU budget: every test run on the host,
-// however many overlap, together holds at most Share percent of the host's
-// cores (owner ruling, 2026-10-20: the merge queue's runs overlapping one
-// another and the owners' own runs drove the whole host past 100%).
+// however many overlap, together holds at most the pool of core seats, and
+// the CPU governor (governor.go) holds back what the rest of the host leaves
+// no room for, so the host's total CPU use stays under CapPercent (owner
+// rulings 2026-10-20, 2026-10-23 and 2026-10-26: overlapping runs drove the
+// whole host past 100%, and a fixed share of the cores still let the host
+// pass 90% while the rest of it was busy).
 //
 // THE BUDGET IS A POOL OF CORE SEATS, ONE PER BUDGETED CORE, SHARED BY EVERY
 // RUN. A unit takes as many seats as it holds core slots (its width) before it
@@ -13,6 +16,7 @@
 package cores
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -20,10 +24,6 @@ import (
 
 	"agentrepl/testrun/internal/seats"
 )
-
-// Share is the percentage of the host's cores every test run together holds
-// (owner ruling 2026-10-23: half, down from the 70% first chosen).
-const Share = 50
 
 // DefaultDir is where the host's core seats live; every run on the host
 // shares it.
@@ -35,12 +35,13 @@ const DefaultDir = "/tmp/agent-repl-test-cores"
 // refuses that run instead.
 const NestedEnv = "AGENT_REPL_TEST_CORE_SEATS_HELD"
 
-// Budget is the host's core budget, Share percent of numCPU rounded down. A
-// host too small to budget a single core is refused, never adjusted.
+// Budget is the host's pool of core seats: CapPercent of numCPU rounded
+// down, all a run may hold on an otherwise idle host. A host too small to
+// budget a single core is refused, never adjusted.
 func Budget(numCPU int) (int, error) {
-	n := numCPU * Share / 100
+	n := numCPU * CapPercent / 100
 	if n < 1 {
-		return 0, fmt.Errorf("this host has %d cores; tests may hold %d%% of them, which is not one whole core", numCPU, Share)
+		return 0, fmt.Errorf("this host has %d cores; tests may hold %d%% of them, which is not one whole core", numCPU, CapPercent)
 	}
 	return n, nil
 }
@@ -84,6 +85,10 @@ type Host struct {
 	Rank int
 	Log  Logger
 	Now  func() time.Time
+	// WaitingForCPU, when set, is told a unit begins to wait while the CPU
+	// governor holds every unit back, and CPUWaitEnded when it has its seats.
+	WaitingForCPU func(id string, state CPUState)
+	CPUWaitEnded  func(id string, waited time.Duration)
 }
 
 // NewHost is the host's core pool of budget seats under dir, taken at rank.
@@ -92,19 +97,42 @@ func NewHost(dir string, budget, rank int, log Logger) Host {
 }
 
 // Hold takes width core seats for unit id, waiting while the host's budget is
-// spent, and answers the function that gives them back.
+// spent or the CPU governor holds units back, and answers the function that
+// gives them back. A wait says which of the two it is.
 func (h Host) Hold(id string, width int) (func() error, error) {
 	var start time.Time
-	waited := false
+	waited, forCPU := false, false
+	var stateErr error
 	held, err := h.Pool.TakeN(width, h.Rank, func() {
 		waited, start = true, h.Now()
+		state, err := ReadState(h.Pool.Dir)
+		if err != nil {
+			stateErr = err
+			h.Log.Infof("core seats: unit %s waits for %d of the host's %d, and cannot tell whether for the CPU: %v", id, width, h.Pool.N, err)
+			return
+		}
+		if state.WaitingForCPU {
+			forCPU = true
+			h.Log.Infof("core seats: unit %s is waiting for CPU; the host is %.0f%% busy against the %d%% cap every test and build together is held to", id, state.BusyPercent, state.CapPercent)
+			if h.WaitingForCPU != nil {
+				h.WaitingForCPU(id, state)
+			}
+			return
+		}
 		h.Log.Infof("core seats: unit %s waits for %d of the host's %d, held by test runs or promised to a run that outranks this one (rank %d)", id, width, h.Pool.N, h.Rank)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("hold %d core seat(s) for unit %s: %w", width, id, err)
+		return nil, errors.Join(fmt.Errorf("hold %d core seat(s) for unit %s: %w", width, id, err), stateErr)
+	}
+	if stateErr != nil {
+		return nil, errors.Join(fmt.Errorf("unit %s waited for core seats but could not tell why: %w", id, stateErr), held.Release())
 	}
 	if waited {
-		h.Log.Infof("core seats: unit %s took %d after %s", id, width, h.Now().Sub(start).Round(time.Millisecond))
+		took := h.Now().Sub(start)
+		h.Log.Infof("core seats: unit %s took %d after %s", id, width, took.Round(time.Millisecond))
+		if forCPU && h.CPUWaitEnded != nil {
+			h.CPUWaitEnded(id, took)
+		}
 	}
 	return held.Release, nil
 }

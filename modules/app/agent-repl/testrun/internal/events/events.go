@@ -9,6 +9,8 @@ package events
 
 import (
 	"io"
+	"sync"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protodelim"
 
@@ -23,7 +25,11 @@ import (
 const TailBytes = 4000
 
 // Emitter writes a run's events to one stream.
+//
+// A unit's hold on the host's cores runs beside the run's own loop, so its
+// CPU wait is stated from another goroutine: every write is one at a time.
 type Emitter struct {
+	mu  sync.Mutex
 	w   io.Writer
 	log *run.Log
 	// broken is set once a write fails: the reader is gone, so the run goes
@@ -35,6 +41,8 @@ type Emitter struct {
 func New(w io.Writer, log *run.Log) *Emitter { return &Emitter{w: w, log: log} }
 
 func (e *Emitter) write(ev *testrunv1.TestRunEvent) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.broken {
 		return
 	}
@@ -139,6 +147,22 @@ func (e *Emitter) Ended(results []run.Result, unplannable int) {
 // Refused states that the selection could not be run, and why.
 func (e *Emitter) Refused(detail string) {
 	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Refused{Refused: &testrunv1.TestRunRefused{Detail: detail}}})
+}
+
+// WaitingForCPU states that unit id waits to start because the host is too
+// busy for tests to add to.
+func (e *Emitter) WaitingForCPU(id string, busyPercent float64, capPercent int) {
+	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_WaitingForCpu{WaitingForCpu: &testrunv1.TestRunWaitingForCpu{
+		UnitId: id, BusyPercent: busyPercent, CapPercent: uint32(capPercent),
+	}}})
+}
+
+// CPUWaitEnded states that unit id, which waited for the host's CPU, has its
+// cores after waiting waited.
+func (e *Emitter) CPUWaitEnded(id string, waited time.Duration) {
+	e.write(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_CpuWaitEnded{CpuWaitEnded: &testrunv1.TestRunCpuWaitEnded{
+		UnitId: id, WaitedMs: waited.Milliseconds(),
+	}}})
 }
 
 // Read reads the next event off r: the daemon's side of the stream.

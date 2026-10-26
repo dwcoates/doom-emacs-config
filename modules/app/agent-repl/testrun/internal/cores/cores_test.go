@@ -12,7 +12,8 @@ import (
 type recLog struct {
 	mu    sync.Mutex
 	lines []string
-	// waits, when set, receives once per line that says a unit waits.
+	// waits, when set, receives once per line that says a unit waits, for
+	// seats or for the CPU.
 	waits chan struct{}
 }
 
@@ -21,7 +22,7 @@ func (l *recLog) Infof(format string, args ...any) {
 	l.mu.Lock()
 	l.lines = append(l.lines, line)
 	l.mu.Unlock()
-	if l.waits != nil && strings.Contains(line, "waits") {
+	if l.waits != nil && strings.Contains(line, " wait") {
 		l.waits <- struct{}{}
 	}
 }
@@ -48,9 +49,9 @@ func TestBudget(t *testing.T) {
 		cpus int
 		want int
 	}{
-		{name: "sixteen cores budget eight", cpus: 16, want: 8},
-		{name: "ten cores budget five", cpus: 10, want: 5},
-		{name: "three cores budget one", cpus: 3, want: 1},
+		{name: "sixteen cores budget ten", cpus: 16, want: 10},
+		{name: "ten cores budget six", cpus: 10, want: 6},
+		{name: "two cores budget one", cpus: 2, want: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
