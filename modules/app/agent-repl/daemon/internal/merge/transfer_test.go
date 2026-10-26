@@ -433,6 +433,55 @@ func TestASuspensionLeavesAnAbandonedRunToItsEnd(t *testing.T) {
 	}
 }
 
+func TestLetGoBound(t *testing.T) {
+	tests := []struct {
+		name       string
+		background bool
+		want       time.Duration
+	}{
+		{name: "a run at the front lets go within the drain's bound", background: false, want: 2 * time.Second},
+		{name: "a waiting member's rebase lets go through git, within both bounds", background: true, want: 12 * time.Second},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.o.drainBound, h.o.gitBound = 2*time.Second, 10*time.Second
+			r := liveRun(t, h, theWorkspace)
+			r.background = tc.background
+
+			// Act
+			got := h.o.letGoBound(r)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("letGoBound = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestATransferWaitsPastTheDrainBoundForAWaitingMembersRebaseToLetGo(t *testing.T) {
+	// Arrange: the drain's bound is gone at once; the run lets go only once
+	// the test has seen it cut, as a rebase abort does after the cut.
+	h := newHarness(t)
+	h.o.drainBound, h.o.gitBound = time.Nanosecond, time.Minute
+	r := liveRun(t, h, theWorkspace)
+	r.background = true
+	go func() {
+		<-r.ctx.Done()
+		close(r.finished)
+	}()
+
+	// Act
+	err := h.o.suspendFor(context.Background(), theWorkspace, suspendTransfer)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("suspendFor = %v, want the waiting member's rebase let go", err)
+	}
+}
+
 func TestASuspensionRefusesAnAbandonedRunThatDoesNotEndWithinItsBound(t *testing.T) {
 	// Arrange: the abandoned run never ends.
 	h := newHarness(t)

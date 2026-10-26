@@ -224,7 +224,7 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 		return nil
 	}
 	fields["lease"] = string(r.lease.ID)
-	bound := o.terminalDrainBound()
+	bound := o.letGoBound(r)
 	if abandoned {
 		return o.awaitOwnEnd(log, op, ws, withField(fields, "cause", string(r.abandonedFor())), r.finished, ownEnd{
 			refusal: "merge: the abandoned merge of %s did not end within %s",
@@ -287,6 +287,21 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 	}
 	o.forgetMoved(ws)
 	return nil
+}
+
+// letGoBound is how long a suspension waits for the cut run R to let go.
+//
+// A WAITING MEMBER'S REBASE LETS GO THROUGH GIT. The cut stands it down by
+// aborting the rebase standing in its worktree (standDownBackground), which is
+// git work, and the terminal drain's bound is sized for SQLite writes, not
+// for git: the git bound is given on top of it (2026-10-26: a waiting
+// member's abort took 2.3s against 2s, and the handover's transfer of its
+// workspace was refused).
+func (o *orchestrator) letGoBound(r *run) time.Duration {
+	if r.background {
+		return o.gitStopBound() + o.terminalDrainBound()
+	}
+	return o.terminalDrainBound()
 }
 
 // ownEnd is what awaitOwnEnd says of one way a run ends by itself: the
