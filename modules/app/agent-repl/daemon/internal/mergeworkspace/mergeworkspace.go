@@ -98,6 +98,10 @@ type Deps struct {
 	// (mergenotice.Service.DeployEnded). Every deploy ends in PayOwed, so
 	// this is the one place a deploy's end is told.
 	Deploys DeployReporter
+	// Owned answers the channel that closes once this daemon owns the state
+	// (rollout.Controller.TookOver for a joining successor). Nil means it
+	// owns the state from the start.
+	Owned func() <-chan struct{}
 }
 
 // DeployReporter tells the merge queue's subscribers a deploy ended.
@@ -406,9 +410,20 @@ func handbackText(mergeWS wsm.Workspace, out merge.DetachedOutcome) (string, str
 	return "", "", fmt.Errorf("mergeworkspace: undeclared detached merge outcome %s", out.Kind)
 }
 
-// Run sweeps for idle merge workspaces at once and then on every TICK, until
-// CTX ends.
+// Run sweeps for idle merge workspaces once this daemon owns the state, and
+// then on every TICK, until CTX ends.
+//
+// A JOINING SUCCESSOR DOES NOT OWN IT YET: its handle is read-only until it
+// takes over, and a sweep there refused every removal at ERROR
+// (2026-10-26).
 func (s *Service) Run(ctx context.Context, tick <-chan time.Time) {
+	if s.deps.Owned != nil {
+		select {
+		case <-s.deps.Owned():
+		case <-ctx.Done():
+			return
+		}
+	}
 	s.Sweep(ctx)
 	for {
 		select {

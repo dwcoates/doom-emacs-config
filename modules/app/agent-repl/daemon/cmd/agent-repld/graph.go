@@ -1397,6 +1397,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// EVERY DEPLOY ENDS IN THE REPORTS' PAYMENT, so that is where the
 		// queue's subscribers are told of it.
 		Deploys: queueNotices,
+		// A JOINING SUCCESSOR SWEEPS ONLY ONCE IT HAS TAKEN OVER: until then
+		// its handle is read-only.
+		Owned: func() <-chan struct{} {
+			if !rolloutController.Joining() {
+				owned := make(chan struct{})
+				close(owned)
+				return owned
+			}
+			return rolloutController.TookOver()
+		},
 	})
 	detachedRef.bind(detached)
 	// THE RETARGET pairs the verb that records a new merge target with the

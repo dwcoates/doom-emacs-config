@@ -849,6 +849,53 @@ func TestRunSweepsAtOnceAndOnEveryTick(t *testing.T) {
 	}
 }
 
+func TestRunSweepsNothingBeforeTheDaemonOwnsTheState(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester := register(t, f.db, "sample", nil)
+	register(t, f.db, "sample-merge", &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"})
+	f.now = time.Now().Add(IdleLimit + time.Hour)
+	owned := make(chan struct{})
+	f.svc.deps.Owned = func() <-chan struct{} { return owned }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	// Act
+	go func() { f.svc.Run(ctx, make(chan time.Time)); close(done) }()
+	cancel()
+	<-done
+
+	// Assert
+	if len(f.workspaces.nuked) != 0 {
+		t.Fatalf("nuked %v before the daemon owned the state, want nothing", f.workspaces.nuked)
+	}
+}
+
+func TestRunSweepsOnceTheDaemonOwnsTheState(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	requester := register(t, f.db, "sample", nil)
+	register(t, f.db, "sample-merge", &wsm.MergeOrigin{Requester: requester.ID, Request: "request-1"})
+	f.now = time.Now().Add(IdleLimit + time.Hour)
+	owned := make(chan struct{})
+	f.svc.deps.Owned = func() <-chan struct{} { return owned }
+	tick := make(chan time.Time)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	// Act: the tick is taken only after the first sweep ran.
+	go func() { f.svc.Run(ctx, tick); close(done) }()
+	close(owned)
+	tick <- time.Now()
+	cancel()
+	<-done
+
+	// Assert
+	if len(f.workspaces.nuked) != 1 {
+		t.Fatalf("nuked %v, want the idle workspace removed once the daemon owned the state", f.workspaces.nuked)
+	}
+}
+
 func TestEverySubmissionCarriesAKeyOfTheSharedDaemonShape(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
