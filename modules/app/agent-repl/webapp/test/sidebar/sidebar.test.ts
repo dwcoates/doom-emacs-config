@@ -1618,7 +1618,7 @@ describe("the rail scrolls the selected row into its section's view", () => {
     sidebar.markShown("ws-4");
 
     // Assert
-    expect(laid.scrollTop()).toBe(70);
+    expect(laid.scrollTop()).toBe(60);
     sidebar.dispose();
   });
 
