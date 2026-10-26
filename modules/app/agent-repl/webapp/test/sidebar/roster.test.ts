@@ -89,6 +89,18 @@ function pane(drawn: HTMLElement): HTMLElement {
 }
 
 
+/** Each band viewport the faded foot is or is not painted on (styles.css), and whether it is. */
+const BAND_FOOT_FADES = [
+  { name: "fades a capped Hidden Workspaces viewport while rows lie below it", cls: "hidden-section", region: "rows", attrs: ["data-band-more"], want: true },
+  { name: "leaves a Hidden Workspaces viewport with nothing below unfaded", cls: "hidden-section", region: "rows", attrs: [], want: false },
+  { name: "leaves a capped Recently Merged viewport unfaded", cls: "merged-section", region: "rows", attrs: ["data-band-more"], want: false },
+  { name: "fades a stretched Recently Merged viewport while rows lie below it", cls: "merged-section", region: "rows", attrs: ["data-band-stretched", "data-band-more"], want: true },
+  { name: "fades a capped Open viewport while rows lie below it", cls: "open-section", region: "sb-sections", attrs: ["data-band-more"], want: true },
+  { name: "fades a stretched Open viewport while rows lie below it", cls: "open-section", region: "sb-sections", attrs: ["data-band-stretched", "data-band-more"], want: true },
+  { name: "leaves an Open viewport with nothing below unfaded", cls: "open-section", region: "sb-sections", attrs: [], want: false },
+  { name: "leaves a stretched Open viewport with nothing below unfaded", cls: "open-section", region: "sb-sections", attrs: ["data-band-stretched"], want: false },
+];
+
 describe("the sections", () => {
   it("draws one section per repository, in the resolver's order", () => {
     const drawn = drawWorkspaceRoster(
@@ -1345,16 +1357,7 @@ describe("recently merged rows", () => {
     expect(css).toContain("#ws-sidebar { --row-gutter-w: 3px; }");
   });
 
-  it.each([
-    { name: "fades a capped Hidden Workspaces viewport while rows lie below it", cls: "hidden-section", region: "rows", attrs: ["data-band-more"], want: true },
-    { name: "leaves a Hidden Workspaces viewport with nothing below unfaded", cls: "hidden-section", region: "rows", attrs: [], want: false },
-    { name: "leaves a capped Recently Merged viewport unfaded", cls: "merged-section", region: "rows", attrs: ["data-band-more"], want: false },
-    { name: "fades a stretched Recently Merged viewport while rows lie below it", cls: "merged-section", region: "rows", attrs: ["data-band-stretched", "data-band-more"], want: true },
-    { name: "fades a capped Open viewport while rows lie below it", cls: "open-section", region: "sb-sections", attrs: ["data-band-more"], want: true },
-    { name: "fades a stretched Open viewport while rows lie below it", cls: "open-section", region: "sb-sections", attrs: ["data-band-stretched", "data-band-more"], want: true },
-    { name: "leaves an Open viewport with nothing below unfaded", cls: "open-section", region: "sb-sections", attrs: [], want: false },
-    { name: "leaves a stretched Open viewport with nothing below unfaded", cls: "open-section", region: "sb-sections", attrs: ["data-band-stretched"], want: false },
-  ])("$name", ({ cls, region, attrs, want }) => {
+  it.each(BAND_FOOT_FADES)("$name", ({ cls, region, attrs, want }) => {
     // Arrange
     const section = document.createElement("div");
     section.className = `repo ${cls}`;
@@ -1366,6 +1369,20 @@ describe("recently merged rows", () => {
     const mask = inRail(section, () => cascadedValue(viewport, "mask-image"));
     // Assert
     expect(mask.includes("var(--band-foot-fade)")).toBe(want);
+  });
+
+  it.each(BAND_FOOT_FADES)("pads the faded strip out of the selection's view where it $name", ({ cls, region, attrs, want }) => {
+    // Arrange
+    const section = document.createElement("div");
+    section.className = `repo ${cls}`;
+    for (const attr of attrs) section.setAttribute(attr, "");
+    const viewport = document.createElement("div");
+    viewport.className = region;
+    section.appendChild(viewport);
+    // Act
+    const padding = inRail(section, () => cascadedValue(viewport, "scroll-padding-bottom"));
+    // Assert
+    expect(padding === "var(--band-foot-fade)").toBe(want);
   });
 
   it("declares the one rail row vertical padding", () => {

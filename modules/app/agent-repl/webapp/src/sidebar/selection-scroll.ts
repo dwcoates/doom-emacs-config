@@ -5,8 +5,15 @@
  * sections do (`band-fit.ts`), so a selected workspace can sit below the
  * Open section's viewport, highlighted where nobody sees it. Once a workspace
  * becomes the highlighted one, its section's viewport scrolls until its line
- * shows, centered when it has to move, so the line clears the faded foot and
- * the header above it.
+ * shows.
+ *
+ * ONLY AS FAR AS THE LINE NEEDS (owner request, 2026-10-26). A line already in
+ * view moves nothing. A line above the view is brought to its top edge, and one
+ * below it to its bottom edge, never centered, so a switch (`M-}` or any other)
+ * moves the rail no more than showing the line takes. The view is the
+ * viewport less its scroll padding: the stylesheet pads a faded foot's strip
+ * (`--band-foot-fade`) out of it in the same rule that paints the fade, so a
+ * line is never left under the fade.
  *
  * ONCE PER SELECTION. The rail is redrawn on every push, and the reader may
  * scroll the section away from the selected row; a push that leaves the same
@@ -14,7 +21,7 @@
  * counts as followed: one in a folded section, a collapsed repository or
  * narrowed away by the search is followed on the first draw that lays it out.
  */
-import { queryAll } from "../dom.js";
+import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { selectionRowScroll } from "../scroll.js";
 import { REGION_SELECTOR } from "./band-fit.js";
@@ -87,20 +94,43 @@ function scrollerOf(line: HTMLElement): HTMLElement {
   return scroller;
 }
 
+/** The scroll padding that insets a viewport's edges. */
+type ScrollPaddingEdge = "scrollPaddingTop" | "scrollPaddingBottom";
+
 /**
- * Scroll LINE's section viewport (the rail's body, for a chat thread's row) so
- * LINE shows whole, centered when it has to move. Answers how it moved, or
- * null when LINE already showed whole.
+ * SCROLLER's computed scroll padding on EDGE, in px: `auto`, the initial value
+ * a viewport the stylesheet pads nothing out of computes to, is none.
+ */
+function scrollPadding(scroller: HTMLElement, edge: ScrollPaddingEdge): number {
+  const value = window.getComputedStyle(scroller)[edge];
+  if (value === "auto") return 0;
+  const px = computedPx(value);
+  if (px === null) {
+    log.error("the selected row cannot be scrolled into view: its viewport's scroll padding is not in px", {
+      operation: "sidebar.selection-scroll.unmeasurable",
+      context: { edge, value, scroller: scroller.className },
+    });
+    throw new RangeError(`sidebar selection scroll: computed ${edge} '${value}' is not in px`);
+  }
+  return px;
+}
+
+/**
+ * Scroll LINE's section viewport (the rail's body, for a chat thread's row)
+ * only as far as LINE needs to show whole: its top to the view's top when it
+ * lies above, its bottom to the view's bottom when it lies below. Answers how
+ * it moved, or null when LINE already showed whole.
  */
 export function scrollLineIntoBand(line: HTMLElement): BandScroll | null {
   const region = scrollerOf(line);
   const box = region.getBoundingClientRect();
-  const viewTop = box.top + region.clientTop;
-  const viewBottom = viewTop + region.clientHeight;
+  const viewportTop = box.top + region.clientTop;
+  const viewTop = viewportTop + scrollPadding(region, "scrollPaddingTop");
+  const viewBottom = viewportTop + region.clientHeight - scrollPadding(region, "scrollPaddingBottom");
   const edges = line.getBoundingClientRect();
   if (edges.top >= viewTop && edges.bottom <= viewBottom) return null;
   const from = region.scrollTop;
-  selectionRowScroll(region, edges.top + edges.height / 2 - (viewTop + region.clientHeight / 2));
+  selectionRowScroll(region, edges.top < viewTop ? edges.top - viewTop : edges.bottom - viewBottom);
   return { from, to: region.scrollTop };
 }
 
