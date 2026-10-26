@@ -1870,8 +1870,8 @@ func (f *fakeFooter) OpenFault(_ ids.WorkspaceID, fault footer.Fault) {
 	f.faults = append(f.faults, fault)
 }
 
-func (f *fakeFooter) SetParked(_ ids.WorkspaceID, parked bool) {
-	f.parked = append(f.parked, parked)
+func (f *fakeFooter) SetParked(_ ids.WorkspaceID, park wsm.Park) {
+	f.parked = append(f.parked, park != wsm.ParkNone)
 }
 
 // Prime records the workspaces registration primed the footer for, in order,
@@ -3091,9 +3091,9 @@ func (s stubTopbar) ContextWindow(ids.WorkspaceID) int64 {
 	return *s.window
 }
 
-func (s stubTopbar) SetParked(_ ids.WorkspaceID, parked bool) {
+func (s stubTopbar) SetParked(_ ids.WorkspaceID, park wsm.Park) {
 	if s.parked != nil {
-		*s.parked = append(*s.parked, parked)
+		*s.parked = append(*s.parked, park != wsm.ParkNone)
 	}
 }
 

@@ -1,6 +1,7 @@
 package topbar
 
 import (
+	"agent-repld/internal/wsm"
 	"slices"
 	"testing"
 
@@ -273,7 +274,7 @@ func TestEffortLevelsReportsFalseWithNoSession(t *testing.T) {
 	h.r.SetModelCatalog(testWS, []*conversationv1.ModelOption{effortCatalogOption("claude-opus-5", effortLow)})
 
 	// Act.
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 	_, ok := h.r.EffortLevels(testWS)
 
 	// Assert.

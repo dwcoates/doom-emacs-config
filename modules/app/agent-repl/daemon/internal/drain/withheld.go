@@ -120,6 +120,7 @@ var withheldReason = standDownReason{
 	op:     opWithheld,
 	detail: "hidden, collapsed or closed by the user; the transcript was left as it stood",
 	done:   "stood a withheld workspace's session down",
+	park:   wsm.ParkHibernated,
 }
 
 // standDownWithheld is one attempt.

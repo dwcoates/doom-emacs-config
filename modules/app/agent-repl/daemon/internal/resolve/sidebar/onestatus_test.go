@@ -508,7 +508,7 @@ func TestTheFooterAndTheRosterAlwaysMakeTheSameCoarseClaim(t *testing.T) {
 			s.footer.SetMerge(theWS, mergeFacts)
 			s.roster.SetMerge(theWS, mergeFacts)
 			if row.parked {
-				s.footer.SetParked(theWS, true)
+				s.footer.SetParked(theWS, wsm.ParkHibernated)
 			}
 
 			// Act

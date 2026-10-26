@@ -1,6 +1,8 @@
 package topbar
 
 import (
+	"agent-repld/internal/wsm"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -787,7 +789,7 @@ func TestTheSessionLessStripDrawsEveryCellItAlwaysDraws(t *testing.T) {
 	h.r.SetAccount(testWS, testAccount("dev@example.com"))
 
 	// Act
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 
 	// Assert: the strip has ONE shape, so the always-drawn cells are all here.
 	view := h.view(t)
@@ -815,7 +817,7 @@ func TestTheSessionLessStripLeavesItsTwoControlsAbsent(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 
 	// Assert: absence is how "no session has stated this" is said; the client
 	// draws the dash in the slot.
@@ -839,7 +841,7 @@ func TestTheParkedStripsChipStatesTheContextTheSessionHeld(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 
 	// Assert: what a revival would carry, not a blank.
 	if got, want := h.view(t).GetContext().GetText(), "142.3k"; got != want {
@@ -882,7 +884,7 @@ func TestTheParkedChipsHoverLeadsWithWhyTheFigureIsNotLive(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 
 	// Assert: the strip has no width for the sentence, so the hover carries it.
 	sections := h.view(t).GetContext().GetBreakdown().GetSections()
@@ -929,7 +931,7 @@ func TestTheParkedStripStatesTheParkAsAWarningLine(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 
 	// Assert: the retired whole-view state's fact is not lost.
 	if got, want := lastWarningLine(t, h), parkedLine(); got != want {
@@ -957,7 +959,7 @@ func TestTheSessionLessWarningCarriesNoOverlay(t *testing.T) {
 	h.ready(t)
 
 	// Act
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 
 	// Assert: the line IS the warning; there is nothing further to reveal, and
 	// a gate is answered in the feed's card and nowhere else.
@@ -973,7 +975,7 @@ func TestTheColdGateOutranksHibernationInTheStatedReason(t *testing.T) {
 	// and the park is waiting on nothing, so the strip names the gate.
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 
 	// Act
 	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 101_100})
@@ -989,7 +991,7 @@ func TestTheParkIsStillStatedOnceTheColdGateIsAnswered(t *testing.T) {
 	// retire it — the workspace really is still stood down.
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 101_100})
 
 	// Act
@@ -1005,7 +1007,7 @@ func TestTheStripGetsItsControlsBackOnRevival(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 
 	// Act: the reviving spawn's own link state is what lifts the park.
 	h.r.OnLink(testWS, shimclient.LinkConnected)
@@ -1475,8 +1477,8 @@ func TestAFactForAnUnboundWorkspaceStatesTheViolationAtError(t *testing.T) {
 	}
 
 	// Act
-	r.SetParked("ws-unbound", true)
-	r.SetParked("ws-unbound", false)
+	r.SetParked("ws-unbound", wsm.ParkHibernated)
+	r.SetParked("ws-unbound", wsm.ParkNone)
 
 	// Assert
 	n := 0
@@ -1524,5 +1526,55 @@ func TestConcurrentChangesLeaveTheNewestViewPublished(t *testing.T) {
 	got, ok := h.r.Topic(testWS).Latest()
 	if !ok || !proto.Equal(got, want) {
 		t.Fatalf("published view = %v, want the render of the final state %v", got, want)
+	}
+}
+
+// The keep-alive-cycle tests are the 2026-10-26 ruling: a shim stood down
+// between keep-alives has its cache warm and comes back on the next look,
+// prompt or beat, so the strip draws the live idle session it stands in for.
+
+func TestAKeepaliveCycleParkKeepsTheStripsControls(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+
+	// Assert
+	view := h.view(t)
+	if view.GetModelSelector() == nil || view.GetPermissionModePicker() == nil {
+		t.Fatalf("view = %+v, want the session-scoped controls drawn as live", view)
+	}
+}
+
+func TestAKeepaliveCycleParkStatesNoHibernation(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+
+	// Assert
+	for _, w := range h.view(t).GetWarnings().GetWarnings() {
+		if strings.HasPrefix(w.GetLine().GetText(), "hibernated since") {
+			t.Fatalf("warning %q, want no hibernation stated for a keep-alive cycle", w.GetLine().GetText())
+		}
+	}
+}
+
+func TestAKeepaliveCycleParkDrawsTheDeadLinkAsConnected(t *testing.T) {
+	// Arrange: the reader's hops are held, and the stood-down shim's link is dead.
+	h := newHarness(t)
+	h.ready(t)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Act
+	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+
+	// Assert
+	if got, want := h.view(t).GetConnectivity().GetGlyph(), connectivityGlyph(linkConnected); got != want {
+		t.Fatalf("connectivity glyph = %q, want %q (connected)", got, want)
 	}
 }

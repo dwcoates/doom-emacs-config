@@ -354,12 +354,13 @@ func (s *server) hostExisting(
 	// TERMINAL WINS. A session whose record carries a death is terminal no
 	// matter what the fleet still holds for it: the record is the durable
 	// truth and the fleet's entry is what has not been reaped yet.
-	// A HIBERNATION IS A PARK, NOT A DEATH. The idle sweep stands the shim
-	// down and a prompt brings the session straight back, so the host keeps
+	// A PARK IS NOT A DEATH (wsm.Session.Parked). The idle sweep, or the
+	// keep-alive cycle, stands the shim down and a prompt brings the session
+	// straight back, so the host keeps
 	// the LIVE arm with the shim UNATTACHED — which is exactly what "live but
 	// momentarily unwired" means, and is what keeps a parked workspace
 	// indistinguishable from an idle one on the frontend.
-	if hasSession && session.Terminal != nil && session.Terminal.Kind != terminalHibernated {
+	if hasSession && session.Terminal != nil && !session.Parked() {
 		out.Standing = &agentreplv1.HostSessionExisting_Terminal{
 			Terminal: &agentreplv1.HostSessionTerminal{
 				// A DELETED session refuses resurrection; every other death
@@ -380,11 +381,6 @@ func (s *server) hostExisting(
 
 // terminalDeleted is wsm's spelling of the one death that refuses resurrection.
 const terminalDeleted = "deleted"
-
-// terminalHibernated is wsm's spelling of the idle sweep's PARK. It is not a
-// death: the session is recoverable by a prompt, so it never composes the
-// terminal arm.
-const terminalHibernated = "hibernated"
 
 // hostLive composes the `live` arm.
 func (s *server) hostLive(

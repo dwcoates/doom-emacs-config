@@ -1,6 +1,7 @@
 package footer
 
 import (
+	"agent-repld/internal/wsm"
 	"testing"
 	"time"
 
@@ -82,7 +83,7 @@ func TestAPushNotificationOutlivesItsTransientWindow(t *testing.T) {
 
 	// Act
 	h.clock.Advance(10 * DefaultTransientWindow)
-	h.r.SetParked(testWS, false)
+	h.r.SetParked(testWS, wsm.ParkNone)
 
 	// Assert
 	if got := lineNow(t, h); got.kind != "notification" {

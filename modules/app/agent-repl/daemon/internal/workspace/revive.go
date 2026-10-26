@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // A HIBERNATED WORKSPACE IS REVIVED BY BEING LOOKED AT, not only by being
@@ -36,7 +37,7 @@ func (v *verbs) parked(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read the session record of %q: %w", ws, err)
 	}
-	return exists && session.Hibernated(), nil
+	return exists && session.Parked(), nil
 }
 
 // unpark lifts the park from the SESSION-SCOPED views the sweep installed it
@@ -49,8 +50,8 @@ func (v *verbs) parked(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
 // must stop claiming a sleep the moment the revival is decided rather than
 // whenever the process gets around to answering.
 func (v *verbs) unpark(ws ids.WorkspaceID) {
-	v.deps.Topbar.SetParked(ws, false)
-	v.deps.Footer.SetParked(ws, false)
+	v.deps.Topbar.SetParked(ws, wsm.ParkNone)
+	v.deps.Footer.SetParked(ws, wsm.ParkNone)
 }
 
 // AT MOST ONE REVIVAL IS IN FLIGHT PER WORKSPACE. A bring-up takes the best

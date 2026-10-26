@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/claudesettings"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // usageFingerprint is one unit's reported usage, kept so a re-report can be
@@ -212,10 +213,12 @@ type wsState struct {
 	link shimclient.LinkState
 	// linkSeen reports whether any link state has been observed.
 	linkSeen bool
-	// parked reports the idle sweep's deliberate stand-down, the same fact the
-	// footer and the roster key their idle arms on. It is cleared by the next
-	// link state of any kind, which belongs to the revival's own spawn.
-	parked bool
+	// park is the daemon's deliberate stand-down, the same fact the footer
+	// and the roster key their idle arms on: the idle sweep's hibernation, or
+	// the keep-alive cycle's, which draws as the live idle session it stands
+	// in for. It is cleared by the next link state of any kind, which belongs
+	// to the revival's own spawn.
+	park wsm.Park
 	// parkedAtMs is when the park was installed, epoch ms. It is the
 	// hibernated view's only content: the strip ticks the age from it, so the
 	// wire carries the instant and never a duration that would be stale on
@@ -340,7 +343,7 @@ func (s *wsState) nextSeq() int {
 // two named states additionally contribute their reason to the context chip's
 // hover and one line to the warning strip.
 func (s *wsState) sessionless() bool {
-	return s.parked || s.coldGate || !s.started
+	return s.park == wsm.ParkHibernated || s.coldGate || !s.started
 }
 
 // ready reports whether the view can be resolved at all. THE GATE IS THE

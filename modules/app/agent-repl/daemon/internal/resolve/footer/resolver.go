@@ -18,6 +18,7 @@ import (
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/vocab"
+	"agent-repld/internal/wsm"
 )
 
 // resolver is the footer resolver. One instance serves every workspace; each
@@ -786,10 +787,11 @@ func (r *resolver) SetBringingUp(ws ids.WorkspaceID, bringingUp bool) {
 		dlog.Context{"bringing_up": bringingUp}, func(s *wsState) { s.bringingUp = bringingUp })
 }
 
-// SetParked installs, or lifts, the idle sweep's park.
-func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
-	r.mutate(ws, "daemon.footer.set_parked", "the footer took the idle sweep's park",
-		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
+// SetParked installs, or lifts with wsm.ParkNone, the daemon's park. Both
+// parks draw alike here: an idle status, never a dead link.
+func (r *resolver) SetParked(ws ids.WorkspaceID, park wsm.Park) {
+	r.mutate(ws, "daemon.footer.set_parked", "the footer took the daemon's park",
+		dlog.Context{"park": park.String()}, func(s *wsState) { s.parked = park != wsm.ParkNone })
 }
 
 // SetAwaiting installs, or lifts with an empty name, the workspace this one

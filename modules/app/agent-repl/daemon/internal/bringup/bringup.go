@@ -229,7 +229,7 @@ func one(ctx context.Context, deps Deps, ws wsm.Workspace) (Outcome, error) {
 		log.Error(deps.Operation, "a workspace's session record could not be read; it is not brought up", fields)
 		return Failed, fmt.Errorf("bringup: read the session record of %q: %w", ws.ID, err)
 	}
-	hibernated := exists && session.Hibernated()
+	hibernated := exists && session.Parked()
 	phase := restarttiming.StartFresh
 	if hibernated {
 		phase = restarttiming.StartWake

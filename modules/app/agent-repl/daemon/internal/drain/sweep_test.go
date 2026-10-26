@@ -859,10 +859,10 @@ func TestAHibernationWithNoRosterSurfaceWiredIsTolerated(t *testing.T) {
 func TestTheHibernationTellsTheSessionScopedViewsAfterTheTerminalRecord(t *testing.T) {
 	// Arrange
 	var terminalsAtPark []string
-	var parked []bool
+	var parked []wsm.Park
 	h := newHarness(t)
 	var ws ids.WorkspaceID
-	h.c.deps.SetParked = func(told ids.WorkspaceID, park bool) {
+	h.c.deps.SetParked = func(told ids.WorkspaceID, park wsm.Park) {
 		parked = append(parked, park)
 		session, found, err := h.db.Session(context.Background(), told)
 		if err != nil || !found || session.Terminal == nil {
@@ -883,8 +883,8 @@ func TestTheHibernationTellsTheSessionScopedViewsAfterTheTerminalRecord(t *testi
 	if len(hibernated) != 1 || hibernated[0] != ws {
 		t.Fatalf("hibernated = %v, want the one idle session %q", hibernated, ws)
 	}
-	if len(parked) != 1 || !parked[0] {
-		t.Fatalf("SetParked calls = %v, want exactly one park for the one hibernation", parked)
+	if len(parked) != 1 || parked[0] != wsm.ParkHibernated {
+		t.Fatalf("SetParked calls = %v, want exactly one hibernated park for the one hibernation", parked)
 	}
 	if terminalsAtPark[0] != TerminalHibernated {
 		t.Fatalf("session terminal seen at the park = %q, want %q: the views must be told after the record",
@@ -897,9 +897,9 @@ func TestTheHibernationTellsTheSessionScopedViewsAfterTheTerminalRecord(t *testi
 // treat the NEXT real link death as a deliberate stand-down.
 func TestARefusedHibernationDoesNotParkTheSessionScopedViews(t *testing.T) {
 	// Arrange
-	var parked []bool
+	var parked []wsm.Park
 	h := newHarness(t, func(d *Deps) {
-		d.SetParked = func(_ ids.WorkspaceID, park bool) { parked = append(parked, park) }
+		d.SetParked = func(_ ids.WorkspaceID, park wsm.Park) { parked = append(parked, park) }
 	})
 	ws := h.workspace(t, instant.Add(-2*time.Hour))
 	h.stand.answer[ws] = &shimv1.HibernateResponse{

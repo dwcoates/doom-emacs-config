@@ -427,13 +427,11 @@ func (v *verbs) EnsureMainWorktrees(ctx context.Context) error {
 	return nil
 }
 
-// The session terminals registration reads. `deleted` refuses resurrection
-// outright; `hibernated` is a stand-down the daemon performed ON PURPOSE and
-// a prompt is what revives it, so neither is revived by an announcement.
-const (
-	terminalDeleted    = "deleted"
-	terminalHibernated = "hibernated"
-)
+// The session terminal registration reads beside a park. `deleted` refuses
+// resurrection outright; a park (wsm.Session.Parked) is a stand-down the
+// daemon performed ON PURPOSE and a look, a prompt or a keep-alive is what
+// revives it, so neither is revived by an announcement.
+const terminalDeleted = "deleted"
 
 // reviveRecordedConversation brings a KNOWN workspace's recorded conversation
 // back up when Emacs announces it again.
@@ -490,7 +488,7 @@ func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger,
 		return
 	}
 	session := recorded.session
-	if session.Terminal != nil && (session.Terminal.Kind == terminalDeleted || session.Terminal.Kind == terminalHibernated) {
+	if session.Terminal != nil && (session.Terminal.Kind == terminalDeleted || session.Parked()) {
 		log.Debug(opRegister, "the announced workspace's session is not revived by an announcement", dlog.Context{
 			"workspace": string(record.ID), "terminal": session.Terminal.Kind,
 		})

@@ -153,7 +153,7 @@ type Deps struct {
 	// (webapp/src/main.ts: a `disconnected` status closes the composer), so
 	// the parked workspace could not be handed the prompt that revives it.
 	// Nil means no session-scoped view is wired.
-	SetParked func(ws ids.WorkspaceID, parked bool)
+	SetParked func(ws ids.WorkspaceID, park wsm.Park)
 	// Detach runs a withheld workspace's stand-down off the caller's
 	// goroutine, on a lifetime the daemon's exit ends and joins
 	// (workspace.Fleet.Detach). Required.

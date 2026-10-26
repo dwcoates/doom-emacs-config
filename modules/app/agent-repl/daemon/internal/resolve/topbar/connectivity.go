@@ -6,6 +6,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/wsm"
 )
 
 // The link states the render-colors topbar_connectivity table is keyed by.
@@ -42,12 +43,25 @@ const (
 // literally the state, and it is the only key the vocabulary already carries
 // for it. Drawing `dead` there hollowed the indicator ("the session's process
 // is gone") for a session the daemon parked on purpose.
-func connectivityKey(seen bool, link shimclient.LinkState, peers, parked bool) string {
+//
+// A KEEP-ALIVE CYCLE'S PARK DRAWS THE LIVE ROUTE IT STANDS IN FOR (owner
+// ruling, 2026-10-26): the shim is down only between beats, with its cache
+// warm, so the indicator reads the reader's hops exactly as a serving link's
+// would.
+func connectivityKey(seen bool, link shimclient.LinkState, peers bool, park wsm.Park) string {
 	if !seen {
 		return linkNoSession
 	}
-	if parked && link == shimclient.LinkDead {
-		return linkNoSession
+	if link == shimclient.LinkDead {
+		switch park {
+		case wsm.ParkHibernated:
+			return linkNoSession
+		case wsm.ParkKeepaliveCycle:
+			if !peers {
+				return linkSevered
+			}
+			return linkConnected
+		}
 	}
 	switch link {
 	case shimclient.LinkDialing:

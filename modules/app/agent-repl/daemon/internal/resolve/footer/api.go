@@ -407,13 +407,15 @@ type Resolver interface {
 	// stands, a submitted prompt is held on the after-reconnect hold,
 	// unclassified, and the edge on which it stops standing releases it.
 	VendorBlock(ws ids.WorkspaceID) (string, bool)
-	// SetParked states that the idle sweep stood this workspace's shim down on
-	// purpose and recorded the `hibernated` session terminal. While it stands,
-	// a DEAD link is not a fault: the daemon put the route down and a prompt
-	// brings it straight back, so the strip keeps an idle status instead of
-	// `disconnected · dead`. It is lifted by the next link state of any kind,
-	// which belongs to the revival's own spawn.
-	SetParked(ws ids.WorkspaceID, parked bool)
+	// SetParked states that the daemon stood this workspace's shim down on
+	// purpose -- the idle sweep's hibernation or the keep-alive cycle's park
+	// (wsm.Park) -- and recorded its session terminal. While either stands, a
+	// DEAD link is not a fault: the daemon put the route down and a look, a
+	// prompt or a beat brings it straight back, so the strip keeps an idle
+	// status instead of `disconnected · dead`. wsm.ParkNone lifts it, and so
+	// does the next link state of any kind, which belongs to the revival's own
+	// spawn.
+	SetParked(ws ids.WorkspaceID, park wsm.Park)
 	// SetAwaiting states the workspace this one awaits correspondence from by
 	// its drawn name, empty when it awaits none
 	// (agentrepl.v1.SetWorkspaceCorrespondence). While it stands and no turn

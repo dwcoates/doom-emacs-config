@@ -492,6 +492,71 @@ func (s Session) Hibernated() bool {
 	return s.Terminal != nil && s.Terminal.Kind == TerminalHibernated
 }
 
+// TerminalKeepaliveCycle is the session terminal the keep-alive cycle records
+// (owner ruling, 2026-10-26): the daemon drives every keep-alive, and between
+// one beat and a minute before the next it stands an idle shim down so the
+// ~350MB it holds is free while nothing uses it (cachelapse.Keeper). It is a
+// PARK exactly as a hibernation is -- the next look, prompt or beat brings
+// the session back -- but its cache is still warm, so every view draws it as
+// the live idle session it stands in for, never as hibernated.
+const TerminalKeepaliveCycle = "keepalive_cycle"
+
+// KeepaliveCycled reports whether this session was stood down between
+// keep-alives. Like a hibernation, the next PutSession clears it.
+func (s Session) KeepaliveCycled() bool {
+	return s.Terminal != nil && s.Terminal.Kind == TerminalKeepaliveCycle
+}
+
+// Parked reports whether this session was stood down ON PURPOSE and comes
+// back on the next look, prompt or keep-alive: hibernated by the idle sweep,
+// or stood down between keep-alives. It is THE ONE question every reader
+// that tells a park from a death asks, so a park kind added later cannot be
+// read as a death by a reader that knew only the first.
+func (s Session) Parked() bool {
+	return s.Hibernated() || s.KeepaliveCycled()
+}
+
+// Park is how a session-scoped view draws a workspace whose shim the daemon
+// stood down on purpose.
+type Park int
+
+const (
+	// ParkNone: no park stands; a dead link is a fault.
+	ParkNone Park = iota
+	// ParkHibernated: the idle sweep's park, drawn as hibernated.
+	ParkHibernated
+	// ParkKeepaliveCycle: stood down between keep-alives with its cache warm,
+	// drawn as the live idle session it stands in for.
+	ParkKeepaliveCycle
+)
+
+// String names the park for the records.
+func (p Park) String() string {
+	switch p {
+	case ParkNone:
+		return "none"
+	case ParkHibernated:
+		return "hibernated"
+	case ParkKeepaliveCycle:
+		return "keepalive_cycle"
+	default:
+		return fmt.Sprintf("park(%d)", int(p))
+	}
+}
+
+// ParkOf is the park a session record's terminal states: the park a view
+// draws for it.
+func ParkOf(s Session) Park {
+	switch {
+	case s.Hibernated():
+		return ParkHibernated
+	case s.KeepaliveCycled():
+		return ParkKeepaliveCycle
+	default:
+		return ParkNone
+	}
+}
+
 // SessionTerminal is a session's death with its cause.
 type SessionTerminal struct {
 	// Kind names the terminal ("deleted", "killed", "shim_died", "superseded").

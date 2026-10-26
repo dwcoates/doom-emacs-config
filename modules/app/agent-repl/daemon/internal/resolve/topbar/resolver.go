@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/publish"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/vocab"
+	"agent-repld/internal/wsm"
 )
 
 // resolver is the topbar resolver. One instance serves every workspace; each
@@ -159,7 +160,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	}
 	log := r.logOf(ws, s)
 	edges := sourceEdges(s, view)
-	parked, coldGate, started := s.parked, s.coldGate, s.started
+	park, coldGate, started := s.park, s.coldGate, s.started
 	// PUBLISHED UNDER THE LOCK THAT RENDERED IT, so views reach the topic in
 	// the order the changes were made. Published after the unlock, a change
 	// rendered first could be published second, and a stale view overwrote a
@@ -195,7 +196,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 		// and "why" has to be answerable from the default level rather than
 		// from a reproduction — the same reason the incomplete record above
 		// sits at info.
-		ctx["parked"] = parked
+		ctx["park"] = park.String()
 		ctx["cold_gate"] = coldGate
 		ctx["started"] = started
 		log.Info(operation, "the topbar published the strip with no session facts", ctx)
@@ -216,7 +217,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 // strip by their own content — the chip carrying the context the session held
 // with the reason in its hover, the strip carrying the state as one line.
 func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
-	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream, s.parked))
+	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream, s.park))
 	if err != nil {
 		return nil, err
 	}
@@ -444,7 +445,7 @@ func sessionlessReason(s *wsState) string {
 	switch {
 	case s.coldGate:
 		return "cold context, awaiting your answer"
-	case s.parked:
+	case s.park == wsm.ParkHibernated:
 		return "hibernated since " + clockTime(s.parkedAtMs)
 	case !s.started:
 		return "no session yet"
@@ -700,7 +701,7 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 // OnLink drives the connectivity glyph and its tone.
 func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 	r.mutate(ws, "daemon.topbar.on_link", "the topbar took a link state",
-		dlog.Context{"shim_link": connectivityKey(true, link, true, false)}, func(s *wsState) {
+		dlog.Context{"shim_link": connectivityKey(true, link, true, wsm.ParkNone)}, func(s *wsState) {
 			s.link = link
 			s.linkSeen = true
 			// THE REVIVAL ENDS THE PARK, for the same reason the footer clears
@@ -708,22 +709,23 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 			// more on it, so the next link state belongs to the shim the
 			// reviving prompt spawned, and a spawn that then dies must hollow
 			// the indicator like any other death.
-			s.parked = false
+			s.park = wsm.ParkNone
 		})
 }
 
-// SetParked installs, or lifts, the idle sweep's park.
+// SetParked installs, or lifts with wsm.ParkNone, the daemon's park.
 //
-// INSTALLING ONE STAMPS THE INSTANT, because the hibernated view's whole
-// content is the age the strip ticks from it. Lifting one leaves the stamp
-// alone: nothing reads it while the park is off, and the next park restamps.
-func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
-	r.mutate(ws, "daemon.topbar.set_parked", "the topbar took the idle sweep's park",
-		dlog.Context{"parked": parked}, func(s *wsState) {
-			if parked && !s.parked {
+// INSTALLING A HIBERNATION STAMPS THE INSTANT, because the hibernated view's
+// whole content is the age the strip ticks from it. Anything else leaves the
+// stamp alone: nothing reads it while no hibernation stands, and the next one
+// restamps.
+func (r *resolver) SetParked(ws ids.WorkspaceID, park wsm.Park) {
+	r.mutate(ws, "daemon.topbar.set_parked", "the topbar took the daemon's park",
+		dlog.Context{"park": park.String()}, func(s *wsState) {
+			if park == wsm.ParkHibernated && s.park != wsm.ParkHibernated {
 				s.parkedAtMs = r.opts.clock.Now().UnixMilli()
 			}
-			s.parked = parked
+			s.park = park
 		})
 }
 

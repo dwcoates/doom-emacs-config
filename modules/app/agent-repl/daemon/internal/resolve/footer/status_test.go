@@ -1051,11 +1051,42 @@ func TestAParkedSessionIsNeverDisconnectedWhateverItsLink(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkRedialing)
 
 	// Act
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 
 	// Assert
 	if got := h.status(t); got != "idle" {
 		t.Fatalf("status = %q, want idle", got)
+	}
+}
+
+func TestAKeepaliveCycleParkIsIdleOverADeadLink(t *testing.T) {
+	// Arrange: the shim was stood down between keep-alives, its link dead.
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, true)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+
+	// Act
+	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+
+	// Assert
+	if got := h.status(t); got != "idle" {
+		t.Fatalf("status = %q, want idle", got)
+	}
+}
+
+func TestLiftingAParkDrawsTheDeadLinkAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, true)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+
+	// Act
+	h.r.SetParked(testWS, wsm.ParkNone)
+
+	// Assert
+	if got := h.status(t); got == "idle" {
+		t.Fatalf("status = %q, want the dead link drawn once no park stands", got)
 	}
 }
 
@@ -1286,7 +1317,7 @@ func TestAParkedSessionWithADeadLinkIsIdleAndNeverDisconnected(t *testing.T) {
 	h.r.OnLink(testWS, shimclient.LinkDead)
 
 	// Act
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 
 	// Assert
 	if got := h.status(t); got != "idle" {
@@ -1304,7 +1335,7 @@ func TestAParkThatWasRevivedNoLongerMasksARealDeath(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 	h.r.OnLink(testWS, shimclient.LinkDead)
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 	connected(h)
 
 	// Act: the revived shim dies for real.
@@ -1450,7 +1481,7 @@ func TestEveryWaitingLineStandsFromWhenItsConditionOpened(t *testing.T) {
 			h.clock.Advance(time.Minute)
 
 			// Act
-			h.r.SetParked(testWS, false)
+			h.r.SetParked(testWS, wsm.ParkNone)
 
 			// Assert
 			at := tt.at(h.view(t).GetStrip().GetStatus())
@@ -1486,7 +1517,7 @@ func TestTheCloseRefusalStandsFromWhenItWasRefused(t *testing.T) {
 	h.clock.Advance(time.Minute)
 
 	// Act
-	h.r.SetParked(testWS, false)
+	h.r.SetParked(testWS, wsm.ParkNone)
 
 	// Assert
 	at := h.view(t).GetStrip().GetStatus().GetClosing().GetActivity().GetSalient().GetAt()

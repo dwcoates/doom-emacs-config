@@ -210,15 +210,10 @@ func noSessionArm(s *wsState, session *wsm.Session) string {
 	return "none"
 }
 
-// terminalHibernated is wsm's spelling of the idle sweep's stand-down. It is a
-// PARK: the workspace is recoverable by a prompt, and the session record keeps
-// the mark only so the next boot knows why the shim is gone. It is spelled
-// here rather than imported from drain, which sits above this resolver.
-const terminalHibernated = "hibernated"
-
-// parked reports whether a session record carries the idle sweep's park.
+// parked reports whether a session record carries a park: the idle sweep's,
+// or the keep-alive cycle's (wsm.Session.Parked).
 func parked(session *wsm.Session) bool {
-	return session != nil && session.Terminal != nil && session.Terminal.Kind == terminalHibernated
+	return session != nil && session.Parked()
 }
 
 // idleArm names the bottom rung's arm. It always answers: every path ends at

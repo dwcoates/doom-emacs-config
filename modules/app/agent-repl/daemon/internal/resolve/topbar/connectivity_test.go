@@ -1,6 +1,7 @@
 package topbar
 
 import (
+	"agent-repld/internal/wsm"
 	"testing"
 
 	"agent-repld/internal/shimclient"
@@ -9,7 +10,7 @@ import (
 
 func TestAnUnobservedLinkIsNoSession(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(false, shimclient.LinkConnected, true, false)
+	got := connectivityKey(false, shimclient.LinkConnected, true, wsm.ParkNone)
 
 	// Assert
 	if got != linkNoSession {
@@ -19,7 +20,7 @@ func TestAnUnobservedLinkIsNoSession(t *testing.T) {
 
 func TestADialingLinkIsConnecting(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkDialing, true, false)
+	got := connectivityKey(true, shimclient.LinkDialing, true, wsm.ParkNone)
 
 	// Assert
 	if got != linkConnecting {
@@ -29,7 +30,7 @@ func TestADialingLinkIsConnecting(t *testing.T) {
 
 func TestAServingLinkIsConnected(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkConnected, true, false)
+	got := connectivityKey(true, shimclient.LinkConnected, true, wsm.ParkNone)
 
 	// Assert
 	if got != linkConnected {
@@ -39,7 +40,7 @@ func TestAServingLinkIsConnected(t *testing.T) {
 
 func TestARedialingLinkIsSevered(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkRedialing, true, false)
+	got := connectivityKey(true, shimclient.LinkRedialing, true, wsm.ParkNone)
 
 	// Assert
 	if got != linkSevered {
@@ -49,7 +50,7 @@ func TestARedialingLinkIsSevered(t *testing.T) {
 
 func TestADeadLinkIsDead(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkDead, true, false)
+	got := connectivityKey(true, shimclient.LinkDead, true, wsm.ParkNone)
 
 	// Assert
 	if got != linkDead {
@@ -59,7 +60,7 @@ func TestADeadLinkIsDead(t *testing.T) {
 
 func TestAServingLinkWithAPeerHopDownIsSevered(t *testing.T) {
 	// Arrange, Act: the shim hop serves but a client hop does not.
-	got := connectivityKey(true, shimclient.LinkConnected, false, false)
+	got := connectivityKey(true, shimclient.LinkConnected, false, wsm.ParkNone)
 
 	// Assert
 	if got != linkSevered {
@@ -70,7 +71,7 @@ func TestAServingLinkWithAPeerHopDownIsSevered(t *testing.T) {
 func TestADialingLinkWithAPeerHopDownIsStillConnecting(t *testing.T) {
 	// Arrange, Act: the shim hop already says not-connected, and the peer hop
 	// must not overwrite the more specific bring-up state.
-	got := connectivityKey(true, shimclient.LinkDialing, false, false)
+	got := connectivityKey(true, shimclient.LinkDialing, false, wsm.ParkNone)
 
 	// Assert
 	if got != linkConnecting {
@@ -80,7 +81,7 @@ func TestADialingLinkWithAPeerHopDownIsStillConnecting(t *testing.T) {
 
 func TestADeadLinkWithAPeerHopDownIsStillDead(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkDead, false, false)
+	got := connectivityKey(true, shimclient.LinkDead, false, wsm.ParkNone)
 
 	// Assert
 	if got != linkDead {
@@ -90,7 +91,7 @@ func TestADeadLinkWithAPeerHopDownIsStillDead(t *testing.T) {
 
 func TestAnUnobservedLinkWithAPeerHopDownIsStillNoSession(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(false, shimclient.LinkConnected, false, false)
+	got := connectivityKey(false, shimclient.LinkConnected, false, wsm.ParkNone)
 
 	// Assert
 	if got != linkNoSession {
@@ -258,7 +259,7 @@ func TestTheLastPeerHopComingUpDrawsTheServingTone(t *testing.T) {
 
 func TestAParkedDeadLinkIsNoSession(t *testing.T) {
 	// Arrange, Act: the idle sweep's deliberate stand-down.
-	got := connectivityKey(true, shimclient.LinkDead, true, true)
+	got := connectivityKey(true, shimclient.LinkDead, true, wsm.ParkHibernated)
 
 	// Assert: `dead` hollows the indicator with "the session's process is
 	// gone", which reports a fault for a route the daemon put down itself.
@@ -272,7 +273,7 @@ func TestARevivalLiftsTheParkFromTheIndicator(t *testing.T) {
 	h := newHarness(t)
 	h.ready(t)
 	h.r.OnLink(testWS, shimclient.LinkDead)
-	h.r.SetParked(testWS, true)
+	h.r.SetParked(testWS, wsm.ParkHibernated)
 	h.r.OnLink(testWS, shimclient.LinkConnected)
 
 	// Act: the revived shim dies for real.
@@ -281,5 +282,30 @@ func TestARevivalLiftsTheParkFromTheIndicator(t *testing.T) {
 	// Assert
 	if got := h.view(t).GetConnectivity().GetGlyph(); got != connectivityGlyph(linkDead) {
 		t.Fatalf("connectivity glyph = %q, want the dead glyph: the park was lifted by the revival", got)
+	}
+}
+
+func TestConnectivityKeyOfADeadLinkUnderAPark(t *testing.T) {
+	tests := []struct {
+		name  string
+		peers bool
+		park  wsm.Park
+		want  string
+	}{
+		{name: "no park: a dead link is dead", peers: true, park: wsm.ParkNone, want: linkDead},
+		{name: "hibernated: no session", peers: true, park: wsm.ParkHibernated, want: linkNoSession},
+		{name: "a keep-alive cycle with both hops held: connected", peers: true, park: wsm.ParkKeepaliveCycle, want: linkConnected},
+		{name: "a keep-alive cycle with a hop down: severed", peers: false, park: wsm.ParkKeepaliveCycle, want: linkSevered},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := connectivityKey(true, shimclient.LinkDead, tt.peers, tt.park)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("key = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

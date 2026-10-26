@@ -463,7 +463,7 @@ func TestAnUnchangedStatusArmIsNotRecordedAgain(t *testing.T) {
 	connected(h)
 
 	// Act: a second fact that leaves the strip idle.
-	h.r.SetParked(testWS, false)
+	h.r.SetParked(testWS, wsm.ParkNone)
 
 	// Assert
 	if got := countOf(h.log.Records(), dlog.LevelInfo, "daemon.footer.status_arm_changed"); got != 1 {
@@ -502,7 +502,7 @@ func TestAnUnchangedSubstatusIsNotRecordedAgain(t *testing.T) {
 	before := len(substatusChanges(h.log.Records()))
 
 	// Act: a second fact that leaves the strip's step where it was.
-	h.r.SetParked(testWS, false)
+	h.r.SetParked(testWS, wsm.ParkNone)
 
 	// Assert
 	if got := len(substatusChanges(h.log.Records())); got != before {
@@ -1030,7 +1030,7 @@ func TestAnUnchangedActivityLineIsNotRecordedAgain(t *testing.T) {
 	before := len(lineChanges(h.log.Records()))
 
 	// Act: a fact that leaves the line where it stands.
-	h.r.SetParked(testWS, false)
+	h.r.SetParked(testWS, wsm.ParkNone)
 
 	// Assert
 	if got := len(lineChanges(h.log.Records())); got != before {

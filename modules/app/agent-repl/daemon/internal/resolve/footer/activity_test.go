@@ -224,7 +224,7 @@ func TestThePermissionLineStandsFromWhenItsAskOpened(t *testing.T) {
 	h.clock.Advance(time.Minute)
 
 	// Act
-	h.r.SetParked(testWS, false)
+	h.r.SetParked(testWS, wsm.ParkNone)
 
 	// Assert
 	at := h.view(t).GetStrip().GetStatus().GetPermission().GetActivity().GetSalient().GetAt()

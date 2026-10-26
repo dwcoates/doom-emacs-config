@@ -1150,9 +1150,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// promises they agree with it about the same link
 		// (resolve/sidebar/status.go's linkArm); telling them from one closure
 		// is what makes a park they could disagree about unrepresentable.
-		SetParked: func(ws ids.WorkspaceID, parked bool) {
-			footerResolver.SetParked(ws, parked)
-			topbarResolver.SetParked(ws, parked)
+		SetParked: func(ws ids.WorkspaceID, park wsm.Park) {
+			footerResolver.SetParked(ws, park)
+			topbarResolver.SetParked(ws, park)
 		},
 		Exit: orderlyExit(func() { p.Exit(standDownOrderly) }),
 		// A WITHHELD WORKSPACE'S STAND-DOWN runs on the fleet's detached

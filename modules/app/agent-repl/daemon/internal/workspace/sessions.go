@@ -1272,7 +1272,7 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 		log.Error(opBringUp, "could not read the session record", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: read the session record: %w", ws, err)
 	}
-	if exists && session.Hibernated() {
+	if exists && session.Parked() {
 		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepWaking})
 	} else {
 		f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepStartingSession})
@@ -1306,7 +1306,7 @@ func (f *Fleet) startUp(ctx context.Context, ws ids.WorkspaceID, rebind bool) er
 	})
 	// THE START IS TIMED FROM HERE ON, now that its kind is known; a record
 	// that cannot be read began no start to time.
-	timing := f.timing(ws, startKind(src.Fresh, exists && session.Hibernated()))
+	timing := f.timing(ws, startKind(src.Fresh, exists && session.Parked()))
 	return f.timedStart(ctx, log, ws, record, session, src, timing, began)
 }
 

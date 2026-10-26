@@ -1,6 +1,7 @@
 package footer
 
 import (
+	"agent-repld/internal/wsm"
 	"testing"
 	"time"
 
@@ -181,7 +182,7 @@ func TestALapsedTransientIsOmittedFromTheNextView(t *testing.T) {
 	h.clock.Advance(DefaultTransientWindow)
 
 	// Act: an unrelated fact composes a fresh view.
-	h.r.SetParked(testWS, false)
+	h.r.SetParked(testWS, wsm.ParkNone)
 
 	// Assert
 	unpinned := unpinnedOf(h.view(t).GetStrip().GetStatus())
@@ -201,7 +202,7 @@ func TestALiveTransientIsKeptInsideItsWindow(t *testing.T) {
 	h.clock.Advance(DefaultTransientWindow - time.Millisecond)
 
 	// Act
-	h.r.SetParked(testWS, false)
+	h.r.SetParked(testWS, wsm.ParkNone)
 
 	// Assert
 	if transientOf(t, h).GetHook() == nil {

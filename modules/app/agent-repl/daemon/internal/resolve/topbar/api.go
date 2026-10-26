@@ -38,6 +38,7 @@ import (
 	"agent-repld/internal/publish"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/vocab"
+	"agent-repld/internal/wsm"
 )
 
 // Account is the topbar's account cell: which root the session spends as, and
@@ -127,12 +128,15 @@ type Resolver interface {
 	// or one not yet connected since the host stream opened, is awaited and
 	// passes as true (server.participantHopsLocked).
 	SetParticipants(ws ids.WorkspaceID, host, web bool)
-	// SetParked states that the idle sweep stood this workspace's shim down on
-	// purpose. While it stands, a DEAD link draws `no_session` rather than
-	// `dead`: the daemon put the route down and a prompt brings it back, so
-	// the indicator reports an absent session and never a broken one. It is
-	// lifted by the next link state of any kind.
-	SetParked(ws ids.WorkspaceID, parked bool)
+	// SetParked states that the daemon stood this workspace's shim down on
+	// purpose, and which park it is. While a HIBERNATION stands, a DEAD link
+	// draws `no_session` rather than `dead`: the daemon put the route down and
+	// a prompt brings it back, so the indicator reports an absent session and
+	// never a broken one. While a KEEP-ALIVE CYCLE stands, the strip draws the
+	// live idle session it stands in for: its cache is warm and the next
+	// look, prompt or beat brings it back. wsm.ParkNone lifts it, and so does
+	// the next link state of any kind.
+	SetParked(ws ids.WorkspaceID, park wsm.Park)
 	// SetColdGate states that this workspace is standing at the COLD GATE: the
 	// shim answered `cold` to the session start, so there is no session and
 	// there will be none until the reader answers the gate. While it stands

@@ -220,6 +220,22 @@ type standDownReason struct {
 	op     string
 	detail string
 	done   string
+	// park is the park the stand-down leaves: the terminal it records and
+	// what the session-scoped views draw (wsm.Park). ParkNone is no reason's.
+	park wsm.Park
+}
+
+// terminal is the session terminal a stand-down for WHY records: the one
+// fact the views' park is derived from, so the two can never disagree.
+func (why standDownReason) terminal() (string, error) {
+	switch why.park {
+	case wsm.ParkHibernated:
+		return TerminalHibernated, nil
+	case wsm.ParkKeepaliveCycle:
+		return wsm.TerminalKeepaliveCycle, nil
+	default:
+		return "", fmt.Errorf("drain: the stand-down %q names no park (%s)", why.op, why.park)
+	}
 }
 
 // idleReason is the idle sweep's.
@@ -228,6 +244,7 @@ func (c *controller) idleReason() standDownReason {
 		op:     opSweep,
 		detail: fmt.Sprintf("idle past the %s cutoff; the transcript was left as it stood", c.deps.IdleCutoff),
 		done:   "hibernated an idle session",
+		park:   wsm.ParkHibernated,
 	}
 }
 
@@ -237,6 +254,11 @@ func (c *controller) idleReason() standDownReason {
 // workspace rather than failing the whole pass, because one wedged session
 // must not stop the sweep reaching the rest.
 func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context, why standDownReason) hibernateOutcome {
+	terminal, err := why.terminal()
+	if err != nil {
+		log.Error(why.op, "the stand-down names no park; nothing is stood down", dlog.WithCause(fields, err))
+		return hibernateFailed
+	}
 	lease, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderHibernate, wsm.PolicyHold)
 	if err != nil {
 		log.Debug(why.op, "another holder has the lease; deferring the hibernation",
@@ -314,7 +336,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	}
 
 	if err := c.deps.DB.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{
-		Kind:   TerminalHibernated,
+		Kind:   terminal,
 		Detail: why.detail,
 		At:     c.deps.Clock.Now(),
 	}); err != nil {
@@ -346,7 +368,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	// calling the deliberate stand-down a dead link, which is what reopens the
 	// webapp's composer for the prompt that revives the session.
 	if c.deps.SetParked != nil {
-		c.deps.SetParked(ws, true)
+		c.deps.SetParked(ws, why.park)
 	}
 	// THE ROSTER'S ARM FOR THIS ROW IS A FUNCTION OF THE RECORD ABOVE. The
 	// roster resolver reads the session terminal to know a park from a fault,

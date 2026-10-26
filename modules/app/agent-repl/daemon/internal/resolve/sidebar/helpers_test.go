@@ -118,11 +118,11 @@ func (f *fanned) bindRegistry(reg sidebar.Registry) {
 		f.footer.SetParticipants(ws.ID, true, true)
 	}
 	f.mu.Unlock()
-	// A HIBERNATED RECORD IS THE IDLE SWEEP'S PARK, which the sweep tells the
+	// A PARKED RECORD IS THE DAEMON'S PARK, which the stand-down tells the
 	// footer in the same breath as it publishes the record.
 	for _, session := range reg.Sessions {
-		if session.Terminal != nil && session.Terminal.Kind == "hibernated" {
-			f.footer.SetParked(session.Workspace, true)
+		if session.Parked() {
+			f.footer.SetParked(session.Workspace, wsm.ParkOf(session))
 		}
 	}
 }
