@@ -319,3 +319,24 @@ wrong labels). That needs one parse, in one place, that every program reads.
   - **Off an entry line `C-o` is what it was** (Evil's own binding), through a
     conditional binding (`agent-repl-prompt-entries--descend-binding`).
   - **A node with no first child keeps its label**, and the composer flashes why.
+
+### 10. `C-o` steps on in reading order, and `C-i` steps up to the parent
+
+- **What:** `EntryNeighborDirection` retired `first_child` (tag 3, reserved) and
+  gained `following` (tag 4) and `parent` (tag 5). `feed.NeighborWay` follows.
+- **Why:** the owner's ask of 2026-10-26. `C-o` no longer stops at a childless
+  node: it goes to the node read after it, its first child, else its next
+  sibling, else the next sibling of its nearest ancestor that has one
+  (`2.1.1 - ` becomes `2.2 - `, or `3 - ` when 2 has no later child). `C-i`
+  goes up to the parent (`2.1 - ` becomes `2 - `).
+- **Decisions inside the shape:**
+  - **One arm per key**, so the daemon walks one tree per keypress. A client
+    asking `first_child` and then `next` could read two different trees.
+  - **`C-i` is Doom's GUI `[C-i]` event**, bound only on an entry line, so
+    `TAB` keeps its meaning everywhere and off an entry line `C-i` decodes as
+    `TAB` as before.
+  - **Both keys share one conditional binding shape**
+    (`agent-repl-prompt-entries--on-entry-binding`), which replaced
+    `agent-repl-prompt-entries--descend-binding`.
+  - **The tree's last node and a root keep their labels** under `C-o` and
+    `C-i`, and the composer flashes why.

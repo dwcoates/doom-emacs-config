@@ -354,7 +354,8 @@ command sends it again; DONE ends the report."
 
 (defun agent-repl-prompt-entries--neighbor (label way)
   "The label of LABEL's node WAY from it in its target tree, or nil.
-WAY is `:next', `:previous' or `:first-child' (EntryNeighborDirection).
+WAY is `:next', `:previous', `:following' or `:parent'
+\(EntryNeighborDirection).
 Nil, with the reason logged, when the composer is not reporting, no ref or
 connection stands, the daemon refused, or it never answered."
   (let* ((ws agent-repl-prompt-entries--ws)
@@ -420,13 +421,17 @@ the entry targets."
   (interactive)
   (agent-repl-prompt-entries--open nil))
 
-;;;; ---- Descending an entry to its node's first child ----
+;;;; ---- Stepping an entry along its tree ----
 ;;
-;; `C-o' on an entry line, in command or insert mode, relabels the entry to
-;; answer its node's first child, in the tree the entry targets: `3.2 - '
-;; becomes `3.2.1 - ', the entry's words kept.  The daemon finds the child
-;; (FindEntryNeighbor's `first_child').  Off an entry line `C-o' is what it
-;; always was.
+;; `C-o' and `C-i' on an entry line, in command or insert mode, relabel the
+;; entry to answer another node of the tree the entry targets, the entry's
+;; words kept.  `C-o' steps on, to the node read after it: its first child
+;; (`3.2 - ' becomes `3.2.1 - '), else its next sibling (`3.3 - '), else the
+;; next sibling of its nearest ancestor that has one (`4 - ').  `C-i' steps
+;; up, to its parent (`3.2 - ' becomes `3 - ').  The daemon finds the node
+;; (FindEntryNeighbor's `following' and `parent').  Off an entry line either
+;; key is what it always was; `C-i' is Doom's GUI-only `[C-i]' event, so `TAB'
+;; is never taken.
 
 (defun agent-repl-prompt-entries--relabel (from to)
   "Replace point's entry label FROM with TO, point keeping its place after it.
@@ -443,44 +448,71 @@ or before the label moves to the new label's end."
     (insert to)
     (when after (goto-char (- (line-end-position) from-eol)))))
 
-(defun agent-repl-prompt-entries-descend ()
-  "Relabel point's entry to answer its node's first child.
-The composer's `C-o' on an entry line: `3.2 - ' becomes `3.2.1 - ', its
-words kept, the child found in the tree the entry targets.  A node with
-no first child there keeps its label, and the composer says so."
-  (interactive)
+(defun agent-repl-prompt-entries--step (way none)
+  "Relabel point's entry to answer its node's neighbor WAY.
+WAY is `:following' or `:parent' (EntryNeighborDirection).  A node with
+no neighbor that way keeps its label, and the composer flashes NONE, a
+format of the label."
   (let* ((ws agent-repl-prompt-entries--ws)
          (label (agent-repl-prompt-entries--label-at-point))
-         (child (and label (agent-repl-prompt-entries--neighbor label :first-child))))
+         (to (and label (agent-repl-prompt-entries--neighbor label way))))
     (cond
      ((null label)
-      (agent-repl--info ws "elisp.prompt-entries.descend-off-entry ws=%s point=%d" ws (point))
+      (agent-repl--info ws "elisp.prompt-entries.step-off-entry ws=%s way=%s point=%d" ws way (point))
       (user-error "Point is on no entry line"))
-     ((null child)
-      (agent-repl--info ws "elisp.prompt-entries.descend-no-child ws=%s label=%s" ws label)
-      (agent-repl--input-flash ws (format "%s has no child to answer" label)))
+     ((null to)
+      (agent-repl--info ws "elisp.prompt-entries.step-none ws=%s label=%s way=%s" ws label way)
+      (agent-repl--input-flash ws (format none label)))
      (t
-      (agent-repl-prompt-entries--relabel label child)
-      (agent-repl--info ws "elisp.prompt-entries.descended ws=%s label=%s child=%s" ws label child)))))
+      (agent-repl-prompt-entries--relabel label to)
+      (agent-repl--info ws "elisp.prompt-entries.stepped ws=%s label=%s way=%s to=%s" ws label way to)))))
 
-(defun agent-repl-prompt-entries--descend-filter (command)
-  "COMMAND on an entry line, else nil, so `C-o' off one keeps its own binding."
+(defun agent-repl-prompt-entries-step-on ()
+  "Relabel point's entry to answer the node read after its own.
+The composer's `C-o' on an entry line: `3.2 - ' becomes `3.2.1 - ', or
+`3.3 - ' when 3.2 has no child, or `4 - ' when 3 has no later child, its
+words kept, the node found in the tree the entry targets.  The tree's
+last node keeps its label, and the composer says so."
+  (interactive)
+  (agent-repl-prompt-entries--step :following "%s is the last node to answer"))
+
+(defun agent-repl-prompt-entries-step-up ()
+  "Relabel point's entry to answer its node's parent.
+The composer's `C-i' on an entry line: `3.2 - ' becomes `3 - ', its words
+kept, the parent found in the tree the entry targets.  A root keeps its
+label, and the composer says so."
+  (interactive)
+  (agent-repl-prompt-entries--step :parent "%s has no parent to answer"))
+
+(defun agent-repl-prompt-entries--on-entry-filter (command)
+  "COMMAND on an entry line, else nil, so the key off one keeps its own binding."
   (and (agent-repl-prompt-entries--label-at-point) command))
 
-(defconst agent-repl-prompt-entries--descend-binding
-  '(menu-item "" agent-repl-prompt-entries-descend
-              :filter agent-repl-prompt-entries--descend-filter)
-  "The composer's `C-o': descend on an entry line, and fall through elsewhere.")
+(defun agent-repl-prompt-entries--on-entry-binding (command)
+  "A binding running COMMAND on an entry line and falling through elsewhere.
+THE ONE SHAPE of every entry-only key: a `menu-item' whose filter
+\(`agent-repl-prompt-entries--on-entry-filter') yields nil off an entry
+line, so the key lookup goes on to the next map."
+  `(menu-item "" ,command :filter agent-repl-prompt-entries--on-entry-filter))
+
+(defconst agent-repl-prompt-entries--entry-keys
+  `((,(kbd "C-o") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-step-on))
+    ([C-i] . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-step-up)))
+  "The composer's entry-only keys in command and insert mode, as (KEY . BINDING).
+`C-o' steps on and `C-i' steps up on an entry line, and both fall through
+elsewhere.  `[C-i]' is the event Doom decodes a GUI `C-i' into when a
+binding for it stands, so `TAB' keeps its own meaning.")
 
 (defun agent-repl-prompt-entries-bind-keys ()
   "Bind the composer's entry-aware keys.
-`o' and `O' in command mode open a line on a neighbor's label; `C-o' in
-command and insert mode descends an entry line's entry."
+`o' and `O' in command mode open a line on a neighbor's label; `C-o' and
+`C-i' in command and insert mode step an entry line's entry
+\(`agent-repl-prompt-entries--entry-keys')."
   (evil-define-key* 'normal agent-repl-input-mode-map
     "o" #'agent-repl-prompt-entries-open-below
     "O" #'agent-repl-prompt-entries-open-above)
-  (evil-define-key* '(normal insert) agent-repl-input-mode-map
-    (kbd "C-o") agent-repl-prompt-entries--descend-binding))
+  (pcase-dolist (`(,key . ,binding) agent-repl-prompt-entries--entry-keys)
+    (evil-define-key* '(normal insert) agent-repl-input-mode-map key binding)))
 
 (with-eval-after-load 'evil
   (agent-repl-prompt-entries-bind-keys))

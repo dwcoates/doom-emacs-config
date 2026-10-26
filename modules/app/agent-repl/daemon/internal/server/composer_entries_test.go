@@ -273,9 +273,10 @@ func neighborRequest(label string, way *agentreplv1.EntryNeighborDirection) *age
 
 // Each direction FindEntryNeighbor is asked for.
 var (
-	wayNext       = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Next{Next: &agentreplv1.EntryNeighborNext{}}}
-	wayPrevious   = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Previous{Previous: &agentreplv1.EntryNeighborPrevious{}}}
-	wayFirstChild = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_FirstChild{FirstChild: &agentreplv1.EntryNeighborFirstChild{}}}
+	wayNext      = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Next{Next: &agentreplv1.EntryNeighborNext{}}}
+	wayPrevious  = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Previous{Previous: &agentreplv1.EntryNeighborPrevious{}}}
+	wayFollowing = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Following{Following: &agentreplv1.EntryNeighborFollowing{}}}
+	wayParent    = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Parent{Parent: &agentreplv1.EntryNeighborParent{}}}
 )
 
 func TestFindEntryNeighborAnswersTheFeedsNeighbor(t *testing.T) {
@@ -285,18 +286,19 @@ func TestFindEntryNeighborAnswersTheFeedsNeighbor(t *testing.T) {
 		want  string
 		found bool
 	}{
-		{"the next node", wayNext, "3.2", true},
-		{"the previous node", wayPrevious, "3", true},
-		{"the first child", wayFirstChild, "3.1.1", true},
+		{"the next node", wayNext, "3.3", true},
+		{"the previous node", wayPrevious, "3.1", true},
+		{"the following node", wayFollowing, "3.2.1", true},
+		{"the parent", wayParent, "3", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
-			h.Feed.neighbors = map[string]string{"3.1\x00next": "3.2", "3.1\x00previous": "3", "3.1\x00first_child": "3.1.1"}
+			h.Feed.neighbors = map[string]string{"3.2\x00next": "3.3", "3.2\x00previous": "3.1", "3.2\x00following": "3.2.1", "3.2\x00parent": "3"}
 
 			// Act
-			resp, err := h.Client.FindEntryNeighbor(context.Background(), connect.NewRequest(neighborRequest("3.1", tc.way)))
+			resp, err := h.Client.FindEntryNeighbor(context.Background(), connect.NewRequest(neighborRequest("3.2", tc.way)))
 
 			// Assert
 			if err != nil || resp.Msg.GetSuccess().GetFound().GetLabel() != tc.want {
