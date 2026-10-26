@@ -436,6 +436,12 @@ type wsState struct {
 	// accountLanded is each account's tally when its latest response bubble
 	// LANDED: the base the account's next bubble counts its delta from.
 	accountLanded map[string]uint64
+	// accountSinceMs is the instant each account's current span began, epoch
+	// ms: the later of its latest bubble's settle and the latest prompt its
+	// agent was given. accountOpenedMs is the instant its first prompt arrived
+	// (usage.go). An account with no known instant has no entry.
+	accountSinceMs  map[string]int64
+	accountOpenedMs map[string]int64
 	// agentModel is the model each agent's latest API response named — what a
 	// subagent's card draws after its label (subagentmodel.go).
 	agentModel latestmodel.Ledger
@@ -777,6 +783,9 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		accountStated: map[string]bool{},
 		accountLanded: map[string]uint64{},
 		agentModel:    latestmodel.Ledger{},
+
+		accountSinceMs:  map[string]int64{},
+		accountOpenedMs: map[string]int64{},
 
 		contextReadings: map[string]contextReading{},
 

@@ -187,6 +187,11 @@ type proseState struct {
 	// base is that account's landed mark then, which the delta counts from.
 	account string
 	base    uint64
+	// sinceMs is the instant the stamp's span began, epoch ms, learned from
+	// the account's span start (accountSinceMs) on the first draw that finds
+	// one; zero while unknown. The final answer's re-stamp moves it to the
+	// instant the turn opened (usage.go).
+	sinceMs int64
 	// frozen records that the stamp LANDED: the bubble settled (or turned
 	// green) and its figure never moves again (usage.go).
 	frozen bool

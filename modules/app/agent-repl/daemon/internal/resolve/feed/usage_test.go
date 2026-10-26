@@ -424,3 +424,178 @@ func TestApplyResponseFacts(t *testing.T) {
 		})
 	}
 }
+
+// A STAMP'S SPAN IS THE STRETCH ITS DELTA COVERS (usage.go): from the later of
+// the account's previous settle and the prompt its agent is answering, to the
+// bubble's own settle. The final answer's span is the turn's whole.
+
+// settledProseAt is a settled prose frame whose producer stamped its settle at
+// AT_MS, carrying no usage of its own.
+func settledProseAt(unit, markdown string, atMs int64) *conversationv1.AgentActivity {
+	return responseFrame(unit, &conversationv1.AgentResponseSuccess{
+		Prose:     &conversationv1.AgentResponseProse{Markdown: markdown},
+		SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: atMs},
+	}, nil)
+}
+
+// span is one bubble's stamped span: where it began and where it settled.
+type span struct{ started, settled int64 }
+
+// spansOf answers the stamped span of every prose bubble in BUBBLES.
+func spansOf(bubbles []*frontendv1.FeedResponse) []span {
+	var out []span
+	for _, bubble := range bubbles {
+		out = append(out, span{bubble.GetUsage().GetStartedAtMs(), bubble.GetUsage().GetAtMs()})
+	}
+	return out
+}
+
+// wantSpans fails unless the root feed's prose bubbles carry exactly WANT.
+func (h *harness) wantSpans(want ...span) {
+	h.t.Helper()
+	got := spansOf(h.proseBubbles())
+	if len(got) != len(want) {
+		h.t.Fatalf("spans = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			h.t.Fatalf("spans = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestStampSpan(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(h *harness)
+		want []span
+	}{
+		{
+			name: "the first bubble spans from the turn's prompt",
+			act: func(h *harness) {
+				h.deliverPromptAt("turn-1", "do the thing", 10_000)
+				h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+				h.main(settledProseAt("unit-prose-1", "an answer", 25_000))
+			},
+			want: []span{{10_000, 25_000}},
+		},
+		{
+			name: "the next bubble spans from the previous bubble's settle",
+			act: func(h *harness) {
+				h.deliverPromptAt("turn-1", "do the thing", 10_000)
+				h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+				h.main(settledProseAt("unit-prose-1", "looking", 25_000))
+				h.main(thinkingFrame("unit-think-2", misses(400, 0)))
+				h.main(settledProseAt("unit-prose-2", "found it", 40_000))
+			},
+			want: []span{{10_000, 25_000}, {25_000, 40_000}},
+		},
+		{
+			name: "a prompt folded into the turn starts the next bubble's span",
+			act: func(h *harness) {
+				h.deliverPromptAt("turn-1", "do the thing", 10_000)
+				h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+				h.main(settledProseAt("unit-prose-1", "looking", 20_000))
+				h.deliverFoldedPromptAt("turn-2", "turn-1", "also this", placeAt(30_000))
+				h.main(thinkingFrame("unit-think-2", misses(400, 0)))
+				h.main(settledProseAt("unit-prose-2", "both done", 45_000))
+			},
+			want: []span{{10_000, 20_000}, {30_000, 45_000}},
+		},
+		{
+			name: "a new turn's first bubble spans from its own prompt",
+			act: func(h *harness) {
+				h.deliverPromptAt("turn-1", "first", 10_000)
+				h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+				h.main(settledProseAt("unit-prose-1", "one", 20_000))
+				h.deliverPromptAt("turn-2", "second", 50_000)
+				h.main(thinkingFrame("unit-think-2", misses(400, 0)))
+				h.main(settledProseAt("unit-prose-2", "two", 70_000))
+			},
+			want: []span{{10_000, 20_000}, {50_000, 70_000}},
+		},
+		{
+			name: "an unplaced prompt leaves the first bubble's span unknown",
+			act: func(h *harness) {
+				h.deliverPrompt("turn-1", "do the thing")
+				h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+				h.main(settledProseAt("unit-prose-1", "an answer", 25_000))
+			},
+			want: []span{{0, 25_000}},
+		},
+		{
+			name: "an arriving bubble carries its span start before it settles",
+			act: func(h *harness) {
+				h.deliverPromptAt("turn-1", "do the thing", 10_000)
+				h.main(responseFrame("unit-prose-1", &conversationv1.AgentResponseStart{}, misses(0, 1_000)))
+			},
+			want: []span{{10_000, 0}},
+		},
+		{
+			name: "a settle restated by the other plane keeps the first span",
+			act: func(h *harness) {
+				h.deliverPromptAt("turn-1", "do the thing", 10_000)
+				h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+				h.main(settledProseAt("unit-prose-1", "looking", 25_000))
+				h.main(thinkingFrame("unit-think-2", misses(400, 0)))
+				h.main(settledProseAt("unit-prose-2", "found it", 40_000))
+				h.main(settledProseAt("unit-prose-1", "looking", 25_000))
+			},
+			want: []span{{10_000, 25_000}, {25_000, 40_000}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			h.wantSpans(tt.want...)
+		})
+	}
+}
+
+func TestTheFinalAnswerSpansTheWholeTurn(t *testing.T) {
+	// Arrange: two bubbles land in one turn.
+	h := newHarness(t)
+	h.deliverPromptAt("turn-1", "do the thing", 10_000)
+	h.main(thinkingFrame("unit-think-1", misses(1_000, 0)))
+	h.main(settledProseAt("unit-prose-1", "looking", 25_000))
+	h.main(thinkingFrame("unit-think-2", misses(400, 0)))
+	h.main(settledProseAt("unit-prose-2", "found it", 40_000))
+
+	// Act: the turn concludes on the second bubble.
+	turn := ids.TurnID("turn-1")
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &turn, completedWith("unit-prose-2"), nil, nil)
+
+	// Assert: the green bubble spans from the turn's prompt; the earlier one
+	// keeps its own span.
+	h.wantSpans(span{10_000, 25_000}, span{10_000, 40_000})
+}
+
+func TestASubFeedsFirstBubbleSpansFromItsSpawn(t *testing.T) {
+	// Arrange: a subagent is spawned at 1_000 (spawnSubagent's start).
+	h := newHarness(t)
+	h.deliverPromptAt("turn-1", "do the thing", 500)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Act: its first API response lands a bubble in its sub-feed.
+	h.resolver.OnActivity(testWorkspace, created, thinkingFrame("sub-think-1", misses(300, 0)), nil, nil)
+	h.resolver.OnActivity(testWorkspace, created, settledProseAt("sub-prose-1", "reading", 6_000), nil, nil)
+
+	// Assert: the sub-feed bubble spans from the spawn, not the main prompt.
+	var bubbles []*frontendv1.FeedResponse
+	for _, row := range h.rows(feedid.Feed{Agent: created}) {
+		if resp := row.GetActivity().GetResponse(); resp != nil && !resp.GetThinking() {
+			bubbles = append(bubbles, resp)
+		}
+	}
+	got := spansOf(bubbles)
+	if len(got) != 1 || got[0] != (span{1_000, 6_000}) {
+		t.Fatalf("sub-feed spans = %v, want [{1000 6000}]", got)
+	}
+}
