@@ -36,6 +36,20 @@
 ;; (`agent-repl--register-timer'), so a hot reload of this file replaces it
 ;; rather than adding a second, and the heartbeat assertion re-arms it when a
 ;; reload of core.el stranded it.
+;;
+;; BREAKING A STALL WITH SIGUSR2 MUST NOT LEAVE THE DEBUGGER ARMED.  SIGUSR2
+;; is `debug-on-event', the documented way to break into a stalled editor,
+;; and Emacs's signal handler answers it by setting `debug-on-quit' from C
+;; and never clearing it.  Every later quit then enters the debugger: an
+;; escape out of any minibuffer prompt (2026-10-26: escaping a one-shot's
+;; prompt) lands in "Entering debugger...".  So `debug-on-quit' only ever
+;; holds a value Lisp left it: a variable watcher records the value every
+;; Lisp `set', `let' and unbinding leaves (a write from C fires no watcher),
+;; and entering the debugger puts that value back when the live one
+;; differs.  The signal's own debugger is the one entered, so the stall is
+;; still broken; and nothing between the signal and that entry can bind
+;; `debug-on-quit' and take the C value for its own, as a `keyboard-quit'
+;; typed in the debugger would by a command's end.
 
 ;;; Code:
 
@@ -113,6 +127,36 @@ arming's, not the loop's."
                 #'agent-repl-stall-sample)))
 
 (agent-repl--arm-stall-sampler)
+
+;; `debug' is the debugger every quit and every signal enters (`debugger').
+(declare-function debug "debug" (&rest args))
+
+(defvar agent-repl-stall--debug-on-quit-lisp nil
+  "The `debug-on-quit' Lisp last left, as its variable watcher saw it.
+No configuration of this editor sets it, so it starts at Emacs's default,
+nil: a value found at load is not trusted, since a SIGUSR2 before a hot
+reload is exactly what leaves it wrong.")
+
+(defun agent-repl-stall--note-debug-on-quit (_symbol value operation where)
+  "Record VALUE as the `debug-on-quit' Lisp left by OPERATION.
+The variable watcher of `debug-on-quit'.  A `set', a `let' and an `unlet'
+each report the value they leave in place; WHERE is the buffer of a
+buffer-local one, which leaves the global value as it was."
+  (when (and (memq operation '(set let unlet)) (null where))
+    (setq agent-repl-stall--debug-on-quit-lisp value)))
+
+(defun agent-repl-stall--restore-debug-on-quit (&rest _)
+  "Put back the `debug-on-quit' Lisp left when a write from C changed it.
+Runs as the debugger is entered (before `debug'), and once at load."
+  (unless (eq debug-on-quit agent-repl-stall--debug-on-quit-lisp)
+    (agent-repl--info agent-repl-stall--central
+                      "elisp.stall.debug-on-quit-restored from=%S to=%S reason=set-outside-lisp event=%S"
+                      debug-on-quit agent-repl-stall--debug-on-quit-lisp debug-on-event)
+    (setq debug-on-quit agent-repl-stall--debug-on-quit-lisp)))
+
+(add-variable-watcher 'debug-on-quit #'agent-repl-stall--note-debug-on-quit)
+(advice-add 'debug :before #'agent-repl-stall--restore-debug-on-quit)
+(agent-repl-stall--restore-debug-on-quit)
 
 (provide 'stall)
 
