@@ -142,6 +142,30 @@ func (s *store) DropWorkspaceSummary(ctx context.Context, id WorkspaceID) error 
 	})
 }
 
+// summaryColumns is every column a WorkspaceSummary is read from, in
+// scanSummary's order: the ONE column list both summary reads share.
+const summaryColumns = `workspace_id, title, digest_hash, digest_prompts, digest_boundary`
+
+// scanSummary reads one stored summary row of summaryColumns. A row no
+// distillation produces is a DecodeError naming its workspace.
+func scanSummary(row interface{ Scan(...any) error }) (WorkspaceID, WorkspaceSummary, error) {
+	var (
+		id       WorkspaceID
+		title    string
+		hash     sql.NullString
+		prompts  sql.NullInt64
+		boundary sql.NullInt64
+	)
+	if err := row.Scan(&id, &title, &hash, &prompts, &boundary); err != nil {
+		return "", WorkspaceSummary{}, err
+	}
+	sum, err := decodeSummary(title, hash, prompts, boundary)
+	if err != nil {
+		return "", WorkspaceSummary{}, &DecodeError{Table: "workspace_summaries", Row: string(id), Err: err}
+	}
+	return id, sum, nil
+}
+
 // WorkspaceSummaryOf loads a workspace's summary; the bool is false when none
 // stands. A stored row no distillation produces is a DecodeError.
 func (s *store) WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (WorkspaceSummary, bool, error) {
@@ -150,25 +174,14 @@ func (s *store) WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (Workspa
 		found bool
 	)
 	err := s.read(ctx, "daemon.wsm.workspace_summary", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		var (
-			title    string
-			hash     sql.NullString
-			prompts  sql.NullInt64
-			boundary sql.NullInt64
-		)
-		err := s.q(ctx).QueryRowContext(ctx,
-			`SELECT title, digest_hash, digest_prompts, digest_boundary FROM workspace_summaries WHERE workspace_id = ?`, id).
-			Scan(&title, &hash, &prompts, &boundary)
+		_, sum, err := scanSummary(s.q(ctx).QueryRowContext(ctx,
+			`SELECT `+summaryColumns+` FROM workspace_summaries WHERE workspace_id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			out, found = WorkspaceSummary{}, false
 			return nil
 		}
 		if err != nil {
 			return err
-		}
-		sum, err := decodeSummary(title, hash, prompts, boundary)
-		if err != nil {
-			return &DecodeError{Table: "workspace_summaries", Row: string(id), Err: err}
 		}
 		out, found = sum, true
 		return nil
@@ -177,6 +190,40 @@ func (s *store) WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (Workspa
 		return WorkspaceSummary{}, false, err
 	}
 	return out, found, nil
+}
+
+// summaryRow is one workspace's stored summary, as listRows reads it.
+type summaryRow struct {
+	id  WorkspaceID
+	sum WorkspaceSummary
+}
+
+// ListWorkspaceSummaries loads every stored summary by workspace,
+// all-or-nothing: a workspace with none is absent from the map, and one
+// corrupt row fails the whole read as a DecodeError rather than being skipped.
+// It is what a read over many workspaces (FindWorkspaces) takes, open and
+// closed alike, in one query.
+func (s *store) ListWorkspaceSummaries(ctx context.Context) (map[WorkspaceID]WorkspaceSummary, error) {
+	var out map[WorkspaceID]WorkspaceSummary
+	err := s.read(ctx, "daemon.wsm.list_workspace_summaries", dlog.Context{}, func(ctx context.Context) error {
+		rows, err := listRows(ctx, s.q(ctx), `SELECT `+summaryColumns+` FROM workspace_summaries`,
+			func(row interface{ Scan(...any) error }) (summaryRow, error) {
+				id, sum, err := scanSummary(row)
+				return summaryRow{id: id, sum: sum}, err
+			})
+		if err != nil {
+			return err
+		}
+		out = make(map[WorkspaceID]WorkspaceSummary, len(rows))
+		for _, r := range rows {
+			out[r.id] = r.sum
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // decodeSummary reads one stored row: the digest columns are all NULL or all
