@@ -596,8 +596,8 @@ func (d *fakeDB) MoveRepository(_ context.Context, id ids.RepoID, before *ids.Re
 	return d.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
 }
 
-func (d *fakeDB) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
-	return d.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), wsm.AnchorField(at)))
+func (d *fakeDB) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor, marks wsm.OneShotMarks) error {
+	return d.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s %s", ws, ids.Optional(into), wsm.AnchorField(at), marks))
 }
 
 func (d *fakeDB) MoveWorkspace(_ context.Context, ws, target ids.WorkspaceID) error {

@@ -143,8 +143,9 @@ type DB interface {
 	MoveRepository(ctx context.Context, id RepoID, before *RepoID) error
 	// PlaceWorkspaces puts root workspaces, with their families, into a
 	// subsection of their repository (nil: none) as one block at an anchor
-	// there: before a root, before a subsection (into none only), or last.
-	PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, at Anchor) error
+	// there: before a root, before a subsection (into none only), or last;
+	// clearing or keeping the families' one-shot marks as MARKS says.
+	PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, at Anchor, marks OneShotMarks) error
 	// SetAttention sets or clears the roster's attention marker.
 	SetAttention(ctx context.Context, id WorkspaceID, on bool) error
 	// SetResult records, or clears with nil, the roster's last turn result.

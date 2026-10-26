@@ -45,13 +45,17 @@ func TestTheArrangementVerbsWriteAndRepublish(t *testing.T) {
 			}},
 		{name: "move a repository", op: opMoveRepository, want: "MoveRepository repo-1 ",
 			act: func(ctx context.Context, v Verbs) error { return v.MoveRepository(ctx, "repo-1", nil) }},
-		{name: "place workspaces", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1] sub-1 before workspace w2",
+		{name: "place workspaces", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1] sub-1 before workspace w2 clear",
 			act: func(ctx context.Context, v Verbs) error {
-				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.BeforeWorkspace{ID: "w2"})
+				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.BeforeWorkspace{ID: "w2"}, wsm.ClearOneShotMarks)
 			}},
-		{name: "place workspaces before a subsection", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1]  before subsection sub-1",
+		{name: "place workspaces before a subsection", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1]  before subsection sub-1 clear",
 			act: func(ctx context.Context, v Verbs) error {
-				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, nil, wsm.BeforeSubsection{ID: "sub-1"})
+				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, nil, wsm.BeforeSubsection{ID: "sub-1"}, wsm.ClearOneShotMarks)
+			}},
+		{name: "place workspaces keeping their one-shot marks", op: opPlaceWorkspace, want: "PlaceWorkspaces [w1] sub-1 end keep",
+			act: func(ctx context.Context, v Verbs) error {
+				return v.PlaceWorkspaces(ctx, []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.AtEnd{}, wsm.KeepOneShotMarks)
 			}},
 	}
 	for _, tt := range tests {
@@ -102,7 +106,7 @@ func TestTheArrangementVerbsAnswerTheStoresRefusalsOnTheirArms(t *testing.T) {
 			f.db.arrangeErr = tt.err
 
 			// Act
-			err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.AtEnd{})
+			err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, subsectionID("sub-1"), wsm.AtEnd{}, wsm.ClearOneShotMarks)
 
 			// Assert
 			refusal := asRefusal(t, err, tt.arm)
@@ -169,7 +173,7 @@ func TestPlaceWorkspacesRefusesAWorkspaceThisDaemonDoesNotServe(t *testing.T) {
 	f.owner.standing = StandingTransferringAway
 
 	// Act
-	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, nil, wsm.AtEnd{})
+	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, nil, wsm.AtEnd{}, wsm.ClearOneShotMarks)
 
 	// Assert
 	asRefusal(t, err, ArmTransferringAway)
@@ -185,7 +189,7 @@ func TestPlaceWorkspacesRefusesAnUnknownAnchor(t *testing.T) {
 	absent := ids.WorkspaceID("absent")
 
 	// Act
-	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, nil, wsm.BeforeWorkspace{ID: absent})
+	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1"}, nil, wsm.BeforeWorkspace{ID: absent}, wsm.ClearOneShotMarks)
 
 	// Assert
 	asRefusal(t, err, ArmUnknownWorkspace)
@@ -247,7 +251,7 @@ func TestPlaceWorkspacesRefusesAnyWorkspaceThisDaemonDoesNotKnow(t *testing.T) {
 	f.workspace("w1", t.TempDir())
 
 	// Act
-	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1", "absent"}, nil, wsm.AtEnd{})
+	err := f.verbs.PlaceWorkspaces(context.Background(), []ids.WorkspaceID{"w1", "absent"}, nil, wsm.AtEnd{}, wsm.ClearOneShotMarks)
 
 	// Assert
 	asRefusal(t, err, ArmUnknownWorkspace)

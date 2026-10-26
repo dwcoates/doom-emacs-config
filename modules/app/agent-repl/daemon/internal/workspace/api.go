@@ -468,7 +468,7 @@ type Verbs interface {
 	// subsection of their repository (nil: none) as one block at an anchor
 	// (before a root there, before a subsection when into none, or last), and
 	// republishes the roster.
-	PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error
+	PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor, marks wsm.OneShotMarks) error
 	// SidebarArrangement reads the repository grouping's arrangement, for an
 	// agent organizing it (GetSidebarArrangement).
 	SidebarArrangement(ctx context.Context) ([]sidebar.ArrangedRepository, error)
