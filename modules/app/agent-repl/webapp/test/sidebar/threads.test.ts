@@ -3,6 +3,9 @@
  * THE SIDEBAR'S APPS: the rail title's switcher and the Chat app's thread
  * list, drawn from the roster and acted on through the daemon.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -13,9 +16,9 @@ import { ShowSidebarAppResponseSchema, type ShowSidebarAppRequest } from "../../
 import { ShowChatNodeResponseSchema, type ShowChatNodeRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_show_chat_node_pb";
 import { CloseWorkspaceResponseSchema, type CloseWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
 import { SearchChatsResponseSchema, type SearchChatsRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_search_chats_pb";
-import { ARCHIVED_HEADING, OPEN_HEADING } from "../../src/sidebar/threads.js";
+import { ARCHIVED_HEADING, OPEN_HEADING, labelOutline } from "../../src/sidebar/threads.js";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
-import type { RosterThreadOutlineSchema, WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { RosterThreadOutlineLabelSchema, type RosterThreadOutlineSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { mountSidebar } from "../../src/sidebar/sidebar.js";
 import { frameQueue, type FrameQueue } from "../frame-queue.js";
@@ -391,9 +394,9 @@ describe("the rail's search in the Chat app", () => {
 describe("the current thread's outline", () => {
   /** An outline of three runs: the shown one, one on its path, one off it. */
   const OUTLINE: MessageInitShape<typeof RosterThreadOutlineSchema> = {
-    breadcrumb: { extent: { case: "elided", value: { first: { node: { id: "n1" }, label: { text: "why?" } }, omitted: 4, last: { node: { id: "n7" }, label: { text: "deeper" } } } } },
+    breadcrumb: { extent: { case: "elided", value: { first: { node: { id: "n1" }, label: { text: "why?", question: "why?" } }, omitted: 4, last: { node: { id: "n7" }, label: { text: "Deeper still", question: "and what lies deeper still, below all of it?" } } } } },
     rows: [
-      { node: { id: "n8" }, label: { text: "and then?" }, depth: 0, turns: 3, place: { place: { case: "onPath", value: {} } } },
+      { node: { id: "n8" }, label: { text: "And then", question: "and then what happened after all of that?" }, depth: 0, turns: 3, place: { place: { case: "onPath", value: {} } } },
       { node: { id: "n9" }, label: { text: "aside" }, depth: 1, turns: 1, folded: { runs: 5 }, place: { place: { case: "off", value: {} } } },
       { node: { id: "n10" }, label: { text: "here" }, depth: 1, turns: 1, place: { place: { case: "shown", value: {} } } },
     ],
@@ -422,7 +425,20 @@ describe("the current thread's outline", () => {
     await settle();
 
     // Assert
-    expect(host.querySelector(".sb-outline-crumbs")?.textContent).toBe("why? › … 4 more › deeper");
+    expect(host.querySelector(".sb-outline-crumbs")?.textContent).toBe("why? › … 4 more › Deeper still");
+  });
+
+  it.each([
+    ["a row", ".sb-outline-row .sb-outline-label", "And then", "and then what happened after all of that?"],
+    ["a crumb", ".sb-outline-crumb:last-of-type", "Deeper still", "and what lies deeper still, below all of it?"],
+  ])("draws %s's abbreviation with its question whole as the tooltip", async (_name, selector, text, question) => {
+    // Arrange / Act
+    const host = mount([roster({ chat: [{ id: "t-1", name: "why", current: true, outline: OUTLINE }] })]);
+    await settle();
+
+    // Assert
+    const el = host.querySelector<HTMLElement>(`[data-thread-outline] ${selector}`);
+    expect([el?.textContent, el?.title]).toEqual([text, question]);
   });
 
   it.each([
@@ -444,6 +460,31 @@ describe("the current thread's outline", () => {
 
     // Assert
     expect(shown.map((r) => [r.thread?.id, r.node?.id])).toEqual([["t-1", want]]);
+  });
+
+  it("labelOutline draws the label's text and titles it with the question", () => {
+    // Arrange
+    const el = document.createElement("span");
+
+    // Act
+    labelOutline(el, create(RosterThreadOutlineLabelSchema, { text: "Short", question: "the long question" }), "label");
+
+    // Assert
+    expect([el.textContent, el.title]).toEqual(["Short", "the long question"]);
+  });
+
+  it("labelOutline refuses an unset label", () => {
+    // Act / Assert
+    expect(() => labelOutline(document.createElement("span"), undefined, "rows[0].label")).toThrow(/rows\[0\]\.label/);
+  });
+
+  it("draws every outline label through labelOutline", () => {
+    // Arrange
+    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/sidebar/threads.ts"), "utf8");
+
+    // Assert: no label is drawn from its text by hand beside labelOutline.
+    expect(source.match(/labelOutline\(/g)?.length).toBe(3);
+    expect(source).not.toMatch(/\.label, `\$\{at\}\.label`\)\.text/);
   });
 
   it("draws nothing under a row the roster gives no outline", async () => {

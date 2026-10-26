@@ -26,6 +26,7 @@ import type {
   RosterThreadOutline,
   RosterThreadOutlineBreadcrumb,
   RosterThreadOutlineCrumb,
+  RosterThreadOutlineLabel,
   RosterThreadRow,
   RosterThreadSection,
   SidebarApp,
@@ -299,7 +300,7 @@ function drawOutline(outline: RosterThreadOutline, sc: SidebarContext, thread: W
     dot.className = "sb-outline-dot";
     const label = document.createElement("span");
     label.className = "sb-outline-label";
-    label.textContent = requireMessage(row.label, `${at}.label`).text;
+    labelOutline(label, row.label, `${at}.label`);
     line.append(dot, label);
     if (row.turns > 1) {
       const turns = document.createElement("span");
@@ -320,6 +321,17 @@ function drawOutline(outline: RosterThreadOutline, sc: SidebarContext, thread: W
   return box;
 }
 
+/**
+ * Labels an outline row or crumb: its text (the question's abbreviation, or
+ * the question while it has none) drawn, and the question whole as its
+ * tooltip. Every outline label is drawn here.
+ */
+export function labelOutline(el: HTMLElement, label: RosterThreadOutlineLabel | undefined, at: string): void {
+  const l = requireMessage(label, at);
+  el.textContent = l.text;
+  el.title = l.question;
+}
+
 /** The breadcrumb: every folded level, or the oldest and newest with the rest counted. */
 function drawCrumbs(
   breadcrumb: RosterThreadOutlineBreadcrumb,
@@ -331,7 +343,7 @@ function drawCrumbs(
   const crumb = (c: RosterThreadOutlineCrumb, at: string): HTMLElement => {
     const el = document.createElement("span");
     el.className = "sb-outline-crumb";
-    el.textContent = requireMessage(c.label, `${at}.label`).text;
+    labelOutline(el, c.label, `${at}.label`);
     el.addEventListener("click", () => show(c.node, `${at}.node`));
     return el;
   };
