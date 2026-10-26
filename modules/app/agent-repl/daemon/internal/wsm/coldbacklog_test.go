@@ -171,3 +171,32 @@ func TestANeverBackloggedWorkspaceRecordsNoGate(t *testing.T) {
 func sameInstant(a, b *time.Time) bool {
 	return (a == nil) == (b == nil) && (a == nil || a.Equal(*b))
 }
+
+func TestBacklogsColdGate(t *testing.T) {
+	other := backlogGate.Add(time.Hour)
+	mergeOf := MergeOrigin{Requester: "w-parent"}
+	tests := []struct {
+		name string
+		ws   Workspace
+		want bool
+	}{
+		{name: "a shown workspace never backlogged", ws: Workspace{}, want: true},
+		{name: "a shown workspace backlogged for an earlier gate", ws: Workspace{BackloggedGateAt: &other}, want: true},
+		{name: "a shown workspace already backlogged for this gate", ws: Workspace{BackloggedGateAt: &backlogGate}, want: false},
+		{name: "the workspace the user is looking at", ws: Workspace{Current: true}, want: false},
+		{name: "a hidden workspace", ws: Workspace{Hidden: true}, want: false},
+		{name: "a closed workspace", ws: Workspace{Closed: true}, want: false},
+		{name: "a merge workspace its async merge withholds", ws: Workspace{MergeOf: &mergeOf}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.ws.BacklogsColdGate(backlogGate)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("BacklogsColdGate = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

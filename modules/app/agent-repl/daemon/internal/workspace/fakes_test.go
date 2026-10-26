@@ -1051,8 +1051,7 @@ func (d *fakeDB) SetHidden(_ context.Context, id ids.WorkspaceID, hidden bool, a
 	return nil
 }
 
-// BacklogColdGate judges as the store does: a selected, hidden or closed
-// workspace, or one already backlogged for the gate, is left as it is.
+// BacklogColdGate judges as the store does (wsm.Workspace.BacklogsColdGate).
 func (d *fakeDB) BacklogColdGate(_ context.Context, id ids.WorkspaceID, gateLapsedAt, at time.Time) (bool, error) {
 	d.backlogs = append(d.backlogs, gateLapsedAt)
 	if d.backlogErr != nil {
@@ -1062,7 +1061,7 @@ func (d *fakeDB) BacklogColdGate(_ context.Context, id ids.WorkspaceID, gateLaps
 	if !ok {
 		return false, wsm.ErrNotFound
 	}
-	if ws.Hidden || ws.Closed || ws.Current || ws.BackloggedGateAt != nil && ws.BackloggedGateAt.Equal(gateLapsedAt) {
+	if !ws.BacklogsColdGate(gateLapsedAt) {
 		return false, nil
 	}
 	stamped, gate := at, gateLapsedAt

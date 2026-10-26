@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -43,14 +44,14 @@ func (s *store) BacklogColdGate(ctx context.Context, id WorkspaceID, gateLapsedA
 	fields := dlog.Context{"workspace": string(id), "gate_lapsed_at": gateLapsedAt, "hidden_at": at}
 	moved := false
 	err := s.write(ctx, "daemon.wsm.backlog_cold_gate", fields, func(ctx context.Context, tx *sql.Tx) error {
-		var (
-			hidden, closed, current bool
-			backlogged              sql.NullInt64
-		)
-		if err := scanWorkspaceRow(ctx, tx, id, "hidden, closed, is_current, cold_gate_backlogged_at", &hidden, &closed, &current, &backlogged); err != nil {
+		ws, err := scanWorkspace(tx.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE id = ?`, id))
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
+		}
+		if err != nil {
 			return err
 		}
-		if hidden || closed || current || (backlogged.Valid && backlogged.Int64 == nanos(gateLapsedAt)) {
+		if !ws.BacklogsColdGate(gateLapsedAt) {
 			return nil
 		}
 		if err := refuseOpenChildren(ctx, tx, id); err != nil {
@@ -64,6 +65,18 @@ func (s *store) BacklogColdGate(ctx context.Context, id WorkspaceID, gateLapsedA
 		return false, err
 	}
 	return moved, nil
+}
+
+// BacklogsColdGate reports whether a cold gate whose cache lapsed at
+// GATELAPSEDAT, once it has stood long enough, moves the workspace into the
+// backlog: the workspace is listed in the Open section (ListedOpen), the user
+// is not looking at it, and it was not already backlogged for that same gate.
+// THE ONE STATEMENT of the judgment: the store makes it in the transaction
+// that writes the move (BacklogColdGate), and coldbacklog.Sweeper reads it to
+// skip the writes it would decline.
+func (ws Workspace) BacklogsColdGate(gateLapsedAt time.Time) bool {
+	spent := ws.BackloggedGateAt != nil && ws.BackloggedGateAt.Equal(gateLapsedAt)
+	return ws.ListedOpen() && !ws.Current && !spent
 }
 
 // errNoBacklogInstant is a decode of a backlog instant that is not positive.
