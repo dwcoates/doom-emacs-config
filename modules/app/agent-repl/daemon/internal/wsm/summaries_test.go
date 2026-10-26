@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -284,5 +285,90 @@ func TestACorruptStoredSummaryIsADecodeError(t *testing.T) {
 				t.Fatalf("a corrupt summary read as found")
 			}
 		})
+	}
+}
+
+func TestListingSummariesAnswersEveryStoredSummaryByWorkspace(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored map[string]WorkspaceSummary
+	}{
+		{name: "none stored", stored: map[string]WorkspaceSummary{}},
+		{name: "one stored beside an unsummarized workspace", stored: map[string]WorkspaceSummary{"first": distilled("Fix the topbar", 1, boundaryNone)}},
+		{name: "two stored, one with its digest reset", stored: map[string]WorkspaceSummary{
+			"first":  distilled("Fix the topbar", 1, boundaryNone),
+			"second": {Title: "Fix the footer"},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			want := map[WorkspaceID]WorkspaceSummary{}
+			for _, name := range []string{"first", "second", "third"} {
+				ws := testWorkspaceNamed(t, s, name)
+				if sum, ok := tt.stored[name]; ok {
+					mustPutSummary(t, s, ws.ID, sum)
+					want[ws.ID] = sum
+				}
+			}
+
+			// Act
+			got, err := s.ListWorkspaceSummaries(context.Background())
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ListWorkspaceSummaries: %v", err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("ListWorkspaceSummaries = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestListingSummariesKeepsAClosedWorkspacesSummary(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	want := distilled("Fix the topbar", 1, boundaryNone)
+	mustPutSummary(t, s, ws.ID, want)
+	if err := s.MarkClosed(context.Background(), ws.ID, Closure{At: time.Unix(1_700_000_000, 0), By: CloseByUser}); err != nil {
+		t.Fatalf("MarkClosed: %v", err)
+	}
+
+	// Act
+	got, err := s.ListWorkspaceSummaries(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ListWorkspaceSummaries: %v", err)
+	}
+	if !reflect.DeepEqual(got[ws.ID], want) {
+		t.Fatalf("a closed workspace's summary = %+v, want %+v", got[ws.ID], want)
+	}
+}
+
+func TestListingSummariesFailsWholeOnACorruptRow(t *testing.T) {
+	// Arrange
+	s, sink := testStore(t)
+	ws := testWorkspace(t, s)
+	mustPutSummary(t, s, ws.ID, distilled("Fix the topbar", 1, boundaryNone))
+	mustPutSummary(t, s, testWorkspaceNamed(t, s, "other").ID, distilled("Fix the footer", 1, boundaryNone))
+	corrupt(t, s, `UPDATE workspace_summaries SET title = '' WHERE workspace_id = '`+string(ws.ID)+`'`)
+
+	// Act
+	got, err := s.ListWorkspaceSummaries(context.Background())
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Table != "workspace_summaries" || decode.Row != string(ws.ID) {
+		t.Fatalf("ListWorkspaceSummaries = %v, want a DecodeError on workspace_summaries row %s", err, ws.ID)
+	}
+	if got != nil {
+		t.Fatalf("a failed read answered %+v, want nothing", got)
+	}
+	if !loggedOperation(sink, "daemon.wsm.list_workspace_summaries", "error") {
+		t.Fatalf("the failed read was not recorded at ERROR: %v", sink.Records())
 	}
 }

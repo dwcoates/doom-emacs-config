@@ -446,6 +446,9 @@ type DB interface {
 	// WorkspaceSummaryOf loads a workspace's summary; the bool is false when
 	// none stands.
 	WorkspaceSummaryOf(ctx context.Context, id WorkspaceID) (WorkspaceSummary, bool, error)
+	// ListWorkspaceSummaries loads every stored summary by workspace; a
+	// workspace with none is absent.
+	ListWorkspaceSummaries(ctx context.Context) (map[WorkspaceID]WorkspaceSummary, error)
 	// PutColdReadPayment records the cold read a workspace's user paid for,
 	// replacing any it had (coldreadpayments.go).
 	PutColdReadPayment(ctx context.Context, id WorkspaceID, p ColdReadPayment) error

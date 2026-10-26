@@ -312,6 +312,16 @@
       }
     },
     {
+      "id": "agent-repld-on-path",
+      "kind": "command_link",
+      "why": "agents, skills and the daemon's briefs call the agent API by its bare name, agent-repld; the link runs the main checkout's build in every shell",
+      "profile": "run",
+      "name": "agent-repld",
+      "source": {
+        "repo": "modules/app/agent-repl/bin/agent-repld"
+      }
+    },
+    {
       "id": "skill-agent-repl-debug",
       "kind": "skill_link",
       "why": "the /agent-repl-debug skill, which investigates the running agent-repl from any repository",

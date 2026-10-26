@@ -1,6 +1,6 @@
 ---
 name: agent-repl-install
-description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (Emacs with xwidgets, toolchains, terminal-notifier, the store, sidecar and metrics-store services, skills, the git hook), walk the user through what only they can provide, and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /agent-repl-install. Update this skill whenever the installation process is expanded or changed.
+description: Set up everything agent-repl needs on a computer — check every requirement, install what is missing or outdated (Emacs with xwidgets, toolchains, terminal-notifier, the store, sidecar and metrics-store services, skills, the `agent-repld` command on PATH, the git hook), walk the user through what only they can provide, and fix the requirement manifests generically when a run finds them inadequate. Use when setting up or bootstrapping agent-repl on a new machine, when an error points at the installer or a missing dependency, when the user asks whether this machine has everything agent-repl needs, or when invoked as /agent-repl-install. Update this skill whenever the installation process is expanded or changed.
 argument-hint: "[check]"
 allowed-tools: Bash(.claude/skills/agent-repl-install/run.sh:*), Bash(~/.claude/skills/agent-repl-install/run.sh:*)
 lineage_root: user.dodge.skills.agent-repl-install
@@ -63,6 +63,7 @@ Every skill agent-repl ships, and where agents can load it. A GLOBAL skill is li
     - a. Give the user the line's fix exactly as printed.
     - b. For an environment variable, have the user add it to their shell profile; it reaches Emacs at step 5.
     - c. For a notification permission, have the user allow the named program in System Settings → Notifications.
+    - d. For a bin dir that is not on PATH, have the user add the printed `export PATH=...` line to their shell profile; it reaches Emacs at step 5.
   - For each `failed` line, and each line whose install ran but left it unmet, go to step 4 with that line as the failure.
   - After the user reports each one done, return to step 0.
 

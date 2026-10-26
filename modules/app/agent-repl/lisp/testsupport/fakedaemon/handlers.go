@@ -519,6 +519,10 @@ func (s *fakeServer) EvaluateInEditor(ctx context.Context, req *connect.Request[
 	return handleUnary[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse](ctx, s, "EvaluateInEditor", req.Msg)
 }
 
+func (s *fakeServer) FindWorkspaces(ctx context.Context, req *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error) {
+	return handleUnary[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse](ctx, s, "FindWorkspaces", req.Msg)
+}
+
 func (s *fakeServer) GetMergeQueueStatus(ctx context.Context, req *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error) {
 	return handleUnary[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse](ctx, s, "GetMergeQueueStatus", req.Msg)
 }

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -34,6 +35,8 @@ type cliClient struct {
 	creates []*agentreplv1.CreateWorkspaceResponse
 	finish  *agentreplv1.FinishWorkspaceResponse
 	queues  *agentreplv1.GetMergeQueueStatusResponse
+	// found answers FindWorkspaces, an empty complete find when nil.
+	found *agentreplv1.FindWorkspacesResponse
 	// arrangement answers GetSidebarArrangement; arrange answers
 	// ArrangeSidebar, a success when nil.
 	arrangement *agentreplv1.GetSidebarArrangementResponse
@@ -162,6 +165,17 @@ func (c *cliClient) RollOutLanding(_ context.Context, req *connect.Request[agent
 	return connect.NewResponse(&agentreplv1.RollOutLandingResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) FindWorkspaces(_ context.Context, req *connect.Request[agentreplv1.FindWorkspacesRequest]) (*connect.Response[agentreplv1.FindWorkspacesResponse], error) {
+	if err := c.record(req.Msg); err != nil {
+		return nil, err
+	}
+	if c.found != nil {
+		return connect.NewResponse(c.found), nil
+	}
+	return connect.NewResponse(&agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Success{Success: &agentreplv1.FindWorkspacesSuccess{
+		Extent: &agentreplv1.FindWorkspacesSuccess_Complete{Complete: &agentreplv1.FindWorkspacesSuccessComplete{}}}}}), nil
+}
+
 func (c *cliClient) GetMergeQueueStatus(_ context.Context, req *connect.Request[agentreplv1.GetMergeQueueStatusRequest]) (*connect.Response[agentreplv1.GetMergeQueueStatusResponse], error) {
 	if err := c.record(req.Msg); err != nil {
 		return nil, err
@@ -189,6 +203,9 @@ type cliFixture struct {
 	dialed []string
 }
 
+// cliNow is the instant the fixture's commands read as now.
+var cliNow = time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+
 func newCLIFixture() *cliFixture {
 	return &cliFixture{client: &cliClient{}, cwd: "/wt/caller/src"}
 }
@@ -212,6 +229,7 @@ func (f *cliFixture) run(noun string, args ...string) int {
 		},
 		getwd:   func() (string, error) { return f.cwd, nil },
 		mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
+		now:     func() time.Time { return cliNow },
 	}
 	return runNoun(context.Background(), noun, args, deps, &f.out, &f.errOut)
 }
@@ -1618,5 +1636,163 @@ func TestPlaceExitsRefusedOnTheDaemonsRefusal(t *testing.T) {
 	// Assert
 	if code != exitRefused {
 		t.Fatalf("exit %d, stderr %q; want refused", code, f.errOut.String())
+	}
+}
+
+// ---- workspace find --------------------------------------------------------
+
+func TestFindSendsEveryNarrowingItNames(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		check func(*agentreplv1.FindWorkspacesRequest) bool
+	}{
+		{name: "nothing named sends the default limit and nothing else", args: nil, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetLimit() == defaultFindLimit && r.Repository == nil && r.Window == nil && r.Standing == nil && r.Text == nil
+		}},
+		{name: "-all sends no limit", args: []string{"-all"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.Limit == nil }},
+		{name: "-limit", args: []string{"-limit", "3"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.GetLimit() == 3 }},
+		{name: "-repository here is the caller's repository", args: []string{"-repository", "here"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetRepository().GetId() == "repo-1"
+		}},
+		{name: "-repository DIR", args: []string{"-repository", "/src/doom"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetRepository().GetDir() == "/src/doom"
+		}},
+		{name: "-since an age in days", args: []string{"-since", "7d"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetWindow().GetSinceMs() == cliNow.AddDate(0, 0, -7).UnixMilli() && r.GetWindow().UntilMs == nil
+		}},
+		{name: "-until an RFC 3339 instant", args: []string{"-until", "2026-10-20T08:00:00Z"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool {
+			return r.GetWindow().GetUntilMs() == time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC).UnixMilli() && r.GetWindow().SinceMs == nil
+		}},
+		{name: "-standing open", args: []string{"-standing", "open"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.GetStanding().GetOpen() != nil }},
+		{name: "-standing closed", args: []string{"-standing", "closed"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.GetStanding().GetClosed() != nil }},
+		{name: "-standing landed", args: []string{"-standing", "landed"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.GetStanding().GetLanded() != nil }},
+		{name: "-text", args: []string{"-text", "footer"}, check: func(r *agentreplv1.FindWorkspacesRequest) bool { return r.GetText() == "footer" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"find"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q; want success", code, f.errOut.String())
+			}
+			if req := only[*agentreplv1.FindWorkspacesRequest](t, f); !tt.check(req) {
+				t.Fatalf("sent %v", req)
+			}
+		})
+	}
+}
+
+func TestFindPrintsTheDaemonsAnswer(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	summary := "Fix the footer"
+	f.client.found = &agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Success{Success: &agentreplv1.FindWorkspacesSuccess{
+		Extent: &agentreplv1.FindWorkspacesSuccess_Partial{Partial: &agentreplv1.FindWorkspacesSuccessPartial{
+			Workspaces: []*agentreplv1.FoundWorkspace{{Name: "footer-fix", Summary: &summary}}, Omitted: 4}}}}}
+
+	// Act
+	code := f.run(workspaceNoun, "find")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q; want success", code, f.errOut.String())
+	}
+	var printed agentreplv1.FindWorkspacesResponse
+	if err := protojson.Unmarshal(f.out.Bytes(), &printed); err != nil {
+		t.Fatalf("the output is no FindWorkspacesResponse: %v\n%s", err, f.out.String())
+	}
+	if !proto.Equal(&printed, f.client.found) {
+		t.Fatalf("printed %v, want the daemon's answer", &printed)
+	}
+}
+
+func TestFindExitsRefusedOnAnUnknownRepository(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.client.found = &agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Error{Error: &agentreplv1.FindWorkspacesError{
+		Cause: &agentreplv1.FindWorkspacesError_UnknownRepository{UnknownRepository: &agentreplv1.FindWorkspacesUnknownRepository{}}}}}
+
+	// Act
+	code := f.run(workspaceNoun, "find", "-repository", "/src/nowhere")
+
+	// Assert
+	if code != exitRefused || !strings.Contains(f.errOut.String(), "the daemon refused") {
+		t.Fatalf("exit %d, stderr %q; want the refusal", code, f.errOut.String())
+	}
+}
+
+func TestFindRefusesAMalformedCommandBeforeCallingTheDaemon(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "a positional", args: []string{"footer"}, want: "nothing is positional"},
+		{name: "-limit with -all", args: []string{"-limit", "3", "-all"}, want: "-limit and -all are exclusive"},
+		{name: "a zero limit", args: []string{"-limit", "0"}, want: "-limit is at least 1"},
+		{name: "an unknown standing", args: []string{"-standing", "merged"}, want: `-standing is open, closed or landed, not "merged"`},
+		{name: "an unreadable since", args: []string{"-since", "last week"}, want: `-since: "last week" is no age`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"find"}, tt.args...)...)
+
+			// Assert
+			if code != exitFailure || !strings.Contains(f.errOut.String(), tt.want) {
+				t.Fatalf("exit %d, stderr %q; want %q", code, f.errOut.String(), tt.want)
+			}
+			if len(f.client.requests) != 0 {
+				t.Fatalf("requests = %v, want none sent", f.client.requests)
+			}
+		})
+	}
+}
+
+func TestParseWhen(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  time.Time
+	}{
+		{name: "days", value: "7d", want: cliNow.AddDate(0, 0, -7)},
+		{name: "zero days", value: "0d", want: cliNow},
+		{name: "a duration", value: "36h", want: cliNow.Add(-36 * time.Hour)},
+		{name: "a date at local midnight", value: "2026-10-20", want: time.Date(2026, 10, 20, 0, 0, 0, 0, time.Local)},
+		{name: "an RFC 3339 instant", value: "2026-10-20T08:30:00Z", want: time.Date(2026, 10, 20, 8, 30, 0, 0, time.UTC)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := parseWhen(tt.value, cliNow)
+
+			// Assert
+			if err != nil || !got.Equal(tt.want) {
+				t.Fatalf("parseWhen(%q) = %v, %v; want %v", tt.value, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseWhenRefusesWhatItCannotRead(t *testing.T) {
+	for _, value := range []string{"", "yesterday", "-3d", "-2h", "2026-13-01"} {
+		t.Run(value, func(t *testing.T) {
+			// Act
+			_, err := parseWhen(value, cliNow)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), "is no age") {
+				t.Fatalf("parseWhen(%q) = %v, want a refusal", value, err)
+			}
+		})
 	}
 }

@@ -24,3 +24,24 @@ func RepositoryAt(repos []Repository, dir string) (Repository, bool) {
 	}
 	return Repository{}, false
 }
+
+// RepositoryNamed answers the repository in repos a repository ref names: by
+// id, by dir, or by both, which must then name the same repository. A ref
+// naming neither finds nothing. dir must already be in the registry's
+// spelling; this compares, it does not normalize.
+func RepositoryNamed(repos []Repository, id RepoID, dir string) (Repository, bool) {
+	switch {
+	case id != "" && dir != "":
+		repo, found := RepositoryWithID(repos, id)
+		if !found || repo.Dir != dir {
+			return Repository{}, false
+		}
+		return repo, true
+	case id != "":
+		return RepositoryWithID(repos, id)
+	case dir != "":
+		return RepositoryAt(repos, dir)
+	default:
+		return Repository{}, false
+	}
+}

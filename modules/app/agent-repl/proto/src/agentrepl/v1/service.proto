@@ -103,6 +103,7 @@ import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
 import "agentrepl/v1/endpoint_watch_page.proto";
 import "agentrepl/v1/endpoint_open_tabs.proto";
 import "agentrepl/v1/endpoint_report_page_drawn.proto";
+import "agentrepl/v1/endpoint_find_workspaces.proto";
 import "agentrepl/v1/endpoint_get_workspace_status.proto";
 import "agentrepl/v1/endpoint_get_merge_queue_status.proto";
 import "agentrepl/v1/endpoint_subscribe_workspace.proto";
@@ -608,6 +609,13 @@ service AgentRepl {
   }
   // Merge queues' status, now. See endpoint_get_merge_queue_status.proto.
   rpc GetMergeQueueStatus(GetMergeQueueStatusRequest) returns (GetMergeQueueStatusResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // The registry's agent workspaces, open or closed, narrowed by repository,
+  // activity window, standing and text, each with its name and summary. See
+  // endpoint_find_workspaces.proto.
+  rpc FindWorkspaces(FindWorkspacesRequest) returns (FindWorkspacesResponse) {
     // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
     option idempotency_level = NO_SIDE_EFFECTS;
   }

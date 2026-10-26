@@ -160,13 +160,7 @@ func (o *orchestrator) scopedRepository(ctx context.Context, op, what string, sc
 	if err != nil {
 		return wsm.Repository{}, "", err
 	}
-	for _, repo := range repos {
-		if scope.ID != "" && repo.ID != scope.ID {
-			continue
-		}
-		if scope.Dir != "" && repo.Dir != scope.Dir {
-			continue
-		}
+	if repo, found := wsm.RepositoryNamed(repos, scope.ID, scope.Dir); found {
 		// THE QUEUE IS KEYED BY THE COMMON DIR (repoKeyFor), never by the
 		// registry's worktree dir: keying a scoped pause by repo.Dir wrote
 		// and read a key no queue is ever stored under, so a scoped pause

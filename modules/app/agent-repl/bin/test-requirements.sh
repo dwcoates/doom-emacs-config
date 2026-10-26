@@ -215,6 +215,24 @@ test_a_missing_field_is_refused() {
   if [ "$RC" -eq 2 ] && has 'x: program needs "command"'; then pass "a missing field is refused"; else fail "missing field" "rc=$RC" "$OUT"; fi
 }
 
+test_a_command_link_with_no_name_is_refused() {
+  new_case
+  manifest '[{"id": "x", "kind": "command_link", "why": "w", "profile": "run", "source": {"repo": "bin/x"}}]'
+  run list
+  if [ "$RC" -eq 2 ] && has 'x: command_link needs "name"'; then pass "a command link with no name is refused"; else fail "command link name" "rc=$RC" "$OUT"; fi
+}
+
+test_a_command_link_sourced_outside_the_repository_is_refused() {
+  new_case
+  manifest '[{"id": "x", "kind": "command_link", "why": "w", "profile": "run", "name": "x", "source": {"env": "X_ROOT", "path": "x"}}]'
+  run list
+  if [ "$RC" -eq 2 ] && has 'x: a command_link source is a path in the repository ("repo")'; then
+    pass "a command link sourced outside the repository is refused"
+  else
+    fail "command link source" "rc=$RC" "$OUT"
+  fi
+}
+
 test_a_bad_profile_is_refused() {
   new_case
   manifest '[{"id": "x", "kind": "env", "why": "w", "profile": "sometimes", "name": "X", "doc": "d"}]'

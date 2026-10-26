@@ -782,6 +782,13 @@ func (s *requestLoggingServer) GetMergeQueueStatus(
 	return serveUnary(s, ctx, "GetMergeQueueStatus", req, s.server.GetMergeQueueStatus)
 }
 
+func (s *requestLoggingServer) FindWorkspaces(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.FindWorkspacesRequest],
+) (*connect.Response[agentreplv1.FindWorkspacesResponse], error) {
+	return serveUnary(s, ctx, "FindWorkspaces", req, s.server.FindWorkspaces)
+}
+
 func (s *requestLoggingServer) GetWorkspaceStatus(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.GetWorkspaceStatusRequest],
