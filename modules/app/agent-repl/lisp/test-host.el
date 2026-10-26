@@ -4164,6 +4164,95 @@ callback must still run rather than resolve to nil."
         ;; Assert
         (should (agent-repl-test-host--logged-p :error "elisp.host.stream-lost ws=ws-1"))))))
 
+(defun agent-repl-test-host--refuse-transferred (ws)
+  "Close WS's host stream the way an incumbent refuses a transferred workspace."
+  (funcall (plist-get (agent-repl-host-stream ws) :on-close)
+           (list :error (list :kind :http :code "failed_precondition" :status nil
+                              :message (concat "WatchHostWorkspace closed the stream: transferring_away: "
+                                               "workspace \"0123456789abcdef\" has been handed to a successor daemon")))))
+
+(ert-deftest agent-repl-test-host-stream-refused-transferred-adopts-on-the-successor ()
+  "A stream refused `transferring_away' adopts onto the successor.
+2026-10-26: taken for a loss, it waited on a promotion the incumbent never
+made, and a fresh Emacs drew every workspace severed."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-test-host--subscribe "ws-1")
+      (setq agent-repl-test-host--calls nil)
+      ;; Act
+      (agent-repl-test-host--refuse-transferred "ws-1")
+      ;; Assert
+      (should (equal (car agent-repl-test-host--calls)
+                     (list "AdoptHostWorkspace" successor
+                           (list :workspace (agent-repl-test-host--ref))))))))
+
+(ert-deftest agent-repl-test-host-stream-refused-transferred-resubscribes-on-the-successor ()
+  "The refused workspace's stream moves to the daemon that serves it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-test-host--refuse-transferred "ws-1")
+      ;; Assert
+      (should (eq (agent-repl-host-conn "ws-1") successor)))))
+
+(ert-deftest agent-repl-test-host-stream-refused-transferred-is-not-a-loss ()
+  "The refusal is the contract's answer, recorded at INFO, never stream-lost."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--refuse-transferred "ws-1")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.stream-refused-transferred ws=ws-1"))
+    (should-not (agent-repl-test-host--logged-p :error "elisp.host.stream-lost"))))
+
+(ert-deftest agent-repl-test-host-stream-refused-transferred-adopts-once-the-successor-is-accepted ()
+  "With the successor's dial not yet accepted, the adopt waits on acceptance."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor nil
+          agent-repl-test-host--successor-pending t)
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--refuse-transferred "ws-1")
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      ;; Act
+      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
+      ;; Assert
+      (should (equal (car agent-repl-test-host--calls)
+                     (list "AdoptHostWorkspace" successor
+                           (list :workspace (agent-repl-test-host--ref))))))))
+
+(ert-deftest agent-repl-test-host-stream-refused-transferred-leaves-the-workspace-detached-until-adopted ()
+  "Until a successor adopts it, the workspace is detached for the link's edges to walk."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor nil
+          agent-repl-test-host--successor-pending t)
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--refuse-transferred "ws-1")
+    ;; Assert
+    (should (plist-get (agent-repl-host--entry "ws-1") :detached))))
+
+(ert-deftest agent-repl-test-host-other-failed-precondition-close-is-still-lost ()
+  "Only the `transferring_away' arm is a handover; another refusal stays a loss."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (funcall (plist-get (agent-repl-host-stream "ws-1") :on-close)
+               (list :error (list :kind :http :code "failed_precondition" :status nil
+                                  :message "WatchHostWorkspace closed the stream: not_yet_adopted: workspace \"0123456789abcdef\" has not been adopted by this daemon yet")))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :error "elisp.host.stream-lost ws=ws-1")))))
+
 (ert-deftest agent-repl-test-host-stream-lost-registers-on-the-live-daemon ()
   "A lost stream re-registers the workspace on the daemon the link now names."
   (agent-repl-test-host--with-harness

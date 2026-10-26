@@ -1189,6 +1189,17 @@ a stream that never carried it, is a loss."
          marked
          (eq marked (or stream (agent-repl-host-stream ws))))))
 
+(defun agent-repl-host--refused-as-transferred-p (outcome)
+  "Return non-nil when OUTCOME is a host stream refused `transferring_away'.
+A Watch* rpc has no `<Rpc>Error' message: its refusal IS the closed
+transport, whose message names the arm (the daemon's `TransportClosed':
+\"<rpc> closed the stream: <arm>: <reason>\")."
+  (and (eq (car outcome) :error)
+       (let ((detail (cadr outcome)))
+         (and (equal (plist-get detail :code) "failed_precondition")
+              (string-match-p "closed the stream: transferring_away: "
+                              (or (plist-get detail :message) ""))))))
+
 (defun agent-repl-host--handle-close (ws outcome &optional stream)
   "React to WS's host STREAM closing with OUTCOME.
 `(:cancelled)' is Emacs's own unsubscribe and is normal.  A clean end
@@ -1223,6 +1234,19 @@ it.  STREAM nil means the caller did not name the stream."
     (agent-repl-host--put ws :ending-stream nil)
     (agent-repl-host--put ws :stream nil)
     (agent-repl-host--follow-live-daemon ws "planned-ending"))
+   ((agent-repl-host--refused-as-transferred-p outcome)
+    ;; THE DAEMON HANDED WS ON, AND SAID SO.  This is the `transferred'
+    ;; notice read off a refused open, not a loss: WS adopts onto the
+    ;; successor.  Taken for a loss it waited on the promotion, which comes
+    ;; only once the incumbent exits -- and an incumbent still serving another
+    ;; workspace never did (2026-10-26: a fresh Emacs, linked by daemon.addr
+    ;; to the incumbent, drew all 45 of its workspaces severed).
+    (agent-repl-host--put ws :ending-stream nil)
+    (agent-repl--info ws "elisp.host.stream-refused-transferred ws=%s" ws)
+    (agent-repl-host-release-restart-hold ws "stream-refused-transferred")
+    (agent-repl-host--put ws :stream nil)
+    (agent-repl-host--put ws :detached t)
+    (agent-repl-host--transferred ws))
    (t
     (agent-repl-host--put ws :ending-stream nil)
     (agent-repl--error ws "elisp.host.stream-lost ws=%s outcome=%S" ws outcome)
