@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { boxSubtree, inSubtree, labelColumn, standingBox, unboxAll, type SubtreeBox } from "../../src/feed/subtree-box.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { boxedBy, drawnRow, exampleSubtreeWidth, exampleTree, labelledTree, lineOf } from "./tree-fixture.js";
 
 const box: SubtreeBox = { className: "box-a", leftProperty: "--a-left", rightProperty: "--a-right" };
@@ -30,9 +31,9 @@ describe("inSubtree", () => {
 
 describe("labelColumn", () => {
   it.each([
-    ["a root", "1", 0],
-    ["a child, past its connector", "1.1", 4],
-    ["a grandchild, past its parent's rail and its connector", "1.1.1", 8],
+    ["a root", "1", "0ch"],
+    ["a child, past its connector", "1.1", "4ch"],
+    ["a grandchild, past its parent's rail and its connector", "1.1.1", "8ch"],
   ])("is the column %s's label starts at", (_name, node, want) => {
     // Arrange
     const row = drawnRow("r1", exampleTree);
@@ -181,5 +182,34 @@ describe("standingBox", () => {
     second.stand(document, { row: "r1", label: "1.2" });
     // Assert
     expect([boxedBy(row, box).map(([node]) => node), boxedBy(row, other).map(([node]) => node)]).toEqual([["1.1", "1.1.1"], ["1.2"]]);
+  });
+});
+
+describe("the edges a box is drawn from", () => {
+  it("are the ones the tree was wrapped by, in its measure's unit", () => {
+    // Arrange — a line drawn in px, as the bubble's measure draws it.
+    const row = document.createElement("article");
+    row.innerHTML = `<div class="mp-tree"><div class="mp-line" data-node="2" data-label-at="0px" data-text-end="88.5px"></div><div class="mp-line" data-node="2" data-text-end="120px"></div></div>`;
+    document.body.replaceChildren(row);
+    // Act
+    boxSubtree(row, "2", box);
+    // Assert
+    expect(boxedBy(row, box)).toEqual([
+      ["2", "0px", "120px"],
+      ["2", "0px", "120px"],
+    ]);
+  });
+
+  it("refuses a line that carries no edge, recording it through the canonical logger", async () => {
+    // Arrange — a head line drawn by hand, with no text end.
+    const capture = captureLogRecords();
+    const row = document.createElement("article");
+    row.innerHTML = `<div class="mp-tree"><div class="mp-line" data-node="2" data-label-at="0px"></div></div>`;
+    document.body.replaceChildren(row);
+    // Act
+    expect(() => boxSubtree(row, "2", box)).toThrow(/subtree box/);
+    // Assert
+    const record = await forwardedRecord(capture, "feed.subtree-box.edge");
+    expect(record).toMatchObject({ level: { case: "error" }, context: { attribute: "data-text-end", value: "", node: "2" } });
   });
 });

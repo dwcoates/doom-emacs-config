@@ -2670,7 +2670,7 @@ describe("no bubble content scrolls horizontally", () => {
 });
 
 describe("a double-width character in a tree", () => {
-  it("is drawn in an inline box exactly two columns of the tree font wide", () => {
+  it("is drawn in an inline box exactly two columns of its face wide", () => {
     // Arrange / Act
     const rule = declarationsOf(".mp-wide") ?? "";
     // Assert
@@ -2771,7 +2771,6 @@ describe("the one bubble rule set", () => {
   });
 
   it.each([
-    ["face", /font-family:\s*var\(--tree-font-family\)/],
     ["size", /--bubble-font-rem:\s*var\(--tree-font-rem\)/],
     ["leading", /--md-line-h:\s*var\(--tree-line-h\)/],
   ] as const)("sets a prompt's %s from the metaprompt tree's token", (_label, pattern) => {
@@ -2782,7 +2781,6 @@ describe("the one bubble rule set", () => {
   });
 
   it.each([
-    ["face", /font-family:\s*var\(--tree-font-family\)/],
     ["size", /font-size:\s*calc\(var\(--tree-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/],
     ["leading", /line-height:\s*var\(--tree-line-h\)/],
   ] as const)("sets a metaprompt tree's %s from the token a prompt reads", (_label, pattern) => {
@@ -2792,23 +2790,55 @@ describe("the one bubble rule set", () => {
     expect(tree).toMatch(pattern);
   });
 
-  it("declares the tree's face once, on the root", () => {
+  it.each([
+    [".bubble", ".bubble"],
+    ["the chat column", ".chat-col"],
+  ])("sets %s's face from the serif token", (_label, selector) => {
     // Arrange / Act
-    const declarations = withoutBlockComments(stylesheet).match(/--tree-font-family\s*:/g) ?? [];
+    const rule = ownDeclarationsOf(selector) ?? "";
     // Assert
-    expect([declarations.length, /--tree-font-family:\s*ui-monospace, monospace;/.test(declarationsOf(":root") ?? "")]).toEqual([1, true]);
+    expect(rule).toMatch(/font-family:\s*var\(--serif-font-family\)/);
   });
 
-  it("hands a prompt bubble the tree's face through the cascade", () => {
+  it.each([
+    ["--serif-font-family", /--serif-font-family:\s*"Source Serif 4 Variable", ui-serif, Georgia, serif;/],
+    ["--tree-rail-font-family", /--tree-rail-font-family:\s*ui-monospace, monospace;/],
+  ] as const)("declares %s once, on the root", (token, pattern) => {
+    // Arrange / Act
+    const declarations = withoutBlockComments(stylesheet).match(new RegExp(`${token}\\s*:`, "g")) ?? [];
+    // Assert
+    expect([declarations.length, pattern.test(declarationsOf(":root") ?? "")]).toEqual([1, true]);
+  });
+
+  it.each([
+    ["a prompt", "prompt", "user", ""],
+    ["a response", "response", "response", ""],
+    ["a thinking bubble", "response", "thinking", ""],
+    ["an interim response", "response", "response", "interim-response"],
+  ])("hands %s the serif through the cascade", (_label, role, variant, extra) => {
     // Arrange
     const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    bubble.setAttribute("data-role", "prompt");
-    bubble.setAttribute("data-variant", "user");
+    bubble.className = `bubble ${extra}`.trim();
+    bubble.setAttribute("data-role", role);
+    bubble.setAttribute("data-variant", variant);
     // Act
     const face = inDocument(bubble, (el) => cascadedValue(el, "font-family"));
     // Assert
-    expect(face).toBe("var(--tree-font-family)");
+    expect(face).toBe("var(--serif-font-family)");
+  });
+
+  it("lets a metaprompt tree inherit its bubble's face", () => {
+    // Arrange / Act
+    const tree = ownDeclarationsOf(".mp-tree") ?? "";
+    // Assert
+    expect(tree).not.toMatch(/font-family\s*:/);
+  });
+
+  it.each([".mp-connectors", ".mp-label-pad"])("sets %s in the rail face", (selector) => {
+    // Arrange / Act
+    const rule = ownDeclarationsOf(selector) ?? "";
+    // Assert
+    expect(rule).toMatch(/font-family:\s*var\(--tree-rail-font-family\)/);
   });
 
   it("lets no rule on a bubble but the prompt's set its size or leading", () => {

@@ -70,7 +70,7 @@ describe("every blue and purple bubble is built by drawBubble", () => {
 
 describe("no bubble kind carries its own copy of the shared logic", () => {
   it("paints and wraps a body only in the body pipeline", () => {
-    expect(sourcesMatching(/\b(?:measureTreeCols|proseHtml|reconcileChildren)\(/)).toEqual(["bubble/body.ts"]);
+    expect(sourcesMatching(/\b(?:measureTreeWidth|treeMeasure|proseHtml|reconcileChildren)\(/)).toEqual(["bubble/body.ts"]);
   });
 
   it("paints a body only through drawBubble, and reveals a slot only for the type-out", () => {

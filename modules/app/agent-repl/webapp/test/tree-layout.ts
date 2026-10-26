@@ -1,9 +1,10 @@
 /**
  * A LAYOUT FOR THE METAPROMPT TREE'S COLUMN BUDGET, IN JSDOM.
  *
- * jsdom performs no layout, so the response bubble's `measureTreeCols` (which
- * reads a character probe's width, the containing block's width, the bubble's
- * `max-width` and the chrome's computed lengths) has nothing to read there.
+ * jsdom performs no layout, so the response bubble's `measureTreeWidth` (which
+ * reads the containing block's width, the bubble's `max-width` and the
+ * chrome's computed lengths) and `treeMeasure` (which reads each piece's width
+ * off a probe) have nothing to read there.
  * This stages exactly those reads, and it stages them the way a REAL engine
  * answers them — which is the whole point: a DETACHED element has no box and no
  * computed style (zero rects, empty strings), so a measurement taken before the
@@ -16,8 +17,9 @@
  *     ancestor-or-self, and none for one inside a hidden subtree — the way an
  *     engine answers a `display: none` element — which is what the body's
  *     "laid out" test reads;
- *   - a `.mp-tree` element's rect is `CHARPX` per character of its text (the
- *     measure's probe is one);
+ *   - a piece the measure draws in its probe (a `.mp-connectors` or `.mp-content`
+ *     inside `.mp-measure`) is `CHARPX` per rendered column of its text, so a
+ *     staged tree wraps as the daemon's columns would at CHARPX a column;
  *   - an element holding a `.bubble` or `.response-run` child reports
  *     `CONTAININGPX` as its `clientWidth` (the capped box's containing block);
  *   - `getComputedStyle` answers a run's `max-width` as MAXWIDTH and a run
@@ -33,12 +35,12 @@
  * Every other read passes through to jsdom untouched.
  */
 import { afterEach, beforeEach } from "vitest";
-import { visibleWidth } from "../src/metaprompt-tree.js";
+import { visibleWidth, type TreeMeasure } from "../src/metaprompt-tree.js";
 import { boxRect } from "./dom-rect.js";
 
 /** The geometry a staged tree measurement reads. */
 export interface TreeLayout {
-  /** One column of the tree's monospace font, in px. */
+  /** One rendered column of a tree piece, in px. */
   charPx: number;
   /** The content width of the bubble's containing block, in px. */
   containingPx: number;
@@ -92,7 +94,9 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
   const originalRect = Element.prototype.getBoundingClientRect;
   Element.prototype.getBoundingClientRect = function staged(this: Element): DOMRect {
     if (!this.isConnected) return rect(0);
-    if (this.classList.contains("mp-tree")) return rect((this.textContent ?? "").length * layout.charPx);
+    if (this.closest(".mp-measure") !== null && (this.classList.contains("mp-connectors") || this.classList.contains("mp-content"))) {
+      return rect(visibleWidth(this.innerHTML) * layout.charPx);
+    }
     return originalRect.call(this);
   };
 
@@ -169,11 +173,29 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
  * box (src/bubble/draw.ts `BUBBLE_UNCAPPED`) reserves no gutter.
  */
 export function stagedCols(layout: TreeLayout, box: "capped" | "uncapped" = "capped"): number {
+  return Math.floor(stagedWidthPx(layout, box) / layout.charPx);
+}
+
+/** The px a staged LAYOUT's bubble body has at its cap, before flooring. */
+function stagedWidthPx(layout: TreeLayout, box: "capped" | "uncapped"): number {
   const pct = /^([\d.]+)%$/.exec(layout.maxWidth);
   const capPx =
     pct === null ? Number.parseFloat(layout.maxWidth) : (Number.parseFloat(pct[1]) / 100) * layout.containingPx;
   const gutterPx = box === "capped" ? layout.scrollbarPx : 0;
-  return Math.floor((capPx - 2 * layout.bodyPaddingPx - gutterPx) / layout.charPx);
+  return capPx - 2 * layout.bodyPaddingPx - gutterPx;
+}
+
+/**
+ * The measure a bubble drawn in a staged LAYOUT wraps by, as bubble/body.ts
+ * `treeMeasure` reads it there: the cap's whole px, and every piece CHARPX a
+ * rendered column.
+ */
+export function stagedMeasure(layout: TreeLayout, box: "capped" | "uncapped" = "capped"): TreeMeasure {
+  return {
+    unit: "px",
+    budget: Math.floor(stagedWidthPx(layout, box)),
+    widths: (items) => items.map((item) => visibleWidth(item.html) * layout.charPx),
+  };
 }
 
 /**

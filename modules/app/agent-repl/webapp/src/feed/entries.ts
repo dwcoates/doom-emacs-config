@@ -33,6 +33,7 @@ import {
   type InlineMarkup,
   type TreeIssue,
   type TreeLineDecor,
+  type TreeMeasure,
 } from "../metaprompt-tree.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, whenSlotPainted } from "../bubble/body.js";
@@ -61,12 +62,12 @@ export const ENTRY_PATH_CLASS = "mp-entry-path";
 
 /**
  * TREE, a run of a prompt's entries, as HTML: the tree their labels make,
- * drawn by the one tree renderer at WIDTH columns (no blank line between its
+ * drawn by the one tree renderer within MEASURE (no blank line between its
  * roots), each entry's lines wearing `ENTRY_CLASS` with its label in
  * `ENTRY_ATTRIBUTE` and its label the click target, each implied ancestor's
  * line `ENTRY_PATH_CLASS`. A node with no place, label or kind is refused.
  */
-export function entryTreeHtml(tree: ProseEntryTree, inline: InlineMarkup, width: number, onIssue?: TreeIssue): string {
+export function entryTreeHtml(tree: ProseEntryTree, inline: InlineMarkup, measure: TreeMeasure, onIssue?: TreeIssue): string {
   const decor: (TreeLineDecor | undefined)[] = [];
   const nodes = tree.nodes.map((node, i) => {
     const path = `ProseEntryTree.nodes[${i}]`;
@@ -98,7 +99,7 @@ export function entryTreeHtml(tree: ProseEntryTree, inline: InlineMarkup, width:
     });
   });
   const drawn = create(ProseTreeSchema, { nodes });
-  return renderTreeHtml(drawn, inline, width, onIssue, { decorate: (i) => decor[i], rootGap: false });
+  return renderTreeHtml(drawn, inline, measure, onIssue, { decorate: (i) => decor[i], rootGap: false });
 }
 
 /**

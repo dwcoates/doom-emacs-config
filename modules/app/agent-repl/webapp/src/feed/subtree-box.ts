@@ -10,8 +10,10 @@
  *     connector leading to the node is outside it and its descendants' rails
  *     are inside;
  *   - its right edge is the nearest column covering every boxed line's text.
- * A tree is drawn in a monospace face with every wide character boxed to two
- * columns (metaprompt-tree.ts), so a column is one `ch`.
+ * The edges are the ones the tree was wrapped by: every drawn branch line
+ * carries where its text ends, and a head line where its label starts, in the
+ * unit its measure measured in (metaprompt-tree.ts), so a box covers exactly
+ * the text as it draws, in any face.
  *
  * Each highlight is a SubtreeBox of its own (the composer's, a hover's, a
  * revealed node's), with its own class and edge properties, so two boxes over
@@ -25,9 +27,16 @@
  */
 import { queryAll } from "../dom.js";
 import { FEED_ROW_SELECTOR, feedRowId } from "./row-id.js";
-import { TREE_CLASS, TREE_LABEL_CLASS, TREE_LINE_CLASS, TREE_NODE_ATTRIBUTE, textWidth } from "../metaprompt-tree.js";
+import { log } from "../log.js";
+import {
+  TREE_CLASS,
+  TREE_LABEL_AT_ATTRIBUTE,
+  TREE_LINE_CLASS,
+  TREE_NODE_ATTRIBUTE,
+  TREE_TEXT_END_ATTRIBUTE,
+} from "../metaprompt-tree.js";
 
-/** One kind of box: the class its lines wear and the properties naming its edges, in `ch`. */
+/** One kind of box: the class its lines wear and the properties naming its edges, as CSS lengths. */
 export interface SubtreeBox {
   readonly className: string;
   readonly leftProperty: string;
@@ -39,14 +48,34 @@ export function inSubtree(node: string | null, label: string): boolean {
   return node !== null && (node === label || node.startsWith(`${label}.`));
 }
 
-/** The column LINE's own label starts at: the width of its prefix before the label. */
-export function labelColumn(line: HTMLElement): number {
-  let text = "";
-  for (const child of line.querySelector(".mp-prefix")?.childNodes ?? []) {
-    if (child instanceof HTMLElement && child.classList.contains(TREE_LABEL_CLASS)) break;
-    text += child.textContent ?? "";
+/** A drawn line's edge, as a CSS length, split into its number and its unit. */
+interface Edge {
+  readonly n: number;
+  readonly unit: string;
+}
+
+/** The edge LINE carries in ATTRIBUTE: every line the renderer drew carries it. */
+function edgeOf(line: HTMLElement, attribute: string): Edge {
+  const value = line.getAttribute(attribute) ?? "";
+  const m = /^(-?\d+(?:\.\d+)?(?:e-?\d+)?)(ch|px)$/.exec(value);
+  if (m === null) {
+    log.error("a drawn tree line carries no edge to box it by", {
+      operation: "feed.subtree-box.edge",
+      context: { attribute, value, node: line.getAttribute(TREE_NODE_ATTRIBUTE) },
+    });
+    throw new Error(`subtree box: a tree line's ${attribute} is ${JSON.stringify(value)}`);
   }
-  return textWidth(text);
+  return { n: Number(m[1]), unit: m[2] };
+}
+
+/** Where LINE's own label starts (a head line's), as a CSS length. */
+export function labelColumn(line: HTMLElement): string {
+  return cssEdge(edgeOf(line, TREE_LABEL_AT_ATTRIBUTE));
+}
+
+/** EDGE as a CSS length. */
+function cssEdge(edge: Edge): string {
+  return `${String(edge.n)}${edge.unit}`;
 }
 
 /** Take BOX off every line in SCOPE. */
@@ -71,11 +100,12 @@ export function boxSubtree(scope: ParentNode, label: string, box: SubtreeBox): v
     const head = lines.find((l) => l.getAttribute(TREE_NODE_ATTRIBUTE) === label);
     if (head === undefined) continue;
     const left = labelColumn(head);
-    const right = Math.max(...lines.map((l) => textWidth((l.textContent ?? "").trimEnd())));
+    const ends = lines.map((l) => edgeOf(l, TREE_TEXT_END_ATTRIBUTE));
+    const right = cssEdge({ n: Math.max(...ends.map((e) => e.n)), unit: ends[0].unit });
     for (const line of lines) {
       line.classList.add(box.className);
-      line.style.setProperty(box.leftProperty, `${left}ch`);
-      line.style.setProperty(box.rightProperty, `${right}ch`);
+      line.style.setProperty(box.leftProperty, left);
+      line.style.setProperty(box.rightProperty, right);
     }
   }
 }
