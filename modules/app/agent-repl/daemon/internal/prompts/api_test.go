@@ -532,9 +532,19 @@ func TestTheRoutingBriefRoutesAMessageAfterTheToolCall(t *testing.T) {
 			// A prompt opening "also, ..." appends to the request ahead of it.
 			name: "an addendum opener",
 			want: []string{
-				"A new message that OPENS as an addendum always answers {{token_after_tool_call}}",
-				`starting with "also", "also,"`,
+				"A new message that ADDS TO the request the running turn is working on always answers {{token_after_tool_call}}",
+				`It may OPEN as an addendum, starting with "also", "also,"`,
 				"so it never waits for the turn to finish ({{token_hold}})",
+			},
+		},
+		{
+			// A prompt carrying its addition mid-sentence ("we should also do
+			// X") appends to the request ahead of it just as an opener does.
+			name: "an addendum inside the sentence",
+			want: []string{
+				"wherever in the message the addition shows and however it is phrased",
+				`"we should also do X", "and when doing X we should also do Y"`,
+				"ANYTHING that suggests the user is appending to, extending, or widening the request they already sent is an addendum",
 			},
 		},
 		{
@@ -572,5 +582,28 @@ func TestTheRoutingBriefRoutesAMessageAfterTheToolCall(t *testing.T) {
 				t.Fatalf("queue-routing-classifier does not say %q", phrase)
 			}
 		})
+	}
+}
+
+func TestTheRoutingBriefHoldsASeparateFollowUpTask(t *testing.T) {
+	// Arrange: a prompt lining up a self-contained task for afterwards
+	// ("after, let's make sure ...") changes nothing about the running work,
+	// so the routing brief holds it, and it is no turn-ending instruction.
+	want := []string{
+		"A new message that only lines up a SEPARATE FOLLOW-UP TASK for afterwards is NOT an addendum",
+		`"after, let's make sure ..."`,
+		"Such a message answers {{token_hold}}",
+		"such a task is not a step of the running turn's ending, so it holds under the follow-up rule above",
+	}
+
+	// Act.
+	got, err := Load(repoPromptsDir, "queue-routing-classifier")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if phrase, missing := unsaid(got.Body, want); missing {
+		t.Fatalf("queue-routing-classifier does not say %q", phrase)
 	}
 }

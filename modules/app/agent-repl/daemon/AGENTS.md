@@ -2534,10 +2534,13 @@ Owner rulings, 2026-09-30 (`internal/promptqueue/acts.go`, `ahead.go`,
   `after_tool_call` (the common case, and the answer when unsure) joins it;
   `interrupt` (the prompt makes the running work wrong or wasted) interrupts
   it. The explicit-interrupt first word is `interrupt` without asking. A
-  prompt opening as an addendum ("also, ..."), clarifying a prompt the user
-  already sent ("I meant the other file"), or marking itself urgent ("asap")
-  is `after_tool_call` by the brief's own rule, never `queue`: at the head of the queue it joins the running turn,
-  and behind a queued prompt it coalesces into that prompt (below).
+  prompt adding to the request in any phrasing ("also, ...", "we should also
+  do X", "and when doing X also do Y"), clarifying a prompt the user already
+  sent ("I meant the other file"), or marking itself urgent ("asap") is
+  `after_tool_call` by the brief's own rule, never `queue`: at the head of
+  the queue it joins the running turn, and behind a queued prompt it
+  coalesces into that prompt (below). A prompt lining up a separate
+  follow-up task for afterwards ("after, let's make sure ...") is `queue`.
 - **THE USER CAN REWRITE THE CLASSIFIER'S BRIEF FROM A HELD CARD**
   (`UpdateClassifierPrompt`, `internal/classifierupdate`): a headless Sonnet
   run (guard site `classifier_update`, brief
