@@ -564,6 +564,10 @@ The Open section's walk is the order and the membership (an open workspace
 has a tab, a hidden one an undrawn tab), so a merged or closed row gets
 none.
 
+`:collapsed' is a tab off the bar: folded, or hidden.  `:hidden' is only
+the user\='s hide, the one that withholds the workspace\='s page
+\(`agent-repl-open-tabs-withheld-p'); a fold withholds nothing.
+
 THE ROWS IT REFUSES A TAB ARE RECORDED.  This predicate is the whole
 answer to \"why is there no tab for that workspace\", and it used to give
 it silently: a register whose row came back CLOSED produced no tab, and
@@ -588,7 +592,8 @@ Once per push over every closed row, which is why it is DEBUG."
                       :name (agent-repl-roster--tab-name entry collisions)
                       :ref (agent-repl-roster-row-ref row)
                       :availability (agent-repl-roster-row-availability row)
-                      :collapsed (plist-get entry :collapsed))))
+                      :collapsed (plist-get entry :collapsed)
+                      :hidden (eq (plist-get entry :section) :hidden))))
             entries)))
 
 ;;;; ---- Threads -----------------------------------------------------------
@@ -640,8 +645,8 @@ user picks a thread (`agent-repl-thread-pick')."
 (defun agent-repl-roster-desired-threads (roster)
   "Return the workspaces ROSTER's threads ask for.
 Shaped as `agent-repl-roster-desired-tabs' returns them.
-Each carries `:thread' t and is never `:collapsed': its page loads and its
-session runs, it is only never drawn."
+Each carries `:thread' t and is never `:collapsed' nor `:hidden': its
+page loads and its session runs, it is only never drawn."
   (mapcar (lambda (row)
             (let ((ref (plist-get row :thread)))
               (list :id (plist-get ref :id)
@@ -649,6 +654,7 @@ session runs, it is only never drawn."
                     :ref ref
                     :availability nil
                     :collapsed nil
+                    :hidden nil
                     :thread t)))
           (agent-repl-roster-threads roster)))
 
@@ -914,7 +920,8 @@ A row that fails to reconcile is contained rather than fatal; see
           (when name
             (push (cons name (plist-get want :id)) names)
             (push (list :id (plist-get want :id) :name name :ref (plist-get want :ref)
-                        :collapsed (plist-get want :collapsed))
+                        :collapsed (plist-get want :collapsed)
+                        :hidden (plist-get want :hidden))
                   rows)
             ;; A THREAD IS NEVER DRAWN, but its page loads: it is hidden
             ;; from the bar while open-tabs asks for it like any shown tab.

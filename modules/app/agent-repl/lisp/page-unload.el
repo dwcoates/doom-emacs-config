@@ -8,11 +8,16 @@
 ;; 2026-10-17) grow with the pages held.  So a page is held only while its
 ;; workspace is in use (owner ruling, 2026-10-17):
 ;;
-;;   - a HIDDEN workspace (hidden, or in a collapsed repository section) holds
-;;     no page while the user is not looking at it: one made before it was
-;;     hidden, or while the user stood on it, is unloaded;
+;;   - a HIDDEN workspace (one the user hid) holds no page while the user is
+;;     not looking at it: one made before it was hidden, or while the user
+;;     stood on it, is unloaded;
 ;;   - a workspace nobody has LOOKED AT for `agent-repl-page-unload-after'
 ;;     seconds of USE is unloaded too.
+;;
+;; A FOLD UNLOADS NOTHING (owner ruling, 2026-10-26).  Folding a repository
+;; section or a subsection only takes its workspaces off the bar: their
+;; pages are held, and age out on the same clock as every other page,
+;; which neither the fold nor the unfold touches.
 ;;
 ;; THE CLOCK RUNS ONLY WHILE THE SYSTEM IS IN USE (owner rulings, 2026-10-17
 ;; and 2026-10-18).  In use means the user switched workspaces within the last

@@ -118,6 +118,15 @@ workspace's web page was checked by Emacs alone, never by the daemon.
     it hid, what it spared with the reason, and what is standing down
     (`daemon.workspace.fold_repository`, `daemon.workspace.fold_subsection`).
 
+### A fold drops no page (owner ruling, 2026-10-26)
+- WHAT: folding a repository section or a subsection takes its workspaces'
+  tabs off the Emacs bar and drops no web page; only the user's hide does
+  (`agent-repl-open-tabs-withheld-p`). A folded workspace's page is loaded
+  like a drawn one's, and is unloaded only by page-unload.el's clock, which
+  the fold and the unfold never touch.
+- Does not claim: anything about the daemon's sessions. A repository fold
+  still stands sessions down as above.
+
 ## Decisions taken for the owner (delegated 2026-10-12, to confirm)
 - Collapsed repository sections count as not visible, like hidden ones.
 - A workspace whose session fails to start still opens, showing its fault.

@@ -1166,9 +1166,10 @@ Refusals, all preconditions rather than failures:
   - `:no-ref'            no `WorkspaceRef' yet, so no URL exists to
                          mount — the roster has not reached this
                          workspace, and a guessed URL is not an option;
-  - `:hidden'            the user hid it, or its repository section is
-                         collapsed, and the user is not looking at it:
-                         it runs nothing (`agent-repl-open-tabs-withheld-p');
+  - `:hidden'            the user hid it, and the user is not looking at
+                         it: it runs nothing
+                         (`agent-repl-open-tabs-withheld-p').  A fold
+                         withholds no page;
   - `:already-mounted'   a live webview buffer already exists (this is
                          what makes pre-creation idempotent);
   - `:no-xwidget'        an Emacs with no xwidget support has no webview

@@ -715,7 +715,7 @@ unscreened WS while every record uses `agent-repl--ws-log-name'."
       ;; A WORKSPACE THE USER SWITCHED TO WITH NO VIEW HAS ITS VIEW MADE NOW,
       ;; whatever left it without one: the user is looking at it, and its
       ;; panels are owed by this switch, not by a later pass.  A withheld
-      ;; one (hidden, or in a collapsed repository section) holds no page
+      ;; one (hidden by the user; a fold withholds nothing) holds no page
       ;; until it is looked at (`agent-repl-open-tabs-withheld-p'); one not
       ;; yet reached by the staggered pre-creation pass has none either.  An
       ;; unloaded page never reaches here: it keeps its slot (page-unload.el),
