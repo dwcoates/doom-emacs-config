@@ -845,9 +845,10 @@ test_uninstall_removes_the_command_link() {
 # Every link kind checks its link through the one check_link, so a link kind
 # with a hand-rolled check of its own fails here rather than drifting.
 test_every_link_kind_checks_through_check_link() {
-  local runner="$REPO_ROOT/modules/app/agent-repl/bin/requirements.sh" fn missing=""
+  local runner="$REPO_ROOT/modules/app/agent-repl/bin/requirements.sh" fn body missing=""
   for fn in check_skill_link_in check_command_link; do
-    if ! awk -v f="$fn" '$0 ~ "^"f"\\(\\)" {on=1} on && /^}/ {exit} on' "$runner" | grep -q 'check_link "\$name" "\$src" "\$dest"'; then
+    body="$(awk -v f="$fn" '$0 ~ "^"f"\\(\\)" {on=1} on && /^}/ {exit} on' "$runner")"
+    if ! grep -q 'check_link "\$name" "\$src" "\$dest"' <<<"$body"; then
       missing="$missing $fn"
     fi
   done
