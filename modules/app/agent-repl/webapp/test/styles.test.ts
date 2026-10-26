@@ -5953,3 +5953,19 @@ describe("a response's level-2 sections", () => {
     expect(others).toEqual([undefined, undefined, undefined, undefined, undefined]);
   });
 });
+
+describe("the response subtree box (feed/subtree-box.ts)", () => {
+  // Owner request, 2026-10-26: a highlighted tree entry carries no accent bar
+  // on its left margin, whichever highlight draws it.
+  it.each([".mp-line.mp-line-composing", ".mp-line.mp-line-revealed", ".mp-line.mp-line-hovered"])(
+    "%s paints its box without the accent's left bar",
+    (selector) => {
+      // Arrange / Act
+      const rule = rulesOfSelector(selector);
+
+      // Assert
+      expect(rule).toMatch(/var\(--composer-entry-bg\) var\(--box-left\)/);
+      expect(rule).not.toMatch(/--accent/);
+    },
+  );
+});
