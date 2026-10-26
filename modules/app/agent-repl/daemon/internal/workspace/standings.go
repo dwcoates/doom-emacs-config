@@ -170,19 +170,12 @@ func (v *verbs) oneShotExitPlacement(ctx context.Context, log dlog.Logger, recor
 // idle agent, so the workspace's agent files the workspace itself.
 func (v *verbs) submitPlacement(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, text string) error {
 	submission := deferredBrief(ws, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT)
-	fields := dlog.Context{"turn": string(submission.Turn)}
-	disposition, err := v.deps.Queue.Submit(ctx, submission)
+	disposition, err := v.queueBrief(ctx, log, opOneShotExitPlacement, "the workspace's", "its placement brief", submission)
 	if err != nil {
-		log.Error(opOneShotExitPlacement, "the workspace's queue did not accept its placement brief", dlog.WithCause(fields, err))
-		return fmt.Errorf("submit the placement brief: %w", err)
+		return err
 	}
-	if disposition.RefusedArm != "" {
-		fields["refused_arm"] = disposition.RefusedArm
-		log.Error(opOneShotExitPlacement, "the workspace's queue refused its placement brief", fields)
-		return fmt.Errorf("submit the placement brief: the queue refused it: %s", disposition.RefusedArm)
-	}
-	fields["delivered"], fields["parked"] = disposition.Delivered, disposition.Parked()
-	log.Info(opOneShotExitPlacement, "asked the workspace that left its one-shot state to file itself into a subsection", fields)
+	log.Info(opOneShotExitPlacement, "asked the workspace that left its one-shot state to file itself into a subsection", dlog.Context{
+		"turn": string(submission.Turn), "delivered": disposition.Delivered, "parked": disposition.Parked()})
 	return nil
 }
 

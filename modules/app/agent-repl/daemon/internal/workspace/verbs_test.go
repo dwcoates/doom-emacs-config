@@ -276,3 +276,65 @@ func functionsReferencing(t *testing.T, name string) []string {
 	slices.Sort(found)
 	return found
 }
+
+func TestQueueBriefRecordsAndFailsWhatTheQueueDidNotTake(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+		message string
+	}{
+		{name: "the queue takes it"},
+		{name: "the queue fails it", arrange: func(f *fixture) { f.queue.submitErr = errors.New("the queue is gone") },
+			message: "the workspace's queue did not accept the brief"},
+		{name: "the queue refuses it", arrange: func(f *fixture) { f.queue.submitRefusedArm = "workspace_closed" },
+			message: "the workspace's queue refused the brief"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			if tt.arrange != nil {
+				tt.arrange(f)
+			}
+			submission := deferredBrief("w1", "BRIEF", conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT)
+			const op = "daemon.workspace.test_brief"
+
+			// Act
+			disposition, err := f.mutable(t).queueBrief(context.Background(), f.log.logger, op, "the workspace's", "the brief", submission)
+
+			// Assert
+			if tt.message == "" {
+				if err != nil || !disposition.Delivered || len(f.queue.submissions) != 1 {
+					t.Fatalf("queueBrief = %+v, %v with %d submissions; want it delivered", disposition, err, len(f.queue.submissions))
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("queueBrief succeeded for a brief the queue did not take")
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: op, Message: tt.message})
+			if !ok || record.Context["turn"] != string(submission.Turn) {
+				t.Fatalf("record = %+v (found %v), want %q naming the brief's turn", record, ok, tt.message)
+			}
+		})
+	}
+}
+
+// TestEveryDeferredBriefIsQueuedThroughQueueBrief pins that the brief sites
+// share queueBrief's shape: a file composing a deferred brief that hands it
+// to the queue itself would take a refused brief for a delivered one.
+func TestEveryDeferredBriefIsQueuedThroughQueueBrief(t *testing.T) {
+	// Arrange / Act.
+	var direct []string
+	for _, file := range sourcescan.Production(t) {
+		source := string(file.Source)
+		if file.Name != "verbs.go" && strings.Contains(source, "deferredBrief(") && strings.Contains(source, "v.deps.Queue.Submit(") {
+			direct = append(direct, file.Name)
+		}
+	}
+
+	// Assert.
+	if len(direct) != 0 {
+		t.Fatalf("files queuing a deferred brief outside queueBrief = %v, want none", direct)
+	}
+}

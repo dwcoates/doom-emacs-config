@@ -72,16 +72,9 @@ func (v *verbs) OpenToRevertMerge(ctx context.Context, ws ids.WorkspaceID, progr
 		return err
 	}
 	submission := deferredBrief(ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT)
-	disposition, err := v.deps.Queue.Submit(ctx, submission)
+	disposition, err := v.queueBrief(ctx, log, opRevertMerge, "the reopened workspace's", "the merge-revert brief", submission)
 	if err != nil {
-		log.Error(opRevertMerge, "the reopened workspace's queue did not accept the merge-revert brief", dlog.Context{
-			"turn": string(submission.Turn), "cause": err.Error()})
-		return fmt.Errorf("revert the merge of %q: submit the brief: %w", ws, err)
-	}
-	if disposition.RefusedArm != "" {
-		log.Error(opRevertMerge, "the reopened workspace's queue refused the merge-revert brief", dlog.Context{
-			"turn": string(submission.Turn), "refused_arm": disposition.RefusedArm})
-		return fmt.Errorf("revert the merge of %q: the queue refused the brief: %s", ws, disposition.RefusedArm)
+		return fmt.Errorf("revert the merge of %q: %w", ws, err)
 	}
 	log.Info(opRevertMerge, "reopened the merged workspace and queued its merge-revert brief", dlog.Context{
 		"turn": string(submission.Turn), "landed_commit": landed,

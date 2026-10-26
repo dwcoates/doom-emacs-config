@@ -222,6 +222,27 @@ func deferredBrief(ws ids.WorkspaceID, text string, origin conversationv1.Prompt
 	return submission
 }
 
+// queueBrief hands SUBMISSION, a daemon brief, to the prompt queue, and
+// fails a submission the queue did not accept or refused: each is recorded at
+// ERROR under OP, worded from WHOSE (the queue's workspace, possessive) and
+// WHAT (the brief), with the brief's turn and the cause, and returned. It is
+// the one submission every daemon brief these verbs queue goes through, so
+// none of them can take a refused brief for a delivered one.
+func (v *verbs) queueBrief(ctx context.Context, log dlog.Logger, op, whose, what string, submission promptqueue.Submission) (promptqueue.Disposition, error) {
+	fields := dlog.Context{"turn": string(submission.Turn)}
+	disposition, err := v.deps.Queue.Submit(ctx, submission)
+	if err != nil {
+		log.Error(op, whose+" queue did not accept "+what, dlog.WithCause(fields, err))
+		return promptqueue.Disposition{}, fmt.Errorf("submit %s: %w", what, err)
+	}
+	if disposition.RefusedArm != "" {
+		fields["refused_arm"] = disposition.RefusedArm
+		log.Error(op, whose+" queue refused "+what, fields)
+		return promptqueue.Disposition{}, fmt.Errorf("submit %s: the queue refused it: %s", what, disposition.RefusedArm)
+	}
+	return disposition, nil
+}
+
 // rootFeed is the workspace's top-level feed, which is where every
 // daemon-synthesized row this package produces lands.
 func rootFeed() feedid.Feed { return feedid.Feed{Root: true} }
