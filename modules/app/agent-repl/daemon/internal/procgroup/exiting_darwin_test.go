@@ -20,9 +20,21 @@ func awaitExitUnreaped(t *testing.T, pid int) {
 	}
 	defer unix.Close(kq)
 	change := unix.Kevent_t{Ident: uint64(pid), Filter: unix.EVFILT_PROC, Flags: unix.EV_ADD | unix.EV_ONESHOT, Fflags: unix.NOTE_EXIT}
+	if _, err := unix.Kevent(kq, []unix.Kevent_t{change}, nil, nil); err != nil {
+		t.Fatalf("kevent register NOTE_EXIT on %d: %v", pid, err)
+	}
+	// THE WAIT IS RESTARTED ON EINTR: the Go runtime's preemption signal
+	// (SIGURG) can land on the blocked thread, and the registration above
+	// stands, so waiting again loses nothing.
 	events := make([]unix.Kevent_t, 1)
-	if _, err := unix.Kevent(kq, []unix.Kevent_t{change}, events, nil); err != nil {
-		t.Fatalf("kevent NOTE_EXIT on %d: %v", pid, err)
+	for {
+		_, err := unix.Kevent(kq, nil, events, nil)
+		if err == nil {
+			return
+		}
+		if err != unix.EINTR {
+			t.Fatalf("kevent NOTE_EXIT on %d: %v", pid, err)
+		}
 	}
 }
 
