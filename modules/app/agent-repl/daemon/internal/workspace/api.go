@@ -343,7 +343,10 @@ type Verbs interface {
 	SetOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, oneShot bool) (string, error)
 	// TakeBackOneShot clears a marked workspace's one-shot mark because the
 	// user took it back, as BY says (standings.go).
-	TakeBackOneShot(ctx context.Context, ws ids.WorkspaceID, by OneShotTakeBack) error
+	TakeBackOneShot(ctx context.Context, ws ids.WorkspaceID, by OneShotTakeBack) (PendingPlacement, error)
+	// SubmitPlacement queues the placement brief a take-back owes to its
+	// workspace's own session, once the prompt that took it back is queued.
+	SubmitPlacement(ctx context.Context, placement PendingPlacement) error
 	// SetCorrespondence marks a workspace awaiting another, or clears the mark
 	// with nil, as the asker (nil for the user) asks (standings.go).
 	SetCorrespondence(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, awaited *ids.WorkspaceID) error

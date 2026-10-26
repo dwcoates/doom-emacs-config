@@ -167,7 +167,7 @@ func TestTakeBackOneShotClearsTheMarkAndRecordsWhatClearedIt(t *testing.T) {
 			f := markedOneShot(t)
 
 			// Act
-			err := f.verbs.TakeBackOneShot(context.Background(), "w1", by)
+			_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", by)
 
 			// Assert
 			if err != nil || f.db.jobs["w1"].OneShot {
@@ -188,7 +188,7 @@ func TestTakeBackOneShotRepublishesTheRoster(t *testing.T) {
 	before := len(f.sidebar.registries)
 
 	// Act
-	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+	_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
 
 	// Assert
 	if err != nil || len(f.sidebar.registries) == before {
@@ -202,7 +202,7 @@ func TestTakeBackOneShotLeavesAnUnmarkedWorkspaceAlone(t *testing.T) {
 	f.db.setOneShotErr = errors.New("no write was expected")
 
 	// Act
-	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+	_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
 
 	// Assert
 	if err != nil {
@@ -221,7 +221,7 @@ func TestTakeBackOneShotLeavesAClosedWorkspacesMark(t *testing.T) {
 	f.db.workspaces["w1"] = ws
 
 	// Act
-	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+	_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
 
 	// Assert
 	if err != nil || !f.db.jobs["w1"].OneShot {
@@ -235,7 +235,7 @@ func TestTakeBackOneShotFailsHardWhenTheMarkCannotBeCleared(t *testing.T) {
 	f.db.setOneShotErr = errors.New("db gone")
 
 	// Act
-	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByReopen)
+	_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByReopen)
 
 	// Assert
 	if _, refused := AsRefusal(err); err == nil || refused {
@@ -345,6 +345,46 @@ func placementSubmissions(f *fixture) []promptqueue.Submission {
 	return out
 }
 
+// takeBackAndSubmit takes w1 back for BY and queues the placement it owes,
+// as the take-back's callers do.
+func takeBackAndSubmit(f *fixture, by OneShotTakeBack) error {
+	placement, err := f.verbs.TakeBackOneShot(context.Background(), "w1", by)
+	if err != nil {
+		return err
+	}
+	return f.verbs.SubmitPlacement(context.Background(), placement)
+}
+
+func TestTakeBackOneShotHandsThePlacementBackUnqueued(t *testing.T) {
+	// Arrange
+	f := rootOneShot(t)
+
+	// Act
+	placement, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+
+	// Assert
+	if err != nil || !placement.Owed() {
+		t.Fatalf("TakeBackOneShot = %+v, %v; want an owed placement", placement, err)
+	}
+	if subs := placementSubmissions(f); len(subs) != 0 {
+		t.Fatalf("placement briefs = %+v, want none queued before the caller asks", subs)
+	}
+}
+
+func TestSubmitPlacementQueuesNothingForANoneOwed(t *testing.T) {
+	// Arrange
+	f := rootOneShot(t)
+	f.queue.submitErr = errors.New("no submission was expected")
+
+	// Act
+	err := f.verbs.SubmitPlacement(context.Background(), PendingPlacement{})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SubmitPlacement = %v, want nothing done", err)
+	}
+}
+
 func TestLeavingTheOneShotStateAsksTheWorkspaceToFileItself(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -355,10 +395,10 @@ func TestLeavingTheOneShotStateAsksTheWorkspaceToFileItself(t *testing.T) {
 			return err
 		}},
 		{name: "the user's prompt takes it back", leave: func(f *fixture) error {
-			return f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+			return takeBackAndSubmit(f, TakenBackByUserPrompt)
 		}},
 		{name: "a reopen takes it back", leave: func(f *fixture) error {
-			return f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByReopen)
+			return takeBackAndSubmit(f, TakenBackByReopen)
 		}},
 	}
 	for _, tt := range tests {
