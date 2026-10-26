@@ -88,6 +88,11 @@ export interface ScrollPosition {
  *   breadcrumb, a hook's gated-call link). Owner request, 2026-10-01: every
  *   jump expands the entry and centers it exactly as the detached-work
  *   selection does (`revealCenterDelta`), so the two share the one routine.
+ * - `composerEntryRevealed`: the composer's entry in Emacs moved to answer
+ *   another node of a response's tree (`feed/composer-entry.ts`), and that
+ *   node's boxed subtree is not wholly in view; the feed moves ONLY AS FAR AS
+ *   the subtree needs (`revealNearestDelta`) and stops following (owner
+ *   request, 2026-10-26). A subtree already wholly in view moves nothing.
  * - `initialPlacement`: a feed's FIRST paint lands at its tail. Placement, not
  *   a scroll change.
  * - `replaceRestore`: a page REPLACE (re-open after reconnect or handover)
@@ -139,6 +144,7 @@ export const SCROLL_CAUSES = [
   "selectionMoved",
   "detachedWorkSelected",
   "entryJumped",
+  "composerEntryRevealed",
   "initialPlacement",
   "replaceRestore",
   "rolledBack",
@@ -173,7 +179,12 @@ type ParkCause =
   | "latestVisible";
 
 /** A named cause that supersedes the reader's click hold (`supersedeClick`). */
-type ClickSupersede = Exclude<ParkCause, "latestVisible"> | "selectionCleared" | "detachedWorkSelected" | "entryJumped";
+type ClickSupersede =
+  | Exclude<ParkCause, "latestVisible">
+  | "selectionCleared"
+  | "detachedWorkSelected"
+  | "entryJumped"
+  | "composerEntryRevealed";
 
 /** What asked the latest-visible latch to look: the one re-latch's callers. */
 type LatchTrigger = "scroll" | "follow" | "reveal" | "selectionEnded";
@@ -607,7 +618,7 @@ export class TailFollow {
    * CENTER the item's card in the viewport (`revealCenterDelta`).
    */
   detachedWorkSelected(geometry: RevealGeometry): void {
-    this.centerReveal("detachedWorkSelected", revealCenterDelta(geometry, this.box));
+    this.revealBy("detachedWorkSelected", revealCenterDelta(geometry, this.box));
   }
 
   /**
@@ -616,7 +627,22 @@ export class TailFollow {
    * detached-work selection does (`revealCenterDelta`).
    */
   entryJumped(geometry: RevealGeometry): void {
-    this.centerReveal("entryJumped", revealCenterDelta(geometry, this.box));
+    this.revealBy("entryJumped", revealCenterDelta(geometry, this.box));
+  }
+
+  /**
+   * The composer's entry in Emacs moved to answer another node of a
+   * response's tree, whose boxed subtree GEOMETRY measures: when the subtree
+   * is not wholly in view, stop following and move the feed ONLY AS FAR AS it
+   * needs (`revealNearestDelta`). Answers whether the feed moved; a subtree
+   * already in view, or one the feed's edges leave no room to move toward,
+   * moves nothing and leaves the follow as it was.
+   */
+  composerEntryRevealed(geometry: RevealGeometry): boolean {
+    const delta = revealNearestDelta(geometry, this.box);
+    if (delta === 0) return false;
+    this.revealBy("composerEntryRevealed", delta);
+    return true;
   }
 
   /**
@@ -1014,8 +1040,8 @@ export class TailFollow {
    * caller computed under CAUSE, take the anchor there, and latch where the
    * view lands if the latest entry is then in sight.
    */
-  private centerReveal(
-    cause: "detachedWorkSelected" | "entryJumped",
+  private revealBy(
+    cause: "detachedWorkSelected" | "entryJumped" | "composerEntryRevealed",
     delta: number,
   ): void {
     this.supersedeClick(cause);
@@ -1527,7 +1553,7 @@ export interface RevealGeometry {
 
 /**
  * How far the box must move to CENTER NODE in its viewport — every centering
- * reveal (`TailFollow.centerReveal`) as an arithmetic. First ruled for the
+ * reveal (`TailFollow.revealBy` with `revealCenterDelta`) as an arithmetic. First ruled for the
  * detached-work selection (owner ruling, 2026-09-23: the item the reader picked
  * in the footer lands in the middle of their view of the feed, where it used to
  * land at the fold's edge).
@@ -1584,6 +1610,21 @@ export function nearestEdgeOffset(view: VerticalSpan, node: VerticalSpan): numbe
   if (node.top >= view.top && node.bottom <= view.bottom) return 0;
   if (node.top < view.top || node.bottom - node.top > view.bottom - view.top) return node.top - view.top;
   return node.bottom - view.bottom;
+}
+
+/**
+ * How far the box must move for NODE to show whole in its viewport, ONLY AS
+ * FAR AS NODE NEEDS (`nearestEdgeOffset`), clamped at the feed's edges: the
+ * composer's reveal (`TailFollow.composerEntryRevealed`) as an arithmetic.
+ * The rects are viewport coordinates (see `RevealGeometry`); BOX supplies the
+ * scroll range the clamp needs.
+ */
+export function revealNearestDelta(g: RevealGeometry, box: ScrollPosition): number {
+  const offset = nearestEdgeOffset(
+    { top: g.boxTop, bottom: g.boxTop + g.boxHeight },
+    { top: g.nodeTop, bottom: g.nodeTop + g.nodeHeight },
+  );
+  return offset === 0 ? 0 : clampedDelta(box, offset);
 }
 
 /** Read BOX and NODE's reveal geometry off the live layout (reading moves nothing). */
