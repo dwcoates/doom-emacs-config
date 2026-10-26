@@ -142,6 +142,10 @@ type fakeDB struct {
 	repositories   []wsm.Repository
 	// listRepositoriesErr fails the repository read, which the slice cannot.
 	listRepositoriesErr error
+	// summaries are the stored workspace summaries ListWorkspaceSummaries
+	// answers; summariesErr fails that read.
+	summaries    map[ids.WorkspaceID]wsm.WorkspaceSummary
+	summariesErr error
 	drainPut            []wsm.DrainSchedule
 	// feedScalePut records every persisted feed text zoom; feedScalePutErr
 	// fails the write; feedScaleRead is what FeedTextScale answers (0 means the
@@ -2600,6 +2604,14 @@ func (d *fakeDB) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// ListWorkspaceSummaries answers the seeded summaries, or summariesErr.
+func (d *fakeDB) ListWorkspaceSummaries(context.Context) (map[ids.WorkspaceID]wsm.WorkspaceSummary, error) {
+	if d.summariesErr != nil {
+		return nil, d.summariesErr
+	}
+	return d.summaries, nil
 }
 
 func (f *fakeFeed) ReadNewest(_ context.Context, ws ids.WorkspaceID) error {
