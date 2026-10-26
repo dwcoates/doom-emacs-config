@@ -12,14 +12,13 @@ const (
 	opFoldMergedSection = "daemon.workspace.fold_merged_section"
 	opFoldHiddenSection = "daemon.workspace.fold_hidden_section"
 	opFoldOpenSection   = "daemon.workspace.fold_open_section"
-	opShowOpenSection   = "daemon.workspace.show_open_section"
 )
 
-// FoldMergedSection records whether the recently-merged band is collapsed,
+// FoldMergedSection records whether the merge queue section is collapsed,
 // then republishes the roster to every page. There is nothing to refuse: the
-// roster carries exactly one band.
+// roster carries exactly one.
 func (v *verbs) FoldMergedSection(ctx context.Context, folded bool) error {
-	return v.foldSingletonSection(ctx, opFoldMergedSection, "recently-merged band", v.deps.DB.SetMergedSectionFolded, folded)
+	return v.foldSingletonSection(ctx, opFoldMergedSection, "merge queue section", v.deps.DB.SetMergedSectionFolded, folded)
 }
 
 // FoldHiddenSection records whether the hidden-workspaces section is
@@ -34,15 +33,6 @@ func (v *verbs) FoldHiddenSection(ctx context.Context, folded bool) error {
 // roster carries exactly one open section.
 func (v *verbs) FoldOpenSection(ctx context.Context, folded bool) error {
 	return v.foldSingletonSection(ctx, opFoldOpenSection, "open section", v.deps.DB.SetOpenSectionFolded, folded)
-}
-
-// ShowOpenMergeQueues records whether the open-workspaces section's
-// repository sections show their merge queues (true) or their open
-// workspaces (false), then republishes the roster to every page. There is
-// nothing to refuse: the roster carries exactly one open section.
-func (v *verbs) ShowOpenMergeQueues(ctx context.Context, mergeQueues bool) error {
-	return v.recordView(ctx, opShowOpenSection, "what the open section shows", dlog.Context{"merge_queues": mergeQueues},
-		func(ctx context.Context) error { return v.deps.DB.SetOpenShowsMergeQueues(ctx, mergeQueues) })
 }
 
 // foldSingletonSection records the fold of a section the roster carries

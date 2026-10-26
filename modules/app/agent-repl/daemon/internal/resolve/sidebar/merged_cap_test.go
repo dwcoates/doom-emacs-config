@@ -79,7 +79,7 @@ func TestRecentlyMergedCountsOnlyTheMergesItHolds(t *testing.T) {
 	r.SetRegistry(registry(merges(sidebar.MergedShown + 5)...))
 
 	// Assert.
-	if got := latest(t, r).GetRecentlyMerged().GetHeader().GetCount().GetWorkspaces(); got != uint32(sidebar.MergedShown) {
+	if got := len(rosterwalk.MergedRows(latest(t, r))); got != sidebar.MergedShown {
 		t.Fatalf("merged count = %d, want %d", got, sidebar.MergedShown)
 	}
 }
