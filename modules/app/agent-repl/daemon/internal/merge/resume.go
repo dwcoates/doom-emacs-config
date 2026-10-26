@@ -67,6 +67,9 @@ func (o *orchestrator) resumeInto(runCtx context.Context, r *run, doc progressDo
 	lease, held, leaseErr := o.deps.DB.Lease(runCtx, r.ws)
 	r.mu.Lock()
 	r.lease, r.resume = lease, &doc
+	if doc.StoppedTurn != "" && doc.StoppedTurn == doc.Turn {
+		r.stoppedTurn = doc.StoppedTurn
+	}
 	r.mu.Unlock()
 	r.startedMS = doc.StartedMS
 	r.restoreFrom(doc)

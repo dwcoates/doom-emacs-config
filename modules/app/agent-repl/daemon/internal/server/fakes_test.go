@@ -146,7 +146,7 @@ type fakeDB struct {
 	// answers; summariesErr fails that read.
 	summaries    map[ids.WorkspaceID]wsm.WorkspaceSummary
 	summariesErr error
-	drainPut            []wsm.DrainSchedule
+	drainPut     []wsm.DrainSchedule
 	// feedScalePut records every persisted feed text zoom; feedScalePutErr
 	// fails the write; feedScaleRead is what FeedTextScale answers (0 means the
 	// default).
@@ -945,6 +945,8 @@ type fakeMerge struct {
 	enqueueErr          error
 	pauseErr            error
 	pauseScope          *merge.RepositoryScope
+	hardStopScope       *merge.RepositoryScope
+	hardStopped         bool
 	answerQueueOfferErr error
 	// queueOfferAnswers is every AnswerQueueOffer answer, in order.
 	queueOfferAnswers []merge.QueueOfferAnswer
@@ -1126,6 +1128,11 @@ func (f *fakeMerge) EnableRacing(context.Context) error {
 
 func (f *fakeMerge) Pause(_ context.Context, scope *merge.RepositoryScope) error {
 	f.pauseScope = scope
+	return f.pauseErr
+}
+
+func (f *fakeMerge) HardStop(_ context.Context, scope *merge.RepositoryScope) error {
+	f.hardStopScope, f.hardStopped = scope, true
 	return f.pauseErr
 }
 

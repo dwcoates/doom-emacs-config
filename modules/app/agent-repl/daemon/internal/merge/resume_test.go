@@ -996,3 +996,73 @@ func TestSuspendingARunNoSuspensionTookPanics(t *testing.T) {
 	}()
 	r.suspend(context.Background(), nil)
 }
+
+// atFixStopped stands a record at a fixing attempt whose turn the queue's hard
+// stop interrupted.
+func atFixStopped(t *testing.T) func(*progressDoc) {
+	fix := atFix(t)
+	return func(d *progressDoc) {
+		fix(d)
+		d.StoppedTurn = string(deadTurn)
+	}
+}
+
+func TestAResumedFixTheHardStopInterruptedIsPromptedAgain(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	interruptedAt(t, h, atFixStopped(t))
+	killed := wsm.CloseKilled
+	recordTurn(h, &killed)
+	landsAfterResume(h)
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); got != 1 {
+		t.Fatalf("fixing briefs = %d, want the stopped attempt prompted again once", got)
+	}
+}
+
+func TestAResumedFixTheHardStopInterruptedSpendsNoAttempt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	interruptedAt(t, h, atFixStopped(t))
+	killed := wsm.CloseKilled
+	recordTurn(h, &killed)
+	landsAfterResume(h)
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if got := fixingAttemptsDrawn(h); !slices.Equal(got, []int{1}) {
+		t.Fatalf("fixing attempts drawn = %v, want attempt 1 only", got)
+	}
+}
+
+func TestAResumedConflictTheHardStopInterruptedIsPromptedAgainWithoutSpendingAnAttempt(t *testing.T) {
+	// Arrange: the bound's last attempt was in flight when the hard stop cut it.
+	h := newHarness(t)
+	interruptedAt(t, h, func(d *progressDoc) {
+		atConflict(MaxConflictAttempts)(d)
+		d.StoppedTurn = string(deadTurn)
+	})
+	killed := wsm.CloseKilled
+	recordTurn(h, &killed)
+	h.git.standing = true
+	h.git.rebaseTotal = 3
+	h.git.conflicted = [][]string{{"a.go"}, nil}
+	landsAfterResume(h)
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if got := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); got != 1 {
+		t.Fatalf("conflict briefs = %d, want the stopped resolution prompted again", got)
+	}
+	if got := h.footer.last(); got.State == StateFailed {
+		t.Fatalf("facts = %+v, want no failure: the stopped attempt never counted", got)
+	}
+}

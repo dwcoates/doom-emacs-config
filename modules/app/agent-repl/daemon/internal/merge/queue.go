@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -87,6 +88,148 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 		o.kick(repo)
 	}
 	return redrawn
+}
+
+// HardStop pauses the queues SCOPE names as Pause does, and stops the work
+// their merges are doing now (agentrepl.v1.UpdateMergeQueuePause.hard).
+//
+// A PAUSE LEAVES A STEP'S TURN RUNNING. It suspends each merge at the step
+// it stands on -- its git stopped, its test gate's run ended with the run's
+// context -- but the agent turn a fixing attempt or a conflict resolution
+// drives goes on in its session, test runs and all (2026-10-26: a fixing
+// attempt's full test run went on for minutes after a pause). A hard stop
+// interrupts those turns, and the turn of every waiting merge's background
+// rebase. The turn of any other step (a pick, a deploy-stage prompt) is left
+// to finish: those steps read an interrupted turn as the user's.
+//
+// A queue already paused is not refused: the hard stop stops what the pause
+// left running. Every turn is attempted; the failures are answered joined.
+func (o *orchestrator) HardStop(ctx context.Context, scope *RepositoryScope) error {
+	const op = "daemon.merge.hard_stop"
+	repos, err := o.pauseScope(ctx, op, scope, true)
+	if err != nil {
+		return err
+	}
+	background := o.backgroundRunsIn(repos)
+	var errs []error
+	unpaused := false
+	for _, repo := range repos {
+		paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
+		if err != nil {
+			return fmt.Errorf("merge: hard stop: read whether %s is paused: %w", repo, err)
+		}
+		unpaused = unpaused || !paused
+	}
+	if unpaused {
+		if err := o.setPaused(ctx, scope, true); err != nil {
+			errs = append(errs, err)
+		}
+	} else {
+		o.deps.Log.Global().Info(op, "the queue is already paused; the hard stop stops the work the pause left running", dlog.Context{"repos": len(repos)})
+	}
+	for _, repo := range repos {
+		stored, err := o.deps.DB.MergeQueue(ctx, repo)
+		if err != nil {
+			o.deps.Log.Global().Error(op, "could not read the queue whose merges' turns the hard stop interrupts", dlog.Context{
+				"repo": string(repo), "error": err.Error()})
+			errs = append(errs, fmt.Errorf("merge: hard stop: read the queue of %s: %w", repo, err))
+			continue
+		}
+		for _, entry := range inLine(stored) {
+			if err := o.stopRecordedTurn(ctx, op, entry.Workspace); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	for _, ws := range background {
+		if err := o.interruptFor(ctx, op, ws, "a waiting merge's background rebase"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	o.deps.Log.Global().Info(op, "hard-stopped the merge queue", dlog.Context{
+		"repos": len(repos), "background_rebases": len(background), "scoped": scope != nil, "failures": len(errs)})
+	return errors.Join(errs...)
+}
+
+// backgroundRunsIn answers the workspaces whose waiting merge's background
+// rebase runs now in one of REPOS, sorted.
+func (o *orchestrator) backgroundRunsIn(repos []wsm.RepoKey) []ids.WorkspaceID {
+	in := map[wsm.RepoKey]bool{}
+	for _, repo := range repos {
+		in[repo] = true
+	}
+	o.mu.Lock()
+	var out []ids.WorkspaceID
+	for ws, r := range o.runsByWorkspace {
+		if r.background && in[r.repo] {
+			out = append(out, ws)
+		}
+	}
+	o.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// stopRecordedTurn interrupts the turn WS's suspended merge recorded, when it
+// stands at a fixing attempt or a conflict resolution and that turn has not
+// ended, writing it down as the turn the hard stop interrupted FIRST, so the
+// resume reads its kill as the queue's.
+func (o *orchestrator) stopRecordedTurn(ctx context.Context, op string, ws ids.WorkspaceID) error {
+	fields := dlog.Context{"workspace": string(ws)}
+	lease, held, err := o.deps.DB.Lease(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read the lease of a merge the hard stop reaches", withField(fields, "error", err.Error()))
+		return fmt.Errorf("merge: hard stop: read the lease of %q: %w", ws, err)
+	}
+	doc, recorded, err := o.loadProgress(ctx, ws, lease, held)
+	if err != nil {
+		return err
+	}
+	if !recorded || doc.Turn == "" {
+		o.deps.Log.Global().Debug(op, "the merge records no turn; there is nothing of its to interrupt", fields)
+		return nil
+	}
+	fields["step"], fields["turn"] = doc.Step, doc.Turn
+	if doc.Step != TabFixes && doc.Step != TabConflicts {
+		o.deps.Log.Global().Info(op, "the merge's turn belongs to a step that reads an interrupt as the user's; it is left to finish", fields)
+		return nil
+	}
+	turn := ids.TurnID(doc.Turn)
+	closes, err := o.deps.DB.TurnCloses(ctx, ws, []ids.TurnID{turn})
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read whether the merge's turn ended", withField(fields, "error", err.Error()))
+		return fmt.Errorf("merge: hard stop: read the close of %q's turn: %w", ws, err)
+	}
+	if _, closed := closes[turn]; closed {
+		o.deps.Log.Global().Debug(op, "the merge's turn already ended; there is nothing to interrupt", fields)
+		return nil
+	}
+	doc.StoppedTurn = doc.Turn
+	encoded, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("merge: hard stop: encode the progress of %q: %w", ws, err)
+	}
+	if err := o.deps.DB.PutMergeProgress(ctx, wsm.MergeProgress{
+		Workspace: ws, Lease: lease.ID, UpdatedAt: o.deps.Now(), Document: encoded,
+	}); err != nil {
+		o.deps.Log.Global().Error(op, "could not record the turn the hard stop interrupts; it is not interrupted, so its resume cannot read the kill as the user's",
+			withField(fields, "error", err.Error()))
+		return fmt.Errorf("merge: hard stop: record the stopped turn of %q: %w", ws, err)
+	}
+	return o.interruptFor(ctx, op, ws, "a merge's "+doc.Step+" turn")
+}
+
+// interruptFor interrupts the turn running in WS's session for the hard stop;
+// WHAT names the turn in the records.
+func (o *orchestrator) interruptFor(ctx context.Context, op string, ws ids.WorkspaceID, what string) error {
+	fields := dlog.Context{"workspace": string(ws), "what": what}
+	running, err := o.deps.InterruptTurn(ctx, ws)
+	if err != nil {
+		o.log(ctx, ws).Error(op, "the hard stop could not interrupt the turn", withField(fields, "error", err.Error()))
+		return fmt.Errorf("merge: hard stop: interrupt %q: %w", ws, err)
+	}
+	o.log(ctx, ws).Info(op, "the hard stop interrupted the turn", withField(fields, "running", running))
+	return nil
 }
 
 // redrawPaused redraws every bubble on each of REPOS' queues once its pause

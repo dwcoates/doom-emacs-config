@@ -2140,3 +2140,206 @@ func TestRelabelFailsLoudlyWhenTheQueuesCannotBeRead(t *testing.T) {
 	}
 	t.Fatalf("no ERROR record of daemon.merge.relabel names the workspace: %+v", h.logs.Records())
 }
+
+// The hard-stop tests are the 2026-10-26 pause: the queue was paused while a
+// merge stood at a fixing attempt, and the attempt's turn -- a full test run
+// with it -- went on in its session for minutes. A hard stop interrupts it.
+
+// hardStopAt stands a merge suspended at the step MUTATE records, its turn
+// open in the session when how is nil, and hard-stops every queue.
+func hardStopAt(t *testing.T, h *harness, mutate func(*progressDoc), how *wsm.TurnClose) error {
+	t.Helper()
+	interruptedAt(t, h, mutate)
+	recordTurn(h, how)
+	return h.o.HardStop(context.Background(), nil)
+}
+
+// interruptedWorkspaces answers the workspaces whose turn was interrupted.
+func interruptedWorkspaces(h *harness) []ids.WorkspaceID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), h.interrupted...)
+}
+
+func TestAHardStopPausesTheQueue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if err := hardStopAt(t, h, atFix(t), nil); err != nil {
+		t.Fatalf("HardStop: %v", err)
+	}
+
+	// Assert.
+	if !h.db.paused[h.repoKey()] {
+		t.Fatal("the hard stop left the queue unpaused")
+	}
+}
+
+func TestAHardStopInterruptsAMergesFixingTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if err := hardStopAt(t, h, atFix(t), nil); err != nil {
+		t.Fatalf("HardStop: %v", err)
+	}
+
+	// Assert.
+	if got := interruptedWorkspaces(h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("interrupted = %v, want the fixing attempt's turn", got)
+	}
+}
+
+func TestAHardStopInterruptsAMergesConflictResolution(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if err := hardStopAt(t, h, atConflict(1), nil); err != nil {
+		t.Fatalf("HardStop: %v", err)
+	}
+
+	// Assert.
+	if got := interruptedWorkspaces(h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("interrupted = %v, want the conflict resolution's turn", got)
+	}
+}
+
+func TestAHardStopRecordsTheTurnItInterrupts(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if err := hardStopAt(t, h, atFix(t), nil); err != nil {
+		t.Fatalf("HardStop: %v", err)
+	}
+
+	// Assert.
+	stored, found, err := h.db.MergeProgressOf(context.Background(), theWorkspace)
+	if err != nil || !found {
+		t.Fatalf("MergeProgressOf = (found %v, %v), want the record", found, err)
+	}
+	doc, err := decodeProgress(stored)
+	if err != nil {
+		t.Fatalf("decodeProgress: %v", err)
+	}
+	if doc.StoppedTurn != string(deadTurn) || doc.Turn != string(deadTurn) {
+		t.Fatalf("stopped turn %q of turn %q, want %q recorded as stopped", doc.StoppedTurn, doc.Turn, deadTurn)
+	}
+}
+
+func TestAHardStopLeavesATurnThatEndedAlone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	completed := wsm.CloseCompleted
+
+	// Act.
+	if err := hardStopAt(t, h, atFix(t), &completed); err != nil {
+		t.Fatalf("HardStop: %v", err)
+	}
+
+	// Assert.
+	if got := interruptedWorkspaces(h); len(got) != 0 {
+		t.Fatalf("interrupted = %v, want nothing: the turn already ended", got)
+	}
+}
+
+func TestAHardStopLeavesAPickTurnToFinish(t *testing.T) {
+	// Arrange: a step that reads an interrupt as the user's.
+	h := newHarness(t)
+	atPick := func(d *progressDoc) {
+		atStep(TabPick, 1)(d)
+		d.Turn = string(deadTurn)
+	}
+
+	// Act.
+	if err := hardStopAt(t, h, atPick, nil); err != nil {
+		t.Fatalf("HardStop: %v", err)
+	}
+
+	// Assert.
+	if got := interruptedWorkspaces(h); len(got) != 0 {
+		t.Fatalf("interrupted = %v, want the pick's turn left to finish", got)
+	}
+}
+
+func TestAHardStopOfAPausedQueueIsNotRefused(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	interruptedAt(t, h, atFix(t))
+	recordTurn(h, nil)
+	h.db.paused[h.repoKey()] = true
+
+	// Act.
+	err := h.o.HardStop(context.Background(), nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("HardStop = %v, want the paused queue's work stopped", err)
+	}
+	if got := interruptedWorkspaces(h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("interrupted = %v, want the turn the pause left running", got)
+	}
+}
+
+func TestAHardStopOfAPausedQueueWritesNoWarning(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	interruptedAt(t, h, atFix(t))
+	recordTurn(h, nil)
+	h.db.paused[h.repoKey()] = true
+
+	// Act.
+	if err := h.o.HardStop(context.Background(), nil); err != nil {
+		t.Fatalf("HardStop: %v", err)
+	}
+
+	// Assert.
+	if record, found := recordWith(h, "warn", "daemon.merge.hard_stop"); found {
+		t.Fatalf("warning %+v, want none", record)
+	}
+	if record, found := recordWith(h, "warn", "daemon.merge.pause"); found {
+		t.Fatalf("warning %+v, want no refused pause", record)
+	}
+}
+
+func TestAHardStopWhoseInterruptFailsAnswersTheFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.interruptErr = errors.New("the shim would not answer")
+
+	// Act.
+	err := hardStopAt(t, h, atFix(t), nil)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the shim would not answer") {
+		t.Fatalf("HardStop = %v, want the interrupt's failure", err)
+	}
+	if _, found := recordWith(h, "error", "daemon.merge.hard_stop"); !found {
+		t.Fatal("the failed interrupt was not recorded at ERROR")
+	}
+}
+
+func TestAHardStopInterruptsAWaitingMergesBackgroundRebase(t *testing.T) {
+	// Arrange: a waiting member's rebase runs; it lets go once cut.
+	h := newHarness(t)
+	h.emacsRepo()
+	enqueue(t, h)
+	r := liveRun(t, h, theWorkspace)
+	r.background = true
+	go func() {
+		<-r.ctx.Done()
+		close(r.finished)
+	}()
+
+	// Act.
+	if err := h.o.HardStop(context.Background(), nil); err != nil {
+		t.Fatalf("HardStop: %v", err)
+	}
+
+	// Assert.
+	if got := interruptedWorkspaces(h); !slices.Equal(got, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("interrupted = %v, want the background rebase's turn", got)
+	}
+}

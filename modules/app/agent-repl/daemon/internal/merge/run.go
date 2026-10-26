@@ -186,6 +186,11 @@ type run struct {
 	// record a resumed run was rebuilt from, consumed by the step it resumes.
 	prog   progressDoc
 	resume *progressDoc
+	// stoppedTurn is the turn a hard stop of the queue interrupted, read off
+	// the record this run resumed from: it outlives the record's consumption
+	// (doneResuming), because the step reads its turn's end after it
+	// (stoppedByQueue).
+	stoppedTurn string
 	// queueRound is the ledger round of the QUEUE tab, opened at admission and
 	// closed when the run leaves the queue for its first step.
 	queueRound tabRound

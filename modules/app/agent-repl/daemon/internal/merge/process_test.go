@@ -2225,3 +2225,68 @@ func TestTheLastFailedFixSettlesTheTestsTabFailed(t *testing.T) {
 		t.Fatalf("tests tab failure = %+v, want the attempts exhausted", failed)
 	}
 }
+
+func TestStoppedByQueue(t *testing.T) {
+	tests := []struct {
+		name    string
+		close   wsm.TurnClose
+		resumed bool
+		turn    string
+		stopped string
+		want    bool
+	}{
+		{name: "the turn the hard stop recorded, killed", close: wsm.CloseKilled, resumed: true, turn: "t1", stopped: "t1", want: true},
+		{name: "a user's kill with no hard stop recorded", close: wsm.CloseKilled, resumed: true, turn: "t1", want: false},
+		{name: "a kill of a later turn than the one stopped", close: wsm.CloseKilled, resumed: true, turn: "t2", stopped: "t1", want: false},
+		{name: "a stopped turn that completed after all", close: wsm.CloseCompleted, resumed: true, turn: "t1", stopped: "t1", want: false},
+		{name: "a kill read under a live merge", close: wsm.CloseKilled, resumed: false, turn: "t1", stopped: "t1", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r := liveRun(t, h, theWorkspace)
+			doc := progressDoc{Turn: tt.turn, StoppedTurn: tt.stopped}
+			if doc.StoppedTurn != "" && doc.StoppedTurn == doc.Turn {
+				r.stoppedTurn = doc.StoppedTurn
+			}
+
+			// Act.
+			got := r.stoppedByQueue(tt.close, tt.resumed)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("stoppedByQueue = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCutShort(t *testing.T) {
+	tests := []struct {
+		name    string
+		close   wsm.TurnClose
+		stopped string
+		want    string
+	}{
+		{name: "a turn a restart orphaned", close: wsm.CloseOrphaned, want: "a restart"},
+		{name: "a turn the hard stop killed", close: wsm.CloseKilled, stopped: "t1", want: "the queue's hard stop"},
+		{name: "a turn that completed", close: wsm.CloseCompleted, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r := liveRun(t, h, theWorkspace)
+			r.stoppedTurn = tt.stopped
+
+			// Act.
+			got := r.cutShort(tt.close, true)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("cutShort = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

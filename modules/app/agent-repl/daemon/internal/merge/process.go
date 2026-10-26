@@ -642,6 +642,33 @@ func cutByRestart(close wsm.TurnClose, resumed bool) bool {
 	return close == wsm.CloseOrphaned || (resumed && close == wsm.CloseAgentDied)
 }
 
+// stoppedByQueue reports whether a merge turn read back on a resume was
+// killed by a hard stop of the queue (HardStop): the turn the merge recorded
+// is the one the hard stop wrote down before it interrupted it. Like a cut by
+// a restart, such a step reruns without spending an attempt.
+func (r *run) stoppedByQueue(close wsm.TurnClose, resumed bool) bool {
+	if !resumed || close != wsm.CloseKilled {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stoppedTurn != ""
+}
+
+// cutShort names what cut a merge turn short so that its step is prompted
+// again without spending an attempt -- "a restart" (cutByRestart) or "the
+// queue's hard stop" (stoppedByQueue) -- and answers "" for a turn that ended
+// by its own hand.
+func (r *run) cutShort(close wsm.TurnClose, resumed bool) string {
+	switch {
+	case cutByRestart(close, resumed):
+		return "a restart"
+	case r.stoppedByQueue(close, resumed):
+		return "the queue's hard stop"
+	}
+	return ""
+}
+
 // MaxConflictAttempts is how many resolution attempts one commit's conflict
 // gets IN A ROW before the merge fails in conflicts: one failure of the
 // rebase-then-resolve cycle is one resolution attempt that left the commit
@@ -679,18 +706,21 @@ func (r *run) conflictSettled(ctx context.Context, p *replay, round tabRound, cl
 		return nil, fmt.Errorf("merge: reading what still conflicts in %s: %w", r.subject.dir, err)
 	}
 	// A RESOLUTION A RESTART CUT SHORT IS PROMPTED AGAIN AND NEVER COUNTS
-	// (owner ruling, 2026-10-12): it did not fail, it was interrupted.
-	if cutByRestart(close, resumed) && len(remaining) > 0 {
+	// (owner ruling, 2026-10-12): it did not fail, it was interrupted. So is
+	// one a hard stop of the queue interrupted.
+	cut := r.cutShort(close, resumed)
+	stopped := r.stoppedByQueue(close, resumed)
+	if cut != "" && len(remaining) > 0 {
 		r.settleAgentic()
-		r.settleConflictAttempt(p, "a restart cut this resolution short; it is prompted again")
+		r.settleConflictAttempt(p, cut+" cut this resolution short; it is prompted again")
 		r.closeTab(ctx, round, "restarted")
-		r.o.log(ctx, r.ws).Info(op, "a restart cut the conflict resolution short; it is prompted again and spends no attempt", dlog.Context{
+		r.o.log(ctx, r.ws).Info(op, cut+" cut the conflict resolution short; it is prompted again and spends no attempt", dlog.Context{
 			"workspace": string(r.ws), "commit": commit.SHA, "close": close.String(), "attempt": r.conflictAttempts, "of": MaxConflictAttempts})
 		return r.promptConflict(ctx, p, commit, remaining, targetBranch)
 	}
 	why := ""
 	switch {
-	case close.Failed():
+	case close.Failed() && !stopped:
 		why = fmt.Sprintf("the conflict resolution's turn ended %s", close)
 	case len(remaining) > 0:
 		why = fmt.Sprintf("%d file(s) still conflict: %s", len(remaining), strings.Join(remaining, ", "))
@@ -963,11 +993,11 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, n, attempt int, su
 	if err := stillWanted(ctx); err != nil {
 		return nil, err
 	}
-	if cutByRestart(close, resumed) {
+	if cut := r.cutShort(close, resumed); cut != "" {
 		r.settleAgentic()
-		r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), "a restart cut this fixing attempt short; it is prompted again"), attempt))
+		r.publish(fixingKey(n), fixingTab(round.settled(r.o.nowMS(), cut+" cut this fixing attempt short; it is prompted again"), attempt))
 		r.closeTab(ctx, round, "restarted")
-		r.o.log(ctx, r.ws).Info(op, "a restart cut the fixing attempt short; it is prompted again and spends no attempt", dlog.Context{
+		r.o.log(ctx, r.ws).Info(op, cut+" cut the fixing attempt short; it is prompted again and spends no attempt", dlog.Context{
 			"workspace": string(r.ws), "attempt": attempt, "of": MaxFixAttempts, "close": close.String()})
 		return r.promptFix(ctx, attempt, suites, archive, tail, targetBranch)
 	}

@@ -77,6 +77,11 @@ type progressDoc struct {
 	// conflict resolution, a fixing attempt) submitted.
 	PromptIndex int    `json:"prompt_index"`
 	Turn        string `json:"turn,omitempty"`
+	// StoppedTurn is the turn a HARD STOP of the queue interrupted (HardStop),
+	// written onto the suspended merge's record before the interrupt. Read
+	// back on the resume, that turn's kill was the queue's, not the user's,
+	// so the step is prompted again and spends no attempt (stoppedByQueue).
+	StoppedTurn string `json:"stopped_turn,omitempty"`
 
 	// The local merge's attempt: the target's branch and the tip the
 	// branch is rebased onto, the branch's head before the rebase began, the

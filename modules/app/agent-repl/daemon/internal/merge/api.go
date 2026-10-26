@@ -113,6 +113,11 @@ type Orchestrator interface {
 	// on. A nil scope is the daemon-wide switch (UpdateMergeQueuePause with an
 	// UNSET repository); a scope names ONE repository's queue.
 	Pause(ctx context.Context, scope *RepositoryScope) error
+	// HardStop pauses as Pause does, scoped the same, and stops the work the
+	// queues' merges are doing now: the turn of each merge suspended at a
+	// fixing attempt or a conflict resolution, and of each waiting merge's
+	// background rebase, is interrupted (UpdateMergeQueuePause.hard).
+	HardStop(ctx context.Context, scope *RepositoryScope) error
 	// Unpause resumes starting merges, with the same scoping as Pause.
 	Unpause(ctx context.Context, scope *RepositoryScope) error
 	// Status answers each registered repository's queue as it stands, its
