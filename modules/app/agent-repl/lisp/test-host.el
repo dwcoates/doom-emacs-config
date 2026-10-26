@@ -4241,7 +4241,7 @@ made, and a fresh Emacs drew every workspace severed."
     (should (plist-get (agent-repl-host--entry "ws-1") :detached))))
 
 (ert-deftest agent-repl-test-host-other-failed-precondition-close-is-still-lost ()
-  "Only the `transferring_away' arm is a handover; another refusal stays a loss."
+  "Only the two handover arms are a handover; another refusal stays a loss."
   (agent-repl-test-host--with-harness
     (agent-repl-test-host--with-dir
       ;; Arrange
@@ -4249,9 +4249,59 @@ made, and a fresh Emacs drew every workspace severed."
       ;; Act
       (funcall (plist-get (agent-repl-host-stream "ws-1") :on-close)
                (list :error (list :kind :http :code "failed_precondition" :status nil
-                                  :message "WatchHostWorkspace closed the stream: not_yet_adopted: workspace \"0123456789abcdef\" has not been adopted by this daemon yet")))
+                                  :message "WatchHostWorkspace closed the stream: closing: workspace \"0123456789abcdef\" is closing")))
       ;; Assert
       (should (agent-repl-test-host--logged-p :error "elisp.host.stream-lost ws=ws-1")))))
+
+(defun agent-repl-test-host--refuse-not-yet-adopted (ws)
+  "Close WS's host stream the way a daemon refuses a workspace it has not adopted."
+  (funcall (plist-get (agent-repl-host-stream ws) :on-close)
+           (list :error (list :kind :http :code "failed_precondition" :status nil
+                              :message (concat "WatchHostWorkspace closed the stream: not_yet_adopted: "
+                                               "workspace \"0123456789abcdef\" has not been adopted by this daemon yet")))))
+
+(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-is-not-a-loss ()
+  "A not-yet-adopted refusal is recorded at INFO, never stream-lost."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-test-host--refuse-not-yet-adopted "ws-1")
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :info "elisp.host.stream-refused-not-yet-adopted ws=ws-1"))
+      (should-not (agent-repl-test-host--logged-p :error "elisp.host.stream-lost")))))
+
+(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-adopts-on-a-standing-successor ()
+  "With a successor standing, the refused workspace adopts onto it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-test-host--subscribe "ws-1")
+      (setq agent-repl-test-host--calls nil)
+      ;; Act
+      (agent-repl-test-host--refuse-not-yet-adopted "ws-1")
+      ;; Assert
+      (should (equal (car agent-repl-test-host--calls)
+                     (list "AdoptHostWorkspace" successor
+                           (list :workspace (agent-repl-test-host--ref))))))))
+
+(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-registers-on-the-live-daemon ()
+  "With no successor, the refused workspace follows the live daemon and registers."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((old (agent-repl-connect-open "127.0.0.1:61043"))
+            (live (agent-repl-connect-open "127.0.0.1:58175")))
+        (agent-repl-test-host--subscribe "ws-1" old)
+        (setq agent-repl-test-host--live live
+              agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-test-host--refuse-not-yet-adopted "ws-1")
+        ;; Assert
+        (should (equal (agent-repl-test-host--calls-to "RegisterWorkspace" live)
+                       (list (list "RegisterWorkspace" live '(:dir "/tmp/ws-1")))))))))
 
 (ert-deftest agent-repl-test-host-stream-lost-registers-on-the-live-daemon ()
   "A lost stream re-registers the workspace on the daemon the link now names."

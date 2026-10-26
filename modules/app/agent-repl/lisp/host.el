@@ -59,6 +59,7 @@
 (declare-function agent-repl--fatal "core" (ws fmt &rest args))
 
 (declare-function agent-repl-connect-stream-cancel "connect" (stream))
+(declare-function agent-repl-connect-refused-arm "connect" (detail))
 (declare-function agent-repl-connect-connection-alive-p "connect" (conn))
 
 (declare-function agent-repl-rpc-register-workspace "rpc" (conn request &rest keys))
@@ -1189,16 +1190,13 @@ a stream that never carried it, is a loss."
          marked
          (eq marked (or stream (agent-repl-host-stream ws))))))
 
-(defun agent-repl-host--refused-as-transferred-p (outcome)
-  "Return non-nil when OUTCOME is a host stream refused `transferring_away'.
-A Watch* rpc has no `<Rpc>Error' message: its refusal IS the closed
-transport, whose message names the arm (the daemon's `TransportClosed':
-\"<rpc> closed the stream: <arm>: <reason>\")."
+(defun agent-repl-host--refused-arm (outcome)
+  "Return the arm a refused host stream's OUTCOME names, or nil.
+Only a `failed_precondition' close carries a handover refusal
+\(`agent-repl-connect-refused-arm')."
   (and (eq (car outcome) :error)
-       (let ((detail (cadr outcome)))
-         (and (equal (plist-get detail :code) "failed_precondition")
-              (string-match-p "closed the stream: transferring_away: "
-                              (or (plist-get detail :message) ""))))))
+       (equal (plist-get (cadr outcome) :code) "failed_precondition")
+       (agent-repl-connect-refused-arm (cadr outcome))))
 
 (defun agent-repl-host--handle-close (ws outcome &optional stream)
   "React to WS's host STREAM closing with OUTCOME.
@@ -1234,7 +1232,7 @@ it.  STREAM nil means the caller did not name the stream."
     (agent-repl-host--put ws :ending-stream nil)
     (agent-repl-host--put ws :stream nil)
     (agent-repl-host--follow-live-daemon ws "planned-ending"))
-   ((agent-repl-host--refused-as-transferred-p outcome)
+   ((equal (agent-repl-host--refused-arm outcome) "transferring_away")
     ;; THE DAEMON HANDED WS ON, AND SAID SO.  This is the `transferred'
     ;; notice read off a refused open, not a loss: WS adopts onto the
     ;; successor.  Taken for a loss it waited on the promotion, which comes
@@ -1247,6 +1245,21 @@ it.  STREAM nil means the caller did not name the stream."
     (agent-repl-host--put ws :stream nil)
     (agent-repl-host--put ws :detached t)
     (agent-repl-host--transferred ws))
+   ((equal (agent-repl-host--refused-arm outcome) "not_yet_adopted")
+    ;; THE DAEMON HAS NOT TAKEN WS OVER YET, AND SAID SO.  Nothing is lost:
+    ;; a standing successor is the one to adopt onto, and otherwise WS
+    ;; follows the live daemon, which registers it once the link settles
+    ;; (2026-10-26: the promoted successor refused a workspace its
+    ;; predecessor still held at its exit, and that was drawn as a loss).
+    (agent-repl-host--put ws :ending-stream nil)
+    (agent-repl--info ws "elisp.host.stream-refused-not-yet-adopted ws=%s" ws)
+    (agent-repl-host-release-restart-hold ws "stream-refused-not-yet-adopted")
+    (agent-repl-host--put ws :stream nil)
+    (agent-repl-host--put ws :detached t)
+    (let ((new (agent-repl-link-successor)))
+      (if new
+          (agent-repl-host--reattach ws new :adopt "stream-refused-not-yet-adopted")
+        (agent-repl-host--follow-live-daemon ws "stream-refused-not-yet-adopted"))))
    (t
     (agent-repl-host--put ws :ending-stream nil)
     (agent-repl--error ws "elisp.host.stream-lost ws=%s outcome=%S" ws outcome)
