@@ -124,9 +124,12 @@ make_tree() {
     mkdir -p "$root/agent-shim/claude/shim/test"
     echo "test('x', () => {})" > "$root/agent-shim/claude/shim/test/main.test.ts"
 
-    # node_modules present so the stubs are never asked to `npm install`.
+    # node_modules present, as complete installs (the .package-lock.json a
+    # finished `npm ci` writes), so the stubs are never asked to `npm install`.
     mkdir -p "$root/agent-shim/claude/shim/node_modules" \
              "$root/webapp/node_modules"
+    : > "$root/agent-shim/claude/shim/node_modules/.package-lock.json"
+    : > "$root/webapp/node_modules/.package-lock.json"
 
     [ "$nogit" = "nogit" ] || commit_tree "$root"
 }
@@ -225,7 +228,7 @@ make_stubs() {
 echo "npm $*" >> "$STUB_LOG"
 # `npm ci` / `npm install` populate node_modules in the cwd (the store entry).
 case "${1:-}" in
-    ci|install) mkdir -p node_modules; echo installed > node_modules/.stamp ;;
+    ci|install) mkdir -p node_modules; echo installed > node_modules/.stamp; : > node_modules/.package-lock.json ;;
 esac
 # Emulate `npm run build` producing dist output for whichever project we're in.
 if [ -d src ] && [ -f package.json ]; then
@@ -298,6 +301,7 @@ store_key_of() {
 seed_entry() {
     local store="$1" name="$2" kb="${3:-0}"
     mkdir -p "$store/$name/node_modules"
+    : > "$store/$name/node_modules/.package-lock.json"
     if [ "$kb" -gt 0 ]; then
         dd if=/dev/zero of="$store/$name/node_modules/blob" bs=1024 count="$kb" 2>/dev/null
     fi
@@ -842,7 +846,7 @@ t_shim_bundle_and_stamp_share_one_revision() {
 #!/usr/bin/env bash
 echo "npm $*" >> "$STUB_LOG"
 case "${1:-}" in
-    ci|install) mkdir -p node_modules; echo installed > node_modules/.stamp ;;
+    ci|install) mkdir -p node_modules; echo installed > node_modules/.stamp; : > node_modules/.package-lock.json ;;
 esac
 case "$PWD" in
     *shim*)   mkdir -p dist; printf '%s' "${SHIM_BUILD_SHA:-unset}" > dist/main.js ;;
