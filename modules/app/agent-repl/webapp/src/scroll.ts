@@ -1560,6 +1560,32 @@ function clampedDelta(box: ScrollPosition, offset: number): number {
   return target - box.scrollTop;
 }
 
+/** A vertical span along one axis: its top and bottom edges, in the same coordinates as the span it is compared with. */
+export interface VerticalSpan {
+  readonly top: number;
+  readonly bottom: number;
+}
+
+/**
+ * How far a view must move for NODE to show whole in VIEW, ONLY AS FAR AS NODE
+ * NEEDS (owner requests, 2026-10-26): every "scroll it into view" that must
+ * not center.
+ *
+ * - a node already whole inside the view moves nothing (0);
+ * - a node above the view is brought to the view's top edge, one below it to
+ *   the view's bottom edge;
+ * - a node taller than the view is brought to the view's top edge, so its head
+ *   is what the reader sees.
+ *
+ * Positive is downward, matching `scrollTop`. The offset is unclamped: the
+ * caller's scroll box clamps it to its range.
+ */
+export function nearestEdgeOffset(view: VerticalSpan, node: VerticalSpan): number {
+  if (node.top >= view.top && node.bottom <= view.bottom) return 0;
+  if (node.top < view.top || node.bottom - node.top > view.bottom - view.top) return node.top - view.top;
+  return node.bottom - view.bottom;
+}
+
 /** Read BOX and NODE's reveal geometry off the live layout (reading moves nothing). */
 export function revealGeometry(box: Element, node: Element): RevealGeometry {
   const b = box.getBoundingClientRect();

@@ -5,6 +5,7 @@
 // a real `ResizeObserver` to the tail owner, and the subscription being wired
 // to THAT element is half of what the footer-occlusion cases assert.
 import scrollSource from "../src/scroll.ts?raw";
+import selectionScrollSource from "../src/sidebar/selection-scroll.ts?raw";
 import { chatEndTop, revealChatExchange } from "../src/scroll.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -26,6 +27,7 @@ import {
   sectionTakesWheel,
   wheelDeltaPx,
   revealCenterDelta,
+  nearestEdgeOffset,
   revealGeometry,
   centerDelta,
   observeScrollBox,
@@ -2266,6 +2268,36 @@ describe("revealCenterDelta", () => {
 
     // Assert
     expect(got).toBe(want);
+  });
+});
+
+/** THE ONLY-AS-FAR-AS-NEEDED ARITHMETIC every non-centering scroll into view shares. */
+describe("nearestEdgeOffset", () => {
+  /** A 300px view starting 100px down. */
+  const view = { top: 100, bottom: 400 };
+
+  it.each([
+    { name: "moves nothing for a node whole inside the view", node: { top: 150, bottom: 250 }, want: 0 },
+    { name: "moves nothing for a node filling the view exactly", node: { top: 100, bottom: 400 }, want: 0 },
+    { name: "brings a node above the view to its top edge", node: { top: 40, bottom: 90 }, want: -60 },
+    { name: "brings a node cut by the view's top to its top edge", node: { top: 80, bottom: 130 }, want: -20 },
+    { name: "brings a node below the view to its bottom edge", node: { top: 500, bottom: 550 }, want: 150 },
+    { name: "brings a node cut by the view's bottom to its bottom edge", node: { top: 380, bottom: 430 }, want: 30 },
+    { name: "brings a node taller than the view, starting inside it, to its top edge", node: { top: 200, bottom: 700 }, want: 100 },
+    { name: "brings a node taller than the view, starting above it, to its top edge", node: { top: -100, bottom: 500 }, want: -200 },
+  ])("$name", ({ node, want }) => {
+    // Arrange, Act
+    const got = nearestEdgeOffset(view, node);
+    // Assert
+    expect(got).toBe(want);
+  });
+
+  it("is the arithmetic the sidebar's selection scroll uses", () => {
+    // Arrange, Act, Assert: the sidebar hand-rolls no edge comparison of its own.
+    expect([
+      selectionScrollSource.match(/nearestEdgeOffset\(/g)?.length,
+      selectionScrollSource.includes("viewBottom"),
+    ]).toEqual([1, false]);
   });
 });
 
