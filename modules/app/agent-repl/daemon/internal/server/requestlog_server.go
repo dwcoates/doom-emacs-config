@@ -275,6 +275,13 @@ func (s *requestLoggingServer) FinishWorkspace(
 	return serveUnary(s, ctx, "FinishWorkspace", req, s.server.FinishWorkspace)
 }
 
+func (s *requestLoggingServer) ParkWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ParkWorkspaceRequest],
+) (*connect.Response[agentreplv1.ParkWorkspaceResponse], error) {
+	return serveUnary(s, ctx, "ParkWorkspace", req, s.server.ParkWorkspace)
+}
+
 func (s *requestLoggingServer) RestartWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.RestartWorkspaceRequest],

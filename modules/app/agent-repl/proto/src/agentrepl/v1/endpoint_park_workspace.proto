@@ -1,0 +1,63 @@
+// endpoint_park_workspace.proto — ParkWorkspace. HARNESS section.
+// Stands the workspace's session down exactly as the keep-alive cycle stands
+// one down after a beat (owner request, 2026-10-26): the shim and its vendor
+// child exit, the session keeps its `keepalive_cycle` park and is drawn as the
+// live idle session it stands in for, and the daemon restores it a minute
+// before its next keep-alive, or at once for a prompt, a look or a history
+// read.
+//
+// THE CYCLE'S OWN RULES HOLD. Nothing is parked under a turn or live detached
+// work (a busy session is parked when it falls free), and the workspace the
+// user is looking at, a hidden or closed one, and one with no live session
+// are never parked. Unlike the cycle, no beat need have gone out first: the
+// next beat is still timed from the cache clock, so it may come at once.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ParkWorkspaceRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ParkWorkspaceResponse {
+  oneof result {
+    ParkWorkspaceSuccess success = 1;
+    ParkWorkspaceError error = 2;
+  }
+}
+
+// THE PARK WAS ASKED FOR. It is taken as the cycle's stand-down is, on the
+// daemon's detached lifetime, under the rules above; whether it was taken
+// shows on the roster and in `daemon.drain.keepalive_cycle`'s records.
+message ParkWorkspaceSuccess {}
+
+// Validation failures (unset field, blank string) are Connect
+// InvalidArgument, never an arm.
+message ParkWorkspaceError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ParkWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ParkWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    ParkWorkspaceTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    ParkWorkspaceNotYetAdopted not_yet_adopted = 4;
+  }
+}
+message ParkWorkspaceUnknownWorkspace {}
+message ParkWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message ParkWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message ParkWorkspaceNotYetAdopted {}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -150,6 +151,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"kill":        {usage: "kill WS", run: workspaceKill},
 		"select":      {usage: "select WS", run: workspaceSelect},
 		"restart":     {usage: "restart WS", run: workspaceRestart},
+		"park":        {usage: "park WS|-all", run: workspacePark},
 		"interrupt":   {usage: "interrupt WS [-all-agents] [-confirm-agents]", run: workspaceInterrupt},
 		"compact":     {usage: "compact WS [-instructions TEXT] [-as-user]", run: workspaceCompact},
 		"status":      {usage: "status WS", run: workspaceStatus},
@@ -1023,6 +1025,43 @@ func workspaceRestart(c *cliCall, args []string) int {
 	return onWorkspace(c, args, func(ref *workspacev1.WorkspaceRef) (*connect.Response[agentreplv1.RestartWorkspaceResponse], error) {
 		return c.client.RestartWorkspace(c.ctx, connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: ref}))
 	})
+}
+
+// workspacePark parks WS's session as the keep-alive cycle parks one, or with
+// -all every open workspace's (endpoint_park_workspace.proto).
+func workspacePark(c *cliCall, args []string) int {
+	if !slices.Contains(args, "-all") {
+		return onWorkspace(c, args, func(ref *workspacev1.WorkspaceRef) (*connect.Response[agentreplv1.ParkWorkspaceResponse], error) {
+			return c.client.ParkWorkspace(c.ctx, connect.NewRequest(&agentreplv1.ParkWorkspaceRequest{Workspace: ref}))
+		})
+	}
+	fs, stateDir := c.flags()
+	fs.Bool("all", false, "park every open workspace")
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(positionals) != 0 {
+		return c.usageFailed("-all names no workspace")
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	roster, ok := c.readRoster()
+	if !ok {
+		return exitFailure
+	}
+	// EVERY OPEN WORKSPACE IS ASKED, and the worst exit is the command's: one
+	// refusal never stops the rest.
+	exit := exitSuccess
+	for _, row := range rosterwalk.OpenRows(roster) {
+		ref := row.GetRow().GetWorkspace().GetWorkspace()
+		resp, err := c.client.ParkWorkspace(c.ctx, connect.NewRequest(&agentreplv1.ParkWorkspaceRequest{Workspace: ref}))
+		if code := answer(c, resp, err); code > exit {
+			exit = code
+		}
+	}
+	return exit
 }
 
 // workspaceInterrupt stops WS's running turn, or with -all-agents every live

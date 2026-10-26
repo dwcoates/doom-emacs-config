@@ -839,6 +839,26 @@ func (s *server) RestartWorkspace(
 	return connect.NewResponse(resp), nil
 }
 
+// ParkWorkspace stands the workspace's session down as the keep-alive cycle
+// does, under the cycle's own rules (endpoint_park_workspace.proto). The
+// stand-down is asked with the beat at now, so a real turn that ran before
+// the ask never keeps the session up; one that runs after it does.
+func (s *server) ParkWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ParkWorkspaceRequest],
+) (*connect.Response[agentreplv1.ParkWorkspaceResponse], error) {
+	const rpc = "ParkWorkspace"
+	resp := &agentreplv1.ParkWorkspaceResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	s.deps.Drain.CycleDown(subject.Record.ID, time.Now())
+	subject.Log.Info("daemon.server.park_workspace", "asked for the workspace's session to be parked as the keep-alive cycle parks it", nil)
+	resp.Result = &agentreplv1.ParkWorkspaceResponse_Success{Success: &agentreplv1.ParkWorkspaceSuccess{}}
+	return connect.NewResponse(resp), nil
+}
+
 // SelectWorkspace records the user's switch to this workspace and clears its
 // attention marker. It is idempotent.
 func (s *server) SelectWorkspace(

@@ -46,6 +46,7 @@ import "agentrepl/v1/endpoint_kill_workspace.proto";
 import "agentrepl/v1/endpoint_forget_workspace.proto";
 import "agentrepl/v1/endpoint_nuke_workspace.proto";
 import "agentrepl/v1/endpoint_finish_workspace.proto";
+import "agentrepl/v1/endpoint_park_workspace.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
 import "agentrepl/v1/endpoint_watch_topbar.proto";
 import "agentrepl/v1/endpoint_open_external.proto";
@@ -303,6 +304,10 @@ service AgentRepl {
   // Bounce the workspace's shim (rebuild if stale); graceful unless forced.
   // See endpoint_restart_workspace.proto.
   rpc RestartWorkspace(RestartWorkspaceRequest) returns (RestartWorkspaceResponse);
+
+  // Stand the workspace's session down as the keep-alive cycle does. See
+  // endpoint_park_workspace.proto.
+  rpc ParkWorkspace(ParkWorkspaceRequest) returns (ParkWorkspaceResponse);
 
   // Set or clear a workspace's priority; setting one moves the workspace to
   // second-to-last within that priority. See

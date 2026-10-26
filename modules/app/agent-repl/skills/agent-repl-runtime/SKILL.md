@@ -37,6 +37,7 @@ Runs agent-repl's build, bounce, deploy, hot-reload, health and daemon-request o
     | "bounce" / "force bounce the backends" | `bounce` | The same without restarting Emacs. |
     | "deploy" / "roll out" | `deploy` | Rolling deploy; running turns continue. |
     | "restart the workspace" / "bounce this workspace" | `agent-repld workspace restart WS` | Immediate: the workspace's shim is relaunched on the same session and its webapp page reloads. The user's own key is `SPC o C-c`. |
+    | "park WS" / "park every workspace" / "stand the shims down between keep-alives" | `agent-repld workspace park WS` or `agent-repld workspace park -all` | Immediate: the workspace's shim is stood down as the keep-alive cycle stands one down; the daemon restores it a minute before its next keep-alive, or at once for a prompt, a look or a history read. Never the selected, a hidden or closed workspace; a busy one parks when it falls free. |
     | "interrupt / stop the turn in WS" | `agent-repld workspace interrupt WS` | Stops the running turn. The user's own key is `C-c C-k` in the input window. |
     | "switch to / select workspace WS" | `agent-repld workspace select WS` | Makes it current; Emacs and the webapp follow. |
     | "is the daemon healthy" | `call DaemonHealth` | Prints the daemon's health and identity. |

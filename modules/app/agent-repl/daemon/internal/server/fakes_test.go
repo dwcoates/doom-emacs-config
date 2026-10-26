@@ -1142,6 +1142,12 @@ type fakeDrain struct {
 	scheduled []wsm.DrainSchedule
 	cancelErr error
 	nowReason *agentreplv1.DrainReason
+	// cycled are the workspaces CycleDown was asked to park.
+	cycled []ids.WorkspaceID
+}
+
+func (f *fakeDrain) CycleDown(ws ids.WorkspaceID, _ time.Time) {
+	f.cycled = append(f.cycled, ws)
 }
 
 func (f *fakeDrain) Schedule(_ context.Context, s wsm.DrainSchedule) error {

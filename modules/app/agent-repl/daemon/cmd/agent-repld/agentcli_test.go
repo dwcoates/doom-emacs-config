@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"regexp"
@@ -131,6 +132,10 @@ func (c *cliClient) SelectWorkspace(_ context.Context, req *connect.Request[agen
 
 func (c *cliClient) RestartWorkspace(_ context.Context, req *connect.Request[agentreplv1.RestartWorkspaceRequest]) (*connect.Response[agentreplv1.RestartWorkspaceResponse], error) {
 	return connect.NewResponse(&agentreplv1.RestartWorkspaceResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) ParkWorkspace(_ context.Context, req *connect.Request[agentreplv1.ParkWorkspaceRequest]) (*connect.Response[agentreplv1.ParkWorkspaceResponse], error) {
+	return connect.NewResponse(&agentreplv1.ParkWorkspaceResponse{}), c.record(req.Msg)
 }
 
 func (c *cliClient) Interrupt(_ context.Context, req *connect.Request[agentreplv1.InterruptRequest]) (*connect.Response[agentreplv1.InterruptResponse], error) {
@@ -1071,6 +1076,61 @@ func TestSelectAndRestartNameTheirWorkspace(t *testing.T) {
 				t.Fatalf("exit %d, workspace %q; want ws-peer", code, got)
 			}
 		})
+	}
+}
+
+func TestParkNamesItsWorkspace(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "park", "peer")
+
+	// Assert
+	if got := only[*agentreplv1.ParkWorkspaceRequest](t, f).GetWorkspace().GetId(); code != exitSuccess || got != "ws-peer" {
+		t.Fatalf("exit %d, workspace %q; want ws-peer", code, got)
+	}
+}
+
+func TestParkAllAsksEveryOpenWorkspace(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.run(workspaceNoun, "list")
+	var open []string
+	for _, line := range strings.Split(strings.TrimSpace(f.out.String()), "\n") {
+		var ws listedWorkspace
+		if err := json.Unmarshal([]byte(line), &ws); err != nil {
+			t.Fatalf("decode %q: %v", line, err)
+		}
+		if ws.Section == "open" {
+			open = append(open, ws.ID)
+		}
+	}
+	f.client.requests = nil
+
+	// Act
+	code := f.run(workspaceNoun, "park", "-all")
+
+	// Assert
+	var asked []string
+	for _, req := range f.client.requests {
+		asked = append(asked, req.(*agentreplv1.ParkWorkspaceRequest).GetWorkspace().GetId())
+	}
+	if code != exitSuccess || len(open) == 0 || !slices.Equal(asked, open) {
+		t.Fatalf("exit %d, asked %v; want every open workspace %v", code, asked, open)
+	}
+}
+
+func TestParkAllNamesNoWorkspace(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "park", "-all", "peer")
+
+	// Assert
+	if code != exitFailure || len(f.client.requests) != 0 {
+		t.Fatalf("exit %d, requests %v; want a failure and nothing sent", code, f.client.requests)
 	}
 }
 

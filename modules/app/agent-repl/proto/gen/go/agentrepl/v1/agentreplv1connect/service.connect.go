@@ -150,6 +150,8 @@ const (
 	// AgentReplRestartWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// RestartWorkspace RPC.
 	AgentReplRestartWorkspaceProcedure = "/agentrepl.v1.AgentRepl/RestartWorkspace"
+	// AgentReplParkWorkspaceProcedure is the fully-qualified name of the AgentRepl's ParkWorkspace RPC.
+	AgentReplParkWorkspaceProcedure = "/agentrepl.v1.AgentRepl/ParkWorkspace"
 	// AgentReplSetWorkspacePriorityProcedure is the fully-qualified name of the AgentRepl's
 	// SetWorkspacePriority RPC.
 	AgentReplSetWorkspacePriorityProcedure = "/agentrepl.v1.AgentRepl/SetWorkspacePriority"
@@ -410,6 +412,7 @@ var (
 	agentReplSetWorkspacePrincipalLinkMethodDescriptor  = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePrincipalLink")
 	agentReplSetWorkspaceNameMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceName")
 	agentReplRestartWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
+	agentReplParkWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("ParkWorkspace")
 	agentReplSetWorkspacePriorityMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
 	agentReplSetWorkspaceHiddenMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceHidden")
 	agentReplSendHiddenKeepalivesMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SendHiddenKeepalives")
@@ -624,6 +627,9 @@ type AgentReplClient interface {
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
 	RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error)
+	// Stand the workspace's session down as the keep-alive cycle does. See
+	// endpoint_park_workspace.proto.
+	ParkWorkspace(context.Context, *connect.Request[v1.ParkWorkspaceRequest]) (*connect.Response[v1.ParkWorkspaceResponse], error)
 	// Set or clear a workspace's priority; setting one moves the workspace to
 	// second-to-last within that priority. See
 	// endpoint_set_workspace_priority.proto.
@@ -1127,6 +1133,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplRestartWorkspaceProcedure,
 			connect.WithSchema(agentReplRestartWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		parkWorkspace: connect.NewClient[v1.ParkWorkspaceRequest, v1.ParkWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplParkWorkspaceProcedure,
+			connect.WithSchema(agentReplParkWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		setWorkspacePriority: connect.NewClient[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse](
@@ -1667,6 +1679,7 @@ type agentReplClient struct {
 	setWorkspacePrincipalLink  *connect.Client[v1.SetWorkspacePrincipalLinkRequest, v1.SetWorkspacePrincipalLinkResponse]
 	setWorkspaceName           *connect.Client[v1.SetWorkspaceNameRequest, v1.SetWorkspaceNameResponse]
 	restartWorkspace           *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
+	parkWorkspace              *connect.Client[v1.ParkWorkspaceRequest, v1.ParkWorkspaceResponse]
 	setWorkspacePriority       *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
 	setWorkspaceHidden         *connect.Client[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse]
 	sendHiddenKeepalives       *connect.Client[v1.SendHiddenKeepalivesRequest, v1.SendHiddenKeepalivesResponse]
@@ -1948,6 +1961,11 @@ func (c *agentReplClient) SetWorkspaceName(ctx context.Context, req *connect.Req
 // RestartWorkspace calls agentrepl.v1.AgentRepl.RestartWorkspace.
 func (c *agentReplClient) RestartWorkspace(ctx context.Context, req *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error) {
 	return c.restartWorkspace.CallUnary(ctx, req)
+}
+
+// ParkWorkspace calls agentrepl.v1.AgentRepl.ParkWorkspace.
+func (c *agentReplClient) ParkWorkspace(ctx context.Context, req *connect.Request[v1.ParkWorkspaceRequest]) (*connect.Response[v1.ParkWorkspaceResponse], error) {
+	return c.parkWorkspace.CallUnary(ctx, req)
 }
 
 // SetWorkspacePriority calls agentrepl.v1.AgentRepl.SetWorkspacePriority.
@@ -2486,6 +2504,9 @@ type AgentReplHandler interface {
 	// Bounce the workspace's shim (rebuild if stale); graceful unless forced.
 	// See endpoint_restart_workspace.proto.
 	RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error)
+	// Stand the workspace's session down as the keep-alive cycle does. See
+	// endpoint_park_workspace.proto.
+	ParkWorkspace(context.Context, *connect.Request[v1.ParkWorkspaceRequest]) (*connect.Response[v1.ParkWorkspaceResponse], error)
 	// Set or clear a workspace's priority; setting one moves the workspace to
 	// second-to-last within that priority. See
 	// endpoint_set_workspace_priority.proto.
@@ -2985,6 +3006,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplRestartWorkspaceProcedure,
 		svc.RestartWorkspace,
 		connect.WithSchema(agentReplRestartWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplParkWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplParkWorkspaceProcedure,
+		svc.ParkWorkspace,
+		connect.WithSchema(agentReplParkWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplSetWorkspacePriorityHandler := connect.NewUnaryHandler(
@@ -3562,6 +3589,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSetWorkspaceNameHandler.ServeHTTP(w, r)
 		case AgentReplRestartWorkspaceProcedure:
 			agentReplRestartWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplParkWorkspaceProcedure:
+			agentReplParkWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspacePriorityProcedure:
 			agentReplSetWorkspacePriorityHandler.ServeHTTP(w, r)
 		case AgentReplSetWorkspaceHiddenProcedure:
@@ -3891,6 +3920,10 @@ func (UnimplementedAgentReplHandler) SetWorkspaceName(context.Context, *connect.
 
 func (UnimplementedAgentReplHandler) RestartWorkspace(context.Context, *connect.Request[v1.RestartWorkspaceRequest]) (*connect.Response[v1.RestartWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RestartWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ParkWorkspace(context.Context, *connect.Request[v1.ParkWorkspaceRequest]) (*connect.Response[v1.ParkWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ParkWorkspace is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SetWorkspacePriority(context.Context, *connect.Request[v1.SetWorkspacePriorityRequest]) (*connect.Response[v1.SetWorkspacePriorityResponse], error) {
