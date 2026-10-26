@@ -668,9 +668,8 @@ export type SessionUpdate = Message<"conversation.v1.SessionUpdate"> & {
     case: "commandCatalog";
   } | {
     /**
-     * THE PROJECTED LAPSE OF THE PROMPT CACHE, stated while the session's
-     * keep-alives are HELD (shim.v1.SetKeepalive). See SessionCacheLapse,
-     * which carries the arm's whole contract.
+     * THE PROJECTED LAPSE OF THE PROMPT CACHE. See SessionCacheLapse, which
+     * carries the arm's whole contract.
      *
      * @generated from field: conversation.v1.SessionCacheLapse cache_lapse = 36;
      */
@@ -1049,17 +1048,16 @@ export const SessionRollbackFailedSchema: GenMessage<SessionRollbackFailed> = /*
 /**
  * When the prompt cache lapses, and what resuming after it will cost.
  *
- * A hidden workspace's keep-alives are held, so its cache lapses on its own
- * clock: a TTL after the conversation's last request, at the tier that request
- * bought (the cold gate's own reading). The consumer counts down to that
- * moment and stands the session down when it comes.
+ * The cache lapses on its own clock unless a keep-alive moves it: a TTL after
+ * the conversation's last request, at the tier that request bought (the cold
+ * gate's own reading). The daemon drives every keep-alive (owner ruling,
+ * 2026-10-26; shim.v1.SendKeepalive), so the shim runs no cadence and always
+ * states the projection; the daemon keeps it for a hidden or closed
+ * workspace, counts down to it and stands the session down when it comes.
  *
- * PRODUCER OBLIGATIONS: the shim states it when keep-alives become held (a
- * hold, or a session born held), whenever the projection changes while held
- * (a request answered moves the lapse), and once on every WatchSession open
- * while held, after the opening re-announcement. NEVER stated while the
- * cadence runs: a running cadence keeps the cache warm, so no lapse is due,
- * and a consumer that ran the cadence again discards the last projection.
+ * PRODUCER OBLIGATIONS: the shim states it at the session's start, whenever
+ * the projection changes (a request answered moves the lapse), and once on
+ * every WatchSession open, after the opening re-announcement.
  *
  * @generated from message conversation.v1.SessionCacheLapse
  */

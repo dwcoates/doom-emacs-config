@@ -599,6 +599,16 @@ beforeEach(() => {
   recordAgentBinaryVersion("2.1.999");
 });
 
+
+/**
+ * Ask the shim for a keep-alive the way the daemon does (shim.v1.SendKeepalive):
+ * the daemon drives every beat, so no cadence timer fires one (owner ruling,
+ * 2026-10-26). Not awaited, as a timer's beat was not: the caller drains.
+ */
+function keepaliveNow(h: Harness): void {
+  void h.engine.sendKeepalive(create(shimv1.SendKeepaliveRequestSchema, {}));
+}
+
 describe("StartSession's session profile", () => {
   it.each([
     {
@@ -825,13 +835,6 @@ describe("StartSession, fresh", () => {
         ? response.result.value.session?.modelCatalog[0]?.capabilities
         : undefined,
     ).toBeUndefined();
-  });
-
-  it("STARTS the keep-alive cadence before success returns", async () => {
-    const h = harness();
-    await started(h);
-
-    expect(h.scheduler.pendingTimeout()).toBeDefined();
   });
 
   it("starts a fresh conversation under the vendor session id its injected minter names", async () => {
@@ -2173,7 +2176,7 @@ describe("a turn the vendor started on its own", () => {
     {
       name: "the keep-alive holds the send slot beside the adopted turn",
       arrange: async (h: Harness) => {
-        h.scheduler.fireTimeout();
+        keepaliveNow(h);
         await new Promise((resolve) => setImmediate(resolve));
         await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
       },
@@ -2261,7 +2264,7 @@ describe("a turn the vendor started on its own", () => {
     // Arrange
     const h = harness();
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await new Promise((resolve) => setImmediate(resolve));
 
     // Act
@@ -2279,7 +2282,7 @@ describe("a turn the vendor started on its own", () => {
     // shell reported stopped (the ship-gns loop, 2026-10-02).
     const h = harness();
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await new Promise((resolve) => setImmediate(resolve));
     await h.engine.onSdkMessage({
       type: "system",
@@ -2301,7 +2304,7 @@ describe("a turn the vendor started on its own", () => {
     // Arrange
     const h = harness();
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await new Promise((resolve) => setImmediate(resolve));
     await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
 
@@ -2317,7 +2320,7 @@ describe("a turn the vendor started on its own", () => {
     // Arrange
     const h = harness();
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await new Promise((resolve) => setImmediate(resolve));
     await h.engine.onSdkMessage(assistantMessage("vendor-reply"));
     await h.engine.onSdkMessage(resultMessage("vendor-result"));
@@ -3055,7 +3058,7 @@ describe("the keep-alive turn", () => {
     const h = harness();
     await started(h);
 
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await new Promise((resolve) => setImmediate(resolve));
 
     const prompt = h.persistence.buffered.find((entry) => entry.item.kind === "prompt");
@@ -3115,7 +3118,7 @@ describe("the keep-alive turn", () => {
 describe("the keep-alive turn serves nothing", () => {
   /** Beat the cadence once and let the send land. */
   async function beat(h: Harness): Promise<void> {
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await new Promise((resolve) => setImmediate(resolve));
   }
 
@@ -3661,7 +3664,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     // Arrange: the beat has claimed the slot but not yet pushed its send.
     const h = harness({ drainSends: [] });
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     const starting = startDuring(h, "turn-1");
     await drainTurns();
 
@@ -3677,7 +3680,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     const sends: SdkUserMessage[] = [];
     const h = harness({ drainSends: sends });
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     const starting = startDuring(h, "turn-1");
     await drainTurns();
 
@@ -3694,7 +3697,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     // Arrange
     const h = harness();
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     await h.engine.onSdkMessage(answering(h, assistantMessage("ka-reply")));
 
@@ -3709,7 +3712,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     // Arrange
     const h = harness();
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     await h.engine.onSdkMessage(answering(h, assistantMessage("ka-reply")));
     const starting = startDuring(h, "turn-1");
@@ -3726,7 +3729,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     const sends: SdkUserMessage[] = [];
     const h = harness({ drainSends: sends });
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     await h.engine.onSdkMessage(answering(h, assistantMessage("ka-reply")));
     const starting = startDuring(h, "turn-1");
@@ -3744,7 +3747,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     // Arrange
     const h = harness();
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
 
     // Act: the result and the start race.
@@ -3761,7 +3764,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     const sends: SdkUserMessage[] = [];
     const h = harness({ drainSends: sends });
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
 
     // Act
@@ -3779,7 +3782,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     const h = harness();
     await started(h);
     await realTurn(h, "turn-0", [assistantMessage("real-assistant-uuid")]);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
 
     // Act
@@ -3796,7 +3799,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     const h = harness();
     await started(h);
     await realTurn(h, "turn-0", [assistantMessage("real-assistant-uuid")]);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     const starting = startDuring(h, "turn-1");
 
@@ -3812,7 +3815,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     // Arrange
     const h = harness();
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     const starting = startDuring(h, "turn-1");
     await h.engine.onSdkMessage(answering(h, resultMessage("ka-result")));
@@ -3849,7 +3852,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     // Arrange
     const h = harness();
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     const starting = startDuring(h, "turn-1");
 
@@ -3866,7 +3869,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     const sends: SdkUserMessage[] = [];
     const h = harness({ drainSends: sends });
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     const caller = new AbortController();
     const starting = startDuring(h, "turn-1", caller.signal);
@@ -3889,7 +3892,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     await started(h);
     await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
     await keepaliveTurn(h, []);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     const starting = startDuring(h, "turn-1");
 
@@ -3913,7 +3916,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     await started(h);
     await realTurn(h, "turn-0", [assistantMessage("assistant-uuid")]);
     await keepaliveTurn(h, []);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     const before = logSinkMark();
 
@@ -3932,7 +3935,7 @@ describe("a real prompt that arrives during a keep-alive", () => {
     const pending = h.engine.startSession(resumeRequest("resume-1"));
     (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     const starting = startDuring(h, "turn-1");
 
@@ -4063,19 +4066,6 @@ describe("the keep-alive spares live detached work", () => {
     expect(h.scheduler.pendingTimeout()).toBeUndefined();
   });
 
-  it("schedules the keep-alive again once the last detached item ends", async () => {
-    // Arrange
-    const h = harness();
-    await started(h);
-    await turnLeavingShell(h, "turn-0");
-
-    // Act
-    await h.engine.onSdkMessage(nothingLive());
-
-    // Assert
-    expect(h.scheduler.pendingTimeout()).toBeDefined();
-  });
-
   it("replaces no query across what used to be a rewind while the shell is live", async () => {
     // Arrange: a keep-alive has run since the anchor, so the next beat would owe a rewind.
     const h = harness();
@@ -4086,7 +4076,7 @@ describe("the keep-alive spares live detached work", () => {
     const opened = h.queries.length;
 
     // Act: the interval passes, with nothing scheduled to fire.
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
 
     // Assert
@@ -4181,7 +4171,7 @@ describe("the keep-alive rewind's span invariant", () => {
 
   /** Beat the keep-alive, let the vendor run a turn of its own first, then answer the keep-alive. */
   async function keepaliveBesideVendorTurn(h: Harness, status: "completed" | "stopped", tag: string): Promise<void> {
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     await h.engine.onSdkMessage(notification(`notif-${tag}`, status));
     await h.engine.onSdkMessage(assistantMessage(`vendor-reply-${tag}`));
@@ -4257,7 +4247,7 @@ describe("the keep-alive rewind's span invariant", () => {
     const h = harness();
     await started(h);
     await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     await h.engine.onSdkMessage(answering(h, assistantMessage("ka-reply")));
     const starting = startDuring(h, "turn-1");
@@ -4364,7 +4354,7 @@ describe("the keep-alive rewind's span invariant", () => {
     await started(h);
     await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
     await keepaliveTurn(h, []);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drainTurns();
     await h.engine.onSdkMessage(notification("notif-1", "stopped"));
 
@@ -5427,16 +5417,8 @@ describe("SetSessionPermissionMode", () => {
   });
 });
 
-/** A SetKeepalive asking for the hold: the request every keep-alive suite holds a session with. */
-function holdKeepaliveRequest(): shimv1.SetKeepaliveRequest {
-  return create(shimv1.SetKeepaliveRequestSchema, {
-    cadence: { case: "hold", value: create(shimv1.SetKeepaliveHoldSchema, {}) },
-  });
-}
-
 describe("SendKeepalive", () => {
   const request = (): shimv1.SendKeepaliveRequest => create(shimv1.SendKeepaliveRequestSchema, {});
-  const hold = holdKeepaliveRequest;
 
   /** The response's arm path, e.g. `success.sent` or `error.noSession`. */
   function armOf(response: shimv1.SendKeepaliveResponse): string {
@@ -5496,7 +5478,6 @@ describe("SendKeepalive", () => {
     const sends: SdkUserMessage[] = [];
     const h = harness({ drainSends: sends });
     await started(h);
-    await h.engine.setKeepalive(hold());
 
     // Act
     const response = await h.engine.sendKeepalive(request());
@@ -5569,170 +5550,6 @@ describe("SendKeepalive", () => {
     const faults =
       update.case === "diagnostics" && update.value.health.case === "unhealthy" ? update.value.health.value.faults : [];
     expect(faults.map((fault) => fault.kind.case)).toContain("keepaliveFailed");
-  });
-});
-
-describe("SetKeepalive", () => {
-  const hold = holdKeepaliveRequest;
-
-  function run(): shimv1.SetKeepaliveRequest {
-    return create(shimv1.SetKeepaliveRequestSchema, {
-      cadence: { case: "run", value: create(shimv1.SetKeepaliveRunSchema, {}) },
-    });
-  }
-
-  function lastRound(): shimv1.SetKeepaliveRequest {
-    return create(shimv1.SetKeepaliveRequestSchema, {
-      cadence: { case: "lastRound", value: create(shimv1.SetKeepaliveLastRoundSchema, {}) },
-    });
-  }
-
-  /**
-   * The arms a stream opened now is caught up on: everything queued before a
-   * sentinel event pushed after the open, which reaches the stream last.
-   */
-  async function standingArms(h: Harness): Promise<string[]> {
-    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
-    h.engine.pushes.push(
-      create(conversationv1.SessionUpdateSchema, {
-        update: { case: "compacting", value: create(conversationv1.SessionCompactingSchema, {}) },
-      }),
-    );
-    const arms: string[] = [];
-    for (;;) {
-      const step = await stream.next();
-      if (step.done === true || step.value.update.case === "compacting") return arms;
-      arms.push(step.value.update.case ?? "");
-    }
-  }
-
-  it("refuses when no session has been started", async () => {
-    // Arrange
-    const h = harness();
-
-    // Act
-    const response = await h.engine.setKeepalive(hold());
-
-    // Assert
-    expect(response.result.case === "error" ? response.result.value.kind.case : undefined).toBe("noSession");
-  });
-
-  it("records the refusal when no session has been started", async () => {
-    // Arrange
-    const h = harness();
-    const before = logSinkMark();
-
-    // Act
-    await h.engine.setKeepalive(hold());
-
-    // Assert
-    expect(logRecordsSince(before).map((record) => record.message)).toContain(
-      "refused SetKeepalive: no session is open",
-    );
-  });
-
-  it("cancels the scheduled keep-alive on a hold", async () => {
-    // Arrange
-    const h = harness();
-    await started(h);
-
-    // Act
-    const response = await h.engine.setKeepalive(hold());
-
-    // Assert
-    expect([response.result.case, h.scheduler.pendingTimeout()]).toEqual(["success", undefined]);
-  });
-
-  it("states the projected lapse on the session stream on a hold", async () => {
-    // Arrange
-    const h = harness();
-    await started(h);
-
-    // Act
-    await h.engine.setKeepalive(hold());
-
-    // Assert
-    expect(await standingArms(h)).toContain("cacheLapse");
-  });
-
-  it("schedules the keep-alive again when it runs", async () => {
-    // Arrange
-    const h = harness();
-    await started(h);
-    await h.engine.setKeepalive(hold());
-
-    // Act
-    await h.engine.setKeepalive(run());
-
-    // Assert
-    expect(h.scheduler.pendingTimeout()).toBeDefined();
-  });
-
-  it("withdraws the projected lapse when it runs", async () => {
-    // Arrange
-    const h = harness();
-    await started(h);
-    await h.engine.setKeepalive(hold());
-
-    // Act
-    await h.engine.setKeepalive(run());
-
-    // Assert
-    expect(await standingArms(h)).not.toContain("cacheLapse");
-  });
-
-  it("keeps the scheduled keep-alive on a last round", async () => {
-    // Arrange
-    const h = harness();
-    await started(h);
-
-    // Act
-    const response = await h.engine.setKeepalive(lastRound());
-
-    // Assert
-    expect([response.result.case, h.scheduler.pendingTimeout() !== undefined]).toEqual(["success", true]);
-  });
-
-  it("withdraws the held lapse while a last round's beat is owed", async () => {
-    // Arrange
-    const h = harness();
-    await started(h);
-    await h.engine.setKeepalive(hold());
-
-    // Act
-    await h.engine.setKeepalive(lastRound());
-
-    // Assert
-    expect(await standingArms(h)).not.toContain("cacheLapse");
-  });
-
-  it("states the projected lapse once the last round's beat went out", async () => {
-    // Arrange
-    const h = harness();
-    await started(h);
-    await h.engine.setKeepalive(lastRound());
-
-    // Act
-    h.scheduler.fireTimeout();
-
-    // Assert
-    expect([h.scheduler.pendingTimeout(), await standingArms(h)]).toEqual([undefined, expect.arrayContaining(["cacheLapse"])]);
-  });
-
-  it("schedules no keep-alive for a session born held", async () => {
-    // Arrange
-    const h = harness();
-    const request = freshRequest();
-    request.holdKeepalive = create(shimv1.StartSessionHoldKeepaliveSchema, {});
-
-    // Act
-    const pending = h.engine.startSession(request);
-    const first = await untilQuery(h, 0);
-    first.query.emit(initMessage({ sessionId: freshSessionId(first.spec) }));
-    await pending;
-
-    // Assert
-    expect([h.scheduler.pendingTimeout(), await standingArms(h)]).toEqual([undefined, expect.arrayContaining(["cacheLapse"])]);
   });
 });
 
@@ -7474,24 +7291,6 @@ describe("the session-started record", () => {
   });
 });
 
-describe("the keep-alive interval", () => {
-  it("beats on the module constant when nothing overrode it", async () => {
-    const h = harness();
-
-    await started(h);
-
-    expect(h.scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
-  });
-
-  it("beats on the interval the caller supplied", async () => {
-    const h = harness({ keepaliveIntervalMs: 200 });
-
-    await started(h);
-
-    expect(h.scheduler.pendingTimeout()?.delayMs).toBe(200);
-  });
-});
-
 describe("the keep-alive cadence's anchor: the conversation's last request, not the process", () => {
   const MINUTE = 60_000;
   /** The last real request's instant in these tests. */
@@ -7526,18 +7325,6 @@ describe("the keep-alive cadence's anchor: the conversation's last request, not 
     } as unknown as SdkMessage;
   }
 
-  it("schedules a restart 5 minutes after a 1-hour turn at that turn + 52 minutes", async () => {
-    const h = await resumedAt(TURN_AT + 5 * MINUTE, cacheLine(TURN_AT, CACHE_TTL_1H_MS));
-
-    expect(h.scheduler.pendingTimeout()?.delayMs).toBe(47 * MINUTE);
-  });
-
-  it("beats at once on a restart 55 minutes after a 1-hour turn", async () => {
-    const h = await resumedAt(TURN_AT + 55 * MINUTE, cacheLine(TURN_AT, CACHE_TTL_1H_MS));
-
-    expect(h.scheduler.pendingTimeout()?.delayMs).toBe(0);
-  });
-
   it("schedules no beat on a restart after the cache expired", async () => {
     const h = await resumedAt(TURN_AT + 61 * MINUTE, cacheLine(TURN_AT, CACHE_TTL_1H_MS));
 
@@ -7562,46 +7349,6 @@ describe("the keep-alive cadence's anchor: the conversation's last request, not 
     expect(h.scheduler.pendingTimeout()).toBeUndefined();
   });
 
-  it("re-anchors on a real turn's response: the next beat is that response + 52 minutes", async () => {
-    const clock = { now: TURN_AT };
-    const h = harness({ clock: () => clock.now });
-    await started(h);
-    clock.now = TURN_AT + 30 * MINUTE;
-
-    await realTurn(h, "turn-0", [responseBuying("real-uuid", CACHE_TTL_1H_MS)]);
-
-    expect(h.scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS);
-  });
-
-  it("re-anchors on the keep-alive's own answer", async () => {
-    const clock = { now: TURN_AT };
-    const h = harness({ clock: () => clock.now });
-    await started(h);
-    clock.now = TURN_AT + 52 * MINUTE;
-    h.scheduler.fireTimeout();
-    await new Promise((resolve) => setImmediate(resolve));
-    clock.now = TURN_AT + 53 * MINUTE;
-    const before = logSinkMark();
-
-    await h.engine.onSdkMessage(answering(h, responseBuying("ka-uuid", CACHE_TTL_1H_MS)));
-    clock.now = TURN_AT + 54 * MINUTE;
-    await h.engine.onSdkMessage(answering(h, resultMessage("keepalive-result-uuid")));
-
-    const record = logRecordsSince(before).find((held) => held.message.includes("keep-alive scheduled"));
-    expect(record?.context["next_beat_at"]).toBe(new Date(TURN_AT + 53 * MINUTE + KEEPALIVE_INTERVAL_MS).toISOString());
-  });
-
-  it("does not re-anchor on a subagent's response, which is not the main conversation's cache", async () => {
-    const clock = { now: TURN_AT };
-    const h = harness({ clock: () => clock.now });
-    await started(h);
-    clock.now = TURN_AT + 30 * MINUTE;
-    const subagent = { ...responseBuying("sub-uuid", CACHE_TTL_1H_MS), parent_tool_use_id: "toolu_1" } as SdkMessage;
-
-    await realTurn(h, "turn-0", [subagent]);
-
-    expect(h.scheduler.pendingTimeout()?.delayMs).toBe(KEEPALIVE_INTERVAL_MS - 30 * MINUTE);
-  });
 });
 
 /**
@@ -9278,7 +9025,7 @@ async function realTurn(
 
 /** A whole keep-alive turn, beaten by the suite's own scheduler. */
 async function keepaliveTurn(h: Harness, records: SdkMessage[]): Promise<void> {
-  h.scheduler.fireTimeout();
+  keepaliveNow(h);
   await new Promise((resolve) => setImmediate(resolve));
   for (const record of records) await h.engine.onSdkMessage(answering(h, record));
   await h.engine.onSdkMessage(answering(h, resultMessage("keepalive-result-uuid")));
@@ -11794,7 +11541,7 @@ describe("the keep-alive beat that could not be recorded", () => {
     };
     const before = h.engine.pushes.faultCount;
 
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     for (let attempt = 0; attempt < 50 && h.engine.pushes.faultCount === before; attempt++) {
       await new Promise((resolve) => setImmediate(resolve));
     }
@@ -12490,7 +12237,7 @@ describe("a vendor failure that is not an Error", () => {
         throw "the record plane went away";
       };
       const before = h.engine.pushes.faultCount;
-      h.scheduler.fireTimeout();
+      keepaliveNow(h);
       for (let attempt = 0; attempt < 50 && h.engine.pushes.faultCount === before; attempt++) {
         await new Promise((resolve) => setImmediate(resolve));
       }
@@ -12765,7 +12512,7 @@ describe("whose book a gated ask lands on", () => {
     // own rows are no exception.
     const h = harness();
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await new Promise((resolve) => setImmediate(resolve));
     // THE ASK FOLLOWS THE ASSISTANT MESSAGE THAT CALLED THE TOOL, and that
     // message is the keep-alive turn's first reply — stamped with its send.
@@ -13573,7 +13320,7 @@ describe("a turn that ends while the session is standing down", () => {
       },
     });
     await started(h);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await new Promise((resolve) => setImmediate(resolve));
     const standing = h.engine.standDown("SIGTERM");
     for (let attempt = 0; attempt < 20 && !(h.queries[0]?.query.calls.includes("interrupt") ?? false); attempt++) {
@@ -13899,14 +13646,14 @@ describe("a component that recovers", () => {
     const h = harness();
     await started(h);
     h.persistence.writeThrows = new Error("the row could not be enveloped");
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await vi.waitFor(() => {
       expect(faultyComponents(h)).toContain("shim-engine-keepalive");
     });
 
     // Act.
     h.persistence.writeThrows = undefined;
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
 
     // Assert.
     await vi.waitFor(() => {
@@ -14534,7 +14281,7 @@ describe("refreshing the context reading after a main-agent API response", () =>
     const h = harness();
     await started(h);
     await realTurn(h, "turn-0", [assistantMessage("real-uuid")]);
-    h.scheduler.fireTimeout();
+    keepaliveNow(h);
     await drained();
     const before = probes(h);
 

@@ -15,7 +15,6 @@ export * from "../../../../proto/gen/ts/shim/v1/endpoint_get_fork_point_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/fork_point_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_get_workflow_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_hibernate_pb.js";
-export * from "../../../../proto/gen/ts/shim/v1/endpoint_set_keepalive_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_send_keepalive_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_retry_vendor_error_now_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_kill_session_pb.js";

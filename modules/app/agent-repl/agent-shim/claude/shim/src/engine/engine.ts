@@ -71,10 +71,7 @@ export interface Engine {
   /** Compact, then ack. The daemon stands the shim down only after the ack. */
   hibernate(request: shimv1.HibernateRequest): Promise<shimv1.HibernateResponse>;
 
-  /** Hold the keep-alive cadence (the workspace is hidden) or run it again. */
-  setKeepalive(request: shimv1.SetKeepaliveRequest): Promise<shimv1.SetKeepaliveResponse>;
-
-  /** Send one keep-alive now, leaving the cadence as it is. */
+  /** Send one keep-alive now. The daemon drives every keep-alive through it. */
   sendKeepalive(request: shimv1.SendKeepaliveRequest): Promise<shimv1.SendKeepaliveResponse>;
 
   /** Make the scheduled vendor-error retry at once. */
@@ -235,10 +232,6 @@ export class NotImplementedEngine implements Engine {
 
   hibernate(): Promise<shimv1.HibernateResponse> {
     return Promise.reject(unimplemented("Hibernate"));
-  }
-
-  setKeepalive(): Promise<shimv1.SetKeepaliveResponse> {
-    return Promise.reject(unimplemented("SetKeepalive"));
   }
 
   sendKeepalive(): Promise<shimv1.SendKeepaliveResponse> {

@@ -67,12 +67,6 @@ export function hibernateRequest(): shimv1.HibernateRequest {
   return create(shimv1.HibernateRequestSchema, {});
 }
 
-export function setKeepaliveRequest(): shimv1.SetKeepaliveRequest {
-  return create(shimv1.SetKeepaliveRequestSchema, {
-    cadence: { case: "hold", value: create(shimv1.SetKeepaliveHoldSchema, {}) },
-  });
-}
-
 export function sendKeepaliveRequest(): shimv1.SendKeepaliveRequest {
   return create(shimv1.SendKeepaliveRequestSchema, {});
 }

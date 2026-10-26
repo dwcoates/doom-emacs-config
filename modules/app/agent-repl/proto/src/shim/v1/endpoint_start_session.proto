@@ -34,11 +34,12 @@ message StartSessionRequest {
     // lapsed and no remediation is named.
     StartSessionResume resume = 2;
   }
-  // Set when the session is BORN with its keep-alives held: the workspace is
-  // hidden, so its cache is left to lapse (endpoint_set_keepalive.proto). The
-  // shim sends no keep-alive and states the projected lapse on the session
-  // stream from its start. Unset, the cadence runs. Presence is the fact.
-  optional StartSessionHoldKeepalive hold_keepalive = 3;
+  // Tag 3 is RETIRED (2026-10-26): `hold_keepalive`. The daemon drives every
+  // keep-alive (SendKeepalive), so a shim runs no cadence to be born held: it
+  // sends no keep-alive of its own and states its projected lapse on the
+  // session stream from its start.
+  reserved 3;
+  reserved "hold_keepalive";
   // THE WORKSPACE'S NAME, as the sidebar draws it. REQUIRED: never empty, and
   // a request without one is refused as invalid. The shim appends it to the
   // session's system prompt, after the metaprompt, so the agent knows it runs
@@ -84,10 +85,6 @@ message SessionProfileChatSystemPrompt {
   // The prompt text, verbatim.
   string text = 1;
 }
-
-// The session starts with its keep-alives held. DELIBERATELY EMPTY: presence
-// is the fact.
-message StartSessionHoldKeepalive {}
 
 // A new vendor session. Carries what nothing can recover: the model and the
 // mode to begin with.

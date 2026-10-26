@@ -1,15 +1,15 @@
-// endpoint_send_keepalive.proto — SendKeepalive: send ONE keep-alive now,
-// whatever the cadence. SESSION section.
+// endpoint_send_keepalive.proto — SendKeepalive: send ONE keep-alive now.
+// SESSION section.
 //
-// A HIDDEN WORKSPACE'S CACHE CAN BE KEPT ON DEMAND (owner request,
-// 2026-10-14). A hidden workspace's cadence is HELD (SetKeepalive), so its
-// cache lapses on its own clock. SendKeepalive is the user asking for one more
-// keep-alive anyway: the shim submits its ordinary keep-alive turn at once,
-// and leaves the cadence exactly as it was, held or running.
+// THE DAEMON DRIVES EVERY KEEP-ALIVE (owner ruling, 2026-10-26). A shim runs
+// no keep-alive cadence of its own: the daemon times each beat from the cache
+// clock its workspace's turns keep, and asks for it here -- and the user can
+// ask for one for a hidden workspace on demand (owner request, 2026-10-14).
+// The shim submits its ordinary keep-alive turn at once.
 //
 // THE NEW LAPSE FOLLOWS ON THE SESSION STREAM, never in this answer. The
 // keep-alive's own API response re-anchors the cache like any request does,
-// and a held cadence restates the projected lapse on every anchor change
+// and the shim restates the projected lapse on every anchor change
 // (conversation.v1.SessionCacheLapse), so the daemon counts down to the later
 // lapse with no second path for it. `sent` therefore means the turn was
 // SUBMITTED; its answer, and the lapse it moves, arrive afterwards.
@@ -112,9 +112,8 @@ export const SendKeepaliveSuccessSchema: GenMessage<SendKeepaliveSuccess> = /*@_
   messageDesc(file_shim_v1_endpoint_send_keepalive, 2);
 
 /**
- * The keep-alive turn was submitted. Its answer re-anchors the cache, and a
- * held cadence restates the projected lapse on the session stream when it
- * does. DELIBERATELY EMPTY: the arm is the outcome.
+ * The keep-alive turn was submitted. Its answer re-anchors the cache, and the
+ * shim restates the projected lapse on the session stream when it does. DELIBERATELY EMPTY: the arm is the outcome.
  *
  * @generated from message shim.v1.SendKeepaliveSent
  */
@@ -129,9 +128,8 @@ export const SendKeepaliveSentSchema: GenMessage<SendKeepaliveSent> = /*@__PURE_
   messageDesc(file_shim_v1_endpoint_send_keepalive, 3);
 
 /**
- * No keep-alive went out. THE ARM IS WHY, and each reason is one the
- * cadence's own beat honors, so an asked-for keep-alive can never do what a
- * scheduled one is forbidden to.
+ * No keep-alive went out. THE ARM IS WHY: the shim stays the judge of whether
+ * a keep-alive may go out, whoever asked for it.
  *
  * @generated from message shim.v1.SendKeepaliveSkipped
  */

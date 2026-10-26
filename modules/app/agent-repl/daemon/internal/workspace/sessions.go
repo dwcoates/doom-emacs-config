@@ -829,23 +829,16 @@ type source struct {
 	// vendor's fork of the parent's, on the spawned shim before it is resumed
 	// (forking.go). Nil for every bring-up but a fork's first.
 	Fork *wsm.PendingFork
-	// HoldKeepalive starts the session with its keep-alives held: the
-	// workspace is in the hidden section and not the user's selection
-	// (wsm.Workspace.KeepaliveHeld), as the record the bring-up started from
-	// reads (cachelapse.Keeper). A hide or a show after that read is the
-	// keeper's to apply, once the session it starts comes up.
-	HoldKeepalive bool
 	// WorkspaceName is the workspace's name, which the session's system prompt
 	// states (shim.v1.StartSessionRequest.workspace_name).
 	WorkspaceName string
 }
 
 // withRecord answers SRC with the facts every bring-up takes from the
-// workspace's RECORD, as the record the bring-up started from reads: whether
-// its keep-alives are held, and its name. It is the one place a bring-up copies the record
-// onto its source, so no path can start a session missing one of them.
+// workspace's RECORD, as the record the bring-up started from reads: its
+// name. It is the one place a bring-up copies the record onto its source, so
+// no path can start a session missing it.
 func (src source) withRecord(record wsm.Workspace) source {
-	src.HoldKeepalive = record.KeepaliveHeld()
 	src.WorkspaceName = record.Name
 	return src
 }
@@ -2496,13 +2489,6 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		return nil, err
 	}
 	req.Profile = profile
-	// A HIDDEN WORKSPACE THE USER IS NOT LOOKING AT IS BORN HELD, so no keep-alive can fire
-	// between its start and the cache keeper's hold (cachelapse.Keeper): its
-	// cache is left to lapse from the first instant it runs.
-	if src.HoldKeepalive {
-		req.HoldKeepalive = &shimv1.StartSessionHoldKeepalive{}
-		log.Info("daemon.workspace.start_session", "the workspace is hidden and not selected; its session starts with its keep-alives held", nil)
-	}
 
 	// THE CALL IS BOUNDED. See DefaultStartSessionBound: a shim that accepts
 	// the start and never answers held this call, and the workspace's start
@@ -3436,43 +3422,7 @@ func (a *shimAdapter) ReadTranscripts(ctx context.Context) (*shimv1.ReadTranscri
 	return a.client.ReadTranscripts(ctx, &shimv1.ReadTranscriptsRequest{})
 }
 
-// Hold holds the session's keep-alive cadence (cachelapse.Keepalives).
-func (a *shimAdapter) Hold(ctx context.Context) error {
-	return a.setKeepalive(ctx, &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Hold{Hold: &shimv1.SetKeepaliveHold{}}})
-}
-
-// Run runs the session's keep-alive cadence again (cachelapse.Keepalives).
-func (a *shimAdapter) Run(ctx context.Context) error {
-	return a.setKeepalive(ctx, &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Run{Run: &shimv1.SetKeepaliveRun{}}})
-}
-
-// LastRound lets the session's cadence send its one scheduled keep-alive,
-// then hold (cachelapse.Keepalives).
-func (a *shimAdapter) LastRound(ctx context.Context) error {
-	return a.setKeepalive(ctx, &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_LastRound{LastRound: &shimv1.SetKeepaliveLastRound{}}})
-}
-
-// setKeepalive sends one SetKeepalive. The shim's one refusal, no session, is
-// cachelapse.ErrNoSession.
-func (a *shimAdapter) setKeepalive(ctx context.Context, req *shimv1.SetKeepaliveRequest) error {
-	response, err := a.client.SetKeepalive(ctx, req)
-	if err != nil {
-		return err
-	}
-	if failure := response.GetError(); failure != nil {
-		if failure.GetNoSession() != nil {
-			return cachelapse.ErrNoSession
-		}
-		return &ShimRefusal{Verb: "SetKeepalive", Arm: "unknown", Detail: "the shim refused with an arm this daemon does not name"}
-	}
-	if response.GetSuccess() == nil {
-		return fmt.Errorf("workspace: SetKeepalive answered no outcome")
-	}
-	return nil
-}
-
-// Beat asks the session for one keep-alive now, leaving its cadence as it is
-// (cachelapse.Keepalives). The shim's refusals are cachelapse.ErrNoSession and
+// Beat asks the session for one keep-alive now (cachelapse.Keepalives). The shim's refusals are cachelapse.ErrNoSession and
 // a *cachelapse.BeatSubmitFailed; its judgment is the success, whole.
 func (a *shimAdapter) Beat(ctx context.Context) (*shimv1.SendKeepaliveSuccess, error) {
 	response, err := a.client.SendKeepalive(ctx, &shimv1.SendKeepaliveRequest{})

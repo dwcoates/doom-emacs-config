@@ -1118,21 +1118,6 @@ func (s *server) Hibernate(ctx context.Context, req *connect.Request[shimv1.Hibe
 	}), nil
 }
 
-// SetKeepalive records the cadence asked for and answers success unless a
-// script says otherwise. The fake keeps no cadence: a test states the lapse a
-// held shim projects by pushing it on the session stream.
-func (s *server) SetKeepalive(ctx context.Context, req *connect.Request[shimv1.SetKeepaliveRequest]) (*connect.Response[shimv1.SetKeepaliveResponse], error) {
-	if err := s.enter(ctx, RPCSetKeepalive, req.Msg); err != nil {
-		return nil, err
-	}
-	if resp, done, err := scripted[shimv1.SetKeepaliveResponse, *shimv1.SetKeepaliveResponse](s, RPCSetKeepalive); done {
-		return resp, err
-	}
-	return connect.NewResponse(&shimv1.SetKeepaliveResponse{
-		Result: &shimv1.SetKeepaliveResponse_Success{Success: &shimv1.SetKeepaliveSuccess{}},
-	}), nil
-}
-
 // SendKeepalive records the keep-alive asked for and answers sent unless a
 // script says otherwise. The fake sends nothing: a test states the lapse the
 // keep-alive's answer would move by pushing it on the session stream.

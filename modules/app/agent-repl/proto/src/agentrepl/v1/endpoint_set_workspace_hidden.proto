@@ -7,7 +7,7 @@
 // grouping into frontend.v1.WorkspaceRoster.hidden, and the Emacs tab bar
 // stops drawing, numbering and navigating to its tab, exactly as it does for a
 // workspace whose repository section is collapsed. Its session's keep-alives
-// are HELD (shim.v1.SetKeepalive, 2026-10-13), so its prompt cache lapses on
+// are HELD (the daemon sends them no more, 2026-10-13), so its prompt cache lapses on
 // its own clock, and the hidden row counts down to that moment
 // (frontend.v1.RosterRowWhenHiddenCache). When it comes, the session is stood
 // down as the idle sweep stands one down (it sleeps, and its conversation is

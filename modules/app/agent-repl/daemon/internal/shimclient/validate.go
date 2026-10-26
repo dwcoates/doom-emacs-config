@@ -178,19 +178,6 @@ func validateHibernateRequest(req *shimv1.HibernateRequest) error {
 	return nil
 }
 
-// validateSetKeepaliveRequest is SetKeepaliveRequest's base function: the
-// cadence arm is the request, so an unset one asks for nothing.
-func validateSetKeepaliveRequest(req *shimv1.SetKeepaliveRequest) error {
-	const m = "SetKeepaliveRequest"
-	if req == nil {
-		return invalid(m, m, "request is nil")
-	}
-	if req.GetCadence() == nil {
-		return invalid(m, m+".cadence", "a keep-alive request names hold, run or a last round")
-	}
-	return nil
-}
-
 // validateSendKeepaliveRequest is SendKeepaliveRequest's base function: the
 // request is empty by design, so only its absence is refused.
 func validateSendKeepaliveRequest(req *shimv1.SendKeepaliveRequest) error {

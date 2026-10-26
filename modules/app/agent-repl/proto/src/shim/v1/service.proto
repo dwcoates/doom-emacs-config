@@ -24,7 +24,6 @@ import "shim/v1/endpoint_resolve_vendor_task.proto";
 import "shim/v1/endpoint_set_session_model.proto";
 import "shim/v1/endpoint_set_session_effort.proto";
 import "shim/v1/endpoint_set_session_permission_mode.proto";
-import "shim/v1/endpoint_set_keepalive.proto";
 import "shim/v1/endpoint_send_keepalive.proto";
 import "shim/v1/endpoint_start_session.proto";
 import "shim/v1/endpoint_start_turn.proto";
@@ -74,12 +73,10 @@ service Shim {
   // stands the shim down only after the ack. See endpoint_hibernate.proto.
   rpc Hibernate(HibernateRequest) returns (HibernateResponse);
 
-  // Hold the keep-alive cadence (the workspace is hidden, so its cache is left
-  // to lapse and the projected lapse is stated on the session stream), or run
-  // it again. See endpoint_set_keepalive.proto.
-  rpc SetKeepalive(SetKeepaliveRequest) returns (SetKeepaliveResponse);
-  // Send one keep-alive now, leaving the cadence as it is (the user keeping a
-  // hidden workspace's cache warm). See endpoint_send_keepalive.proto.
+  // Send one keep-alive now. THE DAEMON DRIVES EVERY KEEP-ALIVE through this
+  // call (2026-10-26): the shim runs no cadence of its own, and the retired
+  // SetKeepalive that held or ran one is gone. See
+  // endpoint_send_keepalive.proto.
   rpc SendKeepalive(SendKeepaliveRequest) returns (SendKeepaliveResponse);
   // Make the scheduled vendor-error retry at once (the user pressed RET in an
   // empty composer). See endpoint_retry_vendor_error_now.proto.

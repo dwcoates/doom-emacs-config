@@ -92,8 +92,6 @@ import {
   forkSessionRefused,
   hibernateAcked,
   hibernateRefused,
-  setKeepaliveApplied,
-  setKeepaliveNoSession,
   sendKeepaliveNoSession,
   sendKeepaliveSent,
   sendKeepaliveSkipped,
@@ -5739,10 +5737,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       deps.scheduler ?? REAL_SCHEDULER,
     );
     const cacheAnchor = startingCacheAnchor(facts, clearedTo, coldCompacted);
-    // A SESSION BORN HELD NEVER BEATS: the hold is taken before the start, so
-    // the start projects the lapse instead of scheduling a beat
-    // (StartSessionRequest.hold_keepalive, the workspace is hidden).
-    if (request.holdKeepalive !== undefined) cadence.hold();
+    // EVERY SESSION IS BORN HELD AND STAYS HELD (owner ruling, 2026-10-26):
+    // the daemon drives every keep-alive (shim.v1.SendKeepalive), so the
+    // cadence never schedules a beat of its own. Held, it projects the lapse
+    // the daemon times its beats and its hidden countdown from.
+    cadence.hold();
     cadence.start(cacheAnchor.anchor, cacheAnchor.reason);
     accountUsageHandle = (deps.scheduler ?? REAL_SCHEDULER).setInterval(
       () => refreshAccountUsage("interval"),
@@ -7070,36 +7069,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * a live turn would kill the turn.
    */
   /**
-   * Hold the keep-alive cadence, or run it again (shim.v1.SetKeepalive). A
-   * hold states the projected lapse on the session stream; running again
-   * withdraws it, so a WatchSession opened afterwards replays no stale lapse.
-   */
-  async function setKeepalive(request: shimv1.SetKeepaliveRequest): Promise<shimv1.SetKeepaliveResponse> {
-    if (!started || identity === undefined || cadence === undefined) {
-      LOGGER.info({ cadence: request.cadence.case }, "refused SetKeepalive: no session is open");
-      return setKeepaliveNoSession();
-    }
-    switch (request.cadence.case) {
-      case "hold":
-        cadence.hold();
-        break;
-      case "run":
-        pushes.withdraw("cacheLapse");
-        cadence.run();
-        break;
-      case "lastRound":
-        // THE HELD PROJECTION NO LONGER STANDS while the round's beat is
-        // owed; the cadence states the new one when the round is spent.
-        pushes.withdraw("cacheLapse");
-        cadence.lastRound();
-        break;
-      default:
-        throw new Error(`SetKeepalive reached the engine with no cadence arm (${String(request.cadence.case)}); validation admits none`);
-    }
-    return setKeepaliveApplied();
-  }
-
-  /**
    * Send one keep-alive now, leaving the cadence as it is
    * (shim.v1.SendKeepalive). The cadence judges first, by the guards its own
    * beat honors; the beat then answers whether it went out. Its answer
@@ -7959,7 +7928,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     setSessionEffort: afterRestart(setSessionEffort),
     setSessionPermissionMode: afterRestart(setSessionPermissionMode),
     hibernate: afterRestart(hibernate),
-    setKeepalive: afterRestart(setKeepalive),
     sendKeepalive: afterRestart(sendKeepalive),
     retryVendorErrorNow: afterRestart(retryVendorErrorNow),
     killSession: afterRestart(killSession),

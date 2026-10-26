@@ -1640,11 +1640,6 @@ func (c *client) RetryVendorErrorNow(ctx context.Context, req *shimv1.RetryVendo
 	return unary(ctx, c, "retry_vendor_error_now", req, validateRetryVendorErrorNowRequest, c.rpc.RetryVendorErrorNow)
 }
 
-// SetKeepalive holds the session's keep-alive cadence, or runs it again.
-func (c *client) SetKeepalive(ctx context.Context, req *shimv1.SetKeepaliveRequest) (*shimv1.SetKeepaliveResponse, error) {
-	return unary(ctx, c, "set_keepalive", req, validateSetKeepaliveRequest, c.rpc.SetKeepalive)
-}
-
 // KillSession ends the session, gracefully unless forced.
 //
 // The stand-down is latched BEFORE the verb goes, not after it answers: the
@@ -1825,7 +1820,7 @@ func unary[Req any, Resp any](
 		}
 		// A CALL ITS OWN CALLER ABANDONED IS NOT A FAULT (callerAbandoned).
 		// MEASURED, daemon integration run 2026-10-14: a handover's exit
-		// cancelled the cache-lapse keeper's SetKeepalive, recorded here at
+		// cancelled the cache-lapse keeper's keep-alive call, recorded here at
 		// ERROR before the keeper recorded its own leaving at INFO.
 		if c.callerAbandoned(ctx, operation, "the shim call", fields) {
 			return nil, err

@@ -2153,9 +2153,9 @@ func TestARequestItsCallerAbandonedIsRecordedAtInfo(t *testing.T) {
 		call      func(ctx context.Context, c *client) error
 	}{
 		{
-			name: "a unary call", operation: "daemon.shimclient.set_keepalive", what: "the shim call",
+			name: "a unary call", operation: "daemon.shimclient.send_keepalive", what: "the shim call",
 			call: func(ctx context.Context, c *client) error {
-				_, err := c.SetKeepalive(ctx, &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Run{Run: &shimv1.SetKeepaliveRun{}}})
+				_, err := c.SendKeepalive(ctx, &shimv1.SendKeepaliveRequest{})
 				return err
 			},
 		},

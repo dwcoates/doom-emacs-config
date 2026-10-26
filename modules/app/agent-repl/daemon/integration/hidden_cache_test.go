@@ -32,7 +32,7 @@ func hiddenRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.Roster
 	return nil
 }
 
-// cacheLapse is the projection a held shim states.
+// cacheLapse is the projection a shim states.
 func cacheLapse(at time.Time, gatedTokens uint64) *conversationv1.SessionUpdate {
 	lapse := &conversationv1.SessionCacheLapse{LapsesAtMs: at.UnixMilli()}
 	if gatedTokens > 0 {
@@ -43,29 +43,23 @@ func cacheLapse(at time.Time, gatedTokens uint64) *conversationv1.SessionUpdate 
 	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_CacheLapse{CacheLapse: lapse}}
 }
 
-// hiddenAndHeld opens a workspace, hides it, and waits for the daemon to hold
-// its shim's keep-alives.
+// hiddenAndHeld opens a workspace and hides it. The daemon drives every
+// keep-alive (2026-10-26), so a hidden workspace is simply sent none: there is
+// no cadence to wait on, and the hide is recorded before its call answers.
 func hiddenAndHeld(t *testing.T) *fixture {
 	t.Helper()
 	f := newOpened(t, harness.Opts{})
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	hide(t, f.d, f.ws)
-	held := &shimv1.SetKeepaliveRequest{}
-	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCSetKeepalive, "the keep-alives held", held, func() bool {
-		return held.GetHold() != nil
-	})
 	return f
 }
 
-func TestHidingAWorkspaceHoldsItsKeepalivesAndStandsNothingDown(t *testing.T) {
+func TestHidingAWorkspaceStandsNothingDown(t *testing.T) {
 	t.Parallel()
 	// Arrange, Act
 	f := hiddenAndHeld(t)
 
-	// Assert: the hold is recorded, and nothing was stood down for it.
-	f.d.AwaitLogRecord(f.d.RunLogPath(), "the keeper's hold", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.cachelapse.cadence" && r.Context["cadence"] == "hold"
-	})
+	// Assert
 	if n := f.d.OpenedShim(f.ws).Count(harness.RPCHibernate); n != 0 {
 		t.Fatalf("the hidden workspace was asked to hibernate %d times at the hide, want none", n)
 	}
@@ -120,9 +114,9 @@ func sendHiddenKeepalives(t *testing.T, d *harness.Daemon) *agentreplv1.SendHidd
 	return resp.Msg
 }
 
-// SPC j R: one keep-alive to every hidden workspace, each cadence left held
+// SPC j R: one keep-alive to every hidden workspace
 // (docs/protobuf-design/hidden-keepalives-on-demand.md).
-func TestSendingTheHiddenKeepalivesAsksEachHeldShimForOneAndLeavesItHeld(t *testing.T) {
+func TestSendingTheHiddenKeepalivesAsksEachHiddenShimForOne(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := hiddenAndHeld(t)
@@ -130,7 +124,7 @@ func TestSendingTheHiddenKeepalivesAsksEachHeldShimForOneAndLeavesItHeld(t *test
 	// Act
 	resp := sendHiddenKeepalives(t, f.d)
 
-	// Assert: the shim was asked once, answered sent, and its cadence is still held.
+	// Assert: the shim was asked once, and answered sent.
 	workspaces := resp.GetSuccess().GetWorkspaces()
 	if len(workspaces) != 1 || workspaces[0].GetWorkspace().GetId() != f.ws.GetId() || workspaces[0].GetSent() == nil {
 		t.Fatalf("SendHiddenKeepalives = %v, want the one hidden workspace sent", resp)
@@ -138,15 +132,6 @@ func TestSendingTheHiddenKeepalivesAsksEachHeldShimForOneAndLeavesItHeld(t *test
 	shim := f.d.OpenedShim(f.ws)
 	if n := shim.Count(harness.RPCSendKeepalive); n != 1 {
 		t.Fatalf("the shim was asked for %d keep-alives, want one", n)
-	}
-	var last any
-	for _, r := range f.d.RunLog() {
-		if r.Operation == "daemon.cachelapse.cadence" {
-			last = r.Context["cadence"]
-		}
-	}
-	if last != "hold" {
-		t.Fatalf("the shim's cadence was last set to %v, want it left held", last)
 	}
 }
 
@@ -170,12 +155,12 @@ func TestTheKeepalivesAnswerMovesTheHiddenRowsCountdown(t *testing.T) {
 }
 
 // A CLOSED WORKSPACE GETS ONE LAST KEEP-ALIVE ROUND, THEN THE COLD GATE (owner
-// request, 2026-10-17): closing leaves the session up, asks the shim for its
-// last round, and stands the session down when the lapse the shim then
+// request, 2026-10-17): closing leaves the session up, the daemon sends the
+// one beat still owed, and the session is stood down when the lapse the shim
 // projects comes, so reopening it meets the cold gate.
 
-// closedAndLastRound opens a workspace, closes it, and waits for the daemon to
-// ask its shim for the last keep-alive round.
+// closedAndLastRound opens a workspace and closes it. The close is recorded
+// before its call answers.
 func closedAndLastRound(t *testing.T) *fixture {
 	t.Helper()
 	f := newOpened(t, harness.Opts{})
@@ -183,22 +168,15 @@ func closedAndLastRound(t *testing.T) *fixture {
 	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws})); err != nil {
 		t.Fatalf("CloseWorkspace = error %v", err)
 	}
-	lastRound := &shimv1.SetKeepaliveRequest{}
-	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCSetKeepalive, "the last keep-alive round", lastRound, func() bool {
-		return lastRound.GetLastRound() != nil
-	})
 	return f
 }
 
-func TestClosingAWorkspaceAsksForItsLastKeepaliveRoundAndStandsNothingDown(t *testing.T) {
+func TestClosingAWorkspaceStandsNothingDown(t *testing.T) {
 	t.Parallel()
 	// Arrange, Act
 	f := closedAndLastRound(t)
 
-	// Assert: the round is recorded, and nothing was stood down for it.
-	f.d.AwaitLogRecord(f.d.RunLogPath(), "the keeper's last round", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.cachelapse.cadence" && r.Context["cadence"] == "last_round"
-	})
+	// Assert
 	if n := f.d.OpenedShim(f.ws).Count(harness.RPCHibernate); n != 0 {
 		t.Fatalf("the closed workspace was asked to hibernate %d times at the close, want none", n)
 	}

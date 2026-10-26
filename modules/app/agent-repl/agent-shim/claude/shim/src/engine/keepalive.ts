@@ -3,9 +3,17 @@
  * prompt.
  *
  * RESPONSIBILITY. The vendor's prompt cache lapses on a timer, and a lapsed
- * cache makes the next real turn cost full price. The shim submits its own
- * minimal turns to keep it warm — entirely shim-internal work that no consumer
- * asked for and none should see.
+ * cache makes the next real turn cost full price. The shim submits minimal
+ * turns to keep it warm — work no consumer sees.
+ *
+ * THE DAEMON DRIVES EVERY BEAT (owner ruling, 2026-10-26). A shim runs no
+ * keep-alive timer: every session is born HELD and stays held, so the cadence
+ * below only projects the lapse (conversation.v1.SessionCacheLapse) and judges
+ * a beat the daemon asks for (shim.v1.SendKeepalive) by the guards its own
+ * beat honored. The daemon times each beat from its workspace's cache clock
+ * and stands an idle shim down between beats (daemon cachelapse.Keeper). The
+ * cadence's own scheduling (`run`, `lastRound`, `schedule`) is unreachable
+ * from the engine now and is to be removed with its tests.
  *
  * THE MARKER IS THE CONTRACT (ruled 2026-08-29). Every keep-alive prompt BEGINS
  * with the literal `<!--agent-repl:keepalive-->`, mirroring the existing

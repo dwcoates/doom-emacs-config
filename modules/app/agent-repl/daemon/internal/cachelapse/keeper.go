@@ -16,10 +16,10 @@
 // does every session coming up or parking, so a session a takeover or a boot
 // adopts for one is stood down too.
 //
-// Hiding a workspace no longer stands its session down at once. Its shim's
-// keep-alives are HELD (shim.v1.SetKeepalive), so the cache lapses on its own
-// clock, and until then the user can show the workspace again with its cache
-// still warm. A held shim states the projected lapse on its session stream
+// Hiding a workspace no longer stands its session down at once. The daemon
+// sends it no more keep-alives, so the cache lapses on its own clock, and
+// until then the user can show the workspace again with its cache still
+// warm. Every shim states the projected lapse on its session stream
 // (conversation.v1.SessionCacheLapse); the Keeper records it on the workspace's
 // row, which the roster counts down to, and stands the session down when it
 // comes.

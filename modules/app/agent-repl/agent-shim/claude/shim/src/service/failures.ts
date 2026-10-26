@@ -315,25 +315,6 @@ export function hibernateRefused(cause: HibernateErrorKind): shimv1.HibernateRes
   });
 }
 
-/** SetKeepalive's refusal: no session is open, so there is no cadence to set. */
-export function setKeepaliveNoSession(): shimv1.SetKeepaliveResponse {
-  return create(shimv1.SetKeepaliveResponseSchema, {
-    result: {
-      case: "error",
-      value: create(shimv1.SetKeepaliveErrorSchema, {
-        kind: { case: "noSession", value: create(shimv1.SetKeepaliveNoSessionSchema, {}) },
-      }),
-    },
-  });
-}
-
-/** SetKeepalive applied. */
-export function setKeepaliveApplied(): shimv1.SetKeepaliveResponse {
-  return create(shimv1.SetKeepaliveResponseSchema, {
-    result: { case: "success", value: create(shimv1.SetKeepaliveSuccessSchema, {}) },
-  });
-}
-
 /** Why SendKeepalive sent no keep-alive: the shim's judgment, answered as a success. */
 export type SendKeepaliveSkipReason =
   | { readonly kind: "busy"; readonly detail: string }

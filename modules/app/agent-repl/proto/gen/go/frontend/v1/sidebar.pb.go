@@ -8837,7 +8837,7 @@ func (*RosterRowWhen_SyncMerging) isRosterRowWhen_Shown() {}
 // MILLISECONDS. Set for exactly the rows the hidden section draws.
 //
 // A HIDDEN WORKSPACE'S KEEP-ALIVES ARE HELD, so its prompt cache lapses on its
-// own clock (shim.v1.SetKeepalive, 2026-10-13). When the daemon knows that
+// own clock (the daemon sends them no more, 2026-10-13). When the daemon knows that
 // moment, `cache` carries it and the column COUNTS DOWN to it ("12m 34s"),
 // reading "cold cache" once it is reached, on a continuous green-to-red
 // gradient: green an hour or more out, the deepest red at the lapse. Unset,

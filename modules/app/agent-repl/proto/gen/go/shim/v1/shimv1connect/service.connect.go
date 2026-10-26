@@ -52,8 +52,6 @@ const (
 	ShimSetSessionPermissionModeProcedure = "/shim.v1.Shim/SetSessionPermissionMode"
 	// ShimHibernateProcedure is the fully-qualified name of the Shim's Hibernate RPC.
 	ShimHibernateProcedure = "/shim.v1.Shim/Hibernate"
-	// ShimSetKeepaliveProcedure is the fully-qualified name of the Shim's SetKeepalive RPC.
-	ShimSetKeepaliveProcedure = "/shim.v1.Shim/SetKeepalive"
 	// ShimSendKeepaliveProcedure is the fully-qualified name of the Shim's SendKeepalive RPC.
 	ShimSendKeepaliveProcedure = "/shim.v1.Shim/SendKeepalive"
 	// ShimRetryVendorErrorNowProcedure is the fully-qualified name of the Shim's RetryVendorErrorNow
@@ -109,7 +107,6 @@ var (
 	shimSetSessionEffortMethodDescriptor         = shimServiceDescriptor.Methods().ByName("SetSessionEffort")
 	shimSetSessionPermissionModeMethodDescriptor = shimServiceDescriptor.Methods().ByName("SetSessionPermissionMode")
 	shimHibernateMethodDescriptor                = shimServiceDescriptor.Methods().ByName("Hibernate")
-	shimSetKeepaliveMethodDescriptor             = shimServiceDescriptor.Methods().ByName("SetKeepalive")
 	shimSendKeepaliveMethodDescriptor            = shimServiceDescriptor.Methods().ByName("SendKeepalive")
 	shimRetryVendorErrorNowMethodDescriptor      = shimServiceDescriptor.Methods().ByName("RetryVendorErrorNow")
 	shimKillSessionMethodDescriptor              = shimServiceDescriptor.Methods().ByName("KillSession")
@@ -158,12 +155,10 @@ type ShimClient interface {
 	// The pre-hibernation directive: the shim compacts, then acks; the daemon
 	// stands the shim down only after the ack. See endpoint_hibernate.proto.
 	Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error)
-	// Hold the keep-alive cadence (the workspace is hidden, so its cache is left
-	// to lapse and the projected lapse is stated on the session stream), or run
-	// it again. See endpoint_set_keepalive.proto.
-	SetKeepalive(context.Context, *connect.Request[v1.SetKeepaliveRequest]) (*connect.Response[v1.SetKeepaliveResponse], error)
-	// Send one keep-alive now, leaving the cadence as it is (the user keeping a
-	// hidden workspace's cache warm). See endpoint_send_keepalive.proto.
+	// Send one keep-alive now. THE DAEMON DRIVES EVERY KEEP-ALIVE through this
+	// call (2026-10-26): the shim runs no cadence of its own, and the retired
+	// SetKeepalive that held or ran one is gone. See
+	// endpoint_send_keepalive.proto.
 	SendKeepalive(context.Context, *connect.Request[v1.SendKeepaliveRequest]) (*connect.Response[v1.SendKeepaliveResponse], error)
 	// Make the scheduled vendor-error retry at once (the user pressed RET in an
 	// empty composer). See endpoint_retry_vendor_error_now.proto.
@@ -280,12 +275,6 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			httpClient,
 			baseURL+ShimHibernateProcedure,
 			connect.WithSchema(shimHibernateMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
-		setKeepalive: connect.NewClient[v1.SetKeepaliveRequest, v1.SetKeepaliveResponse](
-			httpClient,
-			baseURL+ShimSetKeepaliveProcedure,
-			connect.WithSchema(shimSetKeepaliveMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		sendKeepalive: connect.NewClient[v1.SendKeepaliveRequest, v1.SendKeepaliveResponse](
@@ -425,7 +414,6 @@ type shimClient struct {
 	setSessionEffort         *connect.Client[v1.SetSessionEffortRequest, v1.SetSessionEffortResponse]
 	setSessionPermissionMode *connect.Client[v1.SetSessionPermissionModeRequest, v1.SetSessionPermissionModeResponse]
 	hibernate                *connect.Client[v1.HibernateRequest, v1.HibernateResponse]
-	setKeepalive             *connect.Client[v1.SetKeepaliveRequest, v1.SetKeepaliveResponse]
 	sendKeepalive            *connect.Client[v1.SendKeepaliveRequest, v1.SendKeepaliveResponse]
 	retryVendorErrorNow      *connect.Client[v1.RetryVendorErrorNowRequest, v1.RetryVendorErrorNowResponse]
 	killSession              *connect.Client[v1.KillSessionRequest, v1.KillSessionResponse]
@@ -477,11 +465,6 @@ func (c *shimClient) SetSessionPermissionMode(ctx context.Context, req *connect.
 // Hibernate calls shim.v1.Shim.Hibernate.
 func (c *shimClient) Hibernate(ctx context.Context, req *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error) {
 	return c.hibernate.CallUnary(ctx, req)
-}
-
-// SetKeepalive calls shim.v1.Shim.SetKeepalive.
-func (c *shimClient) SetKeepalive(ctx context.Context, req *connect.Request[v1.SetKeepaliveRequest]) (*connect.Response[v1.SetKeepaliveResponse], error) {
-	return c.setKeepalive.CallUnary(ctx, req)
 }
 
 // SendKeepalive calls shim.v1.Shim.SendKeepalive.
@@ -614,12 +597,10 @@ type ShimHandler interface {
 	// The pre-hibernation directive: the shim compacts, then acks; the daemon
 	// stands the shim down only after the ack. See endpoint_hibernate.proto.
 	Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error)
-	// Hold the keep-alive cadence (the workspace is hidden, so its cache is left
-	// to lapse and the projected lapse is stated on the session stream), or run
-	// it again. See endpoint_set_keepalive.proto.
-	SetKeepalive(context.Context, *connect.Request[v1.SetKeepaliveRequest]) (*connect.Response[v1.SetKeepaliveResponse], error)
-	// Send one keep-alive now, leaving the cadence as it is (the user keeping a
-	// hidden workspace's cache warm). See endpoint_send_keepalive.proto.
+	// Send one keep-alive now. THE DAEMON DRIVES EVERY KEEP-ALIVE through this
+	// call (2026-10-26): the shim runs no cadence of its own, and the retired
+	// SetKeepalive that held or ran one is gone. See
+	// endpoint_send_keepalive.proto.
 	SendKeepalive(context.Context, *connect.Request[v1.SendKeepaliveRequest]) (*connect.Response[v1.SendKeepaliveResponse], error)
 	// Make the scheduled vendor-error retry at once (the user pressed RET in an
 	// empty composer). See endpoint_retry_vendor_error_now.proto.
@@ -732,12 +713,6 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		ShimHibernateProcedure,
 		svc.Hibernate,
 		connect.WithSchema(shimHibernateMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
-	shimSetKeepaliveHandler := connect.NewUnaryHandler(
-		ShimSetKeepaliveProcedure,
-		svc.SetKeepalive,
-		connect.WithSchema(shimSetKeepaliveMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	shimSendKeepaliveHandler := connect.NewUnaryHandler(
@@ -880,8 +855,6 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimSetSessionPermissionModeHandler.ServeHTTP(w, r)
 		case ShimHibernateProcedure:
 			shimHibernateHandler.ServeHTTP(w, r)
-		case ShimSetKeepaliveProcedure:
-			shimSetKeepaliveHandler.ServeHTTP(w, r)
 		case ShimSendKeepaliveProcedure:
 			shimSendKeepaliveHandler.ServeHTTP(w, r)
 		case ShimRetryVendorErrorNowProcedure:
@@ -955,10 +928,6 @@ func (UnimplementedShimHandler) SetSessionPermissionMode(context.Context, *conne
 
 func (UnimplementedShimHandler) Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.Hibernate is not implemented"))
-}
-
-func (UnimplementedShimHandler) SetKeepalive(context.Context, *connect.Request[v1.SetKeepaliveRequest]) (*connect.Response[v1.SetKeepaliveResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SetKeepalive is not implemented"))
 }
 
 func (UnimplementedShimHandler) SendKeepalive(context.Context, *connect.Request[v1.SendKeepaliveRequest]) (*connect.Response[v1.SendKeepaliveResponse], error) {

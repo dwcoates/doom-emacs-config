@@ -152,11 +152,8 @@ type Client interface {
 	// Hibernate stands the session down for the idle sweep. It is NOT used by
 	// the relaunch engine, which kills gracefully instead.
 	Hibernate(ctx context.Context, req *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error)
-	// SetKeepalive holds the session's keep-alive cadence (its workspace is
-	// hidden, so its cache is left to lapse) or runs it again.
-	SetKeepalive(ctx context.Context, req *shimv1.SetKeepaliveRequest) (*shimv1.SetKeepaliveResponse, error)
-	// SendKeepalive asks the session for one keep-alive now, leaving its
-	// cadence as it is (the user keeping a hidden workspace's cache warm).
+	// SendKeepalive asks the session for one keep-alive now. The daemon drives
+	// every keep-alive through it; the shim runs no cadence of its own.
 	SendKeepalive(ctx context.Context, req *shimv1.SendKeepaliveRequest) (*shimv1.SendKeepaliveResponse, error)
 	// RetryVendorErrorNow asks the session for its scheduled vendor-error
 	// retry at once (the user pressed RET in an empty composer).

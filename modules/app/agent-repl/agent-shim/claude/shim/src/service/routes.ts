@@ -29,7 +29,6 @@ import {
   validateGatherTitleDigestRequest,
   validateGetForkPointRequest,
   validateHibernateRequest,
-  validateSetKeepaliveRequest,
   validateRetryVendorErrorNowRequest,
   validateSendKeepaliveRequest,
   validateKillSessionRequest,
@@ -213,12 +212,6 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("Hibernate");
         validateHibernateRequest(request);
         return answering("Hibernate", () => engine.hibernate(request));
-      },
-
-      async setKeepalive(request) {
-        entered("SetKeepalive");
-        validateSetKeepaliveRequest(request);
-        return answering("SetKeepalive", () => engine.setKeepalive(request));
       },
 
       async sendKeepalive(request) {

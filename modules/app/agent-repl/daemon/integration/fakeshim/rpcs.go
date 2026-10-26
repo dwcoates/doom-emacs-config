@@ -16,7 +16,6 @@ const (
 	RPCSetSessionPermissionMode = "SetSessionPermissionMode"
 	RPCSetSessionEffort         = "SetSessionEffort"
 	RPCHibernate                = "Hibernate"
-	RPCSetKeepalive             = "SetKeepalive"
 	RPCSendKeepalive            = "SendKeepalive"
 	RPCRetryVendorErrorNow      = "RetryVendorErrorNow"
 	RPCKillSession              = "KillSession"
@@ -51,8 +50,6 @@ func newResponse(rpc string) proto.Message {
 		return &shimv1.SetSessionEffortResponse{}
 	case RPCHibernate:
 		return &shimv1.HibernateResponse{}
-	case RPCSetKeepalive:
-		return &shimv1.SetKeepaliveResponse{}
 	case RPCSendKeepalive:
 		return &shimv1.SendKeepaliveResponse{}
 	case RPCRetryVendorErrorNow:

@@ -168,15 +168,6 @@ export function validateSendKeepaliveRequest(_request: shimv1.SendKeepaliveReque
   // No fields. Nothing to refuse.
 }
 
-/** `shim.v1.SetKeepaliveRequest` — hold, run or a last round, never none. */
-export function validateSetKeepaliveRequest(request: shimv1.SetKeepaliveRequest): void {
-  try {
-    if (request.cadence.case === undefined) throw unsetOneof("set_keepalive.cadence");
-  } catch (err) {
-    refuse("SetKeepalive", err);
-  }
-}
-
 /** `shim.v1.KillSessionRequest` — `force` is a primitive with a legal false. */
 export function validateKillSessionRequest(_request: shimv1.KillSessionRequest): void {
   // `force` is a bool: false is a legitimate value, not an absence.

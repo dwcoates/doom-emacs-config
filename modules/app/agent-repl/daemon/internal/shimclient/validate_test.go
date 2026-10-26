@@ -512,37 +512,6 @@ func TestValidateSetSessionPermissionModeRequest(t *testing.T) {
 	assertInvalidField(t, err, "SetSessionPermissionModeRequest.permission_mode")
 }
 
-// TestValidateSetKeepaliveRequest asserts a keep-alive request names hold or
-// run, and is sent when it does.
-func TestValidateSetKeepaliveRequest(t *testing.T) {
-	tests := []struct {
-		name    string
-		req     *shimv1.SetKeepaliveRequest
-		invalid string
-	}{
-		{"nil", nil, "SetKeepaliveRequest"},
-		{"no cadence", &shimv1.SetKeepaliveRequest{}, "SetKeepaliveRequest.cadence"},
-		{"hold", &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Hold{Hold: &shimv1.SetKeepaliveHold{}}}, ""},
-		{"run", &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_Run{Run: &shimv1.SetKeepaliveRun{}}}, ""},
-		{"last round", &shimv1.SetKeepaliveRequest{Cadence: &shimv1.SetKeepaliveRequest_LastRound{LastRound: &shimv1.SetKeepaliveLastRound{}}}, ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act.
-			err := validateSetKeepaliveRequest(tt.req)
-
-			// Assert.
-			if tt.invalid == "" {
-				if err != nil {
-					t.Fatalf("validateSetKeepaliveRequest = %v, want nil", err)
-				}
-				return
-			}
-			assertInvalidField(t, err, tt.invalid)
-		})
-	}
-}
-
 // TestValidateSendKeepaliveRequest asserts the empty keep-alive request is
 // sent, and only its absence refused.
 func TestValidateSendKeepaliveRequest(t *testing.T) {

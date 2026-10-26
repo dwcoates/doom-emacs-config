@@ -42,10 +42,6 @@ import (
 // fakeClient is a shimclient.Client whose StartSession answer the test
 // arranges.
 type fakeClient struct {
-	// keepalives is every SetKeepalive the daemon sent, in order, answered
-	// with keepaliveErr when it is set.
-	keepalives   []*shimv1.SetKeepaliveRequest
-	keepaliveErr error
 	// retryNowAsks counts every RetryVendorErrorNow, answered with
 	// retryNowResponse and retryNowErr.
 	retryNowAsks     int
@@ -290,14 +286,6 @@ func (c *fakeClient) KillSession(context.Context, *shimv1.KillSessionRequest) (*
 
 func (c *fakeClient) Hibernate(context.Context, *shimv1.HibernateRequest) (*shimv1.HibernateResponse, error) {
 	return &shimv1.HibernateResponse{}, nil
-}
-
-func (c *fakeClient) SetKeepalive(_ context.Context, req *shimv1.SetKeepaliveRequest) (*shimv1.SetKeepaliveResponse, error) {
-	c.keepalives = append(c.keepalives, req)
-	if c.keepaliveErr != nil {
-		return nil, c.keepaliveErr
-	}
-	return &shimv1.SetKeepaliveResponse{Result: &shimv1.SetKeepaliveResponse_Success{Success: &shimv1.SetKeepaliveSuccess{}}}, nil
 }
 
 // RetryVendorErrorNow counts the ask and answers the scripted outcome.
@@ -3881,25 +3869,13 @@ func TestStartTimesEachStepOfTheSessionsStart(t *testing.T) {
 	}
 }
 
-func TestWithRecordTakesTheRecordsFacts(t *testing.T) {
-	tests := []struct {
-		name   string
-		record wsm.Workspace
-		want   bool
-	}{
-		{name: "a shown workspace runs its keep-alives", record: wsm.Workspace{ID: "w1", Name: "parser-fix"}, want: false},
-		{name: "a hidden workspace not selected holds them", record: wsm.Workspace{ID: "w1", Name: "parser-fix", Hidden: true}, want: true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act.
-			got := source{VendorSessionID: "vendor-1"}.withRecord(tc.record)
+func TestWithRecordTakesTheRecordsName(t *testing.T) {
+	// Act.
+	got := source{VendorSessionID: "vendor-1"}.withRecord(wsm.Workspace{ID: "w1", Name: "parser-fix", Hidden: true})
 
-			// Assert.
-			if got.HoldKeepalive != tc.want || got.WorkspaceName != "parser-fix" || got.VendorSessionID != "vendor-1" {
-				t.Fatalf("withRecord = %+v, want HoldKeepalive %v, the record's name, and the source otherwise as it was", got, tc.want)
-			}
-		})
+	// Assert.
+	if got.WorkspaceName != "parser-fix" || got.VendorSessionID != "vendor-1" {
+		t.Fatalf("withRecord = %+v, want the record's name and the source otherwise as it was", got)
 	}
 }
 
