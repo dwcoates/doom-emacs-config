@@ -138,19 +138,11 @@ func (r *resolver) restoreSignedIn(s *wsState) {
 	if r.deps.SignedIn == nil {
 		return
 	}
-	turns, err := r.deps.SignedIn.SignedInTurns(context.Background(), s.id)
-	if err != nil {
-		r.logger(s.id).Error(opSignedInRestore,
-			"the workspace's sign-in-answered turns could not be loaded; their failures may be drawn again",
-			dlog.Context{"error": err.Error()})
-		r.raiseWarning(s, opSignedInRestore, "answered sign-in failures could not be loaded and may be drawn again")
-		return
-	}
-	for _, turn := range turns {
-		s.signedIn[turn] = true
-	}
-	if len(turns) > 0 {
-		r.logger(s.id).Info(opSignedInRestore, "the workspace's sign-in-answered turns were loaded; their failures are not drawn",
-			dlog.Context{"turns": len(turns)})
-	}
+	r.restoreTurnSet(s, turnSetRestore{
+		op:      opSignedInRestore,
+		load:    r.deps.SignedIn.SignedInTurns,
+		failed:  "the workspace's sign-in-answered turns could not be loaded; their failures may be drawn again",
+		warning: "answered sign-in failures could not be loaded and may be drawn again",
+		loaded:  "the workspace's sign-in-answered turns were loaded; their failures are not drawn",
+	}, s.signedIn)
 }

@@ -469,21 +469,13 @@ func (r *resolver) restoreRolledBack(s *wsState) {
 	if r.deps.RolledBack == nil {
 		return
 	}
-	turns, err := r.deps.RolledBack.RolledBackTurns(context.Background(), s.id)
-	if err != nil {
-		r.logger(s.id).Error(opRollbackRestore,
-			"the workspace's rolled-back turns could not be loaded; their rows may be drawn again",
-			dlog.Context{"error": err.Error()})
-		r.raiseWarning(s, opRollbackRestore, "rolled-back prompts could not be loaded and may be drawn again")
-		return
-	}
-	for _, turn := range turns {
-		s.rolledBack[turn] = true
-	}
-	if len(turns) > 0 {
-		r.logger(s.id).Info(opRollbackRestore, "the workspace's rolled-back turns were loaded; their rows are not drawn",
-			dlog.Context{"turns": len(turns)})
-	}
+	r.restoreTurnSet(s, turnSetRestore{
+		op:      opRollbackRestore,
+		load:    r.deps.RolledBack.RolledBackTurns,
+		failed:  "the workspace's rolled-back turns could not be loaded; their rows may be drawn again",
+		warning: "rolled-back prompts could not be loaded and may be drawn again",
+		loaded:  "the workspace's rolled-back turns were loaded; their rows are not drawn",
+	}, s.rolledBack)
 }
 
 // LiveDetachedIn answers how many detached subagents and shells drawn in
