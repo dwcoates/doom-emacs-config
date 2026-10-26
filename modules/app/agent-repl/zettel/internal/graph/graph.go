@@ -50,12 +50,14 @@ type Node struct {
 	ID     NodeID
 	Thread ThreadID
 	// Turn is the daemon turn the node is: recording is idempotent by it.
-	Turn      string
-	Parent    Parent
-	Question  string
-	Answer    Revision
-	CreatedAt time.Time
-	Sightings uint64
+	Turn     string
+	Parent   Parent
+	Question string
+	// Abbreviation is the question in a few words; nil until one is set.
+	Abbreviation *string
+	Answer       Revision
+	CreatedAt    time.Time
+	Sightings    uint64
 }
 
 // Refusals: requests the graph turns down without writing anything.
@@ -84,11 +86,12 @@ func randomID() string {
 }
 
 // RecordExchange records one answered question as a node whose first revision
-// is the answer. IDEMPOTENT BY TURN: a turn already recorded answers its node
-// unchanged, whatever the call carries, so learning one turn's answer twice
-// (live, then on a replay) is one node. The bool reports whether this call
-// created the node.
-func (db *DB) RecordExchange(ctx context.Context, thread ThreadID, turn, question string, parent Parent, markdown string) (Node, bool, error) {
+// is the answer, and ABBREVIATION its question's abbreviation when one was
+// already minted (nil otherwise). IDEMPOTENT BY TURN: a turn already recorded
+// answers its node unchanged, whatever the call carries, so learning one
+// turn's answer twice (live, then on a replay) is one node. The bool reports
+// whether this call created the node.
+func (db *DB) RecordExchange(ctx context.Context, thread ThreadID, turn, question string, abbreviation *string, parent Parent, markdown string) (Node, bool, error) {
 	log := db.log.With(zlog.Context{"thread": string(thread), "turn": turn})
 	var node Node
 	created := false
@@ -115,13 +118,13 @@ func (db *DB) RecordExchange(ctx context.Context, thread ThreadID, turn, questio
 		now := db.now()
 		node = Node{
 			ID: NodeID(db.newID()), Thread: thread, Turn: turn, Parent: parent, Question: question,
-			Answer: Revision{Number: 1, Markdown: markdown, WrittenAt: now}, CreatedAt: now,
+			Abbreviation: abbreviation, Answer: Revision{Number: 1, Markdown: markdown, WrittenAt: now}, CreatedAt: now,
 		}
 		pn, pr, qt, qc := parentColumns(parent)
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO node (id, thread_id, turn_id, parent_node_id, parent_revision, quote_text, quote_context, question, created_at_ms)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			string(node.ID), string(thread), turn, pn, pr, qt, qc, question, now.UnixMilli()); err != nil {
+			INSERT INTO node (id, thread_id, turn_id, parent_node_id, parent_revision, quote_text, quote_context, question, question_abbreviation, created_at_ms)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			string(node.ID), string(thread), turn, pn, pr, qt, qc, question, abbreviation, now.UnixMilli()); err != nil {
 			return storagef(err, "inserting the node")
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO revision (node_id, number, markdown, written_at_ms) VALUES (?, 1, ?, ?)`,
@@ -193,10 +196,41 @@ func (db *DB) RecordSightings(ctx context.Context, nodes []NodeID) error {
 	})
 }
 
+// SetQuestionAbbreviation sets NODE's question abbreviation, replacing any it
+// held, and answers the node as it now stands. An unknown node is an
+// *UnknownNodeError and changes nothing.
+func (db *DB) SetQuestionAbbreviation(ctx context.Context, id NodeID, abbreviation string) (Node, error) {
+	log := db.log.With(zlog.Context{"node": string(id)})
+	var node Node
+	err := db.inWrite(ctx, log, "zettel.abbreviation.set", func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE node SET question_abbreviation = ? WHERE id = ?`, abbreviation, string(id))
+		if err != nil {
+			return storagef(err, "setting the question abbreviation")
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return storagef(err, "confirming the question abbreviation")
+		}
+		if n == 0 {
+			return &UnknownNodeError{Node: id}
+		}
+		node, err = scanNodeRow(tx.QueryRowContext(ctx, nodeSelect+` WHERE node.id = ?`, string(id)))
+		if err != nil {
+			return storagef(err, "reading the abbreviated node")
+		}
+		return nil
+	})
+	if err != nil {
+		return Node{}, err
+	}
+	log.Info("zettel.abbreviation.set", "a node's question was abbreviated", zlog.Context{"abbreviation": abbreviation})
+	return node, nil
+}
+
 // nodeSelect reads a node with its newest revision.
 const nodeSelect = `
 		SELECT node.id, node.thread_id, node.turn_id, node.parent_node_id, node.parent_revision, node.quote_text, node.quote_context,
-		       node.question, node.created_at_ms, node.sightings, revision.number, revision.markdown, revision.written_at_ms
+		       node.question, node.question_abbreviation, node.created_at_ms, node.sightings, revision.number, revision.markdown, revision.written_at_ms
 		  FROM node
 		  JOIN revision ON revision.node_id = node.id
 		   AND revision.number = (SELECT MAX(number) FROM revision r WHERE r.node_id = node.id)`
@@ -220,14 +254,18 @@ type scanner interface{ Scan(...any) error }
 
 func scanNodeRow(s scanner) (Node, error) {
 	var n Node
-	var parentNode, quoteText, quoteContext sql.NullString
+	var parentNode, quoteText, quoteContext, abbreviation sql.NullString
 	var parentRevision sql.NullInt64
 	var created, written int64
 	if err := s.Scan(&n.ID, &n.Thread, &n.Turn, &parentNode, &parentRevision, &quoteText, &quoteContext,
-		&n.Question, &created, &n.Sightings, &n.Answer.Number, &n.Answer.Markdown, &written); err != nil {
+		&n.Question, &abbreviation, &created, &n.Sightings, &n.Answer.Number, &n.Answer.Markdown, &written); err != nil {
 		return Node{}, err
 	}
 	n.Parent = parentFromColumns(parentNode, parentRevision, quoteText, quoteContext)
+	if abbreviation.Valid {
+		a := abbreviation.String
+		n.Abbreviation = &a
+	}
 	n.CreatedAt = time.UnixMilli(created)
 	n.Answer.WrittenAt = time.UnixMilli(written)
 	return n, nil

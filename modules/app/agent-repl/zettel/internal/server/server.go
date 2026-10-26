@@ -94,6 +94,9 @@ func (s *Server) RecordExchange(ctx context.Context, req *connect.Request[zettel
 	if blank(m.GetQuestion().GetText()) {
 		return invalid("question")
 	}
+	if a := m.GetQuestion().Abbreviation; a != nil && blank(*a) {
+		return invalid("question.abbreviation")
+	}
 	if blank(m.GetAnswerMarkdown()) {
 		return invalid("answer_markdown")
 	}
@@ -101,7 +104,7 @@ func (s *Server) RecordExchange(ctx context.Context, req *connect.Request[zettel
 	if !ok {
 		return invalid(field)
 	}
-	node, created, err := s.graph.RecordExchange(ctx, thread, m.GetTurn().GetTurnId(), m.GetQuestion().GetText(), parent, m.GetAnswerMarkdown())
+	node, created, err := s.graph.RecordExchange(ctx, thread, m.GetTurn().GetTurnId(), m.GetQuestion().GetText(), m.GetQuestion().Abbreviation, parent, m.GetAnswerMarkdown())
 	switch {
 	case err == nil:
 		s.log.Debug(op, "served", zlog.Context{"thread": string(thread), "node": string(node.ID), "created": created})
@@ -234,6 +237,50 @@ func (s *Server) RecordSightings(ctx context.Context, req *connect.Request[zette
 	case errors.As(err, &unknown):
 		s.refused(op, "unknown_node", string(unknown.Node))
 		return fail(err.Error(), &zettelv1.RecordSightingsUnknownNode{Node: &zettelv1.NodeId{Id: string(unknown.Node)}}), nil
+	default:
+		return fail(err.Error(), nil), nil
+	}
+}
+
+// ---- Abbreviations ----
+
+// SetQuestionAbbreviation sets one node's question abbreviation.
+func (s *Server) SetQuestionAbbreviation(ctx context.Context, req *connect.Request[zettelv1.SetQuestionAbbreviationRequest]) (*connect.Response[zettelv1.SetQuestionAbbreviationResponse], error) {
+	const op = "zettel.rpc.set_question_abbreviation"
+	fail := func(detail string, kind any) *connect.Response[zettelv1.SetQuestionAbbreviationResponse] {
+		f := &zettelv1.SetQuestionAbbreviationFailure{Detail: detail}
+		switch k := kind.(type) {
+		case *zettelv1.SetQuestionAbbreviationInvalidRequest:
+			f.Kind = &zettelv1.SetQuestionAbbreviationFailure_InvalidRequest{InvalidRequest: k}
+		case *zettelv1.SetQuestionAbbreviationUnknownNode:
+			f.Kind = &zettelv1.SetQuestionAbbreviationFailure_UnknownNode{UnknownNode: k}
+		default:
+			f.Kind = &zettelv1.SetQuestionAbbreviationFailure_StorageFailure{StorageFailure: &zettelv1.SetQuestionAbbreviationStorageFailure{}}
+		}
+		return connect.NewResponse(&zettelv1.SetQuestionAbbreviationResponse{Result: &zettelv1.SetQuestionAbbreviationResponse_Failure{Failure: f}})
+	}
+	invalid := func(field string) (*connect.Response[zettelv1.SetQuestionAbbreviationResponse], error) {
+		s.refused(op, "invalid_request", field)
+		return fail("missing or empty field "+field, &zettelv1.SetQuestionAbbreviationInvalidRequest{Field: field}), nil
+	}
+	m := req.Msg
+	if blank(m.GetNode().GetId()) {
+		return invalid("node")
+	}
+	if blank(m.GetAbbreviation()) {
+		return invalid("abbreviation")
+	}
+	node, err := s.graph.SetQuestionAbbreviation(ctx, graph.NodeID(m.GetNode().GetId()), m.GetAbbreviation())
+	var unknown *graph.UnknownNodeError
+	switch {
+	case err == nil:
+		s.log.Debug(op, "served", zlog.Context{"node": string(node.ID)})
+		return connect.NewResponse(&zettelv1.SetQuestionAbbreviationResponse{Result: &zettelv1.SetQuestionAbbreviationResponse_Success{
+			Success: &zettelv1.SetQuestionAbbreviationSuccess{Node: NodeToProto(node)},
+		}}), nil
+	case errors.As(err, &unknown):
+		s.refused(op, "unknown_node", string(unknown.Node))
+		return fail(err.Error(), &zettelv1.SetQuestionAbbreviationUnknownNode{Node: &zettelv1.NodeId{Id: string(unknown.Node)}}), nil
 	default:
 		return fail(err.Error(), nil), nil
 	}

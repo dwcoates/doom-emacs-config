@@ -354,3 +354,105 @@ func TestSearchAndDeleteAnswerTheStorageArm(t *testing.T) {
 		t.Errorf("delete = %v, err = %v, want the storage arm", del.Msg, derr)
 	}
 }
+
+func TestSetQuestionAbbreviationArms(t *testing.T) {
+	cases := []struct {
+		name string
+		req  func(known string) *zettelv1.SetQuestionAbbreviationRequest
+		want func(*zettelv1.SetQuestionAbbreviationResponse) bool
+	}{
+		{"no node", func(string) *zettelv1.SetQuestionAbbreviationRequest {
+			return &zettelv1.SetQuestionAbbreviationRequest{Abbreviation: "x"}
+		}, func(r *zettelv1.SetQuestionAbbreviationResponse) bool {
+			return r.GetFailure().GetInvalidRequest().GetField() == "node"
+		}},
+		{"a blank abbreviation", func(known string) *zettelv1.SetQuestionAbbreviationRequest {
+			return &zettelv1.SetQuestionAbbreviationRequest{Node: &zettelv1.NodeId{Id: known}, Abbreviation: " "}
+		}, func(r *zettelv1.SetQuestionAbbreviationResponse) bool {
+			return r.GetFailure().GetInvalidRequest().GetField() == "abbreviation"
+		}},
+		{"an unknown node", func(string) *zettelv1.SetQuestionAbbreviationRequest {
+			return &zettelv1.SetQuestionAbbreviationRequest{Node: &zettelv1.NodeId{Id: "nope"}, Abbreviation: "x"}
+		}, func(r *zettelv1.SetQuestionAbbreviationResponse) bool {
+			return r.GetFailure().GetUnknownNode().GetNode().GetId() == "nope"
+		}},
+		{"a known node", func(known string) *zettelv1.SetQuestionAbbreviationRequest {
+			return &zettelv1.SetQuestionAbbreviationRequest{Node: &zettelv1.NodeId{Id: known}, Abbreviation: "Short"}
+		}, func(r *zettelv1.SetQuestionAbbreviationResponse) bool {
+			return r.GetSuccess().GetNode().GetQuestion().GetAbbreviation() == "Short"
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			known := f.answered(t, "t", "turn", threadStart()).GetId().GetId()
+
+			// Act
+			resp, err := f.srv.SetQuestionAbbreviation(ctx(), connect.NewRequest(tc.req(known)))
+
+			// Assert
+			if err != nil || !tc.want(resp.Msg) {
+				t.Errorf("response = %v, err = %v", resp.Msg, err)
+			}
+		})
+	}
+}
+
+func TestSetQuestionAbbreviationAnswersTheStorageArm(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	known := f.answered(t, "t", "turn", threadStart()).GetId().GetId()
+	if err := f.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	resp, err := f.srv.SetQuestionAbbreviation(ctx(), connect.NewRequest(&zettelv1.SetQuestionAbbreviationRequest{Node: &zettelv1.NodeId{Id: known}, Abbreviation: "x"}))
+
+	// Assert
+	if err != nil || resp.Msg.GetFailure().GetStorageFailure() == nil {
+		t.Fatalf("response = %v, err = %v, want the storage arm", resp.Msg, err)
+	}
+}
+
+func TestRecordExchangeCarriesTheQuestionAbbreviation(t *testing.T) {
+	cases := []struct {
+		name         string
+		abbreviation *string
+		wantField    string
+		want         *string
+	}{
+		{name: "one set rides the node", abbreviation: ptr("Short"), want: ptr("Short")},
+		{name: "none leaves the node without one"},
+		{name: "a blank one is refused", abbreviation: ptr(" "), wantField: "question.abbreviation"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			req := record("t", "turn", "q", threadStart())
+			req.Msg.Question.Abbreviation = tc.abbreviation
+
+			// Act
+			resp, err := f.srv.RecordExchange(ctx(), req)
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantField != "" {
+				if resp.Msg.GetFailure().GetInvalidRequest().GetField() != tc.wantField {
+					t.Fatalf("response = %v, want field %q refused", resp.Msg, tc.wantField)
+				}
+				return
+			}
+			got := resp.Msg.GetSuccess().GetNode().GetQuestion().Abbreviation
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Fatalf("abbreviation = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }

@@ -65,7 +65,7 @@ func NodeToProto(n graph.Node) *zettelv1.Node {
 		Id:       &zettelv1.NodeId{Id: string(n.ID)},
 		Thread:   &zettelv1.ThreadId{Id: string(n.Thread)},
 		Parent:   ParentToProto(n.Parent),
-		Question: &zettelv1.NodeQuestion{Text: n.Question},
+		Question: &zettelv1.NodeQuestion{Text: n.Question, Abbreviation: n.Abbreviation},
 		Answer: &zettelv1.NodeRevision{
 			Number:      &zettelv1.RevisionNumber{Number: n.Answer.Number},
 			Markdown:    n.Answer.Markdown,
