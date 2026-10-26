@@ -52,7 +52,7 @@ func mustSubsection(t *testing.T, s *store, repo RepoID, name string) Subsection
 // mustPlace puts WS into INTO at AT.
 func mustPlace(t *testing.T, s *store, ws WorkspaceID, into *SubsectionID, at Anchor) {
 	t.Helper()
-	if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws}, into, at); err != nil {
+	if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws}, into, at, ClearOneShotMarks); err != nil {
 		t.Fatalf("PlaceWorkspace(%s): %v", ws, err)
 	}
 }
@@ -571,7 +571,7 @@ func TestPlaceWorkspaceIntoAnEmptySubsectionPutsItLast(t *testing.T) {
 	later := mustSubsection(t, s, first.Repo, "later")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{first.ID}, &later.ID, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{first.ID}, &later.ID, AtEnd{}, ClearOneShotMarks)
 
 	// Assert
 	if err != nil {
@@ -615,7 +615,7 @@ func TestPlaceWorkspaceBeforeAnAnchor(t *testing.T) {
 			}
 
 			// Act
-			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{byName[tt.move]}, nil, wsAnchor(before))
+			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{byName[tt.move]}, nil, wsAnchor(before), ClearOneShotMarks)
 
 			// Assert
 			if err != nil {
@@ -664,7 +664,7 @@ func TestPlacingAChildMovesItsWholeFamily(t *testing.T) {
 	later := mustSubsection(t, s, parent.Repo, "later")
 
 	// Act -- the grandchild dragged into later.
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{grandchild.ID}, &later.ID, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{grandchild.ID}, &later.ID, AtEnd{}, ClearOneShotMarks)
 
 	// Assert
 	if err != nil {
@@ -689,7 +689,7 @@ func TestPlacingTwoMembersOfOneFamilyPlacesItOnce(t *testing.T) {
 	later := mustSubsection(t, s, parent.Repo, "later")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{child.ID, parent.ID}, &later.ID, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{child.ID, parent.ID}, &later.ID, AtEnd{}, ClearOneShotMarks)
 
 	// Assert
 	if err != nil {
@@ -822,7 +822,7 @@ func TestPlaceWorkspaceRefusals(t *testing.T) {
 			order := orderedNames(t, s)
 
 			// Act
-			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{tt.ws(w)}, tt.into(w), wsAnchor(tt.before(w)))
+			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{tt.ws(w)}, tt.into(w), wsAnchor(tt.before(w)), ClearOneShotMarks)
 
 			// Assert
 			if !errors.Is(err, tt.want) {
@@ -846,7 +846,7 @@ func TestPlaceWorkspaceRecordsARefusal(t *testing.T) {
 	foreign := mustSubsection(t, s, other.Repo, "foreign")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws.ID}, &foreign.ID, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws.ID}, &foreign.ID, AtEnd{}, ClearOneShotMarks)
 
 	// Assert
 	if !errors.Is(err, ErrOtherRepository) {
@@ -1082,7 +1082,7 @@ func TestPlaceWorkspacesFilesSeveralAsOneBlockInTheirOrder(t *testing.T) {
 	later := mustSubsection(t, s, a.Repo, "later")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{c.ID, a.ID, b.ID}, &later.ID, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{c.ID, a.ID, b.ID}, &later.ID, AtEnd{}, ClearOneShotMarks)
 
 	// Assert
 	if err != nil {
@@ -1111,7 +1111,7 @@ func TestPlaceWorkspacesIsAppliedWholeOrNotAtAll(t *testing.T) {
 	later := mustSubsection(t, s, root.Repo, "later")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{root.ID, "absent"}, &later.ID, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{root.ID, "absent"}, &later.ID, AtEnd{}, ClearOneShotMarks)
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
@@ -1129,7 +1129,7 @@ func TestPlaceWorkspacesRefusesWorkspacesOfTwoRepositories(t *testing.T) {
 	b := registerIn(t, s, arrangeRepo(t, "two"), "b", nil)
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{a.ID, b.ID}, nil, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{a.ID, b.ID}, nil, AtEnd{}, ClearOneShotMarks)
 
 	// Assert
 	if !errors.Is(err, ErrOtherRepository) {
@@ -1153,7 +1153,7 @@ func TestPlaceWorkspacesRefusesAMalformedPlacement(t *testing.T) {
 			s, log := testStore(t)
 
 			// Act
-			err := s.PlaceWorkspaces(context.Background(), tt.ws, nil, wsAnchor(tt.before))
+			err := s.PlaceWorkspaces(context.Background(), tt.ws, nil, wsAnchor(tt.before), ClearOneShotMarks)
 
 			// Assert
 			if err == nil {
@@ -1190,7 +1190,7 @@ func TestMoveWorkspaceShiftsTheTabsBetween(t *testing.T) {
 			for _, name := range []string{"a", "b", "c", "d"} {
 				byName[name] = registerIn(t, s, repoDir, name, nil).ID
 			}
-			if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{byName["a"], byName["b"], byName["c"], byName["d"]}, nil, AtEnd{}); err != nil {
+			if err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{byName["a"], byName["b"], byName["c"], byName["d"]}, nil, AtEnd{}, ClearOneShotMarks); err != nil {
 				t.Fatalf("PlaceWorkspaces: %v", err)
 			}
 
@@ -1403,6 +1403,73 @@ func TestPlacingAFamilyClearsItsOneShotMarks(t *testing.T) {
 	}
 }
 
+func TestPlacingAFamilyKeepingItsOneShotMarksRecordsThePlace(t *testing.T) {
+	// Arrange -- an agent filing its own one-shot workspace must not unmark
+	// it, or the one-shot would no longer finish unattended.
+	s, _ := testStore(t)
+	repoDir := arrangeRepo(t, "repo")
+	parent := registerIn(t, s, repoDir, "parent", nil)
+	child := registerChild(t, s, repoDir, "child", parent.ID)
+	for _, ws := range []Workspace{parent, child} {
+		markOneShot(t, s, ws)
+	}
+	later := mustSubsection(t, s, parent.Repo, "later")
+
+	// Act
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{parent.ID}, &later.ID, AtEnd{}, KeepOneShotMarks)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PlaceWorkspaces: %v", err)
+	}
+	for _, ws := range []WorkspaceID{parent.ID, child.ID} {
+		if !oneShotOf(t, s, ws) {
+			t.Errorf("family member %s lost its one-shot mark", ws)
+		}
+	}
+	placed, err := s.Workspace(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if placed.Subsection == nil || *placed.Subsection != later.ID {
+		t.Errorf("the root's subsection = %v, want %s", placed.Subsection, later.ID)
+	}
+}
+
+func TestOneShotMarksNamesEachFate(t *testing.T) {
+	tests := []struct {
+		marks OneShotMarks
+		want  string
+	}{
+		{ClearOneShotMarks, "clear"},
+		{KeepOneShotMarks, "keep"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			// Act
+			got := tt.marks.String()
+
+			// Assert
+			if got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOneShotMarksPanicsOnAnUnknownFate(t *testing.T) {
+	// Arrange
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Error("String() of an unknown fate did not panic")
+		}
+	}()
+
+	// Act
+	_ = OneShotMarks(99).String()
+}
+
 func TestPlacingAFamilyKeepsAClosedMembersOneShotMark(t *testing.T) {
 	// Arrange -- a finished one-shot is still one, and its mark draws the
 	// family nowhere.
@@ -1432,7 +1499,7 @@ func TestARefusedPlacementClearsNoOneShotMark(t *testing.T) {
 	unknown := SubsectionID("sub-none")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws.ID}, &unknown, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{ws.ID}, &unknown, AtEnd{}, ClearOneShotMarks)
 
 	// Assert
 	if !errors.Is(err, ErrUnknownSubsection) {

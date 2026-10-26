@@ -2121,8 +2121,8 @@ func (v *fakeVerbs) MoveRepository(_ context.Context, id ids.RepoID, before *ids
 	return v.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
 }
 
-func (v *fakeVerbs) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
-	return v.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), wsm.AnchorField(at)))
+func (v *fakeVerbs) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor, marks wsm.OneShotMarks) error {
+	return v.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s %s", ws, ids.Optional(into), wsm.AnchorField(at), marks))
 }
 
 func (v *fakeVerbs) SidebarArrangement(context.Context) ([]sidebar.ArrangedRepository, error) {

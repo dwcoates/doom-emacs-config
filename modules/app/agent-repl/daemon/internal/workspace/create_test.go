@@ -2063,3 +2063,246 @@ func TestACreateAdmittedBeforeTheGateClosedRunsToTheEnd(t *testing.T) {
 		t.Fatalf("Create() = %v with %d worktrees, want it created", err, len(f.git.created))
 	}
 }
+
+// ---- A root's subsection placement note -------------------------------------
+
+// placementBrief arranges the subsection placement note's brief.
+func placementBrief(f *fixture) {
+	f.briefs[BriefSubsectionPlacement] = prompts.Prompt{Name: BriefSubsectionPlacement, Body: "PLACE"}
+}
+
+// withSubsection gives the repository the fixture last registered (the one
+// standardSpec creates in) a subsection.
+func withSubsection(f *fixture) {
+	repo := f.db.repositories[len(f.db.repositories)-1].ID
+	f.db.subsections = append(f.db.subsections, wsm.Subsection{ID: "sub-1", Repo: repo, Name: "later", Place: 1})
+}
+
+// sentText is the text of the fixture's first submitted prompt.
+func sentText(f *fixture) string {
+	return f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
+}
+
+func TestCreateClosesARootsFirstMessageWithTheSubsectionPlacementNote(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	placementBrief(f)
+	spec := standardSpec(t, f)
+	withSubsection(f)
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if got, want := sentText(f), "fix the login bug"+prompts.Wrap("\n\nPLACE"); got != want {
+		t.Fatalf("the first message = %q, want %q", got, want)
+	}
+}
+
+func TestCreateOwesNoPlacementNoteWhereNothingCanBePlaced(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, f *fixture, spec *CreateSpec)
+	}{
+		{name: "the repository has no subsections", arrange: func(t *testing.T, f *fixture, _ *CreateSpec) {
+			f.db.subsections = []wsm.Subsection{{ID: "sub-other", Repo: "repo-other", Name: "elsewhere", Place: 1}}
+		}},
+		{name: "the workspace is a child, which sits wherever its root does", arrange: func(t *testing.T, f *fixture, spec *CreateSpec) {
+			withSubsection(f)
+			parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
+			id := parent.ID
+			spec.Parent = &id
+			spec.OwnerNotice = "the owner lands this child"
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			placementBrief(f)
+			spec := standardSpec(t, f)
+			tt.arrange(t, f, &spec)
+
+			// Act.
+			if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Assert.
+			if got := sentText(f); strings.Contains(got, "PLACE") {
+				t.Fatalf("the first message = %q, want no placement note", got)
+			}
+		})
+	}
+}
+
+func TestCreateRecordsWhyNoPlacementNoteIsOwed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	placementBrief(f)
+	spec := standardSpec(t, f)
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opSubsectionPlacement && r.Level == dlog.LevelDebug && r.Context["subsections"] == 0 {
+			return
+		}
+	}
+	t.Fatalf("no debug record under %s says the repository has no subsections", opSubsectionPlacement)
+}
+
+func TestCreatePlacesTheNoteBetweenAOneShotsWordsAndItsDirective(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	placementBrief(f)
+	spec := standardSpec(t, f)
+	withSubsection(f)
+	spec.OneShot = true
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	want := prompts.Wrap("PREAMBLE\n") + "fix the login bug" + prompts.Wrap("\n\nPLACE") +
+		prompts.Wrap("\n"+completionDirectiveLead+"DIRECTIVE")
+	if got := sentText(f); got != want {
+		t.Fatalf("the one-shot prompt = %q, want %q", got, want)
+	}
+}
+
+func TestCreateRefusesARootWhosePlacementNoteCannotBeComposed(t *testing.T) {
+	// Arrange: the repository has a subsection, but no brief to ask with.
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	withSubsection(f)
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	asRefusal(t, err, ArmBriefMissing)
+	if len(f.queue.submissions) != 0 {
+		t.Fatalf("submissions = %d, want none", len(f.queue.submissions))
+	}
+	if !loggedAtError(f, opSubsectionPlacement) {
+		t.Fatal("the missing brief was not logged at error")
+	}
+}
+
+func TestCreateFailsARootWhoseSubsectionsCannotBeRead(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	placementBrief(f)
+	spec := standardSpec(t, f)
+	f.db.listSubsectionsErr = errors.New("the store is gone")
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "the store is gone") {
+		t.Fatalf("Create = %v, want the read's failure", err)
+	}
+	if _, refused := AsRefusal(err); refused {
+		t.Fatalf("err = %v, want a failure rather than a refusal", err)
+	}
+	if len(f.queue.submissions) != 0 {
+		t.Fatalf("submissions = %d, want none", len(f.queue.submissions))
+	}
+	if !loggedAtError(f, opSubsectionPlacement) {
+		t.Fatal("the failed read was not logged at error")
+	}
+}
+
+func TestTheShippedSubsectionPlacementBriefNamesTheVerbs(t *testing.T) {
+	// Arrange.
+	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefSubsectionPlacement)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Act.
+	text, err := brief.Splice(nil)
+
+	// Assert: the verbs as `agent-repld workspace` spells them
+	// (cmd/agent-repld/agentcli.go).
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+	for _, want := range []string{"agent-repld workspace subsections here", "agent-repld workspace place here -subsection NAME"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("brief = %q, want it to name %q", text, want)
+		}
+	}
+}
+
+func TestCreateNoteComposesABriefOrLogsWhyNot(t *testing.T) {
+	tests := []struct {
+		name      string
+		brief     *prompts.Prompt
+		values    map[string]string
+		want      string
+		wantError bool
+	}{
+		{name: "the brief splices", brief: &prompts.Prompt{Name: "note", Body: "HELLO {{who}}", Placeholders: []string{"who"}},
+			values: map[string]string{"who": "you"}, want: "HELLO you"},
+		{name: "the brief is missing", wantError: true},
+		{name: "the brief will not splice", brief: &prompts.Prompt{Name: "note", Body: "HELLO {{who}}", Placeholders: []string{"who"}},
+			values: nil, wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			if tt.brief != nil {
+				f.briefs["note"] = *tt.brief
+			}
+			const op = "daemon.workspace.test_note"
+
+			// Act.
+			got, err := f.mutable(t).createNote(f.log.logger, op, dlog.Context{"brief": "note"}, "note", tt.values)
+
+			// Assert.
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("note = %q, want an error", got)
+				}
+				if !loggedAtError(f, op) {
+					t.Fatalf("the failure was not logged at error under %s", op)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("note = (%q, %v), want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateNotesShareTheCreateNoteComposition(t *testing.T) {
+	// Arrange: the placement note is createNote's text, meta-wrapped after
+	// the words, so a hand-rolled composition would fail to match.
+	f := newFixture(t)
+	placementBrief(f)
+	record := f.workspace("subject", t.TempDir())
+	v := f.mutable(t)
+
+	// Act.
+	placed, placedErr := v.decorateSubsectionPlacement(f.log.logger, "raw", record)
+	note, noteErr := v.createNote(f.log.logger, opSubsectionPlacement, dlog.Context{}, BriefSubsectionPlacement, nil)
+
+	// Assert.
+	if placedErr != nil || noteErr != nil || placed != "raw"+prompts.Wrap("\n\n"+note) {
+		t.Fatalf("placement = (%q, %v), note = (%q, %v), want the note's composition", placed, placedErr, note, noteErr)
+	}
+}

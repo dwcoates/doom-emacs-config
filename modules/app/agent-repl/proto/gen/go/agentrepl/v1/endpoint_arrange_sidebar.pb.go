@@ -604,7 +604,8 @@ func (*ArrangeMoveRepository_End) isArrangeMoveRepository_To() {}
 // the family is drawn where it was placed (frontend.v1.RosterSubsectionOneShot).
 // A closed member keeps its mark: a finished one-shot is still one, and its
 // mark draws the family nowhere. A family enters the one-shot subsection by a
-// mark (SetWorkspaceOneShot), never by a placement.
+// mark (SetWorkspaceOneShot), never by a placement. A placement that sets
+// keep_one_shot clears no mark.
 type ArrangePlaceWorkspace struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Workspace *v1.WorkspaceRef       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
@@ -622,7 +623,15 @@ type ArrangePlaceWorkspace struct {
 	//	*ArrangePlaceWorkspace_Before
 	//	*ArrangePlaceWorkspace_End
 	//	*ArrangePlaceWorkspace_BeforeSubsection
-	At            isArrangePlaceWorkspace_At `protobuf_oneof:"at"`
+	At isArrangePlaceWorkspace_At `protobuf_oneof:"at"`
+	// KEEP THE FAMILY'S ONE-SHOT MARKS rather than clearing them: the placement
+	// is recorded, and a family a mark holds in the one-shot subsection still
+	// draws there, then draws where it was placed once its marks are cleared
+	// (SetWorkspaceOneShot, or the user taking it back). An agent filing its
+	// own workspace sets it, since a one-shot that unmarked itself by filing
+	// itself would no longer finish unattended. Unset is the drag's placement,
+	// which takes the family out of the one-shot subsection.
+	KeepOneShot   bool `protobuf:"varint,7,opt,name=keep_one_shot,json=keepOneShot,proto3" json:"keep_one_shot,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -723,6 +732,13 @@ func (x *ArrangePlaceWorkspace) GetBeforeSubsection() *SubsectionRef {
 	return nil
 }
 
+func (x *ArrangePlaceWorkspace) GetKeepOneShot() bool {
+	if x != nil {
+		return x.KeepOneShot
+	}
+	return false
+}
+
 type isArrangePlaceWorkspace_Into interface {
 	isArrangePlaceWorkspace_Into()
 }
@@ -774,8 +790,8 @@ func (*ArrangePlaceWorkspace_BeforeSubsection) isArrangePlaceWorkspace_At() {}
 // Put several workspaces' FAMILIES of one repository, in the order given,
 // into a subsection of it (or into none) as one block at a place among the roots
 // already there: ArrangePlaceWorkspace for many, applied whole or not at all.
-// Each placed family leaves the one-shot subsection, as ArrangePlaceWorkspace
-// says.
+// Each placed family leaves the one-shot subsection unless keep_one_shot is
+// set, as ArrangePlaceWorkspace says.
 // The bulk form an agent files a batch of workspaces with.
 type ArrangePlaceWorkspaces struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -797,7 +813,10 @@ type ArrangePlaceWorkspaces struct {
 	//	*ArrangePlaceWorkspaces_Before
 	//	*ArrangePlaceWorkspaces_End
 	//	*ArrangePlaceWorkspaces_BeforeSubsection
-	At            isArrangePlaceWorkspaces_At `protobuf_oneof:"at"`
+	At isArrangePlaceWorkspaces_At `protobuf_oneof:"at"`
+	// Keep every placed family's one-shot marks, as
+	// ArrangePlaceWorkspace.keep_one_shot says.
+	KeepOneShot   bool `protobuf:"varint,7,opt,name=keep_one_shot,json=keepOneShot,proto3" json:"keep_one_shot,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -896,6 +915,13 @@ func (x *ArrangePlaceWorkspaces) GetBeforeSubsection() *SubsectionRef {
 		}
 	}
 	return nil
+}
+
+func (x *ArrangePlaceWorkspaces) GetKeepOneShot() bool {
+	if x != nil {
+		return x.KeepOneShot
+	}
+	return false
 }
 
 type isArrangePlaceWorkspaces_Into interface {
@@ -1787,7 +1813,7 @@ const file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc = "" +
 	"repository\x125\n" +
 	"\x06before\x18\x02 \x01(\v2\x1b.workspace.v1.RepositoryRefH\x00R\x06before\x12,\n" +
 	"\x03end\x18\x03 \x01(\v2\x18.agentrepl.v1.ArrangeEndH\x00R\x03endB\x04\n" +
-	"\x02to\"\x98\x03\n" +
+	"\x02to\"\xbc\x03\n" +
 	"\x15ArrangePlaceWorkspace\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12H\n" +
 	"\rno_subsection\x18\x02 \x01(\v2!.agentrepl.v1.ArrangeNoSubsectionH\x00R\fnoSubsection\x12=\n" +
@@ -1796,9 +1822,10 @@ const file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc = "" +
 	"subsection\x124\n" +
 	"\x06before\x18\x04 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x01R\x06before\x12,\n" +
 	"\x03end\x18\x05 \x01(\v2\x18.agentrepl.v1.ArrangeEndH\x01R\x03end\x12J\n" +
-	"\x11before_subsection\x18\x06 \x01(\v2\x1b.agentrepl.v1.SubsectionRefH\x01R\x10beforeSubsectionB\x06\n" +
+	"\x11before_subsection\x18\x06 \x01(\v2\x1b.agentrepl.v1.SubsectionRefH\x01R\x10beforeSubsection\x12\"\n" +
+	"\rkeep_one_shot\x18\a \x01(\bR\vkeepOneShotB\x06\n" +
 	"\x04intoB\x04\n" +
-	"\x02at\"\x9b\x03\n" +
+	"\x02at\"\xbf\x03\n" +
 	"\x16ArrangePlaceWorkspaces\x12:\n" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2\x1a.workspace.v1.WorkspaceRefR\n" +
@@ -1809,7 +1836,8 @@ const file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc = "" +
 	"subsection\x124\n" +
 	"\x06before\x18\x04 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x01R\x06before\x12,\n" +
 	"\x03end\x18\x05 \x01(\v2\x18.agentrepl.v1.ArrangeEndH\x01R\x03end\x12J\n" +
-	"\x11before_subsection\x18\x06 \x01(\v2\x1b.agentrepl.v1.SubsectionRefH\x01R\x10beforeSubsectionB\x06\n" +
+	"\x11before_subsection\x18\x06 \x01(\v2\x1b.agentrepl.v1.SubsectionRefH\x01R\x10beforeSubsection\x12\"\n" +
+	"\rkeep_one_shot\x18\a \x01(\bR\vkeepOneShotB\x06\n" +
 	"\x04intoB\x04\n" +
 	"\x02at\"\x15\n" +
 	"\x13ArrangeNoSubsection\"\f\n" +

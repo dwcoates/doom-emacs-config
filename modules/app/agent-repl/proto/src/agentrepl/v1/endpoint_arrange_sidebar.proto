@@ -123,7 +123,8 @@ message ArrangeMoveRepository {
 // the family is drawn where it was placed (frontend.v1.RosterSubsectionOneShot).
 // A closed member keeps its mark: a finished one-shot is still one, and its
 // mark draws the family nowhere. A family enters the one-shot subsection by a
-// mark (SetWorkspaceOneShot), never by a placement.
+// mark (SetWorkspaceOneShot), never by a placement. A placement that sets
+// keep_one_shot clears no mark.
 message ArrangePlaceWorkspace {
   workspace.v1.WorkspaceRef workspace = 1;
   // WHERE IT GOES. THE ARM IS THE DESTINATION; unset is malformed.
@@ -147,13 +148,21 @@ message ArrangePlaceWorkspace {
     // otherwise).
     SubsectionRef before_subsection = 6;
   }
+  // KEEP THE FAMILY'S ONE-SHOT MARKS rather than clearing them: the placement
+  // is recorded, and a family a mark holds in the one-shot subsection still
+  // draws there, then draws where it was placed once its marks are cleared
+  // (SetWorkspaceOneShot, or the user taking it back). An agent filing its
+  // own workspace sets it, since a one-shot that unmarked itself by filing
+  // itself would no longer finish unattended. Unset is the drag's placement,
+  // which takes the family out of the one-shot subsection.
+  bool keep_one_shot = 7;
 }
 
 // Put several workspaces' FAMILIES of one repository, in the order given,
 // into a subsection of it (or into none) as one block at a place among the roots
 // already there: ArrangePlaceWorkspace for many, applied whole or not at all.
-// Each placed family leaves the one-shot subsection, as ArrangePlaceWorkspace
-// says.
+// Each placed family leaves the one-shot subsection unless keep_one_shot is
+// set, as ArrangePlaceWorkspace says.
 // The bulk form an agent files a batch of workspaces with.
 message ArrangePlaceWorkspaces {
   // At least one; no workspace twice (InvalidArgument otherwise). Every one
@@ -176,6 +185,9 @@ message ArrangePlaceWorkspaces {
     // Just before this subsection, as ArrangePlaceWorkspace.before_subsection.
     SubsectionRef before_subsection = 6;
   }
+  // Keep every placed family's one-shot marks, as
+  // ArrangePlaceWorkspace.keep_one_shot says.
+  bool keep_one_shot = 7;
 }
 
 // The repository's unsectioned workspaces. DELIBERATELY EMPTY: the arm is

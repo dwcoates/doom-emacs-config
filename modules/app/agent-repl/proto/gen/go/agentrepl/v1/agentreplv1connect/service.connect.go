@@ -1179,6 +1179,7 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplGetSidebarArrangementProcedure,
 			connect.WithSchema(agentReplGetSidebarArrangementMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		createTask: connect.NewClient[v1.CreateTaskRequest, v1.CreateTaskResponse](
@@ -3019,6 +3020,7 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplGetSidebarArrangementProcedure,
 		svc.GetSidebarArrangement,
 		connect.WithSchema(agentReplGetSidebarArrangementMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplCreateTaskHandler := connect.NewUnaryHandler(

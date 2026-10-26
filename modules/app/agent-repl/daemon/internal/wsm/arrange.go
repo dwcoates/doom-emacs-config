@@ -307,6 +307,32 @@ func requireAnchorOfRepository(ctx context.Context, tx *sql.Tx, at Anchor, repo 
 	return nil
 }
 
+// OneShotMarks says what a placement does to its families' one-shot marks
+// (agentrepl.v1.ArrangePlaceWorkspace.keep_one_shot).
+type OneShotMarks int
+
+const (
+	// ClearOneShotMarks clears every open member's mark, so the family leaves
+	// the sidebar's one-shot subsection for the place it was put: the drag.
+	ClearOneShotMarks OneShotMarks = iota
+	// KeepOneShotMarks clears none: the place is recorded, and a marked
+	// family keeps drawing in the one-shot subsection until its marks clear.
+	// An agent filing its own workspace places this way.
+	KeepOneShotMarks
+)
+
+// String names the marks' fate for the log.
+func (m OneShotMarks) String() string {
+	switch m {
+	case ClearOneShotMarks:
+		return "clear"
+	case KeepOneShotMarks:
+		return "keep"
+	default:
+		panic(fmt.Sprintf("wsm: unknown one-shot marks %d", int(m)))
+	}
+}
+
 // AnchorField is an anchor as a log field.
 func AnchorField(at Anchor) string {
 	switch a := at.(type) {
@@ -356,6 +382,9 @@ func (s *store) MoveRepository(ctx context.Context, id RepoID, before *RepoID) e
 // ordinary drag; several are an agent filing a batch. It is applied whole or
 // not at all.
 //
+// MARKS says whether the families' one-shot marks are cleared
+// (ClearOneShotMarks, the drag) or kept (KeepOneShotMarks).
+//
 // Only the repository's roots' places move (writeWalk): their descendants
 // are drawn, and walked by the tab bar, under them whatever their places,
 // which order them only among their own siblings.
@@ -367,9 +396,9 @@ func (s *store) MoveRepository(ctx context.Context, id RepoID, before *RepoID) e
 // repository ErrOtherRepository, an unknown subsection ErrUnknownSubsection,
 // and a workspace anchor that is not a root in the destination
 // ErrAnchorElsewhere.
-func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, at Anchor) error {
+func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *SubsectionID, at Anchor, marks OneShotMarks) error {
 	const op = "daemon.wsm.place_workspaces"
-	fields := dlog.Context{"workspaces": ws, "into": ids.Optional(into), "at": AnchorField(at)}
+	fields := dlog.Context{"workspaces": ws, "into": ids.Optional(into), "at": AnchorField(at), "one_shot_marks": marks.String()}
 	if err := malformedPlacement(ws, into, at); err != nil {
 		s.log.Error(op, "refused a malformed placement", withError(fields, err))
 		return err
@@ -409,8 +438,10 @@ func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *Sub
 				return err
 			}
 		}
-		if err := clearFamilyOneShot(ctx, tx, ws); err != nil {
-			return err
+		if marks == ClearOneShotMarks {
+			if err := clearFamilyOneShot(ctx, tx, ws); err != nil {
+				return err
+			}
 		}
 		walk, err := readWalk(ctx, tx, repo)
 		if err != nil {

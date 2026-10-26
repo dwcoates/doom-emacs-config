@@ -74,6 +74,8 @@ type fakeDB struct {
 	subsections  []wsm.Subsection
 	arrangements []string
 	arrangeErr   error
+	// listSubsectionsErr fails ListSubsections, which answers subsections.
+	listSubsectionsErr error
 
 	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
 	// the read.
@@ -576,6 +578,10 @@ func (d *fakeDB) arrange(call string) error {
 	return nil
 }
 
+func (d *fakeDB) ListSubsections(context.Context) ([]wsm.Subsection, error) {
+	return d.subsections, d.listSubsectionsErr
+}
+
 func (d *fakeDB) CreateSubsection(_ context.Context, repo ids.RepoID, name string) (wsm.Subsection, error) {
 	return wsm.Subsection{ID: "sub-new", Repo: repo, Name: name, Place: 1}, d.arrange("CreateSubsection " + string(repo) + " " + name)
 }
@@ -596,8 +602,8 @@ func (d *fakeDB) MoveRepository(_ context.Context, id ids.RepoID, before *ids.Re
 	return d.arrange("MoveRepository " + string(id) + " " + ids.Optional(before))
 }
 
-func (d *fakeDB) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
-	return d.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s", ws, ids.Optional(into), wsm.AnchorField(at)))
+func (d *fakeDB) PlaceWorkspaces(_ context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor, marks wsm.OneShotMarks) error {
+	return d.arrange(fmt.Sprintf("PlaceWorkspaces %v %s %s %s", ws, ids.Optional(into), wsm.AnchorField(at), marks))
 }
 
 func (d *fakeDB) MoveWorkspace(_ context.Context, ws, target ids.WorkspaceID) error {

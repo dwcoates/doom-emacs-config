@@ -244,7 +244,7 @@ func TestPlaceWorkspaceBeforeASubsection(t *testing.T) {
 	}
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.c.ID}, nil, BeforeSubsection{ID: w.s.ID})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.c.ID}, nil, BeforeSubsection{ID: w.s.ID}, ClearOneShotMarks)
 
 	// Assert
 	if err != nil {
@@ -261,7 +261,7 @@ func TestPlaceWorkspaceAtTheEndOfNoSubsectionFollowsEverySubsection(t *testing.T
 	w := newWalkWorld(t, s)
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.a.ID}, nil, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.a.ID}, nil, AtEnd{}, ClearOneShotMarks)
 
 	// Assert
 	if err != nil {
@@ -279,7 +279,7 @@ func TestPlaceWorkspaceOutOfASubsectionBeforeAnother(t *testing.T) {
 	other := mustSubsection(t, s, w.a.Repo, "t")
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.x.ID}, nil, BeforeSubsection{ID: other.ID})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.x.ID}, nil, BeforeSubsection{ID: other.ID}, ClearOneShotMarks)
 
 	// Assert
 	if err != nil {
@@ -316,7 +316,7 @@ func TestPlaceWorkspaceBeforeASubsectionRefusals(t *testing.T) {
 			before := walkShape(t, s, w.a.Repo)
 
 			// Act
-			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.a.ID}, tt.into(w), BeforeSubsection{ID: anchor})
+			err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.a.ID}, tt.into(w), BeforeSubsection{ID: anchor}, ClearOneShotMarks)
 
 			// Assert
 			if !errors.Is(err, tt.want) {
@@ -336,7 +336,7 @@ func TestPlaceWorkspaceIntoASubsectionBeforeASubsectionIsMalformed(t *testing.T)
 	before := walkShape(t, s, w.a.Repo)
 
 	// Act
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.a.ID}, &w.s.ID, BeforeSubsection{ID: w.s.ID})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.a.ID}, &w.s.ID, BeforeSubsection{ID: w.s.ID}, ClearOneShotMarks)
 
 	// Assert
 	if err == nil {
@@ -359,7 +359,7 @@ func TestARowLeavingItsPointLeavesTheSubsectionStanding(t *testing.T) {
 	}
 
 	// Act -- b, the row just after the subsection, goes to the bottom.
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.b.ID}, nil, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.b.ID}, nil, AtEnd{}, ClearOneShotMarks)
 
 	// Assert
 	if err != nil {
@@ -675,7 +675,7 @@ func TestARowDrawnInItsClosedParentsPlaceMovesItsFamilyIntoASubsection(t *testin
 	w := newHoistedWorld(t, s)
 
 	// Act -- the row the sidebar draws, ship, dragged into foo.
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.ship.ID}, &w.foo.ID, AtEnd{})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.ship.ID}, &w.foo.ID, AtEnd{}, ClearOneShotMarks)
 
 	// Assert
 	if err != nil {
@@ -712,7 +712,7 @@ func TestAWorkspaceDroppedBeforeARowDrawnInItsClosedParentsPlaceStandsBeforeIt(t
 	w := newHoistedWorld(t, s)
 
 	// Act -- x dragged out of foo onto ship's line.
-	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.x.ID}, nil, BeforeWorkspace{ID: w.ship.ID})
+	err := s.PlaceWorkspaces(context.Background(), []WorkspaceID{w.x.ID}, nil, BeforeWorkspace{ID: w.ship.ID}, ClearOneShotMarks)
 
 	// Assert
 	if err != nil {

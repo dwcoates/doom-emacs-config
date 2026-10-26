@@ -90,10 +90,10 @@ func (v *verbs) MoveRepository(ctx context.Context, id ids.RepoID, before *ids.R
 }
 
 // PlaceWorkspaces puts root workspaces WS, in that order and with their
-// families, into subsection INTO (nil: none) as one block at AT. Every
-// workspace named must be this daemon's to serve, as every per-workspace
-// verb's are.
-func (v *verbs) PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor) error {
+// families, into subsection INTO (nil: none) as one block at AT, clearing or
+// keeping their one-shot marks as MARKS says. Every workspace named must be
+// this daemon's to serve, as every per-workspace verb's are.
+func (v *verbs) PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into *ids.SubsectionID, at wsm.Anchor, marks wsm.OneShotMarks) error {
 	named := slices.Clone(ws)
 	if before, ok := at.(wsm.BeforeWorkspace); ok {
 		named = append(named, before.ID)
@@ -103,9 +103,9 @@ func (v *verbs) PlaceWorkspaces(ctx context.Context, ws []ids.WorkspaceID, into 
 			return err
 		}
 	}
-	log := v.deps.Log.Global().With(dlog.Context{"workspaces": ws, "into": ids.Optional(into), "at": wsm.AnchorField(at)})
+	log := v.deps.Log.Global().With(dlog.Context{"workspaces": ws, "into": ids.Optional(into), "at": wsm.AnchorField(at), "one_shot_marks": marks.String()})
 	return v.arrange(ctx, log, opPlaceWorkspace, "place the workspaces", func() error {
-		return v.deps.DB.PlaceWorkspaces(ctx, ws, into, at)
+		return v.deps.DB.PlaceWorkspaces(ctx, ws, into, at, marks)
 	})
 }
 
