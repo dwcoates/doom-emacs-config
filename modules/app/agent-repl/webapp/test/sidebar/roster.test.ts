@@ -1737,6 +1737,19 @@ describe("the open section's merge-queue toggle", () => {
   });
 
   it.each([
+    { name: "names the head's merge in bold", selector: ".sb-mq-head .sb-mq-name", property: "font-weight", want: "700" },
+    { name: "leaves a waiting merge's name unbolded", selector: ".sb-mq-waiting .sb-mq-name", property: "font-weight", want: "normal" },
+    { name: "draws a waiting merge in the folded header's faded grey", selector: ".sb-mq-waiting", property: "color", want: "var(--repo-head-collapsed)" },
+    { name: "draws the head's card in the foreground colour", selector: ".sb-mq-head", property: "color", want: "var(--fg)" },
+  ])("$name", ({ selector, property, want }) => {
+    const drawn = drawWorkspaceRoster(
+      roster({ open: openSection(false, true), repos: [repoSection({ id: "repo-1", mergeQueue: { head: mergingHead("w1"), waiting: [waitingMerge("w2")] } })] }),
+      sidebarContext(),
+    );
+    expect(inRail(drawn, () => cascadedValue(drawn.querySelector(selector)!, property))).toBe(want);
+  });
+
+  it.each([
     { name: "a live stage's glyph in the merge purple", state: "live", want: "var(--blocked)" },
     { name: "a passed stage's glyph in green", state: "succeeded", want: "var(--ok)" },
     { name: "a failed stage's glyph in red", state: "failed", want: "var(--err)" },
