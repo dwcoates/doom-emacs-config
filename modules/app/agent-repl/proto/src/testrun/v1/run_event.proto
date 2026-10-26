@@ -5,7 +5,10 @@
 //
 // THE ORDER IS FIXED. A run that can plan states `planned` first, then one
 // `unit_ended` per planned unit, then `ended` last. A selection the runner
-// cannot resolve states `refused` alone.
+// cannot resolve states `refused` alone. Between `planned` and `ended`, a unit
+// the host's CPU holds back states `waiting_for_cpu` when its wait begins and
+// `cpu_wait_ended` once it has its cores, in that order, before its own
+// `unit_ended`.
 syntax = "proto3";
 
 package testrun.v1;
@@ -25,6 +28,10 @@ message TestRunEvent {
     TestRunEnded ended = 3;
     // The selection could not be run at all: the run's only event.
     TestRunRefused refused = 4;
+    // A unit waits to start because the host is too busy for tests to add to.
+    TestRunWaitingForCpu waiting_for_cpu = 5;
+    // A unit that waited for the host's CPU has its cores and starts.
+    TestRunCpuWaitEnded cpu_wait_ended = 6;
   }
 }
 
@@ -162,4 +169,24 @@ message TestRunRefused {
   // What could not be resolved, for a person: the target no suite owns, the
   // test the target does not define, and so on.
   string detail = 1;
+}
+
+// A unit waits to start for the host's CPU. Every test and build on the host
+// together may only bring the host's total CPU use up to a cap; while the host
+// is already that busy, no unit of any run starts (testrun's CPU governor).
+message TestRunWaitingForCpu {
+  // The unit that waits: the next the run would start.
+  string unit_id = 1;
+  // How busy the host was, from 0 to 100, as the governor last read it.
+  double busy_percent = 2;
+  // The cap on the host's total CPU use, from 0 to 100.
+  uint32 cap_percent = 3;
+}
+
+// A unit that waited for the host's CPU has its cores and starts.
+message TestRunCpuWaitEnded {
+  // The unit that waited.
+  string unit_id = 1;
+  // How long it waited.
+  int64 waited_ms = 2;
 }
