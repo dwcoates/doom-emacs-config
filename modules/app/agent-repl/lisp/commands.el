@@ -91,6 +91,8 @@
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
+(declare-function agent-repl-roster-numbered-tab "agent-repl-roster" (number))
+(declare-function agent-repl-roster-tab-number-of "agent-repl-roster" (name))
 (declare-function agent-repl-roster-selection-recency-order "agent-repl-roster" (names))
 (declare-function agent-repl-roster-threads "agent-repl-roster" (&optional roster))
 (declare-function agent-repl-roster-thread-row-ws "agent-repl-roster" (row))
@@ -1286,9 +1288,10 @@ REQUESTED of the daemon, never switched to here."
 
 THE DRAWN ORDER IS NAVIGATION'S ONLY ORDER.  `agent-repl-roster-tab-order'
 is the tab bar's own order (roster.el sets it from the daemon resolver's
-walk, in stored place order), so left/right and the numeral chords walk the
-PICTURE THE USER IS LOOKING AT by construction rather than agreeing with
-it by coincidence.
+walk, in stored place order), so left/right walk the PICTURE THE USER IS
+LOOKING AT by construction rather than agreeing with it by coincidence.
+The numeral chords name a tab by the daemon's number instead
+\(`agent-repl--numbered-tab'), and ask this list only whether it is drawn.
 
 This replaced `agent-repl--live-ws-names' at every navigation site, and
 the difference was the whole defect: that list is the registry hash's key
@@ -1300,8 +1303,8 @@ one end it switched to a splash screen with no tab highlighted or signaled
 an error trying to reach `none'.  A pseudo perspective can never appear in
 the roster's tab order, so it can never be a navigation target.
 
-A TAB OF A COLLAPSED REPOSITORY IS NOT DRAWN, so it is not here either:
-the numerals count only the drawn tabs and stay contiguous."
+A TAB OF A COLLAPSED REPOSITORY IS NOT DRAWN, so it is not here either,
+and the daemon gives it no number."
   (and (fboundp 'agent-repl-roster-drawn-tab-order)
        (agent-repl-roster-drawn-tab-order)))
 
@@ -1422,14 +1425,31 @@ Walks back toward the most recently viewed workspace."
   (interactive)
   (agent-repl--recency-walk -1))
 
+(defun agent-repl--numbered-tab (n drawn)
+  "Return (NAME . DRAWN-P) for the tab the daemon numbers N, or nil.
+DRAWN is the drawn tab order; DRAWN-P is non-nil when NAME is on it.
+THE DAEMON NUMBERS EVERY TAB and the sidebar paints the same number, so
+a slot is the daemon's number, never a count of the tabs Emacs draws: a
+tab still held for its open (open-tabs.el) keeps its number, and every
+tab after it keeps the number the sidebar shows (2026-10-26: a held
+`charm-inference-sf17' was 7 in the sidebar while `M-7' counted it out
+and landed on the sidebar's 8)."
+  (let ((name (agent-repl-roster-numbered-tab n)))
+    (and name (cons name (and (member name drawn) t)))))
+
+(defun agent-repl--last-drawn-tab-number (drawn)
+  "Return the daemon's number of the last tab in DRAWN, or nil."
+  (and drawn (agent-repl-roster-tab-number-of (car (last drawn)))))
+
 (defun agent-repl-switch-to-workspace (&optional n)
   "Switch to the workspace in the Nth slot of the tab bar, counting from 1.
 
-N indexes the DRAWN tab order (`agent-repl--drawn-tab-names'), which is
-why this exists at all: Doom's `+workspace/switch-to-N' indexes
-persp-mode's perspective list, whose slot 0 is Doom's own `main', so
-`M-1' landed on the splash screen and every numeral was off by one
-against the bar.
+N is the DAEMON'S TAB NUMBER (`agent-repl--numbered-tab'), the number the
+bar and the sidebar both paint, which is why this exists at all: Doom's
+`+workspace/switch-to-N' indexes persp-mode's perspective list, whose
+slot 0 is Doom's own `main', so `M-1' landed on the splash screen and
+every numeral was off by one against the bar.  A tab still opening is
+NOT SELECTABLE, as its sidebar row is not: the press is a reported no-op.
 
 Called interactively with no prefix argument, completes over the DRAWN
 NAMES and switches to the chosen one -- the same set the numerals reach,
@@ -1445,7 +1465,8 @@ afterwards is a logging defect."
   (interactive "P")
   (let* ((names (agent-repl--drawn-tab-names))
          (log-ws (agent-repl--ws-current-log-name))
-         (index (and n (prefix-numeric-value n))))
+         (index (and n (prefix-numeric-value n)))
+         (tab (and index (agent-repl--numbered-tab index names))))
     (cond
      ((null names)
       (agent-repl--info log-ws "elisp.commands.switch-to-workspace-no-tabs n=%S" n)
@@ -1454,17 +1475,20 @@ afterwards is a logging defect."
       (let ((choice (completing-read "Switch to workspace: " names nil t)))
         (agent-repl--info log-ws "elisp.commands.switch-to-workspace-chosen ws=%s" choice)
         (agent-repl-host-request-switch choice 'picker)))
-     ((or (< index 1) (> index (length names)))
-      (agent-repl--info log-ws
-                        "elisp.commands.switch-to-workspace-out-of-range n=%d tabs=%d"
-                        index (length names))
-      (message "[agent-repl] No workspace tab %d -- the bar draws %d"
-               index (length names)))
+     ((null tab)
+      (let ((last (agent-repl--last-drawn-tab-number names)))
+        (agent-repl--info log-ws
+                          "elisp.commands.switch-to-workspace-out-of-range n=%d last=%S"
+                          index last)
+        (message "[agent-repl] No workspace tab %d -- the bar's last is %S" index last)))
+     ((not (cdr tab))
+      (agent-repl--info log-ws "elisp.commands.switch-to-workspace-opening n=%d target=%s"
+                        index (car tab))
+      (message "[agent-repl] Tab %d (%s) is still opening" index (car tab)))
      (t
-      (let ((target (nth (1- index) names)))
-        (agent-repl--info log-ws "elisp.commands.switch-to-workspace n=%d target=%s"
-                          index target)
-        (agent-repl-host-request-switch target 'slot))))))
+      (agent-repl--info log-ws "elisp.commands.switch-to-workspace n=%d target=%s"
+                        index (car tab))
+      (agent-repl-host-request-switch (car tab) 'slot)))))
 
 (defun agent-repl--tab-slot (char)
   "Return the tab slot the digit CHAR names: `1'..`9' are slots 1-9 and
@@ -1481,8 +1505,10 @@ RET to send, and any other key is refused in place."
 
 (defun agent-repl--act-on-tab-slot (slot op verb)
   "Ask VERB to act on the current workspace and tab SLOT's workspace.
-SLOT counts the DRAWN tabs (`agent-repl--drawn-tab-names'), exactly as the
-numeral chords do, so the digit names the tab the user is looking at.  OP
+SLOT is the daemon's tab number (`agent-repl--numbered-tab'), exactly as
+the numeral chords read it, so the digit names the tab the user is
+looking at, in the bar and the sidebar alike.  A tab still opening is
+acted on too: the verb moves the daemon's arrangement, not a drawn tab.  OP
 is the gesture's word (\"swap\", \"move\"), naming its log records and its
 messages; VERB is called with the current workspace and the tab's.
 
@@ -1492,15 +1518,16 @@ every other navigation gesture."
   (let* ((names (agent-repl--drawn-tab-names))
          (current (agent-repl--ws-current-name))
          (log-ws (agent-repl--gesture-log-ws current op))
-         (target (and (<= 1 slot (length names)) (nth (1- slot) names))))
+         (target (car (agent-repl--numbered-tab slot names))))
     (cond
      ((not (member current names))
       (agent-repl--info log-ws (format "elisp.commands.%s-no-tab current=%%s slot=%%d" op) current slot)
       (message "[agent-repl] The current workspace has no tab to %s" op))
      ((null target)
-      (agent-repl--info log-ws (format "elisp.commands.%s-out-of-range slot=%%d tabs=%%d" op)
-                        slot (length names))
-      (message "[agent-repl] No workspace tab %d -- the bar draws %d" slot (length names)))
+      (let ((last (agent-repl--last-drawn-tab-number names)))
+        (agent-repl--info log-ws (format "elisp.commands.%s-out-of-range slot=%%d last=%%S" op)
+                          slot last)
+        (message "[agent-repl] No workspace tab %d -- the bar's last is %S" slot last)))
      ((equal target current)
       (agent-repl--info log-ws (format "elisp.commands.%s-own-slot slot=%%d ws=%%s" op) slot current)
       (message "[agent-repl] %s is already tab %d" current slot))
@@ -1548,9 +1575,9 @@ the bar redraws from the next roster push."
 `agent-repl-switch-to-last-workspace\=', the tab at the end of the bar."))
 
 (defun agent-repl--last-tab-slot ()
-  "The 1-based slot of the LAST tab on the drawn bar, never below 1.
+  "The daemon's number of the LAST tab on the drawn bar, never below 1.
 An empty bar still answers 1, so the switch reports its own no-tabs miss."
-  (max 1 (length (agent-repl--drawn-tab-names))))
+  (or (agent-repl--last-drawn-tab-number (agent-repl--drawn-tab-names)) 1))
 
 (defun agent-repl-switch-to-last-workspace ()
   "Switch to the LAST tab on the drawn bar, however many it draws.

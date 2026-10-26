@@ -13,6 +13,8 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
+(defvar agent-repl-roster--tab-numbers)
+
 (defconst agent-repl-test-status--dir
   (file-name-directory (or load-file-name buffer-file-name))
   "Directory holding this suite, for tests that read its own source.")
@@ -1924,6 +1926,15 @@ unread-turn-end marker's turn end (nil for no marker)."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1")))
         (let ((result (agent-repl--tabline-advice '())))
           (should (equal result "")))))))
+
+(ert-deftest agent-repl-test-tabline-rendered-entries-paint-the-daemons-numbers ()
+  "Each tab is painted the daemon's number, so a tab held for its open leaves a gap."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-roster--tab-numbers '(("a" . 1) ("held" . 2) ("c" . 3))))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
+                ((symbol-function 'agent-repl--render-tab-entry)
+                 (lambda (name _current number) (format "%s=%d" name number))))
+        (should (equal (agent-repl--tabline-rendered-entries '("a" "c")) '("a=1" "c=3")))))))
 
 ;;;; ---- Tests: tabline space toggle ----
 

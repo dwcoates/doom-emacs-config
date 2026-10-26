@@ -33,6 +33,7 @@
 (declare-function agent-repl--ws-resolve-persp "workspace")
 (declare-function agent-repl--ws-tab-face "workspace")
 (declare-function agent-repl--ws-tabline-names "workspace")
+(declare-function agent-repl-roster-drawn-tab-numbers "roster" (names))
 (declare-function agent-repl--ws-window-conf "workspace")
 (declare-function agent-repl-host-mark-viewed "host")
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
@@ -2178,15 +2179,16 @@ changes nothing there."
 
 (defun agent-repl--render-tab-entry (name current-name index)
   "Render a single tab entry for workspace NAME.
-CURRENT-NAME is the active workspace name.  INDEX is the 1-based tab
-position.  The display state (from `agent-repl--ws-display-state') drives
-the name face.  The appearance spec is resolved via `agent-repl--tab-spec'
-when display-state is non-nil; when display-state is nil but
+CURRENT-NAME is the active workspace name.  INDEX is the tab's number,
+the daemon's (`agent-repl-roster-drawn-tab-numbers').  The display
+state (from `agent-repl--ws-display-state') drives the name face.  The
+appearance spec is resolved via `agent-repl--tab-spec' when
+display-state is non-nil; when display-state is nil but
 `agent-repl--ws-bracket-state' returns an arm (panels dismissed for a
 workspace the roster does report on, or a `:ready' workspace whose
 panels are not open), the spec is built via
 `agent-repl--tab-spec-bracket-only' so only the [N] bracket keeps the
-arm's color.  The bracket label is the tab's 1-based INDEX and nothing
+arm's color.  The bracket label is the tab's number INDEX and nothing
 else: state reaches the bracket as COLOR.  While the row carries the
 async-merging marker the `[N]' bracket takes the async-merge purple
 instead \(`agent-repl--tab-spec-async-merge'), and the space after it and
@@ -2232,7 +2234,9 @@ the selection highlight and the next step brings it back."
   "Return the list of rendered tab-entry strings for NAMES.
 
 Each element is the propertized output of `agent-repl--render-tab-entry'
-for the corresponding workspace, 1-indexed.  Used by both
+for the corresponding workspace, numbered as the daemon numbers it
+\(`agent-repl-roster-drawn-tab-numbers'), the number the sidebar paints
+beside the same workspace's row.  Used by both
 `agent-repl--tabline-advice' (which mapconcats with a space separator)
 and `agent-repl-workspace-tabline-formatted' (which packs entries
 into a single row, eliding overflow behind \"+N\" badges).
@@ -2240,22 +2244,21 @@ into a single row, eliding overflow behind \"+N\" badges).
 No hide-project-dirs filtering happens here: that mode hides matching
 workspaces at the persp layer (they are killed and leave
 `persp-names-cache' entirely — see `agent-repl-toggle-hide-project-dirs'),
-so the raw persp list this renders is already the visible set and the
-1-indexed positions match `SPC <n>'.
+so the raw persp list this renders is already the visible set.
 
 When NAMES is not supplied, defaults to `agent-repl--ws-tabline-names'
 (the persp-mode integration wrapper in `workspace.el', minus the
 workspaces of folded repos) rather than
 `+workspace-list-names' directly — the tab-bar reflects agent-repl's
 own notion of which workspaces it owns, not persp-mode's raw cache.
-Folded repos drop out here, and since the index is a 1-based position
-in the surviving list, the visible tab numbers stay contiguous and keep
-matching `SPC <n>' (which indexes the same list)."
+Folded repos drop out here and take no number from the daemon, so the
+numbers stay contiguous; a tab held for its open leaves its number's gap,
+and every number matches the `M-<n>' chord that reaches it."
   (let* ((names (if names-supplied-p names (agent-repl--ws-tabline-names)))
          (current-name (agent-repl--ws-current-name)))
     (cl-loop for name in names
-             for i from 1
-             collect (agent-repl--render-tab-entry name current-name i))))
+             for number in (agent-repl-roster-drawn-tab-numbers names)
+             collect (agent-repl--render-tab-entry name current-name number))))
 
 (defconst agent-repl--tabline-row-count 2
   "Number of rows the workspace tab-bar ALWAYS renders.

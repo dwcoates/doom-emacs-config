@@ -212,6 +212,15 @@ No local ordering exists: the resolver orders the roster (priority
 included) and the tab bar follows it.  The bar DRAWS the subset
 `agent-repl-roster-drawn-tab-order' answers.")
 
+(defvar agent-repl-roster--tab-numbers nil
+  "The last reconcile's numbered tabs, as `(NAME . NUMBER)' pairs in walk order.
+THE DAEMON NUMBERS EVERY TAB (`frontend.v1.RosterOpenRowTab.numbered'), and
+the sidebar paints the same number beside the row, so the bar's numbers and
+its slot gestures read this rather than counting the tabs Emacs draws: a
+tab held for its open (open-tabs.el) leaves a gap instead of shifting every
+tab after it onto a number the sidebar gives another workspace.  A folded,
+hidden or thread tab has no number and no pair.")
+
 (defvar agent-repl-roster--hidden-tabs nil
   "Tab names whose repository the daemon holds COLLAPSED, or that are HIDDEN.
 They keep their tabs (their sessions are untouched) and are off the
@@ -590,6 +599,7 @@ Once per push over every closed row, which is why it is DEBUG."
               (let ((row (plist-get entry :row)))
                 (list :id (agent-repl-roster-row-id row)
                       :name (agent-repl-roster--tab-name entry collisions)
+                      :number (agent-repl-roster-tab-number (plist-get entry :tab))
                       :ref (agent-repl-roster-row-ref row)
                       :availability (agent-repl-roster-row-availability row)
                       :collapsed (plist-get entry :collapsed)
@@ -907,6 +917,8 @@ A row that fails to reconcile is contained rather than fatal; see
                  desired))
          (opened 0)
          (names nil)
+         ;; The daemon's number of every numbered tab, by its settled name.
+         (numbers nil)
          ;; The tabs of rows whose repository the daemon holds collapsed.
          (hidden nil)
          ;; Every reconciled row, for the opens (open-tabs.el).
@@ -919,6 +931,8 @@ A row that fails to reconcile is contained rather than fatal; see
         (let ((name (agent-repl-roster--reconcile-row want wanted-ids)))
           (when name
             (push (cons name (plist-get want :id)) names)
+            (when (plist-get want :number)
+              (push (cons name (plist-get want :number)) numbers))
             (push (list :id (plist-get want :id) :name name :ref (plist-get want :ref)
                         :collapsed (plist-get want :collapsed)
                         :hidden (plist-get want :hidden))
@@ -946,7 +960,8 @@ A row that fails to reconcile is contained rather than fatal; see
               name "elisp.roster.row-teardown-failed: ws=%s error=%s"
               name (error-message-string err)))))))
     (setq agent-repl-roster--walked (nreverse names)
-          agent-repl-roster--walked-hidden hidden)
+          agent-repl-roster--walked-hidden hidden
+          agent-repl-roster--tab-numbers (nreverse numbers))
     ;; THE OPENS, once the walk has made every row's workspace and BEFORE
     ;; the order is set: each one owed an open is asked for, its page loaded
     ;; now, and the order below leaves out every tab still held.  An answer
@@ -1093,6 +1108,35 @@ Every tab but those of a repository the daemon holds collapsed
 navigation index THIS list, so a hidden tab takes no number and no stop."
   (cl-remove-if (lambda (name) (member name agent-repl-roster--hidden-tabs))
                 agent-repl-roster--tab-order))
+
+(defun agent-repl-roster-tab-number-of (name)
+  "Return the number the daemon gives tab NAME, or nil when it has none.
+The sidebar paints the same number beside NAME's row
+\(`agent-repl-roster--tab-numbers')."
+  (cdr (assoc name agent-repl-roster--tab-numbers)))
+
+(defun agent-repl-roster-drawn-tab-numbers (names)
+  "Return the number the bar paints on each of the drawn tabs NAMES, in order.
+The daemon's number (`agent-repl-roster-tab-number-of') once a roster has
+numbered any tab, so a tab held for its open leaves a gap rather than
+renumbering the tabs after it.  Before that -- a pre-roster boot draws the
+workspaces in their registration order -- each tab's 1-based place.
+
+A DRAWN TAB WITH NO NUMBER IS AN ERROR.  The drawn order is the Open
+section less its folded and hidden tabs, and the daemon numbers every
+other one (`agent-repl-roster--misnumbered' drops a push that does not)."
+  (if (null agent-repl-roster--tab-numbers)
+      (number-sequence 1 (length names))
+    (mapcar (lambda (name)
+              (or (agent-repl-roster-tab-number-of name)
+                  (error "agent-repl: drawn tab %S has no number from the daemon" name)))
+            names)))
+
+(defun agent-repl-roster-numbered-tab (number)
+  "Return the name of the tab the daemon numbers NUMBER, or nil.
+The tab may be one Emacs does not draw yet, held for its open; the
+caller asks `agent-repl-roster-drawn-tab-order' whether it is drawn."
+  (car (rassq number agent-repl-roster--tab-numbers)))
 
 ;;;; ---- The current workspace (R8) ---------------------------------------
 

@@ -174,11 +174,12 @@ the module."
 ;; `+workspace/switch-to-N', which indexes PERSP-MODE'S
 ;; perspective list -- Doom's own `main' at slot 0, persp-mode's `none'
 ;; among them -- so `M-1' landed on the splash screen with no tab
-;; highlighted and `M-2' on the FIRST tab.  Every chord here indexes
-;; `agent-repl-roster-drawn-tab-order' instead, the same list the bar is drawn
-;; from, so the numerals and the picture cannot disagree.  `M-0' is ours too:
-;; it runs `agent-repl-switch-to-last-workspace', the tab at the END of the
-;; drawn bar, where Doom's `+workspace/switch-to-final' took persp-mode's last.
+;; highlighted and `M-2' on the FIRST tab.  Every chord here names the tab
+;; the DAEMON numbers N (`agent-repl--numbered-tab'), the number the bar and
+;; the sidebar both paint, so the numerals, the picture and the sidebar
+;; cannot disagree.  `M-0' is ours too: it runs
+;; `agent-repl-switch-to-last-workspace', the tab at the END of the drawn
+;; bar, where Doom's `+workspace/switch-to-final' took persp-mode's last.
 ;;
 ;; WHY A KEYMAP OF OUR OWN, and not a later `map!' over Doom's.  Doom's
 ;; numerals are `:g' bindings, i.e. `global-map' entries, and beating a
