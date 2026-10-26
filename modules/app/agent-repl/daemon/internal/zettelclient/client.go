@@ -50,8 +50,13 @@ func (e *RefusedError) Error() string {
 // Client is the daemon's view of zettel.
 type Client interface {
 	// RecordExchange records a thread turn's question and final answer as a
-	// node, idempotent by turn, answering the node.
-	RecordExchange(ctx context.Context, thread ids.WorkspaceID, turn ids.TurnID, question wsm.ThreadQuestion, answer string) (*zettelv1.Node, error)
+	// node, idempotent by turn, answering the node. ABBREVIATION is the
+	// question's abbreviation when one was minted before the answer ended,
+	// nil otherwise.
+	RecordExchange(ctx context.Context, thread ids.WorkspaceID, turn ids.TurnID, question wsm.ThreadQuestion, abbreviation *string, answer string) (*zettelv1.Node, error)
+	// SetQuestionAbbreviation sets a recorded node's question abbreviation,
+	// answering the node as it now stands.
+	SetQuestionAbbreviation(ctx context.Context, node *zettelv1.NodeId, abbreviation string) (*zettelv1.Node, error)
 	// Thread reads one thread's nodes, oldest first.
 	Thread(ctx context.Context, thread ids.WorkspaceID) ([]*zettelv1.Node, error)
 	// RecordSightings counts one sighting per node, all or nothing.
@@ -76,13 +81,13 @@ func New(socketPath string) Client {
 // NewWith answers a client over an existing zettel.v1 client (tests).
 func NewWith(rpc zettelv1connect.ZettelClient) Client { return &client{rpc: rpc} }
 
-func (c *client) RecordExchange(ctx context.Context, thread ids.WorkspaceID, turn ids.TurnID, question wsm.ThreadQuestion, answer string) (*zettelv1.Node, error) {
+func (c *client) RecordExchange(ctx context.Context, thread ids.WorkspaceID, turn ids.TurnID, question wsm.ThreadQuestion, abbreviation *string, answer string) (*zettelv1.Node, error) {
 	const rpc = "RecordExchange"
 	resp, err := c.rpc.RecordExchange(ctx, connect.NewRequest(&zettelv1.RecordExchangeRequest{
 		Thread:         &zettelv1.ThreadId{Id: string(thread)},
 		Turn:           &zettelv1.ExchangeTurn{TurnId: string(turn)},
 		Parent:         question.Parent,
-		Question:       &zettelv1.NodeQuestion{Text: question.Text},
+		Question:       &zettelv1.NodeQuestion{Text: question.Text, Abbreviation: abbreviation},
 		AnswerMarkdown: answer,
 	}))
 	if err != nil {
@@ -92,6 +97,22 @@ func (c *client) RecordExchange(ctx context.Context, thread ids.WorkspaceID, tur
 	case *zettelv1.RecordExchangeResponse_Success:
 		return result.Success.GetNode(), nil
 	case *zettelv1.RecordExchangeResponse_Failure:
+		return nil, refused(rpc, result.Failure)
+	default:
+		return nil, unarmed(rpc)
+	}
+}
+
+func (c *client) SetQuestionAbbreviation(ctx context.Context, node *zettelv1.NodeId, abbreviation string) (*zettelv1.Node, error) {
+	const rpc = "SetQuestionAbbreviation"
+	resp, err := c.rpc.SetQuestionAbbreviation(ctx, connect.NewRequest(&zettelv1.SetQuestionAbbreviationRequest{Node: node, Abbreviation: abbreviation}))
+	if err != nil {
+		return nil, unavailable(rpc, err)
+	}
+	switch result := resp.Msg.GetResult().(type) {
+	case *zettelv1.SetQuestionAbbreviationResponse_Success:
+		return result.Success.GetNode(), nil
+	case *zettelv1.SetQuestionAbbreviationResponse_Failure:
 		return nil, refused(rpc, result.Failure)
 	default:
 		return nil, unarmed(rpc)

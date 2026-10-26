@@ -102,6 +102,8 @@ type Deps struct {
 	// thread has none (the roster draws it under the current thread's row).
 	// Called under the service's lock, in the order the outlines change.
 	Outline func(ids.WorkspaceID, *frontendv1.RosterThreadOutline)
+	// Abbreviator mints each long question's abbreviation (abbreviate.go).
+	Abbreviator Abbreviator
 }
 
 // Service is the chat service.
@@ -109,17 +111,19 @@ type Service struct {
 	deps    Deps
 	mu      sync.Mutex
 	threads map[ids.WorkspaceID]*thread
+	// slots bounds the abbreviation calls running at once.
+	slots chan struct{}
 }
 
 // New builds the service.
 func New(deps Deps) *Service {
-	if deps.Zettel == nil || deps.Turns == nil || deps.Log == nil || deps.Context == nil || deps.Outline == nil {
-		panic("chat: Zettel, Turns, Log, Context and Outline are required")
+	if deps.Zettel == nil || deps.Turns == nil || deps.Log == nil || deps.Context == nil || deps.Outline == nil || deps.Abbreviator == nil {
+		panic("chat: Zettel, Turns, Log, Context, Outline and Abbreviator are required")
 	}
 	if deps.Go == nil {
 		deps.Go = func(f func()) { go f() }
 	}
-	return &Service{deps: deps, threads: map[ids.WorkspaceID]*thread{}}
+	return &Service{deps: deps, threads: map[ids.WorkspaceID]*thread{}, slots: make(chan struct{}, AbbreviationSlots)}
 }
 
 // thread is one thread's state. Every field is read and written under
@@ -154,6 +158,13 @@ type thread struct {
 	// how many asks there have been.
 	reveal         NodeID
 	revealSequence uint64
+	// abbreviating is every turn whose question's abbreviation was asked
+	// for in this daemon's life, so it is asked once; a failed one is asked
+	// again by the next daemon, when it loads the thread.
+	abbreviating map[ids.TurnID]bool
+	// minted is an abbreviation that arrived before its turn's node existed,
+	// held until the node's recording takes it (record).
+	minted map[ids.TurnID]string
 }
 
 // answeredTurn is a turn whose answer is being recorded. It holds the turn's
@@ -174,6 +185,7 @@ func (s *Service) state(id ids.WorkspaceID) *thread {
 			id: id, topic: publish.NewLatestOnly[*frontendv1.ChatView](),
 			nodes: map[NodeID]*zettelv1.Node{}, picks: map[NodeID]NodeID{},
 			prose: map[ids.TurnID]string{}, answered: map[ids.TurnID]answeredTurn{}, ended: map[ids.TurnID]bool{},
+			abbreviating: map[ids.TurnID]bool{}, minted: map[ids.TurnID]string{},
 		}
 		s.threads[id] = t
 	}
@@ -230,9 +242,9 @@ func (s *Service) ensureLoaded(ctx context.Context, id ids.WorkspaceID) error {
 		return err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	t := s.state(id)
 	if t.loaded {
+		s.mu.Unlock()
 		return nil
 	}
 	for _, n := range nodes {
@@ -240,9 +252,12 @@ func (s *Service) ensureLoaded(ctx context.Context, id ids.WorkspaceID) error {
 	}
 	t.loaded = true
 	s.publish(t)
+	owed := t.owedAbbreviations()
+	s.mu.Unlock()
 	s.deps.Log(id).Debug("daemon.chat.loaded", "the thread's graph was read from zettel", dlog.Context{
-		"thread": string(id), "nodes": len(nodes),
+		"thread": string(id), "nodes": len(nodes), "abbreviations_owed": len(owed),
 	})
+	s.abbreviateAll(owed)
 	return nil
 }
 
@@ -263,7 +278,6 @@ func (s *Service) refresh(ctx context.Context, id ids.WorkspaceID) error {
 		return err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	t := s.state(id)
 	t.open = t.open[:0]
 	stillOpen := map[ids.TurnID]bool{}
@@ -299,6 +313,12 @@ func (s *Service) refresh(ctx context.Context, id ids.WorkspaceID) error {
 		}
 	}
 	s.publish(t)
+	var owed []abbreviation
+	if t.loaded {
+		owed = t.owedAbbreviations()
+	}
+	s.mu.Unlock()
+	s.abbreviateAll(owed)
 	return nil
 }
 
@@ -369,11 +389,16 @@ func (s *Service) record(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnI
 		s.forgetAnswer(ws, turn)
 		return
 	}
-	node, err := s.deps.Zettel.RecordExchange(ctx, ws, turn, *row.Question, markdown)
+	// AN ABBREVIATION MINTED ALREADY rides the recording. One minted while
+	// the recording is in flight is held in minted and set below, under the
+	// same lock that adds the node, so it is never lost between the two.
+	early := s.takeMinted(ws, turn)
+	node, err := s.deps.Zettel.RecordExchange(ctx, ws, turn, *row.Question, early, markdown)
 	if err != nil {
 		log.Error("daemon.chat.record_failed", "an answered thread question could not be recorded in zettel", dlog.Context{
 			"thread": string(ws), "turn": string(turn), "parent": row.Question.Parent.String(), "cause": err.Error(),
 		})
+		s.holdMinted(ws, turn, early)
 		s.forgetAnswer(ws, turn)
 		return
 	}
@@ -381,9 +406,9 @@ func (s *Service) record(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnI
 		"thread": string(ws), "turn": string(turn), "node": node.GetId().GetId(),
 	})
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	t, ok := s.threads[ws]
 	if !ok || !t.loaded {
+		s.mu.Unlock()
 		return
 	}
 	known := t.nodes[NodeID(node.GetId().GetId())] != nil
@@ -395,6 +420,14 @@ func (s *Service) record(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnI
 	}
 	delete(t.answered, turn)
 	s.publish(t)
+	late, hasLate := t.minted[turn]
+	delete(t.minted, turn)
+	owed := t.owedAbbreviations()
+	s.mu.Unlock()
+	if hasLate && node.GetQuestion().Abbreviation == nil {
+		s.setAbbreviation(ctx, ws, turn, node.GetId(), late)
+	}
+	s.abbreviateAll(owed)
 }
 
 // forgetAnswer drops an answer that will not be recorded, so it is no longer
@@ -599,13 +632,16 @@ func (t *thread) inFlight() []wsm.Turn {
 }
 
 // recordedTurn reports whether a turn is already a node.
-func (t *thread) recordedTurn(turn ids.TurnID) bool {
+func (t *thread) recordedTurn(turn ids.TurnID) bool { return t.nodeOfTurn(turn) != nil }
+
+// nodeOfTurn answers the node a turn was recorded as, nil while it is none.
+func (t *thread) nodeOfTurn(turn ids.TurnID) *zettelv1.Node {
 	for _, n := range t.nodes {
 		if ids.TurnID(n.GetTurn().GetTurnId()) == turn {
-			return true
+			return n
 		}
 	}
-	return false
+	return nil
 }
 
 // parentOf answers the node a node was asked of, "" for a thread's root.

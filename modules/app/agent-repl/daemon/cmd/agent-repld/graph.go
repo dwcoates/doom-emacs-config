@@ -577,12 +577,25 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// watchers and read by ListSlashCommands and the feed resolver.
 	slashCommands := commandcatalog.New()
 
+	// EVERY HEADLESS CALL ABOUT A WORKSPACE runs under that workspace's
+	// account root: the chat's abbreviations, the topbar's titles and the
+	// turn banners' summaries.
+	configDirs := titleConfigDirs{workspaceDir: func(ctx context.Context, ws ids.WorkspaceID) (string, error) {
+		record, err := p.DB.Workspace(ctx, ws)
+		if err != nil {
+			return "", err
+		}
+		return record.Dir, nil
+	}, accounts: accounts}
+
 	// THE CHAT SERVICE: each zettel chat thread's view, fed by the feed's
 	// answers below, and the recording of those answers in zettel.
 	chatService := chat.New(chat.Deps{
 		Zettel:  zettelclient.New(p.Opts.zettelSocket),
 		Turns:   p.DB,
 		Context: ctx,
+		// A LONG QUESTION IS ABBREVIATED for the outline by a headless call.
+		Abbreviator: chat.HeadlessAbbreviator{Headless: headlessClient, ConfigDirs: configDirs, PromptsDir: paths.PromptsDir},
 		// THE OUTLINE IS THE ROSTER'S to draw, under the current thread's row.
 		Outline: sidebarResolver.SetThreadOutline,
 		// A THREAD'S RECORDS GO TO ITS OWN SINK, as every workspace's do; a
@@ -691,13 +704,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE LOOKUP RUNS ON THE CALLER'S CONTEXT, not the graph's: a banner or a
 	// title composed while the daemon stands down sees its own call's end, and
 	// can tell that stand-down apart from a workspace with no record.
-	configDirs := titleConfigDirs{workspaceDir: func(ctx context.Context, ws ids.WorkspaceID) (string, error) {
-		record, err := p.DB.Workspace(ctx, ws)
-		if err != nil {
-			return "", err
-		}
-		return record.Dir, nil
-	}, accounts: accounts}
 	titleSynth := titlesynth.New(titlesynth.Deps{
 		Digester:   digestRef,
 		Headless:   headlessClient,

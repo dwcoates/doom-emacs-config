@@ -193,6 +193,11 @@ const FakeClaudeMintedName = "fake-minted-name"
 // its first line): what a created thread is renamed to.
 const FakeClaudeMintedTitle = "Fake Minted Title"
 
+// FakeClaudeMintedAbbreviation is the abbreviation the fake vendor answers a
+// chat question's abbreviation call with (the chat-question-abbreviation
+// brief, which it recognizes by its first line).
+const FakeClaudeMintedAbbreviation = "Fake minted abbreviation"
+
 // fakeClaudeScript is the vendor stand-in for BOTH call shapes the daemon
 // has. A headless run (`-p`) drains the question off stdin and answers as the
 // requested output format: a naming call gets the JSON envelope with a legal
@@ -206,6 +211,7 @@ for arg in "$@"; do
     answer="` + FakeClaudeMintedName + `"
     case "$question" in
       *"Title the chat thread"*) answer="` + FakeClaudeMintedTitle + `" ;;
+      *"Abbreviate the chat question"*) answer="` + FakeClaudeMintedAbbreviation + `" ;;
     esac
     for fmt in "$@"; do
       if [ "$fmt" = "json" ]; then
