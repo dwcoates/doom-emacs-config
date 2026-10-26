@@ -530,12 +530,14 @@ func TestUpdateHeldPromptReleaseDeliversNow(t *testing.T) {
 		t.Fatalf("UpdateHeldPrompt{release} = %v, want a success", relResp.Msg)
 	}
 
-	// Assert: release forces delivery, interrupting the running turn.
-	f.shim.ExpectKillTurn()
-	f.shim.PushAgentFrame(mainAgent, interruptedFrame(mainAgent))
+	// Assert: release sends the prompt to the shim at once, to join the
+	// running turn, and interrupts nothing.
 	st2 := f.shim.ExpectStartTurn()
-	if st2.GetTurn().GetValue() != turn2.GetValue() {
-		t.Fatalf("StartTurn after release = turn %q, want the released turn %q", st2.GetTurn().GetValue(), turn2.GetValue())
+	if st2.GetTurn().GetValue() != turn2.GetValue() || !st2.GetJoinRunningTurn() {
+		t.Fatalf("StartTurn after release = %v, want the released turn %q sent to join the running turn", st2, turn2.GetValue())
+	}
+	if kills := f.shim.Count(harness.RPCKillTurn); kills != 0 {
+		t.Fatalf("KillTurn calls = %d, want nothing interrupted", kills)
 	}
 }
 

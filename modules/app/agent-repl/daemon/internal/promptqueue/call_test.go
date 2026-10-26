@@ -378,9 +378,10 @@ func TestABounceAskedDuringAShimCallIsDecidedWhenItSettles(t *testing.T) {
 	}
 }
 
-func TestAReleaseDuringAShimCallIsRefused(t *testing.T) {
+func TestAReleaseDuringAStartTurnJoinsTheTurnItOpensOnceItSettles(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
+	h.watcher.standOnOpening = true
 	heldByDrainLease(t, h, "t2")
 	var releaseErr error
 	h.sender.startHook = func() {
@@ -394,10 +395,37 @@ func TestAReleaseDuringAShimCallIsRefused(t *testing.T) {
 	}
 
 	// Assert
+	if releaseErr != nil {
+		t.Fatalf("Release during the StartTurn = %v, want it accepted", releaseErr)
+	}
+	if got := h.sender.joins; len(got) != 1 || got[0] != "t2" {
+		t.Fatalf("joins = %v, want t2 sent to join t1 once the start settled", got)
+	}
+}
+
+func TestAReleaseDuringAShimCallThatOpensNoTurnIsRefused(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	heldByDrainLease(t, h, "t2")
+	var releaseErr error
+	h.sender.callHook = func(call string) {
+		if call != "PromptAgent" {
+			return
+		}
+		h.sender.callHook = nil
+		releaseErr = h.q.Release(context.Background(), theWorkspace, "t2")
+	}
+
+	// Act: a bubble prompt's PromptAgent opens no turn.
+	if _, err := h.q.Submit(context.Background(), bubbleSubmission("b1")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
 	if !errors.Is(releaseErr, ErrReleaseRefused) {
 		t.Fatalf("Release during the call = %v, want ErrReleaseRefused", releaseErr)
 	}
-	if !logged(h.log.Records(), "info", opRelease, "a delivery to the shim is in flight; the release is refused") {
+	if !logged(h.log.Records(), "info", opRelease, "a shim call that opens no turn is in flight; the release is refused") {
 		t.Fatalf("records = %+v, want the refusal on disk", h.log.Records())
 	}
 }
@@ -782,11 +810,11 @@ func TestTheVerdictLockIsFreeWhileAnInterjectionsInterruptIsSent(t *testing.T) {
 	}
 }
 
-func TestTheDeliveryLockIsFreeWhileAReleasesInterruptIsSent(t *testing.T) {
+func TestTheDeliveryLockIsFreeWhileAReleasedActsInterruptIsSent(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+	putHeld(t, h, wsm.HeldPrompt{Turn: "a1", Act: &wsm.HeldAct{Kind: wsm.ActModel, Value: "opus"}})
 	free, observed := true, false
 	h.sender.callHook = func(call string) {
 		if call == "KillTurn" {
@@ -796,7 +824,7 @@ func TestTheDeliveryLockIsFreeWhileAReleasesInterruptIsSent(t *testing.T) {
 	}
 
 	// Act
-	if err := h.q.Release(context.Background(), theWorkspace, "t1"); err != nil {
+	if err := h.q.Release(context.Background(), theWorkspace, "a1"); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
 

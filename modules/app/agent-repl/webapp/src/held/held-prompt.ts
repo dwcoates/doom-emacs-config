@@ -825,8 +825,9 @@ interface RowRefusal {
  * Answers whether the call succeeded.
  *
  * THE ROW IS DISABLED FOR EXACTLY THE CALL, whatever it answered. A success
- * does not promise a push: a release into a running turn registers an
- * interrupt and leaves the held view as it was until that turn ends, so a row
+ * does not promise a push: a held session act released into a running turn
+ * registers an interrupt and leaves the held view as it was until that turn
+ * ends (a released prompt joins the turn and leaves at once), so a row
  * left disabled for the push to replace stayed dead for the whole turn
  * (2026-10-23). A card the push does take down takes its row with it.
  */
