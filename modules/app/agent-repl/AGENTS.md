@@ -1964,6 +1964,25 @@ the daemon is what failed, no daemon can push that fact, so the webapp says it
 itself. It is written down in `webapp/AGENTS.md`, it is the only one, and a
 second exception is an owner ruling rather than a judgement call.
 
+## An outward link opens in the workspace's Chrome, never in the webview
+
+Owner ruling, standing (2026-10-26). AN INTENTIONAL FEATURE: DO NOT CHANGE IT.
+Every http(s) link in the agent-repl feed or anywhere else on a page opens in
+Chrome, in the profile the workspace's agent-repl login signs in as (work or
+personal), through `OpenExternal` (`daemon/internal/externalbrowser`). It
+NEVER opens in the xwidget.
+
+- Every click on such a link is claimed: modified (meta, ctrl, shift, alt)
+  and middle clicks too. Inside Emacs the "platform" a click could be left to
+  is the agent-repl webview itself, and an unclaimed click navigates the whole
+  host to the site (2026-10-26, 17:06).
+- `webapp/src/link.ts` holds the rule: the structured link, the prose
+  interceptor, and the page-wide `installNavigationGuard` for any outward link
+  a surface did not route.
+- Emacs's host takes back any navigation that still reaches it, recorded at
+  ERROR (`elisp.webhost.navigated-away`, `lisp/webhost.el`). That record means
+  a page drew an unrouted link: fix the page, never the take-back.
+
 ## The topbar's warning chip is the webapp's one error surface
 
 Owner ruling, standing (2026-09-23). The topbar's warning chip and its
