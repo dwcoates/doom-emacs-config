@@ -45,9 +45,11 @@
 //
 // THE DAEMON DRIVES EVERY KEEP-ALIVE (owner ruling, 2026-10-26; schedule.go).
 // A shim runs no keep-alive timer of its own: the Keeper asks it for each beat
-// (shim.v1.SendKeepalive), timed from the cache clock every workspace's turns
-// already keep durably (wsm.Workspace.LastTurnEndedAt, which keep-alive turns
-// move too). Once a beat has gone out a session nobody is using is stood down
+// (shim.v1.SendKeepalive), timed from the cache clock
+// (wsm.Workspace.CacheClock): the later of the last turn's end and the last
+// keep-alive the Keeper sent, which it records on the row, because nothing of
+// a keep-alive turn is stored and the turns' own clock never moves for one.
+// Once a beat has gone out a session nobody is using is stood down
 // (drain.Controller.CycleDown) and restored a minute before its next beat, at
 // most MaxRestores at once, so an idle workspace's ~350MB is free between
 // beats. A hidden workspace beats no more and its cache lapses as above; a
@@ -90,6 +92,9 @@ type DB interface {
 	ListWorkspaces(ctx context.Context) ([]wsm.Workspace, error)
 	Workspace(ctx context.Context, id wsm.WorkspaceID) (wsm.Workspace, error)
 	SetCacheLapse(ctx context.Context, id wsm.WorkspaceID, lapse wsm.CacheLapse) (bool, error)
+	// SetLastKeepalive records when a workspace's keep-alive was sent: the
+	// beat's half of the cache clock (wsm.Workspace.CacheClock).
+	SetLastKeepalive(ctx context.Context, id wsm.WorkspaceID, at time.Time) error
 	// Session reads a workspace's session record: its engagement clock and
 	// its park.
 	Session(ctx context.Context, id wsm.WorkspaceID) (wsm.Session, bool, error)
@@ -195,6 +200,10 @@ type Keeper struct {
 	// lapsedAt is the cache clock at which the shim answered that the cache
 	// had lapsed: no beat goes out again until a turn moves the clock past it.
 	lapsedAt map[ids.WorkspaceID]time.Time
+	// sent is when this Keeper last sent each workspace's keep-alive: the
+	// record's own copy (wsm.Workspace.LastKeepaliveAt) held in memory too,
+	// so a write that failed cannot time the next beat from before it.
+	sent map[ids.WorkspaceID]time.Time
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -226,6 +235,7 @@ func New(deps Deps) (*Keeper, error) {
 		restores:  map[ids.WorkspaceID]time.Time{},
 		restoring: map[ids.WorkspaceID]bool{},
 		lapsedAt:  map[ids.WorkspaceID]time.Time{},
+		sent:      map[ids.WorkspaceID]time.Time{},
 	}, nil
 }
 
@@ -482,6 +492,7 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.beats, ws)
 	delete(k.restores, ws)
 	delete(k.lapsedAt, ws)
+	delete(k.sent, ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace

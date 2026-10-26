@@ -175,6 +175,73 @@ func TestASentBeatArmsAFallbackBeat(t *testing.T) {
 	}
 }
 
+func TestASentBeatIsRecorded(t *testing.T) {
+	// Arrange
+	h := dueHarness(t, sent())
+	h.keeper.beats[theWorkspace] = now
+
+	// Act
+	h.keeper.beatsDue(context.Background())
+
+	// Assert
+	rec, _ := h.db.Workspace(context.Background(), theWorkspace)
+	if rec.LastKeepaliveAt == nil || !rec.LastKeepaliveAt.Equal(now) {
+		t.Fatalf("LastKeepaliveAt = %v, want the beat %v", rec.LastKeepaliveAt, now)
+	}
+}
+
+// TestTheStandDownAfterASentBeatTimesTheNextBeatAnIntervalOn pins the
+// 2026-10-26 loop: the stand-down's edge re-timed the next beat from the last
+// turn alone, already overdue, so the session was restored and beat again
+// within seconds.
+func TestTheStandDownAfterASentBeatTimesTheNextBeatAnIntervalOn(t *testing.T) {
+	// Arrange
+	h := dueHarness(t, sent())
+	h.keeper.beats[theWorkspace] = now
+	h.keeper.beatsDue(context.Background())
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if got := h.keeper.beats[theWorkspace]; !got.Equal(now.Add(KeepaliveInterval)) {
+		t.Fatalf("next beat = %v, want an interval after the sent one", got)
+	}
+}
+
+func TestABeatWhoseRecordFailedIsStillTimedFromIt(t *testing.T) {
+	// Arrange
+	h := dueHarness(t, sent())
+	h.db.keepaliveErr = errors.New("disk full")
+	h.keeper.beats[theWorkspace] = now
+	h.keeper.beatsDue(context.Background())
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if got := h.keeper.beats[theWorkspace]; !got.Equal(now.Add(KeepaliveInterval)) {
+		t.Fatalf("next beat = %v, want an interval after the sent one", got)
+	}
+}
+
+func TestScheduleTimesTheBeatFromARecordedKeepalive(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 40*time.Minute))
+	rec, _ := h.db.Workspace(context.Background(), theWorkspace)
+	beaten := now.Add(-5 * time.Minute)
+	rec.LastKeepaliveAt = &beaten
+	h.db.records[theWorkspace] = rec
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if got := h.keeper.beats[theWorkspace]; !got.Equal(beaten.Add(KeepaliveInterval)) {
+		t.Fatalf("beat = %v, want an interval after the recorded keep-alive", got)
+	}
+}
+
 func TestABeatThatATurnMovedIsRearmedNotSent(t *testing.T) {
 	// Arrange: the row's clock moved since the beat was armed.
 	h := newHarness(t, beatable(visible(), 10*time.Minute))

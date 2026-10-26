@@ -33,6 +33,8 @@ type fakeDB struct {
 	readErr   error
 	setErr    error
 	setLapses []wsm.CacheLapse
+	// keepaliveErr fails SetLastKeepalive.
+	keepaliveErr error
 	// queued are the workspaces with an entry standing in a merge queue;
 	// queuesErr fails the queues' read.
 	queued    []ids.WorkspaceID
@@ -113,6 +115,21 @@ func (f *fakeDB) SetCacheLapse(_ context.Context, id wsm.WorkspaceID, lapse wsm.
 	rec.CacheLapse = &lapse
 	f.records[id] = rec
 	return true, nil
+}
+
+func (f *fakeDB) SetLastKeepalive(_ context.Context, id wsm.WorkspaceID, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.keepaliveErr != nil {
+		return f.keepaliveErr
+	}
+	rec, ok := f.records[id]
+	if !ok {
+		return wsm.ErrNotFound
+	}
+	rec.LastKeepaliveAt = &at
+	f.records[id] = rec
+	return nil
 }
 
 type fakeShim struct {

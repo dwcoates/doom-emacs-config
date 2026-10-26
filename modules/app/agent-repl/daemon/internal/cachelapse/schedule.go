@@ -96,7 +96,14 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 		return none("no turn has ended, so there is no cache to keep")
 	}
 	ended := *record.LastTurnEndedAt
-	if record.Closed && (record.Closure == nil || !ended.Before(record.Closure.At)) {
+	// THE CACHE CLOCK, NOT THE TURNS': a keep-alive writes the cache as a
+	// turn does, and timed from the turns alone the beat after one was already
+	// overdue (2026-10-26).
+	clock := *record.CacheClock()
+	if sent, ok := k.sent[ws]; ok && sent.After(clock) {
+		clock = sent
+	}
+	if record.Closed && (record.Closure == nil || !clock.Before(record.Closure.At)) {
 		return none("it is closed and its last keep-alive is spent")
 	}
 	if lapsed, ok := k.lapsedAt[ws]; ok && !ended.After(lapsed) {
@@ -128,7 +135,7 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	if session.Terminal != nil && !session.KeepaliveCycled() {
 		return none("its session is not live: " + session.Terminal.Kind)
 	}
-	due := ended.Add(KeepaliveInterval)
+	due := clock.Add(KeepaliveInterval)
 	engaged := session.LastEngagementAt
 	if engaged.IsZero() {
 		engaged = session.StartedAt
@@ -205,9 +212,14 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 	switch {
 	case answer.GetSent() != nil:
 		log.Info(opDrive, "sent the workspace's keep-alive; its session is stood down until the next one once it is free", fields)
+		// THE BEAT MOVES THE CACHE CLOCK, and it is recorded before the
+		// stand-down, whose edges re-time the next beat from that clock.
+		k.sent[ws] = now
+		if err := k.deps.DB.SetLastKeepalive(ctx, ws, now); err != nil && !leaving(ctx, log, opDrive, "recording the keep-alive that was sent", err) {
+			log.Error(opDrive, "could not record the keep-alive that was sent; this daemon times the next beat from it, a successor from the turn before it",
+				dlog.WithCause(fields, err))
+		}
 		k.deps.CycleDown(ws, now)
-		// A FALLBACK, NOT THE SCHEDULE: the keep-alive's own turn end moves
-		// the clock and its free edge arms the next beat from it.
 		k.beats[ws] = now.Add(KeepaliveInterval)
 	case answer.GetSkipped().GetMainAgentBusy() != nil:
 		log.Info(opDrive, "the main agent is busy, which keeps the cache warm itself; the next beat is timed when it falls free",

@@ -558,6 +558,9 @@ type DB interface {
 	// RecordUntoldWorkspaceNotice records a subscriber's untold notice about
 	// one followed workspace, replacing the one recorded before.
 	RecordUntoldWorkspaceNotice(ctx context.Context, n UntoldWorkspaceNotice) error
+	// SetLastKeepalive records when a workspace's keep-alive was last sent
+	// (lastkeepalive.go).
+	SetLastKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error
 	// MarkCloseWhenTurnEnds marks a workspace to close when its running turn
 	// ends (selfclose.go).
 	MarkCloseWhenTurnEnds(ctx context.Context, id WorkspaceID, at time.Time) error
