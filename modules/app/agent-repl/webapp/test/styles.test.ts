@@ -47,6 +47,8 @@ import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
 import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, isOwnRule, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
+import { ENTRY_LABEL_CLASS, ENTRY_PATH_CLASS, LABEL_LINK_CLASS } from "../src/feed/entries.js";
+import { TREE_LABEL_CLASS } from "../src/metaprompt-tree.js";
 import { createControl } from "../src/control.js";
 import { DRAGGING_CLASS } from "../src/sidebar/drag.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
@@ -5814,4 +5816,61 @@ describe("the response subtree box (feed/subtree-box.ts)", () => {
       expect(rule).not.toMatch(/--accent/);
     },
   );
+});
+
+/**
+ * AN ANSWERED BRANCH'S LABEL IS PASTEL ORANGE (owner request, 2026-10-26): the
+ * prompt's entry labels, its implied ancestors' labels, and the response's
+ * linked labels all wear the one `--answer-label` token, an ancestor a dimmed
+ * shade of it rather than the grey it was.
+ */
+describe("the answered label's pastel orange", () => {
+  it.each([
+    ["a prompt's entry label", `${TREE_LABEL_CLASS} ${ENTRY_LABEL_CLASS}`],
+    ["a response's linked label", `${TREE_LABEL_CLASS} ${LABEL_LINK_CLASS}`],
+  ])("paints %s the answer-label token", (_name, classes) => {
+    // Arrange
+    const label = document.createElement("span");
+    label.className = classes;
+
+    // Act
+    const got = inDocument(label, (drawn) => cascadedValue(drawn, "color"));
+
+    // Assert
+    expect(got).toBe("var(--answer-label)");
+  });
+
+  it.each([
+    ["color", "var(--answer-label)"],
+    ["opacity", "0.55"],
+  ])("paints an implied ancestor's label's %s as a dimmed shade of the token", (property, want) => {
+    // Act
+    const got = cascadedValueIn(ENTRY_PATH_CLASS, TREE_LABEL_CLASS, property);
+
+    // Assert
+    expect(got).toBe(want);
+  });
+
+  it("keeps the response's linked label underlined", () => {
+    // Arrange
+    const label = document.createElement("span");
+    label.className = `${TREE_LABEL_CLASS} ${LABEL_LINK_CLASS}`;
+
+    // Act
+    const got = inDocument(label, (drawn) => cascadedValue(drawn, "text-decoration"));
+
+    // Assert
+    expect(got).toContain("underline");
+  });
+
+  it.each([
+    ["light", () => rootToken("--answer-label"), "#e08a4c"],
+    ["dark", () => /--answer-label:\s*([^;]+);/.exec(darkThemeBlock())?.[1]?.trim(), "#ffbf8f"],
+  ])("defines the %s theme's pastel orange", (_theme, read, want) => {
+    // Act
+    const got = read();
+
+    // Assert
+    expect(got).toBe(want);
+  });
 });
