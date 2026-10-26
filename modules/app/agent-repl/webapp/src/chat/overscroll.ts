@@ -1,8 +1,8 @@
 /**
  * overscroll — the chat's pull past its end (owner request, 2026-10-25).
  *
- * The chat cannot scroll past its end plus its leeway (scroll.ts
- * `CHAT_LEEWAY_FRACTION`): the box's extent stops there. A wheel that keeps
+ * The chat cannot scroll past its last answer (scroll.ts `chatEndTop`): the
+ * box's extent stops there. A wheel that keeps
  * pushing down at that limit PULLS the drawn content up a little, with
  * mounting resistance, and lets it spring back once the wheel goes quiet:
  * the elastic edge the platform draws for a scroll view. The pull moves

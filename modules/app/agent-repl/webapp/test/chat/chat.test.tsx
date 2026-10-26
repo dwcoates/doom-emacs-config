@@ -402,8 +402,8 @@ describe("the chat's end after a question is asked", () => {
 
     await pushPending(d, conversation([exchange("n1", "q", "a")], pending("why?")), "why?");
 
-    // The end is the last answer's, short of the quarter-page leeway: 1000 - 100 * 1.25.
-    expect([top, moves]).toEqual([875, [{ cause: "promptSent", from: 0, to: 875 }]]);
+    // The end is the last answer's, the furthest the box scrolls: 1000 - 100.
+    expect([top, moves]).toEqual([900, [{ cause: "promptSent", from: 0, to: 900 }]]);
   });
 
   it("lands at the end when a different question replaces the one in flight", async () => {
@@ -413,7 +413,7 @@ describe("the chat's end after a question is asked", () => {
 
     await pushPending(d, conversation([], pending("second?")), "second?");
 
-    expect(moves).toEqual([{ cause: "promptSent", from: 0, to: 875 }]);
+    expect(moves).toEqual([{ cause: "promptSent", from: 0, to: 900 }]);
   });
 
   it("leaves a reader scrolled up where they are while the same question's answer arrives", async () => {
@@ -505,7 +505,7 @@ describe("the chat's scroll across a sibling switch", () => {
     expect([top, moves]).toEqual([900, []]);
   });
 
-  it("holds no height of its own, so the chat never stands past its end and leeway", async () => {
+  it("holds no height of its own, so the chat never stands past its end", async () => {
     const d = daemon();
     mount(d);
 
@@ -515,14 +515,14 @@ describe("the chat's scroll across a sibling switch", () => {
   });
 });
 
-describe("the chat's leeway past its end", () => {
-  it("is the chat's own bottom padding, a quarter of the scroll box", async () => {
+describe("the chat's room past its end", () => {
+  it("is none: the chat draws no bottom padding below its last answer", async () => {
     const d = daemon();
     mount(d);
     d.push(conversation([exchange("n1", "q", "a")]));
     await drawn('[data-chat-answer="n1"]');
 
-    expect(host.style.paddingBottom).toBe("25cqh");
+    expect(host.style.paddingBottom).toBe("");
   });
 });
 
