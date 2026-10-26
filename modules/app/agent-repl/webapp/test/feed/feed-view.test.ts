@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import { isStill } from "../bubble/still.js";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1424,7 +1425,7 @@ describe("createFeedController: a prompt row's turn flags", () => {
     controller.applyPage(page([row()]), "replace");
     // Assert
     const bubble = promptBubble(host, "p1");
-    expect([bubble.hasAttribute("data-wave"), bubble.hasAttribute("style")]).toEqual([false, false]);
+    expect(isStill(bubble)).toBe(true);
   });
 
   it("keeps the bubble when the prompt row is re-pushed not working", () => {

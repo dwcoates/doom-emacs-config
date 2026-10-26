@@ -7,6 +7,7 @@
  * footer after it) is the structure every kind now shares.
  */
 import { describe, expect, it } from "vitest";
+import { isStill } from "./still.js";
 import {
   BUBBLE_CAP_ATTRIBUTE,
   BUBBLE_CAP_LINES,
@@ -272,7 +273,7 @@ describe("drawBubble: every bubble is still", () => {
     // Arrange / Act
     const { bubble } = drawBubble(spec(variant));
     // Assert
-    expect([bubble.hasAttribute("data-wave"), bubble.hasAttribute("style")]).toEqual([false, false]);
+    expect(isStill(bubble)).toBe(true);
   });
 });
 

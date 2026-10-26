@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
+import { isStill } from "../../bubble/still.js";
 import { create } from "@bufbuild/protobuf";
 import { FeedUserPromptBodySchema, FeedUserPromptSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
@@ -114,7 +115,7 @@ describe("drawFeedUserPrompt: the bubble", () => {
     const el = drawFeedUserPrompt(prompt([], "You", working, [], awaitingUser));
 
     // Assert
-    expect([el.hasAttribute("data-wave"), el.hasAttribute("style")]).toEqual([false, false]);
+    expect(isStill(el)).toBe(true);
   });
 
   it("draws no author label, however the daemon resolved it", () => {

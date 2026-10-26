@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
+import { isStill } from "../../bubble/still.js";
 import { create } from "@bufbuild/protobuf";
 import {
   FeedAgentPromptAddressSchema,
@@ -51,7 +52,7 @@ describe("drawFeedAgentPrompt", () => {
     const el = drawFeedAgentPrompt(agentPrompt(sentTo("vetter"), [], working, awaitingUser));
 
     // Assert
-    expect([el.hasAttribute("data-wave"), el.hasAttribute("style")]).toEqual([false, false]);
+    expect(isStill(el)).toBe(true);
   });
 
   it("draws the other end's name verbatim", () => {
