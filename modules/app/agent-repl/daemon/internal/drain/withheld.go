@@ -75,6 +75,7 @@ func (c *controller) StandDownWithheld(ws ids.WorkspaceID) {
 // a session coming up): a stand-down pending on ws is asked again. A
 // workspace with none pending is no change.
 func (c *controller) RetryWithheld(ws ids.WorkspaceID) {
+	c.retryCycle(ws)
 	c.mu.Lock()
 	st := c.withheld[ws]
 	c.mu.Unlock()

@@ -57,11 +57,6 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 			log.Debug(opSweep, "the workspace has no session to hibernate", fields)
 			continue
 		}
-		if session.Terminal != nil {
-			log.Debug(opSweep, "the workspace's session is already terminal",
-				dlog.Merge(fields, dlog.Context{"terminal_kind": session.Terminal.Kind}))
-			continue
-		}
 		// A QUEUED MERGE KEEPS ITS SESSION WARM (owner ruling, 2026-10-13):
 		// the idle clock restarts when the workspace's merge joins the queue,
 		// so its shim and keep-alive stand for a whole cutoff in line, and a
@@ -73,6 +68,22 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 		}
 		idle := now.Sub(since)
 		fields["idle"] = idle.String()
+		// A KEEP-ALIVE CYCLE'S PARK PAST THE CUTOFF IS A HIBERNATION. The
+		// cycle stood the shim down between beats with its cache warm, and the
+		// cache keeper sends no beat past the cutoff, so from here the session
+		// is asleep exactly as the sweep would have left it: its park deepens,
+		// and every view draws it hibernated.
+		if session.KeepaliveCycled() && idle >= c.deps.IdleCutoff {
+			if c.deepenCyclePark(ctx, log, ws.ID, fields) {
+				hibernated = append(hibernated, ws.ID)
+			}
+			continue
+		}
+		if session.Terminal != nil {
+			log.Debug(opSweep, "the workspace's session is already terminal",
+				dlog.Merge(fields, dlog.Context{"terminal_kind": session.Terminal.Kind}))
+			continue
+		}
 		if idle < c.deps.IdleCutoff {
 			log.Debug(opSweep, "the session was engaged inside the cutoff", fields)
 			continue
@@ -116,6 +127,37 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 	c.log.Debug(opSweep, "one idle-sweep pass finished",
 		dlog.Context{"scanned": len(workspaces), "hibernated": ids.Strings(hibernated)})
 	return hibernated, nil
+}
+
+// deepenCyclePark turns a keep-alive cycle's park into the idle sweep's
+// hibernation: the shim is already down, so only the record and the views
+// change. A session a restore or a revival is bringing back is left to it.
+// It answers whether the park was deepened.
+func (c *controller) deepenCyclePark(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, fields dlog.Context) bool {
+	if c.deps.Stand.Serving(ws) || c.deps.Stand.StartUnderWay(ws) {
+		log.Debug(opSweep, "a keep-alive cycle's parked session is coming back up; it is not hibernated", fields)
+		return false
+	}
+	why := c.idleReason()
+	if err := c.deps.DB.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{
+		Kind:   TerminalHibernated,
+		Detail: why.detail,
+		At:     c.deps.Clock.Now(),
+	}); err != nil {
+		log.Error(opSweep, "could not record the hibernation of a keep-alive cycle's parked session", dlog.WithCause(fields, err))
+		return false
+	}
+	if c.deps.SetParked != nil {
+		c.deps.SetParked(ws, wsm.ParkHibernated)
+	}
+	if c.deps.PublishRegistry != nil {
+		if err := c.deps.PublishRegistry(ctx); err != nil {
+			log.Error(opSweep, "could not republish the roster after hibernating a keep-alive cycle's parked session",
+				dlog.WithCause(fields, err))
+		}
+	}
+	log.Info(opSweep, "a keep-alive cycle's parked session went past the idle cutoff; it is hibernated", fields)
+	return true
 }
 
 // standGate is whether a session may be stood down right now, and if not,

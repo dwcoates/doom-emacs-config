@@ -93,6 +93,9 @@ type controller struct {
 	// withheld are the stand-downs of withheld workspaces, pending or
 	// running, by workspace (withheld.go).
 	withheld map[ids.WorkspaceID]*withheldState
+	// cycles are the keep-alive cycle's stand-downs, pending or running, by
+	// workspace (cycle.go).
+	cycles map[ids.WorkspaceID]*cycleState
 }
 
 // Schedule puts a schedule in force and announces it. The persisted row and

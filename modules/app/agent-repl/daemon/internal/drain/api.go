@@ -70,9 +70,15 @@ type Controller interface {
 	// It returns at once.
 	StandDownWithheld(ws ids.WorkspaceID)
 	// RetryWithheld is the daemon's own edge for a workspace (the free edge
-	// a turn's end raises, a session coming up): a stand-down pending on it is
-	// asked again.
+	// a turn's end raises, a session coming up): a stand-down pending on it --
+	// a withheld one or a keep-alive cycle's -- is asked again.
 	RetryWithheld(ws ids.WorkspaceID)
+	// CycleDown stands an idle session down after the keep-alive asked at
+	// BEAT (owner ruling, 2026-10-26; cycle.go): never under a turn or live
+	// detached work, never for the workspace the user is looking at, and
+	// never once a real turn has run since the beat. A busy one is stood down
+	// once it falls free. It returns at once.
+	CycleDown(ws ids.WorkspaceID, beat time.Time)
 }
 
 // Deps are the controller's collaborators.
