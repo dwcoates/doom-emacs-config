@@ -10275,6 +10275,80 @@ describe("the retry label a failed vendor start carries", () => {
     } as unknown as SdkMessage;
   }
 
+  describe("the liveness bound after starts it refused in a row", () => {
+    const FAILED = "what the vendor emitted before the start failed";
+    const ESCALATED = "the liveness bound refused the last starts in a row; this start gives the vendor longer to prove itself live";
+
+    /** The bound the most recent failed start was given. */
+    async function failedStartBound(h: Harness): Promise<unknown> {
+      const before = logSinkMark();
+      await h.engine.startSession(freshRequest());
+      return logContextFor(before, FAILED)?.["bound_ms"];
+    }
+
+    it("gives the first start the base bound", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, initTimeoutMs: AMPLE, holdLiveSignal: true });
+
+      // Act.
+      const bound = await failedStartBound(h);
+
+      // Assert.
+      expect(bound).toBe(5);
+    });
+
+    it("doubles the bound for the start after a miss", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, initTimeoutMs: AMPLE, holdLiveSignal: true });
+      await failedStartBound(h);
+
+      // Act.
+      const bound = await failedStartBound(h);
+
+      // Assert.
+      expect(bound).toBe(10);
+    });
+
+    it("doubles it again for each miss in a row", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, initTimeoutMs: AMPLE, holdLiveSignal: true });
+      await failedStartBound(h);
+      await failedStartBound(h);
+
+      // Act.
+      const bound = await failedStartBound(h);
+
+      // Assert.
+      expect(bound).toBe(20);
+    });
+
+    it("never gives a start longer than the init bound", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, initTimeoutMs: 12, holdLiveSignal: true });
+      await failedStartBound(h);
+      await failedStartBound(h);
+
+      // Act.
+      const bound = await failedStartBound(h);
+
+      // Assert.
+      expect(bound).toBe(12);
+    });
+
+    it("says so when a start gives the vendor longer", async () => {
+      // Arrange.
+      const h = harness({ liveSignalTimeoutMs: 5, initTimeoutMs: AMPLE, holdLiveSignal: true });
+      await failedStartBound(h);
+      const before = logSinkMark();
+
+      // Act.
+      await h.engine.startSession(freshRequest());
+
+      // Assert.
+      expect(logContextFor(before, ESCALATED)).toMatchObject({ bound_ms: 10, misses_in_a_row: 1 });
+    });
+  });
+
   it("labels a liveness-bound timeout retryable", async () => {
     // Arrange.
     const h = harness({ liveSignalTimeoutMs: 5, holdLiveSignal: true });

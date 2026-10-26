@@ -1070,6 +1070,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let permissionMode: conversationv1.AgentPermissionMode =
     fromVendorPermissionMode(DEFAULT_PERMISSION_MODE);
   let modelCatalog: conversationv1.ModelOption[] = [];
+  /**
+   * How many starts the liveness bound refused (see {@link liveSignalBoundMs}).
+   * They are always in a row: a start that succeeds is this shim's last, since
+   * one shim serves exactly one session.
+   */
+  let liveSignalMisses = 0;
   let started = false;
   /** The workspace's name, as StartSession stated it; unset until then. */
   let workspaceName: string | undefined;
@@ -5201,6 +5207,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * answer is what it always was — a `SessionFault` on the catalog's own
    * component, which a later re-read can lift.
    */
+  /**
+   * The liveness bound THIS start gives the vendor: the base bound, doubled
+   * for each start in a row the bound refused, up to the init bound.
+   *
+   * A HOST UNDER LOAD MAKES A HEALTHY CHILD SLOW, NOT WEDGED. At the base bound
+   * alone, every retry killed a child that was seconds from answering and
+   * cold-started another in its place, so a loaded host never started the
+   * workspace and each retry loaded it further (2026-10-26: 33 starts in a row
+   * on one workspace, five workspaces at once, with swap full). The first
+   * start keeps the tight bound, so a wedged child is still reported in
+   * seconds; each miss after it gives the next child twice as long.
+   */
+  function liveSignalBoundMs(): number {
+    const base = deps.liveSignalTimeoutMs ?? LIVE_SIGNAL_TIMEOUT_MS;
+    const cap = Math.max(base, deps.initTimeoutMs ?? INIT_TIMEOUT_MS);
+    return Math.min(base * 2 ** liveSignalMisses, cap);
+  }
+
   async function proveLive(active: QueryLike, boundMs: number): Promise<void> {
     // HOW LONG THE ANSWER TOOK is the measurement the bound is set from
     // (2026-10-17: a deploy restarting thirty shims at once tripped the 3s
@@ -5224,6 +5248,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         // the next child may well answer it.
         const bound: VendorStartBound | undefined =
           err instanceof BoundExceededError ? { name: "live_signal", ms: err.boundMs } : undefined;
+        if (bound !== undefined) liveSignalMisses += 1;
         // THE LIVENESS CALL'S OWN FAILURE SAYS WHOSE IT WAS: one that never
         // reached the API names an outage, a bound that tripped does not.
         startReject(
@@ -5557,7 +5582,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // blocking hook, an error result or a query that ends can still land
       // first and refuse the start with its own reason, and each of those is
       // the more specific account of the same child.
-      const live = proveLive(child, deps.liveSignalTimeoutMs ?? LIVE_SIGNAL_TIMEOUT_MS);
+      const liveBoundMs = liveSignalBoundMs();
+      if (liveSignalMisses > 0) {
+        LOGGER.info(
+          { bound_ms: liveBoundMs, misses_in_a_row: liveSignalMisses },
+          "the liveness bound refused the last starts in a row; this start gives the vendor longer to prove itself live",
+        );
+      }
+      const live = proveLive(child, liveBoundMs);
       await initialized;
       // AND THE CATALOG IS IN HAND BEFORE THE OPENING IS ANSWERED. When the
       // round-trip is what settled the start this has already resolved; when
