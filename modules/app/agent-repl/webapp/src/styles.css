@@ -2890,13 +2890,13 @@ html[data-page-unshown] *::after {
 .mp-line.mp-line-hovered {
   background: linear-gradient(to right,
     transparent var(--box-left),
-    var(--composer-entry-bg) var(--box-left),
-    var(--composer-entry-bg) var(--box-right),
+    var(--box-bg) var(--box-left),
+    var(--box-bg) var(--box-right),
     transparent var(--box-right));
 }
-.mp-line.mp-line-composing { --box-left: var(--composer-left); --box-right: var(--composer-right); }
-.mp-line.mp-line-revealed { --box-left: var(--reveal-left); --box-right: var(--reveal-right); }
-.mp-line.mp-line-hovered { --box-left: var(--hover-left); --box-right: var(--hover-right); cursor: pointer; }
+.mp-line.mp-line-composing { --box-left: var(--composer-left); --box-right: var(--composer-right); --box-bg: var(--composer-entry-bg); }
+.mp-line.mp-line-revealed { --box-left: var(--reveal-left); --box-right: var(--reveal-right); --box-bg: var(--composer-entry-bg); }
+.mp-line.mp-line-hovered { --box-left: var(--hover-left); --box-right: var(--hover-right); --box-bg: var(--composer-entry-bg); cursor: pointer; }
 /* The entry a linked label revealed flashes once, as a coalesced held card does. */
 .mp-entry-flash { animation: mp-entry-flash 1.2s ease-out; }
 @keyframes mp-entry-flash {
