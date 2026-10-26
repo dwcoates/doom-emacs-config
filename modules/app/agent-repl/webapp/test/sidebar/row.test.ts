@@ -670,6 +670,37 @@ describe("the detail panel", () => {
     expect(drawn.querySelector(".detail .children li")?.classList.contains("receded")).toBe(receded);
   });
 
+  it.each([
+    { name: "a line's value", selector: ".detail dd" },
+    { name: "a line's code", selector: ".detail dd code" },
+    { name: "a child's name", selector: ".detail .children li" },
+  ])("paints $name in the value grey, not the foreground", ({ selector }) => {
+    const drawn = drawRosterRow(
+      row({
+        id: "ws-1",
+        detail: { branch: { name: "feat/rail" }, children: [{ workspace: { id: "ws-a", dir: "/d/a" }, name: "alpha" }] },
+      }),
+      sidebarContext(),
+      "R",
+    );
+    expect(inRail(drawn, (rail) => cascadedValue(rail.querySelector(selector) as Element, "color"))).toBe(
+      "var(--detail-value)",
+    );
+  });
+
+  it("gives a line's code no highlight", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", detail: { branch: { name: "feat/rail" } } }), sidebarContext(), "R");
+    expect(
+      inRail(drawn, (rail) => cascadedValue(rail.querySelector(".detail dd code") as Element, "background-color")),
+    ).toBe("rgba(0, 0, 0, 0)");
+  });
+
+  it("derives the value grey from the titles' grey", () => {
+    const root = rulesOf(stylesheet).filter((rule) => rule.selectors.includes(":root"));
+    const values = root.map((rule) => /--detail-value:\s*([^;]+);/.exec(rule.declarations)?.[1]).filter(Boolean);
+    expect(values).toEqual(["color-mix(in srgb, var(--muted) 82%, #000000)"]);
+  });
+
   it("draws the children block after the summary", () => {
     const drawn = drawRosterRow(
       row({

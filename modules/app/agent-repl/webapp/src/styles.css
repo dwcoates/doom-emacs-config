@@ -8,6 +8,10 @@
      it is collapsed. */
   --repo-head-expanded: #9ca3af;
   --repo-head-collapsed: #4b5563;
+  /* A value in a sidebar row's detail panel: `--muted` (the panel's titles)
+     taken a slight step darker, mixed toward black so it is darker in either
+     theme (owner request, 2026-10-26). */
+  --detail-value: color-mix(in srgb, var(--muted) 82%, #000000);
   /* The gutter bar a Recently Merged row merged TODAY carries: a slight
      off-white beside the selection's accent bar (owner request, 2026-10-11).
      The light theme cannot draw off-white on its white ground, so it takes a
@@ -1638,12 +1642,12 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 }
 #ws-sidebar .detail dt { color: var(--muted); }
 #ws-sidebar .detail dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#ws-sidebar .detail code {
-  background: var(--code-bg);
-  border-radius: 4px;
-  padding: 0 0.25em;
-  font-size: 0.92em;
-}
+/* THE PANEL'S VALUES ARE A GREY, NOT THE FOREGROUND (owner request,
+   2026-10-26): each value (a line's value, a child's name) is a slightly darker
+   grey than the titles beside it, and a value's code carries no highlight. */
+#ws-sidebar .detail dd,
+#ws-sidebar .detail .children li { color: var(--detail-value); }
+#ws-sidebar .detail code { font-size: 0.92em; }
 #ws-sidebar .detail .summary { font-style: italic; color: var(--muted); margin: 0.35rem 0 0; }
 #ws-sidebar .detail .children { margin: 0.35rem 0 0; }
 #ws-sidebar .detail .children-head { color: var(--muted); }
