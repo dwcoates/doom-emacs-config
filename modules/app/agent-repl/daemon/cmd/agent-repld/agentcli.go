@@ -166,7 +166,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"dequeue":        {usage: "dequeue MERGE|here", run: queueDequeue},
 		"move-up":        {usage: "move-up MERGE|here", run: queueMove(true)},
 		"move-down":      {usage: "move-down MERGE|here", run: queueMove(false)},
-		"pause":          {usage: "pause [-repository here|DIR]", run: queuePause(true)},
+		"pause":          {usage: "pause [-repository here|DIR] [-hard]", run: queuePause(true)},
 		"resume":         {usage: "resume [-repository here|DIR]", run: queuePause(false)},
 		"disable-racing": {usage: "disable-racing", run: queueRacing(false)},
 		"enable-racing":  {usage: "enable-racing", run: queueRacing(true)},
@@ -1601,6 +1601,10 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 	return func(c *cliCall, args []string) int {
 		fs, stateDir := c.flags()
 		repository := fs.String("repository", "", "here, or a main checkout; unset is every repository")
+		hard := false
+		if pause {
+			fs.BoolVar(&hard, "hard", false, "a hard stop: also interrupt the turns the queue's merges drive")
+		}
 		if _, ok := c.parse(fs, args); !ok || !c.dial(*stateDir) {
 			return exitFailure
 		}
@@ -1610,7 +1614,7 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 		}
 		req := &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Resume{Resume: &agentreplv1.UpdateMergeQueueResume{Repository: scope}}}
 		if pause {
-			req.Action = &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: scope}}
+			req.Action = &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Repository: scope, Hard: hard}}
 		}
 		return c.updateMergeQueue(req)
 	}

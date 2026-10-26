@@ -151,6 +151,66 @@ func TestSetRepositoryScopesThePause(t *testing.T) {
 	}
 }
 
+// hardPause sends a hard pause scoped to repo-1.
+func hardPause(t *testing.T, h *harness) {
+	t.Helper()
+	if _, err := h.Client.UpdateMergeQueue(context.Background(),
+		connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
+			Action: &agentreplv1.UpdateMergeQueueRequest_Pause{
+				Pause: &agentreplv1.UpdateMergeQueuePause{
+					Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
+					Hard:       true,
+				},
+			},
+		})); err != nil {
+		t.Fatalf("UpdateMergeQueue: %v", err)
+	}
+}
+
+func TestAHardPauseHardStopsTheScopedQueue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	hardPause(t, h)
+
+	// Assert.
+	if !h.Merge.hardStopped || h.Merge.hardStopScope == nil || string(h.Merge.hardStopScope.ID) != "repo-1" {
+		t.Fatalf("hard stop = (%v, %v), want repo-1 hard-stopped", h.Merge.hardStopped, h.Merge.hardStopScope)
+	}
+}
+
+func TestAHardPauseIsNotAlsoAnOrdinaryPause(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	hardPause(t, h)
+
+	// Assert.
+	if h.Merge.pauseScope != nil {
+		t.Fatalf("pause scope = %v, want the hard stop alone", h.Merge.pauseScope)
+	}
+}
+
+func TestAnOrdinaryPauseIsNoHardStop(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if _, err := h.Client.UpdateMergeQueue(context.Background(),
+		connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(),
+			Action: &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{}},
+		})); err != nil {
+		t.Fatalf("UpdateMergeQueue: %v", err)
+	}
+
+	// Assert.
+	if h.Merge.hardStopped {
+		t.Fatal("an ordinary pause hard-stopped the queue")
+	}
+}
+
 // TestUnknownRepositoryIsAnAnswer pins the landed arm: a pause naming no
 // registered repository answers UpdateMergeQueueError.unknown_repository.
 func TestUnknownRepositoryIsAnAnswer(t *testing.T) {

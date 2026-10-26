@@ -1422,6 +1422,47 @@ func TestEveryQueueVerbNamesTheCallingWorkspaceAsWhoAsked(t *testing.T) {
 	}
 }
 
+func TestPauseSendsHardOnlyWhenAsked(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "a hard stop", args: []string{"pause", "-repository", "here", "-hard"}, want: true},
+		{name: "an ordinary pause", args: []string{"pause", "-repository", "here"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			if got := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetPause().GetHard(); got != tt.want {
+				t.Fatalf("hard = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResumeTakesNoHardFlag(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(mergeQueueNoun, "resume", "-repository", "here", "-hard")
+
+	// Assert
+	if code == exitSuccess {
+		t.Fatal("resume accepted -hard")
+	}
+}
+
 // EVERY SUBSCRIPTION DETAIL THE CONTRACT DECLARES HAS A -detail SPELLING, so a
 // level added to the proto is never one the command line cannot ask for.
 func TestEveryMergeQueueDetailHasASpelling(t *testing.T) {
