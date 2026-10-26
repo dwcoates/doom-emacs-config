@@ -879,6 +879,7 @@ re-routes their frontend resolution instead."
          ;; (`agent-repl-test--open-tabs-answer-ready'), unless it stages
          ;; its own.
          (agent-repl-open-tabs--state (make-hash-table :test 'equal))
+         (agent-repl-open-tabs--reattached-while-asked (make-hash-table :test 'equal))
          (agent-repl-open-tabs--rows nil)
          (agent-repl-open-tabs--startup 'done)
          (agent-repl-open-tabs--startup-selected nil)

@@ -75,6 +75,13 @@
 (defvar agent-repl-roster--stream)
 (defvar agent-repl-roster--walking)
 (defvar agent-repl-link-up-functions)
+(defvar agent-repl-host-reattached-functions)
+
+(defconst agent-repl-open-tabs--handover-causes '(:transferring-away :not-yet-adopted)
+  "The refusal causes that are a rollout's handover, not a failure.
+The workspace is moving between daemons: the one asked has handed it on,
+or has not taken it over yet.  Its tab is held, and asked for again once
+the workspace is re-attached to the daemon that serves it.")
 
 (defconst agent-repl-open-tabs--central
   '(:agent-repl-central "opening tabs spans every workspace")
@@ -87,9 +94,17 @@
 `in-flight' while an `OpenTabs' names it and has not answered it; `open'
 once answered ready or failed while visible (its tab is drawn); `dormant'
 while it is hidden, or was answered hidden (asked for again when shown);
-`refused' once the daemon refused to open it.  An id with no entry has
-never been asked for, or its open's stream ended unanswered.  A defvar, so
-a hot reload keeps every open tab.")
+`refused' once the daemon refused to open it for good; `handover' once it
+refused because the workspace is moving between daemons (asked for again
+when the workspace is re-attached, `agent-repl-open-tabs--on-reattached').
+An id with no entry has never been asked for, or its open's stream ended
+unanswered.  A defvar, so a hot reload keeps every open tab.")
+
+(defvar agent-repl-open-tabs--reattached-while-asked (make-hash-table :test 'equal)
+  "Ref ids re-attached to a daemon while their open was in flight.
+A handover refusal that arrives AFTER its workspace's reattach finished
+has no reattach left to wait for, so it is asked for again at once.  The
+entry goes with the open's answer, whatever it is.")
 
 (defvar agent-repl-open-tabs--rows nil
   "The last roster walk's rows: plists `(:id :name :ref :collapsed :hidden)'.
@@ -355,7 +370,8 @@ every one never asked for, or shown again, is asked for in ONE request."
     (dolist (row rows) (puthash (plist-get row :id) t wanted))
     (dolist (id (hash-table-keys agent-repl-open-tabs--state))
       (unless (gethash id wanted)
-        (remhash id agent-repl-open-tabs--state))))
+        (remhash id agent-repl-open-tabs--state)
+        (remhash id agent-repl-open-tabs--reattached-while-asked))))
   (setq agent-repl-open-tabs--rows rows)
   (dolist (row rows)
     (when (and (plist-get row :collapsed)
@@ -406,7 +422,9 @@ once a daemon is serving."
          (id (plist-get ref :id))
          (ws (agent-repl-open-tabs--name ref))
          (outcome (plist-get opened :outcome))
-         (row (agent-repl-open-tabs--row id)))
+         (row (agent-repl-open-tabs--row id))
+         (reattached (gethash id agent-repl-open-tabs--reattached-while-asked)))
+    (remhash id agent-repl-open-tabs--reattached-while-asked)
     (pcase (plist-get outcome :arm)
       ((or :ready :failed)
        (cond
@@ -434,6 +452,10 @@ once a daemon is serving."
        (when row (agent-repl-open-tabs--dormant id))
        (agent-repl--info ws "elisp.open-tabs.opened-hidden ws=%s id=%s" ws id)
        (agent-repl-open-tabs--maybe-land-startup))
+      ((and :refused
+            (guard (memq (agent-repl-open-tabs--cause-arm outcome)
+                         agent-repl-open-tabs--handover-causes)))
+       (agent-repl-open-tabs--handed-over row id ws outcome reattached))
       (:refused
        (when row (puthash id 'refused agent-repl-open-tabs--state))
        (agent-repl--error ws "elisp.open-tabs.refused ws=%s id=%s cause=%S"
@@ -443,10 +465,59 @@ once a daemon is serving."
        (agent-repl-open-tabs--maybe-land-startup))
       (arm (agent-repl--error ws "elisp.open-tabs.unknown-outcome arm=%S ws=%s" arm ws)))))
 
+(defun agent-repl-open-tabs--cause-arm (refused)
+  "Return REFUSED's cause arm keyword, e.g. `:unknown-workspace'."
+  (plist-get (plist-get (plist-get refused :value) :cause) :arm))
+
 (defun agent-repl-open-tabs--cause-word (refused)
   "Return the words naming REFUSED's cause, e.g. \"unknown-workspace\"."
-  (let ((arm (plist-get (plist-get (plist-get refused :value) :cause) :arm)))
+  (let ((arm (agent-repl-open-tabs--cause-arm refused)))
     (if (keywordp arm) (substring (symbol-name arm) 1) "unnamed")))
+
+;;;; ---- The handover ---------------------------------------------------------
+
+;; A HANDOVER REFUSAL IS NOT A FAILURE.  During a rollout the daemon asked can
+;; have handed the workspace on (`transferring_away') or not taken it over yet
+;; (`not_yet_adopted'), and a workspace in the middle of a turn stays with the
+;; old daemon until the turn lets it go.  Held as `refused', its tab was held
+;; for the rest of the Emacs session (2026-10-26: `charm-inference-sf17' was
+;; adopted by the new daemon at 13:34 and its tab never appeared, while the
+;; sidebar numbered it 7).  The workspace's REATTACH is the moment a daemon
+;; serves it (`agent-repl-host-reattached-functions'), so it is asked for
+;; again then: once per reattach, never on a walk, so a long handover is not
+;; asked for on every roster push.
+
+(defun agent-repl-open-tabs--handed-over (row id ws refused reattached)
+  "Take workspace WS's (ref ID, walk ROW) handover refusal REFUSED.
+REATTACHED is non-nil when WS was re-attached while the open was in flight:
+there is no reattach left to wait for, so it is asked for again at once."
+  (agent-repl--info ws "elisp.open-tabs.refused-handover ws=%s id=%s cause=%s reattached=%s"
+                    ws id (agent-repl-open-tabs--cause-word refused) (and reattached t))
+  (when row
+    (puthash id 'handover agent-repl-open-tabs--state)
+    (if reattached
+        (agent-repl-open-tabs--ask-again row "reattached-while-asked")
+      (agent-repl-open-tabs--say "%s: moving to the new daemon; its tab opens once it has." ws)))
+  (agent-repl-open-tabs--maybe-land-startup))
+
+(defun agent-repl-open-tabs--ask-again (row why)
+  "Ask again for ROW, held by a handover refusal; WHY is recorded."
+  (agent-repl--info (plist-get row :name) "elisp.open-tabs.handover-ask-again ws=%s id=%s why=%s"
+                    (plist-get row :name) (plist-get row :id) why)
+  (remhash (plist-get row :id) agent-repl-open-tabs--state)
+  (agent-repl-open-tabs--ask (list row)))
+
+(defun agent-repl-open-tabs--on-reattached (ws)
+  "Workspace WS was re-attached to the daemon that serves it.
+Held by a handover refusal, it is asked for again now; with its open in
+flight, the refusal that may still come is asked for again on arrival."
+  (let* ((id (plist-get (agent-repl--ws-get ws :ref) :id))
+         (row (and id (agent-repl-open-tabs--row id))))
+    (pcase (and row (gethash id agent-repl-open-tabs--state))
+      ('handover (agent-repl-open-tabs--ask-again row "reattached"))
+      ('in-flight (puthash id t agent-repl-open-tabs--reattached-while-asked)))))
+
+(add-hook 'agent-repl-host-reattached-functions #'agent-repl-open-tabs--on-reattached)
 
 (defun agent-repl-open-tabs--drawn-open-p (name)
   "Return non-nil when workspace NAME's tab is answered open and drawn."
@@ -464,16 +535,16 @@ workspace the user last selected, kept by the daemon across every restart,
 so when it names a row of this walk that the bar draws and the daemon has
 not refused, the startup waits for that tab (SOURCE `roster') and lands
 on nothing else.  Only when the roster names no such row -- no selection
-at all, or one that is hidden, refused or gone -- is the first drawn tab
-answered open taken (SOURCE `first-drawn'), so a startup still never
-leaves the frame on no workspace."
+at all, or one that is hidden, refused (a handover included) or gone --
+is the first drawn tab answered open taken (SOURCE `first-drawn'), so a
+startup still never leaves the frame on no workspace."
   (let* ((id (and agent-repl-roster-view
                   (agent-repl-roster--current-id agent-repl-roster-view)))
          (row (and id (agent-repl-open-tabs--row id)))
          (name (and row (plist-get row :name))))
     (if (and row
              (not (plist-get row :collapsed))
-             (not (eq (gethash id agent-repl-open-tabs--state) 'refused))
+             (not (memq (gethash id agent-repl-open-tabs--state) '(refused handover)))
              (member name (agent-repl-roster-drawn-tab-order)))
         (cons (and (agent-repl-open-tabs--drawn-open-p name) name) 'roster)
       (cons (cl-find-if #'agent-repl-open-tabs--drawn-open-p
@@ -532,7 +603,9 @@ dialed in a loop."
   (let ((unanswered (cl-remove-if-not
                      (lambda (id) (eq (gethash id agent-repl-open-tabs--state) 'in-flight))
                      ids)))
-    (dolist (id unanswered) (remhash id agent-repl-open-tabs--state))
+    (dolist (id unanswered)
+      (remhash id agent-repl-open-tabs--state)
+      (remhash id agent-repl-open-tabs--reattached-while-asked))
     (if (and (eq (car outcome) :ended) (null unanswered))
         (agent-repl--log agent-repl-open-tabs--central "elisp.open-tabs.closed outcome=ended")
       ;; INFO: the open is not lost, only asked for again.

@@ -742,6 +742,198 @@ Owner ruling 2026-10-26: a fold never unloads."
       ;; Assert
       (should (cl-some (lambda (line) (string-prefix-p "elisp.open-tabs.refused" line)) errors)))))
 
+;;;; ---- Handover refusals ----
+
+(defun agent-repl-test-open-tabs--handover (id &optional cause)
+  "A `refused' frame for workspace ID with the handover CAUSE (default `not_yet_adopted')."
+  (agent-repl-test-open-tabs--opened
+   id :refused (list :cause (list :arm (or cause :not-yet-adopted) :value nil))))
+
+(ert-deftest agent-repl-test-open-tabs-a-handover-refusal-holds-the-tab ()
+  "A workspace refused while it moves between daemons gets no tab yet."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a"))
+    ;; Assert
+    (should (agent-repl-open-tabs-holds-p "a"))))
+
+(ert-deftest agent-repl-test-open-tabs-a-handover-refusal-is-no-error-record ()
+  "A handover refusal is the rollout's ordering, so nothing is recorded at ERROR."
+  (agent-repl-test-open-tabs--with
+    (let (errors)
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (agent-repl-test--record-into errors)))
+        ;; Arrange
+        (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+        ;; Act
+        (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a")))
+      ;; Assert
+      (should (null errors)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-handover-refusal-is-an-info-record-naming-its-cause ()
+  "A handover refusal is recorded at INFO with its cause."
+  (agent-repl-test-open-tabs--with
+    (let (infos)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (agent-repl-test--record-into infos)))
+        ;; Arrange
+        (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+        ;; Act
+        (agent-repl-test-open-tabs--frame
+         (agent-repl-test-open-tabs--handover "a" :transferring-away)))
+      ;; Assert
+      (should (member "elisp.open-tabs.refused-handover ws=a id=a cause=transferring-away reattached=nil"
+                      infos)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-handover-refusal-says-the-tab-waits-for-the-move ()
+  "A handover refusal is one line saying the tab opens once the move is done."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a"))
+    ;; Assert
+    (should (member "a: moving to the new daemon; its tab opens once it has."
+                    agent-repl-test-open-tabs--lines))))
+
+(ert-deftest agent-repl-test-open-tabs-a-link-up-asks-nothing-for-a-handover-refusal ()
+  "A link-up does not ask again for a tab held by a handover: its reattach does."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a"))
+    ;; Act
+    (agent-repl-open-tabs--ask-owed 'conn)
+    ;; Assert
+    (should (= (length agent-repl-test-open-tabs--requests) 1))))
+
+(ert-deftest agent-repl-test-open-tabs-a-reattach-asks-again-for-a-not-yet-adopted-tab ()
+  "The reattach of a workspace refused `not_yet_adopted' asks for it again."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a" :not-yet-adopted))
+    ;; Act
+    (run-hook-with-args 'agent-repl-host-reattached-functions "a")
+    ;; Assert
+    (should (equal (agent-repl-test-open-tabs--asked) '("a")))))
+
+(ert-deftest agent-repl-test-open-tabs-a-reattach-asks-again-for-a-transferring-away-tab ()
+  "The reattach of a workspace refused `transferring_away' asks for it again."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a" :transferring-away))
+    ;; Act
+    (agent-repl-open-tabs--on-reattached "a")
+    ;; Assert
+    (should (= (length agent-repl-test-open-tabs--requests) 2))))
+
+(ert-deftest agent-repl-test-open-tabs-a-tab-asked-again-after-its-handover-is-drawn-once-ready ()
+  "The tab a reattach asked for again is drawn when that open answers ready."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a"))
+    (agent-repl-open-tabs--on-reattached "a")
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Assert
+    (should-not (agent-repl-open-tabs-holds-p "a"))))
+
+(ert-deftest agent-repl-test-open-tabs-asking-again-after-a-handover-is-an-info-record ()
+  "Asking again after a handover is recorded at INFO, naming why."
+  (agent-repl-test-open-tabs--with
+    (let (infos)
+      ;; Arrange
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+      (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a"))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (agent-repl-test--record-into infos)))
+        ;; Act
+        (agent-repl-open-tabs--on-reattached "a"))
+      ;; Assert
+      (should (member "elisp.open-tabs.handover-ask-again ws=a id=a why=reattached" infos)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-reattach-asks-nothing-for-a-tab-refused-for-good ()
+  "A refusal that is no handover is not asked for again by a reattach."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--frame
+     (agent-repl-test-open-tabs--opened "a" :refused '(:cause (:arm :unknown-workspace :value nil))))
+    ;; Act
+    (agent-repl-open-tabs--on-reattached "a")
+    ;; Assert
+    (should (= (length agent-repl-test-open-tabs--requests) 1))))
+
+(ert-deftest agent-repl-test-open-tabs-a-reattach-asks-nothing-for-an-open-tab ()
+  "A reattach of a workspace whose tab is open asks for nothing."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Act
+    (agent-repl-open-tabs--on-reattached "a")
+    ;; Assert
+    (should (= (length agent-repl-test-open-tabs--requests) 1))))
+
+(ert-deftest agent-repl-test-open-tabs-a-reattach-while-asked-asks-nothing-at-once ()
+  "A reattach while the open is in flight leaves that open to answer."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-open-tabs--on-reattached "a")
+    ;; Assert
+    (should (= (length agent-repl-test-open-tabs--requests) 1))))
+
+(ert-deftest agent-repl-test-open-tabs-a-handover-refusal-after-its-reattach-asks-again-at-once ()
+  "A handover refusal that arrives after the workspace's reattach asks again at once."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-open-tabs--on-reattached "a")
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a"))
+    ;; Assert
+    (should (equal (agent-repl-test-open-tabs--asked 1) '("a")))))
+
+(ert-deftest agent-repl-test-open-tabs-a-reattach-while-asked-is-forgotten-once-answered ()
+  "A reattach during an open that answered ready does not carry over to a later handover."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-open-tabs--on-reattached "a")
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a"))
+    ;; Assert
+    (should (= (length agent-repl-test-open-tabs--requests) 2))))
+
+(ert-deftest agent-repl-test-open-tabs-a-handover-selection-lands-on-a-tab-already-open ()
+  "The selection the startup waited for is handed over, so it lands on a tab already drawn."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--selected-before "b")
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a")
+                                     (agent-repl-test-open-tabs--row "b"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "b"))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--switches '(("a" . startup))))))
+
+(ert-deftest agent-repl-test-open-tabs-the-reattach-hook-carries-the-handover-ask ()
+  "The host's reattach hook carries the handover's ask-again."
+  ;; Assert
+  (should (memq #'agent-repl-open-tabs--on-reattached agent-repl-host-reattached-functions)))
+
 ;;;; ---- The stream ending ----
 
 (ert-deftest agent-repl-test-open-tabs-a-stream-that-ends-unanswered-unasks-its-rows ()
