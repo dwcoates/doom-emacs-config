@@ -24,6 +24,7 @@ import (
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
@@ -146,6 +147,15 @@ type Resolver interface {
 	RefreshChessBoards(sessions []chessboard.Session)
 
 	SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.OutputAddress)
+	// SetPullTarget installs the GitHub repository a workspace's
+	// `#<number>` references link into, nil for none: every prose and prompt
+	// the feed draws afterwards links them (pullrefs.go). The workspace
+	// verbs install it as they bind the workspace's views, before anything
+	// is drawn for it.
+	SetPullTarget(ws ids.WorkspaceID, target *pullrefs.Target)
+	// PullTarget answers a copy of the installed target, nil for none. The
+	// prompt queue's mirror of an accepted prompt links through it.
+	PullTarget(ws ids.WorkspaceID) *pullrefs.Target
 	// OutputAddress answers a copy of the address standing for one
 	// workspace, nil when none stands. The prompt queue reads it as it
 	// records a turn the lease holder started.

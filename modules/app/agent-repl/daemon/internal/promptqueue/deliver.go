@@ -308,7 +308,7 @@ func (q *queue) mirrorAccepted(sub Submission) {
 	}
 	// THE HEADER IS THE FEED'S, read off the sender recordTurn just handed it,
 	// so this row and the resolver's own draw of the prompt name one sender.
-	row := feed.PromptRow(origin, q.deps.Feed.PromptHeader(ws, turn, origin), said, q.mirrorBlocks(said))
+	row := feed.PromptRow(origin, q.deps.Feed.PromptHeader(ws, turn, origin), said, q.mirrorBlocks(ws, said))
 	row.Turn = &conversationv1.TurnId{Value: string(turn)}
 	// THE ACCEPTED PROMPT LANDS WHERE ITS TURN DRAWS (recordTurn), never
 	// unconditionally on the root feed: a merge's own prompt belongs in its
@@ -331,9 +331,9 @@ func (q *queue) retractAccepted(ws ids.WorkspaceID, turn ids.TurnID) {
 // session sees only this mirror -- nothing brings a delivered user prompt
 // back on the watch -- so a mirror that drew less than the resolver drew LESS
 // THAN THE PERSON SAID, for the whole session. It dropped every image block.
-func (q *queue) mirrorBlocks(said *conversationv1.UserSaid) []*frontendv1.FeedUserPromptBlock {
+func (q *queue) mirrorBlocks(ws ids.WorkspaceID, said *conversationv1.UserSaid) []*frontendv1.FeedUserPromptBlock {
 	return feed.DrawUserBlocks(said.GetContent(), q.deps.StripSentinels, q.deps.ResolveImage,
-		q.deps.Log.Global())
+		q.deps.Feed.PullTarget(ws), q.deps.Log.Global())
 }
 
 // interruptionNote is what the agent is told, alone, with a prompt that
