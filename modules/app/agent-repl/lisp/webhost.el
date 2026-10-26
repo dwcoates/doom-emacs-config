@@ -202,9 +202,41 @@ reads it, so it is read here off `last-input-event' rather than passed."
       (agent-repl--info agent-repl--webhost-central "elisp.webhost.load-changed status=%s pages=%d shown=%s"
                         status (hash-table-count agent-repl--webhost-pages) agent-repl--webhost-shown)
       (when (equal status "load-committed")
-        ;; From here on every answer is the new document's.
-        (setq agent-repl--webhost-predates-reload-pending nil)
-        (agent-repl--webhost-replay)))))
+        (if-let ((strayed (and agent-repl--webhost-url
+                               (agent-repl--webhost-strayed-uri (agent-repl--webhost-current-uri)))))
+            (agent-repl--webhost-take-back strayed)
+          ;; From here on every answer is the new document's.
+          (setq agent-repl--webhost-predates-reload-pending nil)
+          (agent-repl--webhost-replay))))))
+
+(defun agent-repl--webhost-current-uri ()
+  "Return the URI the host's main frame shows, or nil when there is no host."
+  (when-let ((xw (agent-repl-webhost-xwidget)))
+    (xwidget-webkit-uri xw)))
+
+(defun agent-repl--webhost-strayed-uri (uri)
+  "Return URI when the host committed it outside its own origin, else nil.
+The host only ever loads its own page (`agent-repl--webhost-url'); any other
+origin is an outward link that navigated the whole webview."
+  (when (and agent-repl--webhost-url (stringp uri) (not (string-empty-p uri))
+             (string-match "\\`https?://[^/]+" agent-repl--webhost-url))
+    (let ((origin (match-string 0 agent-repl--webhost-url)))
+      (unless (or (string= uri origin) (string-prefix-p (concat origin "/") uri))
+        uri))))
+
+(defun agent-repl--webhost-take-back (uri)
+  "Navigate the host, which strayed to URI, back to its own page.
+AN OUTWARD LINK NEVER OPENS IN THE WEBVIEW (owner ruling, 2026-10-26 -- an
+intentional feature, do not change): every http(s) link opens in the Chrome
+profile the workspace's login signs in as, through the daemon's OpenExternal
+(webapp/src/link.ts).  A navigation that still reaches the host replaced
+every workspace's page with the site (2026-10-26, 17:06), so it is taken back
+at once and recorded at ERROR: the page that let the link through has a
+defect to fix, and the link itself was not opened."
+  (agent-repl--error agent-repl--webhost-central
+                     "elisp.webhost.navigated-away uri=%s: an outward link escaped the page's routing; the host is taken back and the link was not opened"
+                     uri)
+  (agent-repl--frontend-webview-navigate-widget (agent-repl-webhost-xwidget) agent-repl--webhost-url))
 
 (defun agent-repl--webhost-callback (xwidget event-type)
   "The host XWIDGET's `callback': its prior handler, then the load handler.

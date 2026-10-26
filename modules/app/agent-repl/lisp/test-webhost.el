@@ -54,6 +54,8 @@
                     (push ws agent-repl-test-wh--reported)
                     (funcall on-reported)))
                  ((symbol-function 'agent-repl-webhost-ensure) (lambda (_conn) 'host-xwidget))
+                 ;; The host shows its own page unless a test says otherwise.
+                 ((symbol-function 'xwidget-webkit-uri) (lambda (_xw) agent-repl--webhost-url))
                  ((symbol-function 'agent-repl-frontend-webview-url)
                   (lambda (ws) (concat "http://ws-" ws ".localhost:1/"))))
          ,@body))))
@@ -1360,3 +1362,65 @@ and seven rows drew severed on every webapp deploy."
       ;; Assert
       (should (member "elisp.webhost.reload-unloading-unreported ws=alpha" infos))
       (should (= 1 (length (agent-repl-test-wh--sent "retireAll")))))))
+
+;;;; ---- An outward link never opens in the host ----
+
+(defmacro agent-repl-test-wh--with-committed-uri (uri &rest body)
+  "Run BODY with the host showing URI and its navigations recorded in `navigated'."
+  (declare (indent 1))
+  `(let ((navigated nil))
+     (setq agent-repl--webhost-url "http://host.localhost:1/?host=1")
+     (cl-letf (((symbol-function 'xwidget-webkit-uri) (lambda (_xw) ,uri))
+               ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                (lambda (_xw url) (push url navigated))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-wh-a-host-that-strays-is-taken-back ()
+  "A host committed outside its origin is navigated back to its own page."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-committed-uri "https://github.com/x/y/pull/1"
+      ;; Act
+      (agent-repl-test-wh--load "load-committed")
+      ;; Assert
+      (should (equal navigated '("http://host.localhost:1/?host=1"))))))
+
+(ert-deftest agent-repl-test-wh-a-host-that-strays-is-recorded-at-error ()
+  "The stray navigation is recorded at ERROR, naming the URI."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-committed-uri "https://github.com/x/y/pull/1"
+      (let (errors)
+        (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+          ;; Act
+          (agent-repl-test-wh--load "load-committed"))
+        ;; Assert
+        (should (seq-some (lambda (line) (string-prefix-p "elisp.webhost.navigated-away uri=https://github.com/x/y/pull/1" line))
+                          errors))))))
+
+(ert-deftest agent-repl-test-wh-a-host-that-strays-replays-no-page-into-the-site ()
+  "Nothing is replayed into the site the host strayed to."
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (setq agent-repl-test-wh--calls nil)
+    (agent-repl-test-wh--with-committed-uri "https://github.com/x/y/pull/1"
+      ;; Act
+      (agent-repl-test-wh--load "load-committed")
+      ;; Assert
+      (should (null (agent-repl-test-wh--sent "ensure"))))))
+
+(ert-deftest agent-repl-test-wh-the-hosts-own-page-is-not-taken-back ()
+  "The host's own page commits as before: nothing is navigated."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-committed-uri "http://host.localhost:1/?host=1"
+      ;; Act
+      (agent-repl-test-wh--load "load-committed")
+      ;; Assert
+      (should (null navigated)))))
+
+(ert-deftest agent-repl-test-wh-another-port-on-the-host-name-is-taken-back ()
+  "Only the host's exact origin is its own: another port strayed."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-committed-uri "http://host.localhost:9/?host=1"
+      ;; Act
+      (agent-repl-test-wh--load "load-committed")
+      ;; Assert
+      (should (equal navigated '("http://host.localhost:1/?host=1"))))))
