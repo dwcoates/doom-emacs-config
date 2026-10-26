@@ -866,6 +866,46 @@ func TestGateLapseIsWhenTheConversationWentCold(t *testing.T) {
 	}
 }
 
+func TestGateLapsedAt(t *testing.T) {
+	tests := []struct {
+		name string
+		cold *conversationv1.SessionCold
+		want time.Time
+	}{
+		{name: "a lapsed cache went cold a lifetime after the last request", cold: coldLapsed(), want: now.Add(-time.Hour)},
+		{name: "a model switch went cold at the last request", cold: coldModelSwitch(), want: now.Add(-2 * time.Hour)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := GateLapsedAt(tt.cold)
+
+			// Assert
+			if !got.Equal(tt.want) || got.Location() != time.UTC {
+				t.Fatalf("GateLapsedAt = %v, want %v in UTC", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAGateIsDatedOnlyByGateLapsedAt(t *testing.T) {
+	// Arrange
+	files := sourcescan.Production(t)
+
+	// Act
+	var sites []string
+	for _, file := range files {
+		for range strings.Count(string(file.Source), "GetCacheTtlMs()") {
+			sites = append(sites, file.Name)
+		}
+	}
+
+	// Assert
+	if len(sites) != 1 || sites[0] != "keeper.go" {
+		t.Fatalf("a gate's cache lifetime is read at %v, want only GateLapsedAt in keeper.go", sites)
+	}
+}
+
 func TestGateLapsePanicsOnAGateOverNoContext(t *testing.T) {
 	// Arrange
 	cold := coldLapsed()
