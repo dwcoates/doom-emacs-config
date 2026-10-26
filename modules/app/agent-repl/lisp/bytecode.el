@@ -17,10 +17,19 @@
 ;; definition the load made) and no second build environment to keep in
 ;; step with Doom's macros (this Emacs has them all).
 ;;
-;; THE COMPILE NEVER HOLDS A KEYSTROKE.  It runs in slices off a timer, each
-;; slice inside `while-no-input' and under `agent-repl-bytecode-slice-seconds':
-;; input arriving mid-slice abandons that function's compile before it is
-;; installed, and the next slice starts it again.
+;; THE COMPILE HOLDS A KEYSTROKE FOR ONE FUNCTION AT MOST.  It runs in slices
+;; off a timer, each under `agent-repl-bytecode-slice-seconds', and a slice
+;; asks `input-pending-p' before each function: input that arrived ends the
+;; slice, and the next one picks the queue up where it stopped.
+;;
+;; NEVER `while-no-input'.  Under it, input stored while the compile runs
+;; THROWS: a GTK (or Cocoa) callback that stores an xwidget event reaches
+;; `kbd_buffer_store_event', whose `while-no-input-ignore-events' lookup
+;; quits, and the throw unwinds through the callback's live GSignal emission.
+;; GLib's emission list then names a dead stack frame, and the next
+;; `notify' signal anywhere in the process segfaults walking it (the e2e
+;; sandbox's Emacs, 2026-10-25 on, caught in the act by a longjmp
+;; interposer).  `test-no-throw-on-input.el' keeps every module off it.
 ;;
 ;; A FUNCTION THAT CLOSES OVER A LEXICAL BINDING IS LEFT INTERPRETED.
 ;; Compiling such a closure copies the captured values, so two functions
@@ -147,23 +156,24 @@ redefined or advised since it was queued) or `failed' (logged at ERROR)."
          'failed)))))
 
 (defun agent-repl-bytecode--slice ()
-  "Compile queued functions until the slice's time is up or input arrives.
-A function whose compile input interrupted stays at the head of the queue
-and is compiled again by the next slice.  The run ends, and is recorded,
-when the queue is empty."
+  "Compile queued functions until the slice's time is up or input is pending.
+Input is checked BETWEEN functions (`input-pending-p'), never awaited with
+`while-no-input' (see the Commentary): a function's compile always runs to
+its end, and the functions after it stay queued for the next slice.  The
+run ends, and is recorded, when the queue is empty."
   (let* ((run agent-repl-bytecode--run)
          (started (agent-repl--now))
          (deadline (+ started agent-repl-bytecode-slice-seconds))
-         (interrupted
-          (while-no-input
-            (while (and agent-repl-bytecode--queue (< (agent-repl--now) deadline))
-              (let* ((head (car agent-repl-bytecode--queue))
-                     (outcome (agent-repl-bytecode--compile (car head) (cdr head))))
-                (setq agent-repl-bytecode--queue (cdr agent-repl-bytecode--queue))
-                (pcase outcome
-                  ('compiled (plist-put run :compiled (1+ (plist-get run :compiled))))
-                  ('failed (plist-put run :failed (1+ (plist-get run :failed)))))))
-            nil)))
+         (interrupted nil))
+    (while (and agent-repl-bytecode--queue
+                (< (agent-repl--now) deadline)
+                (not (setq interrupted (input-pending-p))))
+      (let* ((head (car agent-repl-bytecode--queue))
+             (outcome (agent-repl-bytecode--compile (car head) (cdr head))))
+        (setq agent-repl-bytecode--queue (cdr agent-repl-bytecode--queue))
+        (pcase outcome
+          ('compiled (plist-put run :compiled (1+ (plist-get run :compiled))))
+          ('failed (plist-put run :failed (1+ (plist-get run :failed)))))))
     (plist-put run :slices (1+ (plist-get run :slices)))
     (plist-put run :cpu (+ (plist-get run :cpu) (- (agent-repl--now) started)))
     (when interrupted

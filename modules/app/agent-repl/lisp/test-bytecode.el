@@ -15,6 +15,7 @@
 (defvar agent-repl-test-bc--timers nil "Every timer key registered, newest first.")
 (defvar agent-repl-test-bc--cancelled nil "Every timer key cancelled, newest first.")
 (defvar agent-repl-test-bc--clock 0.0 "What the stubbed wall clock answers.")
+(defvar agent-repl-test-bc--input-pending nil "What the stubbed `input-pending-p' answers.")
 
 (defmacro agent-repl-test-bc--with-root (var &rest body)
   "Bind VAR to a fresh temp module root for BODY, deleted afterwards."
@@ -38,9 +39,12 @@
          (agent-repl-test-bc--timers nil)
          (agent-repl-test-bc--cancelled nil)
          (agent-repl-test-bc--clock 100.0)
+         (agent-repl-test-bc--input-pending nil)
          (agent-repl-bytecode--queue nil)
          (agent-repl-bytecode--run nil))
      (cl-letf (((symbol-function 'agent-repl--now) (lambda () agent-repl-test-bc--clock))
+               ((symbol-function 'input-pending-p)
+                (lambda (&rest _) agent-repl-test-bc--input-pending))
                ((symbol-function 'agent-repl--info)
                 (agent-repl-test--record-into agent-repl-test-bc--infos))
                ((symbol-function 'agent-repl--error)
@@ -233,20 +237,57 @@
         (should (equal agent-repl-bytecode--queue `((agent-repl-test-bc-two . ,alpha))))
         (should-not agent-repl-test-bc--cancelled)))))
 
-(ert-deftest agent-repl-test-bc-slice-interrupted-by-input-keeps-the-function-queued ()
-  "Input arriving mid-compile leaves that function at the head of the queue."
+(ert-deftest agent-repl-test-bc-slice-with-input-pending-compiles-nothing ()
+  "Input already pending when a slice starts leaves the whole queue for the next."
   (agent-repl-test-bc--with
     (agent-repl-test-bc--with-root root
       ;; Arrange
       (let ((alpha (agent-repl-test-bc--load-module root "alpha" agent-repl-test-bc--source)))
         (agent-repl-bytecode-schedule root '("alpha"))
-        (cl-letf (((symbol-function 'agent-repl-bytecode--compile)
-                   (lambda (&rest _) (throw throw-on-input t))))
-          ;; Act
-          (agent-repl-bytecode--slice))
+        (setq agent-repl-test-bc--input-pending t)
+        ;; Act
+        (agent-repl-bytecode--slice)
         ;; Assert
         (should (equal (car agent-repl-bytecode--queue) `(agent-repl-test-bc-one . ,alpha)))
+        (should (interpreted-function-p (symbol-function 'agent-repl-test-bc-one)))
         (should (= (plist-get agent-repl-bytecode--run :interrupted) 1))))))
+
+(ert-deftest agent-repl-test-bc-slice-input-arriving-mid-compile-finishes-that-function ()
+  "Input arriving during a compile ends the slice after that function, not inside it."
+  (agent-repl-test-bc--with
+    (agent-repl-test-bc--with-root root
+      ;; Arrange
+      (let ((alpha (agent-repl-test-bc--load-module root "alpha" agent-repl-test-bc--source)))
+        (agent-repl-bytecode-schedule root '("alpha"))
+        (advice-add 'agent-repl-bytecode--compile :after
+                    (lambda (&rest _) (setq agent-repl-test-bc--input-pending t))
+                    '((name . agent-repl-test-bc-input)))
+        (unwind-protect
+            ;; Act
+            (agent-repl-bytecode--slice)
+          (advice-remove 'agent-repl-bytecode--compile 'agent-repl-test-bc-input))
+        ;; Assert
+        (should (byte-code-function-p (symbol-function 'agent-repl-test-bc-one)))
+        (should (equal agent-repl-bytecode--queue `((agent-repl-test-bc-two . ,alpha))))
+        (should (= (plist-get agent-repl-bytecode--run :interrupted) 1))))))
+
+(ert-deftest agent-repl-test-bc-slice-never-binds-throw-on-input ()
+  "A compile runs with `throw-on-input' unbound, so stored input can never throw."
+  (agent-repl-test-bc--with
+    (agent-repl-test-bc--with-root root
+      ;; Arrange
+      (agent-repl-test-bc--load-module root "alpha" agent-repl-test-bc--source)
+      (agent-repl-bytecode-schedule root '("alpha"))
+      (let ((seen 'unset))
+        (advice-add 'agent-repl-bytecode--compile :before
+                    (lambda (&rest _) (setq seen throw-on-input))
+                    '((name . agent-repl-test-bc-throw)))
+        (unwind-protect
+            ;; Act
+            (agent-repl-bytecode--slice)
+          (advice-remove 'agent-repl-bytecode--compile 'agent-repl-test-bc-throw))
+        ;; Assert
+        (should (null seen))))))
 
 (ert-deftest agent-repl-test-bc-last-slice-cancels-the-timer ()
   "The slice that empties the queue cancels the `:bytecode' timer."
