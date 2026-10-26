@@ -23,8 +23,11 @@ message UpdateHeldPromptRequest {
   conversation.v1.TurnId turn = 2;
   // THE ARM IS THE ACTION.
   oneof action {
-    // Deliver NOW — override the hold (interrupting the running turn when
-    // that is what delivery takes).
+    // Deliver NOW — override the hold and send the prompt to the shim at
+    // once, as a prompt typed with nothing to hold it would be: while a turn
+    // runs, the prompt joins it (taken in after its current tool call, or run
+    // as the next turn), and nothing is interrupted. Only a held session act,
+    // which joins nothing, interrupts the running turn to run next.
     UpdateHeldPromptRelease release = 3;
     // Discard it, never delivered (the composer takes the text back).
     UpdateHeldPromptDrop drop = 4;
@@ -68,8 +71,10 @@ message UpdateHeldPromptError {
     // a prompt that is being edited or queued after one that is
     // (EditHeldPrompt): an edit keeps it and everything after it held. Also
     // refused while the workspace drains for a bounce, a merge drives the
-    // session, the session is not up, or another prompt's delivery
-    // to the agent is in flight (ask again once it settles).
+    // session, the session is not up, a shim call that opens no turn is in
+    // flight (ask again once it settles), an interjection is interrupting the
+    // running turn (it goes first), or the running turn cannot be joined (one
+    // the agent started on its own).
     UpdateHeldPromptReleaseRefused release_refused = 8;
     // BEING DELIVERED: the prompt's delivery call to the agent is in flight
     // right now, so it is neither held nor delivered yet. Refused rather than

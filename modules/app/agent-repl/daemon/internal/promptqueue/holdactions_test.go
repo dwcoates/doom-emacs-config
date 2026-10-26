@@ -60,7 +60,7 @@ func TestReleaseRetiresTheHoldItDelivered(t *testing.T) {
 	}
 }
 
-func TestReleaseInterruptsWhenDeliveryTakesOne(t *testing.T) {
+func TestReleaseSendsThePromptToJoinTheRunningTurnAtOnce(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
@@ -70,8 +70,150 @@ func TestReleaseInterruptsWhenDeliveryTakesOne(t *testing.T) {
 		t.Fatalf("Release: %v", err)
 	}
 	// Assert
+	if got := h.sender.joins; len(got) != 1 || got[0] != "t1" {
+		t.Fatalf("joins = %v, want t1 sent to join the running turn", got)
+	}
+}
+
+func TestReleaseIntoARunningTurnInterruptsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+	// Act
+	if err := h.q.Release(context.Background(), theWorkspace, "t1"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	// Assert
+	if killed := h.sender.killed(); len(killed) != 0 {
+		t.Fatalf("killed = %v, want nothing interrupted", killed)
+	}
+}
+
+func TestReleaseIntoARunningTurnRetiresTheHoldAtOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+	// Act
+	if err := h.q.Release(context.Background(), theWorkspace, "t1"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	// Assert
+	if held := h.db.hold("t1"); held.Tombstone == nil || held.Tombstone.Kind != tombstoneDelivered {
+		t.Fatalf("hold = %+v, want it retired as delivered before the running turn ends", held)
+	}
+}
+
+func TestReleaseIntoARunningTurnDrawsThePromptsRowAtOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+	before := len(h.feed.mirrored())
+	// Act
+	if err := h.q.Release(context.Background(), theWorkspace, "t1"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	// Assert
+	if got := len(h.feed.mirrored()); got != before+1 {
+		t.Fatalf("mirrored rows = %d, want the released prompt's row drawn (was %d)", got, before)
+	}
+}
+
+func TestReleaseJoinsBesideAJudgedJoinAlreadyWaiting(t *testing.T) {
+	// Arrange: t1 was judged to join and waits; t2 is held behind it.
+	h := newHarness(t)
+	sentToJoin(t, h)
+	heldPrompt(t, h, "t2", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+	// Act
+	if err := h.q.Release(context.Background(), theWorkspace, "t2"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	// Assert
+	if got := h.sender.joins; len(got) != 2 || got[1] != "t2" {
+		t.Fatalf("joins = %v, want t2 sent beside t1", got)
+	}
+}
+
+func TestReleaseThatCannotJoinIsRefusedAndSaysWhyOnTheVerdict(t *testing.T) {
+	// Arrange: the running turn is one the vendor started, which is never joined.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+	h.watcher.refuseJoins = true
+	// Act
+	err := h.q.Release(context.Background(), theWorkspace, "t1")
+	// Assert
+	if !errors.Is(err, ErrReleaseRefused) {
+		t.Fatalf("err = %v, want ErrReleaseRefused", err)
+	}
+	if !logged(h.log.Records(), "info", opRelease, "the released prompt could not join the running turn; the release is refused") {
+		t.Fatalf("records = %+v, want the refusal on disk", h.log.Records())
+	}
+	if c := verdictOf(t, h, "t1"); c.Arm != wsm.ArmHoldForTurnEnd {
+		t.Fatalf("verdict = %+v, want the prompt waiting with the join's reason", c)
+	}
+}
+
+func TestReleaseOfAHeldSessionActInterruptsTheRunningTurn(t *testing.T) {
+	// Arrange: an act runs as a turn of its own and joins nothing.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	putHeld(t, h, wsm.HeldPrompt{Turn: "a1", Act: &wsm.HeldAct{Kind: wsm.ActModel, Value: "opus"}})
+	// Act
+	if err := h.q.Release(context.Background(), theWorkspace, "a1"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	// Assert
 	if killed := h.sender.killed(); len(killed) != 1 || killed[0] != "running-turn" {
 		t.Fatalf("killed = %v, want the running turn", killed)
+	}
+	if len(h.sender.joins) != 0 {
+		t.Fatalf("joins = %v, want the act sent to join nothing", h.sender.joins)
+	}
+}
+
+func TestReleaseWhileAnInterjectionIsUnderWay(t *testing.T) {
+	tests := []struct {
+		name    string
+		release ids.TurnID
+		wantErr error
+		message string
+	}{
+		{
+			name:    "of the interjecting prompt is answered as already going",
+			release: "t1",
+			wantErr: nil,
+			message: "the prompt is already interjecting; the interrupted turn's end delivers it",
+		},
+		{
+			name:    "of another prompt is refused, so the interjection goes first",
+			release: "t2",
+			wantErr: ErrReleaseRefused,
+			message: "an interjection is interrupting the running turn and goes first; the release is refused",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: t1 interjects the running turn; t2 is held behind it.
+			h := newHarness(t)
+			running(t, h, "running-turn", "the running work")
+			heldPrompt(t, h, "t1", classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "supersedes"})
+			heldPrompt(t, h, "t2", classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"})
+			// Act
+			err := h.q.Release(context.Background(), theWorkspace, tc.release)
+			// Assert
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if len(h.sender.joins) != 0 {
+				t.Fatalf("joins = %v, want nothing sent ahead of the interjection", h.sender.joins)
+			}
+			if !logged(h.log.Records(), "info", opRelease, tc.message) {
+				t.Fatalf("records = %+v, want %q on disk", h.log.Records(), tc.message)
+			}
+		})
 	}
 }
 

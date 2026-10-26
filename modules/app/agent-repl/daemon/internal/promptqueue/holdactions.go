@@ -30,12 +30,24 @@ const (
 	tombstoneSuperseded = "superseded"
 )
 
-// Release delivers a held prompt NOW, overriding the hold and interrupting the
-// running turn when that is what delivery takes.
+// Release delivers a held prompt NOW, overriding the hold: the prompt goes to
+// the shim at once, exactly as a prompt the user had just typed with nothing
+// to hold it would.
 //
-// It REFUSES a hold nothing could deliver through: an uninterruptible turn has
-// no interrupt to send, a session that is still coming up has nothing to send
-// to, and a session a merge drives is the merge's.
+// A PROMPT RELEASED WHILE A TURN RUNS JOINS THAT TURN (owner request,
+// 2026-10-26). It is sent to the shim on the spot, as a flush sends each held
+// prompt (join.go): its row is drawn in the feed as accepted, its card leaves
+// the tray, and the vendor takes it in at the running turn's next tool call,
+// or runs it as the next turn once that one ends. A release used to interrupt
+// the running turn and deliver only at its end: the card stood unchanged until
+// then, a second click met the refusal of the delivery under way, and a
+// stale-shim refresh that the turn end let in held the prompt for the build
+// as well. Only a held session act still interrupts: an act runs as a turn of
+// its own and joins nothing.
+//
+// It REFUSES a hold nothing could deliver through: a context cut is never
+// interrupted or joined, a session that is still coming up has nothing to
+// send to, and a session a merge drives is the merge's.
 func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error {
 	log, err := q.logger(ctx, ws)
 	if err != nil {
@@ -43,9 +55,9 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 	}
 	log = log.With(dlog.Context{"turn": string(turn)})
 
-	// THE INTERRUPT A RELEASE TAKES IS SENT OFF THE DELIVERY LOCK, once the
-	// decision below has registered it: the running turn's end takes the lock
-	// to pop what the interrupt made the head.
+	// THE INTERRUPT A RELEASED ACT TAKES IS SENT OFF THE DELIVERY LOCK, once
+	// the decision below has registered it: the running turn's end takes the
+	// lock to pop what the interrupt made the head.
 	var interrupt func()
 	defer func() {
 		if interrupt != nil {
@@ -66,11 +78,13 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 	if err := q.unclaimed(ws, held, log, opRelease); err != nil {
 		return err
 	}
-	// A SHIM CALL IN FLIGHT IS A DELIVERY UNDER WAY: forcing another prompt
-	// through beside it would race it for the session, so the release is
-	// refused and the user may send it again once the call has settled.
-	if call, ok := q.standingCall(ws); ok {
-		log.Info(opRelease, "a delivery to the shim is in flight; the release is refused", dlog.Context{
+	// A SHIM CALL THAT OPENS A TURN IS THE TURN THE RELEASE JOINS: the join
+	// is deferred to the call's settle (joinLocked), never refused. Any other
+	// call in flight (a revival, a session act, a rollback) opens nothing to
+	// join, and forcing the prompt through beside it would race it for the
+	// session, so the release is refused and may be sent again once it settles.
+	if call, ok := q.standingCall(ws); ok && !call.opensTurn {
+		log.Info(opRelease, "a shim call that opens no turn is in flight; the release is refused", dlog.Context{
 			"call": call.what, "call_turn": string(call.turn),
 		})
 		return ErrReleaseRefused
@@ -126,8 +140,7 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 		return ErrReleaseRefused
 	}
 
-	watcher, ok := q.deps.Watcher(ws)
-	if !ok {
+	if _, ok := q.deps.Watcher(ws); !ok {
 		log.Warn(opRelease, "the workspace has no session watcher", nil)
 		return ErrNoSession
 	}
@@ -138,19 +151,75 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 			"a session act is running; the release is refused and the prompt waits for the act to end")
 		return ErrReleaseRefused
 	}
-	if running := watcher.TurnInFlight(); running != nil {
-		// Delivery takes an interrupt: the release becomes the semantic head
-		// and the real turn end delivers it, exactly as an interjection does.
-		// A running session act refuses the interjection, and so the release.
-		sub := submissionOf(held)
-		if !q.registerInterjection(ctx, sub, *running, log) {
-			return ErrReleaseRefused
-		}
-		interrupt = func() { q.sendInterrupt(ctx, sub, *running, log) }
-		return nil
+	// A PROMPT ADDRESSED TO AN AGENT IS NOT THE SESSION'S TURN: it goes now
+	// whatever the session is running.
+	if held.Target != nil {
+		_, err = q.deliverHeld(ctx, d, held, log)
+		return err
 	}
-	_, err = q.deliverHeld(ctx, d, held, log)
-	return err
+	// A verdict still being judged about this prompt is superseded: the
+	// prompt is on its way to the shim, and a verdict settling after it must
+	// not interject or re-hold it.
+	q.supersede(ws, turn)
+	running, ok := q.flushTarget(ws)
+	if !ok {
+		_, err = q.deliverHeld(ctx, d, held, log)
+		return err
+	}
+	if held.Act != nil {
+		return q.releaseActByInterrupt(ctx, held, running, &interrupt, log)
+	}
+	return q.releaseByJoin(ctx, d, held, running, log)
+}
+
+// releaseByJoin sends the released prompt HELD to join RUNNING (joinLocked).
+// An interjection under way goes first: the prompt that interjects is already
+// the next to go, and any other prompt joined now would run ahead of it.
+// The caller holds the delivery lock (d).
+func (q *queue) releaseByJoin(ctx context.Context, d *delivery, held wsm.HeldPrompt, running ids.TurnID, log dlog.Logger) error {
+	q.mu.Lock()
+	interrupting, head := d.state.interrupting, d.state.head
+	q.mu.Unlock()
+	if interrupting {
+		if head != nil && *head == held.Turn {
+			log.Info(opRelease, "the prompt is already interjecting; the interrupted turn's end delivers it", dlog.Context{"running_turn": string(running)})
+			return nil
+		}
+		log.Info(opRelease, "an interjection is interrupting the running turn and goes first; the release is refused", dlog.Context{
+			"running_turn": string(running), "interjecting_turn": string(*head),
+		})
+		return ErrReleaseRefused
+	}
+	switch outcome := q.joinLocked(ctx, d, submissionOf(held), running, joinReleased, log); outcome {
+	case joinSent, joinDeferred:
+		return nil
+	case joinWaiting:
+		// joinLocked recorded why on the prompt's verdict, which the card says.
+		log.Info(opRelease, "the released prompt could not join the running turn; the release is refused", dlog.Context{"running_turn": string(running)})
+		return ErrReleaseRefused
+	case joinGone:
+		log.Error(opRelease, "a hold read standing under the delivery lock was gone when it was sent to join", dlog.Context{
+			"invariant_violation": "a standing hold changes only under the delivery lock",
+		})
+		return ErrAlreadyDelivered
+	default:
+		panic(fmt.Sprintf("promptqueue: unknown join outcome %d", outcome))
+	}
+}
+
+// releaseActByInterrupt releases a held session act while RUNNING runs: an act
+// runs as a turn of its own and joins nothing, so it becomes the semantic head
+// and an interrupt ends the running turn, whose real end delivers it, exactly
+// as an interjection does. The interrupt is set into INTERRUPT, which the
+// caller sends once the delivery lock is released. A running session act
+// refuses the interjection, and so the release.
+func (q *queue) releaseActByInterrupt(ctx context.Context, held wsm.HeldPrompt, running ids.TurnID, interrupt *func(), log dlog.Logger) error {
+	sub := submissionOf(held)
+	if !q.registerInterjection(ctx, sub, running, log) {
+		return ErrReleaseRefused
+	}
+	*interrupt = func() { q.sendInterrupt(ctx, sub, running, log) }
+	return nil
 }
 
 // Drop discards a held prompt, DURABLY FIRST: the tombstone is written before

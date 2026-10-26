@@ -122,6 +122,9 @@ const (
 	// joinFlushed is a flush of the held queue (flush.go): every held prompt
 	// joins at once, beside the ones already waiting.
 	joinFlushed
+	// joinReleased is the user's release of one held prompt (Release): it
+	// joins at once, beside any already waiting.
+	joinReleased
 )
 
 // joinLocked sends SUB to join RUNNING, for CAUSE. The caller holds the
@@ -247,6 +250,8 @@ func (c joinCause) String() string {
 		return "judged"
 	case joinFlushed:
 		return "flushed"
+	case joinReleased:
+		return "released"
 	default:
 		return fmt.Sprintf("join_cause(%d)", int(c))
 	}

@@ -123,8 +123,11 @@ type isUpdateHeldPromptRequest_Action interface {
 }
 
 type UpdateHeldPromptRequest_Release struct {
-	// Deliver NOW — override the hold (interrupting the running turn when
-	// that is what delivery takes).
+	// Deliver NOW — override the hold and send the prompt to the shim at
+	// once, as a prompt typed with nothing to hold it would be: while a turn
+	// runs, the prompt joins it (taken in after its current tool call, or run
+	// as the next turn), and nothing is interrupted. Only a held session act,
+	// which joins nothing, interrupts the running turn to run next.
 	Release *UpdateHeldPromptRelease `protobuf:"bytes,3,opt,name=release,proto3,oneof"`
 }
 
@@ -496,8 +499,10 @@ type UpdateHeldPromptError_ReleaseRefused struct {
 	// a prompt that is being edited or queued after one that is
 	// (EditHeldPrompt): an edit keeps it and everything after it held. Also
 	// refused while the workspace drains for a bounce, a merge drives the
-	// session, the session is not up, or another prompt's delivery
-	// to the agent is in flight (ask again once it settles).
+	// session, the session is not up, a shim call that opens no turn is in
+	// flight (ask again once it settles), an interjection is interrupting the
+	// running turn (it goes first), or the running turn cannot be joined (one
+	// the agent started on its own).
 	ReleaseRefused *UpdateHeldPromptReleaseRefused `protobuf:"bytes,8,opt,name=release_refused,json=releaseRefused,proto3,oneof"`
 }
 

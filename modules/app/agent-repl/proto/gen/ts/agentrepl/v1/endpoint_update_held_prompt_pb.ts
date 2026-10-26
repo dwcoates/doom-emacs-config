@@ -49,8 +49,11 @@ export type UpdateHeldPromptRequest = Message<"agentrepl.v1.UpdateHeldPromptRequ
    */
   action: {
     /**
-     * Deliver NOW — override the hold (interrupting the running turn when
-     * that is what delivery takes).
+     * Deliver NOW — override the hold and send the prompt to the shim at
+     * once, as a prompt typed with nothing to hold it would be: while a turn
+     * runs, the prompt joins it (taken in after its current tool call, or run
+     * as the next turn), and nothing is interrupted. Only a held session act,
+     * which joins nothing, interrupts the running turn to run next.
      *
      * @generated from field: agentrepl.v1.UpdateHeldPromptRelease release = 3;
      */
@@ -210,8 +213,10 @@ export type UpdateHeldPromptError = Message<"agentrepl.v1.UpdateHeldPromptError"
      * a prompt that is being edited or queued after one that is
      * (EditHeldPrompt): an edit keeps it and everything after it held. Also
      * refused while the workspace drains for a bounce, a merge drives the
-     * session, the session is not up, or another prompt's delivery
-     * to the agent is in flight (ask again once it settles).
+     * session, the session is not up, a shim call that opens no turn is in
+     * flight (ask again once it settles), an interjection is interrupting the
+     * running turn (it goes first), or the running turn cannot be joined (one
+     * the agent started on its own).
      *
      * @generated from field: agentrepl.v1.UpdateHeldPromptReleaseRefused release_refused = 8;
      */
