@@ -3255,8 +3255,28 @@ func TestStandingColdGateFollowsTheGatesLife(t *testing.T) {
 			if standing && !proto.Equal(cold, coldResponse().GetFailure().GetCold()) {
 				t.Fatalf("StandingColdGate cold = %v, want the facts the gate was raised from", cold)
 			}
+			every := f.fleet.StandingColdGates()
+			if listed, ok := every[ws.ID]; ok != tt.want || len(every) != map[bool]int{true: 1, false: 0}[tt.want] || ok && !proto.Equal(listed, cold) {
+				t.Fatalf("StandingColdGates = %v, want exactly what StandingColdGate answers", every)
+			}
 		})
 	}
+}
+
+func TestStandingColdGatesPanicsOnAGateWithNoColdFacts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-torn")
+	f.fleet.coldGates[ws.ID] = coldGate{served: ServedColdGate{VendorSessionID: "vendor-1"}}
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("a standing gate with no cold facts did not panic")
+		}
+	}()
+
+	// Act.
+	f.fleet.StandingColdGates()
 }
 
 func TestStandingColdGatePanicsOnAGateWithNoColdFacts(t *testing.T) {
