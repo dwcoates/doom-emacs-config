@@ -34,7 +34,6 @@ import {
 } from "../../src/bubble/draw.js";
 import { BUBBLE_BODY_TAG } from "../../src/bubble/body.js";
 import { BUBBLE_BOX_CLASS, BUBBLE_SCROLL_CLASS } from "../../src/feed/bubble-scroll.js";
-import { PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING } from "../../src/breathing.js";
 
 /** A plain element of CLASSNAME holding TEXT. */
 function el(className: string, text = ""): HTMLElement {
@@ -49,7 +48,7 @@ function spec(variant: PromptVariant | ResponseVariant, overrides: Partial<Bubbl
   const role = BUBBLE_VARIANTS[variant];
   const base =
     role === "prompt"
-      ? { role, variant: variant as PromptVariant, waving: false, content: [], capLines: "feed" as const }
+      ? { role, variant: variant as PromptVariant, content: [], capLines: "feed" as const }
       : { role, variant: variant as ResponseVariant, content: [], capLines: "feed" as const };
   return { ...base, ...overrides } as BubbleSpec;
 }
@@ -257,7 +256,7 @@ describe("drawBubble: the uncapped mode", () => {
 
   it("builds the unbounded fold's box as a scroll box, so a click can open it", () => {
     // Arrange / Act
-    const { box } = drawBubble({ role: "prompt", variant: "user", waving: false, content: [], capLines: BUBBLE_FOLD_UNBOUNDED });
+    const { box } = drawBubble({ role: "prompt", variant: "user", content: [], capLines: BUBBLE_FOLD_UNBOUNDED });
     // Assert
     expect(box.classList.contains("bubble-scroll")).toBe(true);
   });
@@ -268,33 +267,12 @@ describe("drawBubble: the uncapped mode", () => {
   });
 });
 
-describe("drawBubble: the working wave", () => {
-  it("waves a working prompt", () => {
+describe("drawBubble: every bubble is still", () => {
+  it.each(Object.keys(BUBBLE_VARIANTS) as Array<keyof typeof BUBBLE_VARIANTS>)("draws a %s bubble with no wave marker and no inline animation", (variant) => {
     // Arrange / Act
-    const { bubble } = drawBubble({ ...spec("user"), waving: true } as BubbleSpec);
+    const { bubble } = drawBubble(spec(variant));
     // Assert
-    expect(bubble.getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
-  });
-
-  it("rests a prompt whose turn is not working", () => {
-    // Arrange / Act
-    const { bubble } = drawBubble(spec("user"));
-    // Assert
-    expect(bubble.hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
-  });
-
-  it("stamps the wave's phase on every prompt, waving or not", () => {
-    // Arrange / Act
-    const { bubble } = drawBubble(spec("held"));
-    // Assert
-    expect(bubble.style.animationDelay).toMatch(/^-\d+ms$/);
-  });
-
-  it("never stamps a wave or its phase on a response", () => {
-    // Arrange / Act
-    const { bubble } = drawBubble(spec("response"));
-    // Assert
-    expect(bubble.hasAttribute(PROMPT_WAVE_ATTRIBUTE) || bubble.hasAttribute("style")).toBe(false);
+    expect([bubble.hasAttribute("data-wave"), bubble.hasAttribute("style")]).toEqual([false, false]);
   });
 });
 
@@ -495,19 +473,6 @@ describe("drawBubble: a redraw given its previous draw updates it in place", () 
     drawBubble(spec("response"), first);
     // Assert
     expect(first.hasAttribute("data-state")).toBe(false);
-  });
-
-  it("keeps the wave's phase when only the working flag moved", () => {
-    // Arrange
-    const first = drawBubble(spec("user")).bubble;
-    const phase = first.style.animationDelay;
-    // Act
-    drawBubble({ ...spec("user"), waving: true } as BubbleSpec, first);
-    // Assert
-    expect([first.style.animationDelay, first.getAttribute(PROMPT_WAVE_ATTRIBUTE)]).toEqual([
-      phase,
-      PROMPT_WAVE_WORKING,
-    ]);
   });
 
   /** A chrome element of CLASSNAME that states SAYS. */

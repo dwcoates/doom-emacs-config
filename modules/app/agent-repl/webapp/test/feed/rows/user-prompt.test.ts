@@ -12,10 +12,6 @@ import { captureLogRecords, forwardedRecord } from "../../log-capture.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import { BUBBLE_SCROLL_CLASS } from "../../../src/feed/bubble-scroll.js";
 import {
-  PROMPT_WAVE_ATTRIBUTE,
-  PROMPT_WAVE_WORKING,
-} from "../../../src/breathing.js";
-import {
   BUBBLE_CAP_ATTRIBUTE,
   USER_PROMPT_CAP_LINES,
   BUBBLE_ROLE_ATTRIBUTE,
@@ -109,24 +105,16 @@ describe("drawFeedUserPrompt: the bubble", () => {
     expect(el.className).toBe("bubble md user");
   });
 
-  it("stamps the wave's phase inline, so a redraw does not jump it back", () => {
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]));
-    expect(el.getAttribute("style")).toMatch(/animation-delay:-\d+ms/);
-  });
+  it.each([
+    ["working", true, false],
+    ["working and awaiting the user", true, true],
+    ["at rest", false, false],
+  ] as const)("draws a %s prompt with no wave marker and no inline animation", (_label, working, awaitingUser) => {
+    // Arrange / Act
+    const el = drawFeedUserPrompt(prompt([], "You", working, [], awaitingUser));
 
-  it("waves when its row says the turn is working", () => {
-    const el = drawFeedUserPrompt(prompt([], "You", true));
-    expect(el.getAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(PROMPT_WAVE_WORKING);
-  });
-
-  it("does not wave when its row says the turn is not working", () => {
-    const el = drawFeedUserPrompt(prompt([], "You", false));
-    expect(el.hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
-  });
-
-  it("does not wave while its row says the working turn awaits the user", () => {
-    const el = drawFeedUserPrompt(prompt([], "You", true, [], true));
-    expect(el.hasAttribute(PROMPT_WAVE_ATTRIBUTE)).toBe(false);
+    // Assert
+    expect([el.hasAttribute("data-wave"), el.hasAttribute("style")]).toEqual([false, false]);
   });
 
   it("draws no author label, however the daemon resolved it", () => {

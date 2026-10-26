@@ -25,28 +25,13 @@
  * elsewhere in the footer (the rate-limit rungs, the failure row) and a breathing
  * word wandering into them would read as an alarm rather than as progress.
  *
- * The prompt bubble's own liveness signal lives here too (`BubbleWave`). It is
- * NOT a breath: the bubble and its text hold one static size and a shadow band
- * crosses the fill behind them instead. Both signals share the same epoch
- * mechanic (`AnimationEpoch`) for the same reason — the nodes they paint are
- * rebuilt out from under the animation.
+ * The status word's letter wave lives here too (`StatusWave`), on the same
+ * epoch mechanic (`AnimationEpoch`) for the same reason: the footer rebuilds
+ * the nodes it paints out from under the animation.
  */
 
 /** Stops on the green → purple ramp. */
 export const BREATH_SHADES = 20;
-
-/**
- * One full left-to-right pass of a WORKING prompt bubble's thinking wave. Must
- * match the `bubble-wave` keyframes' duration in `styles.css`:
- * the negative delay computed here only seeks to the point the pass had already
- * reached if both sides agree on how long the pass is, and a period that
- * drifted from the stylesheet would land every rebuilt bubble at the wrong
- * phase instead of no phase at all — a subtler bug than the jump-back it
- * replaced. Reduced motion STOPS the wave outright rather than slowing it (see
- * the `prefers-reduced-motion` block), so this is the one period in both motion
- * modes and the delay never has to ask which mode is live.
- */
-export const BUBBLE_WAVE_PERIOD_MS = 3200;
 
 /** One full inhale-and-exhale. Must match the `pfooter-breath` keyframes. */
 export const BREATH_PERIOD_MS = 2600;
@@ -55,8 +40,8 @@ export const BREATH_PERIOD_MS = 2600;
  * ONE immovable start time, shared by every animation in this module that has
  * to survive its element being rebuilt.
  *
- * Both animations here run on wall-clock time and both are painted onto nodes
- * the feed replaces wholesale, so both need the same thing: a start time
+ * Every animation here runs on wall-clock time and is painted onto nodes the
+ * footer replaces wholesale, so each needs the same thing: a start time
  * stamped once and never moved, against which each render measures how far
  * into the cycle the page already is. That measurement is what a negative
  * `animation-delay` seeks the fresh element to, and it is the whole reason a
@@ -140,166 +125,6 @@ export class BreathingTicker {
 }
 
 /**
- * The prompt bubble's thinking WAVE: a soft shadow band that crosses the
- * bubble's own background from left to right, over and over, while the turn
- * runs. Nothing about the bubble's geometry moves — the bubble and its text
- * hold one static size, and only the fill underneath them changes — so the
- * wave reads as progress running through the answer rather than as the box
- * itself inflating and deflating.
- *
- * The feed rebuilds bubble nodes wholesale (a re-render, a resync, a lazy item
- * upgrading out of its placeholder), and a fresh element starts its CSS
- * animation at 0% — the band back at the left edge. Mid-pass that reads as the
- * wave jumping backwards. So the same EPOCH the footer uses: one start time,
- * stamped on first read and never moved, and every render emits a negative
- * `animation-delay` of how far into the pass that epoch says we are. A rebuilt
- * bubble seeks straight to where the wave already was, making the rebuild
- * indistinguishable from a node that was never touched.
- *
- * The delay is reduced modulo the period here (unlike the footer's raw elapsed
- * time, which browsers accept as-is) purely to keep the emitted attribute a
- * small number; either is equivalent to the animation.
- *
- * ONE epoch serves the whole page, so every prompt bubble's wave crosses in
- * unison. That is deliberate: per-bubble epochs would make the feed shimmer as
- * a dozen unrelated phases drifted past each other.
- *
- * WHICH bubbles wave is not this class's business: the epoch is a phase, and
- * the feed decides who is in flight (`PROMPT_WAVE_ATTRIBUTE`).
- *
- * THE SAME PHASE PAINTS TWO WAYS, both reading THIS epoch, so they never
- * disagree:
- *  - VISIBLE, the compositor runs the `bubble-wave` CSS animation and
- *    `delayMs` seeks a rebuilt node to the right frame (a negative
- *    `animation-delay`);
- *  - HIDDEN, WebKit SUSPENDS that compositor animation (see
- *    `prompt-wave-driver.ts`), so a JS timer paints `background-position-x`
- *    itself, and `positionX` is where along the pass to paint it.
- */
-export class BubbleWave {
-  private epoch = new AnimationEpoch();
-
-  /** How far into the current pass, in `[0, BUBBLE_WAVE_PERIOD_MS)`. */
-  delayMs(nowMs: number): number {
-    return this.epoch.elapsedMs(nowMs) % BUBBLE_WAVE_PERIOD_MS;
-  }
-
-  /**
-   * The `background-position-x` percentage the band sits at RIGHT NOW, for the
-   * JS driver that paints the wave while the compositor animation is suspended.
-   *
-   * It is the exact position the `bubble-wave` keyframes hold at this phase, so
-   * the compositor pass and the hand-painted pass are one wave seen two ways: a
-   * linear walk from {@link BUBBLE_WAVE_FROM_PCT} at the pass's start to
-   * {@link BUBBLE_WAVE_TO_PCT} at its end, over one {@link BUBBLE_WAVE_PERIOD_MS}.
-   * Reading the SAME epoch as `delayMs` is what keeps the hand-off between the
-   * two — hiding, and coming back — free of any jump.
-   */
-  positionX(nowMs: number): number {
-    const fraction = this.delayMs(nowMs) / BUBBLE_WAVE_PERIOD_MS;
-    return BUBBLE_WAVE_FROM_PCT + (BUBBLE_WAVE_TO_PCT - BUBBLE_WAVE_FROM_PCT) * fraction;
-  }
-}
-
-/**
- * The `background-position-x` the pass starts and ends at, DUPLICATED from the
- * `bubble-wave` keyframes in `styles.css` (`from`/`to`) for the same reason the
- * period is: the JS driver's hand-painted pass and the compositor's keyframe
- * pass must trace the identical travel or the wave would jump at the moment one
- * takes over from the other. The larger percentage is the LEFTMOST position
- * (the band enters off the left), so the pass runs from 200% DOWN to -100% —
- * see the keyframes' own note.
- */
-export const BUBBLE_WAVE_FROM_PCT = 200;
-export const BUBBLE_WAVE_TO_PCT = -100;
-
-/** The page-global wave every prompt bubble renders against. */
-export const bubbleWave = new BubbleWave();
-
-/**
- * The attribute a prompt bubble wears WHILE ITS TURN IS IN FLIGHT, and the ONE
- * thing the `bubble-wave` rule keys on.
- *
- * WHETHER A TURN IS IN FLIGHT IS THE DAEMON'S FACT, NEVER THIS PAGE'S. The
- * prompt row carries it (`FeedUserPrompt.working`, `FeedAgentPrompt.working`):
- * set from the row's first draw until the turn's terminal, whichever way the
- * turn ended, and re-pushed unset on that edge. The bubble wears this
- * attribute exactly while its row says so — drawn from the flag at
- * construction ({@link armPromptWave}) and moved by it on a re-push
- * ({@link setPromptWave}) — and from nothing else: no final-answer mark, no
- * `turn_ended` row, no inference over the feed's other rows.
- *
- * A stylesheet that ran the band on `.bubble.user` outright animated every
- * prompt in the scrollback forever: a settled conversation of thirty prompts
- * painting thirty shadow bands over and over, which says "thirty turns are
- * working" when none of them is, and which no screenshot of the page can ever
- * catch at rest. The attribute is what separates those thirty from the one.
- *
- * It is an ATTRIBUTE ON THE BUBBLE rather than a fact rendered into the
- * bubble's body, because the transition out of flight must not redraw a word
- * of the prompt: a re-push that changes only the flag moves it on the element
- * already on screen, so the wave stops without the text under it moving.
- */
-export const PROMPT_WAVE_ATTRIBUTE = "data-wave";
-
-/** The one value {@link PROMPT_WAVE_ATTRIBUTE} takes: the turn is in flight. */
-export const PROMPT_WAVE_WORKING = "working";
-
-/**
- * The inline delay one prompt bubble renders with, as the whole style value.
- * Every construction site of a `.bubble.user` must carry it — a bubble built
- * without it is the jump-back this module exists to remove.
- *
- * STAMPED ON EVERY PROMPT BUBBLE, waving or not. The delay is only a phase,
- * and it is inert on a bubble with no animation to seek; a bubble that carried
- * it only while working would need it re-stamped at the moment the feed marks
- * it, which is one more thing to get wrong for no gain.
- */
-export function bubbleWaveStyle(nowMs: number = Date.now()): string {
-  return animationDelayStyle(bubbleWave.delayMs(nowMs));
-}
-
-/**
- * ARM A FRESH PROMPT BUBBLE: the wave's phase, and the wave iff WORKING.
- *
- * THE ONE CALL EVERY `.bubble.user` CONSTRUCTION SITE MAKES, handed its row's
- * `working` flag verbatim, so a new prompt-bubble site cannot carry the phase
- * and forget the mark, or decide the mark on some ground of its own.
- */
-export function armPromptWave(
-  bubble: HTMLElement,
-  working: boolean,
-  nowMs: number = Date.now(),
-): void {
-  bubble.setAttribute("style", bubbleWaveStyle(nowMs));
-  setPromptWave(bubble, working);
-}
-
-/**
- * WHETHER A PROMPT ROW'S BUBBLE WAVES: its turn is working AND NOT WAITING ON
- * THE USER. Both are the daemon's facts (`working`, `awaitingUser` on
- * `FeedUserPrompt` and `FeedAgentPrompt`); the wave PAUSES while a question or
- * a consent of the turn stands open and resumes when it settles. The ONE
- * reading of the two flags, so a prompt renderer and the feed's in-place move
- * can never disagree about whether a bubble waves.
- */
-export function promptWaves(prompt: { working: boolean; awaitingUser: boolean }): boolean {
-  return prompt.working && !prompt.awaitingUser;
-}
-
-/**
- * Put the wave on BUBBLE iff WORKING, and take it off otherwise. The phase is
- * left as it stands, so a bubble whose flag flips mid-pass never jumps.
- */
-export function setPromptWave(bubble: HTMLElement, working: boolean): void {
-  if (working) {
-    bubble.setAttribute(PROMPT_WAVE_ATTRIBUTE, PROMPT_WAVE_WORKING);
-    return;
-  }
-  bubble.removeAttribute(PROMPT_WAVE_ATTRIBUTE);
-}
-
-/**
  * The footer status word's LETTER WAVE: a bulge that travels along the word
  * while the session is making PROGRESS, forwards and then backwards, forever.
  *
@@ -317,7 +142,7 @@ export function setPromptWave(bubble: HTMLElement, working: boolean): void {
  * PHASE CONTINUITY is the point. The footer rewrites its whole subtree on every
  * push, and a fresh element starts its CSS animation at 0% — mid-wave that reads
  * as a stutter on every arriving frame, which is precisely the defect the
- * bubble's wave and the footer's breath already solved. So the same
+ * footer's breath already solved. So the same
  * {@link AnimationEpoch}: one start time, stamped on first read and never moved,
  * and every render emits each letter's own negative `animation-delay`.
  *

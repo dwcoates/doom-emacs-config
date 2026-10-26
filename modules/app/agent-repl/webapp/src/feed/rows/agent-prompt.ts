@@ -20,7 +20,6 @@
  * keeps the two from drifting, and that sharing is `blocks.ts`.
  */
 import { log } from "../../log.js";
-import { promptWaves } from "../../breathing.js";
 import { AGENT_PROMPT_CAP_LINES, drawBubble } from "../../bubble/draw.js";
 import { requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
@@ -59,7 +58,6 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement
       role: "prompt",
       variant: "agent",
       hooks: ["user", "prompt-agent"],
-      waving: promptWaves(msg),
       strip,
       corner: [drawPromptCopyControl(body.blocks, `${PATH}.body.blocks`)],
       content,

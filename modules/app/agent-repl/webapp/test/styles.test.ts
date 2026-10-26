@@ -813,8 +813,8 @@ describe("the ellipsis instead of the fade", () => {
   function drawnBox(ellipsis: boolean): { box: HTMLElement; body: HTMLElement; remove: () => void } {
     const { bubble, body } = drawBubble(
       ellipsis
-        ? { role: "prompt", variant: "held", waving: false, content: [], capLines: ELLIPSIS_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS }
-        : { role: "prompt", variant: "user", waving: false, content: [], capLines: "feed" },
+        ? { role: "prompt", variant: "held", content: [], capLines: ELLIPSIS_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS }
+        : { role: "prompt", variant: "user", content: [], capLines: "feed" },
     );
     document.body.append(bubble);
     const box = body.parentElement as HTMLElement;
@@ -1170,15 +1170,13 @@ describe("the footer status wave's stylesheet contract", () => {
  * agent-to-agent prompt (the agent-addressed row
  * and the peer message) wears the one amber; a held prompt in the tray wears
  * none. Each case is asked of the stylesheet as the cascade would: which
- * border-setting rules a bubble with that role, variant, wave and hook classes
+ * border-setting rules a bubble with that role, variant and hook classes
  * matches, beyond the base rule's transparent reservation.
  */
 describe("the prompt borders", () => {
-  /** A prompt bubble's attributes, waving or not. */
-  function prompt(variant: string, working: boolean): Record<string, string> {
-    const attrs: Record<string, string> = { "data-role": "prompt", "data-variant": variant };
-    if (working) attrs["data-wave"] = "working";
-    return attrs;
+  /** A prompt bubble's attributes. */
+  function prompt(variant: string): Record<string, string> {
+    return { "data-role": "prompt", "data-variant": variant };
   }
 
   it("reserves a 0.3px transparent border on every bubble, prompt included", () => {
@@ -1189,24 +1187,20 @@ describe("the prompt borders", () => {
     expect(bubble).toMatch(/border:\s*0\.3px solid transparent/);
   });
 
-  it.each([
-    ["in flight", true],
-    ["after its turn resolves", false],
-  ] as const)("gives a user prompt no border %s", (_label, working) => {
+  it("gives a user prompt no border", () => {
     // Arrange / Act
-    const borders = bordersOn(prompt("user", working), ["user"]);
+    const borders = bordersOn(prompt("user"), ["user"]);
 
     // Assert — the user's own prompt is never bordered (owner ruling, 2026-09-27).
     expect(borders).toEqual([]);
   });
 
   it.each([
-    ["an agent-addressed prompt in flight", "agent", true, ["user", "prompt-agent"]],
-    ["an agent-addressed prompt at rest", "agent", false, ["user", "prompt-agent"]],
-    ["a peer message", "peer", false, ["peer"]],
-  ] as const)("gives %s no border: its header alone marks it", (_label, variant, working, hooks) => {
+    ["an agent-addressed prompt", "agent", ["user", "prompt-agent"]],
+    ["a peer message", "peer", ["peer"]],
+  ] as const)("gives %s no border: its header alone marks it", (_label, variant, hooks) => {
     // Arrange / Act
-    const borders = bordersOn(prompt(variant, working), hooks);
+    const borders = bordersOn(prompt(variant), hooks);
 
     // Assert — every agent-to-agent bubble is borderless (owner spec, 2026-10-17).
     expect(borders).toEqual([]);
@@ -1217,20 +1211,10 @@ describe("the prompt borders", () => {
     ["a prompt held by a bounce", ["held-right", "lease-card"]],
   ] as const)("gives %s no border", (_label, hooks) => {
     // Arrange / Act
-    const borders = bordersOn(prompt("held", false), hooks);
+    const borders = bordersOn(prompt("held"), hooks);
 
     // Assert
     expect(borders).toEqual([]);
-  });
-
-  it("keys no border on the working wave", () => {
-    // Arrange / Act
-    const waving = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.some((sel) => sel.includes("data-wave")) && /(?:^|;)\s*border/.test(rule.declarations),
-    );
-
-    // Assert
-    expect(waving.map((rule) => rule.selectors.join(", "))).toEqual([]);
   });
 
   it("defines no agent-to-agent border token any more", () => {
@@ -2081,180 +2065,43 @@ describe("the reviving shimmer's stylesheet contract", () => {
   });
 });
 
-/** Every rule whose selector list names the working (waving) prompt bubble. */
-function workingPromptRules(): CssRule[] {
-  return rulesOf(stylesheet).filter((rule) => rule.selectors.includes('.bubble[data-role="prompt"][data-wave="working"]'));
-}
-
-describe("workingPromptRules", () => {
-  it("finds the rule carrying the wave's gradient and its animation", () => {
-    // Arrange / Act
-    const declarations = workingPromptRules().map((rule) => rule.declarations).join("\n");
-
-    // Assert
-    expect(declarations).toMatch(/background-image:\s*linear-gradient/);
-    expect(declarations).toMatch(/animation:\s*bubble-wave/);
-  });
-
-  it("is the one lookup of the working prompt's rules in this file", () => {
-    // Arrange
-    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
-
-    // Act
-    const handRolled = source.split(`rule.selectors.includes('${'.bubble[data-role="prompt"][data-wave="working"]'}'`).length - 1;
-
-    // Assert — the helper's own body is the single site.
-    expect(handRolled).toBe(1);
-  });
-});
-
 /**
- * THE INLINE-CODE CHIP'S WASH (owner ruling, 2026-10-14: inline code was
- * "nearly imperceptible against the dark grey background" of a response
- * bubble, a shade darker than it, so it should be lighter instead).
- *
- * `--code-bg` is a transparent wash laid over whatever bubble holds the chip,
- * so which color it mixes in decides whether the chip sinks or lifts: black
- * sinks it into the light theme's pale bubble, white lifts it off the dark
- * theme's dark one.
+ * THE PROMPT BUBBLE IS STILL (owner ruling, 2026-10-26: "no animation should be
+ * done there"). The thinking wave that once crossed a working prompt's fill is
+ * gone, and nothing replaces it: no rule that paints a bubble element itself
+ * declares an animation, so no prompt state (in flight, awaiting the user, at
+ * rest) can move it.
  */
-describe("the inline-code chip's wash", () => {
-  const EXPECTED = {
-    light: { color: "#000000", percent: 13 },
-    dark: { color: "#ffffff", percent: 12 },
-  } as const;
-
-  it.each(THEME_BLOCKS)("washes the %s theme's chip with its own color", (theme, block) => {
-    // Arrange / Act
-    const wash = washOf(block(), "--code-bg");
-
-    // Assert
-    expect(wash).toEqual(EXPECTED[theme]);
-  });
-});
-
-/**
- * THE PROMPT GLIMMER'S INTENSITY (owner ruling, 2026-09-21: "make the
- * glimmering in the webapp response bubbles 50% more intense").
- *
- * The glimmer's strength is ONE thing: how much black the `--bubble-wave`
- * wash carries. Nothing else in the effect changes with intensity — the
- * gradient's geometry, its 3.2s period and its phase are all held elsewhere —
- * so the wash percentage is what an assertion can honestly pin, per theme.
- * Both themes carry the same +50%, because one ruling moved both.
- */
-describe("the prompt glimmer's intensity", () => {
-  it("washes the light theme's band with 10.5% black, the ruling's +50% over 7%", () => {
-    // Arrange / Act
-    const root = declarationsOf(":root") ?? "";
-
-    // Assert
-    expect(washOf(root, "--bubble-wave")).toEqual({ color: "#000000", percent: 10.5 });
-  });
-
-  it("washes the dark theme's band with 39% black, the same +50% over 26%", () => {
-    // Arrange / Act
-    const dark = darkThemeBlock();
-
-    // Assert
-    expect(washOf(dark, "--bubble-wave")).toEqual({ color: "#000000", percent: 39 });
-  });
-
-  it("keeps the dark theme's band the deeper of the two, as a dark fill needs", () => {
-    // Arrange / Act
-    const light = washOf(declarationsOf(":root") ?? "", "--bubble-wave").percent;
-    const dark = washOf(darkThemeBlock(), "--bubble-wave").percent;
-
-    // Assert
-    expect(dark).toBeGreaterThan(light);
-  });
-
-  it("carries the intensity in the token alone, so the gradient rule is untouched by it", () => {
-    // Arrange / Act — the band's own rule names the token and no literal wash.
-    const waving = workingPromptRules();
-    const gradient = waving.find((rule) => /background-image/.test(rule.declarations))?.declarations ?? "";
-
-    // Assert
-    expect(gradient).toMatch(/var\(--bubble-wave\)/);
-    expect(gradient).not.toMatch(/color-mix/);
-  });
-
-  it("holds the 3.2s period the effect had before the intensity ruling", () => {
-    // Arrange / Act — intensity is the wash alone; the pass must not speed up.
-    const waving = workingPromptRules();
-
-    // Assert
-    expect(
-      waving.some((rule) => /animation:\s*bubble-wave 3\.2s linear infinite/.test(rule.declarations)),
-    ).toBe(true);
-  });
-});
-
-/**
- * THE PROMPT GLIMMER DARKENS, NEVER BRIGHTENS (owner ruling, 2026-10-11: "the
- * bright brights on the current wave are too bright").
- *
- * The band is a dark wash on a two-bubble-wide image panned from 200% to
- * -100%, a travel of three bubble widths. A point of the bubble sits under the
- * band for the band's own width of that travel, so a band narrower than the
- * bubble keeps every point at its plain fill for most of the pass: the bubble
- * reads as resting at its own color with a darker band crossing it. A band
- * spanning the whole image (the retired 0%-100%) darkened each point for two
- * thirds of the pass, and the plain fill flashed through the gap as a glint.
- */
-describe("the prompt glimmer's band geometry", () => {
-  /** The working prompt's gradient stops, as percentages of the image. */
-  function bandStops(): { start: number; peak: number; end: number } {
-    const gradient = workingPromptRules()
-      .map((rule) => /background-image:\s*linear-gradient\(90deg,\s*transparent ([\d.]+)%,\s*var\(--bubble-wave\) ([\d.]+)%,\s*transparent ([\d.]+)%\)/.exec(rule.declarations))
-      .find((match) => match !== null);
-    if (gradient === undefined || gradient === null) throw new Error("no working-prompt band gradient found");
-    return { start: Number(gradient[1]), peak: Number(gradient[2]), end: Number(gradient[3]) };
+describe("the still prompt bubble", () => {
+  /** The rightmost compound of SELECTOR: the element the rule paints. */
+  function subjectOf(selector: string): string {
+    const parts = selector.split(/[\s>+~]+/).filter((part) => part !== "");
+    return parts[parts.length - 1] ?? "";
   }
 
-  /** The image is `background-size: 200%`, so one image percent is 0.02 bubble widths. */
-  const BUBBLES_PER_IMAGE_PERCENT = 2 / 100;
-  /** `200%` to `-100%` of a leftover of minus one bubble width: three bubble widths. */
-  const PASS_TRAVEL_BUBBLES = 3;
-
-  it("keeps the band narrower than the bubble, so the bubble's own fill is the resting color", () => {
+  it("declares no animation on any rule painting a bubble element", () => {
     // Arrange / Act
-    const { start, end } = bandStops();
+    const animated = rulesOf(stylesheet).filter(
+      (rule) =>
+        /(?:^|;)\s*animation/.test(rule.declarations) &&
+        rule.selectors.some((sel) => /\.bubble(?![\w-])/.test(subjectOf(sel).replace(/:not\([^)]*\)/g, ""))),
+    );
 
     // Assert
-    expect((end - start) * BUBBLES_PER_IMAGE_PERCENT).toBeLessThan(1);
+    expect(animated.flatMap((rule) => rule.selectors)).toEqual([]);
   });
 
-  it("darkens each point for under a third of the pass", () => {
+  it.each([
+    ["the wave's keyframes", "@keyframes bubble-wave"],
+    ["the wave's wash token", "--bubble-wave"],
+    ["the wave's marker", "data-wave"],
+    ["the hidden-page flag the wave's driver stamped", "data-page-hidden"],
+  ])("keeps no trace of %s", (_label, literal) => {
     // Arrange / Act
-    const { start, end } = bandStops();
-    const darkFraction = ((end - start) * BUBBLES_PER_IMAGE_PERCENT) / PASS_TRAVEL_BUBBLES;
+    const found = stylesheet.includes(literal);
 
     // Assert
-    expect(darkFraction).toBeLessThan(1 / 3);
-  });
-
-  it("peaks the wash at the band's center, so the band is symmetric", () => {
-    // Arrange / Act
-    const { start, peak, end } = bandStops();
-
-    // Assert
-    expect(peak - start).toBeCloseTo(end - peak, 5);
-  });
-
-  it("still enters fully off the left edge and leaves fully off the right", () => {
-    // Arrange — the keyframes' offsets, in bubble widths from the box's left edge.
-    const { start, end } = bandStops();
-    const fromOffset = -2;
-    const toOffset = 1;
-
-    // Act
-    const bandRightAtFrom = fromOffset + end * BUBBLES_PER_IMAGE_PERCENT;
-    const bandLeftAtTo = toOffset + start * BUBBLES_PER_IMAGE_PERCENT;
-
-    // Assert
-    expect(bandRightAtFrom).toBeLessThanOrEqual(0);
-    expect(bandLeftAtTo).toBeGreaterThanOrEqual(1);
+    expect(found).toBe(false);
   });
 });
 
@@ -3102,9 +2949,8 @@ describe("the one bubble rule set", () => {
             ),
         ),
     );
-    // Assert — the working wave's own animation is the one other thing a
-    // prompt state draws (ruling f), and it lives on its own rule.
-    expect(beyondBorder.flatMap((rule) => rule.selectors).filter((sel) => !sel.includes("[data-wave="))).toEqual([]);
+    // Assert
+    expect(beyondBorder.flatMap((rule) => rule.selectors)).toEqual([]);
   });
 
   it("draws a fenced code block through the one markdown rule, with no per-kind copy", () => {
