@@ -63,7 +63,7 @@ func ctx() context.Context { return context.Background() }
 // answered records one exchange, failing the test on any error.
 func (f fixture) answered(t *testing.T, thread ThreadID, turn string, parent Parent, question, answer string) Node {
 	t.Helper()
-	node, created, err := f.db.RecordExchange(ctx(), thread, turn, question, parent, answer)
+	node, created, err := f.db.RecordExchange(ctx(), thread, turn, question, nil, parent, answer)
 	if err != nil || !created {
 		t.Fatalf("RecordExchange: created=%v err=%v", created, err)
 	}
@@ -102,7 +102,7 @@ func TestRecordExchangeRefusals(t *testing.T) {
 			before, _ := f.db.Thread(ctx(), thread)
 
 			// Act
-			_, _, err := f.db.RecordExchange(ctx(), thread, "turn-new", "question", parent, "answer")
+			_, _, err := f.db.RecordExchange(ctx(), thread, "turn-new", "question", nil, parent, "answer")
 
 			// Assert
 			if !errors.Is(err, tc.want) {
@@ -127,7 +127,7 @@ func TestRecordExchangeIsIdempotentByTurn(t *testing.T) {
 	first := f.answered(t, "t1", "turn1", Parent{}, "What are quarks?", "Elementary particles.")
 
 	// Act
-	again, created, err := f.db.RecordExchange(ctx(), "t1", "turn1", "a different question", Parent{}, "a different answer")
+	again, created, err := f.db.RecordExchange(ctx(), "t1", "turn1", "a different question", nil, Parent{}, "a different answer")
 
 	// Assert
 	if err != nil || created {
@@ -278,7 +278,7 @@ func TestStorageFailureIsLoggedAndReported(t *testing.T) {
 	f.log.Reset()
 
 	// Act
-	_, _, err := f.db.RecordExchange(ctx(), "t1", "turn1", "q", Parent{}, "a")
+	_, _, err := f.db.RecordExchange(ctx(), "t1", "turn1", "q", nil, Parent{}, "a")
 
 	// Assert
 	if !errors.Is(err, ErrStorage) {
@@ -290,5 +290,124 @@ func TestStorageFailureIsLoggedAndReported(t *testing.T) {
 	}
 	if ctx := recs[0]["context"].(map[string]any); ctx["thread"] != "t1" || ctx["turn"] != "turn1" {
 		t.Errorf("context = %v, want the thread and turn named", ctx)
+	}
+}
+
+func TestQuestionAbbreviation(t *testing.T) {
+	t.Run("an abbreviation recorded with the exchange is read back", func(t *testing.T) {
+		// Arrange
+		f := newFixture(t)
+		a := "Fusion at iron"
+
+		// Act
+		_, _, err := f.db.RecordExchange(ctx(), "t1", "turn1", "Why does fusion stop at iron?", &a, Parent{}, "a")
+
+		// Assert
+		nodes, _ := f.db.Thread(ctx(), "t1")
+		if err != nil || nodes[0].Abbreviation == nil || *nodes[0].Abbreviation != a {
+			t.Fatalf("err = %v, nodes = %+v; want the abbreviation stored", err, nodes)
+		}
+	})
+	t.Run("an exchange recorded without one has none", func(t *testing.T) {
+		// Arrange
+		f := newFixture(t)
+
+		// Act
+		f.answered(t, "t1", "turn1", Parent{}, "q", "a")
+
+		// Assert
+		nodes, _ := f.db.Thread(ctx(), "t1")
+		if nodes[0].Abbreviation != nil {
+			t.Fatalf("abbreviation = %q, want none", *nodes[0].Abbreviation)
+		}
+	})
+	t.Run("setting one answers and stores it", func(t *testing.T) {
+		// Arrange
+		f := newFixture(t)
+		n := f.answered(t, "t1", "turn1", Parent{}, "q", "a")
+
+		// Act
+		got, err := f.db.SetQuestionAbbreviation(ctx(), n.ID, "Short form")
+
+		// Assert
+		nodes, _ := f.db.Thread(ctx(), "t1")
+		if err != nil || got.Abbreviation == nil || *got.Abbreviation != "Short form" || *nodes[0].Abbreviation != "Short form" {
+			t.Fatalf("got = %+v, err = %v, stored = %+v", got, err, nodes[0])
+		}
+	})
+	t.Run("setting one replaces the one held", func(t *testing.T) {
+		// Arrange
+		f := newFixture(t)
+		old := "Old"
+		n, _, _ := f.db.RecordExchange(ctx(), "t1", "turn1", "q", &old, Parent{}, "a")
+
+		// Act
+		_, err := f.db.SetQuestionAbbreviation(ctx(), n.ID, "New")
+
+		// Assert
+		nodes, _ := f.db.Thread(ctx(), "t1")
+		if err != nil || *nodes[0].Abbreviation != "New" {
+			t.Fatalf("err = %v, stored = %+v; want the new abbreviation", err, nodes[0])
+		}
+	})
+	t.Run("an unknown node is refused and changes nothing", func(t *testing.T) {
+		// Arrange
+		f := newFixture(t)
+		f.answered(t, "t1", "turn1", Parent{}, "q", "a")
+
+		// Act
+		_, err := f.db.SetQuestionAbbreviation(ctx(), "nope", "x")
+
+		// Assert
+		var unknown *UnknownNodeError
+		nodes, _ := f.db.Thread(ctx(), "t1")
+		if !errors.As(err, &unknown) || unknown.Node != "nope" || nodes[0].Abbreviation != nil {
+			t.Fatalf("err = %v, node = %+v; want the unknown node named and nothing set", err, nodes[0])
+		}
+	})
+	t.Run("a storage failure is logged and reported", func(t *testing.T) {
+		// Arrange
+		f := newFixture(t)
+		n := f.answered(t, "t1", "turn1", Parent{}, "q", "a")
+		if err := f.db.write.Close(); err != nil {
+			t.Fatal(err)
+		}
+		f.log.Reset()
+
+		// Act
+		_, err := f.db.SetQuestionAbbreviation(ctx(), n.ID, "x")
+
+		// Assert
+		recs := records(f.log)
+		if !errors.Is(err, ErrStorage) || len(recs) == 0 || recs[0]["operation"] != "zettel.abbreviation.set" || recs[0]["level"] != "error" {
+			t.Fatalf("err = %v, records = %v; want ErrStorage and its error record", err, recs)
+		}
+		if c := recs[0]["context"].(map[string]any); c["node"] != string(n.ID) {
+			t.Errorf("context = %v, want the node named", c)
+		}
+	})
+}
+
+func TestALayoutTwoGraphGainsTheAbbreviationColumn(t *testing.T) {
+	// Arrange: a file at layout two, holding a node.
+	f := newFixture(t)
+	f.answered(t, "t1", "turn1", Parent{}, "q", "a")
+	for _, stmt := range []string{"ALTER TABLE node DROP COLUMN question_abbreviation", "PRAGMA user_version = 2"} {
+		if _, err := f.db.write.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	var buf bytes.Buffer
+	reopened := openAt(t, f.path, &buf)
+
+	// Assert
+	nodes, err := reopened.Thread(ctx(), "t1")
+	if err != nil || len(nodes) != 1 || nodes[0].Abbreviation != nil {
+		t.Fatalf("nodes = %+v, err = %v; want the node carried forward with no abbreviation", nodes, err)
 	}
 }

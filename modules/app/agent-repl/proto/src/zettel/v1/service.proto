@@ -14,6 +14,7 @@ import "zettel/v1/endpoint_get_thread.proto";
 import "zettel/v1/endpoint_record_exchange.proto";
 import "zettel/v1/endpoint_record_sightings.proto";
 import "zettel/v1/endpoint_search_threads.proto";
+import "zettel/v1/endpoint_set_question_abbreviation.proto";
 
 option go_package = "agentrepl/proto/zettel/v1;zettelv1";
 
@@ -35,6 +36,11 @@ service Zettel {
 
   // Count one sighting per named node.
   rpc RecordSightings(RecordSightingsRequest) returns (RecordSightingsResponse);
+
+  // ---- Abbreviations: a node's question named in a few words ----
+
+  // Set one node's question abbreviation, minted after its node was recorded.
+  rpc SetQuestionAbbreviation(SetQuestionAbbreviationRequest) returns (SetQuestionAbbreviationResponse);
 
   // ---- Deletion: a thread's graph destroyed ----
 

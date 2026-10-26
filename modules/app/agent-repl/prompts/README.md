@@ -21,6 +21,12 @@ once under "Loading…" and renamed when its title arrives. The e2e suite's fake
 vendor recognizes that file by its first line, "Title the chat thread", so a
 reworded first line needs `daemon/integration/harness/fakes.go` to follow it.
 
+Each chat question longer than a few words is ABBREVIATED for the sidebar's
+branch outline through `chat-question-abbreviation.md`: one to six words in
+sentence case, checked on the answer (`daemon/internal/chat/abbreviate.go`).
+The outline draws the whole question until the abbreviation arrives. The fake
+vendor recognizes that file by its first line, "Abbreviate the chat question".
+
 **This directory is doom's own policy, not everyone's.** These files are the
 one-shot and merge policy of the ONE repository this checkout lives in. Every
 other repository states its own in `.agent-repl/prompts/` at its main checkout

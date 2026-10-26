@@ -192,7 +192,7 @@ func TestLayoutTwoIndexesTheNodesAlreadyStored(t *testing.T) {
 	f.answered(t, "t1", "turn1", Parent{}, "Why is the sky blue?", "Rayleigh scattering.")
 	for _, stmt := range []string{
 		"DROP TRIGGER node_text_on_node", "DROP TRIGGER node_text_on_revision", "DROP TRIGGER node_text_on_delete",
-		"DROP TABLE node_text", "PRAGMA user_version = 1",
+		"DROP TABLE node_text", "ALTER TABLE node DROP COLUMN question_abbreviation", "PRAGMA user_version = 1",
 	} {
 		if _, err := f.db.write.Exec(stmt); err != nil {
 			t.Fatalf("%s: %v", stmt, err)

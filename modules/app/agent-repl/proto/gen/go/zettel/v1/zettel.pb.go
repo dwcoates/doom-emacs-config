@@ -639,7 +639,12 @@ type NodeQuestion struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The question, verbatim as asked (the prompt the user typed, without any
 	// quoted material the daemon added for the model).
-	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	// A few words standing for the question where its whole text would not
+	// fit (the sidebar's branch outline). The daemon mints it; UNSET until it
+	// has (SetQuestionAbbreviation), and on a question short enough to be its
+	// own.
+	Abbreviation  *string `protobuf:"bytes,2,opt,name=abbreviation,proto3,oneof" json:"abbreviation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -677,6 +682,13 @@ func (*NodeQuestion) Descriptor() ([]byte, []int) {
 func (x *NodeQuestion) GetText() string {
 	if x != nil {
 		return x.Text
+	}
+	return ""
+}
+
+func (x *NodeQuestion) GetAbbreviation() string {
+	if x != nil && x.Abbreviation != nil {
+		return *x.Abbreviation
 	}
 	return ""
 }
@@ -831,9 +843,11 @@ const file_zettel_v1_zettel_proto_rawDesc = "" +
 	"\x06answer\x18\x05 \x01(\v2\x17.zettel.v1.NodeRevisionR\x06answer\x12\"\n" +
 	"\rcreated_at_ms\x18\x06 \x01(\x03R\vcreatedAtMs\x126\n" +
 	"\tsightings\x18\a \x01(\v2\x18.zettel.v1.NodeSightingsR\tsightings\x12+\n" +
-	"\x04turn\x18\b \x01(\v2\x17.zettel.v1.ExchangeTurnR\x04turn\"\"\n" +
+	"\x04turn\x18\b \x01(\v2\x17.zettel.v1.ExchangeTurnR\x04turn\"\\\n" +
 	"\fNodeQuestion\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\x81\x01\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12'\n" +
+	"\fabbreviation\x18\x02 \x01(\tH\x00R\fabbreviation\x88\x01\x01B\x0f\n" +
+	"\r_abbreviation\"\x81\x01\n" +
 	"\fNodeRevision\x121\n" +
 	"\x06number\x18\x01 \x01(\v2\x19.zettel.v1.RevisionNumberR\x06number\x12\x1a\n" +
 	"\bmarkdown\x18\x02 \x01(\tR\bmarkdown\x12\"\n" +
@@ -902,6 +916,7 @@ func file_zettel_v1_zettel_proto_init() {
 	}
 	file_zettel_v1_zettel_proto_msgTypes[5].OneofWrappers = []any{}
 	file_zettel_v1_zettel_proto_msgTypes[7].OneofWrappers = []any{}
+	file_zettel_v1_zettel_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

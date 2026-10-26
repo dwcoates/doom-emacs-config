@@ -52,6 +52,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
@@ -64,16 +65,6 @@ type Digester interface {
 	// title is synthesized from. A workspace with no live shim answers the
 	// not-found error, which is not a fault.
 	GatherTitleDigest(ctx context.Context, ws ids.WorkspaceID) (*shimv1.GatherTitleDigestResponse, error)
-}
-
-// ConfigDirSource resolves the account config dir a workspace's headless call
-// must bill. The synthesized title's tokens are attributed to the SAME account
-// the session spends as, so a workspace on a second account never spends the
-// default account's allowance on its title.
-type ConfigDirSource interface {
-	// ConfigDirFor answers the workspace's account config dir, or the error
-	// that kept the workspace's root from being resolved.
-	ConfigDirFor(ctx context.Context, ws ids.WorkspaceID) (string, error)
 }
 
 // SummaryStore keeps each workspace's summary and the digest it was distilled
@@ -105,8 +96,10 @@ type Deps struct {
 	// Headless is the cheap one-shot model runner — the SAME client the
 	// classifier and the naming call use, guarded by the vendor guard.
 	Headless headless.Runner
-	// ConfigDirs resolves the per-workspace account root for token attribution.
-	ConfigDirs ConfigDirSource
+	// ConfigDirs resolves the per-workspace account root for token
+	// attribution: the synthesized title's tokens are billed to the account
+	// the workspace's directory routes to.
+	ConfigDirs account.WorkspaceConfigDirs
 	// Titles installs the synthesized title into the topbar.
 	Titles TitleSink
 	// Store keeps the summary and its cadence across daemon restarts.

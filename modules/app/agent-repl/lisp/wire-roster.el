@@ -1773,11 +1773,17 @@ THE ARM IS THE STANDING, so an unset one is a contract breach."
     (agent-repl-wire--decode-string "NodeId" 'id object)))
 
 (defun agent-repl-wire-decode-roster-thread-outline-label (value)
-  "Decode `RosterThreadOutlineLabel' VALUE as its text."
-  (agent-repl-wire-decode-roster-text "RosterThreadOutlineLabel" value))
+  "Decode VALUE as `RosterThreadOutlineLabel', `(:text S :question Q)'.
+TEXT is what a row draws (the question's abbreviation, or the question
+while it has none); QUESTION is the question whole."
+  (let ((object (agent-repl-wire--object "RosterThreadOutlineLabel" value)))
+    (agent-repl-wire--check-keys "RosterThreadOutlineLabel" object '(text question))
+    (list :text (agent-repl-wire--decode-string "RosterThreadOutlineLabel" 'text object)
+          :question (agent-repl-wire--decode-string "RosterThreadOutlineLabel" 'question object))))
 
 (defun agent-repl-wire-decode-roster-thread-outline-crumb (value)
-  "Decode VALUE as `RosterThreadOutlineCrumb', `(:node ID :label S)'."
+  "Decode VALUE as `RosterThreadOutlineCrumb', `(:node ID :label L)'.
+LABEL is a decoded `RosterThreadOutlineLabel'."
   (let ((object (agent-repl-wire--object "RosterThreadOutlineCrumb" value)))
     (agent-repl-wire--check-keys "RosterThreadOutlineCrumb" object '(node label))
     (list :node (agent-repl-wire--decode-message
@@ -1842,8 +1848,9 @@ THE ARM IS THE STANDING, so an unset one is a contract breach."
 
 (defun agent-repl-wire-decode-roster-thread-outline-row (value)
   "Decode VALUE as `RosterThreadOutlineRow',
-`(:node ID :label S :depth N :turns N :folded N :place P)', FOLDED nil
-when nothing folds below the row."
+`(:node ID :label L :depth N :turns N :folded N :place P)', LABEL a
+decoded `RosterThreadOutlineLabel', FOLDED nil when nothing folds below
+the row."
   (let ((object (agent-repl-wire--object "RosterThreadOutlineRow" value)))
     (agent-repl-wire--check-keys "RosterThreadOutlineRow" object '(node label depth turns folded place))
     (list :node (agent-repl-wire--decode-message

@@ -104,9 +104,12 @@ func TestAChatThreadLivesItsWholeLife(t *testing.T) {
 	})
 
 	// ---- A question typed in the composer is asked of the shown path ----
-	SubmitPrompt(t, w, thread, "And at sunset?")
+	// It is long, so the outline draws it abbreviated (checked below, once
+	// the root's branches make it a run of its own).
+	const longFollowUp = "And what color does the sky turn at sunset, and why?"
+	SubmitPrompt(t, w, thread, longFollowUp)
 	view = harness.AwaitView(t, ctx, chat, "the follow-up's answer", func(v *frontendv1.ChatView) bool {
-		return settled(v, 2, "And at sunset?")
+		return settled(v, 2, longFollowUp)
 	})
 	followUp := exchangesOf(view)[1].GetNode()
 	if nodes := graphOf(t, w, thread); len(nodes) != 2 || nodes[1].GetParent().GetNode().GetNode().GetId() != root.GetId() {
@@ -130,6 +133,19 @@ func TestAChatThreadLivesItsWholeLife(t *testing.T) {
 	highlighted := exchangesOf(view)[1]
 	if highlighted.GetSiblings() == nil {
 		t.Fatalf("exchange = %v, want a sibling control: the root has two children", highlighted)
+	}
+
+	// ---- The long question is abbreviated, in zettel and in the outline ----
+	harness.AwaitView(t, ctx, roster, "the follow-up's outline row drawn abbreviated", func(r *frontendv1.WorkspaceRoster) bool {
+		for _, row := range threadRow(r, thread).GetOutline().GetRows() {
+			if row.GetNode().GetId() == followUp.GetId() {
+				return row.GetLabel().GetText() == harness.FakeClaudeMintedAbbreviation && row.GetLabel().GetQuestion() == longFollowUp
+			}
+		}
+		return false
+	})
+	if nodes := graphOf(t, w, thread); nodes[1].GetQuestion().GetAbbreviation() != harness.FakeClaudeMintedAbbreviation || nodes[0].GetQuestion().Abbreviation != nil {
+		t.Fatalf("graph = %v, want the long follow-up abbreviated and the short root not", nodes)
 	}
 
 	// ---- The siblings switch, and sightings are counted ----

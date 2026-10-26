@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	zettelv1 "agentrepl/proto/zettel/v1"
+
+	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -31,9 +34,21 @@ type fakeZettel struct {
 	deleted   []ids.WorkspaceID
 	matches   []*zettelv1.SearchThreadsMatch
 	searchErr error
+	// recordedAbbreviations is each RecordExchange's abbreviation, in order.
+	recordedAbbreviations []*string
+	// set is each SetQuestionAbbreviation, "node=abbreviation", in order.
+	set    []string
+	setErr error
+	// onRecord, when set, runs inside RecordExchange before it answers: what
+	// else happens while a recording is in flight.
+	onRecord func()
 }
 
-func (f *fakeZettel) RecordExchange(_ context.Context, thread ids.WorkspaceID, turn ids.TurnID, q wsm.ThreadQuestion, answer string) (*zettelv1.Node, error) {
+func (f *fakeZettel) RecordExchange(_ context.Context, thread ids.WorkspaceID, turn ids.TurnID, q wsm.ThreadQuestion, abbreviation *string, answer string) (*zettelv1.Node, error) {
+	f.recordedAbbreviations = append(f.recordedAbbreviations, abbreviation)
+	if f.onRecord != nil {
+		f.onRecord()
+	}
 	if f.recordErr != nil {
 		return nil, f.recordErr
 	}
@@ -45,12 +60,28 @@ func (f *fakeZettel) RecordExchange(_ context.Context, thread ids.WorkspaceID, t
 	f.now++
 	n := &zettelv1.Node{
 		Id: &zettelv1.NodeId{Id: fmt.Sprintf("n%d", len(f.nodes)+1)}, Thread: &zettelv1.ThreadId{Id: string(thread)},
-		Parent: q.Parent, Question: &zettelv1.NodeQuestion{Text: q.Text},
+		Parent: q.Parent, Question: &zettelv1.NodeQuestion{Text: q.Text, Abbreviation: abbreviation},
 		Answer:      &zettelv1.NodeRevision{Number: &zettelv1.RevisionNumber{Number: 1}, Markdown: answer},
 		CreatedAtMs: f.now, Sightings: &zettelv1.NodeSightings{}, Turn: &zettelv1.ExchangeTurn{TurnId: string(turn)},
 	}
 	f.nodes = append(f.nodes, n)
 	return n, nil
+}
+
+func (f *fakeZettel) SetQuestionAbbreviation(_ context.Context, node *zettelv1.NodeId, abbreviation string) (*zettelv1.Node, error) {
+	if f.setErr != nil {
+		return nil, f.setErr
+	}
+	for i, n := range f.nodes {
+		if n.GetId().GetId() == node.GetId() {
+			updated := proto.Clone(n).(*zettelv1.Node)
+			updated.Question.Abbreviation = &abbreviation
+			f.nodes[i] = updated
+			f.set = append(f.set, node.GetId()+"="+abbreviation)
+			return updated, nil
+		}
+	}
+	return nil, errors.New("fake zettel: no such node")
 }
 
 func (f *fakeZettel) Thread(context.Context, ids.WorkspaceID) ([]*zettelv1.Node, error) {
@@ -142,11 +173,33 @@ func (f *fakeTurns) ask(turn ids.TurnID, text, parent, quote string) {
 	f.open = append(f.open, t)
 }
 
+// fakeAbbreviator answers every question "short: <question's first word>",
+// or err; asked is every question it was asked, in order.
+type fakeAbbreviator struct {
+	err   error
+	asked []string
+	// gate, when set, is received from before each answer, so a test holds
+	// an abbreviation back until it chooses.
+	gate chan struct{}
+}
+
+func (a *fakeAbbreviator) Abbreviate(_ context.Context, _ dlog.Logger, _ ids.WorkspaceID, question string) (string, error) {
+	a.asked = append(a.asked, question)
+	if a.gate != nil {
+		<-a.gate
+	}
+	if a.err != nil {
+		return "", a.err
+	}
+	return "short: " + strings.Fields(question)[0], nil
+}
+
 // close closes every open turn, as the records say once the turn ends.
 func (f *fakeTurns) close() { f.open = nil }
 
 type fixture struct {
 	t      *testing.T
+	abbrev *fakeAbbreviator
 	zettel *fakeZettel
 	turns  *fakeTurns
 	log    *dlog.TestLogger
@@ -159,9 +212,9 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{t: t, zettel: &fakeZettel{}, turns: &fakeTurns{turns: map[ids.TurnID]wsm.Turn{}}, log: dlog.NewTestLogger()}
+	f := &fixture{t: t, abbrev: &fakeAbbreviator{}, zettel: &fakeZettel{}, turns: &fakeTurns{turns: map[ids.TurnID]wsm.Turn{}}, log: dlog.NewTestLogger()}
 	f.svc = New(Deps{
-		Zettel: f.zettel, Turns: f.turns, Context: context.Background(),
+		Zettel: f.zettel, Turns: f.turns, Context: context.Background(), Abbreviator: f.abbrev,
 		Log: func(ids.WorkspaceID) dlog.Logger { return f.log },
 		Go:  func(job func()) { job() },
 		Outline: func(_ ids.WorkspaceID, o *frontendv1.RosterThreadOutline) {

@@ -126,9 +126,15 @@ func (t *thread) breadcrumb(above []*run) *frontendv1.RosterThreadOutlineBreadcr
 	}}}
 }
 
-// runLabel is a run's first question's text.
+// runLabel is a run's first question: its abbreviation when it has one,
+// else its text, and its text whole for the tooltip.
 func (t *thread) runLabel(r *run) *frontendv1.RosterThreadOutlineLabel {
-	return &frontendv1.RosterThreadOutlineLabel{Text: t.nodes[r.nodes[0]].GetQuestion().GetText()}
+	q := t.nodes[r.nodes[0]].GetQuestion()
+	text := q.GetText()
+	if q.Abbreviation != nil {
+		text = q.GetAbbreviation()
+	}
+	return &frontendv1.RosterThreadOutlineLabel{Text: text, Question: q.GetText()}
 }
 
 // runPlace is where a run stands against the shown path.

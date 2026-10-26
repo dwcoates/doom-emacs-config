@@ -277,9 +277,14 @@ message RosterThreadOutlineCrumb {
   RosterThreadOutlineLabel label = 2;
 }
 
-// A run's label: its first question's text, verbatim.
+// A run's label: its first question, abbreviated where the daemon has
+// minted an abbreviation (zettel.v1.NodeQuestion.abbreviation).
 message RosterThreadOutlineLabel {
+  // What the row draws: the question's abbreviation, or the question
+  // verbatim while it has none.
   string text = 1;
+  // The question verbatim, for the row's tooltip.
+  string question = 2;
 }
 
 // One run of the outline. A click shows its first question.

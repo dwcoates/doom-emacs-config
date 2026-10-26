@@ -30,6 +30,16 @@ type fakeZettel struct {
 	deleted   *zettelv1.DeleteThreadResponse
 	err       error
 	got       *zettelv1.RecordExchangeRequest
+	abbrev    *zettelv1.SetQuestionAbbreviationResponse
+	gotAbbrev *zettelv1.SetQuestionAbbreviationRequest
+}
+
+func (f *fakeZettel) SetQuestionAbbreviation(_ context.Context, req *connect.Request[zettelv1.SetQuestionAbbreviationRequest]) (*connect.Response[zettelv1.SetQuestionAbbreviationResponse], error) {
+	f.gotAbbrev = req.Msg
+	if f.err != nil {
+		return nil, f.err
+	}
+	return connect.NewResponse(f.abbrev), nil
 }
 
 func (f *fakeZettel) RecordExchange(_ context.Context, req *connect.Request[zettelv1.RecordExchangeRequest]) (*connect.Response[zettelv1.RecordExchangeResponse], error) {
@@ -103,7 +113,7 @@ func TestRecordExchangeSendsTheQuestionAndAnswersTheNode(t *testing.T) {
 	c := serve(t, f)
 
 	// Act
-	node, err := c.RecordExchange(context.Background(), "ws1", "turn1", question(), "Elementary particles.")
+	node, err := c.RecordExchange(context.Background(), "ws1", "turn1", question(), nil, "Elementary particles.")
 
 	// Assert
 	if err != nil || node.GetId().GetId() != "n1" {
@@ -112,6 +122,43 @@ func TestRecordExchangeSendsTheQuestionAndAnswersTheNode(t *testing.T) {
 	if f.got.GetThread().GetId() != "ws1" || f.got.GetTurn().GetTurnId() != "turn1" || f.got.GetQuestion().GetText() != "What are quarks?" ||
 		f.got.GetAnswerMarkdown() != "Elementary particles." || f.got.GetParent().GetThreadStart() == nil {
 		t.Errorf("request = %v, want every field carried", f.got)
+	}
+}
+
+func TestRecordExchangeSendsTheAbbreviation(t *testing.T) {
+	// Arrange
+	f := &fakeZettel{record: &zettelv1.RecordExchangeResponse{Result: &zettelv1.RecordExchangeResponse_Success{
+		Success: &zettelv1.RecordExchangeSuccess{Node: &zettelv1.Node{Id: &zettelv1.NodeId{Id: "n1"}}},
+	}}}
+	c := serve(t, f)
+	abbreviation := "Quarks"
+
+	// Act
+	_, err := c.RecordExchange(context.Background(), "ws1", "turn1", question(), &abbreviation, "a")
+
+	// Assert
+	if err != nil || f.got.GetQuestion().Abbreviation == nil || *f.got.GetQuestion().Abbreviation != "Quarks" {
+		t.Fatalf("request = %v, err = %v; want the abbreviation carried", f.got, err)
+	}
+}
+
+func TestSetQuestionAbbreviationSendsTheNodeAndAnswersIt(t *testing.T) {
+	// Arrange
+	abbreviation := "Quarks"
+	f := &fakeZettel{abbrev: &zettelv1.SetQuestionAbbreviationResponse{Result: &zettelv1.SetQuestionAbbreviationResponse_Success{
+		Success: &zettelv1.SetQuestionAbbreviationSuccess{Node: &zettelv1.Node{Id: &zettelv1.NodeId{Id: "n1"}, Question: &zettelv1.NodeQuestion{Text: "q", Abbreviation: &abbreviation}}},
+	}}}
+	c := serve(t, f)
+
+	// Act
+	node, err := c.SetQuestionAbbreviation(context.Background(), &zettelv1.NodeId{Id: "n1"}, "Quarks")
+
+	// Assert
+	if err != nil || node.GetQuestion().GetAbbreviation() != "Quarks" {
+		t.Fatalf("node = %v, err = %v", node, err)
+	}
+	if f.gotAbbrev.GetNode().GetId() != "n1" || f.gotAbbrev.GetAbbreviation() != "Quarks" {
+		t.Errorf("request = %v, want the node and abbreviation carried", f.gotAbbrev)
 	}
 }
 
@@ -125,15 +172,25 @@ func TestFailureArmsBecomeRefusals(t *testing.T) {
 		{"record: unknown parent", &fakeZettel{record: &zettelv1.RecordExchangeResponse{Result: &zettelv1.RecordExchangeResponse_Failure{
 			Failure: &zettelv1.RecordExchangeFailure{Detail: "no parent", Kind: &zettelv1.RecordExchangeFailure_UnknownParent{UnknownParent: &zettelv1.RecordExchangeUnknownParent{}}},
 		}}}, func(c Client) error {
-			_, err := c.RecordExchange(context.Background(), "ws1", "turn1", question(), "a")
+			_, err := c.RecordExchange(context.Background(), "ws1", "turn1", question(), nil, "a")
 			return err
 		}, "unknown_parent"},
 		{"record: thread already started", &fakeZettel{record: &zettelv1.RecordExchangeResponse{Result: &zettelv1.RecordExchangeResponse_Failure{
 			Failure: &zettelv1.RecordExchangeFailure{Detail: "started", Kind: &zettelv1.RecordExchangeFailure_ThreadAlreadyStarted{ThreadAlreadyStarted: &zettelv1.RecordExchangeThreadAlreadyStarted{}}},
 		}}}, func(c Client) error {
-			_, err := c.RecordExchange(context.Background(), "ws1", "turn1", question(), "a")
+			_, err := c.RecordExchange(context.Background(), "ws1", "turn1", question(), nil, "a")
 			return err
 		}, "thread_already_started"},
+		{"abbreviation: unknown node", &fakeZettel{abbrev: &zettelv1.SetQuestionAbbreviationResponse{Result: &zettelv1.SetQuestionAbbreviationResponse_Failure{
+			Failure: &zettelv1.SetQuestionAbbreviationFailure{Detail: "no node", Kind: &zettelv1.SetQuestionAbbreviationFailure_UnknownNode{UnknownNode: &zettelv1.SetQuestionAbbreviationUnknownNode{}}},
+		}}}, func(c Client) error {
+			_, err := c.SetQuestionAbbreviation(context.Background(), &zettelv1.NodeId{Id: "n1"}, "a")
+			return err
+		}, "unknown_node"},
+		{"abbreviation: unset", &fakeZettel{abbrev: &zettelv1.SetQuestionAbbreviationResponse{}}, func(c Client) error {
+			_, err := c.SetQuestionAbbreviation(context.Background(), &zettelv1.NodeId{Id: "n1"}, "a")
+			return err
+		}, "unset"},
 		{"thread: storage failure", &fakeZettel{thread: &zettelv1.GetThreadResponse{Result: &zettelv1.GetThreadResponse_Failure{
 			Failure: &zettelv1.GetThreadFailure{Detail: "disk", Kind: &zettelv1.GetThreadFailure_StorageFailure{StorageFailure: &zettelv1.GetThreadStorageFailure{}}},
 		}}}, func(c Client) error {
@@ -305,5 +362,18 @@ func TestEveryZettelFailureHasTheShapeRefusedReads(t *testing.T) {
 	}
 	if len(failures) != file.Services().Get(0).Methods().Len() {
 		t.Fatalf("failures = %v, want one per rpc", failures)
+	}
+}
+
+func TestSetQuestionAbbreviationTransportFailureIsUnavailable(t *testing.T) {
+	// Arrange
+	c := serve(t, &fakeZettel{err: connect.NewError(connect.CodeInternal, errors.New("boom"))})
+
+	// Act
+	_, err := c.SetQuestionAbbreviation(context.Background(), &zettelv1.NodeId{Id: "n1"}, "a")
+
+	// Assert
+	if !errors.Is(err, ErrUnavailable) {
+		t.Errorf("err = %v, want ErrUnavailable", err)
 	}
 }

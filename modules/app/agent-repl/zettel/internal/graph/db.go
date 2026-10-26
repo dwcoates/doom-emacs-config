@@ -121,6 +121,7 @@ type migration struct {
 var migrations = []migration{
 	{Version: 1, Name: "graph", DDL: layoutOneDDL},
 	{Version: 2, Name: "search", DDL: layoutTwoDDL},
+	{Version: 3, Name: "question abbreviation", DDL: layoutThreeDDL},
 }
 
 const layoutOneDDL = `
@@ -180,6 +181,12 @@ END;
 CREATE TRIGGER node_text_on_delete AFTER DELETE ON node BEGIN
   DELETE FROM node_text WHERE node_id = OLD.id;
 END;
+`
+
+// layoutThreeDDL is a node's question abbreviation: NULL until the daemon
+// mints one (SetQuestionAbbreviation), or for a question that is its own.
+const layoutThreeDDL = `
+ALTER TABLE node ADD COLUMN question_abbreviation TEXT;
 `
 
 // migrate applies every step the file has not had, each in its own

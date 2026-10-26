@@ -1,0 +1,65 @@
+// endpoint_set_question_abbreviation.proto — SetQuestionAbbreviation: a
+// node's question was named in a few words.
+
+syntax = "proto3";
+
+package zettel.v1;
+
+import "zettel/v1/zettel.proto";
+
+option go_package = "agentrepl/proto/zettel/v1;zettelv1";
+
+// Sets one node's question abbreviation (NodeQuestion.abbreviation),
+// replacing any it held. The daemon calls this when an abbreviation is
+// minted after its node was recorded; one minted before rides
+// RecordExchangeRequest.question instead. Idempotent: setting the same
+// abbreviation again changes nothing.
+message SetQuestionAbbreviationRequest {
+  // The node whose question is abbreviated.
+  NodeId node = 1;
+  // The abbreviation. Never empty.
+  string abbreviation = 2;
+}
+
+// The outcome of SetQuestionAbbreviation.
+message SetQuestionAbbreviationResponse {
+  // Success carries the node as it now stands; failure says why it was not
+  // changed.
+  oneof result {
+    SetQuestionAbbreviationSuccess success = 1;
+    SetQuestionAbbreviationFailure failure = 2;
+  }
+}
+
+// The abbreviation was set.
+message SetQuestionAbbreviationSuccess {
+  // The node, carrying the abbreviation.
+  Node node = 1;
+}
+
+// Nothing was changed.
+message SetQuestionAbbreviationFailure {
+  // A one-line human-readable account of the failure, for the log.
+  string detail = 1;
+  // Which failure it was.
+  oneof kind {
+    SetQuestionAbbreviationStorageFailure storage_failure = 2;
+    SetQuestionAbbreviationInvalidRequest invalid_request = 3;
+    SetQuestionAbbreviationUnknownNode unknown_node = 4;
+  }
+}
+
+// The database could not be written.
+message SetQuestionAbbreviationStorageFailure {}
+
+// A required field was missing or empty.
+message SetQuestionAbbreviationInvalidRequest {
+  // The field at fault, by its proto name.
+  string field = 1;
+}
+
+// The named node does not exist.
+message SetQuestionAbbreviationUnknownNode {
+  // The node named.
+  NodeId node = 1;
+}

@@ -2,10 +2,8 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
@@ -42,24 +40,7 @@ const (
 // quotes and a trailing full stop, two to five words, at most
 // ThreadTitleMaxChars, one line.
 func ValidateThreadTitle(answer string) (string, error) {
-	title := strings.TrimSpace(answer)
-	title = strings.Trim(title, "\"'`“”‘’")
-	title = strings.TrimSuffix(strings.TrimSpace(title), ".")
-	if strings.ContainsAny(title, "\n\r") {
-		return "", errors.New("a title is one line")
-	}
-	words := strings.Fields(title)
-	switch {
-	case len(words) < ThreadTitleMinWords:
-		return "", fmt.Errorf("a title is at least %d words, and %q is %d", ThreadTitleMinWords, title, len(words))
-	case len(words) > ThreadTitleMaxWords:
-		return "", fmt.Errorf("a title is at most %d words, and %q is %d", ThreadTitleMaxWords, title, len(words))
-	}
-	title = strings.Join(words, " ")
-	if n := utf8.RuneCountInString(title); n > ThreadTitleMaxChars {
-		return "", fmt.Errorf("a title is at most %d characters, and %q is %d", ThreadTitleMaxChars, title, n)
-	}
-	return title, nil
+	return headless.Words{Noun: "a title", MinWords: ThreadTitleMinWords, MaxWords: ThreadTitleMaxWords, MaxChars: ThreadTitleMaxChars}.Validate(answer)
 }
 
 // mintThreadTitle asks the model for QUESTION's title, retrying an answer
@@ -81,30 +62,18 @@ func (v *verbs) mintThreadTitle(ctx context.Context, log dlog.Logger, dir, quest
 	if v.deps.Accounts != nil {
 		configDir = v.deps.Accounts.ConfigDirFor(dir)
 	}
-	var last namingFailure
-	for attempt := 1; attempt <= NamingAttempts; attempt++ {
-		resp, err := v.deps.Headless.Run(ctx, headless.Request{
+	title, failure := headless.AskValidated(ctx, v.deps.Headless, headless.Ask{
+		Request: headless.Request{
 			Site: NamingSite, Model: headless.ModelHaiku, Format: headless.FormatJSON,
 			ConfigDir: configDir, Prompt: prompt, Timeout: NamingTimeout,
-		})
-		if err != nil {
-			last = namingFailure{Cause: headless.CauseOf(err), Detail: err.Error(), Attempts: uint32(attempt)}
-			log.Info(opThreadTitle, "the thread title call did not answer", dlog.Context{"cause": last.Cause, "detail": last.Detail, "attempt": attempt})
-			if last.Cause == headless.CauseGuardRefused {
-				break
-			}
-			continue
-		}
-		title, err := ValidateThreadTitle(resp.Text)
-		if err != nil {
-			last = namingFailure{Cause: NamingCauseInvalidAnswer, Detail: err.Error(), Attempts: uint32(attempt), Answer: resp.Text}
-			log.Info(opThreadTitle, "the thread title answer did not validate", dlog.Context{"answer": resp.Text, "reason": err.Error(), "attempt": attempt})
-			continue
-		}
-		log.Info(opThreadTitle, "the thread title call answered", dlog.Context{"title": title, "attempt": attempt, "duration_ms": resp.Duration.Milliseconds()})
-		return title, nil
+		},
+		Attempts: NamingAttempts,
+		Validate: ValidateThreadTitle,
+	}, log, opThreadTitle)
+	if failure != nil {
+		return "", &namingFailure{Cause: failure.Cause, Detail: failure.Detail, Attempts: failure.Attempts, Answer: failure.Answer}
 	}
-	return "", &last
+	return title, nil
 }
 
 // freeThreadNameLocked answers BASE, or BASE with the first " (2)", " (3)",
