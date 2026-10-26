@@ -124,9 +124,14 @@ func TestEntryNeighborWalksTheTargetTree(t *testing.T) {
 		{name: "previous is the previous sibling", label: "1.2", way: NeighborPrevious, want: "1.1", wantOK: true},
 		{name: "previous of a first child is its parent", label: "1.1", way: NeighborPrevious, want: "1", wantOK: true},
 		{name: "previous of the first root is none", label: "1", way: NeighborPrevious},
-		{name: "the first child of a root", label: "1", way: NeighborFirstChild, want: "1.1", wantOK: true},
-		{name: "the first child of a branch", label: "1.2", way: NeighborFirstChild, want: "1.2.1", wantOK: true},
-		{name: "a leaf has no first child", label: "1.1", way: NeighborFirstChild},
+		{name: "following a root is its first child", label: "1", way: NeighborFollowing, want: "1.1", wantOK: true},
+		{name: "following a branch is its first child", label: "1.2", way: NeighborFollowing, want: "1.2.1", wantOK: true},
+		{name: "following a leaf is its next sibling", label: "1.1", way: NeighborFollowing, want: "1.2", wantOK: true},
+		{name: "following a last leaf climbs to its aunt", label: "1.2.1", way: NeighborFollowing, want: "2", wantOK: true},
+		{name: "following the tree's last node is none", label: "2.1", way: NeighborFollowing},
+		{name: "the parent of a branch's child", label: "1.2.1", way: NeighborParent, want: "1.2", wantOK: true},
+		{name: "the parent of a root's child is the root", label: "2.1", way: NeighborParent, want: "2", wantOK: true},
+		{name: "a root has no parent", label: "1", way: NeighborParent},
 		{name: "a label no response holds has no neighbor", label: "9.9", way: NeighborNext},
 	}
 	for _, tc := range tests {
@@ -273,7 +278,8 @@ func TestNeighborWayNamesEachWayAndRefusesAnyOther(t *testing.T) {
 	}{
 		{NeighborNext, "next"},
 		{NeighborPrevious, "previous"},
-		{NeighborFirstChild, "first_child"},
+		{NeighborFollowing, "following"},
+		{NeighborParent, "parent"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.want, func(t *testing.T) {

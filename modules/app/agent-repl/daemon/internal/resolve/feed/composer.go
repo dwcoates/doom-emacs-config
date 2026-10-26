@@ -117,9 +117,12 @@ const (
 	// NeighborPrevious is the node a line opened above the entry answers:
 	// the node's previous sibling, else its parent.
 	NeighborPrevious
-	// NeighborFirstChild is the node the entry answers once it descends: the
-	// node's first child.
-	NeighborFirstChild
+	// NeighborFollowing is the node the entry answers once it steps on (C-o):
+	// the node read after it, its first child, else what NeighborNext names.
+	NeighborFollowing
+	// NeighborParent is the node the entry answers once it steps up (C-i):
+	// the node's parent. A root has none.
+	NeighborParent
 )
 
 func (w NeighborWay) String() string {
@@ -128,8 +131,10 @@ func (w NeighborWay) String() string {
 		return "next"
 	case NeighborPrevious:
 		return "previous"
-	case NeighborFirstChild:
-		return "first_child"
+	case NeighborFollowing:
+		return "following"
+	case NeighborParent:
+		return "parent"
 	}
 	panic(fmt.Sprintf("feed: NeighborWay %d names no way", int(w)))
 }
@@ -186,10 +191,24 @@ func treeNeighbor(tree *frontendv1.ProseTree, label string, way NeighborWay) (ne
 		}
 		return -1
 	}
+	next := func() (string, bool, bool) {
+		for i := at; i >= 0; i = parent[i] {
+			siblings := children[parent[i]]
+			if k := position(i); k+1 < len(siblings) {
+				return nodes[siblings[k+1]].GetLabel().GetText(), true, true
+			}
+		}
+		return "", true, false
+	}
 	switch way {
-	case NeighborFirstChild:
+	case NeighborFollowing:
 		if kids := children[at]; len(kids) > 0 {
 			return nodes[kids[0]].GetLabel().GetText(), true, true
+		}
+		return next()
+	case NeighborParent:
+		if parent[at] >= 0 {
+			return nodes[parent[at]].GetLabel().GetText(), true, true
 		}
 		return "", true, false
 	case NeighborPrevious:
@@ -201,13 +220,7 @@ func treeNeighbor(tree *frontendv1.ProseTree, label string, way NeighborWay) (ne
 		}
 		return "", true, false
 	case NeighborNext:
-		for i := at; i >= 0; i = parent[i] {
-			siblings := children[parent[i]]
-			if k := position(i); k+1 < len(siblings) {
-				return nodes[siblings[k+1]].GetLabel().GetText(), true, true
-			}
-		}
-		return "", true, false
+		return next()
 	}
 	panic(fmt.Sprintf("feed: treeNeighbor asked for NeighborWay %d", int(way)))
 }

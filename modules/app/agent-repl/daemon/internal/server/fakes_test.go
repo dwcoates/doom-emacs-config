@@ -1298,7 +1298,7 @@ type fakeFeed struct {
 	targets       map[string]string
 	targetReplies []string
 	// neighbors is each label's neighbor (EntryNeighbor), keyed by the
-	// label, a NUL, and the way's name ("next", "previous", "first_child").
+	// label, a NUL, and the way's name ("next", "previous", "following", "parent").
 	neighbors map[string]string
 	// labelMoves is what WatchLabelChanges announces (moveLabels).
 	labelMoves publish.Events[ids.WorkspaceID]

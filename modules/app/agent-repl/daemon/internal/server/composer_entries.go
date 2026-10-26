@@ -156,8 +156,10 @@ func neighborWayOf(direction *agentreplv1.EntryNeighborDirection) feed.NeighborW
 		return feed.NeighborNext
 	case *agentreplv1.EntryNeighborDirection_Previous:
 		return feed.NeighborPrevious
-	case *agentreplv1.EntryNeighborDirection_FirstChild:
-		return feed.NeighborFirstChild
+	case *agentreplv1.EntryNeighborDirection_Following:
+		return feed.NeighborFollowing
+	case *agentreplv1.EntryNeighborDirection_Parent:
+		return feed.NeighborParent
 	}
 	panic(fmt.Sprintf("FindEntryNeighbor: validated direction carries way %T", direction.GetWay()))
 }
