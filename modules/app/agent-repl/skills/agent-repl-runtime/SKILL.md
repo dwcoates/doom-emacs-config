@@ -164,7 +164,11 @@ through `run.sh --call` (a typed `agent-repld` verb comes once they land on mast
   noSubsection|subsection, before|beforeSubsection|end}` (`beforeSubsection`
   only into `noSubsection`; `end` into `noSubsection` is the bottom of the
   repository), or the all-or-nothing `placeWorkspaces {workspaces: [...],
-  ...}`, which keeps the given order.
+  ...}`, which keeps the given order. A placement clears the placed families'
+  one-shot marks unless it sets `keepOneShot: true`.
+- To file ONE workspace into a subsection by name, use the agent API instead:
+  `agent-repld workspace subsections WS` and `agent-repld workspace place WS
+  -subsection NAME` (the agent-repl-workspaces skill).
 - Copy every ref verbatim from `GetSidebarArrangement`'s answer. A family
   moves whole: placing any workspace places its root, with every ancestor and
   descendant, and a workspace moves only within its own repository

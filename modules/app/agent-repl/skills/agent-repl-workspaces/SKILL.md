@@ -1,7 +1,7 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), set its principal link (the url its topbar summary opens), rename a workspace, hide or show a workspace, set its priority, retarget its parent, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a link supplied in the conversation best reflects this workspace''s task (set its principal link, without asking); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
-argument-hint: "create | async-merge | prompt | status | list | set | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe"
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status or list them all, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), set its principal link (the url its topbar summary opens), rename a workspace, hide or show a workspace, set its priority, retarget its parent, read its repository's sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever a link supplied in the conversation best reflects this workspace''s task (set its principal link, without asking); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+argument-hint: "create | async-merge | prompt | status | list | set | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe | subsections | place"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
@@ -128,6 +128,19 @@ Choose the combination from what the work needs:
   it goes on following WS if WS is opened again. A notice that waited
   behind your turns lists every change since the last one you were told,
   oldest first, and its status is WS as it stands when the notice is made.
+
+## Filing a workspace into a subsection
+
+- `workspace subsections WS` prints the sidebar arrangement of WS's
+  repository: its subsections by name, each with the workspaces in it, and
+  its workspaces in no subsection, in drawn order.
+- `workspace place WS -subsection NAME` files WS's family at the bottom of
+  its repository's subsection named NAME. It keeps the family's one-shot
+  marks, so a one-shot that files itself still finishes unattended. An
+  unknown or ambiguous NAME is refused, listing the subsections there are.
+- A new top-level workspace whose repository has subsections is told so at
+  the end of its first message. File it once, without asking, into the one
+  subsection that clearly fits its task, or leave it where it is.
 
 ## Marking this workspace (`workspace set`)
 
