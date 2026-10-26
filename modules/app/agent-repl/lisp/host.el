@@ -1307,6 +1307,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:select-requested (agent-repl-host--select-requested ws))
     (:compose-entry (agent-repl-host--compose-entry ws value))
     (:transferred (agent-repl-host--transferred ws value))
+    (:transfer-withdrawn (agent-repl-host--transfer-withdrawn ws))
     (:reload-webapp (agent-repl-host--reload-webapp ws value))
     (:open-in-editor (agent-repl-host--open-in-editor ws value))
     (:open-commit-log (agent-repl-host--open-commit-log ws value))
@@ -1696,6 +1697,12 @@ their own walk."
                (agent-repl-frontend-reload-webview ws)
                (agent-repl--info ws "elisp.host.webview-restored ws=%s address=%S"
                                  ws (and old (agent-repl-connect-connection-address old))))))
+        ;; THE WALK REMEMBERS WHERE IT CAME FROM, so a withdrawn transfer can
+        ;; put WS back while this adopt is still unanswered
+        ;; (`agent-repl-host--transfer-withdrawn').
+        (agent-repl-host--put ws :reattach
+                              (plist-put (plist-get (agent-repl-host--entry ws) :reattach)
+                                         :from old))
         (agent-repl-host--put ws :conn new)
         (agent-repl-frontend-reload-webview ws)
         (agent-repl--info ws "elisp.host.webview-redialed ws=%s address=%S"
@@ -1845,11 +1852,46 @@ then wait for acceptance rather than adopt onto an unproven daemon."
   "Adopt WS onto the successor as soon as its `WatchDaemon' is ACCEPTED.
 NO BUSY LOOP AND NO POLL: the handover hooks are daemon-link's acceptance
 seam, so this hangs ONE self-removing function there and is woken by the
-acceptance itself.  A successor that never arrives simply never wakes it."
+acceptance itself.  A successor that never arrives simply never wakes it.
+A transfer withdrawn before the acceptance clears `:adopt-pending', and
+the acceptance then adopts nothing (`agent-repl-host--transfer-withdrawn')."
+  (agent-repl-host--put ws :adopt-pending t)
   (agent-repl-link-on-successor-accepted
    (lambda (new)
-     (agent-repl--info ws "elisp.host.adopt-retry ws=%s" ws)
-     (agent-repl-host--reattach ws new :adopt "successor-accepted"))))
+     (cond
+      ((plist-get (agent-repl-host--entry ws) :adopt-pending)
+       (agent-repl-host--put ws :adopt-pending nil)
+       (agent-repl--info ws "elisp.host.adopt-retry ws=%s" ws)
+       (agent-repl-host--reattach ws new :adopt "successor-accepted"))
+      (t
+       (agent-repl--info ws "elisp.host.adopt-retry-withdrawn ws=%s" ws))))))
+
+(defun agent-repl-host--transfer-withdrawn (ws)
+  "Keep WS on the daemon that took it back: its transfer was withdrawn.
+
+THE OUTGOING DAEMON TOOK WS BACK, so there is nothing to adopt until its
+next `transferred' push.  The adopt walk that notice began is ended, so a
+scheduled retry and a late answer both find themselves superseded, and
+WS\='s connection and page go back to where the walk took them from.
+Regression, 2026-10-26: never told, Emacs re-adopted on the successor
+every 10s for as long as the workspace\='s turn ran, reloading its page
+each time and recording an ERROR for every adopt."
+  (let* ((walk (plist-get (agent-repl-host--entry ws) :reattach))
+         (from (plist-get walk :from))
+         (pending (plist-get (agent-repl-host--entry ws) :adopt-pending)))
+    (agent-repl-host--put ws :adopt-pending nil)
+    (cond
+     ((eq (plist-get walk :claim) :adopt)
+      (agent-repl-host--put ws :reattach nil)
+      (when (and from (not (eq from (agent-repl-host--recorded-conn ws))))
+        (agent-repl-host--put ws :conn from)
+        (agent-repl-frontend-reload-webview ws))
+      (agent-repl--info ws "elisp.host.transfer-withdrawn ws=%s address=%S adopt=ended"
+                        ws (and from (agent-repl-connect-connection-address from))))
+     (pending
+      (agent-repl--info ws "elisp.host.transfer-withdrawn ws=%s adopt=never-sent" ws))
+     (t
+      (agent-repl--info ws "elisp.host.transfer-withdrawn ws=%s adopt=none" ws)))))
 
 (defun agent-repl-host-route-handover (ws arm slug)
   "Hand ARM, a per-workspace rpc's refusal for WS, to the handover walk.

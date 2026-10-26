@@ -108,6 +108,15 @@ message WatchHostWorkspaceResponse {
     // selection. An event, not state: never replayed to a late subscriber,
     // because a selection belongs to the moment it was made.
     HostWorkspaceChatTextHighlighted chat_text_highlighted = 15;
+    // DAEMON HANDOVER WITHDRAWN: this daemon took back the workspace whose
+    // `transferred` it pushed, because the successor never adopted it within
+    // the adoption window, and it serves the workspace again. The workspace
+    // is offered again later with a fresh `transferred`. Emacs's obligation:
+    // abandon the adopt that notice began and keep the workspace, its stream
+    // and its page on this daemon. An event, not state: never replayed to a
+    // late subscriber (2026-10-26: an Emacs never told kept re-adopting on a
+    // successor that could not adopt it, reloading the page every 10s).
+    HostWorkspaceTransferWithdrawn transfer_withdrawn = 16;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -138,6 +147,7 @@ message HostEvaluate {
 }
 
 message HostWorkspaceTransferred {}
+message HostWorkspaceTransferWithdrawn {}
 message HostWorkspaceReloadWebapp {
   // THE WEBAPP BUILD A DEPLOY BRINGS, which every page and the host page
   // itself must come onto. A deploy pushes it to every workspace with a

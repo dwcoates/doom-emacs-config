@@ -273,6 +273,9 @@ func TestRetractTransferredLetsTheNextIdenticalNoticeReachTheHostStream(t *testi
 		t.Fatal("the first transfer notice did not arrive")
 	}
 	h.Server.RetractTransferred(testWorkspaceID)
+	if receiveHostEvent(t, stream).GetTransferWithdrawn() == nil {
+		t.Fatal("the withdrawal did not arrive")
+	}
 
 	// Act.
 	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
@@ -281,6 +284,51 @@ func TestRetractTransferredLetsTheNextIdenticalNoticeReachTheHostStream(t *testi
 	// Assert.
 	if push.GetTransferred() == nil {
 		t.Fatalf("event = %v, want the second transfer notice", push)
+	}
+}
+
+// TestRetractTransferredTellsAHostStreamThatHeardTheNotice pins that Emacs,
+// adopting on the successor since the notice, is told the transfer was
+// withdrawn rather than left re-adopting there.
+func TestRetractTransferredTellsAHostStreamThatHeardTheNotice(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := dialHostStream(t, h, ctx)
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+	if receiveHostEvent(t, stream).GetTransferred() == nil {
+		t.Fatal("the transfer notice did not arrive")
+	}
+
+	// Act.
+	h.Server.RetractTransferred(testWorkspaceID)
+	push := receiveHostEvent(t, stream)
+
+	// Assert.
+	if push.GetTransferWithdrawn() == nil {
+		t.Fatalf("event = %v, want transfer_withdrawn", push)
+	}
+}
+
+// TestRetractTransferredReplaysNoWithdrawalToALateHostStream pins that the
+// withdrawal is an event: a host stream opened after it is never handed it.
+func TestRetractTransferredReplaysNoWithdrawalToALateHostStream(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
+	h.Server.RetractTransferred(testWorkspaceID)
+	stream := dialHostStream(t, h, ctx)
+
+	// Act: a later notice marks where the stream's first event must be.
+	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:5353")
+	push := receiveHostEvent(t, stream)
+
+	// Assert.
+	if push.GetTransferred() == nil {
+		t.Fatalf("first event = %v, want the later transfer notice and no replayed withdrawal", push)
 	}
 }
 

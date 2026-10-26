@@ -710,6 +710,10 @@ element; the text itself may be empty (a prompt that is an image alone)."
   "Decode VALUE as the empty message `HostWorkspaceTransferred'."
   (agent-repl-wire--decode-empty "HostWorkspaceTransferred" value))
 
+(defun agent-repl-wire-decode-host-workspace-transfer-withdrawn (value)
+  "Decode VALUE as the empty message `HostWorkspaceTransferWithdrawn'."
+  (agent-repl-wire--decode-empty "HostWorkspaceTransferWithdrawn" value))
+
 (defun agent-repl-wire-decode-host-workspace-reload-webapp (value)
   "Decode VALUE as `HostWorkspaceReloadWebapp', a plist `(:webapp-build)'.
 `webapp_build' is OPTIONAL: unset means a reload of the workspace's page
@@ -916,6 +920,10 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `transferred' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-transferred value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-transfer-withdrawn (value)
+  "Decode the `transfer_withdrawn' push arm VALUE."
+  (agent-repl-wire-decode-host-workspace-transfer-withdrawn value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-reload-webapp (value)
   "Decode the `reload_webapp' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-reload-webapp value))
@@ -943,6 +951,8 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
    '((host :host agent-repl-wire-decode-watch-host-workspace-response-host)
      (transferred :transferred
                   agent-repl-wire-decode-watch-host-workspace-response-transferred)
+     (transferWithdrawn :transfer-withdrawn
+                        agent-repl-wire-decode-watch-host-workspace-response-transfer-withdrawn)
      (reloadWebapp :reload-webapp
                    agent-repl-wire-decode-watch-host-workspace-response-reload-webapp)
      (openInEditor :open-in-editor
@@ -969,7 +979,7 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
     (agent-repl-wire--check-keys
      "WatchHostWorkspaceResponse" object
      '(host transferred reloadWebapp openInEditor openCommitLog ending notificationClicked selection evaluate
-       finalResponseClicked selectRequested composeEntry chatTextHighlighted))
+       finalResponseClicked selectRequested composeEntry chatTextHighlighted transferWithdrawn))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

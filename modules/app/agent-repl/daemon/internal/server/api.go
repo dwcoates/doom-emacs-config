@@ -840,8 +840,23 @@ func (s *server) PushTransferred(ws ids.WorkspaceID, successorAddress string) {
 // next transfer's notice, identical to it, was dropped as a repeat -- so no
 // participant heard of it and that adoption window expired too (2026-10-12).
 func (s *server) RetractTransferred(ws ids.WorkspaceID) {
-	host := s.hostNoticeTopic(ws).ClearIf(func(push *agentreplv1.WatchHostWorkspaceResponse) bool {
+	hostTopic := s.hostNoticeTopic(ws)
+	host := hostTopic.ClearIf(func(push *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return push.GetTransferred() != nil
+	})
+	// THE HOST STREAMS ALREADY TOLD ARE TOLD IT IS WITHDRAWN. Clearing the
+	// replay reaches only a late subscriber; Emacs, which heard the notice and
+	// is adopting on the successor, was never told, and re-adopted there every
+	// 10s, reloading the page each time, until the workspace's next transfer
+	// (2026-10-26). The withdrawal is then cleared too, so it is never
+	// replayed.
+	hostTopic.Publish(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_TransferWithdrawn{
+			TransferWithdrawn: &agentreplv1.HostWorkspaceTransferWithdrawn{},
+		},
+	})
+	hostTopic.ClearIf(func(push *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return push.GetTransferWithdrawn() != nil
 	})
 	web := s.webTopic(ws).ClearIf(func(push *agentreplv1.WatchWebWorkspaceResponse) bool {
 		return push.GetTransferred() != nil

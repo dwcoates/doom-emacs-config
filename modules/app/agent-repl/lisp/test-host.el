@@ -2615,6 +2615,78 @@ would adopt onto a connection the link has let go of."
       ;; Assert
       (should (null agent-repl-test-host--timers)))))
 
+(ert-deftest agent-repl-test-host-transfer-withdrawn-mid-adopt-puts-the-workspace-back ()
+  "THE DEFECT: an Emacs never told re-adopted on the successor every 10s.
+The outgoing daemon took the workspace back, so the connection the walk
+moved to the successor goes back to the daemon that serves it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer (list :held))
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((kept (agent-repl-host--recorded-conn "ws-1")))
+      (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+      ;; Act
+      (agent-repl-test-host--push "ws-1" (list :arm :transfer-withdrawn :value nil))
+      ;; Assert
+      (should (eq (agent-repl-host--recorded-conn "ws-1") kept)))))
+
+(ert-deftest agent-repl-test-host-transfer-withdrawn-mid-adopt-reloads-the-page-back ()
+  "The page follows the connection back to the daemon that kept the workspace."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer (list :held))
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+    (setq agent-repl-test-host--walk nil)
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :transfer-withdrawn :value nil))
+    ;; Assert
+    (should (equal agent-repl-test-host--walk '(:reload)))))
+
+(ert-deftest agent-repl-test-host-transfer-withdrawn-ends-the-scheduled-adopt-retry ()
+  "A retry armed by a failed adopt finds its walk ended and adopts nothing."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer
+          (list :failure (list :kind :timeout :message "no answer")))
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+    (let ((retry (car agent-repl-test-host--timers)))
+      (agent-repl-test-host--push "ws-1" (list :arm :transfer-withdrawn :value nil))
+      (setq agent-repl-test-host--calls nil)
+      ;; Act
+      (apply (nth 1 retry) (nthcdr 2 retry))
+      ;; Assert
+      (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls))))))
+
+(ert-deftest agent-repl-test-host-transfer-withdrawn-before-acceptance-adopts-nothing ()
+  "A notice withdrawn while the successor was pending wakes no adopt."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor-pending t)
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+    (agent-repl-test-host--push "ws-1" (list :arm :transfer-withdrawn :value nil))
+    (setq agent-repl-test-host--calls nil)
+    ;; Act
+    (run-hook-with-args 'agent-repl-link-handover-functions nil
+                        (agent-repl-connect-open "127.0.0.1:9100"))
+    ;; Assert
+    (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))
+
+(ert-deftest agent-repl-test-host-transfer-withdrawn-with-no-adopt-is-logged-at-info ()
+  "A withdrawal with nothing in flight is ordinary, so it is INFO."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :transfer-withdrawn :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.transfer-withdrawn ws=ws-1 adopt=none"))))
+
 (defmacro agent-repl-test-host--with-adopt-failing-across-promotion (&rest body)
   "Run BODY with every adopt failing after its successor is promoted to primary.
 The successor slot empties and the primary link becomes the successor's

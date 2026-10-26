@@ -379,6 +379,14 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
 
 ;;;; ---- HostWorkspaceReloadWebapp ----
 
+(ert-deftest agent-repl-test-wire-host-push-decodes-the-transfer-withdrawn-arm ()
+  "A withdrawn transfer decodes to its own keyword."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-watch-host-workspace-response
+                             "{\"transferWithdrawn\":{}}")
+                            :arm)
+                 :transfer-withdrawn)))
+
 (ert-deftest agent-repl-test-wire-host-reload-webapp-carries-the-build ()
   "A deploy's reload decodes the build it brings."
   (should (equal (agent-repl-test-wire-host--decode
@@ -1584,7 +1592,7 @@ opens are OpenTabs streams."
                  (sort (list "evaluate" "host" "transferred" "reloadWebapp"
                              "openInEditor" "openCommitLog" "ending" "notificationClicked" "selection"
                              "finalResponseClicked" "selectRequested" "composeEntry"
-                             "chatTextHighlighted")
+                             "chatTextHighlighted" "transferWithdrawn")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()
