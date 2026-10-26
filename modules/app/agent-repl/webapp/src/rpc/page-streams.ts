@@ -52,6 +52,7 @@ import { ConnectError } from "@connectrpc/connect";
 // contracts for one wire. It is marked internal by the package, so the version
 // is pinned and an unparseable code is refused rather than defaulted (below).
 import { codeFromString } from "@connectrpc/connect/protocol-connect";
+import { createListeners } from "../listeners.js";
 import { log } from "../log.js";
 import {
   SubscribePageRequestSchema,
@@ -233,7 +234,7 @@ function newAttachment(): Attachment {
  */
 export function startPageStreams(ctx: PageStreamContext, page: string, webhostBuild?: string): PageStreamsHandle {
   const subscriptions = new Map<string, FrameQueue<PageFrame>>();
-  const attachedListeners = new Set<() => void>();
+  const attachedListeners = createListeners();
   let attachment = newAttachment();
   /** The generation the page's current run was opened for; its end detaches only that one. */
   let runAttachment = attachment;
@@ -278,10 +279,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhostBu
     page,
     watch,
     onAttached(fn: () => void): () => void {
-      attachedListeners.add(fn);
-      return () => {
-        attachedListeners.delete(fn);
-      };
+      return attachedListeners.add(fn);
     },
     cancel(): void {
       unsubscribeFromMove();
@@ -300,8 +298,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhostBu
           context: { page },
         });
         attachment.resolve();
-        // A copy: a listener may unsubscribe itself as it runs.
-        for (const fn of [...attachedListeners]) fn();
+        attachedListeners.notify();
         return;
       case "push": {
         const queue = subscriptions.get(frame.value.subscription);

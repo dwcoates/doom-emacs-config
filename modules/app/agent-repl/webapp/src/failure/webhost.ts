@@ -14,6 +14,7 @@
  * row (failure/local.ts).
  */
 import { log } from "../log.js";
+import { createListeners } from "../listeners.js";
 import type { WebhostFailure } from "../host/protocol.js";
 import type { LocalFailure, LocalFailureView } from "./local.js";
 
@@ -26,14 +27,11 @@ export interface WebhostFailureView extends LocalFailureView {
 /** A view of the webhost's failures, empty until the webhost states them. */
 export function createWebhostFailureView(): WebhostFailureView {
   let standing: readonly LocalFailure[] = [];
-  const listeners = new Set<() => void>();
+  const listeners = createListeners();
   return {
     standing: () => standing,
     subscribe(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+      return listeners.add(listener);
     },
     set(failures) {
       log.info("the webhost's standing failures changed", {
@@ -41,7 +39,7 @@ export function createWebhostFailureView(): WebhostFailureView {
         context: { arms: failures.map((f) => f.arm) },
       });
       standing = failures;
-      for (const listener of [...listeners]) listener();
+      listeners.notify();
     },
   };
 }

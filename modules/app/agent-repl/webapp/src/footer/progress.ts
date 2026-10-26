@@ -20,12 +20,13 @@
  * There is at most one footer, so there is at most one publisher.
  */
 import { log } from "../log.js";
+import { createListeners } from "../listeners.js";
 
 /** The line the last push carried, or null when it carried no compaction. */
 let standing: string | null = null;
 
 /** Everyone drawing off the line; today, the cold-gate card while it waits. */
-const listeners = new Set<(text: string | null) => void>();
+const listeners = createListeners<[string | null]>();
 
 /**
  * The footer pushed a view whose activity is (or is no longer) a compaction.
@@ -42,8 +43,7 @@ export function publishCompactionProgress(text: string | null): void {
       : `the footer's compaction line is now: ${text}`,
     { operation: "footer.compaction-progress", context: { text: text ?? undefined } },
   );
-  // A copy: a listener may unsubscribe itself as it runs.
-  for (const fn of [...listeners]) fn(standing);
+  listeners.notify(standing);
 }
 
 /** The compaction line now standing, or null. */
@@ -59,11 +59,9 @@ export function compactionProgress(): string | null {
  * happens to push the next one.
  */
 export function onCompactionProgress(fn: (text: string | null) => void): () => void {
-  listeners.add(fn);
+  const unsubscribe = listeners.add(fn);
   fn(standing);
-  return () => {
-    listeners.delete(fn);
-  };
+  return unsubscribe;
 }
 
 /** Drop the standing line and every listener. For the suite's teardown only. */

@@ -39,6 +39,7 @@
  */
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { log } from "../log.js";
+import { createListeners } from "../listeners.js";
 import { reportClientFailure } from "../rpc/link.js";
 import { requireCase } from "../rpc/strict.js";
 import { isClientFailureArm, type ClientFailureArm, type FailureSink } from "./sink.js";
@@ -164,10 +165,10 @@ export function createLocalFailures(): LocalFailures {
   const entries = new Map<ClientFailureArm, LocalFailure>();
   /** Per arm, the instant its suppression window ends. */
   const suppressedUntil = new Map<ClientFailureArm, number>();
-  const listeners = new Set<() => void>();
+  const listeners = createListeners();
 
   const changed = (): void => {
-    for (const listener of [...listeners]) listener();
+    listeners.notify();
   };
 
   return {
@@ -176,10 +177,7 @@ export function createLocalFailures(): LocalFailures {
     },
 
     subscribe(listener: () => void): () => void {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+      return listeners.add(listener);
     },
 
     report(kind: FailureKind): void {

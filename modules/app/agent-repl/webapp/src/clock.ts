@@ -17,6 +17,7 @@
  * clock does no work at all, and the last unsubscriber stops it rather than
  * leaving a timer running against a torn-down view.
  */
+import { createListeners } from "./listeners.js";
 
 export interface Ticker {
   /** Call FN with the current instant, once per interval. Returns its unsubscriber. */
@@ -30,21 +31,21 @@ export const DEFAULT_TICK_MS = 1000;
 
 /** Build a ticker. INTERVALMS is injected by tests running on fake timers. */
 export function createTicker(intervalMs: number = DEFAULT_TICK_MS): Ticker {
-  const subscribers = new Set<(nowMs: number) => void>();
+  const subscribers = createListeners<[number]>();
   let handle: ReturnType<typeof setInterval> | null = null;
 
   const step = (): void => {
     const nowMs = Date.now();
-    // A copy: a subscriber may unsubscribe (or add one) from inside its tick.
-    for (const fn of [...subscribers]) fn(nowMs);
+    // A subscriber may unsubscribe (or add one) from inside its tick.
+    subscribers.notify(nowMs);
   };
 
   return {
     subscribe(fn: (nowMs: number) => void): () => void {
-      subscribers.add(fn);
+      const unsubscribe = subscribers.add(fn);
       handle ??= setInterval(step, intervalMs);
       return () => {
-        if (!subscribers.delete(fn)) return;
+        if (!unsubscribe()) return;
         if (subscribers.size > 0 || handle === null) return;
         clearInterval(handle);
         handle = null;

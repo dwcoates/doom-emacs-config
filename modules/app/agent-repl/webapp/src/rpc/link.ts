@@ -29,6 +29,7 @@
  * again. Dropping an identical repeat is what makes that loop terminate.
  */
 import { log } from "../log.js";
+import { createListeners } from "../listeners.js";
 
 /**
  * Every site that can report, spelled once.
@@ -92,7 +93,7 @@ export interface ClientVerdict {
 let standing: ClientVerdict | null = null;
 
 /** Everyone redrawing off the verdict; today, the footer. */
-const listeners = new Set<(verdict: ClientVerdict | null) => void>();
+const listeners = createListeners<[ClientVerdict | null]>();
 
 /** The substatus word KIND draws. Exported so the suite reads one table. */
 export function clientFailureSubstatus(kind: ClientFailureKind): string {
@@ -162,14 +163,11 @@ export function standingClientFailure(): ClientVerdict | null {
  * daemon's last view, or nothing, over a link that is down.
  */
 export function onClientVerdict(fn: (verdict: ClientVerdict | null) => void): () => void {
-  listeners.add(fn);
+  const unsubscribe = listeners.add(fn);
   fn(standing);
-  return () => {
-    listeners.delete(fn);
-  };
+  return unsubscribe;
 }
 
 function publish(): void {
-  // A copy: a listener may unsubscribe itself as it runs.
-  for (const fn of [...listeners]) fn(standing);
+  listeners.notify(standing);
 }

@@ -10,6 +10,7 @@
  */
 import type { UserSaid } from "../../../proto/gen/ts/conversation/v1/user_pb";
 import { log } from "../log.js";
+import { createListeners } from "../listeners.js";
 
 /** One prompt the editor wrote to the ingress for this workspace. */
 export interface EditorIngressEntry {
@@ -34,7 +35,7 @@ export interface EditorIngressView {
 /** An empty list, until the editor states one. */
 export function createEditorIngressView(): EditorIngressView {
   let standing: readonly EditorIngressEntry[] = [];
-  const listeners = new Set<() => void>();
+  const listeners = createListeners();
   return {
     entries: () => standing,
     set(entries) {
@@ -43,13 +44,10 @@ export function createEditorIngressView(): EditorIngressView {
         context: { from: standing.length, to: entries.length, keys: entries.map((e) => e.key) },
       });
       standing = entries;
-      for (const listener of [...listeners]) listener();
+      listeners.notify();
     },
     subscribe(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+      return listeners.add(listener);
     },
   };
 }

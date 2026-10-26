@@ -60,6 +60,7 @@ import { placeChildren, queryAll } from "../dom.js";
 import { stopTicking } from "../feed/ticking.js";
 import { createDrawnStatusLog, type DrawnStatus } from "../drawn-status.js";
 import { log } from "../log.js";
+import { createListeners } from "../listeners.js";
 import type { AppContext } from "../rpc/context.js";
 import { onClientVerdict, standingClientFailure } from "../rpc/link.js";
 import { isMalformedView } from "../rpc/malformed.js";
@@ -128,9 +129,7 @@ export function mountFooter(
   log.info("mounting the footer", { operation: "footer.mount", context: {} });
   host.setAttribute("data-component", "footer");
 
-  const statusListeners = new Set<
-    (statusCase: string, substatusCase?: string) => void
-  >();
+  const statusListeners = createListeners<[string, string | undefined]>();
   // THE READER'S WANTED PANEL, or null for a closed section. What the section
   // SHOWS is resolved from it on every draw (`shownPanel`), so a wanted panel
   // with no entries is never drawn empty; `shown` is the last draw's answer,
@@ -215,12 +214,10 @@ export function mountFooter(
     onStatus(
       fn: (statusCase: string, substatusCase?: string) => void,
     ): () => void {
-      statusListeners.add(fn);
+      const unsubscribe = statusListeners.add(fn);
       // A composer mounted after the first push must not wait for the next one.
       if (statusCase !== null) fn(statusCase, substatusCase);
-      return () => {
-        statusListeners.delete(fn);
-      };
+      return unsubscribe;
     },
     showResponseUsage(usage: ResponseUsage | null): void {
       hoveredUsage = usage;
@@ -476,7 +473,7 @@ export function mountFooter(
     const arm = requireCase(status.status, "FooterStatus.status");
     statusCase = arm.case;
     substatusCase = substatusOf(arm.value);
-    for (const fn of [...statusListeners]) fn(statusCase, substatusCase);
+    statusListeners.notify(statusCase, substatusCase);
   }
 
   /**

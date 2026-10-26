@@ -15,6 +15,7 @@
  * serving for good. Its roster stood still for every workspace that had moved,
  * so a prompt sent to one turned no row red (2026-10-26, the 0.260.0 deploy).
  */
+import { createListeners } from "../listeners.js";
 
 /** The origin a document's daemon calls go to, and the one way to move it. */
 export interface DaemonOrigin {
@@ -32,21 +33,17 @@ export interface DaemonOrigin {
 /** A daemon origin starting at INITIAL. */
 export function createDaemonOrigin(initial: string): DaemonOrigin {
   let origin = initial;
-  const listeners = new Set<() => void>();
+  const listeners = createListeners();
   return {
     current: () => origin,
     set(next) {
       if (next === origin) return false;
       origin = next;
-      // A copy: a listener may unsubscribe itself as it runs.
-      for (const fn of [...listeners]) fn();
+      listeners.notify();
       return true;
     },
     onMoved(fn) {
-      listeners.add(fn);
-      return () => {
-        listeners.delete(fn);
-      };
+      return listeners.add(fn);
     },
   };
 }

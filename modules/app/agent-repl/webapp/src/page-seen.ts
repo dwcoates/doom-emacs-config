@@ -24,6 +24,7 @@
  * is never told. Until the first roster arrives no workspace is current.
  */
 import type { Presence } from "./presence.js";
+import { createListeners } from "./listeners.js";
 
 /** Which of the two facts last moved the page across seen/unseen. */
 export type SeenCause = "presence" | "current";
@@ -46,7 +47,7 @@ export interface PageSeen {
 /** Track the page for workspace OWN, whose presence PRESENCE reports. */
 export function createPageSeen(own: string, presence: Presence): PageSeen {
   let current: string | null = null;
-  const listeners = new Set<(seen: boolean, cause: SeenCause) => void>();
+  const listeners = createListeners<[boolean, SeenCause]>();
   const seenNow = (): boolean => presence.seen() || (presence.embedded && presence.shown()) || current === own;
   let seen = seenNow();
 
@@ -54,8 +55,7 @@ export function createPageSeen(own: string, presence: Presence): PageSeen {
     const next = seenNow();
     if (next === seen) return;
     seen = next;
-    // A copy: a listener may unsubscribe itself as it runs.
-    for (const fn of [...listeners]) fn(seen, cause);
+    listeners.notify(seen, cause);
   };
   const unfollow = presence.onChange(() => settle("presence"));
 
@@ -66,10 +66,7 @@ export function createPageSeen(own: string, presence: Presence): PageSeen {
       settle("current");
     },
     onChange(fn) {
-      listeners.add(fn);
-      return () => {
-        listeners.delete(fn);
-      };
+      return listeners.add(fn);
     },
     dispose(): void {
       unfollow();
