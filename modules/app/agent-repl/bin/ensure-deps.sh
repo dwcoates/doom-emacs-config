@@ -44,13 +44,13 @@ set -euo pipefail
 dir="${1:-$PWD}"
 cd "$dir"
 
-if npm ls --depth=0 >/dev/null 2>&1; then
+if node_tree_complete "$PWD"; then
     exit 0
 fi
 
 node_store_lock "$PWD/node_modules"
 trap 'node_store_unlock "$PWD/node_modules"' EXIT
-if npm ls --depth=0 >/dev/null 2>&1; then
+if node_tree_complete "$PWD"; then
     exit 0
 fi
 
@@ -61,7 +61,7 @@ if [ -L node_modules ]; then
         if node_store_entry_healthy "$entry"; then
             printf 'ensure-deps: the store entry %s satisfies its own lockfile, so this package is on a different one.\n' "$entry" >&2
         elif node_store_repair "$entry" "$PWD"; then
-            if npm ls --depth=0 >/dev/null 2>&1; then
+            if node_tree_complete "$PWD"; then
                 printf 'ensure-deps: repaired the store entry %s in place; the link is kept.\n' "$entry" >&2
                 exit 0
             fi

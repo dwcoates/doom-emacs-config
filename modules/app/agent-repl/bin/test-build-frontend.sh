@@ -1400,10 +1400,18 @@ t_out_creates_an_absent_dir() {
 # carries its `.ok` marker.
 ENSURE_DEPS="$THIS_DIR/ensure-deps.sh"
 
+# ed_complete_tree DIR — make DIR a node_modules tree the stubs' `npm ls`
+# accepts (its `.ok` marker) that a finished `npm ci` wrote (its
+# .package-lock.json): the complete install lib-node-store.sh's
+# node_tree_complete requires.
+ed_complete_tree() {
+    mkdir -p "$1" && echo ok > "$1/.ok" && : > "$1/.package-lock.json"
+}
+
 ed_fixture() {
     local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     mkdir -p "$root/bin" "$root/pkg" "$root/store/node_modules"
-    echo ok > "$root/store/node_modules/.ok"
+    ed_complete_tree "$root/store/node_modules"
     cat > "$root/bin/npm" <<'EOF'
 #!/usr/bin/env bash
 echo "npm $*" >> "$ED_LOG"
@@ -1415,7 +1423,7 @@ case "${1:-}" in
         else
             rm -rf node_modules
         fi
-        mkdir -p node_modules && echo ok > node_modules/.ok ;;
+        mkdir -p node_modules && echo ok > node_modules/.ok && : > node_modules/.package-lock.json ;;
 esac
 EOF
     chmod +x "$root/bin/npm"
@@ -1487,7 +1495,7 @@ t_ensure_deps_installs_nothing_a_lock_holder_already_installed() {
     # Act: once the waiter has seen the deps unsatisfied, the holder finishes
     # its install and releases the lock.
     until grep -q '^npm ls' "$root/npm.log" 2>/dev/null; do :; done
-    mkdir -p "$root/pkg/node_modules" && echo ok > "$root/pkg/node_modules/.ok"
+    ed_complete_tree "$root/pkg/node_modules"
     rm -rf "$root/pkg/.node_modules.lock"
     local rc=0
     wait "$waiter" || rc=$?
@@ -1496,6 +1504,22 @@ t_ensure_deps_installs_nothing_a_lock_holder_already_installed() {
         pass "ensure-deps: a caller waiting on the install lock installs nothing the holder installed"
     else
         fail "ensure-deps: a caller waiting on the install lock installs nothing the holder installed" "rc=$rc $(cat "$root/npm.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_ensure_deps_reinstalls_a_tree_an_install_was_cut_short_in() {
+    local root; root="$(ed_fixture)"
+    # Arrange: a private tree `npm ls` accepts, but with no .package-lock.json,
+    # as a killed `npm ci` leaves it.
+    mkdir -p "$root/pkg/node_modules" && echo ok > "$root/pkg/node_modules/.ok"
+    # Act
+    ed_run "$root"
+    # Assert
+    if grep -q '^npm ci' "$root/npm.log" && [ -f "$root/pkg/node_modules/.package-lock.json" ]; then
+        pass "ensure-deps: a tree an install was cut short in is reinstalled"
+    else
+        fail "ensure-deps: a tree an install was cut short in is reinstalled" "$(cat "$root/npm.log")"
     fi
     rm -rf "$root"
 }
@@ -1666,7 +1690,7 @@ case "${1:-}" in
             */.trees/*) [ "${NPM_FAIL_IN_TREES:-0}" = 1 ] && exit 9 ;;
         esac
         rm -rf node_modules
-        mkdir -p node_modules && echo ok > node_modules/.ok ;;
+        mkdir -p node_modules && echo ok > node_modules/.ok && : > node_modules/.package-lock.json ;;
 esac
 exit 0
 NPM
@@ -1753,7 +1777,7 @@ t_heal_repairs_a_tree_it_swapped_in_before() {
 
 t_heal_healthy_entry_untouched() {
     local root entry; root="$(heal_fixture)"; entry="$(heal_entry "$root")"
-    echo ok > "$entry/node_modules/.ok"
+    ed_complete_tree "$entry/node_modules"
     echo mine > "$entry/node_modules/sentinel"
     run_script "$root" deps >/dev/null 2>"$root/err"
     if [ -f "$entry/node_modules/sentinel" ] && [ ! -L "$entry/node_modules" ] &&
@@ -1780,7 +1804,7 @@ t_heal_waits_for_a_concurrent_repair_then_skips() {
         case "$line" in *waiting*) saw=1; break ;; esac
     done
     # The holder finishes ITS repair and releases the lock.
-    echo ok > "$entry/node_modules/.ok"
+    ed_complete_tree "$entry/node_modules"
     rm -rf "$lock"
     cat <&3 >> "$root/err"
     exec 3<&-
@@ -1872,7 +1896,7 @@ t_ensure_deps_falls_back_loudly_when_the_repair_fails() {
 
 t_ensure_deps_goes_private_for_a_healthy_entry_on_another_lockfile() {
     local root entry; root="$(heal_fixture)"; entry="$(heal_entry "$root")"
-    echo ok > "$entry/node_modules/.ok"
+    ed_complete_tree "$entry/node_modules"
     echo mine > "$entry/node_modules/sentinel"
     # The entry is whole, yet this package's `npm ls` fails through the link:
     # its lockfile moved on. The marker in the package is how the stub says so.
@@ -1886,7 +1910,7 @@ case "${1:-}" in
         exit $? ;;
     ci)
         if [ -L node_modules ]; then echo "INSTALL-THROUGH-LINK $PWD" >> "$STUB_LOG"; exit 70; fi
-        mkdir -p node_modules && touch node_modules/.private ;;
+        mkdir -p node_modules && touch node_modules/.private node_modules/.package-lock.json ;;
 esac
 exit 0
 NPM
@@ -1982,6 +2006,7 @@ build_group_dependencies() {
     t_ensure_deps_installs_an_absent_tree
     t_ensure_deps_fails_when_the_install_fails
     t_ensure_deps_installs_nothing_a_lock_holder_already_installed
+    t_ensure_deps_reinstalls_a_tree_an_install_was_cut_short_in
     t_ensure_deps_releases_the_install_lock
     t_ensure_deps_releases_the_install_lock_when_the_install_fails
     t_ensure_e2e_deps_ensures_every_e2e_package
