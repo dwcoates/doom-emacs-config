@@ -178,6 +178,7 @@ var migrations = []migration{
 	{To: 77, Name: "durable_rows_retired_shapes", Kind: MigrationAdditive, Rewrite: rewriteRetiredShapeRows},
 	{To: 78, Name: "threads", Kind: MigrationAdditive, DDL: threadsDDL},
 	{To: 79, Name: "durable_rows_retired_merge_tabs", Kind: MigrationAdditive, Rewrite: dropRetiredMergeTabRows},
+	{To: 80, Name: "agent_subsections", Kind: MigrationAdditive, DDL: agentSubsectionsDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

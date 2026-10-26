@@ -131,6 +131,10 @@ type DB interface {
 	ReadArrangement(ctx context.Context) (Arrangement, error)
 	// CreateSubsection records a named subsection after REPO's others.
 	CreateSubsection(ctx context.Context, repo RepoID, name string) (Subsection, error)
+	// CreateAgentSubsection records a named subsection a workspace's agent
+	// created, with its first members placed in it, in one write; it is
+	// removed by the write that leaves it with no open workspace.
+	CreateAgentSubsection(ctx context.Context, creator WorkspaceID, name string, members []WorkspaceID) (Subsection, error)
 	// RenameSubsection relabels one subsection.
 	RenameSubsection(ctx context.Context, id SubsectionID, name string) error
 	// DeleteSubsection removes one subsection, its workspaces returning to

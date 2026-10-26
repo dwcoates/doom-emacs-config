@@ -27,7 +27,7 @@ import (
 //
 // A NEW VERSION IS A NEW ENTRY IN `migrations`. Bumping this constant alone
 // makes the daemon refuse every database the previous build wrote.
-const LayoutVersion = 79
+const LayoutVersion = 80
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
@@ -674,11 +674,21 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "refused the write", withError(fields, err))
 		return err
 	}
+	// EVERY WRITE LEAVES NO EMPTY AGENT-CREATED SUBSECTION behind it
+	// (agentsubsections.go), whichever way it emptied one.
+	pruned, err := pruneEmptyAgentSubsections(ctx, tx)
+	if err != nil {
+		s.endTx(tx, op, fields)
+		wrapped := fmt.Errorf("wsm: remove the agent-created subsections left empty: %w", err)
+		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not remove the agent-created subsections the write left empty", withError(fields, wrapped))
+		return wrapped
+	}
 	if err := committed(ctx, tx.Commit()); err != nil {
 		wrapped := fmt.Errorf("wsm: commit transaction: %w", err)
 		ctxend.Log(err, s.log.Info, s.log.Error, op, writeCancelledMessage, "could not commit the transaction", withError(fields, wrapped))
 		return wrapped
 	}
+	s.recordPruned(op, pruned)
 	s.log.Debug(op, "wrote durable state", fields)
 	return nil
 }
