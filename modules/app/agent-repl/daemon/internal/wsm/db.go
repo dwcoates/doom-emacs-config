@@ -633,6 +633,13 @@ type DB interface {
 	// SignedInTurns loads every turn of a workspace whose account failure a
 	// sign-in answered.
 	SignedInTurns(ctx context.Context, id WorkspaceID) ([]TurnID, error)
+	// RecordReconnectedTurns records that the network coming back answered
+	// the connection failure each of a workspace's turns ended on, all or
+	// nothing.
+	RecordReconnectedTurns(ctx context.Context, id WorkspaceID, turns []TurnID) error
+	// ReconnectedTurns loads every turn of a workspace whose connection
+	// failure the network coming back answered.
+	ReconnectedTurns(ctx context.Context, id WorkspaceID) ([]TurnID, error)
 	// NewsDigestState loads the daily news digest's durable state: the
 	// cadence's origin, the next digest's baseline, the newest digest minted
 	// and whether it stands, and every source's snapshot.

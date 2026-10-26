@@ -313,6 +313,83 @@ func (r *recordingSidebar) FaultClosed(_ ids.WorkspaceID, id string) {
 	r.closed = append(r.closed, id)
 }
 
+// recordingFeed records the network fault edges the sink passed to the feed.
+type recordingFeed struct {
+	opened []string
+	closed []string
+}
+
+func (r *recordingFeed) NetworkFaultOpened(_ ids.WorkspaceID, id string) {
+	r.opened = append(r.opened, id)
+}
+
+func (r *recordingFeed) NetworkFaultClosed(_ ids.WorkspaceID, id string) {
+	r.closed = append(r.closed, id)
+}
+
+// testFaultSurfaces is newFaultSurfaces with a recording feed attached, as
+// the graph attaches the real one once it is built.
+func testFaultSurfaces(f footer.Resolver, s sidebar.Resolver, t topbar.Resolver, loud *health.LoudFaults) *faultSurfaces {
+	surfaces := newFaultSurfaces(f, s, t, loud)
+	surfaces.attachFeed(&recordingFeed{})
+	return surfaces
+}
+
+// networkLine is a workspace network fault's line.
+func networkLine(id ids.FaultID) health.FaultLine {
+	return health.FaultLine{ID: id, Kind: health.KindNetworkUnreachable, Cell: health.FaultCell{Status: health.FaultStatusNetworkFault, SubStatus: health.FaultSubStatusOffline}}
+}
+
+func TestTheFaultSinkPassesANetworkFaultsEdgesToTheFeed(t *testing.T) {
+	tests := []struct {
+		name       string
+		act        func(sink *faultSurfaces)
+		wantOpened []string
+		wantClosed []string
+	}{
+		{name: "a workspace's network fault opening reaches the feed",
+			act: func(sink *faultSurfaces) { sink.FaultOpened("ws-1", networkLine("f-1")) }, wantOpened: []string{"f-1"}},
+		{name: "a workspace fault closing reaches the feed, which keeps only its own",
+			act: func(sink *faultSurfaces) { sink.FaultClosed("ws-1", "f-1") }, wantClosed: []string{"f-1"}},
+		{name: "another domain's fault opening does not",
+			act: func(sink *faultSurfaces) {
+				sink.FaultOpened("ws-1", health.FaultLine{ID: "f-2", Kind: health.KindShimDied, Cell: health.FaultCell{Status: health.FaultStatusAgentReplFault, SubStatus: health.FaultSubStatusDead}})
+			}},
+		{name: "a daemon-scoped fault closing does not",
+			act: func(sink *faultSurfaces) { sink.FaultClosed("", "f-3") }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			feed := &recordingFeed{}
+			sink := newFaultSurfaces(&recordingFooter{}, &recordingSidebar{}, &recordingTopbar{raised: map[string]string{}}, health.NewLoudFaults(dlog.NewTestLogger()))
+			sink.attachFeed(feed)
+
+			// Act
+			tc.act(sink)
+
+			// Assert
+			if !reflect.DeepEqual(feed.opened, tc.wantOpened) || !reflect.DeepEqual(feed.closed, tc.wantClosed) {
+				t.Fatalf("feed opened = %v closed = %v, want %v and %v", feed.opened, feed.closed, tc.wantOpened, tc.wantClosed)
+			}
+		})
+	}
+}
+
+func TestANetworkFaultBeforeTheFeedIsAttachedFailsHard(t *testing.T) {
+	// Arrange
+	sink := newFaultSurfaces(&recordingFooter{}, &recordingSidebar{}, &recordingTopbar{raised: map[string]string{}}, health.NewLoudFaults(dlog.NewTestLogger()))
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("a network fault with no feed attached did not panic")
+		}
+	}()
+
+	// Act
+	sink.FaultOpened("ws-1", networkLine("f-1"))
+}
+
 func TestTheFaultSinkStandsOnlyANetworkFaultOnTheRoster(t *testing.T) {
 	tests := []struct {
 		name string
@@ -334,7 +411,7 @@ func TestTheFaultSinkStandsOnlyANetworkFaultOnTheRoster(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			roster := &recordingSidebar{}
-			sink := newFaultSurfaces(&recordingFooter{}, roster, &recordingTopbar{raised: map[string]string{}}, health.NewLoudFaults(dlog.NewTestLogger()))
+			sink := testFaultSurfaces(&recordingFooter{}, roster, &recordingTopbar{raised: map[string]string{}}, health.NewLoudFaults(dlog.NewTestLogger()))
 
 			// Act
 			sink.FaultOpened(tc.ws, tc.line)
@@ -350,7 +427,7 @@ func TestTheFaultSinkStandsOnlyANetworkFaultOnTheRoster(t *testing.T) {
 func TestTheFaultSinkPassesAWorkspaceFaultsCloseToTheRoster(t *testing.T) {
 	// Arrange
 	roster := &recordingSidebar{}
-	sink := newFaultSurfaces(&recordingFooter{}, roster, &recordingTopbar{raised: map[string]string{}}, health.NewLoudFaults(dlog.NewTestLogger()))
+	sink := testFaultSurfaces(&recordingFooter{}, roster, &recordingTopbar{raised: map[string]string{}}, health.NewLoudFaults(dlog.NewTestLogger()))
 
 	// Act
 	sink.FaultClosed("ws-1", "f-1")
@@ -399,7 +476,7 @@ func TestTheFaultSinkDrawsEachFaultWhereHealthSays(t *testing.T) {
 			// Arrange
 			f := &recordingFooter{}
 			tb := &recordingTopbar{raised: map[string]string{}}
-			sink := newFaultSurfaces(f, &recordingSidebar{}, tb, health.NewLoudFaults(dlog.NewTestLogger()))
+			sink := testFaultSurfaces(f, &recordingSidebar{}, tb, health.NewLoudFaults(dlog.NewTestLogger()))
 
 			// Act
 			sink.FaultOpened(tc.ws, tc.line)
@@ -431,7 +508,7 @@ func TestTheFaultSinkRetractsFromTheTopbarOnlyWhatItRaisedThere(t *testing.T) {
 			// Arrange
 			f := &recordingFooter{}
 			tb := &recordingTopbar{raised: map[string]string{}}
-			sink := newFaultSurfaces(f, &recordingSidebar{}, tb, health.NewLoudFaults(dlog.NewTestLogger()))
+			sink := testFaultSurfaces(f, &recordingSidebar{}, tb, health.NewLoudFaults(dlog.NewTestLogger()))
 			sink.FaultOpened("", tc.line)
 
 			// Act
@@ -468,7 +545,7 @@ func TestTheFaultSinkGivesAFailedDeploysTopbarRowItsOverlay(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			tb := &recordingTopbar{raised: map[string]string{}, warnings: map[string]topbar.DaemonWarning{}}
-			sink := newFaultSurfaces(&recordingFooter{}, &recordingSidebar{}, tb, health.NewLoudFaults(dlog.NewTestLogger()))
+			sink := testFaultSurfaces(&recordingFooter{}, &recordingSidebar{}, tb, health.NewLoudFaults(dlog.NewTestLogger()))
 
 			// Act
 			sink.FaultOpened("", tc.line)
@@ -518,7 +595,7 @@ func TestTheFaultSinkTellsEmacsExactlyTheTopbarsFaults(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			loud := health.NewLoudFaults(dlog.NewTestLogger())
-			sink := newFaultSurfaces(&recordingFooter{}, &recordingSidebar{}, &recordingTopbar{raised: map[string]string{}}, loud)
+			sink := testFaultSurfaces(&recordingFooter{}, &recordingSidebar{}, &recordingTopbar{raised: map[string]string{}}, loud)
 
 			// Act
 			sink.FaultOpened(tc.ws, tc.line)
@@ -534,7 +611,7 @@ func TestTheFaultSinkTellsEmacsExactlyTheTopbarsFaults(t *testing.T) {
 func TestTheFaultSinkRetractsAClosedFaultFromEmacs(t *testing.T) {
 	// Arrange
 	loud := health.NewLoudFaults(dlog.NewTestLogger())
-	sink := newFaultSurfaces(&recordingFooter{}, &recordingSidebar{}, &recordingTopbar{raised: map[string]string{}}, loud)
+	sink := testFaultSurfaces(&recordingFooter{}, &recordingSidebar{}, &recordingTopbar{raised: map[string]string{}}, loud)
 	sink.FaultOpened("", failedBuildLine("f-1"))
 
 	// Act

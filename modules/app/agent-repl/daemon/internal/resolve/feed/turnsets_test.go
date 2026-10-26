@@ -75,11 +75,20 @@ func TestEveryDurableTurnSetIsRestoredThroughTheOneHelper(t *testing.T) {
 		set   func(s *wsState) map[ids.TurnID]bool
 	}{
 		{name: "rolled back", op: opRollbackRestore,
-			build: func(t *testing.T, store *fakeTurnSet) *harness { return newDurableHarness(t, store, nil) },
-			set:   func(s *wsState) map[ids.TurnID]bool { return s.rolledBack }},
+			build: func(t *testing.T, store *fakeTurnSet) *harness {
+				return newDurableHarness(t, durableStores{rolledBack: store})
+			},
+			set: func(s *wsState) map[ids.TurnID]bool { return s.rolledBack }},
 		{name: "signed in", op: opSignedInRestore,
-			build: func(t *testing.T, store *fakeTurnSet) *harness { return newDurableHarness(t, nil, store) },
-			set:   func(s *wsState) map[ids.TurnID]bool { return s.signedIn }},
+			build: func(t *testing.T, store *fakeTurnSet) *harness {
+				return newDurableHarness(t, durableStores{signedIn: store})
+			},
+			set: func(s *wsState) map[ids.TurnID]bool { return s.signedIn }},
+		{name: "reconnected", op: opReconnectedRestore,
+			build: func(t *testing.T, store *fakeTurnSet) *harness {
+				return newDurableHarness(t, durableStores{reconnected: store})
+			},
+			set: func(s *wsState) map[ids.TurnID]bool { return s.reconnected }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

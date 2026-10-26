@@ -16,8 +16,8 @@ import (
 	"agent-repld/internal/ids"
 )
 
-// fakeTurnSet is an in-memory durable turn set: a RolledBackTurnStore and a
-// SignedInTurnStore alike.
+// fakeTurnSet is an in-memory durable turn set: a RolledBackTurnStore, a
+// SignedInTurnStore and a ReconnectedTurnStore alike.
 type fakeTurnSet struct {
 	mu      sync.Mutex
 	turns   []ids.TurnID
@@ -40,6 +40,14 @@ func (f *fakeTurnSet) RecordSignedInTurns(ctx context.Context, ws ids.WorkspaceI
 }
 
 func (f *fakeTurnSet) SignedInTurns(ctx context.Context, ws ids.WorkspaceID) ([]ids.TurnID, error) {
+	return f.RolledBackTurns(ctx, ws)
+}
+
+func (f *fakeTurnSet) RecordReconnectedTurns(ctx context.Context, ws ids.WorkspaceID, turns []ids.TurnID) error {
+	return f.RecordRolledBackTurns(ctx, ws, turns)
+}
+
+func (f *fakeTurnSet) ReconnectedTurns(ctx context.Context, ws ids.WorkspaceID) ([]ids.TurnID, error) {
 	return f.RolledBackTurns(ctx, ws)
 }
 

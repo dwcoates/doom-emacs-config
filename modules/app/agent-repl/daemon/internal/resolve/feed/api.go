@@ -361,6 +361,13 @@ type Resolver interface {
 	// an error says only that recording it durably failed, already logged and
 	// raised.
 	OnSignedIn(ws ids.WorkspaceID) error
+	// NetworkFaultOpened takes a network fault standing for the workspace,
+	// by its record id (reconnect.go).
+	NetworkFaultOpened(ws ids.WorkspaceID, id string)
+	// NetworkFaultClosed retracts one by id; when the last closes, the
+	// connection is back and every connection-failed card leaves the feed
+	// for good (reconnect.go). A fault the feed does not hold changes nothing.
+	NetworkFaultClosed(ws ids.WorkspaceID, id string)
 	// LiveDetachedIn answers how many detached subagents and shells drawn in
 	// the turns are still live: what a files-restoring rollback stops.
 	LiveDetachedIn(ws ids.WorkspaceID, turns []ids.TurnID) int
@@ -564,6 +571,11 @@ type Deps struct {
 	// answered (wsm.DB). nil records and loads nothing, which is what a test
 	// that is not about surviving a restart wants.
 	SignedIn SignedInTurnStore
+	// Reconnected is the durable record of turns whose connection failure
+	// the network coming back answered (wsm.DB). nil records and loads
+	// nothing, which is what a test that is not about surviving a restart
+	// wants.
+	Reconnected ReconnectedTurnStore
 	// History reads the store pages a reader's request needs (book.go). nil
 	// pages nothing: every feed serves exactly what it holds, which is what a
 	// test that is not about loading history wants. Production always wires

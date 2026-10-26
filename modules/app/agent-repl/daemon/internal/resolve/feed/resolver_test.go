@@ -218,13 +218,20 @@ func newHarness(t *testing.T) *harness {
 // two harnesses sharing it are a daemon and its restarted successor.
 func newStoredHarness(t *testing.T, rolledBack RolledBackTurnStore) *harness {
 	t.Helper()
-	return newDurableHarness(t, rolledBack, nil)
+	return newDurableHarness(t, durableStores{rolledBack: rolledBack})
 }
 
-// newDurableHarness is newHarness whose rolled-back turns live in ROLLEDBACK
-// and whose sign-in-answered turns live in SIGNEDIN; two harnesses sharing
-// them are a daemon and its restarted successor.
-func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn SignedInTurnStore) *harness {
+// durableStores are the durable turn sets a harness records into; a nil one
+// records and loads nothing.
+type durableStores struct {
+	rolledBack  RolledBackTurnStore
+	signedIn    SignedInTurnStore
+	reconnected ReconnectedTurnStore
+}
+
+// newDurableHarness is newHarness whose durable turn sets live in STORES; two
+// harnesses sharing them are a daemon and its restarted successor.
+func newDurableHarness(t *testing.T, stores durableStores) *harness {
 	t.Helper()
 	log := dlog.NewTestLogger()
 	painter := &fakePainter{}
@@ -296,8 +303,9 @@ func newDurableHarness(t *testing.T, rolledBack RolledBackTurnStore, signedIn Si
 		AfterFunc:   h.clock.AfterFunc,
 		Faults:      h.faults,
 		Warnings:    h.warnings,
-		RolledBack:  rolledBack,
-		SignedIn:    signedIn,
+		RolledBack:  stores.rolledBack,
+		SignedIn:    stores.signedIn,
+		Reconnected: stores.reconnected,
 		ChessBoards: h.boards,
 		WorkspaceName: func(ws ids.WorkspaceID) (string, error) {
 			if h.nameErr != nil {

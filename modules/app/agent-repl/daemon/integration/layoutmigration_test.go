@@ -211,6 +211,7 @@ var layout3Undo = map[int][]string{
 	79: {},
 	80: {`ALTER TABLE subsections DROP COLUMN created_by`},
 	81: {`ALTER TABLE workspaces DROP COLUMN last_keepalive_at`},
+	82: {`DROP TABLE reconnected_turns`},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by

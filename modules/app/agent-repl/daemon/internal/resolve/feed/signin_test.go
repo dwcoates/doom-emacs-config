@@ -144,7 +144,7 @@ func TestASignInRetiresTheAnsweredFailureAndKeepsTheRest(t *testing.T) {
 func TestASignInWithNothingToAnswerRetiresNothing(t *testing.T) {
 	// Arrange
 	store := &fakeTurnSet{}
-	h := newDurableHarness(t, nil, store)
+	h := newDurableHarness(t, durableStores{signedIn: store})
 	h.failedTurn("t1", overloaded())
 
 	// Act
@@ -183,14 +183,14 @@ func TestAFailureRowOfAnAnsweredTurnArrivingLaterIsNotDrawn(t *testing.T) {
 func TestAnAnsweredFailureStaysRetiredAfterARestart(t *testing.T) {
 	// Arrange
 	store := &fakeTurnSet{}
-	before := newDurableHarness(t, nil, store)
+	before := newDurableHarness(t, durableStores{signedIn: store})
 	before.failedTurn("t1", authFailed())
 	if err := before.resolver.OnSignedIn(testWorkspace); err != nil {
 		t.Fatalf("OnSignedIn: %v", err)
 	}
 
 	// Act: the successor replays the conversation.
-	after := newDurableHarness(t, nil, store)
+	after := newDurableHarness(t, durableStores{signedIn: store})
 	after.failedTurn("t1", authFailed())
 
 	// Assert
@@ -205,7 +205,7 @@ func TestAnAnsweredFailureStaysRetiredAfterARestart(t *testing.T) {
 func TestAFailedSignInRecordStillRetiresTheRowsAndIsRaised(t *testing.T) {
 	// Arrange
 	store := &fakeTurnSet{putErr: errors.New("disk full")}
-	h := newDurableHarness(t, nil, store)
+	h := newDurableHarness(t, durableStores{signedIn: store})
 	h.failedTurn("t1", authFailed())
 
 	// Act
@@ -226,7 +226,7 @@ func TestAFailedSignInLoadIsLoggedAndRaised(t *testing.T) {
 	store := &fakeTurnSet{loadErr: errors.New("corrupt page")}
 
 	// Act
-	h := newDurableHarness(t, nil, store)
+	h := newDurableHarness(t, durableStores{signedIn: store})
 
 	// Assert
 	assertRecordedFault(t, h, opSignedInRestore, "corrupt page")
@@ -235,7 +235,7 @@ func TestAFailedSignInLoadIsLoggedAndRaised(t *testing.T) {
 func TestASignInRecordsTheAnsweredTurns(t *testing.T) {
 	// Arrange
 	store := &fakeTurnSet{}
-	h := newDurableHarness(t, nil, store)
+	h := newDurableHarness(t, durableStores{signedIn: store})
 	h.failedTurn("t1", authFailed())
 
 	// Act
