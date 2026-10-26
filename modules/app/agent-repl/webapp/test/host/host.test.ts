@@ -872,6 +872,7 @@ describe("notes", () => {
       new MessageEvent("message", {
         data: { channel: HOST_CHANNEL, kind: "hello" },
         source: window,
+        origin: "http://host.localhost:60589",
       }),
     );
 
@@ -882,7 +883,29 @@ describe("notes", () => {
     expect(answer.notes).toEqual([
       {
         level: "warn",
-        text: expect.stringContaining("no workspace page") as unknown,
+        text: `a message on the host channel came from no workspace page: source=an unknown window origin="http://host.localhost:60589" data={"channel":"${HOST_CHANNEL}","kind":"hello"}`,
+      },
+    ]);
+  });
+
+  it("notes a message on its channel with no source as a null source", () => {
+    // Arrange
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { channel: HOST_CHANNEL, kind: "drawn", what: "page" },
+        source: null,
+        origin: "http://host.localhost:62330",
+      }),
+    );
+
+    // Act
+    const answer = parsed(host.ids());
+
+    // Assert
+    expect(answer.notes).toEqual([
+      {
+        level: "warn",
+        text: `a message on the host channel came from no workspace page: source=null origin="http://host.localhost:62330" data={"channel":"${HOST_CHANNEL}","kind":"drawn","what":"page"}`,
       },
     ]);
   });

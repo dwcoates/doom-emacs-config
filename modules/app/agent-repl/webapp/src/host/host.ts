@@ -500,7 +500,16 @@ export function createHost(env: HostEnv): Host {
         note("info", `a page this host already removed sent its last host message; it was dropped: ${JSON.stringify(event.data)}`);
         return;
       }
-      note("warn", `a message on the host channel came from no workspace page: ${JSON.stringify(event.data)}`);
+      // THE SOURCE AND ORIGIN SAY WHICH STRANGER IT WAS: a null source is a
+      // window WebKit had already detached when the message was dispatched,
+      // and the origin names the daemon whose page sent it (2026-10-25: 351
+      // of these across a handover whose adopts were retried every 10s, with
+      // nothing to tell them apart).
+      const source = event.source === null ? "null" : "an unknown window";
+      note(
+        "warn",
+        `a message on the host channel came from no workspace page: source=${source} origin=${JSON.stringify(event.origin)} data=${JSON.stringify(event.data)}`,
+      );
       return;
     }
     const message = parsePageToHost(event.data);
