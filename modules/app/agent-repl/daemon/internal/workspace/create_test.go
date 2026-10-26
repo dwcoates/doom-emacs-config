@@ -2245,3 +2245,64 @@ func TestTheShippedSubsectionPlacementBriefNamesTheVerbs(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateNoteComposesABriefOrLogsWhyNot(t *testing.T) {
+	tests := []struct {
+		name      string
+		brief     *prompts.Prompt
+		values    map[string]string
+		want      string
+		wantError bool
+	}{
+		{name: "the brief splices", brief: &prompts.Prompt{Name: "note", Body: "HELLO {{who}}", Placeholders: []string{"who"}},
+			values: map[string]string{"who": "you"}, want: "HELLO you"},
+		{name: "the brief is missing", wantError: true},
+		{name: "the brief will not splice", brief: &prompts.Prompt{Name: "note", Body: "HELLO {{who}}", Placeholders: []string{"who"}},
+			values: nil, wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			if tt.brief != nil {
+				f.briefs["note"] = *tt.brief
+			}
+			const op = "daemon.workspace.test_note"
+
+			// Act.
+			got, err := f.mutable(t).createNote(f.log.logger, op, dlog.Context{"brief": "note"}, "note", tt.values)
+
+			// Assert.
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("note = %q, want an error", got)
+				}
+				if !loggedAtError(f, op) {
+					t.Fatalf("the failure was not logged at error under %s", op)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("note = (%q, %v), want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateNotesShareTheCreateNoteComposition(t *testing.T) {
+	// Arrange: the placement note is createNote's text, meta-wrapped after
+	// the words, so a hand-rolled composition would fail to match.
+	f := newFixture(t)
+	placementBrief(f)
+	record := f.workspace("subject", t.TempDir())
+	v := f.mutable(t)
+
+	// Act.
+	placed, placedErr := v.decorateSubsectionPlacement(f.log.logger, "raw", record)
+	note, noteErr := v.createNote(f.log.logger, opSubsectionPlacement, dlog.Context{}, BriefSubsectionPlacement, nil)
+
+	// Assert.
+	if placedErr != nil || noteErr != nil || placed != "raw"+prompts.Wrap("\n\n"+note) {
+		t.Fatalf("placement = (%q, %v), note = (%q, %v), want the note's composition", placed, placedErr, note, noteErr)
+	}
+}

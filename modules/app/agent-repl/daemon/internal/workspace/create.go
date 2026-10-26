@@ -969,15 +969,9 @@ func (v *verbs) placementOwed(ctx context.Context, log dlog.Logger, record wsm.W
 // the prompt without the note it owes.
 func (v *verbs) decorateSubsectionPlacement(log dlog.Logger, raw string, record wsm.Workspace) (string, error) {
 	fields := dlog.Context{"brief": BriefSubsectionPlacement, "repo_id": string(record.Repo)}
-	loaded, err := v.load(v.deps.PromptsDir, BriefSubsectionPlacement)
+	note, err := v.createNote(log, opSubsectionPlacement, fields, BriefSubsectionPlacement, nil)
 	if err != nil {
-		log.Error(opSubsectionPlacement, "could not read the subsection placement brief", dlog.WithCause(fields, err))
-		return "", fmt.Errorf("read the %s brief: %w", BriefSubsectionPlacement, err)
-	}
-	note, err := v.splice(loaded, nil)
-	if err != nil {
-		log.Error(opSubsectionPlacement, "could not splice the subsection placement brief", dlog.WithCause(fields, err))
-		return "", fmt.Errorf("splice the %s brief: %w", BriefSubsectionPlacement, err)
+		return "", err
 	}
 	log.Debug(opSubsectionPlacement, "asked the new workspace to file itself into a subsection", fields)
 	return raw + prompts.Wrap("\n\n"+note), nil
@@ -1017,17 +1011,30 @@ func (v *verbs) decorateWithWorkspaceNote(
 		log.Error(opCreate, "could not read the workspace a create's note names", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("read the workspace %q the %s brief names: %w", subject, brief, err)
 	}
-	loaded, err := v.load(v.deps.PromptsDir, brief)
+	note, err := v.createNote(log, opCreate, fields, brief, values(record))
 	if err != nil {
-		log.Error(opCreate, "could not read a create note's brief", dlog.WithCause(fields, err))
-		return "", fmt.Errorf("read the %s brief: %w", brief, err)
-	}
-	note, err := v.splice(loaded, values(record))
-	if err != nil {
-		log.Error(opCreate, "could not splice a create note's brief", dlog.WithCause(fields, err))
-		return "", fmt.Errorf("splice the %s brief: %w", brief, err)
+		return "", err
 	}
 	return prompts.Wrap(note) + raw, nil
+}
+
+// createNote reads BRIEF from the daemon's own corpus and splices VALUES into
+// it: the one composition of every note a create adds to a first message. A
+// brief that will not load or splice is logged once here, at ERROR under OP
+// with FIELDS, and returned, so a create never sends its prompt without the
+// note it owes.
+func (v *verbs) createNote(log dlog.Logger, op string, fields dlog.Context, brief string, values map[string]string) (string, error) {
+	loaded, err := v.load(v.deps.PromptsDir, brief)
+	if err != nil {
+		log.Error(op, "could not read a create note's brief", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("read the %s brief: %w", brief, err)
+	}
+	note, err := v.splice(loaded, values)
+	if err != nil {
+		log.Error(op, "could not splice a create note's brief", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("splice the %s brief: %w", brief, err)
+	}
+	return note, nil
 }
 
 // checkDerivation refuses a create whose owner, forked workspace or requester
