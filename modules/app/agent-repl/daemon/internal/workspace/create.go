@@ -938,29 +938,43 @@ const BriefSubsectionPlacement = "workspace-subsection-placement"
 const opSubsectionPlacement = "daemon.workspace.subsection_placement"
 
 // placementOwed reports whether RECORD's first message owes the
-// BriefSubsectionPlacement note: its repository has at least one subsection.
-// With nothing to file into, the agent is not asked. A subsection list that
-// cannot be read fails the create rather than guessing either way.
+// BriefSubsectionPlacement note: its repository has a subsection to file it
+// into, or at least placementGatherMin other open top-level workspaces in no
+// subsection that it could be gathered with into a new one
+// (ArrangeCreateAgentSubsection). Otherwise the agent is not asked. The
+// registry is read as ONE snapshot (wsm.Arrangement), and a read that fails
+// fails the create rather than guessing either way.
 func (v *verbs) placementOwed(ctx context.Context, log dlog.Logger, record wsm.Workspace) (bool, error) {
 	fields := dlog.Context{"repo_id": string(record.Repo)}
-	subsections, err := v.deps.DB.ListSubsections(ctx)
+	arrangement, err := v.deps.DB.ReadArrangement(ctx)
 	if err != nil {
-		log.Error(opSubsectionPlacement, "could not list the subsections a new workspace could file itself into", dlog.WithCause(fields, err))
-		return false, fmt.Errorf("list the subsections of repository %q: %w", record.Repo, err)
+		log.Error(opSubsectionPlacement, "could not read the arrangement a new workspace could file itself into", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("read the arrangement of repository %q: %w", record.Repo, err)
 	}
-	own := 0
-	for _, sub := range subsections {
+	subsections, unsectioned := 0, 0
+	for _, sub := range arrangement.Subsections {
 		if sub.Repo == record.Repo {
-			own++
+			subsections++
 		}
 	}
-	fields["subsections"] = own
-	if own == 0 {
-		log.Debug(opSubsectionPlacement, "the repository has no subsections, so the new workspace is not asked to file itself", fields)
+	for _, ws := range arrangement.Workspaces {
+		if ws.Repo == record.Repo && ws.ID != record.ID && ws.Parent == nil && ws.Subsection == nil && !ws.Closed && ws.MergeOf == nil {
+			unsectioned++
+		}
+	}
+	fields["subsections"], fields["unsectioned"] = subsections, unsectioned
+	if subsections == 0 && unsectioned < placementGatherMin {
+		log.Debug(opSubsectionPlacement, "the repository has no subsection and too few unsectioned workspaces, so the new workspace is not asked to file itself", fields)
 		return false, nil
 	}
 	return true, nil
 }
+
+// placementGatherMin is how many other open top-level workspaces in no
+// subsection make a new workspace worth asking to gather them into a
+// subsection of its own (owner request, 2026-10-26: "2 or more related
+// workspaces without subsections").
+const placementGatherMin = 2
 
 // decorateSubsectionPlacement closes the first message with the meta-wrapped
 // BriefSubsectionPlacement note. The brief is the daemon's own, the same for

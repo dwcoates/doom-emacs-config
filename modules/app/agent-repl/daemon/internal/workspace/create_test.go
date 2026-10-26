@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1270,11 +1271,14 @@ func firstSubmittedText(t *testing.T, f *fixture) string {
 }
 
 // derivationFixture is a repository with an owner and a third workspace,
-// both holding a conversation, and a create spec in that repository.
+// both holding a conversation, and a create spec in that repository. Two
+// workspaces in no subsection owe a new top-level workspace the placement
+// note, so its brief is arranged too.
 func derivationFixture(t *testing.T) (*fixture, CreateSpec, wsm.Workspace, wsm.Workspace) {
 	t.Helper()
 	f := newFixture(t)
 	forkedElsewhereBrief(f)
+	placementBrief(f)
 	spec := standardSpec(t, f)
 	owner := f.workspaceInRepo(t, "owner", spec.RepoDir)
 	other := f.workspaceInRepo(t, "other", spec.RepoDir)
@@ -2199,12 +2203,12 @@ func TestCreateRefusesARootWhosePlacementNoteCannotBeComposed(t *testing.T) {
 	}
 }
 
-func TestCreateFailsARootWhoseSubsectionsCannotBeRead(t *testing.T) {
+func TestCreateFailsARootWhoseArrangementCannotBeRead(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	placementBrief(f)
 	spec := standardSpec(t, f)
-	f.db.listSubsectionsErr = errors.New("the store is gone")
+	f.db.readArrangementErr = errors.New("the store is gone")
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
@@ -2239,7 +2243,8 @@ func TestTheShippedSubsectionPlacementBriefNamesTheVerbs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Splice: %v", err)
 	}
-	for _, want := range []string{"agent-repld workspace subsections here", "agent-repld workspace place here -subsection NAME"} {
+	for _, want := range []string{"agent-repld workspace subsections here", "agent-repld workspace place here -subsection NAME",
+		"agent-repld workspace place here WS... -new-subsection NAME"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("brief = %q, want it to name %q", text, want)
 		}
@@ -2304,5 +2309,49 @@ func TestCreateNotesShareTheCreateNoteComposition(t *testing.T) {
 	// Assert.
 	if placedErr != nil || noteErr != nil || placed != "raw"+prompts.Wrap("\n\n"+note) {
 		t.Fatalf("placement = (%q, %v), note = (%q, %v), want the note's composition", placed, placedErr, note, noteErr)
+	}
+}
+
+func TestCreateAsksToGatherOnlyWithEnoughUnsectionedWorkspaces(t *testing.T) {
+	sub := ids.SubsectionID("sub-1")
+	parent := ids.WorkspaceID("p")
+	tests := []struct {
+		name string
+		// others are the repository's other workspaces, each shaped by its
+		// function.
+		others []func(*wsm.Workspace)
+		want   bool
+	}{
+		{name: "two open unsectioned roots", others: []func(*wsm.Workspace){nil, nil}, want: true},
+		{name: "one open unsectioned root", others: []func(*wsm.Workspace){nil}, want: false},
+		{name: "a closed one does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.Closed = true }}, want: false},
+		{name: "a sectioned one does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.Subsection = &sub }}, want: false},
+		{name: "a child does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.Parent = &parent }}, want: false},
+		{name: "a merge workspace does not count", others: []func(*wsm.Workspace){nil, func(w *wsm.Workspace) { w.MergeOf = &wsm.MergeOrigin{} }}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			placementBrief(f)
+			spec := standardSpec(t, f)
+			for i, shape := range tt.others {
+				ws := f.workspaceInRepo(t, ids.WorkspaceID("other-" + strconv.Itoa(i)), spec.RepoDir)
+				if shape != nil {
+					shape(&ws)
+					f.db.with(ws)
+				}
+			}
+
+			// Act.
+			if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Assert.
+			if got := strings.Contains(sentText(f), "PLACE"); got != tt.want {
+				t.Fatalf("placement note sent = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
