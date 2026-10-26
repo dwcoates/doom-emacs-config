@@ -164,7 +164,9 @@ type isUpdateMergeQueueRequest_Action interface {
 }
 
 type UpdateMergeQueueRequest_Pause struct {
-	// Stop admitting merges to the front; queued merges hold in place.
+	// Stop admitting merges to the front; queued merges hold in place, and a
+	// merge running is suspended at the step it stands on. With `hard`, the
+	// work those merges are doing is stopped too.
 	Pause *UpdateMergeQueuePause `protobuf:"bytes,1,opt,name=pause,proto3,oneof"`
 }
 
@@ -226,7 +228,20 @@ type UpdateMergeQueuePause struct {
 	// WHICH repository's queue. UNSET = every repository that has a queue
 	// (the daemon-wide switch). The queue is per repository, so a caller that
 	// means one names it (added 2026-08-29; the request carried no scope).
-	Repository    *v1.RepositoryRef `protobuf:"bytes,1,opt,name=repository,proto3,oneof" json:"repository,omitempty"`
+	Repository *v1.RepositoryRef `protobuf:"bytes,1,opt,name=repository,proto3,oneof" json:"repository,omitempty"`
+	// A HARD STOP. The queue is paused as an ordinary pause pauses it, and the
+	// work its merges are doing NOW is stopped as well: a pause suspends a
+	// merge's own steps (its git, its test gate's run) but leaves the agent
+	// turn a step drives running in its session -- a fixing attempt's own test
+	// runs went on for minutes after a pause (2026-10-26). A hard stop
+	// interrupts the turn of every merge suspended at a fixing attempt or a
+	// conflict resolution, and of every waiting merge's background rebase. The
+	// turn of any other step (a pick, a deploy-stage prompt) is left to finish.
+	// On resume each merge goes on at the step it recorded, and a turn the
+	// hard stop interrupted is prompted again without spending an attempt.
+	// A hard stop of a queue already paused is not refused as already_paused:
+	// it stops the work the earlier pause left running. (Added 2026-10-26.)
+	Hard          bool `protobuf:"varint,2,opt,name=hard,proto3" json:"hard,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -266,6 +281,13 @@ func (x *UpdateMergeQueuePause) GetRepository() *v1.RepositoryRef {
 		return x.Repository
 	}
 	return nil
+}
+
+func (x *UpdateMergeQueuePause) GetHard() bool {
+	if x != nil {
+		return x.Hard
+	}
+	return false
 }
 
 type UpdateMergeQueueResume struct {
@@ -1270,11 +1292,12 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\renable_racing\x18\n" +
 	" \x01(\v2*.agentrepl.v1.UpdateMergeQueueEnableRacingH\x00R\fenableRacing\x12>\n" +
 	"\trequester\x18\r \x01(\v2 .agentrepl.v1.WorkspaceRequesterR\trequesterB\b\n" +
-	"\x06actionJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\v\x10\fJ\x04\b\f\x10\rR\x05frontR\rhold_rolloutsR\x10release_rolloutsR\tsubscribeR\vunsubscribe\"h\n" +
+	"\x06actionJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\v\x10\fJ\x04\b\f\x10\rR\x05frontR\rhold_rolloutsR\x10release_rolloutsR\tsubscribeR\vunsubscribe\"|\n" +
 	"\x15UpdateMergeQueuePause\x12@\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefH\x00R\n" +
-	"repository\x88\x01\x01B\r\n" +
+	"repository\x88\x01\x01\x12\x12\n" +
+	"\x04hard\x18\x02 \x01(\bR\x04hardB\r\n" +
 	"\v_repository\"i\n" +
 	"\x16UpdateMergeQueueResume\x12@\n" +
 	"\n" +
