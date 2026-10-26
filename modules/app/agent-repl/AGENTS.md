@@ -3051,6 +3051,20 @@ strip, the status panel), never as a line pinned over the session's feedback.
 
 ## Hibernation is the memory knob, and it is gated on real elapsed quiet
 
+THE KEEP-ALIVE CYCLE IS THE OTHER ONE (owner ruling, 2026-10-26). The daemon
+drives every keep-alive (`internal/cachelapse`, `schedule.go`): a beat is due
+52 minutes after a workspace's last turn end (the cache clock below), the
+shim is asked for it (`shim.v1.SendKeepalive`), and once it has gone out an
+idle session is stood down (`drain.Controller.CycleDown`) with the
+`keepalive_cycle` terminal until a minute before its next beat, when it is
+restored, at most three at once, earliest beat first. A shim runs no timer of
+its own. It is never stood down under a turn or live detached work, nor for
+the selected workspace, nor once a real turn ran since the beat. A parked
+session is drawn as the live idle session it stands in for (`wsm.Park`); a
+look, a prompt or a history read brings it back, the boot and the editor's
+opens leave it parked, and past the idle cutoff the sweep deepens its park
+into a hibernation.
+
 A live session costs a node+CLI process pair of roughly 500MB, and dozens of
 workspaces will exhaust a machine. `-idle-timeout` is the mitigation: after a
 workspace has been left alone for that long, the sweeper SIGTERMs its shim and
