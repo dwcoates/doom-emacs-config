@@ -27,6 +27,7 @@ import (
 
 	"agent-repld/internal/cachelapse"
 	"agent-repld/internal/clock"
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -120,11 +121,11 @@ func (s *Sweeper) backlog(ctx context.Context, ws ids.WorkspaceID, lapsedAt, sta
 	case errors.Is(err, wsm.ErrNotFound):
 		log.Debug(opSweep, "the workspace behind a stale cold gate is no longer registered; nothing is moved", nil)
 		return
-	case err != nil && ctx.Err() != nil:
-		log.Info(opSweep, "the daemon is leaving; the sweep ended with it", dlog.Context{"cause": err.Error()})
-		return
 	case err != nil:
-		log.Error(opSweep, "could not read the workspace behind a stale cold gate; it is not moved this sweep", dlog.Context{"cause": err.Error()})
+		ctxend.Log(err, log.Info, log.Error, opSweep,
+			"the daemon is leaving; the sweep ended with it",
+			"could not read the workspace behind a stale cold gate; it is not moved this sweep",
+			dlog.Context{"cause": err.Error()})
 		return
 	}
 	if !record.BacklogsColdGate(lapsedAt) {

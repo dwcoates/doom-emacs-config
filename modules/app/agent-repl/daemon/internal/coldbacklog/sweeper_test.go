@@ -238,6 +238,27 @@ func TestSweepRecordsAFailedReadAtErrorAndMovesNothing(t *testing.T) {
 	}
 }
 
+func TestSweepRecordsAReadTheDaemonsExitCutAtInfo(t *testing.T) {
+	// Arrange
+	h := newHarness(t, at(28, 10))
+	h.gate(wsm.Workspace{ID: "w1"}, at(26, 10))
+	h.db.err = context.Canceled
+
+	// Act
+	h.sweeper.Sweep(context.Background())
+
+	// Assert
+	if len(h.backlogs) != 0 {
+		t.Fatalf("backlogs = %v, want none", h.backlogs)
+	}
+	if !h.logged("info", "the daemon is leaving; the sweep ended with it") {
+		t.Fatalf("the cut read was not recorded at info: %v", h.log.Records())
+	}
+	if _, failed := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error"}); failed {
+		t.Fatalf("a read the daemon's exit cut was recorded at error: %v", h.log.Records())
+	}
+}
+
 func TestSweepGoesOnPastAFailedMove(t *testing.T) {
 	// Arrange
 	h := newHarness(t, at(28, 10))
