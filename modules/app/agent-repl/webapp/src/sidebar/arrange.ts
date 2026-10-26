@@ -59,6 +59,8 @@ export function arrangeSidebarRefusal(
       return "a workspace can only move within its own repository";
     case "anchorElsewhere":
       return "the sidebar changed under the drag; try again";
+    case "noOpenWorkspace":
+      return "a subsection an agent creates needs an open workspace";
     default: {
       const other: { case: string } = cause;
       return unreachableArm("ArrangeSidebarError.cause", other.case);

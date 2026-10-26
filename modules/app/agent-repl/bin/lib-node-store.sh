@@ -64,13 +64,27 @@ node_store_say() {
     printf '[node-store] %s\n' "$*" >&2
 }
 
-# node_store_entry_healthy ENTRY — succeed when ENTRY's node_modules satisfies
-# ENTRY's own manifests. An entry with no package.json or no node_modules is
-# not healthy: there is nothing to satisfy, or nothing satisfying it.
+# node_tree_complete DIR — succeed when DIR's node_modules is a COMPLETE
+# install that satisfies DIR's manifests: `npm ls --depth=0` passes AND the
+# tree carries node_modules/.package-lock.json, which `npm ci` writes last. A
+# tree without it is one an install was cut short in, however much `npm ls`
+# accepts: on 2026-10-26 a killed `npm ci` left a worktree's webapp tree that
+# satisfied `npm ls` with no .package-lock.json, and the test gate's reuse
+# record, which reads that file, failed every run. THE ONE JUDGMENT of a tree,
+# for a package (ensure-deps.sh) and a store entry alike.
+node_tree_complete() {
+    local dir="$1"
+    ( cd "$dir" && npm ls --depth=0 >/dev/null 2>&1 ) && [ -f "$dir/node_modules/.package-lock.json" ]
+}
+
+# node_store_entry_healthy ENTRY — succeed when ENTRY's node_modules is a
+# complete install of ENTRY's own manifests (node_tree_complete). An entry
+# with no package.json or no node_modules is not healthy: there is nothing to
+# satisfy, or nothing satisfying it.
 node_store_entry_healthy() {
     local entry="$1"
     [ -f "$entry/package.json" ] && [ -d "$entry/node_modules" ] || return 1
-    ( cd "$entry" && npm ls --depth=0 >/dev/null 2>&1 )
+    node_tree_complete "$entry"
 }
 
 # node_store_entry_of_link LINK — echo the store entry LINK points into, or
@@ -235,7 +249,7 @@ node_store_repair() {
     if [ "$absent" -eq 1 ]; then
         node_store_say "populating $entry from $source"
     else
-        node_store_say "REPAIRING $entry: it exists but does not satisfy its lockfile (npm ls failed); reinstalling from $source into a fresh tree"
+        node_store_say "REPAIRING $entry: it exists but is no complete install of its lockfile; reinstalling from $source into a fresh tree"
     fi
     if ! node_store_install_tree "$entry" "$source"; then
         node_store_say "the install for $entry FAILED; the entry is left as it was"

@@ -22,6 +22,9 @@ import (
 // The operations the arrangement's records carry, one per change.
 const (
 	opCreateSubsection = "daemon.workspace.create_subsection"
+	// opCreateAgentSubsection is a workspace's agent creating a subsection
+	// with the workspaces it gathers.
+	opCreateAgentSubsection = "daemon.workspace.create_agent_subsection"
 	opRenameSubsection = "daemon.workspace.rename_subsection"
 	opDeleteSubsection = "daemon.workspace.delete_subsection"
 	opMoveSubsection   = "daemon.workspace.move_subsection"
@@ -41,6 +44,31 @@ func (v *verbs) CreateSubsection(ctx context.Context, repo ids.RepoID, name stri
 	var created wsm.Subsection
 	err := v.arrange(ctx, log, opCreateSubsection, "create the subsection", func() error {
 		sub, err := v.deps.DB.CreateSubsection(ctx, repo, name)
+		created = sub
+		return err
+	})
+	if err != nil {
+		return wsm.Subsection{}, err
+	}
+	return created, nil
+}
+
+// CreateAgentSubsection adds a subsection named NAME, created by workspace
+// CREATOR's agent, at the bottom of its MEMBERS' repository, with their
+// families placed in it in that order, keeping their one-shot marks. It is
+// deleted by the write that leaves it with no open workspace
+// (wsm.CreateAgentSubsection). The creator and every member must be this
+// daemon's to serve, as every per-workspace verb's are.
+func (v *verbs) CreateAgentSubsection(ctx context.Context, creator ids.WorkspaceID, name string, members []ids.WorkspaceID) (wsm.Subsection, error) {
+	for _, id := range append([]ids.WorkspaceID{creator}, members...) {
+		if _, _, err := v.owned(ctx, arrangeRPC, id); err != nil {
+			return wsm.Subsection{}, err
+		}
+	}
+	log := v.deps.Log.Global().With(dlog.Context{"created_by": string(creator), "name": name, "workspaces": members})
+	var created wsm.Subsection
+	err := v.arrange(ctx, log, opCreateAgentSubsection, "create the agent's subsection", func() error {
+		sub, err := v.deps.DB.CreateAgentSubsection(ctx, creator, name, members)
 		created = sub
 		return err
 	})
@@ -157,6 +185,8 @@ func arrangementRefusal(log dlog.Logger, err error) *Refusal {
 		return refuse(log, arrangeRPC, ArmOtherRepository, err.Error(), false)
 	case errors.Is(err, wsm.ErrAnchorElsewhere):
 		return refuse(log, arrangeRPC, ArmAnchorElsewhere, err.Error(), false)
+	case errors.Is(err, wsm.ErrNoOpenConstituent):
+		return refuse(log, arrangeRPC, ArmNoOpenWorkspace, err.Error(), false)
 	default:
 		return nil
 	}

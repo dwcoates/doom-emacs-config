@@ -153,7 +153,7 @@ var ErrBlankSubsectionName = errors.New("wsm: a subsection name is blank")
 // arm and records it at its own level.
 func isArrangementRefusal(err error) bool {
 	return errors.Is(err, ErrOtherRepository) || errors.Is(err, ErrAnchorElsewhere) || errors.Is(err, ErrBlankSubsectionName) ||
-		errors.Is(err, ErrNotSiblings)
+		errors.Is(err, ErrNotSiblings) || errors.Is(err, ErrNoOpenConstituent)
 }
 
 // subsectionName trims NAME and refuses it when nothing is left.
@@ -182,18 +182,25 @@ func (s *store) CreateSubsection(ctx context.Context, repo RepoID, name string) 
 		if err := requireRepository(ctx, tx, repo); err != nil {
 			return err
 		}
-		if err := tx.QueryRowContext(ctx,
-			`SELECT COALESCE(MAX(place), 0) + 1 FROM subsections WHERE repo_id = ?`, repo).Scan(&out.Place); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO subsections (id, repo_id, name, place) VALUES (?, ?, ?, ?)`,
-			out.ID, out.Repo, out.Name, out.Place)
-		return err
+		return insertSubsection(ctx, tx, &out)
 	})
 	if err != nil {
 		return Subsection{}, err
 	}
 	return out, nil
+}
+
+// insertSubsection records SUB after its repository's other subsections,
+// setting its Place: the one insert every subsection, the user's or an
+// agent's, is created by.
+func insertSubsection(ctx context.Context, tx *sql.Tx, sub *Subsection) error {
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(place), 0) + 1 FROM subsections WHERE repo_id = ?`, sub.Repo).Scan(&sub.Place); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO subsections (id, repo_id, name, place, created_by) VALUES (?, ?, ?, ?, ?)`,
+		sub.ID, sub.Repo, sub.Name, sub.Place, nullableID(sub.CreatedBy))
+	return err
 }
 
 // RenameSubsection relabels subsection ID to NAME (trimmed). A blank name is
@@ -222,22 +229,29 @@ func (s *store) RenameSubsection(ctx context.Context, id SubsectionID, name stri
 func (s *store) DeleteSubsection(ctx context.Context, id SubsectionID) error {
 	const op = "daemon.wsm.delete_subsection"
 	return s.write(ctx, op, dlog.Context{"subsection": string(id)}, func(ctx context.Context, tx *sql.Tx) error {
-		sub, err := subsectionRow(ctx, tx, id)
-		if err != nil {
-			return err
-		}
-		walk, err := readWalk(ctx, tx, sub.Repo)
-		if err != nil {
-			return err
-		}
-		at := walk.subsectionIndex(id)
-		rest := slices.Concat(walk[:at], rootSteps(walk[at].members), walk[at+1:])
-		// The row goes first, so the walk's renumbering never meets its place.
-		if _, err := tx.ExecContext(ctx, `DELETE FROM subsections WHERE id = ?`, id); err != nil {
-			return err
-		}
-		return writeWalk(ctx, tx, rest)
+		return deleteSubsection(ctx, tx, id)
 	})
+}
+
+// deleteSubsection removes subsection ID inside TX, its families taking its
+// point in the walk: the one delete the user's and the empty agent
+// subsections' removal share.
+func deleteSubsection(ctx context.Context, tx *sql.Tx, id SubsectionID) error {
+	sub, err := subsectionRow(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	walk, err := readWalk(ctx, tx, sub.Repo)
+	if err != nil {
+		return err
+	}
+	at := walk.subsectionIndex(id)
+	rest := slices.Concat(walk[:at], rootSteps(walk[at].members), walk[at+1:])
+	// The row goes first, so the walk's renumbering never meets its place.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM subsections WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return writeWalk(ctx, tx, rest)
 }
 
 // MoveSubsection moves subsection ID among its repository's entries, to TO:
@@ -404,68 +418,75 @@ func (s *store) PlaceWorkspaces(ctx context.Context, ws []WorkspaceID, into *Sub
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		// A FAMILY MOVES WHOLE (familyRoot): each workspace named places
-		// its root, and so its every ancestor and descendant.
-		ws, err := familyRoots(ctx, tx, ws)
-		if err != nil {
-			return err
-		}
-		if at, err = rootAnchor(ctx, tx, at); err != nil {
-			return err
-		}
-		var repo RepoID
-		for i, id := range ws {
-			var own RepoID
-			if err := scanWorkspaceRow(ctx, tx, id, "repo_id", &own); err != nil {
-				return err
-			}
-			if i > 0 && own != repo {
-				return ErrOtherRepository
-			}
-			repo = own
-		}
-		if into != nil {
-			sub, err := subsectionRow(ctx, tx, *into)
-			if err != nil {
-				return err
-			}
-			if sub.Repo != repo {
-				return ErrOtherRepository
-			}
-		}
-		if before, ok := at.(BeforeSubsection); ok {
-			if err := requireAnchorOfRepository(ctx, tx, before, repo); err != nil {
-				return err
-			}
-		}
-		if marks == ClearOneShotMarks {
-			if err := clearFamilyOneShot(ctx, tx, ws); err != nil {
-				return err
-			}
-		}
-		walk, err := readWalk(ctx, tx, repo)
-		if err != nil {
-			return err
-		}
-		walk = walk.without(ws)
-		if into == nil {
-			i, err := walk.entryIndex(at)
-			if err != nil {
-				return err
-			}
-			return writeWalk(ctx, tx, slices.Insert(walk, i, rootSteps(ws)...))
-		}
-		k := walk.subsectionIndex(*into)
-		members := walk[k].members
-		j := len(members)
-		if before, ok := at.(BeforeWorkspace); ok {
-			if j = slices.Index(members, before.ID); j < 0 {
-				return ErrAnchorElsewhere
-			}
-		}
-		walk[k].members = slices.Insert(slices.Clone(members), j, ws...)
-		return writeWalk(ctx, tx, walk)
+		return placeFamilies(ctx, tx, ws, into, at, marks)
 	})
+}
+
+// placeFamilies is PlaceWorkspaces inside TX: the one placement a drag, an
+// agent filing a workspace and an agent creating a subsection with its
+// members all write through.
+func placeFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID, into *SubsectionID, at Anchor, marks OneShotMarks) error {
+	// A FAMILY MOVES WHOLE (familyRoot): each workspace named places
+	// its root, and so its every ancestor and descendant.
+	ws, err := familyRoots(ctx, tx, ws)
+	if err != nil {
+		return err
+	}
+	if at, err = rootAnchor(ctx, tx, at); err != nil {
+		return err
+	}
+	var repo RepoID
+	for i, id := range ws {
+		var own RepoID
+		if err := scanWorkspaceRow(ctx, tx, id, "repo_id", &own); err != nil {
+			return err
+		}
+		if i > 0 && own != repo {
+			return ErrOtherRepository
+		}
+		repo = own
+	}
+	if into != nil {
+		sub, err := subsectionRow(ctx, tx, *into)
+		if err != nil {
+			return err
+		}
+		if sub.Repo != repo {
+			return ErrOtherRepository
+		}
+	}
+	if before, ok := at.(BeforeSubsection); ok {
+		if err := requireAnchorOfRepository(ctx, tx, before, repo); err != nil {
+			return err
+		}
+	}
+	if marks == ClearOneShotMarks {
+		if err := clearFamilyOneShot(ctx, tx, ws); err != nil {
+			return err
+		}
+	}
+	walk, err := readWalk(ctx, tx, repo)
+	if err != nil {
+		return err
+	}
+	walk = walk.without(ws)
+	if into == nil {
+		i, err := walk.entryIndex(at)
+		if err != nil {
+			return err
+		}
+		return writeWalk(ctx, tx, slices.Insert(walk, i, rootSteps(ws)...))
+	}
+	k := walk.subsectionIndex(*into)
+	members := walk[k].members
+	j := len(members)
+	if before, ok := at.(BeforeWorkspace); ok {
+		if j = slices.Index(members, before.ID); j < 0 {
+			return ErrAnchorElsewhere
+		}
+	}
+	walk[k].members = slices.Insert(slices.Clone(members), j, ws...)
+	return writeWalk(ctx, tx, walk)
 }
 
 // clearFamilyOneShot clears the one-shot mark (CreationJob.OneShot) of every
@@ -694,17 +715,22 @@ func listSubsections(ctx context.Context, q querier) ([]Subsection, error) {
 
 // subsectionColumns is every column a Subsection is read from, in
 // scanSubsection's order.
-const subsectionColumns = `id, repo_id, name, place, folded, slot`
+const subsectionColumns = `id, repo_id, name, place, folded, slot, created_by`
 
 // scanSubsection reads one Subsection from a row of subsectionColumns.
 func scanSubsection(row interface{ Scan(...any) error }) (Subsection, error) {
 	var sub Subsection
 	var slot sql.NullInt64
-	if err := row.Scan(&sub.ID, &sub.Repo, &sub.Name, &sub.Place, &sub.Folded, &slot); err != nil {
+	var createdBy sql.NullString
+	if err := row.Scan(&sub.ID, &sub.Repo, &sub.Name, &sub.Place, &sub.Folded, &slot, &createdBy); err != nil {
 		return Subsection{}, err
 	}
 	if slot.Valid {
 		sub.Slot = &slot.Int64
+	}
+	if createdBy.Valid {
+		by := WorkspaceID(createdBy.String)
+		sub.CreatedBy = &by
 	}
 	return sub, nil
 }
@@ -747,8 +773,8 @@ func (s *store) ReadArrangement(ctx context.Context) (Arrangement, error) {
 	return out, err
 }
 
-// nullableSubsection is a subsection id as a SQL argument, NULL for none.
-func nullableSubsection(id *SubsectionID) any {
+// nullableID is a typed id as a SQL argument, NULL for none.
+func nullableID[ID ~string](id *ID) any {
 	if id == nil {
 		return nil
 	}

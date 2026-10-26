@@ -50,7 +50,37 @@ message ArrangeSidebarRequest {
     // Put several workspaces into a subsection (or none) at a place, as one
     // block, in one change.
     ArrangePlaceWorkspaces place_workspaces = 7;
+    // Add a subsection a workspace's agent creates, with the workspaces it
+    // gathers, in one change.
+    ArrangeCreateAgentSubsection create_agent_subsection = 8;
   }
+}
+
+// Add a subsection named `name`, CREATED BY workspace `created_by`'s agent,
+// at the bottom of its workspaces' repository, and put the families of
+// `workspaces` in it, in that order, as one change.
+//
+// AN AGENT-CREATED SUBSECTION LASTS ONLY WHILE IT HAS A CONSTITUENT (owner
+// request, 2026-10-26): the change that leaves it with no open workspace (a
+// close, a landing, a placement elsewhere) deletes it, its closed families
+// returning to no subsection. A subsection the user creates
+// (ArrangeCreateSubsection) survives empty. The placed families keep their
+// one-shot marks, as ArrangePlaceWorkspace.keep_one_shot says: an agent
+// filing workspaces is no drag.
+//
+// An agent creates one when a new workspace belongs in no existing
+// subsection but belongs with related workspaces in no subsection: it gathers
+// them, itself included.
+message ArrangeCreateAgentSubsection {
+  // The workspace whose agent creates the subsection. Required.
+  workspace.v1.WorkspaceRef created_by = 1;
+  // The subsection's drawn label, refused and trimmed as
+  // ArrangeCreateSubsection.name is.
+  string name = 2;
+  // At least one, no workspace twice (InvalidArgument otherwise), all of one
+  // repository (other_repository), at least one of them open
+  // (no_open_workspace). Each stands for its family's root.
+  repeated workspace.v1.WorkspaceRef workspaces = 3;
 }
 
 // Add a subsection named `name` at the bottom of the repository, after
@@ -218,7 +248,8 @@ message ArrangeSidebarSuccess {
   // daemon has resolved no roster yet.
   uint64 roster_revision = 1;
   // THE SUBSECTION THE CHANGE CREATED, present exactly when the change was
-  // create_subsection: the ref later changes name it by.
+  // create_subsection or create_agent_subsection: the ref later changes name
+  // it by.
   optional SubsectionRef created = 2;
 }
 
@@ -249,6 +280,9 @@ message ArrangeSidebarError {
     // destination, or a subsection before one that is not a root in no
     // subsection (it moved since the roster the client drew from).
     ArrangeSidebarAnchorElsewhere anchor_elsewhere = 9;
+    // An agent-created subsection would hold no open workspace, so the change
+    // that created it would delete it.
+    ArrangeSidebarNoOpenWorkspace no_open_workspace = 11;
   }
   // `has_parent` (field 10) is RETIRED and reserved: a family moves whole
   // (owner request, 2026-10-20), so placing a workspace with a recorded
@@ -276,3 +310,5 @@ message ArrangeSidebarBlankName {}
 message ArrangeSidebarOtherRepository {}
 // DELIBERATELY EMPTY: the arm is the fact.
 message ArrangeSidebarAnchorElsewhere {}
+// DELIBERATELY EMPTY: the arm is the fact.
+message ArrangeSidebarNoOpenWorkspace {}

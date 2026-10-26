@@ -272,6 +272,11 @@ type Subsection struct {
 	// sidebar and its workspaces' tabs folded off the tab bar
 	// (SetSubsectionFolded).
 	Folded bool
+	// CreatedBy is the workspace whose agent created the subsection, nil for
+	// one the user created. An agent-created subsection lasts only while it
+	// has a constituent (agentsubsections.go): the write that leaves it with
+	// no open workspace deletes it.
+	CreatedBy *WorkspaceID
 }
 
 // ForgetReport is what a Forget removed BESIDES the workspace's own rows.

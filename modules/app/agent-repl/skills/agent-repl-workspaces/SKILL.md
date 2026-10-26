@@ -134,13 +134,20 @@ Choose the combination from what the work needs:
 - `workspace subsections WS` prints the sidebar arrangement of WS's
   repository: its subsections by name, each with the workspaces in it, and
   its workspaces in no subsection, in drawn order.
-- `workspace place WS -subsection NAME` files WS's family at the bottom of
-  its repository's subsection named NAME. It keeps the family's one-shot
-  marks, so a one-shot that files itself still finishes unattended. An
-  unknown or ambiguous NAME is refused, listing the subsections there are.
-- A new top-level workspace whose repository has subsections is told so at
-  the end of its first message. File it once, without asking, into the one
-  subsection that clearly fits its task, or leave it where it is.
+- `workspace place WS... -subsection NAME` files the named workspaces'
+  families at the bottom of their repository's subsection named NAME. It
+  keeps their one-shot marks, so a one-shot that files itself still finishes
+  unattended. An unknown or ambiguous NAME is refused, listing the
+  subsections there are.
+- `workspace place WS... -new-subsection NAME` creates a subsection named
+  NAME as this workspace's agent, with the named workspaces in it. A
+  subsection an agent creates is removed on its own once none of its
+  workspaces is open; one the user creates stays even when empty.
+- A new top-level workspace whose repository has a subsection, or at least
+  two other open workspaces in no subsection, is told so at the end of its
+  first message. File it once, without asking: into the one subsection that
+  clearly fits its task, or else with two or more clearly related
+  unsectioned workspaces into a new subsection, or else leave it where it is.
 
 ## Marking this workspace (`workspace set`)
 

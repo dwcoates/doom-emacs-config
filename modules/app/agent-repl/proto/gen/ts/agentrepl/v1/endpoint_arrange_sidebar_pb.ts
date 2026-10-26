@@ -38,7 +38,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_arrange_sidebar.proto.
  */
 export const file_agentrepl_v1_endpoint_arrange_sidebar: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfYXJyYW5nZV9zaWRlYmFyLnByb3RvEgxhZ2VudHJlcGwudjEi7wMKFUFycmFuZ2VTaWRlYmFyUmVxdWVzdBJCChFjcmVhdGVfc3Vic2VjdGlvbhgBIAEoCzIlLmFnZW50cmVwbC52MS5BcnJhbmdlQ3JlYXRlU3Vic2VjdGlvbkgAEkIKEXJlbmFtZV9zdWJzZWN0aW9uGAIgASgLMiUuYWdlbnRyZXBsLnYxLkFycmFuZ2VSZW5hbWVTdWJzZWN0aW9uSAASQgoRZGVsZXRlX3N1YnNlY3Rpb24YAyABKAsyJS5hZ2VudHJlcGwudjEuQXJyYW5nZURlbGV0ZVN1YnNlY3Rpb25IABI+Cg9tb3ZlX3N1YnNlY3Rpb24YBCABKAsyIy5hZ2VudHJlcGwudjEuQXJyYW5nZU1vdmVTdWJzZWN0aW9uSAASPgoPbW92ZV9yZXBvc2l0b3J5GAUgASgLMiMuYWdlbnRyZXBsLnYxLkFycmFuZ2VNb3ZlUmVwb3NpdG9yeUgAEj4KD3BsYWNlX3dvcmtzcGFjZRgGIAEoCzIjLmFnZW50cmVwbC52MS5BcnJhbmdlUGxhY2VXb3Jrc3BhY2VIABJAChBwbGFjZV93b3Jrc3BhY2VzGAcgASgLMiQuYWdlbnRyZXBsLnYxLkFycmFuZ2VQbGFjZVdvcmtzcGFjZXNIAEIICgZjaGFuZ2UiWAoXQXJyYW5nZUNyZWF0ZVN1YnNlY3Rpb24SLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEgwKBG5hbWUYAiABKAkiWAoXQXJyYW5nZVJlbmFtZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmEgwKBG5hbWUYAiABKAkiSgoXQXJyYW5nZURlbGV0ZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmIt4BChVBcnJhbmdlTW92ZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmEi0KBmJlZm9yZRgCIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASJwoDZW5kGAMgASgLMhguYWdlbnRyZXBsLnYxLkFycmFuZ2VFbmRIABI2ChBiZWZvcmVfd29ya3NwYWNlGAQgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAQgQKAnRvIqYBChVBcnJhbmdlTW92ZVJlcG9zaXRvcnkSLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEi0KBmJlZm9yZRgCIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmSAASJwoDZW5kGAMgASgLMhguYWdlbnRyZXBsLnYxLkFycmFuZ2VFbmRIAEIECgJ0byLrAgoVQXJyYW5nZVBsYWNlV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOgoNbm9fc3Vic2VjdGlvbhgCIAEoCzIhLmFnZW50cmVwbC52MS5BcnJhbmdlTm9TdWJzZWN0aW9uSAASMQoKc3Vic2VjdGlvbhgDIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASLAoGYmVmb3JlGAQgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgBEicKA2VuZBgFIAEoCzIYLmFnZW50cmVwbC52MS5BcnJhbmdlRW5kSAESOAoRYmVmb3JlX3N1YnNlY3Rpb24YBiABKAsyGy5hZ2VudHJlcGwudjEuU3Vic2VjdGlvblJlZkgBEhUKDWtlZXBfb25lX3Nob3QYByABKAhCBgoEaW50b0IECgJhdCLtAgoWQXJyYW5nZVBsYWNlV29ya3NwYWNlcxIuCgp3b3Jrc3BhY2VzGAEgAygLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhI6Cg1ub19zdWJzZWN0aW9uGAIgASgLMiEuYWdlbnRyZXBsLnYxLkFycmFuZ2VOb1N1YnNlY3Rpb25IABIxCgpzdWJzZWN0aW9uGAMgASgLMhsuYWdlbnRyZXBsLnYxLlN1YnNlY3Rpb25SZWZIABIsCgZiZWZvcmUYBCABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSAESJwoDZW5kGAUgASgLMhguYWdlbnRyZXBsLnYxLkFycmFuZ2VFbmRIARI4ChFiZWZvcmVfc3Vic2VjdGlvbhgGIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAESFQoNa2VlcF9vbmVfc2hvdBgHIAEoCEIGCgRpbnRvQgQKAmF0IhUKE0FycmFuZ2VOb1N1YnNlY3Rpb24iDAoKQXJyYW5nZUVuZCKOAQoWQXJyYW5nZVNpZGViYXJSZXNwb25zZRI2CgdzdWNjZXNzGAEgASgLMiMuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyU3VjY2Vzc0gAEjIKBWVycm9yGAIgASgLMiEuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyRXJyb3JIAEIICgZyZXN1bHQibwoVQXJyYW5nZVNpZGViYXJTdWNjZXNzEhcKD3Jvc3Rlcl9yZXZpc2lvbhgBIAEoBBIxCgdjcmVhdGVkGAIgASgLMhsuYWdlbnRyZXBsLnYxLlN1YnNlY3Rpb25SZWZIAIgBAUIKCghfY3JlYXRlZCLJBQoTQXJyYW5nZVNpZGViYXJFcnJvchJLChJ1bmtub3duX3JlcG9zaXRvcnkYASABKAsyLS5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJVbmtub3duUmVwb3NpdG9yeUgAEksKEnVua25vd25fc3Vic2VjdGlvbhgCIAEoCzItLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhclVua25vd25TdWJzZWN0aW9uSAASSQoRdW5rbm93bl93b3Jrc3BhY2UYAyABKAsyLC5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJVbmtub3duV29ya3NwYWNlSAASUgoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgEIAEoCzIwLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhcldvcmtzcGFjZVJlZk1pc21hdGNoSAASSQoRdHJhbnNmZXJyaW5nX2F3YXkYBSABKAsyLC5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJUcmFuc2ZlcnJpbmdBd2F5SAASRAoPbm90X3lldF9hZG9wdGVkGAYgASgLMikuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyTm90WWV0QWRvcHRlZEgAEjsKCmJsYW5rX25hbWUYByABKAsyJS5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJCbGFua05hbWVIABJHChBvdGhlcl9yZXBvc2l0b3J5GAggASgLMisuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyT3RoZXJSZXBvc2l0b3J5SAASRwoQYW5jaG9yX2Vsc2V3aGVyZRgJIAEoCzIrLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhckFuY2hvckVsc2V3aGVyZUgAQgcKBWNhdXNlSgQIChALUgpoYXNfcGFyZW50IiEKH0FycmFuZ2VTaWRlYmFyVW5rbm93blJlcG9zaXRvcnkiUgofQXJyYW5nZVNpZGViYXJVbmtub3duU3Vic2VjdGlvbhIvCgpzdWJzZWN0aW9uGAEgASgLMhsuYWdlbnRyZXBsLnYxLlN1YnNlY3Rpb25SZWYiTwoeQXJyYW5nZVNpZGViYXJVbmtub3duV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiaQoiQXJyYW5nZVNpZGViYXJXb3Jrc3BhY2VSZWZNaXNtYXRjaBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEhQKDHJlZ2lzdHJ5X2RpchgCIAEoCSIxCh5BcnJhbmdlU2lkZWJhclRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIdChtBcnJhbmdlU2lkZWJhck5vdFlldEFkb3B0ZWQiGQoXQXJyYW5nZVNpZGViYXJCbGFua05hbWUiHwodQXJyYW5nZVNpZGViYXJPdGhlclJlcG9zaXRvcnkiHwodQXJyYW5nZVNpZGViYXJBbmNob3JFbHNld2hlcmVCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfYXJyYW5nZV9zaWRlYmFyLnByb3RvEgxhZ2VudHJlcGwudjEivgQKFUFycmFuZ2VTaWRlYmFyUmVxdWVzdBJCChFjcmVhdGVfc3Vic2VjdGlvbhgBIAEoCzIlLmFnZW50cmVwbC52MS5BcnJhbmdlQ3JlYXRlU3Vic2VjdGlvbkgAEkIKEXJlbmFtZV9zdWJzZWN0aW9uGAIgASgLMiUuYWdlbnRyZXBsLnYxLkFycmFuZ2VSZW5hbWVTdWJzZWN0aW9uSAASQgoRZGVsZXRlX3N1YnNlY3Rpb24YAyABKAsyJS5hZ2VudHJlcGwudjEuQXJyYW5nZURlbGV0ZVN1YnNlY3Rpb25IABI+Cg9tb3ZlX3N1YnNlY3Rpb24YBCABKAsyIy5hZ2VudHJlcGwudjEuQXJyYW5nZU1vdmVTdWJzZWN0aW9uSAASPgoPbW92ZV9yZXBvc2l0b3J5GAUgASgLMiMuYWdlbnRyZXBsLnYxLkFycmFuZ2VNb3ZlUmVwb3NpdG9yeUgAEj4KD3BsYWNlX3dvcmtzcGFjZRgGIAEoCzIjLmFnZW50cmVwbC52MS5BcnJhbmdlUGxhY2VXb3Jrc3BhY2VIABJAChBwbGFjZV93b3Jrc3BhY2VzGAcgASgLMiQuYWdlbnRyZXBsLnYxLkFycmFuZ2VQbGFjZVdvcmtzcGFjZXNIABJNChdjcmVhdGVfYWdlbnRfc3Vic2VjdGlvbhgIIAEoCzIqLmFnZW50cmVwbC52MS5BcnJhbmdlQ3JlYXRlQWdlbnRTdWJzZWN0aW9uSABCCAoGY2hhbmdlIowBChxBcnJhbmdlQ3JlYXRlQWdlbnRTdWJzZWN0aW9uEi4KCmNyZWF0ZWRfYnkYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEgwKBG5hbWUYAiABKAkSLgoKd29ya3NwYWNlcxgDIAMoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiWAoXQXJyYW5nZUNyZWF0ZVN1YnNlY3Rpb24SLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEgwKBG5hbWUYAiABKAkiWAoXQXJyYW5nZVJlbmFtZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmEgwKBG5hbWUYAiABKAkiSgoXQXJyYW5nZURlbGV0ZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmIt4BChVBcnJhbmdlTW92ZVN1YnNlY3Rpb24SLwoKc3Vic2VjdGlvbhgBIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmEi0KBmJlZm9yZRgCIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASJwoDZW5kGAMgASgLMhguYWdlbnRyZXBsLnYxLkFycmFuZ2VFbmRIABI2ChBiZWZvcmVfd29ya3NwYWNlGAQgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgAQgQKAnRvIqYBChVBcnJhbmdlTW92ZVJlcG9zaXRvcnkSLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEi0KBmJlZm9yZRgCIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmSAASJwoDZW5kGAMgASgLMhguYWdlbnRyZXBsLnYxLkFycmFuZ2VFbmRIAEIECgJ0byLrAgoVQXJyYW5nZVBsYWNlV29ya3NwYWNlEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSOgoNbm9fc3Vic2VjdGlvbhgCIAEoCzIhLmFnZW50cmVwbC52MS5BcnJhbmdlTm9TdWJzZWN0aW9uSAASMQoKc3Vic2VjdGlvbhgDIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAASLAoGYmVmb3JlGAQgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZkgBEicKA2VuZBgFIAEoCzIYLmFnZW50cmVwbC52MS5BcnJhbmdlRW5kSAESOAoRYmVmb3JlX3N1YnNlY3Rpb24YBiABKAsyGy5hZ2VudHJlcGwudjEuU3Vic2VjdGlvblJlZkgBEhUKDWtlZXBfb25lX3Nob3QYByABKAhCBgoEaW50b0IECgJhdCLtAgoWQXJyYW5nZVBsYWNlV29ya3NwYWNlcxIuCgp3b3Jrc3BhY2VzGAEgAygLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhI6Cg1ub19zdWJzZWN0aW9uGAIgASgLMiEuYWdlbnRyZXBsLnYxLkFycmFuZ2VOb1N1YnNlY3Rpb25IABIxCgpzdWJzZWN0aW9uGAMgASgLMhsuYWdlbnRyZXBsLnYxLlN1YnNlY3Rpb25SZWZIABIsCgZiZWZvcmUYBCABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSAESJwoDZW5kGAUgASgLMhguYWdlbnRyZXBsLnYxLkFycmFuZ2VFbmRIARI4ChFiZWZvcmVfc3Vic2VjdGlvbhgGIAEoCzIbLmFnZW50cmVwbC52MS5TdWJzZWN0aW9uUmVmSAESFQoNa2VlcF9vbmVfc2hvdBgHIAEoCEIGCgRpbnRvQgQKAmF0IhUKE0FycmFuZ2VOb1N1YnNlY3Rpb24iDAoKQXJyYW5nZUVuZCKOAQoWQXJyYW5nZVNpZGViYXJSZXNwb25zZRI2CgdzdWNjZXNzGAEgASgLMiMuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyU3VjY2Vzc0gAEjIKBWVycm9yGAIgASgLMiEuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyRXJyb3JIAEIICgZyZXN1bHQibwoVQXJyYW5nZVNpZGViYXJTdWNjZXNzEhcKD3Jvc3Rlcl9yZXZpc2lvbhgBIAEoBBIxCgdjcmVhdGVkGAIgASgLMhsuYWdlbnRyZXBsLnYxLlN1YnNlY3Rpb25SZWZIAIgBAUIKCghfY3JlYXRlZCKTBgoTQXJyYW5nZVNpZGViYXJFcnJvchJLChJ1bmtub3duX3JlcG9zaXRvcnkYASABKAsyLS5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJVbmtub3duUmVwb3NpdG9yeUgAEksKEnVua25vd25fc3Vic2VjdGlvbhgCIAEoCzItLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhclVua25vd25TdWJzZWN0aW9uSAASSQoRdW5rbm93bl93b3Jrc3BhY2UYAyABKAsyLC5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJVbmtub3duV29ya3NwYWNlSAASUgoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgEIAEoCzIwLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhcldvcmtzcGFjZVJlZk1pc21hdGNoSAASSQoRdHJhbnNmZXJyaW5nX2F3YXkYBSABKAsyLC5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJUcmFuc2ZlcnJpbmdBd2F5SAASRAoPbm90X3lldF9hZG9wdGVkGAYgASgLMikuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyTm90WWV0QWRvcHRlZEgAEjsKCmJsYW5rX25hbWUYByABKAsyJS5hZ2VudHJlcGwudjEuQXJyYW5nZVNpZGViYXJCbGFua05hbWVIABJHChBvdGhlcl9yZXBvc2l0b3J5GAggASgLMisuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyT3RoZXJSZXBvc2l0b3J5SAASRwoQYW5jaG9yX2Vsc2V3aGVyZRgJIAEoCzIrLmFnZW50cmVwbC52MS5BcnJhbmdlU2lkZWJhckFuY2hvckVsc2V3aGVyZUgAEkgKEW5vX29wZW5fd29ya3NwYWNlGAsgASgLMisuYWdlbnRyZXBsLnYxLkFycmFuZ2VTaWRlYmFyTm9PcGVuV29ya3NwYWNlSABCBwoFY2F1c2VKBAgKEAtSCmhhc19wYXJlbnQiIQofQXJyYW5nZVNpZGViYXJVbmtub3duUmVwb3NpdG9yeSJSCh9BcnJhbmdlU2lkZWJhclVua25vd25TdWJzZWN0aW9uEi8KCnN1YnNlY3Rpb24YASABKAsyGy5hZ2VudHJlcGwudjEuU3Vic2VjdGlvblJlZiJPCh5BcnJhbmdlU2lkZWJhclVua25vd25Xb3Jrc3BhY2USLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiJpCiJBcnJhbmdlU2lkZWJhcldvcmtzcGFjZVJlZk1pc21hdGNoEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSFAoMcmVnaXN0cnlfZGlyGAIgASgJIjEKHkFycmFuZ2VTaWRlYmFyVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh0KG0FycmFuZ2VTaWRlYmFyTm90WWV0QWRvcHRlZCIZChdBcnJhbmdlU2lkZWJhckJsYW5rTmFtZSIfCh1BcnJhbmdlU2lkZWJhck90aGVyUmVwb3NpdG9yeSIfCh1BcnJhbmdlU2lkZWJhckFuY2hvckVsc2V3aGVyZSIfCh1BcnJhbmdlU2lkZWJhck5vT3BlbldvcmtzcGFjZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_subsection, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.ArrangeSidebarRequest
@@ -107,6 +107,15 @@ export type ArrangeSidebarRequest = Message<"agentrepl.v1.ArrangeSidebarRequest"
      */
     value: ArrangePlaceWorkspaces;
     case: "placeWorkspaces";
+  } | {
+    /**
+     * Add a subsection a workspace's agent creates, with the workspaces it
+     * gathers, in one change.
+     *
+     * @generated from field: agentrepl.v1.ArrangeCreateAgentSubsection create_agent_subsection = 8;
+     */
+    value: ArrangeCreateAgentSubsection;
+    case: "createAgentSubsection";
   } | { case: undefined; value?: undefined };
 };
 
@@ -116,6 +125,58 @@ export type ArrangeSidebarRequest = Message<"agentrepl.v1.ArrangeSidebarRequest"
  */
 export const ArrangeSidebarRequestSchema: GenMessage<ArrangeSidebarRequest> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 0);
+
+/**
+ * Add a subsection named `name`, CREATED BY workspace `created_by`'s agent,
+ * at the bottom of its workspaces' repository, and put the families of
+ * `workspaces` in it, in that order, as one change.
+ *
+ * AN AGENT-CREATED SUBSECTION LASTS ONLY WHILE IT HAS A CONSTITUENT (owner
+ * request, 2026-10-26): the change that leaves it with no open workspace (a
+ * close, a landing, a placement elsewhere) deletes it, its closed families
+ * returning to no subsection. A subsection the user creates
+ * (ArrangeCreateSubsection) survives empty. The placed families keep their
+ * one-shot marks, as ArrangePlaceWorkspace.keep_one_shot says: an agent
+ * filing workspaces is no drag.
+ *
+ * An agent creates one when a new workspace belongs in no existing
+ * subsection but belongs with related workspaces in no subsection: it gathers
+ * them, itself included.
+ *
+ * @generated from message agentrepl.v1.ArrangeCreateAgentSubsection
+ */
+export type ArrangeCreateAgentSubsection = Message<"agentrepl.v1.ArrangeCreateAgentSubsection"> & {
+  /**
+   * The workspace whose agent creates the subsection. Required.
+   *
+   * @generated from field: workspace.v1.WorkspaceRef created_by = 1;
+   */
+  createdBy?: WorkspaceRef | undefined;
+
+  /**
+   * The subsection's drawn label, refused and trimmed as
+   * ArrangeCreateSubsection.name is.
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * At least one, no workspace twice (InvalidArgument otherwise), all of one
+   * repository (other_repository), at least one of them open
+   * (no_open_workspace). Each stands for its family's root.
+   *
+   * @generated from field: repeated workspace.v1.WorkspaceRef workspaces = 3;
+   */
+  workspaces: WorkspaceRef[];
+};
+
+/**
+ * Describes the message agentrepl.v1.ArrangeCreateAgentSubsection.
+ * Use `create(ArrangeCreateAgentSubsectionSchema)` to create a new message.
+ */
+export const ArrangeCreateAgentSubsectionSchema: GenMessage<ArrangeCreateAgentSubsection> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 1);
 
 /**
  * Add a subsection named `name` at the bottom of the repository, after
@@ -145,7 +206,7 @@ export type ArrangeCreateSubsection = Message<"agentrepl.v1.ArrangeCreateSubsect
  * Use `create(ArrangeCreateSubsectionSchema)` to create a new message.
  */
 export const ArrangeCreateSubsectionSchema: GenMessage<ArrangeCreateSubsection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 1);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 2);
 
 /**
  * Rename one subsection.
@@ -171,7 +232,7 @@ export type ArrangeRenameSubsection = Message<"agentrepl.v1.ArrangeRenameSubsect
  * Use `create(ArrangeRenameSubsectionSchema)` to create a new message.
  */
 export const ArrangeRenameSubsectionSchema: GenMessage<ArrangeRenameSubsection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 2);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 3);
 
 /**
  * Remove one subsection. Its workspaces return to no subsection, keeping
@@ -192,7 +253,7 @@ export type ArrangeDeleteSubsection = Message<"agentrepl.v1.ArrangeDeleteSubsect
  * Use `create(ArrangeDeleteSubsectionSchema)` to create a new message.
  */
 export const ArrangeDeleteSubsectionSchema: GenMessage<ArrangeDeleteSubsection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 3);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 4);
 
 /**
  * Move one subsection among its own repository's entries: before another
@@ -246,7 +307,7 @@ export type ArrangeMoveSubsection = Message<"agentrepl.v1.ArrangeMoveSubsection"
  * Use `create(ArrangeMoveSubsectionSchema)` to create a new message.
  */
 export const ArrangeMoveSubsectionSchema: GenMessage<ArrangeMoveSubsection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 4);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 5);
 
 /**
  * Move one repository among the repositories. Its workspaces move with it,
@@ -290,7 +351,7 @@ export type ArrangeMoveRepository = Message<"agentrepl.v1.ArrangeMoveRepository"
  * Use `create(ArrangeMoveRepositorySchema)` to create a new message.
  */
 export const ArrangeMoveRepositorySchema: GenMessage<ArrangeMoveRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 5);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 6);
 
 /**
  * Put one workspace's FAMILY into a subsection of its own repository, or into
@@ -396,7 +457,7 @@ export type ArrangePlaceWorkspace = Message<"agentrepl.v1.ArrangePlaceWorkspace"
  * Use `create(ArrangePlaceWorkspaceSchema)` to create a new message.
  */
 export const ArrangePlaceWorkspaceSchema: GenMessage<ArrangePlaceWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 6);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 7);
 
 /**
  * Put several workspaces' FAMILIES of one repository, in the order given,
@@ -484,7 +545,7 @@ export type ArrangePlaceWorkspaces = Message<"agentrepl.v1.ArrangePlaceWorkspace
  * Use `create(ArrangePlaceWorkspacesSchema)` to create a new message.
  */
 export const ArrangePlaceWorkspacesSchema: GenMessage<ArrangePlaceWorkspaces> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 7);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 8);
 
 /**
  * The repository's unsectioned workspaces. DELIBERATELY EMPTY: the arm is
@@ -500,7 +561,7 @@ export type ArrangeNoSubsection = Message<"agentrepl.v1.ArrangeNoSubsection"> & 
  * Use `create(ArrangeNoSubsectionSchema)` to create a new message.
  */
 export const ArrangeNoSubsectionSchema: GenMessage<ArrangeNoSubsection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 8);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 9);
 
 /**
  * After every other item of the list. DELIBERATELY EMPTY: the arm is the
@@ -516,7 +577,7 @@ export type ArrangeEnd = Message<"agentrepl.v1.ArrangeEnd"> & {
  * Use `create(ArrangeEndSchema)` to create a new message.
  */
 export const ArrangeEndSchema: GenMessage<ArrangeEnd> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 9);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 10);
 
 /**
  * THE ARM IS THE OUTCOME.
@@ -547,7 +608,7 @@ export type ArrangeSidebarResponse = Message<"agentrepl.v1.ArrangeSidebarRespons
  * Use `create(ArrangeSidebarResponseSchema)` to create a new message.
  */
 export const ArrangeSidebarResponseSchema: GenMessage<ArrangeSidebarResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 10);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 11);
 
 /**
  * Recorded; the roster push carries the new arrangement to every page and to
@@ -571,7 +632,8 @@ export type ArrangeSidebarSuccess = Message<"agentrepl.v1.ArrangeSidebarSuccess"
 
   /**
    * THE SUBSECTION THE CHANGE CREATED, present exactly when the change was
-   * create_subsection: the ref later changes name it by.
+   * create_subsection or create_agent_subsection: the ref later changes name
+   * it by.
    *
    * @generated from field: optional agentrepl.v1.SubsectionRef created = 2;
    */
@@ -583,7 +645,7 @@ export type ArrangeSidebarSuccess = Message<"agentrepl.v1.ArrangeSidebarSuccess"
  * Use `create(ArrangeSidebarSuccessSchema)` to create a new message.
  */
 export const ArrangeSidebarSuccessSchema: GenMessage<ArrangeSidebarSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 11);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 12);
 
 /**
  * Validation failures (an unset field or arm, a blank id, an item placed
@@ -672,6 +734,15 @@ export type ArrangeSidebarError = Message<"agentrepl.v1.ArrangeSidebarError"> & 
      */
     value: ArrangeSidebarAnchorElsewhere;
     case: "anchorElsewhere";
+  } | {
+    /**
+     * An agent-created subsection would hold no open workspace, so the change
+     * that created it would delete it.
+     *
+     * @generated from field: agentrepl.v1.ArrangeSidebarNoOpenWorkspace no_open_workspace = 11;
+     */
+    value: ArrangeSidebarNoOpenWorkspace;
+    case: "noOpenWorkspace";
   } | { case: undefined; value?: undefined };
 };
 
@@ -680,7 +751,7 @@ export type ArrangeSidebarError = Message<"agentrepl.v1.ArrangeSidebarError"> & 
  * Use `create(ArrangeSidebarErrorSchema)` to create a new message.
  */
 export const ArrangeSidebarErrorSchema: GenMessage<ArrangeSidebarError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 12);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 13);
 
 /**
  * @generated from message agentrepl.v1.ArrangeSidebarUnknownRepository
@@ -693,7 +764,7 @@ export type ArrangeSidebarUnknownRepository = Message<"agentrepl.v1.ArrangeSideb
  * Use `create(ArrangeSidebarUnknownRepositorySchema)` to create a new message.
  */
 export const ArrangeSidebarUnknownRepositorySchema: GenMessage<ArrangeSidebarUnknownRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 13);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 14);
 
 /**
  * Names the subsection ref no subsection matches.
@@ -712,7 +783,7 @@ export type ArrangeSidebarUnknownSubsection = Message<"agentrepl.v1.ArrangeSideb
  * Use `create(ArrangeSidebarUnknownSubsectionSchema)` to create a new message.
  */
 export const ArrangeSidebarUnknownSubsectionSchema: GenMessage<ArrangeSidebarUnknownSubsection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 14);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 15);
 
 /**
  * Names the ref the registry does not hold.
@@ -731,7 +802,7 @@ export type ArrangeSidebarUnknownWorkspace = Message<"agentrepl.v1.ArrangeSideba
  * Use `create(ArrangeSidebarUnknownWorkspaceSchema)` to create a new message.
  */
 export const ArrangeSidebarUnknownWorkspaceSchema: GenMessage<ArrangeSidebarUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 15);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 16);
 
 /**
  * Names the mismatched ref and the dir the registry holds for its id.
@@ -755,7 +826,7 @@ export type ArrangeSidebarWorkspaceRefMismatch = Message<"agentrepl.v1.ArrangeSi
  * Use `create(ArrangeSidebarWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const ArrangeSidebarWorkspaceRefMismatchSchema: GenMessage<ArrangeSidebarWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 16);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 17);
 
 /**
  * The successor's `127.0.0.1:<port>`.
@@ -774,7 +845,7 @@ export type ArrangeSidebarTransferringAway = Message<"agentrepl.v1.ArrangeSideba
  * Use `create(ArrangeSidebarTransferringAwaySchema)` to create a new message.
  */
 export const ArrangeSidebarTransferringAwaySchema: GenMessage<ArrangeSidebarTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 17);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 18);
 
 /**
  * Adoption of a named workspace is still in progress.
@@ -789,7 +860,7 @@ export type ArrangeSidebarNotYetAdopted = Message<"agentrepl.v1.ArrangeSidebarNo
  * Use `create(ArrangeSidebarNotYetAdoptedSchema)` to create a new message.
  */
 export const ArrangeSidebarNotYetAdoptedSchema: GenMessage<ArrangeSidebarNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 18);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 19);
 
 /**
  * DELIBERATELY EMPTY: the arm is the fact.
@@ -804,7 +875,7 @@ export type ArrangeSidebarBlankName = Message<"agentrepl.v1.ArrangeSidebarBlankN
  * Use `create(ArrangeSidebarBlankNameSchema)` to create a new message.
  */
 export const ArrangeSidebarBlankNameSchema: GenMessage<ArrangeSidebarBlankName> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 19);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 20);
 
 /**
  * DELIBERATELY EMPTY: the arm is the fact.
@@ -819,7 +890,7 @@ export type ArrangeSidebarOtherRepository = Message<"agentrepl.v1.ArrangeSidebar
  * Use `create(ArrangeSidebarOtherRepositorySchema)` to create a new message.
  */
 export const ArrangeSidebarOtherRepositorySchema: GenMessage<ArrangeSidebarOtherRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 20);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 21);
 
 /**
  * DELIBERATELY EMPTY: the arm is the fact.
@@ -834,5 +905,20 @@ export type ArrangeSidebarAnchorElsewhere = Message<"agentrepl.v1.ArrangeSidebar
  * Use `create(ArrangeSidebarAnchorElsewhereSchema)` to create a new message.
  */
 export const ArrangeSidebarAnchorElsewhereSchema: GenMessage<ArrangeSidebarAnchorElsewhere> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 21);
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 22);
+
+/**
+ * DELIBERATELY EMPTY: the arm is the fact.
+ *
+ * @generated from message agentrepl.v1.ArrangeSidebarNoOpenWorkspace
+ */
+export type ArrangeSidebarNoOpenWorkspace = Message<"agentrepl.v1.ArrangeSidebarNoOpenWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.ArrangeSidebarNoOpenWorkspace.
+ * Use `create(ArrangeSidebarNoOpenWorkspaceSchema)` to create a new message.
+ */
+export const ArrangeSidebarNoOpenWorkspaceSchema: GenMessage<ArrangeSidebarNoOpenWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_arrange_sidebar, 23);
 

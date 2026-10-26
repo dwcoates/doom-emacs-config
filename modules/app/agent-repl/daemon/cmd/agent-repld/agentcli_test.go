@@ -1499,27 +1499,68 @@ func TestSubsectionsReadsANamedWorkspacesRepository(t *testing.T) {
 	}
 }
 
-func TestPlaceFilesTheWorkspaceKeepingItsOneShotMarks(t *testing.T) {
+func TestPlaceFilesTheWorkspacesKeepingTheirOneShotMarks(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()
 	f.client.arrangement = subsectionsArrangement()
 
 	// Act
-	code := f.run(workspaceNoun, "place", "here", "-subsection", " later ")
+	code := f.run(workspaceNoun, "place", "here", "peer", "-subsection", " later ")
 
 	// Assert
 	if code != exitSuccess {
 		t.Fatalf("exit %d, stderr %q; want success", code, f.errOut.String())
 	}
-	place := only[*agentreplv1.ArrangeSidebarRequest](t, f).GetPlaceWorkspace()
-	want := &agentreplv1.ArrangePlaceWorkspace{
-		Workspace:   &workspacev1.WorkspaceRef{Id: "ws-caller", Dir: "/wt/caller"},
-		Into:        &agentreplv1.ArrangePlaceWorkspace_Subsection{Subsection: &agentreplv1.SubsectionRef{Id: "sub-later"}},
-		At:          &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
+	place := only[*agentreplv1.ArrangeSidebarRequest](t, f).GetPlaceWorkspaces()
+	want := &agentreplv1.ArrangePlaceWorkspaces{
+		Workspaces:  []*workspacev1.WorkspaceRef{{Id: "ws-caller", Dir: "/wt/caller"}, {Id: "ws-peer", Dir: "/wt/peer"}},
+		Into:        &agentreplv1.ArrangePlaceWorkspaces_Subsection{Subsection: &agentreplv1.SubsectionRef{Id: "sub-later"}},
+		At:          &agentreplv1.ArrangePlaceWorkspaces_End{End: &agentreplv1.ArrangeEnd{}},
 		KeepOneShot: true,
 	}
 	if !proto.Equal(place, want) {
 		t.Fatalf("placement = %v, want %v", place, want)
+	}
+}
+
+func TestPlaceIntoANewSubsectionCreatesItAsTheCallingWorkspacesAgent(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "place", "here", "peer", "-new-subsection", "auth work")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q; want success", code, f.errOut.String())
+	}
+	create := only[*agentreplv1.ArrangeSidebarRequest](t, f).GetCreateAgentSubsection()
+	want := &agentreplv1.ArrangeCreateAgentSubsection{
+		CreatedBy:  &workspacev1.WorkspaceRef{Id: "ws-caller", Dir: "/wt/caller"},
+		Name:       "auth work",
+		Workspaces: []*workspacev1.WorkspaceRef{{Id: "ws-caller", Dir: "/wt/caller"}, {Id: "ws-peer", Dir: "/wt/peer"}},
+	}
+	if !proto.Equal(create, want) {
+		t.Fatalf("creation = %v, want %v", create, want)
+	}
+}
+
+func TestPlaceIntoANewSubsectionFromNoWorkspaceSendsNothing(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+	f.cwd = "/elsewhere"
+
+	// Act
+	code := f.run(workspaceNoun, "place", "peer", "-new-subsection", "auth work")
+
+	// Assert
+	if code != exitFailure || !strings.Contains(f.errOut.String(), "inside no workspace") {
+		t.Fatalf("exit %d, stderr %q; want the missing calling workspace named", code, f.errOut.String())
+	}
+	for _, req := range f.client.requests {
+		if _, ok := req.(*agentreplv1.ArrangeSidebarRequest); ok {
+			t.Fatalf("requests = %v, want no change sent", f.client.requests)
+		}
 	}
 }
 
@@ -1529,16 +1570,18 @@ func TestPlaceRefusesASubsectionItCannotPick(t *testing.T) {
 		args    []string
 		wantErr string
 	}{
-		{name: "no subsection named", args: []string{"place", "here"}, wantErr: "-subsection NAME"},
-		{name: "a blank subsection", args: []string{"place", "here", "-subsection", "  "}, wantErr: "-subsection NAME"},
+		{name: "no subsection named", args: []string{"place", "here"}, wantErr: "-subsection NAME or -new-subsection NAME"},
+		{name: "a blank subsection", args: []string{"place", "here", "-subsection", "  "}, wantErr: "-subsection NAME or -new-subsection NAME"},
+		{name: "both destinations", args: []string{"place", "here", "-subsection", "later", "-new-subsection", "auth"},
+			wantErr: "-subsection NAME or -new-subsection NAME"},
+		{name: "no workspace", args: []string{"place", "-subsection", "later"}, wantErr: "names its workspace"},
+		{name: "an unknown workspace", args: []string{"place", "here", "nobody", "-subsection", "later"}, wantErr: `no workspace named "nobody"`},
 		{name: "an unknown subsection", args: []string{"place", "here", "-subsection", "sooner"},
 			wantErr: `no subsection named "sooner"; its subsections are ["later", "twin", "twin"]`},
 		{name: "another repository's subsection", args: []string{"place", "here", "-subsection", "sub-elsewhere"},
 			wantErr: `no subsection named "sub-elsewhere"`},
 		{name: "an ambiguous subsection", args: []string{"place", "here", "-subsection", "twin"},
 			wantErr: `2 subsections named "twin"`},
-		{name: "a positional after the workspace", args: []string{"place", "here", "later"},
-			wantErr: "nothing after it"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

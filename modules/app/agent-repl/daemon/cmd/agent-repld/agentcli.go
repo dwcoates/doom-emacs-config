@@ -154,7 +154,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"unsubscribe": {usage: "unsubscribe WS", run: workspaceUnsubscribe},
 		"gate":        {usage: "gate WS pay|clear|compact|compact-and-resume [-model M -scope all|prompts|responses]", run: workspaceGate},
 		"subsections": {usage: "subsections WS", run: workspaceSubsections},
-		"place":       {usage: "place WS -subsection NAME", run: workspacePlace},
+		"place":       {usage: "place WS... -subsection NAME|-new-subsection NAME", run: workspacePlace},
 	},
 	mergeQueueNoun: {
 		"status":         {usage: "status [-repository here|DIR]", run: queueStatus},
@@ -1110,25 +1110,46 @@ func workspaceSubsections(c *cliCall, args []string) int {
 	return exitSuccess
 }
 
-// workspacePlace files WS's family at the bottom of the subsection of its
-// repository named -subsection (ArrangeSidebar's place_workspace). The
-// placement KEEPS the family's one-shot marks (keep_one_shot): a workspace
+// workspacePlace files the families of the workspaces it names, in order, at
+// the bottom of a subsection of their repository: the one named -subsection
+// (ArrangeSidebar's place_workspaces), or a new one named -new-subsection
+// that the calling workspace's agent creates for them
+// (create_agent_subsection), which the daemon deletes once it holds no open
+// workspace. Either way the families KEEP their one-shot marks: a workspace
 // filing itself is no drag, and a one-shot that unmarked itself by filing
 // itself would no longer finish unattended.
 func workspacePlace(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	name := fs.String("subsection", "", "the subsection's name, as `subsections` prints it")
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	name := fs.String("subsection", "", "the existing subsection's name, as `subsections` prints it")
+	newName := fs.String("new-subsection", "", "the name of a subsection to create for the workspaces")
+	first, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
-	if len(rest) != 0 {
-		return c.usageFailed("the command names its workspace and nothing after it")
+	existing, created := strings.TrimSpace(*name) != "", strings.TrimSpace(*newName) != ""
+	if existing == created {
+		return c.usageFailed("the command names one destination, with -subsection NAME or -new-subsection NAME")
 	}
-	if strings.TrimSpace(*name) == "" {
-		return c.usageFailed("the command names the subsection, with -subsection NAME")
+	refs := []*workspacev1.WorkspaceRef{first}
+	for _, positional := range rest {
+		ref, ok := c.named(positional)
+		if !ok {
+			return exitFailure
+		}
+		refs = append(refs, ref)
 	}
-	arranged, ok := c.arrangedRepositoryOf(ref)
+	if created {
+		creator, ok := c.calling()
+		if !ok {
+			return exitFailure
+		}
+		resp, err := c.client.ArrangeSidebar(c.ctx, connect.NewRequest(&agentreplv1.ArrangeSidebarRequest{
+			Change: &agentreplv1.ArrangeSidebarRequest_CreateAgentSubsection{CreateAgentSubsection: &agentreplv1.ArrangeCreateAgentSubsection{
+				CreatedBy: creator, Name: *newName, Workspaces: refs,
+			}}}))
+		return answer(c, resp, err)
+	}
+	arranged, ok := c.arrangedRepositoryOf(refs[0])
 	if !ok {
 		return exitFailure
 	}
@@ -1137,10 +1158,10 @@ func workspacePlace(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.ArrangeSidebar(c.ctx, connect.NewRequest(&agentreplv1.ArrangeSidebarRequest{
-		Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspace{PlaceWorkspace: &agentreplv1.ArrangePlaceWorkspace{
-			Workspace:   ref,
-			Into:        &agentreplv1.ArrangePlaceWorkspace_Subsection{Subsection: subsection},
-			At:          &agentreplv1.ArrangePlaceWorkspace_End{End: &agentreplv1.ArrangeEnd{}},
+		Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{
+			Workspaces:  refs,
+			Into:        &agentreplv1.ArrangePlaceWorkspaces_Subsection{Subsection: subsection},
+			At:          &agentreplv1.ArrangePlaceWorkspaces_End{End: &agentreplv1.ArrangeEnd{}},
 			KeepOneShot: true,
 		}}}))
 	return answer(c, resp, err)

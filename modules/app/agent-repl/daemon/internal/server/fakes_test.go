@@ -2105,6 +2105,11 @@ func (v *fakeVerbs) CreateSubsection(_ context.Context, repo ids.RepoID, name st
 	return wsm.Subsection{ID: "sub-new", Repo: repo, Name: name, Place: 1}, v.arrange("CreateSubsection " + string(repo) + " " + name)
 }
 
+func (v *fakeVerbs) CreateAgentSubsection(_ context.Context, creator ids.WorkspaceID, name string, members []ids.WorkspaceID) (wsm.Subsection, error) {
+	return wsm.Subsection{ID: "sub-agent", Name: name, Place: 1, CreatedBy: &creator},
+		v.arrange(fmt.Sprintf("CreateAgentSubsection %s %s %v", creator, name, members))
+}
+
 func (v *fakeVerbs) RenameSubsection(_ context.Context, id ids.SubsectionID, name string) error {
 	return v.arrange("RenameSubsection " + string(id) + " " + name)
 }

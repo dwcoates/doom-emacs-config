@@ -130,6 +130,8 @@ func TestArrangeSidebarHandsEachChangeToItsVerb(t *testing.T) {
 					At:          &agentreplv1.ArrangePlaceWorkspaces_End{End: endPlace()},
 					KeepOneShot: true,
 				}}}},
+		{name: "create an agent's subsection", want: "CreateAgentSubsection " + string(testWorkspaceID) + " auth [" + string(testWorkspaceID) + " ws-2]",
+			req: createAgentSubsection(ref(), "auth", ref(), other)},
 		{name: "place several workspaces as one block", want: "PlaceWorkspaces [ws-2 " + string(testWorkspaceID) + "] sub-1 end clear",
 			req: &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{
 				PlaceWorkspaces: &agentreplv1.ArrangePlaceWorkspaces{
@@ -241,6 +243,7 @@ func TestArrangeSidebarMapsAVerbRefusalOntoItsArm(t *testing.T) {
 		{arm: workspace.ArmBlankName, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetBlankName() != nil }},
 		{arm: workspace.ArmOtherRepository, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetOtherRepository() != nil }},
 		{arm: workspace.ArmAnchorElsewhere, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetAnchorElsewhere() != nil }},
+		{arm: workspace.ArmNoOpenWorkspace, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNoOpenWorkspace() != nil }},
 		{arm: workspace.ArmTransferringAway, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetTransferringAway() != nil }},
 		{arm: workspace.ArmNotYetAdopted, check: func(e *agentreplv1.ArrangeSidebarError) bool { return e.GetNotYetAdopted() != nil }},
 	}
@@ -307,6 +310,9 @@ func TestValidateArrangeSidebarRequestRefusesAnIncompleteRequest(t *testing.T) {
 		{"a bulk placement of nothing", bulk(nil, nil)},
 		{"a bulk placement naming one workspace twice", bulk([]*workspacev1.WorkspaceRef{ref(), ref()}, nil)},
 		{"a bulk placement before one of its own", bulk([]*workspacev1.WorkspaceRef{ref()}, ref())},
+		{"an agent's subsection with no creator", createAgentSubsection(nil, "auth", ref())},
+		{"an agent's subsection gathering nothing", createAgentSubsection(ref(), "auth")},
+		{"an agent's subsection gathering one workspace twice", createAgentSubsection(ref(), "auth", ref(), ref())},
 		{"a subsection moved before a workspace with a blank id", &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_MoveSubsection{
 			MoveSubsection: &agentreplv1.ArrangeMoveSubsection{Subsection: subRef("sub-1"),
 				To: &agentreplv1.ArrangeMoveSubsection_BeforeWorkspace{BeforeWorkspace: &workspacev1.WorkspaceRef{}}}}}},
@@ -378,6 +384,44 @@ func bulk(workspaces []*workspacev1.WorkspaceRef, before *workspacev1.WorkspaceR
 	return &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_PlaceWorkspaces{PlaceWorkspaces: place}}
 }
 
+// createAgentSubsection is a create_agent_subsection change by CREATOR,
+// gathering MEMBERS.
+func createAgentSubsection(creator *workspacev1.WorkspaceRef, name string, members ...*workspacev1.WorkspaceRef) *agentreplv1.ArrangeSidebarRequest {
+	return &agentreplv1.ArrangeSidebarRequest{Change: &agentreplv1.ArrangeSidebarRequest_CreateAgentSubsection{
+		CreateAgentSubsection: &agentreplv1.ArrangeCreateAgentSubsection{CreatedBy: creator, Name: name, Workspaces: members}}}
+}
+
+func TestArrangeSidebarResolvesAnAgentSubsectionsWorkspacesBeforeTheVerb(t *testing.T) {
+	tests := []struct {
+		name    string
+		creator *workspacev1.WorkspaceRef
+		members []*workspacev1.WorkspaceRef
+	}{
+		{name: "an unknown creator", creator: &workspacev1.WorkspaceRef{Id: "ws-nope"}, members: []*workspacev1.WorkspaceRef{ref()}},
+		{name: "an unknown member", creator: ref(), members: []*workspacev1.WorkspaceRef{ref(), {Id: "ws-nope"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h, _ := arrangeHarness(t)
+
+			// Act
+			resp, err := h.Client.ArrangeSidebar(context.Background(), connect.NewRequest(createAgentSubsection(tt.creator, "auth", tt.members...)))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ArrangeSidebar: %v", err)
+			}
+			if got := resp.Msg.GetError().GetUnknownWorkspace(); got.GetWorkspace().GetId() != "ws-nope" {
+				t.Fatalf("result = %v, want unknown_workspace naming ws-nope", resp.Msg.GetResult())
+			}
+			if len(h.Verbs.arrangements) != 0 {
+				t.Fatalf("verb calls = %v, want none", h.Verbs.arrangements)
+			}
+		})
+	}
+}
+
 func TestArrangeSidebarNamesTheSubsectionItCreated(t *testing.T) {
 	tests := []struct {
 		name string
@@ -385,6 +429,7 @@ func TestArrangeSidebarNamesTheSubsectionItCreated(t *testing.T) {
 		want string
 	}{
 		{name: "a create names it", req: createSubsection("repo-1", "later"), want: "sub-new"},
+		{name: "an agent's create names it", req: createAgentSubsection(ref(), "auth", ref()), want: "sub-agent"},
 		{name: "any other change names none", req: moveRepository("repo-1", nil), want: ""},
 	}
 	for _, tt := range tests {
@@ -434,6 +479,7 @@ func TestGetSidebarArrangementAnswersTheArrangement(t *testing.T) {
 		Repository: wsm.Repository{ID: "repo-1", Dir: "/repos/one", Name: "one"},
 		Entries: []sidebar.ArrangedEntry{
 			{Subsection: &sidebar.ArrangedSubsection{Subsection: wsm.Subsection{ID: "sub-1", Repo: "repo-1", Name: "later", Place: 1}}},
+			{Subsection: &sidebar.ArrangedSubsection{Subsection: wsm.Subsection{ID: "sub-2", Repo: "repo-1", Name: "auth", Place: 2, CreatedBy: &parent}}},
 			{Workspace: sidebar.ArrangedWorkspace{
 				Workspace: wsm.Workspace{ID: "ws-p", Dir: "/w/p", Name: "p", Branch: "bp"},
 				Children:  []sidebar.ArrangedWorkspace{{Workspace: wsm.Workspace{ID: "ws-k", Dir: "/w/k", Name: "k", Parent: &parent, Hidden: true}}},
@@ -450,15 +496,17 @@ func TestGetSidebarArrangementAnswersTheArrangement(t *testing.T) {
 	}
 	repo := resp.Msg.GetRepositories()[0]
 	sub := repo.GetEntries()[0].GetSubsection()
-	root := repo.GetEntries()[1].GetWorkspace()
+	agents := repo.GetEntries()[1].GetSubsection()
+	root := repo.GetEntries()[2].GetWorkspace()
 	child := root.GetChildren()[0]
 	got := []any{
 		repo.GetRepository().GetId(), repo.GetName(), len(repo.GetEntries()),
-		sub.GetSubsection().GetId(), sub.GetName(),
+		sub.GetSubsection().GetId(), sub.GetName(), sub.CreatedBy == nil,
+		agents.GetSubsection().GetId(), agents.GetCreatedBy().GetId(),
 		root.GetWorkspace().GetId(), root.GetBranch(), root.Parent == nil,
 		child.GetWorkspace().GetId(), child.GetParent().GetId(), child.GetHidden(),
 	}
-	want := []any{"repo-1", "one", 2, "sub-1", "later", "ws-p", "bp", true, "ws-k", "ws-p", true}
+	want := []any{"repo-1", "one", 3, "sub-1", "later", true, "sub-2", "ws-p", "ws-p", "bp", true, "ws-k", "ws-p", true}
 	if !slices.Equal(got, want) {
 		t.Fatalf("arrangement = %v, want %v", got, want)
 	}
