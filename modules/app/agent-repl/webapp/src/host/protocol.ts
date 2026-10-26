@@ -83,6 +83,17 @@ interface DismissDigestMessage {
 }
 
 /**
+ * host -> page: Emacs moved its focus: the selected Emacs window changed, or
+ * Emacs's frame lost the focus. The page lets go of every notice the pointer
+ * raised on it (focus-left.ts). Sent to every page, since a page the host
+ * holds behind the shown one must not keep one either.
+ */
+interface FocusMovedMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "focusMoved";
+}
+
+/**
  * host -> page: whether the webhost draws the sidebar over the page's sidebar
  * column. While it does, the page keeps that column empty and reserved, so its
  * main column and docked gate sit exactly where they would beside its own
@@ -158,6 +169,7 @@ export type HostToPage =
   | InputBackgroundMessage
   | GateDockMessage
   | DismissDigestMessage
+  | FocusMovedMessage
   | SidebarDockMessage
   | WebhostFailuresMessage;
 
@@ -245,6 +257,8 @@ export function parseHostToPage(data: unknown): HostToPage | null {
         : null;
     case "dismissDigest":
       return { channel: HOST_CHANNEL, kind: "dismissDigest" };
+    case "focusMoved":
+      return { channel: HOST_CHANNEL, kind: "focusMoved" };
     case "logLevel": {
       if (!isWindowLevel(data.level)) return null;
       if (data.level === "info") {

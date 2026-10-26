@@ -3,9 +3,9 @@
  * ON IT (owner request, 2026-10-25). A response bubble draws no token figure or
  * duration of its own: hovering it shows its usage stamp (its figure and, once
  * it settled, how long it took and how long ago) in the footer's activity
- * cell, and the pointer
- * leaving it gives the cell back to the daemon's activity line
- * (src/footer/response-usage.ts draws it).
+ * cell, and the pointer leaving it, or the focus leaving the page, gives the
+ * cell back to the daemon's activity line (src/footer/response-usage.ts draws
+ * it).
  *
  * The response draw records each bubble's stamp here on every draw
  * (`setResponseUsage`), so a figure restated while the bubble is hovered (an
@@ -14,6 +14,7 @@
  */
 import type { FeedResponseUsageStamp } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { BUBBLE_CLASS, BUBBLE_ROLE_ATTRIBUTE } from "../bubble/draw.js";
+import type { FocusLeft } from "../focus-left.js";
 import { heatColor } from "../heat.js";
 import { log } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -82,14 +83,32 @@ export function responseUsageOf(bubble: Element): ResponseUsage | null {
   return usages.get(bubble) ?? null;
 }
 
+/** Where the pointer was last seen, in the window's coordinates. */
+interface Point {
+  readonly x: number;
+  readonly y: number;
+}
+
 /**
  * Show the usage of the response bubble under the pointer in HOST through
  * SHOW, and null once the pointer is on none. SHOW is called only when what it
  * shows changes. Answers the uninstall, which shows null if a stamp is shown.
+ *
+ * THE FOCUS LEAVING THE PAGE CLEARS IT, ALWAYS (owner request, 2026-10-26):
+ * FOCUS tells the hover the moment it does (focus-left.ts), and the hover
+ * shows null and stays SUSPENDED until the user is back: the pointer MOVES
+ * from where it rested. Until then a pointer WebKit still believes is over a
+ * bubble shows nothing, even when a redraw under it reports it there again.
  */
-export function installResponseUsageHover(host: HTMLElement, show: ShowResponseUsage): () => void {
+export function installResponseUsageHover(host: HTMLElement, show: ShowResponseUsage, focus: FocusLeft): () => void {
   let hovered: Element | null = null;
   let shown: ResponseUsage | null = null;
+  /** The pointer's last position seen in HOST, or null before any. */
+  let lastPoint: Point | null = null;
+  /** Whether the focus left and the pointer has not moved since. */
+  let suspended = false;
+  /** Where the pointer was when the hover was suspended, or null when unseen. */
+  let suspendedAt: Point | null = null;
   const showFor = (bubble: Element | null): void => {
     hovered = bubble;
     const usage = bubble === null ? null : responseUsageOf(bubble);
@@ -101,20 +120,49 @@ export function installResponseUsageHover(host: HTMLElement, show: ShowResponseU
     });
     show(usage);
   };
+  const bubbleAt = (target: EventTarget | null): Element | null => {
+    const bubble = target instanceof Element ? target.closest(RESPONSE_BUBBLE) : null;
+    return bubble !== null && host.contains(bubble) ? bubble : null;
+  };
   const onOver = (event: MouseEvent): void => {
-    const bubble = event.target instanceof Element ? event.target.closest(RESPONSE_BUBBLE) : null;
-    showFor(bubble !== null && host.contains(bubble) ? bubble : null);
+    if (suspended) return;
+    showFor(bubbleAt(event.target));
+  };
+  const onMove = (event: MouseEvent): void => {
+    const point = { x: event.clientX, y: event.clientY };
+    lastPoint = point;
+    if (!suspended) return;
+    if (suspendedAt !== null && suspendedAt.x === point.x && suspendedAt.y === point.y) return;
+    suspended = false;
+    log.debug("the pointer moved after the focus left; the hover answers again", {
+      operation: "feed.response-usage-hover.resume",
+      context: {},
+    });
+    showFor(bubbleAt(event.target));
   };
   const onLeave = (): void => showFor(null);
+  const onFocusLeft = (why: string): void => {
+    suspended = true;
+    suspendedAt = lastPoint;
+    log.debug("the focus left the page; the footer lets go of the hovered response", {
+      operation: "feed.response-usage-hover.focus-left",
+      context: { why, shown: shown !== null },
+    });
+    showFor(null);
+  };
   const restate = (bubble: Element): void => {
     if (bubble === hovered) showFor(bubble);
   };
   host.addEventListener("mouseover", onOver);
+  host.addEventListener("mousemove", onMove);
   host.addEventListener("mouseleave", onLeave);
+  const stopFocus = focus.onLeft(onFocusLeft);
   restaters.add(restate);
   return () => {
     host.removeEventListener("mouseover", onOver);
+    host.removeEventListener("mousemove", onMove);
     host.removeEventListener("mouseleave", onLeave);
+    stopFocus();
     restaters.delete(restate);
     showFor(null);
   };

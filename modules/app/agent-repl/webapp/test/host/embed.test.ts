@@ -7,10 +7,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { DOCK_BACKGROUND_PROPERTY, DOCK_HEIGHT_PROPERTY } from "../../src/feed/gate-dock.js";
-import { WEBHOST_SIDEBAR_CLASS, connectToHost, type HostLink } from "../../src/host/embed.js";
+import { FOCUS_LEFT_EMACS, WEBHOST_SIDEBAR_CLASS, connectToHost, type HostLink } from "../../src/host/embed.js";
 import { fireResize } from "../resize-observer.js";
 import { HOST_CHANNEL, type PageToHost } from "../../src/host/protocol.js";
 import { createPresence, type PresenceSource } from "../../src/presence.js";
+import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
 import { createWebhostFailureView, type WebhostFailureView } from "../../src/failure/webhost.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
 
@@ -22,6 +23,8 @@ let levelWindow: LevelWindow;
 let clock: number;
 let webhostFailures: WebhostFailureView;
 let editorIngress: EditorIngressView;
+let focusLeft: FocusLeftSource;
+let leftFor: string[];
 let link: HostLink | null;
 let received: PageToHost[];
 let capture: LogCapture;
@@ -76,13 +79,17 @@ beforeEach(() => {
   presence = createPresence(pageDoc, true);
   webhostFailures = createWebhostFailureView();
   editorIngress = createEditorIngressView();
+  focusLeft = createFocusLeft(pageWin, presence);
+  leftFor = [];
+  focusLeft.onLeft((why) => leftFor.push(why));
   clock = 1_000_000;
   levelWindow = new LevelWindow({ level: "info", untilMs: null }, () => clock);
-  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress });
+  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft });
 });
 
 afterEach(() => {
   link?.dispose();
+  focusLeft.dispose();
   presence.dispose();
   pageDoc.documentElement.removeAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
   pageDoc.documentElement.removeAttribute("style");
@@ -96,7 +103,7 @@ describe("joining", () => {
     const alone = createPresence(document, false);
 
     // Act
-    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow, editorIngress });
+    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow, editorIngress, focusLeft });
 
 
     // Assert
@@ -236,6 +243,16 @@ describe("commands", () => {
   });
 });
 
+describe("Emacs moving its focus", () => {
+  it("tells the page's focus-left signal that Emacs moved its focus", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "focusMoved" });
+
+    // Assert
+    expect(leftFor).toEqual([FOCUS_LEFT_EMACS]);
+  });
+});
+
 describe("digest dismissal records", () => {
   it("records a dismissal at info", async () => {
     // Arrange
@@ -281,7 +298,7 @@ describe("reported facts", () => {
     received = [];
 
     // Act
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft });
 
     // Assert
     await delivered();
@@ -457,7 +474,7 @@ describe("the gate band", () => {
     dock.getBoundingClientRect = () => ({ height: band }) as DOMRect;
     pageDoc.body.append(dock);
     received = [];
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft });
     return dock;
   }
 

@@ -542,6 +542,21 @@ reloads while the window lasts.  Non-nil when the call was sent."
   (when-let ((id (agent-repl--webhost-id ws)))
     (agent-repl--webhost-call "dismissDigest" id)))
 
+(defun agent-repl-webhost-focus-moved (&rest _)
+  "Tell every page of the host that Emacs moved its focus.
+Run from `window-selection-change-functions' and `after-focus-change-function',
+so the selected window changing, or the frame gaining or losing the focus,
+reaches the pages: each lets go of every notice the pointer raised on it
+\(webapp/src/focus-left.ts), such as the hovered response's line in the
+footer.  A key the web view forwards to Emacs selects another window without
+the web view ever losing the focus, so the pages cannot see this for
+themselves.  With no host there are no pages to tell, and nothing is sent."
+  (when (agent-repl-webhost-xwidget)
+    (agent-repl--webhost-call "focusMoved")))
+
+(add-hook 'window-selection-change-functions #'agent-repl-webhost-focus-moved)
+(add-function :after after-focus-change-function #'agent-repl-webhost-focus-moved)
+
 ;;;; ---- Replay and reload -----------------------------------------------------
 
 (defun agent-repl--webhost-replay-lanes (ids)

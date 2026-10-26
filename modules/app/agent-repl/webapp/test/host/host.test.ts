@@ -1016,6 +1016,20 @@ describe("the webhost's sidebar", () => {
     document.documentElement.style.removeProperty(SIDEBAR_BOTTOM_PROPERTY);
   });
 
+  it("tells every page Emacs moved its focus", () => {
+    // Arrange
+    pages(host, "a", "b");
+    const toA = postsTo("a");
+    const toB = postsTo("b");
+
+    // Act
+    const outcome = parsed(host.focusMoved()).outcome;
+
+    // Assert
+    const moved = { channel: HOST_CHANNEL, kind: "focusMoved" };
+    expect([outcome, toA, toB]).toEqual(["sent", [moved], [moved]]);
+  });
+
   it("tells every page when it docks the sidebar over it", () => {
     // Arrange
     pages(host, "a", "b");

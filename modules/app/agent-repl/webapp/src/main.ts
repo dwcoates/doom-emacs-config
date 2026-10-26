@@ -48,6 +48,7 @@ import { mountChat } from "./chat/chat.js";
 import { landChatAtEnd } from "./scroll.js";
 import { mountFooter } from "./footer/footer.js";
 import { installResponseUsageHover } from "./feed/response-usage.js";
+import { pageFocusLeft } from "./focus-left.js";
 import { adoptAtBoot, startLifecycle } from "./lifecycle/lifecycle.js";
 import { createRevealRelay } from "./lifecycle/reveal-relay.js";
 import { mountLoginOverlay } from "./login/login.js";
@@ -169,7 +170,15 @@ export async function boot(): Promise<void> {
     // The editor's own held-prompt ingress entries, which the held section
     // draws while this page cannot reach the daemon (held/section.ts).
     const editorIngress = createEditorIngressView();
-    connectToHost({ doc: document, win: window, presence: pagePresence(), webhostFailures, levelWindow, editorIngress });
+    connectToHost({
+      doc: document,
+      win: window,
+      presence: pagePresence(),
+      webhostFailures,
+      levelWindow,
+      editorIngress,
+      focusLeft: pageFocusLeft(),
+    });
 
     // The page's presence — hidden/shown, focused/blurred, resized, and the
     // repaint after each — is recorded from here on (src/page-presence.ts).
@@ -424,7 +433,7 @@ function mountWorkspaceFooter(
   // A HOVERED RESPONSE'S USAGE IS READ IN THE FOOTER (owner request,
   // 2026-10-25): the bubble draws no figure of its own, and the footer's
   // activity cell shows it while the pointer is on the bubble.
-  installResponseUsageHover(shell.feed, (usage) => footer.showResponseUsage(usage));
+  installResponseUsageHover(shell.feed, (usage) => footer.showResponseUsage(usage), pageFocusLeft());
   // THE GATE IS THE FOOTER'S OWN COLOR (owner ruling, 2026-09-28). A
   // composer is closed exactly when the footer's status arm is blue (the
   // workspace is unusable: an agent-repl fault, a network fault, a close) —

@@ -687,6 +687,36 @@ Binds `reloads' and `records', newest first."
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "dismissDigest"))))))
 
+(ert-deftest agent-repl-test-wh-emacs-moving-its-focus-tells-the-pages ()
+  "The selected window changing is relayed to every page of the host."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-focus-moved (selected-frame))
+    ;; Assert
+    (should (= 1 (length (agent-repl-test-wh--sent "focusMoved"))))))
+
+(ert-deftest agent-repl-test-wh-emacs-moving-its-focus-with-no-host-sends-nothing ()
+  "With no host there are no pages to tell, and no call is attempted."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((agent-repl-test-wh--host nil)
+          (attempted nil))
+      (cl-letf (((symbol-function 'agent-repl--webhost-call)
+                 (lambda (&rest args) (push args attempted))))
+        ;; Act
+        (agent-repl-webhost-focus-moved)
+        ;; Assert
+        (should-not attempted)))))
+
+(ert-deftest agent-repl-test-wh-focus-moves-are-hooked ()
+  "Both of Emacs's focus edges run the relay."
+  ;; Assert
+  (should (memq #'agent-repl-webhost-focus-moved
+                (default-value 'window-selection-change-functions)))
+  (should (advice-function-member-p #'agent-repl-webhost-focus-moved
+                                    after-focus-change-function)))
+
 ;;;; ---- Replay ----
 
 (defmacro agent-repl-test-wh--with-order (order current &rest body)

@@ -17,6 +17,7 @@ describe("parseHostToPage", () => {
     ["gateDock with a background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120, background: "#000" }],
     ["gateDock without a background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120, background: null }],
     ["dismissDigest", { channel: HOST_CHANNEL, kind: "dismissDigest" }],
+    ["focusMoved", { channel: HOST_CHANNEL, kind: "focusMoved" }],
     ["sidebarDock", { channel: HOST_CHANNEL, kind: "sidebarDock", docked: true }],
     ["logLevel opening a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: 1_060_000 }],
     ["logLevel closing a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null }],
