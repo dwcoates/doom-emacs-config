@@ -2,10 +2,8 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
@@ -42,24 +40,7 @@ const (
 // quotes and a trailing full stop, two to five words, at most
 // ThreadTitleMaxChars, one line.
 func ValidateThreadTitle(answer string) (string, error) {
-	title := strings.TrimSpace(answer)
-	title = strings.Trim(title, "\"'`“”‘’")
-	title = strings.TrimSuffix(strings.TrimSpace(title), ".")
-	if strings.ContainsAny(title, "\n\r") {
-		return "", errors.New("a title is one line")
-	}
-	words := strings.Fields(title)
-	switch {
-	case len(words) < ThreadTitleMinWords:
-		return "", fmt.Errorf("a title is at least %d words, and %q is %d", ThreadTitleMinWords, title, len(words))
-	case len(words) > ThreadTitleMaxWords:
-		return "", fmt.Errorf("a title is at most %d words, and %q is %d", ThreadTitleMaxWords, title, len(words))
-	}
-	title = strings.Join(words, " ")
-	if n := utf8.RuneCountInString(title); n > ThreadTitleMaxChars {
-		return "", fmt.Errorf("a title is at most %d characters, and %q is %d", ThreadTitleMaxChars, title, n)
-	}
-	return title, nil
+	return headless.Words{Noun: "a title", MinWords: ThreadTitleMinWords, MaxWords: ThreadTitleMaxWords, MaxChars: ThreadTitleMaxChars}.Validate(answer)
 }
 
 // mintThreadTitle asks the model for QUESTION's title, retrying an answer

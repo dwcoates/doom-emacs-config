@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -62,24 +61,7 @@ func NeedsAbbreviation(question string) bool {
 // surrounding quotes and a trailing full stop, one line, one to
 // AbbreviationMaxWords words, at most AbbreviationMaxChars characters.
 func ValidateAbbreviation(answer string) (string, error) {
-	a := strings.TrimSpace(answer)
-	a = strings.Trim(a, "\"'`“”‘’")
-	a = strings.TrimSuffix(strings.TrimSpace(a), ".")
-	if strings.ContainsAny(a, "\n\r") {
-		return "", errors.New("an abbreviation is one line")
-	}
-	words := strings.Fields(a)
-	switch {
-	case len(words) == 0:
-		return "", errors.New("an abbreviation is at least one word")
-	case len(words) > AbbreviationMaxWords:
-		return "", fmt.Errorf("an abbreviation is at most %d words, and %q is %d", AbbreviationMaxWords, a, len(words))
-	}
-	a = strings.Join(words, " ")
-	if n := utf8.RuneCountInString(a); n > AbbreviationMaxChars {
-		return "", fmt.Errorf("an abbreviation is at most %d characters, and %q is %d", AbbreviationMaxChars, a, n)
-	}
-	return a, nil
+	return headless.Words{Noun: "an abbreviation", MinWords: 1, MaxWords: AbbreviationMaxWords, MaxChars: AbbreviationMaxChars}.Validate(answer)
 }
 
 // Abbreviator mints a question's abbreviation.

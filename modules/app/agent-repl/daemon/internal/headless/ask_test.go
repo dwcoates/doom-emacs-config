@@ -3,6 +3,7 @@ package headless
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -123,5 +124,78 @@ func TestNoHandRolledValidatedAskLoop(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWordsValidate(t *testing.T) {
+	w := Words{Noun: "a name", MinWords: 2, MaxWords: 3, MaxChars: 12}
+	cases := []struct {
+		answer  string
+		want    string
+		wantErr string
+	}{
+		{answer: "Two words", want: "Two words"},
+		{answer: `  "Quoted  words."  `, want: "Quoted words"},
+		{answer: "‘Curly quotes’", want: "Curly quotes"},
+		{answer: "One", wantErr: "a name is at least 2 words"},
+		{answer: "one two three four", wantErr: "a name is at most 3 words"},
+		{answer: "longword longerword", wantErr: "a name is at most 12 characters"},
+		{answer: "two\nlines", wantErr: "a name is one line"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.answer, func(t *testing.T) {
+			// Act
+			got, err := w.Validate(tc.answer)
+
+			// Assert
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Validate(%q) = %q, %v; want an error naming %q", tc.answer, got, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("Validate(%q) = %q, %v; want %q", tc.answer, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestWordsValidateSaysOneWordInTheSingular(t *testing.T) {
+	// Act
+	_, err := Words{Noun: "a gist", MinWords: 1, MaxWords: 2, MaxChars: 10}.Validate("")
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "at least 1 word,") {
+		t.Fatalf("err = %v, want the singular", err)
+	}
+}
+
+func TestWordsValidatePanicsOnImpossibleBounds(t *testing.T) {
+	for _, w := range []Words{{MinWords: 0, MaxWords: 1, MaxChars: 1}, {MinWords: 2, MaxWords: 1, MaxChars: 1}, {MinWords: 1, MaxWords: 1}} {
+		t.Run(fmt.Sprintf("%+v", w), func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("Validate did not panic")
+				}
+			}()
+			_, _ = w.Validate("x")
+		})
+	}
+}
+
+// TestShortAnswersValidateThroughWords fails on a short-answer validator that
+// trims and counts words by hand instead of through Words.
+func TestShortAnswersValidateThroughWords(t *testing.T) {
+	for _, file := range []string{"../workspace/threadtitle.go", "../chat/abbreviate.go"} {
+		t.Run(file, func(t *testing.T) {
+			body, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(body), "headless.Words{") || strings.Contains(string(body), "strings.Fields(a)") {
+				t.Fatalf("%s validates its short answer by hand; use headless.Words", file)
+			}
+		})
 	}
 }

@@ -2,7 +2,10 @@ package headless
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"agent-repld/internal/dlog"
 )
@@ -74,4 +77,47 @@ func AskValidated(ctx context.Context, r Runner, ask Ask, log dlog.Logger, op st
 		return value, nil
 	}
 	return "", &last
+}
+
+// Words is the shape of a short answer (a title, an abbreviation): one line
+// of MinWords to MaxWords words, at most MaxChars characters. Its Validate
+// is an Ask's Validate for every such answer.
+type Words struct {
+	// Noun names the answer in its errors, with its article ("a title").
+	Noun string
+	// MinWords, MaxWords and MaxChars bound the answer. MinWords at least 1.
+	MinWords, MaxWords, MaxChars int
+}
+
+// Validate answers ANSWER trimmed of surrounding quotes and a trailing full
+// stop, its words joined by single spaces, or why it is not of W's shape.
+func (w Words) Validate(answer string) (string, error) {
+	if w.MinWords < 1 || w.MaxWords < w.MinWords || w.MaxChars < 1 {
+		panic(fmt.Sprintf("headless.Words: bounds %+v", w))
+	}
+	a := strings.TrimSpace(answer)
+	a = strings.Trim(a, "\"'`“”‘’")
+	a = strings.TrimSuffix(strings.TrimSpace(a), ".")
+	if strings.ContainsAny(a, "\n\r") {
+		return "", errors.New(w.Noun + " is one line")
+	}
+	words := strings.Fields(a)
+	switch {
+	case len(words) < w.MinWords:
+		return "", fmt.Errorf("%s is at least %s, and %q is %d", w.Noun, wordCount(w.MinWords), a, len(words))
+	case len(words) > w.MaxWords:
+		return "", fmt.Errorf("%s is at most %s, and %q is %d", w.Noun, wordCount(w.MaxWords), a, len(words))
+	}
+	a = strings.Join(words, " ")
+	if n := utf8.RuneCountInString(a); n > w.MaxChars {
+		return "", fmt.Errorf("%s is at most %d characters, and %q is %d", w.Noun, w.MaxChars, a, n)
+	}
+	return a, nil
+}
+
+func wordCount(n int) string {
+	if n == 1 {
+		return "1 word"
+	}
+	return fmt.Sprintf("%d words", n)
 }
