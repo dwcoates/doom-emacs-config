@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"agent-repld/internal/creategate"
-	"agent-repld/internal/ids"
 )
 
 func refusedSuccessor(t *testing.T, g *creategate.Gate) (string, bool) {
@@ -126,11 +125,11 @@ func TestARestartClosesTheCreateGateNamingNoSuccessor(t *testing.T) {
 }
 
 func TestAHandoverThatCannotFinishReopensTheCreateGate(t *testing.T) {
-	// Arrange: the quiesce fails, so the transfer does and this daemon stays.
-	h := newHarness(t, func(d *Deps) {
-		d.Quiesce = func(context.Context, ids.WorkspaceID) (ids.LeaseID, error) { return "", errFake }
-	})
+	// Arrange: the transfer fails and its take-back does too, so this daemon
+	// stays.
+	h := newHarness(t)
 	h.workspace(t)
+	failTransferUncleanly(h)
 
 	// Act
 	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
@@ -142,6 +141,22 @@ func TestAHandoverThatCannotFinishReopensTheCreateGate(t *testing.T) {
 	// Assert
 	if _, refused := refusedSuccessor(t, h.creates); refused {
 		t.Fatalf("a create after the unfinished handover was refused, want admitted by the daemon still serving")
+	}
+}
+
+func TestAHandoverWhoseTransferFailedWholeKeepsTheCreateGateClosed(t *testing.T) {
+	// Arrange: the transfer fails with the workspace taken back whole, so the
+	// handover goes on and offers it again.
+	h := newHarness(t)
+	h.workspace(t)
+	setSuspendErr(h, errors.New("the merge did not let go"))
+
+	// Act
+	handOverWithAWholeFailure(t, h)
+
+	// Assert
+	if _, refused := refusedSuccessor(t, h.creates); !refused {
+		t.Fatalf("a create during the converging handover was admitted, want it refused naming the successor")
 	}
 }
 

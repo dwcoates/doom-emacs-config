@@ -805,7 +805,8 @@ func TestATransferWhoseShimWillNotDetachReleasesItsHold(t *testing.T) {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
-	h.c.handoverDone.Wait()
+	// The take-back is done once its re-offer waits out its pacing delay.
+	h.clock.awaitArmed(t, adoptionWindow)
 
 	// Assert
 	if _, held, err := h.db.Lease(context.Background(), ws); err != nil || held {
@@ -825,7 +826,8 @@ func TestATransferWhoseServingReleaseFailsTakesTheWorkspaceBack(t *testing.T) {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
-	h.c.handoverDone.Wait()
+	// The take-back is done once its re-offer waits out its pacing delay.
+	h.clock.awaitArmed(t, adoptionWindow)
 
 	// Assert
 	if _, held, err := h.db.Lease(context.Background(), ws); err != nil || held {
@@ -851,7 +853,8 @@ func TestATransferTakenBackGivesTheFleetItsWorkspaceBack(t *testing.T) {
 		t.Fatalf("HandOver: %v", err)
 	}
 	h.registry.wait()
-	h.c.handoverDone.Wait()
+	// The take-back is done once its re-offer waits out its pacing delay.
+	h.clock.awaitArmed(t, adoptionWindow)
 
 	// Assert: a start on it serves it here again.
 	h.fleet.mu.Lock()
@@ -1097,11 +1100,10 @@ func TestAHandoverWithATransferTheRegistryRefusedDoesNotExit(t *testing.T) {
 }
 
 func TestAHandoverWithAFailedTransferDoesNotExit(t *testing.T) {
-	// Arrange: the quiesce fails, so the transfer does.
-	h := newHarness(t, func(d *Deps) {
-		d.Quiesce = func(context.Context, ids.WorkspaceID) (ids.LeaseID, error) { return "", errFake }
-	})
+	// Arrange: the transfer fails and its take-back does too.
+	h := newHarness(t)
 	h.workspace(t)
+	failTransferUncleanly(h)
 
 	// Act
 	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
@@ -1709,6 +1711,139 @@ func TestATransferWhoseMergeWillNotSuspendIsTakenBack(t *testing.T) {
 	if !loggedError(h.log, opTransfer, "could not suspend the workspace's merge") {
 		t.Fatalf("records = %+v, want the refused suspension at ERROR", h.log.Records())
 	}
+}
+
+// failTransferUncleanly makes every transfer fail and its take-back fail too:
+// the merge will not suspend, and this daemon cannot take its merges back.
+func failTransferUncleanly(h *harness) {
+	h.merges.suspendErr = errors.New("the merge did not let go")
+	h.merges.adoptErr = errors.New("the merges could not be taken back")
+}
+
+// setSuspendErr sets what the merge suspension answers from now on.
+func setSuspendErr(h *harness, err error) {
+	h.merges.mu.Lock()
+	defer h.merges.mu.Unlock()
+	h.merges.suspendErr = err
+}
+
+// handOverWithAWholeFailure starts a handover whose one transfer fails with
+// the workspace taken back whole, and waits for the re-offer's pacing delay.
+func handOverWithAWholeFailure(t *testing.T, h *harness) {
+	t.Helper()
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.registry.wait()
+	h.clock.awaitArmed(t, adoptionWindow)
+}
+
+// The whole-failure tests are the 2026-10-26 incident: a waiting merge's
+// rebase let go of its transfer 0.3s past the bound, the transfer failed with
+// the workspace taken back whole, and the handover ended there -- the
+// incumbent kept serving it while the successor kept the other 58, and a
+// fresh Emacs was refused every workspace. A transfer that fails whole is
+// now offered again, as an expired adoption window's is.
+
+func TestATransferWhoseMergeWillNotSuspendIsOfferedAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	setSuspendErr(h, errors.New("the merge did not let go"))
+
+	// Act
+	handOverWithAWholeFailure(t, h)
+
+	// Assert
+	if !hasRecord(h, opHandover, "info", reofferAfterFailedTransfer) {
+		t.Fatalf("records = %+v, want the workspace offered again", records(h.log, opHandover))
+	}
+}
+
+func TestATransferWhoseQuiesceFailsIsOfferedAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) {
+		d.Quiesce = func(context.Context, ids.WorkspaceID) (ids.LeaseID, error) { return "", errFake }
+	})
+	h.workspace(t)
+
+	// Act
+	handOverWithAWholeFailure(t, h)
+
+	// Assert
+	if !hasRecord(h, opHandover, "info", reofferAfterFailedTransfer) {
+		t.Fatalf("records = %+v, want the workspace offered again", records(h.log, opHandover))
+	}
+}
+
+func TestATransferThatFailsWholeDoesNotEndTheHandover(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	setSuspendErr(h, errors.New("the merge did not let go"))
+
+	// Act
+	handOverWithAWholeFailure(t, h)
+
+	// Assert
+	if loggedError(h.log, opHandover, "the handover cannot finish") {
+		t.Fatalf("records = %+v, want the handover still converging", h.log.Records())
+	}
+}
+
+func TestATransferThatFailsWholeIsLoggedAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	setSuspendErr(h, errors.New("the merge did not let go"))
+
+	// Act
+	handOverWithAWholeFailure(t, h)
+
+	// Assert
+	if !loggedErrorWith(h.log, opTransfer, "it is served here whole and is offered to the successor again", "the merge did not let go") {
+		t.Fatalf("records = %+v, want the failed transfer at ERROR with its cause", records(h.log, opTransfer))
+	}
+}
+
+func TestATransferAtFreenessThatFailsWholeIsOfferedAgainAfterALongerWait(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	setSuspendErr(h, errors.New("the merge did not let go"))
+	handOverWithAWholeFailure(t, h)
+
+	// Act: the offer at freeness fails whole too.
+	h.clock.Fire(adoptionWindow)
+	h.registry.wait()
+
+	// Assert
+	h.clock.awaitArmed(t, 2*adoptionWindow)
+}
+
+func TestATransferOfferedAgainAfterAWholeFailureLandsAndTheHandoverExits(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	setSuspendErr(h, errors.New("the merge did not let go"))
+	handOverWithAWholeFailure(t, h)
+	setSuspendErr(h, nil)
+	reofferOnce(t, h)
+	lease, held, err := h.db.Lease(context.Background(), ws)
+	if err != nil || !held {
+		t.Fatalf("Lease = (%v, %v), want the re-offer's hold", held, err)
+	}
+
+	// Act: the successor adopts the second offer.
+	if err := h.db.ClaimServing(context.Background(), ws, "daemon-successor"); err != nil {
+		t.Fatalf("ClaimServing: %v", err)
+	}
+	if err := h.db.ReleaseLease(context.Background(), lease.ID); err != nil {
+		t.Fatalf("ReleaseLease: %v", err)
+	}
+
+	// Assert
+	awaitExit(t, h)
 }
 
 // workspaceRecords narrows captured records to those written to one

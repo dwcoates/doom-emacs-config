@@ -8,7 +8,6 @@ import (
 
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/health"
-	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/wsm"
 )
@@ -232,11 +231,10 @@ func TestAServingSuccessorClosesTheDaemonFaultsWhoseLifetimeEndsThere(t *testing
 }
 
 func TestAHandoverThatCannotFinishTakesTheLineDown(t *testing.T) {
-	// Arrange: the quiesce fails, so the transfer does.
-	h := newHarness(t, func(d *Deps) {
-		d.Quiesce = func(context.Context, ids.WorkspaceID) (ids.LeaseID, error) { return "", errFake }
-	})
+	// Arrange: the transfer fails and its take-back does too.
+	h := newHarness(t)
 	h.workspace(t)
+	failTransferUncleanly(h)
 
 	// Act
 	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {

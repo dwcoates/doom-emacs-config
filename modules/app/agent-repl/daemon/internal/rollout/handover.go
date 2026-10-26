@@ -48,14 +48,39 @@ type handoverPlan struct {
 	// restart takes every one of them back.
 	moved map[ids.WorkspaceID]movedWorkspace
 	// reclaimed counts the workspaces this daemon took BACK after handing
-	// them toward the successor and will not offer again: a transfer that
-	// failed after its quiesce, or a take-back that did not finish cleanly. A
+	// them toward the successor and will not offer again: a take-back that
+	// did not finish cleanly (one that did is offered again, errServedWhole). A
 	// reclaimed workspace is served here again, so a handover with any
 	// cannot finish and does not exit.
 	reclaimed atomic.Int32
 	// reoffers counts, per workspace, the times an expired adoption window
 	// sent it back to the successor; it paces the next offer.
 	reoffers map[ids.WorkspaceID]int
+}
+
+// errServedWhole marks a transfer that failed while the workspace was still
+// whole here: nothing reached the successor, or the take-back finished
+// cleanly. Such a workspace is offered to the successor again (reoffer).
+//
+// A HANDOVER CONVERGES; A FAILED TRANSFER DOES NOT END IT. A transfer that
+// failed used to count against the handover for good: the incumbent logged
+// that it could not finish and kept serving, while the successor kept every
+// workspace it had already adopted and waited on an exit that never came --
+// two daemons serving one fleet, and a fresh Emacs, linked by daemon.addr to
+// the incumbent, refused every workspace (2026-10-26: one waiting merge's
+// rebase took 2.3s to let go of a 2s bound, and 58 of 59 workspaces stood on
+// the successor until the incumbent was stopped by hand).
+var errServedWhole = errors.New("rollout: the workspace is served here whole; it is offered to the successor again")
+
+// failedTransfer is a transfer's failure past its quiesce: its cause, joined
+// with the take-back's own failure when the take-back did not finish cleanly
+// -- never offered again, as a take-back that did not finish would move what
+// is not whole -- and with errServedWhole when it did.
+func failedTransfer(cause, takeBack error) error {
+	if takeBack != nil {
+		return errors.Join(cause, takeBack)
+	}
+	return errors.Join(cause, errServedWhole)
 }
 
 // ErrAlreadyRollingOut refuses a second handover while one is in flight.
@@ -362,6 +387,10 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 	for _, ws := range plan.workspaces {
 		pending[ws.ID] = true
 	}
+	byID := make(map[ids.WorkspaceID]wsm.Workspace, len(plan.workspaces))
+	for _, ws := range plan.workspaces {
+		byID[ws.ID] = ws
+	}
 	failed := refused
 	for warnings := 0; requested > 0; {
 		select {
@@ -374,7 +403,20 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 			delete(pending, out.ws)
 			c.log.Debug(opTransfer, transferFinishedMessage,
 				dlog.Merge(fields, dlog.Context{"workspace": string(out.ws), "pending": requested}))
-			if out.err != nil {
+			switch {
+			case out.err == nil:
+			case !plan.restart && errors.Is(out.err, errServedWhole):
+				wsFields := dlog.Merge(fields, dlog.Context{"workspace": string(out.ws)})
+				c.log.Error(opTransfer, "a workspace's transfer failed; it is served here whole and is offered to the successor again",
+					dlog.WithCause(wsFields, out.err))
+				windows.Add(1)
+				go func(ws wsm.Workspace) {
+					defer windows.Done()
+					if c.reoffer(ctx, ws, plan, windows, reofferAfterFailedTransfer, wsFields) {
+						plan.reclaimed.Add(1)
+					}
+				}(byID[out.ws])
+			default:
 				failed++
 				c.log.Error(opTransfer, "a workspace's transfer failed; it stays served by this daemon",
 					dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(out.ws)}), out.err))
@@ -462,7 +504,8 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	lease, err := c.deps.Quiesce(ctx, ws.ID)
 	if err != nil {
 		c.log.Error(opTransfer, "could not quiesce the workspace's intake", dlog.WithCause(fields, err))
-		return fmt.Errorf("rollout: transfer %q: quiesce: %w", ws.ID, err)
+		// NOTHING WAS TOUCHED: the workspace is served here as it was.
+		return errors.Join(fmt.Errorf("rollout: transfer %q: quiesce: %w", ws.ID, err), errServedWhole)
 	}
 	fields["lease"] = string(lease)
 	c.log.Debug(opTransfer, "quiesced the workspace's intake", fields)
@@ -474,7 +517,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	// it at its recorded step (merge/transfer.go).
 	if err := c.deps.Merges.SuspendForTransfer(ctx, ws.ID); err != nil {
 		c.log.Error(opTransfer, "could not suspend the workspace's merge for its transfer; taking the workspace back", dlog.WithCause(fields, err))
-		return errors.Join(fmt.Errorf("rollout: transfer %q: suspend the merge: %w", ws.ID, err),
+		return failedTransfer(fmt.Errorf("rollout: transfer %q: suspend the merge: %w", ws.ID, err),
 			c.takeBack(ctx, ws.ID, lease, hadShim, nil, fields))
 	}
 
@@ -487,7 +530,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	// once this process has exited.
 	move, err := c.seal(ctx, ws.ID, fields)
 	if err != nil {
-		return errors.Join(err, c.takeBack(ctx, ws.ID, lease, hadShim, nil, fields))
+		return failedTransfer(err, c.takeBack(ctx, ws.ID, lease, hadShim, nil, fields))
 	}
 
 	// DETACH, NEVER KILL. The shim keeps running and KEEPS its kernel lock
@@ -499,7 +542,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 	switch {
 	case err != nil:
 		c.log.Error(opTransfer, "could not hand the workspace's shim over; taking the workspace back", dlog.WithCause(fields, err))
-		return errors.Join(fmt.Errorf("rollout: transfer %q: hand over the shim: %w", ws.ID, err),
+		return failedTransfer(fmt.Errorf("rollout: transfer %q: hand over the shim: %w", ws.ID, err),
 			c.takeBack(ctx, ws.ID, lease, hadShim, move, fields))
 	case handed:
 		c.log.Debug(opTransfer, "detached from the workspace's shim, leaving it running", fields)
@@ -509,7 +552,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 
 	moved, err := c.releaseServing(ctx, ws.ID, fields)
 	if err != nil {
-		return errors.Join(fmt.Errorf("rollout: transfer %q: release serving: %w", ws.ID, err),
+		return failedTransfer(fmt.Errorf("rollout: transfer %q: release serving: %w", ws.ID, err),
 			c.takeBack(ctx, ws.ID, lease, hadShim, move, fields))
 	}
 
@@ -760,7 +803,7 @@ func (c *controller) timeAdoption(ctx context.Context, ws wsm.Workspace, plan *h
 	case adoptionRefused:
 		return c.fallBackToFreeness(ctx, ws, plan, windows, fields)
 	case adoptionExpired:
-		return c.reoffer(ctx, ws, plan, windows, fields)
+		return c.reoffer(ctx, ws, plan, windows, reofferAfterExpiry, fields)
 	case adoptionTakenBack:
 		return true
 	default:
@@ -768,9 +811,16 @@ func (c *controller) timeAdoption(ctx context.Context, ws wsm.Workspace, plan *h
 	}
 }
 
-// reoffer sends a workspace whose adoption window expired back to the
-// successor, at its freeness, once its pacing delay has passed, and answers
-// whether it ends this daemon's.
+// Why reoffer offers a workspace again, as its record says it.
+const (
+	reofferAfterExpiry         = "the workspace was taken back after its adoption window expired; it is offered to the successor again"
+	reofferAfterFailedTransfer = "the workspace's transfer failed with the workspace whole here; it is offered to the successor again"
+)
+
+// reoffer sends a workspace taken back whole -- its adoption window expired,
+// or its transfer failed (errServedWhole) -- back to the successor, at its
+// freeness, once its pacing delay has passed, and answers whether it ends
+// this daemon's. why is the record's message.
 //
 // A TAKEN-BACK WORKSPACE IS OFFERED AGAIN, NOT KEPT. Keeping it was the
 // handover's end: the incumbent logged that it could not finish and served
@@ -784,7 +834,7 @@ func (c *controller) timeAdoption(ctx context.Context, ws wsm.Workspace, plan *h
 // would otherwise hold it quiesced for one window in every two; the delay
 // doubles from one adoption window up to the holdout cadence, and every
 // expiry is already recorded at ERROR with the workspace's own fault.
-func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup, fields dlog.Context) bool {
+func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup, why string, fields dlog.Context) bool {
 	plan.mu.Lock()
 	if plan.reoffers == nil {
 		plan.reoffers = map[ids.WorkspaceID]int{}
@@ -799,8 +849,7 @@ func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handov
 	if delay > c.deps.HoldoutWarnEvery {
 		delay = c.deps.HoldoutWarnEvery
 	}
-	c.log.Info(opHandover, "the workspace was taken back after its adoption window expired; it is offered to the successor again",
-		dlog.Merge(fields, dlog.Context{"attempt": attempt, "delay": delay.String()}))
+	c.log.Info(opHandover, why, dlog.Merge(fields, dlog.Context{"attempt": attempt, "delay": delay.String()}))
 	select {
 	case <-ctx.Done():
 		c.log.Debug(opHandover, "the daemon's lifetime ended before the workspace was offered again", fields)
@@ -1007,6 +1056,10 @@ func (c *controller) fallBackToFreeness(ctx context.Context, ws wsm.Workspace, p
 			c.log.Debug(opHandover, "the daemon's lifetime ended while a transfer at freeness was pending", fields)
 			return false
 		case err := <-outcome:
+			if err != nil && errors.Is(err, errServedWhole) {
+				c.log.Error(opTransfer, "the transfer at freeness failed; the workspace is served here whole and is offered again", dlog.WithCause(fields, err))
+				return c.reoffer(ctx, ws, plan, windows, reofferAfterFailedTransfer, fields)
+			}
 			if err != nil {
 				c.log.Error(opTransfer, "the transfer at freeness failed; the workspace stays served here", dlog.WithCause(fields, err))
 				return true
