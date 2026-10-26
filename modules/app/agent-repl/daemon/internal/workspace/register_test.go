@@ -1162,6 +1162,9 @@ func TestAnAlreadyRegisteredMainWorktreeIsLeftAsItStands(t *testing.T) {
 			// Arrange.
 			f := newFixture(t)
 			main := wsm.Workspace{ID: "ws-main", Dir: f.git.mainWorktree, Repo: "repo-1", Closed: tt.closed}
+			// The row's repository is held, as the schema's foreign key
+			// requires of every workspace row.
+			f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Dir: f.git.mainWorktree})
 			f.db.with(main)
 
 			// Act.
@@ -1199,6 +1202,7 @@ func TestRegisteringTheMainWorktreeItselfRegistersItOnce(t *testing.T) {
 func TestABornClosedRegistrationOfAClosedRowReopensNothing(t *testing.T) {
 	// Arrange: the row appeared between the lookup and the registration.
 	f := newFixture(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Dir: f.git.mainWorktree})
 	f.db.with(wsm.Workspace{ID: "ws-main", Dir: f.git.mainWorktree, Repo: "repo-1", Closed: true})
 
 	// Act.

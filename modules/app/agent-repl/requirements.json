@@ -231,6 +231,15 @@
       "doc": "docs/USER-GUIDE.md#setup"
     },
     {
+      "id": "github-owners",
+      "kind": "env",
+      "why": "names the GitHub owner of each account besides the work account, whose workspaces' #<number> references then link to that owner's pull requests",
+      "profile": "run",
+      "optional": true,
+      "name": "AGENT_REPL_GITHUB_OWNERS",
+      "doc": "docs/USER-GUIDE.md#setup"
+    },
+    {
       "id": "persistent-wifi-hotspot",
       "kind": "env",
       "why": "names the phone hotspot persistent-wifi mode joins",

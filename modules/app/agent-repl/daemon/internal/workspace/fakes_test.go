@@ -30,6 +30,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
+	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
@@ -1753,6 +1754,17 @@ type fakeFeed struct {
 	freshBooks []ids.WorkspaceID
 	// sourcesUp is every workspace a history source came up for, in order.
 	sourcesUp []ids.WorkspaceID
+	// pullTargets is the latest pull request target installed per workspace,
+	// nil for one installed as none.
+	pullTargets map[ids.WorkspaceID]*pullrefs.Target
+}
+
+// SetPullTarget records the pull request target installed for a workspace.
+func (f *fakeFeed) SetPullTarget(ws ids.WorkspaceID, target *pullrefs.Target) {
+	if f.pullTargets == nil {
+		f.pullTargets = map[ids.WorkspaceID]*pullrefs.Target{}
+	}
+	f.pullTargets[ws] = target
 }
 
 // OnMainAgent records the main agent the feed was told.
@@ -2748,17 +2760,20 @@ type fixture struct {
 	db      *fakeDB
 	git     *fakeGit
 	account *fakeAccounts
-	queue   *fakeQueue
-	merge   *fakeMerge
-	rollout *fakeRollout
-	feed    *fakeFeed
-	footer  *fakeFooter
-	sidebar *fakeSidebar
-	health  *fakeHealth
-	host    *fakeHost
-	banners *fakeBanners
-	browser *fakeBrowser
-	fleet   *fakeSessions
+	// pullOwners is the GitHub owner of each account root; empty, so no
+	// workspace's references link anywhere until a test names an owner.
+	pullOwners pullrefs.Owners
+	queue      *fakeQueue
+	merge      *fakeMerge
+	rollout    *fakeRollout
+	feed       *fakeFeed
+	footer     *fakeFooter
+	sidebar    *fakeSidebar
+	health     *fakeHealth
+	host       *fakeHost
+	banners    *fakeBanners
+	browser    *fakeBrowser
+	fleet      *fakeSessions
 	// threads is the threads' graphs a nuke deletes.
 	threads  *fakeThreadGraphs
 	shim     *fakeShim
@@ -2831,28 +2846,29 @@ func newFixture(t *testing.T) *fixture {
 		db:      newFakeDB(),
 		// The main worktree is a REAL worktree directory: every registration
 		// of a linked worktree registers it first.
-		git:       &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: worktreeDir(t)},
-		account:   &fakeAccounts{configDir: "/config"},
-		queue:     newFakeQueue(),
-		merge:     newFakeMerge(),
-		rollout:   &fakeRollout{done: make(chan struct{}, 8)},
-		feed:      &fakeFeed{},
-		footer:    newFakeFooter(),
-		sidebar:   &fakeSidebar{},
-		health:    &fakeHealth{},
-		host:      &fakeHost{},
-		banners:   &fakeBanners{},
-		browser:   &fakeBrowser{},
-		fleet:     newFakeSessions(),
-		threads:   &fakeThreadGraphs{},
-		shim:      &fakeShim{},
-		owner:     &fakeOwnership{standing: StandingOwned},
-		cards:     newFakeCards(),
-		summaries: &fakeSummaries{},
-		log:       newFakeSurfaces(),
-		headless:  &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
-		briefs:    map[string]prompts.Prompt{},
-		derived:   &fakeDerived{},
+		git:        &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: worktreeDir(t)},
+		account:    &fakeAccounts{configDir: "/config"},
+		pullOwners: pullrefs.Owners{},
+		queue:      newFakeQueue(),
+		merge:      newFakeMerge(),
+		rollout:    &fakeRollout{done: make(chan struct{}, 8)},
+		feed:       &fakeFeed{},
+		footer:     newFakeFooter(),
+		sidebar:    &fakeSidebar{},
+		health:     &fakeHealth{},
+		host:       &fakeHost{},
+		banners:    &fakeBanners{},
+		browser:    &fakeBrowser{},
+		fleet:      newFakeSessions(),
+		threads:    &fakeThreadGraphs{},
+		shim:       &fakeShim{},
+		owner:      &fakeOwnership{standing: StandingOwned},
+		cards:      newFakeCards(),
+		summaries:  &fakeSummaries{},
+		log:        newFakeSurfaces(),
+		headless:   &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
+		briefs:     map[string]prompts.Prompt{},
+		derived:    &fakeDerived{},
 	}
 	f.queue.db = f.db
 	// EVERY UNNAMED CREATE NAMES THROUGH THE MODEL, so the naming brief is part
@@ -2870,7 +2886,7 @@ func newFixture(t *testing.T) *fixture {
 
 	verbs, err := New(Deps{
 		Instance: fixtureInstance,
-		DB:       f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
+		DB:       f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, principalLinks: &f.topbarPrincipalLinks, names: &f.topbarNames}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads,
 		Headless:   f.headless,

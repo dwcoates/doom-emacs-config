@@ -31,6 +31,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
+	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
@@ -641,7 +642,11 @@ type Deps struct {
 	DB       wsm.DB
 	Git      gitclient.Git
 	Accounts account.Resolver
-	Queue    promptqueue.Queue
+	// PullOwners is the GitHub owner of each account root: a workspace's
+	// `#<number>` references link into its repository under the owner of the
+	// account its directory is routed to (bindPullTarget).
+	PullOwners pullrefs.Owners
+	Queue      promptqueue.Queue
 	// TurnStops is the queue's part in a turn stop (the interrupt verb): it
 	// withdraws the accepted turn a stop lands on while the session is still
 	// coming up, and orders a kill behind its turn's start.
@@ -1019,6 +1024,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("the create gate")
 	case deps.Accounts == nil:
 		return nil, missing("an account resolver")
+	case deps.PullOwners == nil:
+		return nil, missing("the GitHub owner of each account root")
 	case deps.Queue == nil:
 		return nil, missing("a prompt queue")
 	case deps.TurnStops == nil:

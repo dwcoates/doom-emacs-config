@@ -29,6 +29,7 @@ and the daemon Emacs starts, see them.
 | `MULTI_REPO_ROOT` | Optional. The directory holding your work repositories, including the `explanation-engine` checkout, in your shell profile. | The installer, which links the `/create-or-update-skill` skill from `$MULTI_REPO_ROOT/explanation-engine`, workspaces worked under the work account, and `SPC TAB O`, which makes its one-shot in `$MULTI_REPO_ROOT/explanation-engine`. | That skill is not linked, and the installer reports it. `SPC TAB O` refuses, naming the variable. |
 | `MULTI_REPO_CONFIG_DIR` | Optional. Your work account's Claude config dir (`~/.claude-chesscom` in the work account row above), in your shell profile. | The installer, which links every global agent-repl skill into its `skills/` as well as `~/.claude/skills`, and Emacs, which hands it to the daemon as the config root of workspaces under `$MULTI_REPO_ROOT`. | Sessions under `$MULTI_REPO_ROOT` have none of the global agent-repl skills, and their composers complete none of them. Emacs falls back to `~/.claude-chesscom`. |
 | Your bin dir on `PATH` | `~/.local/bin` on `PATH` in your shell profile (`export PATH="$HOME/.local/bin:$PATH"`), then `doom env`. `AGENT_REPL_BIN_DIR` names another dir instead. | The installer, which links `agent-repld` there, and every agent, skill and shell that calls `agent-repld` by name. | The installer reports `agent-repld-on-path` as needing you and prints the line to add. Calls of `agent-repld` by name fail with `command not found`. |
+| `AGENT_REPL_GITHUB_OWNERS` | Optional. The GitHub owner of each further account, as comma-separated `<config-dir>=<owner>` pairs, such as `~/.claude=your-login`, in your shell profile. The work account (`$MULTI_REPO_CONFIG_DIR`, else `~/.claude-chesscom`) is `ChessCom` unless a pair names it. | The feed, which links each `#<number>` in a prompt or response to `github.com/<owner>/<repository>/pull/<number>`. The owner is that of the account the workspace's directory is routed to. | `#<number>` stays plain text in the workspaces of that account. A pair that does not parse stops the daemon from starting, naming the pair. |
 | `AGENT_WORKSPACE_PREFIX` | Optional. A prefix for new workspace branches, such as your initials, in your shell profile. The older `CLAUDE_WORKSPACE_PREFIX` is still read when this one is unset. | Workspace creation, which names a branch `<prefix>/<name>`. | Branches get no prefix. |
 
 ## Selecting a bubble
@@ -307,6 +308,22 @@ Clicking a link to a file (not a web address) in a prompt or response bubble ope
   - The workspace's agent is asked, after its running turn and never interrupting it, which file it meant.
   - The question quotes the bubble you clicked in, as a reply to a selected bubble does.
   - The agent is also asked to propose an agent-repl change that avoids such links or teaches the resolver a further fallback.
+
+## Pull request links in prompts and responses
+
+A `#<number>` in a prompt or response bubble is drawn as a link to that pull request on GitHub, in the workspace's repository.
+
+- **The link is `github.com/<owner>/<repository>/pull/<number>`.**
+  - The repository is the name of the workspace's main checkout's directory.
+  - The owner is that of the account the workspace's directory is routed to: `ChessCom` for the work account, and whatever `AGENT_REPL_GITHUB_OWNERS` names for any other (see Setup).
+  - A workspace whose account has no owner draws `#<number>` as plain text.
+- **Only a `#<number>` standing as its own word is linked.**
+  - One inside inline code or a code block is not.
+  - Neither is one glued to what comes before it, such as a web address's `#12` or a link already written.
+  - One followed by a letter, such as `#12a`, is not.
+- **The bubble's text is unchanged.**
+  - Copying it, searching it or replying to it reads `#<number>` as written.
+- **While a response is still arriving, a `#<number>` at its very end is linked once more text follows it.**
 
 ## Copying a code block, a prompt or a final response
 

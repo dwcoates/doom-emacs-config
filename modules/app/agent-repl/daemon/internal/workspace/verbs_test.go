@@ -33,6 +33,7 @@ func TestNewRefusesEveryMissingCollaborator(t *testing.T) {
 		{name: "no git client", strip: func(d *Deps) { d.Git = nil }},
 		{name: "no create gate", strip: func(d *Deps) { d.Creates = nil }},
 		{name: "no account resolver", strip: func(d *Deps) { d.Accounts = nil }},
+		{name: "no GitHub owners", strip: func(d *Deps) { d.PullOwners = nil }},
 		{name: "no prompt queue", strip: func(d *Deps) { d.Queue = nil }},
 		{name: "no turn-stop queue", strip: func(d *Deps) { d.TurnStops = nil }},
 		{name: "no merge orchestrator", strip: func(d *Deps) { d.Merge = nil }},
