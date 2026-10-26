@@ -229,19 +229,27 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 	}
 }
 
-// restoresDue queues every parked session whose restore has come due.
+// restoresDue queues every parked session whose restore has come due, ALL
+// of them before any slot is filled, so the earliest beats take the slots
+// whatever order the armed restores are walked in.
 func (k *Keeper) restoresDue(ctx context.Context) {
 	now := k.deps.Clock.Now()
+	due := false
 	for ws, at := range k.restores {
 		if now.Before(at) {
 			continue
 		}
 		delete(k.restores, ws)
-		due := at.Add(RestoreLead)
-		if beat, ok := k.beats[ws]; ok {
-			due = beat
+		beat := at.Add(RestoreLead)
+		if armed, ok := k.beats[ws]; ok {
+			beat = armed
 		}
-		k.requestRestore(ctx, ws, due)
+		if k.enqueueRestore(ws, beat) {
+			due = true
+		}
+	}
+	if due {
+		k.pump(ctx)
 	}
 }
 
@@ -263,15 +271,23 @@ func (k *Keeper) restoreAsked(ctx context.Context, ws ids.WorkspaceID) {
 	k.requestRestore(ctx, ws, k.deps.Clock.Now())
 }
 
-// requestRestore puts WS in line for a restore slot, unless it is in line or
-// in flight already, and fills the free slots.
+// requestRestore puts WS in line for a restore slot and fills the free
+// slots.
 func (k *Keeper) requestRestore(ctx context.Context, ws ids.WorkspaceID, due time.Time) {
+	if k.enqueueRestore(ws, due) {
+		k.pump(ctx)
+	}
+}
+
+// enqueueRestore puts WS in line for a restore slot, earliest beat first,
+// unless it is in line or in flight already. It answers whether it did.
+func (k *Keeper) enqueueRestore(ws ids.WorkspaceID, due time.Time) bool {
 	if k.restoring[ws] || slices.ContainsFunc(k.queued, func(q queuedRestore) bool { return q.ws == ws }) {
-		return
+		return false
 	}
 	k.queued = append(k.queued, queuedRestore{ws: ws, due: due})
 	slices.SortStableFunc(k.queued, func(a, b queuedRestore) int { return a.due.Compare(b.due) })
-	k.pump(ctx)
+	return true
 }
 
 // pump starts the earliest queued restores while a slot is free. A workspace
