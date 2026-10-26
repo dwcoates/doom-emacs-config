@@ -1156,6 +1156,30 @@ func TestAQueueGroupIsListedThoughItsRepositoryIsCollapsed(t *testing.T) {
 	}
 }
 
+func TestEveryMergeQueueSectionGroupDrawsItsRepositorysHeader(t *testing.T) {
+	// Arrange: the fixture repository has a merge in line and a merge
+	// landed, so it draws a queue group and a merged group.
+	r, _ := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")})
+	landed := workspace("w-merged", "merged")
+	landed.MergedAt = at(0)
+	landed.Closed = true
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one"), landed))
+
+	// Assert: both groups draw one header, the repository's label.
+	section := latest(t, r).GetRecentlyMerged()
+	queueHead := queueGroup(latest(t, r), repo).GetHeader()
+	mergedHead := section.GetGroups()[0].GetHeader()
+	if queueHead.GetLabel().GetText() != repo.Name {
+		t.Fatalf("queue group header = %v, want the repository's label %q", queueHead, repo.Name)
+	}
+	if !proto.Equal(queueHead, mergedHead) {
+		t.Fatalf("queue group header %v and merged group header %v differ, want one shape", queueHead, mergedHead)
+	}
+}
+
 func TestTheMergeQueueSectionDrawsEachFrontAsItsHeadAndTheRestWaiting(t *testing.T) {
 	// Arrange: three of the fixture repository's workspaces in line, the
 	// running one first, and one of otherRepo's on its own queue.

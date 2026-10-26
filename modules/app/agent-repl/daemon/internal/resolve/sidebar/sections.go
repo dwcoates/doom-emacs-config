@@ -439,7 +439,7 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 		inLine += len(q.line)
 		section.Queues = append(section.Queues, &frontendv1.RosterMergeQueueRepoGroup{
 			Key:    repoKey(repo),
-			Header: &frontendv1.RosterMergedRepoGroupHeader{Label: &frontendv1.RosterLabel{Text: repo.Name}},
+			Header: repoGroupHeader(repo),
 			Queue:  r.drawMergeQueue(q, log.With(dlog.Context{"repo_id": string(repo.ID)})),
 		})
 	}
@@ -459,7 +459,7 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 		}
 		group := &frontendv1.RosterMergedRepoGroup{
 			Key:        repoKey(repo),
-			Header:     &frontendv1.RosterMergedRepoGroupHeader{Label: &frontendv1.RosterLabel{Text: repo.Name}},
+			Header:     repoGroupHeader(repo),
 			MergedRows: rows,
 		}
 		setMergedGroupDrawn(group, repo.Folded)
@@ -472,6 +472,13 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 	}
 	setMergedFold(section, r.state.reg.View.MergedFolded)
 	return section
+}
+
+// repoGroupHeader is the header a repository's group in the Merge Queue
+// section draws, a queue group's and a merged group's alike: the
+// repository's label, as its RosterRepoSection's header draws it.
+func repoGroupHeader(repo wsm.Repository) *frontendv1.RosterMergedRepoGroupHeader {
+	return &frontendv1.RosterMergedRepoGroupHeader{Label: &frontendv1.RosterLabel{Text: repo.Name}}
 }
 
 // setMergedGroupDrawn states whether the sidebar draws a merged group, from
