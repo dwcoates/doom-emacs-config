@@ -111,6 +111,7 @@
             "heat": {
               "position": 0.1078
             },
+            "startedAtMs": "${NOW}",
             "text": "9.7k"
           }
         }

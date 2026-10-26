@@ -95,6 +95,7 @@
             "heat": {
               "position": 0.07186666666666668
             },
+            "startedAtMs": "${NOW}",
             "text": "6.5k"
           }
         }
