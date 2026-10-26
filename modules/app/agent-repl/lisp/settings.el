@@ -509,7 +509,7 @@ every one of SOURCES."
 ;;;; ---- The mode -------------------------------------------------------
 
 (defconst agent-repl-settings--colors
-  '((ground . "#111110") (band . "#181817") (card . "#232322") (border . "#2c2c2b")
+  '((ground . "#111110") (band . "#1d1d1c") (card . "#232322") (border . "#2c2c2b")
     (keycap-edge . "#3a3a38") (text . "#f1efe9") (muted . "#898782") (accent . "#8bbeff"))
   "The page's colors, the webapp's dark theme's own (webapp/src/styles.css).
 `ground' is the sidebar's `--sidebar-bg', `band' its selected row's tint,

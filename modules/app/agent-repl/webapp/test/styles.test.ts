@@ -4250,21 +4250,21 @@ describe("the tool card's command grey", () => {
     expect(got).toEqual([0x11, 0x11, 0x10]);
   });
 
-  it("fills the dark theme's selected sidebar row with #181817, just lighter than a help button", () => {
+  it("fills the dark theme's selected sidebar row with #1d1d1c, lighter than a help button", () => {
     // Arrange
     const block = darkThemeBlock();
     const card = rgbOf(block, "--card");
     const ground = rgbOf(block, "--sidebar-bg");
-    const share = 0.38;
+    const share = 0.69;
 
     // Act
     const tint = [0, 1, 2].map((i) => Math.round(share * card[i] + (1 - share) * ground[i]));
 
     // Assert
     expect(withoutBlockComments(stylesheet)).toContain(
-      "--row-current-tint: color-mix(in srgb, var(--card) 38%, var(--sidebar-bg));",
+      "--row-highlight-tint: color-mix(in srgb, var(--card) 69%, var(--sidebar-bg));",
     );
-    expect(tint).toEqual([0x18, 0x18, 0x17]);
+    expect(tint).toEqual([0x1d, 0x1d, 0x1c]);
   });
 
   // The Settings page (lisp/settings.el, agent-repl-settings--colors) wears the
