@@ -2106,3 +2106,59 @@ func TestRegisterWorkspaceWithACreationJobRefusesARegisteredDir(t *testing.T) {
 		t.Fatalf("job = %+v, want it left unmaterialized", got)
 	}
 }
+
+func TestHideColumns(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	tests := []struct {
+		name   string
+		hidden bool
+		want   []workspaceColumn
+	}{
+		{name: "a hide stamps its instant and clears the lapse", hidden: true, want: []workspaceColumn{
+			{name: "hidden", value: true},
+			{name: "hidden_at", value: nanos(at)},
+			{name: "cache_lapses_at", value: nil},
+			{name: "cache_lapse_gated_tokens", value: nil},
+		}},
+		{name: "a show clears its instant and the lapse", hidden: false, want: []workspaceColumn{
+			{name: "hidden", value: false},
+			{name: "hidden_at", value: nil},
+			{name: "cache_lapses_at", value: nil},
+			{name: "cache_lapse_gated_tokens", value: nil},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := hideColumns(tt.hidden, at)
+
+			// Assert
+			if len(got) != len(tt.want) {
+				t.Fatalf("hideColumns = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("hideColumns[%d] = %v, want %v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestHideColumnsAreTheOneHideShape(t *testing.T) {
+	// Arrange
+	files := sourcescan.Production(t)
+
+	// Act
+	var sites []string
+	for _, file := range files {
+		for range strings.Count(string(file.Source), `name: "hidden_at"`) {
+			sites = append(sites, file.Name)
+		}
+	}
+
+	// Assert
+	if len(sites) != 1 || sites[0] != "workspaces.go" {
+		t.Fatalf("the hidden instant is written at %v, want only hideColumns in workspaces.go", sites)
+	}
+}

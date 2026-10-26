@@ -939,10 +939,8 @@ func (s *store) SetPriority(ctx context.Context, id WorkspaceID, p *Priority) er
 // shown under a parent that is not open: both are refused by the family rules,
 // nothing written (family.go).
 func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at time.Time) error {
-	var hiddenAt any
 	fields := dlog.Context{"workspace": string(id), "hidden": hidden}
 	if hidden {
-		hiddenAt = nanos(at)
 		fields["hidden_at"] = at
 	}
 	return s.write(ctx, "daemon.wsm.set_hidden", fields, func(ctx context.Context, tx *sql.Tx) error {
@@ -963,12 +961,27 @@ func (s *store) SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at t
 				return err
 			}
 		}
-		return updateWorkspaceColumns(ctx, tx, id,
-			workspaceColumn{name: "hidden", value: hidden},
-			workspaceColumn{name: "hidden_at", value: hiddenAt},
-			workspaceColumn{name: "cache_lapses_at", value: nil},
-			workspaceColumn{name: "cache_lapse_gated_tokens", value: nil})
+		return updateWorkspaceColumns(ctx, tx, id, hideColumns(hidden, at)...)
 	})
+}
+
+// hideColumns are the columns a move into or out of the hidden section
+// writes: the flag, its instant (AT while hidden, none once shown), and the
+// projected cache lapse, cleared either way, since a shown workspace keeps
+// its cache warm again and a fresh hide waits for the shim's own projection.
+// Every move into or out of the hidden section writes them, so no two moves
+// can disagree about what a hidden row holds (TestHideColumnsAreTheOneHideShape).
+func hideColumns(hidden bool, at time.Time) []workspaceColumn {
+	var hiddenAt any
+	if hidden {
+		hiddenAt = nanos(at)
+	}
+	return []workspaceColumn{
+		{name: "hidden", value: hidden},
+		{name: "hidden_at", value: hiddenAt},
+		{name: "cache_lapses_at", value: nil},
+		{name: "cache_lapse_gated_tokens", value: nil},
+	}
 }
 
 // SetCurrent records the user's selection of a workspace at an instant. At most
