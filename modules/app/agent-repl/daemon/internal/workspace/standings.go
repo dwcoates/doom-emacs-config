@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
@@ -83,6 +84,16 @@ func (v *verbs) SetOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.W
 			return "", fmt.Errorf("set one-shot on %q: %w", ws, err)
 		}
 	}
+	// LEAVING THE ONE-SHOT STATE asks the workspace's own agent to file it
+	// into a subsection (BriefSubsectionPlacement). The brief is composed
+	// BEFORE the mark is written, so a corpus that cannot give it changes
+	// nothing.
+	var placement string
+	if record.OneShot && !oneShot {
+		if placement, err = v.oneShotExitPlacement(ctx, log, record); err != nil {
+			return "", fmt.Errorf("set one-shot on %q: %w", ws, err)
+		}
+	}
 	err = v.deps.DB.SetOneShot(ctx, ws, oneShot)
 	if errors.Is(err, wsm.ErrNotFound) {
 		return "", refuse(log, rpc, ArmNoCreationJob, "the workspace was registered rather than created, so it records no creation to mark", false)
@@ -93,7 +104,54 @@ func (v *verbs) SetOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.W
 	}
 	log.Info(opSetOneShot, "recorded the workspace's one-shot standing", fields)
 	v.republishRegistry(ctx, log, opSetOneShot)
+	if placement != "" {
+		if err := v.submitPlacement(ctx, log, ws, placement); err != nil {
+			return "", fmt.Errorf("set one-shot on %q: %w", ws, err)
+		}
+	}
 	return directive, nil
+}
+
+// opOneShotExitPlacement records the placement brief a workspace leaving its
+// one-shot state is sent, or why it is sent none.
+const opOneShotExitPlacement = "daemon.workspace.one_shot_exit_placement"
+
+// oneShotExitPlacement answers the placement brief RECORD is owed as it leaves
+// its one-shot state, "" when it is owed none: a child sits wherever its root
+// does and a merge workspace has its own brief (filesItself), and a
+// repository with nothing to file into asks nothing (placementOwed).
+func (v *verbs) oneShotExitPlacement(ctx context.Context, log dlog.Logger, record wsm.Workspace) (string, error) {
+	fields := dlog.Context{"brief": BriefSubsectionPlacement, "repo_id": string(record.Repo)}
+	if !filesItself(record.Parent, record.MergeOf != nil) {
+		log.Debug(opOneShotExitPlacement, "the workspace sits wherever its family's root does, so it is not asked to file itself", fields)
+		return "", nil
+	}
+	owed, err := v.placementOwed(ctx, log, record)
+	if err != nil || !owed {
+		return "", err
+	}
+	return v.corpusNote(log, opOneShotExitPlacement, fields, BriefSubsectionPlacement, nil)
+}
+
+// submitPlacement queues the placement brief TEXT to workspace WS's own
+// session as a deferred prompt: it waits behind a running turn and wakes an
+// idle agent, so the workspace's agent files the workspace itself.
+func (v *verbs) submitPlacement(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, text string) error {
+	submission := deferredBrief(ws, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT)
+	fields := dlog.Context{"turn": string(submission.Turn)}
+	disposition, err := v.deps.Queue.Submit(ctx, submission)
+	if err != nil {
+		log.Error(opOneShotExitPlacement, "the workspace's queue did not accept its placement brief", dlog.WithCause(fields, err))
+		return fmt.Errorf("submit the placement brief: %w", err)
+	}
+	if disposition.RefusedArm != "" {
+		fields["refused_arm"] = disposition.RefusedArm
+		log.Error(opOneShotExitPlacement, "the workspace's queue refused its placement brief", fields)
+		return fmt.Errorf("submit the placement brief: the queue refused it: %s", disposition.RefusedArm)
+	}
+	fields["delivered"], fields["parked"] = disposition.Delivered, disposition.Parked()
+	log.Info(opOneShotExitPlacement, "asked the workspace that left its one-shot state to file itself into a subsection", fields)
+	return nil
 }
 
 // TakeBackOneShot clears WS's one-shot mark because the user took the

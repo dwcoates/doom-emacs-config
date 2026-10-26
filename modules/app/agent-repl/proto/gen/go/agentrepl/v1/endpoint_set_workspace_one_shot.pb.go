@@ -17,6 +17,17 @@
 // prompt another workspace's agent sent, or one the daemon submits, leaves
 // it. The clear is this verb's unmark, asked by the user.
 //
+// LEAVING THE ONE-SHOT STATE ASKS THE WORKSPACE TO FILE ITSELF (owner
+// request, 2026-10-26). An unmark of a marked workspace, by any asker or by
+// the user taking it back, queues the daemon's placement brief to the
+// workspace's own session as a deferred prompt
+// (conversation.v1.PromptOrigin.PROMPT_ORIGIN_SUBSECTION_PLACEMENT): its
+// agent reads the repository's subsections and files the workspace, as a new
+// workspace is asked to in its first message. A child, which sits wherever
+// its root does, and a repository with nothing to file into are asked
+// nothing. A brief that cannot be composed fails the unmark with nothing
+// changed.
+//
 // A CHILD ITS OWNER LANDS IS NEVER A ONE-SHOT: landing it is its owner's act,
 // so marking one is refused (`owner_lands`), as creating one is
 // (CreateWorkspaceError.one_shot_owner_lands).

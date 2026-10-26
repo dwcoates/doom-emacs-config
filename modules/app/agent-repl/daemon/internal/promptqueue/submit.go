@@ -298,6 +298,8 @@ func exemptFromLease(lease wsm.Lease, origin conversationv1.PromptOrigin) bool {
 //     child's notice to its owner tell a workspace what another workspace
 //     did, for the same reason: the daemon composed them, so nobody is there
 //     to send them again.
+//   - The brief asking a workspace that left its one-shot state to file
+//     itself into a subsection, for the same reason.
 //
 // A prompt the user types is still refused, so the user knows it did not go,
 // and so is one an agent sent, whose refusal its command prints.
@@ -308,7 +310,8 @@ func waitsOutColdGate(origin conversationv1.PromptOrigin) bool {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE:
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:
 		return true
 	}
 	return false

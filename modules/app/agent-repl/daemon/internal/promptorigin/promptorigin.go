@@ -39,14 +39,16 @@ func CheckSenderNamed(origin string, named bool) error {
 // no prompt row in the feed, and no held card while it waits behind a
 // running turn. Such a prompt is the daemon's word to the agent alone, which
 // the user neither said nor needs to read: a merge queue subscription's
-// notice, a workspace subscription's notice, and the brief notice that a
-// workspace derived from this one was created, landed or closed. The agent's
-// reply to it is drawn as any reply is.
+// notice, a workspace subscription's notice, the brief notice that a
+// workspace derived from this one was created, landed or closed, and the
+// brief asking a workspace that left its one-shot state to file itself into
+// a subsection. The agent's reply to it is drawn as any reply is.
 func Unseen(origin conversationv1.PromptOrigin) bool {
 	switch origin {
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE:
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:
 		return true
 	}
 	return false

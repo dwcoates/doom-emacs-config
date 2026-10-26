@@ -717,6 +717,7 @@ var gateWaitingOrigins = []conversationv1.PromptOrigin{
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT,
 }
 
 // gateWaitingSubmission is a deferred submission of ORIGIN.
@@ -792,6 +793,7 @@ func TestWhichPromptsWaitOutAColdGate(t *testing.T) {
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},

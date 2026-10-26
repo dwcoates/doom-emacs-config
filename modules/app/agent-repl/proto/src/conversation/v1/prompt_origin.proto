@@ -209,4 +209,12 @@ enum PromptOrigin {
   // origins, inside the deploy bubble's hook tab rather than as a prompt the
   // user said.
   PROMPT_ORIGIN_DEPLOY_HOOK = 43;
+  // The daemon's brief asking a workspace that just LEFT its one-shot state
+  // (its mark cleared through agentrepl.v1.SetWorkspaceOneShot: by its own
+  // agent, its owner, or the user taking it back) to file itself into its
+  // repository's sidebar subsections, as a new workspace is asked to in its
+  // first message. Submitted as a deferred prompt, so it waits behind a
+  // running turn and wakes an idle agent, and drawn as NO row: it is the
+  // daemon's word to the agent, as a workspace notice is.
+  PROMPT_ORIGIN_SUBSECTION_PLACEMENT = 44;
 }
