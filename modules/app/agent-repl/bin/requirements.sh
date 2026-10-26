@@ -309,9 +309,9 @@ check_notification_permission() {
   fi
 }
 
-# skill_source ENTRY: the canonical source path of a skill link, or empty when
+# link_source ENTRY: the canonical source path of a link entry, or empty when
 # its env root is unset.
-skill_source() {
+link_source() {
   local e="$1" repo env path
   repo="$(field "$e" .source.repo)"
   if [ -n "$repo" ]; then
@@ -353,7 +353,7 @@ in_linked_worktree() {
 check_retired_skill_link() {
   local e="$1" dir="$2" dest src
   dest="$dir/$(field "$e" .name)"
-  src="$(skill_source "$e")"
+  src="$(link_source "$e")"
   FIX="rm $dest"
   if [ -L "$dest" ] && { [ "$(readlink "$dest")" = "$src" ] || [ ! -e "$dest" ]; }; then
     STATUS=outdated; DETAIL="$dest still links the retired skill"
@@ -383,11 +383,19 @@ check_skill_link_in() {
   fi
   name="$(field "$e" .name)"
   dest="$dir/$name"
-  src="$(skill_source "$e")"
+  src="$(link_source "$e")"
   if [ -z "$src" ]; then
     STATUS=needs-user; DETAIL="$(field "$e" .source.env) is not set, so $name has no source"
     FIX="set $(field "$e" .source.env), then re-run install"; return
   fi
+  check_link "$name" "$src" "$dest"
+}
+
+# check_link NAME SRC DEST: the one check of a link this script keeps, for
+# every link kind. SRC must be a main-worktree path that exists; a file of the
+# user's at DEST is theirs and never overwritten.
+check_link() {
+  local name="$1" src="$2" dest="$3"
   FIX="ln -sfn $src $dest"
   if in_linked_worktree "$src"; then
     STATUS=failed; DETAIL="$name's source $src is inside a linked worktree, whose path dangles once it is pruned"
@@ -572,7 +580,7 @@ install_skill_link() {
   local e="$1" src dir name
   name="$(field "$e" .name)"
   if [ "$(printf '%s\n' "$e" | jq -r '.retired // false')" = true ]; then
-    src="$(skill_source "$e")"
+    src="$(link_source "$e")"
     while IFS= read -r dir; do
       # Only a link of ours comes out; a file or a foreign link is the user's.
       if [ -L "$dir/$name" ] && { [ "$(readlink "$dir/$name")" = "$src" ] || [ ! -e "$dir/$name" ]; }; then
@@ -581,7 +589,7 @@ install_skill_link() {
     done < <(skills_dirs)
     return
   fi
-  src="$(skill_source "$e")"
+  src="$(link_source "$e")"
   [ -n "$src" ] && [ -e "$src" ] || return 1
   while IFS= read -r dir; do
     mkdir -p "$dir"
@@ -678,7 +686,7 @@ uninstall_entry() {
   kind="$(field "$e" .kind)"
   case "$kind" in
     skill_link)
-      src="$(skill_source "$e")"
+      src="$(link_source "$e")"
       while IFS= read -r dir; do
         dest="$dir/$(field "$e" .name)"
         if [ -L "$dest" ] && [ -n "$src" ] && [ "$(readlink "$dest")" = "$src" ]; then
