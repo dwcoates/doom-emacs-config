@@ -745,10 +745,20 @@ func (s CreateSpec) forkedElsewhere() bool {
 	return s.MergeOf == nil && s.ForkFrom != nil && (s.Parent == nil || *s.ForkFrom != *s.Parent)
 }
 
+// filesItself reports whether the created workspace is told to file itself
+// into one of its repository's subsections (BriefSubsectionPlacement). Only a
+// ROOT is: a family never splits across subsections, so a child sits wherever
+// its root does, and placing it would move its whole family; a merge
+// workspace's own brief says what it is.
+func (s CreateSpec) filesItself() bool {
+	return s.Parent == nil && s.MergeOf == nil
+}
+
 // submitInitialPrompt sends the workspace's first message down the ONE delivery
-// path, with origin WORKSPACE_CREATED. A one-shot prompt is DECORATED first:
-// the autonomous preamble, the user's words, and the repository's completion
-// directive.
+// path, with origin WORKSPACE_CREATED. A root's prompt is followed by the
+// subsection placement note when its repository has subsections. A one-shot
+// prompt is DECORATED last: the autonomous preamble, the composed message,
+// and the repository's completion directive.
 func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record wsm.Workspace, spec CreateSpec, policy prompts.Source) error {
 	if strings.TrimSpace(spec.InitialPrompt) == "" {
 		log.Debug(opCreate, "created without an initial prompt", nil)
@@ -768,6 +778,19 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 			return refuse(log, "CreateWorkspace", ArmBriefMissing, err.Error(), false)
 		}
 		text = decorated
+	}
+	if spec.filesItself() {
+		owed, err := v.placementOwed(ctx, log, record)
+		if err != nil {
+			return fmt.Errorf("create %q: %w", record.Name, err)
+		}
+		if owed {
+			decorated, err := v.decorateSubsectionPlacement(log, text, record)
+			if err != nil {
+				return refuse(log, "CreateWorkspace", ArmBriefMissing, err.Error(), false)
+			}
+			text = decorated
+		}
 	}
 	if spec.OneShot {
 		decorated, err := v.decorateOneShot(text, policy)
@@ -902,6 +925,62 @@ func (v *verbs) decorateForkedElsewhere(ctx context.Context, log dlog.Logger, ra
 		func(origin wsm.Workspace) map[string]string {
 			return map[string]string{"origin": origin.Name, "source": source}
 		})
+}
+
+// BriefSubsectionPlacement is the note a root workspace's first message closes
+// with when its repository has subsections: read them, and file this
+// workspace into the one it most belongs in, if any
+// (`agent-repld workspace subsections` and `workspace place`).
+const BriefSubsectionPlacement = "workspace-subsection-placement"
+
+// opSubsectionPlacement is the operation the create records its placement
+// note's decision under: whether the note was owed, and why not.
+const opSubsectionPlacement = "daemon.workspace.subsection_placement"
+
+// placementOwed reports whether RECORD's first message owes the
+// BriefSubsectionPlacement note: its repository has at least one subsection.
+// With nothing to file into, the agent is not asked. A subsection list that
+// cannot be read fails the create rather than guessing either way.
+func (v *verbs) placementOwed(ctx context.Context, log dlog.Logger, record wsm.Workspace) (bool, error) {
+	fields := dlog.Context{"repo_id": string(record.Repo)}
+	subsections, err := v.deps.DB.ListSubsections(ctx)
+	if err != nil {
+		log.Error(opSubsectionPlacement, "could not list the subsections a new workspace could file itself into", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("list the subsections of repository %q: %w", record.Repo, err)
+	}
+	own := 0
+	for _, sub := range subsections {
+		if sub.Repo == record.Repo {
+			own++
+		}
+	}
+	fields["subsections"] = own
+	if own == 0 {
+		log.Debug(opSubsectionPlacement, "the repository has no subsections, so the new workspace is not asked to file itself", fields)
+		return false, nil
+	}
+	return true, nil
+}
+
+// decorateSubsectionPlacement closes the first message with the meta-wrapped
+// BriefSubsectionPlacement note. The brief is the daemon's own, the same for
+// every repository, since the verbs it names are the agent API's. A brief
+// that will not load or splice fails the create loudly rather than sending
+// the prompt without the note it owes.
+func (v *verbs) decorateSubsectionPlacement(log dlog.Logger, raw string, record wsm.Workspace) (string, error) {
+	fields := dlog.Context{"brief": BriefSubsectionPlacement, "repo_id": string(record.Repo)}
+	loaded, err := v.load(v.deps.PromptsDir, BriefSubsectionPlacement)
+	if err != nil {
+		log.Error(opSubsectionPlacement, "could not read the subsection placement brief", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("read the %s brief: %w", BriefSubsectionPlacement, err)
+	}
+	note, err := v.splice(loaded, nil)
+	if err != nil {
+		log.Error(opSubsectionPlacement, "could not splice the subsection placement brief", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("splice the %s brief: %w", BriefSubsectionPlacement, err)
+	}
+	log.Debug(opSubsectionPlacement, "asked the new workspace to file itself into a subsection", fields)
+	return raw + prompts.Wrap("\n\n"+note), nil
 }
 
 // BriefOneShotContext is the note a one-shot asked for from inside another

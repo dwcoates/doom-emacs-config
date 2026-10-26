@@ -74,6 +74,8 @@ type fakeDB struct {
 	subsections  []wsm.Subsection
 	arrangements []string
 	arrangeErr   error
+	// listSubsectionsErr fails ListSubsections, which answers subsections.
+	listSubsectionsErr error
 
 	// rolledBack is each workspace's rolled-back turns; rolledBackErr fails
 	// the read.
@@ -574,6 +576,10 @@ func (d *fakeDB) arrange(call string) error {
 	}
 	d.arrangements = append(d.arrangements, call)
 	return nil
+}
+
+func (d *fakeDB) ListSubsections(context.Context) ([]wsm.Subsection, error) {
+	return d.subsections, d.listSubsectionsErr
 }
 
 func (d *fakeDB) CreateSubsection(_ context.Context, repo ids.RepoID, name string) (wsm.Subsection, error) {
