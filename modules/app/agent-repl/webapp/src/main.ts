@@ -59,7 +59,7 @@ import { drawCommandPanel } from "./panels/panels.js";
 import { liveUnshownAnimationsEnv, pauseAnimationsWhileUnshown } from "./host/unshown-animations.js";
 import { mountSidebar } from "./sidebar/sidebar.js";
 import { mountTopbar } from "./topbar/topbar.js";
-import { installProseLinkRouting } from "./link.js";
+import { installNavigationGuard, installProseLinkRouting } from "./link.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
 import { LEVEL_WINDOW_OPERATION, bindLogContext, log } from "./log.js";
@@ -384,6 +384,9 @@ export async function boot(): Promise<void> {
     // exactly as the structured links do. Hung here, at the feed/markdown seam,
     // once — every markdown-bearing surface lives inside `feedScroll`.
     installProseLinkRouting(ctx, shell.feedScroll);
+    // AND NO OUTWARD LINK ANYWHERE ON THE PAGE NAVIGATES THE WEBVIEW: what no
+    // surface routed opens externally too (link.ts, installNavigationGuard).
+    installNavigationGuard(ctx, document);
 
     // A PAGE THE WEBHOST IS NOT SHOWING RUNS NO ANIMATIONS, and resumes each
     // where it would have been when shown (host/unshown-animations.ts).

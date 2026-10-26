@@ -26,6 +26,20 @@
  * `renderMergeCommitLink` is the same verb again, opening the branch log a
  * landed merge's commit sits in.
  *
+ * AN OUTWARD LINK OPENS IN THE USER'S CHROME, NEVER IN THIS WEBVIEW
+ * (INTENTIONAL, OWNER-RULED 2026-10-26 -- DO NOT CHANGE). Every http(s) link a
+ * page draws opens through OpenExternal, which launches Chrome in the profile
+ * the workspace's agent-repl login signs in as (work or personal,
+ * daemon/internal/externalbrowser). That holds for EVERY click on the link:
+ * a modified click (meta, ctrl, shift, alt) and a middle click are claimed
+ * too, never "left to the platform", because inside Emacs the platform is
+ * this webview -- an unclaimed click on a `target="_blank"` or plain anchor
+ * navigates the whole agent-repl host to the site (2026-10-26, 17:06: a
+ * link opened in the xwidget and the page was lost until the host reloaded).
+ * `installNavigationGuard` catches any outward link a surface did not route,
+ * and Emacs's host takes back any navigation that still slips through
+ * (webhost.el). Changing any of this re-opens links in the xwidget.
+ *
  * NOTHING IS DRAWN ON SUCCESS. The result of either click happens elsewhere —
  * in a browser window, in an editor — so a confirmation on this page would be
  * chrome reporting something the user is already looking at. A REFUSAL is
@@ -112,14 +126,17 @@ export function renderExternalLink(ctx: AppContext, spec: ExternalLinkSpec): HTM
   anchor.setAttribute("data-external-link", "");
   anchor.href = spec.url;
   anchor.textContent = label;
-  anchor.addEventListener("click", (event: MouseEvent) => {
-    if (!claimsClick(event)) return;
+  const onActivate = (event: MouseEvent): void => {
+    if (!claimsOutwardClick(event)) return;
     // Cancel FIRST. A failed open is reported below, while a navigation would
     // already have destroyed the page the report was going to appear on.
     event.preventDefault();
     event.stopPropagation();
     void openExternal(ctx, anchor, spec.url);
-  });
+  };
+  anchor.addEventListener("click", onActivate);
+  // A middle click arrives as `auxclick`, never as `click`.
+  anchor.addEventListener("auxclick", onActivate);
   return anchor;
 }
 
@@ -297,7 +314,45 @@ function editorTargetContext(target: EditorTarget): Record<string, unknown> {
 export function installProseLinkRouting(ctx: AppContext, root: HTMLElement): () => void {
   const onClick = (event: MouseEvent): void => routeProseLinkClick(ctx, event);
   root.addEventListener("click", onClick, true);
-  return () => root.removeEventListener("click", onClick, true);
+  root.addEventListener("auxclick", onClick, true);
+  return () => {
+    root.removeEventListener("click", onClick, true);
+    root.removeEventListener("auxclick", onClick, true);
+  };
+}
+
+/**
+ * THE LAST LINE IN THE PAGE: any outward (http(s)) link click nothing on the
+ * page routed opens through OpenExternal rather than navigating this webview.
+ * Hung once over the whole document, in the bubble phase, so every surface's
+ * own routing runs first and only what none of them claimed reaches it --
+ * recorded, because a surface that draws an unrouted outward link is a
+ * defect to fix there. See the file's "AN OUTWARD LINK OPENS IN THE USER'S
+ * CHROME" rule.
+ */
+export function installNavigationGuard(ctx: AppContext, root: Document | HTMLElement): () => void {
+  const onClick = (event: Event): void => {
+    if (!(event instanceof MouseEvent) || !claimsOutwardClick(event)) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const anchor = target.closest("a[href]");
+    if (!(anchor instanceof HTMLElement)) return;
+    const href = anchor.getAttribute("href") ?? "";
+    if (!LINKABLE_SCHEME.test(href)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    log.info("an outward link no surface routed was opened externally by the page's guard", {
+      operation: "link.navigation-guard",
+      context: { url: href },
+    });
+    void openExternal(ctx, anchor, href);
+  };
+  root.addEventListener("click", onClick);
+  root.addEventListener("auxclick", onClick);
+  return () => {
+    root.removeEventListener("click", onClick);
+    root.removeEventListener("auxclick", onClick);
+  };
 }
 
 function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
@@ -308,7 +363,10 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
   // The structured links own their own click; never handle them twice, and
   // never cancel here — their bubble-phase handler still has to fire.
   if (anchor.hasAttribute("data-external-link") || anchor.hasAttribute("data-editor-link")) return;
-  if (!claimsClick(event)) return;
+  // EVERY CLICK ON A PROSE LINK IS CLAIMED, modified and middle ones too: each
+  // carries an href, so an unclaimed one navigates this webview (see the
+  // file's "AN OUTWARD LINK OPENS IN THE USER'S CHROME" rule).
+  if (!claimsOutwardClick(event)) return;
 
   // The RAW href, exactly as the markdown carried it: the resolved `.href`
   // would have turned a relative or `file://` path into a page-origin url.
@@ -383,6 +441,20 @@ function claimsClick(event: MouseEvent): boolean {
   if (event.defaultPrevented) return false;
   if (event.button !== 0) return false;
   return !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);
+}
+
+/**
+ * Whether a link that carries an href takes the click: a primary click with
+ * any modifiers, or a middle click, not already claimed by somebody else.
+ *
+ * NOT `claimsClick`. Leaving a modified or middle click "to the platform" is
+ * right only for an href-less editor link, where the platform has nothing to
+ * open. On an anchor with an href the platform is this webview, which would
+ * navigate the agent-repl host to the site.
+ */
+function claimsOutwardClick(event: MouseEvent): boolean {
+  if (event.defaultPrevented) return false;
+  return event.button === 0 || event.button === 1;
 }
 
 async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): Promise<void> {

@@ -30,6 +30,7 @@ import type { FailureSink } from "../src/failure/sink.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
 import {
   editorTargetAnchor,
+  installNavigationGuard,
   installProseLinkRouting,
   openExternalRefusal,
   openInEditorRefusal,
@@ -587,25 +588,44 @@ describe("renderExternalLink: the click", () => {
     expect([refusalAt(a) !== null, external.length]).toEqual([false, 1]);
   });
 
-  const ignored: ReadonlyArray<[string, MouseEventInit]> = [
-    ["a meta-click", { metaKey: true }],
-    ["a ctrl-click", { ctrlKey: true }],
-    ["a shift-click", { shiftKey: true }],
-    ["an alt-click", { altKey: true }],
-    ["a middle click", { button: 1 }],
+  // EVERY CLICK IS CLAIMED (owner ruling, 2026-10-26): inside Emacs the
+  // "platform" a modified or middle click was once left to is this webview,
+  // which navigated the agent-repl host to the site. A middle click arrives as
+  // `auxclick`.
+  const claimed: ReadonlyArray<[string, string, MouseEventInit]> = [
+    ["a meta-click", "click", { metaKey: true }],
+    ["a ctrl-click", "click", { ctrlKey: true }],
+    ["a shift-click", "click", { shiftKey: true }],
+    ["an alt-click", "click", { altKey: true }],
+    ["a middle click", "auxclick", { button: 1 }],
   ];
-  for (const [label, init] of ignored) {
-    it(`leaves ${label} to the platform`, async () => {
+  for (const [label, type, init] of claimed) {
+    it(`opens ${label} in the external browser`, async () => {
       const { ctx, external } = harness();
       const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
-      // In the document, so the click reaches the page-level listener that
-      // stands in for the webview -- an unclaimed click is the platform's.
       document.body.append(a);
-      a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...init }));
+      a.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, ...init }));
       await settle();
-      expect(external).toHaveLength(0);
+      a.remove();
+      expect(external.map((r) => r.url)).toEqual(["https://example.test"]);
+    });
+
+    it(`cancels ${label}, so the webview never navigates`, () => {
+      const { ctx } = harness();
+      const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, ...init });
+      a.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
     });
   }
+
+  it("leaves a right click to the context menu", async () => {
+    const { ctx, external } = harness();
+    const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
+    a.dispatchEvent(new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 2 }));
+    await settle();
+    expect(external).toHaveLength(0);
+  });
 
   it("leaves an already-cancelled click to whoever claimed it", async () => {
     const { ctx, external } = harness();
@@ -859,6 +879,34 @@ describe("installProseLinkRouting: a clicked markdown prose link", () => {
     off();
   });
 
+  it("routes a meta-clicked http(s) link through OpenExternal too", async () => {
+    // Arrange.
+    const { ctx, external } = harness();
+    const { root, off } = prose(ctx, renderMarkdown("[docs](https://example.test/x)"));
+
+    // Act.
+    root.querySelector("a")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true }));
+    await settle();
+
+    // Assert.
+    expect(external.map((r) => r.url)).toEqual(["https://example.test/x"]);
+    off();
+  });
+
+  it("routes a middle-clicked http(s) link through OpenExternal too", async () => {
+    // Arrange.
+    const { ctx, external } = harness();
+    const { root, off } = prose(ctx, renderMarkdown("[docs](https://example.test/x)"));
+
+    // Act.
+    root.querySelector("a")!.dispatchEvent(new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }));
+    await settle();
+
+    // Assert.
+    expect(external.map((r) => r.url)).toEqual(["https://example.test/x"]);
+    off();
+  });
+
   it("routes a file:// link through OpenInEditor, decoding its path", async () => {
     // Arrange: markdown restricts anchors to http(s), so a file link is
     // injected as the raw anchor the interceptor must still route.
@@ -1069,5 +1117,64 @@ describe("installProseLinkRouting: a clicked markdown prose link", () => {
       lines.some(([level, line]) => level === "warn" && line.includes("link.prose-unroutable-scheme")),
     ).toBe(true);
     off();
+  });
+});
+
+describe("installNavigationGuard: an outward link no surface routed", () => {
+  /** A raw anchor outside every routed surface, the guard hung over ROOT. */
+  function unrouted(ctx: AppContext, href: string): { anchor: HTMLAnchorElement; off: () => void } {
+    const root = document.createElement("div");
+    const anchor = document.createElement("a");
+    anchor.setAttribute("href", href);
+    anchor.setAttribute("target", "_blank");
+    anchor.textContent = "x";
+    root.appendChild(anchor);
+    return { anchor, off: installNavigationGuard(ctx, root) };
+  }
+
+  it("cancels the click, so the webview never navigates", () => {
+    const { ctx } = harness();
+    const { anchor, off } = unrouted(ctx, "https://example.test/y");
+    const event = click(anchor);
+    off();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("opens the link through OpenExternal", async () => {
+    const { ctx, external } = harness();
+    const { anchor, off } = unrouted(ctx, "https://example.test/y");
+    click(anchor);
+    await settle();
+    off();
+    expect(external.map((r) => r.url)).toEqual(["https://example.test/y"]);
+  });
+
+  it("opens a modified click through OpenExternal too", async () => {
+    const { ctx, external } = harness();
+    const { anchor, off } = unrouted(ctx, "https://example.test/y");
+    anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: true }));
+    await settle();
+    off();
+    expect(external).toHaveLength(1);
+  });
+
+  it("leaves a link a surface already routed alone, opening it once", async () => {
+    const { ctx, external } = harness();
+    const root = document.createElement("div");
+    root.appendChild(renderExternalLink(ctx, { text: "docs", url: "https://example.test" }));
+    const off = installNavigationGuard(ctx, root);
+    click(root.querySelector("a")!);
+    await settle();
+    off();
+    expect(external).toHaveLength(1);
+  });
+
+  it("leaves a non-http(s) href alone", async () => {
+    const { ctx, external } = harness();
+    const { anchor, off } = unrouted(ctx, "#section");
+    const event = click(anchor);
+    await settle();
+    off();
+    expect([event.defaultPrevented, external.length]).toEqual([false, 0]);
   });
 });
