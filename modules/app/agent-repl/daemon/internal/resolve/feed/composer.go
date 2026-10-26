@@ -121,7 +121,8 @@ const (
 	// the node read after it, its first child, else what NeighborNext names.
 	NeighborFollowing
 	// NeighborParent is the node the entry answers once it steps up (C-i):
-	// the node's parent. A root has none.
+	// the node's parent, else, for a root, the next root. The last root has
+	// none.
 	NeighborParent
 )
 
@@ -210,7 +211,7 @@ func treeNeighbor(tree *frontendv1.ProseTree, label string, way NeighborWay) (ne
 		if parent[at] >= 0 {
 			return nodes[parent[at]].GetLabel().GetText(), true, true
 		}
-		return "", true, false
+		return next()
 	case NeighborPrevious:
 		if k := position(at); k > 0 {
 			return nodes[children[parent[at]][k-1]].GetLabel().GetText(), true, true

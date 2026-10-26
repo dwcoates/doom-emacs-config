@@ -338,5 +338,15 @@ wrong labels). That needs one parse, in one place, that every program reads.
   - **Both keys share one conditional binding shape**
     (`agent-repl-prompt-entries--on-entry-binding`), which replaced
     `agent-repl-prompt-entries--descend-binding`.
-  - **The tree's last node and a root keep their labels** under `C-o` and
-    `C-i`, and the composer flashes why.
+  - **The tree's last node keeps its label** under `C-o`, and the composer
+    flashes why. A root under `C-i` now steps on to the next root (section 11).
+
+### 11. `C-i` on a root steps on to the next root
+
+- **What:** `EntryNeighborDirection.parent` answers a root with the next root
+  instead of none. No field or arm changed. `feed.NeighborParent` follows.
+- **Why:** the owner's ask of 2026-10-26: `C-i` with no higher level to go to
+  moves to the next sibling at that level (`2 - ` becomes `3 - `).
+- **Decisions inside the shape:**
+  - **The arm keeps its name**, since every non-root still answers its parent.
+  - **The last root keeps its label**, and the composer flashes why.

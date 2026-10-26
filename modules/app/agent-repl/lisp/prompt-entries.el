@@ -428,7 +428,8 @@ the entry targets."
 ;; words kept.  `C-o' steps on, to the node read after it: its first child
 ;; (`3.2 - ' becomes `3.2.1 - '), else its next sibling (`3.3 - '), else the
 ;; next sibling of its nearest ancestor that has one (`4 - ').  `C-i' steps
-;; up, to its parent (`3.2 - ' becomes `3 - ').  The daemon finds the node
+;; up, to its parent (`3.2 - ' becomes `3 - '), and a root, having none, steps
+;; on to the next root (`3 - ' becomes `4 - ').  The daemon finds the node
 ;; (FindEntryNeighbor's `following' and `parent').  Off an entry line either
 ;; key is what it always was; `C-i' is Doom's GUI-only `[C-i]' event, so `TAB'
 ;; is never taken.
@@ -479,10 +480,11 @@ last node keeps its label, and the composer says so."
 (defun agent-repl-prompt-entries-step-up ()
   "Relabel point's entry to answer its node's parent.
 The composer's `C-i' on an entry line: `3.2 - ' becomes `3 - ', its words
-kept, the parent found in the tree the entry targets.  A root keeps its
-label, and the composer says so."
+kept, the parent found in the tree the entry targets.  A root steps on to
+the next root (`3 - ' becomes `4 - ').  The last root keeps its label, and
+the composer says so."
   (interactive)
-  (agent-repl-prompt-entries--step :parent "%s has no parent to answer"))
+  (agent-repl-prompt-entries--step :parent "%s has no parent or later root to answer"))
 
 (defun agent-repl-prompt-entries--on-entry-filter (command)
   "COMMAND on an entry line, else nil, so the key off one keeps its own binding."

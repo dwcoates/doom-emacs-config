@@ -131,7 +131,8 @@ func TestEntryNeighborWalksTheTargetTree(t *testing.T) {
 		{name: "following the tree's last node is none", label: "2.1", way: NeighborFollowing},
 		{name: "the parent of a branch's child", label: "1.2.1", way: NeighborParent, want: "1.2", wantOK: true},
 		{name: "the parent of a root's child is the root", label: "2.1", way: NeighborParent, want: "2", wantOK: true},
-		{name: "a root has no parent", label: "1", way: NeighborParent},
+		{name: "the parent of a root is the next root", label: "1", way: NeighborParent, want: "2", wantOK: true},
+		{name: "the parent of the last root is none", label: "2", way: NeighborParent},
 		{name: "a label no response holds has no neighbor", label: "9.9", way: NeighborNext},
 	}
 	for _, tc := range tests {

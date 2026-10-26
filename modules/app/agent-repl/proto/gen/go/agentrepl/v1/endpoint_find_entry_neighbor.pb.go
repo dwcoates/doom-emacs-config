@@ -8,7 +8,8 @@
 // relabels that entry with the label the daemon names, its words kept: `C-o`
 // moves the entry one node on in reading order (`3.2 - ` becomes `3.2.1 - `,
 // or `3.3 - ` when 3.2 has no child), and `C-i` moves it up to the node's
-// parent (`3.2 - ` becomes `3 - `).
+// parent (`3.2 - ` becomes `3 - `), or on to the next root from a root
+// (`3 - ` becomes `4 - `).
 //
 // THE TREE IS THE RESPONSE THE ENTRY TARGETS, by the rule the composer's
 // entries are bound by (endpoint_report_composer_entries.proto): the selected
@@ -19,7 +20,8 @@
 //   - `previous`: the node's previous sibling; else its parent, and so on;
 //   - `following`: the node read after it: its first child; else what `next`
 //     names;
-//   - `parent`: the node's parent; a root has none.
+//   - `parent`: the node's parent; else, for a root, the next root; the last
+//     root has none.
 // The answer is for the label the request names, so it holds for the line the
 // key was pressed on whatever the composer has reported since.
 
