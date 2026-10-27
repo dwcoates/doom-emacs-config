@@ -49,6 +49,7 @@
 (declare-function agent-repl-rpc-find-entry-neighbor-sync "rpc" (conn request &optional timeout))
 (declare-function evil-open-below "evil-commands" (count))
 (declare-function evil-open-above "evil-commands" (count))
+(declare-function evil-insert-state "evil-states" (&optional arg))
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
 (defvar agent-repl-input-mode-map)
 (defvar agent-repl-host-update-functions)
@@ -348,6 +349,9 @@ command sends it again; DONE ends the report."
 ;; the previous one's (above), in the tree that entry targets, so the next
 ;; entry answers the next node.  The daemon finds the node
 ;; (FindEntryNeighbor), for the label of the line the key was pressed on.
+;; A neighbor whose entry the composer already holds that way is never
+;; opened twice: point goes to the end of that entry's line, in insert mode,
+;; as if the line had just been opened.
 
 (defconst agent-repl-prompt-entries--neighbor-timeout 1.0
   "Seconds `o' and `O' wait for the daemon to name the neighbor label.")
@@ -397,14 +401,33 @@ an entry, and a click on a response's branch in the webview
   (and agent-repl-prompt-entries--parser
        (agent-repl-prompt-entries--entry-at-point (agent-repl-prompt-entries--entries))))
 
+(defun agent-repl-prompt-entries--existing (label next)
+  "The start of the nearest entry answering LABEL below (NEXT) or above point's line, or nil."
+  (let* ((bol (line-beginning-position))
+         (entries (agent-repl-prompt-entries--entries)))
+    (nth 1 (seq-find (lambda (entry)
+                       (and (equal (car entry) label)
+                            (if next (> (nth 1 entry) bol) (< (nth 1 entry) bol))))
+                     (if next entries (reverse entries))))))
+
 (defun agent-repl-prompt-entries--open (next)
   "Open a line below (NEXT) or above point's line, filled with a neighbor.
 On an entry line whose label has a neighbor that way, the new line opens
-on `LABEL - '; otherwise it opens empty, as `evil-open-below' does."
+on `LABEL - '; otherwise it opens empty, as `evil-open-below' does.  A
+neighbor already holding an entry that way is not opened again: point
+moves to the end of that entry's line, in insert mode."
   (let* ((label (agent-repl-prompt-entries--label-at-point))
-         (neighbor (and label (agent-repl-prompt-entries--neighbor label (if next :next :previous)))))
-    (if next (evil-open-below 1) (evil-open-above 1))
-    (when neighbor (insert (agent-repl-prompt-entries-opening neighbor)))))
+         (neighbor (and label (agent-repl-prompt-entries--neighbor label (if next :next :previous))))
+         (existing (and neighbor (agent-repl-prompt-entries--existing neighbor next))))
+    (if existing
+        (progn
+          (goto-char existing)
+          (end-of-line)
+          (evil-insert-state)
+          (agent-repl--log agent-repl-prompt-entries--ws "elisp.prompt-entries.open-existing ws=%s label=%s neighbor=%s at=%d"
+                           agent-repl-prompt-entries--ws label neighbor existing))
+      (if next (evil-open-below 1) (evil-open-above 1))
+      (when neighbor (insert (agent-repl-prompt-entries-opening neighbor))))))
 
 (defun agent-repl-prompt-entries-open-below ()
   "Open a line below point; on an entry line, fill it with the next label.

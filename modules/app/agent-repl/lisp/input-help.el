@@ -47,9 +47,9 @@
      :keymaps (agent-repl-input-mode-map)
      :bindings ((newline "Insert a newline instead of sending.")
                 (agent-repl-prompt-entries-open-below
-                 "Open a line below. On an entry line, start the next entry with its label.")
+                 "Open a line below. On an entry line, start the next entry with its label, or go to it when it is already below.")
                 (agent-repl-prompt-entries-open-above
-                 "Open a line above. On an entry line, start the previous entry with its label.")
+                 "Open a line above. On an entry line, start the previous entry with its label, or go to it when it is already above.")
                 (agent-repl-discard-input "Save the composer to history, then clear it."))
      :features ("A word starting with / completes against the workspace's commands, and a known one turns purple."
                 "A word that begins an open workspace's name completes to that name."
