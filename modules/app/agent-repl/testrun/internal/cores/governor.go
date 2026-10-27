@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"agentrepl/logging/hostcpu"
+	"agentrepl/testrun/internal/atomicfile"
 	"agentrepl/testrun/internal/seats"
 )
 
@@ -117,17 +118,8 @@ func writeState(dir string, s CPUState) error {
 	if err != nil {
 		return fmt.Errorf("encode the CPU governor's state: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, StateFile+".*")
-	if err != nil {
+	if err := atomicfile.Replace(filepath.Join(dir, StateFile), StateFile+".*", data); err != nil {
 		return fmt.Errorf("write the CPU governor's state: %w", err)
-	}
-	_, werr := tmp.Write(data)
-	cerr := tmp.Close()
-	if err := errors.Join(werr, cerr); err != nil {
-		return errors.Join(fmt.Errorf("write the CPU governor's state %s: %w", tmp.Name(), err), os.Remove(tmp.Name()))
-	}
-	if err := os.Rename(tmp.Name(), filepath.Join(dir, StateFile)); err != nil {
-		return errors.Join(fmt.Errorf("replace the CPU governor's state: %w", err), os.Remove(tmp.Name()))
 	}
 	return nil
 }
