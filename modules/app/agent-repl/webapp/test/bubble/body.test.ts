@@ -13,7 +13,9 @@ import {
   isMarkdownSlot,
   TREE_WIDTH_UNMEASURABLE,
   createBubbleBody,
+  firstLineBudgetPx,
   isBubbleBody,
+  reserveSlotFirstLine,
   markdownSlot,
   measureTreeWidth,
   treeMeasure,
@@ -34,13 +36,13 @@ import {
 import { drawBubble } from "../../src/bubble/draw.js";
 import { RESPONSE_RUN_CLASS } from "../../src/feed/response-run.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
-import { WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../tree-layout.js";
+import { FITTING_TREE, WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../tree-layout.js";
 import { FEED_TEXT_SCALE_PROPERTY, applyFeedTextScale } from "../../src/feed/feed-text-scale.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { fireResize } from "../resize-observer.js";
 import { plainProse, promptProse, servedProse, treeProse } from "../prose.js";
 import { create } from "@bufbuild/protobuf";
-import { ParsedProseSchema } from "../../../proto/gen/ts/frontend/v1/prose_pb";
+import { ParsedProseSchema, type ParsedProse } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 
 afterEach(() => {
@@ -246,6 +248,24 @@ describe("the measure a tree wraps by", () => {
     const measure = treeMeasure(body, 742);
     // Assert
     expect([measure.unit, measure.budget]).toEqual(["px", 742]);
+  });
+
+  it("gives the first line the whole budget unless told", () => {
+    // Arrange
+    const body = stageBody();
+    // Act
+    const measure = treeMeasure(body, 742);
+    // Assert
+    expect(measure.firstLineBudget).toBe(742);
+  });
+
+  it("gives the first line the budget it is told", () => {
+    // Arrange
+    const body = stageBody();
+    // Act
+    const measure = treeMeasure(body, 742, 700);
+    // Assert
+    expect(measure.firstLineBudget).toBe(700);
   });
 
   it("measures each piece as drawn, in order", () => {
@@ -1130,5 +1150,114 @@ describe("addSlotMark", () => {
     // Assert
     const record = await forwardedRecord(capture, BODY_INVARIANT);
     expect([record.level.case, record.context?.slot]).toEqual(["error", "not-a-slot"]);
+  });
+});
+
+describe("firstLineBudgetPx", () => {
+  /** A room of PX. */
+  const room = (px: number) => ({ px: () => px });
+
+  it("takes the room off the budget, in whole px", () => {
+    // Arrange
+    const body = stageBody();
+    // Act + Assert
+    expect(firstLineBudgetPx(body, 742, room(40.5))).toBe(701);
+  });
+
+  it("measures the room inside the body it is handed", () => {
+    // Arrange
+    const body = stageBody();
+    const seen: HTMLElement[] = [];
+    // Act
+    firstLineBudgetPx(body, 742, { px: (b) => (seen.push(b), 40) });
+    // Assert
+    expect(seen).toEqual([body]);
+  });
+
+  it.each([
+    ["no width", 0, "a slot's first-line room measured no width"],
+    ["a width that is not a number", Number.NaN, "a slot's first-line room measured no width"],
+    ["the whole line", 742, "a slot's first-line room leaves its first line no pixel"],
+  ])("records a room measuring %s as unmeasurable, and fails", async (_name, px, reason) => {
+    // Arrange
+    const body = stageBody();
+    const capture = captureLogRecords();
+    // Act
+    expect(() => firstLineBudgetPx(body, 742, room(px))).toThrow(/metaprompt tree width unmeasurable/);
+    // Assert
+    const record = await forwardedRecord(capture, TREE_WIDTH_UNMEASURABLE);
+    expect(record).toMatchObject({ level: { case: "error" }, context: { reason, budget_px: 742 } });
+  });
+});
+
+describe("a slot keeping room free at the end of its first line", () => {
+  const staged = useTreeLayout();
+  /** 400px of room: 50 staged columns. */
+  const ROOM = { px: () => 400 };
+  /** The columns the first line keeps once the room is taken off the cap. */
+  const firstCols = (): number => stagedCols(staged.layout) - 400 / staged.layout.charPx;
+
+  /** A response bubble whose one slot holds PROSE and keeps ROOM (none for null), mounted unless it repaints PREVIOUS. */
+  function roomy(prose: ParsedProse | string, room: { px: () => number } | null = ROOM, previous?: HTMLElement): { bubble: HTMLElement; slot: HTMLElement } {
+    const slot = markdownSlot("prose", typeof prose === "string" ? servedProse(prose) : prose);
+    if (room !== null) reserveSlotFirstLine(slot, room);
+    const { bubble } = drawBubble({ role: "response", variant: "response", content: [slot], capLines: "feed" }, previous);
+    if (previous === undefined) mount(bubble);
+    return { bubble, slot: bubble.querySelector<HTMLElement>(".prose") ?? slot };
+  }
+
+  it("fits a tree that opens the slot with its first line short of the room", () => {
+    // Act
+    const { slot } = roomy(WIDE_TREE);
+    // Assert
+    expect(treeLineWidths(slot)[0]).toBeLessThanOrEqual(firstCols());
+  });
+
+  it("fits the tree's later lines at the whole budget", () => {
+    // Act
+    const { slot } = roomy(WIDE_TREE);
+    // Assert
+    expect(Math.max(...treeLineWidths(slot).slice(1))).toBeGreaterThan(firstCols());
+  });
+
+  it("fits a tree that does not open the slot at the whole budget", () => {
+    // Act — the root line (about 75 columns) is past the first line's room.
+    const opening = create(ParsedProseSchema, {
+      blocks: [{ block: { case: "plain", value: { markdown: "Some words first." } } }, ...servedProse(WIDE_TREE).blocks],
+      source: { markdown: `Some words first.\n\n${WIDE_TREE}` },
+    });
+    const { slot } = roomy(opening);
+    // Assert
+    expect(treeLineWidths(slot)[0]).toBeGreaterThan(firstCols());
+  });
+
+  it("keeps the room across a repaint of the same slot", () => {
+    // Arrange
+    const { bubble } = roomy(FITTING_TREE);
+    // Act
+    const { slot } = roomy(WIDE_TREE, ROOM, bubble);
+    // Assert
+    expect(treeLineWidths(slot)[0]).toBeLessThanOrEqual(firstCols());
+  });
+
+  it("drops the room when the repainting slot keeps none", () => {
+    // Arrange
+    const { bubble } = roomy(WIDE_TREE);
+    // Act
+    const { slot } = roomy(WIDE_TREE, null, bubble);
+    // Assert
+    expect(treeLineWidths(slot)[0]).toBeGreaterThan(firstCols());
+  });
+
+  it("is refused on an element that is not a markdown slot, through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const plain = document.createElement("div");
+    plain.className = "not-a-slot";
+    // Act
+    expect(() => reserveSlotFirstLine(plain, ROOM)).toThrow(/bubble body invariant/);
+    // Assert
+    const record = await forwardedRecord(capture, BODY_INVARIANT);
+    expect(record).toMatchObject({ level: { case: "error" }, context: { slot: "not-a-slot" } });
   });
 });

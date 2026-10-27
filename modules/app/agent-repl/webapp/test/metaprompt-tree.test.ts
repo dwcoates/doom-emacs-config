@@ -808,10 +808,11 @@ describe("formatTree without an inline pass", () => {
  * (a `W` 20px, the one glyph a proportional face draws wider), so a wrap that
  * counted characters instead of widths would break in the wrong place.
  */
-function pxMeasure(budget: number, calls: TreeMeasureItem[][] = []): TreeMeasure {
+function pxMeasure(budget: number, calls: TreeMeasureItem[][] = [], firstLineBudget: number = budget): TreeMeasure {
   return {
     unit: "px",
     budget,
+    firstLineBudget,
     widths: (items) => {
       calls.push([...items]);
       return items.map((item) => {
@@ -843,6 +844,20 @@ describe("columnMeasure", () => {
     const measure = columnMeasure(40);
     // Assert
     expect([measure.unit, measure.budget]).toEqual(["ch", 40]);
+  });
+
+  it("gives the first line the whole budget unless told", () => {
+    // Act
+    const measure = columnMeasure(40);
+    // Assert
+    expect(measure.firstLineBudget).toBe(40);
+  });
+
+  it("gives the first line the columns it is told", () => {
+    // Act
+    const measure = columnMeasure(40, 30);
+    // Assert
+    expect([measure.budget, measure.firstLineBudget]).toEqual([40, 30]);
   });
 
   it("measures every piece in rendered columns, markup and all", () => {
@@ -902,12 +917,85 @@ describe("renderTreeHtml wraps by its measure", () => {
   it("refuses a measure that answers the wrong number of widths, recording it through the canonical logger", async () => {
     // Arrange
     const capture = captureLogRecords();
-    const short: TreeMeasure = { unit: "px", budget: 160, widths: () => [10] };
+    const short: TreeMeasure = { unit: "px", budget: 160, firstLineBudget: 160, widths: () => [10] };
     // Act
     expect(() => renderTreeHtml(graph([ROOT, { parent: 0, label: "1.1", text: "x" }]), identity, short)).toThrow(/metaprompt tree measure/);
     // Assert
     const record = await forwardedRecord(capture, "metaprompt-tree.measure");
     expect(record).toMatchObject({ level: { case: "error" }, context: { answered: 1 } });
+  });
+});
+
+describe("renderTreeHtml fits the tree's first line to its first-line budget", () => {
+  // Every text column is 10px and "1 " is 20px, so a root's text has the
+  // budget less 20px: "aaa bbb" draws 70px, each further word 40px more.
+
+  it("wraps the first line short, and every later line at the whole budget", () => {
+    // Act — 80px of text on the first line, 140px on the rest.
+    const html = renderTreeHtml(graph([{ label: "1", text: "aaa bbb ccc ddd eee fff ggg" }]), identity, pxMeasure(160, [], 100));
+    // Assert
+    expect(textsOf(html, "mp-content")).toEqual(["aaa bbb", "ccc ddd eee", "fff ggg"]);
+  });
+
+  it("narrows only the tree's first line, never a later node's head line", () => {
+    // Act — 1.1's prefix is 64px, so its "aaa bbb ccc" (110px) fits only 160px.
+    const html = renderTreeHtml(graph([{ label: "1", text: "x" }, { parent: 0, label: "1.1", text: "aaa bbb ccc" }]), identity, pxMeasure(174, [], 60));
+    // Assert
+    expect(textsOf(html, "mp-content")).toEqual(["x", "aaa bbb ccc"]);
+  });
+
+  it("gives the first line to a header, which is drawn as it arrived", () => {
+    // Act — the root's "aaa bbb ccc" (110px) would break at 80px.
+    const html = renderTreeHtml(graph([{ label: "1", text: "aaa bbb ccc" }], "Response"), identity, pxMeasure(160, [], 100));
+    // Assert
+    expect(textsOf(html, "mp-content")).toEqual(["Response", "aaa bbb ccc"]);
+  });
+
+  it("starts a first word too wide for the first line, but not for a whole one, on the second line", () => {
+    // Act — "WWWWW" draws 100px: past the first line's 80px, inside the rest's 140px.
+    const html = renderTreeHtml(graph([{ label: "1", text: "WWWWW aaa" }]), identity, pxMeasure(160, [], 100));
+    // Assert
+    expect(textsOf(html, "mp-content")).toEqual(["", "WWWWW aaa"]);
+  });
+
+  it("reports no overflow for a first word that fits a whole line", () => {
+    // Arrange
+    const issues: string[] = [];
+    // Act
+    renderTreeHtml(graph([{ label: "1", text: "WWWWW aaa" }]), identity, pxMeasure(160, [], 100), (message) => issues.push(message));
+    // Assert
+    expect(issues).toEqual([]);
+  });
+
+  it("draws the tree unwrapped, and says so, when its first line's room is taken by the label", () => {
+    // Arrange
+    const issues: Record<string, unknown>[] = [];
+    // Act — "1 " alone is 20px, past the first line's 15px.
+    const html = renderTreeHtml(graph([{ label: "1", text: "aaa bbb ccc ddd" }]), identity, pxMeasure(160, [], 15), (_m, context) => issues.push(context));
+    // Assert
+    expect([textsOf(html, "mp-content"), issues.map((c) => c.operation)]).toEqual([
+      ["aaa bbb ccc ddd"],
+      ["feed.cards.response.tree-unwrappable"],
+    ]);
+  });
+
+  it.each([
+    ["wider than the budget", 161],
+    ["zero", 0],
+    ["not a whole number", 99.5],
+  ])("refuses a first-line budget %s", (_name, first) => {
+    // Act + Assert
+    expect(() => renderTreeHtml(graph([{ label: "1", text: "x" }]), identity, pxMeasure(160, [], first))).toThrow(RangeError);
+  });
+
+  it("records a refused first-line budget through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    // Act
+    expect(() => renderTreeHtml(graph([{ label: "1", text: "x" }]), identity, pxMeasure(160, [], 200))).toThrow(/first-line budget/);
+    // Assert
+    const record = await forwardedRecord(capture, "metaprompt-tree.invalid-first-line-width");
+    expect(record).toMatchObject({ level: { case: "error" }, context: { width: 160, first_width: 200, unit: "px" } });
   });
 });
 

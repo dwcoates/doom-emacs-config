@@ -202,9 +202,11 @@ function stagedWidthPx(layout: TreeLayout, box: "capped" | "uncapped"): number {
  * rendered column.
  */
 export function stagedMeasure(layout: TreeLayout, box: "capped" | "uncapped" = "capped"): TreeMeasure {
+  const budget = Math.floor(stagedWidthPx(layout, box));
   return {
     unit: "px",
-    budget: Math.floor(stagedWidthPx(layout, box)),
+    budget,
+    firstLineBudget: budget,
     widths: (items) => items.map((item) => visibleWidth(item.html) * layout.charPx),
   };
 }
