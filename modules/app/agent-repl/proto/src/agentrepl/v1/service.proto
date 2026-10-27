@@ -122,6 +122,7 @@ import "agentrepl/v1/endpoint_compact_workspace.proto";
 import "agentrepl/v1/endpoint_set_workspace_correspondence.proto";
 import "agentrepl/v1/endpoint_change_workspace_links.proto";
 import "agentrepl/v1/endpoint_set_workspace_name.proto";
+import "agentrepl/v1/endpoint_validate_workspace_name.proto";
 import "agentrepl/v1/endpoint_set_workspace_one_shot.proto";
 import "agentrepl/v1/endpoint_create_thread.proto";
 import "agentrepl/v1/endpoint_request_new_thread.proto";
@@ -250,6 +251,12 @@ service AgentRepl {
   // A new workspace in a repository; the daemon names and creates everything.
   // See endpoint_create_workspace.proto.
   rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse);
+  // Would a create accept this supplied name? Asked while the user can still
+  // edit it. See endpoint_validate_workspace_name.proto.
+  rpc ValidateWorkspaceName(ValidateWorkspaceNameRequest) returns (ValidateWorkspaceNameResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 
   // A repository on its own, with no workspace: resolved from ANY path inside
   // it and idempotent by the resolved dir. See

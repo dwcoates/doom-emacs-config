@@ -324,6 +324,13 @@ func (s *requestLoggingServer) SetWorkspaceName(
 	return serveUnary(s, ctx, "SetWorkspaceName", req, s.server.SetWorkspaceName)
 }
 
+func (s *requestLoggingServer) ValidateWorkspaceName(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ValidateWorkspaceNameRequest],
+) (*connect.Response[agentreplv1.ValidateWorkspaceNameResponse], error) {
+	return serveUnary(s, ctx, "ValidateWorkspaceName", req, s.server.ValidateWorkspaceName)
+}
+
 func (s *requestLoggingServer) SetWorkspaceParent(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetWorkspaceParentRequest],

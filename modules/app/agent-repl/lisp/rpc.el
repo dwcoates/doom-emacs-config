@@ -89,6 +89,8 @@
 (declare-function agent-repl-wire-decode-watch-workspace-roster-response "wire-roster" (alist))
 (declare-function agent-repl-wire-encode-create-workspace-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-create-workspace-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-validate-workspace-name-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-validate-workspace-name-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-register-repository-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-register-repository-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-open-workspace-request "wire-verbs" (request))
@@ -371,6 +373,14 @@ Called on the NEW connection after the old daemon's host stream pushed
 Emacs holds no creation machinery: the request carries the facts and the
 resulting workspace arrives through the roster stream, not through this
 answer.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-validate-workspace-name
+  "ValidateWorkspaceName"
+  agent-repl-wire-encode-validate-workspace-name-request
+  agent-repl-wire-decode-validate-workspace-name-response
+  "Ask the daemon whether a supplied workspace name keeps its naming rule.
+A read: the success\='s verdict is `legal\=' or the create\='s own
+`invalid_name\=' shape, so the rule lives in the daemon alone.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-register-repository
   "RegisterRepository"

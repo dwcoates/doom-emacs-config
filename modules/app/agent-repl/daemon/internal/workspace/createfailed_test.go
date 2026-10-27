@@ -162,6 +162,86 @@ func TestAHandedOverCreateIsNotReported(t *testing.T) {
 	}
 }
 
+func TestACreateRefusedForTheCallersInputIsNotReported(t *testing.T) {
+	cases := []struct {
+		name string
+		arm  string
+	}{
+		{name: "a name that breaks the naming rule", arm: ArmInvalidName},
+		{name: "a name another create or merge holds", arm: ArmNameReserved},
+		{name: "a promptless one-shot", arm: ArmNoSlug},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			spec := failingCreate(t, f, true)
+			v := f.verbs.(*verbs)
+
+			// Act.
+			v.reportCreateFailure(context.Background(), spec, fmt.Errorf("create: %w", &Refusal{Rpc: "CreateWorkspace", Arm: tc.arm}))
+			v.createFailureReports.Wait()
+
+			// Assert.
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: opCreateFailedReport})
+			if !ok || !strings.Contains(record.Message, "caller's own input") || record.Context["arm"] != tc.arm {
+				t.Fatalf("records = %+v, want the debug record naming arm %s", f.log.logger.Records(), tc.arm)
+			}
+			if len(f.queue.submissions) != 0 || len(f.fleet.started) != 0 {
+				t.Fatalf("submissions = %+v, started = %v, want no report", f.queue.submissions, f.fleet.started)
+			}
+		})
+	}
+}
+
+func TestAnyOtherRefusedCreateIsStillReported(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := failingCreate(t, f, true)
+	v := f.verbs.(*verbs)
+
+	// Act.
+	v.reportCreateFailure(context.Background(), spec, &Refusal{Rpc: "CreateWorkspace", Arm: ArmUnknownOwner, Reason: "no such owner"})
+	v.createFailureReports.Wait()
+
+	// Assert.
+	if len(f.queue.submissions) != 1 || f.queue.submissions[0].WS != mainWorkspaceID {
+		t.Fatalf("submissions = %+v, want the one report to the main worktree", f.queue.submissions)
+	}
+	if _, skipped := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: opCreateFailedReport}); skipped {
+		t.Fatalf("records = %+v, want no skip record", f.log.logger.Records())
+	}
+}
+
+func TestCallerInputRefusal(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		wantArm string
+		want    bool
+	}{
+		{name: "an invalid_name refusal", err: &Refusal{Arm: ArmInvalidName}, wantArm: ArmInvalidName, want: true},
+		{name: "a wrapped name_reserved refusal", err: fmt.Errorf("create: %w", &Refusal{Arm: ArmNameReserved}), wantArm: ArmNameReserved, want: true},
+		{name: "a no_slug refusal", err: &Refusal{Arm: ArmNoSlug}, wantArm: ArmNoSlug, want: true},
+		{name: "a refusal of something the daemon holds", err: &Refusal{Arm: ArmUnknownRepository}, want: false},
+		{name: "a naming call that failed", err: &Refusal{Arm: ArmNamingFailed}, want: false},
+		{name: "an internal failure", err: errors.New("fatal: worktree add failed"), want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the cases.
+
+			// Act.
+			arm, got := callerInputRefusal(tc.err)
+
+			// Assert.
+			if got != tc.want || arm != tc.wantArm {
+				t.Fatalf("callerInputRefusal(%v) = %q, %v; want %q, %v", tc.err, arm, got, tc.wantArm, tc.want)
+			}
+		})
+	}
+}
+
 func TestCreateHandedOver(t *testing.T) {
 	cases := []struct {
 		name string

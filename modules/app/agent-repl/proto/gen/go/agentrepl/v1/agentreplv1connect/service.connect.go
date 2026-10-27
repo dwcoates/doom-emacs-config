@@ -108,6 +108,9 @@ const (
 	// AgentReplCreateWorkspaceProcedure is the fully-qualified name of the AgentRepl's CreateWorkspace
 	// RPC.
 	AgentReplCreateWorkspaceProcedure = "/agentrepl.v1.AgentRepl/CreateWorkspace"
+	// AgentReplValidateWorkspaceNameProcedure is the fully-qualified name of the AgentRepl's
+	// ValidateWorkspaceName RPC.
+	AgentReplValidateWorkspaceNameProcedure = "/agentrepl.v1.AgentRepl/ValidateWorkspaceName"
 	// AgentReplRegisterRepositoryProcedure is the fully-qualified name of the AgentRepl's
 	// RegisterRepository RPC.
 	AgentReplRegisterRepositoryProcedure = "/agentrepl.v1.AgentRepl/RegisterRepository"
@@ -400,6 +403,7 @@ var (
 	agentReplAnswerColdGateMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("AnswerColdGate")
 	agentReplWatchWorkspaceRosterMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("WatchWorkspaceRoster")
 	agentReplCreateWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("CreateWorkspace")
+	agentReplValidateWorkspaceNameMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("ValidateWorkspaceName")
 	agentReplRegisterRepositoryMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("RegisterRepository")
 	agentReplOpenWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("OpenWorkspace")
 	agentReplListWorkspaceTranscriptsMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("ListWorkspaceTranscripts")
@@ -587,6 +591,9 @@ type AgentReplClient interface {
 	// A new workspace in a repository; the daemon names and creates everything.
 	// See endpoint_create_workspace.proto.
 	CreateWorkspace(context.Context, *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error)
+	// Would a create accept this supplied name? Asked while the user can still
+	// edit it. See endpoint_validate_workspace_name.proto.
+	ValidateWorkspaceName(context.Context, *connect.Request[v1.ValidateWorkspaceNameRequest]) (*connect.Response[v1.ValidateWorkspaceNameResponse], error)
 	// A repository on its own, with no workspace: resolved from ANY path inside
 	// it and idempotent by the resolved dir. See
 	// endpoint_register_repository.proto.
@@ -1050,6 +1057,13 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplCreateWorkspaceProcedure,
 			connect.WithSchema(agentReplCreateWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		validateWorkspaceName: connect.NewClient[v1.ValidateWorkspaceNameRequest, v1.ValidateWorkspaceNameResponse](
+			httpClient,
+			baseURL+AgentReplValidateWorkspaceNameProcedure,
+			connect.WithSchema(agentReplValidateWorkspaceNameMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
 		registerRepository: connect.NewClient[v1.RegisterRepositoryRequest, v1.RegisterRepositoryResponse](
@@ -1678,6 +1692,7 @@ type agentReplClient struct {
 	answerColdGate             *connect.Client[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse]
 	watchWorkspaceRoster       *connect.Client[v1.WatchWorkspaceRosterRequest, v1.WatchWorkspaceRosterResponse]
 	createWorkspace            *connect.Client[v1.CreateWorkspaceRequest, v1.CreateWorkspaceResponse]
+	validateWorkspaceName      *connect.Client[v1.ValidateWorkspaceNameRequest, v1.ValidateWorkspaceNameResponse]
 	registerRepository         *connect.Client[v1.RegisterRepositoryRequest, v1.RegisterRepositoryResponse]
 	openWorkspace              *connect.Client[v1.OpenWorkspaceRequest, v1.OpenWorkspaceResponse]
 	listWorkspaceTranscripts   *connect.Client[v1.ListWorkspaceTranscriptsRequest, v1.ListWorkspaceTranscriptsResponse]
@@ -1901,6 +1916,11 @@ func (c *agentReplClient) WatchWorkspaceRoster(ctx context.Context, req *connect
 // CreateWorkspace calls agentrepl.v1.AgentRepl.CreateWorkspace.
 func (c *agentReplClient) CreateWorkspace(ctx context.Context, req *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error) {
 	return c.createWorkspace.CallUnary(ctx, req)
+}
+
+// ValidateWorkspaceName calls agentrepl.v1.AgentRepl.ValidateWorkspaceName.
+func (c *agentReplClient) ValidateWorkspaceName(ctx context.Context, req *connect.Request[v1.ValidateWorkspaceNameRequest]) (*connect.Response[v1.ValidateWorkspaceNameResponse], error) {
+	return c.validateWorkspaceName.CallUnary(ctx, req)
 }
 
 // RegisterRepository calls agentrepl.v1.AgentRepl.RegisterRepository.
@@ -2480,6 +2500,9 @@ type AgentReplHandler interface {
 	// A new workspace in a repository; the daemon names and creates everything.
 	// See endpoint_create_workspace.proto.
 	CreateWorkspace(context.Context, *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error)
+	// Would a create accept this supplied name? Asked while the user can still
+	// edit it. See endpoint_validate_workspace_name.proto.
+	ValidateWorkspaceName(context.Context, *connect.Request[v1.ValidateWorkspaceNameRequest]) (*connect.Response[v1.ValidateWorkspaceNameResponse], error)
 	// A repository on its own, with no workspace: resolved from ANY path inside
 	// it and idempotent by the resolved dir. See
 	// endpoint_register_repository.proto.
@@ -2939,6 +2962,13 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplCreateWorkspaceProcedure,
 		svc.CreateWorkspace,
 		connect.WithSchema(agentReplCreateWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplValidateWorkspaceNameHandler := connect.NewUnaryHandler(
+		AgentReplValidateWorkspaceNameProcedure,
+		svc.ValidateWorkspaceName,
+		connect.WithSchema(agentReplValidateWorkspaceNameMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplRegisterRepositoryHandler := connect.NewUnaryHandler(
@@ -3589,6 +3619,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplWatchWorkspaceRosterHandler.ServeHTTP(w, r)
 		case AgentReplCreateWorkspaceProcedure:
 			agentReplCreateWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplValidateWorkspaceNameProcedure:
+			agentReplValidateWorkspaceNameHandler.ServeHTTP(w, r)
 		case AgentReplRegisterRepositoryProcedure:
 			agentReplRegisterRepositoryHandler.ServeHTTP(w, r)
 		case AgentReplOpenWorkspaceProcedure:
@@ -3892,6 +3924,10 @@ func (UnimplementedAgentReplHandler) WatchWorkspaceRoster(context.Context, *conn
 
 func (UnimplementedAgentReplHandler) CreateWorkspace(context.Context, *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CreateWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ValidateWorkspaceName(context.Context, *connect.Request[v1.ValidateWorkspaceNameRequest]) (*connect.Response[v1.ValidateWorkspaceNameResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ValidateWorkspaceName is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RegisterRepository(context.Context, *connect.Request[v1.RegisterRepositoryRequest]) (*connect.Response[v1.RegisterRepositoryResponse], error) {

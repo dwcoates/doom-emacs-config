@@ -1391,6 +1391,16 @@ func validateSetWorkspaceNameRequest(req *agentreplv1.SetWorkspaceNameRequest) *
 	return nil
 }
 
+// validateValidateWorkspaceNameRequest is ValidateWorkspaceNameRequest's base
+// function: a name that is not blank. Whether the name keeps the naming rule
+// is the rpc's verdict, never a malformed request.
+func validateValidateWorkspaceNameRequest(req *agentreplv1.ValidateWorkspaceNameRequest) *connect.Error {
+	if strings.TrimSpace(req.GetName()) == "" {
+		return invalid("name", "a name to judge is required")
+	}
+	return nil
+}
+
 // validateUpdateDeployHoldRequest is UpdateDeployHoldRequest's base function:
 // a repository and an action arm.
 func validateUpdateDeployHoldRequest(req *agentreplv1.UpdateDeployHoldRequest) *connect.Error {

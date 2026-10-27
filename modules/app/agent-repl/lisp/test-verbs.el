@@ -2166,6 +2166,135 @@ current workspace is the forked context, and the topology is primary."
                                 m))
                              logged))))))))
 
+;;;; ---- The name minibuffer asks the daemon before it closes ----
+
+(unless (get 'agent-repl-connect-error 'error-conditions)
+  (define-error 'agent-repl-connect-error "agent-repl transport failure"))
+
+(defvar agent-repl-test-verbs--name-checks nil
+  "The names the stubbed ValidateWorkspaceName was asked about, newest first.")
+(defvar agent-repl-test-verbs--minibuffer-messages nil
+  "What the name minibuffer told the user, newest first.")
+(defvar agent-repl-test-verbs--exited nil
+  "Non-nil once the name minibuffer exited.")
+(defvar agent-repl-test-verbs--logged nil
+  "Every INFO and ERROR record the name check wrote, newest first.")
+
+(defmacro agent-repl-test-verbs--with-name-minibuffer (contents answer &rest body)
+  "Run BODY as the name minibuffer holding CONTENTS, the daemon answering ANSWER.
+ANSWER is the decoded ValidateWorkspaceNameResponse plist, or a function
+called with the request that answers or signals."
+  (declare (indent 2))
+  `(let ((agent-repl-test-verbs--name-checks nil)
+         (agent-repl-test-verbs--minibuffer-messages nil)
+         (agent-repl-test-verbs--exited nil)
+         (agent-repl-test-verbs--logged nil)
+         (agent-repl-verbs--name-blank-refusal "a static workspace IS its name"))
+     (cl-letf (((symbol-function 'minibuffer-contents-no-properties) (lambda () ,contents))
+               ((symbol-function 'agent-repl-verbs--conn) (lambda (&optional _ws) 'conn))
+               ((symbol-function 'agent-repl-rpc-validate-workspace-name-sync)
+                (lambda (_conn request &optional _timeout)
+                  (push (plist-get request :name) agent-repl-test-verbs--name-checks)
+                  (let ((answer ,answer))
+                    (if (functionp answer) (funcall answer request) answer))))
+               ((symbol-function 'minibuffer-message)
+                (lambda (fmt &rest args)
+                  (push (apply #'format fmt args) agent-repl-test-verbs--minibuffer-messages)))
+               ((symbol-function 'exit-minibuffer)
+                (lambda () (setq agent-repl-test-verbs--exited t)))
+               ((symbol-function 'agent-repl--info) (agent-repl-test--record-into agent-repl-test-verbs--logged))
+               ((symbol-function 'agent-repl--error) (agent-repl-test--record-into agent-repl-test-verbs--logged)))
+       ,@body)))
+
+(ert-deftest agent-repl-verbs-name-minibuffer-keeps-an-invalid-name-open-with-the-reason ()
+  "A name breaking the slug rule keeps the minibuffer open with the daemon's reason."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-name-minibuffer "Please fix the login page."
+      '(:arm :success :value (:verdict (:arm :invalid
+                                        :value (:name "Please fix the login page."
+                                                :component "Please fix the login page."
+                                                :rule :slug))))
+    ;; Act.
+    (agent-repl-verbs-name-minibuffer-exit)
+    ;; Assert.
+    (should-not agent-repl-test-verbs--exited)
+    (should (equal agent-repl-test-verbs--name-checks '("Please fix the login page.")))
+    (should (string-match-p "\\`agent-repl: the name \"Please fix the login page.\" is not a workspace name: its last part .* must be lowercase words"
+                            (car agent-repl-test-verbs--minibuffer-messages)))
+    (should (member "elisp.verbs.name-validated name=\"Please fix the login page.\" verdict=invalid component=\"Please fix the login page.\" rule=:slug"
+                    agent-repl-test-verbs--logged))))
+
+(ert-deftest agent-repl-verbs-name-minibuffer-passes-a-legal-name ()
+  "A name the daemon judges legal leaves the minibuffer, trimmed for the check."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-name-minibuffer "  fix-login  "
+      '(:arm :success :value (:verdict (:arm :legal :value nil)))
+    ;; Act.
+    (agent-repl-verbs-name-minibuffer-exit)
+    ;; Assert.
+    (should agent-repl-test-verbs--exited)
+    (should (equal agent-repl-test-verbs--name-checks '("fix-login")))
+    (should-not agent-repl-test-verbs--minibuffer-messages)))
+
+(ert-deftest agent-repl-verbs-name-minibuffer-keeps-a-blank-name-open-without-asking ()
+  "A blank name keeps the minibuffer open with the blank refusal, asking nobody."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-name-minibuffer "   "
+      (lambda (_request) (error "a blank name must not be sent"))
+    ;; Act.
+    (agent-repl-verbs-name-minibuffer-exit)
+    ;; Assert.
+    (should-not agent-repl-test-verbs--exited)
+    (should-not agent-repl-test-verbs--name-checks)
+    (should (equal agent-repl-test-verbs--minibuffer-messages
+                   '("agent-repl: a static workspace IS its name")))))
+
+(ert-deftest agent-repl-verbs-name-minibuffer-signals-a-failed-transport ()
+  "A check the transport fails is recorded at ERROR and signalled; the minibuffer stays."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-name-minibuffer "fix-login"
+      (lambda (_request) (signal 'agent-repl-connect-error (list '(:kind :timeout :message "no answer"))))
+    ;; Act.
+    (let ((err (should-error (agent-repl-verbs-name-minibuffer-exit) :type 'error)))
+      ;; Assert.
+      (should (string-match-p "could not check the name with the daemon" (cadr err)))
+      (should-not agent-repl-test-verbs--exited)
+      (should (cl-some (lambda (m) (string-match-p "\\`elisp.verbs.name-validation-failed name=\"fix-login\" cause=agent-repl-connect-error detail=.*no answer" m))
+                       agent-repl-test-verbs--logged)))))
+
+(ert-deftest agent-repl-verbs-name-minibuffer-signals-the-daemons-error-arm ()
+  "The daemon's error arm is a failed check, recorded at ERROR and signalled, never legal."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-name-minibuffer "fix-login" '(:arm :error :value nil)
+    ;; Act.
+    (let ((err (should-error (agent-repl-verbs-name-minibuffer-exit) :type 'error)))
+      ;; Assert.
+      (should (string-match-p "the daemon could not check the name \"fix-login\"" (cadr err)))
+      (should-not agent-repl-test-verbs--exited)
+      (should (member "elisp.verbs.name-validation-failed name=\"fix-login\" cause=error-arm response=(:arm :error :value nil)"
+                      agent-repl-test-verbs--logged)))))
+
+(ert-deftest agent-repl-verbs-read-name-asks-what-it-wants-and-checks-on-exit ()
+  "The name question says it wants a slug, and its minibuffer's exit is the check."
+  ;; Arrange.
+  (let (asked exit-command blank-refusal)
+    (cl-letf (((symbol-function 'read-string)
+               (lambda (prompt &rest _)
+                 (setq asked prompt)
+                 (with-temp-buffer
+                   (use-local-map minibuffer-local-map)
+                   (run-hooks 'minibuffer-setup-hook)
+                   (setq exit-command (lookup-key (current-local-map) [remap exit-minibuffer])
+                         blank-refusal agent-repl-verbs--name-blank-refusal))
+                 "fix-login")))
+      ;; Act.
+      (let ((name (agent-repl-verbs--read-name "a named fork IS its name")))
+        ;; Assert.
+        (should (equal name "fix-login"))
+        (should (equal asked "Workspace name (slug, no prompt): "))
+        (should (eq exit-command #'agent-repl-verbs-name-minibuffer-exit))
+        (should (equal blank-refusal "a named fork IS its name"))))))
+
 (ert-deftest agent-repl-verbs-static-create-sends-its-name ()
   "The STATIC create asks a repository and a REQUIRED name, and sends both."
   ;; Arrange.

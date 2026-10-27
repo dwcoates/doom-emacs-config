@@ -105,6 +105,9 @@ would abort the very branch a test is asserting."
     ("SetWorkspacePriority" agent-repl-rpc-set-workspace-priority
      agent-repl-wire-encode-set-workspace-priority-request
      agent-repl-wire-decode-set-workspace-priority-response)
+    ("ValidateWorkspaceName" agent-repl-rpc-validate-workspace-name
+     agent-repl-wire-encode-validate-workspace-name-request
+     agent-repl-wire-decode-validate-workspace-name-response)
     ("SetWorkspaceHidden" agent-repl-rpc-set-workspace-hidden
      agent-repl-wire-encode-set-workspace-hidden-request
      agent-repl-wire-decode-set-workspace-hidden-response)

@@ -5362,6 +5362,43 @@ There is no result oneof to unwrap: the response is the clamped scale now
 in force, which the caller may echo."
   (list :scale (agent-repl-wire--decode-double "AdjustFeedTextScaleResponse" 'scale json)))
 
+;;;; ---- ValidateWorkspaceName -----------------------------------------
+;;
+;; Would a create accept this supplied name?  Asked while the user can
+;; still edit it.  See endpoint_validate_workspace_name.proto.
+
+(defun agent-repl-wire-encode-validate-workspace-name-request (request)
+  "Encode ValidateWorkspaceNameRequest from plist REQUEST, (:name NAME).
+NAME is required and non-blank: a blank required name is the caller\='s
+own refusal to make, before anything is sent."
+  (list (cons 'name (agent-repl-wire-verbs--require-string
+                     "ValidateWorkspaceNameRequest" "name" (plist-get request :name)))))
+
+(defun agent-repl-wire-decode-validate-workspace-name-success (json)
+  "Decode ValidateWorkspaceNameSuccess from JSON into (:verdict (:arm ARM :value V)).
+ARM is `:legal\=' with no value, or `:invalid\=' with the decoded
+CreateWorkspaceInvalidName -- the very shape a create\='s `invalid_name\='
+refusal carries, so one sentence words both."
+  (let ((message "ValidateWorkspaceNameSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(legal invalid))
+    (list :verdict
+          (agent-repl-wire-verbs--decode-oneof
+           message "verdict" json
+           (list (list 'legal :legal (agent-repl-wire-verbs--empty-arm "ValidateWorkspaceNameLegal"))
+                 (list 'invalid :invalid #'agent-repl-wire-decode-create-workspace-invalid-name))))))
+
+(defun agent-repl-wire-decode-validate-workspace-name-error (json)
+  "Decode ValidateWorkspaceNameError from JSON.
+Empty: the contract names no cause, and a set error is a failed check."
+  (agent-repl-wire-verbs--decode-empty "ValidateWorkspaceNameError" json))
+
+(defun agent-repl-wire-decode-validate-workspace-name-response (json)
+  "Decode ValidateWorkspaceNameResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "ValidateWorkspaceNameResponse" json
+   #'agent-repl-wire-decode-validate-workspace-name-success
+   #'agent-repl-wire-decode-validate-workspace-name-error))
+
 ;;;; ---- SetWorkspaceHidden ---------------------------------------------
 ;;
 ;; Move a workspace into the sidebar's hidden section, or back out of it.

@@ -1084,6 +1084,39 @@ func (s *server) SetWorkspaceName(
 	return connect.NewResponse(resp), nil
 }
 
+// ValidateWorkspaceName judges a supplied name by the naming rule a create and
+// a rename refuse with (workspace.ValidateSuppliedName), so a client asks
+// while the user can still edit the name and holds no copy of the rule. A
+// read: nothing is recorded or reserved, and whether the name is free stays
+// the create's to decide.
+func (s *server) ValidateWorkspaceName(
+	_ context.Context,
+	req *connect.Request[agentreplv1.ValidateWorkspaceNameRequest],
+) (*connect.Response[agentreplv1.ValidateWorkspaceNameResponse], error) {
+	const op = "daemon.server.validate_workspace_name"
+	if err := validateValidateWorkspaceNameRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	supplied := strings.TrimSpace(req.Msg.GetName())
+	success := &agentreplv1.ValidateWorkspaceNameSuccess{}
+	if breach := workspace.ValidateSuppliedName(supplied); breach != nil {
+		s.log.Debug(op, "the supplied name breaks the naming rule", dlog.Context{
+			"name": supplied, "component": breach.Component, "rule": string(breach.Rule),
+		})
+		// THE BREACH IS FILLED AS THE CREATE'S REFUSAL IS (setArm), so the
+		// read and the refusal spell CreateWorkspaceInvalidName alike.
+		if !setArm(success.ProtoReflect(), "invalid", breach.Fields(supplied)) {
+			panic(fmt.Sprintf("ValidateWorkspaceName: the breach %+v has no CreateWorkspaceInvalidName spelling", breach))
+		}
+	} else {
+		s.log.Debug(op, "the supplied name keeps the naming rule", dlog.Context{"name": supplied})
+		success.Verdict = &agentreplv1.ValidateWorkspaceNameSuccess_Legal{Legal: &agentreplv1.ValidateWorkspaceNameLegal{}}
+	}
+	return connect.NewResponse(&agentreplv1.ValidateWorkspaceNameResponse{
+		Result: &agentreplv1.ValidateWorkspaceNameResponse_Success{Success: success},
+	}), nil
+}
+
 // SetWorkspaceHidden moves a workspace into the roster's hidden section, or
 // back out of it. The new state arrives on the roster stream.
 func (s *server) SetWorkspaceHidden(

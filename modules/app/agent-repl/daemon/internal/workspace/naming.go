@@ -154,7 +154,15 @@ func refuseSuppliedName(log dlog.Logger, rpc, supplied string) error {
 	}
 	return refuseWith(log, rpc, ArmInvalidName,
 		fmt.Sprintf("the name %q breaks the %s rule at %q", supplied, breach.Rule, breach.Component), false,
-		map[string]any{"name": supplied, "component": breach.Component, "rule": breach.Rule})
+		breach.Fields(supplied))
+}
+
+// Fields is the breach of SUPPLIED as the invalid_name arm's fields — its
+// `name`, `component` and nested `rule` arm — so a refusal and a read that
+// answers the same breach (agentrepl.v1.ValidateWorkspaceName) fill the wire's
+// agentrepl.v1.CreateWorkspaceInvalidName from one spelling.
+func (b *NameBreach) Fields(supplied string) map[string]any {
+	return map[string]any{"name": supplied, "component": b.Component, "rule": b.Rule}
 }
 
 // Name composes the workspace name (which is also the branch name) from the
