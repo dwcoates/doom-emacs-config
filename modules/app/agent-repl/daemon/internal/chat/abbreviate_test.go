@@ -173,6 +173,27 @@ func (f *fixture) rowLabel(node string) *frontendv1.RosterThreadOutlineLabel {
 	return nil
 }
 
+// TestTheAbbreviationCallIsBoundedByTheShortAnswerTimeout pins the
+// abbreviation call to the bound every short Haiku answer shares, so a
+// hand-set bound of its own fails here rather than drifting from the naming
+// call's.
+func TestTheAbbreviationCallIsBoundedByTheShortAnswerTimeout(t *testing.T) {
+	// Arrange
+	acct := configDirsFunc(func(context.Context, ids.WorkspaceID) (string, error) { return "/acct", nil })
+	runner := &scriptedRunner{answers: []string{"Fusion at iron"}}
+	a := HeadlessAbbreviator{Headless: runner, ConfigDirs: acct, PromptsDir: "/prompts", Load: abbreviationBrief}
+
+	// Act
+	if _, err := a.Abbreviate(context.Background(), dlog.NewTestLogger(), thr, longQuestion); err != nil {
+		t.Fatalf("Abbreviate: %v", err)
+	}
+
+	// Assert
+	if got := runner.calls[0].Timeout; got != headless.ShortAnswerTimeout {
+		t.Fatalf("timeout = %v, want headless.ShortAnswerTimeout (%v)", got, headless.ShortAnswerTimeout)
+	}
+}
+
 func TestAnAbbreviationMintedBeforeTheAnswerRidesTheRecording(t *testing.T) {
 	// Arrange
 	f := newFixture(t)

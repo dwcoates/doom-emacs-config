@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
@@ -35,10 +34,10 @@ const (
 	// NamingAttempts is how many times the call is made: the first, plus
 	// EXACTLY ONE retry on an invalid or failed answer (owner ruling).
 	NamingAttempts = 2
-	// NamingTimeout bounds ONE attempt. It is a handful of tokens from a small
-	// model; a call that has not answered in this long has failed. The bound
-	// is a constant until a measurement of the real call justifies a flag.
-	NamingTimeout = 15 * time.Second
+	// NamingTimeout bounds ONE attempt: a short answer from a small model
+	// (headless.ShortAnswerTimeout); a call that has not answered in this long
+	// has failed.
+	NamingTimeout = headless.ShortAnswerTimeout
 	// NamingCauseInvalidAnswer is the naming refusal's cause when the model
 	// answered but no answer had the slug's shape. Every other cause is one
 	// of headless's own.

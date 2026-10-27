@@ -45,6 +45,12 @@ const (
 // It is the spelling the CLI's `--model` takes.
 const ModelHaiku = "haiku"
 
+// ShortAnswerTimeout bounds ONE attempt of a short-answer question to
+// ModelHaiku: a handful of tokens back, such as a workspace's name or a
+// question's abbreviation. Every such call shares it, because what bounds them
+// is the CLI's start-up and the round trip, not the answer's length.
+const ShortAnswerTimeout = 15 * time.Second
+
 // ModelSonnet is the stronger model the daemon asks for prose a person reads
 // closely: the news digest's condensing.
 const ModelSonnet = "sonnet"
