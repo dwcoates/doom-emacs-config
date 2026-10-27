@@ -412,12 +412,13 @@
   --tree-line-h: 1.45;
   /* THE SERIF (owner ruling, 2026-10-25): Source Serif 4, the free stand-in
      for claude.ai's Tiempos-derived serif, bundled (main.ts). The chat's
-     text is set in it. */
+     text, and a thinking bubble's and an interim response's, are set in it. */
   --serif-font-family: "Source Serif 4 Variable", ui-serif, Georgia, serif;
   /* THE BUBBLE FACE: every bubble's text (a prompt, a response and its
-     tree, a thinking bubble, an interim response) is set in monospace
-     (owner request, 2026-10-27, superseding 2026-10-26's chat serif). Code
-     keeps its own rules (`.md code`, `pre`). */
+     tree) is set in monospace (owner request, 2026-10-27, superseding
+     2026-10-26's chat serif), but a thinking bubble's and an interim
+     response's, which take the chat's serif (THE WORKING PROSE'S FACE).
+     Code keeps its own rules (`.md code`, `pre`). */
   --bubble-font-family: ui-monospace, monospace;
   /* THE TREE'S RAIL FACE: a metaprompt tree's connectors are always
      monospace (owner ruling, 2026-10-26), so every rail segment is the same
@@ -2340,6 +2341,13 @@ pre {
 .bubble[data-variant="thinking"],
 .bubble.interim-response {
   --bubble-font-rem: var(--small-prose-font-rem);
+}
+/* THE WORKING PROSE'S FACE (owner request, 2026-10-27): a thinking bubble and
+   an interim response are set in the chat's serif, so the agent's working
+   text reads apart from the monospace prompts and final answer. */
+.bubble[data-variant="thinking"],
+.bubble.interim-response {
+  font-family: var(--serif-font-family);
 }
 /* THE THINKING PROSE (owner request, 2026-10-14): a thinking bubble's text is
    italic and a touch greyer than an interim's (--thinking-text), so reasoning

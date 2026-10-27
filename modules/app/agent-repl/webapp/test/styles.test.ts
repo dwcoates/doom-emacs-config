@@ -2812,11 +2812,11 @@ describe("the one bubble rule set", () => {
   });
 
   it.each([
-    ["a prompt", "prompt", "user", ""],
-    ["a response", "response", "response", ""],
-    ["a thinking bubble", "response", "thinking", ""],
-    ["an interim response", "response", "response", "interim-response"],
-  ])("hands %s the bubble face through the cascade", (_label, role, variant, extra) => {
+    ["a prompt", "prompt", "user", "", "var(--bubble-font-family)"],
+    ["a final response", "response", "response", "final-response", "var(--bubble-font-family)"],
+    ["a thinking bubble", "response", "thinking", "", "var(--serif-font-family)"],
+    ["an interim response", "response", "response", "interim-response", "var(--serif-font-family)"],
+  ])("hands %s its face through the cascade", (_label, role, variant, extra, want) => {
     // Arrange
     const bubble = document.createElement("div");
     bubble.className = `bubble ${extra}`.trim();
@@ -2825,7 +2825,7 @@ describe("the one bubble rule set", () => {
     // Act
     const face = inDocument(bubble, (el) => cascadedValue(el, "font-family"));
     // Assert
-    expect(face).toBe("var(--bubble-font-family)");
+    expect(face).toBe(want);
   });
 
   it("lets a metaprompt tree inherit its bubble's face", () => {
@@ -2958,11 +2958,12 @@ describe("the one bubble rule set", () => {
             !(PAD_TOKENS.includes(prop) && rule.selectors.every((sel) => TIGHTER_PAD_SELECTORS.includes(sel))) &&
             // The dimmed prose of a thinking or interim bubble (owner request,
             // 2026-10-08) is the one text color a variant sets, their narrower
-            // `--bubble-font-rem` the one size, and the thinking prose's italic
-            // (owner requests, 2026-10-14) the one font style; their own suite
-            // pins all three.
+            // `--bubble-font-rem` the one size, the thinking prose's italic
+            // (owner requests, 2026-10-14) the one font style, and the
+            // chat's serif (owner request, 2026-10-27) the one face; their
+            // own suites pin all four.
             !(
-              (prop === "color" || prop === "--bubble-font-rem") &&
+              (prop === "color" || prop === "--bubble-font-rem" || prop === "font-family") &&
               rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))
             ) &&
             !(prop === "font-style" && isOwnRule(rule, THINKING_SELECTOR)) &&
