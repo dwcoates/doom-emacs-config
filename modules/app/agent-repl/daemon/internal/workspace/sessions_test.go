@@ -599,6 +599,8 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 type fleetFixture struct {
 	// restoreAsked are the parked sessions a history read asked back.
 	restoreAsked []ids.WorkspaceID
+	// store is the store's read-only face history is read from.
+	store *fakeStoreHistory
 	// restarts records every restart observation the fleet makes.
 	restarts restarttimingtest.Recorder
 	// chatPrompt and chatPromptErr answer the fleet's ChatSystemPrompt.
@@ -773,6 +775,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		now:          fixedNow,
 		standDown:    order,
 		db:           newFakeDB(),
+		store:        &fakeStoreHistory{},
 		accounts:     &fakeAccounts{configDir: "/config", transcript: account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/config"}},
 		client:       &fakeClient{response: startedResponse("vendor-1"), pid: 4242, standDown: order},
 		feed:         &fakeFeed{},
@@ -789,6 +792,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 	f.bundle = &fakeBundle{build: "installed-build"}
 
 	fleet, err := NewFleet(FleetDeps{
+		StoreHistory:  f.store,
 		RestoreParked: func(ws ids.WorkspaceID) { f.restoreAsked = append(f.restoreAsked, ws) },
 		NetworkChanged: func() <-chan struct{} {
 			if f.networkChanged != nil {
@@ -897,31 +901,32 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		deps FleetDeps
 	}{
 		{name: "no state client", deps: FleetDeps{}},
-		{name: "no instance id", deps: FleetDeps{DB: newFakeDB()}},
-		{name: "no account resolver", deps: FleetDeps{DB: newFakeDB(), Instance: fixtureInstance}},
-		{name: "no supervisor", deps: FleetDeps{DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}}},
+		{name: "no store history", deps: FleetDeps{DB: newFakeDB()}},
+		{name: "no instance id", deps: FleetDeps{DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}}},
+		{name: "no account resolver", deps: FleetDeps{DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance}},
+		{name: "no supervisor", deps: FleetDeps{DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}}},
 		{
 			name: "no socket path",
-			deps: FleetDeps{DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{}},
+			deps: FleetDeps{DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{}},
 		},
 		{
 			name: "no shim bundle",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" },
 			},
 		},
 		{
 			name: "no log surfaces",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 			},
 		},
 		{
 			name: "no lock directory",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(),
 			},
@@ -929,7 +934,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no bring-up marker",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run",
 			},
@@ -937,7 +942,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no vendor-start marker",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {},
@@ -946,7 +951,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no bring-up step sink",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
@@ -955,7 +960,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no restart recorder",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
@@ -965,7 +970,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no chat system prompt",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
@@ -986,7 +991,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no session-up hook",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},

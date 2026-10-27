@@ -115,6 +115,9 @@ type ShimBundle interface {
 
 // FleetDeps are what the session fleet needs to bring a session up.
 type FleetDeps struct {
+	// StoreHistory is the store's read-only face, which every workspace's
+	// history is read from (ReadHistory). REQUIRED.
+	StoreHistory StoreHistory
 	// RestoreParked asks for a session the keep-alive cycle parked to be
 	// brought back (cachelapse.Keeper.RestoreParked): a reader asked for
 	// history that only a shim serves. Nil wires no keeper.
@@ -514,6 +517,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	switch {
 	case deps.DB == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a state client")
+	case deps.StoreHistory == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs the store's read-only face")
 	case deps.Instance == "":
 		return nil, fmt.Errorf("workspace: the session fleet needs this daemon's instance id; every session it holds is claimed for it")
 	case deps.Accounts == nil:

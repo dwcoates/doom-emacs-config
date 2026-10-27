@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/storereader"
 	"agent-repld/internal/wsm"
 )
 
@@ -430,15 +431,17 @@ func TestFleetReadHistoryOfAnUnknownSubagentBeforeASessionIsARefusal(t *testing.
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := parkAtColdGate(t, f)
-	f.client.history = unknownAgentResponse()
+	f.store.err = &storereader.Refusal{Arm: storereader.ArmUnknownAgent, Detail: "no such book"}
 
 	// Act.
 	_, err := f.fleet.ReadHistory(context.Background(), ws, &conversationv1.AgentId{Value: "sub-agent"}, nil)
 
 	// Assert.
-	var refusal *ShimRefusal
-	if errors.Is(err, feed.ErrNoHistorySource) || !errors.As(err, &refusal) || refusal.Arm != "unknown_agent" {
-		t.Fatalf("err = %v, want the unknown_agent refusal", err)
+	if errors.Is(err, feed.ErrNoHistorySource) || !storereader.IsUnknownAgent(err) {
+		t.Fatalf("err = %v, want the store's unknown_agent refusal", err)
+	}
+	if len(f.store.asked) != 1 || f.store.asked[0] != "newest sub-agent stated=false" {
+		t.Fatalf("store asked %v, want the subagent's book, named", f.store.asked)
 	}
 }
 
@@ -583,20 +586,154 @@ func TestFleetReadHistoryOfAnyOtherFailureStaysAFailure(t *testing.T) {
 	}
 }
 
-func TestFleetReadInheritedCutShortByAnOrderedStandDownIsNoSource(t *testing.T) {
+func TestFleetReadInheritedSurfacesAFailedStoreRead(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
 	ws := parkAtColdGate(t, f)
-	f.client.historyErr = standDownErr
+	f.store.err = storereader.ErrUnanswered
 
 	// Act.
 	_, err := f.fleet.ReadInherited(context.Background(), ws, &conversationv1.AgentId{Value: "parent-book"}, nil, 1)
 
 	// Assert.
-	if !errors.Is(err, feed.ErrNoHistorySource) {
-		t.Fatalf("err = %v, want ErrNoHistorySource", err)
+	if !errors.Is(err, storereader.ErrUnanswered) || errors.Is(err, feed.ErrNoHistorySource) {
+		t.Fatalf("err = %v, want the store's failure surfaced", err)
 	}
-	if got := recordsAt(f.log, "daemon.workspace.history_stood_down", "info"); len(got) != 1 {
-		t.Fatalf("history_stood_down records = %v, want one INFO", got)
+}
+
+// storePromptPage is a root page of one prompt AGENT was sent, as the store
+// serves it.
+func storePromptPage(agent string) *conversationv1.HistoryPage {
+	return promptPageResponse(agent).GetSuccess().GetPage()
+}
+
+func TestFleetReadHistoryOfARecordedBookReadsTheStore(t *testing.T) {
+	cases := []struct {
+		name   string
+		target *conversationv1.AgentId
+		after  *conversationv1.HistoryPointer
+		want   string
+	}{
+		{name: "the newest page reads the recorded book as stated", want: "newest book-1 stated=true"},
+		{name: "a page below a pointer reads before it", after: &conversationv1.HistoryPointer{Value: "p-3"}, want: "before book-1 p-3"},
+		{name: "a read naming the recorded book reads it as stated", target: &conversationv1.AgentId{Value: "book-1"}, want: "newest book-1 stated=true"},
+		{name: "a read naming another book reads it as named", target: &conversationv1.AgentId{Value: "sub-1"}, want: "newest sub-1 stated=false"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a workspace no shim serves, with its book on record.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.books[ws.ID] = "book-1"
+			f.store.page = storePromptPage("book-1")
+
+			// Act.
+			page, err := f.fleet.ReadHistory(context.Background(), ws.ID, tc.target, tc.after)
+
+			// Assert.
+			if err != nil || page == nil {
+				t.Fatalf("ReadHistory = %v, %v; want the store's page", page, err)
+			}
+			if len(f.store.asked) != 1 || f.store.asked[0] != tc.want {
+				t.Fatalf("store asked %v, want %q", f.store.asked, tc.want)
+			}
+			if f.client.historyReads != 0 || len(f.restoreAsked) != 0 || len(f.supervisor.spawns) != 0 {
+				t.Fatalf("shim reads %d, restores asked %v, spawns %d; want no shim involved", f.client.historyReads, f.restoreAsked, len(f.supervisor.spawns))
+			}
+		})
+	}
+}
+
+func TestFleetReadHistoryOfARecordedBookNamesTheMainAgentForTheFeed(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.books[ws.ID] = "book-1"
+	f.store.page = storePromptPage("book-1")
+
+	// Act.
+	if _, err := f.fleet.ReadHistory(context.Background(), ws.ID, nil, nil); err != nil {
+		t.Fatalf("ReadHistory: %v", err)
+	}
+
+	// Assert.
+	if len(f.feed.mainAgents) != 1 || f.feed.mainAgents[0] != "book-1" {
+		t.Fatalf("feed main agents = %v, want the page's main agent", f.feed.mainAgents)
+	}
+}
+
+func TestFleetReadHistoryOfARecordedBookIsNoSourceDuringAFreshStart(t *testing.T) {
+	// Arrange: the recorded book names the conversation the fresh one replaces.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.books[ws.ID] = "book-old"
+	f.client.responses = []*shimv1.StartSessionResponse{vendorRefusal(retryableVendorStart(), "overloaded")}
+	var readErr error
+	f.retryAfter = func(time.Duration) <-chan time.Time {
+		_, readErr = f.fleet.ReadHistory(context.Background(), ws.ID, nil, nil)
+		fired := make(chan time.Time, 1)
+		fired <- f.now
+		return fired
+	}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if !errors.Is(readErr, feed.ErrNoHistorySource) || len(f.store.asked) != 0 {
+		t.Fatalf("read during a fresh start = %v after store reads %v, want ErrNoHistorySource and none", readErr, f.store.asked)
+	}
+}
+
+func TestFleetReadHistoryOfAnUnrecordedBookIsReadThroughItsShim(t *testing.T) {
+	// Arrange: the cold refusal named no book, so none is on record.
+	f := newFleetFixture(t)
+	ws := parkAtColdGate(t, f)
+
+	// Act.
+	page, err := f.fleet.ReadHistory(context.Background(), ws, nil, nil)
+
+	// Assert.
+	if err != nil || page == nil || f.client.historyReads != 1 || len(f.store.asked) != 0 {
+		t.Fatalf("ReadHistory = %v, %v after %d shim reads and store reads %v; want the shim's page", page, err, f.client.historyReads, f.store.asked)
+	}
+	if got := recordsAt(f.log, "daemon.workspace.history_through_shim", "info"); len(got) != 1 {
+		t.Fatalf("history_through_shim records = %v, want one INFO", got)
+	}
+}
+
+func TestFleetReadHistoryWhoseBookCannotBeReadIsAFailure(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.bookErr = errFake
+
+	// Act.
+	_, err := f.fleet.ReadHistory(context.Background(), ws.ID, nil, nil)
+
+	// Assert.
+	if !errors.Is(err, errFake) || errors.Is(err, feed.ErrNoHistorySource) {
+		t.Fatalf("err = %v, want the failed read surfaced", err)
+	}
+	if got := recordsAt(f.log, "daemon.workspace.history_book", "error"); len(got) != 1 {
+		t.Fatalf("history_book records = %v, want one ERROR", got)
+	}
+}
+
+func TestFleetReadHistoryOfARecordedBookSurfacesAFailedStoreRead(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.books[ws.ID] = "book-1"
+	f.store.err = storereader.ErrUnanswered
+
+	// Act.
+	_, err := f.fleet.ReadHistory(context.Background(), ws.ID, nil, nil)
+
+	// Assert.
+	if !errors.Is(err, storereader.ErrUnanswered) || errors.Is(err, feed.ErrNoHistorySource) {
+		t.Fatalf("err = %v, want the store's failure surfaced", err)
 	}
 }

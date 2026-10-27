@@ -3724,3 +3724,26 @@ func (d *fakeDB) heldCreates() []wsm.QueuedCreate {
 	}
 	return out
 }
+
+// fakeStoreHistory is the store's read-only face: it answers every read with
+// PAGE or ERR and records how it was asked.
+type fakeStoreHistory struct {
+	page  *conversationv1.HistoryPage
+	err   error
+	asked []string
+}
+
+func (s *fakeStoreHistory) Newest(_ context.Context, book string, stated bool) (*conversationv1.HistoryPage, error) {
+	s.asked = append(s.asked, fmt.Sprintf("newest %s stated=%t", book, stated))
+	return s.page, s.err
+}
+
+func (s *fakeStoreHistory) Before(_ context.Context, book string, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
+	s.asked = append(s.asked, fmt.Sprintf("before %s %s", book, after.GetValue()))
+	return s.page, s.err
+}
+
+func (s *fakeStoreHistory) Through(_ context.Context, book string, throughMs int64) (*conversationv1.HistoryPage, error) {
+	s.asked = append(s.asked, fmt.Sprintf("through %s %d", book, throughMs))
+	return s.page, s.err
+}

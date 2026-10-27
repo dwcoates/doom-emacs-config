@@ -77,6 +77,7 @@ import (
 	"agent-repld/internal/signin"
 	"agent-repld/internal/stallbeat"
 	"agent-repld/internal/startslots"
+	"agent-repld/internal/storereader"
 	"agent-repld/internal/subagentmaker"
 	"agent-repld/internal/titlesynth"
 	"agent-repld/internal/vocab"
@@ -860,6 +861,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
+		// THE STORE'S READ-ONLY FACE, dialled beside the store socket every
+		// shim is handed: the daemon reads every workspace's history there,
+		// and never writes the store.
+		StoreHistory:   storereader.New(p.Opts.storeSocket),
 		NetworkChanged: networkWatch.Changed,
 		RestoreParked:  cacheKeeper.RestoreParked,
 		StartSlots:     startSlots,
