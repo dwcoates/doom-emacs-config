@@ -1243,8 +1243,9 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
     `.agent-repl-merge-failing-tests` (`failingtests.go`), kept out of commits
     through the repository's `info/exclude`, and the selected suites run again
     after it;
-  - each cycle, tests-then-fix and rebase-then-resolve, fails the merge after
-    five failures in a row; a pass resets it; a step a restart cut (a turn
+  - tests-then-fix fails the merge once its one fixing attempt leaves the
+    gate failing (`MaxFixAttempts`), and rebase-then-resolve after five
+    failures in a row (`MaxConflictAttempts`); a pass resets it; a step a restart cut (a turn
     closed orphaned, or its agent dead while the merge was suspended:
     `cutByRestart`) is prompted again as the same attempt;
   - every exit settles the leaving merge's own queue tab and redraws every

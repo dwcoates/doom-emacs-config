@@ -247,7 +247,7 @@ branch into the target as a non-fast-forward merge.
     yet in line.
   - The process runs in the requesting workspace: rebase commit by commit,
     conflict repair turns in the requesting session, the gate, up to
-    `MaxFixAttempts = 3` test repair turns (reset by a start-over), commit,
+    `MaxFixAttempts = 1` test repair turn (reset by a start-over), commit,
     update main. If master moved, the run starts over.
   - It fails with an area: `conflicts` (the daemon-made worktree is kept, so
     the rebase stays in progress), `tests`, or `other` (uncommitted changes,

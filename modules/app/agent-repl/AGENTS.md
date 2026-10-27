@@ -1304,9 +1304,12 @@ like an improvement still needs that conversation. Code:
   then is the remediation resolved, and the agent commits and ends its turn.
 - **After remediation, the selected suites run again**, selected afresh from
   the branch's whole diff, fixing commits included.
-- **Five consecutive failures per cycle, and interruptions never count.**
-  - The tests cycle fails the merge when five fixing attempts in a row leave
-    the gate failing (`MaxFixAttempts`).
+- **One fixing attempt, five consecutive conflict failures, and
+  interruptions never count.**
+  - The tests cycle gives a failing gate one fixing attempt, and fails the
+    merge when the gate fails again (`MaxFixAttempts`; owner ruling
+    2026-10-26, down from five, so a merge that cannot get green leaves the
+    queue and the next one can work).
   - The conflict cycle fails the merge when five resolution attempts in a row
     leave one commit's conflict unresolved (`MaxConflictAttempts`); one
     failure is a resolution turn that failed or left files conflicted.
