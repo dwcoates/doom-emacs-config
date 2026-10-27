@@ -252,16 +252,19 @@
   - The verb and its flags are `/agent-repl-workspaces`'.
 - The daemon clears the mark itself when I take the workspace back, so no workspace unmarks itself.
 
-## Principal links
+## Workspace links
 
-### Every supplied link that best captures the workspace's task becomes its principal link
+### Every supplied link that bears on the workspace's task is stored as one of its links
 
-- Whenever a link is supplied in the conversation, the workspace weighs it as its principal link, the url its topbar summary opens.
-  - It sets the link when the workspace has no principal link yet.
-  - It sets the link when the standing principal link captures the workspace's overarching task less well than the new one does.
+- Whenever a link is supplied in the conversation, the workspace stores it as one of its links, under a label of two to eight words in one sentence.
+  - The links are what the topbar's summary opens: one shown link opens on a click, and several drop a menu of their labels.
   - Examples are a pull request, a ticket, a design doc, or a dashboard.
-- The workspace sets it proactively and at once, without asking me any questions.
-  - The verb, its flags, and how to read the standing link are `/agent-repl-workspaces`'.
+  - A link already stored is relabeled rather than stored twice.
+- The menu shows at most five links, so once it is full the workspace chooses which five it shows.
+  - It ranks them by relevance to the project, as seen by the developer working with the agent.
+  - It ranks them by the same lens for the stakeholders the developer reports the work to.
+- The workspace does this proactively and at once, without asking me any questions.
+  - The verb, its flags, and how to read the standing links are `/agent-repl-workspaces`'.
 
 ## Deleted worktrees
 
