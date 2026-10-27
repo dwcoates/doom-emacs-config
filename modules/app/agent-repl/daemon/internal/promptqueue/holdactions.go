@@ -5,10 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
-
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/wsm"
 )
 
@@ -426,7 +425,7 @@ func submissionOf(held wsm.HeldPrompt) Submission {
 		WS:       held.Workspace,
 		Turn:     held.Turn,
 		Said:     held.Said,
-		Origin:   conversationv1.PromptOrigin(conversationv1.PromptOrigin_value[held.Origin]),
+		Origin:   promptorigin.Named(held.Origin),
 		SentBy:   held.SentBy,
 		Target:   held.Target,
 		Delivery: held.Delivery,

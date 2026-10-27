@@ -14,6 +14,13 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
+// Named answers the origin spelled as conversation.v1.PromptOrigin names it,
+// as the store records it: the ONE reading of a stored origin. A name the
+// vocabulary does not hold reads as PROMPT_ORIGIN_UNSPECIFIED.
+func Named(origin string) conversationv1.PromptOrigin {
+	return conversationv1.PromptOrigin(conversationv1.PromptOrigin_value[origin])
+}
+
 // ErrSenderMismatch is a prompt whose sender disagrees with its origin: a
 // sender on a prompt no agent sent, or an agent-sent prompt naming none.
 var ErrSenderMismatch = errors.New("a prompt names its sender exactly when its origin is PROMPT_ORIGIN_AGENT_SENT")
@@ -32,7 +39,7 @@ func CheckSender(origin conversationv1.PromptOrigin, named bool) error {
 // CheckSenderNamed is CheckSender for an origin spelled as
 // conversation.v1.PromptOrigin names it, as the store records it.
 func CheckSenderNamed(origin string, named bool) error {
-	return CheckSender(conversationv1.PromptOrigin(conversationv1.PromptOrigin_value[origin]), named)
+	return CheckSender(Named(origin), named)
 }
 
 // Unseen reports whether a prompt of ORIGIN is drawn NOWHERE in the webapp:
@@ -58,7 +65,7 @@ func Unseen(origin conversationv1.PromptOrigin) bool {
 // names it, as a durable hold stores it. A name the vocabulary does not hold
 // is not unseen.
 func UnseenNamed(origin string) bool {
-	return Unseen(conversationv1.PromptOrigin(conversationv1.PromptOrigin_value[origin]))
+	return Unseen(Named(origin))
 }
 
 // UserSent reports whether a prompt of ORIGIN is the user's own, typed into
