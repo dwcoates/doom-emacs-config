@@ -355,8 +355,25 @@ export function paintBandMore(region: HTMLElement): void {
   section.toggleAttribute(BAND_MORE_ATTRIBUTE, region.scrollTop + region.clientHeight < region.scrollHeight - 0.5);
 }
 
+/** The selector each section's rows region matches, by the section's class. */
+const regionSelector = (className: string, regionClass: string): string => `.${className} > .${regionClass}`;
+
 /** The selector every section's rows region matches. */
-export const REGION_SELECTOR = SECTION_REGIONS.map(([className, regionClass]) => `.${className} > .${regionClass}`).join(", ");
+export const REGION_SELECTOR = SECTION_REGIONS.map(([className, regionClass]) => regionSelector(className, regionClass)).join(", ");
+
+/**
+ * Every section's rows region under ROOT, each named by its section's class
+ * and its place among that class's regions, so a section drawn anew answers
+ * to the name its predecessor had (`scroll-keep.ts`).
+ */
+export function sectionRegions(root: Element): Array<{ name: string; region: HTMLElement }> {
+  return SECTION_REGIONS.flatMap(([className, regionClass]) =>
+    queryAll<HTMLElement>(root, regionSelector(className, regionClass)).map((region, i) => ({
+      name: `${className}#${i}`,
+      region,
+    })),
+  );
+}
 
 /** One open section's band, its lines, and its stops. */
 interface Measured {
@@ -459,7 +476,7 @@ export interface BandFit {
  */
 function watchedBoxes(pane: HTMLElement): HTMLElement[] {
   const regions = SECTION_REGIONS.map(([className, regionClass]) =>
-    pane.querySelector<HTMLElement>(`:scope > .${className} > .${regionClass}`),
+    pane.querySelector<HTMLElement>(`:scope > ${regionSelector(className, regionClass)}`),
   ).filter((region): region is HTMLElement => region !== null);
   return [pane, ...regions.flatMap((region) => [...region.children] as HTMLElement[])];
 }
@@ -471,16 +488,22 @@ function watchedBoxes(pane: HTMLElement): HTMLElement[] {
  * exactly that layout, and so does TICKER's first tick of a new local date,
  * because which merges are today's is part of it. The fit never moves its
  * own room (see the module note), so the re-fit its own resize of the pane
- * provokes draws the same lines and stops there.
+ * provokes draws the same lines and stops there. ON_RESIZED runs after every
+ * fit a resize provoked.
  */
-export function installBandFit(scroller: HTMLElement, ticker: Ticker): BandFit {
+export function installBandFit(scroller: HTMLElement, ticker: Ticker, onResized: () => void = () => undefined): BandFit {
   let fittedAtMs = ticker.now();
   const fitAt = (nowMs: number): void => {
     fittedAtMs = nowMs;
     fitAllBands(scroller, nowMs);
   };
   const fitNow = (): void => fitAt(ticker.now());
-  const observer = new ResizeObserver(fitNow);
+  // A RESIZE IS TOLD ONCE THE SECTIONS ARE FITTED TO IT, so what reads them
+  // (the selection's follow) reads the heights the fit gave them.
+  const observer = new ResizeObserver(() => {
+    fitNow();
+    onResized();
+  });
   observer.observe(scroller);
   // A scroll does not bubble, so the rail captures every section's scroll to
   // repaint whether rows still lie below its edge.

@@ -1537,9 +1537,10 @@ describe("the rail holds its drawing while a row is dragged", () => {
 });
 
 /** A roster of rows ws-0..ws-5 in one repository, CURRENT the one the daemon names current. */
-function sixRows(current: string): WorkspaceRoster {
+function sixRows(current: string, openCount?: number): WorkspaceRoster {
   return roster({
     current,
+    openCount,
     repos: [
       repoSection({
         id: "repo-1",
@@ -1638,6 +1639,26 @@ describe("the rail scrolls the selected row into its section's view", () => {
 
     // Assert
     expect(laid.scrollTop()).toBe(0);
+    sidebar.dispose();
+  });
+
+  it("keeps the Open section where the reader scrolled it on a push that draws the section anew", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const stream = pushedRosters();
+    const sidebar = mountWebhostSidebar(host, ctxFor([], stream.impl), { storage: null, timers: fakeTimers() });
+    const laid = layOpenSection(host);
+    stream.push(sixRows("ws-0"));
+    await settle();
+    const before = host.querySelector(".sb-sections");
+    (before as HTMLElement).scrollTop = 40;
+
+    // Act: a changed open count draws the Open section anew.
+    stream.push(sixRows("ws-0", 7));
+    await settle();
+
+    // Assert
+    expect([host.querySelector(".sb-sections") === before, laid.scrollTop()]).toEqual([false, 40]);
     sidebar.dispose();
   });
 });

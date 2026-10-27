@@ -50,6 +50,7 @@ import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
 import { placeChildren } from "./children.js";
 import { queryAll } from "../dom.js";
 import { createSelectionFade } from "./selection-fade.js";
+import { createRailScrollKeep } from "./scroll-keep.js";
 import { createSelectionScroll, RAIL_BODY_CLASS } from "./selection-scroll.js";
 import type { RosterVersion, WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
@@ -216,6 +217,9 @@ function mountSidebarIn(
   // once per selection, after a draw has fitted the bands and whenever the
   // webhost moves the highlight ahead of the roster.
   const selectionScroll = createSelectionScroll();
+  // A REDRAW NEVER MOVES THE RAIL (scroll-keep.ts): every viewport is read
+  // before a draw and put back once the bands are fitted.
+  const scrollKeep = createRailScrollKeep();
 
   const openDetails = new Set<string>();
   const dropdowns = createDropdowns();
@@ -253,7 +257,12 @@ function mountSidebarIn(
   // THE BAND FIT (band-fit.ts): the Open, Hidden Workspaces and Recently
   // Merged viewports, re-fitted after every draw, on every resize of the rail
   // or a pane, and when the local date turns over.
-  const bandFit = installBandFit(body, ctx.ticker);
+  // A RESIZE KEEPS THE SELECTED ROW IN VIEW (selection-scroll.ts): a gate
+  // docking under the rail shrinks its sections with no push and no switch.
+  const bandFit = installBandFit(body, ctx.ticker, () => selectionScroll.resized(body));
+  // Every viewport's scroll, the reader's or the rail's, notes whether the
+  // selected row still shows, which decides whether a resize brings it back.
+  body.addEventListener("scroll", () => selectionScroll.scrolled(body), true);
   // THE SEARCH NARROWS THE DRAWN ROWS (search.ts): on every keystroke, and
   // again after every push and every row drawn as it came into view, since
   // either draws rows the query has not narrowed.
@@ -387,6 +396,7 @@ function mountSidebarIn(
     // The blink pass brackets the draw: markers are re-attached to the phases
     // already running, and any marker the daemon cleared is forgotten.
     attention.beginPass();
+    scrollKeep.capture(body, chatShown ? "chat" : "workspaces");
     // THE TITLE IS THE APP SWITCHER, and the body is the app the roster shows
     // (threads.ts): a thread on screen shows Chat.
     const switcher = requireMessage(roster.appSwitcher, "WorkspaceRoster.app_switcher");
@@ -420,6 +430,9 @@ function mountSidebarIn(
     }
     // Fitted once the rail is shown, so the band measures the rail it is in.
     bandFit.refit();
+    // Restored once the bands are fitted, so a viewport is clamped only by
+    // the height the draw leaves it, and before the follow, which may move it.
+    scrollKeep.restore(body, chatShown ? "chat" : "workspaces");
     // Followed once the bands are fitted, so it scrolls the viewport they drew.
     selectionScroll.follow(body);
     // Seeked once the draw is in the document, where its animations run.
