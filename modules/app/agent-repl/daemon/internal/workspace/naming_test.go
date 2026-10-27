@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -501,5 +502,45 @@ func TestWorktreeParentOfAMissingRepositoryFails(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("WorktreeParent of a missing repository answered no error")
+	}
+}
+
+func TestNameBreachFieldsSpellTheInvalidNameArm(t *testing.T) {
+	tests := []struct {
+		name     string
+		supplied string
+		want     map[string]any
+	}{
+		{name: "a slug breach", supplied: "Bad Name", want: map[string]any{"name": "Bad Name", "component": "Bad Name", "rule": NameRuleSlug}},
+		{name: "a prefix breach", supplied: "A B/fine", want: map[string]any{"name": "A B/fine", "component": "A B", "rule": NameRulePrefix}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			breach := ValidateSuppliedName(tt.supplied)
+
+			// Act
+			fields := breach.Fields(tt.supplied)
+
+			// Assert
+			if !reflect.DeepEqual(fields, tt.want) {
+				t.Fatalf("Fields = %v, want %v", fields, tt.want)
+			}
+		})
+	}
+}
+
+// TestRefuseSuppliedNameFieldsAreTheBreachFields pins the refusal spelling its
+// fields through NameBreach.Fields, the one spelling the read rpc shares.
+func TestRefuseSuppliedNameFieldsAreTheBreachFields(t *testing.T) {
+	// Arrange
+	supplied := "A B/Bad Name"
+
+	// Act
+	refusal, _ := AsRefusal(refuseSuppliedName(dlog.NewTestLogger(), "SomeRpc", supplied))
+
+	// Assert
+	if want := ValidateSuppliedName(supplied).Fields(supplied); !reflect.DeepEqual(refusal.Fields, want) {
+		t.Fatalf("refusal fields = %v, want NameBreach.Fields = %v", refusal.Fields, want)
 	}
 }
