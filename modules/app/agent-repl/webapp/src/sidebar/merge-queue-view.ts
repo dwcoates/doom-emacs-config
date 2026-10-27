@@ -42,6 +42,7 @@ import {
   SelectWorkspaceResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { formatAge, formatElapsed } from "../duration.js";
+import { settledElapsedClock } from "../elapsed-clock.js";
 import { roundSuffix, STATE_GLYPHS } from "../feed/merge/tab-strip.js";
 import { log } from "../log.js";
 import { MERGE_GLYPH } from "../merge-glyph.js";
@@ -450,10 +451,7 @@ export function drawHeadClock(
 ): HTMLElement | null {
   if (paused === undefined) return drawClock(sc, startedMs);
   if (paused.pausedAtMs === undefined) return null;
-  const clock = document.createElement("span");
-  clock.className = "sb-mq-clock";
-  clock.textContent = formatElapsed(msOf(paused.pausedAtMs, `${path}.paused_at_ms`) - startedMs);
-  return clock;
+  return settledElapsedClock("sb-mq-clock", msOf(paused.pausedAtMs, `${path}.paused_at_ms`) - startedMs);
 }
 
 /**
