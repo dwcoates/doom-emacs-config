@@ -11,6 +11,7 @@
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { SidebarContext } from "./context.js";
+import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { changeView } from "./view-change.js";
@@ -45,7 +46,7 @@ export const CURRENT_FLASH_CLASS = "current-flash";
  * restarts.
  */
 function flashCurrentRow(section: HTMLElement): void {
-  for (const row of section.querySelectorAll<HTMLElement>(".ws.current")) {
+  for (const row of queryAll<HTMLElement>(section, ".ws.current")) {
     row.classList.remove(CURRENT_FLASH_CLASS);
     void row.offsetWidth;
     row.classList.add(CURRENT_FLASH_CLASS);
