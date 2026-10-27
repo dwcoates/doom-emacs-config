@@ -92,6 +92,12 @@ type wsState struct {
 	// signInTurns is the turns whose ending offers the sign-in action, so
 	// every broken bubble of one carries the action too (signin.go).
 	signInTurns map[ids.TurnID]bool
+	// reconnected is the turns whose connection failure the network coming
+	// back answered (reconnect.go): their connection-failed card is not drawn.
+	reconnected map[ids.TurnID]bool
+	// networkFaults is the network faults standing for the workspace, by
+	// record id (reconnect.go): the last one closing is the connection back.
+	networkFaults map[string]bool
 	// promptSaid is each delivered prompt as said, by the turn it opened, so a
 	// rollback can hand it back to the composer (rollback.go).
 	promptSaid map[ids.TurnID]*conversationv1.UserSaid
@@ -718,6 +724,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 	r.restoreDurable(s)
 	r.restoreRolledBack(s)
 	r.restoreSignedIn(s)
+	r.restoreReconnected(s)
 	return s
 }
 
@@ -772,6 +779,8 @@ func newWSState(ws ids.WorkspaceID) *wsState {
 		rollingBack:          map[ids.TurnID]bool{},
 		signedIn:             map[ids.TurnID]bool{},
 		signInTurns:          map[ids.TurnID]bool{},
+		reconnected:          map[ids.TurnID]bool{},
+		networkFaults:        map[string]bool{},
 		promptSaid:           map[ids.TurnID]*conversationv1.UserSaid{},
 		turnAddresses:        map[ids.TurnID]*sessionwatcher.OutputAddress{},
 		turnMirrors:          map[ids.TurnID]*wsm.MirrorAddress{},
@@ -1040,7 +1049,7 @@ func (r *resolver) outputPlacement(s *wsState, turn *ids.TurnID) placement {
 func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, durable bool) {
 	f := r.feed(s, at.feed)
 	if r.rolledBackRow(s, f, row) || r.withheldRollingBack(s, f, at, row, durable) || r.signedInRow(s, f, row) ||
-		r.noticeFoldedIntoEnding(s, f, at, row) {
+		r.reconnectedRow(s, f, row) || r.noticeFoldedIntoEnding(s, f, at, row) {
 		return
 	}
 	id := row.GetId().GetValue()

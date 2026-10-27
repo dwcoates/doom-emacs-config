@@ -22,6 +22,11 @@ func unmodeledFailure() *conversationv1.AgentFailure {
 	return apiFailure(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Unmodeled{Unmodeled: &conversationv1.ApiUnmodeledError{Type: "connection_error"}}})
 }
 
+// unreachableFailure is a request that never reached the API.
+func unreachableFailure() *conversationv1.AgentFailure {
+	return apiFailure(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_Unreachable{Unreachable: &conversationv1.ApiUnreachable{Code: "ENOTFOUND"}}})
+}
+
 // invalidRequest is the vendor refusing the request itself.
 func invalidRequest() *conversationv1.AgentFailure {
 	return apiFailure(&conversationv1.ApiRequestFailed{Kind: &conversationv1.ApiRequestFailed_InvalidRequest{InvalidRequest: &conversationv1.ApiInvalidRequest{}}})
@@ -99,6 +104,7 @@ func TestOnlyAVendorErrorWaitingCuresIsRetiredByService(t *testing.T) {
 		{name: "the API's internal error", failure: internalFailure("API Error: 500"), retired: true},
 		{name: "a rate limit", failure: rateLimited(), retired: true},
 		{name: "an unmodeled class", failure: unmodeledFailure(), retired: true},
+		{name: "a request that never reached the API", failure: unreachableFailure(), retired: true},
 		{name: "a rejected credential", failure: authFailed(), retired: false},
 		{name: "a malformed request", failure: invalidRequest(), retired: false},
 	}

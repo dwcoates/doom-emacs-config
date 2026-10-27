@@ -533,7 +533,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		footerResolver.SetBringingUp(ws, up)
 		sidebarResolver.SetBringingUp(ws, up)
 	}
-	p.DB = health.ObserveFaults(p.DB, newFaultSurfaces(footerResolver, sidebarResolver, topbarResolver, loudFaults), p.Surfaces)
+	faultSurfaces := newFaultSurfaces(footerResolver, sidebarResolver, topbarResolver, loudFaults)
+	p.DB = health.ObserveFaults(p.DB, faultSurfaces, p.Surfaces)
 
 	// THE LOCK STALL WATCHDOG is built before every component whose hot lock
 	// it watches (the feed, the session watchers, the prompt queue), and it
@@ -671,6 +672,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A ROLLED-BACK TURN STAYS ROLLED BACK across a restart.
 		RolledBack: p.DB,
 		SignedIn:   p.DB,
+		// A CONNECTION FAILURE THE NETWORK ANSWERED stays answered too.
+		Reconnected: p.DB,
 		// A row the feed cannot place is drawn nowhere and raised on the
 		// topbar's warning chip, the webapp's one error surface.
 		Warnings: topbarResolver,
@@ -696,6 +699,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the feed resolver: %w", err)
 	}
+	faultSurfaces.attachFeed(feedResolver)
 
 	// ---- the forwarders, and the fleet they let exist first ----
 
@@ -2090,15 +2094,53 @@ type faultSurfaces struct {
 	sidebar sidebar.Resolver
 	topbar  topbar.Resolver
 	loud    *health.LoudFaults
+	// feed takes the network fault's edges, so a connection-failed card
+	// leaves the feed when the connection is back. It is attached once the
+	// feed is built (attachFeed), which it is before any session watcher, the
+	// only source of a network fault, exists.
+	feed networkFaultFeed
 
 	mu sync.Mutex
 	// onTopbar are the open faults raised on the topbar (and so told to
 	// Emacs), so a close retracts exactly those.
 	onTopbar map[ids.FaultID]bool
+	// onFeed are the open network faults told to the feed, so only their
+	// close reaches it. THE FEED CLOSES FAULTS OF ITS OWN WHILE HOLDING ITS
+	// LOCK (a turn start closes its edge's faults), so passing it every
+	// close would re-enter that lock; a network fault closes only on the
+	// shim diagnostics' edge, never from inside the feed.
+	onFeed map[ids.FaultID]bool
 }
 
 func newFaultSurfaces(f footer.Resolver, s sidebar.Resolver, t topbar.Resolver, loud *health.LoudFaults) *faultSurfaces {
-	return &faultSurfaces{footer: f, sidebar: s, topbar: t, loud: loud, onTopbar: map[ids.FaultID]bool{}}
+	return &faultSurfaces{footer: f, sidebar: s, topbar: t, loud: loud, onTopbar: map[ids.FaultID]bool{}, onFeed: map[ids.FaultID]bool{}}
+}
+
+// networkFaultFeed is the slice of the feed the network fault's edges reach
+// (feed.Resolver).
+type networkFaultFeed interface {
+	NetworkFaultOpened(ws ids.WorkspaceID, id string)
+	NetworkFaultClosed(ws ids.WorkspaceID, id string)
+}
+
+// attachFeed hands the surfaces the feed, which is built after the store the
+// surfaces observe.
+func (f *faultSurfaces) attachFeed(feed networkFaultFeed) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.feed = feed
+}
+
+// networkFeed answers the attached feed. A network fault reaching the
+// surfaces before the feed is attached is a wiring defect: only a session
+// watcher raises one, and every watcher is built after the feed.
+func (f *faultSurfaces) networkFeed() networkFaultFeed {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.feed == nil {
+		panic("agent-repld: a network fault reached the fault surfaces before the feed was attached")
+	}
+	return f.feed
 }
 
 // FaultOpened puts a standing fault on the workspace's strip, or on every
@@ -2119,6 +2161,11 @@ func (f *faultSurfaces) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
 	// vendor-start run).
 	if line.Cell.Status == health.FaultStatusNetworkFault && ws != "" {
 		f.sidebar.NetworkFaultOpened(ws, string(line.ID))
+		feed := f.networkFeed()
+		f.mu.Lock()
+		f.onFeed[line.ID] = true
+		f.mu.Unlock()
+		feed.NetworkFaultOpened(ws, string(line.ID))
 	}
 	// ONLY A DAEMON-SCOPED FAULT reaches the topbar: health.FaultTopbarLine
 	// states no line for any other.
@@ -2153,6 +2200,13 @@ func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	f.footer.CloseFault(ws, string(id))
 	if ws != "" {
 		f.sidebar.FaultClosed(ws, string(id))
+		f.mu.Lock()
+		told := f.onFeed[id]
+		delete(f.onFeed, id)
+		f.mu.Unlock()
+		if told {
+			f.networkFeed().NetworkFaultClosed(ws, string(id))
+		}
 	}
 	f.mu.Lock()
 	raised := f.onTopbar[id]

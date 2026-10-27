@@ -2,7 +2,6 @@ package feed
 
 import (
 	"context"
-	"fmt"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -97,39 +96,20 @@ func (r *resolver) OnSignedIn(ws ids.WorkspaceID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
-	log := r.logger(ws)
-	var turns []ids.TurnID
-	r.eachStoredRow(s, func(_ feedid.Feed, _ *feedState, _ string, row *frontendv1.FeedRow) {
-		if offersSignIn(row) && row.GetTurn().GetValue() != "" {
-			turns = append(turns, ids.TurnID(row.GetTurn().GetValue()))
-		}
-	})
-	if len(turns) == 0 {
-		log.Debug(opSignedIn, "a sign-in completed and no drawn turn ending offered it; nothing was retired", nil)
-		return nil
+	answer := turnAnswer{
+		op:       opSignedIn,
+		names:    offersSignIn,
+		retires:  isFailureRow,
+		into:     s.signedIn,
+		nothing:  "a sign-in completed and no drawn turn ending offered it; nothing was retired",
+		failed:   "a sign-in's answered failures were removed from the feed but could not be recorded; a daemon restart will draw them again",
+		warning:  "the answered sign-in failures could not be saved and will reappear after a daemon restart",
+		answered: "a sign-in answered the account failures drawn in the feed; their rows were retired and recorded",
 	}
-	for _, turn := range turns {
-		s.signedIn[turn] = true
-	}
-	retired := 0
-	r.eachStoredRow(s, func(addr feedid.Feed, _ *feedState, id string, row *frontendv1.FeedRow) {
-		if s.signedIn[ids.TurnID(row.GetTurn().GetValue())] && isFailureRow(row) && r.retire(s, addr, id) {
-			retired++
-		}
-	})
-	fields := dlog.Context{"turns": len(turns), "first": firstTurn(turns), "retired": retired}
 	if r.deps.SignedIn != nil {
-		if err := r.deps.SignedIn.RecordSignedInTurns(context.Background(), ws, turns); err != nil {
-			fields["error"] = err.Error()
-			log.Error(opSignedIn,
-				"a sign-in's answered failures were removed from the feed but could not be recorded; a daemon restart will draw them again", fields)
-			r.raiseWarning(s, opSignedIn,
-				fmt.Sprintf("the answered sign-in failures could not be saved and will reappear after a daemon restart: %v", err))
-			return err
-		}
+		answer.record = r.deps.SignedIn.RecordSignedInTurns
 	}
-	log.Info(opSignedIn, "a sign-in answered the account failures drawn in the feed; their rows were retired and recorded", fields)
-	return nil
+	return r.answerTurns(s, answer)
 }
 
 // restoreSignedIn loads the workspace's answered turns when a process first
@@ -138,19 +118,11 @@ func (r *resolver) restoreSignedIn(s *wsState) {
 	if r.deps.SignedIn == nil {
 		return
 	}
-	turns, err := r.deps.SignedIn.SignedInTurns(context.Background(), s.id)
-	if err != nil {
-		r.logger(s.id).Error(opSignedInRestore,
-			"the workspace's sign-in-answered turns could not be loaded; their failures may be drawn again",
-			dlog.Context{"error": err.Error()})
-		r.raiseWarning(s, opSignedInRestore, "answered sign-in failures could not be loaded and may be drawn again")
-		return
-	}
-	for _, turn := range turns {
-		s.signedIn[turn] = true
-	}
-	if len(turns) > 0 {
-		r.logger(s.id).Info(opSignedInRestore, "the workspace's sign-in-answered turns were loaded; their failures are not drawn",
-			dlog.Context{"turns": len(turns)})
-	}
+	r.restoreTurnSet(s, turnSetRestore{
+		op:      opSignedInRestore,
+		load:    r.deps.SignedIn.SignedInTurns,
+		failed:  "the workspace's sign-in-answered turns could not be loaded; their failures may be drawn again",
+		warning: "answered sign-in failures could not be loaded and may be drawn again",
+		loaded:  "the workspace's sign-in-answered turns were loaded; their failures are not drawn",
+	}, s.signedIn)
 }

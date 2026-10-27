@@ -59,6 +59,7 @@ func waitCuredEnding(row *frontendv1.FeedRow) bool {
 	case *frontendv1.FeedTurnEndedErrored_RateLimited,
 		*frontendv1.FeedTurnEndedErrored_Overloaded,
 		*frontendv1.FeedTurnEndedErrored_Internal,
+		*frontendv1.FeedTurnEndedErrored_Unreachable,
 		*frontendv1.FeedTurnEndedErrored_VendorUnmodeled:
 		return true
 	default:

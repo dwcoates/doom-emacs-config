@@ -8,7 +8,7 @@ import (
 
 // everyTurnSet is every durable turn set, so each invariant the helper
 // guarantees is pinned for every set at once.
-var everyTurnSet = []turnSet{rolledBackTurns, signedInTurns}
+var everyTurnSet = []turnSet{rolledBackTurns, signedInTurns, reconnectedTurns}
 
 func TestTurnSetRecordRoundTripsInJoinOrder(t *testing.T) {
 	for _, set := range everyTurnSet {
@@ -106,6 +106,7 @@ func TestTurnSetPublicMethodsShareTheHelper(t *testing.T) {
 	pairs := []pair{
 		{set: rolledBackTurns, record: (*store).RecordRolledBackTurns, load: (*store).RolledBackTurns},
 		{set: signedInTurns, record: (*store).RecordSignedInTurns, load: (*store).SignedInTurns},
+		{set: reconnectedTurns, record: (*store).RecordReconnectedTurns, load: (*store).ReconnectedTurns},
 	}
 	if len(pairs) != len(everyTurnSet) {
 		t.Fatalf("%d public pairs for %d turn sets: a set has no pinned public pair", len(pairs), len(everyTurnSet))
