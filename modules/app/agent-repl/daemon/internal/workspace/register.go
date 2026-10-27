@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"agent-repld/internal/account"
+	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/wsm"
@@ -443,6 +444,12 @@ const terminalDeleted = "deleted"
 // OpenWorkspace follows it, no session comes up, no watcher opens, and the
 // feed serves zero rows for a conversation the store still holds whole.
 //
+// NOR A WORKSPACE THE DAEMON WITHHOLDS (owner ruling, 2026-10-27): a hidden
+// one, one in a collapsed section, or a merge workspace whose merge left every
+// queue starts when it is shown, exactly as the rollout's bring-up withholds
+// it (bringup.OnlyVisible), so a deploy starts no shim that was down before
+// it.
+//
 // SPAWN ON MOUNT still stands. What is revived here is not "every registered
 // workspace" but a workspace whose DURABLE RECORD NAMES A CONVERSATION: a
 // first registration (`created`), a closed workspace, and a workspace that
@@ -474,6 +481,19 @@ func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger,
 	}
 	if v.deps.Sessions.Live(record.ID) {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "v.deps.Sessions.Live(record.ID)"})
+		return
+	}
+	run, _, err := bringup.OnlyVisible(ctx, v.deps.DB, []wsm.Workspace{record})
+	if err != nil {
+		log.Error(opRegister, "could not read whether the announced workspace is withheld; its conversation is not revived", dlog.Context{
+			"workspace": string(record.ID), "cause": err.Error(),
+		})
+		return
+	}
+	if len(run) == 0 {
+		log.Debug(opRegister, "the announced workspace is withheld; its conversation is revived when it is shown", dlog.Context{
+			"workspace": string(record.ID),
+		})
 		return
 	}
 	recorded, err := readRecordedSession(ctx, v.deps.DB, record.ID)
