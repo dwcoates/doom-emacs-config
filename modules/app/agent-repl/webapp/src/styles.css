@@ -2349,6 +2349,33 @@ pre {
 .bubble.interim-response {
   font-family: var(--serif-font-family);
 }
+/* THE WORKING PROSE ENDS AT THE CARDS' EDGE (owner request, 2026-10-27): a
+   thinking bubble's and an interim response's line wraps, and its collapsed
+   `…` lands, at the feed column's right margin, where the tool cards end.
+   Neither kind draws a fill or a border, so nothing marks the bubble's own
+   edge, and the cards' edge is the only one the eye reads. The bubble hangs
+   on the response's left rail, so capping it at `--agent-bubble-cap` puts its
+   right edge on the cards' right one. The 2px gap the bubble's right padding
+   keeps beside its bar goes too (`--bubble-content-inset` re-derives from
+   it, so the expanded text keeps its distance from the bar). */
+.bubble[data-variant="thinking"],
+.bubble.interim-response {
+  max-width: var(--agent-bubble-cap);
+  --bubble-scroll-gap: 0px;
+}
+/* ...and the COLLAPSED line keeps no right inset at all, so its `…` ends on
+   that edge rather than a bar's width and an inset short of it. A collapsed
+   box never scrolls, so it reserves no gutter for a bar, and its body drops
+   the inset from the bar it has not got. Expanding lifts the clamp, which
+   re-wraps the text anyway, so restoring both then moves nothing extra. */
+.bubble[data-variant="thinking"] > .bubble-scroll:not(.expanded),
+.bubble.interim-response > .bubble-scroll:not(.expanded) {
+  scrollbar-gutter: auto;
+}
+.bubble[data-variant="thinking"] > .bubble-scroll:not(.expanded) > .bubble-body,
+.bubble.interim-response > .bubble-scroll:not(.expanded) > .bubble-body {
+  padding-right: 0;
+}
 /* THE THINKING PROSE (owner request, 2026-10-14): a thinking bubble's text is
    italic and a touch greyer than an interim's (--thinking-text), so reasoning
    reads apart from every response the agent actually says. */
