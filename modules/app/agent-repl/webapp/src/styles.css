@@ -132,6 +132,8 @@
      prompt it will become, still parked. Its code sits a step darker again,
      as a user prompt's does under --user. A step darker again (owner
      request, 2026-10-25): #7ea6e8 -> #6c97df. */
+  --prompt-edge: color-mix(in srgb, var(--fg) 8%, transparent);
+  --prompt-bubble-shadow: inset -1px 1px 3px var(--prompt-edge), var(--bubble-shadow);
   --held-prompt-bg: #e0e0e0;
   --held-prompt-code-bg: #c8c8c8;
   /* --ok, the green status: render-colors.json#color_values (src/vocab.ts). */
@@ -2336,6 +2338,12 @@ pre {
   --md-line-h: var(--tree-line-h);
   margin-left: auto;
   margin-right: var(--agent-rail-inset);
+  /* A VERY SUBTLE LIGHT HIGHLIGHT ON THE EDGE (owner request, 2026-10-27):
+     the grey fill sits close to the feed's ground, so a faint --fg glow
+     fades inward from the top and right edges, biased off the bubble's axis
+     toward the top right. A shadow, not a border: a prompt is never
+     bordered. */
+  --bubble-shadow: var(--prompt-bubble-shadow);
 }
 .bubble[data-role="response"] {
   --bubble-bg: var(--assistant);

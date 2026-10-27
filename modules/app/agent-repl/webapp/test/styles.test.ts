@@ -6122,3 +6122,37 @@ describe("the footer's ground (owner request, 2026-10-27)", () => {
     expect(rule).toMatch(/background:\s*var\(--sidebar-bg\)\s*;/);
   });
 });
+
+describe("the prompt bubble's edge highlight (owner request, 2026-10-27)", () => {
+  it("feeds a prompt's --bubble-shadow from --prompt-bubble-shadow", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-role="prompt"]') ?? "";
+
+    // Assert
+    expect(rule).toMatch(/--bubble-shadow:\s*var\(--prompt-bubble-shadow\)\s*;/);
+  });
+
+  it("fades a faint inset glow in from the top right, ahead of the shared shadow", () => {
+    // Arrange / Act
+    const value = themeValueOf(declarationsOf(":root") ?? "", "--prompt-bubble-shadow");
+
+    // Assert
+    expect(value).toBe("inset -1px 1px 3px var(--prompt-edge), var(--bubble-shadow)");
+  });
+
+  it("draws no border on a prompt", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-role="prompt"]') ?? "";
+
+    // Assert
+    expect(rule).not.toMatch(/(?:^|;)\s*border\s*:/);
+  });
+
+  it("derives --prompt-edge from --fg at a few percent", () => {
+    // Arrange / Act
+    const value = themeValueOf(declarationsOf(":root") ?? "", "--prompt-edge") ?? "";
+
+    // Assert
+    expect(value).toMatch(/^color-mix\(in srgb, var\(--fg\) [1-9]%, transparent\)$/);
+  });
+});
