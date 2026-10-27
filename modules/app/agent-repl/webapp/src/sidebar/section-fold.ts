@@ -11,6 +11,7 @@
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { SidebarContext } from "./context.js";
+import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { changeView } from "./view-change.js";
@@ -35,6 +36,24 @@ export type FoldTarget = MessageInitShape<typeof SidebarViewFoldSectionSchema>["
  */
 export const HOLDS_CURRENT_ATTRIBUTE = "data-holds-current";
 
+/** The class that plays the selected row's flash (`ws-current-flash`, styles.css), one 0.7s run. */
+export const CURRENT_FLASH_CLASS = "current-flash";
+
+/**
+ * THE REFUSED COLLAPSE FLASHES THE SELECTED ROW (owner request, 2026-10-27):
+ * the highlight of the current workspace inside SECTION flashes once, so the
+ * user sees which selection keeps the section open. A flash already running
+ * restarts.
+ */
+function flashCurrentRow(section: HTMLElement): void {
+  for (const row of queryAll<HTMLElement>(section, ".ws.current")) {
+    row.classList.remove(CURRENT_FLASH_CLASS);
+    void row.offsetWidth;
+    row.classList.add(CURRENT_FLASH_CLASS);
+    row.addEventListener("animationend", () => row.classList.remove(CURRENT_FLASH_CLASS), { once: true });
+  }
+}
+
 /**
  * A section's fold gesture: the other fold, painted on every copy of the
  * section at once and asked of the daemon, whose push carries it to every
@@ -55,6 +74,7 @@ export function sectionFold(sc: SidebarContext, foldKey: string, target: FoldTar
         operation: "sidebar.fold.holds-current",
         context: { section: foldKey },
       });
+      flashCurrentRow(section);
       return;
     }
     // A FOLD THAT ASKS IS RECORDED at info: a collapse hides a section's

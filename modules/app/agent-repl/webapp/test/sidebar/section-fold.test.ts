@@ -9,6 +9,7 @@ import {
   type UpdateSidebarViewRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
+  CURRENT_FLASH_CLASS,
   HOLDS_CURRENT_ATTRIBUTE,
   drawFoldToggle,
   drawRosterHoldsCurrent,
@@ -180,6 +181,37 @@ describe("sectionFold on a section holding the current workspace", () => {
       operation: "sidebar.fold.holds-current",
       context: { section: "repo:r1" },
     });
+  });
+
+  it("flashes the selected row inside the section", () => {
+    // Arrange
+    const { sc } = recording();
+    const { section, control } = holding(false);
+    const row = document.createElement("div");
+    row.className = "ws current";
+    section.appendChild(row);
+
+    // Act
+    sectionFold(sc, "repo:r1", { case: "repository", value: { id: "r1", dir: "/r1" } })(section, control);
+
+    // Assert
+    expect(row.classList.contains(CURRENT_FLASH_CLASS)).toBe(true);
+  });
+
+  it("stops flashing when the animation ends", () => {
+    // Arrange
+    const { sc } = recording();
+    const { section, control } = holding(false);
+    const row = document.createElement("div");
+    row.className = "ws current";
+    section.appendChild(row);
+    sectionFold(sc, "repo:r1", { case: "repository", value: { id: "r1", dir: "/r1" } })(section, control);
+
+    // Act
+    row.dispatchEvent(new Event("animationend"));
+
+    // Assert
+    expect(row.classList.contains(CURRENT_FLASH_CLASS)).toBe(false);
   });
 
   it("still asks to expand a folded one", async () => {
