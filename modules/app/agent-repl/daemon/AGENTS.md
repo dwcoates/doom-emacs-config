@@ -605,6 +605,27 @@ is Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
   and again after, and `Notifier.Close` cancels and joins them before the state
   client closes.
 
+## A network change is heard, never polled for (`internal/netwatch`)
+
+The daemon owns the ONE watcher of the operating system's network events: a
+route socket on macOS, rtnetlink on Linux, read by a blocking read the kernel
+wakes, so a quiet network costs nothing. Only a routable address gained or
+lost, or a default route added, removed or changed, is a change. Each one
+closes the channel `netwatch.Watcher.Changed` answered, and two waits select
+on it next to their period:
+
+- the fleet's vendor-start backoff after a failure the shim blamed on the
+  network (`vendorstart.go`), which retries at once;
+- every held shim's network probe, through `Fleet.NetworkChanged`
+  (`shim.v1.NetworkChanged`), followed by `netwatch.Follow`, which folds the
+  changes landing during one fan-out into exactly one more.
+
+The periods stay: an outage that ends on the API's side changes nothing on
+this machine. Under the mocked vendor the source is `netwatch.Silent`, so a
+suite's daemon never reacts to the host's real network. A source that cannot
+be opened or fails is recorded at ERROR under `daemon.netwatch` and ends the
+`network_watch` loop loudly.
+
 ## The `-fake` classifier (deterministic)
 
 A held prompt whose first word is `stop` or `abort` (the explicit-interrupt

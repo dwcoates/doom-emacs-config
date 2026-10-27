@@ -198,6 +198,9 @@ func (f *Fleet) CancelVendorStart(ctx context.Context, ws ids.WorkspaceID) bool 
 // EACH ATTEMPT IS TIMED INTO TIMING: its wait for a slot and its StartSession.
 func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclient.Client, src source, session wsm.Session, configDir string, timing sessionTiming) (*conversationv1.SessionStarted, error) {
 	for {
+		// TAKEN BEFORE THE ATTEMPT, so a reconnect that lands while the
+		// attempt is out still cuts the wait after it short.
+		networkChanged := f.deps.NetworkChanged()
 		waitedFrom := f.now()
 		release, err := f.startSlots.Acquire(ctx, ws)
 		timing.since(restarttiming.SessionSlotWait, waitedFrom, err)
@@ -263,8 +266,12 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		}
 		var delay time.Duration
 		retry := true
+		// A NIL CHANNEL NEVER FIRES: only a failure the network caused is
+		// retried at a reconnect; the vendor's own keeps its backoff.
+		var reconnect <-chan struct{}
 		if label.network {
 			delay = f.noteNetworkFailure(ctx, log, ws, label.cause)
+			reconnect = networkChanged
 		} else {
 			delay, retry = f.noteRetryableFailure(ctx, log, ws, label.cause)
 		}
@@ -273,6 +280,10 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		}
 		select {
 		case <-f.after(delay):
+		case <-reconnect:
+			log.Info(opBringUp, "the network changed while the vendor start waited out its backoff; it is retried now", dlog.Context{
+				"retry_was_in_ms": delay.Milliseconds(),
+			})
 		case <-ctx.Done():
 			if errors.Is(context.Cause(ctx), ErrVendorStartCancelled) {
 				f.closeRetrying(ctx, log, ws)

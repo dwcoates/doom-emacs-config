@@ -225,6 +225,11 @@ type FleetDeps struct {
 	// host surface is wired yet (the boot sequence runs before the server),
 	// which is why every call goes through publishHost.
 	PublishHost func(ids.WorkspaceID)
+	// NetworkChanged answers a channel closed at this machine's next network
+	// change (netwatch.Watcher.Changed). A vendor start the network failed
+	// selects on it next to its backoff, so a reconnect retries it at once.
+	// Required.
+	NetworkChanged func() <-chan struct{}
 	// RetryAfter is the vendor-start run's wait between attempts: it answers
 	// a channel that fires once d has passed. Nil means time.After; it is a
 	// field so the backoff is driven by a test rather than slept through.
@@ -311,6 +316,9 @@ type Fleet struct {
 	adoptBound time.Duration
 	// startBound bounds ONE StartSession; see DefaultStartSessionBound.
 	startBound time.Duration
+	// networkBound bounds one shim's answer to a network change; see
+	// networkChangedBound.
+	networkBound time.Duration
 	// after is the vendor-start run's wait; see FleetDeps.RetryAfter.
 	after func(time.Duration) <-chan time.Time
 	// vendorWindow is the vendor-start run's window; see
@@ -523,6 +531,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs a restart recorder; each step of a session's start is timed into it")
 	case deps.ChatSystemPrompt == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs the chat system prompt; every chat thread's session starts under it")
+	case deps.NetworkChanged == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs the network-change signal; a vendor start the network failed is retried at a reconnect by it")
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -558,6 +568,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	}
 	detachedCtx, endDetached := context.WithCancel(context.Background())
 	return &Fleet{
+		networkBound: networkChangedBound,
 		after:        after,
 		vendorWindow: vendorWindow,
 		vendorRuns:   map[ids.WorkspaceID]*vendorRun{},

@@ -701,3 +701,59 @@ func TestARetryableVendorStartNamingNoCauseIsTheVendorsAndRecordedAtError(t *tes
 	}
 	t.Fatalf("records = %+v, want the missing cause at ERROR", f.log.logger.Records())
 }
+
+// A RECONNECT CUTS AN OFFLINE BACKOFF SHORT: the wait never fires on its
+// own, so only the network change can have retried the start.
+func TestAReconnectRetriesAnOfflineVendorStartAtOnce(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.responses = []*shimv1.StartSessionResponse{vendorRefusal(offlineVendorStart(), "offline")}
+	f.retryAfter = func(time.Duration) <-chan time.Time { return make(chan time.Time) }
+	f.networkChanged = make(chan struct{})
+	close(f.networkChanged)
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Start = %v, want the session up on the attempt the reconnect made", err)
+	}
+	found := false
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "info" && r.Message == "the network changed while the vendor start waited out its backoff; it is retried now" {
+			found = r.Context["retry_was_in_ms"] == int64(200)
+		}
+	}
+	if !found {
+		t.Fatalf("no info record of the reconnect naming the 200ms backoff: %+v", f.log.logger.Records())
+	}
+}
+
+// THE VENDOR'S OWN FAILURE KEEPS ITS BACKOFF: a reconnect says nothing about
+// a vendor that answered.
+func TestAReconnectLeavesTheVendorsOwnBackoffAlone(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.responses = []*shimv1.StartSessionResponse{vendorRefusal(retryableVendorStart(), "silent")}
+	f.networkChanged = make(chan struct{})
+	close(f.networkChanged)
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Start = %v, want the session up after the backoff", err)
+	}
+	for _, r := range f.log.logger.Records() {
+		if r.Message == "the network changed while the vendor start waited out its backoff; it is retried now" {
+			t.Fatalf("the vendor's own failure was retried at a reconnect: %+v", r)
+		}
+	}
+	if len(f.retryWaits) != 1 {
+		t.Fatalf("waits = %v, want the one backoff", f.retryWaits)
+	}
+}
