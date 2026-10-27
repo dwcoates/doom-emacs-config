@@ -93,6 +93,16 @@ func Plane(e *internalv1.Entry) any { return e.GetInternal().GetPlane() }
 EOF
 expect 1 "a daemon Go file importing the shim-side package is refused" "$root"
 
+root="$(newFixture write-validation-import)"
+cat >>"$root/daemon/internal/frontend/batch.go" <<'EOF'
+package frontend
+
+import "agentrepl/protohelpers/storewrite"
+
+var _ = storewrite.ValidateWriteBatchRequest
+EOF
+expect 1 "a daemon Go file importing the store's write validation is refused" "$root"
+
 root="$(newFixture ts-import)"
 cat >>"$root/webapp/src/plane.ts" <<'EOF'
 import type { Entry } from "../proto/store/v1/entry_pb.js";

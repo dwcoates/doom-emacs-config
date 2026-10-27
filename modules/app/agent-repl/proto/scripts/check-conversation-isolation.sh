@@ -60,6 +60,11 @@ ROOT="${1:-$(cd "$THIS_DIR/../.." && pwd)}"
 # forms are checked because a Go file names the import path, not the package.
 PROTO_PKG="store/v1"
 GO_PKG="agentrepl/proto/store/v1"
+# The store's write-batch validation (proto/helpers/go/storewrite) imports
+# store.v1, so a daemon importing it would reach the storage half and the write
+# batch without ever naming store/v1. It is the producers' and the store's,
+# never the daemon's: the daemon's relationship with the store is read-only.
+WRITE_PKG="agentrepl/protohelpers/storewrite"
 
 if [ ! -d "$ROOT" ]; then
     printf 'conversation-isolation: root %s does not exist\n' "$ROOT" >&2
@@ -98,7 +103,7 @@ fi
 # durable-isolation gate uses, so "mentioned in prose" and "imported in code"
 # cannot disagree about what counts as code.
 violations="$(
-    awk -v proto_pkg="$PROTO_PKG" -v go_pkg="$GO_PKG" -v root="$ROOT/" '
+    awk -v proto_pkg="$PROTO_PKG" -v go_pkg="$GO_PKG" -v write_pkg="$WRITE_PKG" -v root="$ROOT/" '
     function strip(line,   out, p, b, l) {
         out = ""
         while (length(line) > 0) {
@@ -126,7 +131,7 @@ violations="$(
     {
         code = strip($0)
         if (code == "") { next }
-        if (index(code, go_pkg) > 0 || index(code, proto_pkg) > 0) {
+        if (index(code, go_pkg) > 0 || index(code, proto_pkg) > 0 || index(code, write_pkg) > 0) {
             name = FILENAME
             sub("^" root, "", name)
             printf "%s:%d: IMPORTS the conversation-shimside package\n", name, FNR
