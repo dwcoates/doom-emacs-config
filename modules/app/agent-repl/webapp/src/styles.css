@@ -8083,9 +8083,6 @@ bubble-body.bubble-body { display: block; }
 .merge-run-view-item.is-active {
   background: var(--border);
 }
-/* The root's own path under its address: the SECOND line of an account row,
-   dim for the same reason a model's description is — it identifies the row,
-   it is not what the reader is choosing by. */
 /* A link row's label is a menu row's title, not a link in prose (owner
    ruling, 2026-10-27): the foreground white and the size of the model
    selector's names, and no underline; the row's hover is what says it is
@@ -8095,13 +8092,19 @@ bubble-body.bubble-body { display: block; }
   font: inherit;
   text-decoration: none;
 }
-.topbar-account-option-dir {
+/* A ROW'S SECOND LINE: what identifies the row rather than what the reader
+   chooses by, dim and a step smaller, ONE look in every menu. An account
+   row's root path, a model's description, a summary link's url. */
+.topbar-account-option-dir,
+.topbar-model-description,
+.topbar-title-link-url {
   color: var(--muted);
   font-size: 0.9em;
 }
-.topbar-model-description {
-  color: var(--muted);
-  font-size: 0.9em;
+/* A url has no spaces to wrap at, so a long one breaks anywhere rather than
+   widening the menu past the panel's cap. */
+.topbar-title-link-url {
+  overflow-wrap: anywhere;
 }
 /* A model row's top-right corner (owner request, 2026-10-27): "Make default",
    or "Default" on the login's default row. OUT OF FLOW, pinned inside the

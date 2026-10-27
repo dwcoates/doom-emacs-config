@@ -24,7 +24,7 @@ import {
   drawTopbarTitle,
   drawTopbarWorkspaceName,
 } from "../../src/topbar/strip.js";
-import { cascadedValue, installStylesheet } from "../stylesheet.js";
+import { cascadedValue, cascadedValueIn, installStylesheet } from "../stylesheet.js";
 import { appContext, openPanel, topbarContext } from "./fixtures.js";
 
 const loggedIn = (email: string) =>
@@ -400,6 +400,16 @@ describe("drawTopbarTitle with several shown links", () => {
     ]);
   });
 
+  it("draws each row's url beneath its label, as the row's second line", () => {
+    const { host, title } = drawn();
+    click(title);
+    const rows = [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
+    expect(rows.map((row) => [...row.children].map((el) => [el.className, el.textContent]))).toEqual([
+      [["external-link", "The pull request"], ["topbar-title-link-url", PR]],
+      [["external-link", "The design doc"], ["topbar-title-link-url", DOC]],
+    ]);
+  });
+
   it("names each row's url in its tooltip", () => {
     const { host, title } = drawn();
     click(title);
@@ -478,5 +488,19 @@ describe("drawTopbarTitle with several shown links", () => {
     const future = create(TopbarTitleSchema, { text: "t", links: {} });
     // Act / Assert
     expect(() => drawTopbarTitle(future, topbarContext().tc)).toThrow(/TopbarTitleLinks.opens/);
+  });
+});
+
+describe("a menu row's second line", () => {
+  const SECOND_LINES = ["topbar-account-option-dir", "topbar-model-description", "topbar-title-link-url"];
+
+  it.each(["color", "font-size"])("draws %s the same in every menu", (property) => {
+    const teardown = installStylesheet();
+    try {
+      const values = SECOND_LINES.map((cls) => cascadedValueIn("topbar-reveal", cls, property));
+      expect(new Set(values).size).toBe(1);
+    } finally {
+      teardown();
+    }
   });
 });
