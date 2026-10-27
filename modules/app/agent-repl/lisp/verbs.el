@@ -1183,6 +1183,12 @@ and the new workspace\'s tab arrives through the roster push."
      (lambda (stage)
        (setq progressed t)
        (agent-repl-verbs--create-stage-message stage))
+     ;; A CREATE HELD FOR THE NETWORK IS WAITING, NOT FAILED: it is said as a
+     ;; wait, and its creation arrives later on this same op.
+     :on-waiting-for-network
+     (lambda (_waiting)
+       (setq progressed t)
+       (agent-repl-workspace-progress-report :create :waiting-for-network))
      :on-succeeded
      (lambda (value)
        (setq progressed t)
@@ -1218,13 +1224,15 @@ and the new workspace\'s tab arrives through the roster push."
            :op-id op-id)
      :op "create"
      :on-accepted
-     (lambda (_accepted)
+     (lambda (accepted)
        (agent-repl--info '(:agent-repl-central "workspace creation and daemon administration can precede workspace ownership")
-                         "elisp.verbs.create-accepted op-id=%s" op-id)
+                         "elisp.verbs.create-accepted op-id=%s joined=%S" op-id (plist-get accepted :joined))
        ;; THE WHOLE SEQUENCE IS SHOWN (owner ruling, 2026-09-27): accepted,
-       ;; then every stage the daemon pushes, then created or FAILED.
+       ;; then every stage the daemon pushes, then created or FAILED.  An ack
+       ;; that JOINED an identical pending create says so instead.
        (unless progressed
-         (agent-repl-workspace-progress-report :create :accepted)))
+         (agent-repl-workspace-progress-report
+          :create (if (plist-get accepted :joined) :joined :accepted))))
      :on-success
      ;; A daemon that answered success synchronously (an op_id it did not
      ;; honor) still landed the workspace: run the terminal and drop the op.

@@ -450,6 +450,44 @@ THE ARM IS THE REFUSAL, so a bare error says nothing the caller can act on."
                   :type 'agent-repl-wire-error)))
 
 
+(ert-deftest agent-repl-test-wire-verbs-create-response-accepted-own-create ()
+  "An ack for a create of its own carries the op id and no joined create."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-response
+                    (agent-repl-test-wire-verbs--parse "{\"accepted\":{\"opId\":\"op-7\"}}"))
+                   '(:arm :accepted :value (:op-id "op-7" :joined nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-response-accepted-joined ()
+  "An ack that joined an identical pending create names that create."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"accepted\":{\"opId\":\"op-8\",\"joined\":{\"create\":{\"id\":\"create-1\"}}}}"))
+                   '(:arm :accepted :value (:op-id "op-8" :joined (:create (:id "create-1"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-response-waiting-for-network ()
+  "The synchronous answer for a create held for the network names it."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"waitingForNetwork\":{\"create\":{\"id\":\"create-2\"}}}"))
+                   '(:arm :waiting-for-network :value (:create (:id "create-2")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-waiting-without-a-create-is-a-breach ()
+  "A held create with no pending ref says nothing a caller can follow."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-create-workspace-response
+                   (agent-repl-test-wire-verbs--parse "{\"waitingForNetwork\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-pending-create-ref-without-an-id-is-a-breach ()
+  "A pending ref with no id is no identity at all."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-pending-create-ref
+                   (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+
 ;;;; ---- The {workspace}-request / empty-result verbs -------------------
 
 (ert-deftest agent-repl-test-wire-verbs-simple-request-echoes-ref ()

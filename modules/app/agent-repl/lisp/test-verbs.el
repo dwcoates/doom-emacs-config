@@ -1692,6 +1692,36 @@ and is echoed as the create's failure."
     (should (agent-repl-test-verbs--messaged-p
              "agent-repl: workspace creation FAILED: the name \"Fix It\" is not a workspace name"))))
 
+(ert-deftest agent-repl-verbs-create-held-for-the-network-waits-then-is-created ()
+  "A create held for the network is drawn as waiting, never as FAILED, and its
+later creation is drawn as any async create's is."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :accepted :value (:op-id "op" :joined nil)))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :initial-prompt "fix the flaky login test")
+    (let ((op-id (plist-get (agent-repl-test-verbs--request :create) :op-id)))
+      (agent-repl-mutation-progress-handle
+       (list :op-id op-id :event (list :arm :create
+                                       :value '(:arm :waiting-for-network :value (:create (:id "create-1"))))))
+      (should (agent-repl-test-verbs--messaged-p
+               "agent-repl: no network: the workspace create waits"))
+      (should-not (agent-repl-test-verbs--messaged-p "FAILED"))
+      (agent-repl-mutation-progress-handle
+       (list :op-id op-id :event (list :arm :create
+                                       :value '(:arm :succeeded
+                                                :value (:workspace (:id "w" :dir "/d") :name "minted")))))
+      (should (agent-repl-test-verbs--messaged-p "agent-repl: workspace created: minted")))))
+
+(ert-deftest agent-repl-verbs-create-joined-ack-says-it-joined ()
+  "An ack that joined an identical pending create says so, not merely accepted."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :accepted
+                               :value (:op-id "op" :joined (:create (:id "create-1")))))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :initial-prompt "fix the flaky login test")
+    (should (agent-repl-test-verbs--messaged-p
+             "agent-repl: an identical workspace create is already under way; this request joined it"))))
+
 (ert-deftest agent-repl-verbs-create-naming-failed-names-the-cause ()
   "A create refused because the workspace could not be named states the cause
 the daemon read off the failure."

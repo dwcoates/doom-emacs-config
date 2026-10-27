@@ -2163,6 +2163,13 @@ replaces it."
                                            :value (:workspace (:id "w" :dir "/d")
                                                    :name "minted"))))))))
 
+(ert-deftest agent-repl-test-wire-host-mutation-progress-waiting-for-network ()
+  "A create held for the network decodes to its pending ref, as a step."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-workspace-create-progress
+                  "{\"waitingForNetwork\":{\"create\":{\"id\":\"create-1\"}}}")
+                 '(:arm :waiting-for-network :value (:create (:id "create-1"))))))
+
 (ert-deftest agent-repl-test-wire-host-mutation-progress-failed-internal ()
   "A failed push with an internal error decodes to the internal sentence."
   (should (equal (agent-repl-test-wire-host--decode

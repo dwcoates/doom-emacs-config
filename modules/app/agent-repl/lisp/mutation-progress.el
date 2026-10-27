@@ -49,6 +49,8 @@
      (:deriving-name . "deriving the workspace's name…")
      (:creating-worktree . "creating the workspace's git worktree…")
      (:starting-session . "starting the workspace's session…")
+     (:waiting-for-network . "no network: the workspace create waits, and completes once the network is back…")
+     (:joined . "an identical workspace create is already under way; this request joined it…")
      (:completed . "workspace created: %s")
      (:failed . "workspace creation FAILED: %s"))
     (:open
@@ -86,7 +88,10 @@ request), `:completed\=' and `:failed\='; everything between them is a stage
 the DAEMON reported reaching, and a kind lists only the stages its rpc
 actually has.  A create also carries `:accepted\=': its rpc answers
 with an option-B ack before the background work starts, and that ack
-is the first fact of the sequence the user is shown.
+is the first fact of the sequence the user is shown.  It carries
+`:joined\=' for an ack that joined an identical pending create, and
+`:waiting-for-network\=' for a create held until the network is back,
+which is a wait and never a failure.
 
 The wording follows the startup phases\=' own: a lowercase clause, a
 trailing ellipsis while the work is in flight, none once it has landed,
@@ -151,6 +156,7 @@ fresh subscription."
 (defun agent-repl-mutation-progress-register (op-id &rest callbacks)
   "Register CALLBACKS for the mutation OP-ID.
 CALLBACKS is a plist of `:on-stage' (called with the stage keyword),
+`:on-waiting-for-network' (called with the held create's value),
 `:on-succeeded' (called with the succeeded value) and `:on-failed' (called
 with the failure ARM and VALUE).  Each is optional."
   (puthash op-id callbacks agent-repl-mutation-progress--pending)
@@ -167,8 +173,8 @@ with the failure ARM and VALUE).  Each is optional."
 
 (defun agent-repl-mutation-progress--dispatch-steps (op-id callbacks progress failure)
   "Dispatch one decoded step-shaped PROGRESS for OP-ID to CALLBACKS.
-PROGRESS is `(:arm STEP :value V)': an `entered_stage', or a terminal
-`succeeded' or `failed'.  FAILURE maps a failed value to the list (ARM
+PROGRESS is `(:arm STEP :value V)': an `entered_stage', a create's
+`waiting_for_network', or a terminal `succeeded' or `failed'.  FAILURE maps a failed value to the list (ARM
 VALUE) `:on-failed' is called with, since each mutation words its failure
 in its own message.  Every mutation whose progress ends on this channel
 dispatches through here, so the terminal rule below holds for all of them."
@@ -177,6 +183,11 @@ dispatches through here, so the terminal rule below holds for all of them."
     (pcase step
       (:entered-stage
        (when-let ((fn (plist-get callbacks :on-stage)))
+         (funcall fn value)))
+      (:waiting-for-network
+       ;; NOT TERMINAL: a create held for the network ends later on this same
+       ;; op, possibly from a successor daemon, so the op stays registered.
+       (when-let ((fn (plist-get callbacks :on-waiting-for-network)))
          (funcall fn value)))
       (:succeeded
        ;; TERMINAL: the op is done, so forget it BEFORE the callback runs its
