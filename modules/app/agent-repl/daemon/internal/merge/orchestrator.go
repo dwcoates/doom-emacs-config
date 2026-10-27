@@ -146,6 +146,9 @@ type orchestrator struct {
 	runsByWorkspace map[ids.WorkspaceID]*run
 	// requested are the requests waiting for their requesting turn to end.
 	requested map[ids.WorkspaceID]*requestWait
+	// requestingTurns is the turn in flight when each workspace's merge was
+	// asked for, until TakeRequestingTurn is asked about it.
+	requestingTurns map[ids.WorkspaceID]ids.TurnID
 	// offers records the workspaces with a merge-queue question standing.
 	offers map[ids.WorkspaceID]bool
 	// repoOf remembers which queue a workspace was enqueued on, so an evict
@@ -324,6 +327,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		displaces:          map[ids.WorkspaceID]bool{},
 		runsByWorkspace:    map[ids.WorkspaceID]*run{},
 		requested:          map[ids.WorkspaceID]*requestWait{},
+		requestingTurns:    map[ids.WorkspaceID]ids.TurnID{},
 		ledgerOf:           map[ids.WorkspaceID]ids.LeaseID{},
 		originsOf:          map[ids.WorkspaceID]*mergeOrigin{},
 		heads:              newHeadBook(),

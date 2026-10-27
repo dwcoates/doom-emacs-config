@@ -466,7 +466,13 @@ type requestWait struct {
 func (o *orchestrator) awaitRequestingTurn(ws ids.WorkspaceID, repo wsm.RepoKey) *requestWait {
 	ctx, cancel := context.WithCancel(context.Background())
 	wait := &requestWait{ws: ws, repo: repo, ctx: ctx, cancel: cancel}
+	turn, inFlight := o.deps.TurnInFlight(ws)
 	o.mu.Lock()
+	if inFlight {
+		o.requestingTurns[ws] = turn
+	} else {
+		delete(o.requestingTurns, ws)
+	}
 	if standing, ok := o.requested[ws]; ok {
 		standing.cancel()
 	}
@@ -506,6 +512,17 @@ func (o *orchestrator) waitThenQueue(wait *requestWait) {
 	if err := o.queueRequest(ctx, ws, wait.repo); err != nil {
 		log.Error(op, "could not put the merge request in line", dlog.Context{"workspace": string(ws), "error": err.Error()})
 	}
+}
+
+// TakeRequestingTurn implements Orchestrator.
+func (o *orchestrator) TakeRequestingTurn(ws ids.WorkspaceID, turn ids.TurnID) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.requestingTurns[ws] != turn {
+		return false
+	}
+	delete(o.requestingTurns, ws)
+	return true
 }
 
 // forgetWait retires a finished wait, unless a newer one replaced it.

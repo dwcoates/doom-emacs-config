@@ -165,6 +165,10 @@ type Orchestrator interface {
 	// LeaseChanged is told each lease change of a workspace: a queue front
 	// that waited for that workspace's lease is offered to its queue again.
 	LeaseChanged(ws ids.WorkspaceID)
+	// TakeRequestingTurn reports whether turn of ws is the turn that asked
+	// for a merge of ws, and forgets it. The merge queue's own banners
+	// announce that merge, so the turn's end raises none.
+	TakeRequestingTurn(ws ids.WorkspaceID, turn ids.TurnID) bool
 	// Relabel is told WS was renamed: every queue WS stands in is
 	// republished, so its entry's label and the line naming the merge ahead
 	// read the new name. A workspace on no queue is no change.

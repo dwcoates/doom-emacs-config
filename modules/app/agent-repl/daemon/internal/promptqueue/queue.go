@@ -251,6 +251,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs the roster resolver")
 	case deps.Leases == nil:
 		return nil, fmt.Errorf("the prompt queue needs the lease watcher")
+	case deps.Merges == nil:
+		return nil, fmt.Errorf("the prompt queue needs the merge requests' record")
 	case deps.Edges == nil:
 		return nil, fmt.Errorf("the prompt queue needs the turn edges' observer")
 	case deps.Holds == nil:

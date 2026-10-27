@@ -849,3 +849,41 @@ func TestOnTurnEndedRaisesNoBannerForATurnADaemonNoticeCaused(t *testing.T) {
 		})
 	}
 }
+
+func TestOnTurnEndedRaisesNoBannerForTheTurnThatAskedForAMerge(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "asking-turn", "the work that ends by merging")
+	h.leases.requesting = map[ids.WorkspaceID]ids.TurnID{theWorkspace: "asking-turn"}
+	h.watcher.idle()
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "asking-turn", wsm.CloseCompleted)
+	// Assert
+	if got := h.banners.raised(); len(got) != 0 {
+		t.Fatalf("banners = %+v, want none for the turn that asked for a merge", got)
+	}
+	if got, closed := h.db.closedTurns["asking-turn"]; !closed || got != wsm.CloseCompleted {
+		t.Fatalf("close = (%s, closed %v), want the turn closed all the same", got.String(), closed)
+	}
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Operation == opTurnEnded && r.Context["turn"] == "asking-turn" &&
+			strings.Contains(r.Message, "asked for a merge") {
+			return
+		}
+	}
+	t.Fatalf("the withheld banner was not recorded: %v", h.log.Records())
+}
+
+func TestOnTurnEndedStillRaisesItsBannerWhenAnotherTurnAskedForAMerge(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "plain-turn", "unrelated work")
+	h.leases.requesting = map[ids.WorkspaceID]ids.TurnID{theWorkspace: "asking-turn"}
+	h.watcher.idle()
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "plain-turn", wsm.CloseCompleted)
+	// Assert
+	if got := h.banners.raised(); len(got) != 1 || got[0].Turn != "plain-turn" {
+		t.Fatalf("banners = %+v, want the plain turn's", got)
+	}
+}

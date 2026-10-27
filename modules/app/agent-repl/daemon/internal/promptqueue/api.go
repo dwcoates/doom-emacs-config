@@ -423,12 +423,20 @@ type TurnEdges interface {
 	TurnEndedUnobserved(ws ids.WorkspaceID)
 }
 
-// Deps are the queue's collaborators.
 // LeaseWatcher is told each lease change of a workspace (Deps.Leases).
 type LeaseWatcher interface {
 	LeaseChanged(ws ids.WorkspaceID)
 }
 
+// MergeRequests answers whether a turn is the one that asked for a merge
+// (merge.Orchestrator.TakeRequestingTurn, Deps.Merges).
+type MergeRequests interface {
+	// TakeRequestingTurn reports whether turn of ws is the turn that asked
+	// for a merge of ws, and forgets it, so a turn is asked about once.
+	TakeRequestingTurn(ws ids.WorkspaceID, turn ids.TurnID) bool
+}
+
+// Deps are the queue's collaborators.
 type Deps struct {
 	// DB is the durable hold store and the lease's policy metadata.
 	DB wsm.DB
@@ -437,6 +445,9 @@ type Deps struct {
 	// reaches): a merge waiting for a workspace another holder held takes it
 	// from here (merge.Orchestrator.LeaseChanged). REQUIRED.
 	Leases LeaseWatcher
+	// Merges says which turn asked for a merge, so that turn's end raises no
+	// banner: the merge queue's own banners announce it. REQUIRED.
+	Merges MergeRequests
 	// Judge classifies interjection.
 	Judge classifier.Judge
 	// Feed mirrors an accepted prompt as a user_prompt row.

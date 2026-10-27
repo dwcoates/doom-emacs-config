@@ -193,13 +193,20 @@ func (q *queue) endTurn(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 }
 
 // earnsBanner reports whether a turn's end raises its desktop banner: every
-// turn but one the merge queue caused (causedByMergeQueue).
+// turn but one the merge queue caused (causedByMergeQueue) and one that asked
+// for a merge (Deps.Merges): the merge queue's banners announce that merge.
 //
 // A TURN THE WORKSPACE NEVER RECORDED IS NO MERGE'S: the queue records every
 // turn it delivers, a merge's included, before delivering it. A turn whose
 // record cannot be read is NOT GUESSED AT: it is recorded at ERROR and raises
 // nothing, since a merge's step must never sound.
 func (q *queue) earnsBanner(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger) bool {
+	if q.deps.Merges.TakeRequestingTurn(ws, turn) {
+		log.Info(opTurnEnded, "the turn that asked for a merge ended; the merge queue's banners announce it, no desktop banner", dlog.Context{
+			"turn": string(turn),
+		})
+		return false
+	}
 	record, err := q.deps.DB.Turn(ctx, ws, turn)
 	switch {
 	case errors.Is(err, wsm.ErrNotFound):

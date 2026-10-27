@@ -467,6 +467,7 @@ type mergeTarget interface {
 	rollout.MergeMover
 	drain.MergeSuspension
 	promptqueue.LeaseWatcher
+	promptqueue.MergeRequests
 }
 
 // mergeForwarder carries a handover's merge moves and the immediate
@@ -544,6 +545,15 @@ func (f *mergeForwarder) LeaseChanged(ws ids.WorkspaceID) {
 	if target != nil {
 		target.LeaseChanged(ws)
 	}
+}
+
+// TakeRequestingTurn asks the orchestrator whether a turn asked for a merge.
+// Before the orchestrator is bound no merge was asked for, so none was.
+func (f *mergeForwarder) TakeRequestingTurn(ws ids.WorkspaceID, turn ids.TurnID) bool {
+	f.mu.RLock()
+	target := f.target
+	f.mu.RUnlock()
+	return target != nil && target.TakeRequestingTurn(ws, turn)
 }
 
 // errMergeMoverUnbound is a merge move or drain asked before the orchestrator

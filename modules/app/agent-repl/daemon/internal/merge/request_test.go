@@ -742,3 +742,39 @@ func TestMergeRequestRefusalsAreRecordedThroughLogRefusal(t *testing.T) {
 		t.Fatalf("%v record a refusal by hand; use logRefusal", offenders)
 	}
 }
+
+func TestTakeRequestingTurn(t *testing.T) {
+	cases := []struct {
+		name     string
+		inFlight ids.TurnID
+		ask      ids.TurnID
+		askTwice bool
+		want     bool
+	}{
+		{name: "the turn that asked for the merge", inFlight: "turn-asking", ask: "turn-asking", want: true},
+		{name: "another turn of the workspace", inFlight: "turn-asking", ask: "turn-other", want: false},
+		{name: "a request made with no turn in flight", ask: "turn-other", want: false},
+		{name: "the same turn asked about a second time", inFlight: "turn-asking", ask: "turn-asking", askTwice: true, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.inFlight = tc.inFlight
+			if err := h.request(t, ownBranch, RequestedByAgent); err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+
+			// Act.
+			got := h.o.TakeRequestingTurn(theWorkspace, tc.ask)
+			if tc.askTwice {
+				got = h.o.TakeRequestingTurn(theWorkspace, tc.ask)
+			}
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("TakeRequestingTurn = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
