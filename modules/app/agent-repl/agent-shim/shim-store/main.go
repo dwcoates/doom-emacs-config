@@ -1,11 +1,15 @@
 // Command shim-store is the agent-repl record store: a singleton,
 // launchd-managed service that owns the SQLite database and serves
-// store.v1.ShimStore over a unix domain socket with Connect.
+// store.v1.ShimStore over a unix domain socket with Connect, and its
+// read-only face, storeread.v1.StoreRead, over a second one. The daemon's
+// relationship with the store is read-only: it dials the second socket alone,
+// where no producer verb is served.
 //
 // Flags (every path is injectable, which is what lets a test point the whole
 // stack at a temp dir):
 //
 //	--socket        UDS path to serve on   (env AGENT_REPL_STORE_SOCKET, else …/sock/store.sock)
+//	--read-socket   UDS path to serve the read-only face on (beside --socket: …/store-read.sock)
 //	--db            SQLite database path                          (…/store/events.db)
 //	--log           size-capped rotating log file (…/log/shim-store.log)
 //	--pprof         OPT-IN local-only profiling surface           (env AGENT_REPL_STORE_PPROF_ADDR)
@@ -37,6 +41,7 @@ import (
 	"agentrepl/shim-store/internal/server"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/storesocket"
 )
 
 // shutdownGrace bounds the orderly drain: standing watches are ended first, so
@@ -62,9 +67,13 @@ func main() {
 	pprofAddr := flag.String("pprof", envStr(pprofsurface.EnvAddr, ""), "OPT-IN Go profiling surface: a unix socket path, or an explicitly loopback host:port (127.0.0.1:6061). Empty = OFF, which is the default; there is no always-on listener. The resolved surface is named in the store.pprof.enabled record at startup")
 	metricsRoot := flag.String("metrics-root", "", "ALWAYS-ON metrics surface root: the store listens on an ephemeral loopback port and advertises it in targets/store.json under it. Empty = OFF; the launchd plist passes it")
 	watchBuffer := flag.Int("watch-buffer", server.DefaultWatchBuffer, "per-subscriber WatchAgentSession frame buffer; a subscriber that overflows it is ended and must re-open with known_through")
+	readSocketPath := flag.String("read-socket", "", "UDS path to serve storeread.v1.StoreRead, the read-only face, on; empty = beside --socket (store.sock → store-read.sock), which is where the daemon dials it")
 	flag.Parse()
+	if *readSocketPath == "" {
+		*readSocketPath = storesocket.ReadPath(*socketPath)
+	}
 
-	if err := run(*socketPath, *dbPath, *logPath, *pprofAddr, *metricsRoot, *watchBuffer); err != nil {
+	if err := run(*socketPath, *readSocketPath, *dbPath, *logPath, *pprofAddr, *metricsRoot, *watchBuffer); err != nil {
 		reportFatal(err, os.Stderr)
 		os.Exit(1)
 	}
@@ -93,7 +102,7 @@ func reportFatal(err error, stderr io.Writer) {
 // run wires up logging, the profiling surface, the database and the server,
 // then blocks until a termination signal or a fatal serve error. Factored out
 // of main so its wiring is exercised with temp paths in tests.
-func run(socketPath, dbPath, logPath, pprofAddr, metricsRoot string, watchBuffer int) (err error) {
+func run(socketPath, readSocketPath, dbPath, logPath, pprofAddr, metricsRoot string, watchBuffer int) (err error) {
 	log, closeLog, err := openLogger(socketPath, dbPath, logPath)
 	if err != nil {
 		return err
@@ -101,12 +110,12 @@ func run(socketPath, dbPath, logPath, pprofAddr, metricsRoot string, watchBuffer
 	defer closeLog()
 	defer logProcessExit(log, &err)
 	reportBuild(log, defaultBuildReportDeps())
-	return runWithLogger(socketPath, dbPath, pprofAddr, metricsRoot, watchBuffer, log)
+	return runWithLogger(socketPath, readSocketPath, dbPath, pprofAddr, metricsRoot, watchBuffer, log)
 }
 
 // runWithLogger owns errors that reach the process orchestration after logging
 // is available. db.Open and server.Listen retain their lower-layer ownership.
-func runWithLogger(socketPath, dbPath, pprofAddr, metricsRoot string, watchBuffer int, log *logging.Logger) (err error) {
+func runWithLogger(socketPath, readSocketPath, dbPath, pprofAddr, metricsRoot string, watchBuffer int, log *logging.Logger) (err error) {
 	// OPENED BEFORE THE DATABASE, so a store wedged recreating its schema or
 	// on a cold-cache first read of a large database is still profilable.
 	pprofSurface, err := openPprofSurface(pprofAddr, log)
@@ -198,31 +207,61 @@ func runWithLogger(socketPath, dbPath, pprofAddr, metricsRoot string, watchBuffe
 	if err != nil {
 		return err
 	}
+	// THE READ-ONLY FACE ON A SOCKET OF ITS OWN, from a server holding only
+	// the database's read-only face: a client there reaches no producer verb
+	// whatever it sends, which is how the daemon's relationship with the store
+	// stays read-only.
+	readLog := log.With(logging.Fields{Component: "read-server"})
+	readLn, err := server.Listen(readSocketPath, readLog)
+	if err != nil {
+		if closeErr := ln.Close(); closeErr != nil {
+			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: socketPath}, "closing the producers' socket after the read-only socket failed to bind failed: %v", closeErr)
+			return errors.Join(err, closeErr)
+		}
+		return err
+	}
 	srv := server.New(database, log.With(logging.Fields{Component: "server"}), watchBuffer)
+	readSrv := server.NewRead(database.ReadOnly(), readLog)
 
-	errc := make(chan error, 1)
+	// BOTH SERVERS SEND THEIR END HERE, and the store stands or falls as one:
+	// either one ending (a signal, or a serve error) shuts the other down too,
+	// so no store is left serving one face without the other.
+	errc := make(chan error, 2)
 	go func() { errc <- srv.Serve(ln) }()
+	go func() { errc <- readSrv.Serve(readLn) }()
 
+	var first error
 	select {
 	case sig := <-sigc:
 		log.Log(logging.Fields{Operation: "store.shutdown"}, "received signal=%s", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-		defer cancel()
-		if shutdownErr := srv.Shutdown(ctx); shutdownErr != nil {
-			return shutdownErr
-		}
-		// Serve returns http.ErrServerClosed once the drain completes; that is
-		// the orderly outcome and is not an error.
-		if serveErr := <-errc; serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			return serveErr
-		}
-		return nil
-	case serveErr := <-errc:
-		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			return serveErr
-		}
+	case first = <-errc:
+		log.Log(logging.Fields{Operation: "store.shutdown", Level: "error"}, "one of the store's servers stopped; stopping the other: %v", first)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	if shutdownErr := errors.Join(srv.Shutdown(ctx), readSrv.Shutdown(ctx)); shutdownErr != nil {
+		return errors.Join(servingFailure(first), shutdownErr)
+	}
+	// Serve returns http.ErrServerClosed once the drain completes; that is the
+	// orderly outcome and is not an error.
+	ended := servingFailure(first)
+	remaining := 2
+	if first != nil {
+		remaining = 1
+	}
+	for range remaining {
+		ended = errors.Join(ended, servingFailure(<-errc))
+	}
+	return ended
+}
+
+// servingFailure is a server's end as a failure: nil for none and for the
+// orderly http.ErrServerClosed.
+func servingFailure(err error) error {
+	if err == nil || errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
+	return err
 }
 
 // joinClose runs a deferred close and joins its failure onto the run's result,
