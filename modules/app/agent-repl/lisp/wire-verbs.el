@@ -5791,6 +5791,71 @@ Every arm is an answer to a valid report, so every arm ends the batch."
    #'agent-repl-wire-decode-report-latencies-success
    #'agent-repl-wire-decode-report-latencies-error))
 
+;;;; ---- UpdateSidebarView --------------------------------------------
+;;
+;; The editor folds the sidebar's one-of-a-kind sections: Hidden at every
+;; startup (owner request, 2026-10-27).  A repository's or a subsection's
+;; fold is the sidebar's own ask, never the editor's, so those arms are not
+;; encoded here.  See endpoint_update_sidebar_view.proto.
+
+(defun agent-repl-wire-encode-sidebar-view-empty (message)
+  "Return an encoder for the empty message MESSAGE."
+  (lambda (value) (agent-repl-wire--encode-empty message value)))
+
+(defun agent-repl-wire-encode-sidebar-view-fold-section (value)
+  "Encode SidebarViewFoldSection from plist VALUE.
+VALUE is (:section (:arm SECTION) :fold (:arm FOLD)), SECTION `:hidden',
+`:open' or `:recently-merged', FOLD `:expand' or `:collapse'.  Both are
+required."
+  (let ((message "SidebarViewFoldSection"))
+    (list (agent-repl-wire-verbs--encode-oneof
+           message "section" (plist-get value :section)
+           (list (list :hidden 'hidden (agent-repl-wire-encode-sidebar-view-empty "SidebarViewHidden"))
+                 (list :open 'open (agent-repl-wire-encode-sidebar-view-empty "SidebarViewOpen"))
+                 (list :recently-merged 'recentlyMerged
+                       (agent-repl-wire-encode-sidebar-view-empty "SidebarViewRecentlyMerged"))))
+          (agent-repl-wire-verbs--encode-oneof
+           message "fold" (plist-get value :fold)
+           (list (list :expand 'expand (agent-repl-wire-encode-sidebar-view-empty "SidebarViewExpand"))
+                 (list :collapse 'collapse (agent-repl-wire-encode-sidebar-view-empty "SidebarViewCollapse")))))))
+
+(defun agent-repl-wire-encode-update-sidebar-view-request (request)
+  "Encode UpdateSidebarViewRequest from plist REQUEST.
+REQUEST is (:change (:arm :fold-section :value FOLD)), FOLD as
+`agent-repl-wire-encode-sidebar-view-fold-section' takes it.  The change
+is required: an unset one is refused here, before anything is sent."
+  (list (agent-repl-wire-verbs--encode-oneof
+         "UpdateSidebarViewRequest" "change" (plist-get request :change)
+         '((:fold-section foldSection agent-repl-wire-encode-sidebar-view-fold-section)))))
+
+(defun agent-repl-wire-decode-update-sidebar-view-success (json)
+  "Decode UpdateSidebarViewSuccess from JSON.
+Empty: the roster push carries the new fold."
+  (agent-repl-wire-verbs--decode-empty "UpdateSidebarViewSuccess" json))
+
+(defun agent-repl-wire-decode-update-sidebar-view-error (json)
+  "Decode UpdateSidebarViewError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, each empty: an unknown repository or subsection,
+or a collapse of the section holding the current workspace."
+  (let ((message "UpdateSidebarViewError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownRepository unknownSubsection holdsCurrent))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownRepository :unknown-repository
+                       (agent-repl-wire-verbs--empty-arm "UpdateSidebarViewUnknownRepository"))
+                 (list 'unknownSubsection :unknown-subsection
+                       (agent-repl-wire-verbs--empty-arm "UpdateSidebarViewUnknownSubsection"))
+                 (list 'holdsCurrent :holds-current
+                       (agent-repl-wire-verbs--empty-arm "UpdateSidebarViewHoldsCurrent")))))))
+
+(defun agent-repl-wire-decode-update-sidebar-view-response (json)
+  "Decode UpdateSidebarViewResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "UpdateSidebarViewResponse" json
+   #'agent-repl-wire-decode-update-sidebar-view-success
+   #'agent-repl-wire-decode-update-sidebar-view-error))
+
 (provide 'agent-repl-wire-verbs)
 
 ;;; wire-verbs.el ends here

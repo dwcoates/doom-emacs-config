@@ -706,6 +706,55 @@ that outcome answering the editor\='s close is a contract breach."
                    (agent-repl-test-wire-verbs--parse "{\"stillHidden\":{}}"))
                   :type 'agent-repl-wire-error)))
 
+;;;; ---- UpdateSidebarView ----------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-update-sidebar-view-folds-a-section ()
+  "A fold carries its section's empty arm and the fold's."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case '((:hidden hidden :collapse collapse)
+                    (:open open :expand expand)
+                    (:recently-merged recentlyMerged :collapse collapse)))
+      (pcase-let ((`(,section ,wire-section ,fold ,wire-fold) case))
+        (should (equal (agent-repl-wire-encode-update-sidebar-view-request
+                        (list :change (list :arm :fold-section
+                                            :value (list :section (list :arm section)
+                                                         :fold (list :arm fold)))))
+                       (list (list 'foldSection (list wire-section) (list wire-fold)))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-sidebar-view-refuses-what-it-cannot-send ()
+  "An unset change, an unset section or fold, and a repository fold are refused before send."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (request '(nil
+                       (:change (:arm :fold-section :value (:fold (:arm :collapse))))
+                       (:change (:arm :fold-section :value (:section (:arm :hidden))))
+                       (:change (:arm :fold-section :value (:section (:arm :repository) :fold (:arm :collapse))))))
+      (should-error (agent-repl-wire-encode-update-sidebar-view-request request)
+                    :type 'agent-repl-wire-error))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-sidebar-view-response-success ()
+  "An accepted fold decodes to the empty success arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-sidebar-view-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                   '(:arm :success :value nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-sidebar-view-response-error ()
+  "Each refusal decodes to its own empty cause arm."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case '(("unknownRepository" . :unknown-repository)
+                    ("unknownSubsection" . :unknown-subsection)
+                    ("holdsCurrent" . :holds-current)))
+      (should (equal (agent-repl-wire-decode-update-sidebar-view-response
+                      (agent-repl-test-wire-verbs--parse (format "{\"error\":{\"%s\":{}}}" (car case))))
+                     (list :arm :error :value (list :cause (list :arm (cdr case) :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-sidebar-view-error-refuses-an-unknown-arm ()
+  "A refusal arm this codec does not know is refused as an unknown field."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-update-sidebar-view-error
+                   (agent-repl-test-wire-verbs--parse "{\"stillFolded\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
 ;;;; ---- RetryVendorError -----------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-retry-vendor-error-request ()
