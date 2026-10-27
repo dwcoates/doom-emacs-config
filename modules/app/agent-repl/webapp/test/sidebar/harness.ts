@@ -5,6 +5,7 @@
  * Not a test file — the shared arrangement every sidebar suite reuses, so no
  * suite builds its own idea of what a roster looks like.
  */
+import { createRecentlyDeployed, type RecentlyDeployed } from "../../src/sidebar/recently-deployed.js";
 import { clone, create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -187,6 +188,7 @@ export function sidebarContext(
   view: SidebarView = createSidebarView(),
   openDetails: Set<string> = new Set(),
   reveal: RowReveal = drawsAtOnce,
+  recentlyDeployed: RecentlyDeployed = createRecentlyDeployed(document, () => undefined),
 ): SidebarContext & RailContext & { view: DrawnView & SidebarView; attention: AttentionRegistry; disposers: Array<() => void> } {
   const disposers: Array<() => void> = [];
   const dropdowns = createDropdowns();
@@ -212,6 +214,7 @@ export function sidebarContext(
       layer: document.createElement("div"),
       status: document.createElement("div"),
     },
+    recentlyDeployed,
     disposers,
     onDispose: (fn) => {
       disposers.push(fn);

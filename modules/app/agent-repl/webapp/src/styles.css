@@ -1496,6 +1496,13 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    and is a line of its own in the band fit. */
 #ws-sidebar .sb-deploy-queue-label,
 #ws-sidebar .sb-merged-label { padding-left: 1.1rem; color: var(--blocked); }
+/* "RECENTLY DEPLOYED" SHOWS ITS ROWS ONLY WHILE ASKED FOR (owner request,
+   2026-10-27; src/sidebar/recently-deployed.ts): a click on the heading,
+   whose chevron says which way it stands, shows or hides them, and the
+   groups under a collapsed heading are not drawn. */
+#ws-sidebar .sb-merged-label { cursor: pointer; }
+#ws-sidebar .sb-merged-label > .tri { display: inline-block; width: 0.8rem; margin-left: -0.8rem; font-size: 0.9rem; line-height: 1; }
+#ws-sidebar .sb-merged-label[data-collapsed] ~ .merged-group { display: none; }
 #ws-sidebar .sb-merged-label:not(:has(~ .merged-group:not([hidden]))) { display: none; }
 /* The LINE BOX is pinned, not the row height. Setting `height` drew every
    merged row taller than the content inside it, so the section stood taller
