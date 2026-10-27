@@ -219,6 +219,10 @@ type Keeper struct {
 	// looking at it, unless a prompt engaged it. The instant is when its
 	// restore came up, zero while it is in line or in flight.
 	viewed map[ids.WorkspaceID]time.Time
+	// deferred are the parked sessions a reader asked for while the user was
+	// not looking at the workspace (viewed.go): restored only once it is
+	// selected.
+	deferred map[ids.WorkspaceID]bool
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -255,6 +259,7 @@ func New(deps Deps) (*Keeper, error) {
 		sent:      map[ids.WorkspaceID]time.Time{},
 		freeSince: map[ids.WorkspaceID]time.Time{},
 		viewed:    map[ids.WorkspaceID]time.Time{},
+		deferred:  map[ids.WorkspaceID]bool{},
 	}, nil
 }
 
@@ -509,6 +514,7 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 		return
 	}
 	k.releaseViewed(log, record)
+	k.restoreDeferred(ctx, log, record)
 	if !record.LetsCacheLapse() {
 		delete(k.deadlines, ws)
 	}
@@ -540,6 +546,7 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.sent, ws)
 	delete(k.freeSince, ws)
 	delete(k.viewed, ws)
+	delete(k.deferred, ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace

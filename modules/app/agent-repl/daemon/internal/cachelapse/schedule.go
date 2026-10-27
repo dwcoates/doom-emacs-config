@@ -302,9 +302,21 @@ func (k *Keeper) restoresDue(ctx context.Context) {
 }
 
 // restoreAsked queues WS's restore out of turn, now, when its session is
-// parked by the keep-alive cycle.
+// parked by the keep-alive cycle and the user is looking at it. One the user
+// is not looking at waits until it is selected (restoreDeferred).
 func (k *Keeper) restoreAsked(ctx context.Context, ws ids.WorkspaceID) {
 	log := k.deps.Log.Global().With(dlog.Context{"workspace": string(ws)})
+	record, err := k.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		if errors.Is(err, wsm.ErrNotFound) {
+			log.Info(opRestore, "a reader asked to restore a workspace no longer registered; nothing to do", nil)
+			return
+		}
+		if !leaving(ctx, log, opRestore, "reading the workspace a reader asked to restore", err) {
+			log.Error(opRestore, "could not read whether the user looks at the workspace a reader asked to restore; it is not restored", dlog.Context{"cause": err.Error()})
+		}
+		return
+	}
 	session, found, err := k.deps.DB.Session(ctx, ws)
 	if err != nil {
 		if !leaving(ctx, log, opRestore, "reading the session a reader asked to restore", err) {
@@ -316,6 +328,12 @@ func (k *Keeper) restoreAsked(ctx context.Context, ws ids.WorkspaceID) {
 		log.Debug(opRestore, "a restore was asked for a session the keep-alive cycle has not parked; nothing to do", nil)
 		return
 	}
+	if !record.Current {
+		k.deferred[ws] = true
+		log.Info(opRestore, "a reader asked for a parked session's history while the user is not looking at it; it is restored once the workspace is selected", nil)
+		return
+	}
+	delete(k.deferred, ws)
 	if k.enqueueRestore(ws, k.deps.Clock.Now()) {
 		k.viewed[ws] = time.Time{}
 		k.pump(ctx)
