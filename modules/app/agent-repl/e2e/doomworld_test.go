@@ -310,7 +310,7 @@ func rosterJSON(repoDir string, rows []map[string]any, current string) json.RawM
 		},
 		"open":           map[string]any{"label": map[string]any{"text": "Open"}, "expanded": map[string]any{}},
 		"hidden":         map[string]any{"header": map[string]any{"label": map[string]any{"text": "Hidden"}, "count": map[string]any{"workspaces": 0}}, "hiddenRows": map[string]any{"rows": []any{}}, "expanded": map[string]any{}},
-		"recentlyMerged": map[string]any{"header": map[string]any{"label": map[string]any{"text": "merge queue"}, "count": map[string]any{"workspaces": 0}}, "groups": []any{}, "mergedLabel": map[string]any{"text": "recently merged"}, "collapsed": map[string]any{}},
+		"recentlyMerged": map[string]any{"header": map[string]any{"label": map[string]any{"text": "merge queue"}}, "groups": []any{}, "mergedLabel": map[string]any{"text": "recently merged"}, "collapsed": map[string]any{}},
 		"closed":         map[string]any{"rows": []any{}},
 		// The sidebar's apps, as the daemon draws a world with no thread: the
 		// Workspaces app shown (frontend.v1.WorkspaceRoster.app_switcher).

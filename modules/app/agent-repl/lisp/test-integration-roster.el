@@ -99,7 +99,7 @@ OVERRIDES replaces top-level entries (notably `current')."
      (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                 (rows . ((rows . [])))
                 (expanded . ())))
-     (recentlyMerged . ((mergedLabel . ((text . "Recently Merged"))) (header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
+     (recentlyMerged . ((mergedLabel . ((text . "Recently Merged"))) (header . ((label . ((text . "merge queue")))))
                          (groups . [])
                          (collapsed . ()))))))
 
@@ -157,7 +157,7 @@ order apart from declaration order."
     (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
-    (recentlyMerged . ((mergedLabel . ((text . "Recently Merged"))) (header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
+    (recentlyMerged . ((mergedLabel . ((text . "Recently Merged"))) (header . ((label . ((text . "merge queue")))))
                         (groups . [])
                         (collapsed . ())))))
 
@@ -745,7 +745,7 @@ in the Open section), so only the repo section's row is on the bar."
                  (list (agent-repl-itest-roster--row "ws-repo" "ws-repo" 'ready))
                  `(recentlyMerged
                    . ((mergedLabel . ((text . "Recently Merged")))
-                      (header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
+                      (header . ((label . ((text . "merge queue")))))
                       (groups . ,(vector (agent-repl-itest-roster--merged-group
                                           (vector merged-row) 'shown)))
                       (collapsed . ())))))
@@ -1628,7 +1628,7 @@ pinned directly."
                             (detail . nil)
                             (closed . ((closed . :false))))]))))])))
           (open . ((label . ((text . "Open"))) (expanded . ())))
-          (recentlyMerged . ((mergedLabel . ((text . "Recently Merged"))) (header . ((label . ((text . "recently merged"))) (count . ((workspaces . 1)))))
+          (recentlyMerged . ((mergedLabel . ((text . "Recently Merged"))) (header . ((label . ((text . "merge queue")))))
                              (groups . [])))))))
    :type 'agent-repl-wire-error))
 
