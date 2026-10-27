@@ -114,6 +114,7 @@ function stripView(session: boolean, summary: boolean) {
           modelSelector: {
             options: [{ model: { name: "opus" }, displayName: "Opus 4.7" }],
             selected: { model: { name: "opus" }, displayName: "Opus 4.7" },
+            defaultModel: { name: "opus" },
           },
           permissionModePicker: { current: { mode: "auto", displayName: "auto" }, options: [] },
         }

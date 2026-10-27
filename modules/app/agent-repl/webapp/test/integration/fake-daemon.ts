@@ -99,6 +99,7 @@ import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/end
 import { AssignWorkspaceTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_assign_workspace_task_pb";
 import { SetEffortResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_effort_pb";
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
+import { SetDefaultModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_default_model_pb";
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 import { SelectAccountResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_account_pb";
 import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
@@ -1397,6 +1398,12 @@ export function createFakeDaemon(): FakeDaemon {
       setModel(request) {
         record("setModel", request);
         return answerFor("setModel", SetModelResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      setDefaultModel(request) {
+        record("setDefaultModel", request);
+        return answerFor("setDefaultModel", SetDefaultModelResponseSchema, {
           result: { case: "success", value: {} },
         });
       },

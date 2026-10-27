@@ -2289,6 +2289,8 @@ export type AccountOptionInit = {
 
 type TopbarInit = {
   title?: string;
+  /** The login's default model's name; omitted, the first served model. */
+  defaultModel?: string;
   workspaceName?: string;
   sessionLine?: string;
   account?: (typeof TOPBAR_ACCOUNT_ARMS)[number];
@@ -2381,6 +2383,7 @@ export function topbarView(init?: TopbarInit): TopbarView {
               models[0].description,
             ),
       options: models.map((m) => modelOption(m.name, m.displayName, m.description)),
+      defaultModel: { name: init?.defaultModel ?? models[0].name },
     },
     connectivity: {
       tone: init?.tone ?? "green",

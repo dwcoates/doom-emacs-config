@@ -36,7 +36,7 @@ function view(overrides: Partial<TopbarView> = {}): TopbarView {
       ],
     },
     connectivity: { tone: "green", glyph: "●", title: "connected" },
-    modelSelector: { options: [{ model: { name: "opus" }, displayName: "Opus" }] },
+    modelSelector: { options: [{ model: { name: "opus" }, displayName: "Opus" }], defaultModel: { name: "opus" } },
     permissionModePicker: {
       current: { mode: "auto", displayName: "auto" },
       options: [{ mode: "plan", displayName: "plan" }],
