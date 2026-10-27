@@ -484,9 +484,10 @@ of every rung."
 (defmacro agent-repl-test-prompt-entries--opening (answer &rest body)
   "Run BODY in a composer of \"ws-1\" over the fake tree, the neighbor call answering ANSWER.
 ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
-`asked' to the neighbor requests made and `logs' to every record."
+`asked' to the neighbor requests made, `logs' to every record and
+`inserting' to whether insert mode was entered."
   (declare (indent 1))
-  `(let ((asked nil) (logs nil))
+  `(let ((asked nil) (logs nil) (inserting nil))
      (agent-repl-test-prompt-entries--with-tree agent-repl-test-prompt-entries--headings
        (setq agent-repl-prompt-entries--ws "ws-1")
        (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) '(:id "ws-1" :dir "/w")))
@@ -498,6 +499,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                       (if (eq (car a) :signal) (signal (cadr a) (cddr a)) a))))
                  ((symbol-function 'evil-open-below) (lambda (_n) (end-of-line) (insert "\n")))
                  ((symbol-function 'evil-open-above) (lambda (_n) (beginning-of-line) (insert "\n") (forward-line -1)))
+                 ((symbol-function 'evil-insert-state) (lambda (&optional _arg) (setq inserting t)))
                  ((symbol-function 'agent-repl--log) (agent-repl-test--record-into logs))
                  ((symbol-function 'agent-repl--info) (agent-repl-test--record-into logs))
                  ((symbol-function 'agent-repl--warn) (agent-repl-test--record-into logs))
@@ -550,6 +552,52 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
     ;; Assert
     (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction))
                    '("2 - " (:arm :previous))))))
+
+(ert-deftest agent-repl-test-prompt-entries-o-onto-an-entry-below-goes-to-it ()
+  "`o' whose next node already has an entry below goes to that line's end in insert mode."
+  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "2.1"))))
+    ;; Arrange
+    (goto-char 3)
+    (let ((before (buffer-string)))
+      ;; Act
+      (agent-repl-prompt-entries-open-below)
+      ;; Assert
+      (should (equal (list (buffer-string) (point) (agent-repl-test-prompt-entries--line) inserting)
+                     (list before 29 "2.1 - no" t)))
+      (should (cl-some (lambda (m) (string-match-p "open-existing ws=ws-1 label=1.1 neighbor=2.1 at=21" m)) logs)))))
+
+(ert-deftest agent-repl-test-prompt-entries-O-onto-an-entry-above-goes-to-it ()
+  "`O' whose previous node already has an entry above goes to that line's end in insert mode."
+  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "1.1"))))
+    ;; Arrange
+    (goto-char 23)
+    (let ((before (buffer-string)))
+      ;; Act
+      (agent-repl-prompt-entries-open-above)
+      ;; Assert
+      (should (equal (list (buffer-string) (point) inserting) (list before 10 t))))))
+
+(ert-deftest agent-repl-test-prompt-entries-o-onto-an-entry-only-above-opens-a-line ()
+  "`o' whose next node's entry stands only above still opens a new line below."
+  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "1.1"))))
+    ;; Arrange
+    (goto-char 23)
+    ;; Act
+    (agent-repl-prompt-entries-open-below)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) inserting)
+                   '("1.1 - " 4 nil)))))
+
+(ert-deftest agent-repl-test-prompt-entries-O-onto-an-entry-only-below-opens-a-line ()
+  "`O' whose previous node's entry stands only below still opens a new line above."
+  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "2.1"))))
+    ;; Arrange
+    (goto-char 3)
+    ;; Act
+    (agent-repl-prompt-entries-open-above)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) inserting)
+                   '("2.1 - " 1 nil)))))
 
 (ert-deftest agent-repl-test-prompt-entries-o-with-no-neighbor-opens-an-empty-line ()
   "An entry with no neighbor that way opens the line empty."
