@@ -364,7 +364,7 @@ seconds long, not to an instant one.
 
 | knob | value | basis |
 | --- | --- | --- |
-| naming call timeout | 15s per attempt, as an explicit `context.WithTimeout` in `headless.Run` | it is a Haiku call over a handful of tokens; a call that has not answered in 15s has failed, and the module's bounds rule is "a small multiple of the observed healthy max" — which must be MEASURED once the call exists and this number then re-set from it |
+| naming call timeout | 21s per attempt (`headless.ShortAnswerTimeout`, shared with the question abbreviation call), as an explicit `context.WithTimeout` in `headless.Run` | it is a Haiku call over a handful of tokens, and the bound is just over twice the slowest healthy call measured: 9.7s over 128 naming calls and 10.2s over 10 abbreviation calls in the week to 2026-10-27, when the earlier 15s timed both naming attempts of a create out |
 | retries | one (§4.4), so the worst case is two timeouts | |
 | where the wait shows | the minibuffer, as an explicit `naming the workspace` phase before `workspace requested` | the owner's standing rule that startup phases are echoed as messages, not only in a mode line |
 | the footer | nothing new | a create has no workspace yet, so it has no footer; the footer carries the create's outcome only in the bring-up-failure case already landed (§1.2) |

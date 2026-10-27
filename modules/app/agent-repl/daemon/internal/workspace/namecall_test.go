@@ -111,6 +111,24 @@ func TestCreateAsksTheNamingCallForHaiku(t *testing.T) {
 	}
 }
 
+// TestCreateBoundsTheNamingCallByTheShortAnswerTimeout pins the naming call
+// to the bound every short Haiku answer shares, so a hand-set bound of its own
+// fails here rather than drifting from the abbreviation call's.
+func TestCreateBoundsTheNamingCallByTheShortAnswerTimeout(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), standardSpec(t, f)); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if got := f.headless.calls[0].Timeout; got != headless.ShortAnswerTimeout {
+		t.Fatalf("timeout = %v, want headless.ShortAnswerTimeout (%v)", got, headless.ShortAnswerTimeout)
+	}
+}
+
 func TestCreateAsksTheNamingCallUnderItsOwnGuardSite(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

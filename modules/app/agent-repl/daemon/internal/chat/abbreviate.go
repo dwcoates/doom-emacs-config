@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"agent-repld/internal/account"
@@ -38,9 +37,9 @@ const (
 	// AbbreviationAttempts is how many times the call is made: the first,
 	// plus one retry on an invalid or failed answer.
 	AbbreviationAttempts = 2
-	// AbbreviationTimeout bounds one attempt: a handful of tokens from a
-	// small model, as the thread title's call (workspace.NamingTimeout).
-	AbbreviationTimeout = 15 * time.Second
+	// AbbreviationTimeout bounds one attempt: a short answer from a small
+	// model (headless.ShortAnswerTimeout).
+	AbbreviationTimeout = headless.ShortAnswerTimeout
 	// AbbreviationSlots is how many abbreviation calls run at once, so a
 	// thread loaded with many unabbreviated questions does not fan out one
 	// model process per question.
