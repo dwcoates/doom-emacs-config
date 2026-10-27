@@ -306,7 +306,7 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 		}
 		log = v.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(record.ID)})
 		log.Info(opOpen, "the thread's directory was gone; it was made again", dlog.Context{"dir": record.Dir})
-		if err := v.bindResolvers(log, record.ID, record.Dir); err != nil {
+		if err := v.bindResolvers(ctx, log, record); err != nil {
 			return nil, fmt.Errorf("open %q: bind the thread's views: %w", record.ID, err)
 		}
 		if err := v.publishNaming(ctx, log, record); err != nil {
@@ -377,7 +377,7 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 	// exists (BindViews, PublishRegistry), so a restored one has neither, and
 	// its session's first footer and topbar records would meet a resolver
 	// that does not know where the workspace is.
-	if err := v.bindResolvers(log, record.ID, record.Dir); err != nil {
+	if err := v.bindResolvers(ctx, log, record); err != nil {
 		return nil, fmt.Errorf("open %q: bind the restored workspace's views: %w", record.ID, err)
 	}
 	if err := v.publishNaming(ctx, log, record); err != nil {

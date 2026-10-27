@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/paint"
 	"agent-repld/internal/publish"
+	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
 )
@@ -66,6 +67,10 @@ type resolver struct {
 	// name them (peerdelivery.go). Across workspaces, because one message's two
 	// ends are two workspaces' rows.
 	deliveries map[string]*peerDelivery
+	// pullTargets is the GitHub repository each workspace's `#<number>`
+	// references link into (pullrefs.go). It lives here rather than on
+	// wsState so a reset, which empties the feed, keeps it.
+	pullTargets map[ids.WorkspaceID]pullrefs.Target
 }
 
 // wsState is one workspace's whole feed universe plus the accumulation every
@@ -637,13 +642,14 @@ func newResolver(deps Deps) (*resolver, error) {
 		deps.Go = func(f func()) { go f() }
 	}
 	r := &resolver{
-		deps:       deps,
-		workspaces: map[ids.WorkspaceID]*wsState{},
-		tokens:     map[string]*watchToken{},
-		loggers:    map[ids.WorkspaceID]dlog.Logger{},
-		held:       map[ids.WorkspaceID]*heldState{},
-		hostAsks:   map[ids.WorkspaceID]*agentreplv1.HostAsk{},
-		deliveries: map[string]*peerDelivery{},
+		deps:        deps,
+		workspaces:  map[ids.WorkspaceID]*wsState{},
+		tokens:      map[string]*watchToken{},
+		loggers:     map[ids.WorkspaceID]dlog.Logger{},
+		held:        map[ids.WorkspaceID]*heldState{},
+		hostAsks:    map[ids.WorkspaceID]*agentreplv1.HostAsk{},
+		deliveries:  map[string]*peerDelivery{},
+		pullTargets: map[ids.WorkspaceID]pullrefs.Target{},
 	}
 	// ONE MUTEX FOR EVERY WORKSPACE'S FEED, so its stall is the run log's
 	// record. It lives as long as the process and is never unwatched.

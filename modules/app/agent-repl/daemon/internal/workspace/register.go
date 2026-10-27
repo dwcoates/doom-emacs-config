@@ -261,7 +261,7 @@ func (v *verbs) admit(ctx context.Context, log dlog.Logger, record wsm.Workspace
 	// nothing themselves, so a frame for a workspace they were never told the
 	// directory of is an invariant violation they report and cannot serve.
 	// Registration is the one moment every workspace passes through.
-	if err := v.bindResolvers(log, record.ID, record.Dir); err != nil {
+	if err := v.bindResolvers(ctx, log, record); err != nil {
 		return err
 	}
 	// THE FOOTER IS PRIMED HERE, as the topbar's naming is below. The footer
@@ -522,9 +522,12 @@ func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger,
 }
 
 // bindResolvers binds one workspace's directory on every resolver that needs
-// telling. A failure is the caller's, never absorbed: a resolver that does not
-// know where a workspace is cannot serve its views at all.
-func (v *verbs) bindResolvers(log dlog.Logger, id wsm.WorkspaceID, dir string) error {
+// telling, and its pull request target on the feed (bindPullTarget), before
+// anything is drawn for it. A failure is the caller's, never absorbed: a
+// resolver that does not know where a workspace is cannot serve its views at
+// all.
+func (v *verbs) bindResolvers(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
+	id, dir := record.ID, record.Dir
 	binds := []struct {
 		name string
 		bind func(wsm.WorkspaceID, string) error
@@ -539,6 +542,9 @@ func (v *verbs) bindResolvers(log dlog.Logger, id wsm.WorkspaceID, dir string) e
 			})
 			return fmt.Errorf("bind the %s resolver to %q: %w", b.name, dir, err)
 		}
+	}
+	if err := v.bindPullTarget(ctx, log, record); err != nil {
+		return err
 	}
 	log.Debug(opRegister, "bound the workspace's directory on every resolver that needs it", dlog.Context{
 		"workspace": string(id),
@@ -669,7 +675,7 @@ func (v *verbs) BindViews(ctx context.Context) error {
 			})
 			continue
 		}
-		if err := v.bindResolvers(global, ws.ID, ws.Dir); err != nil {
+		if err := v.bindResolvers(ctx, global, ws); err != nil {
 			return fmt.Errorf("bind the views: %w", err)
 		}
 		bound++
@@ -751,7 +757,7 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 			})
 			continue
 		}
-		if err := v.bindResolvers(global, ws.ID, ws.Dir); err != nil {
+		if err := v.bindResolvers(ctx, global, *ws); err != nil {
 			return fmt.Errorf("publish the opening roster: %w", err)
 		}
 		if err := v.publishNaming(ctx, global, *ws); err != nil {

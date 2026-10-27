@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/sessionwatcher"
@@ -83,6 +84,26 @@ func TestDeliverMirrorsTheAcceptedPromptIntoTheFeed(t *testing.T) {
 	}
 	if _, ok := rows[0].GetRow().(*frontendv1.FeedRow_UserPrompt); !ok {
 		t.Fatalf("row = %T, want a user_prompt row", rows[0].GetRow())
+	}
+}
+
+// The mirror links the prompt's pull request references into the workspace's
+// repository, as the replayed draw does.
+func TestDeliverMirrorsAPromptsPullReferencesLinked(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.feed.pullTarget = &pullrefs.Target{Owner: "ChessCom", Repo: "explanation-engine"}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "review #12")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	blocks := h.feed.mirrored()[0].GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	got := blocks[0].GetText().GetProse().GetBlocks()[0].GetPlain().GetMarkdown()
+	if want := "review [#12](https://github.com/ChessCom/explanation-engine/pull/12)"; got != want {
+		t.Fatalf("the mirrored prompt = %q, want %q", got, want)
 	}
 }
 

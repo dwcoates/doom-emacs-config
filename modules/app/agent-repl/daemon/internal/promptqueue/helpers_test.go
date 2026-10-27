@@ -21,6 +21,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/holds"
@@ -1077,7 +1078,13 @@ type fakeFeed struct {
 	promptsRetired []ids.TurnID
 	// closed are the door's feed tells, in order.
 	closed []closedTell
+	// pullTarget is the pull request target PullTarget answers for every
+	// workspace, nil for none.
+	pullTarget *pullrefs.Target
 }
+
+// PullTarget answers the fixture's pull request target.
+func (f *fakeFeed) PullTarget(ids.WorkspaceID) *pullrefs.Target { return f.pullTarget }
 
 // closedTell is one OnTurnClosed the door made.
 type closedTell struct {

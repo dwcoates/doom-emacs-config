@@ -427,7 +427,9 @@ func TestRegisterRepositoryRefusesAWorkspaceNamingAnUnregisteredRepository(t *te
 	if err == nil || !strings.Contains(err.Error(), "repo-ghost") {
 		t.Fatalf("RegisterRepository = %v, want the missing repository named", err)
 	}
-	if !hasRecord(f, "error", opRegisterRepository) {
+	// The registration's own bind meets the missing repository first, and
+	// records it there, once (bindPullTarget).
+	if !hasRecord(f, "error", opPullTarget) {
 		t.Fatal("the failure was not recorded at ERROR")
 	}
 }

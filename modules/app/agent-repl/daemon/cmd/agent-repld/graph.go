@@ -56,6 +56,7 @@ import (
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
+	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/repodivergence"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
@@ -118,6 +119,10 @@ const graphOperation = "daemon.cmd.graph"
 // call — the classifier's routing question and the workspace naming call —
 // will exec.
 const opHeadlessBinary = "daemon.headless.binary"
+
+// opPullOwners is the operation the boot's read of each account root's GitHub
+// owner is recorded under.
+const opPullOwners = "daemon.pullrefs.owners"
 
 // unwired names every Deps field this composition root cannot supply. It is
 // EMPTY: every collaborator the wave-3 graph needs has a landed producer. The
@@ -314,6 +319,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the account resolver: %w", err)
 	}
+	pullOwners, err := pullrefs.OwnersFromEnv(os.Getenv, paths.Home, p.Opts.multiRepoConfigDir)
+	if err != nil {
+		log.Error(opPullOwners, "the GitHub owners of the account roots could not be read", dlog.Context{"cause": err.Error()})
+		return nil, fmt.Errorf("agent-repld: read the GitHub owners of the account roots: %w", err)
+	}
+	log.Info(opPullOwners, "read the GitHub owner of each account root", dlog.Context{"owners": map[string]string(pullOwners)})
 
 	guard := envc.NewVendorGuard(p.Contracts)
 	// ONE RESOLVED VENDOR BINARY FOR EVERY HEADLESS CALL. It is recorded at
@@ -1339,6 +1350,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		DB:           p.DB,
 		Git:          git,
 		Accounts:     accounts,
+		PullOwners:   pullOwners,
 		Queue:        queue,
 		TurnStops:    queue,
 		Merge:        mergeOrchestrator,
