@@ -69,6 +69,11 @@ async function untilTerminal(
   return watchAgentEntry(frame);
 }
 
+/** Resolves on the shim's record that it CLOSED the turn TURN (a keep-alive's debt is booked then). */
+function turnClosed(shim: Awaited<ReturnType<typeof spawnShim>>, turn: string): Promise<unknown> {
+  return shim.log.record((record) => record.message === "closed a turn" && record.context.turn_id === turn);
+}
+
 describe("StartTurn", () => {
   test("the answer echoes the turn id, the said and the origin", async () => {
     // ECHO TOKENS: every one of these is the daemon's own value coming back, so
@@ -1601,11 +1606,6 @@ describe("keep-alives", () => {
     return String(submitted.context.turn);
   };
 
-  /** Resolves once the shim has CLOSED the turn TURN, its keep-alive debt booked when it is one. */
-  const turnClosed = async (shim: Awaited<ReturnType<typeof spawnShim>>, turn: string): Promise<void> => {
-    await shim.log.record((record) => record.message === "closed a turn" && record.context.turn_id === turn);
-  };
-
   /** One keep-alive asked for and run to its close. */
   const beatAndClose = async (shim: Awaited<ReturnType<typeof spawnShim>>): Promise<void> => {
     await turnClosed(shim, await beat(shim));
@@ -2174,7 +2174,7 @@ describe("replies matched to their send by id", () => {
 
   /** Start t1, which queues a vendor turn, and wait for t1 to close. */
   const queueAVendorTurn = async (shim: Awaited<ReturnType<typeof spawnShim>>): Promise<void> => {
-    const closed = shim.log.record((record) => record.message === "closed a turn" && record.context.turn_id === "t1");
+    const closed = turnClosed(shim, "t1");
     turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" })));
     await closed;
   };
