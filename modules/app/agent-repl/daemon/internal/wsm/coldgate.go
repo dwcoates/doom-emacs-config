@@ -96,8 +96,7 @@ func (s *store) ClearColdGate(ctx context.Context, id WorkspaceID) (bool, error)
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		cleared = n > 0
+		cleared, err = touchedRow(res)
 		return err
 	})
 	return cleared, err
