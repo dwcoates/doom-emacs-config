@@ -17616,3 +17616,43 @@ describe("an agent's prompt delivered as a peer message", () => {
     expect(deliveries.map((send) => send.origin?.kind)).toEqual(["peer", "peer"]);
   });
 });
+
+// THE WORKSPACE'S BOOK, NAMED ON EVERY StartSession ANSWER: the daemon records it
+// and reads the workspace's history from the store with it, so the cold gate and
+// every other refusal name it as a started session does.
+describe("StartSession names the workspace's book", () => {
+  it("names a started session's main agent", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const response = await started(h);
+
+    // Assert
+    expect(response.book?.value).toBe(freshSessionId((await untilQuery(h, 0)).spec));
+  });
+
+  it("names the persisted book on a refusal", async () => {
+    // Arrange
+    const h = harness({ lockThrows: true });
+    persistIdentity(h, "original-session-1");
+
+    // Act
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert
+    expect(failureCause(response)).toBe("conversationOwned");
+    expect(response.book?.value).toBe("original-session-1");
+  });
+
+  it("names no book for a workspace that never settled one", async () => {
+    // Arrange
+    const h = harness({ lockThrows: true });
+
+    // Act
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert
+    expect(response.book).toBeUndefined();
+  });
+});

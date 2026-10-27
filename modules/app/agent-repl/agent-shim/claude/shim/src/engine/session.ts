@@ -7917,10 +7917,26 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
   }
 
+  /**
+   * THE WORKSPACE'S BOOK, NAMED ON EVERY StartSession ANSWER
+   * (shim.v1.StartSessionResponse.book): the started session's main agent, or
+   * the identity this workspace persisted when no session settled one (a cold
+   * gate, a vendor that would not start). The daemon records it and reads the
+   * workspace's history from the store with it, so it never needs this shim up
+   * to show the conversation. A workspace that never settled an identity names
+   * none.
+   */
+  async function statingBook(response: shimv1.StartSessionResponse): Promise<shimv1.StartSessionResponse> {
+    const persisted = identity === undefined ? await identityStore.read() : undefined;
+    const book = identity?.agentId ?? (persisted === undefined ? undefined : mainAgentId(persisted));
+    if (book !== undefined) response.book = book;
+    return response;
+  }
+
   const engine: SessionEngine = {
     pushes,
     onSdkMessage,
-    startSession,
+    startSession: async (request) => statingBook(await startSession(request)),
     // `subscribe()` runs EAGERLY here, at the open, not at the consumer's first
     // pull: the diagnostics frame is seeded into the subscriber's queue by that
     // call, and a generator that only subscribed on first `next()` would leave
