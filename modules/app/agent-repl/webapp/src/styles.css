@@ -2474,6 +2474,29 @@ html[data-page-unshown] *::before,
 html[data-page-unshown] *::after {
   animation-play-state: paused !important;
 }
+/* THE FEED TEXT ZOOM GLIDES (owner request, 2026-10-27: it snapped from one
+   step to the next). `--feed-text-scale` is registered as a number, so the
+   engine interpolates it, and a pushed scale moves to its new value over
+   `--feed-text-zoom-ms` rather than at once. It is the real font size that
+   moves, laid out each frame, never a `transform` painted over the old
+   layout: the scroll anchoring, the collapsed widths and the tree wraps all
+   read laid-out boxes, and would read a transformed feed's scaled ones.
+   A page the webhost is not showing takes its scale at once (nobody sees
+   it, and a glide would restyle it every frame), and so does a reader who
+   asked for reduced motion (the one-line block at the end of this file,
+   since the first reduced-motion block is the footer's). */
+@property --feed-text-scale {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+:root {
+  --feed-text-zoom-ms: 180ms;
+  transition: --feed-text-scale var(--feed-text-zoom-ms) cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+html[data-page-unshown] {
+  transition: none;
+}
 /* THE PEER MESSAGE'S HEADER STRIP: the left arrow and the sender's name, the
    whole of its collapsed face (its cap is zero lines,
    src/feed/rows/peer-message.ts). One line, the name ellipsized, its right
@@ -9320,6 +9343,8 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 .chat-dot:nth-child(3) { animation-delay: .4s; }
 @keyframes chat-pulse { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .chat-dot { animation: none; } }
+/* The feed text zoom takes its scale at once (THE FEED TEXT ZOOM GLIDES). */
+@media (prefers-reduced-motion: reduce) { :root { transition: none; } }
 
 /* ── The sidebar's apps (src/sidebar/threads.ts): the title is the switcher,
    and the Chat app's body is the thread list. The head is otherwise as it

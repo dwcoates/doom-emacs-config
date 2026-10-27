@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FEED_TEXT_SCALE_APPLIED,
   FEED_TEXT_SCALE_PROPERTY,
   applyFeedTextScale,
   createFeedTextScale,
+  feedTextScaleToMeasure,
 } from "../../src/feed/feed-text-scale.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import type { PresenceCause } from "../../src/presence.js";
@@ -222,5 +223,71 @@ describe("createFeedTextScale", () => {
     // Assert
     const record = await forwardedRecord(capture, "feed.text-scale.invalid");
     expect([record.level.case, currentScale(), turns.asks()]).toEqual(["warn", "", 0]);
+  });
+});
+
+describe("the feed text zoom's glide ending", () => {
+  afterEach(() => {
+    document.documentElement.style.removeProperty(FEED_TEXT_SCALE_PROPERTY);
+  });
+
+  /** A transitionend on the root for PROPERTY. */
+  const ended = (property: string): Event => Object.assign(new Event("transitionend"), { propertyName: property });
+
+  it("tells a listener again when the zoom's glide ends", () => {
+    // Arrange
+    const scale = createFeedTextScale({ doc: document, presence: fakePresence(true, true), turns: fakeTurns(), now: () => 0 });
+    let told = 0;
+    scale.onApplied(() => told++);
+    // Act
+    document.documentElement.dispatchEvent(ended(FEED_TEXT_SCALE_PROPERTY));
+    // Assert
+    expect(told).toBe(1);
+  });
+
+  it("tells nothing when another property's transition ends", () => {
+    // Arrange
+    const scale = createFeedTextScale({ doc: document, presence: fakePresence(true, true), turns: fakeTurns(), now: () => 0 });
+    let told = 0;
+    scale.onApplied(() => told++);
+    // Act
+    document.documentElement.dispatchEvent(ended("opacity"));
+    // Assert
+    expect(told).toBe(0);
+  });
+});
+
+describe("feedTextScaleToMeasure", () => {
+  afterEach(() => {
+    document.documentElement.style.removeProperty(FEED_TEXT_SCALE_PROPERTY);
+    vi.restoreAllMocks();
+  });
+
+  /** The root's computed scale reads as DRAWN; its own value is TARGET. */
+  function stage(drawn: string, target: string): void {
+    if (target !== "") document.documentElement.style.setProperty(FEED_TEXT_SCALE_PROPERTY, target);
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({ getPropertyValue: () => drawn } as unknown as CSSStyleDeclaration);
+  }
+
+  it.each([
+    ["the size drawn now, gliding down", "1.2", "1.1", 1.2],
+    ["the size it glides to, gliding up", "1.1", "1.2", 1.2],
+    ["the drawn size alone, on a page with no scale of its own", "1", "", 1],
+  ])("measures at %s", (_name, drawn, target, want) => {
+    // Arrange
+    stage(drawn, target);
+    // Act + Assert
+    expect(feedTextScaleToMeasure(document)).toBe(want);
+  });
+
+  it("refuses a scale that reads as no number, recording it through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    stage("", "");
+    // Act
+    expect(() => feedTextScaleToMeasure(document)).toThrow(/feed text scale/);
+    // Assert
+    const record = await forwardedRecord(capture, "feed.text-scale.unreadable");
+    expect(record.level.case).toBe("error");
   });
 });

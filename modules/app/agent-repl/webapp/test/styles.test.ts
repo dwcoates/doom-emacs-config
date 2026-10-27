@@ -5020,6 +5020,30 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     expect(got).not.toBe("bold");
   });
 
+  it("registers the feed text scale as a number the engine can glide", () => {
+    // Arrange / Act
+    const registration = /@property\s+--feed-text-scale\s*\{([^}]*)\}/.exec(stylesheet)?.[1] ?? "";
+    // Assert
+    expect([/syntax:\s*"<number>"/.test(registration), /inherits:\s*true/.test(registration), /initial-value:\s*1;/.test(registration)]).toEqual([true, true, true]);
+  });
+
+  it.each([
+    ["glides the feed text scale on the root", ":root", /transition:\s*--feed-text-scale var\(--feed-text-zoom-ms\)/],
+    ["takes it at once on a page the webhost is not showing", "html[data-page-unshown]", /transition:\s*none/],
+  ])("%s", (_name, selector, pattern) => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => isOwnRule(r, selector) && /transition/.test(r.declarations))?.declarations ?? "";
+    // Assert
+    expect(rule).toMatch(pattern);
+  });
+
+  it("takes the feed text scale at once for a reader who asked for reduced motion", () => {
+    // Arrange / Act
+    const block = /@media \(prefers-reduced-motion: reduce\)\s*\{\s*:root\s*\{([^}]*)\}/.exec(stylesheet)?.[1] ?? "";
+    // Assert
+    expect(block).toMatch(/transition:\s*none/);
+  });
+
   it("declares the base size on the root as the one value every bubble starts from", () => {
     // Arrange / Act
     const got = [rootToken("--bubble-base-font-rem"), rootToken("--bubble-font-rem")];

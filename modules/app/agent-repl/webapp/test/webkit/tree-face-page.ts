@@ -45,6 +45,11 @@ export interface TreeFacePage {
   measure(text: string): { lines: DrawnLine[]; bodyRight: number; bubbleFace: string };
   /** Land SCALE as a feed watch's push would, let two frames run, and measure the tree drawn last again. */
   rescale(scale: number): Promise<{ lines: DrawnLine[]; bodyRight: number; bubbleFace: string }>;
+  /**
+   * Land SCALE as a push would and sample every frame for MS: the scale drawn
+   * that frame and the most line boxes any tree line was broken across.
+   */
+  glide(scale: number, ms: number): Promise<{ drawn: number; brokenAcross: number }[]>;
 }
 
 declare global {
@@ -74,7 +79,24 @@ function glyphMiddles(el: Element, glyphs: string): number[] {
 /** The bubble `measure` drew last. */
 let drawn: HTMLElement | null = null;
 
+/** The text of every branch line of the tree `measure` drew last. */
+function drawnLines(): NodeListOf<Element> {
+  return drawn!.querySelectorAll(".mp-line[data-node] .mp-content");
+}
+
 window.treeFace = {
+  async glide(scale, ms) {
+    applyFeedTextScale(scale);
+    const samples: { drawn: number; brokenAcross: number }[] = [];
+    const started = performance.now();
+    while (performance.now() - started < ms) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const drawn = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--feed-text-scale"));
+      const broken = [...drawnLines()].map((content) => content.getClientRects().length);
+      samples.push({ drawn, brokenAcross: Math.max(...broken) });
+    }
+    return samples;
+  },
   async rescale(scale) {
     applyFeedTextScale(scale);
     for (let i = 0; i < 2; i++) await new Promise((resolve) => requestAnimationFrame(resolve));

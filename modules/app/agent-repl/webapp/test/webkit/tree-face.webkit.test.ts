@@ -134,3 +134,44 @@ describe("a metaprompt tree when the feed text scale moves, in WebKit", () => {
     expect(lines.every((l) => l.railsLeft + l.textEnd <= bodyRight + NEAR)).toBe(true);
   });
 });
+
+describe("the feed text zoom gliding over a metaprompt tree, in WebKit", () => {
+  let feed: FeedPage;
+  let up: { drawn: number; brokenAcross: number }[];
+  let down: { drawn: number; brokenAcross: number }[];
+
+  beforeAll(async () => {
+    const script = await bundlePage(path.join(here, "tree-face-page.ts"), "treeFacePage");
+    feed = await openFeedPage({ width: 700, height: 900 });
+    await feed.page.addScriptTag({ content: script });
+    await feed.page.evaluate((text) => window.treeFace.measure(text), TREE);
+    up = await feed.page.evaluate(() => window.treeFace.glide(1.3, 400));
+    down = await feed.page.evaluate(() => window.treeFace.glide(1, 400));
+  });
+
+  afterAll(async () => {
+    await feed?.browser.close();
+  });
+
+  it.each([
+    ["up", () => up, 1, 1.3],
+    ["down", () => down, 1.3, 1],
+  ] as const)("draws sizes between the two steps while it glides %s", (_name, samples, from, to) => {
+    const between = samples().filter((s) => s.drawn > Math.min(from, to) + 0.01 && s.drawn < Math.max(from, to) - 0.01);
+    expect(between.length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ["up", () => up, 1.3],
+    ["down", () => down, 1],
+  ] as const)("settles at the scale it glided %s to", (_name, samples, to) => {
+    expect(samples().at(-1)?.drawn).toBeCloseTo(to, 5);
+  });
+
+  it.each([
+    ["up", () => up],
+    ["down", () => down],
+  ] as const)("lets the engine break no tree line in any frame of the glide %s", (_name, samples) => {
+    expect(samples().map((s) => s.brokenAcross)).toEqual(samples().map(() => 1));
+  });
+});
