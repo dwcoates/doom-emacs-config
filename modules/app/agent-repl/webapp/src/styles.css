@@ -44,7 +44,9 @@
      meet in the middle as one color, so the response derives from this token
      rather than carrying a second copy. The dark theme moves its own
      --panel-bg the same 20%. */
-  --tool-card-bg: #f1f4f6;
+  /* SLIGHTLY DARKER (owner request, 2026-10-27): the move toward --bg is now
+     10% here and 40% in the dark theme, from 20% in both. */
+  --tool-card-bg: #f0f2f5;
   /* The workspaces rail's fill: a touch LIGHTER than the feed (--bg), so the
      sidebar reads as a lifted dock rather than the same sheet the
      conversation scrolls on. In the light theme --bg is already pure white —
@@ -53,6 +55,9 @@
      BELOW --card so the row-hover and detail-panel washes (both --card) still
      read as a further lift over the rail instead of inverting against it. */
   --sidebar-bg: #ffffff;
+  /* The topbar's ground (owner request, 2026-10-27): a little lighter than
+     --sidebar-bg, which in the light theme is already white. */
+  --topbar-bg: #ffffff;
   /* The rail's dropdowns (the apps menu): a shade off the rail so the menu
      reads as its own surface, kept BELOW --card so an option's hover wash
      still lifts off it. */
@@ -564,10 +569,11 @@
        (Claude's code block) moved 20% of the way to --bg (owner request,
        2026-10-25, meeting the 40% tool card and the --panel-bg response in
        the middle), #1a1a19 toward #151514, so it still lifts off the feed. */
-    --tool-card-bg: #191918;
+    --tool-card-bg: #181817;
     /* Claude's sidebar, darker than the feed, so the rail recedes behind the
        conversation while its --card hover/detail washes lift off it. */
     --sidebar-bg: #111110;
+    --topbar-bg: #171716;
     /* A little lighter than the rail, and below --card's hover wash. */
     --sidebar-menu-bg: #1b1b1a;
     /* Deeper than the light theme's shadow: a faint drop shadow reads as
@@ -1772,6 +1778,7 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   /* Fixed to --topbar-h (shared with .sb-head) so the two header dividers land
      flush; horizontal padding only, with the height governing the vertical box.
      align-items: center keeps the pickers centered within it. */
+  background: var(--topbar-bg);
   height: var(--topbar-h);
   /* NO EDGE INSET OF ITS OWN. `.topbar-row` inside carries the strip's one
      `--topbar-cell-gap` edge padding, and a second inset here stacked on top
@@ -4687,8 +4694,6 @@ html[data-page-unshown] {
    before the daemon has resolved anything. */
 #footer {
   flex: none;
-  /* The sidebar's own ground (owner request, 2026-10-27). */
-  background: var(--sidebar-bg);
   padding: 0.25rem 1rem 0.5rem;
 }
 #footer:empty { display: none; }
@@ -4761,7 +4766,8 @@ html[data-page-unshown] {
 .pfooter {
   max-width: var(--agent-bubble-cap);
   margin: 0 auto;
-  background: var(--panel-bg);
+  /* The sidebar's own ground inside the dock (owner request, 2026-10-27). */
+  background: var(--sidebar-bg);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--sidebar-shadow);
