@@ -138,6 +138,10 @@ type Deps struct {
 	// due, since the sweep puts that session to sleep. Zero disables the
 	// sweep, and with it this limit.
 	IdleCutoff time.Duration
+	// Interval is how long after the cache clock a beat is due; zero is
+	// KeepaliveInterval. Only the whole stack's fake mode shortens it
+	// (FakeKeepaliveInterval), so a suite can watch keep-alives happen.
+	Interval time.Duration
 	// CycleDown asks for WS's session to be stood down after the keep-alive
 	// asked at BEAT (drain.Controller.CycleDown).
 	CycleDown func(ws ids.WorkspaceID, beat time.Time)

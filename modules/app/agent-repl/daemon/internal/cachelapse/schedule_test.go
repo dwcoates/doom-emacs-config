@@ -646,3 +646,49 @@ func TestScheduleBeatsAQueuedSessionIdlePastTheCutoff(t *testing.T) {
 		t.Fatal("no beat was armed for a queued session idle past the cutoff")
 	}
 }
+
+func TestFakeKeepaliveInterval(t *testing.T) {
+	cases := []struct {
+		name    string
+		fake    bool
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "fake mode with the override", fake: true, value: "100", want: 100 * time.Millisecond},
+		{name: "fake mode without it keeps the production interval", fake: true},
+		{name: "outside fake mode the override is ignored", value: "100"},
+		{name: "a value that is not a number is refused", fake: true, value: "soon", wantErr: true},
+		{name: "a value that is not positive is refused", fake: true, value: "0", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, err := FakeKeepaliveInterval(tc.fake, func(k string) string {
+				if k == FakeKeepaliveIntervalEnv {
+					return tc.value
+				}
+				return ""
+			})
+
+			// Assert
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Fatalf("FakeKeepaliveInterval = %v, %v; want %v, error %v", got, err, tc.want, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestScheduleTimesTheBeatFromTheConfiguredInterval(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 0))
+	h.keeper.deps.Interval = 100 * time.Millisecond
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if got, want := h.keeper.beats[theWorkspace], now.Add(100*time.Millisecond); !got.Equal(want) {
+		t.Fatalf("beat = %v, want %v", got, want)
+	}
+}

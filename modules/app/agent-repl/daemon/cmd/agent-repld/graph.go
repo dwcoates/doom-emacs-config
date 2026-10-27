@@ -771,7 +771,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: resolve the idle cutoff for the cache keeper: %w", err)
 	}
+	keepaliveInterval, err := cachelapse.FakeKeepaliveInterval(p.Contracts.Fake(), os.Getenv)
+	if err != nil {
+		return nil, err
+	}
 	cacheKeeper, err := cachelapse.New(cachelapse.Deps{
+		Interval:        keepaliveInterval,
 		DB:              p.DB,
 		Shim:            func(ws ids.WorkspaceID) (cachelapse.Keepalives, bool) { return fleet.Keepalives(ws) },
 		ColdGate:        func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },

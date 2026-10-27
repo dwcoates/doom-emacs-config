@@ -3,7 +3,9 @@ package cachelapse
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strconv"
 	"time"
 
 	"agent-repld/internal/bringup"
@@ -146,7 +148,7 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	if session.Terminal != nil && !session.KeepaliveCycled() {
 		return none("its session is not live: " + session.Terminal.Kind)
 	}
-	due := clock.Add(KeepaliveInterval)
+	due := clock.Add(k.interval())
 	engaged := session.LastEngagementAt
 	if engaged.IsZero() {
 		engaged = session.StartedAt
@@ -235,13 +237,13 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		// an interval after the session last fell free. A beat that comes
 		// sooner, because detached work ended after the turn, goes out and
 		// leaves the shim up; the next one stands it down.
-		if free, ok := k.freeSince[ws]; ok && now.Sub(free) < KeepaliveInterval {
+		if free, ok := k.freeSince[ws]; ok && now.Sub(free) < k.interval() {
 			log.Info(opDrive, "the session fell free less than an interval ago; the shim stays up until the next keep-alive",
 				dlog.Merge(fields, dlog.Context{"free_since": free}))
 		} else {
 			k.deps.CycleDown(ws, now)
 		}
-		k.beats[ws] = now.Add(KeepaliveInterval)
+		k.beats[ws] = now.Add(k.interval())
 	case answer.GetSkipped().GetMainAgentBusy() != nil:
 		log.Info(opDrive, "the main agent is busy, which keeps the cache warm itself; the next beat is timed when it falls free",
 			dlog.Merge(fields, dlog.Context{"detail": answer.GetSkipped().GetMainAgentBusy().GetDetail()}))
@@ -375,4 +377,36 @@ func (k *Keeper) restored(ctx context.Context, ws ids.WorkspaceID, err error) {
 		}
 	}
 	k.pump(ctx)
+}
+
+// interval is how long after the cache clock a beat is due (Deps.Interval).
+func (k *Keeper) interval() time.Duration {
+	if k.deps.Interval > 0 {
+		return k.deps.Interval
+	}
+	return KeepaliveInterval
+}
+
+// FakeKeepaliveIntervalEnv shortens the keep-alive interval, in
+// milliseconds, under the whole stack's fake mode alone: the same variable
+// the shim honored while it ran its own timer (agent-shim's
+// FAKE_KEEPALIVE_INTERVAL_ENV), so a suite's keep-alive scenarios see beats
+// in seconds.
+const FakeKeepaliveIntervalEnv = "AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS"
+
+// FakeKeepaliveInterval answers the interval FakeKeepaliveIntervalEnv sets
+// when FAKE is the stack's fake mode, zero when it is unset or the stack is
+// not fake. A value that is not a positive whole number of milliseconds is
+// refused: a suite that asked for a short interval and got the production
+// one would wait out its bounds and fail far from the cause.
+func FakeKeepaliveInterval(fake bool, getenv func(string) string) (time.Duration, error) {
+	value := getenv(FakeKeepaliveIntervalEnv)
+	if !fake || value == "" {
+		return 0, nil
+	}
+	ms, err := strconv.Atoi(value)
+	if err != nil || ms <= 0 {
+		return 0, fmt.Errorf("cachelapse: %s=%q is not a positive number of milliseconds", FakeKeepaliveIntervalEnv, value)
+	}
+	return time.Duration(ms) * time.Millisecond, nil
 }
