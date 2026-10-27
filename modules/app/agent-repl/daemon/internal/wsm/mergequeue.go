@@ -382,6 +382,142 @@ func (s *store) MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, mov
 	return moved, nil
 }
 
+// MoveMergeTo moves a merge WAITING in line to the place directly ahead of or
+// behind ANCHOR, another merge waiting in the same queue. It answers whether
+// the merge moved.
+//
+// ONLY WAITING MERGES CHANGE PLACES, as MoveMerge's do: the waiting merges are
+// reordered among the places they already hold, so the admitted merge and a
+// merge only requested keep theirs and are never passed. A merge or an anchor
+// not waiting, or a merge already standing in that place, is left where it is.
+//
+// THE MOVED MERGE TAKES THE ANCHOR'S FRONT MARK, so every front merge stays
+// ahead of every ordinary merge waiting: a place directly beside a front merge
+// is a front place, and one directly beside an ordinary merge an ordinary one.
+//
+// A workspace or an anchor with no entry on this queue is refused.
+func (s *store) MoveMergeTo(ctx context.Context, repo RepoKey, id WorkspaceID, anchor WorkspaceID, side MergeSide) (bool, error) {
+	const op = "daemon.wsm.move_merge_to"
+	fields := dlog.Context{"repo": string(repo), "workspace": string(id), "anchor": string(anchor), "side": side.String()}
+	if !side.valid() {
+		err := fmt.Errorf("wsm: undeclared merge side %d", int(side))
+		s.log.Error(op, "refused an undeclared merge side", withError(fields, err))
+		return false, err
+	}
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
+		return false, err
+	}
+	fields["repo"] = string(key)
+	var moved bool
+	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		_, state, err := entryPlace(ctx, tx, key, id)
+		if err != nil {
+			return err
+		}
+		_, anchorState, err := entryPlace(ctx, tx, key, anchor)
+		if err != nil || state != MergeQueued || anchorState != MergeQueued || id == anchor {
+			return err
+		}
+		waiting, err := waitingInLine(ctx, tx, key)
+		if err != nil {
+			return err
+		}
+		order, anchorFront := placedBeside(waiting, id, anchor, side)
+		for i, row := range order {
+			if row.workspace != waiting[i].workspace {
+				moved = true
+				break
+			}
+		}
+		if !moved {
+			return nil
+		}
+		// THE PLACES GO THROUGH NEGATIVE SEQUENCES, so the unique (repo_key,
+		// seq) index never sees two rows on one place mid-transaction: each
+		// row that changes place parks on the negative of its new place, and
+		// every parked row then comes back positive.
+		for i, row := range order {
+			if row.workspace == waiting[i].workspace {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET seq = ? WHERE repo_key = ? AND workspace_id = ?`,
+				-waiting[i].seq, key, row.workspace); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET seq = -seq WHERE repo_key = ? AND seq < 0`, key); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET source_front = ? WHERE repo_key = ? AND workspace_id = ?`, anchorFront, key, id)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	return moved, nil
+}
+
+// waitingRow is one merge waiting in line: its workspace, its place and its
+// front mark.
+type waitingRow struct {
+	workspace WorkspaceID
+	seq       int64
+	front     bool
+}
+
+// waitingInLine answers every merge waiting in KEY's queue, front first.
+func waitingInLine(ctx context.Context, tx *sql.Tx, key RepoKey) ([]waitingRow, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, seq, source_front FROM merge_queue WHERE repo_key = ? AND state = ? ORDER BY seq`, key, int(MergeQueued))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []waitingRow
+	for rows.Next() {
+		var row waitingRow
+		if err := rows.Scan(&row.workspace, &row.seq, &row.front); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// placedBeside answers WAITING reordered with ID taken out and put on SIDE of
+// ANCHOR, and ANCHOR's front mark. Both are in WAITING: the caller read their
+// states as waiting in the same transaction.
+func placedBeside(waiting []waitingRow, id, anchor WorkspaceID, side MergeSide) ([]waitingRow, bool) {
+	var moved waitingRow
+	rest := make([]waitingRow, 0, len(waiting))
+	for _, row := range waiting {
+		if row.workspace == id {
+			moved = row
+			continue
+		}
+		rest = append(rest, row)
+	}
+	order := make([]waitingRow, 0, len(waiting))
+	anchorFront := false
+	for _, row := range rest {
+		if row.workspace != anchor {
+			order = append(order, row)
+			continue
+		}
+		anchorFront = row.front
+		if side == MergeSideAheadOf {
+			order = append(order, moved, row)
+		} else {
+			order = append(order, row, moved)
+		}
+	}
+	if len(order) != len(waiting) {
+		panic(fmt.Sprintf("wsm: placing %s beside %s lost a waiting merge: %d of %d placed", id, anchor, len(order), len(waiting)))
+	}
+	return order, anchorFront
+}
+
 // PrioritizeMerge moves a merge WAITING in line to the front of the merges
 // waiting in its queue: it runs next, right behind the merge that holds the
 // repository's slot. It answers whether the merge moved.
@@ -801,18 +937,41 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 	return loaded, nil
 }
 
-// SetMergeQueuePaused pauses or resumes one repository's queue.
-func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, paused bool) error {
+// SetMergeQueuePaused pauses one repository's queue with PAUSE's record, or
+// resumes it when PAUSE is nil, clearing the record. A pause written over a
+// standing pause replaces its record: a hard stop of a paused queue is a new
+// act, by whoever asked for it, at its own instant.
+func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, pause *MergeQueuePause) error {
 	const op = "daemon.wsm.set_merge_queue_paused"
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
 		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return err
 	}
-	return s.write(ctx, op, dlog.Context{"repo": string(key), "paused": paused}, func(ctx context.Context, tx *sql.Tx) error {
+	fields := dlog.Context{"repo": string(key), "paused": pause != nil}
+	var at sql.NullInt64
+	var by, name sql.NullString
+	hard := false
+	if pause != nil {
+		if err := pause.validate(); err != nil {
+			s.log.Error(op, "refused a merge queue pause whose record is malformed", withError(fields, err))
+			return err
+		}
+		at = sql.NullInt64{Int64: nanos(pause.At), Valid: true}
+		by = sql.NullString{String: pause.By.Kind.column(), Valid: true}
+		if pause.By.Kind == MergeQueuePauserWorkspace {
+			name = sql.NullString{String: pause.By.Name, Valid: true}
+		}
+		hard = pause.Hard
+		fields["by"] = pause.By.Kind.column()
+		fields["hard"] = hard
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO merge_queue_repos (repo_key, paused) VALUES (?, ?)
-			 ON CONFLICT(repo_key) DO UPDATE SET paused = excluded.paused`, key, paused)
+			`INSERT INTO merge_queue_repos (repo_key, paused, paused_at, paused_by, paused_by_name, paused_hard) VALUES (?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(repo_key) DO UPDATE SET paused = excluded.paused, paused_at = excluded.paused_at,
+			   paused_by = excluded.paused_by, paused_by_name = excluded.paused_by_name, paused_hard = excluded.paused_hard`,
+			key, pause != nil, at, by, name, hard)
 		return err
 	})
 }
@@ -822,20 +981,43 @@ func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, paused bo
 // fact as a corrupt row and is why the absence is reported as false rather than
 // refused.
 func (s *store) MergeQueuePaused(ctx context.Context, repo RepoKey) (bool, error) {
-	const op = "daemon.wsm.merge_queue_paused"
+	pause, err := s.MergeQueuePause(ctx, repo)
+	return pause != nil, err
+}
+
+// MergeQueuePause answers one repository's standing pause, nil while its
+// queue runs. A pause recorded before its record was kept (layout 83) answers
+// a zero At and an unrecorded pauser.
+func (s *store) MergeQueuePause(ctx context.Context, repo RepoKey) (*MergeQueuePause, error) {
+	const op = "daemon.wsm.merge_queue_pause"
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
 		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
-		return false, err
+		return nil, err
 	}
-	var paused bool
+	var pause *MergeQueuePause
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
-		err := s.q(ctx).QueryRowContext(ctx, `SELECT paused FROM merge_queue_repos WHERE repo_key = ?`, key).Scan(&paused)
+		var paused, hard bool
+		var at sql.NullInt64
+		var by, name sql.NullString
+		err := s.q(ctx).QueryRowContext(ctx,
+			`SELECT paused, paused_at, paused_by, paused_by_name, paused_hard FROM merge_queue_repos WHERE repo_key = ?`, key).
+			Scan(&paused, &at, &by, &name, &hard)
 		if errors.Is(err, sql.ErrNoRows) {
-			paused = false
 			return nil
 		}
-		return err
+		if err != nil || !paused {
+			return err
+		}
+		kind, err := mergeQueuePauserKindOf(by)
+		if err != nil {
+			return &DecodeError{Table: "merge_queue_repos", Row: string(key), Field: "paused_by", Err: err}
+		}
+		pause = &MergeQueuePause{By: MergeQueuePauser{Kind: kind, Name: name.String}, Hard: hard}
+		if at.Valid {
+			pause.At = fromNanos(at.Int64)
+		}
+		return nil
 	})
-	return paused, err
+	return pause, err
 }

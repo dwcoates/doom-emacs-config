@@ -498,6 +498,9 @@ type DB interface {
 	// MoveMerge moves a waiting merge one place up or down its queue, past
 	// the nearest waiting merge on that side, answering whether it moved.
 	MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, move MergeMove) (bool, error)
+	// MoveMergeTo moves a waiting merge directly ahead of or behind another
+	// waiting merge on its queue, answering whether it moved.
+	MoveMergeTo(ctx context.Context, repo RepoKey, id WorkspaceID, anchor WorkspaceID, side MergeSide) (bool, error)
 	// PrioritizeMerge moves a waiting merge to the front of the merges
 	// waiting in its queue, so it runs next, answering whether it moved.
 	PrioritizeMerge(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error)
@@ -516,10 +519,14 @@ type DB interface {
 	// AllMergeQueues loads every repository's queue for the boot re-enqueue,
 	// all-or-nothing.
 	AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEntry, error)
-	// SetMergeQueuePaused pauses or resumes one repository's queue.
-	SetMergeQueuePaused(ctx context.Context, repo RepoKey, paused bool) error
+	// SetMergeQueuePaused pauses one repository's queue with its record, or
+	// (a nil pause) resumes it.
+	SetMergeQueuePaused(ctx context.Context, repo RepoKey, pause *MergeQueuePause) error
 	// MergeQueuePaused reports whether one repository's queue is paused.
 	MergeQueuePaused(ctx context.Context, repo RepoKey) (bool, error)
+	// MergeQueuePause answers one repository's standing pause, nil while its
+	// queue runs.
+	MergeQueuePause(ctx context.Context, repo RepoKey) (*MergeQueuePause, error)
 	// SetDeployHold holds one repository's deploy stage from at, or (held
 	// false) ends the hold and clears its skip count.
 	SetDeployHold(ctx context.Context, repo RepoKey, held bool, at time.Time) error
