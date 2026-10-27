@@ -49,7 +49,12 @@ const ModelHaiku = "haiku"
 // ModelHaiku: a handful of tokens back, such as a workspace's name or a
 // question's abbreviation. Every such call shares it, because what bounds them
 // is the CLI's start-up and the round trip, not the answer's length.
-const ShortAnswerTimeout = 15 * time.Second
+//
+// It is just over twice the slowest healthy call measured: over the week to
+// 2026-10-27 the naming call answered 128 times with a 9.7s maximum, and the
+// abbreviation call 10 times with a 10.2s maximum. The 15s it was before
+// timed both naming attempts out on 2026-10-27 while the call ran slow.
+const ShortAnswerTimeout = 21 * time.Second
 
 // ModelSonnet is the stronger model the daemon asks for prose a person reads
 // closely: the news digest's condensing.
