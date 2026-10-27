@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -1373,5 +1374,46 @@ func TestInterruptRollingBackFailsWhenTheHeldRollbackFails(t *testing.T) {
 	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "Interrupt"})
 	if !ok || rec.Context["cause"] != "holds unreadable" {
 		t.Fatalf("ERROR record = %v (%v), want cause %q", rec.Context, ok, "holds unreadable")
+	}
+}
+
+func TestRolledBackUnansweredCarriesTheWordsWithoutTheQuote(t *testing.T) {
+	// Arrange: a prompt that replied quoting a response.
+	quoted := replyquote.Quote(said("my words"), "Paris.", false, "")
+
+	// Act.
+	got := rolledBackUnanswered(quoted)
+
+	// Assert.
+	if !proto.Equal(got.RolledBackUnanswered.GetPrompt(), said("my words")) {
+		t.Fatalf("prompt = %v, want the words alone", got.RolledBackUnanswered.GetPrompt())
+	}
+}
+
+// EVERY STOP THAT TOOK A PROMPT BACK ANSWERS THROUGH rolledBackUnanswered, so
+// a hand-built rolled_back_unanswered arm in the server's source fails here.
+func TestEveryRolledBackUnansweredAnswerIsBuiltByTheHelper(t *testing.T) {
+	// Arrange.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read the server's source: %v", err)
+	}
+	var builds int
+
+	// Act.
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(e.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		builds += strings.Count(string(raw), "&agentreplv1.InterruptSuccess_RolledBackUnanswered{")
+	}
+
+	// Assert.
+	if builds != 1 {
+		t.Fatalf("the rolled_back_unanswered arm is built %d times, want once, in rolledBackUnanswered", builds)
 	}
 }
