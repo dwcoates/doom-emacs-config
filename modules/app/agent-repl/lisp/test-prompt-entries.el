@@ -667,8 +667,8 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                    '("1.1 - yes" (("ws-1" "1.1 is the last node to answer")))))
     (should (cl-some (lambda (m) (string-match-p "step-none ws=ws-1 label=1.1 way=:following" m)) logs))))
 
-(ert-deftest agent-repl-test-prompt-entries-C-i-at-a-root-keeps-the-label-and-says-so ()
-  "A root keeps its label under `C-i'; the composer flashes why, recorded at info."
+(ert-deftest agent-repl-test-prompt-entries-C-i-at-the-last-root-keeps-the-label-and-says-so ()
+  "The last root keeps its label under `C-i'; the composer flashes why, recorded at info."
   (agent-repl-test-prompt-entries--stepping agent-repl-test-prompt-entries--none
     ;; Arrange
     (goto-char 10)
@@ -676,7 +676,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
     (agent-repl-prompt-entries-step-up)
     ;; Assert
     (should (equal (list (agent-repl-test-prompt-entries--line) flashed)
-                   '("1.1 - yes" (("ws-1" "1.1 has no parent to answer")))))
+                   '("1.1 - yes" (("ws-1" "1.1 has no parent or later root to answer")))))
     (should (cl-some (lambda (m) (string-match-p "step-none ws=ws-1 label=1.1 way=:parent" m)) logs))))
 
 (ert-deftest agent-repl-test-prompt-entries-a-step-is-recorded-at-info ()
