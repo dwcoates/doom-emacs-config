@@ -370,8 +370,7 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success carrying the gate on the feed", err)
 	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	req := shim.ExpectStartSession()
+	req := f.gateAttempt()
 	if req.GetResume().GetColdRemediation() != nil {
 		t.Fatalf("the first resume attempt named a remediation %v, want the daemon's first attempt to learn the cost before paying it", req.GetResume().GetColdRemediation())
 	}
@@ -396,11 +395,9 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 		return r.GetHost().GetGate().GetColdGate() != nil
 	})
 
-	// Assert: no re-open until AnswerColdGate — the shim receives no second
-	// StartSession within the probe window.
-	if shim.Count(harness.RPCStartSession) != 1 {
-		t.Fatalf("StartSession count = %d before any AnswerColdGate, want exactly 1 (no re-open)", shim.Count(harness.RPCStartSession))
-	}
+	// Assert: no re-open until AnswerColdGate — the gate's shim is stood
+	// down, so no shim runs to re-open through until the answer spawns one.
+	f.awaitGateShimStoodDown()
 
 	// Act: AnswerColdGate{pay}.
 	if _, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
@@ -411,8 +408,9 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 		t.Fatalf("AnswerColdGate{pay} = error %v, want a success", err)
 	}
 
-	// Assert: the shim sees the retry with cold_remediation{pay}.
-	retry := shim.ExpectStartSession()
+	// Assert: the shim the answer spawned sees the retry with
+	// cold_remediation{pay}.
+	retry := f.answerShim().ExpectStartSession()
 	if retry.GetResume().GetColdRemediation().GetPay() == nil {
 		t.Fatalf("the retry's cold_remediation = %v, want {pay}", retry.GetResume().GetColdRemediation())
 	}
@@ -429,7 +427,6 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 // cold gate", no StartTurn). A prompt never answers the gate.
 type heldAtTheGate struct {
 	f       *fixture
-	shim    *harness.ShimControl
 	gateRow *frontendv1.FeedRow
 	turn    *conversationv1.TurnId
 	holds   *harness.Stream[*frontendv1.FeedHeld]
@@ -466,21 +463,18 @@ func promptHeldAtTheGate(t *testing.T) heldAtTheGate {
 	if turn.GetValue() == "" {
 		t.Fatalf("SubmitPrompt on a workspace with no session = %v, want a minted TurnId", resp)
 	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	shim.ExpectStartSession()
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
 
-	// The prompt waits at the gate, badged as such, and nothing was sent.
+	// The prompt waits at the gate, badged as such, and nothing can be sent:
+	// the gate's shim is stood down until the gate is answered.
 	harness.AwaitView(t, f.d.Ctx(), holds, "the prompt held at the cold gate", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, turn)
 		return p.GetColdGate() != nil && p.GetBadge().GetColdGate() != nil
 	})
-	if n := shim.Count(harness.RPCStartTurn); n != 0 {
-		t.Fatalf("StartTurn count = %d while the gate stands, want 0: a prompt never answers the gate", n)
-	}
-	return heldAtTheGate{f: f, shim: shim, gateRow: gateRow, turn: turn, holds: holds, feed: feed}
+	f.awaitGateShimStoodDown()
+	return heldAtTheGate{f: f, gateRow: gateRow, turn: turn, holds: holds, feed: feed}
 }
 
 // answer answers the gate with CHOICE, failing the test on anything but a
@@ -520,11 +514,13 @@ func TestAPromptHeldAtTheColdGateIsSentByCompactAndResume(t *testing.T) {
 		},
 	}})
 
-	// Assert: the compacted session is handed the held prompt.
-	if compact := g.shim.ExpectStartSession().GetResume().GetColdRemediation().GetCompact(); compact == nil {
+	// Assert: the compacted session, on the shim the answer spawned, is
+	// handed the held prompt.
+	shim := g.f.answerShim()
+	if compact := shim.ExpectStartSession().GetResume().GetColdRemediation().GetCompact(); compact == nil {
 		t.Fatal("the re-open carried no compact remediation")
 	}
-	if got := g.shim.ExpectStartTurn(); got.GetTurn().GetValue() != g.turn.GetValue() {
+	if got := shim.ExpectStartTurn(); got.GetTurn().GetValue() != g.turn.GetValue() {
 		t.Fatalf("StartTurn turn = %q, want the held prompt %q sent", got.GetTurn().GetValue(), g.turn.GetValue())
 	}
 }
@@ -550,11 +546,10 @@ func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
 	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	shim.ExpectStartSession()
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
+	f.awaitGateShimStoodDown()
 
 	// The answer names a model the gate ITSELF served: the compact menu is the
 	// closed set the daemon echoes against, so a model outside it is refused
@@ -582,7 +577,7 @@ func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 	}
 
 	// Assert: the retry echoes the compact choice exactly.
-	retry := shim.ExpectStartSession()
+	retry := f.answerShim().ExpectStartSession()
 	compact := retry.GetResume().GetColdRemediation().GetCompact()
 	if compact == nil {
 		t.Fatalf("the retry's cold_remediation = %v, want {compact}", retry.GetResume().GetColdRemediation())
@@ -655,11 +650,10 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
 	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	shim.ExpectStartSession()
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
+	f.awaitGateShimStoodDown()
 
 	// Act: SESSION_COMPACT_SCOPE_UNSPECIFIED is never a served menu value.
 	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
@@ -1504,11 +1498,10 @@ func TestAnswerColdGateClearEchoesExactly(t *testing.T) {
 	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
 	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	shim.ExpectStartSession()
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
+	f.awaitGateShimStoodDown()
 
 	// Act
 	answered, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
@@ -1524,7 +1517,7 @@ func TestAnswerColdGateClearEchoesExactly(t *testing.T) {
 	}
 
 	// Assert: the retry echoes the clear choice exactly.
-	retry := shim.ExpectStartSession()
+	retry := f.answerShim().ExpectStartSession()
 	if retry.GetResume().GetColdRemediation().GetClear() == nil {
 		t.Fatalf("the retry's cold_remediation = %v, want {clear}", retry.GetResume().GetColdRemediation())
 	}
@@ -1791,10 +1784,10 @@ func TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted(t *testin
 // together with the session. So the shim's PROCESS is killed out from under a
 // standing gate, and Fleet.ResumeCold reads the client's REAPED state before
 // touching the link.
-func TestAnswerColdGateWithNoLiveShimStandsTheGateAgain(t *testing.T) {
+func TestAnAnsweredGateWhoseReopenFailsStandsAgain(t *testing.T) {
 	t.Parallel()
-	// Arrange: stand a cold gate, then kill the shim PROCESS directly (never
-	// through KillWorkspace, which would also clear the coldGates record).
+	// Arrange: stand a cold gate, whose shim is stood down, and script the
+	// shim its answer spawns to refuse the remediated resume.
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
@@ -1813,20 +1806,13 @@ func TestAnswerColdGateWithNoLiveShimStandsTheGateAgain(t *testing.T) {
 	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
 	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	shim.ExpectStartSession()
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
+	f.awaitGateShimStoodDown()
 	footer := f.d.WatchFooter(f.ws)
-	killShim(t, f, shim)
-	// THE DAEMON HAS REAPED THE DEATH before the answer, as the scenario
-	// needs: the process being gone is not the daemon having seen it go, and
-	// an answer racing the reap dials the dead socket instead of reading the
-	// reaped client.
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the daemon's record of the shim's death", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.shimclient.exit" && r.Level == "error"
-	})
+	// WRITTEN AFTER THE STAND-DOWN, so only the shim the answer spawns reads it.
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{VendorStartFailed: "the vendor would not start"})
 
 	// Act
 	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
@@ -1837,7 +1823,7 @@ func TestAnswerColdGateWithNoLiveShimStandsTheGateAgain(t *testing.T) {
 
 	// Assert: the answer is taken.
 	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("AnswerColdGate against a dead shim under a standing gate = (%v, %v), want success: the re-open runs after the answer", resp, err)
+		t.Fatalf("AnswerColdGate under a standing gate = (%v, %v), want success: the re-open runs after the answer", resp, err)
 	}
 	// Assert: the re-open's failure is the footer's fault line.
 	awaitFooter(t, f, footer, "the cold_gate_reopen_failed fault", func(v *frontendv1.FooterView) bool {

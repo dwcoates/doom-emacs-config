@@ -699,6 +699,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	if d.StoreSocket == "" {
 		d.StoreSocket = filepath.Join(sockRoot, "store.sock")
 	}
+	serveFakeStore(t, d.StoreSocket)
 	// THE COVERAGE TEARDOWN IS REGISTERED FIRST, SO IT RUNS LAST. A coverage
 	// run has to let the daemon leave through SIGTERM — a SIGKILLed process
 	// writes no counters — and a graceful shutdown emits records an abruptly

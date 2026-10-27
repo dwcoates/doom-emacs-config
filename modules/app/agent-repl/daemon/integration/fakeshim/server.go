@@ -457,7 +457,21 @@ func scripted[Resp any, PResp interface {
 	return connect.NewResponse((*Resp)(typed)), true, nil
 }
 
+// StartSession answers as startSession does, naming the workspace's book on
+// every answer -- a start, a cold gate, any refusal -- as the real shim does
+// (shim.v1.StartSessionResponse.book).
 func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.StartSessionRequest]) (*connect.Response[shimv1.StartSessionResponse], error) {
+	resp, err := s.startSession(ctx, req)
+	if err != nil || resp == nil {
+		return resp, err
+	}
+	if book := s.book.stated(); book != "" {
+		resp.Msg.Book = &conversationv1.AgentId{Value: book}
+	}
+	return resp, nil
+}
+
+func (s *server) startSession(ctx context.Context, req *connect.Request[shimv1.StartSessionRequest]) (*connect.Response[shimv1.StartSessionResponse], error) {
 	if err := s.enter(ctx, RPCStartSession, req.Msg); err != nil {
 		return nil, err
 	}
