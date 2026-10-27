@@ -1133,8 +1133,9 @@ type harness struct {
 	restarts *restarttimingtest.Recorder
 	// merges records the merge mover's calls, in order, as "suspend <ws>" and
 	// "adopt <ws>"; suspendErr and adoptErr fail them.
-	merges  *fakeMerges
-	reports *fakeReports
+	merges        *fakeMerges
+	queuedCreates *fakeQueuedCreates
+	reports       *fakeReports
 	// endLifetime ends the controller's lifetime, as the daemon's stand-down
 	// does.
 	endLifetime  func()
@@ -1263,36 +1264,38 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 	order := &steps{}
 	freeness := newFakeFreeness()
 	h := &harness{
-		endLifetime:  endLifetime,
-		db:           db,
-		clock:        newFakeClock(instant),
-		spawner:      &fakeSpawner{address: "127.0.0.1:7788"},
-		announcer:    &fakeAnnouncer{},
-		pusher:       &fakePusher{},
-		participants: newFakeParticipants(),
-		freeness:     freeness,
-		fleet:        newFakeFleet(order),
-		registry:     newFakeRegistry(freeness),
-		order:        order,
-		log:          log,
-		state:        state,
-		onFile:       onFile,
-		exits:        make(chan struct{}, 4),
-		claimFree:    make(chan struct{}),
-		lockStates:   make(map[string]sessionlock.State),
-		lockErr:      make(map[string]error),
-		shimBuild:    "installed-build",
-		progress:     &fakeProgress{},
-		startErr:     make(map[ids.WorkspaceID]error),
-		merges:       &fakeMerges{order: order},
-		restarts:     &restarttimingtest.Recorder{},
-		creates:      creategate.New(),
+		endLifetime:   endLifetime,
+		db:            db,
+		clock:         newFakeClock(instant),
+		spawner:       &fakeSpawner{address: "127.0.0.1:7788"},
+		announcer:     &fakeAnnouncer{},
+		pusher:        &fakePusher{},
+		participants:  newFakeParticipants(),
+		freeness:      freeness,
+		fleet:         newFakeFleet(order),
+		registry:      newFakeRegistry(freeness),
+		order:         order,
+		log:           log,
+		state:         state,
+		onFile:        onFile,
+		exits:         make(chan struct{}, 4),
+		claimFree:     make(chan struct{}),
+		lockStates:    make(map[string]sessionlock.State),
+		lockErr:       make(map[string]error),
+		shimBuild:     "installed-build",
+		progress:      &fakeProgress{},
+		startErr:      make(map[ids.WorkspaceID]error),
+		merges:        &fakeMerges{order: order},
+		queuedCreates: &fakeQueuedCreates{},
+		restarts:      &restarttimingtest.Recorder{},
+		creates:       creategate.New(),
 	}
 	h.reports = &fakeReports{registry: h.registry}
 	deps := Deps{
 		Creates:        h.creates,
 		Reports:        h.reports,
 		Merges:         h.merges,
+		QueuedCreates:  h.queuedCreates,
 		SelfExe:        filepath.Join(state, "agent-repld"),
 		SelfAddress:    "127.0.0.1:7777",
 		Instance:       selfInstance,
@@ -1646,6 +1649,26 @@ func (f *fakeMerges) ReviewQueues(context.Context) error {
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "review")
 	return f.reviewErr
+}
+
+// fakeQueuedCreates records each time the held creates are taken up.
+type fakeQueuedCreates struct {
+	mu        sync.Mutex
+	recovered int
+	err       error
+}
+
+func (f *fakeQueuedCreates) RecoverQueuedCreates(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recovered++
+	return f.err
+}
+
+func (f *fakeQueuedCreates) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.recovered
 }
 
 // called reports the merge mover's calls.

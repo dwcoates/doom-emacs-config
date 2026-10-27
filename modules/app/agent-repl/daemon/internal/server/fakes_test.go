@@ -38,6 +38,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/netstate"
 	"agent-repld/internal/opentabs"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
@@ -317,6 +318,11 @@ type fakeVerbs struct {
 
 	// createSpecs records every Create spec, in order.
 	createSpecs []workspace.CreateSpec
+	// createJoined, when set, makes EnterCreate answer a ticket that joined
+	// that pending create; createHeld makes RunCreate answer the create held
+	// for the network under that ref.
+	createJoined workspace.PendingCreateID
+	createHeld   workspace.PendingCreateID
 	// swaps records every Swap pair; swapErr is what it answers.
 	swaps   [][2]ids.WorkspaceID
 	swapErr error
@@ -545,6 +551,29 @@ func (f *fakeVerbs) Create(ctx context.Context, spec workspace.CreateSpec) (wsm.
 		return wsm.Workspace{}, f.createErr
 	}
 	return f.createRec, nil
+}
+
+// EnterCreate answers a ticket for the spec, joined to createJoined when that
+// names a pending create.
+func (f *fakeVerbs) EnterCreate(spec workspace.CreateSpec) *workspace.CreateTicket {
+	if f.createJoined != "" {
+		return workspace.NewCreateTicket(spec, f.createJoined, true)
+	}
+	return workspace.NewCreateTicket(spec, "create-own", false)
+}
+
+// RunCreate runs the ticket's request through Create, or answers the create
+// held for the network when createHeld names one, telling its reporter.
+func (f *fakeVerbs) RunCreate(ctx context.Context, ticket *workspace.CreateTicket) (wsm.Workspace, error) {
+	spec := ticket.Spec()
+	if f.createHeld != "" {
+		f.createSpecs = append(f.createSpecs, spec)
+		if spec.Progress != nil {
+			spec.Progress.WaitingForNetwork(f.createHeld)
+		}
+		return wsm.Workspace{}, &workspace.NetworkWaitError{ID: f.createHeld, Evidence: netstate.EvidenceFaultOpen}
+	}
+	return f.Create(ctx, spec)
 }
 
 func (f *fakeVerbs) SetEffort(_ context.Context, _ ids.WorkspaceID, level conversationv1.AgentEffortLevel) error {

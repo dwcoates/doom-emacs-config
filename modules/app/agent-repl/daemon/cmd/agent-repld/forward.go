@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/server"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -652,4 +653,54 @@ func (f *holdsForwarder) Supersede(ctx context.Context, ws ids.WorkspaceID, turn
 		return false, fmt.Errorf("agent-repld: a notice was superseded before the prompt queue existed")
 	}
 	return target.Supersede(ctx, ws, turn)
+}
+
+// createProgressForwarder answers a create op's reporter from the server,
+// which is built after the workspace verbs that ask for one. A held create is
+// taken up only once the server is bound (Prime, the takeover), so a reporter
+// asked for before then is a wiring defect.
+type createProgressForwarder struct {
+	mu     sync.RWMutex
+	target server.Server
+}
+
+func (f *createProgressForwarder) bind(target server.Server) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.target = target
+}
+
+// For answers OPID's reporter.
+func (f *createProgressForwarder) For(opID string) workspace.CreateProgress {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.target == nil {
+		panic("agent-repld: a held create's op was answered before the server was bound")
+	}
+	return f.target.CreateProgress(opID)
+}
+
+// queuedCreatesForwarder takes up the held creates through the workspace
+// verbs, which are built after the rollout controller that asks at its
+// takeover.
+type queuedCreatesForwarder struct {
+	mu     sync.RWMutex
+	target workspace.Verbs
+}
+
+func (f *queuedCreatesForwarder) bind(target workspace.Verbs) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.target = target
+}
+
+// RecoverQueuedCreates takes up the held creates.
+func (f *queuedCreatesForwarder) RecoverQueuedCreates(ctx context.Context) error {
+	f.mu.RLock()
+	target := f.target
+	f.mu.RUnlock()
+	if target == nil {
+		return fmt.Errorf("agent-repld: the held creates were taken up before the workspace verbs existed")
+	}
+	return target.RecoverQueuedCreates(ctx)
 }

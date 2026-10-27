@@ -307,6 +307,9 @@ type Deps struct {
 	// the adopting daemon -- the successor, or this one taking a transfer back
 	// -- resumes it at its recorded step. Required.
 	Merges MergeMover
+	// QueuedCreates takes up the creates the outgoing daemon held for the
+	// network, at the takeover: until then they are still its own. Required.
+	QueuedCreates QueuedCreateRecovery
 	// LockProbe probes a workspace's shim-held kernel lock. It is what makes a
 	// headless transfer and the bounce accounting possible without any channel.
 	LockProbe LockProbeFunc
@@ -416,6 +419,12 @@ type MergeMover interface {
 	// it once the outgoing daemon is gone: a queue change that daemon made
 	// while both served (a resume) reached only its own pump.
 	ReviewQueues(ctx context.Context) error
+}
+
+// QueuedCreateRecovery takes up the creates a previous daemon held for the
+// network (workspace.Verbs.RecoverQueuedCreates).
+type QueuedCreateRecovery interface {
+	RecoverQueuedCreates(ctx context.Context) error
 }
 
 // BounceRegistry is the prompt queue's bounce registry, as the rollout asks it.
@@ -718,6 +727,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Merges == nil {
 		return nil, errors.New("rollout: the merge mover is required; a workspace whose merge runs must carry it across a handover")
+	}
+	if deps.QueuedCreates == nil {
+		return nil, errors.New("rollout: the held creates' recovery is required; a successor takes up the creates its predecessor held for the network")
 	}
 	if deps.Reports == nil {
 		return nil, errors.New("rollout: the owed landing reports are required; a successor pays the reports its deploy covered")

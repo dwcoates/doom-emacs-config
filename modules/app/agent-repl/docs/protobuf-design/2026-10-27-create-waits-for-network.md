@@ -47,3 +47,36 @@ in-flight create. The contract change was pre-approved (owner, 2026-10-27:
     same ref), so the sync form needs no `joined` field.
   - The pending create's ref survives daemon restarts and handovers: it is the
     key of the durable queued-create row.
+
+## Implementation record
+
+- **One owner of the pending creates.** `daemon/internal/workspace/pendingcreates.go`
+  holds every create running or held, keyed by the normalized request
+  (`createKey`). Entering the set makes the create or joins the standing one
+  under one lock, so a duplicate is structurally impossible within a daemon.
+  The held row (`wsm.QueuedCreate`, layout 86) has the same key as its primary
+  key, so the store refuses a second held copy across daemons too.
+- **Who asked is not part of the key**, per the owner's list of identical
+  facts. Deploy hooks, permission mode and consent ARE part of it: they change
+  what is built, so two requests differing in them are not identical.
+- **Classification** lives in `daemon/internal/netstate`: an open
+  `network_unreachable` fault, the CLI's own words (the shim's socket-code
+  list), or the daemon's own HEAD probe of the API host. Only a naming call
+  that ran (`timeout`, `exit_status`) is classified; a network verdict ends the
+  call at once instead of retrying into the outage.
+- **Resume** awaits the netstate `Restored` latch, taken synchronously when the
+  create is held (before any caller is told it waits), so a restoration is
+  never missed. The daemon's probe beat (5s, the shim's beat) runs only while
+  an outage the daemon itself observed stands; it is the detection the
+  hook-based path monitor replaces inside netstate, and nothing that awaits the
+  latch changes then.
+- **Durability.** A held create holds no create-gate ticket, so a stand-down
+  never waits on the network. An incumbent takes up held rows in `Prime`
+  (before serving); a joining successor takes them up at its takeover
+  (`rollout` `QueuedCreates`), when the outgoing daemon is gone. A resumed
+  attempt holds a ticket like any create; one the daemon's exit cuts off is
+  left held for the next daemon.
+- **Reports.** The main-worktree create-failure report is made per attempt and
+  skipped for a network hold; a held create that later fails for another cause
+  (or cannot be recorded) is reported. Its requester is told the outcome
+  through `prompts/workspace-create-dequeued.md`.

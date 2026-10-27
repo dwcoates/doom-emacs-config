@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -889,11 +890,64 @@ func TestCreateMintsAutoWhenTheCreationNamesNoMode(t *testing.T) {
 	}
 }
 
-// recordingProgress records the stages a Create reports through its
-// CreateProgress reporter, in order.
-type recordingProgress struct{ stages []CreateStage }
+// recordingProgress records what a Create reports through its CreateProgress
+// reporter, in order. OP is the op it answers; ENDED, when set, is closed by
+// the first Created or Failed.
+type recordingProgress struct {
+	mu      sync.Mutex
+	op      string
+	stages  []CreateStage
+	waiting []PendingCreateID
+	created []wsm.Workspace
+	failed  []error
+	ended   chan struct{}
+	// held, when set, is sent each pending ref the reporter is told waits.
+	held chan PendingCreateID
+}
 
-func (r *recordingProgress) Stage(stage CreateStage) { r.stages = append(r.stages, stage) }
+func (r *recordingProgress) Stage(stage CreateStage) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stages = append(r.stages, stage)
+}
+
+func (r *recordingProgress) WaitingForNetwork(id PendingCreateID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.waiting = append(r.waiting, id)
+	if r.held != nil {
+		r.held <- id
+	}
+}
+
+func (r *recordingProgress) Created(created wsm.Workspace) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.created = append(r.created, created)
+	r.endLocked()
+}
+
+func (r *recordingProgress) Failed(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.failed = append(r.failed, err)
+	r.endLocked()
+}
+
+func (r *recordingProgress) endLocked() {
+	if r.ended != nil && len(r.created)+len(r.failed) == 1 {
+		close(r.ended)
+	}
+}
+
+func (r *recordingProgress) OpID() string { return r.op }
+
+// snapshot answers what the reporter has recorded so far.
+func (r *recordingProgress) snapshot() (waiting []PendingCreateID, created []wsm.Workspace, failed []error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]PendingCreateID(nil), r.waiting...), append([]wsm.Workspace(nil), r.created...), append([]error(nil), r.failed...)
+}
 
 // TestCreateReportsItsStageSequencePerForm pins the stages each create form
 // reports, at the real points and in order: DerivingName only when the daemon
