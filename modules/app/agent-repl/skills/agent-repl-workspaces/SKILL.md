@@ -34,8 +34,19 @@ a main-checkout directory), its topology and its context:
   `-topology child -owner WS` is cut from WS's branch and lands into WS.
 - `-context fresh` starts an empty conversation. `-context fork -fork WS`
   copies WS's conversation (cut at its last concluded turn).
+- **A workspace created in another repository is NEVER a fork.**
+  `-context fork -fork WS` needs WS to belong to the repository named by
+  `-repository`; a cross-repository create always takes `-context fresh`,
+  and its `-prompt` carries everything the new workspace needs.
+  - The forked conversation is about WS's repository: its files, paths,
+    branch, worktree, and its own `AGENTS.md`, `CLAUDE.md` and skills. In
+    another repository those references name code that is not there, so
+    the forked context misleads more than it helps.
+  - The daemon refuses a cross-repository fork (as `unknown_fork_source`),
+    so trying one only costs a round trip.
 
-Choose the combination from what the work needs:
+Choose the combination from what the work needs (every `fork` row is within
+one repository):
 
 | want | topology | context | how common |
 |---|---|---|---|
@@ -46,6 +57,7 @@ Choose the combination from what the work needs:
 | a truly tangential bug, or a review that must not be biased by this context | `primary` | `fresh` | situational |
 | a fix sent into another workspace X's unlanded branch | `child -owner X` | `fork -fork here` | rare |
 | fresh work on W's unlanded branch | `child -owner W` | `fresh` | situational |
+| work in a different repository from this workspace's (`-repository DIR`) | `primary` | `fresh` | situational |
 
 - A CHILD THAT DOES NOT FORK ITS OWNER is its owner's to arbitrate and land:
   give `-owner-notice` a plain-English note telling the owner what is coming
