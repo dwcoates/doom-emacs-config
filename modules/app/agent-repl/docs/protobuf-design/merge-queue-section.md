@@ -54,3 +54,50 @@ from the merge purple to the paused amber, as the retired toggle's glyph did.
   messages, with the daemon verb behind it. The state store keeps the
   `sidebar_view.open_shows_merge_queues` column, unread: dropping it is a
   breaking migration, left for its own deploy.
+
+## The follow-up (owner requests, 2026-10-27)
+
+The owner saw the header amber while only another repository's queue was
+paused, and asked for the pause, the count and the stopped work to be drawn on
+each repository's own queue, for a waiting merge to be dragged to a place, and
+for a repository to leave the section once its line empties.
+
+### `frontend.v1.RosterRepoMergeQueue.paused` / `frontend.v1.RosterMergeQueuePaused`
+
+- WHAT: the pause now carries its record: `paused_at_ms`, `by`
+  (`frontend.v1.RosterMergeQueuePauser`: the user, or a workspace by name) and
+  `hard`. The two are unset for a pause recorded before the daemon kept them
+  (the state store's layout 83 added the columns).
+- WHY: the label's hover says who paused the queue and when, and the head's
+  clock stops at the pause.
+
+### `frontend.v1.RosterMergeQueueHeadMerging.suspended`
+
+- WHAT: present while the queue is paused and no turn of the merge's step
+  runs: nothing of the head's work runs.
+- WHY: a pause suspends a merge's own steps but leaves a step's agent turn
+  running until a hard stop interrupts it, so only the daemon knows whether the
+  head's live stage still runs. The sidebar stills the stage's dot when it does
+  not.
+
+### `frontend.v1.RosterMergeQueueRepoGroup.count`
+
+- WHAT: the merges in the group's line. The section's
+  `frontend.v1.RosterMergedSection.header` now carries no count.
+- WHY: the owner asked for the count per repository.
+
+### `agentrepl.v1.UpdateMergeQueueRequest.move_to` / `agentrepl.v1.UpdateMergeQueueMoveTo`
+
+- WHAT: move a waiting merge directly ahead of or behind another waiting merge
+  on its queue, taking that merge's front mark.
+- WHY: the sidebar's drag drops a merge at any place, which one-place moves
+  could only reach by several requests that another change could interleave.
+
+### Retired
+
+- `frontend.v1.RosterMergedSection.merge_queue_paused` (field 8) and its
+  message: a pause is drawn on its own repository.
+- `frontend.v1.RosterMergeQueueHead.failed` (field 5) and
+  `frontend.v1.RosterMergeQueueHeadFailed`: a queue whose line is empty is not
+  listed, so a failed merge no longer stands at its head. The merge's failure
+  stays on its bubble and its workspace's footer.
