@@ -8,7 +8,9 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
-import { create } from "@bufbuild/protobuf";
+import { create, equals, fromJson, type JsonValue } from "@bufbuild/protobuf";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
@@ -23,6 +25,7 @@ import {
   createReader,
   readFailure,
   toHistoryEntry,
+  toHistoryEntryAt,
   toStorePointer,
   transportFailure,
 } from "../../src/store/reader.js";
@@ -3514,4 +3517,30 @@ describe("turn heads", () => {
       kind: "store_unavailable",
     });
   });
+});
+
+// THE SHARED GOLDEN CASES: the store's read-only face renders pages in Go
+// (shim-store/internal/history) and this tail renders lines here, so both
+// suites render every stored line in agent-repl/testdata/history-golden and
+// must agree with the entry it names.
+describe("toHistoryEntryAt renders the shared golden cases", () => {
+  const dir = fileURLToPath(new URL("../../../../../testdata/history-golden/", import.meta.url));
+  const files = readdirSync(dir).filter((name) => name.endsWith(".json"));
+  it("finds the golden cases", () => {
+    expect(files.length).toBeGreaterThan(0);
+  });
+  for (const name of files) {
+    it(name, () => {
+      // Arrange
+      const golden = JSON.parse(readFileSync(dir + name, "utf8")) as { line: JsonValue; entry: JsonValue };
+      const line = fromJson(storev1.StoreLineAtSchema, golden.line);
+      const want = fromJson(conversationv1.HistoryEntryAtSchema, golden.entry);
+
+      // Act
+      const got = toHistoryEntryAt(line);
+
+      // Assert
+      expect(equals(conversationv1.HistoryEntryAtSchema, got, want)).toBe(true);
+    });
+  }
 });

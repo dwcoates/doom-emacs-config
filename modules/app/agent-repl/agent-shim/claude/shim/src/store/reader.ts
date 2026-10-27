@@ -128,8 +128,15 @@ function toHistoryPlace(line: storev1.StoreLineAt): conversationv1.HistoryEntryA
   }
 }
 
-/** One stored line, its pointer, its turn and its place. */
-function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntryAt {
+/**
+ * One stored line, its pointer, its turn and its place.
+ *
+ * THE STORE'S READ-ONLY FACE RENDERS PAGES WITH THE SAME MAPPING in Go
+ * (shim-store/internal/history, EntryAt): a page and this shim's tail must draw
+ * one stored line identically, and both suites read the shared golden cases in
+ * agent-repl/testdata/history-golden.
+ */
+export function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntryAt {
   if (line.at === undefined || line.line === undefined) {
     throw new PersistenceError(
       "store_unavailable",
