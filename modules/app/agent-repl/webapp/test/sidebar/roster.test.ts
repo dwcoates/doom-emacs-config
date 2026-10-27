@@ -1646,6 +1646,16 @@ describe("the Merge Queue section's queues", () => {
     expect(inRail(drawn, () => [cascadedValue(box, "padding-top"), cascadedValue(section, "padding-top")])).toEqual(["0.3rem", "0.4rem"]);
   });
 
+  it("draws the head's name just under its repository header's text size", () => {
+    const drawn = drawWorkspaceRoster(withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]), sidebarContext());
+    const name = mergedRegion(drawn).querySelector<HTMLElement>(".sb-mq-head .sb-mq-name")!;
+    const group = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGE_QUEUE_GROUP_HEAD_CLASS}`)!;
+    expect(inRail(drawn, () => [cascadedValue(name, "font-size"), cascadedValue(group, "font-size")])).toEqual([
+      "calc(var(--merged-group-head-font-size) * 0.96)",
+      "var(--merged-group-head-font-size)",
+    ]);
+  });
+
   it("draws the queues above the Recently Deployed heading and its groups", () => {
     const drawn = drawWorkspaceRoster(
       withQueues([queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } })], [mergedGroup({ id: "repo-1", rows: [merged("m1")] })]),
