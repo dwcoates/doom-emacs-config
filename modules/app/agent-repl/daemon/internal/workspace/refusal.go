@@ -243,9 +243,18 @@ const (
 	ArmOneShotPolicyMissing = "one_shot_policy_missing"
 	// ArmInvalidUrl is an OpenExternal link that is not an absolute url.
 	ArmInvalidUrl = "invalid_url"
-	// ArmInvalidLink is a SetWorkspacePrincipalLink url the external browser
+	// ArmInvalidLink is a ChangeWorkspaceLinks url the external browser
 	// would not open: not http or https, or carrying whitespace.
 	ArmInvalidLink = "invalid_link"
+	// ArmInvalidLabel is a ChangeWorkspaceLinks label the summary's menu does
+	// not draw: not two to eight words in one sentence.
+	ArmInvalidLabel = "invalid_label"
+	// ArmUnknownLink is a ChangeWorkspaceLinks removal or show naming a url
+	// the workspace does not hold.
+	ArmUnknownLink = "unknown_link"
+	// ArmTooManyShown is a ChangeWorkspaceLinks show naming more links than
+	// the summary's menu shows.
+	ArmTooManyShown = "too_many_shown"
 	// ArmNoBrowserConfigured is an OpenExternal on a daemon that resolved no
 	// external browser launcher at all.
 	ArmNoBrowserConfigured = "no_browser_configured"

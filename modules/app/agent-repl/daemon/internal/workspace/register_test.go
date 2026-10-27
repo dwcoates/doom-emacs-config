@@ -13,6 +13,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -1407,23 +1408,24 @@ func countRecords(f *fixture, level, operation string) int {
 	return n
 }
 
-func TestRegistrationHandsTheTitleTheRecordedPrincipalLink(t *testing.T) {
-	link := "https://example.com/design"
+func TestRegistrationHandsTheTitleTheRecordedShownLinks(t *testing.T) {
+	doc := wsm.WorkspaceLink{URL: "https://example.com/design", Label: "The design doc", Shown: true}
+	unshown := wsm.WorkspaceLink{URL: "https://example.com/old", Label: "An older draft"}
 	tests := []struct {
-		name string
-		link *string
-		want string
+		name  string
+		links []wsm.WorkspaceLink
+		want  [][]topbar.Link
 	}{
-		{name: "a recorded link is restored", link: &link, want: link},
-		{name: "a workspace with none is handed none", link: nil, want: ""},
+		{name: "the recorded shown links are restored", links: []wsm.WorkspaceLink{doc, unshown},
+			want: [][]topbar.Link{{{Label: doc.Label, URL: doc.URL}}}},
+		{name: "a workspace with none is handed none", links: nil, want: [][]topbar.Link{nil}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange: the workspace is already registered, as across a restart.
 			f := newFixture(t)
-			ws := f.workspace("w1", f.git.mainWorktree)
-			ws.PrincipalLink = tt.link
-			f.db.with(ws)
+			f.workspace("w1", f.git.mainWorktree)
+			f.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{"w1": tt.links}
 
 			// Act.
 			if _, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{}); err != nil {
@@ -1431,9 +1433,32 @@ func TestRegistrationHandsTheTitleTheRecordedPrincipalLink(t *testing.T) {
 			}
 
 			// Assert.
-			if !slices.Equal(f.topbarPrincipalLinks, []string{tt.want}) {
-				t.Fatalf("topbar links = %q, want [%q]", f.topbarPrincipalLinks, tt.want)
+			if !reflect.DeepEqual(f.topbarLinks, tt.want) {
+				t.Fatalf("topbar links = %v, want %v", f.topbarLinks, tt.want)
 			}
 		})
+	}
+}
+
+func TestRegistrationRefusesWhenTheLinksCannotBeRead(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", f.git.mainWorktree)
+	f.db.linksReadErr = errors.New("disk gone")
+
+	// Act.
+	_, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{})
+
+	// Assert: the failure is surfaced, recorded, and no title links published.
+	if err == nil || !strings.Contains(err.Error(), "disk gone") {
+		t.Fatalf("Register = %v, want the links read failure", err)
+	}
+	if len(f.topbarLinks) != 0 {
+		t.Errorf("topbar links = %v, want none published", f.topbarLinks)
+	}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRegister,
+		Message: "could not read the workspace's links for its title"})
+	if !ok || r.Context["workspace"] != "w1" {
+		t.Errorf("record = %+v, want an ERROR naming the workspace", r)
 	}
 }

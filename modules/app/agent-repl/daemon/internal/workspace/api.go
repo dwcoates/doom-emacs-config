@@ -411,9 +411,17 @@ type Verbs interface {
 	MarkViewed(ctx context.Context, ws ids.WorkspaceID) error
 	// SetPriority sets or clears the roster priority badge.
 	SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error
-	// SetPrincipalLink records the workspace's principal link, which the
-	// topbar's summary opens, or clears it with nil.
-	SetPrincipalLink(ctx context.Context, ws ids.WorkspaceID, link *string) error
+	// SetLink stores a link under its label, or relabels a stored one
+	// (agentrepl.v1.ChangeWorkspaceLinksSet), answering every link the
+	// workspace then holds and republishing the summary's menu.
+	SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string) ([]wsm.WorkspaceLink, error)
+	// RemoveLink removes one stored link, answering the rest.
+	RemoveLink(ctx context.Context, ws ids.WorkspaceID, url string) ([]wsm.WorkspaceLink, error)
+	// ShowLinks names exactly the links the summary's menu shows, answering
+	// every link.
+	ShowLinks(ctx context.Context, ws ids.WorkspaceID, urls []string) ([]wsm.WorkspaceLink, error)
+	// ClearLinks removes every stored link.
+	ClearLinks(ctx context.Context, ws ids.WorkspaceID) ([]wsm.WorkspaceLink, error)
 	// SetName renames the workspace (agentrepl.v1.SetWorkspaceName): its name
 	// only, never its branch or its worktree directory. It answers the name
 	// the workspace now has, with the workspace-name prefix applied, and

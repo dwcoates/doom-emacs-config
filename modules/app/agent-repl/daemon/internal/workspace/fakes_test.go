@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -195,8 +196,11 @@ type fakeDB struct {
 	onMarkSelfClose func()
 	setOneShotErr   error
 	setAwaitingErr  error
-	// setPrincipalLinkErr fails SetPrincipalLink.
-	setPrincipalLinkErr error
+	// links are each workspace's stored links, most recently set first;
+	// linksErr fails every change to them and linksReadErr every read.
+	links        map[ids.WorkspaceID][]wsm.WorkspaceLink
+	linksErr     error
+	linksReadErr error
 	// setNameErr fails SetName; listWorkspacesErrAfterRename becomes
 	// listWorkspacesErr once SetName writes, for a test that fails only the
 	// reads after a rename is recorded.
@@ -659,15 +663,80 @@ func (d *fakeDB) SetAwaiting(_ context.Context, id ids.WorkspaceID, awaited *ids
 	return nil
 }
 
-// SetPrincipalLink records the link on the fake's record;
-// setPrincipalLinkErr fails it and writes nothing.
-func (d *fakeDB) SetPrincipalLink(_ context.Context, id ids.WorkspaceID, link *string) error {
-	if d.setPrincipalLinkErr != nil {
-		return d.setPrincipalLinkErr
+// WorkspaceLinks answers the workspace's stored links; linksReadErr fails it.
+func (d *fakeDB) WorkspaceLinks(_ context.Context, id ids.WorkspaceID) ([]wsm.WorkspaceLink, error) {
+	if d.linksReadErr != nil {
+		return nil, d.linksReadErr
 	}
-	ws := d.workspaces[id]
-	ws.PrincipalLink = link
-	d.workspaces[id] = ws
+	return slices.Clone(d.links[id]), nil
+}
+
+// SetWorkspaceLink stores or relabels a link at the front, shown while fewer
+// than wsm.ShownLinkLimit are, as the store does; linksErr fails it.
+func (d *fakeDB) SetWorkspaceLink(_ context.Context, id ids.WorkspaceID, url, label string) ([]wsm.WorkspaceLink, error) {
+	if d.linksErr != nil {
+		return nil, d.linksErr
+	}
+	if d.links == nil {
+		d.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{}
+	}
+	links := d.links[id]
+	link := wsm.WorkspaceLink{URL: url, Label: label}
+	if i := slices.IndexFunc(links, func(l wsm.WorkspaceLink) bool { return l.URL == url }); i >= 0 {
+		link.Shown = links[i].Shown
+		links = slices.Delete(links, i, i+1)
+	} else {
+		shown := 0
+		for _, l := range links {
+			if l.Shown {
+				shown++
+			}
+		}
+		link.Shown = shown < wsm.ShownLinkLimit
+	}
+	d.links[id] = append([]wsm.WorkspaceLink{link}, links...)
+	return slices.Clone(d.links[id]), nil
+}
+
+// RemoveWorkspaceLink removes a stored link, answering *wsm.UnknownLinkError
+// for one the workspace does not hold; linksErr fails it.
+func (d *fakeDB) RemoveWorkspaceLink(_ context.Context, id ids.WorkspaceID, url string) ([]wsm.WorkspaceLink, error) {
+	if d.linksErr != nil {
+		return nil, d.linksErr
+	}
+	i := slices.IndexFunc(d.links[id], func(l wsm.WorkspaceLink) bool { return l.URL == url })
+	if i < 0 {
+		return nil, &wsm.UnknownLinkError{URL: url}
+	}
+	d.links[id] = slices.Delete(d.links[id], i, i+1)
+	return slices.Clone(d.links[id]), nil
+}
+
+// ShowWorkspaceLinks shows exactly URLS, answering *wsm.UnknownLinkError for
+// one the workspace does not hold and changing nothing; linksErr fails it.
+func (d *fakeDB) ShowWorkspaceLinks(_ context.Context, id ids.WorkspaceID, urls []string) ([]wsm.WorkspaceLink, error) {
+	if d.linksErr != nil {
+		return nil, d.linksErr
+	}
+	links := slices.Clone(d.links[id])
+	for _, url := range urls {
+		if !slices.ContainsFunc(links, func(l wsm.WorkspaceLink) bool { return l.URL == url }) {
+			return nil, &wsm.UnknownLinkError{URL: url}
+		}
+	}
+	for i := range links {
+		links[i].Shown = slices.Contains(urls, links[i].URL)
+	}
+	d.links[id] = links
+	return slices.Clone(links), nil
+}
+
+// ClearWorkspaceLinks removes every stored link; linksErr fails it.
+func (d *fakeDB) ClearWorkspaceLinks(_ context.Context, id ids.WorkspaceID) error {
+	if d.linksErr != nil {
+		return d.linksErr
+	}
+	delete(d.links, id)
 	return nil
 }
 
@@ -2828,10 +2897,10 @@ type fixture struct {
 	// handed; topbarWarnings every warning line it was asked to raise.
 	topbarEffortSettings []claudesettings.Effort
 	topbarWarnings       []string
-	// topbarPrincipalLinks is every principal link the topbar seam was
-	// handed, in order; an empty one is a clear.
-	topbarPrincipalLinks []string
-	topbarNames          []string
+	// topbarLinks is every shown-links list the topbar seam was handed, in
+	// order; an empty one is a clear.
+	topbarLinks [][]topbar.Link
+	topbarNames []string
 	// effortReads is every config root whose settings were read; the read
 	// answers effortSettings and effortErr.
 	effortReads    []string
@@ -2914,7 +2983,7 @@ func newFixture(t *testing.T) *fixture {
 	verbs, err := New(Deps{
 		Instance: fixtureInstance,
 		DB:       f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, principalLinks: &f.topbarPrincipalLinks, names: &f.topbarNames}, Browser: f.browser,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -3116,9 +3185,9 @@ type stubTopbar struct {
 	accounts *[]topbar.Account
 	// loginDefaults records every login default moved, as {root, model}.
 	loginDefaults *[][2]string
-	// principalLinks records every principal link the verbs installed, in
-	// order; an empty one is a clear.
-	principalLinks *[]string
+	// links records every shown-links list the verbs installed, in order; an
+	// empty one is a clear.
+	links *[][]topbar.Link
 	// names records every workspace name a rename installed, in order.
 	names *[]string
 	// window is the context window the strip answers; nil answers none and
@@ -3159,15 +3228,10 @@ func (s stubTopbar) SetName(_ ids.WorkspaceID, name string) {
 		*s.names = append(*s.names, name)
 	}
 }
-func (s stubTopbar) SetPrincipalLink(_ ids.WorkspaceID, link *string) {
-	if s.principalLinks == nil {
-		return
+func (s stubTopbar) SetLinks(_ ids.WorkspaceID, shown []topbar.Link) {
+	if s.links != nil {
+		*s.links = append(*s.links, slices.Clone(shown))
 	}
-	url := ""
-	if link != nil {
-		url = *link
-	}
-	*s.principalLinks = append(*s.principalLinks, url)
 }
 func (s stubTopbar) SetLoginDefaultModel(configDir, model string) {
 	if s.loginDefaults != nil {

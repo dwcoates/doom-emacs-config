@@ -91,12 +91,12 @@ func registryNames(reg sidebar.Registry, ws ids.WorkspaceID, name string) bool {
 }
 
 func TestSetNameKeepsEverythingKeyedByTheWorkspacesID(t *testing.T) {
-	// Arrange: w1 has a principal link, awaits w2, is hidden and a one-shot.
+	// Arrange: w1 awaits w2, is hidden and a one-shot.
 	f := renameFixture(t)
 	f.workspace("w2", t.TempDir())
-	link, awaited := "https://example.com/pr/1", ids.WorkspaceID("w2")
+	awaited := ids.WorkspaceID("w2")
 	ws := f.db.workspaces["w1"]
-	ws.PrincipalLink, ws.Awaiting, ws.Hidden, ws.OneShot = &link, &awaited, true, true
+	ws.Awaiting, ws.Hidden, ws.OneShot = &awaited, true, true
 	f.db.workspaces["w1"] = ws
 
 	// Act.
@@ -108,7 +108,7 @@ func TestSetNameKeepsEverythingKeyedByTheWorkspacesID(t *testing.T) {
 	}
 	after := f.db.workspaces["w1"]
 	after.Name = ws.Name
-	if after.PrincipalLink != ws.PrincipalLink || after.Awaiting != ws.Awaiting || after.Hidden != ws.Hidden || after.OneShot != ws.OneShot || after.ID != ws.ID {
+	if after.Awaiting != ws.Awaiting || after.Hidden != ws.Hidden || after.OneShot != ws.OneShot || after.ID != ws.ID {
 		t.Errorf("after the rename = %+v, want %+v but for the name", after, ws)
 	}
 }
