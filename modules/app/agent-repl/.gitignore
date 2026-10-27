@@ -1,1 +1,5 @@
 *.elc
+# A package's node_modules repair lock (bin/lib-node-store.sh node_store_lock):
+# install state like node_modules itself, left behind when its holder is
+# killed until the next install breaks it.
+.node_modules.lock/
