@@ -394,24 +394,23 @@
      from it. `--bubble-font-rem` is a bubble's text size: every bubble's
      base (`--bubble-base-font-rem`) but a thinking bubble's and an interim
      response's, which narrow it (owner requests, 2026-10-14). ONE SIZE FOR
-     A PROMPT, A RESPONSE'S PROSE AND A TREE (owner ruling, 2026-10-27): the
-     base is the size a metaprompt tree was set in, and a tree is set in the
-     base too, so a plain-prose response, a notice and a prompt all read at
-     the tree's size. A thinking bubble and an interim response are left
+     A PROMPT, A RESPONSE'S PROSE AND A TREE (owner rulings, 2026-10-27: the
+     tree's 0.85 first, then 0.83): a tree is set in the base too, so a
+     plain-prose response, a notice and a prompt all read at the tree's size. A thinking bubble and an interim response are left
      exactly as they were (owner ruling, 2026-10-27): a tree in one keeps
      the base, and their padding keeps the reference it was ruled against
      (`--small-prose-pad-ref-rem`). `--tree-line-h` is a
      tree's leading, which a prompt's text is set in too (owner request,
      2026-10-25). */
-  --bubble-base-font-rem: 0.85;
+  --bubble-base-font-rem: 0.83;
   --bubble-font-rem: var(--bubble-base-font-rem);
   /* THE SMALLER PROSE SIZE: a thinking bubble's and an interim response's
      text (they narrow `--bubble-font-rem` to it). */
   --small-prose-font-rem: 0.8;
   /* THE SIZE AN INTERIM RESPONSE'S PADDING SCALES AGAINST: the bubble size
      in force when its padding was ruled to shrink by as much as its text
-     (owner request, 2026-10-14), kept when the base moved to the tree's size
-     (owner ruling, 2026-10-27), so the interim bubble does not change. */
+     (owner request, 2026-10-14), kept when the base moved (owner ruling,
+     2026-10-27), so the interim bubble does not change. */
   --small-prose-pad-ref-rem: 0.9;
   /* THE TOOL CARD HEAD SIZE: a tool card head's text, the title and a Bash
      card's `$ <command>` alike, a touch below the thinking bubble's text
