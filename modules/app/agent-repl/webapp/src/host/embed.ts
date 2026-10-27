@@ -27,6 +27,7 @@ import { fromJson, type JsonObject } from "@bufbuild/protobuf";
 import { UserSaidSchema } from "../../../proto/gen/ts/conversation/v1/user_pb";
 import type { EditorIngressEntry, EditorIngressView } from "../held/editor-ingress.js";
 import type { HeldIngressWireEntry } from "./protocol.js";
+import type { RestyleTurnsSource } from "./restyle-turn.js";
 
 /**
  * The editor's ingress entries, decoded. An entry whose `said` is not a
@@ -66,6 +67,8 @@ export interface EmbedEnv {
   readonly editorIngress: EditorIngressView;
   /** The page's focus-left signal, which Emacs moving its focus fires (`focusMoved`). */
   readonly focusLeft: FocusLeftSource;
+  /** The page's restyle turns, which ask the host and which its grant runs (`restyleGranted`). */
+  readonly restyleTurns: RestyleTurnsSource;
 }
 
 /** Why the focus left the page when Emacs moved its own. */
@@ -89,12 +92,13 @@ function isTextField(element: Element | null): boolean {
 
 /** Connect the page in ENV to its host; null when the page is in no host. */
 export function connectToHost(env: EmbedEnv): HostLink | null {
-  const { doc, win, presence, webhostFailures, levelWindow, editorIngress, focusLeft } = env;
+  const { doc, win, presence, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns } = env;
   if (win.parent === win) return null;
   const host = win.parent;
   const send = (message: PageToHost): void => {
     host.postMessage(message, "*");
   };
+  restyleTurns.connect((kind) => send({ channel: HOST_CHANNEL, kind }));
 
   const apply = (message: HostToPage): void => {
     const root = doc.documentElement.style;
@@ -137,6 +141,9 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         return;
       case "focusMoved":
         focusLeft.left(FOCUS_LEFT_EMACS);
+        return;
+      case "restyleGranted":
+        restyleTurns.granted();
         return;
       case "dismissDigest": {
         // Escape in Emacs's composer (or a sent prompt) closing the digest is

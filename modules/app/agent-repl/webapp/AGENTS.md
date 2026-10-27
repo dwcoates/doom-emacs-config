@@ -75,6 +75,17 @@ to another daemon moves the webhost with it (lisp/webhost.el
 on a switch, and it was 91% of every page's elements and drawn in every page
 (docs/investigations/2026-10-13-page-cost-by-component.md).
 
+## A hidden page restyles in its turn
+
+Every workspace page shares the webhost's one main thread, so a change every
+page takes at once (the feed text zoom) restyled every page in the same frame,
+and the page on screen waited behind the hidden ones: one zoom nudge blocked
+the thread 135ms then 416ms with about 25 pages open (2026-10-27). A page-wide
+change a page lands goes through `pageRestyleTurns` (src/host/restyle-turn.ts):
+the shown page lands it at once, a hidden page asks the webhost for a turn,
+and the webhost grants one page a turn at a time, a frame apart. The feed text
+scale (src/feed/feed-text-scale.ts) is the first user.
+
 ## The seams
 
 - **`RowRenderers` (src/feed/renderers.ts).** The feed mechanism and the cards

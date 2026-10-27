@@ -1855,3 +1855,142 @@ describe("a page re-pointed into a fresh frame", () => {
     });
   });
 });
+
+describe("restyle turns", () => {
+  /** The frames the host has asked to run on, run one at a time by `nextFrame`. */
+  let frames: FrameRequestCallback[];
+  beforeEach(() => {
+    frames = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((fn) => {
+      frames.push(fn);
+      return frames.length;
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Run the frames the host asked for so far. */
+  const nextFrame = (): void => {
+    const due = frames;
+    frames = [];
+    for (const fn of due) fn(0);
+  };
+  const granted = (posted: HostToPage[]): number => posted.filter((m) => m.kind === "restyleGranted").length;
+  const ask = (id: string): void => fromPage(id, { channel: HOST_CHANNEL, kind: "restyleTurn" });
+  const done = (id: string): void => fromPage(id, { channel: HOST_CHANNEL, kind: "restyled" });
+
+  it("grants the first page that asks at once", () => {
+    // Arrange
+    pages(host, "a");
+    const posted = postsTo("a");
+    // Act
+    ask("a");
+    // Assert
+    expect(granted(posted)).toBe(1);
+  });
+
+  it("holds a second page's turn while the first holds one", () => {
+    // Arrange
+    pages(host, "a", "b");
+    postsTo("a");
+    const toB = postsTo("b");
+    ask("a");
+    // Act
+    ask("b");
+    // Assert
+    expect(granted(toB)).toBe(0);
+  });
+
+  it("grants the next page a frame after the turn before it ended, not in the same task", () => {
+    // Arrange
+    pages(host, "a", "b");
+    postsTo("a");
+    const toB = postsTo("b");
+    ask("a");
+    ask("b");
+    // Act
+    done("a");
+    const sameTask = granted(toB);
+    nextFrame();
+    // Assert
+    expect([sameTask, granted(toB)]).toEqual([0, 1]);
+  });
+
+  it("grants a page that asks again from inside its turn another, after the others", () => {
+    // Arrange
+    pages(host, "a", "b");
+    const toA = postsTo("a");
+    const toB = postsTo("b");
+    ask("a");
+    ask("b");
+    // Act — a asks again before it ends its turn.
+    ask("a");
+    done("a");
+    nextFrame();
+    done("b");
+    nextFrame();
+    // Assert
+    expect([granted(toA), granted(toB)]).toEqual([2, 1]);
+  });
+
+  it("frees the turn of a page that says hello again", () => {
+    // Arrange
+    pages(host, "a", "b");
+    postsTo("a");
+    const toB = postsTo("b");
+    ask("a");
+    ask("b");
+    // Act — a's document reloaded mid-turn.
+    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
+    nextFrame();
+    // Assert
+    expect(granted(toB)).toBe(1);
+  });
+
+  it("frees the turn of a page it removes", () => {
+    // Arrange
+    pages(host, "a", "b");
+    postsTo("a");
+    const toB = postsTo("b");
+    ask("a");
+    ask("b");
+    // Act
+    host.remove("a");
+    nextFrame();
+    // Assert
+    expect(granted(toB)).toBe(1);
+  });
+
+  it("drops the ask of a page it removes while it waits", () => {
+    // Arrange
+    pages(host, "a", "b", "c");
+    postsTo("a");
+    postsTo("b");
+    const toC = postsTo("c");
+    ask("a");
+    ask("b");
+    ask("c");
+    host.remove("b");
+    // Act
+    done("a");
+    nextFrame();
+    // Assert — c, not the removed b, holds the next turn.
+    expect(granted(toC)).toBe(1);
+  });
+
+  it("notes a page ending a turn it did not hold, and changes nothing", () => {
+    // Arrange
+    pages(host, "a", "b");
+    postsTo("a");
+    const toB = postsTo("b");
+    ask("a");
+    ask("b");
+    // Act
+    done("b");
+    nextFrame();
+    const answer = parsed(host.ids());
+    // Assert
+    expect([granted(toB), answer.notes]).toEqual([0, [{ level: "warn", text: "workspace b ended a restyle turn it did not hold" }]]);
+  });
+});

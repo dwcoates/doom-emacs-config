@@ -161,8 +161,18 @@ interface HeldIngressMessage {
   readonly entries: readonly HeldIngressWireEntry[];
 }
 
+/**
+ * host -> page: the page's restyle turn is now (host/restyle-turn.ts): it runs
+ * the work it asked the turn for, then says `restyled`.
+ */
+interface RestyleGrantedMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "restyleGranted";
+}
+
 /** Every message the host sends a page. */
 export type HostToPage =
+  | RestyleGrantedMessage
   | HeldIngressMessage
   | LogLevelMessage
   | PresenceMessage
@@ -214,8 +224,30 @@ interface GateBandMessage {
   readonly pixels: number;
 }
 
+/**
+ * page -> host: the page, not shown, has work that restyles it, and asks for a
+ * turn to run it in (host/restyle-turn.ts).
+ */
+interface RestyleTurnMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "restyleTurn";
+}
+
+/** page -> host: the page's restyle turn is over; the next page's may begin. */
+interface RestyledMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "restyled";
+}
+
 /** Every message a page sends the host. */
-export type PageToHost = HelloMessage | DrawnMessage | SelectionMessage | EditingMessage | GateBandMessage;
+export type PageToHost =
+  | HelloMessage
+  | DrawnMessage
+  | SelectionMessage
+  | EditingMessage
+  | GateBandMessage
+  | RestyleTurnMessage
+  | RestyledMessage;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -257,6 +289,8 @@ export function parseHostToPage(data: unknown): HostToPage | null {
         : null;
     case "dismissDigest":
       return { channel: HOST_CHANNEL, kind: "dismissDigest" };
+    case "restyleGranted":
+      return { channel: HOST_CHANNEL, kind: "restyleGranted" };
     case "focusMoved":
       return { channel: HOST_CHANNEL, kind: "focusMoved" };
     case "logLevel": {
@@ -334,6 +368,10 @@ export function parsePageToHost(data: unknown): PageToHost | null {
       return typeof data.pixels === "number" && Number.isFinite(data.pixels) && data.pixels >= 0
         ? { channel: HOST_CHANNEL, kind: "gateBand", pixels: data.pixels }
         : null;
+    case "restyleTurn":
+      return { channel: HOST_CHANNEL, kind: "restyleTurn" };
+    case "restyled":
+      return { channel: HOST_CHANNEL, kind: "restyled" };
     default:
       return null;
   }

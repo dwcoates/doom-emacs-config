@@ -14,6 +14,7 @@ import { createPresence, type PresenceSource } from "../../src/presence.js";
 import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
 import { createWebhostFailureView, type WebhostFailureView } from "../../src/failure/webhost.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
+import { createRestyleTurns, type RestyleTurnsSource } from "../../src/host/restyle-turn.js";
 
 let pageWin: Window;
 let pageDoc: Document;
@@ -24,6 +25,7 @@ let clock: number;
 let webhostFailures: WebhostFailureView;
 let editorIngress: EditorIngressView;
 let focusLeft: FocusLeftSource;
+let restyleTurns: RestyleTurnsSource;
 let leftFor: string[];
 let link: HostLink | null;
 let received: PageToHost[];
@@ -80,11 +82,12 @@ beforeEach(() => {
   webhostFailures = createWebhostFailureView();
   editorIngress = createEditorIngressView();
   focusLeft = createFocusLeft(pageWin, presence);
+  restyleTurns = createRestyleTurns();
   leftFor = [];
   focusLeft.onLeft((why) => leftFor.push(why));
   clock = 1_000_000;
   levelWindow = new LevelWindow({ level: "info", untilMs: null }, () => clock);
-  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft });
+  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns });
 });
 
 afterEach(() => {
@@ -103,7 +106,7 @@ describe("joining", () => {
     const alone = createPresence(document, false);
 
     // Act
-    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow, editorIngress, focusLeft });
+    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns });
 
 
     // Assert
@@ -121,6 +124,27 @@ describe("joining", () => {
 
   it("records that it joined its host", async () => {
     expect(await operations()).toContain("page.host-joined");
+  });
+});
+
+describe("restyle turns", () => {
+  it("asks the host for a page's turn", async () => {
+    // Act
+    restyleTurns.request(() => {});
+    // Assert
+    await delivered();
+    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "restyleTurn" });
+  });
+
+  it("runs the waiting work when the host grants the turn, and ends it", async () => {
+    // Arrange
+    const ran: string[] = [];
+    restyleTurns.request(() => ran.push("ran"));
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "restyleGranted" });
+    // Assert
+    await delivered();
+    expect([ran, received.filter((m) => (m as { kind?: string }).kind === "restyled").length]).toEqual([["ran"], 1]);
   });
 });
 
@@ -298,7 +322,7 @@ describe("reported facts", () => {
     received = [];
 
     // Act
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns });
 
     // Assert
     await delivered();
@@ -474,7 +498,7 @@ describe("the gate band", () => {
     dock.getBoundingClientRect = () => ({ height: band }) as DOMRect;
     pageDoc.body.append(dock);
     received = [];
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns });
     return dock;
   }
 
