@@ -2872,12 +2872,11 @@ html[data-page-unshown] {
    small muted icon that copies a piece of the feed. Once it copied, the check
    mark replaces the copy icon for a moment (`data-copied`). Each kind's rule
    below places it. */
-/* The control's size, its icon being 1em, and its padding, so its square box
-   is `--copy-control-box` on a side: a bubble's room reservation and its
-   first line's ghost below declare them too, so the boxes cannot differ. */
-.copy-control,
-.bubble > :has(> .bubble-copy)::before,
-.copy-room {
+/* The control's size: its padding, and its square box `--copy-control-box` on
+   a side, the icon filling the box inside the padding. A code block's control
+   is sized from its own text (`1em` of icon); a bubble's is one line tall
+   (`.bubble-copy` below). */
+.copy-control {
   font-size: calc(0.85rem * var(--feed-text-scale));
   --copy-control-pad: 3px;
   --copy-control-box: calc(1em + 2 * var(--copy-control-pad));
@@ -2895,8 +2894,8 @@ html[data-page-unshown] {
 .copy-control:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .copy-control[data-copied] { opacity: 1; color: var(--ok); }
 .copy-control svg {
-  width: 1em;
-  height: 1em;
+  width: calc(var(--copy-control-box) - 2 * var(--copy-control-pad));
+  height: calc(var(--copy-control-box) - 2 * var(--copy-control-pad));
   fill: none;
   stroke: currentColor;
   stroke-width: 1.4;
@@ -2918,39 +2917,59 @@ html[data-page-unshown] {
    `--bubble-copy-gap` from its top and right padding edges, which no gutter,
    fold or content moves. Its containing block is outside the scroll box, so
    the box's clip never cuts it.
-   ON THE FIRST LINE OF TEXT, NEVER A LINE OF ITS OWN (owner request,
-   2026-10-25). Out of flow it reserves no room, so the scroll box's `::before`
-   floats right where it sits and takes that room instead: the first line
-   wraps short of the control, `--bubble-copy-text-gap` from it, and every
-   later line runs the bubble's full width. That float adds nothing to the
+   ON THE FIRST LINE OF TEXT, NEVER A LINE OF ITS OWN (owner requests,
+   2026-10-25 and 2026-10-27). Out of flow it reserves no room, so the scroll
+   box's `::before` floats right where it sits and takes that room instead:
+   the first line wraps short of the control, `--bubble-copy-text-gap` from
+   it, and every later line runs the bubble's full width. A metaprompt tree
+   is fitted short of it the same way (src/bubble/copy-room.ts).
+   ONE LINE TALL AT EVERY TEXT SCALE (owner request, 2026-10-27): the box is
+   one line of the bubble's text, the tightest leading a bubble's first line
+   is set in (`--tree-line-h`), and every length of it is in `em` of that
+   text, never `px`, so `C--` and `C-=` scale the control with its line. Every
+   reader that sets its own size is set in the bubble's text size, so all of
+   them resolve the tokens alike. The gap is the bubble's top padding, so the
+   box lies exactly over the first line. That float adds nothing to the
    bubble's fit-content width beside the body, so the first line of text
    opens with its GHOST (`.copy-room`): as wide, zero-height and invisible,
    inside the line's own formatting context, where a float's width does add.
    The bubble so widens by exactly the room, and a first line at the bubble's
    cap still wraps short of the control. With a classic bar the reservation is
    a gutter wider than it needs to be, never narrower. */
-/* The gap and room tokens, declared once for all three readers, the control,
-   its reservation and its ghost, each of which resolves them against its own
-   (equal) size. */
+/* The size, gap and room tokens, declared once on the bubble for every
+   reader: the control, its reservation, its ghost and the header strip,
+   each of which resolves them against its own (equal) size. */
+.bubble {
+  --bubble-copy-box: calc(var(--tree-line-h) * 1em);
+  --bubble-copy-pad: 0.2em;
+  --bubble-copy-gap: var(--bubble-pad-y);
+  --bubble-copy-text-gap: 0.6em;
+  --bubble-copy-room: calc(var(--bubble-copy-gap) + var(--bubble-copy-box) + var(--bubble-copy-text-gap) - var(--bubble-scroll-gap));
+}
+/* The readers set in a size of their own (the control's is a code block's
+   otherwise, the ghost's its line's) take the bubble's text size, as the
+   reservation and the strip inherit it. */
 .bubble-copy,
 .bubble > :has(> .bubble-copy)::before,
 .copy-room {
-  --bubble-copy-gap: calc(var(--bubble-pad-y) - 0.2em);
-  --bubble-copy-text-gap: 0.6em;
-  --bubble-copy-room: calc(var(--bubble-copy-gap) + var(--copy-control-box) + var(--bubble-copy-text-gap) - var(--bubble-scroll-gap));
+  font-size: calc(var(--bubble-font-rem) * 1rem * var(--feed-text-scale));
 }
 .bubble-copy {
+  --copy-control-pad: var(--bubble-copy-pad);
+  --copy-control-box: var(--bubble-copy-box);
   position: absolute;
   top: var(--bubble-copy-gap);
   right: var(--bubble-copy-gap);
 }
 /* A prompt's control is in the prompt's own text color. */
 .bubble[data-role="prompt"] .bubble-copy { color: inherit; }
+/* The reservation is half a line tall: any height inside the first line
+   narrows that line alone, so the second line can never be narrowed too. */
 .bubble > :has(> .bubble-copy)::before {
   content: "";
   float: right;
   width: var(--bubble-copy-room);
-  height: calc(var(--bubble-copy-gap) + var(--copy-control-box) - var(--bubble-pad-y));
+  height: calc(var(--bubble-copy-box) / 2);
 }
 .copy-room {
   float: right;
@@ -2960,10 +2979,9 @@ html[data-page-unshown] {
 }
 /* A BUBBLE WITH A HEADER STRIP (an agent prompt's address, a held prompt's
    badges) has its copy control beside the strip's first line, so that line
-   keeps clear of it as the first line of text would: the same gap, box and
-   text gap, resolved in the strip's own size. */
+   keeps clear of it as the first line of text would: the same room. */
 .bubble:has(> .bubble-scroll > .bubble-copy) > .bubble-strip:first-child {
-  padding-right: calc(var(--bubble-pad-y) + 1.25em + 6px);
+  padding-right: var(--bubble-copy-room);
 }
 .md a { color: var(--accent); }
 /* A link in a blue prompt bubble takes the prompt's own link color. */
@@ -3017,11 +3035,10 @@ html[data-page-unshown] {
    unsplittable word wider than the whole bubble, which is wrapped rather
    than scrolled. A line stays inline, never a flex row: a row is a
    formatting context of its own, which steps aside from the bubble's
-   floated copy control instead of flowing beside it. `clear: right` starts the tree
-   below the response's floated cost corner, so the tree's box is the
-   body's full width — the width its budget was measured for — instead of
-   a box narrowed beside the float. */
-.mp-tree { font-size: calc(var(--bubble-base-font-rem) * 1rem * var(--feed-text-scale)); line-height: var(--tree-line-h); white-space: pre-wrap; overflow-wrap: anywhere; clear: right; }
+   floated copy control instead of flowing beside it. The tree never clears
+   that float: a tree that opens the bubble has its first line fitted short
+   of the control (src/bubble/copy-room.ts), so it sits beside it. */
+.mp-tree { font-size: calc(var(--bubble-base-font-rem) * 1rem * var(--feed-text-scale)); line-height: var(--tree-line-h); white-space: pre-wrap; overflow-wrap: anywhere; }
 .md .mp-tree { margin: 0.5em 0; }
 .mp-prefix, .mp-content { white-space: pre-wrap; }
 .mp-connectors { font-family: var(--tree-rail-font-family); }

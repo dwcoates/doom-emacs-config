@@ -2448,7 +2448,7 @@ describe("a held prompt folded", () => {
     // Arrange / Act / Assert
     withTallHeld((card) =>
       expect(cascadedValue(card.querySelector(".queued-head") as Element, "padding-right")).toBe(
-        "calc(var(--bubble-pad-y) + 1.25em + 6px)",
+        "var(--bubble-copy-room)",
       ),
     );
   });

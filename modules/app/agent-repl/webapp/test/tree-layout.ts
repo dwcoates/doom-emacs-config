@@ -54,6 +54,8 @@ export interface TreeLayout {
   scrollbarPx: number;
   /** The scroll box's `offsetWidth`, in px. */
   scrollBoxPx: number;
+  /** The drawn width of a bubble copy control's room (a `.copy-room` ghost), in px. */
+  copyRoomPx: number;
 }
 
 /** A layout with the stylesheet's real 77% cap and round numbers. */
@@ -64,6 +66,7 @@ export const DEFAULT_TEST_LAYOUT: TreeLayout = {
   bodyPaddingPx: 10,
   scrollbarPx: 8,
   scrollBoxPx: 700,
+  copyRoomPx: 40,
 };
 
 /** The horizontal lengths the measure reads off computed styles. */
@@ -99,6 +102,7 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
     if (this.closest(".mp-measure") !== null && (this.classList.contains("mp-connectors") || this.classList.contains("mp-content"))) {
       return rect(visibleWidth(this.innerHTML) * layout.charPx);
     }
+    if (this.classList.contains("copy-room")) return rect(layout.copyRoomPx);
     return originalRect.call(this);
   };
 
@@ -202,9 +206,11 @@ function stagedWidthPx(layout: TreeLayout, box: "capped" | "uncapped"): number {
  * rendered column.
  */
 export function stagedMeasure(layout: TreeLayout, box: "capped" | "uncapped" = "capped"): TreeMeasure {
+  const budget = Math.floor(stagedWidthPx(layout, box));
   return {
     unit: "px",
-    budget: Math.floor(stagedWidthPx(layout, box)),
+    budget,
+    firstLineBudget: budget,
     widths: (items) => items.map((item) => visibleWidth(item.html) * layout.charPx),
   };
 }

@@ -259,13 +259,28 @@ export interface TreeMeasure {
   readonly unit: "ch" | "px";
   /** The room a line has, in UNIT: a positive whole number. */
   readonly budget: number;
+  /**
+   * The room the tree's FIRST drawn line has, in UNIT: a positive whole number
+   * no larger than `budget`. It is smaller when the tree opens a bubble whose
+   * copy control sits at the end of that line (src/bubble/copy-room.ts), and
+   * `budget` everywhere else.
+   */
+  readonly firstLineBudget: number;
   /** Each of ITEMS' drawn width, in UNIT, in order. */
   widths(items: readonly TreeMeasureItem[]): number[];
 }
 
-/** The daemon's width model: COLS columns of room, every piece its rendered columns. */
-export function columnMeasure(cols: number): TreeMeasure {
-  return { unit: "ch", budget: cols, widths: (items) => items.map((item) => visibleWidth(item.html)) };
+/**
+ * The daemon's width model: COLS columns of room (FIRSTCOLS on the first
+ * line), every piece its rendered columns.
+ */
+export function columnMeasure(cols: number, firstCols: number = cols): TreeMeasure {
+  return {
+    unit: "ch",
+    budget: cols,
+    firstLineBudget: firstCols,
+    widths: (items) => items.map((item) => visibleWidth(item.html)),
+  };
 }
 
 /** A piece's measured width, by its kind and its HTML. */
@@ -710,6 +725,7 @@ function scanCode(raw: string, state: CodeState): CodeState {
 function pack(
   pieces: Piece[],
   width: number,
+  firstWidth: number,
   markdown: boolean,
   space: number,
 ): { lines: string[]; widths: number[]; overflows: string[] } {
@@ -732,6 +748,8 @@ function pack(
   let current = "";
   let currentWidth = 0;
   let placed = false;
+  // The room the line being filled has: the first line's own, then WIDTH.
+  const room = (): number => (lines.length === 0 ? firstWidth : width);
   for (let i = 0; i < pieces.length; i++) {
     const piece = pieces[i];
     // Room a line must keep for balancing backticks: `reopenW` if this piece
@@ -739,7 +757,14 @@ function pack(
     // ending with this piece is left open and must be closed.
     const reopenW = before[i].open ? before[i].delim : 0;
     const closeW = after[i].open ? after[i].delim : 0;
-    if (placed && currentWidth + space + piece.width + closeW > width) {
+    // A first piece too wide for a narrowed first line, but not for a whole
+    // one, starts on the second line, leaving the first line empty, rather
+    // than overflowing the room the first line keeps free.
+    if (!placed && lines.length === 0 && piece.width + closeW > firstWidth && piece.width + closeW <= width) {
+      lines.push("");
+      widths.push(0);
+    }
+    if (placed && currentWidth + space + piece.width + closeW > room()) {
       // Break: close the current line's open span, then reopen it on the next.
       const closing = before[i].open ? "`".repeat(before[i].delim) : "";
       lines.push(current + piece.breakSuffix + closing);
@@ -752,7 +777,7 @@ function pack(
     if (placed) {
       current += " ";
       currentWidth += space;
-    } else if (piece.width + reopenW + closeW > width) {
+    } else if (piece.width + reopenW + closeW > room()) {
       overflows.push(stripTags(piece.raw));
     }
     current += piece.raw;
@@ -822,7 +847,8 @@ function branchItems(branch: Branch, inline: InlineMarkup): TreeMeasureItem[] {
 }
 
 /**
- * wrap_branch: render BRANCH as one or more lines, none wider than WIDTH.
+ * wrap_branch: render BRANCH as one or more lines, none wider than WIDTH, its
+ * head line no wider than FIRSTWIDTH (WIDTH unless told).
  * Without WIDTHOF the branch is measured in the daemon's columns; with it
  * (an HTML body), by the measure, a space between two pieces as SPACE.
  * Answers each line's width past the prefix (`bodyWidths`) and the prefix's.
@@ -833,18 +859,26 @@ function wrapBranch(
   hasChildren: boolean,
   inline: InlineMarkup | undefined,
   measured?: { widthOf: WidthOf; space: number },
+  firstWidth: number = width,
 ): { lines: RenderLine[]; overflows: string[]; prefixWidth: number; bodyWidths: number[] } {
   const prefixWidth =
     measured === undefined ? textColumn(branch) : railsWidth(branch, measured.widthOf) + labelWidth(branch, measured.widthOf);
   const field = width - prefixWidth;
-  if (field <= 0) {
+  const firstField = firstWidth - prefixWidth;
+  if (field <= 0 || firstField <= 0) {
     throw new TreeOverflowError(
-      `branch prefix occupies ${prefixWidth} of ${width}, leaving no room: ${branch.prefix}${branch.label}`,
+      `branch prefix occupies ${prefixWidth} of ${Math.min(width, firstWidth)}, leaving no room: ${branch.prefix}${branch.label}`,
     );
   }
   const markdown = inline === undefined;
   const body = branchBody(branch, inline);
-  const packed = pack(toPieces(tokenize(body, markdown), field, measured?.widthOf), field, markdown, measured?.space ?? 1);
+  const packed = pack(
+    toPieces(tokenize(body, markdown), field, measured?.widthOf),
+    field,
+    firstField,
+    markdown,
+    measured?.space ?? 1,
+  );
   const rails = continuationPrefix(branch);
   const pad = labelPad(branch, hasChildren);
   const lines: RenderLine[] = [
@@ -984,9 +1018,11 @@ export type TreeIssue = (message: string, context: Record<string, unknown>) => v
 
 /**
  * The measure a tree wraps by, asked for only when a tree is actually drawn
- * (bubble/body.ts `treeMeasure`). There is no default.
+ * (bubble/body.ts `treeMeasure`). There is no default. OPENSFIRSTLINE says
+ * the tree is the first thing its slot draws, so its first line is the line a
+ * reservation at the start of the slot narrows (`TreeMeasure.firstLineBudget`).
  */
-export type TreeMeasureOf = () => TreeMeasure;
+export type TreeMeasureOf = (opensFirstLine: boolean) => TreeMeasure;
 
 /** The one space a wrap places between two pieces, as it is measured. */
 const SPACE_ITEM: TreeMeasureItem = { kind: "text", html: " " };
@@ -1013,12 +1049,22 @@ export function renderTreeHtml(
   options: TreeRenderOptions = {},
 ): string {
   const width = measure.budget;
+  const firstWidth = measure.firstLineBudget;
   if (!Number.isInteger(width) || width < 1) {
     log.error("a metaprompt tree was handed a budget that is not a positive whole number", {
       operation: "metaprompt-tree.invalid-width",
       context: { width, unit: measure.unit },
     });
     throw new RangeError(`metaprompt tree: budget must be a positive integer, got ${String(width)}`);
+  }
+  if (!Number.isInteger(firstWidth) || firstWidth < 1 || firstWidth > width) {
+    log.error("a metaprompt tree was handed a first-line budget that is not a whole number from 1 to its budget", {
+      operation: "metaprompt-tree.invalid-first-line-width",
+      context: { width, first_width: firstWidth, unit: measure.unit },
+    });
+    throw new RangeError(
+      `metaprompt tree: first-line budget must be an integer from 1 to ${String(width)}, got ${String(firstWidth)}`,
+    );
   }
   const rows = layoutTree(tree, { rootGap: options.rootGap });
   const labels = new Set(rows.flatMap((row) => (row.kind === "branch" ? [row.branch.label.trimEnd()] : [])));
@@ -1030,7 +1076,13 @@ export function renderTreeHtml(
   const parts: string[] = [];
   let overflowCount = 0;
   let unwrapped = false;
+  // Whether the next row drawn is the tree's first line, which has the
+  // first-line budget. A passed-through line (a header) or a code block is
+  // drawn as it arrived, and takes the first line all the same.
+  let first = true;
   for (const row of rows) {
+    const opens = first;
+    first = false;
     if (row.kind === "code") {
       parts.push(renderFenceBlock(row.code));
       continue;
@@ -1043,7 +1095,7 @@ export function renderTreeHtml(
     let bodyWidths: number[];
     try {
       if (unwrapped) throw new TreeOverflowError("an earlier branch could not be wrapped");
-      const wrapped = wrapBranch(row.branch, width, row.hasChildren, marked, measured);
+      const wrapped = wrapBranch(row.branch, width, row.hasChildren, marked, measured, opens ? firstWidth : width);
       lines = wrapped.lines;
       bodyWidths = wrapped.bodyWidths;
       overflowCount += wrapped.overflows.length;

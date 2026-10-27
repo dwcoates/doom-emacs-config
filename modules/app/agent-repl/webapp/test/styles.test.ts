@@ -2658,8 +2658,8 @@ describe("no bubble content scrolls horizontally", () => {
     expect(rule).toMatch(/overflow-wrap:\s*anywhere/);
   });
 
-  it.each([".mp-tree", ".md pre.md-code", ".md table"])(
-    "starts %s below the cost corner's float, so its box is the body's full width",
+  it.each([".md pre.md-code", ".md table"])(
+    "starts %s below the copy control's reservation, so its box is the body's full width",
     (selector) => {
       // Arrange / Act
       const rule = declarationsOf(selector) ?? "";
@@ -2667,6 +2667,78 @@ describe("no bubble content scrolls horizontally", () => {
       expect(rule).toMatch(/clear:\s*right/);
     },
   );
+
+  it("never starts a tree below the copy control's reservation, so its first line sits beside the control", () => {
+    // Arrange / Act
+    const rule = declarationsOf(".mp-tree") ?? "";
+    // Assert
+    expect(rule).not.toMatch(/clear\s*:/);
+  });
+});
+
+describe("a bubble's copy control is one line tall", () => {
+  /** The bubble's copy tokens, as declared. */
+  const tokens = (): string => allDeclarationsOf(".bubble");
+
+  it("sizes its box one line of the text, at the tightest leading", () => {
+    // Act + Assert
+    expect(valueOf(tokens(), "--bubble-copy-box")).toBe("calc(var(--tree-line-h) * 1em)");
+  });
+
+  it.each(["--bubble-copy-box", "--bubble-copy-pad", "--bubble-copy-text-gap"])(
+    "states %s in em of the text, never px, so it scales with the line",
+    (token) => {
+      // Act
+      const value = valueOf(tokens(), token) ?? "";
+      // Assert
+      expect([/\dem\b/.test(value), /\dpx\b/.test(value)]).toEqual([true, false]);
+    },
+  );
+
+  it.each([".bubble-copy", ".bubble > :has(> .bubble-copy)::before", ".copy-room"])(
+    "sets %s in the bubble's text size, scaled with the feed text zoom",
+    (selector) => {
+      // Act + Assert
+      expect(valueOf(allDeclarationsOf(selector), "font-size")).toBe("calc(var(--bubble-font-rem) * 1rem * var(--feed-text-scale))");
+    },
+  );
+
+  it("lies over the first line: its gap is the bubble's top padding", () => {
+    // Act + Assert
+    expect(valueOf(tokens(), "--bubble-copy-gap")).toBe("var(--bubble-pad-y)");
+  });
+
+  it.each(["top", "right"])("sits the one gap from the bubble's %s edge", (edge) => {
+    // Act + Assert
+    expect(valueOf(allDeclarationsOf(".bubble-copy"), edge)).toBe("var(--bubble-copy-gap)");
+  });
+
+  it.each([
+    ["--copy-control-box", "var(--bubble-copy-box)"],
+    ["--copy-control-pad", "var(--bubble-copy-pad)"],
+  ])("sizes the control's %s from the bubble's tokens", (token, want) => {
+    // Act + Assert
+    expect(valueOf(allDeclarationsOf(".bubble-copy"), token)).toBe(want);
+  });
+
+  it.each(["width", "height"])("fills the box with the icon inside its padding: %s", (property) => {
+    // Act + Assert
+    expect(valueOf(allDeclarationsOf(".copy-control svg"), property)).toBe(
+      "calc(var(--copy-control-box) - 2 * var(--copy-control-pad))",
+    );
+  });
+
+  it("keeps the reservation inside the first line, so a second line is never narrowed", () => {
+    // Act + Assert
+    expect(valueOf(allDeclarationsOf(".bubble > :has(> .bubble-copy)::before"), "height")).toBe("calc(var(--bubble-copy-box) / 2)");
+  });
+
+  it("keeps a header strip's first line clear of the control by the same room", () => {
+    // Act + Assert
+    expect(
+      valueOf(allDeclarationsOf(".bubble:has(> .bubble-scroll > .bubble-copy) > .bubble-strip:first-child"), "padding-right"),
+    ).toBe("var(--bubble-copy-room)");
+  });
 });
 
 describe("a double-width character in a tree", () => {
@@ -3746,7 +3818,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     const [bg, sidebar] = [rgbOf(block, "--bg"), rgbOf(block, "--sidebar-bg")];
     const user = rgbOf(block, "--user");
     // Assert
-    expect(user).toEqual(bg.map((c, i) => Math.round((c + sidebar[i]!) / 2)));
+    expect(user).toEqual(bg.map((c, i) => Math.round((c + sidebar[i]) / 2)));
   });
 
   it.each([
@@ -3769,7 +3841,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     const user = rgbOf(root, "--user");
 
     // Assert
-    expect(user).toEqual(bg.map((c, i) => Math.round((c + sidebar[i]!) / 2)));
+    expect(user).toEqual(bg.map((c, i) => Math.round((c + sidebar[i]) / 2)));
   });
 
   it("paints a response a neutral grey rather than a hue", () => {

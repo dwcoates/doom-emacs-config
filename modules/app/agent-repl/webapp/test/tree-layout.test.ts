@@ -87,6 +87,24 @@ describe("installTreeLayout", () => {
     }
   });
 
+  it.each([
+    ["an attached", true, 33],
+    ["a detached", false, 0],
+  ] as const)("draws %s copy control's room the layout's width", (_label, attached, want) => {
+    // Arrange
+    const { uninstall } = installTreeLayout({ copyRoomPx: 33 });
+    const { body } = stage(attached);
+    const room = document.createElement("span");
+    room.className = "copy-room";
+    body.append(room);
+    try {
+      // Act + Assert
+      expect(room.getBoundingClientRect().width).toBe(want);
+    } finally {
+      uninstall();
+    }
+  });
+
   it("puts jsdom back when uninstalled", () => {
     // Arrange
     const { uninstall } = installTreeLayout();
@@ -105,12 +123,12 @@ describe("stagedCols", () => {
     { name: "a cap with no gutter", maxWidth: "77%", scrollbarPx: 0, want: 93 },
   ])("computes the budget of $name", ({ maxWidth, scrollbarPx, want }) => {
     // Act + Assert
-    expect(stagedCols({ charPx: 8, containingPx: 1000, maxWidth, bodyPaddingPx: 10, scrollbarPx, scrollBoxPx: 700 })).toBe(want);
+    expect(stagedCols({ charPx: 8, containingPx: 1000, maxWidth, bodyPaddingPx: 10, scrollbarPx, scrollBoxPx: 700, copyRoomPx: 40 })).toBe(want);
   });
 });
 
 describe("stagedMeasure", () => {
-  const layout = { charPx: 8, containingPx: 1000, maxWidth: "77%", bodyPaddingPx: 10, scrollbarPx: 8, scrollBoxPx: 700 };
+  const layout = { charPx: 8, containingPx: 1000, maxWidth: "77%", bodyPaddingPx: 10, scrollbarPx: 8, scrollBoxPx: 700, copyRoomPx: 40 };
 
   it.each([
     ["capped", 742],

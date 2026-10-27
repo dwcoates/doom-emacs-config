@@ -21,9 +21,17 @@
  * reaches the bubble's cap still wraps short of the control, as the
  * reservation makes it. Content whose first thing is not text (an image) has
  * no ghost, and stands under the control's row.
+ *
+ * A TREE IS FITTED SHORT OF THE CONTROL TOO (owner request, 2026-10-27). A
+ * metaprompt tree's lines are fitted to the bubble's cap before they are drawn
+ * (body.ts), so a tree that opens the bubble would be broken again by the
+ * reservation. Its first line is fitted the room shorter instead
+ * (`reserveSlotFirstLine`), the room measured off a probe of the ghost, so the
+ * tree's first line sits beside the control like any other text.
  */
 import { boundCopyControl, type CopyKind } from "../copy-control.js";
-import { addSlotMark, isMarkdownSlot } from "./body.js";
+import { log } from "../log.js";
+import { addSlotMark, isMarkdownSlot, reserveSlotFirstLine, type FirstLineRoom } from "./body.js";
 
 /** The class every bubble's copy control wears, which places it at the bubble's top right. */
 export const BUBBLE_COPY_CLASS = "bubble-copy";
@@ -79,7 +87,27 @@ export function reserveCopyRoom(content: readonly ChildNode[]): void {
     addSlotMark(first, (rendered) => {
       markCopyRoom(rendered);
     });
+    reserveSlotFirstLine(first, COPY_ROOM);
     return;
   }
   markCopyRoom(first);
 }
+
+/**
+ * The copy control's room on a first line, in px: the drawn width of a ghost
+ * probed inside BODY, which the stylesheet sizes from the same tokens as the
+ * reservation. The body judges a width that is not positive unmeasurable.
+ */
+export function measureCopyRoomPx(body: HTMLElement): number {
+  const probe = body.ownerDocument.createElement("span");
+  probe.className = COPY_ROOM_CLASS;
+  probe.setAttribute("aria-hidden", "true");
+  body.append(probe);
+  const px = probe.getBoundingClientRect().width;
+  probe.remove();
+  log.debug("measured a bubble's copy room", { operation: "bubble.copy-room.measure", context: { room_px: px } });
+  return px;
+}
+
+/** The copy control's first-line room, as the body pipeline keeps it. */
+const COPY_ROOM: FirstLineRoom = { px: measureCopyRoomPx };

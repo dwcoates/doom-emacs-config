@@ -50,18 +50,20 @@ const logTreeIssue: TreeIssue = (message, context) => {
  * (metaprompt-tree.ts) draws a tree's rails from its graph and breaks every
  * branch too wide for the measure's budget onto continuation lines under its
  * own text, so the tree fills the bubble and re-flows when the bubble's width
- * changes. MEASURE is asked for only when a tree is actually drawn.
+ * changes. MEASURE is asked for only when a tree is actually drawn, and told
+ * whether the tree is PROSE's first block, whose first line is the slot's.
  */
 export function proseHtml(prose: ParsedProse, measure: TreeMeasureOf): string {
   return prose.blocks
-    .map((block) => {
+    .map((block, index) => {
+      const opens = index === 0;
       switch (block.block.case) {
         case "plain":
           return renderMarkdown(block.block.value.markdown);
         case "tree":
-          return `<div class="${TREE_CLASS}">${renderTreeHtml(block.block.value, inline, measure(), logTreeIssue)}</div>`;
+          return `<div class="${TREE_CLASS}">${renderTreeHtml(block.block.value, inline, measure(opens), logTreeIssue)}</div>`;
         case "entries":
-          return `<div class="${TREE_CLASS} mp-entry-tree">${entryTreeHtml(block.block.value, inline, measure(), logTreeIssue)}</div>`;
+          return `<div class="${TREE_CLASS} mp-entry-tree">${entryTreeHtml(block.block.value, inline, measure(opens), logTreeIssue)}</div>`;
         default:
           return invariant("a prose block has no arm", { case: String(block.block.case) });
       }
@@ -221,6 +223,24 @@ export function measureTreeWidth(body: HTMLElement): number {
   return widthPx;
 }
 
+/**
+ * The first-line budget of a tree opening a slot that keeps ROOM free at the
+ * end of its first line: BUDGETPX less the room, in whole px. A room that
+ * measures no width, or leaves the line no pixel, is `unmeasurable`.
+ */
+export function firstLineBudgetPx(body: HTMLElement, budgetPx: number, room: FirstLineRoom): number {
+  const roomPx = room.px(body);
+  const firstPx = Math.floor(budgetPx - roomPx);
+  const context = { budget_px: budgetPx, room_px: roomPx, first_px: firstPx };
+  if (!Number.isFinite(roomPx) || roomPx <= 0) unmeasurable("a slot's first-line room measured no width", context);
+  if (firstPx < 1) unmeasurable("a slot's first-line room leaves its first line no pixel", context);
+  log.debug("measured a metaprompt tree's first-line budget", {
+    operation: "bubble.body.tree-first-line-width",
+    context,
+  });
+  return firstPx;
+}
+
 /** The class of the hidden probe a tree's pieces are measured in. */
 export const TREE_MEASURE_CLASS = "mp-measure";
 
@@ -239,10 +259,11 @@ export const TREE_MEASURE_CLASS = "mp-measure";
  * drawn now and the size the zoom glides to (`feedTextScaleToMeasure`), so a
  * line wrapped to its widths fits at every size the glide passes through.
  */
-export function treeMeasure(body: HTMLElement, budget: number): TreeMeasure {
+export function treeMeasure(body: HTMLElement, budget: number, firstLineBudget: number = budget): TreeMeasure {
   return {
     unit: "px",
     budget,
+    firstLineBudget,
     widths: (items: readonly TreeMeasureItem[]): number[] => {
       const probe = body.ownerDocument.createElement("div");
       probe.className = `${TREE_CLASS} ${TREE_MEASURE_CLASS}`;
@@ -373,6 +394,32 @@ export type SlotMark = (rendered: HTMLElement) => void;
 /** Every marked slot's mark, held beside the element it paints. */
 const slotMarks = new WeakMap<Element, SlotMark>();
 
+/**
+ * ROOM KEPT FREE AT THE END OF A SLOT'S FIRST LINE (src/bubble/copy-room.ts
+ * keeps it for a bubble's copy control). Prose flows around the stylesheet's
+ * reservation on its own, but a tree's lines are fitted before they are drawn,
+ * so a tree that opens the slot is fitted with its first line `px(body)`
+ * shorter: the room's width in px, measured off the page at every paint.
+ */
+export interface FirstLineRoom {
+  /** The room's width in px, measured inside BODY. */
+  px(body: HTMLElement): number;
+}
+
+/** Every slot's first-line room, held beside the element it paints. */
+const slotRooms = new WeakMap<Element, FirstLineRoom>();
+
+/**
+ * Keep ROOM free at the end of SLOT's first line on every paint, a tree that
+ * opens the slot fitted short of it (`FirstLineRoom`). Like a mark, it is
+ * carried to the live slot by `paintBody`.
+ */
+export function reserveSlotFirstLine(slot: HTMLElement, room: FirstLineRoom): void {
+  const name = slot.className;
+  if (!isMarkdownSlot(slot)) invariant("a first-line room was kept in an element that is not a markdown slot", { slot: name });
+  slotRooms.set(slot, room);
+}
+
 /** A fresh bubble body, the custom element defined on first use, its painter armed. */
 export function createBubbleBody(): BubbleBody {
   const body = createConnectHookElement(BUBBLE_BODY_TAG);
@@ -442,6 +489,9 @@ export function paintBody(body: BubbleBody, content: readonly ChildNode[]): read
       const mark = slotMarks.get(want);
       if (mark === undefined) slotMarks.delete(have);
       else slotMarks.set(have, mark);
+      const room = slotRooms.get(want);
+      if (room === undefined) slotRooms.delete(have);
+      else slotRooms.set(have, room);
       return have;
     }
     return want;
@@ -585,17 +635,22 @@ function armPainter(body: BubbleBody): Painter {
   let deferred = false;
   let observer: ResizeObserver | null = null;
 
-  const measure: TreeMeasureOf = () => {
-    budgetPx ??= measureTreeWidth(body);
-    return treeMeasure(body, budgetPx);
-  };
+  // The measure a tree in SLOT wraps by: the cap's budget, its first line
+  // the slot's first-line room shorter when the tree opens the slot.
+  const measureIn =
+    (slot: HTMLElement): TreeMeasureOf =>
+    (opensFirstLine) => {
+      budgetPx ??= measureTreeWidth(body);
+      const room = opensFirstLine ? slotRooms.get(slot) : undefined;
+      return treeMeasure(body, budgetPx, room === undefined ? budgetPx : firstLineBudgetPx(body, budgetPx, room));
+    };
   const slots = (): HTMLElement[] => [
     ...queryAll<HTMLElement>(body, `[${MARKDOWN_SLOT_ATTRIBUTE}]`),
   ];
   const draw = (targets: readonly HTMLElement[]): void => {
     for (const slot of targets) {
       const target = document.createElement("div");
-      target.innerHTML = proseHtml(sourceOf(slot), measure);
+      target.innerHTML = proseHtml(sourceOf(slot), measureIn(slot));
       slotMarks.get(slot)?.(target);
       // The reconcile compares whole text with whole text, so a revealing slot
       // is restored first and cut again after (`revealSlot`).
