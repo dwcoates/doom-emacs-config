@@ -118,7 +118,12 @@ type fakeDB struct {
 	// read.
 	mergeQueues    map[wsm.RepoKey][]wsm.MergeQueueEntry
 	mergeQueuesErr error
-	tasks          []wsm.Task
+	// books are the workspaces' recorded books (SetWorkspaceBook);
+	// setBookErr fails the record and bookErr the read.
+	books      map[ids.WorkspaceID]string
+	setBookErr error
+	bookErr    error
+	tasks      []wsm.Task
 	// setTaskFoldedErr fails the task fold write, which the slice cannot.
 	// view is the sidebar's recorded view state, nil when nobody changed it
 	// (read back as wsm.DefaultSidebarView); setMergedFoldedErr,
@@ -422,11 +427,28 @@ func (d *fakeDB) owedTurns(ws ids.WorkspaceID) []ids.TurnID {
 	return append([]ids.TurnID(nil), d.owed[ws]...)
 }
 
+func (d *fakeDB) SetWorkspaceBook(_ context.Context, id ids.WorkspaceID, book string) error {
+	if d.setBookErr != nil {
+		return d.setBookErr
+	}
+	d.books[id] = book
+	return nil
+}
+
+func (d *fakeDB) WorkspaceBook(_ context.Context, id ids.WorkspaceID) (string, bool, error) {
+	if d.bookErr != nil {
+		return "", false, d.bookErr
+	}
+	book, ok := d.books[id]
+	return book, ok, nil
+}
+
 func newFakeDB() *fakeDB {
 	return &fakeDB{
 		workspaces:  map[ids.WorkspaceID]wsm.Workspace{},
 		byDir:       map[string]wsm.Workspace{},
 		sessions:    map[ids.WorkspaceID]wsm.Session{},
+		books:       map[ids.WorkspaceID]string{},
 		jobs:        map[ids.WorkspaceID]wsm.CreationJob{},
 		held:        map[ids.WorkspaceID][]wsm.HeldPrompt{},
 		closedFlags: map[ids.WorkspaceID]bool{},

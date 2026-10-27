@@ -3968,3 +3968,65 @@ func TestEveryBringUpTakesTheRecordThroughWithRecord(t *testing.T) {
 		t.Fatalf("these files copy the record onto a source by hand instead of withRecord: %v", found)
 	}
 }
+
+// withBook is ANSWER naming BOOK as the workspace's book.
+func withBook(answer *shimv1.StartSessionResponse, book string) *shimv1.StartSessionResponse {
+	answer.Book = &conversationv1.AgentId{Value: book}
+	return answer
+}
+
+func TestStartRecordsTheBookTheShimNamed(t *testing.T) {
+	tests := []struct {
+		name     string
+		earlier  string
+		response *shimv1.StartSessionResponse
+		want     string
+	}{
+		{name: "a started session's book", response: withBook(startedResponse("vendor-1"), "book-1"), want: "book-1"},
+		{name: "a cold refusal's book", response: withBook(coldResponse(), "book-1"), want: "book-1"},
+		{name: "a later book replaces an earlier one", earlier: "book-0", response: withBook(startedResponse("vendor-1"), "book-1"), want: "book-1"},
+		{name: "an answer naming no book leaves the earlier one", earlier: "book-0", response: startedResponse("vendor-1"), want: "book-0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+			if tt.earlier != "" {
+				f.db.books[ws.ID] = tt.earlier
+			}
+			f.client.response = tt.response
+
+			// Act
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert
+			if got := f.db.books[ws.ID]; got != tt.want {
+				t.Fatalf("recorded book = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStartGoesOnWhenTheBookCannotBeRecorded(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.db.setBookErr = errFake
+	f.client.response = withBook(startedResponse("vendor-1"), "book-1")
+
+	// Act
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Message: "could not record the workspace's book; its history is read through its shim until a start records it"}); !ok {
+		t.Fatalf("records = %+v, want the failed record at ERROR", f.log.logger.Records())
+	}
+}

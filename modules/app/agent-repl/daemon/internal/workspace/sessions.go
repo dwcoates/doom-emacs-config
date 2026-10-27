@@ -2547,6 +2547,10 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		log.Error(opBringUp, "the StartSession call failed", dlog.Context{"cause": err.Error()})
 		return nil, fmt.Errorf("start session for %q: %w", ws, err)
 	}
+	// EVERY ANSWER NAMES THE BOOK, a refusal as much as a start: a workspace
+	// at its cold gate is exactly the one whose conversation must show with
+	// no shim up.
+	f.recordBook(ctx, log, ws, response.GetBook())
 	if failure := response.GetFailure(); failure != nil {
 		if cold := failure.GetCold(); cold != nil {
 			// A READ THE USER ALREADY PAID FOR IS PAID, not asked about
@@ -2864,6 +2868,26 @@ func (f *Fleet) ColdGateDetail(ws ids.WorkspaceID) (string, bool) {
 		return "", false
 	}
 	return held.served.Detail, true
+}
+
+// recordBook records the book the shim stated for WS
+// (shim.v1.StartSessionResponse.book): the store agent the workspace's
+// conversation is filed under, which its history is read from with no shim up
+// (ReadHistory). A shim that stated none -- a workspace whose session never
+// settled an identity -- leaves any earlier record standing. A record that
+// cannot be written is an ERROR and leaves the start to go on: the history is
+// then read through a shim, as before the book was recorded.
+func (f *Fleet) recordBook(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, book *conversationv1.AgentId) {
+	if book.GetValue() == "" {
+		log.Debug(opBringUp, "the shim named no book for the workspace; any recorded one stands", nil)
+		return
+	}
+	if err := f.deps.DB.SetWorkspaceBook(ctx, ws, book.GetValue()); err != nil {
+		log.Error(opBringUp, "could not record the workspace's book; its history is read through its shim until a start records it",
+			dlog.Context{"book": book.GetValue(), "cause": err.Error()})
+		return
+	}
+	log.Debug(opBringUp, "recorded the workspace's book", dlog.Context{"book": book.GetValue()})
 }
 
 // recordFacts persists the session facts that outlive one shim process: the
