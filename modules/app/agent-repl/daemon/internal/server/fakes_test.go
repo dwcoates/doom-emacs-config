@@ -2010,6 +2010,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		DB:                h.DB,
 		Prompts:           h.Prompts,
 		Queue:             h.Queue,
+		HeldRollback:      h.Queue,
 		Verbs:             h.Verbs,
 		Retarget:          h.Retarget,
 		Merge:             h.Merge,

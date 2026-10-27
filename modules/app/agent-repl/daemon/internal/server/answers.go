@@ -150,7 +150,7 @@ func (s *server) Interrupt(
 		if req.Msg.GetTurn().GetRollBackUnanswered() != nil {
 			// A PROMPT HELD BEHIND THE RUNNING TURN THAT NOTHING HAS ANSWERED
 			// SINCE is what the stop takes back first, and the turn runs on.
-			held, ok, err := s.deps.Queue.RollBackHeld(ctx, subject.Record.ID)
+			held, ok, err := s.deps.HeldRollback.RollBackHeld(ctx, subject.Record.ID)
 			if err != nil {
 				return nil, fail(subject.Log, rpc, err)
 			}

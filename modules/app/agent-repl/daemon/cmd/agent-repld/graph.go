@@ -1595,6 +1595,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			DB:                p.DB,
 			Prompts:           handler,
 			Queue:             queue,
+			HeldRollback:      queue,
 			Verbs:             verbs,
 			Retarget:          retargeter,
 			Merge:             mergeOrchestrator,
