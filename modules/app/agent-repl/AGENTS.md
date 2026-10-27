@@ -3071,7 +3071,11 @@ since the beat. A parked
 session is drawn as the live idle session it stands in for (`wsm.Park`); a
 look, a prompt or a history read brings it back, the boot and the editor's
 opens leave it parked, and past the idle cutoff the sweep deepens its park
-into a hibernation.
+into a hibernation. One a history read brought back is parked again once the
+user is not looking at it, unless a prompt engaged it since it came up (owner
+ruling, 2026-10-27; `cachelapse/viewed.go`), so flicking through workspaces
+or every page reloading after a rollout does not keep their shims up until
+their next beat.
 
 A live session costs a node+CLI process pair of roughly 500MB, and dozens of
 workspaces will exhaust a machine. `-idle-timeout` is the mitigation: after a
