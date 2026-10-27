@@ -75,7 +75,7 @@ export const MERGE_QUEUES_CLASS = "sb-merge-queues";
 
 /**
  * The class of the "Deploy Queue" heading at the top of `MERGE_QUEUES_CLASS`,
- * drawn even while no queue is listed under it (owner request, 2026-10-27).
+ * drawn only while a queue is listed under it (owner request, 2026-10-27).
  */
 export const DEPLOY_QUEUE_LABEL_CLASS = "sb-deploy-queue-label";
 

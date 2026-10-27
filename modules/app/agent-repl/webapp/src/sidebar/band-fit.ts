@@ -89,7 +89,6 @@ import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { railScrollKept } from "../scroll.js";
 import {
-  DEPLOY_QUEUE_LABEL_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_WAITING_CLASS,
   MERGE_QUEUES_CLASS,
@@ -133,16 +132,15 @@ const SECTION_REGIONS = [
 
 /**
  * The attribute an EMPTY subsection (`subsections.ts`) wears: it draws its
- * header alone, so its header is a line as a folded subsection's is. The
- * "Deploy Queue" heading wears it while it stands over no queue.
+ * header alone, so its header is a line as a folded subsection's is.
  */
 export const EMPTY_SUBSECTION_ATTRIBUTE = "data-empty";
 
 /**
  * What one line is: a row, a folded repository section's header, the
  * header of a subsection that is folded or empty, a queue's head card or
- * waiting merge, the "Deploy Queue" heading over no queue, or the collapsed
- * "Recently Deployed" heading.
+ * waiting merge, or the collapsed "Recently Deployed" heading. The "Deploy
+ * Queue" heading is drawn only over a queue, and rides with its first card.
  */
 const LINE_SELECTOR = [
   ".row",
@@ -151,7 +149,6 @@ const LINE_SELECTOR = [
   `.sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head`,
   `.${MERGE_QUEUE_HEAD_CLASS}`,
   `.${MERGE_QUEUE_WAITING_CLASS}`,
-  `.${DEPLOY_QUEUE_LABEL_CLASS}[${EMPTY_SUBSECTION_ATTRIBUTE}]`,
   `.${RECENTLY_DEPLOYED_LABEL_CLASS}[${RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE}]`,
 ].join(", ");
 

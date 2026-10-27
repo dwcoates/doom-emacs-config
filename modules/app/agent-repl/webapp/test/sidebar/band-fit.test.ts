@@ -361,16 +361,13 @@ describe("regionLines", () => {
     expect(regionLines(box).map((el) => el.className)).toEqual(["sb-mq-head", "sb-mq-waiting"]);
   });
 
-  it.each([
-    { name: "counts the Deploy Queue heading over no queue as a line", empty: true, want: ["sb-deploy-queue-label", "row"] },
-    { name: "counts the Deploy Queue heading over a queue as no line", empty: false, want: ["row"] },
-  ])("$name", ({ empty, want }) => {
+  it("counts the Deploy Queue heading as no line, as it rides with its first card", () => {
     // Arrange
     const box = document.createElement("div");
-    box.innerHTML = `<div class="sb-merge-queues"><div class="sb-deploy-queue-label"${empty ? ' data-empty=""' : ""}></div></div><div class="row"></div>`;
+    box.innerHTML = `<div class="sb-merge-queues"><div class="sb-deploy-queue-label"></div></div><div class="row"></div>`;
     for (const el of box.querySelectorAll<HTMLElement>(".sb-deploy-queue-label, .row")) el.getBoundingClientRect = () => rect(0, ROW);
     // Act / Assert
-    expect(regionLines(box).map((el) => el.className)).toEqual(want);
+    expect(regionLines(box).map((el) => el.className)).toEqual(["row"]);
   });
 
   it.each([
@@ -477,19 +474,6 @@ describe("mergedTodayLines", () => {
     const got = mergedTodayLines([...queueLines, ...mergedLines(at)], NOW);
     // Assert
     expect(got).toBe(want);
-  });
-
-  it("reaches the Deploy Queue heading standing over no queue", () => {
-    // Arrange: an empty queue box draws its heading alone, above older merges.
-    const queues = document.createElement("div");
-    queues.className = MERGE_QUEUES_CLASS;
-    const heading = document.createElement("div");
-    heading.className = "sb-deploy-queue-label";
-    queues.appendChild(heading);
-    // Act
-    const got = mergedTodayLines([heading, ...mergedLines([startOfToday() - 5])], NOW);
-    // Assert
-    expect(got).toBe(1);
   });
 
   it("reaches the collapsed Recently Deployed heading below the queues", () => {
