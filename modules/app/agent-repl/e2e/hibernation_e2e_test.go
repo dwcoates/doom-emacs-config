@@ -26,11 +26,12 @@
 //     of racing a mock that answers in microseconds. Already exercised by the
 //     shim's own unit suite: agent-shim/claude/shim/test/fake/index.test.ts's
 //     "the turn gate" describe block.
-//   - AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS (src/main.ts's
-//     FAKE_KEEPALIVE_INTERVAL_ENV) compresses the keep-alive cadence — four
-//     minutes in production, against a five-minute vendor cache tier — to a
-//     value this suite can wait out. Honored ONLY under `--fake`, which this
-//     suite's daemon always runs with (world_test.go's NewWorld).
+//
+// The keep-alive tests compress the DAEMON's keep-alive cadence instead,
+// through its documented test-run seam (harness.Opts.KeepaliveInterval, which
+// sets cachelapse.EnvTestKeepaliveInterval): the daemon drives every beat
+// (shim.v1.SendKeepalive), so the cadence that must be shortened is the
+// Keeper's, fifty-two minutes in production.
 //
 // UNREACHABLE, noted rather than fabricated (SPEC.md section F, item 1's
 // disposition style: report a reachability question rather than force it):
@@ -85,18 +86,15 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// The keep-alive cadence override (agent-shim/claude/shim/src/main.ts's
-// FAKE_KEEPALIVE_INTERVAL_ENV — see this file's header comment).
+// The keep-alive cadence (cachelapse.EnvTestKeepaliveInterval, set through
+// harness.Opts.KeepaliveInterval -- see this file's header comment).
 // ---------------------------------------------------------------------------
 
-const fakeKeepaliveIntervalEnv = "AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS"
-
-// fakeKeepaliveIntervalMS is the compressed cadence TestKeepAliveNeverAppearsOnWire
-// waits out. Small enough that keepAliveObservationWindow's margin stays
-// generous, large enough to stay well clear of pollInterval (world_test.go,
-// 20ms) so a slow CI host cannot make the override read as "faster than the
-// suite polls".
-const fakeKeepaliveIntervalMS = 100
+// keepaliveTestInterval is the compressed cadence the keep-alive tests wait
+// out: the Keeper asks the shim for a beat this long after the cache clock.
+// Well clear of pollInterval (world_test.go, 20ms), so a slow host cannot
+// make it read as faster than the suite polls.
+const keepaliveTestInterval = 100 * time.Millisecond
 
 // ---------------------------------------------------------------------------
 // The idle-cutoff hibernation tests' own budget (SPEC.md section B, "Waits"):
@@ -289,7 +287,7 @@ const fakeVendorTurnMessage = "fake vendor runs a turn of its OWN before the nex
 func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
+		KeepaliveInterval: keepaliveTestInterval,
 	}})
 	repo, ws := w.NewRepoWorkspace(t)
 	queued := SubmitPrompt(t, w, ws, "!queue-vendor-turn")
@@ -340,7 +338,7 @@ func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 func TestKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
+		KeepaliveInterval: keepaliveTestInterval,
 	}})
 	repo, ws := w.NewRepoWorkspace(t)
 	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
@@ -400,7 +398,7 @@ func TestKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 func TestPromptDuringKeepAliveTurnsOnce(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
+		KeepaliveInterval: keepaliveTestInterval,
 	}})
 	repo, ws := w.NewRepoWorkspace(t)
 	turn1 := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")

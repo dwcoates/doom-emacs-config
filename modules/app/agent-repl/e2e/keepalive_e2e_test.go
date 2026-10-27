@@ -16,9 +16,9 @@
 // realistic path through a daemon world; the shim's unit suites drive it.
 //
 // Everything runs for real except the vendor (the shim's `--fake` engine) and
-// git (the scripted fake); the keep-alive cadence is compressed by the shim's
-// documented `AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS` lever, exactly as the
-// hibernation area's keep-alive tests do.
+// git (the scripted fake); the daemon's keep-alive cadence is compressed by
+// its documented test-run seam (harness.Opts.KeepaliveInterval), exactly as
+// the hibernation area's keep-alive tests do.
 //
 // SYNCHRONIZATION: every wait is on a record the shim itself writes to its
 // per-workspace log — a rewind's "REWINDING" record (with the span it
@@ -27,9 +27,9 @@
 // awaited strictly after one another (awaitShimRecords), so a count is never
 // satisfied by a record written before the event it is meant to follow.
 //
-// THE KEEP-ALIVE BEFORE THE FIRST PROMPT is not driven here: a daemon world
-// starts the shim's session with the first prompt, so no beat can precede it
-// deterministically. The shim's unit and integration suites cover it.
+// THE KEEP-ALIVE BEFORE THE FIRST PROMPT is not driven here: the daemon
+// times every beat from a turn's end, so none precedes the first prompt. The
+// shim's unit and integration suites cover it.
 //
 // The shim's records are not part of the daemon harness's warning sweep (which
 // reads the daemon's own pid), so each test reads the shim's log for a
@@ -69,7 +69,7 @@ const (
 func keepaliveWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef, string) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
+		KeepaliveInterval: keepaliveTestInterval,
 	}})
 	repo, ws := w.NewRepoWorkspace(t)
 	return w, ws, harness.WorkspaceLogPath(repo.Dir, "shim")
@@ -160,10 +160,9 @@ func TestPromptDuringKeepAliveRewindsPastTheKeepAliveAlone(t *testing.T) {
 	// Arrange
 	w, ws, shimLog := keepaliveWorld(t)
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
-	// THE KEEP-ALIVE IS AWAITED AFTER THE REAL TURN OPENED. The suite's short
-	// interval fires a keep-alive before the first real prompt too, and that
-	// one satisfied an unanchored wait: the "during" prompt then arrived with
-	// no keep-alive in flight and no rewind to observe (2026-10-15 full run).
+	// THE KEEP-ALIVE IS AWAITED AFTER THE REAL TURN OPENED, so the wait can
+	// only be satisfied by a beat the daemon timed from that turn's end
+	// (2026-10-15 full run: an unanchored wait took an earlier one).
 	awaitShimRecords(t, w, shimLog, "a keep-alive submitted after the real turn", turnOpened(turn.GetValue()), 1,
 		func(r harness.LogRecord) bool { return r.Context["outcome"] == "keepalive_submitted" })
 
