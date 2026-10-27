@@ -361,6 +361,20 @@ const regionSelector = (className: string, regionClass: string): string => `.${c
 /** The selector every section's rows region matches. */
 export const REGION_SELECTOR = SECTION_REGIONS.map(([className, regionClass]) => regionSelector(className, regionClass)).join(", ");
 
+/**
+ * Every section's rows region under ROOT, each named by its section's class
+ * and its place among that class's regions, so a section drawn anew answers
+ * to the name its predecessor had (`scroll-keep.ts`).
+ */
+export function sectionRegions(root: Element): Array<{ name: string; region: HTMLElement }> {
+  return SECTION_REGIONS.flatMap(([className, regionClass]) =>
+    queryAll<HTMLElement>(root, regionSelector(className, regionClass)).map((region, i) => ({
+      name: `${className}#${i}`,
+      region,
+    })),
+  );
+}
+
 /** One open section's band, its lines, and its stops. */
 interface Measured {
   band: Band;

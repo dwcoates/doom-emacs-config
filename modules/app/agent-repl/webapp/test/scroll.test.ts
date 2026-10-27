@@ -14,6 +14,7 @@ import {
   collapseClicked,
   dragEdgeScroll,
   selectionRowScroll,
+  railScrollKept,
   installIntentScroll,
   innerScrollerAt,
   TailFollow,
@@ -1693,6 +1694,7 @@ describe("no scroll write outside scroll.ts", () => {
       "section.scrollTop = 0;",
       "scroller.scrollTop += step;",
       "region.scrollTop += delta;",
+      "region.scrollTop = top;",
       "box.scrollTop += delta;",
       "box.scrollTop = chatEndTop(box);",
       "box.scrollTop = to;",
@@ -4405,6 +4407,17 @@ describe("selectionRowScroll", () => {
     selectionRowScroll(region, 60);
     // Assert
     expect(region.scrollTop).toBe(100);
+  });
+});
+
+describe("railScrollKept", () => {
+  it("puts the section back at the position the draw found it at", () => {
+    // Arrange
+    const region = { scrollTop: 0 };
+    // Act
+    railScrollKept(region, 140);
+    // Assert
+    expect(region.scrollTop).toBe(140);
   });
 });
 

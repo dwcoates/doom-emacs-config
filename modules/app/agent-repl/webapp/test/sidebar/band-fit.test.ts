@@ -26,6 +26,8 @@ import {
   paintBandMore,
   regionLines,
   regionStops,
+  REGION_SELECTOR,
+  sectionRegions,
 } from "../../src/sidebar/band-fit.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { fireResize } from "../resize-observer.js";
@@ -978,5 +980,37 @@ describe("installBandFit", () => {
     fit.dispose();
     // Assert
     expect(ticker.subscribers()).toBe(0);
+  });
+});
+
+describe("sectionRegions", () => {
+  /** A section of class CLS holding a rows region of class REGION. */
+  const section = (cls: string, region: string): HTMLElement => {
+    const el = document.createElement("div");
+    el.className = cls;
+    const rows = document.createElement("div");
+    rows.className = region;
+    el.appendChild(rows);
+    return el;
+  };
+
+  it("names each section's rows region by its section's class and its place among them", () => {
+    // Arrange
+    const root = document.createElement("div");
+    root.append(section("open-section", "sb-sections"), section("merged-section", "rows"), section("hidden-section", "rows"), section("hidden-section", "rows"));
+    // Act
+    const names = sectionRegions(root).map((r) => r.name);
+    // Assert
+    expect(names).toEqual(["open-section#0", "merged-section#0", "hidden-section#0", "hidden-section#1"]);
+  });
+
+  it("finds exactly the regions REGION_SELECTOR matches, so the fit and the keeper see the same viewports", () => {
+    // Arrange
+    const root = document.createElement("div");
+    root.append(section("open-section", "sb-sections"), section("merged-section", "rows"), section("open-section", "rows"));
+    // Act
+    const found = sectionRegions(root).map((r) => r.region);
+    // Assert
+    expect(found).toEqual([...root.querySelectorAll(REGION_SELECTOR)]);
   });
 });

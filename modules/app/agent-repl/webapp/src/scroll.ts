@@ -1969,6 +1969,18 @@ export function selectionRowScroll(region: { scrollTop: number }, delta: number)
   region.scrollTop += delta;
 }
 
+/**
+ * THE RAIL WAS REDRAWN: put a section's viewport back at TOP, where it stood
+ * before the draw (src/sidebar/scroll-keep.ts, owner request 2026-10-27). A
+ * draw that rebuilds a section brings a new viewport that starts at its top,
+ * and one that keeps it may still see it clamped while its rows are swapped.
+ * This undoes what the draw did, so it is no move of its own: the viewport
+ * stays where the reader left it.
+ */
+export function railScrollKept(region: { scrollTop: number }, top: number): void {
+  region.scrollTop = top;
+}
+
 /** The sub-feed bubble a merge tab's output is drawn in, which bounds `openAtNewest`. */
 const BUBBLE_FOLD_SELECTOR = ".bubble-fold";
 
