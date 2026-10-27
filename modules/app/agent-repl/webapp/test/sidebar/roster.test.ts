@@ -33,6 +33,7 @@ import {
   drawHeadedSection,
   drawRosterRepoDivergence,
   drawSectionLabel,
+  drawDeploysHeading,
   drawWorkspaceRoster,
   mergedTodayCommitsText,
   OPEN_COUNT_CLASS,
@@ -79,6 +80,7 @@ import { recordingFailures } from "../failure-sink.js";
 // Imported at collection, not inside a test, so the transform never counts
 // against a test's timeout.
 import css from "../../src/styles.css?raw";
+import rosterSource from "../../src/sidebar/roster.ts?raw";
 
 const VIEW_OK = create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
 const VIEW_UNKNOWN_REPOSITORY = create(UpdateSidebarViewResponseSchema, {
@@ -2399,5 +2401,38 @@ describe("the tab number's stylesheet", () => {
 
     // Assert
     expect(value.replace(/\s+/g, "")).toBe("color-mix(insrgb,var(--muted)85%,black)");
+  });
+});
+
+describe("drawDeploysHeading", () => {
+  const label = (text: string): HTMLElement => {
+    const el = document.createElement("span");
+    el.className = SECTION_LABEL_CLASS;
+    el.textContent = text;
+    return el;
+  };
+
+  it("draws a box of its class holding its label first, then what follows", () => {
+    const count = document.createElement("span");
+    count.textContent = "(2 today)";
+    const heading = drawDeploysHeading(MERGED_LABEL_CLASS, label("Recently Deployed"), count);
+    expect([heading.className, [...heading.children].map((el) => el.textContent)]).toEqual([
+      MERGED_LABEL_CLASS,
+      ["Recently Deployed", "(2 today)"],
+    ]);
+  });
+
+  it("draws a heading of its label alone when nothing follows", () => {
+    const heading = drawDeploysHeading(DEPLOY_QUEUE_LABEL_CLASS, label("Deploy Queue"));
+    expect([...heading.children].map((el) => el.textContent)).toEqual(["Deploy Queue"]);
+  });
+
+  it("is how the roster draws both of the Deploys section's headings", () => {
+    const code = rosterSource;
+    expect([
+      code.includes("drawDeploysHeading(DEPLOY_QUEUE_LABEL_CLASS,"),
+      code.includes("drawDeploysHeading(MERGED_LABEL_CLASS,"),
+      /className = (DEPLOY_QUEUE_LABEL_CLASS|MERGED_LABEL_CLASS)/.test(code.replace(/export function drawDeploysHeading[\s\S]*?\n}\n/, "")),
+    ]).toEqual([true, true, false]);
   });
 });

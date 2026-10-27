@@ -735,17 +735,13 @@ export function drawRosterMergedSection(
       region.className = "rows";
       const box = document.createElement("div");
       box.className = MERGE_QUEUES_CLASS;
-      const queueHeading = document.createElement("div");
-      queueHeading.className = DEPLOY_QUEUE_LABEL_CLASS;
+      const queueHeading = drawDeploysHeading(DEPLOY_QUEUE_LABEL_CLASS, queueLabel);
       queueHeading.toggleAttribute(EMPTY_SUBSECTION_ATTRIBUTE, queues.length === 0);
-      queueHeading.appendChild(queueLabel);
       box.append(queueHeading, ...queues);
       region.appendChild(box);
       if (groups.length > 0) {
-        const heading = document.createElement("div");
-        heading.className = MERGED_LABEL_CLASS;
         const merges = groups.flatMap((g) => g.shownMerges);
-        heading.append(mergedLabel, drawMergedTodayCount(merges, sc));
+        const heading = drawDeploysHeading(MERGED_LABEL_CLASS, mergedLabel, drawMergedTodayCount(merges, sc));
         tickMergedTodayCommits(heading, merges, sc);
         region.appendChild(heading);
       }
@@ -754,6 +750,18 @@ export function drawRosterMergedSection(
     },
   );
   return section;
+}
+
+/**
+ * One of the Deploys section's two headings, "Deploy Queue" and "Recently
+ * Deployed": a CLASS_NAME box holding its drawn LABEL and whatever follows
+ * it (the latter's "(K today)"). The stylesheet draws both alike.
+ */
+export function drawDeploysHeading(className: string, label: HTMLElement, ...after: HTMLElement[]): HTMLElement {
+  const heading = document.createElement("div");
+  heading.className = className;
+  heading.append(label, ...after);
+  return heading;
 }
 
 /**
