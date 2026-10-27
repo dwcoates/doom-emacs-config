@@ -52,7 +52,6 @@ import {
   MERGE_QUEUES_CLASS,
   DEPLOY_QUEUE_LABEL_CLASS,
 } from "../../src/sidebar/merge-queue-view.js";
-import { EMPTY_SUBSECTION_ATTRIBUTE } from "../../src/sidebar/band-fit.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
@@ -1683,16 +1682,26 @@ describe("the Merge Queue section's queues", () => {
     ]);
   });
 
-  it("draws the Recently Deployed heading collapsed, its chevron first, and its groups undrawn", () => {
+  it("draws the Recently Deployed heading collapsed, its label first with no chevron, and its groups undrawn", () => {
     const drawn = drawWorkspaceRoster(withQueues([], [mergedGroup({ id: "repo-1", rows: [merged("m1")] })]), sidebarContext());
     const heading = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_LABEL_CLASS}`)!;
     const group = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_GROUP_CLASS}`)!;
     expect([
       heading.hasAttribute("data-collapsed"),
       heading.firstElementChild?.className,
-      heading.firstElementChild?.textContent,
+      heading.querySelector(".tri"),
       inRail(drawn, () => cascadedValue(group, "display")),
-    ]).toEqual([true, "tri", "▸", "none"]);
+    ]).toEqual([true, SECTION_LABEL_CLASS, null, "none"]);
+  });
+
+  it("indents the Recently Deployed heading as far as the Deploy Queue heading", () => {
+    const drawn = drawWorkspaceRoster(
+      withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })], [mergedGroup({ id: "repo-1", rows: [merged("m1")] })]),
+      sidebarContext(),
+    );
+    const queue = mergedRegion(drawn).querySelector<HTMLElement>(`.${DEPLOY_QUEUE_LABEL_CLASS}`)!;
+    const recent = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_LABEL_CLASS}`)!;
+    expect(inRail(drawn, () => [cascadedValue(recent, "padding-left"), cascadedValue(queue, "padding-left")])).toEqual(["1.1rem", "1.1rem"]);
   });
 
   it("shows the Recently Deployed groups once the heading is clicked", () => {
@@ -1701,7 +1710,7 @@ describe("the Merge Queue section's queues", () => {
     const heading = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_LABEL_CLASS}`)!;
     heading.click();
     const group = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_GROUP_CLASS}`)!;
-    expect([heading.hasAttribute("data-collapsed"), heading.firstElementChild?.textContent]).toEqual([false, "▾"]);
+    expect(heading.hasAttribute("data-collapsed")).toBe(false);
     expect(inRail(drawn, () => cascadedValue(group, "display"))).not.toBe("none");
   });
 
@@ -1744,11 +1753,7 @@ describe("the Merge Queue section's queues", () => {
     const drawn = drawWorkspaceRoster(withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]), sidebarContext());
     const box = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGE_QUEUES_CLASS}`)!;
     const heading = box.firstElementChild as HTMLElement;
-    expect([heading.className, heading.textContent, heading.hasAttribute(EMPTY_SUBSECTION_ATTRIBUTE)]).toEqual([
-      DEPLOY_QUEUE_LABEL_CLASS,
-      "Deploy Queue",
-      false,
-    ]);
+    expect([heading.className, heading.textContent]).toEqual([DEPLOY_QUEUE_LABEL_CLASS, "Deploy Queue"]);
   });
 
   it("draws each repository's queue under its label, in the wire's order", () => {
@@ -1768,13 +1773,12 @@ describe("the Merge Queue section's queues", () => {
     expect(mergedRegion(drawn).querySelector(`.${MERGED_LABEL_CLASS}`)).toBeNull();
   });
 
-  it("draws the Deploy Queue heading alone, marked empty, while no queue is listed", () => {
+  it("draws no Deploy Queue heading while no queue is listed", () => {
     const drawn = drawWorkspaceRoster(roster({ merged: mergedSection([merged("m1")], false) }), sidebarContext());
     const box = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGE_QUEUES_CLASS}`)!;
-    expect([...box.children].map((el) => [el.className, el.textContent, el.hasAttribute(EMPTY_SUBSECTION_ATTRIBUTE)])).toEqual([
-      [DEPLOY_QUEUE_LABEL_CLASS, "Deploy Queue", true],
-    ]);
+    expect([box.children.length, mergedRegion(drawn).querySelector(`.${DEPLOY_QUEUE_LABEL_CLASS}`)]).toEqual([0, null]);
   });
+
 
   it.each([
     { name: "draws a section holding only a queue", r: () => withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]), drawn: true },

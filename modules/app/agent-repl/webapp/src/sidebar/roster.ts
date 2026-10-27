@@ -19,7 +19,6 @@
  */
 import {
   BAND_FLOOR,
-  EMPTY_SUBSECTION_ATTRIBUTE,
   HIDDEN_SECTION_CLASS,
   MERGED_AT_ATTRIBUTE,
   MERGED_SECTION_CLASS,
@@ -695,10 +694,9 @@ export function drawRosterRepoKey(u: RosterRepoKey, path: string): RepositoryRef
  * hover. Its label is always the purple of a merge in progress; a paused
  * queue is drawn on its own group (`merge-queue-view.ts`).
  *
- * THE SECTION ALWAYS DRAWS, and so does its "Deploy Queue" heading (owner
- * request, 2026-10-27): with no queue listed the heading stands alone, marked
- * `EMPTY_SUBSECTION_ATTRIBUTE` as an empty subsection's header is, and is a line of its own in the band fit,
- * so an empty queue reads as empty rather than absent.
+ * THE SECTION ALWAYS DRAWS; its "Deploy Queue" heading draws only over a
+ * queue (owner request, 2026-10-27): with no deploy going on, the heading is
+ * left out and "Recently Deployed" stands first.
  *
  * EVERY MERGE THE DAEMON SENDS IS DRAWN (a week of them); once the section is
  * laid out, `fitBands` (band-fit.ts) sizes its scrolling viewport against the
@@ -737,19 +735,14 @@ export function drawRosterMergedSection(
       region.className = "rows";
       const box = document.createElement("div");
       box.className = MERGE_QUEUES_CLASS;
-      const queueHeading = drawDeploysHeading(DEPLOY_QUEUE_LABEL_CLASS, queueLabel);
-      queueHeading.toggleAttribute(EMPTY_SUBSECTION_ATTRIBUTE, queues.length === 0);
-      box.append(queueHeading, ...queues);
+      if (queues.length > 0) box.append(drawDeploysHeading(DEPLOY_QUEUE_LABEL_CLASS, queueLabel), ...queues);
       region.appendChild(box);
       if (groups.length > 0) {
         const merges = groups.flatMap((g) => g.shownMerges);
         const heading = drawDeploysHeading(MERGED_LABEL_CLASS, mergedLabel, drawMergedTodayCount(merges, sc));
         tickMergedTodayCommits(heading, merges, sc);
-        // THE ROWS ARE SHOWN ONLY WHILE ASKED FOR (recently-deployed.ts): the
-        // heading's chevron says which, and a click on it asks the other.
-        const triangle = document.createElement("span");
-        triangle.className = "tri";
-        heading.prepend(triangle);
+        // THE ROWS ARE SHOWN ONLY WHILE ASKED FOR (recently-deployed.ts): a
+        // click on the heading, which draws no chevron, asks the other.
         heading.addEventListener("click", () => sc.recentlyDeployed.toggle());
         sc.recentlyDeployed.paint(heading);
         region.appendChild(heading);

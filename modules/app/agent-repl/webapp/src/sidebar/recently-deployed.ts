@@ -3,7 +3,8 @@
  * ARE SHOWN (owner request, 2026-10-27).
  *
  * THEY ARE SHOWN ONLY WHILE ASKED FOR. The heading is collapsed until it is
- * clicked, and a click on it again collapses it. It collapses again by
+ * clicked, and a click on it again collapses it. It draws no chevron (owner
+ * request, 2026-10-27): the heading itself is what is clicked. It collapses again by
  * itself the moment the user is done with it:
  *   - the focus leaves the rail's page (`focus-left.ts`): a click into a
  *     feed, into another Emacs window, or Emacs moving its own focus;
@@ -23,7 +24,6 @@
 import { queryAll } from "../dom.js";
 import type { FocusLeft } from "../focus-left.js";
 import { log } from "../log.js";
-import { paintTriangle } from "./view.js";
 
 /** The class of the "Recently Deployed" heading over the merged groups, below the queues. */
 export const RECENTLY_DEPLOYED_LABEL_CLASS = "sb-merged-label";
@@ -60,8 +60,6 @@ export function createRecentlyDeployed(root: ParentNode, changed: () => void): R
   let expanded = false;
   const paint = (heading: HTMLElement): void => {
     heading.toggleAttribute(RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE, !expanded);
-    const triangle = heading.querySelector<HTMLElement>(":scope > .tri");
-    if (triangle !== null) paintTriangle(triangle, !expanded);
   };
   const set = (to: boolean, why: string): void => {
     if (expanded === to) return;

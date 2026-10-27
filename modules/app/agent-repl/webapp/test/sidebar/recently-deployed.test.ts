@@ -15,10 +15,10 @@ import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
 import { createPresence } from "../../src/presence.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
-/** A rail holding one heading with its chevron, and a recorder of every refit. */
+/** A rail holding one heading, and a recorder of every refit. */
 function rail(): { root: HTMLElement; heading: HTMLElement; refits: number[] } {
   const root = document.createElement("div");
-  root.innerHTML = `<div class="${RECENTLY_DEPLOYED_LABEL_CLASS}"><span class="tri"></span></div>`;
+  root.innerHTML = `<div class="${RECENTLY_DEPLOYED_LABEL_CLASS}"></div>`;
   return { root, heading: root.firstElementChild as HTMLElement, refits: [] };
 }
 
@@ -32,20 +32,20 @@ describe("createRecentlyDeployed", () => {
     expect(createRecentlyDeployed(document, () => undefined).expanded()).toBe(false);
   });
 
-  it("paints a fresh heading collapsed, its chevron pointing right", () => {
+  it("paints a fresh heading collapsed, drawing it no chevron", () => {
     const { heading } = rail();
     createRecentlyDeployed(document, () => undefined).paint(heading);
-    expect([heading.hasAttribute(RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE), heading.querySelector(".tri")?.textContent]).toEqual([true, "▸"]);
+    expect([heading.hasAttribute(RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE), heading.children.length]).toEqual([true, 0]);
   });
 
   it.each([
-    { name: "expands on the first toggle", toggles: 1, want: [true, false, "▾"] },
-    { name: "collapses on the second toggle", toggles: 2, want: [false, true, "▸"] },
+    { name: "expands on the first toggle", toggles: 1, want: [true, false] },
+    { name: "collapses on the second toggle", toggles: 2, want: [false, true] },
   ])("$name, repainting every heading in its rail", ({ toggles, want }) => {
     const { root, heading } = rail();
     const recently = createRecentlyDeployed(root, () => undefined);
     for (let i = 0; i < toggles; i += 1) recently.toggle();
-    expect([recently.expanded(), heading.hasAttribute(RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE), heading.querySelector(".tri")?.textContent]).toEqual(want);
+    expect([recently.expanded(), heading.hasAttribute(RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE)]).toEqual(want);
   });
 
   it("tells its rail to refit on each change, and not on a collapse of collapsed rows", () => {
