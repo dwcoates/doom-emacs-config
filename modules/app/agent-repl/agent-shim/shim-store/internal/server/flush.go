@@ -57,7 +57,7 @@ func (s *Server) openStream(ctx context.Context, log *logging.Logger, operation 
 	flusher, ok := ctx.Value(responseFlusherKey{}).(http.Flusher)
 	if !ok {
 		ref := refuse(SiteStreamNotFlushable, "", "watch: this stream's transport cannot flush its headers, so the tail could never be opened")
-		s.logOwnFailure(log, operation, ref, logging.Fields{})
+		logOwnFailure(log, operation, ref, logging.Fields{})
 		return connect.NewError(connect.CodeInternal, ref)
 	}
 	flusher.Flush()

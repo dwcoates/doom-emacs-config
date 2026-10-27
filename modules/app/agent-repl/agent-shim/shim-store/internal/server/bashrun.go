@@ -30,7 +30,7 @@ import (
 func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.WatchBashRunRequest], stream *connect.ServerStream[storev1.WatchBashRunResponse]) error {
 	log := s.rpcLogger(storev1connect.ShimStoreWatchBashRunProcedure, req.Header())
 	if ref := validateWatchBashRunRequest(req.Msg); ref != nil {
-		s.logRefusal(log, "store.rpc.watch-bash-run", ref, logging.Fields{})
+		logRefusal(log, "store.rpc.watch-bash-run", ref, logging.Fields{})
 		// A malformed ADDRESS is not an unknown run: the caller must fix the
 		// request rather than conclude the run does not exist.
 		return connect.NewError(connect.CodeInvalidArgument, ref)
@@ -46,14 +46,14 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 
 	replay, err := s.store.BashRun(correlated(ctx, req.Header()), runID)
 	if err != nil {
-		ref := s.storeFailure(log, "store.rpc.watch-bash-run", err, logging.Fields{})
+		ref := storeFailure(log, "store.rpc.watch-bash-run", err, logging.Fields{})
 		return connect.NewError(connect.CodeInternal, ref)
 	}
 	if len(replay.Rows) == 0 {
 		if !req.Msg.GetAwaitFirstRow() {
 			ref := refuseClass(classUnknownRun, SiteUnknownBashRun, "run",
 				fmt.Sprintf("watch: this store holds no row for run %q, so there is no run to follow", runID))
-			s.logRefusal(log, "store.rpc.watch-bash-run", ref, logging.Fields{})
+			logRefusal(log, "store.rpc.watch-bash-run", ref, logging.Fields{})
 			return connect.NewError(connect.CodeNotFound, ref)
 		}
 		// AN ANNOUNCED RUN WITH NO ROW YET IS WAITED ON, NOT REFUSED. Its
