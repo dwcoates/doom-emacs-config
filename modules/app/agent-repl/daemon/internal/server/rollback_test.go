@@ -1280,3 +1280,98 @@ func TestRollBackResendIsRecordedAtInfo(t *testing.T) {
 	}
 	t.Fatalf("INFO records = %v, want one naming the resend's key", log.at("INFO"))
 }
+
+func TestInterruptRollingBackTakesBackAHeldPromptAndLeavesTheTurnRunning(t *testing.T) {
+	// Arrange: a held prompt nothing answered stands behind a running turn
+	// whose own prompt is answered.
+	h := newHarness(t)
+	seedUnanswered(h)
+	h.Feed.promptFollowed = true
+	h.Queue.heldRolledBack = wsm.HeldPrompt{Turn: "t2", Said: said("held prompt")}
+	h.Queue.heldRollBackOK = true
+
+	// Act.
+	resp, err := stopRollingBack(t, h)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	rolled := resp.Msg.GetSuccess().GetRolledBackUnanswered()
+	if rolled == nil || !proto.Equal(rolled.GetPrompt(), replyquote.Words(said("held prompt"))) {
+		t.Fatalf("result = %v, want rolled_back_unanswered carrying the held prompt", resp.Msg.GetResult())
+	}
+	if h.Verbs.interruptTarget.Turn {
+		t.Fatalf("verbs interrupted %+v, want the running turn left running", h.Verbs.interruptTarget)
+	}
+}
+
+func TestInterruptRollingBackStopsTheTurnWhenNoHeldPromptIsTakenBack(t *testing.T) {
+	// Arrange: the queue takes nothing back, and output follows the running
+	// turn's prompt.
+	h := newHarness(t)
+	seedUnanswered(h)
+	h.Feed.promptFollowed = true
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true}
+
+	// Act.
+	resp, err := stopRollingBack(t, h)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if h.Queue.heldRollBackCalls != 1 {
+		t.Fatalf("RollBackHeld calls = %d, want 1", h.Queue.heldRollBackCalls)
+	}
+	if !h.Verbs.interruptTarget.Turn || h.Verbs.interruptTarget.RollBack != nil {
+		t.Fatalf("verbs target = %+v, want a bare turn stop", h.Verbs.interruptTarget)
+	}
+	if resp.Msg.GetSuccess().GetInterruptedTurn() == nil {
+		t.Fatalf("result = %v, want interrupted_turn", resp.Msg.GetResult())
+	}
+}
+
+func TestInterruptWithoutRollingBackNeverTakesBackAHeldPrompt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Queue.heldRollBackOK = true
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true}
+
+	// Act.
+	_, err := h.Client.Interrupt(context.Background(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ref(),
+		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if h.Queue.heldRollBackCalls != 0 {
+		t.Fatalf("RollBackHeld calls = %d, want none", h.Queue.heldRollBackCalls)
+	}
+}
+
+func TestInterruptRollingBackFailsWhenTheHeldRollbackFails(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	seedUnanswered(h)
+	h.Queue.heldRollBackErr = errors.New("holds unreadable")
+
+	// Act.
+	resp, err := stopRollingBack(t, h)
+
+	// Assert.
+	if connectCode(t, err) != connect.CodeInternal || resp != nil {
+		t.Fatalf("Interrupt = %v, %v; want an internal failure and no answer", resp, err)
+	}
+	if h.Verbs.interruptTarget.Turn {
+		t.Fatalf("verbs interrupted %+v, want nothing stopped", h.Verbs.interruptTarget)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "Interrupt"})
+	if !ok || rec.Context["cause"] != "holds unreadable" {
+		t.Fatalf("ERROR record = %v (%v), want cause %q", rec.Context, ok, "holds unreadable")
+	}
+}

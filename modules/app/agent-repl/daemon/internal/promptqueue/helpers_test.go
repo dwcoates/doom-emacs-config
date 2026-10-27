@@ -1081,6 +1081,17 @@ type fakeFeed struct {
 	// pullTarget is the pull request target PullTarget answers for every
 	// workspace, nil for none.
 	pullTarget *pullrefs.Target
+	// answeredAt is when the fixture's root feed last drew agent output, as
+	// the real resolver records it (AnsweredSince); zero for never.
+	answeredAt time.Time
+}
+
+// AnsweredSince answers whether the fixture drew agent output at or after
+// AT, as the real resolver does.
+func (f *fakeFeed) AnsweredSince(_ ids.WorkspaceID, at time.Time) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.answeredAt.IsZero() && !f.answeredAt.Before(at)
 }
 
 // PullTarget answers the fixture's pull request target.

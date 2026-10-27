@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // The four "act on what is on screen" verbs. Each one decodes the clicked row's
@@ -147,6 +148,15 @@ func (s *server) Interrupt(
 	case req.Msg.GetTurn() != nil:
 		target.Turn = true
 		if req.Msg.GetTurn().GetRollBackUnanswered() != nil {
+			// A PROMPT HELD BEHIND THE RUNNING TURN THAT NOTHING HAS ANSWERED
+			// SINCE is what the stop takes back first, and the turn runs on.
+			held, ok, err := s.deps.Queue.RollBackHeld(ctx, subject.Record.ID)
+			if err != nil {
+				return nil, fail(subject.Log, rpc, err)
+			}
+			if ok {
+				return s.rolledBackHeld(subject.Log, held, resp)
+			}
 			plan, ok, err := s.unansweredRollback(ctx, subject.Record.ID, subject.Log)
 			if err != nil {
 				return nil, fail(subject.Log, rpc, err)
@@ -223,6 +233,20 @@ func (s *server) Interrupt(
 		dlog.Context{"nothing_running": outcome.NothingRunning, "merge_queue_offered": outcome.MergeQueueOffered, "detached": outcome.DetachedCount,
 			"rolled_back": outcome.RolledBack, "rollback_refused": outcome.RollbackRefused != nil})
 	resp.Result = &agentreplv1.InterruptResponse_Success{Success: success}
+	return connect.NewResponse(resp), nil
+}
+
+// rolledBackHeld answers a turn stop that took back the held prompt HELD
+// rather than stopping the turn: its words return to the composer exactly as
+// a rolled-back sent prompt's do (InterruptRolledBackUnanswered).
+func (s *server) rolledBackHeld(log dlog.Logger, held wsm.HeldPrompt, resp *agentreplv1.InterruptResponse) (*connect.Response[agentreplv1.InterruptResponse], error) {
+	log.Debug("daemon.server.interrupt", "answered that the stop took back a held prompt and left the turn running",
+		dlog.Context{"turn": string(held.Turn)})
+	resp.Result = &agentreplv1.InterruptResponse_Success{Success: &agentreplv1.InterruptSuccess{
+		Outcome: &agentreplv1.InterruptSuccess_RolledBackUnanswered{
+			RolledBackUnanswered: &agentreplv1.InterruptRolledBackUnanswered{Prompt: replyquote.Words(held.Said)},
+		},
+	}}
 	return connect.NewResponse(resp), nil
 }
 

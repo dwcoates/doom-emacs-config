@@ -261,6 +261,11 @@ type Queue interface {
 	// (under the delivery lock), dropping the planned held prompts only once
 	// it succeeds; ErrHoldsChanged when they are no longer the ones standing.
 	RollBack(ctx context.Context, ws ids.WorkspaceID, since time.Time, drop []ids.TurnID, perform func(context.Context) error) error
+	// RollBackHeld takes back the newest prompt the user sent that stands
+	// held while a turn runs, when nothing answering has been drawn in the
+	// root feed since it was queued: it is retired as rolled back and
+	// answered with ok true. ok is false, and nothing changes, otherwise.
+	RollBackHeld(ctx context.Context, ws ids.WorkspaceID) (held wsm.HeldPrompt, ok bool, err error)
 	// Exclusively runs PERFORM as the workspace's one standing shim call: no
 	// prompt is delivered to the workspace until it returns, and a prompt
 	// submitted meanwhile is held and delivered once it has. WHAT names the

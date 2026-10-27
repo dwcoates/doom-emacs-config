@@ -114,6 +114,14 @@ export type InterruptTurn = Message<"agentrepl.v1.InterruptTurn"> & {
    * follows the prompt, when no prompt can be rolled back, or when detached
    * agents are live (the confirm_required challenge governs that stop).
    *
+   * A HELD PROMPT IS TAKEN BACK FIRST. When the newest prompt the user sent
+   * stands held behind the running turn, and nothing the agent produced has
+   * been drawn in the root feed since it was queued, the stop takes that held
+   * prompt out of the queue INSTEAD of stopping anything: the running turn
+   * runs on, and the answer is `rolled_back_unanswered` carrying the held
+   * prompt's words. Once output has been drawn after it was queued, the stop
+   * stops the turn as above and the held prompt stays queued.
+   *
    * @generated from field: optional agentrepl.v1.InterruptTurnRollBackUnanswered roll_back_unanswered = 1;
    */
   rollBackUnanswered?: InterruptTurnRollBackUnanswered | undefined;
@@ -239,9 +247,11 @@ export type InterruptSuccess = Message<"agentrepl.v1.InterruptSuccess"> & {
     case: "mergeQueueOffered";
   } | {
     /**
-     * The running turn's prompt had nothing after it, the stop asked for it
-     * (InterruptTurn.roll_back_unanswered), and the turn was stopped by
-     * rolling that prompt back.
+     * The stop asked for an unanswered prompt's rollback
+     * (InterruptTurn.roll_back_unanswered) and took one back: either the
+     * running turn's prompt had nothing after it, and the turn was stopped
+     * by rolling that prompt back, or a held prompt nothing had answered
+     * since it was queued was taken out of the queue, and the turn runs on.
      *
      * @generated from field: agentrepl.v1.InterruptRolledBackUnanswered rolled_back_unanswered = 5;
      */
@@ -307,11 +317,13 @@ export const InterruptedTurnNotRolledBackSchema: GenMessage<InterruptedTurnNotRo
   messageDesc(file_agentrepl_v1_endpoint_interrupt, 7);
 
 /**
- * THE STOP ROLLED THE UNANSWERED PROMPT BACK. The conversation ends just
- * before the prompt, held prompts queued after it are dropped, files are
- * kept, and the feed draws neither the prompt nor its turn's end, so no
- * "interrupted" marker appears. Emacs saves the composer's contents to its
- * history and fills it with the prompt, exactly as after RollBack.
+ * THE STOP ROLLED THE UNANSWERED PROMPT BACK. For the running turn's prompt,
+ * the conversation ends just before the prompt, held prompts queued after it
+ * are dropped, files are kept, and the feed draws neither the prompt nor its
+ * turn's end, so no "interrupted" marker appears. For a held prompt, it
+ * leaves the held section and nothing else changes. Either way Emacs saves
+ * the composer's contents to its history and fills it with the prompt,
+ * exactly as after RollBack.
  *
  * @generated from message agentrepl.v1.InterruptRolledBackUnanswered
  */
