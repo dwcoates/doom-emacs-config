@@ -1470,9 +1470,14 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   content: "";
   display: block;
   height: 1px;
-  margin: 0.35rem 0.7rem 0.1rem;
+  margin: 0.35rem 0.7rem 0.3rem;
   background: var(--border);
 }
+/* THE DEPLOYS SECTION'S HEADINGS STAND OFF what is above them (owner request,
+   2026-10-27): "Deploy Queue" from the "Deploys" header, and "Recently
+   Deployed" from the rule above it (the rule's bottom margin), each by a
+   little less than the 0.4rem a main section's header stands off its rule. */
+#ws-sidebar .sb-merge-queues { padding-top: 0.3rem; }
 /* THE "RECENTLY MERGED" HEADING over the merged groups, below the queues:
    drawn as a group header is (the rule above), set out to the left of the
    groups and in the section's purple, so it rides with the first merged row
