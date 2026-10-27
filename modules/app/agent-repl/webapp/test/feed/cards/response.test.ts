@@ -38,8 +38,8 @@ import {
   SIGN_IN_ACTION_ATTRIBUTE,
   answerLoginRequests,
 } from "../../../src/login/request.js";
-import { visibleWidth } from "../../../src/metaprompt-tree.js";
-import { installTreeLayout, stagedCols, useTreeLayout } from "../../tree-layout.js";
+import { visibleWidth, columnMeasure } from "../../../src/metaprompt-tree.js";
+import { installTreeLayout, stagedCols, stagedMeasure, useTreeLayout } from "../../tree-layout.js";
 import { stopTicking } from "../../../src/feed/ticking.js";
 import { fireResize } from "../../resize-observer.js";
 import stylesheet from "../../../src/styles.css?raw";
@@ -761,7 +761,7 @@ describe("the wrapped tree a settled response carries", () => {
     // Arrange
     const host = document.createElement("div");
     // Act — at 105 columns.
-    host.innerHTML = proseHtml(treeProse(SHOWCASE_TREE), () => 105);
+    host.innerHTML = proseHtml(treeProse(SHOWCASE_TREE), () => columnMeasure(105));
     const prefixes = [...host.querySelectorAll(".mp-prefix")].map((el) => el.textContent ?? "");
     // Assert — 1.1 wrapped, and its continuation carries the ancestor rail plus
     // 1.1's own held-open child rail as REAL characters, so the wrap does not
@@ -786,7 +786,7 @@ describe("the wrapped tree a settled response carries", () => {
     ].join("\n");
     // Act
     const host = document.createElement("div");
-    host.innerHTML = proseHtml(servedProse(markdown), () => 105);
+    host.innerHTML = proseHtml(servedProse(markdown), () => columnMeasure(105));
     // Assert — one tree, the code opaque (in a <pre><code>, `__name__` literal
     // and never bolded), and the last branch kept a tree line rather than
     // spilled into generic markdown after the tree. The daemon labels each
@@ -808,7 +808,7 @@ describe("the wrapped tree a settled response carries", () => {
     ].join("\n");
     // Act — a width narrower than the branch text forces a wrap.
     const host = document.createElement("div");
-    host.innerHTML = proseHtml(treeProse(tree), () => 60);
+    host.innerHTML = proseHtml(treeProse(tree), () => columnMeasure(60));
     // Assert — a tree rendered, and no rendered tree line exceeds the width.
     const lines = [...host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)")];
     expect(host.querySelector(".mp-tree")).not.toBeNull();
@@ -821,8 +821,8 @@ describe("the wrapped tree a settled response carries", () => {
     const narrow = document.createElement("div");
     const wide = document.createElement("div");
     // Act — the same tree at two widths, the mechanism a resize drives.
-    narrow.innerHTML = proseHtml(treeProse(SHOWCASE_TREE), () => 40);
-    wide.innerHTML = proseHtml(treeProse(SHOWCASE_TREE), () => 200);
+    narrow.innerHTML = proseHtml(treeProse(SHOWCASE_TREE), () => columnMeasure(40));
+    wide.innerHTML = proseHtml(treeProse(SHOWCASE_TREE), () => columnMeasure(200));
     // Assert
     const narrowLines = narrow.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length;
     const wideLines = wide.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)").length;
@@ -1350,7 +1350,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     // Drive the type-out to completion so no reveal frame is left pending; the
     // resize is then the only work the timers run.
     vi.advanceTimersByTime(5000);
-    const before = stagedCols(staged.layout, "uncapped");
+    const before = stagedMeasure(staged.layout, "uncapped");
     // Act — the column narrows: the observer re-measures and repaints.
     staged.layout.containingPx = 600;
     fireResize(column);
@@ -1358,7 +1358,7 @@ describe("the incremental reveal reconciles the prose without rebuilding it", ()
     // Assert — the re-wrapped prose equals the whole render at the NEW width,
     // and is no longer the render at the width it first drew at.
     const shown = Number(el.getAttribute(REVEALED_ATTRIBUTE));
-    const after = stagedCols(staged.layout, "uncapped");
+    const after = stagedMeasure(staged.layout, "uncapped");
     expect(prose(body)).toBe(proseHtml(treeProse(SHOWCASE_TREE.slice(0, shown)), () => after));
     expect(prose(body)).not.toBe(proseHtml(treeProse(SHOWCASE_TREE.slice(0, shown)), () => before));
   });

@@ -12,7 +12,15 @@ import {
   TREE_LABEL_ATTRIBUTE,
   TREE_LABEL_CLASS,
   TREE_NODE_ATTRIBUTE,
+  TREE_LABEL_AT_ATTRIBUTE,
+  TREE_LABEL_PAD_CLASS,
+  TREE_RAILS_CLASS,
+  TREE_TEXT_END_ATTRIBUTE,
   visibleWidth,
+  columnMeasure,
+  cssLength,
+  type TreeMeasure,
+  type TreeMeasureItem,
 } from "../src/metaprompt-tree.js";
 import { ProseTreeSchema, type ProseTree } from "../../proto/gen/ts/frontend/v1/prose_pb";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
@@ -357,7 +365,7 @@ describe("wrap engine — inline-code balancing", () => {
     // Arrange — a minimal inline pass that turns `x` spans into <code>x</code>.
     const inlineCode = (s: string): string => s.replace(/`([^`]+)`/g, "<code>$1</code>");
     // Act
-    const html = renderTreeHtml(tree(`${R}\n└── 1.1 \`alpha beta gamma\``), inlineCode, 18);
+    const html = renderTreeHtml(tree(`${R}\n└── 1.1 \`alpha beta gamma\``), inlineCode, columnMeasure(18));
     // Assert — every content span of the branch became a <code>, and no bare
     // backtick leaks.
     const contents = [...html.matchAll(/<span class="mp-content">(.*?)<\/span>/g)].map((m) => m[1]).slice(1);
@@ -369,21 +377,21 @@ describe("wrap engine — inline-code balancing", () => {
 describe("a node's label", () => {
   it("is drawn as its own element naming the label", () => {
     // Act
-    const html = renderTreeHtml(tree(`${R}\n└── 1.1 Detail`), identity, 100);
+    const html = renderTreeHtml(tree(`${R}\n└── 1.1 Detail`), identity, columnMeasure(100));
     // Assert
     expect(html).toContain(`<span class="${TREE_LABEL_CLASS}" ${TREE_LABEL_ATTRIBUTE}="1.1">1.1</span> `);
   });
 
   it("is drawn on a root too", () => {
     // Act
-    const html = renderTreeHtml(tree(`${R}\n└── 1.1 Detail`), identity, 100);
+    const html = renderTreeHtml(tree(`${R}\n└── 1.1 Detail`), identity, columnMeasure(100));
     // Assert
     expect(html).toContain(`<span class="${TREE_LABEL_CLASS}" ${TREE_LABEL_ATTRIBUTE}="1">1</span> `);
   });
 
   it("is not drawn on a wrapped line's continuation", () => {
     // Act
-    const html = renderTreeHtml(tree(`${R}\n└── 1.1 foo bar`), identity, 14);
+    const html = renderTreeHtml(tree(`${R}\n└── 1.1 foo bar`), identity, columnMeasure(14));
     // Assert — two labels: the root's and 1.1's head line, none on its wrap.
     expect(html.split(`class="${TREE_LABEL_CLASS}"`).length - 1).toBe(2);
   });
@@ -400,7 +408,7 @@ describe("a node's lines", () => {
 
   it("all name their node, its wrap lines too", () => {
     // Act
-    const html = renderTreeHtml(tree(`${R}\n└── 1.1 foo bar`), identity, 14);
+    const html = renderTreeHtml(tree(`${R}\n└── 1.1 foo bar`), identity, columnMeasure(14));
     // Assert
     expect(lines(html).map((l) => l.attributes[TREE_NODE_ATTRIBUTE])).toEqual(["1", "1.1", "1.1"]);
   });
@@ -410,7 +418,7 @@ describe("a node's lines", () => {
     const decorate = (node: number) =>
       node === 1 ? { lineClass: "picked", attributes: { "data-x": "y" }, labelClass: "picked-label" } : undefined;
     // Act
-    const drawn = lines(renderTreeHtml(tree(`${R}\n└── 1.1 foo bar`), identity, 14, undefined, { decorate }));
+    const drawn = lines(renderTreeHtml(tree(`${R}\n└── 1.1 foo bar`), identity, columnMeasure(14), undefined, { decorate }));
     // Assert
     expect(drawn.map((l) => [l.classes.includes("picked"), l.attributes["data-x"] ?? null, l.labelClasses.includes("picked-label")])).toEqual([
       [false, null, false],
@@ -426,40 +434,40 @@ describe("a node's lines", () => {
       { label: "2", text: "b" },
     ]);
     // Act
-    const html = renderTreeHtml(twoRoots, identity, 40, undefined, { rootGap: false });
+    const html = renderTreeHtml(twoRoots, identity, columnMeasure(40), undefined, { rootGap: false });
     // Assert
-    expect([html.includes("mp-blank"), renderTreeHtml(twoRoots, identity, 40).includes("mp-blank")]).toEqual([false, true]);
+    expect([html.includes("mp-blank"), renderTreeHtml(twoRoots, identity, columnMeasure(40)).includes("mp-blank")]).toEqual([false, true]);
   });
 });
 
 describe("renderTreeHtml", () => {
   it("renders a fitting branch as a prefix/content pair with real connectors", () => {
     // Act
-    const html = renderTreeHtml(tree(`${R}\n├── 1.1 Detail\n└── 1.2 x`), identity, 100);
+    const html = renderTreeHtml(tree(`${R}\n├── 1.1 Detail\n└── 1.2 x`), identity, columnMeasure(100));
     // Assert
-    expect(html).toContain(`<span class="mp-prefix">├── <span class="mp-label" data-label="1.1">1.1</span> </span>`);
+    expect(html).toContain(`<span class="mp-prefix"><span class="mp-connectors">├── </span><span class="mp-label" data-label="1.1">1.1</span> </span>`);
     expect(html).toContain(`<span class="mp-content">Detail</span>`);
   });
 
   it("emits real rail characters on a wrapped branch's continuation", () => {
     // Arrange — 1.1 has a child, so the wrap holds a rail; force a wrap at 15.
-    const html = renderTreeHtml(tree(`${R}\n├── 1.1 aaaa bbbb cccc\n│   └── 1.1.1 x\n└── 1.2 y`), identity, 15);
+    const html = renderTreeHtml(tree(`${R}\n├── 1.1 aaaa bbbb cccc\n│   └── 1.1.1 x\n└── 1.2 y`), identity, columnMeasure(15));
     // Assert — the continuation prefix carries the ancestor rail plus 1.1's own
     // held-open child rail as REAL characters in the prefix span, no repaint.
-    expect(html).toContain(`<span class="mp-prefix">│   │`);
+    expect(html).toContain(`<span class="mp-prefix"><span class="mp-connectors">│   </span><span class="mp-label-pad mp-label-pad-ruled" style="width: 4ch">│   </span></span>`);
     expect(html).not.toContain("mp-rail");
   });
 
   it("renders blank lines as spacer rows", () => {
     // Act
-    const html = renderTreeHtml(tree("1 🔧 A\n└── 1.1 a\n\n2 ✅ B\n└── 2.1 b"), identity, 100);
+    const html = renderTreeHtml(tree("1 🔧 A\n└── 1.1 a\n\n2 ✅ B\n└── 2.1 b"), identity, columnMeasure(100));
     // Assert
     expect(html).toContain(`class="mp-line mp-blank"`);
   });
 
   it("escapes markup in tree content", () => {
     // Act
-    const html = renderTreeHtml(tree(`${R}\n└── 1.1 <img src=x>`), identity, 100);
+    const html = renderTreeHtml(tree(`${R}\n└── 1.1 <img src=x>`), identity, columnMeasure(100));
     // Assert
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img src=x&gt;");
@@ -469,14 +477,14 @@ describe("renderTreeHtml", () => {
     // Arrange
     const shout = (s: string): string => s.toUpperCase();
     // Act + Assert
-    expect(renderTreeHtml(tree(`${R}\n└── 1.1 detail`), shout, 100)).toContain("DETAIL");
+    expect(renderTreeHtml(tree(`${R}\n└── 1.1 detail`), shout, columnMeasure(100))).toContain("DETAIL");
   });
 
   it("falls back to unwrapped lines and surfaces the issue when a prefix cannot fit", () => {
     // Arrange — a prefix wider than the width, and a spy for the issue callback.
     const issues: string[] = [];
     // Act
-    const html = renderTreeHtml(tree(`${R}\n└── 1.1 a\n    └── 1.1.1 text`), identity, 10, (message) =>
+    const html = renderTreeHtml(tree(`${R}\n└── 1.1 a\n    └── 1.1.1 text`), identity, columnMeasure(10), (message) =>
       issues.push(message),
     );
     // Assert — the tree is still drawn, and the refusal was surfaced, not swallowed.
@@ -497,7 +505,7 @@ describe("renderTreeHtml", () => {
       "└── 1.2 Done",
     ].join("\n");
     // Act
-    const html = renderTreeHtml(tree(text), identity, 100);
+    const html = renderTreeHtml(tree(text), identity, columnMeasure(100));
     // Assert — the code sits in a <pre><code>, not a tree line, and is NOT
     // markdown-parsed, so `__name__` stays literal and is never bolded.
     expect(html).toContain('<pre class="md-code">');
@@ -506,7 +514,7 @@ describe("renderTreeHtml", () => {
     // The fence delimiters themselves never leak as tree lines.
     expect(html).not.toContain("```");
     // Branches around the code still render as tree lines.
-    expect(html).toContain(`<span class="mp-prefix">└── <span class="mp-label" data-label="1.2">1.2</span> </span>`);
+    expect(html).toContain(`<span class="mp-prefix"><span class="mp-connectors">└── </span><span class="mp-label" data-label="1.2">1.2</span> </span>`);
   });
 
   it("renders a fence drawn behind its branch's rail as a code block with the rail stripped", () => {
@@ -520,20 +528,20 @@ describe("renderTreeHtml", () => {
       "└── 1.2 Done",
     ].join("\n");
     // Act
-    const html = renderTreeHtml(tree(text), identity, 100);
+    const html = renderTreeHtml(tree(text), identity, columnMeasure(100));
     // Assert — one code block holding the body without its rail, no delimiter
     // leaking as a tree line, and the branch after it still a tree line.
     expect(html).toMatch(/<pre class="md-code">(?:(?!<\/pre>).)*<code class="hljs lang-json">/);
     expect(html).not.toContain("```");
     expect(html).not.toMatch(/<code[^>]*>│/);
-    expect(html).toContain(`<span class="mp-prefix">└── <span class="mp-label" data-label="1.2">1.2</span> </span>`);
+    expect(html).toContain(`<span class="mp-prefix"><span class="mp-connectors">└── </span><span class="mp-label" data-label="1.2">1.2</span> </span>`);
   });
 
   it("keeps a code body's own rail beyond its fence's indent", () => {
     // Arrange — an unrailed fence whose code is itself a drawn tree.
     const text = [R, "├── 1.1 Shape", "    ```", "    │   ├── x", "    ```", "└── 1.2 Done"].join("\n");
     // Act
-    const html = renderTreeHtml(tree(text), identity, 100);
+    const html = renderTreeHtml(tree(text), identity, columnMeasure(100));
     // Assert
     expect(html).toContain("<code class=\"hljs\">│   ├── x</code>");
   });
@@ -542,7 +550,7 @@ describe("renderTreeHtml", () => {
     // Arrange — a language-less fence whose body carries a raw tag.
     const text = [R, "├── 1.1 Snippet", "    ```", "    <img src=x>", "    ```", "└── 1.2 Done"].join("\n");
     // Act
-    const html = renderTreeHtml(tree(text), identity, 100);
+    const html = renderTreeHtml(tree(text), identity, columnMeasure(100));
     // Assert — the tag is escaped inside the code block, not rendered.
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img src=x&gt;");
@@ -562,14 +570,14 @@ describe("renderTreeHtml's column budget", () => {
     { name: "NaN", width: Number.NaN },
   ])("refuses $name rather than guessing a width", ({ width }) => {
     // Act + Assert
-    expect(() => renderTreeHtml(tree(`${R}\n└── 1.1 Detail`), identity, width)).toThrow(RangeError);
+    expect(() => renderTreeHtml(tree(`${R}\n└── 1.1 Detail`), identity, columnMeasure(width))).toThrow(RangeError);
   });
 
   it("records the refused width through the canonical logger", async () => {
     // Arrange
     const capture = captureLogRecords();
     // Act
-    expect(() => renderTreeHtml(tree(`${R}\n└── 1.1 Detail`), identity, 0)).toThrow(RangeError);
+    expect(() => renderTreeHtml(tree(`${R}\n└── 1.1 Detail`), identity, columnMeasure(0))).toThrow(RangeError);
     // Assert
     const record = await forwardedRecord(capture, "metaprompt-tree.invalid-width");
     expect([record.level.case, record.context]).toEqual(["error", expect.objectContaining({ width: 0 })]);
@@ -606,7 +614,7 @@ describe("boxWideChars", () => {
 
   it("draws a root line's emoji inside a two-column box", () => {
     // Act
-    const html = renderTreeHtml(tree("1 🔧 Fixed it\n└── 1.1 x"), identity, 100);
+    const html = renderTreeHtml(tree("1 🔧 Fixed it\n└── 1.1 x"), identity, columnMeasure(100));
     // Assert
     expect(html).toContain(`<span class="mp-content">${box("🔧")} Fixed it</span>`);
   });
@@ -680,14 +688,14 @@ describe("renderTreeHtml wraps by the width a line draws", () => {
   ])("keeps a branch on one line when $name draws only its file name", ({ src, text }) => {
     // Arrange — "└── 1.1 " is 8 columns; the drawn text fits 8 + 16, the source does not.
     // Act
-    const contents = lineContents(renderTreeHtml(tree(`${R}\n${src}`), inline, 24)).slice(1);
+    const contents = lineContents(renderTreeHtml(tree(`${R}\n${src}`), inline, columnMeasure(24))).slice(1);
     // Assert
     expect(contents.map(drawn)).toEqual([text]);
   });
 
   it("wraps before a link rather than cutting its markdown apart", () => {
     // Act — the drawn "aaaa the long config" is 20 columns, wider than the 16-column field.
-    const contents = lineContents(renderTreeHtml(tree(`${R}\n└── 1.1 aaaa [the long config](~/x.el)`), inline, 24)).slice(1);
+    const contents = lineContents(renderTreeHtml(tree(`${R}\n└── 1.1 aaaa [the long config](~/x.el)`), inline, columnMeasure(24))).slice(1);
     // Assert — the link is one whole anchor on the continuation, never a literal "[" or "](".
     expect(contents.map(drawn)).toEqual(["aaaa", "the long config"]);
     expect(contents[1]).toMatch(/^<a href="~\/x.el"[^>]*>the long config<\/a>$/);
@@ -695,7 +703,7 @@ describe("renderTreeHtml wraps by the width a line draws", () => {
 
   it("draws a bold phrase that crosses no wrap with no literal asterisks", () => {
     // Act
-    const contents = lineContents(renderTreeHtml(tree(`${R}\n└── 1.1 aaaa **bold words**`), inline, 18)).slice(1);
+    const contents = lineContents(renderTreeHtml(tree(`${R}\n└── 1.1 aaaa **bold words**`), inline, columnMeasure(18))).slice(1);
     // Assert
     expect(contents.join("")).not.toContain("*");
     expect(contents.join("")).toContain("<strong>bold words</strong>");
@@ -703,14 +711,14 @@ describe("renderTreeHtml wraps by the width a line draws", () => {
 
   it("does not count a code span's backticks toward the width", () => {
     // Act — "abc defgh" draws 9 columns, exactly the field; with backticks it is 11.
-    const contents = lineContents(renderTreeHtml(tree(`${R}\n└── 1.1 abc \`defgh\``), inline, 17)).slice(1);
+    const contents = lineContents(renderTreeHtml(tree(`${R}\n└── 1.1 abc \`defgh\``), inline, columnMeasure(17))).slice(1);
     // Assert
     expect(contents).toEqual(["abc <code>defgh</code>"]);
   });
 
   it("runs a header line outside any branch through the inline pass", () => {
     // Act
-    const html = renderTreeHtml(tree("Response (`x`)\n\n1 🔧 A\n└── 1.1 b"), inline, 40);
+    const html = renderTreeHtml(tree("Response (`x`)\n\n1 🔧 A\n└── 1.1 b"), inline, columnMeasure(40));
     // Assert
     expect(html).toContain("Response (<code>x</code>)");
   });
@@ -722,5 +730,124 @@ describe("formatTree without an inline pass", () => {
     const { lines } = formatTree(tree(`${R}\n└── 1.1 abc \`defgh\``), 17);
     // Assert
     expect(lines.map(lineText)).toEqual([R, "└── 1.1 abc", "        `defgh`"]);
+  });
+});
+
+/**
+ * A px measure for the wrap: every rails column 6px, every text column 10px
+ * (a `W` 20px, the one glyph a proportional face draws wider), so a wrap that
+ * counted characters instead of widths would break in the wrong place.
+ */
+function pxMeasure(budget: number, calls: TreeMeasureItem[][] = []): TreeMeasure {
+  return {
+    unit: "px",
+    budget,
+    widths: (items) => {
+      calls.push([...items]);
+      return items.map((item) => {
+        const text = metapromptTree.stripTags(item.html);
+        if (item.kind === "rails") return visibleWidth(text) * 6;
+        return [...text].reduce((px, ch) => px + (ch === "W" ? 20 : visibleWidth(ch) * 10), 0);
+      });
+    },
+  };
+}
+
+/** Every drawn branch line of HTML, as (its node, its label start, its text end). */
+function edges(html: string): [string, string | null, string][] {
+  const attr = (tag: string, name: string): string | null => new RegExp(`${name}="([^"]*)"`).exec(tag)?.[1] ?? null;
+  return [...html.matchAll(/<div class="mp-line"[^>]*>/g)]
+    .map((m) => m[0])
+    .filter((tag) => tag.includes(TREE_NODE_ATTRIBUTE))
+    .map((tag) => [attr(tag, TREE_NODE_ATTRIBUTE) ?? "", attr(tag, TREE_LABEL_AT_ATTRIBUTE), attr(tag, TREE_TEXT_END_ATTRIBUTE) ?? ""]);
+}
+
+/** The text of every element of HTML wearing CLASSNAME alone, in order. */
+function textsOf(html: string, className: string): string[] {
+  return [...html.matchAll(new RegExp(`<span class="${className}">([^<]*)</span>`, "g"))].map((m) => m[1]);
+}
+
+describe("columnMeasure", () => {
+  it("answers its budget in columns", () => {
+    // Act
+    const measure = columnMeasure(40);
+    // Assert
+    expect([measure.unit, measure.budget]).toEqual(["ch", 40]);
+  });
+
+  it("measures every piece in rendered columns, markup and all", () => {
+    // Act + Assert
+    expect(columnMeasure(40).widths([{ kind: "rails", html: "│   " }, { kind: "text", html: "<b>a</b> &amp; 🔧" }])).toEqual([4, 6]);
+  });
+});
+
+describe("renderTreeHtml wraps by its measure", () => {
+  /** R's root, hand-built. */
+  const ROOT: NodeSpec = { label: "1", text: "Root", marker: "🎯" };
+
+  it("asks the measure once for every piece the tree can place", () => {
+    // Arrange
+    const calls: TreeMeasureItem[][] = [];
+    // Act
+    renderTreeHtml(graph([ROOT, { parent: 0, label: "1.1", text: "aaaa bbbb" }, { parent: 0, label: "1.2", text: "cccc" }]), identity, pxMeasure(400, calls));
+    // Assert
+    expect([calls.length, calls[0].some((i) => i.kind === "rails" && i.html === "├── "), calls[0].some((i) => i.html === "bbbb")]).toEqual([1, true, true]);
+  });
+
+  it("breaks a line where its drawn width runs out, not its character count", () => {
+    // 1.1's prefix is 24px of rails and 40px of label: 64px. "WWW"
+    // draws 60px and "aaa" 30px, so 64 + 60 + 10 + 30 = 164px does not fit
+    // 160px, though the line's 12 characters would fit 16 columns.
+    // Act
+    const html = renderTreeHtml(graph([ROOT, { parent: 0, label: "1.1", text: "WWW aaa" }]), identity, pxMeasure(160));
+    // Assert — 1.1's two lines (the root's text holds its boxed emoji, no plain run).
+    expect(textsOf(html, "mp-content")).toEqual(["WWW", "aaa"]);
+  });
+
+  it("carries each line's label start and text end in the measure's unit", () => {
+    // Act
+    const html = renderTreeHtml(graph([ROOT, { parent: 0, label: "1.1", text: "WWW aaa" }]), identity, pxMeasure(160));
+    // Assert — the root: no rails, "1 " 20px, "🎯 Root" 70px.
+    expect(edges(html)).toEqual([
+      ["1", "0px", "90px"],
+      ["1.1", "24px", "124px"],
+      ["1.1", null, "94px"],
+    ]);
+  });
+
+  it("draws a wrap line's label pad exactly as wide as its head line's label", () => {
+    // Act
+    const html = renderTreeHtml(graph([ROOT, { parent: 0, label: "1.1", text: "WWW aaa" }, { parent: 1, label: "1.1.1", text: "x" }, { parent: 0, label: "1.2", text: "y" }]), identity, pxMeasure(160));
+    // Assert — "1.1 " is 40px; the pad holds 1.1's held-open child rule.
+    expect(html).toContain(`<span class="${TREE_LABEL_PAD_CLASS} mp-label-pad-ruled" style="width: 40px">│   </span>`);
+  });
+
+  it("sets only the connectors in the rail element", () => {
+    // Act
+    const html = renderTreeHtml(graph([ROOT, { parent: 0, label: "1.1", text: "x" }]), identity, pxMeasure(160));
+    // Assert
+    expect(textsOf(html, TREE_RAILS_CLASS)).toEqual(["", "└── "]);
+  });
+
+  it("refuses a measure that answers the wrong number of widths, recording it through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const short: TreeMeasure = { unit: "px", budget: 160, widths: () => [10] };
+    // Act
+    expect(() => renderTreeHtml(graph([ROOT, { parent: 0, label: "1.1", text: "x" }]), identity, short)).toThrow(/metaprompt tree measure/);
+    // Assert
+    const record = await forwardedRecord(capture, "metaprompt-tree.measure");
+    expect(record).toMatchObject({ level: { case: "error" }, context: { answered: 1 } });
+  });
+});
+
+describe("cssLength", () => {
+  it.each([
+    [4, "ch", "4ch"],
+    [88.5, "px", "88.5px"],
+    [0, "px", "0px"],
+  ] as const)("spells %s in %s as %s", (n, unit, want) => {
+    // Act + Assert
+    expect(cssLength(n, unit)).toBe(want);
   });
 });

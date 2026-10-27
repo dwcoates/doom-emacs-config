@@ -196,7 +196,7 @@ describe("mountFeed: opening the root feed", () => {
     // Assert — a line of that node drawn in that row is boxed.
     const row = document.createElement("article");
     row.setAttribute("data-feed-row", "r1");
-    row.innerHTML = `<div class="mp-tree"><div class="mp-line" data-node="3.1"><span class="mp-prefix">└── <span class="mp-label">3.1</span> </span><span class="mp-content">x</span></div></div>`;
+    row.innerHTML = `<div class="mp-tree"><div class="mp-line" data-node="3.1" data-label-at="4ch" data-text-end="9ch"><span class="mp-prefix"><span class="mp-connectors">└── </span><span class="mp-label">3.1</span> </span><span class="mp-content">x</span></div></div>`;
     document.body.append(row);
     channel.push(create(WatchFeedResponseSchema, { composerEntry: { at: { case: "node", value: { row: { value: "r1" }, label: "3.1" } } } }));
     await settle();

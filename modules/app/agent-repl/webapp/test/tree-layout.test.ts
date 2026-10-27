@@ -1,18 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { installTreeLayout, stagedCols, useTreeLayout } from "./tree-layout.js";
+import { installTreeLayout, stagedCols, stagedMeasure, useTreeLayout } from "./tree-layout.js";
 
-/** A column holding a bubble holding a body and a tree probe. */
+/** A column holding a bubble holding a body and a tree measure's probe, its one piece ten rendered columns (an emoji counts two). */
 function stage(attached: boolean): { column: HTMLElement; bubble: HTMLElement; body: HTMLElement; probe: HTMLElement } {
   const column = document.createElement("div");
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   const body = document.createElement("div");
   body.className = "bubble-body";
-  const probe = document.createElement("div");
-  probe.className = "mp-tree";
-  probe.textContent = "0".repeat(10);
-  body.append(probe);
+  const measure = document.createElement("div");
+  measure.className = "mp-tree mp-measure";
+  const probe = document.createElement("span");
+  probe.className = "mp-content";
+  probe.innerHTML = `${"0".repeat(8)}🔧`;
+  measure.append(probe);
+  body.append(measure);
   bubble.append(body);
   column.append(bubble);
   if (attached) document.body.append(column);
@@ -103,6 +106,23 @@ describe("stagedCols", () => {
   ])("computes the budget of $name", ({ maxWidth, scrollbarPx, want }) => {
     // Act + Assert
     expect(stagedCols({ charPx: 8, containingPx: 1000, maxWidth, bodyPaddingPx: 10, scrollbarPx, scrollBoxPx: 700 })).toBe(want);
+  });
+});
+
+describe("stagedMeasure", () => {
+  const layout = { charPx: 8, containingPx: 1000, maxWidth: "77%", bodyPaddingPx: 10, scrollbarPx: 8, scrollBoxPx: 700 };
+
+  it.each([
+    ["capped", 742],
+    ["uncapped", 750],
+  ] as const)("budgets a %s bubble's whole px", (box, want) => {
+    // Act + Assert
+    expect([stagedMeasure(layout, box).unit, stagedMeasure(layout, box).budget]).toEqual(["px", want]);
+  });
+
+  it("measures every piece CHARPX a rendered column", () => {
+    // Act + Assert
+    expect(stagedMeasure(layout).widths([{ kind: "rails", html: "├── " }, { kind: "text", html: "<b>ok</b> 🔧" }])).toEqual([32, 40]);
   });
 });
 

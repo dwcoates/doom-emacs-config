@@ -23,7 +23,7 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { plainProse, promptProse } from "../prose.js";
 import { inline } from "../../src/markdown.js";
-import { TREE_NODE_ATTRIBUTE } from "../../src/metaprompt-tree.js";
+import { TREE_NODE_ATTRIBUTE, columnMeasure } from "../../src/metaprompt-tree.js";
 
 /** The entry tree the daemon parses PROMPT's one run of entries into. */
 function entryTree(prompt: string): ProseEntryTree {
@@ -33,7 +33,7 @@ function entryTree(prompt: string): ProseEntryTree {
 }
 
 /** PROMPT's entry tree drawn, in a detached element. */
-const drawnEntries = (prompt: string): HTMLElement => hosted(entryTreeHtml(entryTree(prompt), inline, 80));
+const drawnEntries = (prompt: string): HTMLElement => hosted(entryTreeHtml(entryTree(prompt), inline, columnMeasure(80)));
 
 /** The lines of EL whose node is LABEL. */
 const linesOf = (el: HTMLElement, label: string): Element[] =>
@@ -120,7 +120,7 @@ describe("entryTreeHtml", () => {
     ["no place", { nodes: [{ id: { index: 0 }, label: { text: "3" }, kind: { case: "path", value: {} } }] }],
   ])("refuses a node served with %s", (_name, init) => {
     // Act + Assert
-    expect(() => entryTreeHtml(create(ProseEntryTreeSchema, init as never), inline, 80)).toThrow(MalformedView);
+    expect(() => entryTreeHtml(create(ProseEntryTreeSchema, init as never), inline, columnMeasure(80))).toThrow(MalformedView);
   });
 });
 

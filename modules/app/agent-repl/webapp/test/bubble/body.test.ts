@@ -3,6 +3,7 @@
  * body — the one bubble body: the custom element that knows when it joins the
  * document, the cap measurement a metaprompt tree wraps to, and its refusals.
  */
+import { columnMeasure } from "../../src/metaprompt-tree.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BODY_INVARIANT,
@@ -14,7 +15,9 @@ import {
   createBubbleBody,
   isBubbleBody,
   markdownSlot,
-  measureTreeCols,
+  measureTreeWidth,
+  treeMeasure,
+  TREE_MEASURE_CLASS,
   observeContainingBlock,
   paintBody,
   paintGeneration,
@@ -93,45 +96,53 @@ const TREE = ["Response (✏️ changes made)", "", "1 🔧 Fixed it", "├─�
 );
 
 /**
- * `measureTreeCols` reports the columns a tree wraps to: the body's content
- * width at the bubble's CAP, in columns of the tree font — and nothing else.
+ * `measureTreeWidth` reports the px a tree wraps to: the body's content
+ * width at the bubble's CAP, in whole px — and nothing else.
  * `installTreeLayout` stages the reads the way a real engine answers them, so a
  * DETACHED element reads as no box and no style, exactly as in the webview.
  */
-describe("the columns a tree wraps to are measured against the bubble cap", () => {
+describe("the width a tree wraps to is measured against the bubble cap", () => {
   const staged = useTreeLayout();
 
 
-  it("measures the cap less the chrome, in columns of the tree font", () => {
+  it("measures the cap less the chrome, in whole px", () => {
     // Arrange — 77% of 1000px = 770px, less 2 x 10px body padding and the 8px
     // scrollbar gutter = 742px.
     const body = stageBody();
     // Act
-    const cols = measureTreeCols(body);
-    // Assert — floor(742 / 8).
-    expect(cols).toBe(92);
+    const px = measureTreeWidth(body);
+    // Assert
+    expect(px).toBe(742);
+  });
+
+  it("floors a fractional content width to a whole px", () => {
+    // Arrange — 77% of 1001px = 770.77px, less the same 28px of chrome.
+    staged.layout.containingPx = 1001;
+    const body = stageBody();
+    // Act + Assert
+    expect(measureTreeWidth(body)).toBe(742);
   });
 
   it.each([
-    ["an overlay bar's 0px", 0, 93],
-    ["a classic bar's 14px", 14, 92],
+    ["an overlay bar's 0px", 0, 750],
+    ["a classic bar's 14px", 14, 736],
   ] as const)("takes %s measured gutter off the budget", (_label, gutterPx, want) => {
     // Arrange — 770px cap less 20px body padding less the gutter.
     staged.layout.scrollbarPx = gutterPx;
     const body = stageBody();
     // Act
-    const cols = measureTreeCols(body);
-    // Assert — floor(750 / 8) and floor(736 / 8).
-    expect(cols).toBe(want);
+    const px = measureTreeWidth(body);
+    // Assert
+    expect(px).toBe(want);
   });
 
   it("takes no gutter off an uncapped bubble's budget, whose box reserves none", () => {
     // Arrange — the uncapped box wears `.bubble-box` alone (BUBBLE_UNCAPPED).
     const body = stageBody({ boxClass: "bubble-box" });
     // Act
-    const cols = measureTreeCols(body);
-    // Assert — floor(750 / 8): the 8px classic gutter is not taken.
-    expect(cols).toBe(93);
+    const px = measureTreeWidth(body);
+    // Assert — the 8px classic gutter is not taken.
+    expect(px).toBe(750);
   });
 
   it("wraps a collapsed bubble to the same budget as the expanded one", () => {
@@ -139,21 +150,21 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     const body = stageBody();
     const scroll = body.parentElement;
     if (scroll === null) throw new Error("no scroll box");
-    const collapsed = measureTreeCols(body);
+    const collapsed = measureTreeWidth(body);
     // Act
     scroll.classList.add(EXPANDED_CLASS);
-    const expanded = measureTreeCols(body);
+    const expanded = measureTreeWidth(body);
     // Assert
     expect(expanded).toBe(collapsed);
   });
 
-  it("resolves the percentage cap against the containing block, so a wider column yields more columns", () => {
+  it("resolves the percentage cap against the containing block, so a wider column yields more room", () => {
     // Arrange
     const body = stageBody();
-    const narrow = measureTreeCols(body);
+    const narrow = measureTreeWidth(body);
     // Act
     staged.layout.containingPx = 1400;
-    const wide = measureTreeCols(body);
+    const wide = measureTreeWidth(body);
     // Assert
     expect(wide).toBeGreaterThan(narrow);
   });
@@ -162,8 +173,8 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     // Arrange — an engine that resolves the cap to px hands it back as px.
     staged.layout.maxWidth = "560px";
     const body = stageBody();
-    // Act + Assert — 560 - 20 - 8 = 532px, floor(532 / 8).
-    expect(measureTreeCols(body)).toBe(66);
+    // Act + Assert — 560 - 20 - 8 = 532px.
+    expect(measureTreeWidth(body)).toBe(532);
   });
 
   it("resolves a single-percentage calc() cap as that percentage", () => {
@@ -171,7 +182,7 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     staged.layout.maxWidth = "calc(77%)";
     const body = stageBody();
     // Act + Assert
-    expect(measureTreeCols(body)).toBe(92);
+    expect(measureTreeWidth(body)).toBe(742);
   });
 
   it("never reads the bubble's own fit-content width", () => {
@@ -179,31 +190,31 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     const body = stageBody();
     const bubble = body.closest<HTMLElement>(".bubble");
     if (bubble === null) throw new Error("no bubble");
-    const atCap = measureTreeCols(body);
+    const atCap = measureTreeWidth(body);
     // Act — shrink the bubble's box and the body's own width.
     bubble.style.width = "120px";
     bubble.getBoundingClientRect = () => ({ width: 120 }) as DOMRect;
     Object.defineProperty(body, "clientWidth", { value: 100, configurable: true });
     // Assert — the budget is the cap's, unmoved.
-    expect(measureTreeCols(body)).toBe(atCap);
+    expect(measureTreeWidth(body)).toBe(atCap);
   });
 
   it("measures a bubble coalesced into a run against the run's cap", () => {
     // Arrange — the member's own max-width is `none`; the run carries 77%.
     const body = stageRunMemberBody();
     // Act
-    const cols = measureTreeCols(body);
-    // Assert — the same floor(742 / 8) as a bubble capped by itself.
-    expect(cols).toBe(92);
+    const px = measureTreeWidth(body);
+    // Assert — the same 742px as a bubble capped by itself.
+    expect(px).toBe(742);
   });
 
   it("resolves a run member's cap against the run's containing block", () => {
     // Arrange
     const body = stageRunMemberBody();
-    const narrow = measureTreeCols(body);
+    const narrow = measureTreeWidth(body);
     // Act
     staged.layout.containingPx = 1400;
-    const wide = measureTreeCols(body);
+    const wide = measureTreeWidth(body);
     // Assert
     expect(wide).toBeGreaterThan(narrow);
   });
@@ -213,10 +224,95 @@ describe("the columns a tree wraps to are measured against the bubble cap", () =
     const capture = captureLogRecords("debug");
     const body = stageBody();
     // Act
-    measureTreeCols(body);
+    measureTreeWidth(body);
     // Assert
-    const record = await forwardedRecord(capture, "bubble.body.tree-cols");
-    expect(record.context).toMatchObject({ cols: 92, char_px: 8, gutter_px: 8 });
+    const record = await forwardedRecord(capture, "bubble.body.tree-width");
+    expect(record.context).toMatchObject({ width_px: 742, gutter_px: 8 });
+  });
+});
+
+/**
+ * `treeMeasure` reads every piece a tree wraps by off a hidden probe, each in
+ * the element it draws in, in one layout.
+ */
+describe("the measure a tree wraps by", () => {
+  const staged = useTreeLayout();
+
+  it("answers its budget in px", () => {
+    // Arrange
+    const body = stageBody();
+    // Act
+    const measure = treeMeasure(body, 742);
+    // Assert
+    expect([measure.unit, measure.budget]).toEqual(["px", 742]);
+  });
+
+  it("measures each piece as drawn, in order", () => {
+    // Arrange
+    const body = stageBody();
+    // Act
+    const widths = treeMeasure(body, 742).widths([
+      { kind: "rails", html: "├── " },
+      { kind: "text", html: "1.1 " },
+      { kind: "text", html: "<strong>bold</strong> &amp;" },
+    ]);
+    // Assert — 8px a staged column.
+    expect(widths).toEqual([32, 32, 48]);
+  });
+
+  it.each([
+    ["rails", "mp-connectors"],
+    ["text", "mp-content"],
+  ] as const)("draws a %s piece in the element it is drawn in", (kind, className) => {
+    // Arrange
+    const body = stageBody();
+    const drawnIn: string[] = [];
+    const spy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      drawnIn.push(`${this.parentElement?.className ?? ""} > ${this.className}`);
+      return { width: 8 } as DOMRect;
+    });
+    // Act
+    treeMeasure(body, 742).widths([{ kind, html: "x" }]);
+    spy.mockRestore();
+    // Assert
+    expect(drawnIn).toEqual([`mp-line > ${className}`]);
+  });
+
+  it("draws its probe in the body as a tree and takes it away after", () => {
+    // Arrange
+    const body = stageBody();
+    const probes: (string | null)[] = [];
+    const spy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      probes.push(this.closest(`.${TREE_MEASURE_CLASS}`)?.parentElement === body ? this.closest(".mp-tree")?.className ?? null : null);
+      return { width: 8 } as DOMRect;
+    });
+    // Act
+    treeMeasure(body, 742).widths([{ kind: "text", html: "x" }]);
+    spy.mockRestore();
+    // Assert
+    expect([probes, body.querySelector(`.${TREE_MEASURE_CLASS}`)]).toEqual([[`mp-tree ${TREE_MEASURE_CLASS}`], null]);
+  });
+
+  it("answers no width for a piece with no text", () => {
+    // Arrange
+    const body = stageBody();
+    // Act + Assert
+    expect(treeMeasure(body, 742).widths([{ kind: "text", html: "" }])).toEqual([0]);
+  });
+
+  it("refuses a piece with text that measures no width, recording it through the canonical logger", async () => {
+    // Arrange — a page that laid the probe out at no width.
+    staged.layout.charPx = 0;
+    const capture = captureLogRecords();
+    const body = stageBody();
+    // Act
+    expect(() => treeMeasure(body, 742).widths([{ kind: "text", html: "word" }])).toThrow(/metaprompt tree width unmeasurable/);
+    // Assert
+    const record = await forwardedRecord(capture, TREE_WIDTH_UNMEASURABLE);
+    expect(record).toMatchObject({
+      level: { case: "error" },
+      context: { reason: "a tree piece with text measured no width", kind: "text", html: "word", width_px: 0 },
+    });
   });
 });
 
@@ -227,7 +323,7 @@ describe("an unmeasurable tree width is an invariant violation", () => {
   /** Measure BODY, and answer the reason the violation was recorded with. */
   async function violation(body: HTMLElement): Promise<string> {
     const capture = captureLogRecords();
-    expect(() => measureTreeCols(body)).toThrow(/metaprompt tree width unmeasurable/);
+    expect(() => measureTreeWidth(body)).toThrow(/metaprompt tree width unmeasurable/);
     const record = await forwardedRecord(capture, TREE_WIDTH_UNMEASURABLE);
     expect(record.level.case).toBe("error");
     const reason = record.context?.reason;
@@ -261,14 +357,6 @@ describe("an unmeasurable tree width is an invariant violation", () => {
     } finally {
       root.classList.remove("bubble");
     }
-  });
-
-  it("refuses a tree font whose column measures no width", async () => {
-    // Arrange — a laid-out page that gave the probe no box.
-    staged.layout.charPx = 0;
-    const body = stageBody();
-    // Act + Assert
-    expect(await violation(body)).toBe("the tree font's column measured no width");
   });
 
   it("refuses a containing block with no width", async () => {
@@ -316,12 +404,12 @@ describe("an unmeasurable tree width is an invariant violation", () => {
     expect(await violation(body)).toBe("the bubble body has no scroll box");
   });
 
-  it("refuses a cap whose content width holds no column", async () => {
+  it("refuses a cap whose content width holds no pixel", async () => {
     // Arrange — a body padding wider than the whole cap.
     staged.layout.bodyPaddingPx = 400;
     const body = stageBody();
     // Act + Assert
-    expect(await violation(body)).toBe("the bubble's content width at its cap holds no column");
+    expect(await violation(body)).toBe("the bubble's content width at its cap holds no pixel");
   });
 
   it("refuses to follow the column on a page with no ResizeObserver", async () => {
@@ -359,12 +447,12 @@ describe("an unmeasurable tree width is an invariant violation", () => {
 describe("proseHtml", () => {
   it("draws a plain block as markdown", () => {
     // Act + Assert
-    expect(proseHtml(plainProse("**done**"), () => 80)).toContain("<strong>done</strong>");
+    expect(proseHtml(plainProse("**done**"), () => columnMeasure(80))).toContain("<strong>done</strong>");
   });
 
   it("draws a tree block as the tree, wrapped to the budget", () => {
     // Act
-    const html = proseHtml(servedProse("1 🔧 Fixed it\n└── 1.1 x"), () => 80);
+    const html = proseHtml(servedProse("1 🔧 Fixed it\n└── 1.1 x"), () => columnMeasure(80));
     // Assert
     expect(html).toMatch(/^<div class="mp-tree">.*<\/div>$/s);
   });
@@ -380,7 +468,7 @@ describe("proseHtml", () => {
     });
     const host = document.createElement("div");
     // Act
-    host.innerHTML = proseHtml(prose, () => 80);
+    host.innerHTML = proseHtml(prose, () => columnMeasure(80));
     // Assert
     expect([...host.children].map((c) => c.className || c.tagName)).toEqual(["P", "mp-tree", "P"]);
   });
@@ -389,7 +477,7 @@ describe("proseHtml", () => {
     // Arrange
     const host = document.createElement("div");
     // Act
-    host.innerHTML = proseHtml(promptProse("3.1 - yes"), () => 80);
+    host.innerHTML = proseHtml(promptProse("3.1 - yes"), () => columnMeasure(80));
     // Assert
     const tree = host.querySelector(".mp-entry-tree");
     expect([tree?.classList.contains("mp-tree"), tree?.querySelector('.mp-entry[data-entry-label="3.1"]') !== null]).toEqual([true, true]);
@@ -397,11 +485,11 @@ describe("proseHtml", () => {
 
   it("measures no budget for prose with no tree", () => {
     // Arrange
-    const cols = vi.fn(() => 80);
+    const measure = vi.fn(() => columnMeasure(80));
     // Act
-    proseHtml(plainProse("hello"), cols);
+    proseHtml(plainProse("hello"), measure);
     // Assert
-    expect(cols).not.toHaveBeenCalled();
+    expect(measure).not.toHaveBeenCalled();
   });
 
   it("refuses a block with no arm, recording it through the canonical logger", async () => {
@@ -409,7 +497,7 @@ describe("proseHtml", () => {
     const capture = captureLogRecords();
     const prose = create(ParsedProseSchema, { blocks: [{}] });
     // Act
-    expect(() => proseHtml(prose, () => 80)).toThrow(/bubble body invariant/);
+    expect(() => proseHtml(prose, () => columnMeasure(80))).toThrow(/bubble body invariant/);
     // Assert
     const record = await forwardedRecord(capture, BODY_INVARIANT);
     expect(record.level.case).toBe("error");

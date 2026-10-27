@@ -5,7 +5,7 @@
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { ProseTreeNodeSchema, ProseTreeSchema, type ProseTree } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import type { SubtreeBox } from "../../src/feed/subtree-box.js";
-import { TREE_CLASS, renderTreeHtml } from "../../src/metaprompt-tree.js";
+import { TREE_CLASS, renderTreeHtml, columnMeasure } from "../../src/metaprompt-tree.js";
 
 /** A node's place: a root with no PARENT, else a branch under it. */
 function placeOf(parent: number | undefined): MessageInitShape<typeof ProseTreeNodeSchema>["place"] {
@@ -43,7 +43,7 @@ export const exampleSubtreeWidth = `    └── 1.1.1 It goes live with the ne
 export function drawnRow(row: string, ...trees: ProseTree[]): HTMLElement {
   const el = document.createElement("article");
   el.setAttribute("data-feed-row", row);
-  el.innerHTML = trees.map((t) => `<div class="${TREE_CLASS}">${renderTreeHtml(t, (s) => s, 120)}</div>`).join("");
+  el.innerHTML = trees.map((t) => `<div class="${TREE_CLASS}">${renderTreeHtml(t, (s) => s, columnMeasure(120))}</div>`).join("");
   document.body.replaceChildren(el);
   return el;
 }

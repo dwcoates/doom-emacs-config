@@ -33,25 +33,31 @@
  *     rendered beneath the wrap, so the tree's vertical rules stay unbroken.
  *
  * The rails are therefore REAL characters the wrapper emits, not rails a
- * renderer repaints: the continuation prefix is `│   ` / spaces text, so the
- * wrapped output renders as ordinary monospace lines with no width reasoning
- * left to the stylesheet.
+ * renderer repaints: the continuation prefix is `│   ` / spaces text.
  *
- * Width is measured in RENDERED columns, not source length: HTML tags
- * contribute nothing, HTML entities count as the single character they denote,
- * and emoji count as two columns. Inline elements are atomic, so a wrap never
- * lands between a tag and its text; an element too long to fit alone is split
- * with its tags closed at the end of one line and reopened at the start of the
- * next.
+ * ONLY THE RAILS ARE MONOSPACE (owner ruling, 2026-10-26). A drawn line's
+ * connectors (`TREE_RAILS_CLASS`) are set in the monospace rail face, so every
+ * rail segment is the same width and the vertical rules line up; its label
+ * and text are set in the bubble's own proportional face. A continuation
+ * line's label columns are one pad (`TREE_LABEL_PAD_CLASS`) exactly as wide as
+ * the head line's drawn label, so the remainder hangs under its own text.
  *
- * THE COUNT IS THE DRAWN WIDTH BY CONSTRUCTION. A double-width character (an
- * emoji above all) renders wider than two monospace columns in the webview's
- * fonts, so every character the width model counts as two is drawn inside a
- * `WIDE_CHAR_CLASS` box the stylesheet sizes to exactly `2ch` of the tree font.
+ * A LINE IS WRAPPED BY THE WIDTH IT DRAWS. The wrapper is handed a
+ * `TreeMeasure`: a budget and a measurer, in one unit. The daemon's own width
+ * model is `columnMeasure` (rendered columns: HTML tags contribute nothing,
+ * HTML entities count as the single character they denote, and emoji count as
+ * two). The bubble hands a measure that reads each piece's drawn width off the
+ * page in px (bubble/body.ts `treeMeasure`), because a proportional face has
+ * no columns. Inline elements are atomic, so a wrap never lands between a tag
+ * and its text; an element too long to fit alone is split with its tags
+ * closed at the end of one line and reopened at the start of the next.
  *
- * THERE IS NO DEFAULT WIDTH. The caller measures the column budget; a width
- * that is not a positive whole number of columns is refused loudly, never
- * replaced by a guess.
+ * A double-width character (an emoji above all) is drawn inside a
+ * `WIDE_CHAR_CLASS` box the stylesheet sizes to exactly `2ch`, and measured
+ * as drawn, box included.
+ *
+ * THERE IS NO DEFAULT WIDTH. The caller measures the budget; a budget that is
+ * not a positive whole number is refused loudly, never replaced by a guess.
  */
 
 import { codeBlockHtml } from "./code-block.js";
@@ -230,6 +236,73 @@ export function visibleWidth(raw: string): number {
 }
 
 // ---------------------------------------------------------------------------
+// The measure a tree is wrapped by
+// ---------------------------------------------------------------------------
+
+/** What one measured piece of a drawn line is: its rails, or its text (a label, a body piece). */
+export type TreeMeasureKind = "rails" | "text";
+
+/** One piece of a drawn line to measure: its kind and its HTML, as drawn. */
+export interface TreeMeasureItem {
+  readonly kind: TreeMeasureKind;
+  readonly html: string;
+}
+
+/**
+ * The width model a tree is wrapped by: the room a line has, and the drawn
+ * width of any piece of a line, both in UNIT. `widths` is called once per
+ * drawn tree, with every piece the wrap can place, so a measure that reads a
+ * layout reads it once.
+ */
+export interface TreeMeasure {
+  /** The CSS unit every width is in: columns (`ch`) or a drawn layout's `px`. */
+  readonly unit: "ch" | "px";
+  /** The room a line has, in UNIT: a positive whole number. */
+  readonly budget: number;
+  /** Each of ITEMS' drawn width, in UNIT, in order. */
+  widths(items: readonly TreeMeasureItem[]): number[];
+}
+
+/** The daemon's width model: COLS columns of room, every piece its rendered columns. */
+export function columnMeasure(cols: number): TreeMeasure {
+  return { unit: "ch", budget: cols, widths: (items) => items.map((item) => visibleWidth(item.html)) };
+}
+
+/** A piece's measured width, by its kind and its HTML. */
+type WidthOf = (kind: TreeMeasureKind, html: string) => number;
+
+/** Measure every one of ITEMS through MEASURE in one call, and answer the lookup. */
+function measuredWidths(measure: TreeMeasure, items: readonly TreeMeasureItem[]): WidthOf {
+  const key = (kind: TreeMeasureKind, html: string): string => `${kind}\u0000${html}`;
+  const unique = new Map<string, TreeMeasureItem>();
+  for (const item of items) unique.set(key(item.kind, item.html), item);
+  const listed = [...unique.values()];
+  const widths = measure.widths(listed);
+  if (widths.length !== listed.length) {
+    measureBroke("the measure answered a different number of widths than it was asked for", {
+      asked: listed.length,
+      answered: widths.length,
+    });
+  }
+  const table = new Map<string, number>();
+  listed.forEach((item, i) => table.set(key(item.kind, item.html), widths[i]));
+  return (kind, html) => {
+    const width = table.get(key(kind, html));
+    if (width === undefined) measureBroke("a piece was placed that was never measured", { kind, html });
+    return width;
+  };
+}
+
+/** The tree's measure broke its contract: record it once, and fail. */
+function measureBroke(message: string, context: Record<string, unknown>): never {
+  log.error(`a metaprompt tree's measure broke its contract: ${message}`, {
+    operation: "metaprompt-tree.measure",
+    context,
+  });
+  throw new Error(`metaprompt tree measure: ${message}`);
+}
+
+// ---------------------------------------------------------------------------
 // Markup-aware tokenization (treefmt: Run / Subword / Atom / Tokenize)
 // ---------------------------------------------------------------------------
 
@@ -331,8 +404,11 @@ function parseRuns(raw: string): Run[] {
  * open tag stack. Used only as the fallback for an atom too wide to fit a line
  * on its own; the tag stack lets each resulting line close and reopen whatever
  * element the split lands inside.
+ *
+ * A word's text is decoded to count its columns; when ESCAPE (an HTML body),
+ * it is escaped back, so a decoded `<` is drawn as the character it is.
  */
-function atomSubwords(a: Atom): Subword[] {
+function atomSubwords(a: Atom, escape: boolean): Subword[] {
   const result: Subword[] = [];
   const stack: string[] = [];
   let pending = "";
@@ -361,7 +437,7 @@ function atomSubwords(a: Atom): Subword[] {
       if (isSpace(segment)) {
         flush();
       } else {
-        pending += segment;
+        pending += escape ? escapeHtml(segment) : segment;
         pendingWidth += textWidth(segment);
       }
     }
@@ -475,17 +551,26 @@ function textColumn(b: Branch): number {
 }
 
 /**
- * Branch.continuation_indent: the full indent a wrapped remainder carries. The
- * label's columns become padding, except that the first of them holds a
- * vertical rule when the branch has children rendered beneath the wrap.
+ * The label columns a wrapped remainder carries after its rails: the head
+ * line's label drawn as padding, except that its first column holds a vertical
+ * rule when the branch has children rendered beneath the wrap.
  */
-function continuationIndent(b: Branch, hasChildren: boolean): string {
-  const labelWidth = visibleWidth(b.label);
-  const padding =
-    hasChildren && labelWidth > 0
-      ? "│" + " ".repeat(labelWidth - 1)
-      : " ".repeat(labelWidth);
-  return continuationPrefix(b) + padding;
+export interface LabelPad {
+  /** The head line's label, with the space after it ("1.1 "). */
+  readonly label: string;
+  /** Whether the pad's first column holds a vertical rule. */
+  readonly rail: boolean;
+}
+
+/** Branch.continuation_indent's label part: the pad a wrapped remainder of B carries. */
+function labelPad(b: Branch, hasChildren: boolean): LabelPad {
+  return { label: b.label, rail: hasChildren && visibleWidth(b.label) > 0 };
+}
+
+/** PAD as the daemon formatter's text: the label's columns as spaces, the first a rule when railed. */
+function padText(pad: LabelPad): string {
+  const labelWidth = visibleWidth(pad.label);
+  return pad.rail ? "│" + " ".repeat(labelWidth - 1) : " ".repeat(labelWidth);
 }
 
 // ---------------------------------------------------------------------------
@@ -507,19 +592,24 @@ interface Piece {
   breakPrefix: string;
 }
 
-/** to_pieces: turn atoms into packer pieces, expanding any atom too wide. */
-function toPieces(atoms: Atom[], width: number): Piece[] {
+/**
+ * to_pieces: turn atoms into packer pieces, expanding any atom too wide. An
+ * HTML body's pieces are measured by WIDTHOF; a markdown body's are counted in
+ * the daemon's columns, as the port always counted them.
+ */
+function toPieces(atoms: Atom[], width: number, widthOf?: WidthOf): Piece[] {
   const pieces: Piece[] = [];
   for (const atom of atoms) {
-    if (atomWidth(atom) <= width) {
-      pieces.push({ raw: atomRaw(atom), width: atomWidth(atom), breakSuffix: "", breakPrefix: "" });
+    const atomW = widthOf === undefined ? atomWidth(atom) : widthOf("text", pieceHtml(atomRaw(atom)));
+    if (atomW <= width) {
+      pieces.push({ raw: atomRaw(atom), width: atomW, breakSuffix: "", breakPrefix: "" });
       continue;
     }
     let stack: string[] = [];
-    for (const sw of atomSubwords(atom)) {
+    for (const sw of atomSubwords(atom, widthOf !== undefined)) {
       pieces.push({
         raw: sw.raw,
-        width: sw.width,
+        width: widthOf === undefined ? sw.width : widthOf("text", pieceHtml(sw.raw)),
         breakSuffix: closeSequence(stack),
         breakPrefix: openSequence(stack),
       });
@@ -527,6 +617,21 @@ function toPieces(atoms: Atom[], width: number): Piece[] {
     }
   }
   return pieces;
+}
+
+/** A piece of body text as it is drawn, and so as it is measured: its wide characters boxed. */
+function pieceHtml(raw: string): string {
+  return boxWideChars(raw);
+}
+
+/** Every piece the wrap of ATOMS can place, as the measure is asked for it. */
+function pieceItems(atoms: Atom[]): TreeMeasureItem[] {
+  const items: TreeMeasureItem[] = [];
+  for (const atom of atoms) {
+    items.push({ kind: "text", html: pieceHtml(atomRaw(atom)) });
+    for (const sw of atomSubwords(atom, true)) items.push({ kind: "text", html: pieceHtml(sw.raw) });
+  }
+  return items;
 }
 
 /**
@@ -602,8 +707,14 @@ function scanCode(raw: string, state: CodeState): CodeState {
  * itself overflows. Triple-backtick FENCED blocks are handled opaquely elsewhere
  * (the daemon serves each as a node's code, drawn by renderFenceBlock) and never reach here.
  */
-function pack(pieces: Piece[], width: number, markdown: boolean): { lines: string[]; overflows: string[] } {
+function pack(
+  pieces: Piece[],
+  width: number,
+  markdown: boolean,
+  space: number,
+): { lines: string[]; widths: number[]; overflows: string[] } {
   const lines: string[] = [];
+  const widths: number[] = [];
   const overflows: string[] = [];
   // The inline-code state entering and leaving each piece. `before[i]` is the
   // state at the end of the current line when a break falls before piece i;
@@ -628,10 +739,11 @@ function pack(pieces: Piece[], width: number, markdown: boolean): { lines: strin
     // ending with this piece is left open and must be closed.
     const reopenW = before[i].open ? before[i].delim : 0;
     const closeW = after[i].open ? after[i].delim : 0;
-    if (placed && currentWidth + 1 + piece.width + closeW > width) {
+    if (placed && currentWidth + space + piece.width + closeW > width) {
       // Break: close the current line's open span, then reopen it on the next.
       const closing = before[i].open ? "`".repeat(before[i].delim) : "";
       lines.push(current + piece.breakSuffix + closing);
+      widths.push(currentWidth + closing.length);
       const reopen = before[i].open ? "`".repeat(before[i].delim) : "";
       current = piece.breakPrefix + reopen;
       currentWidth = reopen.length;
@@ -639,7 +751,7 @@ function pack(pieces: Piece[], width: number, markdown: boolean): { lines: strin
     }
     if (placed) {
       current += " ";
-      currentWidth++;
+      currentWidth += space;
     } else if (piece.width + reopenW + closeW > width) {
       overflows.push(stripTags(piece.raw));
     }
@@ -647,17 +759,26 @@ function pack(pieces: Piece[], width: number, markdown: boolean): { lines: strin
     currentWidth += piece.width;
     placed = true;
   }
-  if (placed) lines.push(current);
-  if (lines.length === 0) lines.push("");
-  return { lines, overflows };
+  if (placed) {
+    lines.push(current);
+    widths.push(currentWidth);
+  }
+  if (lines.length === 0) {
+    lines.push("");
+    widths.push(0);
+  }
+  return { lines, widths, overflows };
 }
 
 /** One output line of a wrapped tree, split so inline markup applies to the
  * body alone and the structural prefix is emitted verbatim. */
 export interface RenderLine {
-  /** Connectors (a node's head line) or continuation indent (wrap lines);
+  /** Connectors (a node's head line) or continuation rails (wrap lines);
    * empty for a passed-through non-branch line. */
   prefix: string;
+  /** A wrap line's label columns, after its rails; unset on a head line and a
+   * passed-through line. */
+  pad?: LabelPad;
   /** A node's head line's label, with the space after it ("1.1 "); unset on
    * a wrap line and a passed-through line. Drawn as its own element
    * (`TREE_LABEL_CLASS`) so a label a later prompt answers can be a link. */
@@ -671,34 +792,68 @@ export interface RenderLine {
 
 /** The exact text of one output line, matching the daemon formatter's output. */
 export function lineText(l: RenderLine): string {
-  return l.raw ? l.body : (l.prefix + (l.label ?? "") + l.body).replace(/\s+$/u, "");
+  return l.raw ? l.body : (l.prefix + (l.pad === undefined ? "" : padText(l.pad)) + (l.label ?? "") + l.body).replace(/\s+$/u, "");
 }
 
-/** wrap_branch: render BRANCH as one or more lines, none wider than WIDTH. */
+/** A branch's body, as the wrapper packs it: raw markdown, or INLINE's HTML. */
+function branchBody(branch: Branch, inline: InlineMarkup | undefined): string {
+  return inline === undefined ? branch.body : inline(escapeHtml(branch.body));
+}
+
+/** The width a head line's rails take, measured by WIDTHOF. */
+function railsWidth(branch: Branch, widthOf: WidthOf): number {
+  return widthOf("rails", escapeHtml(branch.prefix));
+}
+
+/** The width a head line's label (and the space after it) takes, measured by WIDTHOF. */
+function labelWidth(branch: Branch, widthOf: WidthOf): number {
+  return widthOf("text", escapeHtml(branch.label));
+}
+
+/** Every piece BRANCH's wrap can measure: its rails, its label, its whole body and every piece of it. */
+function branchItems(branch: Branch, inline: InlineMarkup): TreeMeasureItem[] {
+  const body = branchBody(branch, inline);
+  return [
+    { kind: "rails", html: escapeHtml(branch.prefix) },
+    { kind: "text", html: escapeHtml(branch.label) },
+    { kind: "text", html: pieceHtml(body) },
+    ...pieceItems(tokenize(body, false)),
+  ];
+}
+
+/**
+ * wrap_branch: render BRANCH as one or more lines, none wider than WIDTH.
+ * Without WIDTHOF the branch is measured in the daemon's columns; with it
+ * (an HTML body), by the measure, a space between two pieces as SPACE.
+ * Answers each line's width past the prefix (`bodyWidths`) and the prefix's.
+ */
 function wrapBranch(
   branch: Branch,
   width: number,
   hasChildren: boolean,
   inline: InlineMarkup | undefined,
-): { lines: RenderLine[]; overflows: string[] } {
-  const prefixWidth = textColumn(branch);
+  measured?: { widthOf: WidthOf; space: number },
+): { lines: RenderLine[]; overflows: string[]; prefixWidth: number; bodyWidths: number[] } {
+  const prefixWidth =
+    measured === undefined ? textColumn(branch) : railsWidth(branch, measured.widthOf) + labelWidth(branch, measured.widthOf);
   const field = width - prefixWidth;
   if (field <= 0) {
     throw new TreeOverflowError(
-      `branch prefix occupies ${prefixWidth} columns, leaving no room within ${width}: ${branch.prefix}${branch.label}`,
+      `branch prefix occupies ${prefixWidth} of ${width}, leaving no room: ${branch.prefix}${branch.label}`,
     );
   }
   const markdown = inline === undefined;
-  const body = markdown ? branch.body : inline(escapeHtml(branch.body));
-  const packed = pack(toPieces(tokenize(body, markdown), field), field, markdown);
-  const indent = continuationIndent(branch, hasChildren);
+  const body = branchBody(branch, inline);
+  const packed = pack(toPieces(tokenize(body, markdown), field, measured?.widthOf), field, markdown, measured?.space ?? 1);
+  const rails = continuationPrefix(branch);
+  const pad = labelPad(branch, hasChildren);
   const lines: RenderLine[] = [
     { prefix: branch.prefix, label: branch.label, body: packed.lines[0], raw: false },
   ];
   for (let i = 1; i < packed.lines.length; i++) {
-    lines.push({ prefix: indent, body: packed.lines[i], raw: false });
+    lines.push({ prefix: rails, pad, body: packed.lines[i], raw: false });
   }
-  return { lines, overflows: packed.overflows };
+  return { lines, overflows: packed.overflows, prefixWidth, bodyWidths: packed.widths };
 }
 
 // ---------------------------------------------------------------------------
@@ -828,39 +983,48 @@ export type InlineMarkup = (escaped: string) => string;
 export type TreeIssue = (message: string, context: Record<string, unknown>) => void;
 
 /**
- * The column budget a tree wraps to, measured from the bubble only when a tree
- * is actually drawn (bubble/body.ts `measureTreeCols`). There is no default.
+ * The measure a tree wraps by, asked for only when a tree is actually drawn
+ * (bubble/body.ts `treeMeasure`). There is no default.
  */
-export type TreeCols = () => number;
+export type TreeMeasureOf = () => TreeMeasure;
+
+/** The one space a wrap places between two pieces, as it is measured. */
+const SPACE_ITEM: TreeMeasureItem = { kind: "text", html: " " };
 
 /**
  * Render TREE (served as a graph, frontend.v1.ProseTree) as wrapped tree lines
- * at WIDTH columns. Each output line is an `.mp-line` div carrying its
+ * within MEASURE's budget. Each output line is an `.mp-line` div carrying its
  * structural prefix verbatim and its branch body with INLINE markdown applied
  * (markdown.ts's inline pass, injected rather than imported so this module
  * never depends back on markdown.ts). INLINE runs BEFORE the wrap, so the
- * width a line is wrapped to is the width it draws. A node's code blocks are
- * drawn beneath its head, opaque.
+ * width a line is wrapped to is the width it draws. Every piece is measured in
+ * ONE call to the measure. A node's code blocks are drawn beneath its head,
+ * opaque.
  *
- * When a branch's prefix alone exceeds WIDTH the wrapper refuses (the tree is
- * too deep for the width); the issue is surfaced through ONISSUE and the tree is
- * rendered unwrapped rather than not at all, so the reader still sees it.
+ * When a branch's prefix alone exceeds the budget the wrapper refuses (the tree
+ * is too deep for the width); the issue is surfaced through ONISSUE and the
+ * tree is rendered unwrapped rather than not at all, so the reader still sees it.
  */
 export function renderTreeHtml(
   tree: ProseTree,
   inline: InlineMarkup,
-  width: number,
+  measure: TreeMeasure,
   onIssue?: TreeIssue,
   options: TreeRenderOptions = {},
 ): string {
+  const width = measure.budget;
   if (!Number.isInteger(width) || width < 1) {
-    log.error("a metaprompt tree was handed a column budget that is not a positive whole number", {
+    log.error("a metaprompt tree was handed a budget that is not a positive whole number", {
       operation: "metaprompt-tree.invalid-width",
-      context: { width },
+      context: { width, unit: measure.unit },
     });
-    throw new RangeError(`metaprompt tree: column budget must be a positive integer, got ${String(width)}`);
+    throw new RangeError(`metaprompt tree: budget must be a positive integer, got ${String(width)}`);
   }
   const rows = layoutTree(tree, { rootGap: options.rootGap });
+  const items: TreeMeasureItem[] = [SPACE_ITEM];
+  for (const row of rows) if (row.kind === "branch") items.push(...branchItems(row.branch, inline));
+  const widthOf = measuredWidths(measure, items);
+  const measured = { widthOf, space: widthOf(SPACE_ITEM.kind, SPACE_ITEM.html) };
   const parts: string[] = [];
   let overflowCount = 0;
   let unwrapped = false;
@@ -870,14 +1034,16 @@ export function renderTreeHtml(
       continue;
     }
     if (row.kind === "raw") {
-      parts.push(renderLine({ prefix: "", body: inline(escapeHtml(row.text)), raw: true }));
+      parts.push(renderRawLine({ prefix: "", body: inline(escapeHtml(row.text)), raw: true }));
       continue;
     }
     let lines: RenderLine[];
+    let bodyWidths: number[];
     try {
       if (unwrapped) throw new TreeOverflowError("an earlier branch could not be wrapped");
-      const wrapped = wrapBranch(row.branch, width, row.hasChildren, inline);
+      const wrapped = wrapBranch(row.branch, width, row.hasChildren, inline, measured);
       lines = wrapped.lines;
+      bodyWidths = wrapped.bodyWidths;
       overflowCount += wrapped.overflows.length;
     } catch (err) {
       if (!(err instanceof TreeOverflowError)) throw err;
@@ -889,10 +1055,13 @@ export function renderTreeHtml(
         });
       }
       unwrapped = true;
-      lines = [{ prefix: row.branch.prefix, label: row.branch.label, body: inline(escapeHtml(row.branch.body)), raw: false }];
+      const body = branchBody(row.branch, inline);
+      lines = [{ prefix: row.branch.prefix, label: row.branch.label, body, raw: false }];
+      bodyWidths = [widthOf("text", pieceHtml(body))];
     }
     const node: NodeLines = { label: row.branch.label.trimEnd(), decor: options.decorate?.(row.node) };
-    parts.push(lines.map((l) => renderLine(l, node)).join(""));
+    const geometry = branchGeometry(row.branch, widthOf, measure.unit);
+    parts.push(lines.map((l, i) => renderLine(l, node, geometry, bodyWidths[i])).join(""));
   }
   if (onIssue && overflowCount > 0) {
     onIssue("a metaprompt tree holds words wider than the column limit; served wider, never truncated", {
@@ -939,6 +1108,47 @@ interface NodeLines {
   decor: TreeLineDecor | undefined;
 }
 
+/** Where a branch's lines draw their label and text, in the measure's UNIT. */
+interface BranchGeometry {
+  /** Where the label starts: past the rails. */
+  readonly labelAt: number;
+  /** The label's width, with the space after it: the width a wrap line's pad takes. */
+  readonly labelWidth: number;
+  readonly unit: TreeMeasure["unit"];
+}
+
+/**
+ * BRANCH's geometry, measured by WIDTHOF. Every line of a branch shares it: a
+ * wrap line's rails are as many monospace segments as its head line's, so they
+ * draw as wide, and its pad is as wide as the head line's label.
+ */
+function branchGeometry(branch: Branch, widthOf: WidthOf, unit: TreeMeasure["unit"]): BranchGeometry {
+  return { labelAt: railsWidth(branch, widthOf), labelWidth: labelWidth(branch, widthOf), unit };
+}
+
+/** The attribute a branch's head line carries: where its label starts, as a CSS length. */
+export const TREE_LABEL_AT_ATTRIBUTE = "data-label-at";
+
+/** The attribute every branch line carries: where its text ends, as a CSS length. */
+export const TREE_TEXT_END_ATTRIBUTE = "data-text-end";
+
+/** The class a drawn line's rails wear: the one part of a tree set in the monospace rail face. */
+export const TREE_RAILS_CLASS = "mp-connectors";
+
+/** The class a wrap line's label pad wears (`LabelPad`). */
+export const TREE_LABEL_PAD_CLASS = "mp-label-pad";
+
+/** N in UNIT, as a CSS length: the one spelling of every edge and pad width a tree line carries. */
+export function cssLength(n: number, unit: TreeMeasure["unit"]): string {
+  return `${String(n)}${unit}`;
+}
+
+/** PAD drawn WIDTH wide: its rule in the rail face, and its daemon-formatter text for a copy. */
+function padHtml(pad: LabelPad, width: string): string {
+  const classes = pad.rail ? `${TREE_LABEL_PAD_CLASS} mp-label-pad-ruled` : TREE_LABEL_PAD_CLASS;
+  return `<span class="${classes}" style="width: ${width}">${escapeHtml(padText(pad))}</span>`;
+}
+
 /** The class every drawn tree line wears. */
 export const TREE_LINE_CLASS = "mp-line";
 
@@ -952,19 +1162,30 @@ export const TREE_CLASS = "mp-tree";
  */
 export const TREE_NODE_ATTRIBUTE = "data-node";
 
-function renderLine(l: RenderLine, node?: NodeLines): string {
-  if (l.raw && l.body.trim() === "") return `<div class="${TREE_LINE_CLASS} mp-blank"></div>`;
-  const content = boxWideChars(l.body);
-  if (l.raw) {
-    return `<div class="${TREE_LINE_CLASS}"><span class="mp-content">${content}</span></div>`;
-  }
-  const decor = node?.decor;
+/** A passed-through line (a header, a blank between roots), which draws no rails and no label. */
+function renderRawLine(l: RenderLine): string {
+  if (l.body.trim() === "") return `<div class="${TREE_LINE_CLASS} mp-blank"></div>`;
+  return `<div class="${TREE_LINE_CLASS} mp-raw"><span class="mp-content">${boxWideChars(l.body)}</span></div>`;
+}
+
+/**
+ * A branch line L of NODE: its rails, its label (a head line) or its label pad
+ * (a wrap line), and its text, BODYWIDTH wide. It carries where its text ends,
+ * and a head line where its label starts, for the highlight over its subtree
+ * (feed/subtree-box.ts).
+ */
+function renderLine(l: RenderLine, node: NodeLines, geometry: BranchGeometry, bodyWidth: number): string {
+  const decor = node.decor;
   const classes = decor?.lineClass === undefined ? TREE_LINE_CLASS : `${TREE_LINE_CLASS} ${decor.lineClass}`;
-  let attributes = node === undefined ? "" : ` ${TREE_NODE_ATTRIBUTE}="${escapeHtml(node.label)}"`;
+  let attributes = ` ${TREE_NODE_ATTRIBUTE}="${escapeHtml(node.label)}"`;
+  if (l.label !== undefined) attributes += ` ${TREE_LABEL_AT_ATTRIBUTE}="${cssLength(geometry.labelAt, geometry.unit)}"`;
+  const textEnd = geometry.labelAt + geometry.labelWidth + bodyWidth;
+  attributes += ` ${TREE_TEXT_END_ATTRIBUTE}="${cssLength(textEnd, geometry.unit)}"`;
   for (const [name, value] of Object.entries(decor?.attributes ?? {})) attributes += ` ${name}="${escapeHtml(value)}"`;
-  return `<div class="${classes}"${attributes}><span class="mp-prefix">${boxWideChars(
-    escapeHtml(l.prefix),
-  )}${labelHtml(l.label, decor?.labelClass)}</span><span class="mp-content">${content}</span></div>`;
+  const pad = l.pad === undefined ? "" : padHtml(l.pad, cssLength(geometry.labelWidth, geometry.unit));
+  return `<div class="${classes}"${attributes}><span class="mp-prefix"><span class="${TREE_RAILS_CLASS}">${escapeHtml(
+    l.prefix,
+  )}</span>${pad}${labelHtml(l.label, decor?.labelClass)}</span><span class="mp-content">${boxWideChars(l.body)}</span></div>`;
 }
 
 /** The class a tree node's label wears, its label text in `TREE_LABEL_ATTRIBUTE`. */

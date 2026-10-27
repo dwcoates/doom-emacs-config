@@ -387,11 +387,10 @@
      compute one from the other. `--bubble-font-rem` is a bubble's text size:
      every bubble's base (`--bubble-base-font-rem`) but a thinking bubble's and
      an interim response's, which narrow it (owner requests, 2026-10-14).
-     `--tree-font-rem` and `--tree-line-h` are a metaprompt tree's monospace
-     size and leading, and `--tree-font-family` its face. A prompt's text is
-     set in all three, so it reads exactly as a response's tree does (owner
-     request, 2026-10-25, superseding 2026-10-13's and 2026-10-14's prose
-     prompt spaced from the tree's leading). */
+     `--tree-font-rem` and `--tree-line-h` are a metaprompt tree's size and
+     leading. A prompt's text is set in both, so it reads exactly as a
+     response's tree does (owner request, 2026-10-25, superseding 2026-10-13's
+     and 2026-10-14's prose prompt spaced from the tree's leading). */
   --bubble-base-font-rem: 0.9;
   --bubble-font-rem: var(--bubble-base-font-rem);
   /* THE SMALLER PROSE SIZE: a thinking bubble's and an interim response's
@@ -404,7 +403,17 @@
   --tool-head-font-rem: 0.75;
   --tree-font-rem: 0.85;
   --tree-line-h: 1.45;
-  --tree-font-family: ui-monospace, monospace;
+  /* THE SERIF (owner rulings, 2026-10-25 and 2026-10-26): Source Serif 4,
+     the free stand-in for claude.ai's Tiempos-derived serif, bundled
+     (main.ts). The chat's text and every bubble's (a prompt, a response and
+     its tree, a thinking bubble, an interim response) are set in it. Code
+     keeps its monospace through its own rules (`.md code`, `pre`). */
+  --serif-font-family: "Source Serif 4 Variable", ui-serif, Georgia, serif;
+  /* THE TREE'S RAIL FACE: a metaprompt tree's connectors alone stay
+     monospace (owner ruling, 2026-10-26), so every rail segment is the same
+     width and the vertical rules line up; its labels and text are the
+     bubble's serif. */
+  --tree-rail-font-family: ui-monospace, monospace;
   /* THE FEED'S BOTTOM GAP (owner ruling, 2026-09-27): the one source of the
      space between the conversation and the footer dock. It is NOT padding on
      the scrolled content, which only showed once the reader reached the end
@@ -2142,6 +2151,8 @@ pre {
   --md-line-h: 1.5;
   font-size: calc(var(--bubble-font-rem) * 1rem * var(--feed-text-scale));
   line-height: var(--md-line-h);
+  /* ONE FACE FOR EVERY BUBBLE, the chat's (owner request, 2026-10-26). */
+  font-family: var(--serif-font-family);
   /* Every bubble fits its text, up to the one cap; its role says which rail
      it hangs on and its fill (`--bubble-bg`), and nothing else. */
   width: fit-content;
@@ -2225,13 +2236,13 @@ pre {
 .bubble[data-role="prompt"] {
   --bubble-bg: var(--user);
   /* A PROMPT IS SET AS A RESPONSE'S TREE IS (owner request, 2026-10-25,
-     superseding 2026-10-13's tree-spaced prose): the tree's face, size and
-     leading, read from the tokens `.mp-tree` reads, so the two cannot drift.
-     The size feeds the one bubble size rule through `--bubble-font-rem`, and
-     the collapsed cap counts in `--md-line-h`, so it follows. */
+     superseding 2026-10-13's tree-spaced prose): the tree's size and
+     leading, read from the tokens `.mp-tree` reads, so the two cannot drift,
+     in every bubble's one face. The size feeds the one bubble size rule
+     through `--bubble-font-rem`, and the collapsed cap counts in
+     `--md-line-h`, so it follows. */
   --bubble-font-rem: var(--tree-font-rem);
   --md-line-h: var(--tree-line-h);
-  font-family: var(--tree-font-family);
   margin-left: auto;
   margin-right: var(--agent-rail-inset);
 }
@@ -2530,7 +2541,7 @@ html[data-page-unshown] *::after {
    fill-cap pin of the same date). Every bubble sizes to its widest RENDERED
    line plus its padding via `width: fit-content`, capped at
    `--bubble-max-width` -- INCLUDING those whose body drew a metaprompt tree.
-   The tree is pre-wrapped to the cap's own column budget (`measureTreeCols`),
+   The tree is pre-wrapped to the cap's own budget (`measureTreeWidth`),
    so its longest physical line never exceeds the cap and the bubble shrinks to
    that line rather than sitting pinned at the full cap. */
 /* THE BORDER LADDER. The state or variant sets the BORDER and nothing else,
@@ -2831,19 +2842,32 @@ html[data-page-unshown] *::after {
 .md .task-list-item-checkbox { margin: 0 0.4em 0 0; vertical-align: middle; }
 
 /* Metaprompt TLDR trees: the webapp wraps each branch to the bubble's
-   column budget at its CAP (metaprompt-tree.ts, a port of the daemon's
-   former treefmt), so every line arrives here already fitted and the
+   budget at its CAP (metaprompt-tree.ts, a port of the daemon's former
+   treefmt), measuring every piece as it draws (bubble/body.ts
+   `treeMeasure`), so every line arrives here already fitted and the
    continuation rails (│ / spaces under a wrapped branch) are REAL
    characters the wrapper emitted, not rails the stylesheet repaints.
+   The tree is set in the bubble's serif, which it inherits; only its rails
+   (`.mp-connectors`, and a wrap line's rule under its label) are set in the
+   monospace rail face.
    `pre-wrap` never breaks a fitted line; it breaks only the degenerate
    unsplittable word wider than the whole bubble, which is wrapped rather
-   than scrolled. `clear: right` starts the tree below the response's
-   floated cost corner, so the tree's box is the body's full width — the
-   width its budget was measured for — instead of a box narrowed beside
-   the float. */
-.mp-tree { font-family: var(--tree-font-family); font-size: calc(var(--tree-font-rem) * 1rem * var(--feed-text-scale)); line-height: var(--tree-line-h); white-space: pre-wrap; overflow-wrap: anywhere; clear: right; }
+   than scrolled. A line stays inline, never a flex row: a row is a
+   formatting context of its own, which steps aside from the bubble's
+   floated copy control instead of flowing beside it. `clear: right` starts the tree
+   below the response's floated cost corner, so the tree's box is the
+   body's full width — the width its budget was measured for — instead of
+   a box narrowed beside the float. */
+.mp-tree { font-size: calc(var(--tree-font-rem) * 1rem * var(--feed-text-scale)); line-height: var(--tree-line-h); white-space: pre-wrap; overflow-wrap: anywhere; clear: right; }
 .md .mp-tree { margin: 0.5em 0; }
 .mp-prefix, .mp-content { white-space: pre-wrap; }
+.mp-connectors { font-family: var(--tree-rail-font-family); }
+/* A WRAP LINE'S LABEL PAD is exactly as wide as its head line's drawn label
+   (metaprompt-tree.ts sets its width), so the remainder hangs under its own
+   text. Its text is the daemon formatter's (a rule, then spaces), set in the
+   rail face so the rule lines up with the connectors beneath it; the spaces
+   may run past the pad, unseen. */
+.mp-label-pad { display: inline-block; font-family: var(--tree-rail-font-family); }
 /* A TREE LABEL A LATER PROMPT ANSWERS is a link to that prompt (feed/entries.ts):
    underlined, so it reads as the link it is, in the answered label's orange
    the prompt's entry labels wear too. */
@@ -8654,7 +8678,7 @@ ar-button.merge-queue-move[aria-disabled="true"] {
    overlay, about 14px classic -- collapsed and expanded alike, so an expanded
    bubble's prose no longer re-flows when its bar appears. A custom bar could
    never match that reservation (ours was 8px), which is why it is gone.
-   `src/bubble/body.ts` `measureTreeCols` MEASURES the same gutter off the
+   `src/bubble/body.ts` `measureTreeWidth` MEASURES the same gutter off the
    scroll box, so a tree wraps the same in both states.
    "More below" is signalled by the `.has-more` fade, not by the bar.
    `overflow-y` STAYS `auto`, never `scroll`. */
@@ -9098,14 +9122,13 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 /* THE CHAT'S TEXT IS A SHADE GREYER than the theme's foreground (owner
    request, 2026-10-25): mixed a fifth of the way toward --muted, so either
    theme's pair carries it.
-   AND IT IS SET IN A SERIF (owner ruling, 2026-10-25): Source Serif 4, the
-   free stand-in for claude.ai's Tiempos-derived serif, bundled (main.ts).
-   Code keeps its monospace through its own rules (`.md code`, `pre`). */
+   AND IT IS SET IN A SERIF (owner ruling, 2026-10-25): `--serif-font-family`,
+   the face every bubble shares. */
 .chat-col {
   width: var(--agent-bubble-cap); margin: 0 auto; padding: 28px 0 48px;
   display: flex; flex-direction: column; gap: 18px;
   color: color-mix(in srgb, var(--fg) 80%, var(--muted));
-  font-family: "Source Serif 4 Variable", ui-serif, Georgia, serif;
+  font-family: var(--serif-font-family);
 }
 .chat-empty { color: var(--muted); text-align: center; margin-top: 18vh; line-height: 1.7; }
 .chat-exchange { display: flex; flex-direction: column; gap: 18px; }

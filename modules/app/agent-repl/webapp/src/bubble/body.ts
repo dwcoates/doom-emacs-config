@@ -7,7 +7,7 @@
  * held prompt all go through `paintBody`: the content's nodes are placed, and
  * every MARKDOWN SLOT among them (`markdownSlot`) is rendered through
  * `proseHtml`, so a metaprompt tree in ANY bubble is wrapped by the metaprompt
- * engine at that bubble's own cap — the budget `measureTreeCols` resolves from
+ * engine at that bubble's own cap — the budget `treeMeasure` resolves from
  * the bubble's CSS `max-width` (one token for every bubble) — and a bubble
  * below its cap never wraps. It paints on attach when it needs a width, and
  * re-wraps only when the containing block's width moves the budget.
@@ -18,7 +18,17 @@ import { requireMessage } from "../rpc/strict.js";
 import { create } from "@bufbuild/protobuf";
 import { ParsedProseSchema, type ParsedProse } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import { inline, renderMarkdown } from "../markdown.js";
-import { TREE_CLASS, renderTreeHtml, type TreeCols, type TreeIssue } from "../metaprompt-tree.js";
+import {
+  TREE_CLASS,
+  TREE_RAILS_CLASS,
+  TREE_LINE_CLASS,
+  renderTreeHtml,
+  stripTags,
+  type TreeIssue,
+  type TreeMeasure,
+  type TreeMeasureItem,
+  type TreeMeasureOf,
+} from "../metaprompt-tree.js";
 import { computedPx, pageResizeObserver, placeChildren, queryAll, scrollbarWidthPx } from "../dom.js";
 import { onDiscard, stopTicking } from "../feed/ticking.js";
 import { entryTreeHtml } from "../feed/entries.js";
@@ -32,25 +42,25 @@ const logTreeIssue: TreeIssue = (message, context) => {
 
 /**
  * Served prose → HTML: each plain block as markdown, each tree and each run of
- * a prompt's entries WRAPPED to the measured COLS.
+ * a prompt's entries WRAPPED by the MEASURE.
  *
  * The daemon serves every drawn text parsed (prose.proto): runs of plain
  * markdown and the trees between them, each tree a graph. The wrapper
  * (metaprompt-tree.ts) draws a tree's rails from its graph and breaks every
- * branch too wide for COLS onto continuation lines under its own text column,
- * so the tree fills the bubble and re-flows when the bubble's width changes.
- * COLS is asked for only when a tree is actually drawn.
+ * branch too wide for the measure's budget onto continuation lines under its
+ * own text, so the tree fills the bubble and re-flows when the bubble's width
+ * changes. MEASURE is asked for only when a tree is actually drawn.
  */
-export function proseHtml(prose: ParsedProse, cols: TreeCols): string {
+export function proseHtml(prose: ParsedProse, measure: TreeMeasureOf): string {
   return prose.blocks
     .map((block) => {
       switch (block.block.case) {
         case "plain":
           return renderMarkdown(block.block.value.markdown);
         case "tree":
-          return `<div class="${TREE_CLASS}">${renderTreeHtml(block.block.value, inline, cols(), logTreeIssue)}</div>`;
+          return `<div class="${TREE_CLASS}">${renderTreeHtml(block.block.value, inline, measure(), logTreeIssue)}</div>`;
         case "entries":
-          return `<div class="${TREE_CLASS} mp-entry-tree">${entryTreeHtml(block.block.value, inline, cols(), logTreeIssue)}</div>`;
+          return `<div class="${TREE_CLASS} mp-entry-tree">${entryTreeHtml(block.block.value, inline, measure(), logTreeIssue)}</div>`;
         default:
           return invariant("a prose block has no arm", { case: String(block.block.case) });
       }
@@ -83,7 +93,7 @@ export function unparsedProse(markdown: string): ParsedProse {
 }
 
 /**
- * Whether drawing PROSE needs a measured column budget: it holds a tree or a
+ * Whether drawing PROSE needs a measured budget: it holds a tree or a
  * run of a prompt's entries, both wrapped to the budget (proseHtml). Prose
  * that holds neither draws the same at every width, so it can be drawn before
  * the body has a containing block.
@@ -96,12 +106,12 @@ export function proseNeedsWidth(prose: ParsedProse): boolean {
 export const TREE_WIDTH_UNMEASURABLE = "bubble.body.tree-width-unmeasurable";
 
 /**
- * A tree's column budget could not be measured: record it once, with what was
+ * A tree's budget could not be measured: record it once, with what was
  * read, and fail. There is no default width to fall back to — a guessed width is
  * how trees came to wrap at 105 columns inside bubbles with room for 140.
  */
 function unmeasurable(reason: string, context: Record<string, unknown>): never {
-  log.error(`a metaprompt tree's column budget could not be measured: ${reason}`, {
+  log.error(`a metaprompt tree's budget could not be measured: ${reason}`, {
     operation: TREE_WIDTH_UNMEASURABLE,
     context: { reason, ...context },
   });
@@ -137,8 +147,8 @@ function insetXPx(el: Element, view: Window, parts: { border: boolean; margin: b
 }
 
 /**
- * The column budget a tree in BODY wraps to: the body's content width WHEN THE
- * BUBBLE IS AT ITS CAP, in columns of the tree's monospace font.
+ * The budget a tree in BODY wraps to: the body's content width WHEN THE
+ * BUBBLE IS AT ITS CAP, in whole px.
  *
  * We never scroll horizontally; lines wider than the max bubble width wrap instead.
  *
@@ -155,29 +165,20 @@ function insetXPx(el: Element, view: Window, parts: { border: boolean; margin: b
  * REGRESSION WATCH (breadcrumb, per AGENTS.md): this used to run while the
  * bubble was still DETACHED (drawFeedResponse paints before feed-view attaches
  * the row) and fall back to 105 columns when it read nothing. A real engine
- * neither lays out nor styles a detached node — the character probe measured
+ * neither lays out nor styles a detached node — the character probe it then read measured
  * 0px and `getComputedStyle` answered empty strings — so EVERY first paint
  * wrapped at the fallback, whatever the bubble's room. jsdom styles detached
  * nodes and the unit suite stubbed geometry regardless of attachment, which is
  * why the tests never saw it. The first paint of a tree now waits for the body
  * to be laid out (`armPainter`). This is a watch flag, not a lock.
  */
-export function measureTreeCols(body: HTMLElement): number {
+export function measureTreeWidth(body: HTMLElement): number {
   if (!body.isConnected) unmeasurable("the bubble body is not in the document", {});
   const view = body.ownerDocument.defaultView;
   if (view === null) unmeasurable("the bubble body's document has no window", {});
   const bubble = requireBubble(body);
   const capped = cappedBoxOf(bubble);
   const containing = containingBlockOf(capped);
-
-  const probe = body.ownerDocument.createElement("div");
-  probe.className = TREE_CLASS;
-  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0;";
-  probe.textContent = "0".repeat(100);
-  body.appendChild(probe);
-  const charPx = probe.getBoundingClientRect().width / 100;
-  probe.remove();
-  if (!(charPx > 0)) unmeasurable("the tree font's column measured no width", { char_px: charPx });
 
   const containingPx =
     containing.clientWidth - insetXPx(containing, view, { border: false, margin: false });
@@ -203,22 +204,65 @@ export function measureTreeCols(body: HTMLElement): number {
   const gutterPx = scrollbarGutterPx(body, view);
   chromePx += gutterPx;
 
-  const contentPx = capPx - chromePx;
-  const cols = Math.floor(contentPx / charPx);
+  const widthPx = Math.floor(capPx - chromePx);
   const context = {
-    cols,
-    char_px: charPx,
+    width_px: widthPx,
     cap_px: capPx,
     chrome_px: chromePx,
     gutter_px: gutterPx,
     containing_px: containingPx,
   };
-  if (cols < 1) unmeasurable("the bubble's content width at its cap holds no column", context);
-  log.debug("measured a metaprompt tree's column budget", {
-    operation: "bubble.body.tree-cols",
+  if (widthPx < 1) unmeasurable("the bubble's content width at its cap holds no pixel", context);
+  log.debug("measured a metaprompt tree's budget", {
+    operation: "bubble.body.tree-width",
     context,
   });
-  return cols;
+  return widthPx;
+}
+
+/** The class of the hidden probe a tree's pieces are measured in. */
+export const TREE_MEASURE_CLASS = "mp-measure";
+
+/**
+ * The measure a tree in BODY wraps by: BUDGET px of room, and every piece's
+ * drawn width read off the page. The pieces are drawn in a hidden probe inside
+ * the body, each in its own tree line and in the element it is drawn in (the
+ * rails in `TREE_RAILS_CLASS`, a label or a body piece in the text's), so each
+ * is set in the face, size and markup it draws in. One probe, one layout,
+ * however many pieces.
+ *
+ * A piece with text that measures no width is unmeasurable: the probe is not
+ * laid out, and its widths would wrap every line at its first word.
+ */
+export function treeMeasure(body: HTMLElement, budget: number): TreeMeasure {
+  return {
+    unit: "px",
+    budget,
+    widths: (items: readonly TreeMeasureItem[]): number[] => {
+      const probe = body.ownerDocument.createElement("div");
+      probe.className = `${TREE_CLASS} ${TREE_MEASURE_CLASS}`;
+      probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0;";
+      const spans = items.map((item) => {
+        const line = body.ownerDocument.createElement("div");
+        line.className = TREE_LINE_CLASS;
+        const span = body.ownerDocument.createElement("span");
+        span.className = item.kind === "rails" ? TREE_RAILS_CLASS : "mp-content";
+        span.innerHTML = item.html;
+        line.append(span);
+        probe.append(line);
+        return span;
+      });
+      body.appendChild(probe);
+      const widths = spans.map((span) => span.getBoundingClientRect().width);
+      probe.remove();
+      items.forEach((item, i) => {
+        if (stripTags(item.html) !== "" && !(widths[i] > 0)) {
+          unmeasurable("a tree piece with text measured no width", { kind: item.kind, html: item.html, width_px: widths[i] });
+        }
+      });
+      return widths;
+    },
+  };
 }
 
 /**
@@ -526,13 +570,13 @@ function invariant(reason: string, context: Record<string, unknown>): never {
  * torn down with the body through `stopTicking` (see ticking.ts).
  */
 function armPainter(body: BubbleBody): Painter {
-  let cols: number | null = null;
+  let budgetPx: number | null = null;
   let deferred = false;
   let observer: ResizeObserver | null = null;
 
-  const budget: TreeCols = () => {
-    cols ??= measureTreeCols(body);
-    return cols;
+  const measure: TreeMeasureOf = () => {
+    budgetPx ??= measureTreeWidth(body);
+    return treeMeasure(body, budgetPx);
   };
   const slots = (): HTMLElement[] => [
     ...queryAll<HTMLElement>(body, `[${MARKDOWN_SLOT_ATTRIBUTE}]`),
@@ -540,7 +584,7 @@ function armPainter(body: BubbleBody): Painter {
   const draw = (targets: readonly HTMLElement[]): void => {
     for (const slot of targets) {
       const target = document.createElement("div");
-      target.innerHTML = proseHtml(sourceOf(slot), budget);
+      target.innerHTML = proseHtml(sourceOf(slot), measure);
       slotMarks.get(slot)?.(target);
       // The reconcile compares whole text with whole text, so a revealing slot
       // is restored first and cut again after (`revealSlot`).
@@ -588,9 +632,9 @@ function armPainter(body: BubbleBody): Painter {
       paint();
       return;
     }
-    const next = measureTreeCols(body);
-    if (next === cols) return;
-    cols = next;
+    const next = measureTreeWidth(body);
+    if (next === budgetPx) return;
+    budgetPx = next;
     draw(slots());
   }
 
@@ -606,7 +650,7 @@ function armPainter(body: BubbleBody): Painter {
  * Run REWRAP, handed the block, whenever the CONTAINING BLOCK of BODY's
  * bubble (the box its percentage cap resolves against) changes size: the one
  * observer of a bubble's column, for the tree painter here (which repaints
- * only when the integer column count moved) and the collapsed width
+ * only when the whole-px budget moved) and the collapsed width
  * (src/feed/collapsed-width.ts). The recompute is deferred to an animation
  * frame so a burst of resizes coalesces and the caller's own reaction is not
  * re-observed inside the same delivery. The block is the bubble's parent when
