@@ -96,7 +96,7 @@ describe("a warning", () => {
     log.warn("the view arrived thin", { operation: "harness.warn-case" });
     await flush();
     // Assert
-    expect(recorded().at(-1)?.record?.level.case).toBe("warn");
+    expect(recordFor("harness.warn-case").level.case).toBe("warn");
   });
 
   it("carries the call site's operation", async () => {
@@ -106,7 +106,7 @@ describe("a warning", () => {
     log.warn("the view arrived thin", { operation: "harness.warn-case" });
     await flush();
     // Assert
-    expect(recorded().at(-1)?.record?.operation).toBe("harness.warn-case");
+    expect(recordFor("harness.warn-case").operation).toBe("harness.warn-case");
   });
 
   it("carries the message verbatim", async () => {
@@ -116,7 +116,7 @@ describe("a warning", () => {
     log.warn("the view arrived thin", { operation: "harness.warn-case" });
     await flush();
     // Assert
-    expect(recorded().at(-1)?.record?.message).toBe("the view arrived thin");
+    expect(recordFor("harness.warn-case").message).toBe("the view arrived thin");
   });
 
   it("echoes the page's own workspace", async () => {
@@ -126,7 +126,7 @@ describe("a warning", () => {
     log.warn("the view arrived thin", { operation: "harness.warn-case" });
     await flush();
     // Assert
-    expect(workspaceOf(recorded().at(-1))?.id).toBe(WORKSPACE_ID);
+    expect(workspaceOf(callFor("harness.warn-case"))?.id).toBe(WORKSPACE_ID);
   });
 
   it("carries the call site's evidence in the record's context", async () => {
@@ -139,7 +139,7 @@ describe("a warning", () => {
     });
     await flush();
     // Assert
-    expect(recorded().at(-1)?.record?.context).toMatchObject({ rows: 3 });
+    expect(recordFor("harness.warn-case").context).toMatchObject({ rows: 3 });
   });
 
   it("waits for the throttle's window rather than calling per record", async () => {
@@ -161,7 +161,7 @@ describe("an error", () => {
     log.error("the stream died", { operation: "harness.error-case" });
     await harness.settle();
     // Assert
-    expect(recorded().at(-1)?.record?.level.case).toBe("error");
+    expect(recordFor("harness.error-case").level.case).toBe("error");
   });
 
   it("does not wait for the throttle's window", async () => {
@@ -181,7 +181,7 @@ describe("an error", () => {
     log.error("the stream died", { operation: "harness.error-case" });
     await harness.settle();
     // Assert
-    expect(recorded().at(-1)?.record?.operation).toBe("harness.error-case");
+    expect(recordFor("harness.error-case").operation).toBe("harness.error-case");
   });
 
   it("echoes the page's own workspace", async () => {
@@ -191,7 +191,7 @@ describe("an error", () => {
     log.error("the stream died", { operation: "harness.error-case" });
     await harness.settle();
     // Assert
-    expect(workspaceOf(recorded().at(-1))?.id).toBe(WORKSPACE_ID);
+    expect(workspaceOf(callFor("harness.error-case"))?.id).toBe(WORKSPACE_ID);
   });
 });
 
@@ -203,7 +203,7 @@ describe("an info record", () => {
     log.info("the reader opened a bubble", { operation: "harness.info-case" });
     await flush();
     // Assert
-    expect(recorded().at(-1)?.record?.level.case).toBe("info");
+    expect(recordFor("harness.info-case").level.case).toBe("info");
   });
 
   it("carries the client instant from before the throttle window", async () => {
@@ -249,7 +249,7 @@ describe("a debug record", () => {
     log.debug("drawing a row", { operation: "harness.debug-case" });
     await flush();
     // Assert
-    expect(recorded().at(-1)?.record?.level.case).toBe("debug");
+    expect(recordFor("harness.debug-case").level.case).toBe("debug");
   });
 });
 
@@ -278,9 +278,22 @@ describe("the app's own diagnostics", () => {
  * than reading as an absent field: "the record never went" and "it went
  * without the identity" are different facts, and only one is under test.
  */
-function recordFor(operation: string): ClientLogRecord {
-  const found = recorded().find((call) => call.record?.operation === operation)?.record;
+/**
+ * The one call carrying OPERATION's record. A case reads its own record by
+ * its operation, never the wire's last: every emitter on the page shares the
+ * wire, so whatever else lands within the throttle's window would otherwise
+ * stand in for the case's record.
+ */
+function callFor(operation: string): LoggedCall {
+  const found = recorded().find((call) => call.record?.operation === operation);
   if (found === undefined) throw new Error(`no ClientLog record for ${operation}`);
+  return found;
+}
+
+/** The record OPERATION's call carries. */
+function recordFor(operation: string): ClientLogRecord {
+  const found = callFor(operation).record;
+  if (found === undefined) throw new Error(`the ClientLog call for ${operation} carries no record`);
   return found;
 }
 
