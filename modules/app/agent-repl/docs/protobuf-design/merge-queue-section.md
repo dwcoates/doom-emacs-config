@@ -101,3 +101,27 @@ for a repository to leave the section once its line empties.
   `frontend.v1.RosterMergeQueueHeadFailed`: a queue whose line is empty is not
   listed, so a failed merge no longer stands at its head. The merge's failure
   stays on its bubble and its workspace's footer.
+
+## Follow-up: the Deploys section (owner request, 2026-10-27)
+
+The section is renamed and moved: "Merge Queue" is now "Deploys", its merged
+groups' heading "Recently Deployed", and it is drawn directly under the Open
+section, above Hidden. The message keeps its name
+(`frontend.v1.RosterMergedSection`); only the labels the daemon composes change.
+
+### `frontend.v1.RosterMergedSection.queue_label`
+
+- WHAT: the heading over the queues, "Deploy Queue". Always set, and drawn
+  even while no queue is listed, so the section always draws.
+- WHY: the owner asked for an empty queue to read as empty rather than
+  absent. The heading has one author, the daemon, as every other drawn string.
+
+### The band fit
+
+- The heading over no queue is a line of its own, so it claims a row of the
+  section's share.
+- A rail too short for the bands' share shrinks Hidden first, down to no rows,
+  and only then Deploys. Spare share and room the Open section leaves go to
+  Deploys' queue and today's merges first, then Hidden, then older merges.
+- Hidden is now the lowest section, so it is the one stretched to the rail's
+  foot.
