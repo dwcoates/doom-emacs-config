@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
+import { cascadedValue, inRail } from "../stylesheet.js";
 import {
   SelectWorkspaceResponseSchema,
   type SelectWorkspaceRequest,
@@ -236,13 +237,13 @@ describe("drawRosterMergeQueue", () => {
     expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, {}), sc, "queue")).toThrow(MalformedView);
   });
 
-  it("numbers no waiting merge", () => {
+  it("numbers no waiting merge: each opens with the same bullet, then its name", () => {
     const { sc } = daemon();
     const queue = create(RosterRepoMergeQueueSchema, { head: mergingHead("w0"), waiting: [waitingMerge("w1"), waitingMerge("w2")] });
     const body = drawRosterMergeQueue(queue, sc, "queue");
-    expect([...body.querySelectorAll(`.${MERGE_QUEUE_WAITING_CLASS}`)].map((el) => [el.firstElementChild?.className, el.firstElementChild?.textContent])).toEqual([
-      ["sb-mq-name", "w1"],
-      ["sb-mq-name", "w2"],
+    expect([...body.querySelectorAll(`.${MERGE_QUEUE_WAITING_CLASS}`)].map((el) => [...el.children].slice(0, 2).map((child) => child.textContent))).toEqual([
+      ["•", "w1"],
+      ["•", "w2"],
     ]);
   });
 
@@ -480,13 +481,21 @@ describe("drawRosterMergeQueueStage", () => {
 });
 
 describe("drawRosterMergeQueueWaiting", () => {
-  it("draws its name and how long it has waited, and no place number", () => {
+  it("draws a bullet, its name and how long it has waited, and no place number", () => {
     const { sc } = daemon();
     const line = drawRosterMergeQueueWaiting(waitingMerge("w1", { queuedAtMs: BigInt(NOW - 3_000), subject: queueSubject("w1", { name: "one" }) }), sc, "w");
     expect([...line.children].map((el) => [el.className, el.textContent])).toEqual([
+      ["sb-mq-bullet", "•"],
       ["sb-mq-name", "one"],
       ["sb-mq-clock", formatTickedElapsed(3_000)],
     ]);
+  });
+
+  it("draws its bullet in its name's own color", () => {
+    const { sc } = daemon();
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w1"), sc, "w");
+    const [bullet, name] = inRail(line, (rail) => [".sb-mq-bullet", ".sb-mq-name"].map((sel) => cascadedValue(rail.querySelector(sel)!, "color")));
+    expect(bullet).toBe(name);
   });
 
   it.each([
