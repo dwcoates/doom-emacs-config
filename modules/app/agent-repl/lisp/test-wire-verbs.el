@@ -651,6 +651,49 @@ that outcome answering the editor\='s close is a contract breach."
 
 ;;;; ---- SetWorkspaceHidden ----------------------------------------------
 
+(ert-deftest agent-repl-test-wire-verbs-validate-name-request-carries-the-name ()
+  "A name check carries the name as the user typed it."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-validate-workspace-name-request '(:name "fix-login"))
+                   '((name . "fix-login"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-validate-name-request-without-name ()
+  "A name check with no name is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-validate-workspace-name-request '(:name ""))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-validate-name-legal-verdict ()
+  "A legal verdict decodes as the empty `legal' arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-validate-workspace-name-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"legal\":{}}}"))
+                   '(:arm :success :value (:verdict (:arm :legal :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-validate-name-invalid-verdict ()
+  "An invalid verdict decodes as the create's own `invalid_name' shape."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-validate-workspace-name-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"invalid\":{\"name\":\"Fix It\",\"component\":\"Fix It\",\"slug\":{}}}}"))
+                   '(:arm :success
+                     :value (:verdict (:arm :invalid
+                                       :value (:name "Fix It" :component "Fix It" :rule :slug))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-validate-name-error-arm ()
+  "The daemon's error arm decodes as an empty error."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-validate-workspace-name-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
+                   '(:arm :error :value nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-validate-name-unset-verdict-is-a-breach ()
+  "A success with no verdict set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-validate-workspace-name-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
 (ert-deftest agent-repl-test-wire-verbs-set-hidden-hide ()
   "A hide carries the workspace and the empty `hide' arm."
   (agent-repl-test-wire-verbs--with-common

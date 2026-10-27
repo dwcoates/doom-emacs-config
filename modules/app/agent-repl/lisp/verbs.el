@@ -114,6 +114,7 @@
 (declare-function agent-repl-rpc-restart-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-interrupt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-create-workspace "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-validate-workspace-name-sync "agent-repl-rpc" (conn request &optional timeout))
 (declare-function agent-repl-mutation-progress-new-op-id "mutation-progress" ())
 (declare-function agent-repl-mutation-progress-register "mutation-progress" (op-id &rest callbacks))
 (declare-function agent-repl-mutation-progress-forget "mutation-progress" (op-id))
@@ -2451,9 +2452,82 @@ says where the create stopped, and the caller still sees it stop."
                        command read (car err) (error-message-string err))
      (signal (car err) (cdr err)))))
 
+(defconst agent-repl-verbs--name-question "Workspace name (slug, no prompt): "
+  "The question a static create or a named fork reads its REQUIRED name with.
+It says what it wants because a prompt typed here is no name: the daemon
+refuses it, and the question is the one place to say so before the user
+types.")
+
+(defvar-local agent-repl-verbs--name-blank-refusal nil
+  "The sentence the name minibuffer refuses a blank name with.")
+
+(defvar agent-repl-verbs--name-exit-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [remap exit-minibuffer] #'agent-repl-verbs-name-minibuffer-exit)
+    map)
+  "Keymap the name minibuffer layers over its own: leaving it is a check.")
+
+(defun agent-repl-verbs--name-refusal (name)
+  "Answer the sentence refusing NAME as a workspace name, or nil if it is one.
+THE NAMING RULE LIVES IN THE DAEMON ALONE, so this asks it
+\(ValidateWorkspaceName) rather than holding a copy that could drift.  A
+refusal is worded as the create\='s own `invalid_name\=' refusal is
+\(`agent-repl-verbs--create-invalid-name-sentence\=').
+
+An ask that fails -- the transport, an undecodable answer, or the
+daemon\='s error arm -- is recorded at ERROR and SIGNALLED: a name nobody
+checked is never passed on as a legal one."
+  (let ((response
+         (condition-case err
+             (agent-repl-rpc-validate-workspace-name-sync
+              (agent-repl-verbs--conn) (list :name name))
+           ((agent-repl-connect-error agent-repl-wire-error)
+            (agent-repl--error agent-repl-verbs--create-log-scope
+                               "elisp.verbs.name-validation-failed name=%S cause=%s detail=%S"
+                               name (car err) (cdr err))
+            (error "agent-repl: could not check the name with the daemon: %s"
+                   (error-message-string err))))))
+    (pcase response
+      (`(:arm :success :value (:verdict (:arm :legal . ,_)))
+       (agent-repl--log agent-repl-verbs--create-log-scope
+                        "elisp.verbs.name-validated name=%S verdict=legal" name)
+       nil)
+      (`(:arm :success :value (:verdict (:arm :invalid :value ,invalid)))
+       (agent-repl--info agent-repl-verbs--create-log-scope
+                         "elisp.verbs.name-validated name=%S verdict=invalid component=%S rule=%s"
+                         name (plist-get invalid :component) (plist-get invalid :rule))
+       (agent-repl-verbs--create-invalid-name-sentence invalid))
+      (_
+       (agent-repl--error agent-repl-verbs--create-log-scope
+                          "elisp.verbs.name-validation-failed name=%S cause=error-arm response=%S"
+                          name response)
+       (error "agent-repl: the daemon could not check the name %S" name)))))
+
+(defun agent-repl-verbs-name-minibuffer-exit ()
+  "Leave the name minibuffer only with a name the daemon accepts.
+A blank name, or one breaking the naming rule, keeps the minibuffer OPEN
+with the reason, the user\='s text intact and editable: refusing it after
+the minibuffer closed lost whatever was typed."
+  (interactive)
+  (let* ((name (string-trim (minibuffer-contents-no-properties)))
+         (refusal (if (string-empty-p name)
+                      agent-repl-verbs--name-blank-refusal
+                    (agent-repl-verbs--name-refusal name))))
+    (if refusal
+        (minibuffer-message "agent-repl: %s" refusal)
+      (exit-minibuffer))))
+
 (defun agent-repl-verbs--read-name (refusal)
-  "Read a REQUIRED workspace name, refusing a blank one with REFUSAL."
-  (let ((name (string-trim (read-string "Name: "))))
+  "Read a REQUIRED workspace name, refusing a blank one with REFUSAL.
+The daemon judges the name before the minibuffer closes
+\(`agent-repl-verbs-name-minibuffer-exit\=')."
+  (let ((name (string-trim
+               (minibuffer-with-setup-hook
+                   (lambda ()
+                     (setq-local agent-repl-verbs--name-blank-refusal refusal)
+                     (use-local-map (make-composed-keymap agent-repl-verbs--name-exit-map
+                                                          (current-local-map))))
+                 (read-string agent-repl-verbs--name-question)))))
     (when (string-empty-p name)
       (user-error "agent-repl: %s" refusal))
     name))
