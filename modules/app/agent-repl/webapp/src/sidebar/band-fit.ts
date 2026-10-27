@@ -355,8 +355,11 @@ export function paintBandMore(region: HTMLElement): void {
   section.toggleAttribute(BAND_MORE_ATTRIBUTE, region.scrollTop + region.clientHeight < region.scrollHeight - 0.5);
 }
 
+/** The selector each section's rows region matches, by the section's class. */
+const regionSelector = (className: string, regionClass: string): string => `.${className} > .${regionClass}`;
+
 /** The selector every section's rows region matches. */
-export const REGION_SELECTOR = SECTION_REGIONS.map(([className, regionClass]) => `.${className} > .${regionClass}`).join(", ");
+export const REGION_SELECTOR = SECTION_REGIONS.map(([className, regionClass]) => regionSelector(className, regionClass)).join(", ");
 
 /** One open section's band, its lines, and its stops. */
 interface Measured {
@@ -459,7 +462,7 @@ export interface BandFit {
  */
 function watchedBoxes(pane: HTMLElement): HTMLElement[] {
   const regions = SECTION_REGIONS.map(([className, regionClass]) =>
-    pane.querySelector<HTMLElement>(`:scope > .${className} > .${regionClass}`),
+    pane.querySelector<HTMLElement>(`:scope > ${regionSelector(className, regionClass)}`),
   ).filter((region): region is HTMLElement => region !== null);
   return [pane, ...regions.flatMap((region) => [...region.children] as HTMLElement[])];
 }
