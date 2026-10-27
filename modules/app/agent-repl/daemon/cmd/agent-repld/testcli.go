@@ -60,18 +60,6 @@ const exitTestsFailed = 1
 // testNoun is the test commands' noun.
 const testNoun = "test"
 
-// selectionFlag collects one kind of selection's repeated flag values.
-type selectionFlag struct{ values *[]string }
-
-func (f selectionFlag) String() string { return "" }
-func (f selectionFlag) Set(value string) error {
-	if strings.TrimSpace(value) == "" {
-		return errors.New("an empty selection")
-	}
-	*f.values = append(*f.values, value)
-	return nil
-}
-
 // testSelections are `test run`'s selection flags.
 type testSelections struct {
 	goSel, vitest, ert, harness, suites []string
@@ -86,11 +74,11 @@ func testRun(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	workspace := fs.String("workspace", here, "the workspace whose worktree runs the tests")
 	var sel testSelections
-	fs.Var(selectionFlag{&sel.goSel}, "go", "a Go package's tests: DIR, or DIR=TestA,TestB/sub/path")
-	fs.Var(selectionFlag{&sel.vitest}, "vitest", "a vitest file's tests: FILE, or FILE=full name")
-	fs.Var(selectionFlag{&sel.ert}, "ert", "an ERT file's tests: FILE, or FILE=test-a,test-b")
-	fs.Var(selectionFlag{&sel.harness}, "harness", "a shell harness: SCRIPT, or SCRIPT=group1,group2")
-	fs.Var(selectionFlag{&sel.suites}, "suite", "one roster suite, whole")
+	fs.Var(repeatedFlag{values: &sel.goSel, noun: "selection"}, "go", "a Go package's tests: DIR, or DIR=TestA,TestB/sub/path")
+	fs.Var(repeatedFlag{values: &sel.vitest, noun: "selection"}, "vitest", "a vitest file's tests: FILE, or FILE=full name")
+	fs.Var(repeatedFlag{values: &sel.ert, noun: "selection"}, "ert", "an ERT file's tests: FILE, or FILE=test-a,test-b")
+	fs.Var(repeatedFlag{values: &sel.harness, noun: "selection"}, "harness", "a shell harness: SCRIPT, or SCRIPT=group1,group2")
+	fs.Var(repeatedFlag{values: &sel.suites, noun: "selection"}, "suite", "one roster suite, whole")
 	fs.BoolVar(&sel.every, "every-suite", false, "the whole roster (the merge queue's gate; only with a stated reason)")
 	coverage := fs.Bool("coverage", false, "instrument the run and report coverage (whole suites only)")
 	record := fs.Bool("record", false, "append the run's timings to the history (-every-suite alone)")
