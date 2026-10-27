@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { codeBlockHtml } from "../src/code-block.js";
+import { escapeHtml } from "../src/highlight.js";
 import { inline, LEAD_CLASS, renderMarkdown, setInlineMarkdown } from "../src/markdown.js";
 
 describe("renderMarkdown blocks", () => {
@@ -346,6 +347,71 @@ describe("renderMarkdown: file links", () => {
 
   it("keeps a web image", () => {
     expect(renderMarkdown("![alt](https://example.com/p.png)")).toContain("<img");
+  });
+});
+
+// A metaprompt tree's bullets are drawn by `inline`, so a bare URL there must
+// link as the block pipeline's linkify links it.
+describe("inline: bare web URLs", () => {
+  const slack =
+    "https://chesscom.slack.com/archives/C04FPU3L4JG/p1793069096504069?thread_ts=1792730535.549649&cid=C04FPU3L4JG";
+  const draw = (text: string): string => inline(escapeHtml(text));
+
+  it("links a quoted Slack URL, the quotes outside the anchor", () => {
+    // Arrange
+    const href = slack.replace("&", "&amp;");
+    // Act / Assert
+    expect(draw(`"${slack}"`)).toBe(
+      `&quot;<a href="${href}" target="_blank" rel="noopener noreferrer">${href}</a>&quot;`,
+    );
+  });
+
+  it("links a URL mid-sentence and keeps the text around it", () => {
+    expect(draw("see https://example.com/a now")).toBe(
+      `see <a href="https://example.com/a" target="_blank" rel="noopener noreferrer">https://example.com/a</a> now`,
+    );
+  });
+
+  it("links an http URL", () => {
+    expect(draw("http://example.com")).toContain('<a href="http://example.com"');
+  });
+
+  it("links every URL in the text", () => {
+    expect(draw("https://a.example and https://b.example").match(/<a /g)?.length).toBe(2);
+  });
+
+  it("does not link a bare host", () => {
+    expect(draw("see example.com now")).not.toContain("<a ");
+  });
+
+  it("does not link a bare file name", () => {
+    expect(draw("see README.md now")).not.toContain("<a ");
+  });
+
+  it("does not link a URL inside a code span", () => {
+    expect(draw("`https://example.com`")).toBe("<code>https://example.com</code>");
+  });
+
+  it("does not link inside an explicit link a second time", () => {
+    expect(draw("[https://example.com](https://example.com)").match(/<a /g)?.length).toBe(1);
+  });
+
+  it("keeps escaped characters outside the URL escaped", () => {
+    expect(draw("<b> https://example.com & x")).toMatch(/^&lt;b&gt; <a [^>]*>https:\/\/example\.com<\/a> &amp; x$/);
+  });
+
+  it("leaves text with no URL unchanged", () => {
+    expect(draw(`a "b" & <c>`)).toBe("a &quot;b&quot; &amp; &lt;c&gt;");
+  });
+});
+
+describe("renderMarkdown: bare web URLs", () => {
+  it("links a quoted Slack URL", () => {
+    // Arrange
+    const slack =
+      "https://chesscom.slack.com/archives/C04FPU3L4JG/p1793069096504069?thread_ts=1792730535.549649&cid=C04FPU3L4JG";
+    // Act / Assert
+    expect(renderMarkdown(`"${slack}"`)).toContain(`<a href="${slack.replace("&", "&amp;")}"`);
   });
 });
 

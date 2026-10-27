@@ -77,6 +77,7 @@ export function inline(escaped: string): string {
     const label = fileLinkLabel(shown);
     return anchorHtml(url, shown, span === null ? label : `<code>${label}</code>`);
   });
+  out = autolinkWebUrls(out);
   // Bold before italic so ** is not consumed as two *.
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/\*([^*]+)\*/g, "<em>$1</em>");
@@ -109,6 +110,59 @@ function restoreCodeSpans(text: string, codeSpans: readonly string[], link: bool
     return href === null ? html : anchorHtml(href, href, `<code>${fileLinkLabel(href)}</code>`);
   });
 }
+
+/** The four entities `escapeHtml` writes, each standing for one character. */
+const ESCAPED_CHAR = /&(?:amp|lt|gt|quot);/y;
+
+/**
+ * A BARE WEB URL IN `inline`'S TEXT IS A LINK, as the markdown-it pipeline's
+ * `linkify` makes it one in a block (owner request, 2026-10-26). A metaprompt
+ * tree's bullets are drawn by `inline`, so a URL the model wrote bare in a
+ * tree was plain text. Matching is the pipeline's own linkifier (`md.linkify`)
+ * run over the UNESCAPED text, so `&quot;` around a URL never joins it; only a
+ * match written with an `http(s)://` scheme links, never a fuzzy bare host or
+ * file name. ESCAPED is `inline`'s working string: the anchors it already drew
+ * are skipped, and every character outside a link keeps its escaped form.
+ */
+function autolinkWebUrls(escaped: string): string {
+  return escaped
+    .split(/(<a [^>]*>[\s\S]*?<\/a>)/)
+    .map((part, i) => (i % 2 === 1 ? part : autolinkEscapedRun(part)))
+    .join("");
+}
+
+/** `autolinkWebUrls` for one RUN of escaped text holding no anchor. */
+function autolinkEscapedRun(run: string): string {
+  // starts[k] is where plain character k begins in RUN; one past the end closes it.
+  let plain = "";
+  const starts: number[] = [];
+  for (let at = 0; at < run.length; ) {
+    starts.push(at);
+    ESCAPED_CHAR.lastIndex = at;
+    const entity = ESCAPED_CHAR.exec(run);
+    plain += entity === null ? run[at] : unescapeEntity(entity[0]);
+    at += entity === null ? 1 : entity[0].length;
+  }
+  starts.push(run.length);
+  const matches = (md.linkify.match(plain) ?? []).filter((m) => isWebHref(m.raw));
+  let out = "";
+  let from = 0;
+  for (const m of matches) {
+    const [begin, end] = [starts[m.index], starts[m.lastIndex]];
+    out += run.slice(from, begin) + anchorHtml(escapeHtml(m.url), null, run.slice(begin, end));
+    from = end;
+  }
+  return out + run.slice(from);
+}
+
+/** The character one of `ESCAPED_CHAR`'s entities stands for. */
+function unescapeEntity(entity: string): string {
+  const char = UNESCAPED[entity];
+  if (char === undefined) throw new Error(`unescapeEntity: ${entity} is not one of escapeHtml's entities`);
+  return char;
+}
+
+const UNESCAPED: Readonly<Record<string, string>> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"' };
 
 /**
  * The anchor `inline` draws, attributes in the order the markdown-it pipeline
