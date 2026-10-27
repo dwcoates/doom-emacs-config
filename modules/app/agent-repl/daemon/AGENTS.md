@@ -2532,9 +2532,10 @@ Owner rulings, 2026-09-30 (`internal/promptqueue/acts.go`, `ahead.go`,
   running turn is.
 - **THE CLASSIFIER ROUTES THREE WAYS** (`classifier.Route`; brief
   `prompts/queue-routing-classifier.md`): `queue` waits for the running turn;
-  `after_tool_call` (the common case, and the answer when unsure) joins it;
-  `interrupt` (the prompt makes the running work wrong or wasted) interrupts
-  it. The explicit-interrupt first word is `interrupt` without asking. A
+  `after_tool_call` (the common case, and the default: the answer on any
+  doubt, never `queue`) joins it; `interrupt` (the prompt makes the running
+  work wrong or wasted) interrupts it. `queue` is only for a prompt the brief
+  is certain is independent of the running turn. The explicit-interrupt first word is `interrupt` without asking. A
   prompt adding to the request in any phrasing ("also, ...", "we should also
   do X", "and when doing X also do Y"), clarifying a prompt the user already
   sent ("I meant the other file"), or marking itself urgent ("asap") is
