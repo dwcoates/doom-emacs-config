@@ -356,10 +356,11 @@ type fakeVerbs struct {
 	// setHiddenErr is what it answers.
 	hiddenSets   []hiddenSet
 	setHiddenErr error
-	// principalLinks records every link SetPrincipalLink received, "" for a
-	// clear; setPrincipalLinkErr is what it answers.
-	principalLinks      []string
-	setPrincipalLinkErr error
+	// linkChanges records every links verb received, as "<verb> <args>";
+	// linksErr is what each answers, and a success answers links.
+	linkChanges []string
+	links       []wsm.WorkspaceLink
+	linksErr    error
 	// names records every name SetName received; setNameErr is what it
 	// answers, and a success answers the name it received.
 	names      []string
@@ -659,13 +660,29 @@ func (f *fakeVerbs) SetHidden(_ context.Context, ws ids.WorkspaceID, hidden bool
 	return f.setHiddenErr
 }
 
-func (f *fakeVerbs) SetPrincipalLink(_ context.Context, _ ids.WorkspaceID, link *string) error {
-	url := ""
-	if link != nil {
-		url = *link
+// linkChange records one links verb's call and answers the fake's links.
+func (f *fakeVerbs) linkChange(change string) ([]wsm.WorkspaceLink, error) {
+	f.linkChanges = append(f.linkChanges, change)
+	if f.linksErr != nil {
+		return nil, f.linksErr
 	}
-	f.principalLinks = append(f.principalLinks, url)
-	return f.setPrincipalLinkErr
+	return f.links, nil
+}
+
+func (f *fakeVerbs) SetLink(_ context.Context, _ ids.WorkspaceID, url, label string) ([]wsm.WorkspaceLink, error) {
+	return f.linkChange("set " + url + " " + label)
+}
+
+func (f *fakeVerbs) RemoveLink(_ context.Context, _ ids.WorkspaceID, url string) ([]wsm.WorkspaceLink, error) {
+	return f.linkChange("remove " + url)
+}
+
+func (f *fakeVerbs) ShowLinks(_ context.Context, _ ids.WorkspaceID, urls []string) ([]wsm.WorkspaceLink, error) {
+	return f.linkChange("show " + strings.Join(urls, ","))
+}
+
+func (f *fakeVerbs) ClearLinks(_ context.Context, _ ids.WorkspaceID) ([]wsm.WorkspaceLink, error) {
+	return f.linkChange("clear")
 }
 
 func (f *fakeVerbs) SetName(_ context.Context, _ ids.WorkspaceID, name string) (string, error) {

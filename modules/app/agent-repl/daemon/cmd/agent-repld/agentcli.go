@@ -144,7 +144,8 @@ var cliNouns = map[string]map[string]cliCommand{
 		"create":      {usage: "create -repository here|DIR -topology primary|child [-origin-master] [-owner WS] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-as-user]", run: workspaceCreate},
 		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":      {usage: "prompt WS TEXT", run: workspacePrompt},
-		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-principal-link URL|-no-principal-link] [-name NAME] [-as-user]", run: workspaceSet},
+		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-as-user]", run: workspaceSet},
+		"link":        {usage: "link WS (-url URL -label TEXT | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":    {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":        {usage: "open WS", run: workspaceOpen},
 		"close":       {usage: "close WS [-as-user]", run: workspaceClose},
@@ -808,15 +809,13 @@ func workspaceSet(c *cliCall, args []string) int {
 	notOneShot := fs.Bool("not-one-shot", false, "unmark the workspace a one-shot")
 	await := fs.String("await", "", "mark the workspace awaiting this workspace")
 	notAwaiting := fs.Bool("not-awaiting", false, "clear what the workspace awaits")
-	principalLink := fs.String("principal-link", "", "the url the topbar's summary opens")
-	noPrincipalLink := fs.Bool("no-principal-link", false, "clear the workspace's principal link")
 	name := fs.String("name", "", "rename the workspace: its name only, never its branch or directory")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
-	if len(rest) != 0 || (*hidden && *shown) || (*parent != "" && *topLevel) || (*oneShot && *notOneShot) || (*await != "" && *notAwaiting) || (*principalLink != "" && *noPrincipalLink) {
+	if len(rest) != 0 || (*hidden && *shown) || (*parent != "" && *topLevel) || (*oneShot && *notOneShot) || (*await != "" && *notAwaiting) {
 		return c.usageFailed("each setting is set one way, and nothing else is positional")
 	}
 	var calls []func() int
@@ -859,12 +858,6 @@ func workspaceSet(c *cliCall, args []string) int {
 		calls = append(calls, func() int {
 			resp, err := c.client.SetWorkspaceParent(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceParentRequest{Workspace: ref,
 				Parent: &agentreplv1.SetWorkspaceParentRequest_TopLevel{TopLevel: &agentreplv1.SetWorkspaceParentTopLevel{}}}))
-			return answer(c, resp, err)
-		})
-	}
-	if req := principalLinkRequest(ref, *principalLink, *noPrincipalLink); req != nil {
-		calls = append(calls, func() int {
-			resp, err := c.client.SetWorkspacePrincipalLink(c.ctx, connect.NewRequest(req))
 			return answer(c, resp, err)
 		})
 	}
@@ -915,19 +908,61 @@ func workspaceSet(c *cliCall, args []string) int {
 	return exitSuccess
 }
 
-// principalLinkRequest reads the -principal-link and -no-principal-link flags
-// into the request for REF: a set naming the url, a clear, or nil when neither
-// flag was given.
-func principalLinkRequest(ref *workspacev1.WorkspaceRef, url string, clear bool) *agentreplv1.SetWorkspacePrincipalLinkRequest {
-	switch {
-	case url != "":
-		return &agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref,
-			Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Set{Set: &agentreplv1.SetWorkspacePrincipalLinkSet{Url: url}}}
-	case clear:
-		return &agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref,
-			Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Clear{Clear: &agentreplv1.SetWorkspacePrincipalLinkClear{}}}
+// workspaceLink changes one of a workspace's links, the topbar summary's
+// menu: store or relabel one (-url with -label), remove one (-remove), name
+// exactly the ones the menu shows (-show, repeated), or clear them (-clear).
+// The answer carries every link and whether the menu is full.
+func workspaceLink(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	url := fs.String("url", "", "the link to store or relabel")
+	label := fs.String("label", "", "the link's label: two to eight words, one sentence")
+	remove := fs.String("remove", "", "the url of the link to remove")
+	var show []string
+	fs.Var(repeatedFlag{values: &show, noun: "url"}, "show", "a url the menu shows; repeat it for each, at most five")
+	clear := fs.Bool("clear", false, "remove every link")
+	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
 	}
-	return nil
+	req, problem := linkRequest(ref, *url, *label, *remove, show, *clear)
+	if len(rest) != 0 || problem != "" {
+		if problem == "" {
+			problem = "nothing is positional"
+		}
+		return c.usageFailed("%s", problem)
+	}
+	resp, err := c.client.ChangeWorkspaceLinks(c.ctx, connect.NewRequest(req))
+	return answer(c, resp, err)
+}
+
+// linkRequest reads workspaceLink's flags into the request for REF, or names
+// why they do not make one: exactly one change, and a set names both its url
+// and its label.
+func linkRequest(ref *workspacev1.WorkspaceRef, url, label, remove string, show []string, clear bool) (*agentreplv1.ChangeWorkspaceLinksRequest, string) {
+	changes := 0
+	for _, given := range []bool{url != "" || label != "", remove != "", len(show) > 0, clear} {
+		if given {
+			changes++
+		}
+	}
+	if changes != 1 {
+		return nil, "name exactly one change: -url with -label, -remove, -show, or -clear"
+	}
+	req := &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref}
+	switch {
+	case url != "" || label != "":
+		if url == "" || label == "" {
+			return nil, "a set names both -url and -label"
+		}
+		req.Change = &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: url, Label: label}}
+	case remove != "":
+		req.Change = &agentreplv1.ChangeWorkspaceLinksRequest_Remove{Remove: &agentreplv1.ChangeWorkspaceLinksRemove{Url: remove}}
+	case len(show) > 0:
+		req.Change = &agentreplv1.ChangeWorkspaceLinksRequest_Show{Show: &agentreplv1.ChangeWorkspaceLinksShow{Urls: show}}
+	default:
+		req.Change = &agentreplv1.ChangeWorkspaceLinksRequest_Clear{Clear: &agentreplv1.ChangeWorkspaceLinksClear{}}
+	}
+	return req, ""
 }
 
 // priorityOf reads a -priority flag: a level, or none to clear it.

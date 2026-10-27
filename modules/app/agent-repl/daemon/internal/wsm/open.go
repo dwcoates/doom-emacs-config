@@ -27,7 +27,7 @@ import (
 //
 // A NEW VERSION IS A NEW ENTRY IN `migrations`. Bumping this constant alone
 // makes the daemon refuse every database the previous build wrote.
-const LayoutVersion = 84
+const LayoutVersion = 85
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
@@ -618,6 +618,13 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 		// ordinary schedule, and every caller states what it means at its own
 		// level. Resurrecting a retired hold is a different refusal and stays
 		// an ERROR below.
+		// A LINK THE WORKSPACE DOES NOT HOLD is the store answering what was
+		// asked; the verb turns it into the rpc's unknown_link arm.
+		var unknownLink *UnknownLinkError
+		if errors.As(err, &unknownLink) {
+			s.log.Debug(op, "the workspace holds no such link; nothing was written", withError(fields, err))
+			return err
+		}
 		if errors.Is(err, ErrHoldRetired) {
 			s.log.Debug(op, "the held prompt was retired; the write was refused", withError(fields, err))
 			return err

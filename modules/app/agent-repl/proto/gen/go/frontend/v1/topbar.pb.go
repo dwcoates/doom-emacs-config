@@ -1087,12 +1087,11 @@ type TopbarTitle struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The summary sentence, verbatim. Never empty when the title is set.
 	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
-	// The workspace's principal link (agentrepl.v1.SetWorkspacePrincipalLink),
-	// which the summary opens when clicked. UNSET while the workspace has none,
-	// and the summary is then plain text. It rides the TITLE rather than the
-	// view, so a workspace with no summary has nothing clickable by
-	// construction.
-	Link          *TopbarTitleLink `protobuf:"bytes,2,opt,name=link,proto3,oneof" json:"link,omitempty"`
+	// What a click on the summary opens: the workspace's shown links
+	// (agentrepl.v1.ChangeWorkspaceLinks). UNSET while the menu shows none, and
+	// the summary is then plain text. It rides the TITLE rather than the view,
+	// so a workspace with no summary has nothing clickable by construction.
+	Links         *TopbarTitleLinks `protobuf:"bytes,3,opt,name=links,proto3,oneof" json:"links,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1134,31 +1133,119 @@ func (x *TopbarTitle) GetText() string {
 	return ""
 }
 
-func (x *TopbarTitle) GetLink() *TopbarTitleLink {
+func (x *TopbarTitle) GetLinks() *TopbarTitleLinks {
 	if x != nil {
-		return x.Link
+		return x.Links
 	}
 	return nil
 }
 
-// The summary's link: the summary is drawn underlined, its tooltip names the
-// url, and a click opens the url through OpenExternal (the Chrome profile of
-// the account the workspace's session spends as), never the heading's own
-// session-line reveal. Its own element because it is the title's clickable
-// part, with props of its own.
+// The summary's links: the summary is drawn underlined, and a click on it
+// opens what the arm names, never the heading's own session-line reveal.
+// THE ARM IS WHAT THE CLICK DOES, resolved by the daemon from how many links
+// the menu shows, so the client never counts them to decide.
+type TopbarTitleLinks struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Opens:
+	//
+	//	*TopbarTitleLinks_Single
+	//	*TopbarTitleLinks_Menu
+	Opens         isTopbarTitleLinks_Opens `protobuf_oneof:"opens"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TopbarTitleLinks) Reset() {
+	*x = TopbarTitleLinks{}
+	mi := &file_frontend_v1_topbar_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TopbarTitleLinks) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TopbarTitleLinks) ProtoMessage() {}
+
+func (x *TopbarTitleLinks) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_topbar_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TopbarTitleLinks.ProtoReflect.Descriptor instead.
+func (*TopbarTitleLinks) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *TopbarTitleLinks) GetOpens() isTopbarTitleLinks_Opens {
+	if x != nil {
+		return x.Opens
+	}
+	return nil
+}
+
+func (x *TopbarTitleLinks) GetSingle() *TopbarTitleLink {
+	if x != nil {
+		if x, ok := x.Opens.(*TopbarTitleLinks_Single); ok {
+			return x.Single
+		}
+	}
+	return nil
+}
+
+func (x *TopbarTitleLinks) GetMenu() *TopbarTitleLinkMenu {
+	if x != nil {
+		if x, ok := x.Opens.(*TopbarTitleLinks_Menu); ok {
+			return x.Menu
+		}
+	}
+	return nil
+}
+
+type isTopbarTitleLinks_Opens interface {
+	isTopbarTitleLinks_Opens()
+}
+
+type TopbarTitleLinks_Single struct {
+	// Exactly one link is shown: the click opens it directly.
+	Single *TopbarTitleLink `protobuf:"bytes,1,opt,name=single,proto3,oneof"`
+}
+
+type TopbarTitleLinks_Menu struct {
+	// Two or more links are shown: the click drops their menu.
+	Menu *TopbarTitleLinkMenu `protobuf:"bytes,2,opt,name=menu,proto3,oneof"`
+}
+
+func (*TopbarTitleLinks_Single) isTopbarTitleLinks_Opens() {}
+
+func (*TopbarTitleLinks_Menu) isTopbarTitleLinks_Opens() {}
+
+// The one shown link a click opens directly, through OpenExternal (the Chrome
+// profile of the account the workspace's session spends as). Its tooltip
+// names the label and the url beneath the whole summary.
 type TopbarTitleLink struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// The agent's label for the link, two to eight words, verbatim.
+	Label string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
 	// The absolute http or https url, verbatim as the agent set it. The daemon
 	// refused any url the external browser would not open, so the client
 	// renders and opens it without inspecting it.
-	Url           string `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	Url           string `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TopbarTitleLink) Reset() {
 	*x = TopbarTitleLink{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[15]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1170,7 +1257,7 @@ func (x *TopbarTitleLink) String() string {
 func (*TopbarTitleLink) ProtoMessage() {}
 
 func (x *TopbarTitleLink) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[15]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1183,10 +1270,123 @@ func (x *TopbarTitleLink) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarTitleLink.ProtoReflect.Descriptor instead.
 func (*TopbarTitleLink) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{15}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *TopbarTitleLink) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
 }
 
 func (x *TopbarTitleLink) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+// The menu a click on the summary drops beneath the heading: one row per
+// shown link, at most five.
+type TopbarTitleLinkMenu struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The shown links, MOST RECENTLY SET FIRST, in the order drawn. At least
+	// two.
+	Items         []*TopbarTitleLinkMenuItem `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TopbarTitleLinkMenu) Reset() {
+	*x = TopbarTitleLinkMenu{}
+	mi := &file_frontend_v1_topbar_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TopbarTitleLinkMenu) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TopbarTitleLinkMenu) ProtoMessage() {}
+
+func (x *TopbarTitleLinkMenu) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_topbar_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TopbarTitleLinkMenu.ProtoReflect.Descriptor instead.
+func (*TopbarTitleLinkMenu) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *TopbarTitleLinkMenu) GetItems() []*TopbarTitleLinkMenuItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+// One row of the summary's menu: the label drawn as a link, which a pick
+// opens through OpenExternal, closing the menu.
+type TopbarTitleLinkMenuItem struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The agent's label for the link, two to eight words, drawn verbatim as the
+	// row's text.
+	Label string `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
+	// The absolute http or https url, verbatim as the agent set it, named in
+	// the row's tooltip.
+	Url           string `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TopbarTitleLinkMenuItem) Reset() {
+	*x = TopbarTitleLinkMenuItem{}
+	mi := &file_frontend_v1_topbar_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TopbarTitleLinkMenuItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TopbarTitleLinkMenuItem) ProtoMessage() {}
+
+func (x *TopbarTitleLinkMenuItem) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_topbar_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TopbarTitleLinkMenuItem.ProtoReflect.Descriptor instead.
+func (*TopbarTitleLinkMenuItem) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *TopbarTitleLinkMenuItem) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *TopbarTitleLinkMenuItem) GetUrl() string {
 	if x != nil {
 		return x.Url
 	}
@@ -1208,7 +1408,7 @@ type TopbarWorkspaceName struct {
 
 func (x *TopbarWorkspaceName) Reset() {
 	*x = TopbarWorkspaceName{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[16]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1220,7 +1420,7 @@ func (x *TopbarWorkspaceName) String() string {
 func (*TopbarWorkspaceName) ProtoMessage() {}
 
 func (x *TopbarWorkspaceName) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[16]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1233,7 +1433,7 @@ func (x *TopbarWorkspaceName) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarWorkspaceName.ProtoReflect.Descriptor instead.
 func (*TopbarWorkspaceName) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{16}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *TopbarWorkspaceName) GetText() string {
@@ -1254,7 +1454,7 @@ type TopbarSessionLine struct {
 
 func (x *TopbarSessionLine) Reset() {
 	*x = TopbarSessionLine{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[17]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1266,7 +1466,7 @@ func (x *TopbarSessionLine) String() string {
 func (*TopbarSessionLine) ProtoMessage() {}
 
 func (x *TopbarSessionLine) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[17]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1279,7 +1479,7 @@ func (x *TopbarSessionLine) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarSessionLine.ProtoReflect.Descriptor instead.
 func (*TopbarSessionLine) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{17}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *TopbarSessionLine) GetText() string {
@@ -1312,7 +1512,7 @@ type TopbarModelSelector struct {
 
 func (x *TopbarModelSelector) Reset() {
 	*x = TopbarModelSelector{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[18]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1324,7 +1524,7 @@ func (x *TopbarModelSelector) String() string {
 func (*TopbarModelSelector) ProtoMessage() {}
 
 func (x *TopbarModelSelector) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[18]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1337,7 +1537,7 @@ func (x *TopbarModelSelector) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarModelSelector.ProtoReflect.Descriptor instead.
 func (*TopbarModelSelector) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{18}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *TopbarModelSelector) GetSelected() *v1.ModelOption {
@@ -1383,7 +1583,7 @@ type TopbarEffortSelector struct {
 
 func (x *TopbarEffortSelector) Reset() {
 	*x = TopbarEffortSelector{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[19]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1395,7 +1595,7 @@ func (x *TopbarEffortSelector) String() string {
 func (*TopbarEffortSelector) ProtoMessage() {}
 
 func (x *TopbarEffortSelector) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[19]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1408,7 +1608,7 @@ func (x *TopbarEffortSelector) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarEffortSelector.ProtoReflect.Descriptor instead.
 func (*TopbarEffortSelector) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{19}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *TopbarEffortSelector) GetSupport() isTopbarEffortSelector_Support {
@@ -1470,7 +1670,7 @@ type TopbarEffortSelectorSupported struct {
 
 func (x *TopbarEffortSelectorSupported) Reset() {
 	*x = TopbarEffortSelectorSupported{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[20]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1482,7 +1682,7 @@ func (x *TopbarEffortSelectorSupported) String() string {
 func (*TopbarEffortSelectorSupported) ProtoMessage() {}
 
 func (x *TopbarEffortSelectorSupported) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[20]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1495,7 +1695,7 @@ func (x *TopbarEffortSelectorSupported) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarEffortSelectorSupported.ProtoReflect.Descriptor instead.
 func (*TopbarEffortSelectorSupported) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{20}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *TopbarEffortSelectorSupported) GetCurrent() *TopbarEffortOption {
@@ -1521,7 +1721,7 @@ type TopbarEffortSelectorUnsupported struct {
 
 func (x *TopbarEffortSelectorUnsupported) Reset() {
 	*x = TopbarEffortSelectorUnsupported{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[21]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1533,7 +1733,7 @@ func (x *TopbarEffortSelectorUnsupported) String() string {
 func (*TopbarEffortSelectorUnsupported) ProtoMessage() {}
 
 func (x *TopbarEffortSelectorUnsupported) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[21]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1546,7 +1746,7 @@ func (x *TopbarEffortSelectorUnsupported) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarEffortSelectorUnsupported.ProtoReflect.Descriptor instead.
 func (*TopbarEffortSelectorUnsupported) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{21}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{24}
 }
 
 // One effort level the selector offers.
@@ -1562,7 +1762,7 @@ type TopbarEffortOption struct {
 
 func (x *TopbarEffortOption) Reset() {
 	*x = TopbarEffortOption{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[22]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1574,7 +1774,7 @@ func (x *TopbarEffortOption) String() string {
 func (*TopbarEffortOption) ProtoMessage() {}
 
 func (x *TopbarEffortOption) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[22]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1587,7 +1787,7 @@ func (x *TopbarEffortOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarEffortOption.ProtoReflect.Descriptor instead.
 func (*TopbarEffortOption) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{22}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *TopbarEffortOption) GetLevel() v1.AgentEffortLevel {
@@ -1630,7 +1830,7 @@ type TopbarConnectivity struct {
 
 func (x *TopbarConnectivity) Reset() {
 	*x = TopbarConnectivity{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[23]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1642,7 +1842,7 @@ func (x *TopbarConnectivity) String() string {
 func (*TopbarConnectivity) ProtoMessage() {}
 
 func (x *TopbarConnectivity) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[23]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1655,7 +1855,7 @@ func (x *TopbarConnectivity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarConnectivity.ProtoReflect.Descriptor instead.
 func (*TopbarConnectivity) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{23}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *TopbarConnectivity) GetTone() string {
@@ -1713,7 +1913,7 @@ type TopbarAgentReplSession struct {
 
 func (x *TopbarAgentReplSession) Reset() {
 	*x = TopbarAgentReplSession{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[24]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1725,7 +1925,7 @@ func (x *TopbarAgentReplSession) String() string {
 func (*TopbarAgentReplSession) ProtoMessage() {}
 
 func (x *TopbarAgentReplSession) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[24]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1738,7 +1938,7 @@ func (x *TopbarAgentReplSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarAgentReplSession.ProtoReflect.Descriptor instead.
 func (*TopbarAgentReplSession) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{24}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *TopbarAgentReplSession) GetStartedAtMs() int64 {
@@ -1798,7 +1998,7 @@ type TopbarSessionBeganLogin struct {
 
 func (x *TopbarSessionBeganLogin) Reset() {
 	*x = TopbarSessionBeganLogin{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[25]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1810,7 +2010,7 @@ func (x *TopbarSessionBeganLogin) String() string {
 func (*TopbarSessionBeganLogin) ProtoMessage() {}
 
 func (x *TopbarSessionBeganLogin) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[25]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1823,7 +2023,7 @@ func (x *TopbarSessionBeganLogin) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarSessionBeganLogin.ProtoReflect.Descriptor instead.
 func (*TopbarSessionBeganLogin) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{25}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{28}
 }
 
 // This Emacs starting began the session.
@@ -1835,7 +2035,7 @@ type TopbarSessionBeganEditorStart struct {
 
 func (x *TopbarSessionBeganEditorStart) Reset() {
 	*x = TopbarSessionBeganEditorStart{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[26]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1847,7 +2047,7 @@ func (x *TopbarSessionBeganEditorStart) String() string {
 func (*TopbarSessionBeganEditorStart) ProtoMessage() {}
 
 func (x *TopbarSessionBeganEditorStart) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[26]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1860,7 +2060,7 @@ func (x *TopbarSessionBeganEditorStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarSessionBeganEditorStart.ProtoReflect.Descriptor instead.
 func (*TopbarSessionBeganEditorStart) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{26}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{29}
 }
 
 // The warning strip: everything the topbar has to WARN about right now.
@@ -1885,7 +2085,7 @@ type TopbarWarningStrip struct {
 
 func (x *TopbarWarningStrip) Reset() {
 	*x = TopbarWarningStrip{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[27]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1897,7 +2097,7 @@ func (x *TopbarWarningStrip) String() string {
 func (*TopbarWarningStrip) ProtoMessage() {}
 
 func (x *TopbarWarningStrip) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[27]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1910,7 +2110,7 @@ func (x *TopbarWarningStrip) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarWarningStrip.ProtoReflect.Descriptor instead.
 func (*TopbarWarningStrip) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{27}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *TopbarWarningStrip) GetWarnings() []*TopbarWarning {
@@ -1950,7 +2150,7 @@ type TopbarWarning struct {
 
 func (x *TopbarWarning) Reset() {
 	*x = TopbarWarning{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[28]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1962,7 +2162,7 @@ func (x *TopbarWarning) String() string {
 func (*TopbarWarning) ProtoMessage() {}
 
 func (x *TopbarWarning) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[28]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1975,7 +2175,7 @@ func (x *TopbarWarning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarWarning.ProtoReflect.Descriptor instead.
 func (*TopbarWarning) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{28}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *TopbarWarning) GetLine() *TopbarWarningLine {
@@ -2106,7 +2306,7 @@ type TopbarWarningLine struct {
 
 func (x *TopbarWarningLine) Reset() {
 	*x = TopbarWarningLine{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[29]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2118,7 +2318,7 @@ func (x *TopbarWarningLine) String() string {
 func (*TopbarWarningLine) ProtoMessage() {}
 
 func (x *TopbarWarningLine) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[29]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2131,7 +2331,7 @@ func (x *TopbarWarningLine) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarWarningLine.ProtoReflect.Descriptor instead.
 func (*TopbarWarningLine) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{29}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *TopbarWarningLine) GetText() string {
@@ -2156,7 +2356,7 @@ type TopbarAccountingWarningDetail struct {
 
 func (x *TopbarAccountingWarningDetail) Reset() {
 	*x = TopbarAccountingWarningDetail{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[30]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2168,7 +2368,7 @@ func (x *TopbarAccountingWarningDetail) String() string {
 func (*TopbarAccountingWarningDetail) ProtoMessage() {}
 
 func (x *TopbarAccountingWarningDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[30]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2181,7 +2381,7 @@ func (x *TopbarAccountingWarningDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarAccountingWarningDetail.ProtoReflect.Descriptor instead.
 func (*TopbarAccountingWarningDetail) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{30}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *TopbarAccountingWarningDetail) GetLines() []*TopbarWarningDetailLine {
@@ -2202,7 +2402,7 @@ type TopbarWarningDetailLine struct {
 
 func (x *TopbarWarningDetailLine) Reset() {
 	*x = TopbarWarningDetailLine{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[31]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2214,7 +2414,7 @@ func (x *TopbarWarningDetailLine) String() string {
 func (*TopbarWarningDetailLine) ProtoMessage() {}
 
 func (x *TopbarWarningDetailLine) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[31]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2227,7 +2427,7 @@ func (x *TopbarWarningDetailLine) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarWarningDetailLine.ProtoReflect.Descriptor instead.
 func (*TopbarWarningDetailLine) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{31}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *TopbarWarningDetailLine) GetText() string {
@@ -2255,7 +2455,7 @@ type TopbarUnmodeledToolWarningDetail struct {
 
 func (x *TopbarUnmodeledToolWarningDetail) Reset() {
 	*x = TopbarUnmodeledToolWarningDetail{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[32]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2267,7 +2467,7 @@ func (x *TopbarUnmodeledToolWarningDetail) String() string {
 func (*TopbarUnmodeledToolWarningDetail) ProtoMessage() {}
 
 func (x *TopbarUnmodeledToolWarningDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[32]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2280,7 +2480,7 @@ func (x *TopbarUnmodeledToolWarningDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarUnmodeledToolWarningDetail.ProtoReflect.Descriptor instead.
 func (*TopbarUnmodeledToolWarningDetail) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{32}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *TopbarUnmodeledToolWarningDetail) GetToolName() *TopbarUnmodeledToolName {
@@ -2308,7 +2508,7 @@ type TopbarUnmodeledToolName struct {
 
 func (x *TopbarUnmodeledToolName) Reset() {
 	*x = TopbarUnmodeledToolName{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[33]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2320,7 +2520,7 @@ func (x *TopbarUnmodeledToolName) String() string {
 func (*TopbarUnmodeledToolName) ProtoMessage() {}
 
 func (x *TopbarUnmodeledToolName) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[33]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2333,7 +2533,7 @@ func (x *TopbarUnmodeledToolName) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarUnmodeledToolName.ProtoReflect.Descriptor instead.
 func (*TopbarUnmodeledToolName) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{33}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *TopbarUnmodeledToolName) GetText() string {
@@ -2358,7 +2558,7 @@ type TopbarDetachedUnmodeledWarningDetail struct {
 
 func (x *TopbarDetachedUnmodeledWarningDetail) Reset() {
 	*x = TopbarDetachedUnmodeledWarningDetail{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[34]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2370,7 +2570,7 @@ func (x *TopbarDetachedUnmodeledWarningDetail) String() string {
 func (*TopbarDetachedUnmodeledWarningDetail) ProtoMessage() {}
 
 func (x *TopbarDetachedUnmodeledWarningDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[34]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2383,7 +2583,7 @@ func (x *TopbarDetachedUnmodeledWarningDetail) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use TopbarDetachedUnmodeledWarningDetail.ProtoReflect.Descriptor instead.
 func (*TopbarDetachedUnmodeledWarningDetail) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{34}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *TopbarDetachedUnmodeledWarningDetail) GetToolName() *TopbarUnmodeledToolName {
@@ -2415,7 +2615,7 @@ type TopbarSessionFaultWarningDetail struct {
 
 func (x *TopbarSessionFaultWarningDetail) Reset() {
 	*x = TopbarSessionFaultWarningDetail{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[35]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2427,7 +2627,7 @@ func (x *TopbarSessionFaultWarningDetail) String() string {
 func (*TopbarSessionFaultWarningDetail) ProtoMessage() {}
 
 func (x *TopbarSessionFaultWarningDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[35]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2440,7 +2640,7 @@ func (x *TopbarSessionFaultWarningDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarSessionFaultWarningDetail.ProtoReflect.Descriptor instead.
 func (*TopbarSessionFaultWarningDetail) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{35}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *TopbarSessionFaultWarningDetail) GetComponent() *TopbarWarningComponent {
@@ -2468,7 +2668,7 @@ type TopbarWarningComponent struct {
 
 func (x *TopbarWarningComponent) Reset() {
 	*x = TopbarWarningComponent{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[36]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2480,7 +2680,7 @@ func (x *TopbarWarningComponent) String() string {
 func (*TopbarWarningComponent) ProtoMessage() {}
 
 func (x *TopbarWarningComponent) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[36]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2493,7 +2693,7 @@ func (x *TopbarWarningComponent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarWarningComponent.ProtoReflect.Descriptor instead.
 func (*TopbarWarningComponent) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{36}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *TopbarWarningComponent) GetText() string {
@@ -2526,7 +2726,7 @@ type TopbarDegradedWindowWarningDetail struct {
 
 func (x *TopbarDegradedWindowWarningDetail) Reset() {
 	*x = TopbarDegradedWindowWarningDetail{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[37]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2538,7 +2738,7 @@ func (x *TopbarDegradedWindowWarningDetail) String() string {
 func (*TopbarDegradedWindowWarningDetail) ProtoMessage() {}
 
 func (x *TopbarDegradedWindowWarningDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[37]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2551,7 +2751,7 @@ func (x *TopbarDegradedWindowWarningDetail) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use TopbarDegradedWindowWarningDetail.ProtoReflect.Descriptor instead.
 func (*TopbarDegradedWindowWarningDetail) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{37}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *TopbarDegradedWindowWarningDetail) GetComponent() *TopbarWarningComponent {
@@ -2647,7 +2847,7 @@ type TopbarDeployFailedWarningDetail struct {
 
 func (x *TopbarDeployFailedWarningDetail) Reset() {
 	*x = TopbarDeployFailedWarningDetail{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[38]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2659,7 +2859,7 @@ func (x *TopbarDeployFailedWarningDetail) String() string {
 func (*TopbarDeployFailedWarningDetail) ProtoMessage() {}
 
 func (x *TopbarDeployFailedWarningDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[38]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2672,7 +2872,7 @@ func (x *TopbarDeployFailedWarningDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarDeployFailedWarningDetail.ProtoReflect.Descriptor instead.
 func (*TopbarDeployFailedWarningDetail) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{38}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *TopbarDeployFailedWarningDetail) GetStep() *TopbarWarningDetailLine {
@@ -2719,7 +2919,7 @@ type TopbarDegradedWindowOpen struct {
 
 func (x *TopbarDegradedWindowOpen) Reset() {
 	*x = TopbarDegradedWindowOpen{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[39]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2731,7 +2931,7 @@ func (x *TopbarDegradedWindowOpen) String() string {
 func (*TopbarDegradedWindowOpen) ProtoMessage() {}
 
 func (x *TopbarDegradedWindowOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[39]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2744,7 +2944,7 @@ func (x *TopbarDegradedWindowOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarDegradedWindowOpen.ProtoReflect.Descriptor instead.
 func (*TopbarDegradedWindowOpen) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{39}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{42}
 }
 
 // Closed, with its cost.
@@ -2760,7 +2960,7 @@ type TopbarDegradedWindowClosed struct {
 
 func (x *TopbarDegradedWindowClosed) Reset() {
 	*x = TopbarDegradedWindowClosed{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[40]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2772,7 +2972,7 @@ func (x *TopbarDegradedWindowClosed) String() string {
 func (*TopbarDegradedWindowClosed) ProtoMessage() {}
 
 func (x *TopbarDegradedWindowClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[40]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2785,7 +2985,7 @@ func (x *TopbarDegradedWindowClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopbarDegradedWindowClosed.ProtoReflect.Descriptor instead.
 func (*TopbarDegradedWindowClosed) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{40}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *TopbarDegradedWindowClosed) GetEndedAtMs() int64 {
@@ -2817,7 +3017,7 @@ type TokenBreakdownView struct {
 
 func (x *TokenBreakdownView) Reset() {
 	*x = TokenBreakdownView{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[41]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2829,7 +3029,7 @@ func (x *TokenBreakdownView) String() string {
 func (*TokenBreakdownView) ProtoMessage() {}
 
 func (x *TokenBreakdownView) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[41]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2842,7 +3042,7 @@ func (x *TokenBreakdownView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenBreakdownView.ProtoReflect.Descriptor instead.
 func (*TokenBreakdownView) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{41}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *TokenBreakdownView) GetSections() []*TokenBreakdownSection {
@@ -2865,7 +3065,7 @@ type TokenBreakdownSection struct {
 
 func (x *TokenBreakdownSection) Reset() {
 	*x = TokenBreakdownSection{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[42]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2877,7 +3077,7 @@ func (x *TokenBreakdownSection) String() string {
 func (*TokenBreakdownSection) ProtoMessage() {}
 
 func (x *TokenBreakdownSection) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[42]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2890,7 +3090,7 @@ func (x *TokenBreakdownSection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenBreakdownSection.ProtoReflect.Descriptor instead.
 func (*TokenBreakdownSection) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{42}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *TokenBreakdownSection) GetHeading() *TokenBreakdownHeading {
@@ -2918,7 +3118,7 @@ type TokenBreakdownHeading struct {
 
 func (x *TokenBreakdownHeading) Reset() {
 	*x = TokenBreakdownHeading{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[43]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2930,7 +3130,7 @@ func (x *TokenBreakdownHeading) String() string {
 func (*TokenBreakdownHeading) ProtoMessage() {}
 
 func (x *TokenBreakdownHeading) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[43]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2943,7 +3143,7 @@ func (x *TokenBreakdownHeading) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenBreakdownHeading.ProtoReflect.Descriptor instead.
 func (*TokenBreakdownHeading) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{43}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *TokenBreakdownHeading) GetText() string {
@@ -2977,7 +3177,7 @@ type TokenBreakdownRow struct {
 
 func (x *TokenBreakdownRow) Reset() {
 	*x = TokenBreakdownRow{}
-	mi := &file_frontend_v1_topbar_proto_msgTypes[44]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2989,7 +3189,7 @@ func (x *TokenBreakdownRow) String() string {
 func (*TokenBreakdownRow) ProtoMessage() {}
 
 func (x *TokenBreakdownRow) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_topbar_proto_msgTypes[44]
+	mi := &file_frontend_v1_topbar_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3002,7 +3202,7 @@ func (x *TokenBreakdownRow) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenBreakdownRow.ProtoReflect.Descriptor instead.
 func (*TokenBreakdownRow) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{44}
+	return file_frontend_v1_topbar_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *TokenBreakdownRow) GetLabel() string {
@@ -3105,13 +3305,23 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\n" +
 	"logged_out\x18\x03 \x01(\v2#.frontend.v1.TopbarAccountLoggedOutH\x00R\tloggedOut\x12\x18\n" +
 	"\acurrent\x18\x04 \x01(\bR\acurrentB\a\n" +
-	"\x05state\"a\n" +
+	"\x05state\"q\n" +
 	"\vTopbarTitle\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\x125\n" +
-	"\x04link\x18\x02 \x01(\v2\x1c.frontend.v1.TopbarTitleLinkH\x00R\x04link\x88\x01\x01B\a\n" +
-	"\x05_link\"#\n" +
-	"\x0fTopbarTitleLink\x12\x10\n" +
-	"\x03url\x18\x01 \x01(\tR\x03url\")\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x128\n" +
+	"\x05links\x18\x03 \x01(\v2\x1d.frontend.v1.TopbarTitleLinksH\x00R\x05links\x88\x01\x01B\b\n" +
+	"\x06_linksJ\x04\b\x02\x10\x03R\x04link\"\x8b\x01\n" +
+	"\x10TopbarTitleLinks\x126\n" +
+	"\x06single\x18\x01 \x01(\v2\x1c.frontend.v1.TopbarTitleLinkH\x00R\x06single\x126\n" +
+	"\x04menu\x18\x02 \x01(\v2 .frontend.v1.TopbarTitleLinkMenuH\x00R\x04menuB\a\n" +
+	"\x05opens\"9\n" +
+	"\x0fTopbarTitleLink\x12\x14\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\x12\x10\n" +
+	"\x03url\x18\x02 \x01(\tR\x03url\"Q\n" +
+	"\x13TopbarTitleLinkMenu\x12:\n" +
+	"\x05items\x18\x01 \x03(\v2$.frontend.v1.TopbarTitleLinkMenuItemR\x05items\"A\n" +
+	"\x17TopbarTitleLinkMenuItem\x12\x14\n" +
+	"\x05label\x18\x01 \x01(\tR\x05label\x12\x10\n" +
+	"\x03url\x18\x02 \x01(\tR\x03url\")\n" +
 	"\x13TopbarWorkspaceName\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"'\n" +
 	"\x11TopbarSessionLine\x12\x12\n" +
@@ -3226,7 +3436,7 @@ func file_frontend_v1_topbar_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_topbar_proto_rawDescData
 }
 
-var file_frontend_v1_topbar_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
+var file_frontend_v1_topbar_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
 var file_frontend_v1_topbar_proto_goTypes = []any{
 	(*TopbarView)(nil),                           // 0: frontend.v1.TopbarView
 	(*TopbarPersistentWifi)(nil),                 // 1: frontend.v1.TopbarPersistentWifi
@@ -3243,52 +3453,55 @@ var file_frontend_v1_topbar_proto_goTypes = []any{
 	(*TopbarAccountLoggedOut)(nil),               // 12: frontend.v1.TopbarAccountLoggedOut
 	(*TopbarAccountOption)(nil),                  // 13: frontend.v1.TopbarAccountOption
 	(*TopbarTitle)(nil),                          // 14: frontend.v1.TopbarTitle
-	(*TopbarTitleLink)(nil),                      // 15: frontend.v1.TopbarTitleLink
-	(*TopbarWorkspaceName)(nil),                  // 16: frontend.v1.TopbarWorkspaceName
-	(*TopbarSessionLine)(nil),                    // 17: frontend.v1.TopbarSessionLine
-	(*TopbarModelSelector)(nil),                  // 18: frontend.v1.TopbarModelSelector
-	(*TopbarEffortSelector)(nil),                 // 19: frontend.v1.TopbarEffortSelector
-	(*TopbarEffortSelectorSupported)(nil),        // 20: frontend.v1.TopbarEffortSelectorSupported
-	(*TopbarEffortSelectorUnsupported)(nil),      // 21: frontend.v1.TopbarEffortSelectorUnsupported
-	(*TopbarEffortOption)(nil),                   // 22: frontend.v1.TopbarEffortOption
-	(*TopbarConnectivity)(nil),                   // 23: frontend.v1.TopbarConnectivity
-	(*TopbarAgentReplSession)(nil),               // 24: frontend.v1.TopbarAgentReplSession
-	(*TopbarSessionBeganLogin)(nil),              // 25: frontend.v1.TopbarSessionBeganLogin
-	(*TopbarSessionBeganEditorStart)(nil),        // 26: frontend.v1.TopbarSessionBeganEditorStart
-	(*TopbarWarningStrip)(nil),                   // 27: frontend.v1.TopbarWarningStrip
-	(*TopbarWarning)(nil),                        // 28: frontend.v1.TopbarWarning
-	(*TopbarWarningLine)(nil),                    // 29: frontend.v1.TopbarWarningLine
-	(*TopbarAccountingWarningDetail)(nil),        // 30: frontend.v1.TopbarAccountingWarningDetail
-	(*TopbarWarningDetailLine)(nil),              // 31: frontend.v1.TopbarWarningDetailLine
-	(*TopbarUnmodeledToolWarningDetail)(nil),     // 32: frontend.v1.TopbarUnmodeledToolWarningDetail
-	(*TopbarUnmodeledToolName)(nil),              // 33: frontend.v1.TopbarUnmodeledToolName
-	(*TopbarDetachedUnmodeledWarningDetail)(nil), // 34: frontend.v1.TopbarDetachedUnmodeledWarningDetail
-	(*TopbarSessionFaultWarningDetail)(nil),      // 35: frontend.v1.TopbarSessionFaultWarningDetail
-	(*TopbarWarningComponent)(nil),               // 36: frontend.v1.TopbarWarningComponent
-	(*TopbarDegradedWindowWarningDetail)(nil),    // 37: frontend.v1.TopbarDegradedWindowWarningDetail
-	(*TopbarDeployFailedWarningDetail)(nil),      // 38: frontend.v1.TopbarDeployFailedWarningDetail
-	(*TopbarDegradedWindowOpen)(nil),             // 39: frontend.v1.TopbarDegradedWindowOpen
-	(*TopbarDegradedWindowClosed)(nil),           // 40: frontend.v1.TopbarDegradedWindowClosed
-	(*TokenBreakdownView)(nil),                   // 41: frontend.v1.TokenBreakdownView
-	(*TokenBreakdownSection)(nil),                // 42: frontend.v1.TokenBreakdownSection
-	(*TokenBreakdownHeading)(nil),                // 43: frontend.v1.TokenBreakdownHeading
-	(*TokenBreakdownRow)(nil),                    // 44: frontend.v1.TokenBreakdownRow
-	(*v1.ModelOption)(nil),                       // 45: conversation.v1.ModelOption
-	(*v1.AgentModel)(nil),                        // 46: conversation.v1.AgentModel
-	(v1.AgentEffortLevel)(0),                     // 47: conversation.v1.AgentEffortLevel
+	(*TopbarTitleLinks)(nil),                     // 15: frontend.v1.TopbarTitleLinks
+	(*TopbarTitleLink)(nil),                      // 16: frontend.v1.TopbarTitleLink
+	(*TopbarTitleLinkMenu)(nil),                  // 17: frontend.v1.TopbarTitleLinkMenu
+	(*TopbarTitleLinkMenuItem)(nil),              // 18: frontend.v1.TopbarTitleLinkMenuItem
+	(*TopbarWorkspaceName)(nil),                  // 19: frontend.v1.TopbarWorkspaceName
+	(*TopbarSessionLine)(nil),                    // 20: frontend.v1.TopbarSessionLine
+	(*TopbarModelSelector)(nil),                  // 21: frontend.v1.TopbarModelSelector
+	(*TopbarEffortSelector)(nil),                 // 22: frontend.v1.TopbarEffortSelector
+	(*TopbarEffortSelectorSupported)(nil),        // 23: frontend.v1.TopbarEffortSelectorSupported
+	(*TopbarEffortSelectorUnsupported)(nil),      // 24: frontend.v1.TopbarEffortSelectorUnsupported
+	(*TopbarEffortOption)(nil),                   // 25: frontend.v1.TopbarEffortOption
+	(*TopbarConnectivity)(nil),                   // 26: frontend.v1.TopbarConnectivity
+	(*TopbarAgentReplSession)(nil),               // 27: frontend.v1.TopbarAgentReplSession
+	(*TopbarSessionBeganLogin)(nil),              // 28: frontend.v1.TopbarSessionBeganLogin
+	(*TopbarSessionBeganEditorStart)(nil),        // 29: frontend.v1.TopbarSessionBeganEditorStart
+	(*TopbarWarningStrip)(nil),                   // 30: frontend.v1.TopbarWarningStrip
+	(*TopbarWarning)(nil),                        // 31: frontend.v1.TopbarWarning
+	(*TopbarWarningLine)(nil),                    // 32: frontend.v1.TopbarWarningLine
+	(*TopbarAccountingWarningDetail)(nil),        // 33: frontend.v1.TopbarAccountingWarningDetail
+	(*TopbarWarningDetailLine)(nil),              // 34: frontend.v1.TopbarWarningDetailLine
+	(*TopbarUnmodeledToolWarningDetail)(nil),     // 35: frontend.v1.TopbarUnmodeledToolWarningDetail
+	(*TopbarUnmodeledToolName)(nil),              // 36: frontend.v1.TopbarUnmodeledToolName
+	(*TopbarDetachedUnmodeledWarningDetail)(nil), // 37: frontend.v1.TopbarDetachedUnmodeledWarningDetail
+	(*TopbarSessionFaultWarningDetail)(nil),      // 38: frontend.v1.TopbarSessionFaultWarningDetail
+	(*TopbarWarningComponent)(nil),               // 39: frontend.v1.TopbarWarningComponent
+	(*TopbarDegradedWindowWarningDetail)(nil),    // 40: frontend.v1.TopbarDegradedWindowWarningDetail
+	(*TopbarDeployFailedWarningDetail)(nil),      // 41: frontend.v1.TopbarDeployFailedWarningDetail
+	(*TopbarDegradedWindowOpen)(nil),             // 42: frontend.v1.TopbarDegradedWindowOpen
+	(*TopbarDegradedWindowClosed)(nil),           // 43: frontend.v1.TopbarDegradedWindowClosed
+	(*TokenBreakdownView)(nil),                   // 44: frontend.v1.TokenBreakdownView
+	(*TokenBreakdownSection)(nil),                // 45: frontend.v1.TokenBreakdownSection
+	(*TokenBreakdownHeading)(nil),                // 46: frontend.v1.TokenBreakdownHeading
+	(*TokenBreakdownRow)(nil),                    // 47: frontend.v1.TokenBreakdownRow
+	(*v1.ModelOption)(nil),                       // 48: conversation.v1.ModelOption
+	(*v1.AgentModel)(nil),                        // 49: conversation.v1.AgentModel
+	(v1.AgentEffortLevel)(0),                     // 50: conversation.v1.AgentEffortLevel
 }
 var file_frontend_v1_topbar_proto_depIdxs = []int32{
 	14, // 0: frontend.v1.TopbarView.title:type_name -> frontend.v1.TopbarTitle
-	17, // 1: frontend.v1.TopbarView.session_line:type_name -> frontend.v1.TopbarSessionLine
-	18, // 2: frontend.v1.TopbarView.model_selector:type_name -> frontend.v1.TopbarModelSelector
-	23, // 3: frontend.v1.TopbarView.connectivity:type_name -> frontend.v1.TopbarConnectivity
-	27, // 4: frontend.v1.TopbarView.warnings:type_name -> frontend.v1.TopbarWarningStrip
+	20, // 1: frontend.v1.TopbarView.session_line:type_name -> frontend.v1.TopbarSessionLine
+	21, // 2: frontend.v1.TopbarView.model_selector:type_name -> frontend.v1.TopbarModelSelector
+	26, // 3: frontend.v1.TopbarView.connectivity:type_name -> frontend.v1.TopbarConnectivity
+	30, // 4: frontend.v1.TopbarView.warnings:type_name -> frontend.v1.TopbarWarningStrip
 	9,  // 5: frontend.v1.TopbarView.context:type_name -> frontend.v1.TopbarContextChip
 	10, // 6: frontend.v1.TopbarView.account:type_name -> frontend.v1.TopbarAccount
 	7,  // 7: frontend.v1.TopbarView.permission_mode_picker:type_name -> frontend.v1.TopbarPermissionModePicker
 	1,  // 8: frontend.v1.TopbarView.persistent_wifi:type_name -> frontend.v1.TopbarPersistentWifi
-	19, // 9: frontend.v1.TopbarView.effort_selector:type_name -> frontend.v1.TopbarEffortSelector
-	16, // 10: frontend.v1.TopbarView.workspace_name:type_name -> frontend.v1.TopbarWorkspaceName
+	22, // 9: frontend.v1.TopbarView.effort_selector:type_name -> frontend.v1.TopbarEffortSelector
+	19, // 10: frontend.v1.TopbarView.workspace_name:type_name -> frontend.v1.TopbarWorkspaceName
 	2,  // 11: frontend.v1.TopbarPersistentWifi.joined:type_name -> frontend.v1.TopbarPersistentWifiJoined
 	3,  // 12: frontend.v1.TopbarPersistentWifi.not_joined:type_name -> frontend.v1.TopbarPersistentWifiNotJoined
 	4,  // 13: frontend.v1.TopbarPersistentWifi.on:type_name -> frontend.v1.TopbarPersistentWifiModeOn
@@ -3296,55 +3509,58 @@ var file_frontend_v1_topbar_proto_depIdxs = []int32{
 	6,  // 15: frontend.v1.TopbarPersistentWifi.tooltip:type_name -> frontend.v1.TopbarPersistentWifiTooltip
 	8,  // 16: frontend.v1.TopbarPermissionModePicker.current:type_name -> frontend.v1.TopbarPermissionModeOption
 	8,  // 17: frontend.v1.TopbarPermissionModePicker.options:type_name -> frontend.v1.TopbarPermissionModeOption
-	41, // 18: frontend.v1.TopbarContextChip.breakdown:type_name -> frontend.v1.TokenBreakdownView
+	44, // 18: frontend.v1.TopbarContextChip.breakdown:type_name -> frontend.v1.TokenBreakdownView
 	11, // 19: frontend.v1.TopbarAccount.logged_in:type_name -> frontend.v1.TopbarAccountLoggedIn
 	12, // 20: frontend.v1.TopbarAccount.logged_out:type_name -> frontend.v1.TopbarAccountLoggedOut
 	13, // 21: frontend.v1.TopbarAccount.options:type_name -> frontend.v1.TopbarAccountOption
 	11, // 22: frontend.v1.TopbarAccountOption.logged_in:type_name -> frontend.v1.TopbarAccountLoggedIn
 	12, // 23: frontend.v1.TopbarAccountOption.logged_out:type_name -> frontend.v1.TopbarAccountLoggedOut
-	15, // 24: frontend.v1.TopbarTitle.link:type_name -> frontend.v1.TopbarTitleLink
-	45, // 25: frontend.v1.TopbarModelSelector.selected:type_name -> conversation.v1.ModelOption
-	45, // 26: frontend.v1.TopbarModelSelector.options:type_name -> conversation.v1.ModelOption
-	46, // 27: frontend.v1.TopbarModelSelector.default_model:type_name -> conversation.v1.AgentModel
-	20, // 28: frontend.v1.TopbarEffortSelector.supported:type_name -> frontend.v1.TopbarEffortSelectorSupported
-	21, // 29: frontend.v1.TopbarEffortSelector.unsupported:type_name -> frontend.v1.TopbarEffortSelectorUnsupported
-	22, // 30: frontend.v1.TopbarEffortSelectorSupported.current:type_name -> frontend.v1.TopbarEffortOption
-	22, // 31: frontend.v1.TopbarEffortSelectorSupported.options:type_name -> frontend.v1.TopbarEffortOption
-	47, // 32: frontend.v1.TopbarEffortOption.level:type_name -> conversation.v1.AgentEffortLevel
-	24, // 33: frontend.v1.TopbarConnectivity.session:type_name -> frontend.v1.TopbarAgentReplSession
-	25, // 34: frontend.v1.TopbarAgentReplSession.login:type_name -> frontend.v1.TopbarSessionBeganLogin
-	26, // 35: frontend.v1.TopbarAgentReplSession.editor_start:type_name -> frontend.v1.TopbarSessionBeganEditorStart
-	28, // 36: frontend.v1.TopbarWarningStrip.warnings:type_name -> frontend.v1.TopbarWarning
-	29, // 37: frontend.v1.TopbarWarning.line:type_name -> frontend.v1.TopbarWarningLine
-	30, // 38: frontend.v1.TopbarWarning.accounting:type_name -> frontend.v1.TopbarAccountingWarningDetail
-	32, // 39: frontend.v1.TopbarWarning.unmodeled_tool:type_name -> frontend.v1.TopbarUnmodeledToolWarningDetail
-	34, // 40: frontend.v1.TopbarWarning.detached_unmodeled:type_name -> frontend.v1.TopbarDetachedUnmodeledWarningDetail
-	35, // 41: frontend.v1.TopbarWarning.session_fault:type_name -> frontend.v1.TopbarSessionFaultWarningDetail
-	37, // 42: frontend.v1.TopbarWarning.degraded_window:type_name -> frontend.v1.TopbarDegradedWindowWarningDetail
-	38, // 43: frontend.v1.TopbarWarning.deploy_failed:type_name -> frontend.v1.TopbarDeployFailedWarningDetail
-	31, // 44: frontend.v1.TopbarAccountingWarningDetail.lines:type_name -> frontend.v1.TopbarWarningDetailLine
-	33, // 45: frontend.v1.TopbarUnmodeledToolWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
-	31, // 46: frontend.v1.TopbarUnmodeledToolWarningDetail.argument_lines:type_name -> frontend.v1.TopbarWarningDetailLine
-	33, // 47: frontend.v1.TopbarDetachedUnmodeledWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
-	36, // 48: frontend.v1.TopbarSessionFaultWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
-	31, // 49: frontend.v1.TopbarSessionFaultWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
-	36, // 50: frontend.v1.TopbarDegradedWindowWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
-	31, // 51: frontend.v1.TopbarDegradedWindowWarningDetail.reason:type_name -> frontend.v1.TopbarWarningDetailLine
-	39, // 52: frontend.v1.TopbarDegradedWindowWarningDetail.open:type_name -> frontend.v1.TopbarDegradedWindowOpen
-	40, // 53: frontend.v1.TopbarDegradedWindowWarningDetail.closed:type_name -> frontend.v1.TopbarDegradedWindowClosed
-	31, // 54: frontend.v1.TopbarDeployFailedWarningDetail.step:type_name -> frontend.v1.TopbarWarningDetailLine
-	36, // 55: frontend.v1.TopbarDeployFailedWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
-	31, // 56: frontend.v1.TopbarDeployFailedWarningDetail.rollback:type_name -> frontend.v1.TopbarWarningDetailLine
-	31, // 57: frontend.v1.TopbarDeployFailedWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
-	31, // 58: frontend.v1.TopbarDeployFailedWarningDetail.log:type_name -> frontend.v1.TopbarWarningDetailLine
-	42, // 59: frontend.v1.TokenBreakdownView.sections:type_name -> frontend.v1.TokenBreakdownSection
-	43, // 60: frontend.v1.TokenBreakdownSection.heading:type_name -> frontend.v1.TokenBreakdownHeading
-	44, // 61: frontend.v1.TokenBreakdownSection.rows:type_name -> frontend.v1.TokenBreakdownRow
-	62, // [62:62] is the sub-list for method output_type
-	62, // [62:62] is the sub-list for method input_type
-	62, // [62:62] is the sub-list for extension type_name
-	62, // [62:62] is the sub-list for extension extendee
-	0,  // [0:62] is the sub-list for field type_name
+	15, // 24: frontend.v1.TopbarTitle.links:type_name -> frontend.v1.TopbarTitleLinks
+	16, // 25: frontend.v1.TopbarTitleLinks.single:type_name -> frontend.v1.TopbarTitleLink
+	17, // 26: frontend.v1.TopbarTitleLinks.menu:type_name -> frontend.v1.TopbarTitleLinkMenu
+	18, // 27: frontend.v1.TopbarTitleLinkMenu.items:type_name -> frontend.v1.TopbarTitleLinkMenuItem
+	48, // 28: frontend.v1.TopbarModelSelector.selected:type_name -> conversation.v1.ModelOption
+	48, // 29: frontend.v1.TopbarModelSelector.options:type_name -> conversation.v1.ModelOption
+	49, // 30: frontend.v1.TopbarModelSelector.default_model:type_name -> conversation.v1.AgentModel
+	23, // 31: frontend.v1.TopbarEffortSelector.supported:type_name -> frontend.v1.TopbarEffortSelectorSupported
+	24, // 32: frontend.v1.TopbarEffortSelector.unsupported:type_name -> frontend.v1.TopbarEffortSelectorUnsupported
+	25, // 33: frontend.v1.TopbarEffortSelectorSupported.current:type_name -> frontend.v1.TopbarEffortOption
+	25, // 34: frontend.v1.TopbarEffortSelectorSupported.options:type_name -> frontend.v1.TopbarEffortOption
+	50, // 35: frontend.v1.TopbarEffortOption.level:type_name -> conversation.v1.AgentEffortLevel
+	27, // 36: frontend.v1.TopbarConnectivity.session:type_name -> frontend.v1.TopbarAgentReplSession
+	28, // 37: frontend.v1.TopbarAgentReplSession.login:type_name -> frontend.v1.TopbarSessionBeganLogin
+	29, // 38: frontend.v1.TopbarAgentReplSession.editor_start:type_name -> frontend.v1.TopbarSessionBeganEditorStart
+	31, // 39: frontend.v1.TopbarWarningStrip.warnings:type_name -> frontend.v1.TopbarWarning
+	32, // 40: frontend.v1.TopbarWarning.line:type_name -> frontend.v1.TopbarWarningLine
+	33, // 41: frontend.v1.TopbarWarning.accounting:type_name -> frontend.v1.TopbarAccountingWarningDetail
+	35, // 42: frontend.v1.TopbarWarning.unmodeled_tool:type_name -> frontend.v1.TopbarUnmodeledToolWarningDetail
+	37, // 43: frontend.v1.TopbarWarning.detached_unmodeled:type_name -> frontend.v1.TopbarDetachedUnmodeledWarningDetail
+	38, // 44: frontend.v1.TopbarWarning.session_fault:type_name -> frontend.v1.TopbarSessionFaultWarningDetail
+	40, // 45: frontend.v1.TopbarWarning.degraded_window:type_name -> frontend.v1.TopbarDegradedWindowWarningDetail
+	41, // 46: frontend.v1.TopbarWarning.deploy_failed:type_name -> frontend.v1.TopbarDeployFailedWarningDetail
+	34, // 47: frontend.v1.TopbarAccountingWarningDetail.lines:type_name -> frontend.v1.TopbarWarningDetailLine
+	36, // 48: frontend.v1.TopbarUnmodeledToolWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
+	34, // 49: frontend.v1.TopbarUnmodeledToolWarningDetail.argument_lines:type_name -> frontend.v1.TopbarWarningDetailLine
+	36, // 50: frontend.v1.TopbarDetachedUnmodeledWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
+	39, // 51: frontend.v1.TopbarSessionFaultWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
+	34, // 52: frontend.v1.TopbarSessionFaultWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
+	39, // 53: frontend.v1.TopbarDegradedWindowWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
+	34, // 54: frontend.v1.TopbarDegradedWindowWarningDetail.reason:type_name -> frontend.v1.TopbarWarningDetailLine
+	42, // 55: frontend.v1.TopbarDegradedWindowWarningDetail.open:type_name -> frontend.v1.TopbarDegradedWindowOpen
+	43, // 56: frontend.v1.TopbarDegradedWindowWarningDetail.closed:type_name -> frontend.v1.TopbarDegradedWindowClosed
+	34, // 57: frontend.v1.TopbarDeployFailedWarningDetail.step:type_name -> frontend.v1.TopbarWarningDetailLine
+	39, // 58: frontend.v1.TopbarDeployFailedWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
+	34, // 59: frontend.v1.TopbarDeployFailedWarningDetail.rollback:type_name -> frontend.v1.TopbarWarningDetailLine
+	34, // 60: frontend.v1.TopbarDeployFailedWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
+	34, // 61: frontend.v1.TopbarDeployFailedWarningDetail.log:type_name -> frontend.v1.TopbarWarningDetailLine
+	45, // 62: frontend.v1.TokenBreakdownView.sections:type_name -> frontend.v1.TokenBreakdownSection
+	46, // 63: frontend.v1.TokenBreakdownSection.heading:type_name -> frontend.v1.TokenBreakdownHeading
+	47, // 64: frontend.v1.TokenBreakdownSection.rows:type_name -> frontend.v1.TokenBreakdownRow
+	65, // [65:65] is the sub-list for method output_type
+	65, // [65:65] is the sub-list for method input_type
+	65, // [65:65] is the sub-list for extension type_name
+	65, // [65:65] is the sub-list for extension extendee
+	0,  // [0:65] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_topbar_proto_init() }
@@ -3368,17 +3584,21 @@ func file_frontend_v1_topbar_proto_init() {
 		(*TopbarAccountOption_LoggedOut)(nil),
 	}
 	file_frontend_v1_topbar_proto_msgTypes[14].OneofWrappers = []any{}
-	file_frontend_v1_topbar_proto_msgTypes[18].OneofWrappers = []any{}
-	file_frontend_v1_topbar_proto_msgTypes[19].OneofWrappers = []any{
+	file_frontend_v1_topbar_proto_msgTypes[15].OneofWrappers = []any{
+		(*TopbarTitleLinks_Single)(nil),
+		(*TopbarTitleLinks_Menu)(nil),
+	}
+	file_frontend_v1_topbar_proto_msgTypes[21].OneofWrappers = []any{}
+	file_frontend_v1_topbar_proto_msgTypes[22].OneofWrappers = []any{
 		(*TopbarEffortSelector_Supported)(nil),
 		(*TopbarEffortSelector_Unsupported)(nil),
 	}
-	file_frontend_v1_topbar_proto_msgTypes[23].OneofWrappers = []any{}
-	file_frontend_v1_topbar_proto_msgTypes[24].OneofWrappers = []any{
+	file_frontend_v1_topbar_proto_msgTypes[26].OneofWrappers = []any{}
+	file_frontend_v1_topbar_proto_msgTypes[27].OneofWrappers = []any{
 		(*TopbarAgentReplSession_Login)(nil),
 		(*TopbarAgentReplSession_EditorStart)(nil),
 	}
-	file_frontend_v1_topbar_proto_msgTypes[28].OneofWrappers = []any{
+	file_frontend_v1_topbar_proto_msgTypes[31].OneofWrappers = []any{
 		(*TopbarWarning_Accounting)(nil),
 		(*TopbarWarning_UnmodeledTool)(nil),
 		(*TopbarWarning_DetachedUnmodeled)(nil),
@@ -3386,19 +3606,19 @@ func file_frontend_v1_topbar_proto_init() {
 		(*TopbarWarning_DegradedWindow)(nil),
 		(*TopbarWarning_DeployFailed)(nil),
 	}
-	file_frontend_v1_topbar_proto_msgTypes[37].OneofWrappers = []any{
+	file_frontend_v1_topbar_proto_msgTypes[40].OneofWrappers = []any{
 		(*TopbarDegradedWindowWarningDetail_Open)(nil),
 		(*TopbarDegradedWindowWarningDetail_Closed)(nil),
 	}
-	file_frontend_v1_topbar_proto_msgTypes[38].OneofWrappers = []any{}
-	file_frontend_v1_topbar_proto_msgTypes[44].OneofWrappers = []any{}
+	file_frontend_v1_topbar_proto_msgTypes[41].OneofWrappers = []any{}
+	file_frontend_v1_topbar_proto_msgTypes[47].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_topbar_proto_rawDesc), len(file_frontend_v1_topbar_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   45,
+			NumMessages:   48,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

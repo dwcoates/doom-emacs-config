@@ -1285,33 +1285,44 @@ func TestARetractedSynthesisWithNoVendorSummaryLeavesNoTitle(t *testing.T) {
 	}
 }
 
-// link is a principal link for SetPrincipalLink, which takes an optional url.
-func link(url string) *string { return &url }
+// docLink and ticketLink are two links the summary's menu may show.
+var (
+	docLink    = Link{Label: "The design doc", URL: "https://example.com/doc"}
+	ticketLink = Link{Label: "The tracking ticket", URL: "https://example.com/ticket"}
+)
 
-func TestThePrincipalLinkRidesTheTitle(t *testing.T) {
-	const url = "https://github.com/o/r/pull/7"
+func TestTheShownLinksRideTheTitle(t *testing.T) {
+	single := &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Single{
+		Single: &frontendv1.TopbarTitleLink{Label: docLink.Label, Url: docLink.URL}}}
+	menu := &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Menu{Menu: &frontendv1.TopbarTitleLinkMenu{
+		Items: []*frontendv1.TopbarTitleLinkMenuItem{
+			{Label: ticketLink.Label, Url: ticketLink.URL}, {Label: docLink.Label, Url: docLink.URL}}}}}
 	tests := []struct {
-		name     string
-		arrange  func(h *harness)
-		wantText string
-		wantLink string
-		noTitle  bool
+		name      string
+		arrange   func(h *harness)
+		wantText  string
+		wantLinks *frontendv1.TopbarTitleLinks
+		noTitle   bool
 	}{
-		{name: "a summary carries the link", arrange: func(h *harness) {
+		{name: "one shown link is opened directly", arrange: func(h *harness) {
 			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
-			h.r.SetPrincipalLink(testWS, link(url))
-		}, wantText: "Wire up the reconnect backoff", wantLink: url},
-		{name: "a link set before the summary lands with it", arrange: func(h *harness) {
-			h.r.SetPrincipalLink(testWS, link(url))
+			h.r.SetLinks(testWS, []Link{docLink})
+		}, wantText: "Wire up the reconnect backoff", wantLinks: single},
+		{name: "two shown links drop a menu in the order given", arrange: func(h *harness) {
+			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+			h.r.SetLinks(testWS, []Link{ticketLink, docLink})
+		}, wantText: "Wire up the reconnect backoff", wantLinks: menu},
+		{name: "links set before the summary land with it", arrange: func(h *harness) {
+			h.r.SetLinks(testWS, []Link{docLink})
 			h.r.OnSessionUpdate(testWS, sessionTitle("the vendor's own summary"))
-		}, wantText: "the vendor's own summary", wantLink: url},
-		{name: "a cleared link leaves plain text", arrange: func(h *harness) {
+		}, wantText: "the vendor's own summary", wantLinks: single},
+		{name: "cleared links leave plain text", arrange: func(h *harness) {
 			h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
-			h.r.SetPrincipalLink(testWS, link(url))
-			h.r.SetPrincipalLink(testWS, nil)
+			h.r.SetLinks(testWS, []Link{docLink})
+			h.r.SetLinks(testWS, nil)
 		}, wantText: "Wire up the reconnect backoff"},
-		{name: "no summary publishes no link", arrange: func(h *harness) {
-			h.r.SetPrincipalLink(testWS, link(url))
+		{name: "no summary publishes no links", arrange: func(h *harness) {
+			h.r.SetLinks(testWS, []Link{docLink})
 		}, noTitle: true},
 	}
 	for _, tt := range tests {
@@ -1334,17 +1345,32 @@ func TestThePrincipalLinkRidesTheTitle(t *testing.T) {
 			if got.GetText() != tt.wantText {
 				t.Errorf("title text = %q, want %q", got.GetText(), tt.wantText)
 			}
-			if tt.wantLink == "" && got.Link != nil {
-				t.Errorf("title link = %v, want none", got.Link)
-			}
-			if tt.wantLink != "" && got.GetLink().GetUrl() != tt.wantLink {
-				t.Errorf("title link = %q, want %q", got.GetLink().GetUrl(), tt.wantLink)
+			if !proto.Equal(got.GetLinks(), tt.wantLinks) {
+				t.Errorf("title links = %v, want %v", got.GetLinks(), tt.wantLinks)
 			}
 		})
 	}
 }
 
-func TestSettingThePrincipalLinkRepublishesTheStrip(t *testing.T) {
+func TestSetLinksKeepsItsOwnCopy(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff")
+	shown := []Link{docLink}
+
+	// Act: the caller reuses its slice after handing it over.
+	h.r.SetLinks(testWS, shown)
+	shown[0] = ticketLink
+	h.r.SetSynthesizedTitle(testWS, "Wire up the reconnect backoff again")
+
+	// Assert
+	if got := h.view(t).GetTitle().GetLinks().GetSingle().GetUrl(); got != docLink.URL {
+		t.Fatalf("title link = %q, want %q: the resolver read the caller's later write", got, docLink.URL)
+	}
+}
+
+func TestSettingTheLinksRepublishesTheStrip(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
@@ -1352,11 +1378,11 @@ func TestSettingThePrincipalLinkRepublishesTheStrip(t *testing.T) {
 	before := h.view(t)
 
 	// Act
-	h.r.SetPrincipalLink(testWS, link("https://example.com/doc"))
+	h.r.SetLinks(testWS, []Link{docLink})
 
 	// Assert: a NEW view was published, carrying the link.
 	after := h.view(t)
-	if after == before || after.GetTitle().GetLink().GetUrl() != "https://example.com/doc" {
+	if after == before || after.GetTitle().GetLinks().GetSingle().GetUrl() != docLink.URL {
 		t.Fatalf("published view = %v, want a fresh view whose title links the doc", after.GetTitle())
 	}
 }

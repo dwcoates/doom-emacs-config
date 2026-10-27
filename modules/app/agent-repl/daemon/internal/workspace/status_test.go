@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -270,20 +271,23 @@ func TestStatusFailsLoudlyWhenAWorkspaceItNamesCannotBeRead(t *testing.T) {
 
 func ptrTo[T any](v T) *T { return &v }
 
-func TestStatusAnswersThePrincipalLink(t *testing.T) {
-	link := "https://example.com/ticket"
+func TestStatusAnswersTheLinks(t *testing.T) {
+	doc := wsm.WorkspaceLink{URL: "https://example.com/ticket", Label: "The tracking ticket", Shown: true}
 	tests := []struct {
-		name string
-		link *string
+		name  string
+		links []wsm.WorkspaceLink
+		want  *agentreplv1.WorkspaceLinks
 	}{
-		{name: "a set link is answered", link: &link},
-		{name: "no link is answered unset", link: nil},
+		{name: "stored links are answered with their placement", links: []wsm.WorkspaceLink{doc},
+			want: LinksView([]wsm.WorkspaceLink{doc})},
+		{name: "no links answer an empty list with room", links: nil, want: LinksView(nil)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			f := newFixture(t)
-			f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", Repo: "repo-1", PrincipalLink: tt.link}
+			f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", Repo: "repo-1"}
+			f.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{"ws-1": tt.links}
 			f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-1": footerIdle()}
 
 			// Act.
@@ -293,9 +297,28 @@ func TestStatusAnswersThePrincipalLink(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Status: %v", err)
 			}
-			if (got.PrincipalLink == nil) != (tt.link == nil) || (tt.link != nil && got.GetPrincipalLink() != *tt.link) {
-				t.Errorf("principal link = %v, want %v", got.PrincipalLink, tt.link)
+			if !proto.Equal(got.GetLinks(), tt.want) {
+				t.Errorf("links = %v, want %v", got.GetLinks(), tt.want)
 			}
 		})
+	}
+}
+
+func TestStatusRefusesWhenTheLinksCannotBeRead(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1", Repo: "repo-1"}
+	f.db.linksReadErr = errors.New("disk gone")
+
+	// Act.
+	got, err := f.verbs.Status(context.Background(), "ws-1")
+
+	// Assert.
+	if err == nil || got != nil || !strings.Contains(err.Error(), "disk gone") {
+		t.Fatalf("Status = %v, %v; want the links read failure and no status", got, err)
+	}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opStatus})
+	if !ok || r.Context["workspace"] != "ws-1" {
+		t.Errorf("record = %+v, want an ERROR naming the workspace", r)
 	}
 }

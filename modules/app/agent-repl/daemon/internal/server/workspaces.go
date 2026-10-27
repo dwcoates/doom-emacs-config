@@ -1020,31 +1020,41 @@ func (s *server) SetWorkspacePriority(
 	return connect.NewResponse(resp), nil
 }
 
-// SetWorkspacePrincipalLink sets or clears the workspace's principal link,
-// which the topbar's summary opens. The new title arrives on the topbar stream.
-func (s *server) SetWorkspacePrincipalLink(
+// ChangeWorkspaceLinks stores, relabels or removes one of the workspace's
+// links, names the ones the topbar's summary menu shows, or clears them all,
+// and answers every link the workspace then holds. The new menu arrives on the
+// topbar stream.
+func (s *server) ChangeWorkspaceLinks(
 	ctx context.Context,
-	req *connect.Request[agentreplv1.SetWorkspacePrincipalLinkRequest],
-) (*connect.Response[agentreplv1.SetWorkspacePrincipalLinkResponse], error) {
-	const rpc = "SetWorkspacePrincipalLink"
-	if err := validateSetWorkspacePrincipalLinkRequest(req.Msg); err != nil {
+	req *connect.Request[agentreplv1.ChangeWorkspaceLinksRequest],
+) (*connect.Response[agentreplv1.ChangeWorkspaceLinksResponse], error) {
+	const rpc = "ChangeWorkspaceLinks"
+	if err := validateChangeWorkspaceLinksRequest(req.Msg); err != nil {
 		return nil, err
 	}
-	resp := &agentreplv1.SetWorkspacePrincipalLinkResponse{}
+	resp := &agentreplv1.ChangeWorkspaceLinksResponse{}
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
 	}
-	var link *string
-	if set := req.Msg.GetSet(); set != nil {
-		url := set.GetUrl()
-		link = &url
+	ws := subject.Record.ID
+	var links []wsm.WorkspaceLink
+	var err error
+	switch change := req.Msg.GetChange().(type) {
+	case *agentreplv1.ChangeWorkspaceLinksRequest_Set:
+		links, err = s.deps.Verbs.SetLink(ctx, ws, change.Set.GetUrl(), change.Set.GetLabel())
+	case *agentreplv1.ChangeWorkspaceLinksRequest_Remove:
+		links, err = s.deps.Verbs.RemoveLink(ctx, ws, change.Remove.GetUrl())
+	case *agentreplv1.ChangeWorkspaceLinksRequest_Show:
+		links, err = s.deps.Verbs.ShowLinks(ctx, ws, change.Show.GetUrls())
+	case *agentreplv1.ChangeWorkspaceLinksRequest_Clear:
+		links, err = s.deps.Verbs.ClearLinks(ctx, ws)
 	}
-	if err := s.deps.Verbs.SetPrincipalLink(ctx, subject.Record.ID, link); err != nil {
+	if err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
-	resp.Result = &agentreplv1.SetWorkspacePrincipalLinkResponse_Success{
-		Success: &agentreplv1.SetWorkspacePrincipalLinkSuccess{},
+	resp.Result = &agentreplv1.ChangeWorkspaceLinksResponse_Success{
+		Success: &agentreplv1.ChangeWorkspaceLinksSuccess{Links: workspace.LinksView(links)},
 	}
 	return connect.NewResponse(resp), nil
 }

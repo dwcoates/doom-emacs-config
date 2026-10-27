@@ -1,0 +1,86 @@
+// workspace_links.proto — A WORKSPACE'S LINKS AS AN AGENT READS THEM: every
+// link an agent stored for the workspace's task, each with its short label,
+// and which of them the topbar's summary menu shows. Shared by
+// ChangeWorkspaceLinks's answer and WorkspaceStatus, so the answer to a change
+// and a later read describe the links identically.
+//
+// UNLIMITED STORAGE, A CAPPED MENU. A workspace holds any number of links, but
+// the summary's menu shows at most five of them. While the menu has room, a newly set link is shown; once it is full,
+// a new link is stored unshown, the answer's `menu` is `full`, and the agent
+// chooses which links the menu shows (ChangeWorkspaceLinksShow), most relevant
+// first to the developer working with the agent and to the stakeholders the
+// developer reports the work to.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Every link a workspace holds, and the standing of its summary menu.
+message WorkspaceLinks {
+  // Every stored link, MOST RECENTLY SET FIRST: setting a link that is
+  // already stored (a relabel) moves it to the front. Shown and unshown links
+  // alike; each one's `placement` says which. Empty while the workspace has
+  // no links.
+  repeated WorkspaceLink links = 1;
+  // Whether the menu can take another link, which is how an agent learns the
+  // cap was reached.
+  WorkspaceLinksMenu menu = 2;
+}
+
+// One stored link.
+message WorkspaceLink {
+  // The absolute http or https url, verbatim as the agent set it; the key a
+  // relabel, a removal or a show names it by.
+  string url = 1;
+  // The agent's label for it, two to eight words in one sentence, which the
+  // menu draws as the link's text.
+  string label = 2;
+  // Whether the summary's menu shows this link.
+  WorkspaceLinkPlacement placement = 3;
+}
+
+// Whether the summary's menu shows a link. THE ARM IS THE PLACEMENT.
+message WorkspaceLinkPlacement {
+  oneof placement {
+    // The menu shows the link.
+    WorkspaceLinkPlacementShown shown = 1;
+    // The link is stored, and the menu leaves it out: the menu was full when
+    // it was set, or the agent's last show named other links.
+    WorkspaceLinkPlacementUnshown unshown = 2;
+  }
+}
+
+// The menu shows the link. DELIBERATELY EMPTY: the arm is the placement.
+message WorkspaceLinkPlacementShown {}
+
+// The menu leaves the link out. DELIBERATELY EMPTY: the arm is the placement.
+message WorkspaceLinkPlacementUnshown {}
+
+// The summary menu's standing against its cap. THE ARM IS THE STANDING.
+message WorkspaceLinksMenu {
+  oneof standing {
+    // The menu shows fewer links than the cap, so the next new link is shown.
+    WorkspaceLinksMenuRoom room = 1;
+    // The menu shows as many links as the cap allows, so the next new link is
+    // stored unshown. While any link is unshown, the agent chooses which
+    // links the menu shows (ChangeWorkspaceLinksShow).
+    WorkspaceLinksMenuFull full = 2;
+  }
+}
+
+// The menu has room.
+message WorkspaceLinksMenuRoom {
+  // How many more links the menu can show; at least one.
+  uint32 free = 1;
+}
+
+// The menu is full.
+message WorkspaceLinksMenuFull {
+  // How many links the menu shows: the cap, five.
+  uint32 limit = 1;
+  // How many stored links the menu leaves out; zero when every stored link is
+  // shown.
+  uint32 unshown = 2;
+}

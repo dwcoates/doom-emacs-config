@@ -11,7 +11,7 @@
 // reads WorkspaceStatus.branch, never the name.
 //
 // EVERYTHING KEYED BY THE WORKSPACE'S ID SURVIVES IT: its subscriptions, what
-// it awaits and who awaits it, its held prompts, its principal link, its
+// it awaits and who awaits it, its held prompts, its links, its
 // queue entry and its place in the sidebar. The daemon republishes the roster
 // in the same operation, so the sidebar, the tab bar and the topbar show the
 // new name with no reload, and the old name stops resolving at once.

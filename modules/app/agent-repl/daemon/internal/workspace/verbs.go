@@ -35,7 +35,7 @@ const (
 	opFollowSelected       = "daemon.workspace.follow_selection"
 	opMarkViewed           = "daemon.workspace.mark_viewed"
 	opSetPriority          = "daemon.workspace.set_priority"
-	opSetPrincipalLink     = "daemon.workspace.set_principal_link"
+	opChangeLinks          = "daemon.workspace.change_links"
 	opSetName              = "daemon.workspace.set_name"
 	opSetHidden            = "daemon.workspace.set_hidden"
 	opRevealMergeWorkspace = "daemon.workspace.reveal_merge_workspace"

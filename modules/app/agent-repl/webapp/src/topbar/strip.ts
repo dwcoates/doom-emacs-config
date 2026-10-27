@@ -26,12 +26,13 @@
  * workspace's name into it; this end never concatenates identity fragments and
  * never stands the name in for a missing summary.
  *
- * THE SUMMARY OPENS THE PRINCIPAL LINK, when the title carries one. It is drawn
- * through the one external-link component, so the click is OpenExternal (the
- * Chrome profile of the session's account) and never a navigation, and that
- * component's claimed click stops propagating, so the heading's session-line
- * reveal does not also open. With no summary there is no title, so nothing is
- * clickable.
+ * THE SUMMARY OPENS THE WORKSPACE'S SHOWN LINKS, when the title carries them,
+ * and the daemon's arm says how: one link is opened directly, through the one
+ * external-link component, so the click is OpenExternal (the Chrome profile of
+ * the session's account) and never a navigation; several drop a menu under the
+ * heading whose rows are that same component. Either click stops propagating,
+ * so the heading's session-line reveal does not also open. With no summary
+ * there is no title, so nothing is clickable.
  */
 import { createControl } from "../control.js";
 import type {
@@ -39,6 +40,7 @@ import type {
   TopbarConnectivity,
   TopbarSessionLine,
   TopbarTitle,
+  TopbarTitleLinkMenu,
   TopbarWorkspaceName,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { renderExternalLink } from "../link.js";
@@ -156,11 +158,11 @@ export function drawTopbarConnectivity(u: TopbarConnectivity): HTMLElement {
 export function drawTopbarHeading(
   title: TopbarTitle | undefined,
   name: TopbarWorkspaceName,
-  ctx: AppContext,
+  tc: TopbarContext,
 ): HTMLElement {
   const heading = document.createElement("div");
   heading.className = "topbar-heading";
-  if (title !== undefined) heading.append(drawTopbarTitle(title, ctx));
+  if (title !== undefined) heading.append(drawTopbarTitle(title, tc));
   heading.append(drawTopbarWorkspaceName(name));
   return heading;
 }
@@ -177,18 +179,74 @@ export function drawHeadingLine(className: string, text: string): HTMLElement {
   return element;
 }
 
+/** The summary's menu's name in the strip's one reveal layer. */
+export const LINKS_REVEAL = "links";
+
 /**
- * The title: the workspace's generated summary, drawn verbatim. With a
- * principal link the summary's text is that link, and the tooltip names the
- * url beneath the whole summary.
+ * The title: the workspace's generated summary, drawn verbatim. With one shown
+ * link the summary's text is that link, and the tooltip names its label and
+ * url beneath the whole summary. With several, a click on the summary drops
+ * their menu.
  */
-export function drawTopbarTitle(u: TopbarTitle, ctx: AppContext): HTMLElement {
+export function drawTopbarTitle(u: TopbarTitle, tc: TopbarContext): HTMLElement {
   const element = drawHeadingLine("topbar-title", u.text);
-  if (u.link === undefined) return element;
+  if (u.links === undefined) return element;
   element.classList.add("topbar-title-linked");
-  element.title = `${u.text}\n${u.link.url}`;
-  element.replaceChildren(renderExternalLink(ctx, { text: u.text, url: u.link.url }));
-  return element;
+  const opens = requireCase(u.links.opens, "TopbarTitleLinks.opens");
+  switch (opens.case) {
+    case "single":
+      element.title = `${u.text}\n${opens.value.label}\n${opens.value.url}`;
+      element.replaceChildren(renderExternalLink(tc.ctx, { text: u.text, url: opens.value.url }));
+      return element;
+    case "menu":
+      bindTitleLinkMenu(element, opens.value, tc);
+      return element;
+    default: {
+      const other: { case: string } = opens;
+      return unreachableArm("TopbarTitleLinks.opens", other.case);
+    }
+  }
+}
+
+/**
+ * Wire the summary's click to the menu of its shown links. The click is
+ * claimed, so the heading's session-line reveal does not also toggle.
+ */
+export function bindTitleLinkMenu(element: HTMLElement, menu: TopbarTitleLinkMenu, tc: TopbarContext): void {
+  element.classList.add("topbar-title-menu");
+  asAnchor(element, LINKS_REVEAL);
+  const body = (): HTMLElement => drawTitleLinkMenu(menu, tc);
+  // Registered as it is drawn, so a push arriving while the menu is open
+  // re-opens it with THIS push's links rather than the previous push's.
+  tc.reveals.register(LINKS_REVEAL, LINKS_REVEAL, body);
+  element.addEventListener("click", (event) => {
+    event.stopPropagation();
+    tc.reveals.toggle(LINKS_REVEAL, LINKS_REVEAL, body);
+  });
+}
+
+/**
+ * The summary's menu: one row per shown link, in the served order (most
+ * recently set first), each the label drawn as its link. A pick closes the
+ * menu as it opens the link.
+ */
+export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext): HTMLElement {
+  const list = document.createElement("div");
+  list.className = "topbar-title-link-options list-rows";
+  log.debug("drawing the summary's link menu", {
+    operation: "topbar.title-link-menu",
+    context: { items: menu.items.length },
+  });
+  for (const item of menu.items) {
+    const row = document.createElement("div");
+    row.className = "topbar-title-link-option";
+    row.title = item.url;
+    const link = renderExternalLink(tc.ctx, { text: item.label, url: item.url });
+    link.addEventListener("click", () => tc.reveals.close());
+    row.append(link);
+    list.append(row);
+  }
+  return list;
 }
 
 /** The workspace's name, drawn verbatim on the heading's second line. */

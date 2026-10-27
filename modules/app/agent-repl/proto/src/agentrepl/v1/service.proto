@@ -120,7 +120,7 @@ import "agentrepl/v1/endpoint_evaluate_in_editor.proto";
 import "agentrepl/v1/endpoint_answer_editor_evaluation.proto";
 import "agentrepl/v1/endpoint_compact_workspace.proto";
 import "agentrepl/v1/endpoint_set_workspace_correspondence.proto";
-import "agentrepl/v1/endpoint_set_workspace_principal_link.proto";
+import "agentrepl/v1/endpoint_change_workspace_links.proto";
 import "agentrepl/v1/endpoint_set_workspace_name.proto";
 import "agentrepl/v1/endpoint_set_workspace_one_shot.proto";
 import "agentrepl/v1/endpoint_create_thread.proto";
@@ -293,9 +293,10 @@ service AgentRepl {
   // Mark a workspace as awaiting correspondence from another, or clear the
   // mark. See endpoint_set_workspace_correspondence.proto.
   rpc SetWorkspaceCorrespondence(SetWorkspaceCorrespondenceRequest) returns (SetWorkspaceCorrespondenceResponse);
-  // Name the link that best stands for a workspace's task, which the topbar's
-  // summary opens, or clear it. See endpoint_set_workspace_principal_link.proto.
-  rpc SetWorkspacePrincipalLink(SetWorkspacePrincipalLinkRequest) returns (SetWorkspacePrincipalLinkResponse);
+  // Store, relabel or remove a workspace's links, choose which of them the
+  // topbar's summary menu shows, or clear them. See
+  // endpoint_change_workspace_links.proto.
+  rpc ChangeWorkspaceLinks(ChangeWorkspaceLinksRequest) returns (ChangeWorkspaceLinksResponse);
   // Rename a workspace: its name only, never its branch or its worktree
   // directory. See endpoint_set_workspace_name.proto.
   rpc SetWorkspaceName(SetWorkspaceNameRequest) returns (SetWorkspaceNameResponse);

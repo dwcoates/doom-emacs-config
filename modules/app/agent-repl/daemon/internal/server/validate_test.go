@@ -371,26 +371,60 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "name",
 		},
 		{
-			name: "set principal link with no workspace",
+			name: "change links with no workspace",
 			check: func() *connect.Error {
-				return validateSetWorkspacePrincipalLinkRequest(&agentreplv1.SetWorkspacePrincipalLinkRequest{})
+				return validateChangeWorkspaceLinksRequest(&agentreplv1.ChangeWorkspaceLinksRequest{})
 			},
 			field: "workspace",
 		},
 		{
-			name: "set principal link with no change arm",
+			name: "change links with no change arm",
 			check: func() *connect.Error {
-				return validateSetWorkspacePrincipalLinkRequest(&agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref()})
+				return validateChangeWorkspaceLinksRequest(&agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref()})
 			},
 			field: "change",
 		},
 		{
-			name: "set principal link with a blank url",
+			name: "change links with a set of a blank url",
 			check: func() *connect.Error {
-				return validateSetWorkspacePrincipalLinkRequest(&agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref(),
-					Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Set{Set: &agentreplv1.SetWorkspacePrincipalLinkSet{Url: " "}}})
+				return validateChangeWorkspaceLinksRequest(&agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: " ", Label: "The doc"}}})
 			},
 			field: "set.url",
+		},
+		{
+			name: "change links with a set of a blank label",
+			check: func() *connect.Error {
+				return validateChangeWorkspaceLinksRequest(&agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://x", Label: " "}}})
+			},
+			field: "set.label",
+		},
+		{
+			name: "change links with a removal of a blank url",
+			check: func() *connect.Error {
+				return validateChangeWorkspaceLinksRequest(&agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Remove{Remove: &agentreplv1.ChangeWorkspaceLinksRemove{}}})
+			},
+			field: "remove.url",
+		},
+		{
+			name: "change links with an empty show",
+			check: func() *connect.Error {
+				return validateChangeWorkspaceLinksRequest(&agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Show{Show: &agentreplv1.ChangeWorkspaceLinksShow{}}})
+			},
+			field: "show.urls",
+		},
+		{
+			name: "change links with a show of a blank url",
+			check: func() *connect.Error {
+				return validateChangeWorkspaceLinksRequest(&agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Show{Show: &agentreplv1.ChangeWorkspaceLinksShow{Urls: []string{" "}}}})
+			},
+			field: "show.urls",
+		},
+		{
+			name: "change links with a show naming a url twice",
+			check: func() *connect.Error {
+				return validateChangeWorkspaceLinksRequest(&agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Show{Show: &agentreplv1.ChangeWorkspaceLinksShow{Urls: []string{"https://x", "https://x"}}}})
+			},
+			field: "show.urls",
 		},
 		{
 			name: "swap with no workspace",

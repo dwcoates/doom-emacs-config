@@ -34,15 +34,20 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 	if err != nil {
 		return nil, err
 	}
+	links, err := v.deps.DB.WorkspaceLinks(ctx, ws)
+	if err != nil {
+		v.deps.Log.Global().Error(opStatus, "could not read the links of the workspace whose status was asked", dlog.WithCause(dlog.Context{"workspace": string(ws)}, err))
+		return nil, fmt.Errorf("status: read the links of %q: %w", ws, err)
+	}
 	out := &agentreplv1.WorkspaceStatus{
-		Workspace:     record.Ref(),
-		Name:          record.Name,
-		Branch:        record.Branch,
-		MergeTarget:   target,
-		Hidden:        record.Hidden || record.MergeHidden(),
-		OneShot:       record.OneShot,
-		Repository:    &workspacev1.RepositoryRef{Id: string(record.Repo)},
-		PrincipalLink: record.PrincipalLink,
+		Workspace:   record.Ref(),
+		Name:        record.Name,
+		Branch:      record.Branch,
+		MergeTarget: target,
+		Hidden:      record.Hidden || record.MergeHidden(),
+		OneShot:     record.OneShot,
+		Repository:  &workspacev1.RepositoryRef{Id: string(record.Repo)},
+		Links:       LinksView(links),
 	}
 	if record.Awaiting != nil {
 		awaited, err := v.refOf(ctx, *record.Awaiting, "the workspace it awaits")

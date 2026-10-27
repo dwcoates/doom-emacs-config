@@ -186,23 +186,26 @@ Two marks an agent sets on its own workspace show on every surface:
   - The workspace is drawn in the background status (yellow) while no turn runs, and the footer names the workspace it waits for.
   - The agent clears the mark when the answer arrives.
 
-## The summary's principal link
+## The summary's links
 
-A workspace can have one principal link: the link that best stands for its task, such as its pull request, ticket or design doc.
+A workspace keeps every link that bears on its task, such as its pull request, ticket or design doc, each under a short label.
 
-- While one is set, the purple summary in the top bar is underlined.
-  - Hovering it shows the whole summary, with the link beneath it.
-  - Clicking it opens the link in the Chrome profile of the account the workspace's session runs as, the same way a link in the feed opens.
-  - Clicking it does not open the session line the heading otherwise opens.
-- A workspace with no summary yet has nothing to click, even with a link set.
-- Agents set the link on their own, without asking, whenever a link in the conversation best reflects the workspace's task.
-  - A later link that fits the task better replaces it.
-- You can set or clear it yourself from a shell:
-  - `agent-repld workspace set WS -principal-link URL` sets it.
-  - `agent-repld workspace set WS -no-principal-link` clears it.
+- While at least one link is shown, the purple summary in the top bar is underlined.
+  - With one shown link, clicking the summary opens it.
+  - With several, clicking the summary drops a menu of their labels, most recently set first, and picking one opens it.
+  - Links open in the Chrome profile of the account the workspace's session runs as, the same way a link in the feed opens.
+  - Clicking the summary does not open the session line the heading otherwise opens.
+- A workspace with no summary yet has nothing to click, even with links stored.
+- The menu shows at most five links, though a workspace can store any number.
+  - Once the menu is full, the agent chooses which five it shows, ranked by how much each matters to you and to the people you report the work to.
+- Agents store links on their own, without asking, whenever one comes up in the conversation.
+- You can change them yourself from a shell:
+  - `agent-repld workspace link WS -url URL -label TEXT` stores a link, or relabels one. A label is two to eight words in one sentence.
+  - `agent-repld workspace link WS -show URL -show URL` names the links the menu shows, at most five.
+  - `agent-repld workspace link WS -remove URL` removes one, and `-clear` removes them all.
   - Only `http` and `https` links are accepted.
-- `agent-repld workspace status WS` shows the link as `principalLink`.
-- The link is kept across restarts.
+- `agent-repld workspace status WS` shows every link as `links`, with whether the menu shows it.
+- The links are kept across restarts.
 
 ## Renaming a workspace
 

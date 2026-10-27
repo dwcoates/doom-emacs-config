@@ -7777,10 +7777,12 @@ bubble-body.bubble-body { display: block; }
   font-style: italic;
   color: var(--tool-title);
 }
-/* THE SUMMARY AS ITS PRINCIPAL LINK: the same purple, underlined, with the
-   pointer. The link component's anchor would otherwise take the agent's link
-   color, so it inherits the summary's. */
-.topbar-title-linked .external-link {
+/* THE SUMMARY AS ITS LINKS: the same purple, underlined, with the pointer,
+   whether it is its one link or the door to their menu. The link component's
+   anchor would otherwise take the agent's link color, so it inherits the
+   summary's. */
+.topbar-title-linked .external-link,
+.topbar-title-menu {
   color: inherit;
   text-decoration: underline;
   cursor: pointer;
@@ -8004,6 +8006,7 @@ bubble-body.bubble-body { display: block; }
 .topbar-effort-option,
 .topbar-mode-option,
 .topbar-warning-row,
+.topbar-title-link-option,
 .merge-run-view-item {
   display: flex;
   flex-direction: column;
@@ -8023,6 +8026,7 @@ bubble-body.bubble-body { display: block; }
 .topbar-effort-option:hover,
 .topbar-mode-option:hover,
 .topbar-warning-row:hover,
+.topbar-title-link-option:hover,
 .merge-run-view-item:hover,
 .merge-run-view-item.is-active {
   background: var(--border);
