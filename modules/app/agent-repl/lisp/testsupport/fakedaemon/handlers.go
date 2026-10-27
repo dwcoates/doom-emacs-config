@@ -523,6 +523,10 @@ func (s *fakeServer) FindWorkspaces(ctx context.Context, req *connect.Request[v1
 	return handleUnary[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse](ctx, s, "FindWorkspaces", req.Msg)
 }
 
+func (s *fakeServer) ParkWorkspace(ctx context.Context, req *connect.Request[v1.ParkWorkspaceRequest]) (*connect.Response[v1.ParkWorkspaceResponse], error) {
+	return handleUnary[v1.ParkWorkspaceRequest, v1.ParkWorkspaceResponse](ctx, s, "ParkWorkspace", req.Msg)
+}
+
 func (s *fakeServer) GetMergeQueueStatus(ctx context.Context, req *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error) {
 	return handleUnary[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse](ctx, s, "GetMergeQueueStatus", req.Msg)
 }
