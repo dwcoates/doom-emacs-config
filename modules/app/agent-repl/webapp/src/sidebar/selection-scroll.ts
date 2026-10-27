@@ -23,7 +23,7 @@
  */
 import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
-import { selectionRowScroll } from "../scroll.js";
+import { nearestEdgeOffset, selectionRowScroll } from "../scroll.js";
 import { REGION_SELECTOR } from "./band-fit.js";
 
 /** What became of following a selection into view. */
@@ -117,20 +117,21 @@ function scrollPadding(scroller: HTMLElement, edge: ScrollPaddingEdge): number {
 
 /**
  * Scroll LINE's section viewport (the rail's body, for a chat thread's row)
- * only as far as LINE needs to show whole: its top to the view's top when it
- * lies above, its bottom to the view's bottom when it lies below. Answers how
+ * only as far as LINE needs to show whole (`nearestEdgeOffset`). Answers how
  * it moved, or null when LINE already showed whole.
  */
 export function scrollLineIntoBand(line: HTMLElement): BandScroll | null {
   const region = scrollerOf(line);
   const box = region.getBoundingClientRect();
   const viewportTop = box.top + region.clientTop;
-  const viewTop = viewportTop + scrollPadding(region, "scrollPaddingTop");
-  const viewBottom = viewportTop + region.clientHeight - scrollPadding(region, "scrollPaddingBottom");
-  const edges = line.getBoundingClientRect();
-  if (edges.top >= viewTop && edges.bottom <= viewBottom) return null;
+  const view = {
+    top: viewportTop + scrollPadding(region, "scrollPaddingTop"),
+    bottom: viewportTop + region.clientHeight - scrollPadding(region, "scrollPaddingBottom"),
+  };
+  const offset = nearestEdgeOffset(view, line.getBoundingClientRect());
+  if (offset === 0) return null;
   const from = region.scrollTop;
-  selectionRowScroll(region, edges.top < viewTop ? edges.top - viewTop : edges.bottom - viewBottom);
+  selectionRowScroll(region, offset);
   return { from, to: region.scrollTop };
 }
 

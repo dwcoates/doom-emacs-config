@@ -5,6 +5,7 @@
 // a real `ResizeObserver` to the tail owner, and the subscription being wired
 // to THAT element is half of what the footer-occlusion cases assert.
 import scrollSource from "../src/scroll.ts?raw";
+import selectionScrollSource from "../src/sidebar/selection-scroll.ts?raw";
 import { chatEndTop, revealChatExchange } from "../src/scroll.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -26,6 +27,8 @@ import {
   sectionTakesWheel,
   wheelDeltaPx,
   revealCenterDelta,
+  nearestEdgeOffset,
+  revealNearestDelta,
   revealGeometry,
   centerDelta,
   observeScrollBox,
@@ -400,7 +403,7 @@ async function moves(capture: LogCapture): Promise<Array<Record<string, unknown>
  * the owner offers can move it.
  */
 describe("SCROLL_CAUSES", () => {
-  it("names exactly the fifteen causes the owner rules allow", () => {
+  it("names exactly the seventeen causes the owner rules allow", () => {
     // Arrange + Act + Assert
     expect([...SCROLL_CAUSES]).toEqual([
       "promptSent",
@@ -408,6 +411,7 @@ describe("SCROLL_CAUSES", () => {
       "selectionMoved",
       "detachedWorkSelected",
       "entryJumped",
+      "composerEntryRevealed",
       "initialPlacement",
       "replaceRestore",
       "rolledBack",
@@ -922,6 +926,66 @@ describe("TailFollow.entryJumped", () => {
     a.tail.entryJumped({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 200 });
     // Assert
     expect(await moves(capture)).toEqual([{ cause: "entryJumped", from: 100, to: 300, follow: false }]);
+  });
+});
+
+describe("TailFollow.composerEntryRevealed", () => {
+  it("brings a subtree below the fold only as far as its bottom edge", () => {
+    // Arrange: a 100px subtree whose top is 250px down a 300px viewport.
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    const moved = a.tail.composerEntryRevealed({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 100 });
+    // Assert: its bottom (350) moves to the viewport's (300): 50px down.
+    expect([moved, box.scrollTop]).toEqual([true, 150]);
+  });
+
+  it("moves nothing for a subtree wholly in view", () => {
+    // Arrange
+    const box = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
+    const a = armed(box);
+    // Act
+    const moved = a.tail.composerEntryRevealed({ boxTop: 0, boxHeight: 300, nodeTop: 50, nodeHeight: 100 });
+    // Assert
+    expect([moved, box.scrollTop]).toEqual([false, 100]);
+  });
+
+  it("keeps a standing follow when the subtree is in view", () => {
+    // Arrange
+    const f = following();
+    // Act
+    f.tail.composerEntryRevealed({ boxTop: 0, boxHeight: 300, nodeTop: 100, nodeHeight: 50 });
+    // Assert
+    expect(f.tail.isFollowing()).toBe(true);
+  });
+
+  it("ends a standing follow when it moves the feed", () => {
+    // Arrange
+    const f = following();
+    // Act
+    f.tail.composerEntryRevealed({ boxTop: 0, boxHeight: 300, nodeTop: -400, nodeHeight: 50 });
+    // Assert
+    expect(f.tail.isFollowing()).toBe(false);
+  });
+
+  it("is recorded at DEBUG as composerEntryRevealed", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    a.tail.composerEntryRevealed({ boxTop: 0, boxHeight: 300, nodeTop: 250, nodeHeight: 100 });
+    // Assert
+    expect(await moves(capture)).toEqual([{ cause: "composerEntryRevealed", from: 100, to: 150, follow: false }]);
+  });
+
+  it("records no move for a subtree wholly in view", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const a = armed({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 });
+    // Act
+    a.tail.composerEntryRevealed({ boxTop: 0, boxHeight: 300, nodeTop: 50, nodeHeight: 100 });
+    // Assert
+    expect(await moves(capture)).toEqual([]);
   });
 });
 
@@ -2266,6 +2330,70 @@ describe("revealCenterDelta", () => {
 
     // Assert
     expect(got).toBe(want);
+  });
+});
+
+/** THE COMPOSER'S REVEAL'S ARITHMETIC: how far the feed moves to show the boxed subtree whole. */
+describe("revealNearestDelta", () => {
+  /** A 300px viewport at the top of the screen. */
+  const view = { boxTop: 0, boxHeight: 300 };
+  const box = { scrollTop: 200, scrollHeight: 1000, clientHeight: 300 };
+
+  it.each([
+    { name: "moves nothing for a subtree wholly in view", node: { nodeTop: 50, nodeHeight: 100 }, box, want: 0 },
+    { name: "brings a subtree below the view to its bottom edge", node: { nodeTop: 280, nodeHeight: 60 }, box, want: 40 },
+    { name: "brings a subtree above the view to its top edge", node: { nodeTop: -90, nodeHeight: 60 }, box, want: -90 },
+    { name: "brings a subtree taller than the view to its top edge", node: { nodeTop: 100, nodeHeight: 500 }, box, want: 100 },
+    {
+      name: "clamps at the feed's end",
+      node: { nodeTop: 280, nodeHeight: 60 },
+      box: { scrollTop: 690, scrollHeight: 1000, clientHeight: 300 },
+      // the subtree asks +40, but only 10px of range remain below.
+      want: 10,
+    },
+    {
+      name: "clamps at the feed's start",
+      node: { nodeTop: -90, nodeHeight: 60 },
+      box: { scrollTop: 30, scrollHeight: 1000, clientHeight: 300 },
+      want: -30,
+    },
+  ])("$name", ({ node, box, want }) => {
+    // Arrange, Act
+    const got = revealNearestDelta({ ...view, ...node }, box);
+    // Assert
+    expect(got).toBe(want);
+  });
+});
+
+/** THE ONLY-AS-FAR-AS-NEEDED ARITHMETIC every non-centering scroll into view shares. */
+describe("nearestEdgeOffset", () => {
+  /** A 300px view starting 100px down. */
+  const view = { top: 100, bottom: 400 };
+
+  it.each([
+    { name: "moves nothing for a node whole inside the view", node: { top: 150, bottom: 250 }, want: 0 },
+    { name: "moves nothing for a node filling the view exactly", node: { top: 100, bottom: 400 }, want: 0 },
+    { name: "brings a node above the view to its top edge", node: { top: 40, bottom: 90 }, want: -60 },
+    { name: "brings a node cut by the view's top to its top edge", node: { top: 80, bottom: 130 }, want: -20 },
+    { name: "brings a node below the view to its bottom edge", node: { top: 500, bottom: 550 }, want: 150 },
+    { name: "brings a node cut by the view's bottom to its bottom edge", node: { top: 380, bottom: 430 }, want: 30 },
+    { name: "brings a node taller than the view, starting inside it, to its top edge", node: { top: 200, bottom: 700 }, want: 100 },
+    { name: "brings a node taller than the view, starting above it, to its top edge", node: { top: -100, bottom: 500 }, want: -200 },
+  ])("$name", ({ node, want }) => {
+    // Arrange, Act
+    const got = nearestEdgeOffset(view, node);
+    // Assert
+    expect(got).toBe(want);
+  });
+
+  it("is the one arithmetic the sidebar's selection scroll and the feed's composer reveal share", () => {
+    // Arrange, Act, Assert: neither hand-rolls an edge comparison of its own;
+    // scroll.ts holds the definition and the feed's one use.
+    expect([
+      selectionScrollSource.match(/nearestEdgeOffset\(/g)?.length,
+      selectionScrollSource.includes("viewBottom"),
+      scrollSource.match(/nearestEdgeOffset\(/g)?.length,
+    ]).toEqual([1, false, 2]);
   });
 });
 

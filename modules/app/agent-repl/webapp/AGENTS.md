@@ -593,7 +593,11 @@ hand any more:
   FIRST time parks the feed at its tail and follows, as a sent prompt does; a
   re-push or a removal moves nothing), `selectionMoved`, `detachedWorkSelected`,
   `entryJumped` (every other jump: a breadcrumb, a hook's gated-call link,
-  centered by the same `revealCenterDelta`), `initialPlacement`,
+  centered by the same `revealCenterDelta`), `composerEntryRevealed` (the
+  composer's entry moved to another node of a response's tree whose boxed
+  subtree is not wholly in view: the feed moves only as far as the subtree
+  needs, `revealNearestDelta`, and a subtree in view moves nothing),
+  `initialPlacement`,
   `replaceRestore`, `rolledBack` (a row removal the daemon marks
   `frontend.v1.FeedRowRemoved.rolled_back` parks the feed at its tail and
   follows), `workspaceSelected` (the roster's `current` moved to this

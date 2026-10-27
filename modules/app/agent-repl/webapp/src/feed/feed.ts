@@ -198,16 +198,19 @@ export function mountFeed(
   deps: FeedDeps,
 ): FeedHandle {
   log.info("mounting the feed", { operation: "feed.mount", context: {} });
-  // THE NODE THE COMPOSER IS ANSWERING is drawn by one stylesheet rule the
-  // root watch's composer-entry pushes rewrite (composer-entry.ts).
-  const composerEntry = createComposerEntryHighlight(host.ownerDocument);
-
   const scrollBox = deps.scrollBox ?? host.parentElement ?? null;
   // THE SCROLL ANCHOR'S ROWS ARE THE ROOT BODY'S ROW LIST, not the feed
   // host's own children (the page-error slot and the body mount), which held
   // one box for the whole feed and so never moved when a row above the reader
   // changed height.
   const tail = scrollBox === null ? null : createFeedTail(scrollBox, () => rootRows(host));
+  // THE NODE THE COMPOSER IS ANSWERING is boxed by the root watch's
+  // composer-entry pushes, and brought into view in this feed when a push
+  // moves it (composer-entry.ts).
+  const composerEntry = createComposerEntryHighlight(
+    host.ownerDocument,
+    scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
+  );
   // The tail owner's OTHER two inputs, which only a mount holding the real
   // element can give it: the box's scroll events and the box's size changes.
   // The size half is the footer occlusion (see `observeScrollBox`) — the
