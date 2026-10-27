@@ -7800,15 +7800,21 @@ bubble-body.bubble-body { display: block; }
   font-style: italic;
   color: var(--tool-title);
 }
-/* THE SUMMARY AS ITS LINKS: the same purple, underlined, with the pointer,
-   whether it is its one link or the door to their menu. The link component's
-   anchor would otherwise take the agent's link color, so it inherits the
-   summary's. */
-.topbar-title-linked .external-link,
-.topbar-title-menu {
-  color: inherit;
+/* THE SUMMARY WITH LINKS IS THE SUMMARY, UNDERLINED (owner ruling,
+   2026-10-27): the same purple, italic, font and size as a summary with none,
+   and only the underline and the pointer say links are there. The rule sets
+   those two on the summary itself, whether it opens its one link or drops
+   their menu, so it never touches the summary's own color or face. */
+.topbar-title-linked {
   text-decoration: underline;
   cursor: pointer;
+}
+/* The one link's anchor would otherwise take the agent's link color and the
+   user agent's link face, so it takes the summary's whole look instead. */
+.topbar-title-linked .external-link {
+  color: inherit;
+  font: inherit;
+  text-decoration: inherit;
 }
 /* THE WORKSPACE NAME: the foreground color, bold, and a step larger than the
    summary and every cell of the band (owner ruling, 2026-10-17: "row 1.5,
