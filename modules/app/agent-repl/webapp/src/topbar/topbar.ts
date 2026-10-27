@@ -235,7 +235,7 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   const center = drawTopbarHeading(
     u.title,
     requireMessage(u.workspaceName, "TopbarView.workspaceName"),
-    tc.ctx,
+    tc,
   );
   // The heading opens the session line too, in every account state.
   bindHeadingSessionReveal(center, u.sessionLine, tc);
