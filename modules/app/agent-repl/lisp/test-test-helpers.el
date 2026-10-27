@@ -653,6 +653,57 @@ signature this looks for."
     ;; Assert
     (should-not offenders)))
 
+;;;; ---- Source scans ----
+
+(ert-deftest agent-repl-test-helpers-module-sources-leaves-out-every-suite ()
+  "`agent-repl-test--module-sources' lists module sources and no `test-*.el'."
+  ;; Act
+  (let ((names (mapcar #'file-name-nondirectory (agent-repl-test--module-sources))))
+    ;; Assert
+    (should (member "bytecode.el" names))
+    (should-not (cl-some (lambda (n) (string-prefix-p "test-" n)) names))))
+
+(ert-deftest agent-repl-test-helpers-file-forms-reads-every-top-level-form ()
+  "`agent-repl-test--file-forms' answers each form as data, comments skipped."
+  (agent-repl-test--with-temp-dir dir "agent-repl-file-forms-"
+    ;; Arrange
+    (let ((file (expand-file-name "probe.el" dir)))
+      (with-temp-file file
+        (insert ";; a comment (not-a-form)
+(defun probe ()
+  \"Doc.\" 1)
+(defvar probe-v 2)
+"))
+      ;; Act
+      (let ((forms (agent-repl-test--file-forms file)))
+        ;; Assert
+        (should (equal forms '((defun probe () "Doc." 1) (defvar probe-v 2))))))))
+
+(ert-deftest agent-repl-test-helpers-file-forms-answers-nil-for-an-empty-file ()
+  "A file with no forms reads as no forms rather than signaling."
+  (agent-repl-test--with-temp-dir dir "agent-repl-file-forms-"
+    ;; Arrange
+    (let ((file (expand-file-name "empty.el" dir)))
+      (with-temp-file file (insert ";; nothing\n"))
+      ;; Act / Assert
+      (should (equal (agent-repl-test--file-forms file) nil)))))
+
+(ert-deftest agent-repl-test-helpers-no-source-scan-hand-rolls-its-reader ()
+  "Every suite that reads module sources as data goes through the shared helpers.
+A hand-rolled scan lists `lisp/' itself or loops `read' over a buffer, the
+signatures this looks for."
+  ;; Arrange
+  (let ((offenders nil))
+    (dolist (file (directory-files agent-repl-test--module-dir t "\\`test-.*\\.el\\'"))
+      (unless (member (file-name-nondirectory file) '("test-helpers.el" "test-test-helpers.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          ;; Act
+          (when (re-search-forward "(while t\\s-*(let ((form (read (current-buffer)))" nil t)
+            (push (file-name-nondirectory file) offenders)))))
+    ;; Assert
+    (should-not offenders)))
+
 (provide 'test-test-helpers)
 
 ;;; test-test-helpers.el ends here

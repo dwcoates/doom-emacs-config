@@ -5568,16 +5568,12 @@ rows the roster holds (812 records per switch before, 2026-10-15)."
   "Each colored tab face is defined by `agent-repl-defface', so a load re-specs it."
   ;; Arrange
   (let ((defined nil))
-    (with-temp-buffer
-      (insert-file-contents (expand-file-name "status.el" agent-repl-test--module-dir))
-      ;; Act
-      (condition-case nil
-          (while t
-            (let ((form (read (current-buffer))))
-              (when (and (eq (car-safe form) 'agent-repl-defface)
-                         (eq (car-safe (cadr form)) 'quote))
-                (push (cadr (cadr form)) defined))))
-        (end-of-file nil)))
+    ;; Act
+    (dolist (form (agent-repl-test--file-forms
+                   (expand-file-name "status.el" agent-repl-test--module-dir)))
+      (when (and (eq (car-safe form) 'agent-repl-defface)
+                 (eq (car-safe (cadr form)) 'quote))
+        (push (cadr (cadr form)) defined)))
     ;; Assert
     (dolist (pair agent-repl--tab-state-faces)
       (should (memq (car pair) defined)))))
