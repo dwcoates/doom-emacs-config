@@ -103,6 +103,7 @@ import {
   type RowPlace,
 } from "./row.js";
 import { countNoun } from "../count-noun.js";
+import { formatAge } from "../duration.js";
 import { paintTabNumbers, tabNumbers } from "./tab-numbers.js";
 
 /**
@@ -908,16 +909,28 @@ export const MERGED_TODAY_COUNT_CLASS = "sb-today-count";
  * The "Recently Deployed" heading's "(K today)": how many of its merges landed
  * TODAY (local date), counted over every row of its SHOWN groups the daemon
  * sent, including those scrolled out of view (owner requests, 2026-10-11 and
- * 2026-10-27). The shared ticker recounts it, so it drops at midnight
- * together with the green names.
+ * 2026-10-27), and how long ago the latest of them landed
+ * (`mergedTodayCountText`). The shared ticker repaints it, so the age counts
+ * up and the count drops at midnight together with the green names.
  */
 export function drawMergedTodayCount(merges: MergedRowFacts[], sc: SidebarContext): HTMLElement {
   const count = document.createElement("span");
   count.className = `sb-count ${MERGED_TODAY_COUNT_CLASS}`;
   tickPaint(sc, (nowMs) => {
-    count.textContent = `(${todaysMerges(merges, nowMs).length} today)`;
+    count.textContent = mergedTodayCountText(todaysMerges(merges, nowMs), nowMs);
   });
   return count;
+}
+
+/**
+ * The today count's words for TODAY's merges at NOW_MS: "(K today)", and, once
+ * any landed, "(K today, last D ago)" with D the latest one's age in at most
+ * two units (`formatAge`: `1h 5m`, `5m 30s`; owner request, 2026-10-27).
+ */
+export function mergedTodayCountText(today: MergedRowFacts[], nowMs: number): string {
+  if (today.length === 0) return "(0 today)";
+  const last = Math.max(...today.map((m) => m.atMs));
+  return `(${today.length} today, last ${formatAge(nowMs - last)} ago)`;
 }
 
 /**

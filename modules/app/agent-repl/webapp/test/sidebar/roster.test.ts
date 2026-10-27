@@ -41,6 +41,7 @@ import {
   paintRepoHoldsCurrent,
   SECTION_LABEL_CLASS,
   todaysMerges,
+  mergedTodayCountText,
 } from "../../src/sidebar/roster.js";
 import { HOLDS_CURRENT_ATTRIBUTE } from "../../src/sidebar/section-fold.js";
 import { REARRANGED_ATTRIBUTE } from "../../src/sidebar/drag.js";
@@ -1117,6 +1118,22 @@ describe("todaysMerges", () => {
   });
 });
 
+describe("mergedTodayCountText", () => {
+  it.each([
+    { name: "no age when nothing landed today", ages: [] as number[], want: "(0 today)" },
+    { name: "the latest merge's age in seconds", ages: [45_000], want: "(1 today, last 45s ago)" },
+    { name: "minutes and seconds", ages: [5 * 60_000 + 30_000, 2 * 3_600_000], want: "(2 today, last 5m 30s ago)" },
+    { name: "hours and minutes, the seconds dropped", ages: [3_600_000 + 5 * 60_000 + 59_000], want: "(1 today, last 1h 5m ago)" },
+    { name: "a whole hour as one unit", ages: [2 * 3_600_000], want: "(1 today, last 2h ago)" },
+    { name: "a stamp a moment ahead of the clock as 0s", ages: [-400], want: "(1 today, last 0s ago)" },
+  ])("words $name", ({ ages, want }) => {
+    // Arrange
+    const today = ages.map((age) => ({ atMs: NOW - age, commits: 1 }));
+    // Act / Assert
+    expect(mergedTodayCountText(today, NOW)).toBe(want);
+  });
+});
+
 describe("the Recently Merged heading's today count and commit hover", () => {
   const merged = (id: string, atMs: number, commits?: number) =>
     row({
@@ -1133,7 +1150,17 @@ describe("the Recently Merged heading's today count and commit hover", () => {
 
   it("counts the merges that landed today beside the heading", () => {
     const drawn = drawBand([merged("ws-1", NOW, 3), merged("ws-2", startOfToday(), 5), merged("ws-3", startOfToday() - 1, 100)]);
-    expect(header(drawn).querySelector(`.${MERGED_TODAY_COUNT_CLASS}`)?.textContent).toBe("(2 today)");
+    expect(header(drawn).querySelector(`.${MERGED_TODAY_COUNT_CLASS}`)?.textContent).toBe("(2 today, last 0s ago)");
+  });
+
+  it("counts the latest merge's age up as the shared ticker ticks", () => {
+    // Arrange
+    const ticker = fakeTicker();
+    const drawn = drawBand([merged("ws-1", NOW - 60_000, 3), merged("ws-2", NOW - 5 * 60_000, 1)], sidebarContext(appContext({}, ticker)));
+    // Act
+    ticker.tick(NOW + 30_000);
+    // Assert
+    expect(header(drawn).querySelector(`.${MERGED_TODAY_COUNT_CLASS}`)?.textContent).toBe("(2 today, last 1m 30s ago)");
   });
 
   it("recounts today's merges once the shared ticker crosses midnight", () => {
