@@ -110,9 +110,10 @@ names its requester and placement as well, so the request tests read
   ;; the usual two: CreateWorkspaceResponse carries the option-B `accepted' ack
   ;; beside success and error.
   ;; CreateWorkspaceResponse's `async_merge_accepted' answers only an async
-  ;; merge, which is an agent's request and never the editor's.
+  ;; merge, which is an agent's request and never the editor's, and its
+  ;; `waiting_for_network' answers a synchronous create held for the network.
   '(("agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceResponse"
-     ("accepted" "asyncMergeAccepted" "error" "success"))
+     ("accepted" "asyncMergeAccepted" "error" "success" "waitingForNetwork"))
     ("agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceResponse")
     ("agentrepl/v1/endpoint_list_workspace_transcripts.pb.go" "ListWorkspaceTranscriptsResponse")
     ("agentrepl/v1/endpoint_bind_workspace_session.pb.go" "BindWorkspaceSessionResponse")
