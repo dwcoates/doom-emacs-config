@@ -156,16 +156,22 @@ export const DEFAULT_MARK_ATTRIBUTE = "data-default-mark";
 /** What the login's default row says in the control's place. */
 export const DEFAULT_MARK_LABEL = "Default";
 
+/**
+ * The refusal of a model the selector never served, worded once for every rpc
+ * that echoes a served model (SetModel, SetDefaultModel).
+ */
+export const NOT_IN_CATALOG_SENTENCE = "that model is not in the served catalog";
+
 /** The causes only SetDefaultModel can answer with. */
 export const SET_DEFAULT_MODEL_CAUSES = {
   noSession: () => "this workspace has no session to read a model catalog from",
-  notInCatalog: () => "that model is not in the served catalog",
+  notInCatalog: () => NOT_IN_CATALOG_SENTENCE,
 } as unknown as SentenceTable;
 
 /** The causes only SetModel can answer with. */
 export const SET_MODEL_CAUSES = {
   noSession: () => "this workspace has no session to set a model on",
-  notInCatalog: () => "that model is not in the served catalog",
+  notInCatalog: () => NOT_IN_CATALOG_SENTENCE,
   vendorRefused: (value: { detail: string }) => `the vendor refused: ${value.detail}`,
   cold: () => COLD_REFUSAL_SENTENCE,
 } as unknown as SentenceTable;

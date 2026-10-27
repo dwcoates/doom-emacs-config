@@ -31,6 +31,9 @@ import {
   MAKE_DEFAULT_LABEL,
   MODEL_PLACEHOLDER,
   MODEL_TOOLTIP,
+  NOT_IN_CATALOG_SENTENCE,
+  SET_DEFAULT_MODEL_CAUSES,
+  SET_MODEL_CAUSES,
   SELECTED_MODEL_ATTRIBUTE,
   SELECTED_OPTION_ATTRIBUTE,
   drawModelCapabilities,
@@ -727,6 +730,17 @@ describe("the default corner", () => {
       expect(cascadedValue(control, "border-style") || cascadedValue(control, "border")).toMatch(/none/);
       expect(cascadedValue(control, "background-color") || cascadedValue(control, "background")).toMatch(/none|transparent|rgba\(0, 0, 0, 0\)/);
     });
+  });
+});
+
+describe("NOT_IN_CATALOG_SENTENCE", () => {
+  it("is the one wording of an unserved model, for every rpc that echoes one", () => {
+    // ARRANGE
+    const tables = [SET_MODEL_CAUSES, SET_DEFAULT_MODEL_CAUSES] as unknown as Record<string, (value: unknown) => string>[];
+    // ACT
+    const said = tables.map((table) => table.notInCatalog({}));
+    // ASSERT
+    expect(said).toEqual([NOT_IN_CATALOG_SENTENCE, NOT_IN_CATALOG_SENTENCE]);
   });
 });
 
