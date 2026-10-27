@@ -1095,8 +1095,10 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    the head's name. */
 #ws-sidebar .sb-mq-head .sb-mq-name { font-weight: 700; }
 /* THE HEAD'S NAME IS ITS REPOSITORY'S TEXT SIZE AT MOST (owner request,
-   2026-10-27): ever so slightly under the group header above it. */
-#ws-sidebar .sb-mq-head .sb-mq-name { font-size: calc(var(--merged-group-head-font-size) * 0.96); }
+   2026-10-27): ever so slightly under the group header above it, and every
+   waiting merge's name is the head's size (owner request, 2026-10-27). */
+#ws-sidebar .sb-mq-head .sb-mq-name,
+#ws-sidebar .sb-mq-waiting .sb-mq-name { font-size: calc(var(--merged-group-head-font-size) * 0.96); }
 #ws-sidebar .sb-mq-waiting {
   color: color-mix(in srgb, var(--repo-head-expanded) 55%, var(--repo-head-collapsed));
   font-size: 0.9em;
