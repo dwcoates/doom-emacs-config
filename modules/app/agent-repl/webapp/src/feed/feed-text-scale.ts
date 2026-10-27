@@ -27,6 +27,14 @@
  * A SCALE MOVES EVERY TREE'S DRAWN WIDTHS, so whatever drew to them is told
  * (`onFeedTextScaleApplied`) in the same task the scale lands, and redraws in
  * the same layout.
+ *
+ * THE SCALE GLIDES on the page on screen (styles.css "THE FEED TEXT ZOOM
+ * GLIDES"): the property is a transition, so between a landing and its end the
+ * text is drawn at every size in between. A tree is measured at the WIDER of
+ * the size drawn now and the size it is gliding to
+ * (`feedTextScaleToMeasure`), so no line it wraps is ever wider than the
+ * budget while the glide runs; and whatever drew to the scale is told again
+ * when the glide ends, to wrap to the size it settled at.
  */
 import { log } from "../log.js";
 import { perDocument } from "../per-document.js";
@@ -81,6 +89,15 @@ export function createFeedTextScale(env: FeedTextScaleEnv): FeedTextScale {
     }
   };
 
+  doc.documentElement.addEventListener("transitionend", (event) => {
+    if (event.propertyName !== FEED_TEXT_SCALE_PROPERTY) return;
+    listeners.notify();
+    log.debug("the feed text zoom finished gliding", {
+      operation: "feed.text-scale.settled",
+      context: { scale: shownValue() },
+    });
+  });
+
   presence.onChange(() => {
     if (pending === null || !presence.shown()) return;
     const scale = pending;
@@ -128,7 +145,28 @@ export function applyFeedTextScale(scale: number): void {
   pageFeedTextScale(document).apply(scale);
 }
 
-/** Tell LISTENER each time this page lands a new scale; answers the unsubscribe. */
+/** Tell LISTENER each time this page lands a new scale, and each time its glide ends; answers the unsubscribe. */
 export function onFeedTextScaleApplied(doc: Document, listener: () => void): () => void {
   return pageFeedTextScale(doc).onApplied(listener);
+}
+
+/**
+ * The scale a tree in DOC is measured at: the wider of the scale drawn now
+ * (mid-glide, the transition's value) and the one the page is gliding to (the
+ * root's own value), so a line wrapped to it fits at every size the glide
+ * passes through. A scale that reads as no number is a defect in the page.
+ */
+export function feedTextScaleToMeasure(doc: Document): number {
+  const root = doc.documentElement;
+  const drawn = Number.parseFloat(root.ownerDocument.defaultView?.getComputedStyle(root).getPropertyValue(FEED_TEXT_SCALE_PROPERTY) ?? "");
+  const target = Number.parseFloat(root.style.getPropertyValue(FEED_TEXT_SCALE_PROPERTY));
+  const known = [drawn, target].filter((n) => Number.isFinite(n) && n > 0);
+  if (known.length === 0) {
+    log.error("the page's feed text scale reads as no number; no tree can be measured", {
+      operation: "feed.text-scale.unreadable",
+      context: { drawn: String(drawn), target: String(target) },
+    });
+    throw new Error("feed text scale: the page's scale reads as no number");
+  }
+  return Math.max(...known);
 }

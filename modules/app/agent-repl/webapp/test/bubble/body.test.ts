@@ -294,6 +294,24 @@ describe("the measure a tree wraps by", () => {
     expect([probes, body.querySelector(`.${TREE_MEASURE_CLASS}`)]).toEqual([[`mp-tree ${TREE_MEASURE_CLASS}`], null]);
   });
 
+  it("sets its probe at the scale the zoom glides to, the wider one", () => {
+    // Arrange — the page is gliding up to 1.3.
+    document.documentElement.style.setProperty(FEED_TEXT_SCALE_PROPERTY, "1.3");
+    const body = stageBody();
+    const scales: string[] = [];
+    const spy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const probe = this.closest<HTMLElement>(`.${TREE_MEASURE_CLASS}`);
+      scales.push(probe?.style.getPropertyValue(FEED_TEXT_SCALE_PROPERTY) ?? "");
+      return { width: 8 } as DOMRect;
+    });
+    // Act
+    treeMeasure(body, 742).widths([{ kind: "text", html: "x" }]);
+    spy.mockRestore();
+    document.documentElement.style.removeProperty(FEED_TEXT_SCALE_PROPERTY);
+    // Assert
+    expect(scales).toEqual(["1.3"]);
+  });
+
   it("answers no width for a piece with no text", () => {
     // Arrange
     const body = stageBody();

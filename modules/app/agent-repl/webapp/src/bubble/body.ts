@@ -34,7 +34,7 @@ import { onDiscard, stopTicking } from "../feed/ticking.js";
 import { entryTreeHtml } from "../feed/entries.js";
 import { RESPONSE_RUN_CLASS } from "../feed/response-run.js";
 import { applyTextReveal, clearTextReveal, fullTextOf } from "./text-reveal.js";
-import { onFeedTextScaleApplied } from "../feed/feed-text-scale.js";
+import { FEED_TEXT_SCALE_PROPERTY, feedTextScaleToMeasure, onFeedTextScaleApplied } from "../feed/feed-text-scale.js";
 
 /** The webapp surfaces a wrap issue through the client logger. */
 const logTreeIssue: TreeIssue = (message, context) => {
@@ -234,6 +234,10 @@ export const TREE_MEASURE_CLASS = "mp-measure";
  *
  * A piece with text that measures no width is unmeasurable: the probe is not
  * laid out, and its widths would wrap every line at its first word.
+ *
+ * WHILE THE FEED TEXT ZOOM GLIDES the probe is set at the wider of the size
+ * drawn now and the size the zoom glides to (`feedTextScaleToMeasure`), so a
+ * line wrapped to its widths fits at every size the glide passes through.
  */
 export function treeMeasure(body: HTMLElement, budget: number): TreeMeasure {
   return {
@@ -243,6 +247,7 @@ export function treeMeasure(body: HTMLElement, budget: number): TreeMeasure {
       const probe = body.ownerDocument.createElement("div");
       probe.className = `${TREE_CLASS} ${TREE_MEASURE_CLASS}`;
       probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0;";
+      probe.style.setProperty(FEED_TEXT_SCALE_PROPERTY, String(feedTextScaleToMeasure(body.ownerDocument)));
       const spans = items.map((item) => {
         const line = body.ownerDocument.createElement("div");
         line.className = TREE_LINE_CLASS;

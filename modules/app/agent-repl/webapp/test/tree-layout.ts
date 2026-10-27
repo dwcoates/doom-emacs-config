@@ -17,6 +17,8 @@
  *     ancestor-or-self, and none for one inside a hidden subtree — the way an
  *     engine answers a `display: none` element — which is what the body's
  *     "laid out" test reads;
+ *   - the root's computed `--feed-text-scale` is 1 when nothing sets it, the
+ *     stylesheet's registered initial value;
  *   - a piece the measure draws in its probe (a `.mp-connectors` or `.mp-content`
  *     inside `.mp-measure`) is `CHARPX` per rendered column of its text, so a
  *     staged tree wraps as the daemon's columns would at CHARPX a column;
@@ -147,6 +149,15 @@ export function installTreeLayout(overrides: Partial<TreeLayout> = {}): {
           if (!el.isConnected) return "";
           const padded = el.classList.contains("bubble-body") && property.startsWith("padding");
           return padded ? `${String(layout.bodyPaddingPx)}px` : "0px";
+        }
+        // THE ROOT ALWAYS HAS A FEED TEXT SCALE: the stylesheet registers it with
+        // an initial value of 1 (styles.css "THE FEED TEXT ZOOM GLIDES"), which
+        // jsdom, reading no stylesheet, does not know.
+        if (property === "getPropertyValue" && el === el.ownerDocument.documentElement) {
+          return (name: string): string => {
+            const real = target.getPropertyValue(name);
+            return name === "--feed-text-scale" && real === "" ? "1" : real;
+          };
         }
         const value: unknown = Reflect.get(target, property);
         return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
