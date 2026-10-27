@@ -7,9 +7,9 @@
 // calls it too when the person presses `C-o` or `C-i` on an entry line, and
 // relabels that entry with the label the daemon names, its words kept: `C-o`
 // moves the entry one node on in reading order (`3.2 - ` becomes `3.2.1 - `,
-// or `3.3 - ` when 3.2 has no child), and `C-i` moves it up to the node's
-// parent (`3.2 - ` becomes `3 - `), or on to the next root from a root
-// (`3 - ` becomes `4 - `).
+// or `3.3 - ` when 3.2 has no child), and `C-i` moves it back, to the node's
+// previous sibling (`3.2 - ` becomes `3.1 - `), else up to its parent
+// (`3.1 - ` becomes `3 - `), the way `O` opens a line.
 //
 // THE TREE IS THE RESPONSE THE ENTRY TARGETS, by the rule the composer's
 // entries are bound by (endpoint_report_composer_entries.proto): the selected
@@ -17,11 +17,10 @@
 // feed whose tree holds the label. The neighbor is found in that tree:
 //   - `next`: the node's next sibling; else its parent's next sibling, and so
 //     on up its ancestors;
-//   - `previous`: the node's previous sibling; else its parent, and so on;
+//   - `previous`: the node's previous sibling; else its parent; the first
+//     root has none;
 //   - `following`: the node read after it: its first child; else what `next`
-//     names;
-//   - `parent`: the node's parent; else, for a root, the next root; the last
-//     root has none.
+//     names.
 // The answer is for the label the request names, so it holds for the line the
 // key was pressed on whatever the composer has reported since.
 
@@ -123,7 +122,6 @@ type EntryNeighborDirection struct {
 	//	*EntryNeighborDirection_Next
 	//	*EntryNeighborDirection_Previous
 	//	*EntryNeighborDirection_Following
-	//	*EntryNeighborDirection_Parent
 	Way           isEntryNeighborDirection_Way `protobuf_oneof:"way"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -193,15 +191,6 @@ func (x *EntryNeighborDirection) GetFollowing() *EntryNeighborFollowing {
 	return nil
 }
 
-func (x *EntryNeighborDirection) GetParent() *EntryNeighborParent {
-	if x != nil {
-		if x, ok := x.Way.(*EntryNeighborDirection_Parent); ok {
-			return x.Parent
-		}
-	}
-	return nil
-}
-
 type isEntryNeighborDirection_Way interface {
 	isEntryNeighborDirection_Way()
 }
@@ -212,7 +201,8 @@ type EntryNeighborDirection_Next struct {
 }
 
 type EntryNeighborDirection_Previous struct {
-	// The node a line opened above the entry line answers (`O`).
+	// The node a line opened above the entry line answers (`O`), and the
+	// node the entry answers instead once it steps back (`C-i`).
 	Previous *EntryNeighborPrevious `protobuf:"bytes,2,opt,name=previous,proto3,oneof"`
 }
 
@@ -221,18 +211,11 @@ type EntryNeighborDirection_Following struct {
 	Following *EntryNeighborFollowing `protobuf:"bytes,4,opt,name=following,proto3,oneof"`
 }
 
-type EntryNeighborDirection_Parent struct {
-	// The node the entry answers instead once it steps up (`C-i`).
-	Parent *EntryNeighborParent `protobuf:"bytes,5,opt,name=parent,proto3,oneof"`
-}
-
 func (*EntryNeighborDirection_Next) isEntryNeighborDirection_Way() {}
 
 func (*EntryNeighborDirection_Previous) isEntryNeighborDirection_Way() {}
 
 func (*EntryNeighborDirection_Following) isEntryNeighborDirection_Way() {}
-
-func (*EntryNeighborDirection_Parent) isEntryNeighborDirection_Way() {}
 
 type EntryNeighborNext struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -342,42 +325,6 @@ func (*EntryNeighborFollowing) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{4}
 }
 
-type EntryNeighborParent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EntryNeighborParent) Reset() {
-	*x = EntryNeighborParent{}
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EntryNeighborParent) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EntryNeighborParent) ProtoMessage() {}
-
-func (x *EntryNeighborParent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EntryNeighborParent.ProtoReflect.Descriptor instead.
-func (*EntryNeighborParent) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{5}
-}
-
 // THE ARM IS THE OUTCOME.
 type FindEntryNeighborResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -392,7 +339,7 @@ type FindEntryNeighborResponse struct {
 
 func (x *FindEntryNeighborResponse) Reset() {
 	*x = FindEntryNeighborResponse{}
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -404,7 +351,7 @@ func (x *FindEntryNeighborResponse) String() string {
 func (*FindEntryNeighborResponse) ProtoMessage() {}
 
 func (x *FindEntryNeighborResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -417,7 +364,7 @@ func (x *FindEntryNeighborResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindEntryNeighborResponse.ProtoReflect.Descriptor instead.
 func (*FindEntryNeighborResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *FindEntryNeighborResponse) GetResult() isFindEntryNeighborResponse_Result {
@@ -476,7 +423,7 @@ type FindEntryNeighborSuccess struct {
 
 func (x *FindEntryNeighborSuccess) Reset() {
 	*x = FindEntryNeighborSuccess{}
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -488,7 +435,7 @@ func (x *FindEntryNeighborSuccess) String() string {
 func (*FindEntryNeighborSuccess) ProtoMessage() {}
 
 func (x *FindEntryNeighborSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -501,7 +448,7 @@ func (x *FindEntryNeighborSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindEntryNeighborSuccess.ProtoReflect.Descriptor instead.
 func (*FindEntryNeighborSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *FindEntryNeighborSuccess) GetNeighbor() isFindEntryNeighborSuccess_Neighbor {
@@ -558,7 +505,7 @@ type FindEntryNeighborFound struct {
 
 func (x *FindEntryNeighborFound) Reset() {
 	*x = FindEntryNeighborFound{}
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -570,7 +517,7 @@ func (x *FindEntryNeighborFound) String() string {
 func (*FindEntryNeighborFound) ProtoMessage() {}
 
 func (x *FindEntryNeighborFound) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -583,7 +530,7 @@ func (x *FindEntryNeighborFound) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindEntryNeighborFound.ProtoReflect.Descriptor instead.
 func (*FindEntryNeighborFound) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *FindEntryNeighborFound) GetLabel() string {
@@ -601,7 +548,7 @@ type FindEntryNeighborNone struct {
 
 func (x *FindEntryNeighborNone) Reset() {
 	*x = FindEntryNeighborNone{}
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -613,7 +560,7 @@ func (x *FindEntryNeighborNone) String() string {
 func (*FindEntryNeighborNone) ProtoMessage() {}
 
 func (x *FindEntryNeighborNone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -626,7 +573,7 @@ func (x *FindEntryNeighborNone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindEntryNeighborNone.ProtoReflect.Descriptor instead.
 func (*FindEntryNeighborNone) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{8}
 }
 
 type FindEntryNeighborError struct {
@@ -644,7 +591,7 @@ type FindEntryNeighborError struct {
 
 func (x *FindEntryNeighborError) Reset() {
 	*x = FindEntryNeighborError{}
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -656,7 +603,7 @@ func (x *FindEntryNeighborError) String() string {
 func (*FindEntryNeighborError) ProtoMessage() {}
 
 func (x *FindEntryNeighborError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -669,7 +616,7 @@ func (x *FindEntryNeighborError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindEntryNeighborError.ProtoReflect.Descriptor instead.
 func (*FindEntryNeighborError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *FindEntryNeighborError) GetCause() isFindEntryNeighborError_Cause {
@@ -756,7 +703,7 @@ type FindEntryNeighborUnknownWorkspace struct {
 
 func (x *FindEntryNeighborUnknownWorkspace) Reset() {
 	*x = FindEntryNeighborUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -768,7 +715,7 @@ func (x *FindEntryNeighborUnknownWorkspace) String() string {
 func (*FindEntryNeighborUnknownWorkspace) ProtoMessage() {}
 
 func (x *FindEntryNeighborUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -781,7 +728,7 @@ func (x *FindEntryNeighborUnknownWorkspace) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use FindEntryNeighborUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*FindEntryNeighborUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{10}
 }
 
 // The echoed dir disagrees with the registry's dir for this id.
@@ -795,7 +742,7 @@ type FindEntryNeighborWorkspaceRefMismatch struct {
 
 func (x *FindEntryNeighborWorkspaceRefMismatch) Reset() {
 	*x = FindEntryNeighborWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -807,7 +754,7 @@ func (x *FindEntryNeighborWorkspaceRefMismatch) String() string {
 func (*FindEntryNeighborWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *FindEntryNeighborWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -820,7 +767,7 @@ func (x *FindEntryNeighborWorkspaceRefMismatch) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use FindEntryNeighborWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*FindEntryNeighborWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *FindEntryNeighborWorkspaceRefMismatch) GetRegistryDir() string {
@@ -841,7 +788,7 @@ type FindEntryNeighborTransferringAway struct {
 
 func (x *FindEntryNeighborTransferringAway) Reset() {
 	*x = FindEntryNeighborTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -853,7 +800,7 @@ func (x *FindEntryNeighborTransferringAway) String() string {
 func (*FindEntryNeighborTransferringAway) ProtoMessage() {}
 
 func (x *FindEntryNeighborTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -866,7 +813,7 @@ func (x *FindEntryNeighborTransferringAway) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use FindEntryNeighborTransferringAway.ProtoReflect.Descriptor instead.
 func (*FindEntryNeighborTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *FindEntryNeighborTransferringAway) GetAddress() string {
@@ -885,7 +832,7 @@ type FindEntryNeighborNotYetAdopted struct {
 
 func (x *FindEntryNeighborNotYetAdopted) Reset() {
 	*x = FindEntryNeighborNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -897,7 +844,7 @@ func (x *FindEntryNeighborNotYetAdopted) String() string {
 func (*FindEntryNeighborNotYetAdopted) ProtoMessage() {}
 
 func (x *FindEntryNeighborNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -910,7 +857,7 @@ func (x *FindEntryNeighborNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindEntryNeighborNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*FindEntryNeighborNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP(), []int{13}
 }
 
 var File_agentrepl_v1_endpoint_find_entry_neighbor_proto protoreflect.FileDescriptor
@@ -921,17 +868,15 @@ const file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDesc = "" +
 	"\x18FindEntryNeighborRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12B\n" +
-	"\tdirection\x18\x03 \x01(\v2$.agentrepl.v1.EntryNeighborDirectionR\tdirection\"\xaf\x02\n" +
+	"\tdirection\x18\x03 \x01(\v2$.agentrepl.v1.EntryNeighborDirectionR\tdirection\"\x80\x02\n" +
 	"\x16EntryNeighborDirection\x125\n" +
 	"\x04next\x18\x01 \x01(\v2\x1f.agentrepl.v1.EntryNeighborNextH\x00R\x04next\x12A\n" +
 	"\bprevious\x18\x02 \x01(\v2#.agentrepl.v1.EntryNeighborPreviousH\x00R\bprevious\x12D\n" +
-	"\tfollowing\x18\x04 \x01(\v2$.agentrepl.v1.EntryNeighborFollowingH\x00R\tfollowing\x12;\n" +
-	"\x06parent\x18\x05 \x01(\v2!.agentrepl.v1.EntryNeighborParentH\x00R\x06parentB\x05\n" +
-	"\x03wayJ\x04\b\x03\x10\x04R\vfirst_child\"\x13\n" +
+	"\tfollowing\x18\x04 \x01(\v2$.agentrepl.v1.EntryNeighborFollowingH\x00R\tfollowingB\x05\n" +
+	"\x03wayJ\x04\b\x03\x10\x04J\x04\b\x05\x10\x06R\vfirst_childR\x06parent\"\x13\n" +
 	"\x11EntryNeighborNext\"\x17\n" +
 	"\x15EntryNeighborPrevious\"\x18\n" +
-	"\x16EntryNeighborFollowing\"\x15\n" +
-	"\x13EntryNeighborParent\"\xa7\x01\n" +
+	"\x16EntryNeighborFollowing\"\xa7\x01\n" +
 	"\x19FindEntryNeighborResponse\x12B\n" +
 	"\asuccess\x18\x01 \x01(\v2&.agentrepl.v1.FindEntryNeighborSuccessH\x00R\asuccess\x12<\n" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.FindEntryNeighborErrorH\x00R\x05errorB\b\n" +
@@ -969,45 +914,43 @@ func file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_agentrepl_v1_endpoint_find_entry_neighbor_proto_goTypes = []any{
 	(*FindEntryNeighborRequest)(nil),              // 0: agentrepl.v1.FindEntryNeighborRequest
 	(*EntryNeighborDirection)(nil),                // 1: agentrepl.v1.EntryNeighborDirection
 	(*EntryNeighborNext)(nil),                     // 2: agentrepl.v1.EntryNeighborNext
 	(*EntryNeighborPrevious)(nil),                 // 3: agentrepl.v1.EntryNeighborPrevious
 	(*EntryNeighborFollowing)(nil),                // 4: agentrepl.v1.EntryNeighborFollowing
-	(*EntryNeighborParent)(nil),                   // 5: agentrepl.v1.EntryNeighborParent
-	(*FindEntryNeighborResponse)(nil),             // 6: agentrepl.v1.FindEntryNeighborResponse
-	(*FindEntryNeighborSuccess)(nil),              // 7: agentrepl.v1.FindEntryNeighborSuccess
-	(*FindEntryNeighborFound)(nil),                // 8: agentrepl.v1.FindEntryNeighborFound
-	(*FindEntryNeighborNone)(nil),                 // 9: agentrepl.v1.FindEntryNeighborNone
-	(*FindEntryNeighborError)(nil),                // 10: agentrepl.v1.FindEntryNeighborError
-	(*FindEntryNeighborUnknownWorkspace)(nil),     // 11: agentrepl.v1.FindEntryNeighborUnknownWorkspace
-	(*FindEntryNeighborWorkspaceRefMismatch)(nil), // 12: agentrepl.v1.FindEntryNeighborWorkspaceRefMismatch
-	(*FindEntryNeighborTransferringAway)(nil),     // 13: agentrepl.v1.FindEntryNeighborTransferringAway
-	(*FindEntryNeighborNotYetAdopted)(nil),        // 14: agentrepl.v1.FindEntryNeighborNotYetAdopted
-	(*v1.WorkspaceRef)(nil),                       // 15: workspace.v1.WorkspaceRef
+	(*FindEntryNeighborResponse)(nil),             // 5: agentrepl.v1.FindEntryNeighborResponse
+	(*FindEntryNeighborSuccess)(nil),              // 6: agentrepl.v1.FindEntryNeighborSuccess
+	(*FindEntryNeighborFound)(nil),                // 7: agentrepl.v1.FindEntryNeighborFound
+	(*FindEntryNeighborNone)(nil),                 // 8: agentrepl.v1.FindEntryNeighborNone
+	(*FindEntryNeighborError)(nil),                // 9: agentrepl.v1.FindEntryNeighborError
+	(*FindEntryNeighborUnknownWorkspace)(nil),     // 10: agentrepl.v1.FindEntryNeighborUnknownWorkspace
+	(*FindEntryNeighborWorkspaceRefMismatch)(nil), // 11: agentrepl.v1.FindEntryNeighborWorkspaceRefMismatch
+	(*FindEntryNeighborTransferringAway)(nil),     // 12: agentrepl.v1.FindEntryNeighborTransferringAway
+	(*FindEntryNeighborNotYetAdopted)(nil),        // 13: agentrepl.v1.FindEntryNeighborNotYetAdopted
+	(*v1.WorkspaceRef)(nil),                       // 14: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_find_entry_neighbor_proto_depIdxs = []int32{
-	15, // 0: agentrepl.v1.FindEntryNeighborRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	14, // 0: agentrepl.v1.FindEntryNeighborRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.FindEntryNeighborRequest.direction:type_name -> agentrepl.v1.EntryNeighborDirection
 	2,  // 2: agentrepl.v1.EntryNeighborDirection.next:type_name -> agentrepl.v1.EntryNeighborNext
 	3,  // 3: agentrepl.v1.EntryNeighborDirection.previous:type_name -> agentrepl.v1.EntryNeighborPrevious
 	4,  // 4: agentrepl.v1.EntryNeighborDirection.following:type_name -> agentrepl.v1.EntryNeighborFollowing
-	5,  // 5: agentrepl.v1.EntryNeighborDirection.parent:type_name -> agentrepl.v1.EntryNeighborParent
-	7,  // 6: agentrepl.v1.FindEntryNeighborResponse.success:type_name -> agentrepl.v1.FindEntryNeighborSuccess
-	10, // 7: agentrepl.v1.FindEntryNeighborResponse.error:type_name -> agentrepl.v1.FindEntryNeighborError
-	8,  // 8: agentrepl.v1.FindEntryNeighborSuccess.found:type_name -> agentrepl.v1.FindEntryNeighborFound
-	9,  // 9: agentrepl.v1.FindEntryNeighborSuccess.none:type_name -> agentrepl.v1.FindEntryNeighborNone
-	11, // 10: agentrepl.v1.FindEntryNeighborError.unknown_workspace:type_name -> agentrepl.v1.FindEntryNeighborUnknownWorkspace
-	12, // 11: agentrepl.v1.FindEntryNeighborError.workspace_ref_mismatch:type_name -> agentrepl.v1.FindEntryNeighborWorkspaceRefMismatch
-	13, // 12: agentrepl.v1.FindEntryNeighborError.transferring_away:type_name -> agentrepl.v1.FindEntryNeighborTransferringAway
-	14, // 13: agentrepl.v1.FindEntryNeighborError.not_yet_adopted:type_name -> agentrepl.v1.FindEntryNeighborNotYetAdopted
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	6,  // 5: agentrepl.v1.FindEntryNeighborResponse.success:type_name -> agentrepl.v1.FindEntryNeighborSuccess
+	9,  // 6: agentrepl.v1.FindEntryNeighborResponse.error:type_name -> agentrepl.v1.FindEntryNeighborError
+	7,  // 7: agentrepl.v1.FindEntryNeighborSuccess.found:type_name -> agentrepl.v1.FindEntryNeighborFound
+	8,  // 8: agentrepl.v1.FindEntryNeighborSuccess.none:type_name -> agentrepl.v1.FindEntryNeighborNone
+	10, // 9: agentrepl.v1.FindEntryNeighborError.unknown_workspace:type_name -> agentrepl.v1.FindEntryNeighborUnknownWorkspace
+	11, // 10: agentrepl.v1.FindEntryNeighborError.workspace_ref_mismatch:type_name -> agentrepl.v1.FindEntryNeighborWorkspaceRefMismatch
+	12, // 11: agentrepl.v1.FindEntryNeighborError.transferring_away:type_name -> agentrepl.v1.FindEntryNeighborTransferringAway
+	13, // 12: agentrepl.v1.FindEntryNeighborError.not_yet_adopted:type_name -> agentrepl.v1.FindEntryNeighborNotYetAdopted
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_find_entry_neighbor_proto_init() }
@@ -1019,17 +962,16 @@ func file_agentrepl_v1_endpoint_find_entry_neighbor_proto_init() {
 		(*EntryNeighborDirection_Next)(nil),
 		(*EntryNeighborDirection_Previous)(nil),
 		(*EntryNeighborDirection_Following)(nil),
-		(*EntryNeighborDirection_Parent)(nil),
 	}
-	file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[6].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[5].OneofWrappers = []any{
 		(*FindEntryNeighborResponse_Success)(nil),
 		(*FindEntryNeighborResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[7].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[6].OneofWrappers = []any{
 		(*FindEntryNeighborSuccess_Found)(nil),
 		(*FindEntryNeighborSuccess_None)(nil),
 	}
-	file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[10].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_find_entry_neighbor_proto_msgTypes[9].OneofWrappers = []any{
 		(*FindEntryNeighborError_UnknownWorkspace)(nil),
 		(*FindEntryNeighborError_WorkspaceRefMismatch)(nil),
 		(*FindEntryNeighborError_TransferringAway)(nil),
@@ -1041,7 +983,7 @@ func file_agentrepl_v1_endpoint_find_entry_neighbor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDesc), len(file_agentrepl_v1_endpoint_find_entry_neighbor_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

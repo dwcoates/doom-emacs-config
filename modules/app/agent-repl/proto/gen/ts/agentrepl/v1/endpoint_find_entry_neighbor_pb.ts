@@ -7,9 +7,9 @@
 // calls it too when the person presses `C-o` or `C-i` on an entry line, and
 // relabels that entry with the label the daemon names, its words kept: `C-o`
 // moves the entry one node on in reading order (`3.2 - ` becomes `3.2.1 - `,
-// or `3.3 - ` when 3.2 has no child), and `C-i` moves it up to the node's
-// parent (`3.2 - ` becomes `3 - `), or on to the next root from a root
-// (`3 - ` becomes `4 - `).
+// or `3.3 - ` when 3.2 has no child), and `C-i` moves it back, to the node's
+// previous sibling (`3.2 - ` becomes `3.1 - `), else up to its parent
+// (`3.1 - ` becomes `3 - `), the way `O` opens a line.
 //
 // THE TREE IS THE RESPONSE THE ENTRY TARGETS, by the rule the composer's
 // entries are bound by (endpoint_report_composer_entries.proto): the selected
@@ -17,11 +17,10 @@
 // feed whose tree holds the label. The neighbor is found in that tree:
 //   - `next`: the node's next sibling; else its parent's next sibling, and so
 //     on up its ancestors;
-//   - `previous`: the node's previous sibling; else its parent, and so on;
+//   - `previous`: the node's previous sibling; else its parent; the first
+//     root has none;
 //   - `following`: the node read after it: its first child; else what `next`
-//     names;
-//   - `parent`: the node's parent; else, for a root, the next root; the last
-//     root has none.
+//     names.
 // The answer is for the label the request names, so it holds for the line the
 // key was pressed on whatever the composer has reported since.
 
@@ -39,7 +38,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_find_entry_neighbor.proto.
  */
 export const file_agentrepl_v1_endpoint_find_entry_neighbor: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfZmluZF9lbnRyeV9uZWlnaGJvci5wcm90bxIMYWdlbnRyZXBsLnYxIpEBChhGaW5kRW50cnlOZWlnaGJvclJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhINCgVsYWJlbBgCIAEoCRI3CglkaXJlY3Rpb24YAyABKAsyJC5hZ2VudHJlcGwudjEuRW50cnlOZWlnaGJvckRpcmVjdGlvbiKMAgoWRW50cnlOZWlnaGJvckRpcmVjdGlvbhIvCgRuZXh0GAEgASgLMh8uYWdlbnRyZXBsLnYxLkVudHJ5TmVpZ2hib3JOZXh0SAASNwoIcHJldmlvdXMYAiABKAsyIy5hZ2VudHJlcGwudjEuRW50cnlOZWlnaGJvclByZXZpb3VzSAASOQoJZm9sbG93aW5nGAQgASgLMiQuYWdlbnRyZXBsLnYxLkVudHJ5TmVpZ2hib3JGb2xsb3dpbmdIABIzCgZwYXJlbnQYBSABKAsyIS5hZ2VudHJlcGwudjEuRW50cnlOZWlnaGJvclBhcmVudEgAQgUKA3dheUoECAMQBFILZmlyc3RfY2hpbGQiEwoRRW50cnlOZWlnaGJvck5leHQiFwoVRW50cnlOZWlnaGJvclByZXZpb3VzIhgKFkVudHJ5TmVpZ2hib3JGb2xsb3dpbmciFQoTRW50cnlOZWlnaGJvclBhcmVudCKXAQoZRmluZEVudHJ5TmVpZ2hib3JSZXNwb25zZRI5CgdzdWNjZXNzGAEgASgLMiYuYWdlbnRyZXBsLnYxLkZpbmRFbnRyeU5laWdoYm9yU3VjY2Vzc0gAEjUKBWVycm9yGAIgASgLMiQuYWdlbnRyZXBsLnYxLkZpbmRFbnRyeU5laWdoYm9yRXJyb3JIAEIICgZyZXN1bHQikgEKGEZpbmRFbnRyeU5laWdoYm9yU3VjY2VzcxI1CgVmb3VuZBgBIAEoCzIkLmFnZW50cmVwbC52MS5GaW5kRW50cnlOZWlnaGJvckZvdW5kSAASMwoEbm9uZRgCIAEoCzIjLmFnZW50cmVwbC52MS5GaW5kRW50cnlOZWlnaGJvck5vbmVIAEIKCghuZWlnaGJvciInChZGaW5kRW50cnlOZWlnaGJvckZvdW5kEg0KBWxhYmVsGAEgASgJIhcKFUZpbmRFbnRyeU5laWdoYm9yTm9uZSLdAgoWRmluZEVudHJ5TmVpZ2hib3JFcnJvchJMChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIvLmFnZW50cmVwbC52MS5GaW5kRW50cnlOZWlnaGJvclVua25vd25Xb3Jrc3BhY2VIABJVChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjMuYWdlbnRyZXBsLnYxLkZpbmRFbnRyeU5laWdoYm9yV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJMChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIvLmFnZW50cmVwbC52MS5GaW5kRW50cnlOZWlnaGJvclRyYW5zZmVycmluZ0F3YXlIABJHCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyLC5hZ2VudHJlcGwudjEuRmluZEVudHJ5TmVpZ2hib3JOb3RZZXRBZG9wdGVkSABCBwoFY2F1c2UiIwohRmluZEVudHJ5TmVpZ2hib3JVbmtub3duV29ya3NwYWNlIj0KJUZpbmRFbnRyeU5laWdoYm9yV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjQKIUZpbmRFbnRyeU5laWdoYm9yVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIiAKHkZpbmRFbnRyeU5laWdoYm9yTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfZmluZF9lbnRyeV9uZWlnaGJvci5wcm90bxIMYWdlbnRyZXBsLnYxIpEBChhGaW5kRW50cnlOZWlnaGJvclJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhINCgVsYWJlbBgCIAEoCRI3CglkaXJlY3Rpb24YAyABKAsyJC5hZ2VudHJlcGwudjEuRW50cnlOZWlnaGJvckRpcmVjdGlvbiLlAQoWRW50cnlOZWlnaGJvckRpcmVjdGlvbhIvCgRuZXh0GAEgASgLMh8uYWdlbnRyZXBsLnYxLkVudHJ5TmVpZ2hib3JOZXh0SAASNwoIcHJldmlvdXMYAiABKAsyIy5hZ2VudHJlcGwudjEuRW50cnlOZWlnaGJvclByZXZpb3VzSAASOQoJZm9sbG93aW5nGAQgASgLMiQuYWdlbnRyZXBsLnYxLkVudHJ5TmVpZ2hib3JGb2xsb3dpbmdIAEIFCgN3YXlKBAgDEARKBAgFEAZSC2ZpcnN0X2NoaWxkUgZwYXJlbnQiEwoRRW50cnlOZWlnaGJvck5leHQiFwoVRW50cnlOZWlnaGJvclByZXZpb3VzIhgKFkVudHJ5TmVpZ2hib3JGb2xsb3dpbmcilwEKGUZpbmRFbnRyeU5laWdoYm9yUmVzcG9uc2USOQoHc3VjY2VzcxgBIAEoCzImLmFnZW50cmVwbC52MS5GaW5kRW50cnlOZWlnaGJvclN1Y2Nlc3NIABI1CgVlcnJvchgCIAEoCzIkLmFnZW50cmVwbC52MS5GaW5kRW50cnlOZWlnaGJvckVycm9ySABCCAoGcmVzdWx0IpIBChhGaW5kRW50cnlOZWlnaGJvclN1Y2Nlc3MSNQoFZm91bmQYASABKAsyJC5hZ2VudHJlcGwudjEuRmluZEVudHJ5TmVpZ2hib3JGb3VuZEgAEjMKBG5vbmUYAiABKAsyIy5hZ2VudHJlcGwudjEuRmluZEVudHJ5TmVpZ2hib3JOb25lSABCCgoIbmVpZ2hib3IiJwoWRmluZEVudHJ5TmVpZ2hib3JGb3VuZBINCgVsYWJlbBgBIAEoCSIXChVGaW5kRW50cnlOZWlnaGJvck5vbmUi3QIKFkZpbmRFbnRyeU5laWdoYm9yRXJyb3ISTAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLy5hZ2VudHJlcGwudjEuRmluZEVudHJ5TmVpZ2hib3JVbmtub3duV29ya3NwYWNlSAASVQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIzLmFnZW50cmVwbC52MS5GaW5kRW50cnlOZWlnaGJvcldvcmtzcGFjZVJlZk1pc21hdGNoSAASTAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLy5hZ2VudHJlcGwudjEuRmluZEVudHJ5TmVpZ2hib3JUcmFuc2ZlcnJpbmdBd2F5SAASRwoPbm90X3lldF9hZG9wdGVkGAQgASgLMiwuYWdlbnRyZXBsLnYxLkZpbmRFbnRyeU5laWdoYm9yTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIiMKIUZpbmRFbnRyeU5laWdoYm9yVW5rbm93bldvcmtzcGFjZSI9CiVGaW5kRW50cnlOZWlnaGJvcldvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSI0CiFGaW5kRW50cnlOZWlnaGJvclRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIgCh5GaW5kRW50cnlOZWlnaGJvck5vdFlldEFkb3B0ZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.FindEntryNeighborRequest
@@ -96,7 +95,8 @@ export type EntryNeighborDirection = Message<"agentrepl.v1.EntryNeighborDirectio
     case: "next";
   } | {
     /**
-     * The node a line opened above the entry line answers (`O`).
+     * The node a line opened above the entry line answers (`O`), and the
+     * node the entry answers instead once it steps back (`C-i`).
      *
      * @generated from field: agentrepl.v1.EntryNeighborPrevious previous = 2;
      */
@@ -110,14 +110,6 @@ export type EntryNeighborDirection = Message<"agentrepl.v1.EntryNeighborDirectio
      */
     value: EntryNeighborFollowing;
     case: "following";
-  } | {
-    /**
-     * The node the entry answers instead once it steps up (`C-i`).
-     *
-     * @generated from field: agentrepl.v1.EntryNeighborParent parent = 5;
-     */
-    value: EntryNeighborParent;
-    case: "parent";
   } | { case: undefined; value?: undefined };
 };
 
@@ -168,19 +160,6 @@ export const EntryNeighborFollowingSchema: GenMessage<EntryNeighborFollowing> = 
   messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 4);
 
 /**
- * @generated from message agentrepl.v1.EntryNeighborParent
- */
-export type EntryNeighborParent = Message<"agentrepl.v1.EntryNeighborParent"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.EntryNeighborParent.
- * Use `create(EntryNeighborParentSchema)` to create a new message.
- */
-export const EntryNeighborParentSchema: GenMessage<EntryNeighborParent> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 5);
-
-/**
  * THE ARM IS THE OUTCOME.
  *
  * @generated from message agentrepl.v1.FindEntryNeighborResponse
@@ -209,7 +188,7 @@ export type FindEntryNeighborResponse = Message<"agentrepl.v1.FindEntryNeighborR
  * Use `create(FindEntryNeighborResponseSchema)` to create a new message.
  */
 export const FindEntryNeighborResponseSchema: GenMessage<FindEntryNeighborResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 6);
+  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 5);
 
 /**
  * What the new line answers. THE ARM IS THE ANSWER: no neighbor is an answer,
@@ -246,7 +225,7 @@ export type FindEntryNeighborSuccess = Message<"agentrepl.v1.FindEntryNeighborSu
  * Use `create(FindEntryNeighborSuccessSchema)` to create a new message.
  */
 export const FindEntryNeighborSuccessSchema: GenMessage<FindEntryNeighborSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 7);
+  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 6);
 
 /**
  * @generated from message agentrepl.v1.FindEntryNeighborFound
@@ -265,7 +244,7 @@ export type FindEntryNeighborFound = Message<"agentrepl.v1.FindEntryNeighborFoun
  * Use `create(FindEntryNeighborFoundSchema)` to create a new message.
  */
 export const FindEntryNeighborFoundSchema: GenMessage<FindEntryNeighborFound> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 8);
+  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 7);
 
 /**
  * @generated from message agentrepl.v1.FindEntryNeighborNone
@@ -278,7 +257,7 @@ export type FindEntryNeighborNone = Message<"agentrepl.v1.FindEntryNeighborNone"
  * Use `create(FindEntryNeighborNoneSchema)` to create a new message.
  */
 export const FindEntryNeighborNoneSchema: GenMessage<FindEntryNeighborNone> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 9);
+  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 8);
 
 /**
  * @generated from message agentrepl.v1.FindEntryNeighborError
@@ -327,7 +306,7 @@ export type FindEntryNeighborError = Message<"agentrepl.v1.FindEntryNeighborErro
  * Use `create(FindEntryNeighborErrorSchema)` to create a new message.
  */
 export const FindEntryNeighborErrorSchema: GenMessage<FindEntryNeighborError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 10);
+  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 9);
 
 /**
  * The workspace id is not in the daemon's registry.
@@ -342,7 +321,7 @@ export type FindEntryNeighborUnknownWorkspace = Message<"agentrepl.v1.FindEntryN
  * Use `create(FindEntryNeighborUnknownWorkspaceSchema)` to create a new message.
  */
 export const FindEntryNeighborUnknownWorkspaceSchema: GenMessage<FindEntryNeighborUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 11);
+  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 10);
 
 /**
  * The echoed dir disagrees with the registry's dir for this id.
@@ -363,7 +342,7 @@ export type FindEntryNeighborWorkspaceRefMismatch = Message<"agentrepl.v1.FindEn
  * Use `create(FindEntryNeighborWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const FindEntryNeighborWorkspaceRefMismatchSchema: GenMessage<FindEntryNeighborWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 12);
+  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 11);
 
 /**
  * This daemon released the workspace to a successor.
@@ -384,7 +363,7 @@ export type FindEntryNeighborTransferringAway = Message<"agentrepl.v1.FindEntryN
  * Use `create(FindEntryNeighborTransferringAwaySchema)` to create a new message.
  */
 export const FindEntryNeighborTransferringAwaySchema: GenMessage<FindEntryNeighborTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 13);
+  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 12);
 
 /**
  * A joining daemon has not finished adopting this workspace yet.
@@ -399,5 +378,5 @@ export type FindEntryNeighborNotYetAdopted = Message<"agentrepl.v1.FindEntryNeig
  * Use `create(FindEntryNeighborNotYetAdoptedSchema)` to create a new message.
  */
 export const FindEntryNeighborNotYetAdoptedSchema: GenMessage<FindEntryNeighborNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 14);
+  messageDesc(file_agentrepl_v1_endpoint_find_entry_neighbor, 13);
 

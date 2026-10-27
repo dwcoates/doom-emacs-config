@@ -600,7 +600,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                          (list '(normal insert) t (list (kbd "C-o") (agent-repl-prompt-entries--on-entry-binding
                                                                     #'agent-repl-prompt-entries-step-on)))
                          (list '(normal insert) t (list [C-i] (agent-repl-prompt-entries--on-entry-binding
-                                                              #'agent-repl-prompt-entries-step-up))))))))
+                                                              #'agent-repl-prompt-entries-step-back))))))))
 
 ;;;; ---- Stepping an entry along its tree ----
 
@@ -631,16 +631,16 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
     (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction) (plist-get (car asked) :label))
                    '("1.2 - yes" (:arm :following) "1.1")))))
 
-(ert-deftest agent-repl-test-prompt-entries-C-i-relabels-the-entry-to-its-parent ()
-  "`C-i' on an entry relabels it to its node's parent, its words kept."
+(ert-deftest agent-repl-test-prompt-entries-C-i-relabels-the-entry-to-the-previous-node ()
+  "`C-i' on an entry relabels it to the node `O' would answer, its words kept."
   (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1")
     ;; Arrange
     (goto-char 10)
     ;; Act
-    (agent-repl-prompt-entries-step-up)
+    (agent-repl-prompt-entries-step-back)
     ;; Assert
     (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction) (plist-get (car asked) :label))
-                   '("1 - yes" (:arm :parent) "1.1")))))
+                   '("1 - yes" (:arm :previous) "1.1")))))
 
 (ert-deftest agent-repl-test-prompt-entries-C-o-keeps-point-after-the-label ()
   "Point after the label stays as far from the line's end; in the label it goes to the new label's end."
@@ -667,17 +667,17 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                    '("1.1 - yes" (("ws-1" "1.1 is the last node to answer")))))
     (should (cl-some (lambda (m) (string-match-p "step-none ws=ws-1 label=1.1 way=:following" m)) logs))))
 
-(ert-deftest agent-repl-test-prompt-entries-C-i-at-the-last-root-keeps-the-label-and-says-so ()
-  "The last root keeps its label under `C-i'; the composer flashes why, recorded at info."
+(ert-deftest agent-repl-test-prompt-entries-C-i-at-the-first-node-keeps-the-label-and-says-so ()
+  "The tree's first node keeps its label under `C-i'; the composer flashes why, recorded at info."
   (agent-repl-test-prompt-entries--stepping agent-repl-test-prompt-entries--none
     ;; Arrange
     (goto-char 10)
     ;; Act
-    (agent-repl-prompt-entries-step-up)
+    (agent-repl-prompt-entries-step-back)
     ;; Assert
     (should (equal (list (agent-repl-test-prompt-entries--line) flashed)
-                   '("1.1 - yes" (("ws-1" "1.1 has no parent or later root to answer")))))
-    (should (cl-some (lambda (m) (string-match-p "step-none ws=ws-1 label=1.1 way=:parent" m)) logs))))
+                   '("1.1 - yes" (("ws-1" "1.1 is the first node to answer")))))
+    (should (cl-some (lambda (m) (string-match-p "step-none ws=ws-1 label=1.1 way=:previous" m)) logs))))
 
 (ert-deftest agent-repl-test-prompt-entries-a-step-is-recorded-at-info ()
   "A step leaves an INFO record naming the label, the way and the new label."
@@ -692,7 +692,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
 (ert-deftest agent-repl-test-prompt-entries-a-step-off-an-entry-refuses-and-asks-nothing ()
   "Run off an entry line, either step is refused, recorded, and asks the daemon nothing."
   (dolist (case '((agent-repl-prompt-entries-step-on ":following")
-                  (agent-repl-prompt-entries-step-up ":parent")))
+                  (agent-repl-prompt-entries-step-back ":previous")))
     (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1.1.1")
       ;; Arrange
       (goto-char 15)
@@ -725,7 +725,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
 (ert-deftest agent-repl-test-prompt-entries-entry-keys-fall-through-off-an-entry-line ()
   "Looked up through the active keymaps, `C-o' and `C-i' step on an entry line and keep their own bindings elsewhere."
   (pcase-dolist (`(,key ,command) `((,(kbd "C-o") agent-repl-prompt-entries-step-on)
-                                    ([C-i] agent-repl-prompt-entries-step-up)))
+                                    ([C-i] agent-repl-prompt-entries-step-back)))
     (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1.1.1")
       ;; Arrange: the composer's map above a map binding the key as it always was.
       (let ((ours (make-sparse-keymap))

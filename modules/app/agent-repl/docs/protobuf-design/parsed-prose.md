@@ -350,3 +350,18 @@ wrong labels). That needs one parse, in one place, that every program reads.
 - **Decisions inside the shape:**
   - **The arm keeps its name**, since every non-root still answers its parent.
   - **The last root keeps its label**, and the composer flashes why.
+
+### 12. `C-i` steps back, the reverse of `C-o`
+
+- **What:** `EntryNeighborDirection` retired `parent` (tag 5, reserved). `C-i`
+  asks `previous`, the arm `O` already asks. `feed.NeighborParent` is gone.
+- **Why:** the owner's ask of 2026-10-27: `C-i` reverses `C-o`, so it goes
+  back to the previous sibling when there is one before it goes up a level
+  (`2.2 - ` becomes `2.1 - `, `2.1 - ` becomes `2 - `, `2 - ` becomes `1 - `).
+  This supersedes section 11.
+- **Decisions inside the shape:**
+  - **`previous` already names that node**, so `C-i` and `O` share one arm
+    and no arm is left that no key asks for.
+  - **A previous sibling is named itself, not its last descendant**, as the
+    owner's ask reads, so `C-i` never jumps down into a sibling's subtree.
+  - **The first root keeps its label**, and the composer flashes why.

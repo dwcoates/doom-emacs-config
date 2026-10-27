@@ -354,8 +354,7 @@ command sends it again; DONE ends the report."
 
 (defun agent-repl-prompt-entries--neighbor (label way)
   "The label of LABEL's node WAY from it in its target tree, or nil.
-WAY is `:next', `:previous', `:following' or `:parent'
-\(EntryNeighborDirection).
+WAY is `:next', `:previous' or `:following' (EntryNeighborDirection).
 Nil, with the reason logged, when the composer is not reporting, no ref or
 connection stands, the daemon refused, or it never answered."
   (let* ((ws agent-repl-prompt-entries--ws)
@@ -428,9 +427,10 @@ the entry targets."
 ;; words kept.  `C-o' steps on, to the node read after it: its first child
 ;; (`3.2 - ' becomes `3.2.1 - '), else its next sibling (`3.3 - '), else the
 ;; next sibling of its nearest ancestor that has one (`4 - ').  `C-i' steps
-;; up, to its parent (`3.2 - ' becomes `3 - '), and a root, having none, steps
-;; on to the next root (`3 - ' becomes `4 - ').  The daemon finds the node
-;; (FindEntryNeighbor's `following' and `parent').  Off an entry line either
+;; back, to its previous sibling (`3.2 - ' becomes `3.1 - '), else up to its
+;; parent (`3.1 - ' becomes `3 - '), so a root steps back to the previous
+;; root (`3 - ' becomes `2 - ').  The daemon finds the node
+;; (FindEntryNeighbor's `following' and `previous').  Off an entry line either
 ;; key is what it always was; `C-i' is Doom's GUI-only `[C-i]' event, so `TAB'
 ;; is never taken.
 
@@ -451,7 +451,7 @@ or before the label moves to the new label's end."
 
 (defun agent-repl-prompt-entries--step (way none)
   "Relabel point's entry to answer its node's neighbor WAY.
-WAY is `:following' or `:parent' (EntryNeighborDirection).  A node with
+WAY is `:following' or `:previous' (EntryNeighborDirection).  A node with
 no neighbor that way keeps its label, and the composer flashes NONE, a
 format of the label."
   (let* ((ws agent-repl-prompt-entries--ws)
@@ -477,14 +477,15 @@ last node keeps its label, and the composer says so."
   (interactive)
   (agent-repl-prompt-entries--step :following "%s is the last node to answer"))
 
-(defun agent-repl-prompt-entries-step-up ()
-  "Relabel point's entry to answer its node's parent.
-The composer's `C-i' on an entry line: `3.2 - ' becomes `3 - ', its words
-kept, the parent found in the tree the entry targets.  A root steps on to
-the next root (`3 - ' becomes `4 - ').  The last root keeps its label, and
-the composer says so."
+(defun agent-repl-prompt-entries-step-back ()
+  "Relabel point's entry to answer the node before its own, `C-o' undone.
+The composer's `C-i' on an entry line: `3.2 - ' becomes `3.1 - ', or
+`3 - ' when 3.2 is its parent's first child, its words kept, the node
+found in the tree the entry targets, as `O' finds it.  A root steps
+back to the previous root (`3 - ' becomes `2 - ').  The first root keeps
+its label, and the composer says so."
   (interactive)
-  (agent-repl-prompt-entries--step :parent "%s has no parent or later root to answer"))
+  (agent-repl-prompt-entries--step :previous "%s is the first node to answer"))
 
 (defun agent-repl-prompt-entries--on-entry-filter (command)
   "COMMAND on an entry line, else nil, so the key off one keeps its own binding."
@@ -499,9 +500,9 @@ line, so the key lookup goes on to the next map."
 
 (defconst agent-repl-prompt-entries--entry-keys
   `((,(kbd "C-o") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-step-on))
-    ([C-i] . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-step-up)))
+    ([C-i] . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-step-back)))
   "The composer's entry-only keys in command and insert mode, as (KEY . BINDING).
-`C-o' steps on and `C-i' steps up on an entry line, and both fall through
+`C-o' steps on and `C-i' steps back on an entry line, and both fall through
 elsewhere.  `[C-i]' is the event Doom decodes a GUI `C-i' into when a
 binding for it stands, so `TAB' keeps its own meaning.")
 

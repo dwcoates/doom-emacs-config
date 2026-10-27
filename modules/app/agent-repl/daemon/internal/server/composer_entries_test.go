@@ -276,7 +276,6 @@ var (
 	wayNext      = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Next{Next: &agentreplv1.EntryNeighborNext{}}}
 	wayPrevious  = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Previous{Previous: &agentreplv1.EntryNeighborPrevious{}}}
 	wayFollowing = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Following{Following: &agentreplv1.EntryNeighborFollowing{}}}
-	wayParent    = &agentreplv1.EntryNeighborDirection{Way: &agentreplv1.EntryNeighborDirection_Parent{Parent: &agentreplv1.EntryNeighborParent{}}}
 )
 
 func TestFindEntryNeighborAnswersTheFeedsNeighbor(t *testing.T) {
@@ -289,13 +288,12 @@ func TestFindEntryNeighborAnswersTheFeedsNeighbor(t *testing.T) {
 		{"the next node", wayNext, "3.3", true},
 		{"the previous node", wayPrevious, "3.1", true},
 		{"the following node", wayFollowing, "3.2.1", true},
-		{"the parent", wayParent, "3", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
-			h.Feed.neighbors = map[string]string{"3.2\x00next": "3.3", "3.2\x00previous": "3.1", "3.2\x00following": "3.2.1", "3.2\x00parent": "3"}
+			h.Feed.neighbors = map[string]string{"3.2\x00next": "3.3", "3.2\x00previous": "3.1", "3.2\x00following": "3.2.1"}
 
 			// Act
 			resp, err := h.Client.FindEntryNeighbor(context.Background(), connect.NewRequest(neighborRequest("3.2", tc.way)))

@@ -114,16 +114,13 @@ const (
 	// NeighborNext is the node a line opened below the entry answers: the
 	// node's next sibling, else its parent's next sibling, and so on up.
 	NeighborNext NeighborWay = iota
-	// NeighborPrevious is the node a line opened above the entry answers:
-	// the node's previous sibling, else its parent.
+	// NeighborPrevious is the node a line opened above the entry answers,
+	// and the node the entry answers once it steps back (C-i): the node's
+	// previous sibling, else its parent. The first root has none.
 	NeighborPrevious
 	// NeighborFollowing is the node the entry answers once it steps on (C-o):
 	// the node read after it, its first child, else what NeighborNext names.
 	NeighborFollowing
-	// NeighborParent is the node the entry answers once it steps up (C-i):
-	// the node's parent, else, for a root, the next root. The last root has
-	// none.
-	NeighborParent
 )
 
 func (w NeighborWay) String() string {
@@ -134,8 +131,6 @@ func (w NeighborWay) String() string {
 		return "previous"
 	case NeighborFollowing:
 		return "following"
-	case NeighborParent:
-		return "parent"
 	}
 	panic(fmt.Sprintf("feed: NeighborWay %d names no way", int(w)))
 }
@@ -205,11 +200,6 @@ func treeNeighbor(tree *frontendv1.ProseTree, label string, way NeighborWay) (ne
 	case NeighborFollowing:
 		if kids := children[at]; len(kids) > 0 {
 			return nodes[kids[0]].GetLabel().GetText(), true, true
-		}
-		return next()
-	case NeighborParent:
-		if parent[at] >= 0 {
-			return nodes[parent[at]].GetLabel().GetText(), true, true
 		}
 		return next()
 	case NeighborPrevious:
