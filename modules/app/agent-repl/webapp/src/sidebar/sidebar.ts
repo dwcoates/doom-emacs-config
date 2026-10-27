@@ -31,6 +31,8 @@ import { WINDOW_TIMERS, type Timers } from "../timers.js";
 import { AttentionRegistry } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
 import { createRowHover } from "./row-hover.js";
+import { createRecentlyDeployed, installRecentlyDeployedCollapse } from "./recently-deployed.js";
+import { pageFocusLeft, type FocusLeft } from "../focus-left.js";
 import { installTransients } from "./transients.js";
 import { createArrangeHold } from "./arrange.js";
 import { createSidebarView } from "./view.js";
@@ -106,6 +108,8 @@ export interface SidebarDeps {
    * (`band-fit.ts`). Omitted: no gate band is ever under the rail.
    */
   gateBand?: () => number;
+  /** Where the page hears that the user's focus left it (`focus-left.ts`). Defaults to the page's. */
+  focusLeft?: FocusLeft;
 }
 
 /**
@@ -259,6 +263,9 @@ function mountSidebarIn(
     selectionFade: createSelectionFade(body),
     shownAhead: () => shownAhead,
     arrange: { hold: createArrangeHold((roster) => drawRoster(roster)), layer: arrangeLayer, status: arrangeStatus },
+    // A CHANGE IS FITTED AT ONCE: the rows shown or let go are the Deploys
+    // band's lines (band-fit.ts).
+    recentlyDeployed: createRecentlyDeployed(body, () => bandFit.refit()),
   };
   // THE BAND FIT (band-fit.ts): the Open, Hidden Workspaces and Recently
   // Merged viewports, re-fitted after every draw, on every resize of the rail
@@ -322,6 +329,10 @@ function mountSidebarIn(
   // (row-hover.ts): a row drawn under a resting pointer never sees it leave,
   // but the host sees every move and the pointer leaving the rail.
   const transients = installTransients(host, { dropdowns, rowHover: rail.rowHover, win: window });
+  // "RECENTLY DEPLOYED" COLLAPSES THE MOMENT THE USER IS DONE WITH IT
+  // (recently-deployed.ts): the focus gone from the page, or a workspace
+  // outside its rows clicked.
+  const removeRecentlyDeployedCollapse = installRecentlyDeployedCollapse(host, rail.recentlyDeployed, deps.focusLeft ?? pageFocusLeft());
 
   // ONLY A PAGE'S OWN SIDEBAR IS GATED: the webhost's is the one on screen.
   const unseen =
@@ -482,6 +493,7 @@ function mountSidebarIn(
       window.removeEventListener("scroll", replace, true);
       host.removeEventListener("click", dismiss);
       transients.dispose();
+      removeRecentlyDeployedCollapse();
       rail.rowHover.dispose();
       disposeWorkspaceRoster(rail);
       disposeThreadList(rail);

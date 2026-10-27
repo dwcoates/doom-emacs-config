@@ -8,6 +8,7 @@
  * flight. A dropdown open mid-gesture (a row's menu or detail popover) is NOT
  * view state: it is transient to the page that opened it.
  */
+import type { RecentlyDeployed } from "./recently-deployed.js";
 import type { DrawnStatusLog } from "../drawn-status.js";
 import type { DaemonContext } from "../rpc/context.js";
 import type { ArrangeHold } from "./arrange.js";
@@ -66,6 +67,8 @@ export interface RailContext {
   shownAhead(): string | null;
   /** What arranging the repository grouping needs (`arrange.ts`). */
   arrange: ArrangeContext;
+  /** Whether the "Recently Deployed" rows are shown, this page's own (`recently-deployed.ts`). */
+  recentlyDeployed: RecentlyDeployed;
 }
 
 /**

@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { drawWorkspaceRoster } from "../../src/sidebar/roster.js";
+import { createRecentlyDeployed } from "../../src/sidebar/recently-deployed.js";
 import { MERGE_QUEUES_CLASS } from "../../src/sidebar/merge-queue-view.js";
 import {
   BAND_LINES_ATTRIBUTE,
@@ -23,6 +24,7 @@ import {
   fitBands,
   installBandFit,
   mergedTodayLines,
+  recentlyDeployedFloorLines,
   paintBandMore,
   regionLines,
   regionStops,
@@ -61,10 +63,14 @@ interface Drawing {
   /** How many of the merged rows, the first ones, landed today. */
   today?: number;
   folded?: { open?: boolean; hidden?: boolean; merged?: boolean };
+  /** Whether "Recently Deployed" shows its rows (recently-deployed.ts); shown unless said. */
+  expanded?: boolean;
 }
 
 /** A rail drawn as DRAWING says. */
-function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {} }: Drawing): { scroller: HTMLElement; pane: HTMLElement } {
+function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {}, expanded = true }: Drawing): { scroller: HTMLElement; pane: HTMLElement } {
+  const recently = createRecentlyDeployed(document, () => undefined);
+  if (expanded) recently.toggle();
   const openRows = Array.from({ length: open }, (_, i) => row({ id: `o-${i}` }));
   const hiddenRows = Array.from({ length: hidden }, (_, i) => row({ id: `h-${i}` }));
   const mergedRows = Array.from({ length: merged }, (_, i) =>
@@ -85,7 +91,7 @@ function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {} }: Dra
         hidden: hiddenSection(hiddenRows, hidden, folded.hidden ?? false),
         merged: mergedSection(mergedRows, folded.merged ?? false),
       }),
-      sidebarContext(),
+      sidebarContext(undefined, undefined, undefined, undefined, undefined, recently),
     ),
   );
   document.body.replaceChildren(scroller);
@@ -112,12 +118,20 @@ function region(pane: HTMLElement, cls: SectionClass): HTMLElement | null {
   return pane.querySelector(`:scope > .${cls}`)?.querySelector<HTMLElement>(REGIONS[cls]) ?? null;
 }
 
-/** Lay one section's rows region out: its lines ROW px each, as tall as its height says, else capped by its max-height. */
+/**
+ * Lay one section's rows region out: its lines ROW px each, as tall as its
+ * height says, else capped by its max-height. A collapsed "Recently Deployed"
+ * heading is a line, and the merged rows under it are drawn as none, as the
+ * stylesheet draws them.
+ */
 function layRegion(pane: HTMLElement, cls: SectionClass): void {
   const section = pane.querySelector<HTMLElement>(`:scope > .${cls}`);
   const rows = region(pane, cls);
   if (section === null || rows === null) return;
-  const lines = [...rows.querySelectorAll<HTMLElement>(".row")];
+  const collapsed = rows.querySelector(".sb-merged-label[data-collapsed]") !== null;
+  const lines = [...rows.querySelectorAll<HTMLElement>(".row, .sb-merged-label[data-collapsed]")].filter(
+    (line) => !(collapsed && line.closest(".merged-group") !== null),
+  );
   const full = lines.length * ROW;
   const height = (): number => {
     if (section.classList.contains("folded")) return 0;
@@ -187,8 +201,8 @@ function heights(pane: HTMLElement): string[] {
 }
 
 /** What `allocateSectionLines` is handed: sections of O, H and M lines, TODAY of M today's. */
-function sections(o: number, h: number, m: number, today = 0) {
-  return { open: stops(o), hidden: stops(h), merged: stops(m), mergedToday: today };
+function sections(o: number, h: number, m: number, today = 0, floor = 0) {
+  return { open: stops(o), hidden: stops(h), merged: stops(m), mergedToday: today, mergedFloor: floor };
 }
 
 describe("bandShare", () => {
@@ -221,24 +235,28 @@ describe("allocateSectionLines", () => {
     { name: "every merge the room a whole Hidden Workspaces leaves", room: 12 * ROW, s: sections(0, 1, 20, 9), want: { open: 0, hidden: 1, merged: 11 } },
     { name: "a short rail's Hidden Workspaces shrunk first", room: 5 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 2, merged: 3 } },
     { name: "a short rail's Hidden Workspaces shrunk away before Deploys gives a line", room: 2 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 0, merged: 2 } },
+    { name: "an expanded Recently Deployed's floor taken from Hidden Workspaces' share", room: 20 * ROW, s: sections(40, 40, 40, 0, 4), want: { open: 14, hidden: 2, merged: 4 } },
+    { name: "a floor of the whole share taken from Hidden Workspaces entirely", room: 20 * ROW, s: sections(40, 40, 40, 0, 6), want: { open: 14, hidden: 0, merged: 6 } },
+    { name: "a floor beyond the share taken from the Open section", room: 20 * ROW, s: sections(40, 40, 40, 0, 8), want: { open: 12, hidden: 0, merged: 8 } },
+    { name: "a floor shrunk only in a rail too short for it", room: 5 * ROW, s: sections(10, 10, 10, 0, 6), want: { open: 0, hidden: 0, merged: 5 } },
     { name: "nothing in no room at all", room: -100, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 0, merged: 0 } },
     { name: "a folded Open section's room to the bands", room: 9 * ROW, s: sections(0, 5, 40, 0), want: { open: 0, hidden: 5, merged: 4 } },
     {
       name: "the room a tall Open line cannot use to Hidden Workspaces",
       room: 10 * ROW,
-      s: { open: [0, ROW, 2 * ROW, 5 * ROW], hidden: stops(10), merged: stops(10), mergedToday: 0 },
+      s: { open: [0, ROW, 2 * ROW, 5 * ROW], hidden: stops(10), merged: stops(10), mergedToday: 0, mergedFloor: 0 },
       want: { open: 2, hidden: 8, merged: 0 },
     },
     {
       name: "the room a tall Open line and a whole Hidden Workspaces leave to older merges",
       room: 8 * ROW,
-      s: { open: [0, ROW, 2 * ROW, 5 * ROW], hidden: stops(4), merged: stops(10), mergedToday: 0 },
+      s: { open: [0, ROW, 2 * ROW, 5 * ROW], hidden: stops(4), merged: stops(10), mergedToday: 0, mergedFloor: 0 },
       want: { open: 2, hidden: 4, merged: 2 },
     },
     {
       name: "the room a tall Hidden line cannot use to older merges",
       room: 9 * ROW,
-      s: { open: stops(1), hidden: [0, ROW, 2 * ROW, 3 * ROW, 4 * ROW, 8 * ROW], merged: stops(10), mergedToday: 3 },
+      s: { open: stops(1), hidden: [0, ROW, 2 * ROW, 3 * ROW, 4 * ROW, 8 * ROW], merged: stops(10), mergedToday: 3, mergedFloor: 0 },
       want: { open: 1, hidden: 4, merged: 4 },
     },
   ])("allocates $name", ({ room, s, want }) => {
@@ -270,6 +288,15 @@ describe("allocateSectionLines", () => {
     expect(() => allocateSectionLines(5 * ROW, sections(40, 40, 40, 40), gate)).toThrow(/band fit: a gate band of/);
   });
 
+  it("fills Deploys through an expanded floor first in the room a gate band leaves the bands", () => {
+    // Arrange — the Open section keeps the 7 lines it has in the room plus the gate.
+    const s = sections(10, 10, 10, 0, 5);
+    // Act
+    const got = allocateSectionLines(10 * ROW, s, 3 * ROW);
+    // Assert
+    expect(got).toEqual({ open: 7, merged: 3, hidden: 0 });
+  });
+
   it.each([
     { name: "no stops", s: { ...sections(3, 3, 3), hidden: [] } },
     { name: "stops not starting at zero", s: { ...sections(3, 3, 3), open: [5, 20] } },
@@ -277,6 +304,9 @@ describe("allocateSectionLines", () => {
     { name: "more lines of today's merges than the band has", s: sections(3, 3, 3, 4) },
     { name: "a negative count of today's merges", s: sections(3, 3, 3, -1) },
     { name: "a fractional count of today's merges", s: sections(3, 3, 3, 1.5) },
+    { name: "a floor longer than the band", s: sections(3, 3, 3, 0, 4) },
+    { name: "a negative floor", s: sections(3, 3, 3, 0, -1) },
+    { name: "a fractional floor", s: sections(3, 3, 3, 0, 1.5) },
   ])("refuses $name", ({ s }) => {
     // Arrange / Act / Assert
     expect(() => allocateSectionLines(100, s)).toThrow(RangeError);
@@ -343,6 +373,18 @@ describe("regionLines", () => {
     expect(regionLines(box).map((el) => el.className)).toEqual(want);
   });
 
+  it.each([
+    { name: "counts the collapsed Recently Deployed heading as a line", collapsed: true, want: ["sb-merged-label", "row"] },
+    { name: "counts the expanded Recently Deployed heading as no line", collapsed: false, want: ["row"] },
+  ])("$name", ({ collapsed, want }) => {
+    // Arrange
+    const box = document.createElement("div");
+    box.innerHTML = `<div class="sb-merged-label"${collapsed ? ' data-collapsed=""' : ""}></div><div class="row"></div>`;
+    for (const el of box.querySelectorAll<HTMLElement>(".sb-merged-label, .row")) el.getBoundingClientRect = () => rect(0, ROW);
+    // Act / Assert
+    expect(regionLines(box).map((el) => el.className)).toEqual(want);
+  });
+
   it("counts a queue group's header as no line", () => {
     // Arrange
     const box = document.createElement("div");
@@ -359,6 +401,37 @@ describe("regionLines", () => {
     for (const el of box.querySelectorAll<HTMLElement>(".repo-head, .row")) el.getBoundingClientRect = () => rect(0, ROW);
     // Act / Assert
     expect(regionLines(box).map((el) => el.className)).toEqual(["row"]);
+  });
+});
+
+describe("recentlyDeployedFloorLines", () => {
+  /** A queue line, then a merged line per merged row, as a Deploys region draws them. */
+  function deploysLines(merged: number): HTMLElement[] {
+    const queues = document.createElement("div");
+    queues.className = MERGE_QUEUES_CLASS;
+    const head = document.createElement("div");
+    head.className = "sb-mq-head";
+    queues.appendChild(head);
+    const rows = Array.from({ length: merged }, () => {
+      const ws = document.createElement("div");
+      ws.setAttribute("data-merged-at", String(startOfToday() - 5));
+      const line = document.createElement("div");
+      line.className = "row";
+      ws.appendChild(line);
+      return line;
+    });
+    return [head, ...rows];
+  }
+
+  it.each([
+    { name: "every line through the fifth merged row", merged: 8, want: 6 },
+    { name: "every line through the last of fewer merged rows", merged: 3, want: 4 },
+    { name: "no line while no merged row is drawn", merged: 0, want: 0 },
+  ])("keeps $name", ({ merged, want }) => {
+    // Arrange / Act
+    const got = recentlyDeployedFloorLines(deploysLines(merged));
+    // Assert
+    expect(got).toBe(want);
   });
 });
 
@@ -417,6 +490,15 @@ describe("mergedTodayLines", () => {
     const got = mergedTodayLines([heading, ...mergedLines([startOfToday() - 5])], NOW);
     // Assert
     expect(got).toBe(1);
+  });
+
+  it("reaches the collapsed Recently Deployed heading below the queues", () => {
+    // Arrange: a collapsed heading draws no merged row, and is a line of its own.
+    const heading = document.createElement("div");
+    heading.className = "sb-merged-label";
+    heading.setAttribute("data-collapsed", "");
+    // Act / Assert
+    expect(mergedTodayLines([heading], NOW)).toBe(1);
   });
 
   it("reads a nested family row's instant off the row it hangs under", () => {
@@ -549,14 +631,35 @@ describe("paintBandMore", () => {
 });
 
 describe("fitBands", () => {
-  it("lengthens the Open section until each band keeps three lines", () => {
+  it("lengthens the Open section until the bands keep their six-line share", () => {
+    // Arrange — room for twenty lines below 100px of other content; a
+    // collapsed Recently Deployed is its heading's one line.
+    const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10, expanded: false });
+    laidOut(rail, 500, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect([...maxHeights(rail.pane), heights(rail.pane)[2]]).toEqual(["280px", "", "", "100px"]);
+  });
+
+  it("keeps an expanded Recently Deployed's five rows, Hidden Workspaces the share's last line", () => {
     // Arrange — room for twenty lines below 100px of other content.
     const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
     laidOut(rail, 500, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect([...maxHeights(rail.pane), heights(rail.pane)[2]]).toEqual(["280px", "60px", "", "60px"]);
+    expect([...maxHeights(rail.pane), heights(rail.pane)[2]]).toEqual(["280px", "100px", "", "20px"]);
+  });
+
+  it("takes an expanded Recently Deployed's five rows from the Open section once Hidden Workspaces has none", () => {
+    // Arrange — room for twenty lines, nothing hidden.
+    const rail = drawn({ open: 30, merged: 10 });
+    laidOut(rail, 500, 100);
+    // Act
+    const got = fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(got).toEqual({ open: 15, merged: 5, hidden: 0 });
   });
 
   it("stretches Hidden Workspaces to the rail's foot through a line it cuts", () => {
@@ -566,7 +669,7 @@ describe("fitBands", () => {
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(heights(rail.pane)).toEqual(["", "", "70px"]);
+    expect(heights(rail.pane)).toEqual(["", "", "30px"]);
   });
 
   it("states the whole lines a stretched band shows", () => {
@@ -576,7 +679,7 @@ describe("fitBands", () => {
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(band(rail.pane, "hidden-section").getAttribute(BAND_LINES_ATTRIBUTE)).toBe("3");
+    expect(band(rail.pane, "hidden-section").getAttribute(BAND_LINES_ATTRIBUTE)).toBe("1");
   });
 
   it("stretches Hidden Workspaces to the rail's foot when every line fits", () => {
@@ -629,7 +732,7 @@ describe("fitBands", () => {
     // Act
     const second = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect([second, heights(rail.pane)[2]]).toEqual([first, "70px"]);
+    expect([second, heights(rail.pane)[2]]).toEqual([first, "30px"]);
   });
 
   it("marks only the lowest open section as reaching the rail's foot", () => {
@@ -713,17 +816,17 @@ describe("fitBands", () => {
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(SECTIONS.map((cls) => band(rail.pane, cls).getAttribute(BAND_LINES_ATTRIBUTE))).toEqual(["14", "1", "5"]);
+    expect(SECTIONS.map((cls) => band(rail.pane, cls).getAttribute(BAND_LINES_ATTRIBUTE))).toEqual(["14", "5", "1"]);
   });
 
-  it("gives older merges no room while the Open section scrolls", () => {
+  it("gives a collapsed Recently Deployed only its heading's line while the Open section scrolls", () => {
     // Arrange — room for twenty lines, no merge today.
-    const rail = drawn({ open: 30, hidden: 2, merged: 10 });
+    const rail = drawn({ open: 30, hidden: 2, merged: 10, expanded: false });
     laidOut(rail, 500, 100);
     // Act
     const got = fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(got).toEqual({ open: 18, hidden: 2, merged: 0 });
+    expect(got).toEqual({ open: 17, hidden: 2, merged: 1 });
   });
 
   it("leaves every section uncapped when every line fits", () => {
@@ -906,8 +1009,9 @@ describe("installBandFit", () => {
   });
 
   it("keeps the Open section's height when a docking gate band shrinks the rail, taking it from the bands", () => {
-    // Arrange — fitted out of room: Open 4 lines, Hidden Workspaces 6.
-    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    // Arrange — fitted out of room: Open 4 lines, Deploys its collapsed
+    // Recently Deployed heading's 1, Hidden Workspaces 5.
+    const rail = drawn({ open: 10, hidden: 10, merged: 10, expanded: false });
     laidOut(rail, 300, 100);
     let gate = 0;
     const fit = installBandFit(rail.scroller, fakeTicker(), { gateBand: () => gate });
@@ -919,8 +1023,8 @@ describe("installBandFit", () => {
     fireResize(rail.scroller);
     // Assert — Hidden Workspaces, the lowest, stands as tall as its lines.
     expect([before, { open: maxHeights(rail.pane)[0], hidden: heights(rail.pane)[2] }]).toEqual([
-      { open: `${4 * ROW}px`, hidden: `${6 * ROW}px` },
-      { open: `${4 * ROW}px`, hidden: `${3 * ROW}px` },
+      { open: `${4 * ROW}px`, hidden: `${5 * ROW}px` },
+      { open: `${4 * ROW}px`, hidden: `${2 * ROW}px` },
     ]);
     fit.dispose();
   });
@@ -987,16 +1091,17 @@ describe("installBandFit", () => {
   });
 
   it("re-fits when the local date turns over", () => {
-    // Arrange — one merge today holds a line of the share; tomorrow it holds none.
+    // Arrange — six merges today hold the whole share past the five-row
+    // floor; tomorrow only the floor holds.
     const ticker = fakeTicker();
-    const rail = drawn({ open: 30, hidden: 10, merged: 1, today: 1 });
+    const rail = drawn({ open: 30, merged: 8, today: 6 });
     laidOut(rail, 500, 100);
     const fit = installBandFit(rail.scroller, ticker);
     fit.refit();
     // Act
     ticker.tick(startOfTomorrow() + 1);
     // Assert
-    expect(band(rail.pane, "merged-section").getAttribute(BAND_LINES_ATTRIBUTE)).toBe("0");
+    expect(band(rail.pane, "merged-section").getAttribute(BAND_LINES_ATTRIBUTE)).toBe("5");
     fit.dispose();
   });
 

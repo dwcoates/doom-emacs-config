@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // The host page: one iframe per workspace, one shown, state replayed on hello,
 // facts mirrored for Emacs. See src/host/host.ts.
+import { FOCUS_LEFT_EMACS, pageFocusLeft } from "../../src/focus-left.js";
 import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { levelApplyShapeOf } from "./level-apply-shape.js";
@@ -1029,6 +1030,19 @@ describe("the webhost's sidebar", () => {
     // Assert
     const moved = { channel: HOST_CHANNEL, kind: "focusMoved" };
     expect([outcome, toA, toB]).toEqual(["sent", [moved], [moved]]);
+  });
+
+  it("tells the webhost's own document Emacs moved its focus, so its sidebar lets go", () => {
+    // Arrange
+    const left: string[] = [];
+    const unsubscribe = pageFocusLeft().onLeft((why) => left.push(why));
+
+    // Act
+    host.focusMoved();
+
+    // Assert
+    unsubscribe();
+    expect(left).toEqual([FOCUS_LEFT_EMACS]);
   });
 
   it("tells every page when it docks the sidebar over it", () => {

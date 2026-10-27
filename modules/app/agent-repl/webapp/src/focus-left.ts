@@ -40,6 +40,8 @@ export interface FocusLeftSource extends FocusLeft {
 /** What the focus left the page for, as its listeners are told. */
 export const FOCUS_LEFT_BLUR = "the page lost focus";
 export const FOCUS_LEFT_HIDDEN = "the page was hidden";
+/** Why the focus left the page when Emacs moved its own. */
+export const FOCUS_LEFT_EMACS = "Emacs moved its focus";
 
 /** The focus-left signal of the page in WIN, whose presence is PRESENCE. */
 export function createFocusLeft(win: Window, presence: Presence): FocusLeftSource {

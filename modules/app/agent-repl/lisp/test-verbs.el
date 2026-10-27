@@ -239,6 +239,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :daemon-health))
                 ((symbol-function 'agent-repl-rpc-send-hidden-keepalives)
                  (agent-repl-test-verbs--stub :hidden-keepalives))
+                ((symbol-function 'agent-repl-rpc-update-sidebar-view)
+                 (agent-repl-test-verbs--stub :update-sidebar-view))
                 ((symbol-function 'agent-repl-rpc-retry-vendor-error)
                  (agent-repl-test-verbs--stub :retry-vendor-error))
                 ((symbol-function 'agent-repl-rpc-session-health)
@@ -4243,6 +4245,34 @@ goes on is an async merge, which Emacs does not offer."
     (agent-repl-test-verbs--tab-arrives "ws-id-1" "repo-ws")
     ;; Assert.
     (should-not agent-repl-test-verbs--tab-switched)))
+
+
+;;;; ---- Folding the Hidden section at startup ----------------------------
+
+(ert-deftest agent-repl-verbs-fold-hidden-section-asks-the-hidden-collapse ()
+  "The startup fold asks the daemon to collapse the Hidden section, and nothing else."
+  (agent-repl-test-verbs--with nil
+    ;; Act
+    (agent-repl-verbs-fold-hidden-section 'conn)
+    ;; Assert
+    (should (equal (agent-repl-test-verbs--request :update-sidebar-view)
+                   '(:change (:arm :fold-section
+                              :value (:section (:arm :hidden) :fold (:arm :collapse))))))))
+
+(ert-deftest agent-repl-verbs-fold-hidden-section-reports-a-refusal ()
+  "A refused fold is logged as the verb's refusal and said in the echo area."
+  (let (logged)
+    (agent-repl-test-verbs--with
+        (list (cons :update-sidebar-view
+                    (list :response (list :arm :error
+                                          :value (list :cause (list :arm :holds-current :value nil))))))
+      (cl-letf (((symbol-function 'agent-repl--warn) (agent-repl-test--record-into logged)))
+        ;; Act
+        (agent-repl-verbs-fold-hidden-section 'conn)
+        ;; Assert
+        (should (agent-repl-test-verbs--messaged-p "fold-hidden refused: holds-current"))
+        (should (cl-some (lambda (m) (string-match-p "\\`elisp.verbs.fold-hidden-refused ws=nil arm=:holds-current" m))
+                         logged))))))
 
 (provide 'test-verbs)
 

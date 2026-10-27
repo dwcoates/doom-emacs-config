@@ -41,6 +41,7 @@ export function openScope(rail: RailContext): DrawScope {
     selectionFade: rail.selectionFade,
     shownAhead: () => rail.shownAhead(),
     arrange: rail.arrange,
+    recentlyDeployed: rail.recentlyDeployed,
     view: {
       track: (key, wire, paint) => viewScope.track(key, wire, paint),
       ask: (key, value) => rail.view.ask(key, value),

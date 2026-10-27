@@ -110,6 +110,8 @@
 (declare-function agent-repl-wire-encode-set-workspace-priority-request "wire-verbs" (request))
 (declare-function agent-repl-wire-encode-set-workspace-hidden-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-set-workspace-hidden-response "wire-verbs" (json))
+(declare-function agent-repl-wire-encode-update-sidebar-view-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-update-sidebar-view-response "wire-verbs" (json))
 (declare-function agent-repl-wire-decode-set-workspace-priority-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-swap-workspaces-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-swap-workspaces-response "wire-verbs" (alist))
@@ -471,6 +473,14 @@ each hidden workspace's outcome; only an unreadable registry is an error.")
   "Move a workspace into the sidebar's hidden section, or back out of it.
 A hidden workspace keeps its session and its tab; the roster push that
 follows takes its tab off the bar's drawing, numbering and navigation.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-update-sidebar-view
+  "UpdateSidebarView"
+  agent-repl-wire-encode-update-sidebar-view-request
+  agent-repl-wire-decode-update-sidebar-view-response
+  "Fold or unfold one of the sidebar's sections.
+The fold is the daemon's view state, so every page draws it; the roster
+push that follows carries it.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-swap-workspaces
   "SwapWorkspaces"

@@ -663,11 +663,14 @@ The top bar's effort selector sits between the model selector and the permission
   - The open workspaces section, headed "OPEN", holds the grouping you picked (repositories, tasks or stages).
   - "DEPLOYS" holds the deploy queue and the merges of the last week.
   - "HIDDEN" holds the workspaces you hid.
+    - It starts folded every time agent-repl starts in Emacs.
 - **The sidebar itself never scrolls; a section too long for its room scrolls its own rows.**
   - "OPEN" takes the room first, down to three rows each for "DEPLOYS" and "HIDDEN".
   - "DEPLOYS" and "HIDDEN" share those six rows, so a "DEPLOYS" of one row leaves "HIDDEN" five.
   - "DEPLOYS" claims that room only for its queue and today's merges.
     - Older merges show only in room the other sections leave.
+  - An expanded "RECENTLY DEPLOYED" keeps room for at least five workspaces.
+    - It takes that room from "HIDDEN" first, then from "OPEN".
   - A sidebar too short for those six rows shrinks "HIDDEN" first.
     - "DEPLOYS" gives up rows only once "HIDDEN" shows none.
 - **`SPC j R` sends every hidden workspace one keep-alive.**
@@ -698,6 +701,9 @@ The top bar's effort selector sits between the model selector and the permission
     - Clicking the name resumes the queue.
   - The workspaces that merged recently are listed below a grey rule, under "RECENTLY DEPLOYED".
     - The number beside "RECENTLY DEPLOYED" counts today's merges.
+    - Its workspaces show only after you click the heading, and a second click hides them again.
+    - They hide again by themselves when the focus leaves the sidebar, for the feed or another Emacs window.
+    - They also hide when you click a workspace outside them, or reopen one of them.
   - The "DEPLOYS" heading is always purple.
 - **The time at the right of an open workspace's row is its running turn's duration.**
   - It reads the same number as the footer's turn clock.

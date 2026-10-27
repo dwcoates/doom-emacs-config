@@ -128,6 +128,7 @@
 (declare-function agent-repl-rpc-update-merge-queue "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-daemon-health "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-send-hidden-keepalives "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-update-sidebar-view "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-retry-vendor-error "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-session-health "agent-repl-rpc" (conn request &rest keys))
 
@@ -1028,6 +1029,20 @@ roster stream.  The echo says how each one went."
        (agent-repl--info agent-repl--global-log-scope
                          "elisp.verbs.hidden-keepalives workspaces=%S" workspaces)
        (message "agent-repl: %s" (agent-repl-verbs-describe-hidden-keepalives workspaces))))))
+
+(defconst agent-repl-verbs-fold-hidden-request
+  '(:change (:arm :fold-section
+             :value (:section (:arm :hidden) :fold (:arm :collapse))))
+  "The UpdateSidebarView request that folds the sidebar's Hidden section.")
+
+(defun agent-repl-verbs-fold-hidden-section (conn)
+  "Fold the sidebar's Hidden section on CONN.
+The editor sends it once per startup (startup.el), so Hidden always opens
+folded (owner request, 2026-10-27); unfolding it afterwards is the
+sidebar's own ask.  The roster push that follows carries the fold."
+  (agent-repl-verbs--send
+   #'agent-repl-rpc-update-sidebar-view conn agent-repl-verbs-fold-hidden-request
+   :op "fold-hidden"))
 
 (defun agent-repl-verbs--land-after-visibility (ws hidden)
   "Request the switch an accepted visibility change of WS lands on.

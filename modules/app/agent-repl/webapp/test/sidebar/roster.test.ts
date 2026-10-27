@@ -1656,6 +1656,38 @@ describe("the Merge Queue section's queues", () => {
     ]);
   });
 
+  it("draws the Recently Deployed heading collapsed, its chevron first, and its groups undrawn", () => {
+    const drawn = drawWorkspaceRoster(withQueues([], [mergedGroup({ id: "repo-1", rows: [merged("m1")] })]), sidebarContext());
+    const heading = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_LABEL_CLASS}`)!;
+    const group = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_GROUP_CLASS}`)!;
+    expect([
+      heading.hasAttribute("data-collapsed"),
+      heading.firstElementChild?.className,
+      heading.firstElementChild?.textContent,
+      inRail(drawn, () => cascadedValue(group, "display")),
+    ]).toEqual([true, "tri", "▸", "none"]);
+  });
+
+  it("shows the Recently Deployed groups once the heading is clicked", () => {
+    const drawn = drawWorkspaceRoster(withQueues([], [mergedGroup({ id: "repo-1", rows: [merged("m1")] })]), sidebarContext());
+    document.body.replaceChildren(drawn);
+    const heading = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_LABEL_CLASS}`)!;
+    heading.click();
+    const group = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_GROUP_CLASS}`)!;
+    expect([heading.hasAttribute("data-collapsed"), heading.firstElementChild?.textContent]).toEqual([false, "▾"]);
+    expect(inRail(drawn, () => cascadedValue(group, "display"))).not.toBe("none");
+  });
+
+  it("draws a waiting merge's name at the head's size", () => {
+    const drawn = drawWorkspaceRoster(withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1"), waiting: [waitingMerge("w2")] } })]), sidebarContext());
+    const head = mergedRegion(drawn).querySelector<HTMLElement>(".sb-mq-head .sb-mq-name")!;
+    const waiting = mergedRegion(drawn).querySelector<HTMLElement>(".sb-mq-waiting .sb-mq-name")!;
+    expect(inRail(drawn, () => [cascadedValue(waiting, "font-size"), cascadedValue(head, "font-size")])).toEqual([
+      "calc(var(--merged-group-head-font-size) * 0.96)",
+      "calc(var(--merged-group-head-font-size) * 0.96)",
+    ]);
+  });
+
   it("draws the queues above the Recently Deployed heading and its groups", () => {
     const drawn = drawWorkspaceRoster(
       withQueues([queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } })], [mergedGroup({ id: "repo-1", rows: [merged("m1")] })]),

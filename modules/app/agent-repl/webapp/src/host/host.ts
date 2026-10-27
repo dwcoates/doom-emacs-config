@@ -25,6 +25,7 @@
  * tells every page whether it is docked and which of the webhost's failures
  * stand, and ends the sidebar above the gate band of the page on screen.
  */
+import { FOCUS_LEFT_EMACS, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
 import { endPage } from "../page-teardown.js";
 import {
   parseWindowLevel,
@@ -64,6 +65,12 @@ export interface HostEnv {
   readonly daemon: DaemonOrigin;
   /** Run FN at the next animation frame; `nextFrame` when omitted. */
   readonly frame?: (fn: () => void) => void;
+  /**
+   * The webhost document's own focus-left signal, which `focusMoved` fires as
+   * well as telling every page, so the webhost's sidebar lets go of what it
+   * raised (recently-deployed.ts); the document's own when omitted.
+   */
+  readonly focusLeft?: FocusLeftSource;
 }
 
 /**
@@ -235,6 +242,7 @@ const NOTE_LIMIT = 50;
 export function createHost(env: HostEnv): Host {
   const { doc, win } = env;
   const atNextFrame = env.frame ?? nextFrame;
+  const focusLeft = env.focusLeft ?? pageFocusLeft();
   const frames = new Map<string, Frame>();
   const frameParent = env.frames ?? doc.body;
   let shownId: string | null = null;
@@ -830,6 +838,7 @@ export function createHost(env: HostEnv): Host {
     },
     focusMoved() {
       broadcast({ channel: HOST_CHANNEL, kind: "focusMoved" });
+      focusLeft.left(FOCUS_LEFT_EMACS);
       return answer("focusMoved", null, "sent");
     },
     retireAll() {

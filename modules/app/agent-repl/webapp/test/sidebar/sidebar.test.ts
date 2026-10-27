@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SELECTION_ANIMATIONS, SELECTION_NUMBER_RISE } from "../../src/sidebar/selection-fade.js";
 import { create } from "@bufbuild/protobuf";
@@ -201,6 +202,36 @@ describe("the preferences a page stored before the view was the daemon's", () =>
     });
     await settle();
     expect(host.querySelector(".merged-section")?.classList.contains("folded")).toBe(true);
+  });
+});
+
+describe("the rail's Recently Deployed rows", () => {
+  /** The page's focus-left signal, fired by hand through its own writer. */
+  function manualFocus(): FocusLeftSource {
+    return createFocusLeft(window, createPresence(document, true));
+  }
+
+  const heading = (host: HTMLElement): HTMLElement => host.querySelector<HTMLElement>(".sb-merged-label")!;
+
+  it.each([
+    { name: "draws its heading collapsed when the rail mounts", clicks: 0, leave: false, want: true },
+    { name: "shows them when the heading is clicked", clicks: 1, leave: false, want: false },
+    { name: "collapses them again once the focus leaves the page", clicks: 1, leave: true, want: true },
+  ])("$name", async ({ clicks, leave, want }) => {
+    // Arrange
+    const host = document.createElement("nav");
+    document.body.replaceChildren(host);
+    const focus = manualFocus();
+    mountSidebar(host, ctxFor([roster({ merged: mergedSection([row({ id: "ws-9", closed: true })], false) })]), {
+      timers: fakeTimers(),
+      focusLeft: focus,
+    });
+    await settle();
+    // Act
+    for (let i = 0; i < clicks; i += 1) await click(heading(host));
+    if (leave) focus.left("the page lost focus");
+    // Assert
+    expect(heading(host).hasAttribute("data-collapsed")).toBe(want);
   });
 });
 

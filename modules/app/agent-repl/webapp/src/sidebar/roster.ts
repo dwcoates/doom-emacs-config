@@ -88,6 +88,7 @@ import {
   type RosterSectionFold,
 } from "./section-fold.js";
 import { openScope, type DrawScope } from "./scope.js";
+import { RECENTLY_DEPLOYED_LABEL_CLASS } from "./recently-deployed.js";
 import { DEPLOY_QUEUE_LABEL_CLASS, drawRosterMergeQueueRepoGroup, MERGE_QUEUES_CLASS } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
@@ -743,6 +744,13 @@ export function drawRosterMergedSection(
         const merges = groups.flatMap((g) => g.shownMerges);
         const heading = drawDeploysHeading(MERGED_LABEL_CLASS, mergedLabel, drawMergedTodayCount(merges, sc));
         tickMergedTodayCommits(heading, merges, sc);
+        // THE ROWS ARE SHOWN ONLY WHILE ASKED FOR (recently-deployed.ts): the
+        // heading's chevron says which, and a click on it asks the other.
+        const triangle = document.createElement("span");
+        triangle.className = "tri";
+        heading.prepend(triangle);
+        heading.addEventListener("click", () => sc.recentlyDeployed.toggle());
+        sc.recentlyDeployed.paint(heading);
         region.appendChild(heading);
       }
       for (const group of groups) region.appendChild(group.element);
@@ -769,7 +777,7 @@ export function drawDeploysHeading(className: string, label: HTMLElement, ...aft
  * the queues. The stylesheet hides it while every group under it is left out
  * (its repository collapsed).
  */
-export const MERGED_LABEL_CLASS = "sb-merged-label";
+export const MERGED_LABEL_CLASS = RECENTLY_DEPLOYED_LABEL_CLASS;
 
 /**
  * How many of the band's rows are drawn with the band; every later one is a

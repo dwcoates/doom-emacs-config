@@ -24,6 +24,11 @@
  *     (a repository's header riding with its first row), fills Deploys
  *     through today's merges, then Hidden Workspaces, then Deploys' older
  *     merges, each as far as its lines fit.
+ *   - AN EXPANDED "RECENTLY DEPLOYED" KEEPS `RECENTLY_DEPLOYED_FLOOR` ROWS
+ *     (owner request, 2026-10-27; recently-deployed.ts): Deploys keeps every
+ *     line through its fifth merged row, taken from Hidden Workspaces'
+ *     share first and then from the Open section. Collapsed, its heading is
+ *     one line Deploys claims.
  *   - A RAIL TOO SHORT FOR THE BANDS' SHARE SHRINKS HIDDEN WORKSPACES FIRST
  *     (owner request, 2026-10-27: Deploys stands above Hidden, and a merge
  *     in flight matters more than a workspace put away), down to no lines,
@@ -88,6 +93,11 @@ import {
   MERGE_QUEUE_WAITING_CLASS,
   MERGE_QUEUES_CLASS,
 } from "./merge-queue-view.js";
+import {
+  RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE,
+  RECENTLY_DEPLOYED_FLOOR,
+  RECENTLY_DEPLOYED_LABEL_CLASS,
+} from "./recently-deployed.js";
 import { mergedToday } from "./row.js";
 
 /** The classes the three sections are drawn with. */
@@ -130,7 +140,8 @@ export const EMPTY_SUBSECTION_ATTRIBUTE = "data-empty";
 /**
  * What one line is: a row, a folded repository section's header, the
  * header of a subsection that is folded or empty, a queue's head card or
- * waiting merge, or the "Deploy Queue" heading over no queue.
+ * waiting merge, the "Deploy Queue" heading over no queue, or the collapsed
+ * "Recently Deployed" heading.
  */
 const LINE_SELECTOR = [
   ".row",
@@ -140,6 +151,7 @@ const LINE_SELECTOR = [
   `.${MERGE_QUEUE_HEAD_CLASS}`,
   `.${MERGE_QUEUE_WAITING_CLASS}`,
   `.${DEPLOY_QUEUE_LABEL_CLASS}[${EMPTY_SUBSECTION_ATTRIBUTE}]`,
+  `.${RECENTLY_DEPLOYED_LABEL_CLASS}[${RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE}]`,
 ].join(", ");
 
 /** How many lines each section's viewport shows. */
@@ -163,6 +175,12 @@ export interface SectionStops {
   hidden: BandStops;
   /** How many of Deploys' first lines it takes to show its queues and every merge of today. */
   mergedToday: number;
+  /**
+   * How many of Deploys' first lines it keeps ahead of Hidden Workspaces and
+   * the Open section: through its `RECENTLY_DEPLOYED_FLOOR`th merged row
+   * while "Recently Deployed" is expanded, else 0.
+   */
+  mergedFloor: number;
 }
 
 /** Refuse stops that do not describe a section (see `BandStops`). */
@@ -192,7 +210,7 @@ export function bandShare(today: number, hidden: number): { merged: number; hidd
  * lose to the gate. Returns the number of lines each section's viewport shows.
  */
 export function allocateSectionLines(room: number, stops: SectionStops, gate = 0): SectionLines {
-  const { open, merged, hidden, mergedToday: today } = stops;
+  const { open, merged, hidden, mergedToday: today, mergedFloor: floor } = stops;
   assertStops(open, "open");
   assertStops(merged, "merged");
   assertStops(hidden, "hidden");
@@ -201,6 +219,9 @@ export function allocateSectionLines(room: number, stops: SectionStops, gate = 0
   const totalM = merged.length - 1;
   if (!Number.isInteger(today) || today < 0 || today > totalM) {
     throw new RangeError(`band fit: ${today} lines of today's merges in a band of ${totalM}`);
+  }
+  if (!Number.isInteger(floor) || floor < 0 || floor > totalM) {
+    throw new RangeError(`band fit: a floor of ${floor} lines in a band of ${totalM}`);
   }
   if (!Number.isFinite(gate) || gate < 0) {
     throw new RangeError(`band fit: a gate band of ${gate}px`);
@@ -213,6 +234,12 @@ export function allocateSectionLines(room: number, stops: SectionStops, gate = 0
     return { open: o, ...fillBands(o, 0, 0) };
   }
   let { merged: m, hidden: h } = bandShare(today, totalH);
+  // AN EXPANDED "RECENTLY DEPLOYED" KEEPS ITS FLOOR, taking the lines from
+  // Hidden Workspaces' share first and then from the Open section's room.
+  if (floor > m) {
+    m = floor;
+    h = Math.min(h, Math.max(0, 2 * BAND_FLOOR - m));
+  }
   while (!fits(0, m, h) && h > 0) h -= 1;
   while (!fits(0, m, h) && m > 0) m -= 1;
   let o = 0;
@@ -221,11 +248,13 @@ export function allocateSectionLines(room: number, stops: SectionStops, gate = 0
 
   /**
    * Grow the bands from M and H lines beside an Open section of O lines, in
-   * the room it leaves: Deploys through today's merges, then Hidden
-   * Workspaces, then Deploys' older merges.
+   * the room it leaves: Deploys through today's merges and an expanded
+   * "Recently Deployed"'s floor, then Hidden Workspaces, then Deploys' older
+   * merges.
    */
   function fillBands(o: number, m: number, h: number): { merged: number; hidden: number } {
-    while (m < today && fits(o, m + 1, h)) m += 1;
+    const claim = Math.max(today, floor);
+    while (m < claim && fits(o, m + 1, h)) m += 1;
     while (h < totalH && fits(o, m, h + 1)) h += 1;
     while (m < totalM && fits(o, m + 1, h)) m += 1;
     return { merged: m, hidden: h };
@@ -288,15 +317,34 @@ export function regionStops(region: HTMLElement, lines: readonly HTMLElement[] =
 }
 
 /**
+ * How many of Deploys' first LINES an expanded "Recently Deployed" keeps
+ * ahead of the other sections: through its `RECENTLY_DEPLOYED_FLOOR`th
+ * merged row (a line inside a row stamped `MERGED_AT_ATTRIBUTE`), or its
+ * last when it has fewer. A collapsed one draws no merged row, so it keeps
+ * none.
+ */
+export function recentlyDeployedFloorLines(lines: readonly HTMLElement[]): number {
+  let rows = 0;
+  let through = 0;
+  lines.forEach((line, i) => {
+    if (rows === RECENTLY_DEPLOYED_FLOOR || line.closest(`[${MERGED_AT_ATTRIBUTE}]`) === null) return;
+    rows += 1;
+    through = i + 1;
+  });
+  return through;
+}
+
+/**
  * How many of Deploys' first LINES it takes to show its queues and every
  * merge that landed on NOW_MS's local date: through the last line that is a
- * queue's (inside `MERGE_QUEUES_CLASS`) or whose row carries a merged instant
- * of today. Any other line outside a stamped row is malformed.
+ * queue's (inside `MERGE_QUEUES_CLASS`), the collapsed "Recently Deployed"
+ * heading, or whose row carries a merged instant of today. Any other line
+ * outside a stamped row is malformed.
  */
 export function mergedTodayLines(lines: readonly HTMLElement[], nowMs: number): number {
   let through = 0;
   lines.forEach((line, i) => {
-    if (line.closest(`.${MERGE_QUEUES_CLASS}`) !== null) {
+    if (line.closest(`.${MERGE_QUEUES_CLASS}`) !== null || line.matches(`.${RECENTLY_DEPLOYED_LABEL_CLASS}`)) {
       through = i + 1;
       return;
     }
@@ -444,11 +492,13 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   const merged = measure(mergedSection);
   const hidden = measure(hiddenSection);
   const today = merged === null ? 0 : mergedTodayLines(merged.lines, nowMs);
+  const floor = merged === null ? 0 : recentlyDeployedFloorLines(merged.lines);
   const lines = allocateSectionLines(room, {
     open: open?.stops ?? [0],
     merged: merged?.stops ?? [0],
     hidden: hidden?.stops ?? [0],
     mergedToday: today,
+    mergedFloor: floor,
   }, gate);
   const sized = [
     [open, lines.open],
@@ -468,6 +518,7 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     hidden_shown: lines.hidden,
     merged_total: (merged?.stops.length ?? 1) - 1,
     merged_today: today,
+    merged_floor: floor,
     merged_shown: lines.merged,
     stretch,
   };
