@@ -1641,6 +1641,16 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   --row-highlight-tint: color-mix(in srgb, var(--card) 69%, var(--sidebar-bg));
 }
 #ws-sidebar .ws.current > .row { background-color: var(--row-highlight-tint); }
+/* A REFUSED COLLAPSE FLASHES THE SELECTED ROW (owner request, 2026-10-27): the
+   highlight fades out and back over 0.7s. The class is set by
+   src/sidebar/section-fold.ts and removed when the animation ends. */
+#ws-sidebar .ws.current.current-flash > .row {
+  animation: ws-current-flash 0.7s ease-in-out 1;
+}
+@keyframes ws-current-flash {
+  0%, 100% { background-color: var(--row-highlight-tint); }
+  50% { background-color: var(--card); }
+}
 /* THE HIGHLIGHTED ROW'S TAB NUMBER IS WHITE (owner request, 2026-10-18): it
    rises from its own grey into white over half a second (owner request,
    2026-10-20: twice as fast as the second it first took) when the highlight
