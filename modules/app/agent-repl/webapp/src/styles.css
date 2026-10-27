@@ -8094,11 +8094,17 @@ bubble-body.bubble-body { display: block; }
 }
 /* A ROW'S SECOND LINE: what identifies the row rather than what the reader
    chooses by, dim and a step smaller, ONE look in every menu. An account
-   row's root path, a model's description. */
+   row's root path, a model's description, a summary link's url. */
 .topbar-account-option-dir,
-.topbar-model-description {
+.topbar-model-description,
+.topbar-title-link-url {
   color: var(--muted);
   font-size: 0.9em;
+}
+/* A url has no spaces to wrap at, so a long one breaks anywhere rather than
+   widening the menu past the panel's cap. */
+.topbar-title-link-url {
+  overflow-wrap: anywhere;
 }
 /* A model row's top-right corner (owner request, 2026-10-27): "Make default",
    or "Default" on the login's default row. OUT OF FLOW, pinned inside the

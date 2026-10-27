@@ -400,6 +400,16 @@ describe("drawTopbarTitle with several shown links", () => {
     ]);
   });
 
+  it("draws each row's url beneath its label, as the row's second line", () => {
+    const { host, title } = drawn();
+    click(title);
+    const rows = [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
+    expect(rows.map((row) => [...row.children].map((el) => [el.className, el.textContent]))).toEqual([
+      [["external-link", "The pull request"], ["topbar-title-link-url", PR]],
+      [["external-link", "The design doc"], ["topbar-title-link-url", DOC]],
+    ]);
+  });
+
   it("names each row's url in its tooltip", () => {
     const { host, title } = drawn();
     click(title);
@@ -482,7 +492,7 @@ describe("drawTopbarTitle with several shown links", () => {
 });
 
 describe("a menu row's second line", () => {
-  const SECOND_LINES = ["topbar-account-option-dir", "topbar-model-description"];
+  const SECOND_LINES = ["topbar-account-option-dir", "topbar-model-description", "topbar-title-link-url"];
 
   it.each(["color", "font-size"])("draws %s the same in every menu", (property) => {
     const teardown = installStylesheet();
