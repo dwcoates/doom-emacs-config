@@ -28,6 +28,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 			Leases:      &fakeLeases{},
 			TurnBanners: &fakeTurnBanners{},
 			Commits:     &fakeRecounter{},
+			CacheClocks: &fakeCacheClocks{},
 			Client:      func(ids.WorkspaceID) (Sender, bool) { return h.sender, true },
 			Watcher:     func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, true },
 			ResolveImage: func(*conversationv1.ImageBlock) (string, string, error) {
@@ -46,6 +47,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		{"feed resolver", func(d *Deps) { d.Feed = nil }},
 		{"turn banners", func(d *Deps) { d.TurnBanners = nil }},
 		{"commit recounter", func(d *Deps) { d.Commits = nil }},
+		{"keep-alive keeper's cache clocks", func(d *Deps) { d.CacheClocks = nil }},
 		{"footer resolver", func(d *Deps) { d.Footer = nil }},
 		{"roster resolver", func(d *Deps) { d.Sidebar = nil }},
 		{"turn edges' observer", func(d *Deps) { d.Edges = nil }},

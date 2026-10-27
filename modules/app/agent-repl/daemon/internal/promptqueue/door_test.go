@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -303,6 +304,31 @@ func TestEveryClosePathOwesTheBranchARecount(t *testing.T) {
 			got := w.h.commits.recounts()
 			if len(got) != 1 || got[0] != w.ws {
 				t.Fatalf("recounts owed = %v, want exactly [%s]", got, w.ws)
+			}
+		})
+	}
+}
+
+// The keep-alive keeper reads its cache clock off the closed rows, so it is
+// told only once the close is on the record (2026-10-26: told by the free
+// edge alone, it found no turn ended and armed no beat).
+func TestEveryClosePathMovesTheCacheClockAfterTheDurableClose(t *testing.T) {
+	for _, path := range closePaths {
+		t.Run(path.name, func(t *testing.T) {
+			// Arrange
+			w := newDoorWorld(t)
+			w.h.clocks.probe = func(ws ids.WorkspaceID) bool {
+				open, err := w.db.OpenTurns(context.Background(), ws)
+				return err == nil && len(open) == 0
+			}
+
+			// Act
+			path.live(t, w)
+
+			// Assert
+			told, closed := w.h.clocks.snapshot()
+			if !reflect.DeepEqual(told, []ids.WorkspaceID{w.ws}) || !reflect.DeepEqual(closed, []bool{true}) {
+				t.Fatalf("cache clocks told %v with the row closed %v, want exactly [%s] after the close", told, closed, w.ws)
 			}
 		})
 	}

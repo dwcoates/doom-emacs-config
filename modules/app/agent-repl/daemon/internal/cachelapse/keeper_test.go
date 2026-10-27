@@ -689,6 +689,29 @@ func TestRunSendsAKeepaliveAQueuedEdgeFindsDue(t *testing.T) {
 	<-h.shim.beaten
 }
 
+// The free edge comes before the turn's close is written, so it can find no
+// turn ended; the close's own edge, raised after the write, times the beat
+// (2026-10-26).
+func TestRunTimesTheBeatFromATurnCloseRecordedAfterTheFreeEdge(t *testing.T) {
+	// Arrange: the session fell free before its turn's close was on the row.
+	h := newHarness(t, visible())
+	h.shim.answer = sent()
+	h.shim.beaten = make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.keeper.Run(ctx) }()
+	h.keeper.SessionFree(theWorkspace, true)
+	h.db.mu.Lock()
+	h.db.records[theWorkspace] = beatable(visible(), KeepaliveInterval+time.Minute)
+	h.db.mu.Unlock()
+
+	// Act
+	h.keeper.TurnClosed(theWorkspace)
+
+	// Assert
+	<-h.shim.beaten
+}
+
 func TestRunSendsAClosedWorkspacesLastKeepalive(t *testing.T) {
 	// Arrange
 	rec := beatable(closed(), KeepaliveInterval+time.Minute)

@@ -544,6 +544,13 @@ type Deps struct {
 	// turn close, so the roster's detail panel states the count as of the
 	// workspace's last turn. REQUIRED.
 	Commits CommitRecounter
+	// CacheClocks is the keep-alive keeper (cachelapse.Keeper.TurnClosed).
+	// THE DOOR tells it every turn close AFTER the durable write, because
+	// the cache clock it times beats from is read off the closed rows: the
+	// session watcher's free edge comes before that write, so a keeper
+	// timing the beat from the free edge alone could find no turn ended
+	// (2026-10-26). REQUIRED.
+	CacheClocks CacheClocks
 	// Log is the queue's logger.
 	Log dlog.Surfaces
 	// Stalls is the lock stall watchdog. OPTIONAL: nil leaves the queue's
@@ -557,6 +564,12 @@ type Deps struct {
 // CommitRecounter owes a workspace a recount of its branch commits
 // (branchcommits.Recounter.TurnClosed). It never blocks the door.
 type CommitRecounter interface {
+	TurnClosed(ws ids.WorkspaceID)
+}
+
+// CacheClocks re-times a workspace's next keep-alive once a turn's close is
+// on the record (cachelapse.Keeper.TurnClosed). It never blocks.
+type CacheClocks interface {
 	TurnClosed(ws ids.WorkspaceID)
 }
 

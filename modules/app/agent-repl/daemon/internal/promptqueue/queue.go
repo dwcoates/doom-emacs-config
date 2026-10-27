@@ -243,6 +243,8 @@ func newQueue(deps Deps) (*queue, error) {
 		return nil, fmt.Errorf("the prompt queue needs the turn banners")
 	case deps.Commits == nil:
 		return nil, fmt.Errorf("the prompt queue needs the branch commit recounter")
+	case deps.CacheClocks == nil:
+		return nil, fmt.Errorf("the prompt queue needs the keep-alive keeper's cache clocks")
 	case deps.Footer == nil:
 		return nil, fmt.Errorf("the prompt queue needs the footer resolver")
 	case deps.Sidebar == nil:

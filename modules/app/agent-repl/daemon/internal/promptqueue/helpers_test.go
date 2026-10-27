@@ -993,6 +993,30 @@ func (r *fakeRecounter) TurnClosed(ws ids.WorkspaceID) {
 	r.owed = append(r.owed, ws)
 }
 
+// fakeCacheClocks records every workspace the door told its cache clock
+// moved, and, when probe is set, what probe answered at that moment.
+type fakeCacheClocks struct {
+	mu     sync.Mutex
+	told   []ids.WorkspaceID
+	probe  func(ids.WorkspaceID) bool
+	probed []bool
+}
+
+func (c *fakeCacheClocks) TurnClosed(ws ids.WorkspaceID) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.told = append(c.told, ws)
+	if c.probe != nil {
+		c.probed = append(c.probed, c.probe(ws))
+	}
+}
+
+func (c *fakeCacheClocks) snapshot() ([]ids.WorkspaceID, []bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), c.told...), append([]bool(nil), c.probed...)
+}
+
 func (r *fakeRecounter) recounts() []ids.WorkspaceID {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1621,6 +1645,7 @@ type harness struct {
 	drain   *noteRecorder
 	banners *fakeTurnBanners
 	commits *fakeRecounter
+	clocks  *fakeCacheClocks
 	log     *dlog.TestSurfaces
 
 	// noSession, when set, makes the client resolver report no session.
@@ -1678,11 +1703,13 @@ func newHarness(t *testing.T) *harness {
 		drain:   &noteRecorder{},
 		banners: &fakeTurnBanners{},
 		commits: &fakeRecounter{},
+		clocks:  &fakeCacheClocks{},
 		log:     dlog.NewTestSurfaces(),
 	}
 	q, err := newQueue(Deps{
 		TurnBanners: h.banners,
 		Commits:     h.commits,
+		CacheClocks: h.clocks,
 		// The harness's image resolver is a plain naming of the path, so a
 		// mirrored image block is legible in an assertion; every test whose
 		// SUBJECT is resolution overrides it.

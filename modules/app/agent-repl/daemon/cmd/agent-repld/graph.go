@@ -939,6 +939,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		RestartSlots:   startSlots,
 		TurnBanners:    turnBanners,
 		Commits:        commitRecounter,
+		CacheClocks:    cacheKeeper,
 		StripSentinels: stripSentinels,
 		ResolveImage:   resolveImage,
 		DB:             p.DB,

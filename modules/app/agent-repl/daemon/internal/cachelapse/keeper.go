@@ -266,6 +266,15 @@ func (k *Keeper) SessionFree(ws ids.WorkspaceID, workEnded bool) {
 	k.enqueue(edge{ws: ws, kind: edgeFree, workEnded: workEnded, why: "the session fell free"})
 }
 
+// TurnClosed is a turn's close on WS, already on the record
+// (promptqueue.CacheClocks): the cache clock the beat is timed from moved,
+// so its cadence is reconciled. The free edge alone cannot carry this, since
+// the session watcher raises it before the close is written. It never
+// blocks.
+func (k *Keeper) TurnClosed(ws ids.WorkspaceID) {
+	k.enqueue(edge{ws: ws, why: "a turn's close was recorded"})
+}
+
 // RestoreParked asks for a session the keep-alive cycle parked to be brought
 // back now, through the same restore slots the beats use: a reader needs its
 // history, which only a shim serves. A workspace not parked is no change. It
