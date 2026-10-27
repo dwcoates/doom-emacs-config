@@ -61,6 +61,7 @@ import "agentrepl/v1/endpoint_open_login.proto";
 import "agentrepl/v1/endpoint_watch_login_terminal.proto";
 import "agentrepl/v1/endpoint_close_login.proto";
 import "agentrepl/v1/endpoint_set_model.proto";
+import "agentrepl/v1/endpoint_set_default_model.proto";
 import "agentrepl/v1/endpoint_set_effort.proto";
 import "agentrepl/v1/endpoint_set_permission_mode.proto";
 import "agentrepl/v1/endpoint_fold_repository.proto";
@@ -385,6 +386,10 @@ service AgentRepl {
   // The selector's pick: the typed echo token handed back. See
   // endpoint_set_model.proto.
   rpc SetModel(SetModelRequest) returns (SetModelResponse);
+
+  // A selector row's "Make default": the model every NEW session on the
+  // workspace's login starts under. See endpoint_set_default_model.proto.
+  rpc SetDefaultModel(SetDefaultModelRequest) returns (SetDefaultModelResponse);
 
   // The effort selector's pick, SetModel's sibling. See
   // endpoint_set_effort.proto.

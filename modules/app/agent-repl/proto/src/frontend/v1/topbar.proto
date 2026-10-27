@@ -319,6 +319,13 @@ message TopbarModelSelector {
   // The selectable models, in display order. The selector renders exactly
   // this list.
   repeated conversation.v1.ModelOption options = 2;
+  // The model a NEW session on this workspace's login (its account root)
+  // starts under when nobody names one: the default the reader made with
+  // SetDefaultModel, else the daemon's built-in default for that login.
+  // ALWAYS SET: every login has a default, so the row that is it is marked
+  // and every other row offers "Make default". Compared to an option by
+  // AgentModel.name, the same echo token the selection is named by.
+  conversation.v1.AgentModel default_model = 3;
 }
 
 // THE EFFORT SELECTOR: the reasoning effort the workspace's session runs at,

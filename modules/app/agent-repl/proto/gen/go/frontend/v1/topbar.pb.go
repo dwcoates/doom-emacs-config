@@ -1298,7 +1298,14 @@ type TopbarModelSelector struct {
 	Selected *v1.ModelOption `protobuf:"bytes,1,opt,name=selected,proto3,oneof" json:"selected,omitempty"`
 	// The selectable models, in display order. The selector renders exactly
 	// this list.
-	Options       []*v1.ModelOption `protobuf:"bytes,2,rep,name=options,proto3" json:"options,omitempty"`
+	Options []*v1.ModelOption `protobuf:"bytes,2,rep,name=options,proto3" json:"options,omitempty"`
+	// The model a NEW session on this workspace's login (its account root)
+	// starts under when nobody names one: the default the reader made with
+	// SetDefaultModel, else the daemon's built-in default for that login.
+	// ALWAYS SET: every login has a default, so the row that is it is marked
+	// and every other row offers "Make default". Compared to an option by
+	// AgentModel.name, the same echo token the selection is named by.
+	DefaultModel  *v1.AgentModel `protobuf:"bytes,3,opt,name=default_model,json=defaultModel,proto3" json:"default_model,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1343,6 +1350,13 @@ func (x *TopbarModelSelector) GetSelected() *v1.ModelOption {
 func (x *TopbarModelSelector) GetOptions() []*v1.ModelOption {
 	if x != nil {
 		return x.Options
+	}
+	return nil
+}
+
+func (x *TopbarModelSelector) GetDefaultModel() *v1.AgentModel {
+	if x != nil {
+		return x.DefaultModel
 	}
 	return nil
 }
@@ -3101,10 +3115,11 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\x13TopbarWorkspaceName\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"'\n" +
 	"\x11TopbarSessionLine\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\"\x99\x01\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"\xdb\x01\n" +
 	"\x13TopbarModelSelector\x12=\n" +
 	"\bselected\x18\x01 \x01(\v2\x1c.conversation.v1.ModelOptionH\x00R\bselected\x88\x01\x01\x126\n" +
-	"\aoptions\x18\x02 \x03(\v2\x1c.conversation.v1.ModelOptionR\aoptionsB\v\n" +
+	"\aoptions\x18\x02 \x03(\v2\x1c.conversation.v1.ModelOptionR\aoptions\x12@\n" +
+	"\rdefault_model\x18\x03 \x01(\v2\x1b.conversation.v1.AgentModelR\fdefaultModelB\v\n" +
 	"\t_selected\"\xbf\x01\n" +
 	"\x14TopbarEffortSelector\x12J\n" +
 	"\tsupported\x18\x01 \x01(\v2*.frontend.v1.TopbarEffortSelectorSupportedH\x00R\tsupported\x12P\n" +
@@ -3259,7 +3274,8 @@ var file_frontend_v1_topbar_proto_goTypes = []any{
 	(*TokenBreakdownHeading)(nil),                // 43: frontend.v1.TokenBreakdownHeading
 	(*TokenBreakdownRow)(nil),                    // 44: frontend.v1.TokenBreakdownRow
 	(*v1.ModelOption)(nil),                       // 45: conversation.v1.ModelOption
-	(v1.AgentEffortLevel)(0),                     // 46: conversation.v1.AgentEffortLevel
+	(*v1.AgentModel)(nil),                        // 46: conversation.v1.AgentModel
+	(v1.AgentEffortLevel)(0),                     // 47: conversation.v1.AgentEffortLevel
 }
 var file_frontend_v1_topbar_proto_depIdxs = []int32{
 	14, // 0: frontend.v1.TopbarView.title:type_name -> frontend.v1.TopbarTitle
@@ -3289,45 +3305,46 @@ var file_frontend_v1_topbar_proto_depIdxs = []int32{
 	15, // 24: frontend.v1.TopbarTitle.link:type_name -> frontend.v1.TopbarTitleLink
 	45, // 25: frontend.v1.TopbarModelSelector.selected:type_name -> conversation.v1.ModelOption
 	45, // 26: frontend.v1.TopbarModelSelector.options:type_name -> conversation.v1.ModelOption
-	20, // 27: frontend.v1.TopbarEffortSelector.supported:type_name -> frontend.v1.TopbarEffortSelectorSupported
-	21, // 28: frontend.v1.TopbarEffortSelector.unsupported:type_name -> frontend.v1.TopbarEffortSelectorUnsupported
-	22, // 29: frontend.v1.TopbarEffortSelectorSupported.current:type_name -> frontend.v1.TopbarEffortOption
-	22, // 30: frontend.v1.TopbarEffortSelectorSupported.options:type_name -> frontend.v1.TopbarEffortOption
-	46, // 31: frontend.v1.TopbarEffortOption.level:type_name -> conversation.v1.AgentEffortLevel
-	24, // 32: frontend.v1.TopbarConnectivity.session:type_name -> frontend.v1.TopbarAgentReplSession
-	25, // 33: frontend.v1.TopbarAgentReplSession.login:type_name -> frontend.v1.TopbarSessionBeganLogin
-	26, // 34: frontend.v1.TopbarAgentReplSession.editor_start:type_name -> frontend.v1.TopbarSessionBeganEditorStart
-	28, // 35: frontend.v1.TopbarWarningStrip.warnings:type_name -> frontend.v1.TopbarWarning
-	29, // 36: frontend.v1.TopbarWarning.line:type_name -> frontend.v1.TopbarWarningLine
-	30, // 37: frontend.v1.TopbarWarning.accounting:type_name -> frontend.v1.TopbarAccountingWarningDetail
-	32, // 38: frontend.v1.TopbarWarning.unmodeled_tool:type_name -> frontend.v1.TopbarUnmodeledToolWarningDetail
-	34, // 39: frontend.v1.TopbarWarning.detached_unmodeled:type_name -> frontend.v1.TopbarDetachedUnmodeledWarningDetail
-	35, // 40: frontend.v1.TopbarWarning.session_fault:type_name -> frontend.v1.TopbarSessionFaultWarningDetail
-	37, // 41: frontend.v1.TopbarWarning.degraded_window:type_name -> frontend.v1.TopbarDegradedWindowWarningDetail
-	38, // 42: frontend.v1.TopbarWarning.deploy_failed:type_name -> frontend.v1.TopbarDeployFailedWarningDetail
-	31, // 43: frontend.v1.TopbarAccountingWarningDetail.lines:type_name -> frontend.v1.TopbarWarningDetailLine
-	33, // 44: frontend.v1.TopbarUnmodeledToolWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
-	31, // 45: frontend.v1.TopbarUnmodeledToolWarningDetail.argument_lines:type_name -> frontend.v1.TopbarWarningDetailLine
-	33, // 46: frontend.v1.TopbarDetachedUnmodeledWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
-	36, // 47: frontend.v1.TopbarSessionFaultWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
-	31, // 48: frontend.v1.TopbarSessionFaultWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
-	36, // 49: frontend.v1.TopbarDegradedWindowWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
-	31, // 50: frontend.v1.TopbarDegradedWindowWarningDetail.reason:type_name -> frontend.v1.TopbarWarningDetailLine
-	39, // 51: frontend.v1.TopbarDegradedWindowWarningDetail.open:type_name -> frontend.v1.TopbarDegradedWindowOpen
-	40, // 52: frontend.v1.TopbarDegradedWindowWarningDetail.closed:type_name -> frontend.v1.TopbarDegradedWindowClosed
-	31, // 53: frontend.v1.TopbarDeployFailedWarningDetail.step:type_name -> frontend.v1.TopbarWarningDetailLine
-	36, // 54: frontend.v1.TopbarDeployFailedWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
-	31, // 55: frontend.v1.TopbarDeployFailedWarningDetail.rollback:type_name -> frontend.v1.TopbarWarningDetailLine
-	31, // 56: frontend.v1.TopbarDeployFailedWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
-	31, // 57: frontend.v1.TopbarDeployFailedWarningDetail.log:type_name -> frontend.v1.TopbarWarningDetailLine
-	42, // 58: frontend.v1.TokenBreakdownView.sections:type_name -> frontend.v1.TokenBreakdownSection
-	43, // 59: frontend.v1.TokenBreakdownSection.heading:type_name -> frontend.v1.TokenBreakdownHeading
-	44, // 60: frontend.v1.TokenBreakdownSection.rows:type_name -> frontend.v1.TokenBreakdownRow
-	61, // [61:61] is the sub-list for method output_type
-	61, // [61:61] is the sub-list for method input_type
-	61, // [61:61] is the sub-list for extension type_name
-	61, // [61:61] is the sub-list for extension extendee
-	0,  // [0:61] is the sub-list for field type_name
+	46, // 27: frontend.v1.TopbarModelSelector.default_model:type_name -> conversation.v1.AgentModel
+	20, // 28: frontend.v1.TopbarEffortSelector.supported:type_name -> frontend.v1.TopbarEffortSelectorSupported
+	21, // 29: frontend.v1.TopbarEffortSelector.unsupported:type_name -> frontend.v1.TopbarEffortSelectorUnsupported
+	22, // 30: frontend.v1.TopbarEffortSelectorSupported.current:type_name -> frontend.v1.TopbarEffortOption
+	22, // 31: frontend.v1.TopbarEffortSelectorSupported.options:type_name -> frontend.v1.TopbarEffortOption
+	47, // 32: frontend.v1.TopbarEffortOption.level:type_name -> conversation.v1.AgentEffortLevel
+	24, // 33: frontend.v1.TopbarConnectivity.session:type_name -> frontend.v1.TopbarAgentReplSession
+	25, // 34: frontend.v1.TopbarAgentReplSession.login:type_name -> frontend.v1.TopbarSessionBeganLogin
+	26, // 35: frontend.v1.TopbarAgentReplSession.editor_start:type_name -> frontend.v1.TopbarSessionBeganEditorStart
+	28, // 36: frontend.v1.TopbarWarningStrip.warnings:type_name -> frontend.v1.TopbarWarning
+	29, // 37: frontend.v1.TopbarWarning.line:type_name -> frontend.v1.TopbarWarningLine
+	30, // 38: frontend.v1.TopbarWarning.accounting:type_name -> frontend.v1.TopbarAccountingWarningDetail
+	32, // 39: frontend.v1.TopbarWarning.unmodeled_tool:type_name -> frontend.v1.TopbarUnmodeledToolWarningDetail
+	34, // 40: frontend.v1.TopbarWarning.detached_unmodeled:type_name -> frontend.v1.TopbarDetachedUnmodeledWarningDetail
+	35, // 41: frontend.v1.TopbarWarning.session_fault:type_name -> frontend.v1.TopbarSessionFaultWarningDetail
+	37, // 42: frontend.v1.TopbarWarning.degraded_window:type_name -> frontend.v1.TopbarDegradedWindowWarningDetail
+	38, // 43: frontend.v1.TopbarWarning.deploy_failed:type_name -> frontend.v1.TopbarDeployFailedWarningDetail
+	31, // 44: frontend.v1.TopbarAccountingWarningDetail.lines:type_name -> frontend.v1.TopbarWarningDetailLine
+	33, // 45: frontend.v1.TopbarUnmodeledToolWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
+	31, // 46: frontend.v1.TopbarUnmodeledToolWarningDetail.argument_lines:type_name -> frontend.v1.TopbarWarningDetailLine
+	33, // 47: frontend.v1.TopbarDetachedUnmodeledWarningDetail.tool_name:type_name -> frontend.v1.TopbarUnmodeledToolName
+	36, // 48: frontend.v1.TopbarSessionFaultWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
+	31, // 49: frontend.v1.TopbarSessionFaultWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
+	36, // 50: frontend.v1.TopbarDegradedWindowWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
+	31, // 51: frontend.v1.TopbarDegradedWindowWarningDetail.reason:type_name -> frontend.v1.TopbarWarningDetailLine
+	39, // 52: frontend.v1.TopbarDegradedWindowWarningDetail.open:type_name -> frontend.v1.TopbarDegradedWindowOpen
+	40, // 53: frontend.v1.TopbarDegradedWindowWarningDetail.closed:type_name -> frontend.v1.TopbarDegradedWindowClosed
+	31, // 54: frontend.v1.TopbarDeployFailedWarningDetail.step:type_name -> frontend.v1.TopbarWarningDetailLine
+	36, // 55: frontend.v1.TopbarDeployFailedWarningDetail.component:type_name -> frontend.v1.TopbarWarningComponent
+	31, // 56: frontend.v1.TopbarDeployFailedWarningDetail.rollback:type_name -> frontend.v1.TopbarWarningDetailLine
+	31, // 57: frontend.v1.TopbarDeployFailedWarningDetail.detail:type_name -> frontend.v1.TopbarWarningDetailLine
+	31, // 58: frontend.v1.TopbarDeployFailedWarningDetail.log:type_name -> frontend.v1.TopbarWarningDetailLine
+	42, // 59: frontend.v1.TokenBreakdownView.sections:type_name -> frontend.v1.TokenBreakdownSection
+	43, // 60: frontend.v1.TokenBreakdownSection.heading:type_name -> frontend.v1.TokenBreakdownHeading
+	44, // 61: frontend.v1.TokenBreakdownSection.rows:type_name -> frontend.v1.TokenBreakdownRow
+	62, // [62:62] is the sub-list for method output_type
+	62, // [62:62] is the sub-list for method input_type
+	62, // [62:62] is the sub-list for extension type_name
+	62, // [62:62] is the sub-list for extension extendee
+	0,  // [0:62] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_topbar_proto_init() }
