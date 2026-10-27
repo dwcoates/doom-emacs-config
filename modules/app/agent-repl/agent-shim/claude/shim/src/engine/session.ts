@@ -164,6 +164,7 @@ import { forkSession as forkVendorConversation, type ForkVendorSession } from ".
 import {
   conversationRecordUuid,
   detachedWorkContext,
+  KEEPALIVE_INTERVAL_MS,
   KeepaliveCadence,
   KeepaliveRewind,
   KeepaliveScope,
@@ -366,13 +367,6 @@ interface EngineDeps {
   readonly initTimeoutMs?: number;
   /** How long StartSession waits for its one control round-trip to answer. */
   readonly liveSignalTimeoutMs?: number;
-  /**
-   * The keep-alive cadence, when something overrode the module constant.
-   *
-   * `main.ts` fills this ONLY for a `--fake` process; a real session always
-   * beats on {@link KEEPALIVE_INTERVAL_MS}.
-   */
-  readonly keepaliveIntervalMs?: number;
   /**
    * How much LATER than now the cold gate judges a transcript, when something
    * overrode the default of zero.
@@ -5733,7 +5727,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         ),
       () => live.all(),
       coldNowMs,
-      deps.keepaliveIntervalMs,
+      KEEPALIVE_INTERVAL_MS,
       deps.scheduler ?? REAL_SCHEDULER,
     );
     const cacheAnchor = startingCacheAnchor(facts, clearedTo, coldCompacted);

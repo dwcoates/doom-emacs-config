@@ -1860,9 +1860,12 @@ proving nothing the same scenario at a smaller bound does not prove — what the
 assert is an ordering and an attempt count, neither of which is a function of
 how long the process idles.
 
-Each therefore has a `--fake`-ONLY environment override, in the shape
-`AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS` already established: REFUSED for a real
-session, refused when malformed, every refusal reported. **The production
+Each therefore has a `--fake`-ONLY environment override
+(`resolveFakeMsOverride` in `src/main.ts`): REFUSED for a real session, refused
+when malformed, every refusal reported. (The keep-alive interval had one too,
+`AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS`, retired once the daemon drove every
+beat: a test asks for each beat over `SendKeepalive`, and an end-to-end test
+compresses the daemon's cadence through `cachelapse.EnvTestKeepaliveInterval`.) **The production
 defaults are unchanged, and a real session cannot reach any of them.**
 
 | Constant | Where | Production default | Override | Harness value |

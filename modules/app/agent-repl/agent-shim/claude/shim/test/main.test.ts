@@ -18,7 +18,6 @@ import { LOCK_DIR_ENV, lockBinaryPath, lockDir } from "../src/locks.js";
 import { DEFAULT_RETRY_POLICY } from "../src/store/persistence.js";
 import {
   DEFAULT_STATE_DIR_NAME,
-  FAKE_KEEPALIVE_INTERVAL_ENV,
   FAKE_STORE_BACKOFF_ENV,
   FAKE_WATCHER_CONCLUSION_BUDGET_ENV,
   FAKE_API_REACHABLE_GATE_ENV,
@@ -33,7 +32,6 @@ import {
   queryFactory,
   QUERY_VENDORS,
   type QueryVendors,
-  resolveKeepaliveIntervalMs,
   resolveColdGateLaterMs,
   FAKE_COLD_GATE_LATER_ENV,
   OWNED_ENV,
@@ -683,34 +681,6 @@ describe("shutdownSignalHandlers", () => {
 
     // Assert.
     expect(handlers.standingDown()).toBeNull();
-  });
-});
-
-describe("the keep-alive interval override", () => {
-  it("is unset when the environment names none", () => {
-    expect(resolveKeepaliveIntervalMs({}, true)).toBeUndefined();
-  });
-
-  it("is honored under --fake", () => {
-    expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "200" }, true)).toBe(200);
-  });
-
-  it("is REFUSED for a real session", () => {
-    // A production shim that took its cadence from the environment could be
-    // told to hammer the vendor or never to beat at all.
-    expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "200" }, false)).toBeUndefined();
-  });
-
-  it("refuses a value that is not a whole number", () => {
-    expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "1.5" }, true)).toBeUndefined();
-  });
-
-  it("refuses a value that is not positive", () => {
-    expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "0" }, true)).toBeUndefined();
-  });
-
-  it("refuses a value that is not a number at all", () => {
-    expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "soon" }, true)).toBeUndefined();
   });
 });
 
@@ -1495,18 +1465,6 @@ describe("main", () => {
     expect(sampling?.wait).toBe(backgroundTimerWait);
     expect(sampling?.signal.aborted).toBe(false);
     expect(typeof sampling?.monoMs()).toBe("number");
-  });
-
-  it("hands the engine the keep-alive cadence the fake environment named", async () => {
-    // Arrange.
-    const h = await harness([...SERVING, "--fake"], { [FAKE_KEEPALIVE_INTERVAL_ENV]: "200" });
-
-    // Act.
-    h.run();
-    await h.reached("startup_arguments_validated");
-
-    // Assert.
-    expect(h.engineDeps()["keepaliveIntervalMs"]).toBe(200);
   });
 
   it("hands the engine the watcher-conclusion budget the fake environment named", async () => {

@@ -236,19 +236,6 @@ export const OWNED_ENV = "AGENT_REPL_OWNED";
 export const SESSION_ID_ENV = "AGENT_REPL_SESSION_ID";
 
 /**
- * The keep-alive interval override, honored ONLY under `--fake`.
- *
- * The cadence is fifty-two minutes against subscription billing's ~1-hour
- * cache window (engine/keepalive.ts), and from outside the process there was
- * no way to make one fire — so the two
- * keep-alive obligations could only be declared, never tested. The override
- * exists for that and nothing else, which is why it is refused for a real
- * session: a production shim that took its cadence from the environment could
- * be told to hammer the vendor or to never beat at all.
- */
-export const FAKE_KEEPALIVE_INTERVAL_ENV = "AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS";
-
-/**
  * The cold gate's lateness override, honored ONLY under `--fake`.
  *
  * The gate refuses a resume whose cache has lapsed (engine/cold.ts), and a
@@ -313,24 +300,6 @@ function resolveFakeMsOverride(
  */
 export function resolveColdGateLaterMs(env: NodeJS.ProcessEnv, fake: boolean, log: typeof MAIN_LIFECYCLE_LOGGER = MAIN_LIFECYCLE_LOGGER): number | undefined {
   return resolveFakeMsOverride(env, fake, FAKE_COLD_GATE_LATER_ENV, "cold_gate_later_override", "cold-gate lateness", log);
-}
-
-/**
- * Resolve the keep-alive interval for this process.
- *
- * Answers `undefined` for "use the module constant".
- */
-export function resolveKeepaliveIntervalMs(
-  env: NodeJS.ProcessEnv,
-  fake: boolean,
-  log: typeof MAIN_LIFECYCLE_LOGGER = MAIN_LIFECYCLE_LOGGER,
-): number | undefined {
-  return resolveFakeMsOverride(
-    env,
-    fake,
-    FAKE_KEEPALIVE_INTERVAL_ENV,
-    "keepalive_override",
-    "keep-alive interval", log);
 }
 
 /**
@@ -1013,7 +982,6 @@ export async function main(deps: MainDeps = PRODUCTION_MAIN_DEPS): Promise<void>
   // while the daemon's probe still reads a held lock as "a live shim owns this
   // conversation".
 
-  const keepaliveIntervalMs = resolveKeepaliveIntervalMs(process.env, args.fake, deps.lifecycle);
   const coldGateLaterMs = resolveColdGateLaterMs(process.env, args.fake, deps.lifecycle);
   const watcherConclusionBudgetMs = resolveWatcherConclusionBudgetMs(process.env, args.fake, deps.lifecycle);
   const retry = resolveRetryPolicy(process.env, args.fake, deps.lifecycle);
@@ -1056,7 +1024,6 @@ export async function main(deps: MainDeps = PRODUCTION_MAIN_DEPS): Promise<void>
     // THE EVENT LOOP IS SAMPLED FOR THE PROCESS'S WHOLE LIFE, on a timer that
     // never holds the process open.
     eventLoopSampling: { wait: backgroundTimerWait, monoMs: () => performance.now(), signal: new AbortController().signal },
-    ...(keepaliveIntervalMs === undefined ? {} : { keepaliveIntervalMs }),
     ...(coldGateLaterMs === undefined ? {} : { coldGateLaterMs }),
     ...(watcherConclusionBudgetMs === undefined ? {} : { watcherConclusionBudgetMs }),
     probeApiReachable,

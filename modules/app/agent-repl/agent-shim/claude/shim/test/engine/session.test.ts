@@ -176,7 +176,6 @@ function harness(
     lockThrows?: boolean;
     /** Make the WORKSPACE claim refuse, so its own conversation_owned arm shows. */
     workspaceLockThrows?: boolean;
-    keepaliveIntervalMs?: number;
     /** How much later than now the cold gate judges a transcript. */
     coldGateLaterMs?: number;
     /** What every scripted query answers `backgroundTasks` with. */
@@ -353,9 +352,6 @@ function harness(
     ...(options.liveSignalTimeoutMs === undefined
       ? {}
       : { liveSignalTimeoutMs: options.liveSignalTimeoutMs }),
-    ...(options.keepaliveIntervalMs === undefined
-      ? {}
-      : { keepaliveIntervalMs: options.keepaliveIntervalMs }),
     ...(options.coldGateLaterMs === undefined ? {} : { coldGateLaterMs: options.coldGateLaterMs }),
     ...(options.watcherConclusionBudgetMs === undefined
       ? {}
