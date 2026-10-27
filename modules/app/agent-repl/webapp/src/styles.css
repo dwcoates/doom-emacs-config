@@ -1091,8 +1091,9 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    every merge waiting behind it a step smaller, in a grey between the folded
    and the open header's (owner request, 2026-10-27): the one merge running
    stands out from the line it leads without the line fading away. A waiting
-   merge is not numbered; its name keeps the indent the number held, under
-   the head's name. */
+   merge is not numbered; its line opens with a bullet where the number stood
+   (owner request, 2026-10-27), in the name's own color, and its name follows
+   the bullet. */
 #ws-sidebar .sb-mq-head .sb-mq-name { font-weight: 700; }
 /* THE HEAD'S NAME IS ITS REPOSITORY'S TEXT SIZE AT MOST (owner request,
    2026-10-27): ever so slightly under the group header above it, and every
@@ -1104,6 +1105,9 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   font-size: 0.9em;
   padding-left: calc(0.9rem + var(--ws-mark-width) + 0.45rem);
 }
+/* The bullet takes the line's color and holds its place in the indent; the
+   line's gap sets the name off it. */
+#ws-sidebar .sb-mq-bullet { flex: 0 0 auto; }
 /* THE STAGES wear the bubble's tab glyphs, and their colours from the
    bubble's own rules (".merge-tab-glyph.is-live" and its siblings). */
 #ws-sidebar .sb-mq-stages {
