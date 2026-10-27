@@ -1581,12 +1581,14 @@ func TestMain(m *testing.M) {
 // TestStartFreshNamesTheAccountsDefaultModel is the default-model rulings
 // from the daemon's side: an unmodeled launch names opus (2026-09-14) unless
 // the session spends as the work account, which names sonnet (2026-10-19),
-// and a recorded choice outranks both.
+// and a recorded choice outranks both. A default the reader made for the
+// login (SetDefaultModel) outranks the built-in one, for that login alone.
 func TestStartFreshNamesTheAccountsDefaultModel(t *testing.T) {
 	cases := []struct {
 		name      string
 		routedDir string
 		session   wsm.Session
+		chosen    map[string]string
 		want      string
 	}{
 		{name: "an unmodeled personal session launches under opus", routedDir: "/personal",
@@ -1599,6 +1601,12 @@ func TestStartFreshNamesTheAccountsDefaultModel(t *testing.T) {
 			session: wsm.Session{SelectedConfigDir: "/personal"}, want: DefaultLaunchModel},
 		{name: "a modeled work-account session launches under its own choice", routedDir: "/work",
 			session: wsm.Session{Model: "haiku"}, want: "haiku"},
+		{name: "an unmodeled work session launches under the work login's chosen default", routedDir: "/work",
+			chosen: map[string]string{"/work": "haiku"}, want: "haiku"},
+		{name: "an unmodeled personal session ignores the work login's chosen default", routedDir: "/personal",
+			chosen: map[string]string{"/work": "haiku"}, want: DefaultLaunchModel},
+		{name: "a modeled session outranks the login's chosen default", routedDir: "/personal",
+			session: wsm.Session{Model: "sonnet"}, chosen: map[string]string{"/personal": "haiku"}, want: "sonnet"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1606,6 +1614,7 @@ func TestStartFreshNamesTheAccountsDefaultModel(t *testing.T) {
 			f := newFleetFixture(t)
 			f.accounts.configDir = tc.routedDir
 			f.accounts.multiRepoDir = "/work"
+			f.db.defaultModels = tc.chosen
 			ws := f.workspace("w1")
 			session := tc.session
 			session.Workspace = ws.ID
@@ -1626,27 +1635,25 @@ func TestStartFreshNamesTheAccountsDefaultModel(t *testing.T) {
 }
 
 // TestFreshModel pins freshModel's precedence: the recorded choice, then the
-// account's default.
+// login's default.
 func TestFreshModel(t *testing.T) {
 	cases := []struct {
-		name        string
-		recorded    string
-		workAccount bool
-		want        string
+		name         string
+		recorded     string
+		loginDefault string
+		want         string
 	}{
-		{name: "unrecorded personal is opus", want: "opus"},
-		{name: "unrecorded work is sonnet", workAccount: true, want: "sonnet"},
-		{name: "recorded personal is the record", recorded: "haiku", want: "haiku"},
-		{name: "recorded work is the record", recorded: "opus", workAccount: true, want: "opus"},
+		{name: "unrecorded is the login's default", loginDefault: "sonnet", want: "sonnet"},
+		{name: "recorded is the record", recorded: "haiku", loginDefault: "sonnet", want: "haiku"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got := freshModel(tc.recorded, tc.workAccount)
+			got := freshModel(tc.recorded, tc.loginDefault)
 
 			// Assert.
 			if got.GetName() != tc.want {
-				t.Fatalf("freshModel(%q, %v) = %q, want %q", tc.recorded, tc.workAccount, got.GetName(), tc.want)
+				t.Fatalf("freshModel(%q, %q) = %q, want %q", tc.recorded, tc.loginDefault, got.GetName(), tc.want)
 			}
 		})
 	}

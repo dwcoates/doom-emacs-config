@@ -734,6 +734,15 @@ func validateSetModelRequest(req *agentreplv1.SetModelRequest) *connect.Error {
 	return validateAgentModel("model", req.GetModel())
 }
 
+// validateSetDefaultModelRequest is SetDefaultModelRequest's base function:
+// the same echoed model SetModel takes.
+func validateSetDefaultModelRequest(req *agentreplv1.SetDefaultModelRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	return validateAgentModel("model", req.GetModel())
+}
+
 // validateSetEffortRequest is SetEffortRequest's base function. The level is
 // an enum whose zero is unset, and a client never invents one.
 func validateRetryVendorErrorRequest(req *agentreplv1.RetryVendorErrorRequest) *connect.Error {

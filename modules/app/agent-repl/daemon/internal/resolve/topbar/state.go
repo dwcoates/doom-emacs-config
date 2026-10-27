@@ -208,6 +208,10 @@ type wsState struct {
 	accountOptions []AccountOption
 	// accountSet reports whether the config root has been read at all.
 	accountSet bool
+	// accountConfigDir is the login the session spends as, and defaultModel
+	// that login's default model (Account.DefaultModel).
+	accountConfigDir string
+	defaultModel     string
 
 	// link is the last observed link state.
 	link shimclient.LinkState

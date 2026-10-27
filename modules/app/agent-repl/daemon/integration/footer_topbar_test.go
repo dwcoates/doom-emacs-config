@@ -738,6 +738,30 @@ func TestTopbarModelSelectorReflectsTheCatalogAndTheEffectiveModel(t *testing.T)
 	}
 }
 
+func TestTopbarModelSelectorCarriesTheLoginsDefaultAndMakeDefaultMovesIt(t *testing.T) {
+	t.Parallel()
+	// Arrange: a personal login nobody chose a default for defaults to opus.
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	awaitTopbar(t, f, topbar, "the built-in default", func(v *frontendv1.TopbarView) bool {
+		return v.GetModelSelector().GetDefaultModel().GetName() == "opus"
+	})
+
+	// Act
+	resp, err := f.d.Client().SetDefaultModel(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetDefaultModelRequest{
+		Workspace: f.ws,
+		Model:     &conversationv1.AgentModel{Name: "haiku"},
+	}))
+
+	// Assert: the call succeeds and the strip republishes with the new default.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("SetDefaultModel(haiku) = %v, %v; want a success", resp, err)
+	}
+	awaitTopbar(t, f, topbar, "the chosen default", func(v *frontendv1.TopbarView) bool {
+		return v.GetModelSelector().GetDefaultModel().GetName() == "haiku"
+	})
+}
+
 func TestTopbarContextChipReflectsTheContextUsagePush(t *testing.T) {
 	t.Parallel()
 	// Arrange

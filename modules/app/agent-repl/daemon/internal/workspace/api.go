@@ -498,6 +498,10 @@ type Verbs interface {
 	// an effort change never puts a row in front of the reader, and the shim
 	// itself waits for the running turn to end.
 	SetEffort(ctx context.Context, ws ids.WorkspaceID, level conversationv1.AgentEffortLevel) error
+	// SetDefaultModel makes a model the topbar's selector served the default
+	// of the LOGIN the workspace's session spends as: every new session on
+	// that account root starts under it. No running session changes.
+	SetDefaultModel(ctx context.Context, ws ids.WorkspaceID, model string) error
 	// RetryVendorError asks the workspace's shim for its scheduled
 	// vendor-error retry now (RET in an empty composer) and answers the
 	// shim's judgment whole.

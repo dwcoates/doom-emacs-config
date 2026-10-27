@@ -55,6 +55,13 @@ type Account struct {
 	Email string
 	// Options is every root the daemon knows, in the account package's order.
 	Options []AccountOption
+	// ConfigDir is the root the session spends as: the LOGIN whose default
+	// model the selector marks, and the key SetLoginDefaultModel moves it by.
+	ConfigDir string
+	// DefaultModel is that login's default model (AgentModel.name): the
+	// model a new session on it starts under when nobody names one. Never
+	// empty, because every login has one.
+	DefaultModel string
 }
 
 // AccountOption is one root the session may switch to.
@@ -201,6 +208,10 @@ type Resolver interface {
 	// the daemon knows beside it. An EMPTY email is the logged-out arm, which
 	// is a drawn warning rather than a blank label.
 	SetAccount(ws ids.WorkspaceID, account Account)
+	// SetLoginDefaultModel moves the default model of the login CONFIG_DIR on
+	// every strip spending as it, so a "Make default" on one workspace is
+	// drawn on all of them at once. Its sole producer is SetDefaultModel.
+	SetLoginDefaultModel(configDir, model string)
 	// SetDetachedUnmodeled installs the live detached-unmodeled items, one
 	// warning each. Nothing on the shim's streams announces them —
 	// DetachableWork has no unmodeled arm — so the daemon states the set.

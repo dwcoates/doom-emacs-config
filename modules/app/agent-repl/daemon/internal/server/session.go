@@ -45,6 +45,29 @@ func (s *server) SetModel(
 	return connect.NewResponse(resp), nil
 }
 
+// SetDefaultModel makes the echoed catalog token the default of the login the
+// workspace's session spends as. Every strip on that login is republished on
+// the topbar stream; no running session changes.
+func (s *server) SetDefaultModel(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetDefaultModelRequest],
+) (*connect.Response[agentreplv1.SetDefaultModelResponse], error) {
+	const rpc = "SetDefaultModel"
+	if err := validateSetDefaultModelRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.SetDefaultModelResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	if err := s.deps.Verbs.SetDefaultModel(ctx, subject.Record.ID, req.Msg.GetModel().GetName()); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.SetDefaultModelResponse_Success{Success: &agentreplv1.SetDefaultModelSuccess{}}
+	return connect.NewResponse(resp), nil
+}
+
 // SetEffort switches the session's reasoning effort to the echoed level. It is
 // answered once the shim has the level in effect, which is after the running
 // turn ends; the selector's new state arrives on the topbar stream.

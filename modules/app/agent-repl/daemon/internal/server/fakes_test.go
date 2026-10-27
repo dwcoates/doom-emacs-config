@@ -428,6 +428,10 @@ type fakeVerbs struct {
 
 	setModel    string
 	setModelErr error
+	// setDefaultModel is the model the last SetDefaultModel named;
+	// setDefaultModelErr fails it.
+	setDefaultModel    string
+	setDefaultModelErr error
 
 	setEffort    conversationv1.AgentEffortLevel
 	setEffortErr error
@@ -555,6 +559,11 @@ func (f *fakeVerbs) RetryVendorError(_ context.Context, _ ids.WorkspaceID) (*shi
 func (f *fakeVerbs) SetModel(_ context.Context, _ ids.WorkspaceID, model string) error {
 	f.setModel = model
 	return f.setModelErr
+}
+
+func (f *fakeVerbs) SetDefaultModel(_ context.Context, _ ids.WorkspaceID, model string) error {
+	f.setDefaultModel = model
+	return f.setDefaultModelErr
 }
 
 // openStages records every stage the server's reporter relayed into the verb,

@@ -2,6 +2,7 @@ package topbar
 
 import (
 	"agent-repld/internal/wsm"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -93,8 +94,10 @@ func (h *harness) ready(t *testing.T) {
 // fixture spends from, offered as the only option and marked current.
 func testAccount(email string) Account {
 	return Account{
-		Email:   email,
-		Options: []AccountOption{{ConfigDir: "/Users/dev/.claude", Email: email, Current: true}},
+		Email:        email,
+		Options:      []AccountOption{{ConfigDir: "/Users/dev/.claude", Email: email, Current: true}},
+		ConfigDir:    "/Users/dev/.claude",
+		DefaultModel: "opus",
 	}
 }
 
@@ -1392,7 +1395,9 @@ func TestTheAccountCellOffersEveryRootWithTheCurrentOneMarked(t *testing.T) {
 
 	// Act
 	h.r.SetAccount(testWS, Account{
-		Email: "dev@example.com",
+		Email:        "dev@example.com",
+		ConfigDir:    "/Users/dev/.claude",
+		DefaultModel: "opus",
 		Options: []AccountOption{
 			{ConfigDir: "/Users/dev/.claude", Email: "dev@example.com", Current: true},
 			{ConfigDir: "/Users/dev/.claude-work", Email: "work@example.com"},
@@ -1419,7 +1424,9 @@ func TestALoggedOutOptionCarriesTheLoggedOutArm(t *testing.T) {
 
 	// Act
 	h.r.SetAccount(testWS, Account{
-		Email: "dev@example.com",
+		Email:        "dev@example.com",
+		ConfigDir:    "/Users/dev/.claude",
+		DefaultModel: "opus",
 		Options: []AccountOption{
 			{ConfigDir: "/Users/dev/.claude", Email: "dev@example.com", Current: true},
 			{ConfigDir: "/Users/dev/.claude-work"},
@@ -1440,8 +1447,10 @@ func TestALoggedInOptionCarriesItsEmail(t *testing.T) {
 
 	// Act
 	h.r.SetAccount(testWS, Account{
-		Email:   "dev@example.com",
-		Options: []AccountOption{{ConfigDir: "/Users/dev/.claude", Email: "dev@example.com", Current: true}},
+		Email:        "dev@example.com",
+		Options:      []AccountOption{{ConfigDir: "/Users/dev/.claude", Email: "dev@example.com", Current: true}},
+		ConfigDir:    "/Users/dev/.claude",
+		DefaultModel: "opus",
 	})
 
 	// Assert
@@ -1576,5 +1585,72 @@ func TestAKeepaliveCycleParkDrawsTheDeadLinkAsConnected(t *testing.T) {
 	// Assert
 	if got, want := h.view(t).GetConnectivity().GetGlyph(), connectivityGlyph(linkConnected); got != want {
 		t.Fatalf("connectivity glyph = %q, want %q (connected)", got, want)
+	}
+}
+
+func TestTheSelectorCarriesTheLoginsDefaultModel(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.ready(t)
+
+	// Assert
+	if got := h.view(t).GetModelSelector().GetDefaultModel().GetName(); got != "opus" {
+		t.Fatalf("default model = %q, want the login's default the account cell carried", got)
+	}
+}
+
+func TestMovingALoginsDefaultMovesItsStrips(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetLoginDefaultModel("/Users/dev/.claude", "sonnet")
+
+	// Assert
+	if got := h.view(t).GetModelSelector().GetDefaultModel().GetName(); got != "sonnet" {
+		t.Fatalf("default model = %q, want the login's new default", got)
+	}
+}
+
+func TestMovingAnotherLoginsDefaultLeavesTheStripAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetLoginDefaultModel("/Users/dev/.claude-work", "sonnet")
+
+	// Assert
+	if got := h.view(t).GetModelSelector().GetDefaultModel().GetName(); got != "opus" {
+		t.Fatalf("default model = %q, want this login's default unchanged", got)
+	}
+}
+
+func TestAnAccountWithoutADefaultModelIsRefusedLoudly(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	account := testAccount("dev@example.com")
+	account.DefaultModel = ""
+
+	// Act
+	h.r.SetNaming(testWS, Naming{Name: "fix-flaky-reconnect", ConfigDir: "/Users/dev/.claude"})
+	h.r.OnSessionStarted(testWS, sessionStarted("vend-1", "claude-opus-5"))
+	h.r.SetAccount(testWS, account)
+
+	// Assert
+	if _, ok := h.r.Topic(testWS).Latest(); ok {
+		t.Fatalf("a view was published for an account cell with no default model")
+	}
+	var refused map[string]any
+	for _, record := range h.log.Records() {
+		if record.Operation == "daemon.topbar.set_account" && record.Level == "error" {
+			refused = record.Context
+		}
+	}
+	if refused == nil || !contains(fmt.Sprint(refused["cause"]), "/Users/dev/.claude") {
+		t.Fatalf("set_account ERROR = %v, want one naming the login with no default", refused)
 	}
 }

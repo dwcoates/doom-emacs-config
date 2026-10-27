@@ -2365,20 +2365,16 @@ const WorkDefaultLaunchModel = "sonnet"
 // selectable model — so the button had no selection and "the actual default"
 // was nothing at all. This reverses landing 7's "substitute nothing": an unset
 // choice becomes DefaultLaunchModel, so a session the user never modeled runs
-// under opus and the selector draws opus as the selection.
-// A work-account session's default is WorkDefaultLaunchModel instead; a
-// recorded choice outranks either default.
+// under the login's default (loginDefaultModel: the reader's "Make default",
+// else the built-in) and the selector draws it as the selection.
+// A recorded choice outranks the default.
 // SessionStarted.effective_model is what took effect, and recordFacts persists
 // that.
-func freshModel(recorded string, workAccount bool) *conversationv1.AgentModel {
-	switch {
-	case recorded != "":
+func freshModel(recorded, loginDefault string) *conversationv1.AgentModel {
+	if recorded != "" {
 		return &conversationv1.AgentModel{Name: recorded}
-	case workAccount:
-		return &conversationv1.AgentModel{Name: WorkDefaultLaunchModel}
-	default:
-		return &conversationv1.AgentModel{Name: DefaultLaunchModel}
 	}
+	return &conversationv1.AgentModel{Name: loginDefault}
 }
 
 // sessionProfile is the session a workspace runs: an agent's, or a zettel
@@ -2445,8 +2441,15 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 	req := &shimv1.StartSessionRequest{WorkspaceName: src.WorkspaceName}
 	if src.Fresh {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "src.Fresh"})
+		loginDefault, err := loginDefaultModel(ctx, f.deps.DB, f.deps.Accounts, configDir)
+		if err != nil {
+			log.Error(opBringUp, "the login's default model could not be read; the session was not started", dlog.Context{
+				"config_dir": configDir, "cause": err.Error(),
+			})
+			return nil, fmt.Errorf("start session for %q: %w", ws, err)
+		}
 		req.Source = &shimv1.StartSessionRequest_Fresh{Fresh: &shimv1.StartSessionFresh{
-			Model:          freshModel(session.Model, f.deps.Accounts.IsMultiRepo(configDir)),
+			Model:          freshModel(session.Model, loginDefault),
 			PermissionMode: permissionMode(session.PermissionMode),
 		}}
 	} else {
