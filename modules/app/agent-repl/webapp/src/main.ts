@@ -369,7 +369,11 @@ export async function boot(): Promise<void> {
     if (pagePresence().embedded) {
       watchShownEdge(pagePresence(), () => feed.workspaceSelected());
     } else {
-      mountSidebar(shell.sidebar, ctx, { workspaceSelected: () => feed.workspaceSelected() });
+      mountSidebar(shell.sidebar, ctx, {
+        workspaceSelected: () => feed.workspaceSelected(),
+        // A page's own rail ends above its docked gate band (styles.css body grid).
+        gateBand: () => shell.gateDock.getBoundingClientRect().height,
+      });
     }
 
     // A STANDING GATE DOCKS AT THE BOTTOM EDGE while Emacs hides the input
