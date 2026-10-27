@@ -449,6 +449,30 @@ describe("drawTopbarTitle with several shown links", () => {
     }
   });
 
+  it("draws each row's label like a model selector's name: white, the same size, never underlined", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const { host, title } = drawn();
+      click(title);
+      const label = openPanel(host)!.querySelector("a")!;
+      const labelPaint = paint(label);
+      const panel = document.createElement("div");
+      panel.className = "topbar-reveal";
+      const row = document.createElement("button");
+      row.className = "topbar-model-option";
+      const name = document.createElement("span");
+      name.className = "topbar-model-name";
+      row.append(name);
+      panel.append(row);
+      document.body.append(panel);
+      // Act / Assert
+      expect(labelPaint).toEqual({ ...paint(name), textDecoration: "none" });
+    } finally {
+      teardown();
+    }
+  });
+
   it("refuses a links arm this build cannot draw", () => {
     // Arrange
     const future = create(TopbarTitleSchema, { text: "t", links: {} });

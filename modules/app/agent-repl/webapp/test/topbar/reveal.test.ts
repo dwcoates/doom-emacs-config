@@ -3,6 +3,7 @@ import { createControl } from "../../src/control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountRevealLayer, type RevealGeometry } from "../../src/topbar/reveal.js";
 import { boxRect } from "../dom-rect.js";
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
 
 /** jsdom reports every rect as zero, so geometry is supplied outright. */
 const GEOMETRY: RevealGeometry = {
@@ -221,5 +222,40 @@ describe("mountRevealLayer: the default DOM geometry", () => {
     const panel = openWithStagedRects(rect({ left: 120, top: 2, width: 90, height: 30 }));
     // ASSERT: the stubbed 800px window, less the 32px top, less the 8px margin.
     expect(panel.style.maxHeight).toBe("760px");
+  });
+});
+
+describe("mountRevealLayer: stacking", () => {
+  /** The cascaded z-index of an element carrying ATTRS, mounted in the body. */
+  function zIndexOf(attrs: { className?: string; component?: string }): number {
+    const element = document.createElement("div");
+    if (attrs.className !== undefined) element.className = attrs.className;
+    if (attrs.component !== undefined) element.setAttribute("data-component", attrs.component);
+    document.body.append(element);
+    return Number(cascadedValue(element, "z-index"));
+  }
+
+  it.each([
+    ["the news digest", { component: "news-digest" }],
+    ["an open image", { component: "image-overlay" }],
+  ])("stacks every topbar dropdown above %s, which covers only the feed", (_, overlay) => {
+    const teardown = installStylesheet();
+    try {
+      expect(zIndexOf({ className: "topbar-reveal-layer" })).toBeGreaterThan(zIndexOf(overlay));
+    } finally {
+      teardown();
+    }
+  });
+
+  it.each([
+    ["the hover tooltip", { className: "app-tooltip" }],
+    ["the login overlay", { component: "login-overlay" }],
+  ])("stacks every topbar dropdown under %s", (_, above) => {
+    const teardown = installStylesheet();
+    try {
+      expect(zIndexOf({ className: "topbar-reveal-layer" })).toBeLessThan(zIndexOf(above));
+    } finally {
+      teardown();
+    }
   });
 });
