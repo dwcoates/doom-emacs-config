@@ -1688,6 +1688,22 @@ describe("the Merge Queue section's queues", () => {
     ]);
   });
 
+  it("stands the today count off the Recently Deployed label by a group header's gap", () => {
+    const drawn = drawWorkspaceRoster(withQueues([], [mergedGroup({ id: "repo-1", rows: [merged("m1")] })]), sidebarContext());
+    const count = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_LABEL_CLASS} .sb-count`)!;
+    const group = mergedRegion(drawn).querySelector<HTMLElement>(".merged-group-head")!;
+    expect(inRail(drawn, () => [cascadedValue(count, "margin-left"), cascadedValue(group, "gap")])).toEqual(["0.4rem", "0.4rem"]);
+  });
+
+  it.each(["merged-section", "hidden-section"])("draws no space above the rule over the %s, only below it", (cls) => {
+    const drawn = drawWorkspaceRoster(
+      roster({ hidden: hiddenSection([HIDDEN_ROW]), merged: mergedSection([merged("m1")], false) }),
+      sidebarContext(),
+    );
+    const section = pane(drawn).querySelector<HTMLElement>(`.${cls}`)!;
+    expect(inRail(drawn, () => [cascadedValue(section, "margin-top"), cascadedValue(section, "padding-top")])).toEqual(["0", "0.4rem"]);
+  });
+
   it("draws the queues above the Recently Deployed heading and its groups", () => {
     const drawn = drawWorkspaceRoster(
       withQueues([queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } })], [mergedGroup({ id: "repo-1", rows: [merged("m1")] })]),
