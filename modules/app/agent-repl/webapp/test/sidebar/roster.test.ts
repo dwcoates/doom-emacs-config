@@ -1639,6 +1639,13 @@ describe("the Merge Queue section's queues", () => {
     expect(drawn.querySelector(".repo-section .sb-merge-queue")).toBeNull();
   });
 
+  it("stands the Deploy Queue heading off the Deploys header by a little less than a section's header stands off its rule", () => {
+    const drawn = drawWorkspaceRoster(withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]), sidebarContext());
+    const box = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGE_QUEUES_CLASS}`)!;
+    const section = pane(drawn).querySelector<HTMLElement>(".merged-section")!;
+    expect(inRail(drawn, () => [cascadedValue(box, "padding-top"), cascadedValue(section, "padding-top")])).toEqual(["0.3rem", "0.4rem"]);
+  });
+
   it("draws the queues above the Recently Deployed heading and its groups", () => {
     const drawn = drawWorkspaceRoster(
       withQueues([queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } })], [mergedGroup({ id: "repo-1", rows: [merged("m1")] })]),
