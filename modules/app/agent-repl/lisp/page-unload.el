@@ -367,9 +367,10 @@ Registered on `agent-repl-link-up-functions'; a timer already running is kept."
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-page-unload-on-roster-update)
 
 (defun agent-repl-page-unload-report-pageless ()
-  "Tell the daemon about every open workspace whose page the host does not hold.
-A page dropped before every drop was announced (`agent-repl-page-drop-announced')
-left its workspace drawn severed, blue, until a page connected again.
+  "Tell the daemon of every open workspace whose page the host does not hold.
+A page dropped before every drop was announced
+\(`agent-repl-page-drop-announced') left its workspace drawn severed,
+blue, until a page connected again.
 Reporting it now has the daemon await its page instead, so the row heals.
 A workspace whose report is already in flight is skipped.  Answers how
 many reports were sent."

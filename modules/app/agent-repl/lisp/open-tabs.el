@@ -133,8 +133,8 @@ THE WORKSPACE THE USER IS LOOKING AT IS NEVER WITHHELD (owner ruling,
 2026-10-17), the daemon\='s own rule (`wsm.Workspace.Runs'): selecting a
 hidden workspace revives its session, so its page is made too.  Without
 it a switch to one (the picker, a sidebar row) landed on a perspective
-with no page, and nothing ever made one.  Moving off it withholds it again, and the unload pass
-drops its page (page-unload.el)."
+with no page, and nothing ever made one.  Moving off it withholds it
+again, and the unload pass drops its page (page-unload.el)."
   (and (agent-repl-open-tabs-hidden-p ws)
        (not (equal ws (agent-repl--ws-current-name)))))
 

@@ -1800,7 +1800,8 @@ LABEL is a decoded `RosterThreadOutlineLabel'."
                                       #'agent-repl-wire-decode-roster-thread-outline-crumb)))
 
 (defun agent-repl-wire-decode-roster-thread-outline-breadcrumb-elided (value)
-  "Decode VALUE as `RosterThreadOutlineBreadcrumbElided', `(:first C :omitted N :last C)'."
+  "Decode VALUE as `RosterThreadOutlineBreadcrumbElided'.
+The result is `(:first C :omitted N :last C)'."
   (let ((object (agent-repl-wire--object "RosterThreadOutlineBreadcrumbElided" value)))
     (agent-repl-wire--check-keys "RosterThreadOutlineBreadcrumbElided" object '(first omitted last))
     (list :first (agent-repl-wire--decode-message
