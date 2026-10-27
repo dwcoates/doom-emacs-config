@@ -3357,7 +3357,10 @@ describe("the response bubble's fill", () => {
     expect(decls).not.toMatch(/--assistant:/);
   });
 
-  it.each(THEME_BLOCKS)("paints the %s theme's tool card --panel-bg moved 20%% of the way to --bg (owner request, 2026-10-25)", (_theme, block) => {
+  it.each([
+    ["light", () => withoutBlockComments(declarationsOf(":root") ?? ""), 0.1],
+    ["dark", () => darkThemeBlock(), 0.4],
+  ] as const)("paints the %s theme's tool card --panel-bg moved a set share of the way to --bg (owner request, 2026-10-27, slightly darker than 2026-10-25's 20%%)", (_theme, block, share) => {
     // Arrange
     const css = block();
 
@@ -3365,10 +3368,10 @@ describe("the response bubble's fill", () => {
     const [panel, bg, card] = ["--panel-bg", "--bg", "--tool-card-bg"].map((token) => themeRgbOf(css, token));
 
     // Assert
-    expect(card).toEqual(panel.map((channel, i) => Math.round(channel + (bg[i] - channel) * 0.2)));
+    expect(card).toEqual(panel.map((channel, i) => Math.round(channel + (bg[i] - channel) * share)));
   });
 
-  it("paints the dark theme's response midway between the old tool card and Claude's code-block fill (owner request, 2026-10-25)", () => {
+  it("paints the dark theme's response 40% of the way from Claude's code-block fill to --bg (owner request, 2026-10-27)", () => {
     // Arrange
     const css = darkThemeBlock();
 
@@ -3376,7 +3379,7 @@ describe("the response bubble's fill", () => {
     const response = themeRgbOf(css, "--assistant");
 
     // Assert
-    expect(response).toEqual([0x19, 0x19, 0x18]);
+    expect(response).toEqual([0x18, 0x18, 0x17]);
   });
 
   it("is what a response bubble paints", () => {
@@ -3802,7 +3805,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
 
   it.each([
     [".tool-card", "--tool-card-bg"],
-    [".pfooter", "--panel-bg"],
+    [".pfooter", "--sidebar-bg"],
     [".merge-strip", "--tool-card-bg"],
   ])("fills %s with %s", (selector, token) => {
     // Arrange / Act
@@ -6113,12 +6116,57 @@ describe("the answered label's pastel orange", () => {
   });
 });
 
-describe("the footer's ground (owner request, 2026-10-27)", () => {
-  it("paints #footer the sidebar's background", () => {
+describe("the prompt bubble's edge highlight (owner request, 2026-10-27)", () => {
+  it("feeds a prompt's --bubble-shadow from --prompt-bubble-shadow", () => {
     // Arrange / Act
-    const rule = declarationsOf("#footer") ?? "";
+    const rule = declarationsOf('.bubble[data-role="prompt"]') ?? "";
 
     // Assert
-    expect(rule).toMatch(/background:\s*var\(--sidebar-bg\)\s*;/);
+    expect(rule).toMatch(/--bubble-shadow:\s*var\(--prompt-bubble-shadow\)\s*;/);
+  });
+
+  it("fades a faint inset glow in from the top right, ahead of the shared shadow", () => {
+    // Arrange / Act
+    const value = themeValueOf(declarationsOf(":root") ?? "", "--prompt-bubble-shadow");
+
+    // Assert
+    expect(value).toBe("inset -1px 1px 3px var(--prompt-edge), var(--bubble-shadow)");
+  });
+
+  it("draws no border on a prompt", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-role="prompt"]') ?? "";
+
+    // Assert
+    expect(rule).not.toMatch(/(?:^|;)\s*border\s*:/);
+  });
+
+  it("derives --prompt-edge from --fg at a few percent", () => {
+    // Arrange / Act
+    const value = themeValueOf(declarationsOf(":root") ?? "", "--prompt-edge") ?? "";
+
+    // Assert
+    expect(value).toMatch(/^color-mix\(in srgb, var\(--fg\) [1-9]%, transparent\)$/);
+  });
+});
+
+describe("the topbar's ground (owner request, 2026-10-27)", () => {
+  it("paints #topbar from --topbar-bg", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#topbar") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/background:\s*var\(--topbar-bg\)\s*;/);
+  });
+
+  it("sits the dark topbar a little lighter than the sidebar", () => {
+    // Arrange
+    const block = darkThemeBlock();
+
+    // Act
+    const [topbar, sidebar] = [luminance(rgbOf(block, "--topbar-bg")), luminance(rgbOf(block, "--sidebar-bg"))];
+
+    // Assert
+    expect(topbar).toBeGreaterThan(sidebar);
   });
 });
