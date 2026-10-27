@@ -257,6 +257,25 @@ describe("drawTopbarTitle", () => {
   });
 });
 
+/** What the cascade paints on EL: the summary's look, property by property. */
+function paint(el: Element): Record<string, string> {
+  return {
+    color: cascadedValue(el, "color"),
+    fontStyle: cascadedValue(el, "font-style"),
+    fontSize: cascadedValue(el, "font-size"),
+    fontWeight: cascadedValue(el, "font-weight"),
+    fontFamily: cascadedValue(el, "font-family"),
+    textDecoration: cascadedValue(el, "text-decoration"),
+  };
+}
+
+/** The paint of a summary with no links, drawn in a heading as the strip does. */
+function plainPaint(): Record<string, string> {
+  const heading = drawTopbarHeading(create(TopbarTitleSchema, { text: "t" }), workspaceName("w"), topbarContext().tc);
+  document.body.replaceChildren(heading);
+  return paint(heading.querySelector(".topbar-title")!);
+}
+
 /** A context whose OpenExternal records every request it is sent. */
 function recordingContext(): { ctx: AppContext; opened: OpenExternalRequest[] } {
   const opened: OpenExternalRequest[] = [];
@@ -324,7 +343,7 @@ describe("drawTopbarTitle with one shown link", () => {
     expect(openPanel(host)).toBeNull();
   });
 
-  it("is underlined in the summary's own color", () => {
+  it("is underlined and keeps the summary's own color and face", () => {
     // Arrange
     const teardown = installStylesheet();
     try {
@@ -332,10 +351,7 @@ describe("drawTopbarTitle with one shown link", () => {
       document.body.replaceChildren(heading);
       const anchor = heading.querySelector("a")!;
       // Act / Assert
-      expect([cascadedValue(anchor, "text-decoration"), cascadedValue(anchor, "color")]).toEqual([
-        "underline",
-        "var(--tool-title)",
-      ]);
+      expect(paint(anchor)).toEqual({ ...plainPaint(), textDecoration: "underline" });
     } finally {
       teardown();
     }
@@ -419,6 +435,18 @@ describe("drawTopbarTitle with several shown links", () => {
     // Assert
     await vi.waitFor(() => expect(opened.map((req) => req.url)).toEqual([DOC]));
     expect(openPanel(host)).toBeNull();
+  });
+
+  it("is underlined and keeps the summary's own color and face", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const { title } = drawn();
+      // Act / Assert
+      expect(paint(title)).toEqual({ ...plainPaint(), textDecoration: "underline" });
+    } finally {
+      teardown();
+    }
   });
 
   it("refuses a links arm this build cannot draw", () => {
