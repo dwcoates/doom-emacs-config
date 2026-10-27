@@ -112,12 +112,13 @@ type Orchestrator interface {
 	// Pause stops the queue from starting new merges; an in-flight merge runs
 	// on. A nil scope is the daemon-wide switch (UpdateMergeQueuePause with an
 	// UNSET repository); a scope names ONE repository's queue.
-	Pause(ctx context.Context, scope *RepositoryScope) error
+	// BY is who asked, recorded on the pause (frontend.v1.RosterMergeQueuePaused).
+	Pause(ctx context.Context, scope *RepositoryScope, by Pauser) error
 	// HardStop pauses as Pause does, scoped the same, and stops the work the
 	// queues' merges are doing now: the turn of each merge suspended at a
 	// fixing attempt or a conflict resolution, and of each waiting merge's
 	// background rebase, is interrupted (UpdateMergeQueuePause.hard).
-	HardStop(ctx context.Context, scope *RepositoryScope) error
+	HardStop(ctx context.Context, scope *RepositoryScope, by Pauser) error
 	// Unpause resumes starting merges, with the same scoping as Pause.
 	Unpause(ctx context.Context, scope *RepositoryScope) error
 	// Status answers each registered repository's queue as it stands, its
@@ -179,6 +180,11 @@ type Orchestrator interface {
 	// A merge with no waiting merge on that side, or one not waiting (running,
 	// or only requested), is left where it is.
 	Move(ctx context.Context, ws ids.WorkspaceID, move wsm.MergeMove) (bool, error)
+	// MoveTo moves WS's waiting merge directly to SIDE of ANCHOR's waiting
+	// merge on the same queue (UpdateMergeQueueMoveTo), answering whether it
+	// moved. A merge or an anchor not waiting is left where it is; an anchor
+	// with no merge on WS's queue is the no_such_queued_merge refusal.
+	MoveTo(ctx context.Context, ws, anchor ids.WorkspaceID, side wsm.MergeSide) (bool, error)
 	// AnswerQueueOffer answers the merge-queue question an interrupt raised:
 	// evict the merge (a running one is abandoned, as Evict does), move it to
 	// the front of the merges waiting in its queue, or leave the queue as it
@@ -504,6 +510,14 @@ const (
 	// (agentrepl.v1.WorkspaceRequesterUser).
 	RequestedByUser
 )
+
+// Pauser is who asked for a pause: the user, or the agent of the workspace
+// Asker names.
+type Pauser struct {
+	By Requester
+	// Asker is the asking workspace; empty for the user.
+	Asker ids.WorkspaceID
+}
 
 // String names a requester for the log record.
 func (r Requester) String() string {

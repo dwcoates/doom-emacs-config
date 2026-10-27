@@ -2279,19 +2279,19 @@ func TestMergePausedMarker(t *testing.T) {
 		{
 			name:    "a merging row on a paused queue",
 			arrange: func(r sidebarResolver) { r.SetMerge(theWS, mergingFacts()) },
-			queue:   sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}},
+			queue:   sidebar.MergeQueue{Pause: pausedBy(), Workspaces: []ids.WorkspaceID{theWS}},
 			want:    true,
 		},
 		{
 			name:    "a merge_queued row on a paused queue",
 			arrange: func(r sidebarResolver) { r.SetMerge(theWS, queuedFacts()) },
-			queue:   sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}},
+			queue:   sidebar.MergeQueue{Pause: pausedBy(), Workspaces: []ids.WorkspaceID{theWS}},
 			want:    true,
 		},
 		{
 			name:    "an async-merge row on a paused queue",
 			arrange: func(r sidebarResolver) {},
-			queue:   sidebar.MergeQueue{Paused: true, AsyncRequesters: []ids.WorkspaceID{theWS}},
+			queue:   sidebar.MergeQueue{Pause: pausedBy(), AsyncRequesters: []ids.WorkspaceID{theWS}},
 			want:    true,
 		},
 		{
@@ -2309,19 +2309,19 @@ func TestMergePausedMarker(t *testing.T) {
 		{
 			name:    "a ready row on a paused queue with no merge of its own",
 			arrange: func(r sidebarResolver) {},
-			queue:   sidebar.MergeQueue{Paused: true},
+			queue:   sidebar.MergeQueue{Pause: pausedBy()},
 			want:    false,
 		},
 		{
 			name:    "a merging row whose merge is not on the paused queue",
 			arrange: func(r sidebarResolver) { r.SetMerge(theWS, mergingFacts()) },
-			queue:   sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{"other"}},
+			queue:   sidebar.MergeQueue{Pause: pausedBy(), Workspaces: []ids.WorkspaceID{"other"}},
 			want:    false,
 		},
 		{
 			name:    "a merge_failed row still on a paused queue",
 			arrange: func(r sidebarResolver) { r.SetMerge(theWS, footer.MergeFacts{State: "failed"}) },
-			queue:   sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}},
+			queue:   sidebar.MergeQueue{Pause: pausedBy(), Workspaces: []ids.WorkspaceID{theWS}},
 			want:    false,
 		},
 	}
@@ -2348,7 +2348,7 @@ func TestAPausedQueueLeavesTheMergeArm(t *testing.T) {
 	r.SetMerge(theWS, mergingFacts())
 
 	// Act.
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Pause: pausedBy(), Workspaces: []ids.WorkspaceID{theWS}})
 
 	// Assert: the pause changes how the merge is drawn, never the status.
 	if got := statusName(onlyRow(t, r)); got != "merging" {
@@ -2360,7 +2360,7 @@ func TestResumingTheQueueDropsTheMergePausedMarker(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))
 	r.SetMerge(theWS, mergingFacts())
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Pause: pausedBy(), Workspaces: []ids.WorkspaceID{theWS}})
 
 	// Act: the queue is resumed with the merge still on it.
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{theWS}})
@@ -2385,7 +2385,7 @@ func TestPausingOneRepositoryMarksOnlyItsRows(t *testing.T) {
 	r.SetMergeQueue(otherQueue, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w2"}})
 
 	// Act: only theRepo's queue is paused.
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Pause: pausedBy(), Workspaces: []ids.WorkspaceID{theWS}})
 
 	// Assert.
 	rows := repoRows(t, latest(t, r))
@@ -2403,7 +2403,7 @@ func TestPausingAnotherQueuesitoryLeavesAnAsyncMerge(t *testing.T) {
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{AsyncRequesters: []ids.WorkspaceID{theWS}})
 
 	// Act: a different repository's queue is paused.
-	r.SetMergeQueue(otherQueue, sidebar.MergeQueue{Paused: true})
+	r.SetMergeQueue(otherQueue, sidebar.MergeQueue{Pause: pausedBy()})
 
 	// Assert.
 	row := onlyRow(t, r)
@@ -2421,7 +2421,7 @@ func TestMergePausedMarkerIsLogged(t *testing.T) {
 	r.SetMerge(theWS, mergingFacts())
 
 	// Act.
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Pause: pausedBy(), Workspaces: []ids.WorkspaceID{theWS}})
 	onlyRow(t, r)
 
 	// Assert.
@@ -2439,7 +2439,7 @@ func TestSetMergeQueueIsLogged(t *testing.T) {
 	r := live(t, arrange(t))
 
 	// Act.
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Paused: true, Workspaces: []ids.WorkspaceID{theWS}})
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Pause: pausedBy(), Workspaces: []ids.WorkspaceID{theWS}})
 
 	// Assert.
 	got := dlog.FilterRecords(r.surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.set_merge_queue"})

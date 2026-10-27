@@ -34,20 +34,45 @@ import (
 //
 // A nil scope pauses EVERY repository, which is the daemon-wide switch an
 // UNSET request ref means. A scope names one repository, whose queue is the
-// only one touched.
-func (o *orchestrator) Pause(ctx context.Context, scope *RepositoryScope) error {
-	return o.setPaused(ctx, scope, true)
+// only one touched. BY is recorded on the pause, with its instant.
+func (o *orchestrator) Pause(ctx context.Context, scope *RepositoryScope, by Pauser) error {
+	const op = "daemon.merge.pause"
+	pause, err := o.pauseRecord(ctx, op, by, false)
+	if err != nil {
+		return err
+	}
+	return o.setPaused(ctx, scope, pause)
 }
 
 // Unpause resumes admitting merges, scoped exactly as Pause is.
 func (o *orchestrator) Unpause(ctx context.Context, scope *RepositoryScope) error {
-	return o.setPaused(ctx, scope, false)
+	return o.setPaused(ctx, scope, nil)
 }
 
-// setPaused is the one pause-write path, so both verbs refuse a no-op the same
-// way: pausing a paused queue is a refusal rather than a quiet success, because
-// the operator asked for a change that did not happen.
-func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, paused bool) error {
+// pauseRecord is the record a pause BY writes now: who asked, by the asking
+// workspace's name as it stands, and whether it is a hard stop. A workspace
+// the registry cannot read is refused, recorded under OP.
+func (o *orchestrator) pauseRecord(ctx context.Context, op string, by Pauser, hard bool) (*wsm.MergeQueuePause, error) {
+	pause := &wsm.MergeQueuePause{At: o.deps.Now(), By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser}, Hard: hard}
+	if by.By == RequestedByUser {
+		return pause, nil
+	}
+	ws, err := o.deps.DB.Workspace(ctx, by.Asker)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "could not read the workspace that asked for a pause, so the queue is not paused", dlog.Context{
+			"asker": string(by.Asker), "error": err.Error()})
+		return nil, fmt.Errorf("merge: read the pausing workspace %s: %w", by.Asker, err)
+	}
+	pause.By = wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: ws.Name}
+	return pause, nil
+}
+
+// setPaused is the one pause-write path: PAUSE pauses the scope's queues with
+// its record, and nil resumes them. Both refuse a no-op the same way: pausing
+// a paused queue is a refusal rather than a quiet success, because the
+// operator asked for a change that did not happen.
+func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pause *wsm.MergeQueuePause) error {
+	paused := pause != nil
 	op := "daemon.merge.pause"
 	if !paused {
 		op = "daemon.merge.unpause"
@@ -65,7 +90,7 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 		if was == paused {
 			continue
 		}
-		if err := o.deps.DB.SetMergeQueuePaused(ctx, repo, paused); err != nil {
+		if err := o.deps.DB.SetMergeQueuePaused(ctx, repo, pause); err != nil {
 			return err
 		}
 		changed = append(changed, repo)
@@ -103,25 +128,41 @@ func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, pa
 // to finish: those steps read an interrupted turn as the user's.
 //
 // A queue already paused is not refused: the hard stop stops what the pause
-// left running. Every turn is attempted; the failures are answered joined.
-func (o *orchestrator) HardStop(ctx context.Context, scope *RepositoryScope) error {
+// left running, and its pause is recorded anew as a hard stop BY its asker.
+// Every turn is attempted; the failures are answered joined.
+func (o *orchestrator) HardStop(ctx context.Context, scope *RepositoryScope, by Pauser) error {
 	const op = "daemon.merge.hard_stop"
 	repos, err := o.pauseScope(ctx, op, scope, true)
+	if err != nil {
+		return err
+	}
+	pause, err := o.pauseRecord(ctx, op, by, true)
 	if err != nil {
 		return err
 	}
 	background := o.backgroundRunsIn(repos)
 	var errs []error
 	unpaused := false
+	var alreadyPaused []wsm.RepoKey
 	for _, repo := range repos {
 		paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
 		if err != nil {
 			return fmt.Errorf("merge: hard stop: read whether %s is paused: %w", repo, err)
 		}
 		unpaused = unpaused || !paused
+		if paused {
+			alreadyPaused = append(alreadyPaused, repo)
+		}
+	}
+	for _, repo := range alreadyPaused {
+		if err := o.deps.DB.SetMergeQueuePaused(ctx, repo, pause); err != nil {
+			o.deps.Log.Global().Error(op, "could not record a paused queue's pause as a hard stop", dlog.Context{
+				"repo": string(repo), "error": err.Error()})
+			errs = append(errs, fmt.Errorf("merge: hard stop: record the hard stop of %s: %w", repo, err))
+		}
 	}
 	if unpaused {
-		if err := o.setPaused(ctx, scope, true); err != nil {
+		if err := o.setPaused(ctx, scope, pause); err != nil {
 			errs = append(errs, err)
 		}
 	} else {
@@ -429,6 +470,21 @@ func (o *orchestrator) Move(ctx context.Context, ws ids.WorkspaceID, move wsm.Me
 		moved:   "moved a merge one place in its queue",
 		do: func(repo wsm.RepoKey) (bool, error) {
 			return o.deps.DB.MoveMerge(ctx, repo, ws, move)
+		},
+	})
+}
+
+// MoveTo moves WS's waiting merge directly to SIDE of ANCHOR's waiting merge
+// on the same queue (agentrepl.v1.UpdateMergeQueueMoveTo).
+func (o *orchestrator) MoveTo(ctx context.Context, ws, anchor ids.WorkspaceID, side wsm.MergeSide) (bool, error) {
+	return o.reorder(ctx, ws, reordering{
+		op:      "daemon.merge.move_to",
+		fields:  dlog.Context{"anchor": string(anchor), "side": side.String()},
+		failed:  "could not move a merge to a place in its queue",
+		unmoved: "a merge asked to move to a place already stands there, or it or its anchor is not waiting, and it stays where it is",
+		moved:   "moved a merge to a place in its queue",
+		do: func(repo wsm.RepoKey) (bool, error) {
+			return o.deps.DB.MoveMergeTo(ctx, repo, ws, anchor, side)
 		},
 	})
 }

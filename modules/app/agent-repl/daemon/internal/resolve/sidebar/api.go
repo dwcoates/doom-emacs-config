@@ -202,10 +202,11 @@ type Resolver interface {
 // stated whole on every change, so nothing a queue no longer says can linger
 // in the roster.
 type MergeQueue struct {
-	// Paused reports whether the queue is paused. A row whose merge is on a
-	// paused queue carries the `merge_paused` marker beside its merge
-	// indicator (frontend.v1.RosterRowMergePaused).
-	Paused bool
+	// Pause is the queue's standing pause, nil while it runs. A row whose
+	// merge is on a paused queue carries the `merge_paused` marker beside its
+	// merge indicator (frontend.v1.RosterRowMergePaused), and the queue's
+	// group in the Merge Queue section draws it (frontend.v1.RosterMergeQueuePaused).
+	Pause *wsm.MergeQueuePause
 	// Workspaces are the workspaces with a row on the queue, in queue order:
 	// the queue a `merging` or `merge_queued` row's own merge is on.
 	Workspaces []ids.WorkspaceID
@@ -215,10 +216,6 @@ type MergeQueue struct {
 	// showing its merge queue draws the first as its head and the rest as
 	// its waiting merges (frontend.v1.RosterRepoMergeQueue).
 	Line []QueueEntry
-	// Failed is the last merge on the queue that failed, nil when none
-	// stands: it is set when a merge fails and cleared when the next merge
-	// is put in line. The section draws it as its head while Line is empty.
-	Failed *FailedMerge
 	// AsyncRequesters are the workspaces whose own branch has an async merge
 	// on the queue, from the moment the async request is recorded until its
 	// merge leaves the queue. Each row carries the `async_merging` marker
@@ -260,15 +257,8 @@ type QueueEntry struct {
 	Admitted bool
 	// Stages are the merge's stages so far, read from its ledger
 	// (frontend.v1.RosterMergeQueueHead.stages). Only the front of the line
-	// and a failed merge carry them.
+	// carries them.
 	Stages []*frontendv1.RosterMergeQueueStage
-}
-
-// FailedMerge is the last merge on a queue that failed: the merge as its
-// head draws it, and the one-line account of why it gave up.
-type FailedMerge struct {
-	Entry   QueueEntry
-	Summary string
 }
 
 // FooterStatus is the footer resolver's answers to what a workspace's strip

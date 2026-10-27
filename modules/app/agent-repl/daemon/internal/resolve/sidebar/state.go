@@ -436,21 +436,19 @@ type rosterState struct {
 
 // mergeQueue is one repository's merge queue, indexed for the row lookups.
 type mergeQueue struct {
-	// paused reports whether the queue is paused.
-	paused bool
+	// pause is the queue's standing pause, nil while it runs.
+	pause *wsm.MergeQueuePause
 	// members are the workspaces with a row on the queue.
 	members map[ids.WorkspaceID]struct{}
 	// async are the workspaces whose own branch has an async merge on it.
 	async map[ids.WorkspaceID]struct{}
 	// line is the merges in line, front first (MergeQueue.Line).
 	line []QueueEntry
-	// failed is the last merge on the queue that failed (MergeQueue.Failed).
-	failed *FailedMerge
 }
 
 // newMergeQueue indexes one stated queue.
 func newMergeQueue(q MergeQueue) mergeQueue {
-	return mergeQueue{paused: q.Paused, members: setOf(q.Workspaces), async: setOf(q.AsyncRequesters), line: q.Line, failed: q.Failed}
+	return mergeQueue{pause: q.Pause, members: setOf(q.Workspaces), async: setOf(q.AsyncRequesters), line: q.Line}
 }
 
 // setOf indexes WS as a set.
@@ -463,9 +461,9 @@ func setOf(ws []ids.WorkspaceID) map[ids.WorkspaceID]struct{} {
 }
 
 // empty reports whether the queue says nothing the roster could draw: not
-// paused, no workspace on it, and no failed merge standing.
+// paused, and no workspace on it.
 func (q mergeQueue) empty() bool {
-	return !q.paused && len(q.members) == 0 && len(q.async) == 0 && len(q.line) == 0 && q.failed == nil
+	return q.pause == nil && len(q.members) == 0 && len(q.async) == 0 && len(q.line) == 0
 }
 
 // newRosterState builds an empty roster accumulation.
@@ -497,7 +495,7 @@ func (r *rosterState) asyncMerging(ws ids.WorkspaceID) bool {
 func (r *rosterState) pausedMergeQueue(ws ids.WorkspaceID, arm string, async bool) (wsm.RepoKey, bool) {
 	ownMerge := arm == "merging" || arm == "merge_queued"
 	for repo, q := range r.queues {
-		if !q.paused {
+		if q.pause == nil {
 			continue
 		}
 		if _, on := q.members[ws]; ownMerge && on {
@@ -508,17 +506,6 @@ func (r *rosterState) pausedMergeQueue(ws ids.WorkspaceID, arm string, async boo
 		}
 	}
 	return "", false
-}
-
-// anyMergeQueuePaused reports whether any repository's merge queue is
-// paused, a merge on it or not (frontend.v1.RosterMergedSectionMergeQueuePaused).
-func (r *rosterState) anyMergeQueuePaused() bool {
-	for _, q := range r.queues {
-		if q.paused {
-			return true
-		}
-	}
-	return false
 }
 
 // workspace resolves a workspace's live half, minting it on first sight.

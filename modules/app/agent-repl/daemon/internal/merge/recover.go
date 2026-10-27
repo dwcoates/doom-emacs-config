@@ -284,7 +284,6 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 				}, headRecover)
 		}
 		o.publish(repo, ws, MergeFacts{State: StateFailed, FailedArea: footer.FailedOther, Detail: summary})
-		o.noteFailed(ctx, repo, ws, entry.Ledger, summary)
 		o.ended(ctx, ws, DetachedOutcome{Kind: DetachedFailed, Summary: summary})
 		return nil
 	}

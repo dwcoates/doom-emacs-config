@@ -1174,6 +1174,18 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 	if down := req.GetMoveDown(); down != nil {
 		return validateWorkspaceRef("move_down.workspace", down.GetWorkspace())
 	}
+	if to := req.GetMoveTo(); to != nil {
+		if err := validateWorkspaceRef("move_to.workspace", to.GetWorkspace()); err != nil {
+			return err
+		}
+		switch place := to.GetPlace().(type) {
+		case *agentreplv1.UpdateMergeQueueMoveTo_AheadOf:
+			return validateWorkspaceRef("move_to.ahead_of", place.AheadOf)
+		case *agentreplv1.UpdateMergeQueueMoveTo_Behind:
+			return validateWorkspaceRef("move_to.behind", place.Behind)
+		}
+		return invalid("move_to.place", "a move to a place names the merge it goes beside")
+	}
 	return nil
 }
 

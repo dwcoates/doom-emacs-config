@@ -92,6 +92,18 @@ func (s *server) UpdateMergeQueue(
 		})
 	}
 
+	if to := req.Msg.GetMoveTo(); to != nil {
+		anchorRef, side := moveToPlaceOf(to)
+		anchor, cerr, done := s.subjectFor(ctx, rpc, anchorRef, resp)
+		if done {
+			return answer(resp, cerr)
+		}
+		return s.actOnQueuedMerge(ctx, rpc, to.GetWorkspace(), resp, func(ws ids.WorkspaceID) error {
+			_, err := s.deps.Merge.MoveTo(ctx, ws, anchor.Record.ID, side)
+			return err
+		})
+	}
+
 	if action, apply, ok := s.daemonWideMergeAction(req.Msg); ok {
 		if err := apply(ctx); err != nil {
 			return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
@@ -108,10 +120,12 @@ func (s *server) UpdateMergeQueue(
 	var err error
 	if pause := req.Msg.GetPause(); pause != nil {
 		scope = scopeOf(pause.GetRepository())
+		by, asker := askerOf(req.Msg.GetRequester())
+		pauser := merge.Pauser{By: by, Asker: asker}
 		if pause.GetHard() {
-			err = s.deps.Merge.HardStop(ctx, scope)
+			err = s.deps.Merge.HardStop(ctx, scope, pauser)
 		} else {
-			err = s.deps.Merge.Pause(ctx, scope)
+			err = s.deps.Merge.Pause(ctx, scope, pauser)
 		}
 	} else {
 		scope = scopeOf(req.Msg.GetResume().GetRepository())
@@ -195,6 +209,8 @@ func mergeQueueActionName(req *agentreplv1.UpdateMergeQueueRequest) string {
 		return "move_up"
 	case *agentreplv1.UpdateMergeQueueRequest_MoveDown:
 		return "move_down"
+	case *agentreplv1.UpdateMergeQueueRequest_MoveTo:
+		return "move_to"
 	case *agentreplv1.UpdateMergeQueueRequest_DisableRacing:
 		return "disable_racing"
 	case *agentreplv1.UpdateMergeQueueRequest_EnableRacing:
@@ -212,7 +228,22 @@ func mergeQueueTarget(req *agentreplv1.UpdateMergeQueueRequest) *workspacev1.Wor
 	if ref, _, ok := mergeMoveOf(req); ok {
 		return ref
 	}
+	if to := req.GetMoveTo(); to != nil {
+		return to.GetWorkspace()
+	}
 	return nil
+}
+
+// moveToPlaceOf reads a move_to arm's place as the anchor it names and the
+// side of it the merge goes to. Validation refused an unset place before this.
+func moveToPlaceOf(to *agentreplv1.UpdateMergeQueueMoveTo) (*workspacev1.WorkspaceRef, wsm.MergeSide) {
+	switch place := to.GetPlace().(type) {
+	case *agentreplv1.UpdateMergeQueueMoveTo_AheadOf:
+		return place.AheadOf, wsm.MergeSideAheadOf
+	case *agentreplv1.UpdateMergeQueueMoveTo_Behind:
+		return place.Behind, wsm.MergeSideBehind
+	}
+	panic(fmt.Sprintf("server: UpdateMergeQueueMoveTo place %T past validation has no side", to.GetPlace()))
 }
 
 // mergeMoveOf reads a move_up or move_down arm as the workspace it names and

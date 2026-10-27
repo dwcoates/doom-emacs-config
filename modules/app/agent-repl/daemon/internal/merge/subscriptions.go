@@ -334,6 +334,18 @@ func (d queueEventsDB) MoveMerge(ctx context.Context, repo wsm.RepoKey, id wsm.W
 	return moved, err
 }
 
+// MoveMergeTo moves a waiting merge to a place beside another and reports the
+// reorder when it moved.
+func (d queueEventsDB) MoveMergeTo(ctx context.Context, repo wsm.RepoKey, id, anchor wsm.WorkspaceID, side wsm.MergeSide) (bool, error) {
+	var moved bool
+	err := d.reported(ctx, repo, false, func() (queueWrite, error) {
+		var err error
+		moved, err = d.DB.MoveMergeTo(ctx, repo, id, anchor, side)
+		return queueWrite{report: moved, kind: QueueChangeReordered, subject: id}, err
+	})
+	return moved, err
+}
+
 // PrioritizeMerge moves a waiting merge to the front of the waiting and
 // reports the reorder when it moved.
 func (d queueEventsDB) PrioritizeMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID) (bool, error) {
@@ -356,13 +368,13 @@ func (d queueEventsDB) YieldMergeHead(ctx context.Context, repo wsm.RepoKey, los
 
 // SetMergeQueuePaused pauses or resumes a queue and reports it. The
 // orchestrator writes only a change (setPaused), so every write is one.
-func (d queueEventsDB) SetMergeQueuePaused(ctx context.Context, repo wsm.RepoKey, paused bool) error {
+func (d queueEventsDB) SetMergeQueuePaused(ctx context.Context, repo wsm.RepoKey, pause *wsm.MergeQueuePause) error {
 	return d.reported(ctx, repo, false, func() (queueWrite, error) {
 		kind := QueueChangeResumed
-		if paused {
+		if pause != nil {
 			kind = QueueChangePaused
 		}
-		return queueWrite{report: true, kind: kind}, d.DB.SetMergeQueuePaused(ctx, repo, paused)
+		return queueWrite{report: true, kind: kind}, d.DB.SetMergeQueuePaused(ctx, repo, pause)
 	})
 }
 

@@ -284,6 +284,136 @@ func TestMoveMovesTheNamedWorkspacesMerge(t *testing.T) {
 	}
 }
 
+// TestMoveToMovesTheNamedMergeBesideItsAnchor pins that each side of a move
+// to a place reaches the orchestrator with the merge, its anchor and the side.
+func TestMoveToMovesTheNamedMergeBesideItsAnchor(t *testing.T) {
+	tests := []struct {
+		name  string
+		place func(*agentreplv1.UpdateMergeQueueMoveTo)
+		side  wsm.MergeSide
+	}{
+		{name: "ahead of", side: wsm.MergeSideAheadOf, place: func(to *agentreplv1.UpdateMergeQueueMoveTo) {
+			to.Place = &agentreplv1.UpdateMergeQueueMoveTo_AheadOf{AheadOf: ref()}
+		}},
+		{name: "behind", side: wsm.MergeSideBehind, place: func(to *agentreplv1.UpdateMergeQueueMoveTo) {
+			to.Place = &agentreplv1.UpdateMergeQueueMoveTo_Behind{Behind: ref()}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			to := &agentreplv1.UpdateMergeQueueMoveTo{Workspace: ref()}
+			tt.place(to)
+
+			// Act.
+			resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+				Requester: userRequester(), Action: &agentreplv1.UpdateMergeQueueRequest_MoveTo{MoveTo: to}}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("UpdateMergeQueue: %v", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+			}
+			id := ids.WorkspaceID(ref().GetId())
+			if want := []fakeMoveTo{{ws: id, anchor: id, side: tt.side}}; !slices.Equal(h.Merge.movesTo, want) {
+				t.Fatalf("moves to = %v, want %v", h.Merge.movesTo, want)
+			}
+		})
+	}
+}
+
+// TestMoveToAnUnknownAnchorIsAnAnswer pins that an anchor the registry does
+// not hold answers unknown_workspace and moves nothing.
+func TestMoveToAnUnknownAnchorIsAnAnswer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	to := &agentreplv1.UpdateMergeQueueMoveTo{Workspace: ref(),
+		Place: &agentreplv1.UpdateMergeQueueMoveTo_Behind{Behind: &workspacev1.WorkspaceRef{Id: "nobody", Dir: "/nowhere"}}}
+
+	// Act.
+	resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Requester: userRequester(), Action: &agentreplv1.UpdateMergeQueueRequest_MoveTo{MoveTo: to}}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("UpdateMergeQueue: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+	if len(h.Merge.movesTo) != 0 {
+		t.Fatalf("moves to = %v, want none", h.Merge.movesTo)
+	}
+}
+
+// TestMoveToWithNoPlaceOrNoWorkspaceIsInvalid pins the validation: a move to
+// a place names its merge and the merge it goes beside.
+func TestMoveToWithNoPlaceOrNoWorkspaceIsInvalid(t *testing.T) {
+	tests := []struct {
+		name string
+		to   *agentreplv1.UpdateMergeQueueMoveTo
+	}{
+		{name: "no place", to: &agentreplv1.UpdateMergeQueueMoveTo{Workspace: ref()}},
+		{name: "no workspace", to: &agentreplv1.UpdateMergeQueueMoveTo{Place: &agentreplv1.UpdateMergeQueueMoveTo_Behind{Behind: ref()}}},
+		{name: "an empty anchor", to: &agentreplv1.UpdateMergeQueueMoveTo{Workspace: ref(), Place: &agentreplv1.UpdateMergeQueueMoveTo_AheadOf{AheadOf: &workspacev1.WorkspaceRef{}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+				Requester: userRequester(), Action: &agentreplv1.UpdateMergeQueueRequest_MoveTo{MoveTo: tt.to}}))
+
+			// Assert.
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("UpdateMergeQueue = %v, want InvalidArgument", err)
+			}
+			if len(h.Merge.movesTo) != 0 {
+				t.Fatalf("moves to = %v, want none", h.Merge.movesTo)
+			}
+		})
+	}
+}
+
+// TestAPauseNamesWhoAskedForIt pins that a pause and a hard stop reach the
+// orchestrator with their asker: the user, or the asking workspace.
+func TestAPauseNamesWhoAskedForIt(t *testing.T) {
+	tests := []struct {
+		name      string
+		requester *agentreplv1.WorkspaceRequester
+		hard      bool
+		want      merge.Pauser
+	}{
+		{name: "the user's pause", requester: userRequester(), want: merge.Pauser{By: merge.RequestedByUser}},
+		{name: "a workspace's pause", requester: workspaceRequester(ref()), want: merge.Pauser{By: merge.RequestedByAgent, Asker: ids.WorkspaceID(ref().GetId())}},
+		{name: "a workspace's hard stop", requester: workspaceRequester(ref()), hard: true, want: merge.Pauser{By: merge.RequestedByAgent, Asker: ids.WorkspaceID(ref().GetId())}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			if _, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+				Requester: tt.requester,
+				Action:    &agentreplv1.UpdateMergeQueueRequest_Pause{Pause: &agentreplv1.UpdateMergeQueuePause{Hard: tt.hard}},
+			})); err != nil {
+				t.Fatalf("UpdateMergeQueue: %v", err)
+			}
+
+			// Assert.
+			if h.Merge.pauser == nil || *h.Merge.pauser != tt.want {
+				t.Fatalf("pauser = %+v, want %+v", h.Merge.pauser, tt.want)
+			}
+		})
+	}
+}
+
 // TestMoveOfNothingQueuedIsAnAnswer pins that a move for a workspace with no
 // queued merge answers no_such_queued_merge.
 func TestMoveOfNothingQueuedIsAnAnswer(t *testing.T) {

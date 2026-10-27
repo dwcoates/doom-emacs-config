@@ -57,7 +57,7 @@ func TestAPauseSuspendsTheRunningMergeAndTheQueuesResumeTakesItOnAtItsStep(t *te
 func pausedUnderGate(t *testing.T) *chain {
 	t.Helper()
 	c, done := headInGate(t)
-	if err := c.h.o.Pause(context.Background(), nil); err != nil {
+	if err := c.h.o.Pause(context.Background(), nil, userPauser); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	<-done
@@ -143,7 +143,7 @@ func seedQueue(h *harness, repo wsm.RepoKey, paused bool) {
 // pauseVerb runs Pause or Unpause, the two verbs every pause test drives.
 func pauseVerb(h *harness, pause bool, scope *RepositoryScope) error {
 	if pause {
-		return h.o.Pause(context.Background(), scope)
+		return h.o.Pause(context.Background(), scope, userPauser)
 	}
 	return h.o.Unpause(context.Background(), scope)
 }
@@ -219,7 +219,7 @@ func TestAnUnscopedPausePausesEveryRepositoryWithAQueue(t *testing.T) {
 	seedQueue(h, otherQueueKey, false)
 
 	// Act.
-	err := h.o.Pause(context.Background(), nil)
+	err := h.o.Pause(context.Background(), nil, userPauser)
 
 	// Assert.
 	if err != nil {
@@ -270,7 +270,7 @@ func TestAScopedPauseOfARepositoryTheRegistryDoesNotHoldIsRefused(t *testing.T) 
 			seedQueue(h, h.repoKey(), false)
 
 			// Act.
-			err := h.o.Pause(context.Background(), tt.scope)
+			err := h.o.Pause(context.Background(), tt.scope, userPauser)
 
 			// Assert.
 			var refused *RefusalError
@@ -300,9 +300,9 @@ func TestAPauseChangeRedrawsEveryBubbleOnTheQueue(t *testing.T) {
 		act        func(h *harness) error
 		wantPaused bool
 	}{
-		{name: "pause", act: func(h *harness) error { return h.o.Pause(context.Background(), nil) }, wantPaused: true},
+		{name: "pause", act: func(h *harness) error { return h.o.Pause(context.Background(), nil, userPauser) }, wantPaused: true},
 		{name: "resume", act: func(h *harness) error {
-			if err := h.o.Pause(context.Background(), nil); err != nil {
+			if err := h.o.Pause(context.Background(), nil, userPauser); err != nil {
 				return err
 			}
 			return h.o.Unpause(context.Background(), nil)
@@ -346,7 +346,7 @@ func TestAPauseWhoseRedrawFailsIsRecordedAndThePauseStands(t *testing.T) {
 	h.db.mu.Unlock()
 
 	// Act.
-	err := h.o.Pause(context.Background(), nil)
+	err := h.o.Pause(context.Background(), nil, userPauser)
 
 	// Assert.
 	if err == nil {

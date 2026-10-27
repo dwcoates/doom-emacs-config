@@ -94,6 +94,13 @@ func (d rosterQueueDB) MoveMerge(ctx context.Context, repo wsm.RepoKey, id wsm.W
 	return moved, d.republishedIf(ctx, repo, moved, err)
 }
 
+// MoveMergeTo moves a waiting merge to a place beside another and
+// republishes its repository's queue when it moved.
+func (d rosterQueueDB) MoveMergeTo(ctx context.Context, repo wsm.RepoKey, id, anchor wsm.WorkspaceID, side wsm.MergeSide) (bool, error) {
+	moved, err := d.DB.MoveMergeTo(ctx, repo, id, anchor, side)
+	return moved, d.republishedIf(ctx, repo, moved, err)
+}
+
 // PrioritizeMerge moves a waiting merge to the front of the waiting and
 // republishes its repository's queue when it moved.
 func (d rosterQueueDB) PrioritizeMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID) (bool, error) {
@@ -109,8 +116,8 @@ func (d rosterQueueDB) YieldMergeHead(ctx context.Context, repo wsm.RepoKey, los
 
 // SetMergeQueuePaused pauses or resumes a queue and republishes it, so the
 // roster's merge indicators follow the pause at once.
-func (d rosterQueueDB) SetMergeQueuePaused(ctx context.Context, repo wsm.RepoKey, paused bool) error {
-	return d.republished(ctx, repo, d.DB.SetMergeQueuePaused(ctx, repo, paused))
+func (d rosterQueueDB) SetMergeQueuePaused(ctx context.Context, repo wsm.RepoKey, pause *wsm.MergeQueuePause) error {
+	return d.republished(ctx, repo, d.DB.SetMergeQueuePaused(ctx, repo, pause))
 }
 
 // republished answers ERR, the error of a write to REPO's queue, and
@@ -156,7 +163,7 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 			dlog.Context{"repo": string(repo)}, err)
 		return
 	}
-	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
+	pause, err := o.deps.DB.MergeQueuePause(ctx, repo)
 	if err != nil {
 		recordFailed(o.deps.Log.Global(), op, "could not read whether the merge queue is paused, so the roster is not told the queue",
 			"the pause's read ended when its context was cancelled; the roster is not told the queue",
@@ -170,7 +177,7 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
-	queue := sidebar.MergeQueue{Paused: paused, AsyncRequesters: requesters}
+	queue := sidebar.MergeQueue{Pause: pause, AsyncRequesters: requesters}
 	for _, entry := range entries {
 		queue.Workspaces = append(queue.Workspaces, entry.Workspace)
 	}
@@ -182,19 +189,7 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 		return
 	}
 	queue.Line = line
-	o.retireFailed(repo, inLine(entries))
-	failed, err := o.rosterFailed(ctx, repo)
-	if err != nil {
-		recordFailed(o.deps.Log.Global(), op, "could not read the failed merge's stages, so the roster is not told the queue",
-			"the failed merge's read ended when its context was cancelled; the roster is not told the queue",
-			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
-		return
-	}
-	queue.Failed = failed
-	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": paused, "requesters": ids.Strings(requesters)}
-	if failed != nil {
-		fields["failed"] = string(failed.Entry.Workspace)
-	}
+	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "requesters": ids.Strings(requesters)}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue", fields)
 	o.deps.Sidebar.SetMergeQueue(repo, queue)
 }
@@ -275,78 +270,6 @@ func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntr
 // queue reveals.
 func (o *orchestrator) bubbleHeadID(ws ids.WorkspaceID, lease ids.LeaseID) *frontendv1.FeedId {
 	return feedid.Encode(headRef(o.bubbleOf(ws).ws, lease))
-}
-
-// failedMerge is a queue's last failed merge as the orchestrator keeps it:
-// the merge as the roster draws it, without its stages, which are read from
-// its ledger each time the queue is published. It is kept in memory only, so
-// a daemon restart forgets it.
-type failedMerge struct {
-	entry   sidebar.QueueEntry
-	lease   ids.LeaseID
-	summary string
-}
-
-// noteFailed records the merge running in WS, under LEASE, as REPO's last
-// failed merge, with SUMMARY the account its bubble carries, and republishes
-// REPO's queue so the roster draws it. Every failure a merge resolves with
-// goes through it.
-func (o *orchestrator) noteFailed(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lease ids.LeaseID, summary string) {
-	credited, async, err := o.creditOf(ctx, ws, false)
-	if err != nil {
-		recordFailed(o.deps.Log.Global(), "daemon.merge.roster_queue", "could not resolve who a failed merge is credited to, so the roster does not draw it",
-			"the failed merge's read ended when its context was cancelled; the roster does not draw it",
-			dlog.Context{"repo": string(repo), "workspace": string(ws)}, err)
-		return
-	}
-	entry := sidebar.QueueEntry{Workspace: ws, Credited: credited, Async: async, Admitted: true}
-	if lease != "" {
-		entry.Reveal = o.bubbleHeadID(ws, lease)
-	}
-	o.mu.Lock()
-	o.failed[repo] = failedMerge{entry: entry, lease: lease, summary: summary}
-	o.mu.Unlock()
-	o.publishRosterQueue(ctx, repo)
-}
-
-// retireFailed drops REPO's failed merge once LINE, the merges in line, holds
-// any other merge: the roster draws a failed merge only until the next merge
-// joins the line. The failed merge itself may still be in line as it fails
-// (its entry leaves after its terminal), and a merge put back in line under
-// the same ledger is still that merge, so neither retires it.
-func (o *orchestrator) retireFailed(repo wsm.RepoKey, line []wsm.MergeQueueEntry) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	failed, ok := o.failed[repo]
-	if !ok {
-		return
-	}
-	for _, entry := range line {
-		if entry.Workspace != failed.entry.Workspace || entry.Ledger != failed.lease {
-			delete(o.failed, repo)
-			return
-		}
-	}
-}
-
-// rosterFailed answers REPO's failed merge as the roster draws it, its stages
-// read from its ledger, and nil when none stands.
-func (o *orchestrator) rosterFailed(ctx context.Context, repo wsm.RepoKey) (*sidebar.FailedMerge, error) {
-	o.mu.Lock()
-	failed, ok := o.failed[repo]
-	o.mu.Unlock()
-	if !ok {
-		return nil, nil
-	}
-	entry := failed.entry
-	if failed.lease != "" {
-		stages, err := o.ledgerStages(ctx, entry.Workspace, failed.lease)
-		if err != nil {
-			return nil, err
-		}
-		entry.Stages = stages
-	}
-	return &sidebar.FailedMerge{Entry: entry, Summary: failed.summary}, nil
 }
 
 // ledgerStages answers the stages of the merge running in WS under LEASE, read
