@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/ratelimittest"
 	"agent-repld/internal/resolve/turnfault"
@@ -351,6 +352,23 @@ func TestTheColdGateDrawsOverItsStoodDownShim(t *testing.T) {
 				t.Fatalf("status = %+v, want the cold gate's waiting step, never a fault", status)
 			}
 		})
+	}
+}
+
+func TestAFailedAnswersFaultDrawsOverTheGateStandingAgain(t *testing.T) {
+	// Arrange: the answer's re-open failed, and its gate stands again with no
+	// shim.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "context cold — 182k tokens to re-read"}})
+
+	// Act
+	h.r.OpenFault(testWS, faultOf(t, "fault-1", health.KindColdGateReopenFailed, false))
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault() == nil {
+		t.Fatalf("status = %+v, want the recorded fault drawn over the gate", h.view(t).GetStrip().GetStatus())
 	}
 }
 

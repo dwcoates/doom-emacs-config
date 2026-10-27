@@ -35,10 +35,7 @@ import (
 //     fallback the contract admits ONLY where the footer would otherwise read
 //     idle, then idle itself.
 func (r *resolver) status(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	// A STANDING COLD GATE IS A PARK TOO (owner ruling, 2026-10-27): the gate
-	// runs no shim until it is answered, so its route being down is the gate's
-	// own state, never a fault, and the gate's `waiting` rung draws it.
-	claim, status := ladder.Resolve(s.merge.State, s.parked || s.coldGate.Standing,
+	claim, status := ladder.Resolve(s.merge.State, s.parked,
 		func(claim ladder.Claim) (*frontendv1.FooterStatus, bool) {
 			drawn := r.rung(claim, s, log)
 			return drawn, drawn != nil
@@ -148,6 +145,13 @@ func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 	// still being dialed or redialed, or a standing agent-repl fault, claims
 	// this rung; the vendor rung draws the rest (owner ruling, 2026-10-02).
 	if s.link != shimclient.LinkDialing && s.link != shimclient.LinkRedialing && r.standingFault(s, health.FaultStatusVendorFault) != nil {
+		return r.agentReplByFault(s, log)
+	}
+	// A STANDING COLD GATE RUNS NO SHIM until it is answered (owner ruling,
+	// 2026-10-27): its route being down is the gate's own state, never a
+	// fault, so only a RECORDED fault (a failed answer's re-open) claims this
+	// rung, and otherwise the gate's `waiting` rung draws the workspace.
+	if s.coldGate.Standing && s.link == shimclient.LinkDead {
 		return r.agentReplByFault(s, log)
 	}
 	arm := &frontendv1.FooterStatusAgentReplFault{}
