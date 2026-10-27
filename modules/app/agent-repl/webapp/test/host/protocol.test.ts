@@ -18,6 +18,7 @@ describe("parseHostToPage", () => {
     ["gateDock without a background", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120, background: null }],
     ["dismissDigest", { channel: HOST_CHANNEL, kind: "dismissDigest" }],
     ["focusMoved", { channel: HOST_CHANNEL, kind: "focusMoved" }],
+    ["restyleGranted", { channel: HOST_CHANNEL, kind: "restyleGranted" }],
     ["sidebarDock", { channel: HOST_CHANNEL, kind: "sidebarDock", docked: true }],
     ["logLevel opening a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: 1_060_000 }],
     ["logLevel closing a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "info", untilMs: null }],
@@ -96,6 +97,8 @@ describe("parsePageToHost", () => {
     ["selection with no selection object", { channel: HOST_CHANNEL, kind: "selection", text: null, focused: false }],
     ["editing", { channel: HOST_CHANNEL, kind: "editing", editing: true }],
     ["gateBand", { channel: HOST_CHANNEL, kind: "gateBand", pixels: 120 }],
+    ["restyleTurn", { channel: HOST_CHANNEL, kind: "restyleTurn" }],
+    ["restyled", { channel: HOST_CHANNEL, kind: "restyled" }],
     ["gateBand with no band", { channel: HOST_CHANNEL, kind: "gateBand", pixels: 0 }],
   ])("reads a %s message", (_name, data) => {
     // Arrange / Act

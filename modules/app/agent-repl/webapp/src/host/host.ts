@@ -46,6 +46,7 @@ import {
 } from "./protocol.js";
 import { isDaemonOrigin, type DaemonOrigin } from "../rpc/daemon-origin.js";
 import { createListeners } from "../listeners.js";
+import { nextFrame } from "../frame.js";
 
 /** What the host needs from its environment, injectable for tests. */
 export interface HostEnv {
@@ -61,6 +62,8 @@ export interface HostEnv {
   readonly measure?: (element: Element) => { width: number; height: number };
   /** The daemon the webhost's own calls go to (`setDaemon` moves it). */
   readonly daemon: DaemonOrigin;
+  /** Run FN at the next animation frame; `nextFrame` when omitted. */
+  readonly frame?: (fn: () => void) => void;
 }
 
 /**
@@ -231,6 +234,7 @@ const NOTE_LIMIT = 50;
 /** Build the host over ENV and start listening to its pages. */
 export function createHost(env: HostEnv): Host {
   const { doc, win } = env;
+  const atNextFrame = env.frame ?? nextFrame;
   const frames = new Map<string, Frame>();
   const frameParent = env.frames ?? doc.body;
   let shownId: string | null = null;
@@ -420,10 +424,51 @@ export function createHost(env: HostEnv): Host {
     frame.iframe.remove();
   };
 
+  /**
+   * THE RESTYLE TURNS (host/restyle-turn.ts): a page not shown that has a
+   * restyle to run asks for a turn, and ONE page holds the turn at a time; the
+   * next is granted only a frame after the last one ended, so each hidden
+   * page's restyle gets a frame of its own and none lands in the shown page's.
+   * A page's turn is its document's: a page that says hello again (a reload)
+   * or leaves gives up its ask and its turn, so a page that is gone never
+   * holds the others.
+   */
+  const restyleQueue: Frame[] = [];
+  let restyling: Frame | null = null;
+  let restyleFramePending = false;
+
+  /** Grant the next asking page its turn, if no page holds one. */
+  const grantRestyle = (): void => {
+    if (restyling !== null || restyleFramePending) return;
+    const next = restyleQueue.shift();
+    if (next === undefined) return;
+    restyling = next;
+    post(next, { channel: HOST_CHANNEL, kind: "restyleGranted" });
+  };
+
+  /** The turn is over: grant the next one a frame from now. */
+  const endRestyle = (): void => {
+    restyling = null;
+    if (restyleFramePending) return;
+    restyleFramePending = true;
+    atNextFrame(() => {
+      restyleFramePending = false;
+      grantRestyle();
+    });
+  };
+
+  /** FRAME's document gave up its ask and its turn (it reloaded, or left). */
+  const dropRestyle = (frame: Frame): void => {
+    const at = restyleQueue.indexOf(frame);
+    if (at >= 0) restyleQueue.splice(at, 1);
+    if (restyling === frame) endRestyle();
+  };
+
   const retire = (frame: Frame): void => {
     removeFrame(frame);
     unqueue(frame.id);
     finishTurn(frame.id);
+    dropRestyle(frame);
   };
 
   /** Load ID now if it is still waiting its turn (it is being shown). */
@@ -457,6 +502,7 @@ export function createHost(env: HostEnv): Host {
     win.clearTimeout(waiting.bound);
     incoming.delete(id);
     removeFrame(waiting.fresh);
+    dropRestyle(waiting.fresh);
   };
 
   /** ID's replacement takes the old page's place, on screen if it is shown. */
@@ -478,7 +524,21 @@ export function createHost(env: HostEnv): Host {
       case "hello":
         resetFacts(frame);
         frame.attached = true;
+        dropRestyle(frame);
         sendState(frame);
+        return;
+      case "restyleTurn":
+        // A page may ask again from inside its own turn (its work raised more):
+        // it waits behind the others, as any ask does.
+        if (!restyleQueue.includes(frame)) restyleQueue.push(frame);
+        grantRestyle();
+        return;
+      case "restyled":
+        if (restyling !== frame) {
+          note("warn", `workspace ${frame.id} ended a restyle turn it did not hold`);
+          return;
+        }
+        endRestyle();
         return;
       case "drawn":
         frame.drawn = message.what;

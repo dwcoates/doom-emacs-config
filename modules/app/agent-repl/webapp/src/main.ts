@@ -31,6 +31,7 @@
  * time: the warning chip if step 5 got that far, and the emergency console path if
  * it did not, which is the documented exception to "no direct console".
  */
+import { pageRestyleTurns } from "./host/restyle-turn.js";
 import { installGateDock } from "./feed/gate-dock.js";
 import { installAskTray } from "./feed/ask-tray.js";
 import "./styles.css";
@@ -178,6 +179,7 @@ export async function boot(): Promise<void> {
       levelWindow,
       editorIngress,
       focusLeft: pageFocusLeft(),
+      restyleTurns: pageRestyleTurns(document),
     });
 
     // The page's presence — hidden/shown, focused/blurred, resized, and the
