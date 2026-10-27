@@ -112,6 +112,11 @@ one repository):
   agent-repld, which holds the prompt behind the recipient's running work,
   waits out its cold gate, and draws the send in both workspaces' feeds; a
   `SendMessage` to another session goes around all of it.
+- `ListAgents` never lists workspaces: an open workspace that is idle or
+  cold has no running Claude process, so it is missing there however open it
+  is. Find workspaces with `workspace list`, `workspace status` and
+  `workspace find`. agent-repl's shim notes this on every `ListAgents`
+  answer, and refuses a `SendMessage` to an `agent-repl:NAME` address.
 - `workspace prompt WS TEXT` submits TEXT to WS as this agent's prompt, from
   this workspace: WS's feed heads it with a left arrow, then this workspace's
   name, and this workspace's feed shows it sent, with WS's name then a right

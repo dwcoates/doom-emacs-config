@@ -25,6 +25,9 @@
  *   - `mcpServers` carries agent-repl's OWN MCP server (sdk/agent-repl-mcp.ts),
  *     whose tools agent-repl itself draws, and `allowedTools` pre-allows them:
  *     they change nothing on the machine, so a prompt would only stall the turn.
+ *   - `hooks` makes the vendor's `ListAgents` and `SendMessage` say that
+ *     agent-repl workspaces are reached through agent-repld, never through
+ *     them (sdk/agent-repl-hooks.ts).
  *
  * THE BINARY IS THE SDK'S OWN. `pathToClaudeCodeExecutable` is deliberately
  * NOT set (ruling R12): the shim drives the SDK's bundled, pinned agent binary
@@ -38,6 +41,7 @@ import type { McpServerConfig, Options, SpawnedProcess, SpawnOptions } from "@an
 import { bindLog } from "../log.js";
 import { systemPromptOption } from "../metaprompt.js";
 import { importRealSDK } from "../vendor-guard.js";
+import { agentReplHooks } from "./agent-repl-hooks.js";
 import { AGENT_REPL_AUTO_ALLOWED_TOOLS, agentReplMcpServers } from "./agent-repl-mcp.js";
 import type {
   CanUseToolLike,
@@ -348,18 +352,19 @@ export function asQueryLike(query: object): QueryLike {
  * The options a session's profile decides.
  *
  * AN AGENT SESSION is the workspace agent: the vendor's coding preset with the
- * metaprompt appended, agent-repl's own tools pre-allowed, and every settings
- * source (which `denied.by_policy` gate emissions need).
+ * metaprompt appended, agent-repl's own tools pre-allowed, agent-repl's hooks on
+ * the vendor's agent-to-agent tools, and every settings source (which
+ * `denied.by_policy` gate emissions need).
  *
  * A CHAT SESSION answers questions in a zettel thread and must inherit nothing
  * of the user's agent setup: no settings sources (so no skills, CLAUDE.md or
- * memory), no tools of any kind, no MCP servers, and the daemon's system prompt
+ * memory), no tools of any kind, no MCP servers, no hooks, and the daemon's system prompt
  * in place of the coding preset.
  */
 export function profileOptions(
   spec: RealQuerySpec,
   mcpServers: Record<string, McpServerConfig>,
-): Pick<Options, "systemPrompt" | "mcpServers" | "allowedTools" | "settingSources" | "tools"> {
+): Pick<Options, "systemPrompt" | "mcpServers" | "allowedTools" | "settingSources" | "tools" | "hooks"> {
   switch (spec.profile.kind) {
     case "agent":
       return {
@@ -367,6 +372,7 @@ export function profileOptions(
         mcpServers,
         allowedTools: [...AGENT_REPL_AUTO_ALLOWED_TOOLS],
         settingSources: ["user", "project", "local"],
+        hooks: agentReplHooks(),
       };
     case "chat":
       return {
@@ -375,6 +381,7 @@ export function profileOptions(
         allowedTools: [],
         settingSources: [],
         tools: [],
+        hooks: {},
       };
   }
 }

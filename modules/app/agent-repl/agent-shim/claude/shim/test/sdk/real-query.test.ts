@@ -18,6 +18,7 @@ import {
   type VendorChildExit,
 } from "../../src/sdk/real-query.js";
 import { METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH, workspaceSection } from "../../src/metaprompt.js";
+import { agentReplHooks } from "../../src/sdk/agent-repl-hooks.js";
 
 /** The servers argument of a test that is not about agent-repl's own MCP server. */
 const NO_SERVERS = {};
@@ -86,6 +87,14 @@ describe("realQueryOptions", () => {
       preset: "claude_code",
       append: `BE EXCELLENT\n\n${workspaceSection("parser-fix")}`,
     });
+  });
+
+  it("hooks the vendor's ListAgents and SendMessage so they point at agent-repl's workspaces", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec(), NO_SERVERS);
+
+    // Assert.
+    expect(options.hooks).toEqual(agentReplHooks());
   });
 
   it("loads user, project and local settings so denied.by_policy exists", () => {
@@ -261,6 +270,14 @@ describe("realQueryOptions for a chat session", () => {
     expect(options.tools).toEqual([]);
     expect(options.allowedTools).toEqual([]);
     expect(options.mcpServers).toEqual({});
+  });
+
+  it("gives a chat no hooks, since it has no tools to hook", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(chat(), NO_SERVERS);
+
+    // Assert.
+    expect(options.hooks).toEqual({});
   });
 
   it("keeps everything the profile does not decide, such as the cwd and partial messages", () => {
