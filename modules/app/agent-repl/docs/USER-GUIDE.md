@@ -212,7 +212,7 @@ A rename changes the workspace's name and nothing else.
   - A box opens holding the current name; type the new one and press Enter.
   - Escape, or a click outside the box, closes it unchanged.
   - A refused name is explained beside the box, which stays open.
-  - Rows in Recently Merged and Hidden don't offer it, because a click there reopens or shows the workspace.
+  - Rows in Recently Deployed and Hidden don't offer it, because a click there reopens or shows the workspace.
 - **From a shell:** `agent-repld workspace set WS -name NAME`.
 - **The new name shows everywhere at once:**
   - the sidebar;
@@ -261,7 +261,7 @@ A rename changes the workspace's name and nothing else.
     - The merge workspace runs only the prompts its request names, never the ones the asking workspace was created with.
   - The main workspace can ask for an async merge; it lands in the repository's own checkout.
 - **An async merge workspace is hidden from the tab bar and the sidebar's open rows.**
-  - It is listed among the closed workspaces, and under Recently Merged once it lands.
+  - It is listed among the closed workspaces, and under Recently Deployed once it lands.
   - The bubble is drawn only in your feed, placed where it was asked for rather than pinned, and its resolving, conflicts and fixes tabs stream the merge workspace's agent.
   - Every queue tab lists the merge by its own name; clicking the entry switches to your workspace and opens the merge's bubble there, and never selects or reveals the merge workspace.
 - **The merge workspace is revealed, and stays visible, when:**
@@ -283,7 +283,7 @@ A rename changes the workspace's name and nothing else.
 - **A merge workspace nobody has used for 15 calendar days is removed.**
   - The bubble's button then reads `merge workspace removed` and does nothing.
 - **Your own workspace is retired a day after its async merge lands, if nobody has used it since.**
-  - Its session stops, its worktree is removed, and it moves to Recently Merged, as a sync merge leaves it.
+  - Its session stops, its worktree is removed, and it moves to Recently Deployed, as a sync merge leaves it.
   - Its branch is kept.
   - It is kept while it holds commits or changes the merge did not take, while anything runs or is held in it, or while another open workspace was cut from it.
 
@@ -658,12 +658,15 @@ The top bar's effort selector sits between the model selector and the permission
 
 - **The sidebar lists workspaces in three sections, top to bottom.**
   - The open workspaces section, headed "OPEN", holds the grouping you picked (repositories, tasks or stages).
+  - "DEPLOYS" holds the deploy queue and the merges of the last week.
   - "HIDDEN" holds the workspaces you hid.
-  - "RECENTLY MERGED" holds the merges of the last week.
 - **The sidebar itself never scrolls; a section too long for its room scrolls its own rows.**
-  - "OPEN" takes the room first, down to four rows each for "HIDDEN" and "RECENTLY MERGED".
-  - "HIDDEN" and "RECENTLY MERGED" share those eight rows, so one merge today leaves "HIDDEN" seven.
-  - Only today's merges claim that room; older merges show only in room the other sections leave.
+  - "OPEN" takes the room first, down to three rows each for "DEPLOYS" and "HIDDEN".
+  - "DEPLOYS" and "HIDDEN" share those six rows, so a "DEPLOYS" of one row leaves "HIDDEN" five.
+  - "DEPLOYS" claims that room only for its queue and today's merges.
+    - Older merges show only in room the other sections leave.
+  - A sidebar too short for those six rows shrinks "HIDDEN" first.
+    - "DEPLOYS" gives up rows only once "HIDDEN" shows none.
 - **`SPC j R` sends every hidden workspace one keep-alive.**
   - A hidden workspace's cache is otherwise left to lapse, and its session stops when it does.
   - The keep-alive moves each lapse later, so the "HIDDEN" countdowns grow back.
@@ -675,7 +678,8 @@ The top bar's effort selector sits between the model selector and the permission
     - Unfolding it always works.
 - **"OPEN" shows how many workspaces it lists, folded or not.**
   - The number counts every row, children of other workspaces included, and the rows of a folded repository too.
-- **"MERGE QUEUE", the last section, shows every repository's merge queue, then what recently merged.**
+- **"DEPLOYS", below "OPEN", shows every repository's merge queue, then what recently deployed.**
+  - The queues are listed under "DEPLOY QUEUE", which shows even while no merge is queued.
   - Each repository with a merge in its queue is listed under its name, between two grey rules.
     - The number beside the name counts the merges in that repository's line.
     - A repository leaves the list as soon as its line is empty.
@@ -689,9 +693,9 @@ The top bar's effort selector sits between the model selector and the permission
     - The head's running stage shows a still grey dot once nothing of its work runs.
     - Resting the pointer on the name says who paused the queue and how long ago.
     - Clicking the name resumes the queue.
-  - The workspaces that merged recently are listed below a grey rule, under "RECENTLY MERGED".
-    - The number beside "RECENTLY MERGED" counts today's merges.
-  - The "MERGE QUEUE" heading is always purple.
+  - The workspaces that merged recently are listed below a grey rule, under "RECENTLY DEPLOYED".
+    - The number beside "RECENTLY DEPLOYED" counts today's merges.
+  - The "DEPLOYS" heading is always purple.
 - **The time at the right of an open workspace's row is its running turn's duration.**
   - It reads the same number as the footer's turn clock.
   - A workspace with no turn running reads `0s`.
@@ -743,7 +747,7 @@ The top bar's effort selector sits between the model selector and the permission
 - **The magnifier left of "Workspaces" opens a search bar under the sidebar's header.**
   - The bar slides down over the top of the list rather than pushing it down.
 - **Typing narrows every section to the workspaces whose names match.**
-  - The open workspaces section (under every grouping), Hidden Workspaces and Recently Merged are all narrowed.
+  - The open workspaces section (under every grouping), Hidden Workspaces and Recently Deployed are all narrowed.
   - A space matches anything, so `fix side` finds `fix-the-sidebar`.
   - The words must appear in the order typed, and case does not matter.
   - A section left with no match is hidden until the search changes.
@@ -788,7 +792,7 @@ The top bar's effort selector sits between the model selector and the permission
 ## Reopening a merged workspace
 
 - **A merged workspace can be opened again, from the sidebar or from Emacs.**
-  - Clicking its row under Recently Merged offers two choices, and either one opens it and switches to it.
+  - Clicking its row under Recently Deployed offers two choices, and either one opens it and switches to it.
   - **Reopen** brings it back as it was, to ask it about what it landed or to revise it.
   - **Reopen and revert the merge** also hands its agent a brief to revert the merge and land the revert; follow the revert from the workspace's feed.
   - `SPC p p`, `SPC p P` and the row menu's Open reopen it without reverting.
@@ -798,7 +802,7 @@ The top bar's effort selector sits between the model selector and the permission
   - When the reopened conversation is large enough to stop at the cold-cache choice, the brief waits there; the choice you make decides it, as it does for any prompt waiting at that choice.
 - **It comes back as an ordinary open workspace.**
   - Its worktree is checked out again from its branch, and its conversation comes back.
-  - It leaves Recently Merged and returns to its groupings and the tab bar.
+  - It leaves Recently Deployed and returns to its groupings and the tab bar.
 - **Its branch moves up to where its parent branch is now.**
   - The work it merged is already there, so nothing is lost.
   - It stays where it was if its branch has commits its parent lacks, or the worktree has uncommitted changes.

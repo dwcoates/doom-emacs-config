@@ -1282,8 +1282,10 @@ message RosterRepoKey {
 // and expanding it puts the group back. The band's own fold still folds the
 // whole band.
 message RosterMergedSection {
-  // The section's label, "Merge Queue", drawn in the purple of a merge in
-  // progress whatever its queues stand at. It carries NO COUNT (its `count`
+  // The section's label, "Deploys" (owner request, 2026-10-27; it was "Merge
+  // Queue"), drawn in the purple of a merge in progress whatever its queues
+  // stand at. The section is drawn directly under the Open section, above
+  // the Hidden section (owner request, 2026-10-27). It carries NO COUNT (its `count`
   // is unset): each queue group counts its own line
   // (RosterMergeQueueRepoGroup.count, owner request 2026-10-27).
   RosterSectionHeader header = 1;
@@ -1308,8 +1310,14 @@ message RosterMergedSection {
   // its repository is folded.
   repeated RosterMergeQueueRepoGroup queues = 6;
   // The heading drawn over the merged groups, below the queues, while any
-  // group is drawn: "Recently Merged". Always set.
+  // group is drawn: "Recently Deployed" (owner request, 2026-10-27; it was
+  // "Recently Merged"). Always set.
   RosterLabel merged_label = 7;
+  // The heading drawn over the queues, at the top of the section: "Deploy
+  // Queue" (owner request, 2026-10-27). It is drawn ALWAYS, even while no
+  // queue is listed, so an empty queue reads as empty rather than absent.
+  // Always set.
+  RosterLabel queue_label = 9;
   // Tag 8 (`merge_queue_paused`, the section-wide pause marker) is RETIRED
   // (2026-10-27): each queue carries its own pause
   // (RosterRepoMergeQueue.paused), drawn on its own group.

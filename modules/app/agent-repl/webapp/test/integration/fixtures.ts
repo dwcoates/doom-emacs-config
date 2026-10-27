@@ -2584,8 +2584,9 @@ export function roster(init?: {
       fold: { case: "expanded", value: {} },
     },
     recentlyMerged: {
-      header: { label: { text: "merge queue" } },
-      mergedLabel: { text: "recently merged" },
+      header: { label: { text: "deploys" } },
+      queueLabel: { text: "deploy queue" },
+      mergedLabel: { text: "recently deployed" },
       groups: [
         {
           key: { repository: repositoryRef() },

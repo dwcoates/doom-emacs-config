@@ -372,7 +372,7 @@ func inPlaceHandbackText(out merge.DetachedOutcome) (string, string, error) {
 // merge, with NOTE (what became of its deploy) at its end.
 func landedText(branch, mergeName, summary, note string) (string, string) {
 	return fmt.Sprintf("merge of %s landed", branch),
-		fmt.Sprintf("It ran detached, in a merge workspace forked from this conversation. %s. Its merge workspace `%s` is closed now and listed under Recently Merged; the user can still open it to read the merge's own conversation.%s", summary, mergeName, note)
+		fmt.Sprintf("It ran detached, in a merge workspace forked from this conversation. %s. Its merge workspace `%s` is closed now and listed under Recently Deployed; the user can still open it to read the merge's own conversation.%s", summary, mergeName, note)
 }
 
 // undeployedNote is what a landing reported at once says about its deploy:

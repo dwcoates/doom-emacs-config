@@ -1,12 +1,14 @@
 /**
- * THE SECTION FIT, IN WEBKIT (owner requests, 2026-10-11 and 2026-10-18).
+ * THE SECTION FIT, IN WEBKIT (owner requests, 2026-10-11, 2026-10-18 and
+ * 2026-10-27).
  *
  * The rail never scrolls. Once it is out of room, the Open section lengthens
- * until Hidden Workspaces and Recently Merged are left three lines each, the
- * two sharing those six lines and Recently Merged claiming only today's
- * merges, any room the Open section cannot use goes to Hidden Workspaces and
- * then Recently Merged, the lowest open section's viewport reaches the rail's
- * foot, and each section scrolls the rest. jsdom lays nothing out, so this draws a rail in
+ * until Deploys and Hidden Workspaces below it are left three lines each, the
+ * two sharing those six lines and Deploys claiming only its "Deploy Queue"
+ * heading and today's merges, any room the Open section cannot use goes to
+ * Deploys' today's merges, then Hidden Workspaces, then older merges, the
+ * lowest open section's viewport reaches the rail's foot, and each section
+ * scrolls the rest. jsdom lays nothing out, so this draws a rail in
  * the shape the sidebar draws it, in real headless WebKit over the real
  * stylesheet, runs the REAL `fitBands` (src/sidebar/band-fit.ts, bundled), and
  * measures the viewports the engine draws.
@@ -35,7 +37,7 @@ function bandSection(cls: string, label: string, count: number, inner: string): 
   return `<div class="repo ${cls}"><div class="repo-head"><span class="sb-label">${label}</span><span class="sb-count" data-section-count>(${count})</span></div><div class="rows">${inner}</div></div>`;
 }
 
-/** The Recently Merged band's rows region: MERGED rows, the first TODAY of them today's, dealt round-robin into GROUPS repository groups. */
+/** The Deploys band's merged groups: MERGED rows, the first TODAY of them today's, dealt round-robin into GROUPS repository groups. */
 function mergedGroups(merged: number, today: number, groups: number): string {
   return Array.from({ length: groups }, (_, g) => {
     const rows = Array.from({ length: merged }, (_, i) => i)
@@ -45,6 +47,13 @@ function mergedGroups(merged: number, today: number, groups: number): string {
     return `<div class="merged-group" data-repository="repo-${g}" data-repository-collapsed="false"><div class="merged-group-head"><span class="sb-label">repo-${g}</span></div><div class="rows">${rows}</div></div>`;
   }).join("");
 }
+
+/** The Deploys band's queue box over no queue: its "Deploy Queue" heading alone, a line of its own. */
+const EMPTY_DEPLOY_QUEUE =
+  '<div class="sb-merge-queues"><div class="sb-deploy-queue-label" data-empty=""><span class="sb-label">Deploy Queue</span></div></div>';
+
+/** The "Recently Deployed" heading over the Deploys band's merged groups. */
+const RECENTLY_DEPLOYED = '<div class="sb-merged-label"><span class="sb-label">Recently Deployed</span></div>';
 
 /** What a rail is drawn with: its rows per section, how many merges are today's, the merged groups, and the Open section's repositories. */
 interface Drawing {
@@ -65,8 +74,8 @@ function rail(height: number, { live, hidden, merged, today = merged, groups = 1
   }).join("");
   return `<nav id="ws-sidebar" style="height:${height}px"><div class="sb-head"><span class="sb-title">Workspaces</span></div><div class="sb-scroll"><div class="sb-roster">
 <div class="sb-pane"><div class="repo open-section"><div class="repo-head"><span class="sb-label">Open</span></div><div class="sb-sections">${repoSections}</div></div>
+${bandSection("merged-section", "Deploys", merged, `${EMPTY_DEPLOY_QUEUE}${merged === 0 ? "" : RECENTLY_DEPLOYED}${mergedGroups(merged, today, groups)}`)}
 ${bandSection("hidden-section", "Hidden Workspaces", hidden, ids("hidden", hidden).map((id) => wsRow(id, null)).join(""))}
-${bandSection("merged-section", "Recently Merged", merged, mergedGroups(merged, today, groups))}
 </div></div></div></nav>`;
 }
 
@@ -89,7 +98,7 @@ interface Fitted {
   railScrolls: boolean;
   /** The rail's room left under the pane, in px. */
   slack: number;
-  /** Recently Merged's viewport's computed mask, as fitted and once scrolled to its end. */
+  /** Deploys' viewport's computed mask, as fitted and once scrolled to its end. */
   mergedMask: { fitted: string; atEnd: string };
 }
 
@@ -109,7 +118,7 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
       const box = region.getBoundingClientRect();
       let whole = 0;
       let cut = 0;
-      for (const line of region.querySelectorAll(".row")) {
+      for (const line of region.querySelectorAll(".row, .sb-deploy-queue-label[data-empty]")) {
         const r = line.getBoundingClientRect();
         if (r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5) whole += 1;
         else if (r.top < box.bottom - 0.5 && r.bottom > box.top + 0.5) cut += 1;
@@ -221,29 +230,43 @@ describe("the band fit in WebKit", () => {
     expect(got.railScrolls).toBe(false);
   });
 
-  it("cuts no line of the Open section or Hidden Workspaces through in a rail out of room", async () => {
+  it("cuts no line of the Open section or Deploys through in a rail out of room", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
-    expect([got.open.cut, got.hidden.cut]).toEqual([0, 0]);
+    expect([got.open.cut, got.merged.cut]).toEqual([0, 0]);
   });
 
-  it("cuts at most Recently Merged's last line through, at the rail's foot", async () => {
+  it("cuts at most Hidden Workspaces' last line through, at the rail's foot", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
-    expect(got.merged.cut).toBeLessThanOrEqual(1);
+    expect(got.hidden.cut).toBeLessThanOrEqual(1);
   });
 
-  it("gives Hidden Workspaces five lines beside one merge today", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 1 }));
+  it("gives Hidden Workspaces five lines beside an empty Deploys' heading", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 0 }));
     expect([got.hidden.whole, got.merged.whole]).toEqual([5, 1]);
   });
 
-  it("gives Hidden Workspaces four lines beside two merges today", async () => {
-    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 2 }));
+  it("gives Hidden Workspaces four lines beside the heading and one merge today", async () => {
+    const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 1 }));
     expect([got.hidden.whole, got.merged.whole]).toEqual([4, 2]);
   });
 
   it("shows no older merge while the Open section scrolls", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, today: 0 }));
-    expect([got.hidden.whole, got.merged.whole]).toEqual([6, 0]);
+    expect([got.hidden.whole, got.merged.whole]).toEqual([5, 1]);
+  });
+
+  it("shrinks Hidden Workspaces before Deploys, at every short rail height", async () => {
+    // A line the rail still has room for is never left unused, so a Deploys
+    // line too tall for the room can leave a shorter Hidden line shown; but
+    // Hidden Workspaces never keeps its share while Deploys loses a line of
+    // its own, and some rail keeps Deploys whole while Hidden shrinks.
+    const heights = Array.from({ length: 41 }, (_, i) => 150 + i * 5);
+    const fitted = [];
+    for (const height of heights) fitted.push(await fit(page, rail(height, { live: 40, hidden: 20, merged: 20 })));
+    expect([
+      fitted.some((got) => got.merged.whole < 3 && got.hidden.whole >= 3),
+      fitted.some((got) => got.merged.whole === 3 && got.hidden.whole < 3),
+    ]).toEqual([false, true]);
   });
 
   it("shows three whole merged lines across several repository groups", async () => {
@@ -268,7 +291,7 @@ describe("the band fit in WebKit", () => {
       false,
       4,
       false,
-      5,
+      6,
       false,
     ]);
   });
@@ -292,13 +315,18 @@ describe("the band fit in WebKit", () => {
     expect(await unsettled(page, heights, { live: 12, hidden: 9, merged: 9, today: 4 })).toEqual([]);
   });
 
-  it("grows Hidden Workspaces, not Recently Merged, into the room a whole Open section leaves", async () => {
+  it("grows today's merges, not Hidden Workspaces, into the room a whole Open section leaves", async () => {
     const got = await fit(page, rail(880, { live: 2, hidden: 40, merged: 40 }));
-    expect([got.hidden.whole > 3, got.merged.whole, got.railScrolls]).toEqual([true, 3, false]);
+    expect([got.merged.whole > 3, got.hidden.whole, got.railScrolls]).toEqual([true, 3, false]);
   });
 
-  it("grows Recently Merged into the room a whole Open section and Hidden Workspaces leave", async () => {
-    const got = await fit(page, rail(880, { live: 2, hidden: 4, merged: 40 }));
+  it("grows Hidden Workspaces, not older merges, into the room a whole Open section leaves", async () => {
+    const got = await fit(page, rail(880, { live: 2, hidden: 40, merged: 40, today: 0 }));
+    expect([got.hidden.whole > 5, got.merged.whole, got.railScrolls]).toEqual([true, 1, false]);
+  });
+
+  it("grows older merges into the room a whole Open section and Hidden Workspaces leave", async () => {
+    const got = await fit(page, rail(880, { live: 2, hidden: 4, merged: 40, today: 0 }));
     expect([got.hidden.whole, got.merged.whole > 3, got.railScrolls]).toEqual([4, true, false]);
   });
 
@@ -312,12 +340,12 @@ describe("the band fit in WebKit", () => {
     expect(short).toEqual([]);
   });
 
-  it("fades the foot of Recently Merged's viewport while it cuts a line", async () => {
+  it("fades the foot of a capped Deploys viewport while rows lie below it", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
     expect(got.mergedMask.fitted).toContain("linear-gradient");
   });
 
-  it("drops the fade once Recently Merged is scrolled to its end", async () => {
+  it("drops the fade once Deploys is scrolled to its end", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
     expect(got.mergedMask.atEnd).toBe("none");
   });

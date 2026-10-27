@@ -1,9 +1,9 @@
 /**
- * roster — the rail: the open workspaces by repository, the hidden
- * workspaces, and the Merge Queue section, one copy of each (owner ruling,
+ * roster — the rail: the open workspaces by repository, the Deploys
+ * section, and the hidden workspaces, one copy of each (owner ruling,
  * 2026-10-15). Nothing is re-grouped, re-sorted or counted here.
  *
- * THE MERGE QUEUE SECTION has no key of its own (the roster carries exactly
+ * THE DEPLOYS SECTION has no key of its own (the roster carries exactly
  * one), so its fold identity is fixed. It draws every repository's merge
  * queue (`merge-queue-view.ts`), and below them its recently merged
  * workspaces in one group per repository, a merged group following its
@@ -19,6 +19,7 @@
  */
 import {
   BAND_FLOOR,
+  EMPTY_SUBSECTION_ATTRIBUTE,
   HIDDEN_SECTION_CLASS,
   MERGED_AT_ATTRIBUTE,
   MERGED_SECTION_CLASS,
@@ -87,7 +88,7 @@ import {
   type RosterSectionFold,
 } from "./section-fold.js";
 import { openScope, type DrawScope } from "./scope.js";
-import { drawRosterMergeQueueRepoGroup, MERGE_QUEUES_CLASS } from "./merge-queue-view.js";
+import { DEPLOY_QUEUE_LABEL_CLASS, drawRosterMergeQueueRepoGroup, MERGE_QUEUES_CLASS } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
   drawRosterRowDetailCommits,
@@ -151,7 +152,7 @@ interface DrawnSection<W, D extends Drawn = Drawn> {
  * A PUSH REDRAWS ONLY WHAT IT CHANGED (2026-10-15). Every push used to throw
  * the whole rail away and rebuild it: 45ms and more of script for a push that
  * changed one row, and pushes come in bursts. A section — a repository's, the
- * hidden band, the Merge Queue section, the open section's heading — whose
+ * hidden band, the Deploys section, the open section's heading — whose
  * wire is equal to the one it was drawn from is kept, DOM, view copies, clocks
  * and all (`scope.ts`); a changed one is drawn anew and the old one's scope
  * disposed. Equality is the wire's own, so nothing here decides what changed.
@@ -163,7 +164,8 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   const roster = document.createElement("div");
   roster.className = "sb-roster";
   // ONE COPY OF EVERY SECTION (owner ruling, 2026-10-15): the open workspaces
-  // by repository, then the hidden workspaces, then the Merge Queue section.
+  // by repository, then the Deploys section, then the hidden workspaces
+  // (owner request, 2026-10-27: Deploys moved above Hidden).
   // The pane is the box band-fit.ts fits the three sections' viewports in.
   const pane = document.createElement("div");
   pane.className = "sb-pane";
@@ -301,7 +303,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
         (scoped) => ({ element: drawRosterMergedSection(mergedWire, scoped, `${path}.recently_merged`) }),
         discarded,
       );
-      placeChildren(pane, [open.drawn.element, hidden.drawn.element, merged.drawn.element]);
+      placeChildren(pane, [open.drawn.element, merged.drawn.element, hidden.drawn.element]);
 
       // Disposed only once every kept section has moved into the new drawing,
       // so a discarded box's teardown never reaches a kept section's rows.
@@ -439,7 +441,7 @@ export const OPEN_COUNT_CLASS = "sb-open-count";
 
 /**
  * The open-workspaces section: the "Open" heading over the repository
- * sections, drawn like the Hidden and Merge Queue headings, with "(N)"
+ * sections, drawn like the Hidden and Deploys headings, with "(N)"
  * beside the label whether the section is folded or not (owner request,
  * 2026-10-13). N is the daemon's sum of the sections' counts, so it is what a
  * person counting the section's entries arrives at, a folded section's
@@ -679,25 +681,22 @@ export function drawRosterRepoKey(u: RosterRepoKey, path: string): RepositoryRef
 }
 
 /**
- * The Merge Queue section (owner request, 2026-10-26): every repository's
- * merge queue at its top (`merge-queue-view.ts`), then, under a "Recently
- * Merged" heading, the settled merges hoisted out of every grouping, in one
- * group per repository.
+ * The Deploys section (owner request, 2026-10-26; renamed from Merge Queue
+ * 2026-10-27), drawn directly under the Open section and above Hidden: a
+ * "Deploy Queue" heading over every repository's merge queue
+ * (`merge-queue-view.ts`), then, under a "Recently Deployed" heading, the
+ * settled merges hoisted out of every grouping, in one group per repository.
  *
  * ITS HEADER COUNTS NOTHING (owner request, 2026-10-27): each queue group
- * counts the merges in its own line, and the "Recently Merged" heading counts
- * today's merges, "(K today)", with the commits they brought in on its hover.
- * Its label is always the purple of a merge in progress; a paused queue is
- * drawn on its own group (`merge-queue-view.ts`).
+ * counts the merges in its own line, and the "Recently Deployed" heading
+ * counts today's merges, "(K today)", with the commits they brought in on its
+ * hover. Its label is always the purple of a merge in progress; a paused
+ * queue is drawn on its own group (`merge-queue-view.ts`).
  *
- * A SECTION THAT SHOWS NOTHING IS NOT DRAWN. The wire always carries the
- * section -- the roster's `recently_merged` is a plain field with a
- * resolver-composed heading, and its absence would be a contract breach, not
- * an empty section -- so the emptiness is answered HERE: with no queue listed
- * and no merge in a group whose repository is expanded, a heading over no
- * rows is a fold toggle onto nothing. A REPOSITORY section still draws with no
- * rows, because the grouping would flicker as its last workspace merged; this
- * section has no place to keep, so it goes away entire until a merge shows.
+ * THE SECTION ALWAYS DRAWS, and so does its "Deploy Queue" heading (owner
+ * request, 2026-10-27): with no queue listed the heading stands alone, marked
+ * `EMPTY_SUBSECTION_ATTRIBUTE` as an empty subsection's header is, and is a line of its own in the band fit,
+ * so an empty queue reads as empty rather than absent.
  *
  * EVERY MERGE THE DAEMON SENDS IS DRAWN (a week of them); once the section is
  * laid out, `fitBands` (band-fit.ts) sizes its scrolling viewport against the
@@ -714,6 +713,7 @@ export function drawRosterMergedSection(
       drawRosterMergedRepoGroupHeader(requireMessage(group.header, headerPath), headerPath),
     ),
   );
+  const queueLabel = drawSectionLabel(requireMessage(u.queueLabel, `${path}.queue_label`), `${path}.queue_label`);
   const mergedLabel = drawSectionLabel(requireMessage(u.mergedLabel, `${path}.merged_label`), `${path}.merged_label`);
   const drawnNow = { left: MERGED_DRAWN_AT_ONCE };
   const groups = u.groups.map((group, index) =>
@@ -729,25 +729,19 @@ export function drawRosterMergedSection(
       target: { case: "recentlyMerged", value: {} },
       foldBy: "header",
       countless: true,
-      leftOut: {
-        when: () => queues.length === 0 && groups.every((g) => g.shownMerges.length === 0),
-        attribute: "data-merged-empty",
-      },
     },
     () => {
       const region = document.createElement("div");
       region.className = "rows";
-      if (queues.length > 0) {
-        const box = document.createElement("div");
-        box.className = MERGE_QUEUES_CLASS;
-        box.append(...queues);
-        region.appendChild(box);
-      }
+      const box = document.createElement("div");
+      box.className = MERGE_QUEUES_CLASS;
+      const queueHeading = drawDeploysHeading(DEPLOY_QUEUE_LABEL_CLASS, queueLabel);
+      queueHeading.toggleAttribute(EMPTY_SUBSECTION_ATTRIBUTE, queues.length === 0);
+      box.append(queueHeading, ...queues);
+      region.appendChild(box);
       if (groups.length > 0) {
-        const heading = document.createElement("div");
-        heading.className = MERGED_LABEL_CLASS;
         const merges = groups.flatMap((g) => g.shownMerges);
-        heading.append(mergedLabel, drawMergedTodayCount(merges, sc));
+        const heading = drawDeploysHeading(MERGED_LABEL_CLASS, mergedLabel, drawMergedTodayCount(merges, sc));
         tickMergedTodayCommits(heading, merges, sc);
         region.appendChild(heading);
       }
@@ -759,7 +753,19 @@ export function drawRosterMergedSection(
 }
 
 /**
- * The class of the "Recently Merged" heading over the merged groups, below
+ * One of the Deploys section's two headings, "Deploy Queue" and "Recently
+ * Deployed": a CLASS_NAME box holding its drawn LABEL and whatever follows
+ * it (the latter's "(K today)"). The stylesheet draws both alike.
+ */
+export function drawDeploysHeading(className: string, label: HTMLElement, ...after: HTMLElement[]): HTMLElement {
+  const heading = document.createElement("div");
+  heading.className = className;
+  heading.append(label, ...after);
+  return heading;
+}
+
+/**
+ * The class of the "Recently Deployed" heading over the merged groups, below
  * the queues. The stylesheet hides it while every group under it is left out
  * (its repository collapsed).
  */
@@ -887,11 +893,11 @@ export function paintMergedRepoGroup(group: HTMLElement, collapsed: boolean): vo
   group.setAttribute(MERGED_REPOSITORY_COLLAPSED_ATTRIBUTE, collapsed ? "true" : "false");
 }
 
-/** The class of the "Recently Merged" heading's today count. */
+/** The class of the "Recently Deployed" heading's today count. */
 export const MERGED_TODAY_COUNT_CLASS = "sb-today-count";
 
 /**
- * The "Recently Merged" heading's "(K today)": how many of its merges landed
+ * The "Recently Deployed" heading's "(K today)": how many of its merges landed
  * TODAY (local date), counted over every row of its SHOWN groups the daemon
  * sent, including those scrolled out of view (owner requests, 2026-10-11 and
  * 2026-10-27). The shared ticker recounts it, so it drops at midnight
@@ -916,7 +922,7 @@ export function todaysMerges(merges: MergedRowFacts[], nowMs: number): MergedRow
 }
 
 /**
- * Paint the "Recently Merged" heading's hover now and on every tick: the
+ * Paint the "Recently Deployed" heading's hover now and on every tick: the
  * commits today's merges brought in, summed (owner request, 2026-10-14). The
  * ticker drops a merge from the sum at midnight.
  */
@@ -954,7 +960,7 @@ export function mergedTodayCommitsText(today: MergedRowFacts[]): string {
  * nothing is a fold toggle onto nothing.
  *
  * ITS ROWS SCROLL once the rail is out of room: `fitBands` (band-fit.ts)
- * sizes its viewport against the Open section's and the Merge Queue
+ * sizes its viewport against the Open section's and the Deploys
  * section's.
  *
  * CLICKING A ROW SHOWS THE WORKSPACE AGAIN (`SetWorkspaceHidden`), rather
@@ -987,7 +993,7 @@ export function drawRosterHiddenSection(
   );
 }
 
-/** The header repos and the Merge Queue section share: a label and a fold toggle. */
+/** The header repos and the Deploys section share: a label and a fold toggle. */
 export function drawRosterSectionHeader(
   u: RosterSectionHeader,
   section: HTMLElement,

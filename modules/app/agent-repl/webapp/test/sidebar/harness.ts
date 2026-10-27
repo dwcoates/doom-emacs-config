@@ -383,10 +383,11 @@ export function mergedBand(
   queues: { queues?: RosterMergeQueueRepoGroup[] } = {},
 ): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
-    header: { label: { text: "Merge Queue" } },
+    header: { label: { text: "Deploys" } },
     groups,
     queues: queues.queues ?? [],
-    mergedLabel: { text: "Recently Merged" },
+    queueLabel: { text: "Deploy Queue" },
+    mergedLabel: { text: "Recently Deployed" },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });
 }

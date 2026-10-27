@@ -287,11 +287,11 @@ describe("row decoration", () => {
     ).toBe(true);
   });
 
-  it("draws the recently merged section", async () => {
+  it("draws the recently deployed heading", async () => {
     // Arrange / Act
     await withRoster({});
     // Assert
-    expect(harness.$('[data-component="sidebar"]')?.textContent).toContain("recently merged");
+    expect(harness.$('[data-component="sidebar"]')?.textContent).toContain("recently deployed");
   });
 
   it("draws a merged row in the merged section", async () => {
@@ -309,11 +309,12 @@ describe("row decoration", () => {
     expect(group?.querySelector(".merged-group-head")?.textContent).toBe("doom");
   });
 
-  it("leaves a collapsed repository's merges out of the band", async () => {
+  it("leaves a collapsed repository's merges out of the band, the band still drawn", async () => {
     // Arrange / Act
     await withRoster({ mergedCollapsed: false, mergedRepositoryCollapsed: true });
     // Assert
-    expect(harness.$('.sb-pane .merged-section')?.getAttribute("data-merged-empty")).toBe("true");
+    const band = harness.$(".sb-pane .merged-section") as HTMLElement | null;
+    expect([band?.hidden, band?.querySelector<HTMLElement>(".merged-group")?.hidden]).toEqual([false, true]);
   });
 });
 
@@ -607,13 +608,13 @@ describe("roster ordering", () => {
       ],
     });
     // Assert
-    // The open workspaces section heads the pane and the recently-merged
-    // section is its last, by construction.
+    // The open workspaces section heads the pane and the Deploys section
+    // follows it, by construction (an empty Hidden section is left out).
     expect(harness.texts('.sb-pane .repo-head .sb-label')).toEqual([
       "Open",
       "zulu",
       "alpha",
-      "merge queue",
+      "deploys",
     ]);
   });
 

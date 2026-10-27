@@ -6265,8 +6265,10 @@ func (x *RosterRepoKey) GetRepository() *v1.RepositoryRef {
 // whole band.
 type RosterMergedSection struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The section's label, "Merge Queue", drawn in the purple of a merge in
-	// progress whatever its queues stand at. It carries NO COUNT (its `count`
+	// The section's label, "Deploys" (owner request, 2026-10-27; it was "Merge
+	// Queue"), drawn in the purple of a merge in progress whatever its queues
+	// stand at. The section is drawn directly under the Open section, above
+	// the Hidden section (owner request, 2026-10-27). It carries NO COUNT (its `count`
 	// is unset): each queue group counts its own line
 	// (RosterMergeQueueRepoGroup.count, owner request 2026-10-27).
 	Header *RosterSectionHeader `protobuf:"bytes,1,opt,name=header,proto3" json:"header,omitempty"`
@@ -6289,8 +6291,14 @@ type RosterMergedSection struct {
 	// its repository is folded.
 	Queues []*RosterMergeQueueRepoGroup `protobuf:"bytes,6,rep,name=queues,proto3" json:"queues,omitempty"`
 	// The heading drawn over the merged groups, below the queues, while any
-	// group is drawn: "Recently Merged". Always set.
+	// group is drawn: "Recently Deployed" (owner request, 2026-10-27; it was
+	// "Recently Merged"). Always set.
 	MergedLabel *RosterLabel `protobuf:"bytes,7,opt,name=merged_label,json=mergedLabel,proto3" json:"merged_label,omitempty"`
+	// The heading drawn over the queues, at the top of the section: "Deploy
+	// Queue" (owner request, 2026-10-27). It is drawn ALWAYS, even while no
+	// queue is listed, so an empty queue reads as empty rather than absent.
+	// Always set.
+	QueueLabel *RosterLabel `protobuf:"bytes,9,opt,name=queue_label,json=queueLabel,proto3" json:"queue_label,omitempty"`
 	// WHETHER THE BAND IS FOLDED. DAEMON-HELD (UpdateSidebarView), because a
 	// fold is no page's own: opening it in one workspace's page opens it in
 	// every page (owner ruling, 2026-10-06). Never folded or unfolded by
@@ -6360,6 +6368,13 @@ func (x *RosterMergedSection) GetQueues() []*RosterMergeQueueRepoGroup {
 func (x *RosterMergedSection) GetMergedLabel() *RosterLabel {
 	if x != nil {
 		return x.MergedLabel
+	}
+	return nil
+}
+
+func (x *RosterMergedSection) GetQueueLabel() *RosterLabel {
+	if x != nil {
+		return x.QueueLabel
 	}
 	return nil
 }
@@ -11010,12 +11025,14 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\rRosterRepoKey\x12;\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
-	"repository\"\xc9\x03\n" +
+	"repository\"\x84\x04\n" +
 	"\x13RosterMergedSection\x128\n" +
 	"\x06header\x18\x01 \x01(\v2 .frontend.v1.RosterSectionHeaderR\x06header\x12:\n" +
 	"\x06groups\x18\x05 \x03(\v2\".frontend.v1.RosterMergedRepoGroupR\x06groups\x12>\n" +
 	"\x06queues\x18\x06 \x03(\v2&.frontend.v1.RosterMergeQueueRepoGroupR\x06queues\x12;\n" +
-	"\fmerged_label\x18\a \x01(\v2\x18.frontend.v1.RosterLabelR\vmergedLabel\x12F\n" +
+	"\fmerged_label\x18\a \x01(\v2\x18.frontend.v1.RosterLabelR\vmergedLabel\x129\n" +
+	"\vqueue_label\x18\t \x01(\v2\x18.frontend.v1.RosterLabelR\n" +
+	"queueLabel\x12F\n" +
 	"\bexpanded\x18\x03 \x01(\v2(.frontend.v1.RosterMergedSectionExpandedH\x00R\bexpanded\x12I\n" +
 	"\tcollapsed\x18\x04 \x01(\v2).frontend.v1.RosterMergedSectionCollapsedH\x00R\tcollapsedB\x06\n" +
 	"\x04foldJ\x04\b\x02\x10\x03J\x04\b\b\x10\tR\x04rowsR\x12merge_queue_paused\"\xfb\x01\n" +
@@ -11548,99 +11565,100 @@ var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	105, // 114: frontend.v1.RosterMergedSection.groups:type_name -> frontend.v1.RosterMergedRepoGroup
 	102, // 115: frontend.v1.RosterMergedSection.queues:type_name -> frontend.v1.RosterMergeQueueRepoGroup
 	114, // 116: frontend.v1.RosterMergedSection.merged_label:type_name -> frontend.v1.RosterLabel
-	103, // 117: frontend.v1.RosterMergedSection.expanded:type_name -> frontend.v1.RosterMergedSectionExpanded
-	104, // 118: frontend.v1.RosterMergedSection.collapsed:type_name -> frontend.v1.RosterMergedSectionCollapsed
-	100, // 119: frontend.v1.RosterMergeQueueRepoGroup.key:type_name -> frontend.v1.RosterRepoKey
-	106, // 120: frontend.v1.RosterMergeQueueRepoGroup.header:type_name -> frontend.v1.RosterMergedRepoGroupHeader
-	63,  // 121: frontend.v1.RosterMergeQueueRepoGroup.queue:type_name -> frontend.v1.RosterRepoMergeQueue
-	113, // 122: frontend.v1.RosterMergeQueueRepoGroup.count:type_name -> frontend.v1.RosterSectionCount
-	100, // 123: frontend.v1.RosterMergedRepoGroup.key:type_name -> frontend.v1.RosterRepoKey
-	106, // 124: frontend.v1.RosterMergedRepoGroup.header:type_name -> frontend.v1.RosterMergedRepoGroupHeader
-	38,  // 125: frontend.v1.RosterMergedRepoGroup.merged_rows:type_name -> frontend.v1.RosterMergedRows
-	107, // 126: frontend.v1.RosterMergedRepoGroup.shown:type_name -> frontend.v1.RosterMergedRepoGroupShown
-	108, // 127: frontend.v1.RosterMergedRepoGroup.repository_collapsed:type_name -> frontend.v1.RosterMergedRepoGroupRepositoryCollapsed
-	114, // 128: frontend.v1.RosterMergedRepoGroupHeader.label:type_name -> frontend.v1.RosterLabel
-	112, // 129: frontend.v1.RosterHiddenSection.header:type_name -> frontend.v1.RosterSectionHeader
-	36,  // 130: frontend.v1.RosterHiddenSection.hidden_rows:type_name -> frontend.v1.RosterHiddenRows
-	110, // 131: frontend.v1.RosterHiddenSection.expanded:type_name -> frontend.v1.RosterHiddenSectionExpanded
-	111, // 132: frontend.v1.RosterHiddenSection.collapsed:type_name -> frontend.v1.RosterHiddenSectionCollapsed
-	114, // 133: frontend.v1.RosterSectionHeader.label:type_name -> frontend.v1.RosterLabel
-	113, // 134: frontend.v1.RosterSectionHeader.count:type_name -> frontend.v1.RosterSectionCount
-	116, // 135: frontend.v1.RosterRow.workspace:type_name -> frontend.v1.RosterRowWorkspace
-	43,  // 136: frontend.v1.RosterRow.attention:type_name -> frontend.v1.RosterRowAttention
-	42,  // 137: frontend.v1.RosterRow.priority:type_name -> frontend.v1.RosterRowPriorityBadge
-	44,  // 138: frontend.v1.RosterRow.viewed:type_name -> frontend.v1.RosterRowViewed
-	45,  // 139: frontend.v1.RosterRow.idle_async_unread:type_name -> frontend.v1.RosterRowIdleAsyncUnread
-	46,  // 140: frontend.v1.RosterRow.reviving:type_name -> frontend.v1.RosterRowReviving
-	118, // 141: frontend.v1.RosterRow.last_selected:type_name -> frontend.v1.RosterRowLastSelected
-	119, // 142: frontend.v1.RosterRow.last_turn_ended:type_name -> frontend.v1.RosterRowLastTurnEnded
-	120, // 143: frontend.v1.RosterRow.closure:type_name -> frontend.v1.RosterRowClosure
-	121, // 144: frontend.v1.RosterRow.last_updated:type_name -> frontend.v1.RosterRowLastUpdated
-	52,  // 145: frontend.v1.RosterRow.availability:type_name -> frontend.v1.RosterRowAvailability
-	47,  // 146: frontend.v1.RosterRow.detached_live:type_name -> frontend.v1.RosterRowDetachedLive
-	48,  // 147: frontend.v1.RosterRow.one_shot:type_name -> frontend.v1.RosterRowOneShot
-	51,  // 148: frontend.v1.RosterRow.opening:type_name -> frontend.v1.RosterRowOpening
-	49,  // 149: frontend.v1.RosterRow.async_merging:type_name -> frontend.v1.RosterRowAsyncMerging
-	50,  // 150: frontend.v1.RosterRow.merge_paused:type_name -> frontend.v1.RosterRowMergePaused
-	117, // 151: frontend.v1.RosterRow.name:type_name -> frontend.v1.RosterRowName
-	142, // 152: frontend.v1.RosterRow.submitting:type_name -> frontend.v1.RosterRowStatusSubmitting
-	143, // 153: frontend.v1.RosterRow.thinking:type_name -> frontend.v1.RosterRowStatusThinking
-	144, // 154: frontend.v1.RosterRow.clearing:type_name -> frontend.v1.RosterRowStatusClearing
-	145, // 155: frontend.v1.RosterRow.compacting:type_name -> frontend.v1.RosterRowStatusCompacting
-	146, // 156: frontend.v1.RosterRow.permission:type_name -> frontend.v1.RosterRowStatusPermission
-	147, // 157: frontend.v1.RosterRow.question:type_name -> frontend.v1.RosterRowStatusQuestion
-	148, // 158: frontend.v1.RosterRow.done:type_name -> frontend.v1.RosterRowStatusDone
-	149, // 159: frontend.v1.RosterRow.interrupted:type_name -> frontend.v1.RosterRowStatusInterrupted
-	150, // 160: frontend.v1.RosterRow.turn_failed:type_name -> frontend.v1.RosterRowStatusTurnFailed
-	151, // 161: frontend.v1.RosterRow.ready:type_name -> frontend.v1.RosterRowStatusReady
-	152, // 162: frontend.v1.RosterRow.idle_async:type_name -> frontend.v1.RosterRowStatusIdleAsync
-	153, // 163: frontend.v1.RosterRow.vendor_blocked:type_name -> frontend.v1.RosterRowStatusVendorBlocked
-	164, // 164: frontend.v1.RosterRow.vendor_fault:type_name -> frontend.v1.RosterRowStatusVendorFault
-	165, // 165: frontend.v1.RosterRow.network_fault:type_name -> frontend.v1.RosterRowStatusNetworkFault
-	160, // 166: frontend.v1.RosterRow.init:type_name -> frontend.v1.RosterRowStatusInit
-	161, // 167: frontend.v1.RosterRow.severed:type_name -> frontend.v1.RosterRowStatusSevered
-	162, // 168: frontend.v1.RosterRow.start_failed:type_name -> frontend.v1.RosterRowStatusStartFailed
-	163, // 169: frontend.v1.RosterRow.degraded:type_name -> frontend.v1.RosterRowStatusDegraded
-	166, // 170: frontend.v1.RosterRow.dead:type_name -> frontend.v1.RosterRowStatusDead
-	154, // 171: frontend.v1.RosterRow.turn_died:type_name -> frontend.v1.RosterRowStatusTurnDied
-	167, // 172: frontend.v1.RosterRow.merging:type_name -> frontend.v1.RosterRowStatusMerging
-	168, // 173: frontend.v1.RosterRow.merge_queued:type_name -> frontend.v1.RosterRowStatusMergeQueued
-	169, // 174: frontend.v1.RosterRow.merge_failed:type_name -> frontend.v1.RosterRowStatusMergeFailed
-	170, // 175: frontend.v1.RosterRow.merged:type_name -> frontend.v1.RosterRowStatusMerged
-	171, // 176: frontend.v1.RosterRow.none:type_name -> frontend.v1.RosterRowStatusNone
-	172, // 177: frontend.v1.RosterRow.inactive:type_name -> frontend.v1.RosterRowStatusInactive
-	155, // 178: frontend.v1.RosterRow.api_retrying:type_name -> frontend.v1.RosterRowStatusApiRetrying
-	156, // 179: frontend.v1.RosterRow.closing:type_name -> frontend.v1.RosterRowStatusClosing
-	157, // 180: frontend.v1.RosterRow.daemon_impaired:type_name -> frontend.v1.RosterRowStatusDaemonImpaired
-	158, // 181: frontend.v1.RosterRow.waiting:type_name -> frontend.v1.RosterRowStatusWaiting
-	159, // 182: frontend.v1.RosterRow.cold_gate:type_name -> frontend.v1.RosterRowStatusColdGate
-	126, // 183: frontend.v1.RosterRow.current:type_name -> frontend.v1.RosterRowCurrent
-	127, // 184: frontend.v1.RosterRow.when:type_name -> frontend.v1.RosterRowWhen
-	134, // 185: frontend.v1.RosterRow.detail:type_name -> frontend.v1.RosterRowDetail
-	141, // 186: frontend.v1.RosterRow.closed:type_name -> frontend.v1.RosterRowClosed
-	173, // 187: frontend.v1.RosterRowWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
-	122, // 188: frontend.v1.RosterRowClosure.user:type_name -> frontend.v1.RosterRowClosureByUser
-	123, // 189: frontend.v1.RosterRowClosure.agent:type_name -> frontend.v1.RosterRowClosureByAgent
-	124, // 190: frontend.v1.RosterRowClosure.merge:type_name -> frontend.v1.RosterRowClosureByMerge
-	125, // 191: frontend.v1.RosterRowClosure.daemon:type_name -> frontend.v1.RosterRowClosureByDaemon
-	130, // 192: frontend.v1.RosterRowWhen.merged:type_name -> frontend.v1.RosterRowWhenMerged
-	128, // 193: frontend.v1.RosterRowWhen.hidden:type_name -> frontend.v1.RosterRowWhenHidden
-	131, // 194: frontend.v1.RosterRowWhen.turn_running:type_name -> frontend.v1.RosterRowWhenTurnRunning
-	132, // 195: frontend.v1.RosterRowWhen.no_turn_running:type_name -> frontend.v1.RosterRowWhenNoTurnRunning
-	133, // 196: frontend.v1.RosterRowWhen.sync_merging:type_name -> frontend.v1.RosterRowWhenSyncMerging
-	129, // 197: frontend.v1.RosterRowWhenHidden.cache:type_name -> frontend.v1.RosterRowWhenHiddenCache
-	137, // 198: frontend.v1.RosterRowDetail.branch:type_name -> frontend.v1.RosterRowDetailBranch
-	138, // 199: frontend.v1.RosterRowDetail.parent_branch:type_name -> frontend.v1.RosterRowDetailParentBranch
-	139, // 200: frontend.v1.RosterRowDetail.summary:type_name -> frontend.v1.RosterRowDetailSummary
-	140, // 201: frontend.v1.RosterRowDetail.commits:type_name -> frontend.v1.RosterRowDetailCommits
-	135, // 202: frontend.v1.RosterRowDetail.children:type_name -> frontend.v1.RosterRowDetailChild
-	173, // 203: frontend.v1.RosterRowDetailChild.workspace:type_name -> workspace.v1.WorkspaceRef
-	136, // 204: frontend.v1.RosterRowDetailChild.receded:type_name -> frontend.v1.RosterRowDetailChildReceded
-	205, // [205:205] is the sub-list for method output_type
-	205, // [205:205] is the sub-list for method input_type
-	205, // [205:205] is the sub-list for extension type_name
-	205, // [205:205] is the sub-list for extension extendee
-	0,   // [0:205] is the sub-list for field type_name
+	114, // 117: frontend.v1.RosterMergedSection.queue_label:type_name -> frontend.v1.RosterLabel
+	103, // 118: frontend.v1.RosterMergedSection.expanded:type_name -> frontend.v1.RosterMergedSectionExpanded
+	104, // 119: frontend.v1.RosterMergedSection.collapsed:type_name -> frontend.v1.RosterMergedSectionCollapsed
+	100, // 120: frontend.v1.RosterMergeQueueRepoGroup.key:type_name -> frontend.v1.RosterRepoKey
+	106, // 121: frontend.v1.RosterMergeQueueRepoGroup.header:type_name -> frontend.v1.RosterMergedRepoGroupHeader
+	63,  // 122: frontend.v1.RosterMergeQueueRepoGroup.queue:type_name -> frontend.v1.RosterRepoMergeQueue
+	113, // 123: frontend.v1.RosterMergeQueueRepoGroup.count:type_name -> frontend.v1.RosterSectionCount
+	100, // 124: frontend.v1.RosterMergedRepoGroup.key:type_name -> frontend.v1.RosterRepoKey
+	106, // 125: frontend.v1.RosterMergedRepoGroup.header:type_name -> frontend.v1.RosterMergedRepoGroupHeader
+	38,  // 126: frontend.v1.RosterMergedRepoGroup.merged_rows:type_name -> frontend.v1.RosterMergedRows
+	107, // 127: frontend.v1.RosterMergedRepoGroup.shown:type_name -> frontend.v1.RosterMergedRepoGroupShown
+	108, // 128: frontend.v1.RosterMergedRepoGroup.repository_collapsed:type_name -> frontend.v1.RosterMergedRepoGroupRepositoryCollapsed
+	114, // 129: frontend.v1.RosterMergedRepoGroupHeader.label:type_name -> frontend.v1.RosterLabel
+	112, // 130: frontend.v1.RosterHiddenSection.header:type_name -> frontend.v1.RosterSectionHeader
+	36,  // 131: frontend.v1.RosterHiddenSection.hidden_rows:type_name -> frontend.v1.RosterHiddenRows
+	110, // 132: frontend.v1.RosterHiddenSection.expanded:type_name -> frontend.v1.RosterHiddenSectionExpanded
+	111, // 133: frontend.v1.RosterHiddenSection.collapsed:type_name -> frontend.v1.RosterHiddenSectionCollapsed
+	114, // 134: frontend.v1.RosterSectionHeader.label:type_name -> frontend.v1.RosterLabel
+	113, // 135: frontend.v1.RosterSectionHeader.count:type_name -> frontend.v1.RosterSectionCount
+	116, // 136: frontend.v1.RosterRow.workspace:type_name -> frontend.v1.RosterRowWorkspace
+	43,  // 137: frontend.v1.RosterRow.attention:type_name -> frontend.v1.RosterRowAttention
+	42,  // 138: frontend.v1.RosterRow.priority:type_name -> frontend.v1.RosterRowPriorityBadge
+	44,  // 139: frontend.v1.RosterRow.viewed:type_name -> frontend.v1.RosterRowViewed
+	45,  // 140: frontend.v1.RosterRow.idle_async_unread:type_name -> frontend.v1.RosterRowIdleAsyncUnread
+	46,  // 141: frontend.v1.RosterRow.reviving:type_name -> frontend.v1.RosterRowReviving
+	118, // 142: frontend.v1.RosterRow.last_selected:type_name -> frontend.v1.RosterRowLastSelected
+	119, // 143: frontend.v1.RosterRow.last_turn_ended:type_name -> frontend.v1.RosterRowLastTurnEnded
+	120, // 144: frontend.v1.RosterRow.closure:type_name -> frontend.v1.RosterRowClosure
+	121, // 145: frontend.v1.RosterRow.last_updated:type_name -> frontend.v1.RosterRowLastUpdated
+	52,  // 146: frontend.v1.RosterRow.availability:type_name -> frontend.v1.RosterRowAvailability
+	47,  // 147: frontend.v1.RosterRow.detached_live:type_name -> frontend.v1.RosterRowDetachedLive
+	48,  // 148: frontend.v1.RosterRow.one_shot:type_name -> frontend.v1.RosterRowOneShot
+	51,  // 149: frontend.v1.RosterRow.opening:type_name -> frontend.v1.RosterRowOpening
+	49,  // 150: frontend.v1.RosterRow.async_merging:type_name -> frontend.v1.RosterRowAsyncMerging
+	50,  // 151: frontend.v1.RosterRow.merge_paused:type_name -> frontend.v1.RosterRowMergePaused
+	117, // 152: frontend.v1.RosterRow.name:type_name -> frontend.v1.RosterRowName
+	142, // 153: frontend.v1.RosterRow.submitting:type_name -> frontend.v1.RosterRowStatusSubmitting
+	143, // 154: frontend.v1.RosterRow.thinking:type_name -> frontend.v1.RosterRowStatusThinking
+	144, // 155: frontend.v1.RosterRow.clearing:type_name -> frontend.v1.RosterRowStatusClearing
+	145, // 156: frontend.v1.RosterRow.compacting:type_name -> frontend.v1.RosterRowStatusCompacting
+	146, // 157: frontend.v1.RosterRow.permission:type_name -> frontend.v1.RosterRowStatusPermission
+	147, // 158: frontend.v1.RosterRow.question:type_name -> frontend.v1.RosterRowStatusQuestion
+	148, // 159: frontend.v1.RosterRow.done:type_name -> frontend.v1.RosterRowStatusDone
+	149, // 160: frontend.v1.RosterRow.interrupted:type_name -> frontend.v1.RosterRowStatusInterrupted
+	150, // 161: frontend.v1.RosterRow.turn_failed:type_name -> frontend.v1.RosterRowStatusTurnFailed
+	151, // 162: frontend.v1.RosterRow.ready:type_name -> frontend.v1.RosterRowStatusReady
+	152, // 163: frontend.v1.RosterRow.idle_async:type_name -> frontend.v1.RosterRowStatusIdleAsync
+	153, // 164: frontend.v1.RosterRow.vendor_blocked:type_name -> frontend.v1.RosterRowStatusVendorBlocked
+	164, // 165: frontend.v1.RosterRow.vendor_fault:type_name -> frontend.v1.RosterRowStatusVendorFault
+	165, // 166: frontend.v1.RosterRow.network_fault:type_name -> frontend.v1.RosterRowStatusNetworkFault
+	160, // 167: frontend.v1.RosterRow.init:type_name -> frontend.v1.RosterRowStatusInit
+	161, // 168: frontend.v1.RosterRow.severed:type_name -> frontend.v1.RosterRowStatusSevered
+	162, // 169: frontend.v1.RosterRow.start_failed:type_name -> frontend.v1.RosterRowStatusStartFailed
+	163, // 170: frontend.v1.RosterRow.degraded:type_name -> frontend.v1.RosterRowStatusDegraded
+	166, // 171: frontend.v1.RosterRow.dead:type_name -> frontend.v1.RosterRowStatusDead
+	154, // 172: frontend.v1.RosterRow.turn_died:type_name -> frontend.v1.RosterRowStatusTurnDied
+	167, // 173: frontend.v1.RosterRow.merging:type_name -> frontend.v1.RosterRowStatusMerging
+	168, // 174: frontend.v1.RosterRow.merge_queued:type_name -> frontend.v1.RosterRowStatusMergeQueued
+	169, // 175: frontend.v1.RosterRow.merge_failed:type_name -> frontend.v1.RosterRowStatusMergeFailed
+	170, // 176: frontend.v1.RosterRow.merged:type_name -> frontend.v1.RosterRowStatusMerged
+	171, // 177: frontend.v1.RosterRow.none:type_name -> frontend.v1.RosterRowStatusNone
+	172, // 178: frontend.v1.RosterRow.inactive:type_name -> frontend.v1.RosterRowStatusInactive
+	155, // 179: frontend.v1.RosterRow.api_retrying:type_name -> frontend.v1.RosterRowStatusApiRetrying
+	156, // 180: frontend.v1.RosterRow.closing:type_name -> frontend.v1.RosterRowStatusClosing
+	157, // 181: frontend.v1.RosterRow.daemon_impaired:type_name -> frontend.v1.RosterRowStatusDaemonImpaired
+	158, // 182: frontend.v1.RosterRow.waiting:type_name -> frontend.v1.RosterRowStatusWaiting
+	159, // 183: frontend.v1.RosterRow.cold_gate:type_name -> frontend.v1.RosterRowStatusColdGate
+	126, // 184: frontend.v1.RosterRow.current:type_name -> frontend.v1.RosterRowCurrent
+	127, // 185: frontend.v1.RosterRow.when:type_name -> frontend.v1.RosterRowWhen
+	134, // 186: frontend.v1.RosterRow.detail:type_name -> frontend.v1.RosterRowDetail
+	141, // 187: frontend.v1.RosterRow.closed:type_name -> frontend.v1.RosterRowClosed
+	173, // 188: frontend.v1.RosterRowWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	122, // 189: frontend.v1.RosterRowClosure.user:type_name -> frontend.v1.RosterRowClosureByUser
+	123, // 190: frontend.v1.RosterRowClosure.agent:type_name -> frontend.v1.RosterRowClosureByAgent
+	124, // 191: frontend.v1.RosterRowClosure.merge:type_name -> frontend.v1.RosterRowClosureByMerge
+	125, // 192: frontend.v1.RosterRowClosure.daemon:type_name -> frontend.v1.RosterRowClosureByDaemon
+	130, // 193: frontend.v1.RosterRowWhen.merged:type_name -> frontend.v1.RosterRowWhenMerged
+	128, // 194: frontend.v1.RosterRowWhen.hidden:type_name -> frontend.v1.RosterRowWhenHidden
+	131, // 195: frontend.v1.RosterRowWhen.turn_running:type_name -> frontend.v1.RosterRowWhenTurnRunning
+	132, // 196: frontend.v1.RosterRowWhen.no_turn_running:type_name -> frontend.v1.RosterRowWhenNoTurnRunning
+	133, // 197: frontend.v1.RosterRowWhen.sync_merging:type_name -> frontend.v1.RosterRowWhenSyncMerging
+	129, // 198: frontend.v1.RosterRowWhenHidden.cache:type_name -> frontend.v1.RosterRowWhenHiddenCache
+	137, // 199: frontend.v1.RosterRowDetail.branch:type_name -> frontend.v1.RosterRowDetailBranch
+	138, // 200: frontend.v1.RosterRowDetail.parent_branch:type_name -> frontend.v1.RosterRowDetailParentBranch
+	139, // 201: frontend.v1.RosterRowDetail.summary:type_name -> frontend.v1.RosterRowDetailSummary
+	140, // 202: frontend.v1.RosterRowDetail.commits:type_name -> frontend.v1.RosterRowDetailCommits
+	135, // 203: frontend.v1.RosterRowDetail.children:type_name -> frontend.v1.RosterRowDetailChild
+	173, // 204: frontend.v1.RosterRowDetailChild.workspace:type_name -> workspace.v1.WorkspaceRef
+	136, // 205: frontend.v1.RosterRowDetailChild.receded:type_name -> frontend.v1.RosterRowDetailChildReceded
+	206, // [206:206] is the sub-list for method output_type
+	206, // [206:206] is the sub-list for method input_type
+	206, // [206:206] is the sub-list for extension type_name
+	206, // [206:206] is the sub-list for extension extendee
+	0,   // [0:206] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_sidebar_proto_init() }
