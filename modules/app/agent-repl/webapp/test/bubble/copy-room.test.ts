@@ -6,17 +6,22 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BUBBLE_COPY_CLASS,
   COPY_ROOM_CLASS,
   bubbleCopyControl,
   markCopyRoom,
+  measureCopyRoomPx,
   reserveCopyRoom,
 } from "../../src/bubble/copy-room.js";
 import { createBubbleBody, markdownSlot, paintBody } from "../../src/bubble/body.js";
+import { drawBubble } from "../../src/bubble/draw.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../tree-layout.js";
+import { boxRect } from "../dom-rect.js";
 import { COPY_CONTROL_CLASS, COPY_KIND_ATTRIBUTE, boundCopyText } from "../../src/copy-control.js";
-import { plainProse } from "../prose.js";
+import { plainProse, servedProse } from "../prose.js";
 import { filesUnder } from "../files-under.js";
 
 afterEach(() => {
@@ -174,6 +179,74 @@ describe("reserveCopyRoom", () => {
   it("leaves empty content alone", () => {
     // Act / Assert
     expect(() => reserveCopyRoom([])).not.toThrow();
+  });
+});
+
+/** Draw every ghost probe PX wide, for the rest of the test. */
+function stageRoom(px: number): void {
+  // Captured to be CALLED with the probed element as `this`, never off the reference.
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- see above
+  const staged = Element.prototype.getBoundingClientRect;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    return this.classList.contains(COPY_ROOM_CLASS) ? boxRect({ width: px }) : staged.call(this);
+  });
+}
+
+describe("measureCopyRoomPx", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("answers the drawn width of a ghost probed inside the body", () => {
+    // Arrange
+    const body = document.createElement("div");
+    document.body.append(body);
+    stageRoom(37.5);
+    // Act + Assert
+    expect(measureCopyRoomPx(body)).toBe(37.5);
+  });
+
+  it("leaves no probe behind", () => {
+    // Arrange
+    const body = document.createElement("div");
+    body.innerHTML = "<p>text</p>";
+    document.body.append(body);
+    // Act
+    measureCopyRoomPx(body);
+    // Assert
+    expect(body.innerHTML).toBe("<p>text</p>");
+  });
+
+  it("records the width it measured", async () => {
+    // Arrange
+    const body = document.createElement("div");
+    document.body.append(body);
+    stageRoom(42);
+    const capture = captureLogRecords("debug");
+    // Act
+    measureCopyRoomPx(body);
+    // Assert
+    const record = await forwardedRecord(capture, "bubble.copy-room.measure");
+    expect(record).toMatchObject({ level: { case: "debug" }, context: { room_px: 42 } });
+  });
+});
+
+describe("a tree that opens a bubble with a copy control", () => {
+  const staged = useTreeLayout();
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("fits its first line short of the control's room", () => {
+    // Arrange — 400px of room: 50 staged columns.
+    stageRoom(400);
+    const slot = markdownSlot("prose", servedProse(WIDE_TREE));
+    reserveCopyRoom([slot]);
+    // Act
+    const { bubble } = drawBubble({ role: "response", variant: "response", content: [slot], capLines: "feed" });
+    document.body.append(bubble);
+    // Assert
+    expect(treeLineWidths(bubble)[0]).toBeLessThanOrEqual(stagedCols(staged.layout) - 50);
   });
 });
 
