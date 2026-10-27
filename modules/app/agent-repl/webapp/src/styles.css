@@ -1083,6 +1083,11 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .sb-mq-glyph { color: var(--blocked); flex: 0 0 auto; }
 #ws-sidebar .sb-mq-head[data-standing="failed"] .sb-mq-glyph { color: var(--err); }
 #ws-sidebar .sb-mq-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* THE MERGE AT THE HEAD is named in bold, and every merge waiting behind it
+   in the folded header's faded grey (owner request, 2026-10-26): the one
+   merge running stands out from the line it leads. */
+#ws-sidebar .sb-mq-head .sb-mq-name { font-weight: 700; }
+#ws-sidebar .sb-mq-waiting { color: var(--repo-head-collapsed); }
 /* THE STAGES wear the bubble's tab glyphs, and their colours from the
    bubble's own rules (".merge-tab-glyph.is-live" and its siblings). */
 #ws-sidebar .sb-mq-stages {
