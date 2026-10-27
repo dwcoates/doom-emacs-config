@@ -22,6 +22,16 @@
  * both sides shows every row above it can and fills the rest below, and one
  * too short even for the rows above shows the line with as many as fit.
  *
+ * AND AGAIN WHEN ITS VIEWPORT CHANGES HEIGHT (owner request, 2026-10-27). A
+ * standing gate docks under the rail and Emacs resizes the page, so a section
+ * can grow or shrink with no push and no switch, and a shrink can cut the
+ * selected row off. When the followed row's viewport changes height and the row
+ * showed before it did, the row and its neighbors are brought back into view
+ * (`resized`). A row the reader had scrolled out of view stays out, so the
+ * resize never undoes the reader's own scrolling: whether the row shows is
+ * noted after every move of its viewport (`scrolled`), the reader's or the
+ * rail's.
+ *
  * ONCE PER SELECTION. The rail is redrawn on every push, and the reader may
  * scroll the section away from the selected row; a push that leaves the same
  * workspace highlighted moves nothing. Only a row that is drawn with a box
@@ -46,10 +56,29 @@ export type FollowOutcome =
   /** The section scrolled to show the highlighted row's line. */
   | "scrolled";
 
+/** What became of keeping the followed row in view across a resize. */
+export type ResizeOutcome =
+  /** No row is followed, or the followed row is no longer the highlighted one. */
+  | "none"
+  /** The followed row's viewport kept its height. */
+  | "unchanged"
+  /** The followed row did not show before the resize: the reader had scrolled it away. */
+  | "away"
+  /** The followed row draws no box now. */
+  | "unlaid"
+  /** The followed row and its neighbors still show whole. */
+  | "visible"
+  /** The viewport scrolled to show the followed row and its neighbors again. */
+  | "scrolled";
+
 /** The rail's follower of the highlighted row. */
 export interface SelectionScroll {
   /** Scroll ROOT's highlighted row into its section's view, once per selection. */
   follow(root: HTMLElement): FollowOutcome;
+  /** A viewport in ROOT scrolled: note whether the followed row still shows. */
+  scrolled(root: HTMLElement): void;
+  /** ROOT's viewports may have changed size: keep the followed row in view if it showed. */
+  resized(root: HTMLElement): ResizeOutcome;
 }
 
 /** The highlighted row's own line: the `.row` of the one `[data-roster-row][data-current]`. */
@@ -131,6 +160,13 @@ function viewOf(region: HTMLElement): VerticalSpan {
   };
 }
 
+/** Whether any of LINE shows in its viewport's view. */
+function lineShows(line: HTMLElement): boolean {
+  const view = viewOf(scrollerOf(line));
+  const rect = line.getBoundingClientRect();
+  return rect.height > 0 && rect.bottom > view.top && rect.top < view.bottom;
+}
+
 /** The rows kept in view before and after the selected row, where its viewport has them. */
 export const SELECTION_CONTEXT_ROWS = 5;
 
@@ -194,6 +230,31 @@ export function scrollLineIntoBand(line: HTMLElement): BandScroll | null {
 /** The rail's follower: it remembers the last workspace it followed. */
 export function createSelectionScroll(): SelectionScroll {
   let followed: string | null = null;
+  // Whether the followed row showed at its viewport's last move, and the
+  // height that viewport had then.
+  let shown = false;
+  let height: number | null = null;
+
+  /** Bring LINE and its neighbors into view under TRIGGER, logging any move. */
+  const reveal = (id: string, line: HTMLElement, trigger: "selection" | "resize"): BandScroll | null => {
+    const scrolled = scrollLineIntoBand(line);
+    shown = true;
+    height = scrollerOf(line).clientHeight;
+    const record = {
+      operation: "sidebar.selection-scroll",
+      context: { workspace: id, trigger, ...(scrolled ?? {}) },
+    };
+    if (scrolled === null) log.debug("the selected row already shows with its neighbors", record);
+    else log.info("scrolled the selected row and its neighbors into its section's view", record);
+    return scrolled;
+  };
+
+  /** ROOT's highlighted line, when it is the followed row's. */
+  const followedLine = (root: HTMLElement): HTMLElement | null => {
+    const highlighted = highlightedLine(root);
+    return highlighted !== null && highlighted.id === followed ? highlighted.line : null;
+  };
+
   return {
     follow(root: HTMLElement): FollowOutcome {
       const highlighted = highlightedLine(root);
@@ -202,14 +263,28 @@ export function createSelectionScroll(): SelectionScroll {
       if (id === followed) return "followed";
       if (line.getBoundingClientRect().height <= 0) return "unlaid";
       followed = id;
-      const scrolled = scrollLineIntoBand(line);
-      const record = {
-        operation: "sidebar.selection-scroll",
-        context: { workspace: id, ...(scrolled ?? {}) },
-      };
-      if (scrolled === null) log.debug("the selected row already shows with its neighbors", record);
-      else log.info("scrolled the selected row and its neighbors into its section's view", record);
-      return scrolled === null ? "visible" : "scrolled";
+      return reveal(id, line, "selection") === null ? "visible" : "scrolled";
+    },
+    scrolled(root: HTMLElement): void {
+      const line = followedLine(root);
+      if (line === null) return;
+      shown = lineShows(line);
+      height = scrollerOf(line).clientHeight;
+    },
+    resized(root: HTMLElement): ResizeOutcome {
+      const line = followedLine(root);
+      if (line === null || followed === null) return "none";
+      const now = scrollerOf(line).clientHeight;
+      if (now === height) return "unchanged";
+      const before = height;
+      height = now;
+      if (!shown) return "away";
+      if (line.getBoundingClientRect().height <= 0) return "unlaid";
+      log.debug("the selected row's section changed height while the row showed", {
+        operation: "sidebar.selection-scroll.resized",
+        context: { workspace: followed, from_height: before, to_height: now },
+      });
+      return reveal(followed, line, "resize") === null ? "visible" : "scrolled";
     },
   };
 }

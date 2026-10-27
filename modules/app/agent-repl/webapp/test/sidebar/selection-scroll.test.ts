@@ -53,6 +53,8 @@ function band({
   root: HTMLElement;
   region: HTMLElement;
   line: (id: string) => HTMLElement;
+  /** Lay the viewport out VIEW lines tall, as a resize does. */
+  resize: (view: number) => void;
 } {
   const root = document.createElement("div");
   const section = document.createElement("div");
@@ -67,16 +69,17 @@ function band({
     region.appendChild(list);
   }
   let top = 0;
+  let shown = view;
   Object.defineProperty(region, "scrollTop", {
     configurable: true,
     get: () => top,
     set: (v: number) => {
-      top = Math.max(0, Math.min(v, lines * ROW - view * ROW));
+      top = Math.max(0, Math.min(v, lines * ROW - shown * ROW));
     },
   });
-  Object.defineProperty(region, "clientHeight", { configurable: true, value: view * ROW });
+  Object.defineProperty(region, "clientHeight", { configurable: true, get: () => shown * ROW });
   Object.defineProperty(region, "clientTop", { configurable: true, value: 0 });
-  region.getBoundingClientRect = () => rect(0, view * ROW);
+  region.getBoundingClientRect = () => rect(0, shown * ROW);
   const computed = window.getComputedStyle.bind(window);
   vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) =>
     el === region ? ({ scrollPaddingTop: padTop, scrollPaddingBottom: padBottom } as CSSStyleDeclaration) : computed(el, pseudo),
@@ -97,7 +100,10 @@ function band({
     if (found === null) throw new Error(`no line ${id}`);
     return found;
   };
-  return { root, region, line };
+  const resize = (next: number): void => {
+    shown = next;
+  };
+  return { root, region, line, resize };
 }
 
 /** Move ROOT's highlight to ID, as a draw or `markShown` does. */
@@ -527,5 +533,126 @@ describe("createSelectionScroll", () => {
     const record = await forwardedRecord(capture, "sidebar.selection-scroll.malformed");
     expect(record.level.case).toBe("error");
     expect(record.context).toMatchObject({ workspace: "ws-1" });
+  });
+});
+
+describe("createSelectionScroll keeps the followed row in view across a resize", () => {
+  it("brings a row that showed back with its neighbors when its section shrinks under it", async () => {
+    // Arrange: ws-12 shows with five rows each side in a 20-line view.
+    const capture = captureLogRecords();
+    const b = band({ lines: 30, view: 20, current: ["ws-12"] });
+    const follower = createSelectionScroll();
+    follower.follow(b.root);
+    b.resize(10);
+    // Act
+    const outcome = follower.resized(b.root);
+    // Assert: ws-7 at the top, ws-16 at the foot.
+    expect([outcome, b.region.scrollTop]).toEqual(["scrolled", 7 * ROW]);
+    const record = await forwardedRecord(capture, "sidebar.selection-scroll");
+    expect(record.context).toMatchObject({ workspace: "ws-12", trigger: "resize", from: 0, to: 7 * ROW });
+  });
+
+  it("answers visible for a row whose neighbors still show after the resize", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 15, current: ["ws-6"] });
+    const follower = createSelectionScroll();
+    follower.follow(b.root);
+    b.resize(20);
+    // Act
+    const outcome = follower.resized(b.root);
+    // Assert
+    expect([outcome, b.region.scrollTop]).toEqual(["visible", 0]);
+  });
+
+  it("moves nothing when the section kept its height", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 15, current: ["ws-6"] });
+    const follower = createSelectionScroll();
+    follower.follow(b.root);
+    b.region.scrollTop = 4 * ROW;
+    follower.scrolled(b.root);
+    // Act
+    const outcome = follower.resized(b.root);
+    // Assert
+    expect([outcome, b.region.scrollTop]).toEqual(["unchanged", 4 * ROW]);
+  });
+
+  it("leaves a row the reader scrolled out of view where it is", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 10, current: ["ws-2"] });
+    const follower = createSelectionScroll();
+    follower.follow(b.root);
+    b.region.scrollTop = 15 * ROW;
+    follower.scrolled(b.root);
+    b.resize(8);
+    // Act
+    const outcome = follower.resized(b.root);
+    // Assert
+    expect([outcome, b.region.scrollTop]).toEqual(["away", 15 * ROW]);
+  });
+
+  it("brings back a row the reader scrolled into view again before the resize", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 10, current: ["ws-2"] });
+    const follower = createSelectionScroll();
+    follower.follow(b.root);
+    b.region.scrollTop = 15 * ROW;
+    follower.scrolled(b.root);
+    b.region.scrollTop = 0;
+    follower.scrolled(b.root);
+    b.resize(3);
+    // Act
+    const outcome = follower.resized(b.root);
+    // Assert: a 3-line view holds ws-2 with the rows above that fit.
+    expect([outcome, b.region.scrollTop]).toEqual(["visible", 0]);
+  });
+
+  it("answers none before any row was followed", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 10, current: ["ws-2"] });
+    // Act
+    const outcome = createSelectionScroll().resized(b.root);
+    // Assert
+    expect(outcome).toBe("none");
+  });
+
+  it("answers none once the highlight moved to a row not yet followed", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 10, current: ["ws-2"] });
+    const follower = createSelectionScroll();
+    follower.follow(b.root);
+    highlight(b.root, "ws-20");
+    b.resize(5);
+    // Act
+    const outcome = follower.resized(b.root);
+    // Assert
+    expect([outcome, b.region.scrollTop]).toEqual(["none", 0]);
+  });
+
+  it("answers unlaid for a followed row that draws no box after the resize", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 10, current: ["ws-2"] });
+    const follower = createSelectionScroll();
+    follower.follow(b.root);
+    b.line("ws-2").getBoundingClientRect = () => rect(0, 0);
+    b.resize(0);
+    // Act
+    const outcome = follower.resized(b.root);
+    // Assert
+    expect(outcome).toBe("unlaid");
+  });
+
+  it("acts once per change in height, so a second report of the same height moves nothing", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 20, current: ["ws-12"] });
+    const follower = createSelectionScroll();
+    follower.follow(b.root);
+    b.resize(10);
+    follower.resized(b.root);
+    b.region.scrollTop = 0;
+    // Act
+    const outcome = follower.resized(b.root);
+    // Assert
+    expect([outcome, b.region.scrollTop]).toEqual(["unchanged", 0]);
   });
 });

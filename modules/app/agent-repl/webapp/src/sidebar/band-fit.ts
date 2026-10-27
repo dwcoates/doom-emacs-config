@@ -488,16 +488,22 @@ function watchedBoxes(pane: HTMLElement): HTMLElement[] {
  * exactly that layout, and so does TICKER's first tick of a new local date,
  * because which merges are today's is part of it. The fit never moves its
  * own room (see the module note), so the re-fit its own resize of the pane
- * provokes draws the same lines and stops there.
+ * provokes draws the same lines and stops there. ON_RESIZED runs after every
+ * fit a resize provoked.
  */
-export function installBandFit(scroller: HTMLElement, ticker: Ticker): BandFit {
+export function installBandFit(scroller: HTMLElement, ticker: Ticker, onResized: () => void = () => undefined): BandFit {
   let fittedAtMs = ticker.now();
   const fitAt = (nowMs: number): void => {
     fittedAtMs = nowMs;
     fitAllBands(scroller, nowMs);
   };
   const fitNow = (): void => fitAt(ticker.now());
-  const observer = new ResizeObserver(fitNow);
+  // A RESIZE IS TOLD ONCE THE SECTIONS ARE FITTED TO IT, so what reads them
+  // (the selection's follow) reads the heights the fit gave them.
+  const observer = new ResizeObserver(() => {
+    fitNow();
+    onResized();
+  });
   observer.observe(scroller);
   // A scroll does not bubble, so the rail captures every section's scroll to
   // repaint whether rows still lie below its edge.

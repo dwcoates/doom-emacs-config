@@ -883,6 +883,36 @@ describe("installBandFit", () => {
     fit.dispose();
   });
 
+  it("tells ON_RESIZED after the fit a resize provoked, with the sections already fitted", () => {
+    // Arrange — fitted out of room.
+    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    laidOut(rail, 180, 100);
+    const seen: string[][] = [];
+    const fit = installBandFit(rail.scroller, fakeTicker(), () => seen.push(maxHeights(rail.pane)));
+    fit.refit();
+    // Act — the rail grows to hold everything.
+    railHeight(rail.scroller, 1000);
+    fireResize(rail.scroller);
+    // Assert
+    expect(seen).toEqual([["", "", ""]]);
+    fit.dispose();
+  });
+
+  it("does not tell ON_RESIZED for a draw's own refit", () => {
+    // Arrange
+    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    laidOut(rail, 180, 100);
+    let told = 0;
+    const fit = installBandFit(rail.scroller, fakeTicker(), () => {
+      told += 1;
+    });
+    // Act
+    fit.refit();
+    // Assert
+    expect(told).toBe(0);
+    fit.dispose();
+  });
+
   it("re-fits when a pane changes size", () => {
     // Arrange — fitted out of room.
     const rail = drawn({ open: 10, hidden: 10, merged: 10 });

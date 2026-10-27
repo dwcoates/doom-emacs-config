@@ -257,7 +257,12 @@ function mountSidebarIn(
   // THE BAND FIT (band-fit.ts): the Open, Hidden Workspaces and Recently
   // Merged viewports, re-fitted after every draw, on every resize of the rail
   // or a pane, and when the local date turns over.
-  const bandFit = installBandFit(body, ctx.ticker);
+  // A RESIZE KEEPS THE SELECTED ROW IN VIEW (selection-scroll.ts): a gate
+  // docking under the rail shrinks its sections with no push and no switch.
+  const bandFit = installBandFit(body, ctx.ticker, () => selectionScroll.resized(body));
+  // Every viewport's scroll, the reader's or the rail's, notes whether the
+  // selected row still shows, which decides whether a resize brings it back.
+  body.addEventListener("scroll", () => selectionScroll.scrolled(body), true);
   // THE SEARCH NARROWS THE DRAWN ROWS (search.ts): on every keystroke, and
   // again after every push and every row drawn as it came into view, since
   // either draws rows the query has not narrowed.
