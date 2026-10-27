@@ -31,7 +31,7 @@ type HTTPProber struct {
 	// unresolvable is why the configured base URL is no URL, answered as
 	// "unreachable" by every check rather than replaced by the default.
 	unresolvable string
-	client *http.Client
+	client       *http.Client
 }
 
 // NewHTTPProber resolves the API base URL from GETENV (ANTHROPIC_BASE_URL,
