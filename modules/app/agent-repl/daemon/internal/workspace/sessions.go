@@ -303,6 +303,15 @@ type live struct {
 	sessionAbsent bool
 }
 
+// held reports whether the entry's shim is still held: its client is not
+// reaped. A reaped client is NO SESSION, whatever the map says: the entry
+// outlives the process, and a verb sent over it would answer a raw transport
+// error where the contract spells no_session.
+func (l *live) held() bool {
+	_, reaped := l.client.Reaped()
+	return !reaped
+}
+
 // Fleet brings sessions up and down. It is the SPAWN-ON-MOUNT semantics in one
 // place, and it is what Deps.Sessions, Deps.Shim and Deps.Freeness are wired
 // from, so the four answers cannot disagree about one workspace.
@@ -653,7 +662,7 @@ func (f *Fleet) idleHeld(ws ids.WorkspaceID) (*live, bool) {
 	if _, gated := f.coldGates[ws]; gated {
 		return nil, false
 	}
-	if _, reaped := session.client.Reaped(); reaped {
+	if !session.held() {
 		return nil, false
 	}
 	held := *session
@@ -1624,7 +1633,7 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	// A REAPED CLIENT IS NO SESSION, read the same way Fleet.Shim reads it: the
 	// map entry outlives the process, and re-opening over a dead connection
 	// answers a raw transport error where the contract spells no_session.
-	if _, reaped := session.client.Reaped(); reaped {
+	if !session.held() {
 		return refuse(f.deps.Log.Global(), "AnswerColdGate", ArmNoSession,
 			fmt.Sprintf("workspace %q has no live session to re-open", ws), false)
 	}
@@ -3029,7 +3038,7 @@ func (f *Fleet) Shim(ws ids.WorkspaceID) (Shim, bool) {
 	// something tears it down — and reading liveness from map presence alone
 	// would send the verb over a dead connection, which answers a raw transport
 	// error where the contract spells no_session.
-	if _, reaped := session.client.Reaped(); reaped {
+	if !session.held() {
 		return nil, false
 	}
 	return &shimAdapter{client: session.client}, true
@@ -3110,7 +3119,7 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 		f.mu.Unlock()
 		return
 	}
-	if _, reaped := session.client.Reaped(); !reaped {
+	if session.held() {
 		f.mu.Unlock()
 		return
 	}

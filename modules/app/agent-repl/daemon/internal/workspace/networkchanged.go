@@ -80,7 +80,7 @@ func (f *Fleet) heldClients() map[ids.WorkspaceID]shimclient.Client {
 	defer f.mu.RUnlock()
 	held := make(map[ids.WorkspaceID]shimclient.Client, len(f.sessions))
 	for ws, session := range f.sessions {
-		if _, reaped := session.client.Reaped(); reaped {
+		if !session.held() {
 			continue
 		}
 		held[ws] = session.client
