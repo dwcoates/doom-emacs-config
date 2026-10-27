@@ -1,10 +1,10 @@
 package workspace
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/sourcescan"
 )
 
 func TestLiveHeldIsWhetherItsClientIsReaped(t *testing.T) {
@@ -35,31 +35,18 @@ func TestLiveHeldIsWhetherItsClientIsReaped(t *testing.T) {
 // TestEveryReapedCheckGoesThroughHeld pins that the fleet reads a client's
 // reaping only through live.held, so a hand-rolled check cannot drift from it.
 func TestEveryReapedCheckGoesThroughHeld(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Act.
+	// Arrange, Act.
 	var sites []string
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		body, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, line := range strings.Split(string(body), "\n") {
+	for _, file := range sourcescan.Production(t) {
+		for _, line := range strings.Split(string(file.Source), "\n") {
 			if strings.Contains(line, "client.Reaped()") {
-				sites = append(sites, file+":"+strings.TrimSpace(line))
+				sites = append(sites, file.Name+":"+strings.TrimSpace(line))
 			}
 		}
 	}
 
 	// Assert.
-	if len(sites) != 1 || !strings.HasPrefix(sites[0], "sessions.go:_, reaped := l.client.Reaped()") {
+	if len(sites) != 1 || sites[0] != "sessions.go:_, reaped := l.client.Reaped()" {
 		t.Fatalf("reaped checks outside live.held: %v", sites)
 	}
 }
