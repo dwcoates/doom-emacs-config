@@ -180,6 +180,9 @@ type watcher struct {
 	// busy is what the last freeness judgement found: work in flight. The
 	// lifecycle sink's OnFree fires on its true-to-false edge alone.
 	busy bool
+	// attaching is a pure attach's starting busy, which no judgement has
+	// found work under yet: its edge tells OnFree no work ended.
+	attaching bool
 	// turnWaiters are the standing AwaitTurnEnd calls, keyed by the turn.
 	turnWaiters map[ids.TurnID][]chan turnEnd
 	// pendingTurnEnds are the turn ends recorded under mu and not yet handed
@@ -486,7 +489,8 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		// A PURE ATTACH STARTS NOT FREE (freeLocked), so its facts arriving
 		// with nothing in flight is a true-to-false edge the bounce registry
 		// hears.
-		busy: session.Started == nil,
+		busy:      session.Started == nil,
+		attaching: session.Started == nil,
 	}
 	w.linkNow.Store(int32(shimclient.LinkConnected))
 	w.unwatch = func() {}

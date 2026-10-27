@@ -173,6 +173,9 @@ type edge struct {
 	lapse *conversationv1.SessionCacheLapse
 	// err is how a restore ended (edgeRestored).
 	err error
+	// workEnded is a free edge's (edgeFree): work ended, rather than an
+	// attach coming up free.
+	workEnded bool
 	// why names the edge for the records.
 	why string
 }
@@ -252,9 +255,10 @@ func (k *Keeper) OnCacheLapse(ws ids.WorkspaceID, lapse *conversationv1.SessionC
 
 // SessionFree is WS's session falling free (no turn, no live detached work):
 // its next beat is timed afresh from the cache clock its turns moved, and a
-// beat that waited on the work goes out. It never blocks.
-func (k *Keeper) SessionFree(ws ids.WorkspaceID) {
-	k.enqueue(edge{ws: ws, kind: edgeFree, why: "the session fell free"})
+// beat that waited on the work goes out. WORKENDED restarts the hour of grace
+// before a stand-down; an attach coming up free does not. It never blocks.
+func (k *Keeper) SessionFree(ws ids.WorkspaceID, workEnded bool) {
+	k.enqueue(edge{ws: ws, kind: edgeFree, workEnded: workEnded, why: "the session fell free"})
 }
 
 // RestoreParked asks for a session the keep-alive cycle parked to be brought
@@ -395,7 +399,9 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 	case edgeLapse:
 		k.record(ctx, e.ws, e.lapse)
 	case edgeFree:
-		k.freeSince[e.ws] = k.deps.Clock.Now()
+		if e.workEnded {
+			k.freeSince[e.ws] = k.deps.Clock.Now()
+		}
 		k.schedule(ctx, e.ws, e.why)
 	case edgeRestored:
 		k.restored(ctx, e.ws, e.err)

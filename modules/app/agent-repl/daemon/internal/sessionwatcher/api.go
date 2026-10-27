@@ -436,8 +436,11 @@ type LifecycleSink interface {
 	// watcher's lock, on a goroutine of its own that Close joins, because the
 	// sink is the prompt queue's bounce registry, which reads this watcher
 	// under its own delivery lock. It is told once per transition, never while
-	// the workspace simply stays free.
-	OnFree(ws ids.WorkspaceID)
+	// the workspace simply stays free. WORKENDED is false for a pure attach's
+	// first facts, which start the watcher busy so the edge is heard: no work
+	// ended there, and the keep-alive cycle's hour of grace is not restarted
+	// by it (2026-10-26: every handover reset it).
+	OnFree(ws ids.WorkspaceID, workEnded bool)
 	// OnNotification raises a host notification and the roster's attention
 	// marker.
 	OnNotification(ws ids.WorkspaceID, note HostNotification)

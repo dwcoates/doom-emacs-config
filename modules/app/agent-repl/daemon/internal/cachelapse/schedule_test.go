@@ -277,11 +277,27 @@ func TestTheFreeEdgeStampsWhenTheSessionFellFree(t *testing.T) {
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
 
 	// Act
-	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, why: "test"})
+	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, workEnded: true, why: "test"})
 
 	// Assert
 	if got := h.keeper.freeSince[theWorkspace]; !got.Equal(now) {
 		t.Fatalf("freeSince = %v, want %v", got, now)
+	}
+}
+
+// TestAnAttachComingUpFreeStampsNothing pins the 2026-10-26 handover: the
+// adoption's free edge restarted every workspace's hour of grace, so no beat
+// in the next hour parked a shim.
+func TestAnAttachComingUpFreeStampsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+
+	// Act
+	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, why: "test"})
+
+	// Assert
+	if got, stamped := h.keeper.freeSince[theWorkspace]; stamped {
+		t.Fatalf("freeSince = %v, want nothing stamped for an attach", got)
 	}
 }
 
@@ -336,7 +352,7 @@ func TestABeatSkippedForDetachedWorkIsSentWhenTheSessionFallsFree(t *testing.T) 
 	h.shim.answer = sent()
 
 	// Act
-	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, why: "test"})
+	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeFree, workEnded: true, why: "test"})
 	h.keeper.beatsDue(context.Background())
 
 	// Assert

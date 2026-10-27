@@ -52,7 +52,7 @@ type lifecycleSink struct {
 // clock the turn moved).
 type sessionUpNotifiee interface {
 	SessionUp(ws ids.WorkspaceID)
-	SessionFree(ws ids.WorkspaceID)
+	SessionFree(ws ids.WorkspaceID, workEnded bool)
 }
 
 // standDownsFunc adapts a function to the cache keeper's withheld
@@ -358,7 +358,7 @@ func (s *lifecycleSink) replaceShim(ws ids.WorkspaceID, reason rollout.RelaunchR
 // OnFree is the freeness edge, which a turn's end raises: the queue bounces a
 // shim registered for it, and a withheld workspace's stand-down the turn
 // deferred is taken.
-func (s *lifecycleSink) OnFree(ws ids.WorkspaceID) {
+func (s *lifecycleSink) OnFree(ws ids.WorkspaceID, workEnded bool) {
 	s.queue.OnFree(ws)
 	s.retryWithheld(ws, "free")
 	if s.caches == nil {
@@ -367,7 +367,7 @@ func (s *lifecycleSink) OnFree(ws ids.WorkspaceID) {
 		})
 		return
 	}
-	s.caches.SessionFree(ws)
+	s.caches.SessionFree(ws, workEnded)
 }
 
 // OnDeparted is the departure edge: a dead shim's registered bounce is decided

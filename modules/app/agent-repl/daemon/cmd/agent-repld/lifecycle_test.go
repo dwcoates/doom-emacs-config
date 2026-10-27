@@ -452,7 +452,7 @@ func TestTheFreenessEdgeReachesTheQueue(t *testing.T) {
 	sink := &lifecycleSink{queue: queue, log: dlog.NewTestLogger()}
 
 	// Act
-	sink.OnFree("ws-1")
+	sink.OnFree("ws-1", true)
 
 	// Assert
 	if len(queue.frees) != 1 || queue.frees[0] != "ws-1" {
@@ -811,10 +811,17 @@ func TestSessionUpBeforeTheQueueIsWiredIsRecordedAtError(t *testing.T) {
 }
 
 // fakeCaches records every session-up the sink told the cache keeper.
-type fakeCaches struct{ up, free []ids.WorkspaceID }
+type fakeCaches struct {
+	up, free []ids.WorkspaceID
+	// workEnded is each free edge's flag, in order.
+	workEnded []bool
+}
 
-func (c *fakeCaches) SessionUp(ws ids.WorkspaceID)   { c.up = append(c.up, ws) }
-func (c *fakeCaches) SessionFree(ws ids.WorkspaceID) { c.free = append(c.free, ws) }
+func (c *fakeCaches) SessionUp(ws ids.WorkspaceID) { c.up = append(c.up, ws) }
+func (c *fakeCaches) SessionFree(ws ids.WorkspaceID, workEnded bool) {
+	c.free = append(c.free, ws)
+	c.workEnded = append(c.workEnded, workEnded)
+}
 
 func TestOnFreeTellsTheCacheKeeper(t *testing.T) {
 	// Arrange
@@ -822,11 +829,29 @@ func TestOnFreeTellsTheCacheKeeper(t *testing.T) {
 	sink := &lifecycleSink{queue: &fakeFreeQueue{}, standDowns: &fakeRetrier{}, caches: caches, log: dlog.NewTestLogger()}
 
 	// Act
-	sink.OnFree("ws-1")
+	sink.OnFree("ws-1", true)
 
 	// Assert
 	if len(caches.free) != 1 || caches.free[0] != "ws-1" {
 		t.Fatalf("cache keeper frees = %v, want ws-1", caches.free)
+	}
+}
+
+func TestOnFreeTellsTheCacheKeeperWhetherWorkEnded(t *testing.T) {
+	for _, workEnded := range []bool{true, false} {
+		t.Run(fmt.Sprint(workEnded), func(t *testing.T) {
+			// Arrange
+			caches := &fakeCaches{}
+			sink := &lifecycleSink{queue: &fakeFreeQueue{}, standDowns: &fakeRetrier{}, caches: caches, log: dlog.NewTestLogger()}
+
+			// Act
+			sink.OnFree("ws-1", workEnded)
+
+			// Assert
+			if len(caches.workEnded) != 1 || caches.workEnded[0] != workEnded {
+				t.Fatalf("workEnded = %v, want [%v]", caches.workEnded, workEnded)
+			}
+		})
 	}
 }
 
@@ -885,7 +910,7 @@ func TestTheFreenessEdgeRetriesADeferredStandDown(t *testing.T) {
 	sink := &lifecycleSink{queue: &fakeFreeQueue{}, standDowns: retrier, log: dlog.NewTestLogger()}
 
 	// Act
-	sink.OnFree("ws-1")
+	sink.OnFree("ws-1", true)
 
 	// Assert
 	if len(retrier.retried) != 1 || retrier.retried[0] != "ws-1" {
@@ -913,7 +938,7 @@ func TestAnEdgeBeforeTheStandDownsAreWiredIsAnError(t *testing.T) {
 	sink := &lifecycleSink{queue: &fakeFreeQueue{}, log: log}
 
 	// Act
-	sink.OnFree("ws-1")
+	sink.OnFree("ws-1", true)
 
 	// Assert
 	for _, r := range log.Records() {

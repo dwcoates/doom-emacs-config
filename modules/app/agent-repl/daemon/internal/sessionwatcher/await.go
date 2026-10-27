@@ -293,11 +293,18 @@ func (w *watcher) rememberClosedTurnLocked(turn ids.TurnID, how TurnClose) {
 func (w *watcher) signalFreenessLocked() {
 	if !w.freeLocked() {
 		w.busy = true
+		// ONLY WORK SEEN ENDS THE ATTACH'S GRACE: an attach not yet told its
+		// facts is not free either, and that is no work.
+		if w.started {
+			w.attaching = false
+		}
 		return
 	}
 	if w.busy {
 		w.busy = false
-		w.freeEdgeLocked()
+		workEnded := !w.attaching
+		w.attaching = false
+		w.freeEdgeLocked(workEnded)
 	}
 	if len(w.freeWaiters) == 0 {
 		return
@@ -362,16 +369,16 @@ func (w *watcher) dropTurnWaiter(turn ids.TurnID, ch chan turnEnd) {
 // the lock and joinable through the same WaitGroup the turn-end dispatch uses.
 // The sink reads this watcher (the bounce registry judges freeness itself,
 // under its own lock), so telling it inline would be a self-deadlock.
-func (w *watcher) freeEdgeLocked() {
+func (w *watcher) freeEdgeLocked(workEnded bool) {
 	if w.closed {
 		return
 	}
 	w.log.Debug("daemon.sessionwatcher.free", "the workspace fell free; telling the lifecycle sink", dlog.Context{
-		"state": "busy", "before": true, "after": false,
+		"state": "busy", "before": true, "after": false, "work_ended": workEnded,
 	})
 	w.dispatching.Add(1)
 	go func() {
 		defer w.dispatching.Done()
-		w.sinks.Lifecycle.OnFree(w.ws)
+		w.sinks.Lifecycle.OnFree(w.ws, workEnded)
 	}()
 }

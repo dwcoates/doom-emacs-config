@@ -569,6 +569,73 @@ func TestAPureAttachWhoseFactsNameATurnStaysBusy(t *testing.T) {
 	h.noFree(t)
 }
 
+// freeWorkEnded answers the one free edge's workEnded, failing when none was told.
+func (h *harness) freeWorkEnded(t *testing.T) bool {
+	t.Helper()
+	h.w.dispatching.Wait()
+	select {
+	case ended := <-h.rec.freeWork:
+		return ended
+	default:
+		t.Fatal("OnFree was never told")
+		return false
+	}
+}
+
+func TestAPureAttachsOwnFreeEdgeSaysNoWorkEnded(t *testing.T) {
+	// Arrange.
+	h := startHarness(t, Session{}, nil)
+	h.session = h.client.nextSessionOpen(t)
+
+	// Act.
+	h.reannounce(t, sessionStarted(""))
+	h.awaitFree(t)
+
+	// Assert.
+	if h.freeWorkEnded(t) {
+		t.Fatal("the attach's own edge said work ended")
+	}
+}
+
+func TestATurnsEndSaysWorkEnded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+	h.w.OnTurnOpened(h.w.ws, &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-1"},
+		Agent: agentID("main-1"),
+	}, nil)
+
+	// Act.
+	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Assert.
+	if !h.freeWorkEnded(t) {
+		t.Fatal("a turn's end said no work ended")
+	}
+}
+
+func TestAnAttachedTurnsEndSaysWorkEnded(t *testing.T) {
+	// Arrange.
+	h := startHarness(t, Session{}, nil)
+	h.session = h.client.nextSessionOpen(t)
+	h.reannounce(t, sessionStarted("turn-1"))
+	h.noFree(t)
+	open := h.client.nextAgentOpenFor(t, "")
+	h.main, h.mainReq = open.stream, open.req
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+
+	// Act.
+	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Assert.
+	if !h.freeWorkEnded(t) {
+		t.Fatal("the end of a turn the attach found running said no work ended")
+	}
+}
+
 // mainWatched reads whether the main watch has served its opening page.
 func (h *harness) mainWatched() bool {
 	h.w.mu.Lock()

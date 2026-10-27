@@ -644,6 +644,8 @@ type recorder struct {
 	// is not fixed, and folding it into ch would make every sequence
 	// assertion depend on scheduling.
 	frees chan ids.WorkspaceID
+	// freeWork carries each OnFree edge's workEnded, in the same order.
+	freeWork chan bool
 	// departures carries every OnDeparted edge, on a channel of its own for
 	// the same reason.
 	departures chan departedEdge
@@ -659,6 +661,7 @@ func newRecorder() *recorder {
 	return &recorder{
 		ch:         make(chan event, 512),
 		frees:      make(chan ids.WorkspaceID, 64),
+		freeWork:   make(chan bool, 64),
 		departures: make(chan departedEdge, 64),
 	}
 }
@@ -1074,7 +1077,10 @@ func (s *lifecycleSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnLiveWorkChanged", live: &held})
 }
 
-func (s *lifecycleSink) OnFree(ws ids.WorkspaceID) { s.rec.frees <- ws }
+func (s *lifecycleSink) OnFree(ws ids.WorkspaceID, workEnded bool) {
+	s.rec.freeWork <- workEnded
+	s.rec.frees <- ws
+}
 
 // departedEdge is one OnDeparted call.
 type departedEdge struct {
