@@ -162,8 +162,9 @@ function inkOffset(ref: Drawn, end: number): number {
 /**
  * The text a clamp's `…` follows: its first line up to the character whose
  * right edge sits the reference offset left of the `…`'s ink, or undefined
- * when no character sits within a pixel and a half of it (each trimmable mark
- * is wider than that, so a match names one character).
+ * when no character sits within half the line's narrowest character advance
+ * of it (so a match names one character, in any face: a monospace face's
+ * clipped last glyph lands over a pixel and a half from the reference).
  */
 function before(row: Drawn, end: number, offset: number): string | undefined {
   const at = end - offset;
@@ -171,7 +172,9 @@ function before(row: Drawn, end: number, offset: number): string | undefined {
   for (let i = 0; i < row.line.length; i++) {
     if (best < 0 || Math.abs(row.line[i].right - at) < Math.abs(row.line[best].right - at)) best = i;
   }
-  if (best < 0 || Math.abs(row.line[best].right - at) > 1.5) return undefined;
+  const advances = row.line.slice(1).map((c, i) => c.right - row.line[i].right);
+  const tolerance = Math.min(...advances) / 2;
+  if (best < 0 || Math.abs(row.line[best].right - at) > tolerance) return undefined;
   return row.line
     .slice(0, best + 1)
     .map((c) => c.ch)

@@ -2791,17 +2791,18 @@ describe("the one bubble rule set", () => {
   });
 
   it.each([
-    [".bubble", ".bubble"],
-    ["the chat column", ".chat-col"],
-  ])("sets %s's face from the serif token", (_label, selector) => {
+    [".bubble", ".bubble", "--bubble-font-family"],
+    ["the chat column", ".chat-col", "--serif-font-family"],
+  ])("sets %s's face from its token", (_label, selector, token) => {
     // Arrange / Act
     const rule = ownDeclarationsOf(selector) ?? "";
     // Assert
-    expect(rule).toMatch(/font-family:\s*var\(--serif-font-family\)/);
+    expect(rule).toMatch(new RegExp(`font-family:\\s*var\\(${token}\\)`));
   });
 
   it.each([
     ["--serif-font-family", /--serif-font-family:\s*"Source Serif 4 Variable", ui-serif, Georgia, serif;/],
+    ["--bubble-font-family", /--bubble-font-family:\s*ui-monospace, monospace;/],
     ["--tree-rail-font-family", /--tree-rail-font-family:\s*ui-monospace, monospace;/],
   ] as const)("declares %s once, on the root", (token, pattern) => {
     // Arrange / Act
@@ -2815,7 +2816,7 @@ describe("the one bubble rule set", () => {
     ["a response", "response", "response", ""],
     ["a thinking bubble", "response", "thinking", ""],
     ["an interim response", "response", "response", "interim-response"],
-  ])("hands %s the serif through the cascade", (_label, role, variant, extra) => {
+  ])("hands %s the bubble face through the cascade", (_label, role, variant, extra) => {
     // Arrange
     const bubble = document.createElement("div");
     bubble.className = `bubble ${extra}`.trim();
@@ -2824,7 +2825,7 @@ describe("the one bubble rule set", () => {
     // Act
     const face = inDocument(bubble, (el) => cascadedValue(el, "font-family"));
     // Assert
-    expect(face).toBe("var(--serif-font-family)");
+    expect(face).toBe("var(--bubble-font-family)");
   });
 
   it("lets a metaprompt tree inherit its bubble's face", () => {
