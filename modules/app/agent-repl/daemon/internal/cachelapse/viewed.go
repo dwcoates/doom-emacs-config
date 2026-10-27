@@ -21,6 +21,12 @@ import (
 // the session up (drain.Controller.CycleDown), as it keeps a busy one up until
 // it falls free. One the user switched away from before its restore started
 // is taken out of line instead.
+//
+// A READER NEVER RESTORES A WORKSPACE THE USER IS NOT LOOKING AT (owner
+// ruling, 2026-10-27). Every page reloads after a rollout and asks for its
+// newest rows; a parked workspace's page is left unloaded instead, and its
+// ask is remembered, so selecting the workspace restores it and the waiting
+// reader is served once the session is up.
 
 // viewedUp takes a reader's restore coming up: the session is viewed from now,
 // and stood down at once when the user is already not looking at it.
@@ -42,6 +48,16 @@ func (k *Keeper) viewedUp(ctx context.Context, log dlog.Logger, ws ids.Workspace
 		return
 	}
 	k.releaseViewed(log, record)
+}
+
+// restoreDeferred restores RECORD's parked session once the user selects it,
+// when a reader asked for its history while the user was not looking at it.
+func (k *Keeper) restoreDeferred(ctx context.Context, log dlog.Logger, record wsm.Workspace) {
+	if !record.Current || !k.deferred[record.ID] {
+		return
+	}
+	log.Info(opRestore, "the user selected a workspace whose parked session a reader is waiting on; it is restored", nil)
+	k.restoreAsked(ctx, record.ID)
 }
 
 // releaseViewed stands RECORD's session down again when a reader's restore

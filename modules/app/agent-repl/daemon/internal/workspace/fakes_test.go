@@ -106,7 +106,11 @@ type fakeDB struct {
 	// listRepositoriesErr fails the registry read, which the create path must
 	// surface rather than read as "the repository is not registered".
 	listRepositoriesErr error
-	tasks               []wsm.Task
+	// mergeQueues is every repository's merge queue; mergeQueuesErr fails its
+	// read.
+	mergeQueues    map[wsm.RepoKey][]wsm.MergeQueueEntry
+	mergeQueuesErr error
+	tasks          []wsm.Task
 	// setTaskFoldedErr fails the task fold write, which the slice cannot.
 	// view is the sidebar's recorded view state, nil when nobody changed it
 	// (read back as wsm.DefaultSidebarView); setMergedFoldedErr,
@@ -554,6 +558,10 @@ func (d *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 		return nil, d.listRepositoriesErr
 	}
 	return d.repositories, nil
+}
+
+func (d *fakeDB) AllMergeQueues(context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {
+	return d.mergeQueues, d.mergeQueuesErr
 }
 
 func (d *fakeDB) Tasks(context.Context) ([]wsm.Task, error) { return d.tasks, d.tasksErr }

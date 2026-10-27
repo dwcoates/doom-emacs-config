@@ -424,6 +424,63 @@ func TestRegisterRevivesAKnownWorkspacesRecordedConversation(t *testing.T) {
 	}
 }
 
+// TestRegisterRevivesNoWithheldWorkspace holds a deploy to the shims that were
+// up before it (owner ruling, 2026-10-27): a workspace the daemon withholds
+// starts when it is shown, as the rollout's bring-up withholds it, and an
+// announcement that cannot tell revives nothing.
+func TestRegisterRevivesNoWithheldWorkspace(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture, dir string, record wsm.Workspace)
+		wantLog dlog.RecordQuery
+	}{
+		{
+			name: "a hidden workspace",
+			arrange: func(f *fixture, dir string, record wsm.Workspace) {
+				record.Hidden = true
+				f.db.workspaces[record.ID] = record
+				f.db.byDir[dir] = record
+			},
+			wantLog: dlog.RecordQuery{Level: "debug", Message: "the announced workspace is withheld; its conversation is revived when it is shown"},
+		},
+		{
+			name: "a workspace in a collapsed section",
+			arrange: func(f *fixture, _ string, record wsm.Workspace) {
+				f.db.repositories = []wsm.Repository{{ID: record.Repo, Folded: true}}
+			},
+			wantLog: dlog.RecordQuery{Level: "debug", Message: "the announced workspace is withheld; its conversation is revived when it is shown"},
+		},
+		{
+			name: "a workspace whose merge queues cannot be read",
+			arrange: func(f *fixture, _ string, _ wsm.Workspace) {
+				f.db.mergeQueuesErr = errFake
+			},
+			wantLog: dlog.RecordQuery{Level: "error", Message: "could not read whether the announced workspace is withheld; its conversation is not revived"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			dir, record := registeredWithAConversation(t, f, nil)
+			tt.arrange(f, dir, record)
+
+			// Act.
+			if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+				t.Fatalf("the re-announcement: %v", err)
+			}
+
+			// Assert.
+			if got := f.fleet.started; len(got) != 0 {
+				t.Fatalf("sessions started by the re-announcement = %v, want none", got)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), tt.wantLog); !ok {
+				t.Fatalf("records = %+v, want %+v", f.log.logger.Records(), tt.wantLog)
+			}
+		})
+	}
+}
+
 // TestRegisterLeavesALiveSessionAlone is the OTHER half of the relaunch rule.
 // The revival exists for a daemon that came back to a conversation nobody was
 // serving; a re-announcement of a workspace whose session is ALREADY UP on

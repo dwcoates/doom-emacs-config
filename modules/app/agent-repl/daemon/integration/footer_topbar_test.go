@@ -1304,12 +1304,16 @@ func TestFooterANetworkResumeWaitKeepsTheAgentsRowAndMarksTheChip(t *testing.T) 
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
+	// Each wait names the live-work set's own edge (the background status), not
+	// the chip alone: the chip counts the spawn before the run is detached and
+	// drops for one push while the run moves to the live-work set, and a wait
+	// that matched either would let the next push overtake the frame before it.
 	awaitFooter(t, f, footer, "the agents chip counting the detached run", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1
+		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1 && v.GetStrip().GetStatus().GetBackground() != nil
 	})
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1", "toolu-1")))
 	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetAgents() == nil
+		return v.GetStrip().GetLiveWork().GetAgents() == nil && v.GetStrip().GetStatus().GetIdle() != nil
 	})
 
 	// Act: the shim opens a wait for the failed run.
