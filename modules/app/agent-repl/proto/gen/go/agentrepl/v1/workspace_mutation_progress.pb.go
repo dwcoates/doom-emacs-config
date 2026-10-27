@@ -1002,6 +1002,7 @@ type WorkspaceCreateProgress struct {
 	//	*WorkspaceCreateProgress_EnteredStage
 	//	*WorkspaceCreateProgress_Succeeded
 	//	*WorkspaceCreateProgress_Failed
+	//	*WorkspaceCreateProgress_WaitingForNetwork
 	Step          isWorkspaceCreateProgress_Step `protobuf_oneof:"step"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1071,6 +1072,15 @@ func (x *WorkspaceCreateProgress) GetFailed() *WorkspaceCreateFailed {
 	return nil
 }
 
+func (x *WorkspaceCreateProgress) GetWaitingForNetwork() *CreateWorkspaceWaitingForNetwork {
+	if x != nil {
+		if x, ok := x.Step.(*WorkspaceCreateProgress_WaitingForNetwork); ok {
+			return x.WaitingForNetwork
+		}
+	}
+	return nil
+}
+
 type isWorkspaceCreateProgress_Step interface {
 	isWorkspaceCreateProgress_Step()
 }
@@ -1100,11 +1110,23 @@ type WorkspaceCreateProgress_Failed struct {
 	Failed *WorkspaceCreateFailed `protobuf:"bytes,3,opt,name=failed,proto3,oneof"`
 }
 
+type WorkspaceCreateProgress_WaitingForNetwork struct {
+	// NOT TERMINAL: the create's naming call could not run because this
+	// machine cannot reach the network, so the daemon holds the create and
+	// completes it once the network is restored. Later steps -- the stages it
+	// re-enters, then `succeeded` or `failed` -- arrive on this same op_id,
+	// possibly from a successor daemon. A client draws it as waiting for the
+	// network, never as a failure, and keeps the op registered.
+	WaitingForNetwork *CreateWorkspaceWaitingForNetwork `protobuf:"bytes,5,opt,name=waiting_for_network,json=waitingForNetwork,proto3,oneof"`
+}
+
 func (*WorkspaceCreateProgress_EnteredStage) isWorkspaceCreateProgress_Step() {}
 
 func (*WorkspaceCreateProgress_Succeeded) isWorkspaceCreateProgress_Step() {}
 
 func (*WorkspaceCreateProgress_Failed) isWorkspaceCreateProgress_Step() {}
+
+func (*WorkspaceCreateProgress_WaitingForNetwork) isWorkspaceCreateProgress_Step() {}
 
 // The terminal failure of a background create. THE ARM IS THE KIND OF FAILURE,
 // mirroring the synchronous form: a typed refusal it would have answered on its
@@ -1529,11 +1551,12 @@ const file_agentrepl_v1_workspace_mutation_progress_proto_rawDesc = "" +
 	"\x1aWorkspaceOpenStageReviving\"\"\n" +
 	" WorkspaceOpenStageClearingClosed\"!\n" +
 	"\x1fWorkspaceOpenStageCheckingBuild\"%\n" +
-	"#WorkspaceOpenStageRestoringWorktree\"\x80\x02\n" +
+	"#WorkspaceOpenStageRestoringWorktree\"\xe2\x02\n" +
 	"\x17WorkspaceCreateProgress\x12I\n" +
 	"\rentered_stage\x18\x04 \x01(\v2\".agentrepl.v1.WorkspaceCreateStageH\x00R\fenteredStage\x12F\n" +
 	"\tsucceeded\x18\x02 \x01(\v2&.agentrepl.v1.WorkspaceCreateSucceededH\x00R\tsucceeded\x12=\n" +
-	"\x06failed\x18\x03 \x01(\v2#.agentrepl.v1.WorkspaceCreateFailedH\x00R\x06failedB\x06\n" +
+	"\x06failed\x18\x03 \x01(\v2#.agentrepl.v1.WorkspaceCreateFailedH\x00R\x06failed\x12`\n" +
+	"\x13waiting_for_network\x18\x05 \x01(\v2..agentrepl.v1.CreateWorkspaceWaitingForNetworkH\x00R\x11waitingForNetworkB\x06\n" +
 	"\x04stepJ\x04\b\x01\x10\x02R\x05stage\"~\n" +
 	"\x15WorkspaceCreateFailed\x12>\n" +
 	"\arefusal\x18\x01 \x01(\v2\".agentrepl.v1.CreateWorkspaceErrorH\x00R\arefusal\x12\x1c\n" +
@@ -1588,8 +1611,9 @@ var file_agentrepl_v1_workspace_mutation_progress_proto_goTypes = []any{
 	(*WorkspaceCreateStageStartingSession)(nil),  // 20: agentrepl.v1.WorkspaceCreateStageStartingSession
 	(*WorkspaceCreateSucceeded)(nil),             // 21: agentrepl.v1.WorkspaceCreateSucceeded
 	(*NukeWorkspaceError)(nil),                   // 22: agentrepl.v1.NukeWorkspaceError
-	(*CreateWorkspaceError)(nil),                 // 23: agentrepl.v1.CreateWorkspaceError
-	(*v1.WorkspaceRef)(nil),                      // 24: workspace.v1.WorkspaceRef
+	(*CreateWorkspaceWaitingForNetwork)(nil),     // 23: agentrepl.v1.CreateWorkspaceWaitingForNetwork
+	(*CreateWorkspaceError)(nil),                 // 24: agentrepl.v1.CreateWorkspaceError
+	(*v1.WorkspaceRef)(nil),                      // 25: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_workspace_mutation_progress_proto_depIdxs = []int32{
 	15, // 0: agentrepl.v1.WorkspaceMutationProgress.create:type_name -> agentrepl.v1.WorkspaceCreateProgress
@@ -1611,16 +1635,17 @@ var file_agentrepl_v1_workspace_mutation_progress_proto_depIdxs = []int32{
 	17, // 16: agentrepl.v1.WorkspaceCreateProgress.entered_stage:type_name -> agentrepl.v1.WorkspaceCreateStage
 	21, // 17: agentrepl.v1.WorkspaceCreateProgress.succeeded:type_name -> agentrepl.v1.WorkspaceCreateSucceeded
 	16, // 18: agentrepl.v1.WorkspaceCreateProgress.failed:type_name -> agentrepl.v1.WorkspaceCreateFailed
-	23, // 19: agentrepl.v1.WorkspaceCreateFailed.refusal:type_name -> agentrepl.v1.CreateWorkspaceError
-	18, // 20: agentrepl.v1.WorkspaceCreateStage.deriving_name:type_name -> agentrepl.v1.WorkspaceCreateStageDerivingName
-	19, // 21: agentrepl.v1.WorkspaceCreateStage.creating_worktree:type_name -> agentrepl.v1.WorkspaceCreateStageCreatingWorktree
-	20, // 22: agentrepl.v1.WorkspaceCreateStage.starting_session:type_name -> agentrepl.v1.WorkspaceCreateStageStartingSession
-	24, // 23: agentrepl.v1.WorkspaceCreateSucceeded.workspace:type_name -> workspace.v1.WorkspaceRef
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	23, // 19: agentrepl.v1.WorkspaceCreateProgress.waiting_for_network:type_name -> agentrepl.v1.CreateWorkspaceWaitingForNetwork
+	24, // 20: agentrepl.v1.WorkspaceCreateFailed.refusal:type_name -> agentrepl.v1.CreateWorkspaceError
+	18, // 21: agentrepl.v1.WorkspaceCreateStage.deriving_name:type_name -> agentrepl.v1.WorkspaceCreateStageDerivingName
+	19, // 22: agentrepl.v1.WorkspaceCreateStage.creating_worktree:type_name -> agentrepl.v1.WorkspaceCreateStageCreatingWorktree
+	20, // 23: agentrepl.v1.WorkspaceCreateStage.starting_session:type_name -> agentrepl.v1.WorkspaceCreateStageStartingSession
+	25, // 24: agentrepl.v1.WorkspaceCreateSucceeded.workspace:type_name -> workspace.v1.WorkspaceRef
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_workspace_mutation_progress_proto_init() }
@@ -1660,6 +1685,7 @@ func file_agentrepl_v1_workspace_mutation_progress_proto_init() {
 		(*WorkspaceCreateProgress_EnteredStage)(nil),
 		(*WorkspaceCreateProgress_Succeeded)(nil),
 		(*WorkspaceCreateProgress_Failed)(nil),
+		(*WorkspaceCreateProgress_WaitingForNetwork)(nil),
 	}
 	file_agentrepl_v1_workspace_mutation_progress_proto_msgTypes[16].OneofWrappers = []any{
 		(*WorkspaceCreateFailed_Refusal)(nil),

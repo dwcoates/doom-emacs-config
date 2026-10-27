@@ -181,6 +181,13 @@ message WorkspaceCreateProgress {
     // prompt's submission; the pre-detach refusals stay on the rpc's own
     // `error` arm.
     WorkspaceCreateFailed failed = 3;
+    // NOT TERMINAL: the create's naming call could not run because this
+    // machine cannot reach the network, so the daemon holds the create and
+    // completes it once the network is restored. Later steps -- the stages it
+    // re-enters, then `succeeded` or `failed` -- arrive on this same op_id,
+    // possibly from a successor daemon. A client draws it as waiting for the
+    // network, never as a failure, and keeps the op registered.
+    CreateWorkspaceWaitingForNetwork waiting_for_network = 5;
   }
 }
 

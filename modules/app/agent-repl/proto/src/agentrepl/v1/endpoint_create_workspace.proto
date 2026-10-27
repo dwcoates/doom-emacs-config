@@ -350,7 +350,42 @@ message CreateWorkspaceResponse {
     // the requesting turn ends, and its merge workspace does not exist until
     // the merge starts, so there is no workspace identity to return.
     CreateWorkspaceAsyncMergeAccepted async_merge_accepted = 4;
+    // THE CREATE WAITS FOR THE NETWORK. Answered -- instead of `success` or
+    // `error` -- by the synchronous form when the create's naming call could
+    // not run because this machine cannot reach the network. Nothing was
+    // refused and nothing failed: the daemon holds the create durably and
+    // completes it, from the naming call, once the network is restored. The
+    // requesting workspace, if one asked, is told when it was created.
+    CreateWorkspaceWaitingForNetwork waiting_for_network = 5;
   }
+}
+
+// The typed identity of one pending create: a create the daemon is running or
+// holding for the network. Minted by the daemon when the create is first
+// asked for and handed back unchanged; a request identical to a pending create
+// is answered with that create's ref rather than starting a second one.
+message PendingCreateRef {
+  // Opaque to the client: minted by the daemon, stable for the create's whole
+  // life, across daemon restarts and handovers.
+  string id = 1;
+}
+
+// A create held until the network is restored. It is an ANSWER, not a
+// failure: the create will complete exactly as it would have, and a client
+// draws it as waiting, never as failed.
+message CreateWorkspaceWaitingForNetwork {
+  // The pending create that waits. An identical request asked while it waits
+  // is answered with this same ref.
+  PendingCreateRef create = 1;
+}
+
+// The request was identical to a create already pending (the same
+// repository, topology, owner, context or fork source, one-shot, name, model,
+// priority and initial prompt after whitespace trimming), so no second create
+// was started: this request joined that one.
+message CreateWorkspaceJoined {
+  // The pending create this request joined.
+  PendingCreateRef create = 1;
 }
 
 // An accepted async merge, named as its merge workspace will be.
@@ -367,6 +402,11 @@ message CreateWorkspaceAccepted {
   // The op_id the request supplied, echoed back so the client can assert the
   // ack correlates to the create it issued.
   string op_id = 1;
+  // UNSET = this request started a create of its own. SET = the request was
+  // identical to a create already pending, which it joined: no second create
+  // runs, and this op_id receives that create's progress and its terminal
+  // outcome from here on, exactly as the first requester's op does.
+  optional CreateWorkspaceJoined joined = 2;
 }
 
 // The created workspace's identity — the dir the daemon minted. Everything
