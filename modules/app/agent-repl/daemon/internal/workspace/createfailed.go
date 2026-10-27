@@ -63,10 +63,12 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 // and neither the create's caller (a synchronous rpc, the command-file
 // ingress) nor a client's deadline may wait on or cancel it.
 //
-// Two failures are not reported. A MERGE WORKSPACE's failure is the merge
+// Three failures are not reported. A MERGE WORKSPACE's failure is the merge
 // queue's, which hands it back to the requester itself. A HANDOVER is not a
 // failure at all (createHandedOver): the create is the successor daemon's to
-// make.
+// make. A refusal of the CALLER'S OWN INPUT (callerInputRefusal) is the
+// caller's to correct, and the caller is answered with it: there is nothing
+// for the main worktree to investigate.
 func (v *verbs) reportCreateFailure(ctx context.Context, spec CreateSpec, cause error) {
 	log := v.deps.Log.Global().With(dlog.Context{"repo_dir": spec.RepoDir, "create_failure": cause.Error()})
 	if spec.MergeOf != nil {
@@ -75,6 +77,10 @@ func (v *verbs) reportCreateFailure(ctx context.Context, spec CreateSpec, cause 
 	}
 	if createHandedOver(cause) {
 		log.Debug(opCreateFailedReport, "the create was handed over or this daemon is exiting; it is not reported as a failure", nil)
+		return
+	}
+	if arm, ok := callerInputRefusal(cause); ok {
+		log.Debug(opCreateFailedReport, "the create was refused for the caller's own input; it is not reported to the main worktree", dlog.Context{"arm": arm})
 		return
 	}
 	detached := context.WithoutCancel(ctx)
@@ -99,6 +105,27 @@ func createHandedOver(err error) bool {
 		errors.Is(err, rollout.ErrNotYetAdopted) ||
 		errors.Is(err, bounce.ErrMovedAway) ||
 		errors.Is(err, context.Canceled)
+}
+
+// callerInputArms are the create refusals the caller's own input causes:
+// a supplied name that breaks the naming rule, a supplied name a pending
+// merge or a create in flight already holds, and a promptless one-shot. Each
+// is answered to the caller, who corrects the input; none is a fault of the
+// daemon or the repository.
+var callerInputArms = map[string]bool{
+	ArmInvalidName:  true,
+	ArmNameReserved: true,
+	ArmNoSlug:       true,
+}
+
+// callerInputRefusal answers the arm of a create's error when it is a refusal
+// of the caller's own input (callerInputArms).
+func callerInputRefusal(err error) (string, bool) {
+	var refusal *Refusal
+	if errors.As(err, &refusal) && callerInputArms[refusal.Arm] {
+		return refusal.Arm, true
+	}
+	return "", false
 }
 
 // deliverCreateFailure opens the main-worktree workspace of the repository the
