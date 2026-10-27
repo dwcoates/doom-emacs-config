@@ -56,6 +56,7 @@
 (declare-function agent-repl--panels-note-arrival-reason "agent-repl-panels"
                   (id reason))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
+(declare-function agent-repl-refill-keymap "agent-repl-core" (map fill))
 (declare-function agent-repl--main-worktree-for-dir "agent-repl-workspace" (dir))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl--meta-wrap "agent-repl-core" (text))
@@ -2461,11 +2462,13 @@ types.")
 (defvar-local agent-repl-verbs--name-blank-refusal nil
   "The sentence the name minibuffer refuses a blank name with.")
 
-(defvar agent-repl-verbs--name-exit-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [remap exit-minibuffer] #'agent-repl-verbs-name-minibuffer-exit)
-    map)
+(defvar agent-repl-verbs--name-exit-map (make-sparse-keymap)
   "Keymap the name minibuffer layers over its own: leaving it is a check.")
+
+(agent-repl-refill-keymap
+ agent-repl-verbs--name-exit-map
+ (lambda (map)
+   (define-key map [remap exit-minibuffer] #'agent-repl-verbs-name-minibuffer-exit)))
 
 (defun agent-repl-verbs--name-refusal (name)
   "Answer the sentence refusing NAME as a workspace name, or nil if it is one.

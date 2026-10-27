@@ -319,7 +319,8 @@ binding form of the module and every one of its keymaps.")
     (agent-repl-settings . "the Settings buttons themselves, on the composer's bar and the splash")
     (agent-repl-input-company-return . "RET in the completion popup, described under Writing prompts")
     (company-complete-selection . "TAB in the completion popup, described under Writing prompts")
-    (isearch-backward . "C-r in a creation prompt's minibuffer, not the composer, described in USER-GUIDE.md"))
+    (isearch-backward . "C-r in a creation prompt's minibuffer, not the composer, described in USER-GUIDE.md")
+    (agent-repl-verbs-name-minibuffer-exit . "RET in a creation's name minibuffer, not the composer, which checks the name with the daemon before it closes"))
   "Commands agent-repl binds that no help topic lists, each with why.")
 
 (defconst agent-repl-input-help-bar-background "#111110"
