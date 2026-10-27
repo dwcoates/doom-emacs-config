@@ -1331,24 +1331,50 @@ func validateSetWorkspaceCorrespondenceRequest(req *agentreplv1.SetWorkspaceCorr
 	return invalid("mark", "a mark arm (awaiting or clear) is required")
 }
 
-// validateSetWorkspacePrincipalLinkRequest is SetWorkspacePrincipalLinkRequest's
-// base function: a workspace and a change arm, and a set names a url. Whether
-// the url is one the browser opens is the verb's invalid_link refusal, not a
-// malformed request.
-func validateSetWorkspacePrincipalLinkRequest(req *agentreplv1.SetWorkspacePrincipalLinkRequest) *connect.Error {
+// validateChangeWorkspaceLinksRequest is ChangeWorkspaceLinksRequest's base
+// function: a workspace and a change arm; a set names a url and a label, a
+// removal a url, and a show one or more urls, none blank and none twice.
+// Whether a url is one the browser opens, a label one the menu draws, a url
+// one the workspace holds, and a show within the menu's cap, are the verb's
+// refusals, not a malformed request.
+func validateChangeWorkspaceLinksRequest(req *agentreplv1.ChangeWorkspaceLinksRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
 	switch change := req.GetChange().(type) {
-	case *agentreplv1.SetWorkspacePrincipalLinkRequest_Set:
+	case *agentreplv1.ChangeWorkspaceLinksRequest_Set:
 		if strings.TrimSpace(change.Set.GetUrl()) == "" {
-			return invalid("set.url", "a set names its url; clearing is the clear arm")
+			return invalid("set.url", "a set names its url")
+		}
+		if strings.TrimSpace(change.Set.GetLabel()) == "" {
+			return invalid("set.label", "a set names its label")
 		}
 		return nil
-	case *agentreplv1.SetWorkspacePrincipalLinkRequest_Clear:
+	case *agentreplv1.ChangeWorkspaceLinksRequest_Remove:
+		if strings.TrimSpace(change.Remove.GetUrl()) == "" {
+			return invalid("remove.url", "a removal names its url; removing every link is the clear arm")
+		}
+		return nil
+	case *agentreplv1.ChangeWorkspaceLinksRequest_Show:
+		urls := change.Show.GetUrls()
+		if len(urls) == 0 {
+			return invalid("show.urls", "a show names at least one url")
+		}
+		seen := make(map[string]bool, len(urls))
+		for _, url := range urls {
+			if strings.TrimSpace(url) == "" {
+				return invalid("show.urls", "a show names no blank url")
+			}
+			if seen[url] {
+				return invalid("show.urls", "a show names each url once")
+			}
+			seen[url] = true
+		}
+		return nil
+	case *agentreplv1.ChangeWorkspaceLinksRequest_Clear:
 		return nil
 	}
-	return invalid("change", "a change arm (set or clear) is required")
+	return invalid("change", "a change arm (set, remove, show or clear) is required")
 }
 
 // validateSetWorkspaceNameRequest is SetWorkspaceNameRequest's base function:

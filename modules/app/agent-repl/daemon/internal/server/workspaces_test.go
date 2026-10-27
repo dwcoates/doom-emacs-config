@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -910,88 +911,117 @@ func TestSetWorkspaceHiddenMapsTheVerbsRefusal(t *testing.T) {
 	}
 }
 
-// ---- SetWorkspacePrincipalLink ---------------------------------------------
+// ---- ChangeWorkspaceLinks --------------------------------------------------
 
-// TestSetWorkspacePrincipalLinkHandsTheChangeToTheVerb pins each change arm
-// reaching the verb: a set as its url, a clear as no link.
-func TestSetWorkspacePrincipalLinkHandsTheChangeToTheVerb(t *testing.T) {
+// TestChangeWorkspaceLinksHandsTheChangeToTheVerb pins each change arm reaching
+// its verb, and the success arm answering the links the verb answered.
+func TestChangeWorkspaceLinksHandsTheChangeToTheVerb(t *testing.T) {
 	tests := []struct {
-		name   string
-		change *agentreplv1.SetWorkspacePrincipalLinkRequest
-		want   string
+		name string
+		req  *agentreplv1.ChangeWorkspaceLinksRequest
+		want string
 	}{
-		{"set", &agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref(),
-			Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Set{Set: &agentreplv1.SetWorkspacePrincipalLinkSet{Url: "https://example.com/pr/1"}}}, "https://example.com/pr/1"},
-		{"clear", &agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref(),
-			Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Clear{Clear: &agentreplv1.SetWorkspacePrincipalLinkClear{}}}, ""},
+		{"set", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://example.com/pr/1", Label: "The pull request"}}},
+			"set https://example.com/pr/1 The pull request"},
+		{"remove", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Remove{Remove: &agentreplv1.ChangeWorkspaceLinksRemove{Url: "https://example.com/pr/1"}}},
+			"remove https://example.com/pr/1"},
+		{"show", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Show{Show: &agentreplv1.ChangeWorkspaceLinksShow{Urls: []string{"https://a", "https://b"}}}},
+			"show https://a,https://b"},
+		{"clear", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Clear{Clear: &agentreplv1.ChangeWorkspaceLinksClear{}}}, "clear"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
+			h.Verbs.links = []wsm.WorkspaceLink{{URL: "https://example.com/pr/1", Label: "The pull request", Shown: true}}
 
 			// Act
-			resp, err := h.Client.SetWorkspacePrincipalLink(context.Background(), connect.NewRequest(tt.change))
+			resp, err := h.Client.ChangeWorkspaceLinks(context.Background(),
+				connect.NewRequest(tt.req))
 
 			// Assert
 			if err != nil {
-				t.Fatalf("SetWorkspacePrincipalLink: %v", err)
+				t.Fatalf("ChangeWorkspaceLinks: %v", err)
 			}
-			if resp.Msg.GetSuccess() == nil {
-				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+			if !proto.Equal(resp.Msg.GetSuccess().GetLinks(), workspace.LinksView(h.Verbs.links)) {
+				t.Fatalf("result = %v, want success answering the verb's links", resp.Msg.GetResult())
 			}
-			if len(h.Verbs.principalLinks) != 1 || h.Verbs.principalLinks[0] != tt.want {
-				t.Fatalf("links = %q, want [%q]", h.Verbs.principalLinks, tt.want)
+			if len(h.Verbs.linkChanges) != 1 || h.Verbs.linkChanges[0] != tt.want {
+				t.Fatalf("changes = %q, want [%q]", h.Verbs.linkChanges, tt.want)
 			}
 		})
 	}
 }
 
-// TestSetWorkspacePrincipalLinkRefusesAnUnknownWorkspace pins the
+// TestChangeWorkspaceLinksRefusesAnUnknownWorkspace pins the
 // unknown_workspace arm, with no verb reached.
-func TestSetWorkspacePrincipalLinkRefusesAnUnknownWorkspace(t *testing.T) {
+func TestChangeWorkspaceLinksRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
 	// Act
-	resp, err := h.Client.SetWorkspacePrincipalLink(context.Background(),
-		connect.NewRequest(&agentreplv1.SetWorkspacePrincipalLinkRequest{
+	resp, err := h.Client.ChangeWorkspaceLinks(context.Background(),
+		connect.NewRequest(&agentreplv1.ChangeWorkspaceLinksRequest{
 			Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"},
-			Change:    &agentreplv1.SetWorkspacePrincipalLinkRequest_Clear{Clear: &agentreplv1.SetWorkspacePrincipalLinkClear{}},
+			Change:    &agentreplv1.ChangeWorkspaceLinksRequest_Clear{Clear: &agentreplv1.ChangeWorkspaceLinksClear{}},
 		}))
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SetWorkspacePrincipalLink: %v", err)
+		t.Fatalf("ChangeWorkspaceLinks: %v", err)
 	}
 	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
 		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
 	}
-	if len(h.Verbs.principalLinks) != 0 {
-		t.Fatalf("links = %q, want none for an unknown workspace", h.Verbs.principalLinks)
+	if len(h.Verbs.linkChanges) != 0 {
+		t.Fatalf("changes = %q, want none for an unknown workspace", h.Verbs.linkChanges)
 	}
 }
 
-// TestSetWorkspacePrincipalLinkMapsAnInvalidLink pins the verb's invalid_link
-// refusal answering its arm with the url and the reason.
-func TestSetWorkspacePrincipalLinkMapsAnInvalidLink(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.Verbs.setPrincipalLinkErr = &workspace.Refusal{Arm: workspace.ArmInvalidLink, Reason: "not http",
-		Fields: map[string]any{"url": "ftp://x", "reason": "url must be http or https"}}
-
-	// Act
-	resp, err := h.Client.SetWorkspacePrincipalLink(context.Background(),
-		connect.NewRequest(&agentreplv1.SetWorkspacePrincipalLinkRequest{Workspace: ref(),
-			Change: &agentreplv1.SetWorkspacePrincipalLinkRequest_Set{Set: &agentreplv1.SetWorkspacePrincipalLinkSet{Url: "ftp://x"}}}))
-
-	// Assert
-	if err != nil {
-		t.Fatalf("SetWorkspacePrincipalLink: %v", err)
+// TestChangeWorkspaceLinksMapsTheVerbsRefusals pins each of the verb's own
+// refusals answering its arm with its fields.
+func TestChangeWorkspaceLinksMapsTheVerbsRefusals(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal *workspace.Refusal
+		check   func(e *agentreplv1.ChangeWorkspaceLinksError) bool
+	}{
+		{name: "invalid_link", refusal: &workspace.Refusal{Arm: workspace.ArmInvalidLink, Fields: map[string]any{"url": "ftp://x", "reason": "url must be http or https"}},
+			check: func(e *agentreplv1.ChangeWorkspaceLinksError) bool {
+				return e.GetInvalidLink().GetUrl() == "ftp://x" && e.GetInvalidLink().GetReason() == "url must be http or https"
+			}},
+		{name: "invalid_label", refusal: &workspace.Refusal{Arm: workspace.ArmInvalidLabel, Fields: map[string]any{"label": "Doc", "reason": "a label is 2 to 8 words, not 1"}},
+			check: func(e *agentreplv1.ChangeWorkspaceLinksError) bool {
+				return e.GetInvalidLabel().GetLabel() == "Doc" && e.GetInvalidLabel().GetReason() == "a label is 2 to 8 words, not 1"
+			}},
+		{name: "unknown_link", refusal: &workspace.Refusal{Arm: workspace.ArmUnknownLink, Fields: map[string]any{"url": "https://absent"}},
+			check: func(e *agentreplv1.ChangeWorkspaceLinksError) bool {
+				return e.GetUnknownLink().GetUrl() == "https://absent"
+			}},
+		{name: "too_many_shown", refusal: &workspace.Refusal{Arm: workspace.ArmTooManyShown, Fields: map[string]any{"named": uint32(6), "limit": uint32(5)}},
+			check: func(e *agentreplv1.ChangeWorkspaceLinksError) bool {
+				return e.GetTooManyShown().GetNamed() == 6 && e.GetTooManyShown().GetLimit() == 5
+			}},
 	}
-	got := resp.Msg.GetError().GetInvalidLink()
-	if got.GetUrl() != "ftp://x" || got.GetReason() != "url must be http or https" {
-		t.Fatalf("result = %v, want invalid_link carrying the url and reason", resp.Msg.GetResult())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Verbs.linksErr = tt.refusal
+
+			// Act
+			resp, err := h.Client.ChangeWorkspaceLinks(context.Background(),
+				connect.NewRequest(&agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(),
+					Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "ftp://x", Label: "Doc"}}}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ChangeWorkspaceLinks: %v", err)
+			}
+			if !tt.check(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want %s carrying its fields", resp.Msg.GetResult(), tt.name)
+			}
+		})
 	}
 }
 
