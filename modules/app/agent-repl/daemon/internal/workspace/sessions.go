@@ -225,6 +225,11 @@ type FleetDeps struct {
 	// host surface is wired yet (the boot sequence runs before the server),
 	// which is why every call goes through publishHost.
 	PublishHost func(ids.WorkspaceID)
+	// NetworkChanged answers a channel closed at this machine's next network
+	// change (netwatch.Watcher.Changed). A vendor start the network failed
+	// selects on it next to its backoff, so a reconnect retries it at once.
+	// Required.
+	NetworkChanged func() <-chan struct{}
 	// RetryAfter is the vendor-start run's wait between attempts: it answers
 	// a channel that fires once d has passed. Nil means time.After; it is a
 	// field so the backoff is driven by a test rather than slept through.
@@ -298,6 +303,15 @@ type live struct {
 	sessionAbsent bool
 }
 
+// held reports whether the entry's shim is still held: its client is not
+// reaped. A reaped client is NO SESSION, whatever the map says: the entry
+// outlives the process, and a verb sent over it would answer a raw transport
+// error where the contract spells no_session.
+func (l *live) held() bool {
+	_, reaped := l.client.Reaped()
+	return !reaped
+}
+
 // Fleet brings sessions up and down. It is the SPAWN-ON-MOUNT semantics in one
 // place, and it is what Deps.Sessions, Deps.Shim and Deps.Freeness are wired
 // from, so the four answers cannot disagree about one workspace.
@@ -311,6 +325,9 @@ type Fleet struct {
 	adoptBound time.Duration
 	// startBound bounds ONE StartSession; see DefaultStartSessionBound.
 	startBound time.Duration
+	// networkBound bounds one shim's answer to a network change; see
+	// networkChangedBound.
+	networkBound time.Duration
 	// after is the vendor-start run's wait; see FleetDeps.RetryAfter.
 	after func(time.Duration) <-chan time.Time
 	// vendorWindow is the vendor-start run's window; see
@@ -523,6 +540,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs a restart recorder; each step of a session's start is timed into it")
 	case deps.ChatSystemPrompt == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs the chat system prompt; every chat thread's session starts under it")
+	case deps.NetworkChanged == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs the network-change signal; a vendor start the network failed is retried at a reconnect by it")
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -558,6 +577,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	}
 	detachedCtx, endDetached := context.WithCancel(context.Background())
 	return &Fleet{
+		networkBound: networkChangedBound,
 		after:        after,
 		vendorWindow: vendorWindow,
 		vendorRuns:   map[ids.WorkspaceID]*vendorRun{},
@@ -642,7 +662,7 @@ func (f *Fleet) idleHeld(ws ids.WorkspaceID) (*live, bool) {
 	if _, gated := f.coldGates[ws]; gated {
 		return nil, false
 	}
-	if _, reaped := session.client.Reaped(); reaped {
+	if !session.held() {
 		return nil, false
 	}
 	held := *session
@@ -1613,7 +1633,7 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	// A REAPED CLIENT IS NO SESSION, read the same way Fleet.Shim reads it: the
 	// map entry outlives the process, and re-opening over a dead connection
 	// answers a raw transport error where the contract spells no_session.
-	if _, reaped := session.client.Reaped(); reaped {
+	if !session.held() {
 		return refuse(f.deps.Log.Global(), "AnswerColdGate", ArmNoSession,
 			fmt.Sprintf("workspace %q has no live session to re-open", ws), false)
 	}
@@ -3018,7 +3038,7 @@ func (f *Fleet) Shim(ws ids.WorkspaceID) (Shim, bool) {
 	// something tears it down — and reading liveness from map presence alone
 	// would send the verb over a dead connection, which answers a raw transport
 	// error where the contract spells no_session.
-	if _, reaped := session.client.Reaped(); reaped {
+	if !session.held() {
 		return nil, false
 	}
 	return &shimAdapter{client: session.client}, true
@@ -3099,7 +3119,7 @@ func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
 		f.mu.Unlock()
 		return
 	}
-	if _, reaped := session.client.Reaped(); !reaped {
+	if session.held() {
 		f.mu.Unlock()
 		return
 	}

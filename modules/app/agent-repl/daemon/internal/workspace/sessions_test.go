@@ -47,6 +47,13 @@ type fakeClient struct {
 	retryNowAsks     int
 	retryNowResponse *shimv1.RetryVendorErrorNowResponse
 	retryNowErr      error
+	// networkChanges counts every NetworkChanged, answered with
+	// networkResponse and networkErr; networkCalled, when set, is told of
+	// each one as it is asked.
+	networkChanges  int
+	networkResponse *shimv1.NetworkChangedResponse
+	networkErr      error
+	networkCalled   chan<- struct{}
 	shimclient.Client
 
 	// efforts is every SetSessionEffort asked; effortResponse and effortErr
@@ -292,6 +299,19 @@ func (c *fakeClient) Hibernate(context.Context, *shimv1.HibernateRequest) (*shim
 func (c *fakeClient) RetryVendorErrorNow(context.Context, *shimv1.RetryVendorErrorNowRequest) (*shimv1.RetryVendorErrorNowResponse, error) {
 	c.retryNowAsks++
 	return c.retryNowResponse, c.retryNowErr
+}
+
+// NetworkChanged counts the change and answers the scripted outcome, idle when
+// none is scripted.
+func (c *fakeClient) NetworkChanged(context.Context, *shimv1.NetworkChangedRequest) (*shimv1.NetworkChangedResponse, error) {
+	c.networkChanges++
+	if c.networkCalled != nil {
+		c.networkCalled <- struct{}{}
+	}
+	if c.networkResponse == nil && c.networkErr == nil {
+		return &shimv1.NetworkChangedResponse{Outcome: &shimv1.NetworkChangedResponse_Idle{Idle: &shimv1.NetworkChangedIdle{}}}, nil
+	}
+	return c.networkResponse, c.networkErr
 }
 
 func (c *fakeClient) PID() int { return c.pid }
@@ -606,6 +626,9 @@ type fleetFixture struct {
 	// retryAfter, when set, answers the run's wait instead of the default,
 	// which advances `now` by the wait and fires at once.
 	retryAfter func(d time.Duration) <-chan time.Time
+	// networkChanged, when set, is the channel the fleet's network-change
+	// signal answers; unset, it answers a fresh channel that never fires.
+	networkChanged chan struct{}
 	// vendorStarts is every vendor-start state the roster was told, in order.
 	vendorStarts []sidebar.VendorStart
 	// steps are the bring-up steps the fleet reported, in order.
@@ -767,7 +790,13 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 
 	fleet, err := NewFleet(FleetDeps{
 		RestoreParked: func(ws ids.WorkspaceID) { f.restoreAsked = append(f.restoreAsked, ws) },
-		DB:            f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
+		NetworkChanged: func() <-chan struct{} {
+			if f.networkChanged != nil {
+				return f.networkChanged
+			}
+			return make(chan struct{})
+		},
+		DB: f.db, Instance: fixtureInstance, Accounts: f.accounts, Supervisor: f.supervisor, ShimBundle: f.bundle,
 		Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{coldGates: &f.topbarGates, picked: &f.picked, warnings: &f.topbarWarnings, window: &f.topbarWindow}, Log: f.log,
 		Sinks: sessionwatcher.Sinks{
 			Lifecycle: &quietLifecycle{},
@@ -941,6 +970,17 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
 				Steps: func(ids.WorkspaceID, opentabs.Step) {}, Restarts: &restarttimingtest.Recorder{},
+			},
+		},
+		{
+			name: "no network-change signal",
+			deps: FleetDeps{
+				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
+				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
+				Steps: func(ids.WorkspaceID, opentabs.Step) {}, Restarts: &restarttimingtest.Recorder{},
+				ChatSystemPrompt: func() (string, error) { return "", nil },
 			},
 		},
 		{

@@ -37,6 +37,14 @@
  *   and a probe that cannot reach the API stands the network fault through
  *   {@link NetworkResumeDeps.unreachable}; one that can ends the suspicion,
  *   since the network is not what failed.
+ * - THE NETWORK COMING BACK PROBES AT ONCE (2026-10-27). The daemon hears
+ *   the operating system's network changes and calls `shim.v1.NetworkChanged`
+ *   ({@link NetworkResume.networkChanged}); while anything waits, that call
+ *   probes now instead of at the next beat, so recovery follows the
+ *   reconnect rather than the beat. A change that lands while a probe is out
+ *   probes again once that probe ends, so a change the first probe was too
+ *   early for is never left to the beat. The beat stays: an outage the API
+ *   ends on its own side changes nothing on this machine.
  * - THE WAIT IS BOUNDED. {@link NETWORK_RESUME_WINDOW_MS} from the failure,
  *   after which the wait gives up at ERROR and the agent keeps its failure.
  * - ONE RESUME PER FAILURE EVENT, and the window restarts only when the resumed
@@ -61,7 +69,7 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { isAgentTaskType } from "../convert/detached.js";
 import { detachedWorkId } from "../convert/ids.js";
-import { conversationv1 } from "../proto.js";
+import { conversationv1, shimv1 } from "../proto.js";
 import type { KeepaliveScheduler } from "./keepalive.js";
 import { networkResumePrompt } from "./network-resume-prompt.js";
 import type { SdkMessage } from "../sdk/types.js";
@@ -225,6 +233,22 @@ export interface ProbeAnswer {
 /** A reachability probe. It never throws: a failure to reach is its answer. */
 export type ReachabilityProbe = () => Promise<ProbeAnswer>;
 
+/** What a network change came to: a probe made (or queued), or nothing waiting. */
+export type NetworkChangeOutcome = "probing" | "idle";
+
+/** The `shim.v1.NetworkChangedResponse` a network change's outcome answers. */
+export function networkChangedResponse(outcome: NetworkChangeOutcome): shimv1.NetworkChangedResponse {
+  const arm = ((): shimv1.NetworkChangedResponse["outcome"] => {
+    switch (outcome) {
+      case "probing":
+        return { case: "probing", value: create(shimv1.NetworkChangedProbingSchema, {}) };
+      case "idle":
+        return { case: "idle", value: create(shimv1.NetworkChangedIdleSchema, {}) };
+    }
+  })();
+  return create(shimv1.NetworkChangedResponseSchema, { outcome: arm });
+}
+
 /** What delivering one resume prompt came to. */
 export type ResumeDelivery =
   | { readonly kind: "delivered" }
@@ -330,6 +354,8 @@ export class NetworkResume {
   private nextWaitId = 1;
   private handle: unknown;
   private probing = false;
+  /** A network change landed while a probe was out: probe again once it ends. */
+  private reprobe = false;
   private stopped = false;
   /** Whether the session's network fault stands, so the loop runs until the API answers. */
   private faultStanding = false;
@@ -398,6 +424,33 @@ export class NetworkResume {
     this.faultStanding = false;
     LOGGER.debug({}, "a request reached the vendor while the network fault stood; the probe no longer waits on it");
     this.cancelLoopIfIdle();
+  }
+
+  /**
+   * This machine's network changed (`shim.v1.NetworkChanged`): probe now if
+   * anything waits on the API, instead of at the loop's next beat. A probe
+   * already out is followed by one more once it ends, since the change may
+   * have come after it was sent.
+   */
+  networkChanged(): NetworkChangeOutcome {
+    if (this.stopped || this.handle === undefined) {
+      LOGGER.debug({}, "the network changed and nothing waits on the API; nothing is probed");
+      return "idle";
+    }
+    if (this.probing) {
+      this.reprobe = true;
+      LOGGER.info(
+        { waiting: this.waiting.size },
+        "the network changed while a probe was out; the API is probed again once it answers",
+      );
+      return "probing";
+    }
+    LOGGER.info(
+      { waiting: this.waiting.size, fault_standing: this.faultStanding, unanswered: this.unanswered !== undefined },
+      "the network changed while something waits on the API; it is probed now instead of at the next beat",
+    );
+    void this.tick();
+    return "probing";
   }
 
   /** Read one SDK message for what it says about an agent run. */
@@ -614,8 +667,22 @@ export class NetworkResume {
     LOGGER.debug({}, "the network-resume probe loop stopped");
   }
 
-  /** One beat of the loop. Exposed for the suite's scheduler; production reaches it by timer only. */
+  /**
+   * One beat of the loop, and the probe a network change queued behind it.
+   * Exposed for the suite's scheduler; production reaches it by the timer and
+   * by {@link networkChanged}.
+   */
   async tick(): Promise<void> {
+    await this.beat();
+    // A BEAT SKIPPED BECAUSE A PROBE IS OUT leaves the queued probe to the
+    // beat that sent that probe, which runs it here once its answer is read.
+    while (this.reprobe && !this.probing && !this.stopped) {
+      this.reprobe = false;
+      await this.beat();
+    }
+  }
+
+  private async beat(): Promise<void> {
     if (this.stopped) return;
     this.expire();
     if (this.waiting.size === 0 && !this.faultStanding && this.unanswered === undefined) {

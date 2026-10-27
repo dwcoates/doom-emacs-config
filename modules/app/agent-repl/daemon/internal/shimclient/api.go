@@ -158,6 +158,9 @@ type Client interface {
 	// RetryVendorErrorNow asks the session for its scheduled vendor-error
 	// retry at once (the user pressed RET in an empty composer).
 	RetryVendorErrorNow(ctx context.Context, req *shimv1.RetryVendorErrorNowRequest) (*shimv1.RetryVendorErrorNowResponse, error)
+	// NetworkChanged tells the shim this machine's network changed, so
+	// whatever waits on the API is probed now (netwatch).
+	NetworkChanged(ctx context.Context, req *shimv1.NetworkChangedRequest) (*shimv1.NetworkChangedResponse, error)
 	// KillSession ends the session, gracefully unless forced.
 	KillSession(ctx context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error)
 	// StartTurn opens a turn with the daemon's minted TurnId and the required

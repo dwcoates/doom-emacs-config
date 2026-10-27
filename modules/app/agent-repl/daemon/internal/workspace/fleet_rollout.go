@@ -50,7 +50,7 @@ func (f *Fleet) Client(ws ids.WorkspaceID) (shimclient.Client, bool) {
 	if !ok {
 		return nil, false
 	}
-	if _, reaped := session.client.Reaped(); reaped {
+	if !session.held() {
 		return nil, false
 	}
 	return session.client, true

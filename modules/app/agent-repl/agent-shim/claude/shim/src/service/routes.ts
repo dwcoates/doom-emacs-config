@@ -30,6 +30,7 @@ import {
   validateGetForkPointRequest,
   validateHibernateRequest,
   validateRetryVendorErrorNowRequest,
+  validateNetworkChangedRequest,
   validateSendKeepaliveRequest,
   validateKillSessionRequest,
   validateKillTurnRequest,
@@ -223,6 +224,11 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("RetryVendorErrorNow");
         validateRetryVendorErrorNowRequest(request);
         return answering("RetryVendorErrorNow", () => engine.retryVendorErrorNow(request));
+      },
+      async networkChanged(request) {
+        entered("NetworkChanged");
+        validateNetworkChangedRequest(request);
+        return answering("NetworkChanged", () => engine.networkChanged(request));
       },
 
       async killSession(request) {

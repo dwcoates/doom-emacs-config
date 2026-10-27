@@ -1,0 +1,46 @@
+// endpoint_network_changed.proto — NetworkChanged: this machine's network
+// changed, so whatever waits on the API is asked again at once. SESSION
+// section.
+//
+// THE NETWORK COMING BACK IS HEARD, NOT POLLED FOR (owner ruling, 2026-10-27).
+// While anything waits on the API (the session's standing network fault, a
+// background agent waiting to be resumed, a request that got no answer), the
+// shim probes the API on a fixed beat. The daemon owns the one watcher of the
+// operating system's network events (a route socket on macOS, rtnetlink on
+// Linux) and, on every change that can bring the network back, calls this on
+// every shim it holds: a shim with something waiting probes NOW instead of at
+// its next beat, and its recovery (the fault resolving, the resumes, the
+// vendor-error retry made at once) follows from that probe exactly as it
+// follows from a beat's. A change that lands while a probe is out probes
+// again once that probe ends, so a change the first probe was too early for
+// is never left to the beat.
+//
+// THE PROBE'S ANSWER FOLLOWS ON THE SESSION STREAM, never in this answer.
+
+syntax = "proto3";
+
+package shim.v1;
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// DELIBERATELY EMPTY: the call is the request. What changed is the daemon's
+// to record; whether anything waits is the shim's to judge.
+message NetworkChangedRequest {}
+
+// THE ARM IS WHAT HAPPENED. Every arm is an answer, never a failure of the
+// request.
+message NetworkChangedResponse {
+  oneof outcome {
+    // Something waits on the API, and a probe was made (or queued behind the
+    // one already out).
+    NetworkChangedProbing probing = 1;
+    // Nothing waits on the API, so nothing was probed.
+    NetworkChangedIdle idle = 2;
+  }
+}
+
+// A probe was made or queued. DELIBERATELY EMPTY: the arm is the outcome.
+message NetworkChangedProbing {}
+
+// Nothing waits on the API. DELIBERATELY EMPTY: the arm is the outcome.
+message NetworkChangedIdle {}

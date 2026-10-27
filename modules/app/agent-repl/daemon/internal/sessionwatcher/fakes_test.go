@@ -509,6 +509,10 @@ func (c *fakeClient) RetryVendorErrorNow(context.Context, *shimv1.RetryVendorErr
 	panic("sessionwatcher must not call RetryVendorErrorNow")
 }
 
+func (c *fakeClient) NetworkChanged(context.Context, *shimv1.NetworkChangedRequest) (*shimv1.NetworkChangedResponse, error) {
+	panic("sessionwatcher must not call NetworkChanged")
+}
+
 func (c *fakeClient) SendKeepalive(context.Context, *shimv1.SendKeepaliveRequest) (*shimv1.SendKeepaliveResponse, error) {
 	panic("sessionwatcher must not call SendKeepalive")
 }

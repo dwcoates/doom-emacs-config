@@ -75,6 +75,10 @@ export function retryVendorErrorNowRequest(): shimv1.RetryVendorErrorNowRequest 
   return create(shimv1.RetryVendorErrorNowRequestSchema, {});
 }
 
+export function networkChangedRequest(): shimv1.NetworkChangedRequest {
+  return create(shimv1.NetworkChangedRequestSchema, {});
+}
+
 export function killSessionRequest(): shimv1.KillSessionRequest {
   return create(shimv1.KillSessionRequestSchema, { force: false });
 }

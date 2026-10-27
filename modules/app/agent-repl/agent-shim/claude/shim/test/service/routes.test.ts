@@ -62,6 +62,10 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("retryVendorErrorNow")(request);
       return create(shimv1.RetryVendorErrorNowResponseSchema, {});
     },
+    async networkChanged(request) {
+      record("networkChanged")(request);
+      return create(shimv1.NetworkChangedResponseSchema, {});
+    },
     async killSession(request) {
       record("killSession")(request);
       return create(shimv1.KillSessionResponseSchema, {});
@@ -157,6 +161,7 @@ describe("shimRoutes unary delegation", () => {
     ["hibernate", requests.hibernateRequest],
     ["sendKeepalive", requests.sendKeepaliveRequest],
     ["retryVendorErrorNow", requests.retryVendorErrorNowRequest],
+    ["networkChanged", requests.networkChangedRequest],
     ["killSession", requests.killSessionRequest],
     ["startTurn", requests.startTurnRequest],
     ["updateAgent", requests.updateAgentRequest],

@@ -48,6 +48,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/mergenotice"
 	"agent-repld/internal/mergeworkspace"
+	"agent-repld/internal/netwatch"
 	"agent-repld/internal/opentabs"
 	"agent-repld/internal/pagesupersede"
 	"agent-repld/internal/paint"
@@ -833,14 +834,29 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// before it stands its old shim down, and its resume is answered from it.
 	startSlots := startslots.New(startslots.DefaultSize())
 
+	// THE ONE WATCHER OF THE OPERATING SYSTEM'S NETWORK EVENTS (netwatch): a
+	// reconnect cuts short every wait on the network, the fleet's offline
+	// vendor-start backoff and every shim's probe beat. Under the mocked
+	// vendor it hears nothing, so a suite's daemon never reacts to the
+	// host's real network.
+	openNetworkEvents := netwatch.OpenSystem
+	if p.Contracts.Fake() || fakeShims() {
+		openNetworkEvents = netwatch.Silent
+	}
+	networkWatch, err := netwatch.New(openNetworkEvents, log)
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the network watcher: %w", err)
+	}
+
 	fleet, err = workspace.NewFleet(workspace.FleetDeps{
-		RestoreParked: cacheKeeper.RestoreParked,
-		StartSlots:    startSlots,
-		PublishHost:   relay.PublishHostWorkspace,
-		DB:            p.DB,
-		Instance:      p.Instance,
-		Accounts:      accounts,
-		Supervisor:    supervisor,
+		NetworkChanged: networkWatch.Changed,
+		RestoreParked:  cacheKeeper.RestoreParked,
+		StartSlots:     startSlots,
+		PublishHost:    relay.PublishHostWorkspace,
+		DB:             p.DB,
+		Instance:       p.Instance,
+		Accounts:       accounts,
+		Supervisor:     supervisor,
 		Sinks: sessionwatcher.Sinks{
 			Feed:       feedResolver,
 			Footer:     footerResolver,
@@ -1564,6 +1580,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}},
 		{Name: "lock_watchdog", Run: stalls.Run},
 		{Name: "persistent_wifi", Run: wifi.Run},
+		{Name: "network_watch", Run: networkWatch.Run},
+		{Name: "network_changed", Run: func(ctx context.Context) error {
+			netwatch.Follow(ctx, networkWatch.Changed, fleet.NetworkChanged)
+			return nil
+		}},
 		{Name: "web_footprint", Run: func(ctx context.Context) error {
 			footprints.Run(ctx)
 			return nil

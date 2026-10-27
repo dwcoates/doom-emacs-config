@@ -18,6 +18,7 @@ const (
 	RPCHibernate                = "Hibernate"
 	RPCSendKeepalive            = "SendKeepalive"
 	RPCRetryVendorErrorNow      = "RetryVendorErrorNow"
+	RPCNetworkChanged           = "NetworkChanged"
 	RPCKillSession              = "KillSession"
 	RPCStartTurn                = "StartTurn"
 	RPCWatchAgent               = "WatchAgent"
@@ -54,6 +55,8 @@ func newResponse(rpc string) proto.Message {
 		return &shimv1.SendKeepaliveResponse{}
 	case RPCRetryVendorErrorNow:
 		return &shimv1.RetryVendorErrorNowResponse{}
+	case RPCNetworkChanged:
+		return &shimv1.NetworkChangedResponse{}
 	case RPCKillSession:
 		return &shimv1.KillSessionResponse{}
 	case RPCRollBackSession:

@@ -10,6 +10,7 @@ package shim.v1;
 
 import "shim/v1/endpoint_detach_foreground.proto";
 import "shim/v1/endpoint_retry_vendor_error_now.proto";
+import "shim/v1/endpoint_network_changed.proto";
 import "shim/v1/endpoint_fork_session.proto";
 import "shim/v1/endpoint_gather_title_digest.proto";
 import "shim/v1/endpoint_get_fork_point.proto";
@@ -81,6 +82,9 @@ service Shim {
   // Make the scheduled vendor-error retry at once (the user pressed RET in an
   // empty composer). See endpoint_retry_vendor_error_now.proto.
   rpc RetryVendorErrorNow(RetryVendorErrorNowRequest) returns (RetryVendorErrorNowResponse);
+  // This machine's network changed: probe the API now if anything waits on
+  // it, instead of at the next beat. See endpoint_network_changed.proto.
+  rpc NetworkChanged(NetworkChangedRequest) returns (NetworkChangedResponse);
 
   // END: the session and EVERYTHING live in it — the turn if one is open and
   // every live task, whichever turn spawned it. Refuses while anything is

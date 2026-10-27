@@ -77,6 +77,9 @@ export interface Engine {
   /** Make the scheduled vendor-error retry at once. */
   retryVendorErrorNow(request: shimv1.RetryVendorErrorNowRequest): Promise<shimv1.RetryVendorErrorNowResponse>;
 
+  /** This machine's network changed: probe the API now if anything waits on it. */
+  networkChanged(request: shimv1.NetworkChangedRequest): Promise<shimv1.NetworkChangedResponse>;
+
   /** End the session and everything live in it; refuses unless forced. */
   killSession(request: shimv1.KillSessionRequest): Promise<shimv1.KillSessionResponse>;
 
@@ -240,6 +243,10 @@ export class NotImplementedEngine implements Engine {
 
   retryVendorErrorNow(): Promise<shimv1.RetryVendorErrorNowResponse> {
     return Promise.reject(unimplemented("RetryVendorErrorNow"));
+  }
+
+  networkChanged(): Promise<shimv1.NetworkChangedResponse> {
+    return Promise.reject(unimplemented("NetworkChanged"));
   }
 
   killSession(): Promise<shimv1.KillSessionResponse> {

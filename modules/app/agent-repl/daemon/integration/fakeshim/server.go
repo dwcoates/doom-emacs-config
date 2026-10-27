@@ -1151,6 +1151,20 @@ func (s *server) RetryVendorErrorNow(ctx context.Context, req *connect.Request[s
 	}), nil
 }
 
+// NetworkChanged records the change and answers idle unless a script says
+// otherwise: the fake probes nothing of its own, so nothing waits on the API.
+func (s *server) NetworkChanged(ctx context.Context, req *connect.Request[shimv1.NetworkChangedRequest]) (*connect.Response[shimv1.NetworkChangedResponse], error) {
+	if err := s.enter(ctx, RPCNetworkChanged, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.NetworkChangedResponse, *shimv1.NetworkChangedResponse](s, RPCNetworkChanged); done {
+		return resp, err
+	}
+	return connect.NewResponse(&shimv1.NetworkChangedResponse{
+		Outcome: &shimv1.NetworkChangedResponse_Idle{Idle: &shimv1.NetworkChangedIdle{}},
+	}), nil
+}
+
 func (s *server) SetSessionModel(ctx context.Context, req *connect.Request[shimv1.SetSessionModelRequest]) (*connect.Response[shimv1.SetSessionModelResponse], error) {
 	if err := s.enter(ctx, RPCSetSessionModel, req.Msg); err != nil {
 		return nil, err
