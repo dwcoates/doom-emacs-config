@@ -35,7 +35,10 @@ import (
 //     fallback the contract admits ONLY where the footer would otherwise read
 //     idle, then idle itself.
 func (r *resolver) status(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	claim, status := ladder.Resolve(s.merge.State, s.parked,
+	// A STANDING COLD GATE IS A PARK TOO (owner ruling, 2026-10-27): the gate
+	// runs no shim until it is answered, so its route being down is the gate's
+	// own state, never a fault, and the gate's `waiting` rung draws it.
+	claim, status := ladder.Resolve(s.merge.State, s.parked || s.coldGate.Standing,
 		func(claim ladder.Claim) (*frontendv1.FooterStatus, bool) {
 			drawn := r.rung(claim, s, log)
 			return drawn, drawn != nil

@@ -48,8 +48,14 @@ const (
 // ruling, 2026-10-26): the shim is down only between beats, with its cache
 // warm, so the indicator reads the reader's hops exactly as a serving link's
 // would.
-func connectivityKey(seen bool, link shimclient.LinkState, peers bool, park wsm.Park) string {
+//
+// A STANDING COLD GATE RUNS NO SHIM (owner ruling, 2026-10-27), so its route
+// being gone is `no_session` too, as a hibernation's is.
+func connectivityKey(seen bool, link shimclient.LinkState, peers bool, park wsm.Park, coldGate bool) string {
 	if !seen {
+		return linkNoSession
+	}
+	if link == shimclient.LinkDead && coldGate {
 		return linkNoSession
 	}
 	if link == shimclient.LinkDead {

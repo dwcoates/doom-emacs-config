@@ -218,7 +218,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 // strip by their own content — the chip carrying the context the session held
 // with the reason in its hover, the strip carrying the state as one line.
 func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
-	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream, s.park))
+	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream, s.park, s.coldGate))
 	if err != nil {
 		return nil, err
 	}
@@ -748,7 +748,7 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 // OnLink drives the connectivity glyph and its tone.
 func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 	r.mutate(ws, "daemon.topbar.on_link", "the topbar took a link state",
-		dlog.Context{"shim_link": connectivityKey(true, link, true, wsm.ParkNone)}, func(s *wsState) {
+		dlog.Context{"shim_link": connectivityKey(true, link, true, wsm.ParkNone, false)}, func(s *wsState) {
 			s.link = link
 			s.linkSeen = true
 			// THE REVIVAL ENDS THE PARK, for the same reason the footer clears

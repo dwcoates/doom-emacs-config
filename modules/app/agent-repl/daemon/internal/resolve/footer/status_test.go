@@ -325,6 +325,35 @@ func TestTheColdGateIsAWaitingStep(t *testing.T) {
 	}
 }
 
+func TestTheColdGateDrawsOverItsStoodDownShim(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(h *harness)
+	}{
+		{name: "a shim that connected and was stood down", setup: func(h *harness) {
+			connected(h)
+			h.r.OnLink(testWS, shimclient.LinkDead)
+		}},
+		{name: "a gate raised from its record with no shim ever seen", setup: func(*harness) {}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the gate runs no shim until it is answered.
+			h := newHarness(t)
+			tt.setup(h)
+
+			// Act
+			h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "context cold — 182k tokens to re-read"}})
+
+			// Assert
+			status := h.view(t).GetStrip().GetStatus()
+			if status.GetWaiting().GetColdGate() == nil {
+				t.Fatalf("status = %+v, want the cold gate's waiting step, never a fault", status)
+			}
+		})
+	}
+}
+
 func TestTheColdGatesCostLineCarriesItsParts(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
