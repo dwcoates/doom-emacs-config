@@ -127,4 +127,6 @@ changes through and report after (2026-10-13):
   at the gate also needs the gate itself to outlive the shim: its facts
   (vendor session id, the shim's `SessionCold`, the account root) recorded
   durably and raised again with no shim, and an answer that spawns the shim it
-  resumes through. That is the next change.
+  resumes through. Done by the follow-up change that records the gate
+  (`wsm` `cold_gate`, daemon/AGENTS.md "A workspace at its cold gate runs no
+  shim"); it needed no contract change.

@@ -3083,6 +3083,9 @@ workspace restores it. One a history read brought back is parked again once
 the user is not looking at it, unless a prompt engaged it since it came up
 (owner ruling, 2026-10-27; `cachelapse/viewed.go`). So neither flicking
 through workspaces nor every page reloading after a rollout keeps shims up.
+A WORKSPACE AT ITS COLD GATE RUNS NO SHIM until the user answers the gate: the
+gate is recorded and raised from the record, and only the answer spawns a shim
+(daemon/AGENTS.md "A workspace at its cold gate runs no shim").
 A DEPLOY STARTS NO SHIM THAT WAS DOWN BEFORE IT: Emacs's re-announcement
 after a relaunch revives no withheld workspace (`workspace/register.go`),
 exactly as the rollout's bring-up withholds it (`bringup.OnlyVisible`).

@@ -1785,6 +1785,36 @@ Design record `docs/protobuf-design/vendor-start-resilience.md`.
   (`restartAnswer`). A caller that leaves first is answered its context's end
   at ERROR, and the bounce runs on and records its own outcome.
 
+## A workspace at its cold gate runs no shim until the gate is answered
+
+Owner ruling, 2026-10-27 (`internal/workspace/coldgaterecord.go`, `wsm`
+`cold_gate`). The gate is the shim's judgment, made once, at the start whose
+resume it refuses cold:
+
+- **Recorded and stood down.** That start records the gate (the conversation,
+  the shim's `SessionCold`, the account root) and stands its shim down before
+  it returns (`standDownAtGate`), keeping the gate.
+- **Raised from the record ever after.** Every later start, the boot's, a
+  handover successor's and a prompt's revival included, raises the recorded
+  gate with no shim (`raiseRecordedGate`); nothing is spawned for it. The
+  conversation is read from the store (`ReadHistory`), so the gated workspace
+  shows it whole.
+- **A gate is a quiet session that exists.** `Live`, `Running` and `Health`
+  read a standing gate with no shim as a session that exists, runs nothing and
+  does not serve, never as an absence to report. The footer draws a gate's dead
+  link as the gate, and only a recorded fault (a failed answer's re-open)
+  claims its fault rung over it; the topbar reads it `no_session`.
+- **The queue reads the gate before it looks for a shim**: a revival that
+  parked at it, a held delivery, a lease ending over it and a prompt that waits
+  it out are held under `wsm.HoldColdGate`, never read as a session that did
+  not come up.
+- **The answer spawns the shim it resumes through** (`ResumeCold`,
+  `heldForAnswer`, under the workspace's start gate). A re-open that fails
+  raises the gate again and stands that shim down again.
+- **The record is retired** when a session comes up (`sessionUp`, which every
+  answer's resume reaches) or a rebind points the workspace at another
+  conversation, and with the workspace's row.
+
 ## A prompt waits at the cold gate, and nothing that waits on a session is left unheld
 
 Owner rulings, 2026-10-10 (`internal/promptqueue/sessionhold.go`; design
