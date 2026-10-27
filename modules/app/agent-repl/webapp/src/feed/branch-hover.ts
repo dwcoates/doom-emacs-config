@@ -15,10 +15,16 @@
  * by metaprompt-tree.ts's `markReferences`) boxes the cited node's subtree in
  * a box of its own color, and the branch holding the citation is not boxed
  * meanwhile.
+ *
+ * A PROMPT'S ENTRY LABEL BOXES THE RESPONSE NODE IT ANSWERS while the pointer
+ * is on it (owner request, 2026-10-27), in the box a response's own branch
+ * takes, drawn as the composer's is while the person types that entry: the
+ * label (`entries.ts`'s `answeredNodeAt`) names the response row and node.
  */
 import { log } from "../log.js";
 import { branchAt, governedRowAt, isResponseRow } from "./bubble-selection.js";
 import { TREE_CLASS, TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
+import { answeredNodeAt } from "./entries.js";
 import { feedRowId } from "./row-id.js";
 import { boxSubtree, unboxAll, type SubtreeBox } from "./subtree-box.js";
 
@@ -67,17 +73,46 @@ export function citationAt(row: HTMLElement, target: Element): string | null {
   return label;
 }
 
-/** What the pointer boxes: a branch it is on, or the node a citation it is on cites. */
-function boxUnder(row: HTMLElement, target: Element): { label: string; box: SubtreeBox; operation: string } | null {
+/** One box the pointer stands: the row it is drawn in, the node it boxes, and how. */
+interface Hovered {
+  readonly row: HTMLElement;
+  readonly label: string;
+  readonly box: SubtreeBox;
+}
+
+/**
+ * What the pointer on TARGET, in the governed ROW of the feed HOST, boxes: a
+ * branch it is on, the node a citation it is on cites, or the response node
+ * a prompt's entry label it is on answers.
+ */
+function boxUnder(host: HTMLElement, row: HTMLElement, target: Element): (Hovered & { operation: string; record: string }) | null {
   const cited = citationAt(row, target);
-  if (cited !== null) return { label: cited, box: REFERENCE_BOX, operation: "feed.branch-hover.reference" };
+  if (cited !== null) {
+    return {
+      row,
+      label: cited,
+      box: REFERENCE_BOX,
+      operation: "feed.branch-hover.reference",
+      record: "boxed the response branch the citation under the pointer cites",
+    };
+  }
+  const answered = answeredNodeAt(host, row, target);
+  if (answered !== null) {
+    return {
+      ...answered,
+      box: HOVER_BOX,
+      operation: "feed.branch-hover.entry",
+      record: "boxed the response branch the prompt entry under the pointer answers",
+    };
+  }
   const branch = branchAt(row, target);
-  return branch === null ? null : { label: branch.label, box: HOVER_BOX, operation: "feed.branch-hover" };
+  if (branch === null) return null;
+  return { row, label: branch.label, box: HOVER_BOX, operation: "feed.branch-hover", record: "boxed the response branch under the pointer" };
 }
 
 /** Arm the hover box on the root feed HOST. Answers the uninstall. */
 export function installBranchHover(host: HTMLElement): () => void {
-  let hovered: { row: HTMLElement; label: string; box: SubtreeBox } | undefined;
+  let hovered: Hovered | undefined;
   const clear = (): void => {
     if (hovered === undefined) return;
     unboxAll(hovered.row, hovered.box);
@@ -85,29 +120,27 @@ export function installBranchHover(host: HTMLElement): () => void {
   };
   const onOver = (event: MouseEvent): void => {
     const row = governedRowAt(event.target, host);
-    const under = row !== null && event.target instanceof Element ? boxUnder(row, event.target) : null;
-    if (row === null || under === null) {
+    const under = row !== null && event.target instanceof Element ? boxUnder(host, row, event.target) : null;
+    if (under === null) {
       clear();
       return;
     }
     // A repaint of the row's prose drops the box, so the same node is boxed
     // again while its lines no longer wear it.
     if (
-      hovered?.row === row &&
+      hovered?.row === under.row &&
       hovered.label === under.label &&
       hovered.box === under.box &&
-      row.querySelector(`.${under.box.className}`) !== null
+      under.row.querySelector(`.${under.box.className}`) !== null
     )
       return;
     clear();
-    boxSubtree(row, under.label, under.box);
-    hovered = { row, label: under.label, box: under.box };
-    log.debug(
-      under.box === REFERENCE_BOX
-        ? "boxed the response branch the citation under the pointer cites"
-        : "boxed the response branch under the pointer",
-      { operation: under.operation, context: { row: feedRowId(row) ?? "unset", label: under.label } },
-    );
+    boxSubtree(under.row, under.label, under.box);
+    hovered = { row: under.row, label: under.label, box: under.box };
+    log.debug(under.record, {
+      operation: under.operation,
+      context: { row: feedRowId(under.row) ?? "unset", label: under.label },
+    });
   };
   host.addEventListener("mouseover", onOver);
   host.addEventListener("mouseleave", clear);
