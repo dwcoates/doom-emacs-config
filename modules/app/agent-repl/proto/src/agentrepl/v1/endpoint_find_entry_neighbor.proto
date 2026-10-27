@@ -7,9 +7,9 @@
 // calls it too when the person presses `C-o` or `C-i` on an entry line, and
 // relabels that entry with the label the daemon names, its words kept: `C-o`
 // moves the entry one node on in reading order (`3.2 - ` becomes `3.2.1 - `,
-// or `3.3 - ` when 3.2 has no child), and `C-i` moves it up to the node's
-// parent (`3.2 - ` becomes `3 - `), or on to the next root from a root
-// (`3 - ` becomes `4 - `).
+// or `3.3 - ` when 3.2 has no child), and `C-i` moves it back, to the node's
+// previous sibling (`3.2 - ` becomes `3.1 - `), else up to its parent
+// (`3.1 - ` becomes `3 - `), the way `O` opens a line.
 //
 // THE TREE IS THE RESPONSE THE ENTRY TARGETS, by the rule the composer's
 // entries are bound by (endpoint_report_composer_entries.proto): the selected
@@ -17,11 +17,10 @@
 // feed whose tree holds the label. The neighbor is found in that tree:
 //   - `next`: the node's next sibling; else its parent's next sibling, and so
 //     on up its ancestors;
-//   - `previous`: the node's previous sibling; else its parent, and so on;
+//   - `previous`: the node's previous sibling; else its parent; the first
+//     root has none;
 //   - `following`: the node read after it: its first child; else what `next`
-//     names;
-//   - `parent`: the node's parent; else, for a root, the next root; the last
-//     root has none.
+//     names.
 // The answer is for the label the request names, so it holds for the line the
 // key was pressed on whatever the composer has reported since.
 
@@ -50,17 +49,17 @@ message EntryNeighborDirection {
   oneof way {
     // The node a line opened below the entry line answers (`o`).
     EntryNeighborNext next = 1;
-    // The node a line opened above the entry line answers (`O`).
+    // The node a line opened above the entry line answers (`O`), and the
+    // node the entry answers instead once it steps back (`C-i`).
     EntryNeighborPrevious previous = 2;
     // The node the entry answers instead once it steps on (`C-o`).
     EntryNeighborFollowing following = 4;
-    // The node the entry answers instead once it steps up (`C-i`).
-    EntryNeighborParent parent = 5;
   }
   // `first_child` (3) was `C-o`'s way until `C-o` went on past a childless
-  // node; `following` replaced it.
-  reserved 3;
-  reserved "first_child";
+  // node; `following` replaced it. `parent` (5) was `C-i`'s way until `C-i`
+  // stepped back to the previous sibling first; `previous` replaced it.
+  reserved 3, 5;
+  reserved "first_child", "parent";
 }
 
 message EntryNeighborNext {}
@@ -68,8 +67,6 @@ message EntryNeighborNext {}
 message EntryNeighborPrevious {}
 
 message EntryNeighborFollowing {}
-
-message EntryNeighborParent {}
 
 // THE ARM IS THE OUTCOME.
 message FindEntryNeighborResponse {

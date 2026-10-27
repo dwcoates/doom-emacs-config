@@ -5608,7 +5608,7 @@ instead diverges from it unseen."
 (ert-deftest agent-repl-test-wire-verbs-find-entry-neighbor-encodes-every-way ()
   "Each way the composer asks for is its own arm of the direction."
   (agent-repl-test-wire-verbs--with-common
-    (dolist (case '((:next "next") (:previous "previous") (:following "following") (:parent "parent")))
+    (dolist (case '((:next "next") (:previous "previous") (:following "following")))
       (should (equal (json-serialize
                       (cdr (assq 'direction
                                  (agent-repl-wire-encode-find-entry-neighbor-request
@@ -5621,7 +5621,7 @@ instead diverges from it unseen."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_find_entry_neighbor.pb.go" "EntryNeighborDirection")
                        #'string<)
-                 '("following" "next" "parent" "previous"))))
+                 '("following" "next" "previous"))))
 
 (ert-deftest agent-repl-test-wire-verbs-find-entry-neighbor-refuses-a-missing-direction ()
   "The direction is REQUIRED."
