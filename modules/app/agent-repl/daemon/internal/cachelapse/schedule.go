@@ -316,7 +316,10 @@ func (k *Keeper) restoreAsked(ctx context.Context, ws ids.WorkspaceID) {
 		log.Debug(opRestore, "a restore was asked for a session the keep-alive cycle has not parked; nothing to do", nil)
 		return
 	}
-	k.requestRestore(ctx, ws, k.deps.Clock.Now())
+	if k.enqueueRestore(ws, k.deps.Clock.Now()) {
+		k.viewed[ws] = time.Time{}
+		k.pump(ctx)
+	}
 }
 
 // requestRestore puts WS in line for a restore slot and fills the free
@@ -381,8 +384,11 @@ func (k *Keeper) restored(ctx context.Context, ws ids.WorkspaceID, err error) {
 	switch {
 	case err == nil:
 		log.Info(opRestore, "the parked session is back up for its keep-alive", nil)
+		k.viewedUp(ctx, log, ws)
 	case leaving(ctx, log, opRestore, "restoring the parked session", err):
+		delete(k.viewed, ws)
 	default:
+		delete(k.viewed, ws)
 		log.Error(opRestore, "the parked session could not be restored; it is asked again shortly",
 			dlog.Context{"cause": err.Error(), "retry_in": BeatRetry.String()})
 		if _, armed := k.beats[ws]; armed {

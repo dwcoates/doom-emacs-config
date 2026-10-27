@@ -214,6 +214,11 @@ type Keeper struct {
 	// detached work), as this Keeper saw it. A beat stands a session down
 	// only once it has been free StandDownGrace (owner ruling, 2026-10-26).
 	freeSince map[ids.WorkspaceID]time.Time
+	// viewed are the parked sessions restored only because a reader asked for
+	// their history (viewed.go): each is stood down again once the user is not
+	// looking at it, unless a prompt engaged it. The instant is when its
+	// restore came up, zero while it is in line or in flight.
+	viewed map[ids.WorkspaceID]time.Time
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -249,6 +254,7 @@ func New(deps Deps) (*Keeper, error) {
 		lapsedAt:  map[ids.WorkspaceID]time.Time{},
 		sent:      map[ids.WorkspaceID]time.Time{},
 		freeSince: map[ids.WorkspaceID]time.Time{},
+		viewed:    map[ids.WorkspaceID]time.Time{},
 	}, nil
 }
 
@@ -424,6 +430,9 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 	case edgeFree:
 		if e.workEnded {
 			k.freeSince[e.ws] = k.deps.Clock.Now()
+			// WORK RAN, so the session was used, not only viewed: the cycle
+			// parks it at a beat after the grace, as any other.
+			delete(k.viewed, e.ws)
 		}
 		k.schedule(ctx, e.ws, e.why)
 	case edgeRestored:
@@ -499,6 +508,7 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 		log.Error(opCadence, "could not read the workspace's visibility; its keep-alives are left as they are", dlog.Context{"cause": err.Error()})
 		return
 	}
+	k.releaseViewed(log, record)
 	if !record.LetsCacheLapse() {
 		delete(k.deadlines, ws)
 	}
@@ -529,6 +539,7 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.lapsedAt, ws)
 	delete(k.sent, ws)
 	delete(k.freeSince, ws)
+	delete(k.viewed, ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace
