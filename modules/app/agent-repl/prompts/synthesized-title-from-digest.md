@@ -28,6 +28,13 @@ semicolons, no colons, no parentheses, no slashes and no "and" or "while" chains
 used to join what would otherwise be several clauses or sentences. If it does
 not fit one plain sentence, rise to a higher level of abstraction until it does.
 
+TWELVE WORDS AT MOST. THIS IS A HARD LIMIT, NOT A TARGET. The sentence has
+twelve words or fewer, counting every word including the verb, articles and
+prepositions. Count the words before you reply. If the count is over twelve,
+cut detail or rise to a higher level of abstraction and count again. A sentence
+of thirteen words or more is a failed answer, however accurate it is: the title
+bar has room for twelve, and nothing past them is ever read.
+
 Name the SUBJECT of the work, the thing being built or fixed or changed,
 specifically enough to tell this workspace from another. Never name the person,
 the date, or how the session was started.
