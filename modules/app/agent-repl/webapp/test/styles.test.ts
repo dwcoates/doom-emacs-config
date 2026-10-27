@@ -4970,8 +4970,8 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     // Arrange / Act
     const got = [rootToken("--small-prose-pad-ref-rem"), rootToken("--bubble-base-font-rem")];
 
-    // Assert — 0.9 was every bubble's size on 2026-10-14; the base is now the tree's 0.85.
-    expect(got).toEqual(["0.9", "0.85"]);
+    // Assert — 0.9 was every bubble's size on 2026-10-14; the base has since moved to 0.83.
+    expect(got).toEqual(["0.9", "0.83"]);
   });
 
   it("sets an interim response's prose at the thinking bubble's smaller size", () => {
@@ -5025,7 +5025,7 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     const got = [rootToken("--bubble-base-font-rem"), rootToken("--bubble-font-rem")];
 
     // Assert
-    expect(got).toEqual(["0.85", "var(--bubble-base-font-rem)"]);
+    expect(got).toEqual(["0.83", "var(--bubble-base-font-rem)"]);
   });
 
   it("leaves the turn's answer at every bubble's size", () => {
