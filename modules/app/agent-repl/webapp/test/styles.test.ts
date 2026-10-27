@@ -2972,6 +2972,13 @@ describe("the one bubble rule set", () => {
             // remaining visible highlight once their fill is already the
             // page's own --bg; its own suite below pins it.
             !(prop === "box-shadow" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))) &&
+            // THE WORKING PROSE ENDS AT THE CARDS' EDGE (owner request,
+            // 2026-10-27): the same two widen to the cards' cap and drop the
+            // gap beside the bar; "the working prose's right edge" pins both.
+            !(
+              (prop === "max-width" || prop === "--bubble-scroll-gap") &&
+              rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))
+            ) &&
             // THE BLUE PROMPT'S CODE (owner request, 2026-10-19): the user
             // prompt feeds the two code fills their darker blue; the suite
             // "code in a blue prompt bubble" pins both.
@@ -3037,6 +3044,144 @@ describe("the one bubble rule set", () => {
  * mode is `BUBBLE_UNCAPPED` in src/bubble/draw.ts, and its box wears only
  * `.bubble-box`; these hold the stylesheet to leaving that box alone.
  */
+/**
+ * THE WORKING PROSE ENDS AT THE CARDS' EDGE (owner request, 2026-10-27): a
+ * thinking bubble and an interim response hang on the response's left rail
+ * and reach the tool cards' right edge, and their collapsed line keeps no
+ * right inset, so its `…` ends on that edge. Every other bubble keeps the one
+ * bubble width and its inset.
+ */
+describe("the working prose's right edge", () => {
+  /** A bubble of ROLE, VARIANT and EXTRA classes holding a box (EXPANDED or not) and a body. */
+  function bubbleOf(role: string, variant: string, extra: string, expanded: boolean): HTMLElement {
+    const bubble = document.createElement("div");
+    bubble.className = `bubble ${extra}`.trim();
+    bubble.setAttribute("data-role", role);
+    bubble.setAttribute("data-variant", variant);
+    bubble.setAttribute("data-more", "ellipsis");
+    const box = document.createElement("div");
+    box.className = expanded ? `bubble-box bubble-scroll ${EXPANDED_CLASS}` : "bubble-box bubble-scroll";
+    const body = document.createElement("div");
+    body.className = "bubble-body";
+    box.append(body);
+    bubble.append(box);
+    return bubble;
+  }
+
+  const WORKING = [
+    ["a thinking bubble", "response", "thinking", ""],
+    ["an interim response", "response", "response", "interim-response"],
+  ] as const;
+  const OTHERS = [
+    ["a final response", "response", "response", "final-response"],
+    ["a prompt", "prompt", "user", ""],
+  ] as const;
+
+  it.each(WORKING)("hangs %s on the response's left rail", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const margin = inDocument(bubbleOf(role, variant, extra, false), (el) => cascadedValue(el, "margin-left"));
+    // Assert -- the rail inset plus the cap is the centered cards' right edge.
+    expect(margin).toBe("var(--agent-rail-inset)");
+  });
+
+  it.each(WORKING)("caps %s at the cards' width", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const cap = inDocument(bubbleOf(role, variant, extra, false), (el) => cascadedValue(el, "max-width"));
+    // Assert
+    expect(cap).toBe("var(--agent-bubble-cap)");
+  });
+
+  it.each(OTHERS)("keeps %s at the one bubble width", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const cap = inDocument(bubbleOf(role, variant, extra, false), (el) => cascadedValue(el, "max-width"));
+    // Assert
+    expect(cap).toBe("var(--bubble-max-width)");
+  });
+
+  it("caps the feed's cards at the same width the working prose takes", () => {
+    // Arrange / Act
+    const cards = declarationsOf(".feed-item > .tool-card") ?? "";
+    // Assert
+    expect(cards).toMatch(/max-width:\s*var\(--agent-bubble-cap\)/);
+  });
+
+  /** The `--bubble-scroll-gap` BUBBLE inherits or sets, mounted in the main column that declares it. */
+  function scrollGapOf(bubble: HTMLElement): string {
+    const column = document.createElement("div");
+    column.id = "main-col";
+    column.append(bubble);
+    return inDocument(column, () => cascadedValue(bubble, "--bubble-scroll-gap"));
+  }
+
+  it.each(WORKING)("drops the gap beside the bar on %s", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const gap = scrollGapOf(bubbleOf(role, variant, extra, false));
+    // Assert
+    expect(gap).toBe("0px");
+  });
+
+  it.each(OTHERS)("keeps the gap beside the bar on %s", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const gap = scrollGapOf(bubbleOf(role, variant, extra, false));
+    // Assert
+    expect(gap).toBe("2px");
+  });
+
+  it.each(WORKING)("reserves no gutter on %s's collapsed box", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const gutter = declarationsOf(
+      variant === "thinking"
+        ? '.bubble[data-variant="thinking"] > .bubble-scroll:not(.expanded)'
+        : ".bubble.interim-response > .bubble-scroll:not(.expanded)",
+    );
+    const matches = inDocument(bubbleOf(role, variant, extra, false), (el) =>
+      (el.firstElementChild as HTMLElement).matches(
+        '.bubble[data-variant="thinking"] > .bubble-scroll:not(.expanded), .bubble.interim-response > .bubble-scroll:not(.expanded)',
+      ),
+    );
+    // Assert
+    expect([/scrollbar-gutter:\s*auto/.test(gutter ?? ""), matches]).toEqual([true, true]);
+  });
+
+  it.each(WORKING)("keeps the gutter on %s's expanded box", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const matches = inDocument(bubbleOf(role, variant, extra, true), (el) =>
+      (el.firstElementChild as HTMLElement).matches(
+        '.bubble[data-variant="thinking"] > .bubble-scroll:not(.expanded), .bubble.interim-response > .bubble-scroll:not(.expanded)',
+      ),
+    );
+    // Assert
+    expect(matches).toBe(false);
+  });
+
+  it.each(WORKING)("lets %s's collapsed line reach its right edge", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const inset = inDocument(bubbleOf(role, variant, extra, false), (el) =>
+      cascadedValue(el.querySelector(".bubble-body") as HTMLElement, "padding-right"),
+    );
+    // Assert
+    expect(inset).toBe("0px");
+  });
+
+  it.each(WORKING)("keeps %s's expanded text off the bar", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const inset = inDocument(bubbleOf(role, variant, extra, true), (el) =>
+      cascadedValue(el.querySelector(".bubble-body") as HTMLElement, "padding-right"),
+    );
+    // Assert
+    expect(inset).toBe("var(--bubble-content-inset)");
+  });
+
+  it.each(OTHERS)("keeps %s's collapsed text off the bar", (_label, role, variant, extra) => {
+    // Arrange / Act
+    const inset = inDocument(bubbleOf(role, variant, extra, false), (el) =>
+      cascadedValue(el.querySelector(".bubble-body") as HTMLElement, "padding-right"),
+    );
+    // Assert
+    expect(inset).toBe("var(--bubble-content-inset)");
+  });
+});
+
 describe("the uncapped bubble", () => {
   /** A drawn bubble of CAPLINES, the answer's hooks and state, mounted. */
   function boxOf(capLines: BubbleCapLines): HTMLElement {
