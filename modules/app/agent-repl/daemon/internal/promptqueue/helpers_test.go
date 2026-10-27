@@ -1741,6 +1741,7 @@ func newHarness(t *testing.T) *harness {
 		Sidebar: h.sidebar,
 		Edges:   h.edges,
 		Leases:  h.leases,
+		Merges:  h.leases,
 		Holds:   h.holds,
 		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession && !h.clientReaped },
 		Revive: func(context.Context, ids.WorkspaceID) error {
@@ -1927,6 +1928,18 @@ func productionFuncs(t *testing.T) (*token.FileSet, []*ast.FuncDecl) {
 type fakeLeases struct {
 	mu      sync.Mutex
 	changed []ids.WorkspaceID
+	// requesting is the turn each workspace's merge was asked for in.
+	requesting map[ids.WorkspaceID]ids.TurnID
+}
+
+func (l *fakeLeases) TakeRequestingTurn(ws ids.WorkspaceID, turn ids.TurnID) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.requesting[ws] != turn {
+		return false
+	}
+	delete(l.requesting, ws)
+	return true
 }
 
 func (l *fakeLeases) LeaseChanged(ws ids.WorkspaceID) {

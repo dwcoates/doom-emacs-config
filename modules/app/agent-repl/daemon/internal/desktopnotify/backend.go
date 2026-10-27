@@ -23,7 +23,7 @@ const EnvNotifierCmd = "AGENT_REPL_NOTIFIER_CMD"
 // click, a dismissal or this timeout, which is what lets the daemon read the
 // click back. A banner HANDED to the platform (terminal-notifier) has no such
 // wait: macOS keeps it, and its click runs the action stored with it.
-const ClickTimeout = 60 * time.Second
+const ClickTimeout = 10 * time.Second
 
 // postBound bounds one banner program's whole run: its own click timeout plus
 // the program's start and exit. A run past it is a hung program.

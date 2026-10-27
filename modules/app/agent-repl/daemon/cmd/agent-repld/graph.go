@@ -951,6 +951,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	mergeMover := &mergeForwarder{}
 	queue, err = promptqueue.New(promptqueue.Deps{
 		Leases:         mergeMover,
+		Merges:         mergeMover,
 		RestartSlots:   startSlots,
 		TurnBanners:    turnBanners,
 		Commits:        commitRecounter,

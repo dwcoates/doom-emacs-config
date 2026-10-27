@@ -350,6 +350,39 @@ func TestTheMergeForwarderCarriesALeaseChange(t *testing.T) {
 	}
 }
 
+func (m *recordingMover) TakeRequestingTurn(ws ids.WorkspaceID, turn ids.TurnID) bool {
+	m.calls = append(m.calls, "take "+string(ws)+" "+string(turn))
+	return true
+}
+
+func TestTheMergeForwarderCarriesARequestingTurnQuestion(t *testing.T) {
+	cases := []struct {
+		name  string
+		bound bool
+		want  bool
+	}{
+		{name: "bound, to the orchestrator", bound: true, want: true},
+		{name: "unbound: no merge was asked for yet", bound: false, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := &mergeForwarder{}
+			if tc.bound {
+				f.bind(&recordingMover{})
+			}
+
+			// Act.
+			got := f.TakeRequestingTurn("ws-1", "turn-1")
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("TakeRequestingTurn = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestABoundMergeMoverCarriesBothMoves(t *testing.T) {
 	// Arrange.
 	f := &mergeForwarder{}
