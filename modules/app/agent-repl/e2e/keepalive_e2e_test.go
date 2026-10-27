@@ -39,6 +39,9 @@ package e2e
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -73,6 +76,34 @@ func keepaliveWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef, string) {
 	}})
 	repo, ws := w.NewRepoWorkspace(t)
 	return w, ws, harness.WorkspaceLogPath(repo.Dir, "shim")
+}
+
+// TestKeepaliveWorldIsTheOneCompressedCadence pins keepaliveWorld as the one
+// place a world compresses the daemon's keep-alive cadence, so a test that
+// hand-rolls its own cannot drift from it.
+func TestKeepaliveWorldIsTheOneCompressedCadence(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("listing the e2e test files: %v", err)
+	}
+
+	// Act
+	sites := map[string]int{}
+	for _, file := range files {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+		if n := strings.Count(string(src), "KeepaliveInterval"+": "); n > 0 {
+			sites[file] = n
+		}
+	}
+
+	// Assert
+	if want := map[string]int{"keepalive_e2e_test.go": 1}; !reflect.DeepEqual(sites, want) {
+		t.Errorf("worlds compressing the keep-alive cadence = %v, want only keepaliveWorld's %v", sites, want)
+	}
 }
 
 // awaitShimRecords awaits COUNT records satisfying pred, the first at or after

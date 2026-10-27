@@ -286,16 +286,13 @@ const fakeVendorTurnMessage = "fake vendor runs a turn of its OWN before the nex
 // order. Only then is absence asserted.
 func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 	// Arrange
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		KeepaliveInterval: keepaliveTestInterval,
-	}})
-	repo, ws := w.NewRepoWorkspace(t)
+	w, ws, shimLog := keepaliveWorld(t)
 	queued := SubmitPrompt(t, w, ws, "!queue-vendor-turn")
 	AwaitTurnEnded(t, w, ws, queued)
 
 	// Act: the keep-alive beats, the vendor runs its own turn first, then
 	// answers the keep-alive.
-	w.Daemon.AwaitLogRecordAfter(harness.WorkspaceLogPath(repo.Dir, "shim"),
+	w.Daemon.AwaitLogRecordAfter(shimLog,
 		"a keep-alive turn to close after the vendor's own turn ran",
 		func(r harness.LogRecord) bool { return r.Message == fakeVendorTurnMessage },
 		func(r harness.LogRecord) bool { return r.Message == "closed a turn" && r.Context["keepalive"] == true })
@@ -337,15 +334,12 @@ func TestKeepAliveAnswerAfterVendorTurnNeverServed(t *testing.T) {
 // Seam: keepalive-marker
 func TestKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 	// Arrange
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		KeepaliveInterval: keepaliveTestInterval,
-	}})
-	repo, ws := w.NewRepoWorkspace(t)
+	w, ws, shimLog := keepaliveWorld(t)
 	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
 	// Act: a keep-alive runs to its answer, then a real turn follows it.
-	w.Daemon.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "shim"), "a keep-alive turn to close",
+	w.Daemon.AwaitLogRecord(shimLog, "a keep-alive turn to close",
 		func(r harness.LogRecord) bool { return r.Message == "closed a turn" && r.Context["keepalive"] == true })
 	driveDocumentedPrompt(t, w, ws, w.DefaultConfigDir, "after the keep-alive")
 
@@ -397,12 +391,9 @@ func TestKeepAliveStoresNothingOnEitherPlane(t *testing.T) {
 // end, and the feed must carry exactly the real turns, each once.
 func TestPromptDuringKeepAliveTurnsOnce(t *testing.T) {
 	// Arrange
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
-		KeepaliveInterval: keepaliveTestInterval,
-	}})
-	repo, ws := w.NewRepoWorkspace(t)
+	w, ws, shimLog := keepaliveWorld(t)
 	turn1 := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
-	w.Daemon.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "shim"), "a keep-alive to be submitted",
+	w.Daemon.AwaitLogRecord(shimLog, "a keep-alive to be submitted",
 		func(r harness.LogRecord) bool { return r.Context["outcome"] == "keepalive_submitted" })
 
 	// Act
