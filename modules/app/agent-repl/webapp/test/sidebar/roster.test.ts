@@ -1682,7 +1682,7 @@ describe("the Merge Queue section's queues", () => {
     { name: "draws the head's card in the foreground colour", selector: ".sb-mq-head", property: "color", want: "var(--fg)" },
   ])("$name", ({ selector, property, want }) => {
     const drawn = drawWorkspaceRoster(
-      roster({ open: openSection(false, true), repos: [repoSection({ id: "repo-1", mergeQueue: { head: mergingHead("w1"), waiting: [waitingMerge("w2")] } })] }),
+      withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1"), waiting: [waitingMerge("w2")] } })]),
       sidebarContext(),
     );
     expect(inRail(drawn, () => cascadedValue(drawn.querySelector(selector)!, property))).toBe(want);
