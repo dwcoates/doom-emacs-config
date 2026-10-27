@@ -27,6 +27,7 @@ import (
 
 	"agent-repld/integration/fakegit"
 	"agent-repld/integration/grantedclock"
+	"agent-repld/internal/cachelapse"
 	"agent-repld/internal/chessboard"
 	"agent-repld/internal/cpugov"
 	"agent-repld/internal/daemonaddr"
@@ -333,6 +334,13 @@ type Opts struct {
 	// hibernation tests
 	// use so the cutoff can be a handful of milliseconds.
 	IdleCutoffMS int
+	// KeepaliveInterval compresses the daemon's keep-alive cadence through
+	// its test-run seam (cachelapse.EnvTestKeepaliveInterval): the Keeper
+	// asks the shim for a beat this long after the cache clock instead of
+	// fifty-two minutes. It exists for the suites whose subject is a
+	// keep-alive turn -- its rewind, what it stores, a prompt racing it --
+	// which cannot see one otherwise. Zero leaves the production cadence.
+	KeepaliveInterval time.Duration
 	// FooterMomentaryDwell compresses the footer's momentary-status dwell via
 	// --footer-momentary-dwell. It exists for the two tests whose subject IS
 	// the retirement: the product window is 1.5s because a person has to read
@@ -843,6 +851,9 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	)
 	if d.inMemoryState {
 		env = append(env, wsm.EnvTestStateInMemory+"=1")
+	}
+	if opts.KeepaliveInterval > 0 {
+		env = append(env, cachelapse.EnvTestKeepaliveInterval+"="+opts.KeepaliveInterval.String())
 	}
 	env = append(env, BuildIdentityEnv(PinnedCheckout(t))...)
 	env = append(env, HostNeutralNamingEnv()...)

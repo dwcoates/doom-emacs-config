@@ -3,9 +3,7 @@ package cachelapse
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
-	"strconv"
 	"time"
 
 	"agent-repld/internal/bringup"
@@ -24,15 +22,23 @@ import (
 // turn holding the main agent, live detached work its rewind would kill, a
 // cache already lapsed -- is the shim's answer (shim.v1.SendKeepalive), and
 // the daemon only acts on it: a busy or working session is asked again when
-// it falls free, and a lapsed cache is beaten no more until a turn moves its
-// clock.
+// it falls free (a busy one an interval on at the latest, since not every
+// busy slot is one the daemon sees end), and a lapsed cache is beaten no more
+// until a turn moves its clock.
 
 // The keep-alive drive's timings.
 const (
 	// KeepaliveInterval is how long after the cache clock a beat is due: 52
 	// minutes (ruled 2026-09-17), inside the subscription's one-hour cache
-	// window with an eight-minute margin against a slow turn.
+	// window with an eight-minute margin against a slow turn. Deps.Interval
+	// carries it, or a test run's compressed cadence (IntervalFromEnv).
 	KeepaliveInterval = 52 * time.Minute
+	// StandDownGrace is how long a session must have been free before a beat
+	// stands it down: the user prompts with no shim start for about an
+	// interval after the work ends (owner ruling, 2026-10-26). It is NOT the
+	// beat cadence (Deps.Interval), so a test run's compressed cadence never
+	// cycles its sessions down.
+	StandDownGrace = KeepaliveInterval
 	// RestoreLead is how long before its beat a parked session is restored.
 	// A shim that takes longer than this to start is a defect of its own
 	// (owner ruling, 2026-10-26).
@@ -148,7 +154,7 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	if session.Terminal != nil && !session.KeepaliveCycled() {
 		return none("its session is not live: " + session.Terminal.Kind)
 	}
-	due := clock.Add(k.interval())
+	due := clock.Add(k.deps.Interval)
 	engaged := session.LastEngagementAt
 	if engaged.IsZero() {
 		engaged = session.StartedAt
@@ -237,16 +243,23 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		// an interval after the session last fell free. A beat that comes
 		// sooner, because detached work ended after the turn, goes out and
 		// leaves the shim up; the next one stands it down.
-		if free, ok := k.freeSince[ws]; ok && now.Sub(free) < k.interval() {
+		if free, ok := k.freeSince[ws]; ok && now.Sub(free) < StandDownGrace {
 			log.Info(opDrive, "the session fell free less than an interval ago; the shim stays up until the next keep-alive",
 				dlog.Merge(fields, dlog.Context{"free_since": free}))
 		} else {
 			k.deps.CycleDown(ws, now)
 		}
-		k.beats[ws] = now.Add(k.interval())
+		k.beats[ws] = now.Add(k.deps.Interval)
 	case answer.GetSkipped().GetMainAgentBusy() != nil:
-		log.Info(opDrive, "the main agent is busy, which keeps the cache warm itself; the next beat is timed when it falls free",
-			dlog.Merge(fields, dlog.Context{"detail": answer.GetSkipped().GetMainAgentBusy().GetDetail()}))
+		// NOT EVERY BUSY SLOT ENDS IN A FREE EDGE. A turn the daemon serves
+		// does, and re-times the beat from its own end; the shim's own
+		// keep-alive turn and a vendor turn it never serves hold the slot
+		// unseen. So the beat is armed one interval on as well, as the
+		// shim's own cadence armed a skipped beat, and a free edge re-times
+		// it sooner.
+		k.beats[ws] = now.Add(k.deps.Interval)
+		log.Info(opDrive, "the main agent is busy, which keeps the cache warm itself; the next beat falls one interval on, or is timed when it falls free",
+			dlog.Merge(fields, dlog.Context{"detail": answer.GetSkipped().GetMainAgentBusy().GetDetail(), "next": k.beats[ws]}))
 	case answer.GetSkipped().GetDetachedWorkLive() != nil:
 		log.Info(opDrive, "detached work is live, and the rewind a keep-alive owes would kill it; the keep-alive goes out when it ends",
 			dlog.Merge(fields, dlog.Context{"live_items": answer.GetSkipped().GetDetachedWorkLive().GetLiveItems()}))
@@ -377,36 +390,4 @@ func (k *Keeper) restored(ctx context.Context, ws ids.WorkspaceID, err error) {
 		}
 	}
 	k.pump(ctx)
-}
-
-// interval is how long after the cache clock a beat is due (Deps.Interval).
-func (k *Keeper) interval() time.Duration {
-	if k.deps.Interval > 0 {
-		return k.deps.Interval
-	}
-	return KeepaliveInterval
-}
-
-// FakeKeepaliveIntervalEnv shortens the keep-alive interval, in
-// milliseconds, under the whole stack's fake mode alone: the same variable
-// the shim honored while it ran its own timer (agent-shim's
-// FAKE_KEEPALIVE_INTERVAL_ENV), so a suite's keep-alive scenarios see beats
-// in seconds.
-const FakeKeepaliveIntervalEnv = "AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS"
-
-// FakeKeepaliveInterval answers the interval FakeKeepaliveIntervalEnv sets
-// when FAKE is the stack's fake mode, zero when it is unset or the stack is
-// not fake. A value that is not a positive whole number of milliseconds is
-// refused: a suite that asked for a short interval and got the production
-// one would wait out its bounds and fail far from the cause.
-func FakeKeepaliveInterval(fake bool, getenv func(string) string) (time.Duration, error) {
-	value := getenv(FakeKeepaliveIntervalEnv)
-	if !fake || value == "" {
-		return 0, nil
-	}
-	ms, err := strconv.Atoi(value)
-	if err != nil || ms <= 0 {
-		return 0, fmt.Errorf("cachelapse: %s=%q is not a positive number of milliseconds", FakeKeepaliveIntervalEnv, value)
-	}
-	return time.Duration(ms) * time.Millisecond, nil
 }

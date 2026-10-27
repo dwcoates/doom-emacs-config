@@ -138,9 +138,8 @@ type Deps struct {
 	// due, since the sweep puts that session to sleep. Zero disables the
 	// sweep, and with it this limit.
 	IdleCutoff time.Duration
-	// Interval is how long after the cache clock a beat is due; zero is
-	// KeepaliveInterval. Only the whole stack's fake mode shortens it
-	// (FakeKeepaliveInterval), so a suite can watch keep-alives happen.
+	// Interval is how long after the cache clock a beat is due:
+	// KeepaliveInterval, or a test run's compressed cadence (IntervalFromEnv).
 	Interval time.Duration
 	// CycleDown asks for WS's session to be stood down after the keep-alive
 	// asked at BEAT (drain.Controller.CycleDown).
@@ -213,7 +212,7 @@ type Keeper struct {
 	sent map[ids.WorkspaceID]time.Time
 	// freeSince is when each session last fell free (no turn, no live
 	// detached work), as this Keeper saw it. A beat stands a session down
-	// only once it has been free a whole interval (owner ruling, 2026-10-26).
+	// only once it has been free StandDownGrace (owner ruling, 2026-10-26).
 	freeSince map[ids.WorkspaceID]time.Time
 }
 
@@ -230,6 +229,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs the withheld stand-downs")
 	case deps.PublishRegistry == nil:
 		return nil, errors.New("cachelapse: the keeper needs the roster republish")
+	case deps.Interval <= 0:
+		return nil, errors.New("cachelapse: the keeper needs a positive keep-alive interval")
 	case deps.CycleDown == nil:
 		return nil, errors.New("cachelapse: the keeper needs the keep-alive cycle's stand-down")
 	case deps.Restore == nil:

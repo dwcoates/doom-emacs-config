@@ -250,6 +250,7 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		StandDowns:      h.standDowns,
 		PublishRegistry: func(context.Context) error { h.publishes++; return nil },
 		IdleCutoff:      6 * time.Hour,
+		Interval:        KeepaliveInterval,
 		CycleDown: func(ws ids.WorkspaceID, beat time.Time) {
 			h.cycled = append(h.cycled, cycleCall{ws: ws, beat: beat})
 		},
@@ -298,6 +299,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			ColdGate:        func(ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return nil, false },
 			StandDowns:      &fakeStandDowns{},
 			PublishRegistry: func(context.Context) error { return nil },
+			Interval:        KeepaliveInterval,
 			CycleDown:       func(ids.WorkspaceID, time.Time) {},
 			Restore:         func(ids.WorkspaceID, func(error)) {},
 			Clock:           clocktest.New(now),
@@ -313,6 +315,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "standing cold gates", strip: func(d *Deps) { d.ColdGate = nil }},
 		{name: "stand-downs", strip: func(d *Deps) { d.StandDowns = nil }},
 		{name: "republish", strip: func(d *Deps) { d.PublishRegistry = nil }},
+		{name: "keep-alive interval", strip: func(d *Deps) { d.Interval = 0 }},
 		{name: "keep-alive cycle's stand-down", strip: func(d *Deps) { d.CycleDown = nil }},
 		{name: "parked sessions' restore", strip: func(d *Deps) { d.Restore = nil }},
 		{name: "clock", strip: func(d *Deps) { d.Clock = nil }},

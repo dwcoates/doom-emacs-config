@@ -258,10 +258,10 @@ func TestASentBeatSoonAfterTheSessionFellFreeLeavesTheShimUp(t *testing.T) {
 	}
 }
 
-func TestASentBeatAnIntervalAfterTheSessionFellFreeStandsItDown(t *testing.T) {
+func TestASentBeatTheGraceAfterTheSessionFellFreeStandsItDown(t *testing.T) {
 	// Arrange
 	h := dueHarness(t, sent())
-	h.keeper.freeSince[theWorkspace] = now.Add(-KeepaliveInterval)
+	h.keeper.freeSince[theWorkspace] = now.Add(-StandDownGrace)
 	h.keeper.beats[theWorkspace] = now
 
 	// Act
@@ -269,7 +269,77 @@ func TestASentBeatAnIntervalAfterTheSessionFellFreeStandsItDown(t *testing.T) {
 
 	// Assert
 	if len(h.cycled) != 1 {
-		t.Fatalf("cycle stand-downs = %+v, want one an interval after falling free", h.cycled)
+		t.Fatalf("cycle stand-downs = %+v, want one the grace after falling free", h.cycled)
+	}
+}
+
+// A test run's compressed cadence (IntervalFromEnv) times the beats and
+// nothing else: the stand-down keeps its production grace, so a run of
+// compressed beats is a run on one live shim.
+func TestACompressedIntervalTimesTheBeats(t *testing.T) {
+	tests := []struct {
+		name   string
+		act    func(h *harness)
+		assert func(t *testing.T, h *harness)
+	}{
+		{
+			name: "the beat is armed the interval after the last turn",
+			act:  func(h *harness) { h.keeper.schedule(context.Background(), theWorkspace, "test") },
+			assert: func(t *testing.T, h *harness) {
+				if got, want := h.keeper.beats[theWorkspace], now.Add(-10*time.Minute).Add(100*time.Millisecond); !got.Equal(want) {
+					t.Fatalf("beat = %v, want %v", got, want)
+				}
+			},
+		},
+		{
+			name: "a sent beat arms the next the interval on",
+			act:  func(h *harness) { h.keeper.beats[theWorkspace] = now; h.keeper.beatsDue(context.Background()) },
+			assert: func(t *testing.T, h *harness) {
+				if got, want := h.keeper.beats[theWorkspace], now.Add(100*time.Millisecond); !got.Equal(want) {
+					t.Fatalf("next beat = %v, want %v", got, want)
+				}
+			},
+		},
+		{
+			name: "a sent beat many intervals after the session fell free leaves the shim up",
+			act:  func(h *harness) { h.keeper.beats[theWorkspace] = now; h.keeper.beatsDue(context.Background()) },
+			assert: func(t *testing.T, h *harness) {
+				if len(h.cycled) != 0 {
+					t.Fatalf("cycle stand-downs = %+v, want none within the grace", h.cycled)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, beatable(visible(), 10*time.Minute))
+			h.keeper.deps.Interval = 100 * time.Millisecond
+			h.shim.answer = sent()
+			h.keeper.freeSince[theWorkspace] = now.Add(-time.Second)
+
+			// Act
+			tt.act(h)
+
+			// Assert
+			tt.assert(t, h)
+		})
+	}
+}
+
+// The shim's own keep-alive turn, and a vendor turn it never serves, hold the
+// main agent where the daemon sees no turn, so no free edge follows them.
+func TestABusyBeatIsArmedAnIntervalOn(t *testing.T) {
+	// Arrange
+	h := dueHarness(t, skipped(&shimv1.SendKeepaliveSkipped{Reason: &shimv1.SendKeepaliveSkipped_MainAgentBusy{MainAgentBusy: &shimv1.SendKeepaliveSkippedMainAgentBusy{Detail: "a turn is open"}}}))
+	h.keeper.beats[theWorkspace] = now
+
+	// Act
+	h.keeper.beatsDue(context.Background())
+
+	// Assert
+	if got, want := h.keeper.beats[theWorkspace], now.Add(KeepaliveInterval); !got.Equal(want) {
+		t.Fatalf("next beat = %v, want %v", got, want)
 	}
 }
 
@@ -644,38 +714,6 @@ func TestScheduleBeatsAQueuedSessionIdlePastTheCutoff(t *testing.T) {
 	// Assert
 	if _, armed := h.keeper.beats[theWorkspace]; !armed {
 		t.Fatal("no beat was armed for a queued session idle past the cutoff")
-	}
-}
-
-func TestFakeKeepaliveInterval(t *testing.T) {
-	cases := []struct {
-		name    string
-		fake    bool
-		value   string
-		want    time.Duration
-		wantErr bool
-	}{
-		{name: "fake mode with the override", fake: true, value: "100", want: 100 * time.Millisecond},
-		{name: "fake mode without it keeps the production interval", fake: true},
-		{name: "outside fake mode the override is ignored", value: "100"},
-		{name: "a value that is not a number is refused", fake: true, value: "soon", wantErr: true},
-		{name: "a value that is not positive is refused", fake: true, value: "0", wantErr: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act
-			got, err := FakeKeepaliveInterval(tc.fake, func(k string) string {
-				if k == FakeKeepaliveIntervalEnv {
-					return tc.value
-				}
-				return ""
-			})
-
-			// Assert
-			if (err != nil) != tc.wantErr || got != tc.want {
-				t.Fatalf("FakeKeepaliveInterval = %v, %v; want %v, error %v", got, err, tc.want, tc.wantErr)
-			}
-		})
 	}
 }
 

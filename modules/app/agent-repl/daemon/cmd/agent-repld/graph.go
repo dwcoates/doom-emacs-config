@@ -771,18 +771,18 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: resolve the idle cutoff for the cache keeper: %w", err)
 	}
-	keepaliveInterval, err := cachelapse.FakeKeepaliveInterval(p.Contracts.Fake(), os.Getenv)
+	keepaliveInterval, err := cachelapse.IntervalFromEnv(p.Contracts, os.Getenv)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("agent-repld: resolve the keep-alive interval: %w", err)
 	}
 	cacheKeeper, err := cachelapse.New(cachelapse.Deps{
-		Interval:        keepaliveInterval,
 		DB:              p.DB,
 		Shim:            func(ws ids.WorkspaceID) (cachelapse.Keepalives, bool) { return fleet.Keepalives(ws) },
 		ColdGate:        func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },
 		StandDowns:      standDownsFunc(func(ws ids.WorkspaceID) { drainController.StandDownWithheld(ws) }),
 		PublishRegistry: verbsRef.publishRegistry("a hidden workspace's cache lapse moved"),
 		IdleCutoff:      idleCutoff,
+		Interval:        keepaliveInterval,
 		CycleDown:       func(ws ids.WorkspaceID, beat time.Time) { drainController.CycleDown(ws, beat) },
 		// A RESTORE IS THE FLEET'S OWN DETACHED START, which the session's
 		// bring-up retires the park's terminal under; the views' park is
