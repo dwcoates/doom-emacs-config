@@ -5,8 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/wsm"
 )
 
@@ -164,7 +167,7 @@ func TestTakeBackOneShotClearsTheMarkAndRecordsWhatClearedIt(t *testing.T) {
 			f := markedOneShot(t)
 
 			// Act
-			err := f.verbs.TakeBackOneShot(context.Background(), "w1", by)
+			_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", by)
 
 			// Assert
 			if err != nil || f.db.jobs["w1"].OneShot {
@@ -185,7 +188,7 @@ func TestTakeBackOneShotRepublishesTheRoster(t *testing.T) {
 	before := len(f.sidebar.registries)
 
 	// Act
-	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+	_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
 
 	// Assert
 	if err != nil || len(f.sidebar.registries) == before {
@@ -199,7 +202,7 @@ func TestTakeBackOneShotLeavesAnUnmarkedWorkspaceAlone(t *testing.T) {
 	f.db.setOneShotErr = errors.New("no write was expected")
 
 	// Act
-	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+	_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
 
 	// Assert
 	if err != nil {
@@ -218,7 +221,7 @@ func TestTakeBackOneShotLeavesAClosedWorkspacesMark(t *testing.T) {
 	f.db.workspaces["w1"] = ws
 
 	// Act
-	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+	_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
 
 	// Assert
 	if err != nil || !f.db.jobs["w1"].OneShot {
@@ -232,7 +235,7 @@ func TestTakeBackOneShotFailsHardWhenTheMarkCannotBeCleared(t *testing.T) {
 	f.db.setOneShotErr = errors.New("db gone")
 
 	// Act
-	err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByReopen)
+	_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByReopen)
 
 	// Assert
 	if _, refused := AsRefusal(err); err == nil || refused {
@@ -311,5 +314,206 @@ func TestRegisteringAWorkspaceThatAwaitsDrawsItInTheBackground(t *testing.T) {
 	// Assert
 	if err != nil || f.footer.awaiting["w1"] != "planner" {
 		t.Fatalf("restoreAwaiting = %v, drawn %q; want planner", err, f.footer.awaiting["w1"])
+	}
+}
+
+// rootOneShot is a fixture whose top-level workspace w1, created, is marked a
+// one-shot in a repository with a subsection, and the placement brief is
+// arranged.
+func rootOneShot(t *testing.T) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir())
+	f.db.jobs["w1"] = wsm.CreationJob{Workspace: "w1"}
+	oneShotBriefs(f)
+	placementBrief(f)
+	f.db.subsections = []wsm.Subsection{{ID: "sub-1", Repo: ws.Repo, Name: "later", Place: 1}}
+	if err := f.db.SetOneShot(context.Background(), "w1", true); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	return f
+}
+
+// placementSubmissions are the placement briefs the fixture's queue accepted.
+func placementSubmissions(f *fixture) []promptqueue.Submission {
+	var out []promptqueue.Submission
+	for _, sub := range f.queue.submissions {
+		if sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT {
+			out = append(out, sub)
+		}
+	}
+	return out
+}
+
+// takeBackAndSubmit takes w1 back for BY and queues the placement it owes,
+// as the take-back's callers do.
+func takeBackAndSubmit(f *fixture, by OneShotTakeBack) error {
+	placement, err := f.verbs.TakeBackOneShot(context.Background(), "w1", by)
+	if err != nil {
+		return err
+	}
+	return f.verbs.SubmitPlacement(context.Background(), placement)
+}
+
+func TestTakeBackOneShotHandsThePlacementBackUnqueued(t *testing.T) {
+	// Arrange
+	f := rootOneShot(t)
+
+	// Act
+	placement, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+
+	// Assert
+	if err != nil || !placement.Owed() {
+		t.Fatalf("TakeBackOneShot = %+v, %v; want an owed placement", placement, err)
+	}
+	if subs := placementSubmissions(f); len(subs) != 0 {
+		t.Fatalf("placement briefs = %+v, want none queued before the caller asks", subs)
+	}
+}
+
+func TestSubmitPlacementQueuesNothingForANoneOwed(t *testing.T) {
+	// Arrange
+	f := rootOneShot(t)
+	f.queue.submitErr = errors.New("no submission was expected")
+
+	// Act
+	err := f.verbs.SubmitPlacement(context.Background(), PendingPlacement{})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SubmitPlacement = %v, want nothing done", err)
+	}
+}
+
+func TestLeavingTheOneShotStateAsksTheWorkspaceToFileItself(t *testing.T) {
+	tests := []struct {
+		name  string
+		leave func(f *fixture) error
+	}{
+		{name: "its agent unmarks it", leave: func(f *fixture) error {
+			_, err := f.verbs.SetOneShot(context.Background(), "w1", idOf("w1"), false)
+			return err
+		}},
+		{name: "the user's prompt takes it back", leave: func(f *fixture) error {
+			return takeBackAndSubmit(f, TakenBackByUserPrompt)
+		}},
+		{name: "a reopen takes it back", leave: func(f *fixture) error {
+			return takeBackAndSubmit(f, TakenBackByReopen)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := rootOneShot(t)
+
+			// Act
+			err := tt.leave(f)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("leave: %v", err)
+			}
+			subs := placementSubmissions(f)
+			if len(subs) != 1 {
+				t.Fatalf("placement briefs = %d, want one", len(subs))
+			}
+			if subs[0].WS != "w1" || subs[0].Delivery != wsm.DeliveryDeferred || subs[0].Said.GetContent().GetBlocks()[0].GetText().GetText() != "PLACE" {
+				t.Fatalf("placement brief = %+v, want a deferred PLACE to w1", subs[0])
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opOneShotExitPlacement}); !ok {
+				t.Error("the placement brief was not recorded")
+			}
+		})
+	}
+}
+
+func TestStayingOrBecomingAOneShotAsksNoPlacement(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T) *fixture
+		oneShot bool
+	}{
+		{name: "marking a workspace", arrange: func(t *testing.T) *fixture {
+			f := rootOneShot(t)
+			if err := f.db.SetOneShot(context.Background(), "w1", false); err != nil {
+				t.Fatalf("unmark: %v", err)
+			}
+			return f
+		}, oneShot: true},
+		{name: "unmarking a workspace that is none", arrange: func(t *testing.T) *fixture {
+			f := rootOneShot(t)
+			if err := f.db.SetOneShot(context.Background(), "w1", false); err != nil {
+				t.Fatalf("unmark: %v", err)
+			}
+			return f
+		}},
+		{name: "a child leaving its one-shot state", arrange: func(t *testing.T) *fixture {
+			f := rootOneShot(t)
+			ws := f.db.workspaces["w1"]
+			ws.Parent = idOf("ws-owner")
+			f.db.with(ws)
+			return f
+		}},
+		{name: "a repository with nothing to file into", arrange: func(t *testing.T) *fixture {
+			f := rootOneShot(t)
+			f.db.subsections = nil
+			return f
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := tt.arrange(t)
+
+			// Act
+			_, err := f.verbs.SetOneShot(context.Background(), "w1", nil, tt.oneShot)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetOneShot: %v", err)
+			}
+			if subs := placementSubmissions(f); len(subs) != 0 {
+				t.Fatalf("placement briefs = %+v, want none", subs)
+			}
+		})
+	}
+}
+
+func TestLeavingTheOneShotStateFailsLoudlyWhenThePlacementCannotBeAsked(t *testing.T) {
+	tests := []struct {
+		name     string
+		arrange  func(f *fixture)
+		wantMark bool
+		message  string
+	}{
+		{name: "the brief is missing", arrange: func(f *fixture) { delete(f.briefs, BriefSubsectionPlacement) },
+			wantMark: true, message: "could not read a create note's brief"},
+		{name: "the arrangement cannot be read", arrange: func(f *fixture) { f.db.readArrangementErr = errors.New("the store is gone") },
+			wantMark: true, message: "could not read the arrangement a new workspace could file itself into"},
+		{name: "the queue fails the brief", arrange: func(f *fixture) { f.queue.submitErr = errors.New("the queue is gone") },
+			message: "the workspace's queue did not accept its placement brief"},
+		{name: "the queue refuses the brief", arrange: func(f *fixture) { f.queue.submitRefusedArm = "merge_in_progress" },
+			message: "the workspace's queue refused its placement brief"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := rootOneShot(t)
+			tt.arrange(f)
+
+			// Act
+			_, err := f.verbs.SetOneShot(context.Background(), "w1", idOf("w1"), false)
+
+			// Assert
+			if err == nil {
+				t.Fatal("SetOneShot succeeded without asking for the placement")
+			}
+			if got := f.db.jobs["w1"].OneShot; got != tt.wantMark {
+				t.Fatalf("one-shot = %v, want %v", got, tt.wantMark)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Message: tt.message}); !ok {
+				t.Fatalf("no error record %q: %+v", tt.message, f.log.logger.Records())
+			}
+		})
 	}
 }

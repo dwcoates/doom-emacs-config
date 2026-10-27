@@ -178,7 +178,8 @@ one repository):
   workspaces is open; one the user creates stays even when empty.
 - A new top-level workspace whose repository has a subsection, or at least
   two other open workspaces in no subsection, is told so at the end of its
-  first message. File it once, without asking: into the one subsection that
+  first message, and a top-level workspace leaving its one-shot state is sent
+  the same brief as a prompt of its own. File it once, without asking: into the one subsection that
   clearly fits its task, or else with two or more clearly related
   unsectioned workspaces into a new subsection, or else leave it where it is.
 

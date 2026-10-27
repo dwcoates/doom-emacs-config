@@ -18,6 +18,7 @@ var unseenOrigins = map[conversationv1.PromptOrigin]bool{
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE:       true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE:         true,
 	conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE: true,
+	conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:     true,
 }
 
 func TestOnlyTheAgentNoticesAreUnseen(t *testing.T) {

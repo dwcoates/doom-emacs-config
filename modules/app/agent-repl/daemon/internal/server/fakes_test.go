@@ -697,6 +697,11 @@ type agentAPI struct {
 	awaitErr     error
 	takeBacks    []fakeTakeBack
 	takeBackErr  error
+	// placementsQueued is, for each SubmitPlacement, how many prompts had
+	// been handed on when it was asked for (-1 when the test wired no
+	// prompts); placementErr fails it.
+	placementsQueued []int
+	placementErr     error
 	// prompts, when set, is read at each take-back, so a test can tell
 	// whether the take-back came before the prompt was handed on.
 	prompts *fakePrompts
@@ -742,13 +747,23 @@ func (f *fakeVerbs) SetOneShot(_ context.Context, ws ids.WorkspaceID, asker *ids
 	return "", f.api.oneShotErr
 }
 
-func (f *fakeVerbs) TakeBackOneShot(_ context.Context, ws ids.WorkspaceID, by workspace.OneShotTakeBack) error {
-	before := -1
-	if f.api.prompts != nil {
-		before = f.api.prompts.submits
+func (f *fakeVerbs) TakeBackOneShot(_ context.Context, ws ids.WorkspaceID, by workspace.OneShotTakeBack) (workspace.PendingPlacement, error) {
+	f.api.takeBacks = append(f.api.takeBacks, fakeTakeBack{ws: ws, by: by, submitsBefore: f.promptsHandedOn()})
+	return workspace.PendingPlacement{}, f.api.takeBackErr
+}
+
+func (f *fakeVerbs) SubmitPlacement(context.Context, workspace.PendingPlacement) error {
+	f.api.placementsQueued = append(f.api.placementsQueued, f.promptsHandedOn())
+	return f.api.placementErr
+}
+
+// promptsHandedOn is how many prompts the wired fake prompts had handed on,
+// -1 when the test wired none.
+func (f *fakeVerbs) promptsHandedOn() int {
+	if f.api.prompts == nil {
+		return -1
 	}
-	f.api.takeBacks = append(f.api.takeBacks, fakeTakeBack{ws: ws, by: by, submitsBefore: before})
-	return f.api.takeBackErr
+	return f.api.prompts.submits
 }
 
 func (f *fakeVerbs) SetCorrespondence(_ context.Context, ws ids.WorkspaceID, asker, awaited *ids.WorkspaceID) error {

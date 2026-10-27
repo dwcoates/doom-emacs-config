@@ -179,7 +179,11 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 	// unattended, so its mark goes. Cleared once the row is open, because a
 	// closed workspace's standing is not asked about.
 	if record.Closed {
-		if err := v.TakeBackOneShot(ctx, ws, TakenBackByReopen); err != nil {
+		placement, err := v.TakeBackOneShot(ctx, ws, TakenBackByReopen)
+		if err != nil {
+			return fmt.Errorf("open %q: %w", ws, err)
+		}
+		if err := v.SubmitPlacement(ctx, placement); err != nil {
 			return fmt.Errorf("open %q: %w", ws, err)
 		}
 	}

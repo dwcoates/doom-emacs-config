@@ -145,13 +145,22 @@ func (s *server) SubmitPrompt(
 	// THE USER STEPPING IN TAKES A ONE-SHOT BACK, before the prompt reaches
 	// the agent: it no longer finishes unattended. An agent's prompt never
 	// does (promptorigin.UserSent).
+	var placement workspace.PendingPlacement
 	if sentBy == nil && promptorigin.UserSent(req.Msg.GetOrigin()) {
-		if err := s.deps.Verbs.TakeBackOneShot(ctx, subject.Record.ID, workspace.TakenBackByUserPrompt); err != nil {
+		if placement, err = s.deps.Verbs.TakeBackOneShot(ctx, subject.Record.ID, workspace.TakenBackByUserPrompt); err != nil {
 			return nil, fail(subject.Log, rpc, err)
 		}
 	}
 	outcome, err := s.deps.Prompts.Submit(ctx, subject.Record.ID, said,
 		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), sentBy, delivery, target)
+	// THE PLACEMENT BRIEF THE TAKE-BACK OWES IS QUEUED AFTER THE USER'S
+	// PROMPT, so the user's words run first; the workspace left its one-shot
+	// state whatever became of the prompt. Its failure is the brief's, not
+	// the prompt's: SubmitPlacement records it at ERROR, and the answer
+	// stays the prompt's own, so the user never resends a prompt that went.
+	if placementErr := s.deps.Verbs.SubmitPlacement(ctx, placement); placementErr != nil {
+		subject.Log.Debug(opSubmit, "the placement brief the take-back owed was not queued; its failure is recorded", dlog.Context{"cause": placementErr.Error()})
+	}
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
 			return refuse(submitRefusal(modelActRefused(err, bubbleRefused(askRefused(refused)))))

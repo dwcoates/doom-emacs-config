@@ -826,6 +826,36 @@ func TestSubmitPromptTakesAOneShotBack(t *testing.T) {
 	}
 }
 
+func TestSubmitPromptQueuesThePlacementAfterTheUsersPrompt(t *testing.T) {
+	tests := []struct {
+		name         string
+		placementErr error
+	}{
+		{name: "the placement is queued"},
+		{name: "the placement fails, and the prompt's answer stands", placementErr: errors.New("the queue is gone")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Verbs.api.prompts = h.Prompts
+			h.Verbs.api.placementErr = tt.placementErr
+			h.Prompts.outcome = prompthandler.Outcome{Turn: "turn-1", Disposition: promptqueue.Disposition{Delivered: true}}
+
+			// Act
+			resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+			// Assert
+			if err != nil || resp.Msg.GetError() != nil {
+				t.Fatalf("SubmitPrompt = %v, %v; want the prompt's own answer", resp, err)
+			}
+			if got := h.Verbs.api.placementsQueued; !reflect.DeepEqual(got, []int{1}) {
+				t.Fatalf("placements queued after %v prompts, want one after the user's prompt", got)
+			}
+		})
+	}
+}
+
 func TestSubmitPromptWhoseTakeBackFailsDeliversNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

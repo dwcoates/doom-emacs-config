@@ -2251,7 +2251,7 @@ func TestTheShippedSubsectionPlacementBriefNamesTheVerbs(t *testing.T) {
 	}
 }
 
-func TestCreateNoteComposesABriefOrLogsWhyNot(t *testing.T) {
+func TestCorpusNoteComposesABriefOrLogsWhyNot(t *testing.T) {
 	tests := []struct {
 		name      string
 		brief     *prompts.Prompt
@@ -2275,7 +2275,7 @@ func TestCreateNoteComposesABriefOrLogsWhyNot(t *testing.T) {
 			const op = "daemon.workspace.test_note"
 
 			// Act.
-			got, err := f.mutable(t).createNote(f.log.logger, op, dlog.Context{"brief": "note"}, "note", tt.values)
+			got, err := f.mutable(t).corpusNote(f.log.logger, op, dlog.Context{"brief": "note"}, "note", tt.values)
 
 			// Assert.
 			if tt.wantError {
@@ -2294,8 +2294,8 @@ func TestCreateNoteComposesABriefOrLogsWhyNot(t *testing.T) {
 	}
 }
 
-func TestCreateNotesShareTheCreateNoteComposition(t *testing.T) {
-	// Arrange: the placement note is createNote's text, meta-wrapped after
+func TestCreateNotesShareTheCorpusNoteComposition(t *testing.T) {
+	// Arrange: the placement note is corpusNote's text, meta-wrapped after
 	// the words, so a hand-rolled composition would fail to match.
 	f := newFixture(t)
 	placementBrief(f)
@@ -2304,7 +2304,7 @@ func TestCreateNotesShareTheCreateNoteComposition(t *testing.T) {
 
 	// Act.
 	placed, placedErr := v.decorateSubsectionPlacement(f.log.logger, "raw", record)
-	note, noteErr := v.createNote(f.log.logger, opSubsectionPlacement, dlog.Context{}, BriefSubsectionPlacement, nil)
+	note, noteErr := v.corpusNote(f.log.logger, opSubsectionPlacement, dlog.Context{}, BriefSubsectionPlacement, nil)
 
 	// Assert.
 	if placedErr != nil || noteErr != nil || placed != "raw"+prompts.Wrap("\n\n"+note) {

@@ -149,6 +149,17 @@ func TestTheAuthorLabelOfAMergeRevertBriefIsMergeRevert(t *testing.T) {
 	}
 }
 
+// The placement brief is the daemon's, never the user's.
+func TestTheAuthorLabelOfAPlacementBriefIsSidebarPlacement(t *testing.T) {
+	// Arrange, Act.
+	got := AuthorLabel(conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT)
+
+	// Assert.
+	if got != "Sidebar placement" {
+		t.Fatalf("author = %q, want Sidebar placement", got)
+	}
+}
+
 func TestPromptRowHiddenNamesEveryOriginTheFeedDrawsNoRowFor(t *testing.T) {
 	tests := []struct {
 		origin conversationv1.PromptOrigin
@@ -156,6 +167,7 @@ func TestPromptRowHiddenNamesEveryOriginTheFeedDrawsNoRowFor(t *testing.T) {
 	}{
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},

@@ -751,7 +751,14 @@ func (s CreateSpec) forkedElsewhere() bool {
 // its root does, and placing it would move its whole family; a merge
 // workspace's own brief says what it is.
 func (s CreateSpec) filesItself() bool {
-	return s.Parent == nil && s.MergeOf == nil
+	return filesItself(s.Parent, s.MergeOf != nil)
+}
+
+// filesItself is the one rule of which workspace is asked to file itself
+// into a subsection: a ROOT (PARENT nil) that is no merge workspace. A
+// create and a workspace leaving its one-shot state both ask it.
+func filesItself(parent *ids.WorkspaceID, merge bool) bool {
+	return parent == nil && !merge
 }
 
 // submitInitialPrompt sends the workspace's first message down the ONE delivery
@@ -983,7 +990,7 @@ const placementGatherMin = 2
 // the prompt without the note it owes.
 func (v *verbs) decorateSubsectionPlacement(log dlog.Logger, raw string, record wsm.Workspace) (string, error) {
 	fields := dlog.Context{"brief": BriefSubsectionPlacement, "repo_id": string(record.Repo)}
-	note, err := v.createNote(log, opSubsectionPlacement, fields, BriefSubsectionPlacement, nil)
+	note, err := v.corpusNote(log, opSubsectionPlacement, fields, BriefSubsectionPlacement, nil)
 	if err != nil {
 		return "", err
 	}
@@ -1025,19 +1032,20 @@ func (v *verbs) decorateWithWorkspaceNote(
 		log.Error(opCreate, "could not read the workspace a create's note names", dlog.WithCause(fields, err))
 		return "", fmt.Errorf("read the workspace %q the %s brief names: %w", subject, brief, err)
 	}
-	note, err := v.createNote(log, opCreate, fields, brief, values(record))
+	note, err := v.corpusNote(log, opCreate, fields, brief, values(record))
 	if err != nil {
 		return "", err
 	}
 	return prompts.Wrap(note) + raw, nil
 }
 
-// createNote reads BRIEF from the daemon's own corpus and splices VALUES into
-// it: the one composition of every note a create adds to a first message. A
+// corpusNote reads BRIEF from the daemon's own corpus and splices VALUES into
+// it: the one composition of every note a create adds to a first message, and
+// of the placement brief a workspace leaving its one-shot state is sent. A
 // brief that will not load or splice is logged once here, at ERROR under OP
 // with FIELDS, and returned, so a create never sends its prompt without the
 // note it owes.
-func (v *verbs) createNote(log dlog.Logger, op string, fields dlog.Context, brief string, values map[string]string) (string, error) {
+func (v *verbs) corpusNote(log dlog.Logger, op string, fields dlog.Context, brief string, values map[string]string) (string, error) {
 	loaded, err := v.load(v.deps.PromptsDir, brief)
 	if err != nil {
 		log.Error(op, "could not read a create note's brief", dlog.WithCause(fields, err))

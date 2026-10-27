@@ -822,6 +822,7 @@ func TestOnTurnEndedRaisesNoBannerForATurnADaemonNoticeCaused(t *testing.T) {
 	}{
 		{origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE},
 		{origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE},
+		{origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT},
 		{origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT},
 		{origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE, banner: true},
 		{origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, banner: true},

@@ -424,6 +424,9 @@ func AuthorLabel(origin conversationv1.PromptOrigin) string {
 		return "Workspace notice"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE:
 		return "Owner notice"
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:
+		// promptorigin.Unseen, as a workspace notice is.
+		return "Sidebar placement"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT:
 		return "Agent"
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED:
