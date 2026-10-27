@@ -141,6 +141,26 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 		return withheldSettled
 	}
 	log := c.workspaceLog(record)
+	// A FOLD NEVER STANDS DOWN WHAT IT SPARES (owner ruling, 2026-10-25),
+	// read afresh here too: a workspace a fold held back while it was busy may
+	// have become a one-shot, or queued a merge, by the time it falls free.
+	if spare, spared := record.FoldSpare(); spared {
+		log.Info(opWithheld, "the folded workspace is spared; its session keeps running",
+			dlog.Merge(fields, dlog.Context{"spare": string(spare)}))
+		return withheldSettled
+	}
+	// A WORKSPACE WITH A MERGE QUEUED IS NEVER STOOD DOWN (owner ruling,
+	// 2026-10-26), hidden or closed alike: its session carries the merge, and
+	// the queue can hold it for hours (wsm.Workspace.Runs).
+	queued, err := bringup.MergeQueued(ctx, c.deps.DB, record)
+	if err != nil {
+		log.Error(opWithheld, "could not read whether the workspace has a merge queued; its stand-down is dropped", dlog.WithCause(fields, err))
+		return withheldSettled
+	}
+	if queued {
+		log.Info(opWithheld, "the workspace has a merge queued; its session keeps running", fields)
+		return withheldSettled
+	}
 	// SHOWN OR REOPENED MEANWHILE IS NOT STOOD DOWN: the visibility and the
 	// close are read afresh on every attempt. A CLOSED workspace is withheld
 	// whatever its visibility: its cache lapsed after its last keep-alive
@@ -152,14 +172,6 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 	}
 	if visible && !record.Closed {
 		log.Info(opWithheld, "the workspace was shown or reopened before its session was stood down; it keeps running", fields)
-		return withheldSettled
-	}
-	// A FOLD NEVER STANDS DOWN WHAT IT SPARES (owner ruling, 2026-10-25),
-	// read afresh here too: a workspace a fold held back while it was busy may
-	// have become a one-shot, or queued a merge, by the time it falls free.
-	if spare, spared := record.FoldSpare(); spared {
-		log.Info(opWithheld, "the folded workspace is spared; its session keeps running",
-			dlog.Merge(fields, dlog.Context{"spare": string(spare)}))
 		return withheldSettled
 	}
 	session, found, err := c.deps.DB.Session(ctx, ws)

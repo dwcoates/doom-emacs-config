@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -568,4 +569,80 @@ func TestRunArmsEveryWorkspacesBeatAtTheStart(t *testing.T) {
 
 	// Assert: the due beat goes out with no edge at all.
 	<-h.shim.beaten
+}
+
+func TestScheduleBeatsAWorkspaceWithAMergeQueued(t *testing.T) {
+	spentClose := closed()
+	spentClose.Closure = &wsm.Closure{At: now.Add(-time.Hour)}
+	tests := []struct {
+		name string
+		rec  wsm.Workspace
+	}{
+		{name: "hidden, nobody looking at it", rec: hidden()},
+		{name: "closed, its last keep-alive spent", rec: spentClose},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: its merge waits in a queue.
+			h := newHarness(t, beatable(tt.rec, 10*time.Minute))
+			h.db.queued = []ids.WorkspaceID{theWorkspace}
+
+			// Act
+			h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+			// Assert
+			if got, want := h.keeper.beats[theWorkspace], now.Add(-10*time.Minute).Add(KeepaliveInterval); !got.Equal(want) {
+				t.Fatalf("beat = %v, want %v: a queued workspace's cache is kept warm", got, want)
+			}
+		})
+	}
+}
+
+func TestScheduleHoldsAHiddenWorkspaceOnceItsMergeLeftTheQueue(t *testing.T) {
+	// Arrange: no entry of it stands in any queue.
+	h := newHarness(t, beatable(hidden(), 10*time.Minute))
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if _, armed := h.keeper.beats[theWorkspace]; armed {
+		t.Fatal("a beat was armed for a hidden workspace with no merge queued")
+	}
+}
+
+func TestScheduleLogsQueuesThatCannotBeRead(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(hidden(), 10*time.Minute))
+	h.db.queuesErr = errors.New("database is locked")
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opDrive})
+	if cause, _ := rec.Context["cause"].(string); !ok || !strings.Contains(cause, "database is locked") {
+		t.Fatalf("error record = %+v, %v; want the queues' read failure", rec, ok)
+	}
+	if _, armed := h.keeper.beats[theWorkspace]; armed {
+		t.Fatal("a beat was armed though the queues could not be read")
+	}
+}
+
+func TestScheduleBeatsAQueuedSessionIdlePastTheCutoff(t *testing.T) {
+	// Arrange: idle six hours, past the cutoff, with its merge in line; the
+	// idle sweep keeps a queued session warm, so its beats go on.
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	s := liveSession(theWorkspace)
+	s.LastEngagementAt = now.Add(-6 * time.Hour)
+	h.db.sessions[theWorkspace] = s
+	h.db.queued = []ids.WorkspaceID{theWorkspace}
+
+	// Act
+	h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+	// Assert
+	if _, armed := h.keeper.beats[theWorkspace]; !armed {
+		t.Fatal("no beat was armed for a queued session idle past the cutoff")
+	}
 }

@@ -71,10 +71,13 @@ func (ws Workspace) LetsCacheLapse() bool {
 // collapsed, is started by nothing; a hidden one already running is kept until
 // its cache lapses (cachelapse.Keeper).
 //
-// A HIDDEN MERGE WORKSPACE RUNS WHILE ITS MERGE IS QUEUED (MERGEQUEUED: an
-// entry of it stands in a merge queue, waiting or running). It is withheld by
-// its async merge, not by the user, and its session is what carries that
-// merge; it is drawn in no tab bar until revealed, and once revealed it
+// EVERY WORKSPACE IN A MERGE QUEUE RUNS (MERGEQUEUED: an entry of it stands
+// in a merge queue, waiting or running; owner ruling, 2026-10-26), hidden,
+// closed or in a collapsed section alike: its session is what carries the
+// merge, and a queue can hold a merge for hours, so the session and its
+// cache are kept for as long as the entry stands (cachelapse.Keeper keeps
+// beating it). A hidden merge workspace is withheld by its async merge, not by
+// the user; it is drawn in no tab bar until revealed, and once revealed it
 // follows the ordinary rule. Once its merge has left every queue unlanded (it
 // failed, or was taken off) nothing is carried, and it runs only while the
 // user looks at it: its requester's bubble opens it, which selects it.
@@ -84,11 +87,11 @@ func (ws Workspace) LetsCacheLapse() bool {
 // stood that session down the moment it came up, so its cold gate stood again
 // after every answer. Moving off it withholds it again.
 func (ws Workspace) Runs(repoFolded, mergeQueued bool) bool {
-	if ws.Current {
+	if ws.Current || mergeQueued {
 		return true
 	}
 	if ws.MergeHidden() {
-		return mergeQueued
+		return false
 	}
 	return ws.Withheld(repoFolded) == Drawn
 }

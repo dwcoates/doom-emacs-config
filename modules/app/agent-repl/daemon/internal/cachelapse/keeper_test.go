@@ -1079,3 +1079,62 @@ func TestRunStandsDownAMergeWorkspaceWhoseMergeLeftItsQueue(t *testing.T) {
 		t.Fatalf("Run = %v, want nil", err)
 	}
 }
+
+func TestLapseDueKeepsAWorkspaceWithAMergeQueued(t *testing.T) {
+	for _, mk := range []func() wsm.Workspace{hidden, closed} {
+		// Arrange
+		rec := mk()
+		rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
+		h := newHarness(t, rec)
+		h.db.queued = []ids.WorkspaceID{theWorkspace}
+		h.keeper.deadlines[theWorkspace] = lapseAt
+		h.clock.Set(lapseAt)
+
+		// Act
+		h.keeper.lapseDue(context.Background())
+
+		// Assert
+		if h.stoodDown() || h.publishes != 0 {
+			t.Fatalf("%+v: stood down %v with %d publishes, want a queued workspace kept", rec, h.stoodDown(), h.publishes)
+		}
+		if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opLapse}); !ok {
+			t.Fatal("no record says why the lapse was not taken")
+		}
+	}
+}
+
+func TestLapseDueLeavesASessionRunningWhenTheQueuesCannotBeRead(t *testing.T) {
+	// Arrange
+	rec := hidden()
+	rec.CacheLapse = &wsm.CacheLapse{LapsesAt: lapseAt}
+	h := newHarness(t, rec)
+	h.db.queuesErr = errors.New("database is locked")
+	h.keeper.deadlines[theWorkspace] = lapseAt
+	h.clock.Set(lapseAt)
+
+	// Act
+	h.keeper.lapseDue(context.Background())
+
+	// Assert
+	r, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opLapse})
+	if cause, _ := r.Context["cause"].(string); !ok || !strings.Contains(cause, "database is locked") || h.stoodDown() {
+		t.Fatalf("error record = %+v, %v; want the cause and no stand-down", r, ok)
+	}
+}
+
+func TestMergeEnteredQueueArmsAHiddenWorkspacesBeat(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(hidden(), 10*time.Minute))
+	h.db.queued = []ids.WorkspaceID{theWorkspace}
+
+	// Act
+	h.keeper.MergeEnteredQueue(theWorkspace)
+	for _, e := range h.keeper.take() {
+		h.keeper.apply(context.Background(), e)
+	}
+
+	// Assert
+	if _, armed := h.keeper.beats[theWorkspace]; !armed {
+		t.Fatal("entering a queue armed no beat")
+	}
+}

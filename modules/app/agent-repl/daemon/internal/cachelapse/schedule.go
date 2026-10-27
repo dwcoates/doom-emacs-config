@@ -89,7 +89,18 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 		log.Debug(opDrive, "the workspace owes no keep-alive", dlog.Context{"why": why})
 		return time.Time{}, false, false
 	}
-	if record.KeepaliveHeld() {
+	// A WORKSPACE IN A MERGE QUEUE IS ALWAYS KEPT WARM (owner ruling,
+	// 2026-10-26): its entry can wait for hours, and the merge's prompts run
+	// on its session, so neither a hide nor a close lets its cache lapse
+	// while the entry stands.
+	queued, err := bringup.MergeQueued(ctx, k.deps.DB, record)
+	if err != nil {
+		if !leaving(ctx, log, opDrive, "reading whether the workspace has a merge queued", err) {
+			log.Error(opDrive, "could not read whether the workspace has a merge queued; its keep-alive is not armed", dlog.Context{"cause": err.Error()})
+		}
+		return time.Time{}, false, false
+	}
+	if record.KeepaliveHeld() && !queued {
 		return none("it is hidden and nobody is looking at it; its cache lapses on its own clock")
 	}
 	if record.LastTurnEndedAt == nil {
@@ -103,7 +114,7 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	if sent, ok := k.sent[ws]; ok && sent.After(clock) {
 		clock = sent
 	}
-	if record.Closed && (record.Closure == nil || !clock.Before(record.Closure.At)) {
+	if record.Closed && !queued && (record.Closure == nil || !clock.Before(record.Closure.At)) {
 		return none("it is closed and its last keep-alive is spent")
 	}
 	if lapsed, ok := k.lapsedAt[ws]; ok && !ended.After(lapsed) {
@@ -140,7 +151,7 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	if engaged.IsZero() {
 		engaged = session.StartedAt
 	}
-	if k.deps.IdleCutoff > 0 && engaged.Add(k.deps.IdleCutoff).Before(due) {
+	if k.deps.IdleCutoff > 0 && !queued && engaged.Add(k.deps.IdleCutoff).Before(due) {
 		return none("it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
 	}
 	return due, session.KeepaliveCycled(), true

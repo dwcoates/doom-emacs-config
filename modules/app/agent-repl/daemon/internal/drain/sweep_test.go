@@ -1287,8 +1287,10 @@ func TestSweepKeepsAnIdleSessionWhoseMergeJoinedTheQueueInsideTheCutoff(t *testi
 	}
 }
 
-func TestSweepHibernatesAQueuedSessionIdlePastTheCutoffSinceItJoined(t *testing.T) {
-	// Arrange: queued two hours ago, past the harness's one-hour cutoff.
+func TestSweepKeepsAQueuedSessionIdlePastTheCutoffSinceItJoined(t *testing.T) {
+	// Arrange: queued two hours ago, past the harness's one-hour cutoff
+	// (owner ruling, 2026-10-26: a queued merge's session is kept warm for
+	// as long as its entry stands).
 	h := newHarness(t)
 	ws := h.workspace(t, instant.Add(-3*time.Hour))
 	queuedAt(t, h, ws, instant.Add(-2*time.Hour))
@@ -1300,8 +1302,8 @@ func TestSweepHibernatesAQueuedSessionIdlePastTheCutoffSinceItJoined(t *testing.
 	if err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
-	if len(hibernated) != 1 || hibernated[0] != ws {
-		t.Fatalf("hibernated = %v, want [%s]", hibernated, ws)
+	if len(hibernated) != 0 {
+		t.Fatalf("hibernated = %v, want the queued merge's session kept warm", hibernated)
 	}
 }
 

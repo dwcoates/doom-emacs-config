@@ -3,7 +3,6 @@ package bringup
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -51,17 +50,12 @@ func folds(ctx context.Context, repos RepositoryLister) (map[ids.RepoID]bool, er
 	return out, nil
 }
 
-// queuedMerges answers which of pending's hidden merge workspaces have an
-// entry standing in a merge queue. The queues are read only when one of
-// pending is a hidden merge workspace: no other workspace's verdict reads
-// them.
-func queuedMerges(ctx context.Context, repos RepositoryLister, pending []wsm.Workspace) (map[ids.WorkspaceID]bool, error) {
-	if !slices.ContainsFunc(pending, wsm.Workspace.MergeHidden) {
-		return nil, nil
-	}
+// queuedMerges answers which workspaces have an entry standing in a merge
+// queue: every workspace's verdict reads them (wsm.Workspace.Runs).
+func queuedMerges(ctx context.Context, repos RepositoryLister) (map[ids.WorkspaceID]bool, error) {
 	queues, err := repos.AllMergeQueues(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("bringup: read the merge queues to tell which merge workspaces carry a merge: %w", err)
+		return nil, fmt.Errorf("bringup: read the merge queues to tell which workspaces carry a merge: %w", err)
 	}
 	out := map[ids.WorkspaceID]bool{}
 	for _, entries := range queues {
@@ -72,10 +66,10 @@ func queuedMerges(ctx context.Context, repos RepositoryLister, pending []wsm.Wor
 	return out, nil
 }
 
-// MergeQueued reports whether WS, a hidden merge workspace, still carries its
-// merge: an entry of it stands in a merge queue (wsm.Workspace.Runs).
+// MergeQueued reports whether WS carries a merge: an entry of it stands in a
+// merge queue, waiting or running (wsm.Workspace.Runs).
 func MergeQueued(ctx context.Context, repos RepositoryLister, ws wsm.Workspace) (bool, error) {
-	queued, err := queuedMerges(ctx, repos, []wsm.Workspace{ws})
+	queued, err := queuedMerges(ctx, repos)
 	if err != nil {
 		return false, err
 	}
@@ -97,7 +91,7 @@ func OnlyVisible(ctx context.Context, repos RepositoryLister, pending []wsm.Work
 	if err != nil {
 		return nil, nil, err
 	}
-	queued, err := queuedMerges(ctx, repos, pending)
+	queued, err := queuedMerges(ctx, repos)
 	if err != nil {
 		return nil, nil, err
 	}

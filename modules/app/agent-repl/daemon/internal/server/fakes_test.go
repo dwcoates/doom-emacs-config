@@ -129,6 +129,8 @@ func (f *fakeSurfaces) CentralClientLog(rec dlog.ClientRecord) error {
 
 // fakeDB answers the registry lookups the handlers make.
 type fakeDB struct {
+	// mergeQueues are the merge queues AllMergeQueues answers.
+	mergeQueues map[wsm.RepoKey][]wsm.MergeQueueEntry
 	wsm.DB
 	// subscribed records every workspace subscription; replacesSub,
 	// subscribeErr, endsSub and unsubscribeErr answer them.
@@ -220,6 +222,12 @@ func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 		return nil, f.listRepositoriesErr
 	}
 	return f.repositories, nil
+}
+
+// AllMergeQueues answers the seeded merge queues: whether a workspace has a
+// merge queued decides whether it runs (wsm.Workspace.Runs).
+func (f *fakeDB) AllMergeQueues(context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {
+	return f.mergeQueues, nil
 }
 
 // Turn answers the turn with its seeded start time, or turnStartedErr when

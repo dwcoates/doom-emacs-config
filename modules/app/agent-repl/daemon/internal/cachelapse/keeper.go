@@ -288,9 +288,18 @@ func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID) {
 }
 
 // MergeLeftQueue is WS's entry leaving its merge queue: a hidden merge
-// workspace whose merge left every queue is stood down. It never blocks.
+// workspace whose merge left every queue is stood down, and any other's
+// cadence reconciled, so a hidden or closed one lets its cache lapse again.
+// It never blocks.
 func (k *Keeper) MergeLeftQueue(ws ids.WorkspaceID) {
 	k.enqueue(edge{ws: ws, why: "its merge left its queue"})
+}
+
+// MergeEnteredQueue is WS's merge moving into a queue: its cadence is
+// reconciled, so a hidden or closed workspace beats again while the entry
+// stands. It never blocks.
+func (k *Keeper) MergeEnteredQueue(ws ids.WorkspaceID) {
+	k.enqueue(edge{ws: ws, why: "its merge entered a queue"})
 }
 
 // SessionUp is a session coming up on WS: its cadence is reconciled. It never
@@ -571,6 +580,17 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 	}
 	if !record.LetsCacheLapse() || record.CacheLapse == nil {
 		log.Info(opLapse, "the workspace was shown, selected or reopened before its cache lapsed; it keeps running", nil)
+		return false
+	}
+	queued, err := bringup.MergeQueued(ctx, k.deps.DB, record)
+	if err != nil {
+		if !leaving(ctx, log, opLapse, "reading whether a workspace whose cache lapsed has a merge queued", err) {
+			log.Error(opLapse, "could not read whether the workspace has a merge queued; its session is left running", dlog.Context{"cause": err.Error()})
+		}
+		return false
+	}
+	if queued {
+		log.Info(opLapse, "the workspace has a merge queued, so its session and cache are kept until the merge leaves its queue", nil)
 		return false
 	}
 	if !record.CacheLapse.Lapsed(now) {

@@ -86,24 +86,24 @@ func TestOnlyVisibleRefusesWhenTheQueuesCannotBeRead(t *testing.T) {
 	reg := &fakeRegistry{queuesErr: errors.New("arranged: the store is gone")}
 
 	// Act
-	run, withheld, err := OnlyVisible(context.Background(), reg, []wsm.Workspace{{ID: "a", MergeOf: &wsm.MergeOrigin{}}})
+	run, withheld, err := OnlyVisible(context.Background(), reg, []wsm.Workspace{{ID: "a"}})
 
-	// Assert
+	// Assert: every workspace's verdict reads the queues, merge workspace or not.
 	if err == nil || run != nil || withheld != nil {
 		t.Fatalf("run = %v, withheld = %v, err = %v; want an error and no split", run, withheld, err)
 	}
 }
 
-func TestOnlyVisibleReadsNoQueueWhenNoMergeWorkspaceIsPending(t *testing.T) {
-	// Arrange: queues that would fail if read.
-	reg := &fakeRegistry{queuesErr: errors.New("arranged: must not be read")}
+func TestOnlyVisibleRunsAHiddenWorkspaceWithAMergeQueued(t *testing.T) {
+	// Arrange: a workspace the user hid has a one-shot merge waiting.
+	reg := &fakeRegistry{queues: map[wsm.RepoKey][]wsm.MergeQueueEntry{"/repo/.git": {{Workspace: "a"}}}}
 
 	// Act
-	run, _, err := OnlyVisible(context.Background(), reg, []wsm.Workspace{{ID: "a"}})
+	run, withheld, err := OnlyVisible(context.Background(), reg, []wsm.Workspace{{ID: "a", Hidden: true}})
 
 	// Assert
-	if err != nil || len(run) != 1 {
-		t.Fatalf("run = %v, err = %v; want the workspace run and no queue read", run, err)
+	if err != nil || len(run) != 1 || len(withheld) != 0 {
+		t.Fatalf("run = %v, withheld = %v, err = %v; want the queued workspace run", run, withheld, err)
 	}
 }
 

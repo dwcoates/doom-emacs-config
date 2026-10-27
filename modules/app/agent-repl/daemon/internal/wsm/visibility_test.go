@@ -123,6 +123,9 @@ func TestRuns(t *testing.T) {
 		{name: "a revealed merge workspace the user hid does not run", ws: Workspace{MergeOf: &of, MergeRevealed: true, Hidden: true}, want: false},
 		{name: "a hidden workspace the user is looking at runs", ws: Workspace{Hidden: true, Current: true}, want: true},
 		{name: "a collapsed workspace the user is looking at runs", ws: Workspace{Current: true}, repoFolded: true, want: true},
+		{name: "a hidden workspace with a merge queued runs", ws: Workspace{Hidden: true}, mergeQueued: true, want: true},
+		{name: "a closed workspace with a merge queued runs", ws: Workspace{Closed: true}, mergeQueued: true, want: true},
+		{name: "a collapsed workspace with a merge queued runs", ws: Workspace{}, repoFolded: true, mergeQueued: true, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

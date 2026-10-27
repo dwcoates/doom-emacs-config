@@ -57,16 +57,16 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 			log.Debug(opSweep, "the workspace has no session to hibernate", fields)
 			continue
 		}
-		// A QUEUED MERGE KEEPS ITS SESSION WARM (owner ruling, 2026-10-13):
-		// the idle clock restarts when the workspace's merge joins the queue,
-		// so its shim and keep-alive stand for a whole cutoff in line, and a
-		// merge whose session went cold is ejected rather than kept waiting.
-		since := session.LastEngagementAt
-		if enqueued, ok := queued[ws.ID]; ok && enqueued.After(since) {
-			since = enqueued
-			fields["queued_at"] = enqueued.Format(time.RFC3339)
+		// A QUEUED MERGE KEEPS ITS SESSION WARM FOR AS LONG AS IT STANDS IN
+		// LINE (owner rulings, 2026-10-13 and 2026-10-26): the merge's prompts
+		// run on that session, and a long queue holds an entry for hours, so
+		// no idle cutoff hibernates it while its entry stands.
+		if enqueued, ok := queued[ws.ID]; ok {
+			log.Debug(opSweep, "the workspace has a merge queued; its session is kept warm",
+				dlog.Merge(fields, dlog.Context{"queued_at": enqueued.Format(time.RFC3339)}))
+			continue
 		}
-		idle := now.Sub(since)
+		idle := now.Sub(session.LastEngagementAt)
 		fields["idle"] = idle.String()
 		// A KEEP-ALIVE CYCLE'S PARK PAST THE CUTOFF IS A HIBERNATION. The
 		// cycle stood the shim down between beats with its cache warm, and the

@@ -7,15 +7,16 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// MergeQueueSink is told of every entry leaving a merge queue once it is
-// recorded. The Keeper is the production one.
+// MergeQueueSink is told of every entry entering or leaving a merge queue
+// once it is recorded. The Keeper is the production one.
 type MergeQueueSink interface {
+	MergeEnteredQueue(ws ids.WorkspaceID)
 	MergeLeftQueue(ws ids.WorkspaceID)
 }
 
-// ObserveMergeQueues wraps a state client so every removal from a merge queue
-// (RemoveMergeQueueEntry, DropAdmittedMerge) it records is told to SINK,
-// after the write.
+// ObserveMergeQueues wraps a state client so every entry into a merge queue
+// (QueueMerge) and every removal from one (RemoveMergeQueueEntry,
+// DropAdmittedMerge) it records is told to SINK, after the write.
 // Nothing else about the client changes.
 //
 // EVERY END OF A MERGE REACHES THE KEEPER. A merge leaves its queue when it
@@ -30,6 +31,16 @@ func ObserveMergeQueues(db wsm.DB, sink MergeQueueSink) wsm.DB {
 type mergeQueueObservedDB struct {
 	wsm.DB
 	sink MergeQueueSink
+}
+
+// QueueMerge records the entry, then tells the sink.
+func (o *mergeQueueObservedDB) QueueMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, ledger wsm.LeaseID) (int, error) {
+	place, err := o.DB.QueueMerge(ctx, repo, id, ledger)
+	if err != nil {
+		return place, err
+	}
+	o.sink.MergeEnteredQueue(id)
+	return place, nil
 }
 
 // RemoveMergeQueueEntry records the removal, then tells the sink.

@@ -2,6 +2,8 @@ package drain
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -536,5 +538,56 @@ func TestAFoldedWorkspaceThatQueuedAMergeWhileBusyIsSparedOnceFree(t *testing.T)
 	}
 	if h.pending(ws) {
 		t.Fatal("a spared workspace's stand-down stayed pending")
+	}
+}
+
+func TestAWorkspaceWithAMergeQueuedIsNeverStoodDown(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness) ids.WorkspaceID
+	}{
+		{name: "hidden", arrange: func(t *testing.T, h *harness) ids.WorkspaceID { return h.hidden(t) }},
+		{name: "closed", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			if err := h.db.MarkClosed(context.Background(), ws, wsm.Closure{At: instant, By: wsm.CloseByUser}); err != nil {
+				t.Fatalf("MarkClosed: %v", err)
+			}
+			return ws
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: its merge waits in a queue.
+			h := newHarness(t)
+			ws := tc.arrange(t, h)
+			queuedAt(t, h, ws, instant)
+
+			// Act
+			h.c.StandDownWithheld(ws)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want the queued workspace kept", killed)
+			}
+			if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opWithheld, Message: "the workspace has a merge queued; its session keeps running"}); !ok {
+				t.Fatal("no record says the queued workspace was kept")
+			}
+		})
+	}
+}
+
+func TestAWithheldStandDownWhoseQueuesCannotBeReadIsDropped(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.hidden(t)
+	h.c.deps.DB = sweepReadErrDB{DB: h.c.deps.DB, read: "queues", err: errors.New("database is locked")}
+
+	// Act
+	h.c.StandDownWithheld(ws)
+
+	// Assert
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opWithheld})
+	if !ok || !strings.Contains(fmt.Sprint(rec.Context["cause"]), "database is locked") || len(h.stand.Killed()) != 0 {
+		t.Fatalf("error record = %+v, %v; want the queues' read failure and no stand-down", rec, ok)
 	}
 }
