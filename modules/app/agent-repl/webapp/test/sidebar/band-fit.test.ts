@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 /**
- * THE SECTION FIT (owner requests, 2026-10-11 and 2026-10-18): the rail
- * never scrolls. Once it is out of room, the Open section lengthens until
- * Hidden Workspaces and Recently Merged are left three lines each, the two
- * sharing those six lines, and each section scrolls the rest. Recently
- * Merged claims room only for today's merges. The lowest open section
+ * THE SECTION FIT (owner requests, 2026-10-11, 2026-10-18 and 2026-10-27):
+ * the rail never scrolls. Once it is out of room, the Open section lengthens
+ * until Deploys and Hidden Workspaces below it are left three lines each, the
+ * two sharing those six lines, and each section scrolls the rest. Deploys
+ * claims room only for its queues and today's merges, and a short rail
+ * shrinks Hidden Workspaces before it. The lowest open section
  * reaches the rail's foot, its cut line fading out. jsdom lays nothing out, so
  * `laidOut` states the geometry the engine would give: a rail SCROLLER px
  * tall, a pane whose content other than the sections' rows regions is
@@ -145,7 +146,7 @@ function railHeight(scroller: HTMLElement, rail: number): void {
   scroller.getBoundingClientRect = () => rect(0, rail);
 }
 
-const SECTIONS: SectionClass[] = ["open-section", "hidden-section", "merged-section"];
+const SECTIONS: SectionClass[] = ["open-section", "merged-section", "hidden-section"];
 
 /**
  * State the layout: the rail's height and the pane's other content. OTHERS
@@ -198,7 +199,7 @@ describe("bandShare", () => {
     { name: "nothing to two empty bands", hidden: 0, today: 0, want: { hidden: 0, merged: 0 } },
   ])("shares $name", ({ hidden, today, want }) => {
     // Arrange / Act
-    const got = bandShare(hidden, today);
+    const got = bandShare(today, hidden);
     // Assert
     expect(got).toEqual(want);
   });
@@ -214,9 +215,10 @@ describe("allocateSectionLines", () => {
     { name: "the lines reaching today's merges, older ones above them", room: 20 * ROW, s: sections(40, 40, 10, 2), want: { open: 14, hidden: 4, merged: 2 } },
     { name: "older merges the room a whole Open and Hidden leave", room: 10 * ROW, s: sections(3, 2, 30, 0), want: { open: 3, hidden: 2, merged: 5 } },
     { name: "Hidden Workspaces grown before older merges", room: 10 * ROW, s: sections(2, 10, 10, 0), want: { open: 2, hidden: 8, merged: 0 } },
-    { name: "Hidden Workspaces grown before today's merges", room: 13 * ROW, s: sections(2, 20, 20, 20), want: { open: 2, hidden: 8, merged: 3 } },
+    { name: "today's merges grown before Hidden Workspaces", room: 13 * ROW, s: sections(2, 20, 20, 20), want: { open: 2, hidden: 3, merged: 8 } },
     { name: "every merge the room a whole Hidden Workspaces leaves", room: 12 * ROW, s: sections(0, 1, 20, 9), want: { open: 0, hidden: 1, merged: 11 } },
-    { name: "a short rail's bands shrunk, the longer first", room: 5 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 3, merged: 2 } },
+    { name: "a short rail's Hidden Workspaces shrunk first", room: 5 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 2, merged: 3 } },
+    { name: "a short rail's Hidden Workspaces shrunk away before Deploys gives a line", room: 2 * ROW, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 0, merged: 2 } },
     { name: "nothing in no room at all", room: -100, s: sections(10, 10, 10, 10), want: { open: 0, hidden: 0, merged: 0 } },
     { name: "a folded Open section's room to the bands", room: 9 * ROW, s: sections(0, 5, 40, 0), want: { open: 0, hidden: 5, merged: 4 } },
     {
@@ -226,13 +228,13 @@ describe("allocateSectionLines", () => {
       want: { open: 2, hidden: 8, merged: 0 },
     },
     {
-      name: "the room a tall Open line and a whole Hidden Workspaces leave to Recently Merged",
+      name: "the room a tall Open line and a whole Hidden Workspaces leave to older merges",
       room: 8 * ROW,
       s: { open: [0, ROW, 2 * ROW, 5 * ROW], hidden: stops(4), merged: stops(10), mergedToday: 0 },
       want: { open: 2, hidden: 4, merged: 2 },
     },
     {
-      name: "the room a tall Hidden line cannot use to Recently Merged",
+      name: "the room a tall Hidden line cannot use to older merges",
       room: 9 * ROW,
       s: { open: stops(1), hidden: [0, ROW, 2 * ROW, 3 * ROW, 4 * ROW, 8 * ROW], merged: stops(10), mergedToday: 3 },
       want: { open: 1, hidden: 4, merged: 4 },
@@ -305,6 +307,18 @@ describe("regionLines", () => {
     expect(regionLines(box).map((el) => el.className)).toEqual(["sb-mq-head", "sb-mq-waiting"]);
   });
 
+  it.each([
+    { name: "counts the Deploy Queue heading over no queue as a line", empty: true, want: ["sb-deploy-queue-label", "row"] },
+    { name: "counts the Deploy Queue heading over a queue as no line", empty: false, want: ["row"] },
+  ])("$name", ({ empty, want }) => {
+    // Arrange
+    const box = document.createElement("div");
+    box.innerHTML = `<div class="sb-merge-queues"><div class="sb-deploy-queue-label"${empty ? ' data-empty=""' : ""}></div></div><div class="row"></div>`;
+    for (const el of box.querySelectorAll<HTMLElement>(".sb-deploy-queue-label, .row")) el.getBoundingClientRect = () => rect(0, ROW);
+    // Act / Assert
+    expect(regionLines(box).map((el) => el.className)).toEqual(want);
+  });
+
   it("counts a queue group's header as no line", () => {
     // Arrange
     const box = document.createElement("div");
@@ -366,6 +380,19 @@ describe("mergedTodayLines", () => {
     const got = mergedTodayLines([...queueLines, ...mergedLines(at)], NOW);
     // Assert
     expect(got).toBe(want);
+  });
+
+  it("reaches the Deploy Queue heading standing over no queue", () => {
+    // Arrange: an empty queue box draws its heading alone, above older merges.
+    const queues = document.createElement("div");
+    queues.className = MERGE_QUEUES_CLASS;
+    const heading = document.createElement("div");
+    heading.className = "sb-deploy-queue-label";
+    queues.appendChild(heading);
+    // Act
+    const got = mergedTodayLines([heading, ...mergedLines([startOfToday() - 5])], NOW);
+    // Assert
+    expect(got).toBe(1);
   });
 
   it("reads a nested family row's instant off the row it hangs under", () => {
@@ -508,7 +535,7 @@ describe("fitBands", () => {
     expect([...maxHeights(rail.pane), heights(rail.pane)[2]]).toEqual(["280px", "60px", "", "60px"]);
   });
 
-  it("stretches Recently Merged to the rail's foot through a line it cuts", () => {
+  it("stretches Hidden Workspaces to the rail's foot through a line it cuts", () => {
     // Arrange — 410px of room: twenty whole lines and half of one more.
     const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
@@ -525,22 +552,22 @@ describe("fitBands", () => {
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(band(rail.pane, "merged-section").getAttribute(BAND_LINES_ATTRIBUTE)).toBe("3");
+    expect(band(rail.pane, "hidden-section").getAttribute(BAND_LINES_ATTRIBUTE)).toBe("3");
   });
 
-  it("stretches Recently Merged to the rail's foot when every line fits", () => {
+  it("stretches Hidden Workspaces to the rail's foot when every line fits", () => {
     // Arrange — 900px of room, 200px of lines.
     const rail = drawn({ open: 3, hidden: 3, merged: 4 });
     laidOut(rail, 1000, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect([...maxHeights(rail.pane), ...heights(rail.pane)]).toEqual(["", "", "", "", "", "780px"]);
+    expect([...maxHeights(rail.pane), ...heights(rail.pane)]).toEqual(["", "", "", "", "", "760px"]);
   });
 
-  it("stretches Hidden Workspaces when Recently Merged is folded", () => {
+  it("stretches Deploys when Hidden Workspaces is folded", () => {
     // Arrange
-    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { merged: true } });
+    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { hidden: true } });
     laidOut(rail, 1000, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
@@ -559,15 +586,15 @@ describe("fitBands", () => {
   });
 
   it("lets go of a stretch once a band below unfolds", () => {
-    // Arrange — fitted with Recently Merged folded, Hidden Workspaces stretched.
-    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { merged: true } });
+    // Arrange — fitted with Hidden Workspaces folded, Deploys stretched.
+    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { hidden: true } });
     laidOut(rail, 1000, 100);
     fitBands(rail.scroller, rail.pane, NOW);
-    band(rail.pane, "merged-section").classList.remove("folded");
+    band(rail.pane, "hidden-section").classList.remove("folded");
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(heights(rail.pane)).toEqual(["", "", "780px"]);
+    expect(heights(rail.pane)).toEqual(["", "", "760px"]);
   });
 
   it("measures a stretched band from its rows, not its stretch", () => {
@@ -598,22 +625,22 @@ describe("fitBands", () => {
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(band(rail.pane, "merged-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(true);
+    expect(band(rail.pane, "hidden-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(true);
   });
 
-  it("marks a capped Hidden Workspaces band with rows below its edge", () => {
-    // Arrange — Hidden Workspaces capped at its share, Recently Merged lowest.
+  it("marks a capped Deploys band with rows below its edge", () => {
+    // Arrange — Deploys capped at its share, Hidden Workspaces lowest.
     const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    const hidden = band(rail.pane, "hidden-section");
-    expect([hidden.hasAttribute(BAND_STRETCHED_ATTRIBUTE), hidden.hasAttribute(BAND_MORE_ATTRIBUTE)]).toEqual([false, true]);
+    const merged = band(rail.pane, "merged-section");
+    expect([merged.hasAttribute(BAND_STRETCHED_ATTRIBUTE), merged.hasAttribute(BAND_MORE_ATTRIBUTE)]).toEqual([false, true]);
   });
 
   it("marks a capped Open band with rows below its edge", () => {
-    // Arrange — the Open section capped above the bands, Recently Merged lowest.
+    // Arrange — the Open section capped above the bands, Hidden Workspaces lowest.
     const rail = drawn({ open: 30, hidden: 10, merged: 10, today: 10 });
     laidOut(rail, 510, 100);
     // Act
@@ -630,19 +657,19 @@ describe("fitBands", () => {
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(band(rail.pane, "merged-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(false);
+    expect(band(rail.pane, "hidden-section").hasAttribute(BAND_MORE_ATTRIBUTE)).toBe(false);
   });
 
   it("clears the foot mark from a band that is no longer lowest", () => {
-    // Arrange — fitted with Recently Merged folded, Hidden Workspaces lowest.
-    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { merged: true } });
+    // Arrange — fitted with Hidden Workspaces folded, Deploys lowest.
+    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { hidden: true } });
     laidOut(rail, 1000, 100);
     fitBands(rail.scroller, rail.pane, NOW);
-    band(rail.pane, "merged-section").classList.remove("folded");
+    band(rail.pane, "hidden-section").classList.remove("folded");
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(band(rail.pane, "hidden-section").hasAttribute(BAND_STRETCHED_ATTRIBUTE)).toBe(false);
+    expect(band(rail.pane, "merged-section").hasAttribute(BAND_STRETCHED_ATTRIBUTE)).toBe(false);
   });
 
   it("stretches nothing in a rail shorter than the headers", () => {
@@ -662,7 +689,7 @@ describe("fitBands", () => {
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(SECTIONS.map((cls) => band(rail.pane, cls).getAttribute(BAND_LINES_ATTRIBUTE))).toEqual(["14", "5", "1"]);
+    expect(SECTIONS.map((cls) => band(rail.pane, cls).getAttribute(BAND_LINES_ATTRIBUTE))).toEqual(["14", "1", "5"]);
   });
 
   it("gives older merges no room while the Open section scrolls", () => {

@@ -15,13 +15,19 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// MergedSectionLabel is the merge queue section's heading. It has one author
-// for the same reason every other drawn string does.
-const MergedSectionLabel = "Merge Queue"
+// MergedSectionLabel is the Deploys section's heading (owner request,
+// 2026-10-27; it was "Merge Queue"). It has one author for the same reason
+// every other drawn string does.
+const MergedSectionLabel = "Deploys"
 
-// RecentlyMergedLabel is the heading over the merge queue section's merged
-// groups, below its queues.
-const RecentlyMergedLabel = "Recently Merged"
+// DeployQueueLabel is the heading over the Deploys section's queues, drawn
+// even while no queue is listed (owner request, 2026-10-27).
+const DeployQueueLabel = "Deploy Queue"
+
+// RecentlyMergedLabel is the heading over the Deploys section's merged
+// groups, below its queues (owner request, 2026-10-27; it was "Recently
+// Merged").
+const RecentlyMergedLabel = "Recently Deployed"
 
 // HiddenSectionLabel is the hidden-workspaces section's heading.
 const HiddenSectionLabel = "Hidden"
@@ -434,6 +440,7 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 	section := &frontendv1.RosterMergedSection{
 		Header:      &frontendv1.RosterSectionHeader{Label: &frontendv1.RosterLabel{Text: MergedSectionLabel}},
 		MergedLabel: &frontendv1.RosterLabel{Text: RecentlyMergedLabel},
+		QueueLabel:  &frontendv1.RosterLabel{Text: DeployQueueLabel},
 	}
 	for _, repo := range sortRepositories(r.state.reg.Repositories) {
 		q, ok := queues[repo.ID]

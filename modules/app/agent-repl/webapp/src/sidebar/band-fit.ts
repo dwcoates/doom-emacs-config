@@ -1,10 +1,11 @@
 /**
- * band-fit — how many lines of the Open, Hidden Workspaces and Merge Queue
- * sections the rail shows, each section scrolling through the rest.
+ * band-fit — how many lines of the Open, Deploys and Hidden Workspaces
+ * sections the rail shows, top to bottom, each section scrolling through the
+ * rest.
  *
  * THE RAIL NEVER SCROLLS; ITS SECTIONS DO (owner request, 2026-10-18). The
- * daemon sends every row of every section (Merge Queue holds a week of
- * merges below its queues). Only this page knows its own height, so the split is decided here:
+ * daemon sends every row of every section (Deploys holds a week of merges
+ * below its queues). Only this page knows its own height, so the split is decided here:
  *
  *   - When every line of every section fits, every line shows and nothing
  *     scrolls.
@@ -12,22 +13,26 @@
  *     below it are left `BAND_FLOOR` lines each, and scrolls past that.
  *   - The bands SHARE those `2 * BAND_FLOOR` lines (six, owner request,
  *     2026-10-19): a band that needs fewer than `BAND_FLOOR` gives the rest
- *     to the other, so a Merge Queue of one merge today leaves Hidden
- *     Workspaces five.
- *   - Merge Queue claims its share only for the lines that reach its queues
- *     and TODAY's merges. An older merge has no claim against the Open
- *     section: it shows only in room the Open section cannot use.
+ *     to the other, Deploys taking the spare first, so a Deploys of one
+ *     line today leaves Hidden Workspaces five.
+ *   - Deploys claims its share only for the lines that reach its queues
+ *     (its "Deploy Queue" heading at least) and TODAY's merges. An older
+ *     merge has no claim against the Open section: it shows only in room the
+ *     Open section and Hidden Workspaces cannot use.
  *   - NO ROOM IS LEFT UNUSED (owner request, 2026-10-19). Room the Open
  *     section leaves, whole or stopped short by a line taller than the room
- *     (a repository's header riding with its first row), fills Hidden
- *     Workspaces as far as its lines fit, then Merge Queue.
- *   - A rail too short for the bands' share shrinks the bands, the longer one
- *     first, Merge Queue on a tie, and shows the Open section no lines.
+ *     (a repository's header riding with its first row), fills Deploys
+ *     through today's merges, then Hidden Workspaces, then Deploys' older
+ *     merges, each as far as its lines fit.
+ *   - A RAIL TOO SHORT FOR THE BANDS' SHARE SHRINKS HIDDEN WORKSPACES FIRST
+ *     (owner request, 2026-10-27: Deploys stands above Hidden, and a merge
+ *     in flight matters more than a workspace put away), down to no lines,
+ *     and only then Deploys, and shows the Open section no lines.
  *   - THE LOWEST OPEN SECTION REACHES THE RAIL'S FOOT (owner request,
  *     2026-10-19). Whatever room is left once every section shows its whole
  *     lines, less than one more line of any section, is added to the
- *     viewport of the lowest section not folded (Merge Queue, unless it is
- *     folded), so no strip of the rail is ever left under it. That
+ *     viewport of the lowest section not folded (Hidden Workspaces, unless
+ *     it is folded), so no strip of the rail is ever left under it. That
  *     viewport may cut its last line through, scrolling it into view; the
  *     section's rows region stands that tall even when it holds fewer rows.
  *   - A LINE CUT AT THE FOOT FADES OUT (owner request, 2026-10-19). While the
@@ -38,11 +43,12 @@
  * A LINE IS ONE `.row`, a nested family member included, a folded
  * repository's header, or the header of a subsection that is folded or empty
  * (a subsection with no rows to show draws its header alone, so it is a line
- * as a folded repository's header is), and in the Merge Queue section a
- * queue's head card and each merge waiting behind it. A viewport of K lines is
+ * as a folded repository's header is), and in the Deploys section a queue's
+ * head card, each merge waiting behind it, and the "Deploy Queue" heading
+ * while it stands over no queue. A viewport of K lines is
  * exactly as tall as the first K lines are drawn, the header above a line (a
- * repository section's, a subsection's, a Merge Queue repository group's, the
- * "Recently Merged" heading) riding with it, so no
+ * repository section's, a subsection's, a Deploys repository group's, the
+ * "Deploy Queue" and "Recently Deployed" headings) riding with it, so no
  * line is cut through but the lowest section's last. A folded section shows no
  * lines and takes no room.
  *
@@ -69,7 +75,12 @@
 import { sameLocalDate, type Ticker } from "../clock.js";
 import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
-import { MERGE_QUEUE_HEAD_CLASS, MERGE_QUEUE_WAITING_CLASS, MERGE_QUEUES_CLASS } from "./merge-queue-view.js";
+import {
+  DEPLOY_QUEUE_LABEL_CLASS,
+  MERGE_QUEUE_HEAD_CLASS,
+  MERGE_QUEUE_WAITING_CLASS,
+  MERGE_QUEUES_CLASS,
+} from "./merge-queue-view.js";
 import { mergedToday } from "./row.js";
 
 /** The classes the three sections are drawn with. */
@@ -98,20 +109,21 @@ export const BAND_FLOOR = 3;
 /** Each section's class and its rows region's, top to bottom. */
 const SECTION_REGIONS = [
   [OPEN_SECTION_CLASS, OPEN_REGION_CLASS],
-  [HIDDEN_SECTION_CLASS, "rows"],
   [MERGED_SECTION_CLASS, "rows"],
+  [HIDDEN_SECTION_CLASS, "rows"],
 ] as const;
 
 /**
  * The attribute an EMPTY subsection (`subsections.ts`) wears: it draws its
- * header alone, so its header is a line as a folded subsection's is.
+ * header alone, so its header is a line as a folded subsection's is. The
+ * "Deploy Queue" heading wears it while it stands over no queue.
  */
 export const EMPTY_SUBSECTION_ATTRIBUTE = "data-empty";
 
-
 /**
- * What one line is: a row, a folded repository section's header, or the
- * header of a subsection that is folded or empty.
+ * What one line is: a row, a folded repository section's header, the
+ * header of a subsection that is folded or empty, a queue's head card or
+ * waiting merge, or the "Deploy Queue" heading over no queue.
  */
 const LINE_SELECTOR = [
   ".row",
@@ -120,13 +132,14 @@ const LINE_SELECTOR = [
   `.sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head`,
   `.${MERGE_QUEUE_HEAD_CLASS}`,
   `.${MERGE_QUEUE_WAITING_CLASS}`,
+  `.${DEPLOY_QUEUE_LABEL_CLASS}[${EMPTY_SUBSECTION_ATTRIBUTE}]`,
 ].join(", ");
 
 /** How many lines each section's viewport shows. */
 export interface SectionLines {
   open: number;
-  hidden: number;
   merged: number;
+  hidden: number;
 }
 
 /**
@@ -139,9 +152,9 @@ export type BandStops = readonly number[];
 /** What the fit is handed of the three sections. */
 export interface SectionStops {
   open: BandStops;
-  hidden: BandStops;
   merged: BandStops;
-  /** How many of Merge Queue's first lines it takes to show its queues and every merge of today. */
+  hidden: BandStops;
+  /** How many of Deploys' first lines it takes to show its queues and every merge of today. */
   mergedToday: number;
 }
 
@@ -154,15 +167,15 @@ function assertStops(stops: BandStops, section: string): void {
 
 /**
  * The bands' share of `2 * BAND_FLOOR` lines: `BAND_FLOOR` each, a band that
- * needs fewer giving the rest to the other. HIDDEN and TODAY are the lines
- * each band claims.
+ * needs fewer giving the rest to the other, Deploys taking it first. TODAY
+ * and HIDDEN are the lines each band claims.
  */
-export function bandShare(hidden: number, today: number): { hidden: number; merged: number } {
-  const h = Math.min(hidden, BAND_FLOOR);
+export function bandShare(today: number, hidden: number): { merged: number; hidden: number } {
   const m = Math.min(today, BAND_FLOOR);
-  const spare = 2 * BAND_FLOOR - h - m;
-  const hGrown = h + Math.min(hidden - h, spare);
-  return { hidden: hGrown, merged: m + Math.min(today - m, spare - (hGrown - h)) };
+  const h = Math.min(hidden, BAND_FLOOR);
+  const spare = 2 * BAND_FLOOR - m - h;
+  const mGrown = m + Math.min(today - m, spare);
+  return { merged: mGrown, hidden: h + Math.min(hidden - h, spare - (mGrown - m)) };
 }
 
 /**
@@ -170,28 +183,27 @@ export function bandShare(hidden: number, today: number): { hidden: number; merg
  * Returns the number of lines each section's viewport shows.
  */
 export function allocateSectionLines(room: number, stops: SectionStops): SectionLines {
-  const { open, hidden, merged, mergedToday: today } = stops;
+  const { open, merged, hidden, mergedToday: today } = stops;
   assertStops(open, "open");
-  assertStops(hidden, "hidden");
   assertStops(merged, "merged");
+  assertStops(hidden, "hidden");
   const totalO = open.length - 1;
   const totalH = hidden.length - 1;
   const totalM = merged.length - 1;
   if (!Number.isInteger(today) || today < 0 || today > totalM) {
     throw new RangeError(`band fit: ${today} lines of today's merges in a band of ${totalM}`);
   }
-  const fits = (o: number, h: number, m: number): boolean => open[o] + hidden[h] + merged[m] <= room;
-  if (fits(totalO, totalH, totalM)) return { open: totalO, hidden: totalH, merged: totalM };
-  let { hidden: h, merged: m } = bandShare(totalH, today);
-  while (!fits(0, h, m) && h + m > 0) {
-    if (m >= h) m -= 1;
-    else h -= 1;
-  }
+  const fits = (o: number, m: number, h: number): boolean => open[o] + merged[m] + hidden[h] <= room;
+  if (fits(totalO, totalM, totalH)) return { open: totalO, merged: totalM, hidden: totalH };
+  let { merged: m, hidden: h } = bandShare(today, totalH);
+  while (!fits(0, m, h) && h > 0) h -= 1;
+  while (!fits(0, m, h) && m > 0) m -= 1;
   let o = 0;
-  while (o < totalO && fits(o + 1, h, m)) o += 1;
-  while (h < totalH && fits(o, h + 1, m)) h += 1;
-  while (m < totalM && fits(o, h, m + 1)) m += 1;
-  return { open: o, hidden: h, merged: m };
+  while (o < totalO && fits(o + 1, m, h)) o += 1;
+  while (m < today && fits(o, m + 1, h)) m += 1;
+  while (h < totalH && fits(o, m, h + 1)) h += 1;
+  while (m < totalM && fits(o, m + 1, h)) m += 1;
+  return { open: o, merged: m, hidden: h };
 }
 
 /** A computed length, which a laid-out element always reports in px. */
@@ -237,7 +249,7 @@ export function regionLines(region: HTMLElement): HTMLElement[] {
 /**
  * The stops of a laid-out rows REGION drawing LINES: one per line, at that
  * line's BOTTOM, so whatever is drawn above a line (a repository section's
- * header, a Recently Merged repository group's) is shown together with it,
+ * header, a Deploys repository group's) is shown together with it,
  * never dangling at the viewport's foot. Measured against the region's
  * scrolled content, so a scrolled or capped region measures the same as an
  * uncapped one.
@@ -250,7 +262,7 @@ export function regionStops(region: HTMLElement, lines: readonly HTMLElement[] =
 }
 
 /**
- * How many of Merge Queue's first LINES it takes to show its queues and every
+ * How many of Deploys' first LINES it takes to show its queues and every
  * merge that landed on NOW_MS's local date: through the last line that is a
  * queue's (inside `MERGE_QUEUES_CLASS`) or whose row carries a merged instant
  * of today. Any other line outside a stamped row is malformed.
@@ -265,11 +277,11 @@ export function mergedTodayLines(lines: readonly HTMLElement[], nowMs: number): 
     const stamped = line.closest<HTMLElement>(`[${MERGED_AT_ATTRIBUTE}]`);
     const atMs = stamped === null ? Number.NaN : Number(stamped.getAttribute(MERGED_AT_ATTRIBUTE));
     if (!Number.isFinite(atMs)) {
-      log.error("a sidebar band cannot be fitted: a Merge Queue line is no queue's and carries no merged instant", {
+      log.error("a sidebar band cannot be fitted: a Deploys line is no queue's and carries no merged instant", {
         operation: "sidebar.band-fit.unstamped",
         context: { line: i, merged_at: stamped?.getAttribute(MERGED_AT_ATTRIBUTE) ?? null },
       });
-      throw new Error(`band fit: Merge Queue line ${i} is no queue's and carries no merged instant`);
+      throw new Error(`band fit: Deploys line ${i} is no queue's and carries no merged instant`);
     }
     if (mergedToday(atMs, nowMs)) through = i + 1;
   });
@@ -367,10 +379,10 @@ function measure(band: Band | null): Measured | null {
  * module note).
  */
 export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number): SectionLines | null {
-  const [openSection, hiddenSection, mergedSection] = SECTION_REGIONS.map(([className, regionClass]) =>
+  const [openSection, mergedSection, hiddenSection] = SECTION_REGIONS.map(([className, regionClass]) =>
     openBand(pane, className, regionClass),
   );
-  if (openSection === null && hiddenSection === null && mergedSection === null) return null;
+  if (openSection === null && mergedSection === null && hiddenSection === null) return null;
   const paneHeight = pane.getBoundingClientRect().height;
   const scrollerHeight = scroller.getBoundingClientRect().height;
   if (paneHeight <= 0 || scrollerHeight <= 0) {
@@ -380,25 +392,25 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     });
     return null;
   }
-  const bands = [openSection, hiddenSection, mergedSection].filter((band): band is Band => band !== null);
+  const bands = [openSection, mergedSection, hiddenSection].filter((band): band is Band => band !== null);
   // A stretched viewport stands taller than its rows, so it is let go before
   // the rows are measured: the stops are the rows' own, never the stretch's.
   for (const band of bands) band.region.style.height = "";
   const room = measureRoom(scroller, pane, bands);
   const open = measure(openSection);
-  const hidden = measure(hiddenSection);
   const merged = measure(mergedSection);
+  const hidden = measure(hiddenSection);
   const today = merged === null ? 0 : mergedTodayLines(merged.lines, nowMs);
   const lines = allocateSectionLines(room, {
     open: open?.stops ?? [0],
-    hidden: hidden?.stops ?? [0],
     merged: merged?.stops ?? [0],
+    hidden: hidden?.stops ?? [0],
     mergedToday: today,
   });
   const sized = [
     [open, lines.open],
-    [hidden, lines.hidden],
     [merged, lines.merged],
+    [hidden, lines.hidden],
   ].filter((entry): entry is [Measured, number] => entry[0] !== null);
   const used = sized.reduce((sum, [m, n]) => sum + m.stops[n], 0);
   // A rail shorter than the sections' headers leaves no room to stretch into.
@@ -443,7 +455,7 @@ export interface BandFit {
  * The boxes whose size the fit is a function of inside PANE: the pane, and
  * every child of each section's rows region, whose size a capped region
  * hides from the pane (a repository folded inside the Open section, a
- * Recently Merged group collapsed).
+ * Recently Deployed group collapsed).
  */
 function watchedBoxes(pane: HTMLElement): HTMLElement[] {
   const regions = SECTION_REGIONS.map(([className, regionClass]) =>

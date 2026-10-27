@@ -1,11 +1,12 @@
 /**
- * merge-queue-view — THE MERGE QUEUES the Merge Queue section draws above its
- * recently merged groups (owner requests, 2026-10-24 to 2026-10-26).
+ * merge-queue-view — THE MERGE QUEUES the Deploys section draws under its
+ * "Deploy Queue" heading, above its recently deployed groups (owner
+ * requests, 2026-10-24 to 2026-10-27).
  *
  * ONE GROUP PER REPOSITORY WHOSE LINE HOLDS A MERGE
  * (`frontend.v1.RosterMergedSection.queues`): the repository's label and the
  * merges in its line, "(N)", over its queue, in the repository sections'
- * order. The section's own "Merge Queue" label is always the purple of a
+ * order. The section's own "Deploys" label is always the purple of a
  * merge in progress; a PAUSE IS DRAWN ON ITS OWN REPOSITORY (owner request,
  * 2026-10-27): the label in the error red, the queue's merge glyphs in the
  * amber a paused merge bubble is framed in, and the head's clock stopped at
@@ -71,6 +72,12 @@ export const MERGE_QUEUE_COUNT_CLASS = "sb-count";
 
 /** The class of the box the section's queue groups are drawn in, above its merged groups. */
 export const MERGE_QUEUES_CLASS = "sb-merge-queues";
+
+/**
+ * The class of the "Deploy Queue" heading at the top of `MERGE_QUEUES_CLASS`,
+ * drawn even while no queue is listed under it (owner request, 2026-10-27).
+ */
+export const DEPLOY_QUEUE_LABEL_CLASS = "sb-deploy-queue-label";
 
 /** The class of one repository's queue group, and of its header. */
 export const MERGE_QUEUE_GROUP_CLASS = "mq-group";
@@ -212,7 +219,7 @@ export function queueDrag(
   if (workspace === undefined) throw new Error("invariant: every waiting merge drawn names its workspace");
   const section = body.closest<HTMLElement>(".repo");
   const scroller = body.parentElement?.closest<HTMLElement>(".rows") ?? null;
-  if (section === null || scroller === null) throw new Error("invariant: a queue is drawn inside the Merge Queue section's rows");
+  if (section === null || scroller === null) throw new Error("invariant: a queue is drawn inside the Deploys section's rows");
   const waiting = (): HTMLElement[] => [...body.children].filter((el): el is HTMLElement => refs.has(el as HTMLElement));
   return {
     kind: "merge",

@@ -99,7 +99,7 @@ OVERRIDES replaces top-level entries (notably `current')."
      (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                 (rows . ((rows . [])))
                 (expanded . ())))
-     (recentlyMerged . ((mergedLabel . ((text . "Recently Merged"))) (header . ((label . ((text . "merge queue")))))
+     (recentlyMerged . ((queueLabel . ((text . "Deploy Queue"))) (mergedLabel . ((text . "Recently Deployed"))) (header . ((label . ((text . "merge queue")))))
                          (groups . [])
                          (collapsed . ()))))))
 
@@ -157,7 +157,7 @@ order apart from declaration order."
     (hidden . ((header . ((label . ((text . "Hidden"))) (count . ((workspaces . 0)))))
                (rows . ((rows . [])))
                (expanded . ())))
-    (recentlyMerged . ((mergedLabel . ((text . "Recently Merged"))) (header . ((label . ((text . "merge queue")))))
+    (recentlyMerged . ((queueLabel . ((text . "Deploy Queue"))) (mergedLabel . ((text . "Recently Deployed"))) (header . ((label . ((text . "merge queue")))))
                         (groups . [])
                         (collapsed . ())))))
 
@@ -744,7 +744,7 @@ in the Open section), so only the repo section's row is on the bar."
          daemon (agent-repl-itest-roster--roster
                  (list (agent-repl-itest-roster--row "ws-repo" "ws-repo" 'ready))
                  `(recentlyMerged
-                   . ((mergedLabel . ((text . "Recently Merged")))
+                   . ((queueLabel . ((text . "Deploy Queue"))) (mergedLabel . ((text . "Recently Deployed")))
                       (header . ((label . ((text . "merge queue")))))
                       (groups . ,(vector (agent-repl-itest-roster--merged-group
                                           (vector merged-row) 'shown)))
@@ -999,12 +999,12 @@ never a silently-empty view."
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
-      ;; The raw-context needle is the recently-merged header, NOT the row's
+      ;; The raw-context needle is the Recently Deployed heading, NOT the row's
       ;; marker: the rows live inside `repository', so deleting that field
       ;; deletes them with it and no row text is on the wire at all.  What is
       ;; left of the roster is what the raw context must still carry.
       (should (agent-repl-itest-roster--push-invalid-carries-raw
-               daemon "recently merged")))))
+               daemon "recently deployed")))))
 
 (ert-deftest agent-repl-itest-roster-roster-missing-recently-merged-is-refused ()
   "A `WorkspaceRoster' with no `recentlyMerged' field at all: ERROR, dropped."
@@ -1628,7 +1628,7 @@ pinned directly."
                             (detail . nil)
                             (closed . ((closed . :false))))]))))])))
           (open . ((label . ((text . "Open"))) (expanded . ())))
-          (recentlyMerged . ((mergedLabel . ((text . "Recently Merged"))) (header . ((label . ((text . "merge queue")))))
+          (recentlyMerged . ((queueLabel . ((text . "Deploy Queue"))) (mergedLabel . ((text . "Recently Deployed"))) (header . ((label . ((text . "merge queue")))))
                              (groups . [])))))))
    :type 'agent-repl-wire-error))
 

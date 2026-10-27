@@ -395,7 +395,7 @@ func TestHandBackSubmitsADeferredReportLedByItsLabel(t *testing.T) {
 		wantText  string
 	}{
 		{name: "landed", outcome: merge.DetachedOutcome{Kind: merge.DetachedLanded, Summary: "it landed as commit abc", Branch: "sample"},
-			wantLabel: "merge of sample landed", wantText: "Recently Merged"},
+			wantLabel: "merge of sample landed", wantText: "Recently Deployed"},
 		{name: "failed", outcome: merge.DetachedOutcome{Kind: merge.DetachedFailed, Summary: "tests failed", Branch: "sample"},
 			wantLabel: "merge of sample failed", wantText: "stays hidden at /w/sample-merge, exactly where the merge stopped, listed among the closed workspaces"},
 		{name: "abandoned", outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the fork failed", Branch: "sample"},
