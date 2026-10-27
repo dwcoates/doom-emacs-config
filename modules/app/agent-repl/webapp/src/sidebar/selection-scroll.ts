@@ -15,6 +15,13 @@
  * (`--band-foot-fade`) out of it in the same rule that paints the fade, so a
  * line is never left under the fade.
  *
+ * WITH ITS NEIGHBORS (owner request, 2026-10-27). What must show is not the
+ * line alone but the line with the `SELECTION_CONTEXT_ROWS` rows before it and
+ * after it in its viewport (`contextSpan`), so the rows a next switch lands on
+ * are already in view. The rows above come first: a viewport too short for
+ * both sides shows every row above it can and fills the rest below, and one
+ * too short even for the rows above shows the line with as many as fit.
+ *
  * ONCE PER SELECTION. The rail is redrawn on every push, and the reader may
  * scroll the section away from the selected row; a push that leaves the same
  * workspace highlighted moves nothing. Only a row that is drawn with a box
@@ -23,7 +30,7 @@
  */
 import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
-import { nearestEdgeOffset, selectionRowScroll } from "../scroll.js";
+import { nearestEdgeOffset, selectionRowScroll, type VerticalSpan } from "../scroll.js";
 import { REGION_SELECTOR } from "./band-fit.js";
 
 /** What became of following a selection into view. */
@@ -115,20 +122,69 @@ function scrollPadding(scroller: HTMLElement, edge: ScrollPaddingEdge): number {
   return px;
 }
 
-/**
- * Scroll LINE's section viewport (the rail's body, for a chat thread's row)
- * only as far as LINE needs to show whole (`nearestEdgeOffset`). Answers how
- * it moved, or null when LINE already showed whole.
- */
-export function scrollLineIntoBand(line: HTMLElement): BandScroll | null {
-  const region = scrollerOf(line);
-  const box = region.getBoundingClientRect();
-  const viewportTop = box.top + region.clientTop;
-  const view = {
+/** REGION's view in page coordinates: its viewport less its scroll padding. */
+function viewOf(region: HTMLElement): VerticalSpan {
+  const viewportTop = region.getBoundingClientRect().top + region.clientTop;
+  return {
     top: viewportTop + scrollPadding(region, "scrollPaddingTop"),
     bottom: viewportTop + region.clientHeight - scrollPadding(region, "scrollPaddingBottom"),
   };
-  const offset = nearestEdgeOffset(view, line.getBoundingClientRect());
+}
+
+/** The rows kept in view before and after the selected row, where its viewport has them. */
+export const SELECTION_CONTEXT_ROWS = 5;
+
+/**
+ * The span that must show for the line at INDEX of LINES (a viewport's laid-out
+ * lines, top to bottom) in a view ROOM px tall: the line with up to ROWS lines
+ * before it and after it, the lines before it first. Each side gives up its
+ * farthest lines until the span fits; a line taller than ROOM is its own span.
+ */
+export function contextSpan(lines: readonly VerticalSpan[], index: number, room: number, rows = SELECTION_CONTEXT_ROWS): VerticalSpan {
+  const line = lines[index];
+  if (line === undefined) throw new RangeError(`sidebar selection scroll: line ${index} of ${lines.length} does not exist`);
+  let top = line.top;
+  for (let k = Math.min(rows, index); k > 0; k -= 1) {
+    if (line.bottom - lines[index - k].top <= room) {
+      top = lines[index - k].top;
+      break;
+    }
+  }
+  let bottom = line.bottom;
+  for (let k = Math.min(rows, lines.length - 1 - index); k > 0; k -= 1) {
+    if (lines[index + k].bottom - top <= room) {
+      bottom = lines[index + k].bottom;
+      break;
+    }
+  }
+  return { top, bottom };
+}
+
+/** The lines REGION draws, top to bottom: every row's own line that is laid out. */
+function laidOutLines(region: HTMLElement): HTMLElement[] {
+  return queryAll<HTMLElement>(region, "[data-roster-row] > .row").filter((line) => line.getBoundingClientRect().height > 0);
+}
+
+/**
+ * Scroll LINE's section viewport (the rail's body, for a chat thread's row)
+ * only as far as LINE and its neighbors need to show whole (`contextSpan`,
+ * `nearestEdgeOffset`). Answers how it moved, or null when they already
+ * showed whole.
+ */
+export function scrollLineIntoBand(line: HTMLElement): BandScroll | null {
+  const region = scrollerOf(line);
+  const view = viewOf(region);
+  const lines = laidOutLines(region);
+  const index = lines.indexOf(line);
+  if (index < 0) {
+    log.error("the selected row's line is not among its viewport's laid-out lines", {
+      operation: "sidebar.selection-scroll.unlisted",
+      context: { workspace: line.parentElement?.getAttribute("data-roster-row") ?? null, lines: lines.length },
+    });
+    throw new Error("sidebar selection scroll: the selected line is not among its viewport's laid-out lines");
+  }
+  const rects = lines.map((l) => l.getBoundingClientRect());
+  const offset = nearestEdgeOffset(view, contextSpan(rects, index, view.bottom - view.top));
   if (offset === 0) return null;
   const from = region.scrollTop;
   selectionRowScroll(region, offset);
@@ -147,10 +203,12 @@ export function createSelectionScroll(): SelectionScroll {
       if (line.getBoundingClientRect().height <= 0) return "unlaid";
       followed = id;
       const scrolled = scrollLineIntoBand(line);
-      log.debug(scrolled === null ? "the selected row already shows" : "scrolled the selected row into its section's view", {
+      const record = {
         operation: "sidebar.selection-scroll",
         context: { workspace: id, ...(scrolled ?? {}) },
-      });
+      };
+      if (scrolled === null) log.debug("the selected row already shows with its neighbors", record);
+      else log.info("scrolled the selected row and its neighbors into its section's view", record);
       return scrolled === null ? "visible" : "scrolled";
     },
   };

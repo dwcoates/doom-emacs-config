@@ -9,7 +9,13 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetLoggingForTests } from "../../src/log.js";
-import { createSelectionScroll, RAIL_BODY_CLASS, scrollLineIntoBand } from "../../src/sidebar/selection-scroll.js";
+import {
+  contextSpan,
+  createSelectionScroll,
+  RAIL_BODY_CLASS,
+  scrollLineIntoBand,
+  SELECTION_CONTEXT_ROWS,
+} from "../../src/sidebar/selection-scroll.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { boxRect } from "../dom-rect.js";
 
@@ -143,14 +149,14 @@ describe("scrollLineIntoBand", () => {
     expect([moved, b.region.scrollTop]).toEqual([{ from: 0, to: 4 * ROW }, 4 * ROW]);
   });
 
-  it("brings a line above the viewport only to its top edge", () => {
+  it("brings a line above the viewport, with the rows above it that fit, only to its top edge", () => {
     // Arrange
     const b = band({ lines: 10, view: 3 });
     b.region.scrollTop = 7 * ROW;
     // Act
     const moved = scrollLineIntoBand(b.line("ws-3"));
     // Assert
-    expect(moved).toEqual({ from: 7 * ROW, to: 3 * ROW });
+    expect(moved).toEqual({ from: 7 * ROW, to: ROW });
   });
 
   it("scrolls a line the viewport's foot cuts through only until its bottom shows", () => {
@@ -163,14 +169,14 @@ describe("scrollLineIntoBand", () => {
     expect(moved).toEqual({ from: ROW / 2, to: ROW });
   });
 
-  it("scrolls a line the viewport's top cuts through only until its top shows", () => {
+  it("scrolls a line the viewport's top cuts through until the rows above it that fit show", () => {
     // Arrange
     const b = band({ lines: 10, view: 3 });
     b.region.scrollTop = 3 * ROW + ROW / 2;
     // Act
     const moved = scrollLineIntoBand(b.line("ws-3"));
     // Assert
-    expect(moved).toEqual({ from: 3 * ROW + ROW / 2, to: 3 * ROW });
+    expect(moved).toEqual({ from: 3 * ROW + ROW / 2, to: ROW });
   });
 
   it("scrolls a line under the faded foot's scroll padding until it clears it", () => {
@@ -192,13 +198,13 @@ describe("scrollLineIntoBand", () => {
   });
 
   it("brings a line above the viewport to the edge of its top scroll padding", () => {
-    // Arrange
+    // Arrange: 50px of view hold the line and one row above it.
     const b = band({ lines: 10, view: 3, padTop: "10px" });
     b.region.scrollTop = 7 * ROW;
     // Act
     const moved = scrollLineIntoBand(b.line("ws-3"));
     // Assert
-    expect(moved).toEqual({ from: 7 * ROW, to: 3 * ROW - 10 });
+    expect(moved).toEqual({ from: 7 * ROW, to: 2 * ROW - 10 });
   });
 
   it("refuses a viewport whose scroll padding is not in px, logging it at ERROR and moving nothing", async () => {
@@ -262,6 +268,136 @@ describe("scrollLineIntoBand", () => {
   });
 });
 
+describe("scrollLineIntoBand keeps the selected row's neighbors in view", () => {
+  it("brings a line below the viewport up until the five rows below it show", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 15 });
+    // Act
+    const moved = scrollLineIntoBand(b.line("ws-20"));
+    // Assert: ws-25's bottom sits on the view's bottom.
+    expect(moved).toEqual({ from: 0, to: 11 * ROW });
+  });
+
+  it("brings a line above the viewport down until the five rows above it show", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 15 });
+    b.region.scrollTop = 15 * ROW;
+    // Act
+    const moved = scrollLineIntoBand(b.line("ws-10"));
+    // Assert: ws-5's top sits on the view's top.
+    expect(moved).toEqual({ from: 15 * ROW, to: 5 * ROW });
+  });
+
+  it("scrolls a line already in view that sits within five rows of the view's foot", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 15 });
+    // Act
+    const moved = scrollLineIntoBand(b.line("ws-12"));
+    // Assert
+    expect(moved).toEqual({ from: 0, to: 3 * ROW });
+  });
+
+  it("leaves a line whose five rows each side already show where it is", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 15 });
+    // Act
+    const moved = scrollLineIntoBand(b.line("ws-7"));
+    // Assert
+    expect([moved, b.region.scrollTop]).toEqual([null, 0]);
+  });
+
+  it("shows the rows a line near the section's top has above it, however few", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 15 });
+    b.region.scrollTop = 10 * ROW;
+    // Act
+    const moved = scrollLineIntoBand(b.line("ws-2"));
+    // Assert
+    expect(moved).toEqual({ from: 10 * ROW, to: 0 });
+  });
+
+  it("shows the rows a line near the section's foot has below it, however few", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 15 });
+    // Act
+    const moved = scrollLineIntoBand(b.line("ws-28"));
+    // Assert
+    expect(moved).toEqual({ from: 0, to: 15 * ROW });
+  });
+
+  it("shows the five rows above first when the viewport cannot hold five each side", () => {
+    // Arrange
+    const b = band({ lines: 30, view: 8 });
+    // Act
+    const moved = scrollLineIntoBand(b.line("ws-20"));
+    // Assert: ws-15 at the top, ws-22 at the foot.
+    expect(moved).toEqual({ from: 0, to: 15 * ROW });
+  });
+
+  it("counts only laid-out rows as neighbors, so a folded row is skipped", () => {
+    // Arrange: ws-15..ws-19 draw no box, as a folded subsection's rows do.
+    const b = band({ lines: 30, view: 15 });
+    for (let i = 15; i < 20; i += 1) b.line(`ws-${i}`).getBoundingClientRect = () => rect(0, 0);
+    // Act
+    const moved = scrollLineIntoBand(b.line("ws-20"));
+    // Assert: ws-10 is the fifth laid-out row above, ws-24 the farthest below that still fits.
+    expect(moved).toEqual({ from: 0, to: 10 * ROW });
+  });
+
+  it("refuses a line that is not among its viewport's laid-out lines, logging it at ERROR and moving nothing", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const b = band({ lines: 10, view: 3 });
+    b.line("ws-6").getBoundingClientRect = () => rect(0, 0);
+    // Act
+    const act = (): unknown => scrollLineIntoBand(b.line("ws-6"));
+    // Assert
+    expect(act).toThrow(/not among its viewport's laid-out lines/);
+    expect(b.region.scrollTop).toBe(0);
+    const record = await forwardedRecord(capture, "sidebar.selection-scroll.unlisted");
+    expect(record.level.case).toBe("error");
+    expect(record.context).toMatchObject({ workspace: "ws-6", lines: 9 });
+  });
+});
+
+describe("contextSpan", () => {
+  /** N lines of ROW px from 0. */
+  const lines = (n: number): Array<{ top: number; bottom: number }> =>
+    Array.from({ length: n }, (_, i) => ({ top: i * ROW, bottom: (i + 1) * ROW }));
+
+  it("keeps five rows each side of the selected row", () => {
+    // Arrange + Act + Assert
+    expect([SELECTION_CONTEXT_ROWS, contextSpan(lines(30), 15, 11 * ROW)]).toEqual([5, { top: 10 * ROW, bottom: 21 * ROW }]);
+  });
+
+  it("gives up rows below before any row above", () => {
+    // Arrange + Act + Assert
+    expect(contextSpan(lines(30), 15, 7 * ROW)).toEqual({ top: 10 * ROW, bottom: 17 * ROW });
+  });
+
+  it("gives up the farthest rows above once no row below fits", () => {
+    // Arrange + Act + Assert
+    expect(contextSpan(lines(30), 15, 3 * ROW)).toEqual({ top: 13 * ROW, bottom: 16 * ROW });
+  });
+
+  it("answers the line alone when it is taller than the room", () => {
+    // Arrange + Act + Assert
+    expect(contextSpan(lines(30), 15, ROW / 2)).toEqual({ top: 15 * ROW, bottom: 16 * ROW });
+  });
+
+  it("stops at the first and last lines there are", () => {
+    // Arrange + Act + Assert
+    expect(contextSpan(lines(4), 1, 30 * ROW)).toEqual({ top: 0, bottom: 4 * ROW });
+  });
+
+  it("refuses an index naming no line", () => {
+    // Arrange + Act
+    const act = (): unknown => contextSpan(lines(3), 3, 10 * ROW);
+    // Assert
+    expect(act).toThrow(/line 3 of 3 does not exist/);
+  });
+});
+
 describe("createSelectionScroll", () => {
   it("scrolls a newly highlighted row into view", () => {
     // Arrange
@@ -298,7 +434,7 @@ describe("createSelectionScroll", () => {
     const b = band({ lines: 10, view: 3, current: ["ws-8"] });
     const follower = createSelectionScroll();
     follower.follow(b.root);
-    highlight(b.root, "ws-1");
+    highlight(b.root, "ws-3");
     // Act
     const outcome = follower.follow(b.root);
     // Assert
@@ -342,16 +478,28 @@ describe("createSelectionScroll", () => {
     expect([first, second, b.region.scrollTop]).toEqual(["unlaid", "scrolled", 6 * ROW]);
   });
 
-  it("states the scroll at DEBUG with the workspace and where the band moved", async () => {
+  it("states the scroll at INFO with the workspace and where the band moved", async () => {
     // Arrange
-    const capture = captureLogRecords("debug");
+    const capture = captureLogRecords();
     const b = band({ lines: 10, view: 3, current: ["ws-8"] });
     // Act
     createSelectionScroll().follow(b.root);
     // Assert
     const record = await forwardedRecord(capture, "sidebar.selection-scroll");
-    expect(record.level.case).toBe("debug");
+    expect(record.level.case).toBe("info");
     expect(record.context).toMatchObject({ workspace: "ws-8", from: 0, to: 6 * ROW });
+  });
+
+  it("states a row already showing with its neighbors at DEBUG, as nothing moved", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const b = band({ lines: 10, view: 3, current: ["ws-1"] });
+    // Act
+    createSelectionScroll().follow(b.root);
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.selection-scroll");
+    expect(record.level.case).toBe("debug");
+    expect([record.context?.workspace, record.context?.from]).toEqual(["ws-1", undefined]);
   });
 
   it("refuses a rail with two highlighted rows, logging it at ERROR", async () => {
