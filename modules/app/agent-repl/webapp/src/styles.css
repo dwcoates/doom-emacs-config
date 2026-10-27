@@ -279,8 +279,8 @@
   --selected-entry: #2563eb;
   /* AN ANSWERED BRANCH'S LABEL (owner request, 2026-10-26): a pastel orange
      on both ends of an answer, the prompt's entry labels and the response's
-     linked labels alike (feed/entries.ts). An entry's implied ancestor draws
-     the same hue dimmed, a paler shade of it rather than the old grey. */
+     linked labels alike (feed/entries.ts). An entry's implied ancestor wears
+     the very same shade, never dimmed (owner request, 2026-10-27). */
   --answer-label: #e08a4c;
   /* THE SELECTED BUBBLE's fill (owner ruling, 2026-10-11): a neutral grey, a
      little lighter than the response bubble's own --assistant (the tool
@@ -2985,10 +2985,12 @@ html[data-page-unshown] {
 .mp-label-linked { color: var(--answer-label); cursor: pointer; text-decoration: underline; text-underline-offset: 0.15em; }
 /* A PROMPT'S ENTRIES, drawn as the tree their labels make (feed/entries.ts):
    an entry's label is the click target that edits it; an ancestor no entry
-   answers is drawn by its label alone, a dimmed shade of the same orange. */
+   answers is drawn by its label alone. Both wear the response's linked label's
+   orange exactly, ONE shade, never dimmed (owner request, 2026-10-27). */
 .mp-entry { border-radius: 4px; }
-.mp-entry-label { color: var(--answer-label); cursor: pointer; }
-.mp-entry-path .mp-label { color: var(--answer-label); opacity: 0.55; }
+.mp-entry-label,
+.mp-entry-path .mp-label { color: var(--answer-label); }
+.mp-entry-label { cursor: pointer; }
 /* A RESPONSE NODE'S SUBTREE IS ONE BOX (feed/subtree-box.ts): each line
    inside it is painted from its left edge, the column the node's label starts
    at, to its right edge, the widest line's text. The box carries no accent bar

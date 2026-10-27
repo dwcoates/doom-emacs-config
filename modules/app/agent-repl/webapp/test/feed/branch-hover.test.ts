@@ -13,7 +13,13 @@ import {
 import { SELECTABLE_ATTRIBUTE, SELECTION_GOVERNED_ATTRIBUTE } from "../../src/feed/bubble-selection.js";
 import { TREE_CLASS, TREE_REFERENCE_CLASS } from "../../src/metaprompt-tree.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import { boxedBy, drawnRow, exampleSubtreeWidth, exampleTree, labelledTree, lineOf } from "./tree-fixture.js";
+import { linkAnswers, entryTreeHtml } from "../../src/feed/entries.js";
+import { create } from "@bufbuild/protobuf";
+import { FeedResponseAnswerSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { columnMeasure } from "../../src/metaprompt-tree.js";
+import { inline } from "../../src/markdown.js";
+import { promptProse } from "../prose.js";
+import { boxedBy, drawnRow, exampleSubtreeWidth, exampleTree, labelOf, labelledTree, lineOf } from "./tree-fixture.js";
 
 const HOVER_BOX = { className: BRANCH_HOVER_CLASS, leftProperty: HOVER_LEFT_PROPERTY, rightProperty: HOVER_RIGHT_PROPERTY };
 const REFERENCE_BOX = {
@@ -267,5 +273,99 @@ describe("citationAt", () => {
     el.removeAttribute("data-ref");
     // Act + Assert
     expect(() => citationAt(row, el)).toThrow("names no label");
+  });
+});
+
+/** A response tree whose 3.1 the prompt p1 answers: 3, its child 3.1 and grandchild 3.1.1, then 3.2. */
+const answeredTree = labelledTree([
+  ["3", "The cause"],
+  ["3.1", "The shim drops it", 0],
+  ["3.1.1", "At fork time", 1],
+  ["3.2", "A sibling", 0],
+]);
+
+/**
+ * The response r1 drawing answeredTree with 3.1 answered by the prompt p1,
+ * and p1 drawing ENTRIES, both governed rows of the document's body.
+ */
+function answeredFeed(entries = "3.1 - yes"): { response: HTMLElement; prompt: HTMLElement } {
+  const row = response({}, answeredTree);
+  linkAnswers(row, [create(FeedResponseAnswerSchema, { label: "3.1", prompt: { value: "p1" } })]);
+  const block = promptProse(entries).blocks[0]?.block;
+  if (block?.case !== "entries") throw new Error("the prompt draws no entries");
+  const prompt = document.createElement("article");
+  prompt.setAttribute("data-feed-row", "p1");
+  prompt.toggleAttribute(SELECTION_GOVERNED_ATTRIBUTE, true);
+  prompt.innerHTML = `<div class="${TREE_CLASS}">${entryTreeHtml(block.value, inline, columnMeasure(80))}</div>`;
+  document.body.append(prompt);
+  return { response: row, prompt };
+}
+
+describe("the box over the response node a hovered prompt entry answers", () => {
+  it("boxes the answered node's subtree in the response, as the composer's box is drawn", () => {
+    // Arrange
+    const { response: row, prompt } = answeredFeed();
+    uninstall = installBranchHover(document.body);
+    // Act
+    over(labelOf(prompt, "3.1"));
+    // Assert
+    const width = `    └── 3.1.1 At fork time`.length;
+    expect(boxedBy(row, HOVER_BOX)).toEqual([
+      ["3.1", "4ch", `${width}ch`],
+      ["3.1.1", "4ch", `${width}ch`],
+    ]);
+  });
+
+  it("boxes an implied ancestor's own subtree", () => {
+    // Arrange
+    const { response: row, prompt } = answeredFeed();
+    uninstall = installBranchHover(document.body);
+    // Act
+    over(labelOf(prompt, "3"));
+    // Assert
+    expect(boxedBy(row, HOVER_BOX).map(([node]) => node)).toEqual(["3", "3.1", "3.1.1", "3.2"]);
+  });
+
+  it("boxes nothing in the prompt itself", () => {
+    // Arrange
+    const { prompt } = answeredFeed();
+    uninstall = installBranchHover(document.body);
+    // Act
+    over(labelOf(prompt, "3.1"));
+    // Assert
+    expect(boxedBy(prompt, HOVER_BOX)).toEqual([]);
+  });
+
+  it("is taken down when the pointer moves off the label onto the entry's words", () => {
+    // Arrange
+    const { response: row, prompt } = answeredFeed();
+    uninstall = installBranchHover(document.body);
+    over(labelOf(prompt, "3.1"));
+    // Act
+    over(words(prompt, "3.1"));
+    // Assert
+    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+  });
+
+  it("boxes nothing for an entry no drawn response is answered by", () => {
+    // Arrange
+    const { response: row, prompt } = answeredFeed("3.1 - a\n4.2 - **b**\n5.5.1 - c");
+    uninstall = installBranchHover(document.body);
+    // Act
+    over(labelOf(prompt, "4.2"));
+    // Assert
+    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+  });
+
+  it("records each newly boxed answered node at debug", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { prompt } = answeredFeed();
+    uninstall = installBranchHover(document.body);
+    // Act
+    over(labelOf(prompt, "3.1"));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.branch-hover.entry");
+    expect([record.level.case, record.context]).toEqual(["debug", expect.objectContaining({ row: "r1", label: "3.1" })]);
   });
 });

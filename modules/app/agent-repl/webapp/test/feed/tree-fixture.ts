@@ -55,6 +55,13 @@ export function lineOf(el: HTMLElement, node: string): HTMLElement {
   return line;
 }
 
+/** The label drawn on the line of EL drawing NODE. */
+export function labelOf(el: HTMLElement, node: string): Element {
+  const label = lineOf(el, node).querySelector(".mp-label");
+  if (label === null) throw new Error(`${node}'s line draws no label`);
+  return label;
+}
+
 /** Each line of EL wearing BOX, as (its node, its left edge, its right edge). */
 export const boxedBy = (el: HTMLElement, box: SubtreeBox): [string | null, string, string][] =>
   [...el.querySelectorAll<HTMLElement>(`.${box.className}`)].map((l) => [

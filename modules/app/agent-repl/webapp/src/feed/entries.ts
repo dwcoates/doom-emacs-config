@@ -10,12 +10,16 @@
  *     `entryTreeHtml`), drawn by the one tree renderer: each entry's line a
  *     click target (`ENTRY_LABEL_CLASS`) that selects the prompt and has
  *     Emacs fill the composer with the entry (SelectFeedRow's `entry` move,
- *     bubble-selection.ts), each implied ancestor dimmed (`ENTRY_PATH_CLASS`);
+ *     bubble-selection.ts), each implied ancestor drawn by its label
+ *     (`ENTRY_PATH_CLASS`), in the entry labels' one shade;
  *   - a response's answered labels, marked as links (`LABEL_LINK_CLASS`) on
  *     every paint of its prose (`linkAnswers`, the slot's mark): a click
  *     selects the answering prompt, centered (SelectFeedRow's `answer` move);
  *   - the flash of the entry such a click reveals (`flashEntry`), once the
- *     daemon's selection push names it (FeedSelectionRowViewportReveal).
+ *     daemon's selection push names it (FeedSelectionRowViewportReveal);
+ *   - the response node a prompt's label answers (`answeredNodeAt`), which
+ *     the pointer boxes while it is on that label (branch-hover.ts), found by
+ *     every prompt answering each response label (`ANSWERED_BY_ATTRIBUTE`).
  */
 import type { FeedResponseAnswer } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { create } from "@bufbuild/protobuf";
@@ -29,6 +33,7 @@ import { log } from "../log.js";
 import {
   TREE_LABEL_ATTRIBUTE,
   TREE_LABEL_CLASS,
+  TREE_NODE_ATTRIBUTE,
   renderTreeHtml,
   type InlineMarkup,
   type TreeIssue,
@@ -37,7 +42,8 @@ import {
 } from "../metaprompt-tree.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, whenSlotPainted } from "../bubble/body.js";
-import { feedRowId } from "./row-id.js";
+import { feedRowId, feedRowOf } from "./row-id.js";
+import { inSubtree } from "./subtree-box.js";
 
 /** The class every line of an entry wears, its label in `ENTRY_ATTRIBUTE`. */
 export const ENTRY_CLASS = "mp-entry";
@@ -57,7 +63,14 @@ export const LABEL_LINK_CLASS = "mp-label-linked";
 /** The attribute naming the prompt row a linked label's answer is in. */
 export const ANSWER_PROMPT_ATTRIBUTE = "data-answer-prompt";
 
-/** The class an implied ancestor's line wears: no entry answers it, so it is dimmed. */
+/**
+ * The attribute naming every prompt row answering a response's tree label,
+ * space-separated: a label several prompts answer links to the latest
+ * (`ANSWER_PROMPT_ATTRIBUTE`), but each of them finds its node by this.
+ */
+export const ANSWERED_BY_ATTRIBUTE = "data-answered-by";
+
+/** The class an implied ancestor's line wears: no entry answers it, so it is drawn by its label alone. */
 export const ENTRY_PATH_CLASS = "mp-entry-path";
 
 /**
@@ -109,20 +122,24 @@ export function entryTreeHtml(tree: ProseEntryTree, inline: InlineMarkup, measur
  * the links.
  */
 export function linkAnswers(rendered: HTMLElement, answers: readonly FeedResponseAnswer[]): void {
-  const latest = new Map<string, string>();
+  const answering = new Map<string, string[]>();
   for (const answer of answers) {
-    latest.set(answer.label, requireMessage(answer.prompt, "FeedResponseAnswer.prompt").value);
+    const prompt = requireMessage(answer.prompt, "FeedResponseAnswer.prompt").value;
+    if (prompt === "" || /\s/.test(prompt)) throw new Error(`an answering prompt's row id ${JSON.stringify(prompt)} is not one token`);
+    answering.set(answer.label, [...(answering.get(answer.label) ?? []), prompt]);
   }
   let linked = 0;
   for (const label of queryAll<HTMLElement>(rendered, `.${TREE_LABEL_CLASS}`)) {
-    const prompt = latest.get(label.getAttribute(TREE_LABEL_ATTRIBUTE) ?? "");
-    label.classList.toggle(LABEL_LINK_CLASS, prompt !== undefined);
-    if (prompt === undefined) {
+    const prompts = answering.get(label.getAttribute(TREE_LABEL_ATTRIBUTE) ?? "");
+    label.classList.toggle(LABEL_LINK_CLASS, prompts !== undefined);
+    if (prompts === undefined) {
       label.removeAttribute(ANSWER_PROMPT_ATTRIBUTE);
+      label.removeAttribute(ANSWERED_BY_ATTRIBUTE);
       label.removeAttribute("title");
       continue;
     }
-    label.setAttribute(ANSWER_PROMPT_ATTRIBUTE, prompt);
+    label.setAttribute(ANSWER_PROMPT_ATTRIBUTE, prompts[prompts.length - 1]);
+    label.setAttribute(ANSWERED_BY_ATTRIBUTE, prompts.join(" "));
     label.title = "show the prompt that answered this";
     linked++;
   }
@@ -130,6 +147,34 @@ export function linkAnswers(rendered: HTMLElement, answers: readonly FeedRespons
     operation: "feed.entries.labels-linked",
     context: { answers: answers.length, linked },
   });
+}
+
+/**
+ * The response node the label TARGET is on, in the prompt row PROMPT drawn in
+ * HOST, answers, or null: TARGET is not on a label of PROMPT's entries, or no
+ * response drawn in HOST is answered by them. An entry's label answers its
+ * own node; an implied ancestor's answers its own node in the response its
+ * entries beneath it answer.
+ */
+export function answeredNodeAt(host: ParentNode, prompt: HTMLElement, target: Element): { row: HTMLElement; label: string } | null {
+  const line = target.closest(`.${TREE_LABEL_CLASS}`)?.closest<HTMLElement>(`.${ENTRY_CLASS}, .${ENTRY_PATH_CLASS}`);
+  if (line === undefined || line === null || !prompt.contains(line)) return null;
+  const label = line.getAttribute(TREE_NODE_ATTRIBUTE);
+  if (label === null) throw new Error("a prompt's entry line names no node");
+  const id = feedRowId(prompt);
+  if (id === null) throw new Error("a prompt drawing entries carries no row id");
+  const entries = new Set(
+    queryAll<HTMLElement>(prompt, `.${ENTRY_CLASS}`)
+      .map((entry) => entry.getAttribute(ENTRY_ATTRIBUTE))
+      .filter((entry): entry is string => inSubtree(entry, label)),
+  );
+  const answered = queryAll<HTMLElement>(host, `.${TREE_LABEL_CLASS}[${ANSWERED_BY_ATTRIBUTE}]`).find(
+    (el) =>
+      entries.has(el.getAttribute(TREE_LABEL_ATTRIBUTE) ?? "") &&
+      (el.getAttribute(ANSWERED_BY_ATTRIBUTE) ?? "").split(" ").includes(id),
+  );
+  const row = answered === undefined ? null : feedRowOf<HTMLElement>(answered);
+  return row === null ? null : { row, label };
 }
 
 /**

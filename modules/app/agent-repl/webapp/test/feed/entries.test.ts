@@ -4,6 +4,7 @@ import { create } from "@bufbuild/protobuf";
 import { FeedResponseAnswerSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { ProseEntryTreeSchema, type ProseEntryTree } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import {
+  ANSWERED_BY_ATTRIBUTE,
   ANSWER_PROMPT_ATTRIBUTE,
   ENTRY_ATTRIBUTE,
   ENTRY_CLASS,
@@ -11,6 +12,7 @@ import {
   ENTRY_LABEL_CLASS,
   ENTRY_PATH_CLASS,
   LABEL_LINK_CLASS,
+  answeredNodeAt,
   entryTreeHtml,
   flashEntry,
   flashEntryOncePainted,
@@ -19,6 +21,7 @@ import {
 import { createBubbleBody, markdownSlot, paintBody } from "../../src/bubble/body.js";
 import { drawBubble } from "../../src/bubble/draw.js";
 import { useTreeLayout } from "../tree-layout.js";
+import { labelOf } from "./tree-fixture.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { plainProse, promptProse } from "../prose.js";
@@ -159,9 +162,112 @@ describe("linkAnswers", () => {
     expect([label?.classList.contains(LABEL_LINK_CLASS), label?.hasAttribute(ANSWER_PROMPT_ATTRIBUTE)]).toEqual([false, false]);
   });
 
+  it("names every prompt answering a label, the earlier ones too", () => {
+    // Arrange
+    const el = labels("1.1");
+    // Act
+    linkAnswers(el, [answer("1.1", "p1"), answer("1.1", "p2")]);
+    // Assert
+    expect(el.firstElementChild?.getAttribute(ANSWERED_BY_ATTRIBUTE)).toBe("p1 p2");
+  });
+
+  it("drops the answering prompts of a label whose answer is gone on the next paint", () => {
+    // Arrange
+    const el = labels("1.1");
+    linkAnswers(el, [answer("1.1", "p1")]);
+    // Act
+    linkAnswers(el, []);
+    // Assert
+    expect(el.firstElementChild?.hasAttribute(ANSWERED_BY_ATTRIBUTE)).toBe(false);
+  });
+
   it("refuses an answer served without its prompt", () => {
     // Act + Assert
     expect(() => linkAnswers(labels("1.1"), [create(FeedResponseAnswerSchema, { label: "1.1" })])).toThrow(MalformedView);
+  });
+
+  it.each([
+    ["an empty", ""],
+    ["a spaced", "p 1"],
+  ])("refuses %s answering prompt row id", (_name, prompt) => {
+    // Act + Assert
+    expect(() => linkAnswers(labels("1.1"), [answer("1.1", prompt)])).toThrow("is not one token");
+  });
+});
+
+/**
+ * A response row r1 drawing labels LABELS linked to ANSWERS, and the prompt
+ * row PROMPTID drawing PROMPT's entries, as the document's whole body.
+ */
+function answeredFeed(opts: { labels: string[]; answers: [string, string][]; prompt: string; promptId?: string }): {
+  response: HTMLElement;
+  prompt: HTMLElement;
+} {
+  const response = labels(...opts.labels);
+  response.setAttribute("data-feed-row", "r1");
+  linkAnswers(response, opts.answers.map(([label, prompt]) => answer(label, prompt)));
+  const prompt = drawnEntries(opts.prompt);
+  if (opts.promptId !== undefined) prompt.setAttribute("data-feed-row", opts.promptId);
+  document.body.replaceChildren(response, prompt);
+  return { response, prompt };
+}
+
+describe("answeredNodeAt", () => {
+  it("answers the response node an entry's label answers", () => {
+    // Arrange
+    const { response, prompt } = answeredFeed({ labels: ["3", "3.1"], answers: [["3.1", "p1"]], prompt: "3.1 - yes", promptId: "p1" });
+    // Act
+    const got = answeredNodeAt(document.body, prompt, labelOf(prompt, "3.1"));
+    // Assert
+    expect(got).toEqual({ row: response, label: "3.1" });
+  });
+
+  it("answers an implied ancestor's own node, in the response its entries answer", () => {
+    // Arrange
+    const { response, prompt } = answeredFeed({ labels: ["3", "3.1"], answers: [["3.1", "p1"]], prompt: "3.1 - yes", promptId: "p1" });
+    // Act
+    const got = answeredNodeAt(document.body, prompt, labelOf(prompt, "3"));
+    // Assert
+    expect(got).toEqual({ row: response, label: "3" });
+  });
+
+  it("answers the node for an earlier prompt a later one answered again", () => {
+    // Arrange
+    const { response, prompt } = answeredFeed({
+      labels: ["3.1"],
+      answers: [
+        ["3.1", "p1"],
+        ["3.1", "p2"],
+      ],
+      prompt: "3.1 - yes",
+      promptId: "p1",
+    });
+    // Act
+    const got = answeredNodeAt(document.body, prompt, labelOf(prompt, "3.1"));
+    // Assert
+    expect(got).toEqual({ row: response, label: "3.1" });
+  });
+
+  it("answers null for a label no drawn response is answered by this prompt", () => {
+    // Arrange
+    const { prompt } = answeredFeed({ labels: ["3.1"], answers: [["3.1", "p2"]], prompt: "3.1 - yes", promptId: "p1" });
+    // Act + Assert
+    expect(answeredNodeAt(document.body, prompt, labelOf(prompt, "3.1"))).toBeNull();
+  });
+
+  it("answers null off a label", () => {
+    // Arrange
+    const { prompt } = answeredFeed({ labels: ["3.1"], answers: [["3.1", "p1"]], prompt: "3.1 - yes", promptId: "p1" });
+    const words = linesOf(prompt, "3.1")[0]?.querySelector(".mp-content") as Element;
+    // Act + Assert
+    expect(answeredNodeAt(document.body, prompt, words)).toBeNull();
+  });
+
+  it("refuses a prompt drawing entries with no row id", () => {
+    // Arrange
+    const { prompt } = answeredFeed({ labels: ["3.1"], answers: [["3.1", "p1"]], prompt: "3.1 - yes" });
+    // Act + Assert
+    expect(() => answeredNodeAt(document.body, prompt, labelOf(prompt, "3.1"))).toThrow("carries no row id");
   });
 });
 
