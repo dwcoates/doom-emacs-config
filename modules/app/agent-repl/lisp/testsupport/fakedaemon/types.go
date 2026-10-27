@@ -85,7 +85,7 @@ var unaryResponseTypes = map[string]func() proto.Message{
 	"SetWorkspaceCorrespondence": func() proto.Message { return &v1.SetWorkspaceCorrespondenceResponse{} },
 	"SetWorkspaceName":           func() proto.Message { return &v1.SetWorkspaceNameResponse{} },
 	"SetWorkspaceOneShot":        func() proto.Message { return &v1.SetWorkspaceOneShotResponse{} },
-	"SetWorkspacePrincipalLink":  func() proto.Message { return &v1.SetWorkspacePrincipalLinkResponse{} },
+	"ChangeWorkspaceLinks":       func() proto.Message { return &v1.ChangeWorkspaceLinksResponse{} },
 	"SubscribeMergeQueue":        func() proto.Message { return &v1.SubscribeMergeQueueResponse{} },
 	"SubscribeWorkspace":         func() proto.Message { return &v1.SubscribeWorkspaceResponse{} },
 	"UnsubscribeMergeQueue":      func() proto.Message { return &v1.UnsubscribeMergeQueueResponse{} },
