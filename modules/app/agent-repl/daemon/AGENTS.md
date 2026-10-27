@@ -999,12 +999,32 @@ relaunch engine already used. Whether a SESSION runs on it is a separate fact
 - A start that met a vendor or network fault is no agent-repl failure to
   its callers (`startEndedByDaemon`): the fault itself is the record.
 
-## A feed's history source is the shim, never the vendor session
+## A feed's history source is the store, never a shim or the vendor session
 
-Owner principle, 2026-10-02: the vendor and its state never gate agent-repl's
-own functions, and a restarted workspace shows what it showed before. History
-is read through any shim client the fleet can reach (`workspace.Fleet.ReadHistory`,
-`internal/workspace/history.go`), whatever the vendor session is doing:
+Owner rulings, 2026-10-27: a shim runs only when a session must, and the
+daemon's relationship with the store is read-only. Every workspace's history
+is read from the store's read-only face (`storeread.v1`, through
+`internal/storereader`, the daemon's one way into the store), whether or not
+any shim is up: a parked workspace, one at its cold gate, one whose shim is
+starting or gone, and none is started to show it
+(`workspace.Fleet.ReadHistory`, `internal/workspace/history.go`).
+
+- **The workspace's book** is the store agent its conversation is filed
+  under: the shim names it on every StartSession answer, a refusal included
+  (`shimv1.StartSessionResponse.book`), and the fleet records it
+  (`recordBook`, `wsm` `workspace_book`). A read of the workspace's own book
+  is STATED, so a book nothing is written under yet reads as the empty page;
+  a read naming any other book (a subagent's, a fork's parent's) is NAMED,
+  and the store refuses one it never heard of.
+- **A fresh start's book is no source** until its session starts: the book on
+  record names the conversation it replaces.
+- **A workspace with no recorded book** is read through its shim as below,
+  recorded at INFO (`daemon.workspace.history_through_shim`), until a start
+  records its book. That path, and the parked-session restore it asks for,
+  retire once every workspace has started under a build that records books.
+
+The shim path, for a workspace with no recorded book (owner principle,
+2026-10-02: the vendor and its state never gate agent-repl's own functions):
 
 - **Every held shim**: the fleet holds every shim from the moment it is
   spawned or adopted (see "The fleet holds every shim from its spawn"), so a
@@ -1074,7 +1094,7 @@ reader from ever being handed a row it will withhold:
   what the fork said. The fleet states the workspace's lineage at every
   bring-up (`Resolver.NoteLineage`, from `wsm.Lineage`); the root feed's walk
   reads the fork's own book to its start and then each generation's book
-  through `HistorySource.ReadInherited` (ReadHistory's bounded `through`
+  through `HistorySource.ReadInherited` (the store's bounded `through`
   read), leaving out entries, and turn heads, of the turns open when the fork
   was taken. An
   inherited book's agent is a root-feed agent (`wsState.agentFeed`), and its

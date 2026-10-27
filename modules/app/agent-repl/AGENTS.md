@@ -6,6 +6,12 @@ browser GUI (`webapp/`), two OS-managed services carrying the file plane
 (`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`), and zettel
 (`zettel/`), the OS-managed knowledge-graph service behind chat threads.
 
+The shim and the sidecar write the record store; the daemon only reads it,
+through the store's read-only face (`storeread.v1`, on a socket of its own),
+and never writes it (owner ruling, 2026-10-27; enforced as described in
+`agent-shim/shim-store/AGENTS.md`). Every workspace's history is read from
+there, so showing a conversation never needs a shim up.
+
 The knowledge graph and chat have a glossary of their own, and every term in
 it is the one word for its concept in code, protos and docs alike: see
 `zettel/AGENTS.md` "Glossary". The planning record is
