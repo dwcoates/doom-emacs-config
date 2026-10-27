@@ -274,24 +274,57 @@ message TopbarAccountOption {
 message TopbarTitle {
   // The summary sentence, verbatim. Never empty when the title is set.
   string text = 1;
-  // The workspace's principal link (agentrepl.v1.SetWorkspacePrincipalLink),
-  // which the summary opens when clicked. UNSET while the workspace has none,
-  // and the summary is then plain text. It rides the TITLE rather than the
-  // view, so a workspace with no summary has nothing clickable by
-  // construction.
-  optional TopbarTitleLink link = 2;
+  reserved 2;
+  reserved "link";
+  // What a click on the summary opens: the workspace's shown links
+  // (agentrepl.v1.ChangeWorkspaceLinks). UNSET while the menu shows none, and
+  // the summary is then plain text. It rides the TITLE rather than the view,
+  // so a workspace with no summary has nothing clickable by construction.
+  optional TopbarTitleLinks links = 3;
 }
 
-// The summary's link: the summary is drawn underlined, its tooltip names the
-// url, and a click opens the url through OpenExternal (the Chrome profile of
-// the account the workspace's session spends as), never the heading's own
-// session-line reveal. Its own element because it is the title's clickable
-// part, with props of its own.
+// The summary's links: the summary is drawn underlined, and a click on it
+// opens what the arm names, never the heading's own session-line reveal.
+// THE ARM IS WHAT THE CLICK DOES, resolved by the daemon from how many links
+// the menu shows, so the client never counts them to decide.
+message TopbarTitleLinks {
+  oneof opens {
+    // Exactly one link is shown: the click opens it directly.
+    TopbarTitleLink single = 1;
+    // Two or more links are shown: the click drops their menu.
+    TopbarTitleLinkMenu menu = 2;
+  }
+}
+
+// The one shown link a click opens directly, through OpenExternal (the Chrome
+// profile of the account the workspace's session spends as). Its tooltip
+// names the label and the url beneath the whole summary.
 message TopbarTitleLink {
+  // The agent's label for the link, two to eight words, verbatim.
+  string label = 1;
   // The absolute http or https url, verbatim as the agent set it. The daemon
   // refused any url the external browser would not open, so the client
   // renders and opens it without inspecting it.
-  string url = 1;
+  string url = 2;
+}
+
+// The menu a click on the summary drops beneath the heading: one row per
+// shown link, at most five.
+message TopbarTitleLinkMenu {
+  // The shown links, MOST RECENTLY SET FIRST, in the order drawn. At least
+  // two.
+  repeated TopbarTitleLinkMenuItem items = 1;
+}
+
+// One row of the summary's menu: the label drawn as a link, which a pick
+// opens through OpenExternal, closing the menu.
+message TopbarTitleLinkMenuItem {
+  // The agent's label for the link, two to eight words, drawn verbatim as the
+  // row's text.
+  string label = 1;
+  // The absolute http or https url, verbatim as the agent set it, named in
+  // the row's tooltip.
+  string url = 2;
 }
 
 // The workspace's name as the registry holds it: drawn on the heading's

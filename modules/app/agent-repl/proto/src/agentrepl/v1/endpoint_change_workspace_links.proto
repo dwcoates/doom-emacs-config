@@ -1,0 +1,174 @@
+// endpoint_change_workspace_links.proto — ChangeWorkspaceLinks: store, relabel
+// or remove one of a workspace's links, choose which of them the topbar's
+// summary menu shows, or clear them all. AGENT API section.
+//
+// THE LINKS ARE THE TOPBAR SUMMARY'S MENU. While the menu shows one link, a
+// click on the workspace's summary opens it; while it shows several, the click
+// drops a menu of their labels, most recently set first, and a pick opens that
+// link the way every outward link opens: OpenExternal, in the Chrome profile of
+// the account the workspace's session spends as. A workspace with no summary
+// draws nothing clickable, whatever its links.
+//
+// THE AGENT KEEPS THEM CURRENT. An agent stores, without asking anyone, every
+// link supplied in its conversation that bears on the workspace's task (a pull
+// request, a ticket, a design doc, a dashboard), each under a short label.
+//
+// DURABLE: the daemon records the links on the workspace, so they stand across
+// a daemon restart, and every change republishes the workspace's topbar.
+// GetWorkspaceStatus reads them back (WorkspaceStatus.links).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_links.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ChangeWorkspaceLinksRequest {
+  // The workspace whose links change.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // THE ARM IS THE CHANGE. Unset is a malformed request (Connect
+  // InvalidArgument).
+  oneof change {
+    // Store a link, or relabel one already stored.
+    ChangeWorkspaceLinksSet set = 2;
+    // Remove one stored link.
+    ChangeWorkspaceLinksRemove remove = 3;
+    // Name exactly the links the menu shows.
+    ChangeWorkspaceLinksShow show = 4;
+    // Remove every stored link. Clearing a workspace that has none is no
+    // change and succeeds.
+    ChangeWorkspaceLinksClear clear = 5;
+  }
+}
+
+// Store a link, or relabel one already stored. Either way the link becomes the
+// most recently set. A new link is shown while the menu has room and stored
+// unshown once it is full; a relabeled link keeps its placement.
+message ChangeWorkspaceLinksSet {
+  // The link, an absolute http or https url with no whitespace, stored and
+  // later opened verbatim. A url the external browser would refuse to open is
+  // refused (`invalid_link`), so a stored link is always one a click can open.
+  // A blank url is a malformed request (Connect InvalidArgument).
+  string url = 1;
+  // What the menu draws for the link: two to eight words, one sentence, no
+  // line breaks. Any other label is refused (`invalid_label`), so every label
+  // the menu draws fits it. A blank label is a malformed request (Connect
+  // InvalidArgument).
+  string label = 2;
+}
+
+// Remove one stored link. A url the workspace does not hold is refused
+// (`unknown_link`).
+message ChangeWorkspaceLinksRemove {
+  // The stored link's url, exactly as it was set.
+  string url = 1;
+}
+
+// Name exactly the links the menu shows; every other stored link becomes
+// unshown. Every url must be one the workspace holds (`unknown_link`
+// otherwise), and there may be at most five (`too_many_shown` otherwise). An
+// empty list, or one naming a url twice, is a malformed request (Connect
+// InvalidArgument).
+message ChangeWorkspaceLinksShow {
+  // The urls of the links to show, each exactly as it was set. The menu
+  // still draws them most recently set first, whatever the order here.
+  repeated string urls = 1;
+}
+
+// Remove every stored link. DELIBERATELY EMPTY: the arm is the request.
+message ChangeWorkspaceLinksClear {}
+
+// THE ARM IS THE OUTCOME.
+message ChangeWorkspaceLinksResponse {
+  oneof result {
+    ChangeWorkspaceLinksSuccess success = 1;
+    ChangeWorkspaceLinksError error = 2;
+  }
+}
+
+// Recorded; the workspace's topbar push carries the new menu.
+message ChangeWorkspaceLinksSuccess {
+  // Every link the workspace now holds, and the menu's standing, so the agent
+  // learns at once when the menu is full and a link went unshown.
+  WorkspaceLinks links = 1;
+}
+
+// The daemon's refusals; nothing was recorded. Validation failures (an unset
+// field or arm, a blank url or label, an empty or repeating show) are Connect
+// InvalidArgument, never an arm.
+message ChangeWorkspaceLinksError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ChangeWorkspaceLinksUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ChangeWorkspaceLinksWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    ChangeWorkspaceLinksTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    ChangeWorkspaceLinksNotYetAdopted not_yet_adopted = 4;
+    // The url is not one the external browser opens: not http or https, or
+    // carrying whitespace.
+    ChangeWorkspaceLinksInvalidLink invalid_link = 5;
+    // The label is not two to eight words in one sentence.
+    ChangeWorkspaceLinksInvalidLabel invalid_label = 6;
+    // A remove or a show named a url the workspace does not hold.
+    ChangeWorkspaceLinksUnknownLink unknown_link = 7;
+    // A show named more links than the menu shows.
+    ChangeWorkspaceLinksTooManyShown too_many_shown = 8;
+  }
+}
+
+// The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
+message ChangeWorkspaceLinksUnknownWorkspace {}
+
+// The echoed dir disagrees with the registry's dir for this id.
+message ChangeWorkspaceLinksWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor.
+message ChangeWorkspaceLinksTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting this workspace yet.
+// DELIBERATELY EMPTY.
+message ChangeWorkspaceLinksNotYetAdopted {}
+
+// The url is not one the external browser opens.
+message ChangeWorkspaceLinksInvalidLink {
+  // The url exactly as the request named it.
+  string url = 1;
+  // Why it was refused, in the validator's words, for the agent to correct
+  // the url from. Prose to be read, not a vocabulary to switch on.
+  string reason = 2;
+}
+
+// The label is not one the menu draws.
+message ChangeWorkspaceLinksInvalidLabel {
+  // The label exactly as the request named it.
+  string label = 1;
+  // Why it was refused (too few words, too many, more than one sentence, a
+  // line break), for the agent to shorten or reword the label from. Prose to
+  // be read, not a vocabulary to switch on.
+  string reason = 2;
+}
+
+// A remove or a show named a url the workspace does not hold.
+message ChangeWorkspaceLinksUnknownLink {
+  // The url exactly as the request named it.
+  string url = 1;
+}
+
+// A show named more links than the menu shows.
+message ChangeWorkspaceLinksTooManyShown {
+  // How many links the show named.
+  uint32 named = 1;
+  // How many the menu shows: five.
+  uint32 limit = 2;
+}

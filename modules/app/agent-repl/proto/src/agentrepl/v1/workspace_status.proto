@@ -12,6 +12,7 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "agentrepl/v1/workspace_links.proto";
 import "frontend/v1/feed.proto";
 import "workspace/v1/workspace.proto";
 
@@ -43,11 +44,13 @@ message WorkspaceStatus {
   // create from inside this workspace names to be cut in the same
   // repository (CreateWorkspaceRequest.repository).
   workspace.v1.RepositoryRef repository = 9;
-  // The workspace's principal link (SetWorkspacePrincipalLink), the url the
-  // topbar's summary opens, verbatim. UNSET while the workspace has none. An
-  // agent reads it to judge whether a link it was just given fits the task
-  // better than the one standing.
-  optional string principal_link = 10;
+  reserved 10;
+  reserved "principal_link";
+  // Every link the workspace holds (ChangeWorkspaceLinks) and which of them
+  // the topbar's summary menu shows. An agent reads it to judge whether a
+  // link it was just given is already stored, and which links to show once
+  // the menu is full.
+  WorkspaceLinks links = 11;
 }
 
 // Where a workspace's branch lands.
