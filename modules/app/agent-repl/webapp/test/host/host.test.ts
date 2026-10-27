@@ -19,6 +19,7 @@ import {
 } from "../../src/host/host.js";
 import { HOST_CHANNEL, type HostToPage } from "../../src/host/protocol.js";
 import { beginPage, pageEnded } from "../../src/page-teardown.js";
+import { frameQueue, type FrameQueue } from "../frame-queue.js";
 
 let host: Host;
 
@@ -1857,25 +1858,22 @@ describe("a page re-pointed into a fresh frame", () => {
 });
 
 describe("restyle turns", () => {
-  /** The frames the host has asked to run on, run one at a time by `nextFrame`. */
-  let frames: FrameRequestCallback[];
+  /** The frames the host asks for, run by hand. */
+  let queue: FrameQueue;
   beforeEach(() => {
-    frames = [];
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((fn) => {
-      frames.push(fn);
-      return frames.length;
+    host.dispose();
+    queue = frameQueue();
+    host = createHost({
+      daemon: createDaemonOrigin("http://host.localhost:1"),
+      doc: document,
+      win: window,
+      level: LevelWindow.fixed("info"),
+      frame: queue.frame,
     });
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   /** Run the frames the host asked for so far. */
-  const nextFrame = (): void => {
-    const due = frames;
-    frames = [];
-    for (const fn of due) fn(0);
-  };
+  const nextFrame = (): void => queue.run();
   const granted = (posted: HostToPage[]): number => posted.filter((m) => m.kind === "restyleGranted").length;
   const ask = (id: string): void => fromPage(id, { channel: HOST_CHANNEL, kind: "restyleTurn" });
   const done = (id: string): void => fromPage(id, { channel: HOST_CHANNEL, kind: "restyled" });

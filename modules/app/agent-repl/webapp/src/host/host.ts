@@ -46,6 +46,7 @@ import {
 } from "./protocol.js";
 import { isDaemonOrigin, type DaemonOrigin } from "../rpc/daemon-origin.js";
 import { createListeners } from "../listeners.js";
+import { nextFrame } from "../frame.js";
 
 /** What the host needs from its environment, injectable for tests. */
 export interface HostEnv {
@@ -61,6 +62,8 @@ export interface HostEnv {
   readonly measure?: (element: Element) => { width: number; height: number };
   /** The daemon the webhost's own calls go to (`setDaemon` moves it). */
   readonly daemon: DaemonOrigin;
+  /** Run FN at the next animation frame; `nextFrame` when omitted. */
+  readonly frame?: (fn: () => void) => void;
 }
 
 /**
@@ -231,6 +234,7 @@ const NOTE_LIMIT = 50;
 /** Build the host over ENV and start listening to its pages. */
 export function createHost(env: HostEnv): Host {
   const { doc, win } = env;
+  const atNextFrame = env.frame ?? nextFrame;
   const frames = new Map<string, Frame>();
   const frameParent = env.frames ?? doc.body;
   let shownId: string | null = null;
@@ -447,7 +451,7 @@ export function createHost(env: HostEnv): Host {
     restyling = null;
     if (restyleFramePending) return;
     restyleFramePending = true;
-    win.requestAnimationFrame(() => {
+    atNextFrame(() => {
       restyleFramePending = false;
       grantRestyle();
     });
