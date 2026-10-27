@@ -120,7 +120,12 @@ type fakeDB struct {
 	mergeQueuesErr error
 	// books are the workspaces' recorded books (SetWorkspaceBook);
 	// setBookErr fails the record and bookErr the read.
-	books      map[ids.WorkspaceID]string
+	books map[ids.WorkspaceID]string
+	// gates are the workspaces' recorded cold gates; gateErr fails their
+	// read and setGateErr their record and retirement.
+	gates      map[ids.WorkspaceID]wsm.ColdGateRecord
+	gateErr    error
+	setGateErr error
 	setBookErr error
 	bookErr    error
 	tasks      []wsm.Task
@@ -427,6 +432,31 @@ func (d *fakeDB) owedTurns(ws ids.WorkspaceID) []ids.TurnID {
 	return append([]ids.TurnID(nil), d.owed[ws]...)
 }
 
+func (d *fakeDB) ColdGate(_ context.Context, id ids.WorkspaceID) (wsm.ColdGateRecord, bool, error) {
+	if d.gateErr != nil {
+		return wsm.ColdGateRecord{}, false, d.gateErr
+	}
+	rec, ok := d.gates[id]
+	return rec, ok, nil
+}
+
+func (d *fakeDB) SetColdGate(_ context.Context, id ids.WorkspaceID, rec wsm.ColdGateRecord) error {
+	if d.setGateErr != nil {
+		return d.setGateErr
+	}
+	d.gates[id] = rec
+	return nil
+}
+
+func (d *fakeDB) ClearColdGate(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.setGateErr != nil {
+		return false, d.setGateErr
+	}
+	_, ok := d.gates[id]
+	delete(d.gates, id)
+	return ok, nil
+}
+
 func (d *fakeDB) SetWorkspaceBook(_ context.Context, id ids.WorkspaceID, book string) error {
 	if d.setBookErr != nil {
 		return d.setBookErr
@@ -449,6 +479,7 @@ func newFakeDB() *fakeDB {
 		byDir:       map[string]wsm.Workspace{},
 		sessions:    map[ids.WorkspaceID]wsm.Session{},
 		books:       map[ids.WorkspaceID]string{},
+		gates:       map[ids.WorkspaceID]wsm.ColdGateRecord{},
 		jobs:        map[ids.WorkspaceID]wsm.CreationJob{},
 		held:        map[ids.WorkspaceID][]wsm.HeldPrompt{},
 		closedFlags: map[ids.WorkspaceID]bool{},

@@ -400,6 +400,11 @@ func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimcli
 		return nil, s.spawnErr
 	}
 	s.spawns = append(s.spawns, spec)
+	// A SPAWN IS A FRESH PROCESS: the one fake client stands in for every
+	// shim this supervisor starts, so a client killed before (a gate's
+	// stand-down) is alive again in the process spawned now.
+	s.client.reaped = false
+	s.client.reapedAt = time.Time{}
 	if s.spawned == nil {
 		s.spawned = make(map[ids.WorkspaceID]int)
 	}
@@ -1820,11 +1825,11 @@ func TestBringUpRecordsALockHolderFailureStatingNoHowAtError(t *testing.T) {
 	}
 }
 
-// TestAGateParkedBringUpStatesTheLinkItself pins the link restatement: no
-// watcher opens on the gate-parked path, so without this the surfaces keep
-// drawing the DEAD link of the shim that died before this one — which outranks
-// the gate in the footer's status tree and hides what the user must answer.
-func TestAGateParkedBringUpStatesTheLinkItself(t *testing.T) {
+// TestAGateParkedBringUpTellsEverySurfaceItsShimIsGone pins the gate's
+// stand-down on the views: the gate runs no shim, so the footer, topbar and
+// roster are each told the link is gone, which a standing gate draws as the
+// gate rather than a fault (resolve/footer, resolve/topbar).
+func TestAGateParkedBringUpTellsEverySurfaceItsShimIsGone(t *testing.T) {
 	// Arrange
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
@@ -1836,11 +1841,9 @@ func TestAGateParkedBringUpStatesTheLinkItself(t *testing.T) {
 	}
 
 	// Assert
-	want := []sessionwatcher.LinkState{
-		shimclient.LinkConnected, shimclient.LinkConnected, shimclient.LinkConnected,
-	}
+	want := []sessionwatcher.LinkState{shimclient.LinkDead, shimclient.LinkDead, shimclient.LinkDead}
 	if len(f.links.links) != len(want) {
-		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is connected", f.links.links)
+		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the gate's shim is gone", f.links.links)
 	}
 	for i, got := range f.links.links {
 		if got != want[i] {
@@ -2336,21 +2339,31 @@ func TestResumeColdRefusesAWorkspaceWithNoLiveSession(t *testing.T) {
 	asRefusal(t, err, ArmNoSession)
 }
 
-func TestResumeColdRefusesAReapedClient(t *testing.T) {
-	// Arrange: the map entry outlives the process, and re-opening over a dead
-	// connection answers a raw transport error where the contract spells
-	// no_session.
+func TestResumeColdOfAGateWhoseShimIsGoneSpawnsTheOneItResumesThrough(t *testing.T) {
+	// Arrange: the gate runs no shim, so the answer has none to re-open
+	// through until it spawns one.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	parkedGate(t, f, ws)
-	f.client.reaped = true
+	if f.fleet.Held(ws.ID) {
+		t.Fatal("the gate's shim is still held, so this test could not tell the spawn apart")
+	}
+	spawned := len(f.supervisor.spawns)
 
 	// Act.
 	err := f.fleet.ResumeCold(context.Background(), ws.ID,
 		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
 
 	// Assert.
-	asRefusal(t, err, ArmNoSession)
+	if err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+	if len(f.supervisor.spawns) != spawned+1 {
+		t.Fatalf("spawns = %d, want one more for the answer", len(f.supervisor.spawns)-spawned)
+	}
+	if exists, serving := f.fleet.Health(ws.ID); !exists || !serving {
+		t.Fatalf("Health() = (%v, %v), want the re-opened session serving", exists, serving)
+	}
 }
 
 func TestResumeColdRefusesWhenTheShimRefusesTheRemediatedResumeAsColdAgain(t *testing.T) {

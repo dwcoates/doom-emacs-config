@@ -143,8 +143,22 @@ func resumable(f *fleetFixture) ids.WorkspaceID {
 	return ws.ID
 }
 
-// parkAtColdGate brings W1 up to a standing cold gate: the client is held and
-// no session, so no watcher, is up.
+// heldWithoutSession brings W1 up to a shim held with no session and no
+// watcher: a start the vendor rejected, which leaves its shim held for the
+// next start to reuse.
+func heldWithoutSession(t *testing.T, f *fleetFixture) ids.WorkspaceID {
+	t.Helper()
+	ws := resumable(f)
+	f.client.response = vendorRefusal(rejectedVendorStart(), "invalid api key")
+	_ = f.fleet.Start(context.Background(), ws)
+	if !f.fleet.Held(ws) {
+		t.Fatal("the rejected start left no shim held")
+	}
+	return ws
+}
+
+// parkAtColdGate brings W1 up to a standing cold gate: its shim is stood down,
+// so no shim, session or watcher is up.
 func parkAtColdGate(t *testing.T, f *fleetFixture) ids.WorkspaceID {
 	t.Helper()
 	ws := resumable(f)
@@ -183,24 +197,30 @@ func TestFleetReadHistoryWithNoShimAsksForAParkedSessionBack(t *testing.T) {
 	}
 }
 
-func TestFleetReadHistoryReadsAColdGatedWorkspacesShim(t *testing.T) {
-	// Arrange.
+func TestFleetReadHistoryOfAColdGatedWorkspaceReadsTheStoreAndSpawnsNothing(t *testing.T) {
+	// Arrange: the gate's shim is stood down, and its book is on record.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := resumable(f)
+	f.client.response = withBook(coldResponse(), "book-1")
+	if err := f.fleet.Start(context.Background(), ws); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.store.page = storePromptPage("book-1")
+	spawned := len(f.supervisor.spawns)
 
 	// Act.
 	page, err := f.fleet.ReadHistory(context.Background(), ws, nil, nil)
 
 	// Assert.
-	if err != nil || page == nil || f.client.historyReads != 1 {
-		t.Fatalf("ReadHistory = %v, %v after %d reads; want the shim's page", page, err, f.client.historyReads)
+	if err != nil || page == nil || f.client.historyReads != 0 || len(f.supervisor.spawns) != spawned {
+		t.Fatalf("ReadHistory = %v, %v after %d shim reads and %d spawns; want the store's page and no shim", page, err, f.client.historyReads, len(f.supervisor.spawns)-spawned)
 	}
 }
 
 func TestFleetReadHistoryWithoutAWatcherNamesTheMainAgentForTheFeed(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 	f.client.history = promptPageResponse("main-agent")
 
 	// Act.
@@ -217,7 +237,7 @@ func TestFleetReadHistoryWithoutAWatcherNamesTheMainAgentForTheFeed(t *testing.T
 func TestFleetReadHistoryWithoutAWatcherNamesTheMainAgentForTheFooter(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 	f.client.history = promptPageResponse("main-agent")
 
 	// Act.
@@ -234,7 +254,7 @@ func TestFleetReadHistoryWithoutAWatcherNamesTheMainAgentForTheFooter(t *testing
 func TestFleetReadHistoryWithoutAWatcherHandsTheFooterThePage(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 	f.client.history = promptPageResponse("main-agent")
 
 	// Act.
@@ -251,7 +271,7 @@ func TestFleetReadHistoryWithoutAWatcherHandsTheFooterThePage(t *testing.T) {
 func TestFleetReadHistoryOfASubagentNamesNoMainAgent(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 	f.client.history = promptPageResponse("sub-agent")
 
 	// Act.
@@ -400,7 +420,7 @@ func unknownAgentResponse() *shimv1.ReadHistoryResponse {
 func TestFleetReadHistoryOfNoBookBeforeASessionIsNoSource(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 	f.client.history = unknownAgentResponse()
 
 	// Act.
@@ -415,7 +435,7 @@ func TestFleetReadHistoryOfNoBookBeforeASessionIsNoSource(t *testing.T) {
 func TestFleetReadHistoryOfNoBookBeforeASessionIsRecorded(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 	f.client.history = unknownAgentResponse()
 
 	// Act.
@@ -544,7 +564,7 @@ var standDownErr = fmt.Errorf("%w: unavailable: use of closed network connection
 func TestFleetReadHistoryCutShortByAnOrderedStandDownIsNoSource(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 	f.client.historyErr = standDownErr
 
 	// Act.
@@ -559,7 +579,7 @@ func TestFleetReadHistoryCutShortByAnOrderedStandDownIsNoSource(t *testing.T) {
 func TestFleetReadHistoryCutShortByAnOrderedStandDownIsRecordedAtInfo(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 	f.client.historyErr = standDownErr
 
 	// Act.
@@ -574,7 +594,7 @@ func TestFleetReadHistoryCutShortByAnOrderedStandDownIsRecordedAtInfo(t *testing
 func TestFleetReadHistoryOfAnyOtherFailureStaysAFailure(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 	f.client.historyErr = errors.New("unavailable: connection reset")
 
 	// Act.
@@ -690,7 +710,7 @@ func TestFleetReadHistoryOfARecordedBookIsNoSourceDuringAFreshStart(t *testing.T
 func TestFleetReadHistoryOfAnUnrecordedBookIsReadThroughItsShim(t *testing.T) {
 	// Arrange: the cold refusal named no book, so none is on record.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 
 	// Act.
 	page, err := f.fleet.ReadHistory(context.Background(), ws, nil, nil)

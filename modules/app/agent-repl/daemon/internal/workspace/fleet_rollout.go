@@ -1117,10 +1117,16 @@ func (f *Fleet) AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conve
 	if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: session.HostSessionID}); err != nil {
 		return nil, fmt.Errorf("workspace: adopt the parked shim of %q: %w", ws, err)
 	}
-	f.standCarriedColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session))
+	configDir := spawnRootFor(f.deps.Accounts, record.Dir, session)
+	f.standCarriedColdGate(ws, session.VendorSessionID, cold, configDir)
 	log.Info(opFleetRollout, "adopted the running shim parked at its cold gate; the gate stands on this daemon", dlog.Context{
 		"shim_pid": client.PID(), "vendor_session_id": session.VendorSessionID,
 	})
+	// A GATE RUNS NO SHIM (owner ruling, 2026-10-27): the carried gate is
+	// recorded, so it is raised from the record from now on, and the adopted
+	// shim is stood down.
+	f.recordGate(ctx, log, ws, wsm.ColdGateRecord{VendorSessionID: session.VendorSessionID, Cold: cold, ConfigDir: configDir})
+	f.Detach(func(ctx context.Context) { f.standDownAtGate(ctx, ws) })
 	return client, nil
 }
 
