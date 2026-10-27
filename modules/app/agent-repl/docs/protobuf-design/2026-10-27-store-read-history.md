@@ -112,3 +112,19 @@ changes through and report after (2026-10-13):
   daemon keeps the shim read as the fallback for exactly that case until every
   workspace has started once under the new build, and logs each use at INFO so
   the fallback's retirement is evidenced.
+
+## Deferred, by name
+
+- **Retiring `shim.v1.ReadHistory`** (iteration step 3) waits on the daemon's
+  fallback: a workspace with no recorded book is still read through its shim
+  (`daemon.workspace.history_through_shim`, INFO). Once those records stop
+  appearing, every workspace has its book on record, and the fallback, the
+  parked-session restore it asks for (`cachelapse` `RestoreParked`, the
+  viewed and deferred bookkeeping in `cachelapse/viewed.go`) and the rpc
+  retire together.
+- **No shim at the cold gate.** Reading history from the store is what lets a
+  gated workspace show its conversation with no shim. Standing the shim down
+  at the gate also needs the gate itself to outlive the shim: its facts
+  (vendor session id, the shim's `SessionCold`, the account root) recorded
+  durably and raised again with no shim, and an answer that spawns the shim it
+  resumes through. That is the next change.
