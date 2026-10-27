@@ -2057,3 +2057,36 @@ func TestATakeoverWhoseQueueReviewFailsSaysSoAndGoesOn(t *testing.T) {
 		t.Fatalf("payments = %+v, want the takeover to go on past the failed review", paid)
 	}
 }
+
+func TestTheTakeoverTakesUpTheHeldCreates(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if got := h.queuedCreates.count(); got != 1 {
+		t.Fatalf("held creates taken up %d times, want once at the takeover", got)
+	}
+}
+
+func TestATakeoverWhoseHeldCreatesCannotBeReadSaysSoAndGoesOn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.queuedCreates.mu.Lock()
+	h.queuedCreates.err = errors.New("database is locked")
+	h.queuedCreates.mu.Unlock()
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if _, found := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opAdopt,
+		Message: "the creates the outgoing daemon held for the network could not be taken up; they wait until the next daemon takes them up"}); !found {
+		t.Fatalf("the failed take-up was not recorded at ERROR: %+v", h.log.Records())
+	}
+	if paid := h.reports.payments(); len(paid) != 1 {
+		t.Fatalf("payments = %+v, want the takeover to go on past the failed take-up", paid)
+	}
+}

@@ -29,6 +29,7 @@ import (
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/netstate"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/pullrefs"
@@ -147,11 +148,26 @@ const (
 	CreateStageStartingSession
 )
 
-// CreateProgress receives a Create's stage transitions in order. The terminal
-// outcome is NOT reported here: it is the verb's own return value, which the
-// caller maps. A create with no reporter leaves this nil.
+// CreateProgress receives a Create's stage transitions in order, for one
+// caller's op. A create with no reporter leaves this nil.
+//
+// THE TERMINAL OUTCOME OF AN ATTEMPT IS THE VERB'S OWN RETURN VALUE, which the
+// caller maps. Created and Failed are told only to a caller whose create was
+// HELD for the network: that caller was already answered that it waits, so
+// the outcome reaches it here, possibly from a successor daemon.
 type CreateProgress interface {
+	// Stage is a stage the create has just entered.
 	Stage(CreateStage)
+	// WaitingForNetwork says the create is held until the network is
+	// restored (NetworkWaitError).
+	WaitingForNetwork(PendingCreateID)
+	// Created is a held create's workspace.
+	Created(wsm.Workspace)
+	// Failed is a held create's failure.
+	Failed(error)
+	// OpID is the op the reporter answers, which a held create records so a
+	// successor daemon answers the same op (Deps.CreateProgressFor).
+	OpID() string
 }
 
 // OpenStage is one stage an Open passes through while its rpc is in flight.
@@ -296,8 +312,20 @@ type Verbs interface {
 	SettleMissingDirectory(ctx context.Context, op string, ws wsm.Workspace, statErr error) (bool, error)
 	// Create materializes a new workspace: slug from the initial prompt by the
 	// naming rule, branch, worktree, layout facts recorded, and REGISTRATION
-	// ONLY AFTER MATERIALIZATION.
+	// ONLY AFTER MATERIALIZATION. It is EnterCreate then RunCreate. A create
+	// whose naming call the network blocked answers *NetworkWaitError: it is
+	// held and completes once the network is restored.
 	Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error)
+	// EnterCreate puts a create's request in the pending-create set, making
+	// the create or joining the identical one already pending
+	// (pendingcreates.go). The ticket says which.
+	EnterCreate(spec CreateSpec) *CreateTicket
+	// RunCreate runs the create a ticket names to its answer.
+	RunCreate(ctx context.Context, ticket *CreateTicket) (wsm.Workspace, error)
+	// RecoverQueuedCreates takes up every create a previous daemon held for
+	// the network. The daemon that writes the state calls it before it
+	// admits a create: an incumbent at boot, a successor at its takeover.
+	RecoverQueuedCreates(ctx context.Context) error
 	// CreateThread makes a new zettel chat thread named after its first
 	// question and brings its session up (thread.go); the caller submits the
 	// question.
@@ -752,6 +780,26 @@ type Deps struct {
 	// DefaultWorktreeBound, where the sizing is stated; it is a field so the
 	// overrun is exercised without waiting the real bound out.
 	WorktreeBound time.Duration
+	// Network decides whether a naming call failed because the network is
+	// down, and answers the latch a held create resumes on (netstate).
+	// Required.
+	Network Network
+	// CreateProgressFor answers the reporter of a held create's op, for a
+	// create a previous daemon held. Required.
+	CreateProgressFor func(opID string) CreateProgress
+	// Lifetime is the daemon's: a held create's wait for the network, and its
+	// resumed attempt, end with it. Required.
+	Lifetime context.Context
+}
+
+// Network is the daemon's network state (netstate.Monitor), as a create asks
+// it.
+type Network interface {
+	// Classify decides whether a failure whose own account is WORDS was the
+	// network's.
+	Classify(ctx context.Context, words string) netstate.Verdict
+	// Restored answers the latch closed when the network is next restored.
+	Restored() <-chan struct{}
 }
 
 // CacheLapses is the hidden workspaces' cache keeper (cachelapse.Keeper),
@@ -1033,6 +1081,12 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a git client")
 	case deps.Creates == nil:
 		return nil, missing("the create gate")
+	case deps.Network == nil:
+		return nil, missing("the network state")
+	case deps.CreateProgressFor == nil:
+		return nil, missing("a held create's progress reporters")
+	case deps.Lifetime == nil:
+		return nil, missing("the daemon's lifetime")
 	case deps.Accounts == nil:
 		return nil, missing("an account resolver")
 	case deps.PullOwners == nil:

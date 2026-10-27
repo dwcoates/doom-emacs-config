@@ -588,6 +588,13 @@ type DB interface {
 	ShowWorkspaceLinks(ctx context.Context, id WorkspaceID, urls []string) ([]WorkspaceLink, error)
 	// ClearWorkspaceLinks removes every link a workspace holds.
 	ClearWorkspaceLinks(ctx context.Context, id WorkspaceID) error
+	// PutQueuedCreate holds a create until the network is restored, or
+	// replaces the held create of the same request key (queuedcreates.go).
+	PutQueuedCreate(ctx context.Context, q QueuedCreate) error
+	// QueuedCreates answers every held create, oldest first.
+	QueuedCreates(ctx context.Context) ([]QueuedCreate, error)
+	// DeleteQueuedCreate releases the held create of a request key.
+	DeleteQueuedCreate(ctx context.Context, key string) error
 	// SetName records a workspace's new name, leaving its branch and
 	// directory as they are (rename.go). An empty name is refused.
 	SetName(ctx context.Context, id WorkspaceID, name string) error

@@ -48,6 +48,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/mergenotice"
 	"agent-repld/internal/mergeworkspace"
+	"agent-repld/internal/netstate"
 	"agent-repld/internal/netwatch"
 	"agent-repld/internal/opentabs"
 	"agent-repld/internal/pagesupersede"
@@ -535,7 +536,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		sidebarResolver.SetBringingUp(ws, up)
 	}
 	faultSurfaces := newFaultSurfaces(footerResolver, sidebarResolver, topbarResolver, loudFaults)
-	p.DB = health.ObserveFaults(p.DB, faultSurfaces, p.Surfaces)
+	// THE NETWORK'S STATE HANGS OFF THE SAME DOOR: a shim's network fault
+	// opening and closing is what says the network is down and restored
+	// (netstate), beside the daemon's own evidence.
+	network := netstate.New(ctx, netstate.Deps{
+		Log:   log,
+		Probe: netstate.NewHTTPProber(guard, os.Getenv, log),
+		After: time.After,
+	})
+	p.DB = health.ObserveFaults(p.DB, faultSinks{faultSurfaces, network}, p.Surfaces)
 
 	// THE LOCK STALL WATCHDOG is built before every component whose hot lock
 	// it watches (the feed, the session watchers, the prompt queue), and it
@@ -1100,6 +1109,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// waits the tickets out first -- a handover or restart before it lists
 	// what it serves, every other exit before it ends its streams.
 	creates := creategate.New()
+	// A CREATE HELD FOR THE NETWORK answers its ops through the server and is
+	// taken up at a takeover through the verbs; both are built later.
+	createProgress := &createProgressForwarder{}
+	queuedCreates := &queuedCreatesForwarder{}
 	// THE DETACHED-MERGE SERVICE IS BUILT AFTER THE ROLLOUT AND THE DEPLOY,
 	// which pay the landing reports it owes; both reach it through this.
 	detachedRef := &detachedForwarder{}
@@ -1109,6 +1122,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Reconnects:       p.Reconnects,
 		Reports:          detachedRef,
 		Merges:           mergeMover,
+		QueuedCreates:    queuedCreates,
 		HoldoutWarnEvery: holdoutWarnEvery,
 		FactsBound:       factsBound,
 		PublishHost:      relay.PublishHostWorkspace,
@@ -1365,41 +1379,46 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Instance: p.Instance,
 		// A NUKED THREAD'S GRAPH is deleted through the chat service, which
 		// also forgets what it held of the thread.
-		Threads:      chatService,
-		Creates:      creates,
-		Derived:      derivedNotices,
-		DB:           p.DB,
-		Git:          git,
-		Accounts:     accounts,
-		PullOwners:   pullOwners,
-		Queue:        queue,
-		TurnStops:    queue,
-		Merge:        mergeOrchestrator,
-		Rollout:      rolloutController,
-		Drain:        drainController,
-		Health:       healthReporter,
-		Feed:         feedResolver,
-		Footer:       footerResolver,
-		Topbar:       topbarResolver,
-		Summaries:    titleSynth,
-		Sidebar:      sidebarResolver,
-		Host:         relay,
-		Banners:      notifier,
-		Sessions:     fleet,
-		Headless:     headlessClient,
-		Browser:      browser,
-		PromptsDir:   paths.PromptsDir,
-		CheckoutRoot: paths.Checkout,
-		HomeDir:      paths.Home,
-		Log:          p.Surfaces,
-		Shim:         fleet.Shim,
-		Freeness:     fleet.Running,
-		Ownership:    ownership,
-		StandDowns:   drainController,
-		CacheLapses:  cacheKeeper,
-		Cards:        workspace.NewCards(feedResolver, topbarResolver, fleet),
-		LoadPrompt:   prompts.Load,
-		SplicePrompt: func(prompt prompts.Prompt, values map[string]string) (string, error) { return prompt.Splice(values) },
+		Threads: chatService,
+		Creates: creates,
+		// A CREATE THE NETWORK BLOCKS IS HELD and resumes on the network's
+		// restoration; its ops are answered through the server, bound below.
+		Network:           network,
+		CreateProgressFor: createProgress.For,
+		Lifetime:          ctx,
+		Derived:           derivedNotices,
+		DB:                p.DB,
+		Git:               git,
+		Accounts:          accounts,
+		PullOwners:        pullOwners,
+		Queue:             queue,
+		TurnStops:         queue,
+		Merge:             mergeOrchestrator,
+		Rollout:           rolloutController,
+		Drain:             drainController,
+		Health:            healthReporter,
+		Feed:              feedResolver,
+		Footer:            footerResolver,
+		Topbar:            topbarResolver,
+		Summaries:         titleSynth,
+		Sidebar:           sidebarResolver,
+		Host:              relay,
+		Banners:           notifier,
+		Sessions:          fleet,
+		Headless:          headlessClient,
+		Browser:           browser,
+		PromptsDir:        paths.PromptsDir,
+		CheckoutRoot:      paths.Checkout,
+		HomeDir:           paths.Home,
+		Log:               p.Surfaces,
+		Shim:              fleet.Shim,
+		Freeness:          fleet.Running,
+		Ownership:         ownership,
+		StandDowns:        drainController,
+		CacheLapses:       cacheKeeper,
+		Cards:             workspace.NewCards(feedResolver, topbarResolver, fleet),
+		LoadPrompt:        prompts.Load,
+		SplicePrompt:      func(prompt prompts.Prompt, values map[string]string) (string, error) { return prompt.Splice(values) },
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the workspace verbs: %w", err)
@@ -1448,6 +1467,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		},
 	})
 	detachedRef.bind(detached)
+	queuedCreates.bind(verbs)
 	// THE RETARGET pairs the verb that records a new merge target with the
 	// notice queued through the same handler every prompt takes, as one
 	// operation.
@@ -1694,6 +1714,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			if err := verbs.PublishRegistry(ctx); err != nil {
 				return err
 			}
+			// THE CREATES A PREVIOUS DAEMON HELD FOR THE NETWORK are taken up
+			// before anything is served, so an identical request joins them.
+			// A JOINING DAEMON TAKES THEM UP AT ITS TAKEOVER instead: until the
+			// outgoing daemon is gone, they are still its own.
+			if p.Opts.joining == "" {
+				if err := verbs.RecoverQueuedCreates(ctx); err != nil {
+					return err
+				}
+			}
 			if err := drainController.Republish(ctx); err != nil {
 				return err
 			}
@@ -1718,6 +1747,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return digest.Republish(ctx)
 		},
 		Bind: func(srv server.Server) {
+			createProgress.bind(srv)
 			pushes.bind(srv)
 			relay.bind(srv.Relay())
 			clicks.bind(srv)
@@ -2133,6 +2163,22 @@ type faultSurfaces struct {
 	// close would re-enter that lock; a network fault closes only on the
 	// shim diagnostics' edge, never from inside the feed.
 	onFeed map[ids.FaultID]bool
+}
+
+// faultSinks tells every sink of each fault, in order: the one fault hook
+// (health.ObserveFaults) feeds more than one owner.
+type faultSinks []health.FaultSink
+
+func (sinks faultSinks) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
+	for _, sink := range sinks {
+		sink.FaultOpened(ws, line)
+	}
+}
+
+func (sinks faultSinks) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
+	for _, sink := range sinks {
+		sink.FaultClosed(ws, id)
+	}
 }
 
 func newFaultSurfaces(f footer.Resolver, s sidebar.Resolver, t topbar.Resolver, loud *health.LoudFaults) *faultSurfaces {

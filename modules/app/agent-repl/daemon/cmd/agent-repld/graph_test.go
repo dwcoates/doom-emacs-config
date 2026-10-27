@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 
 	"agent-repld/internal/dlog"
@@ -723,4 +724,31 @@ func TestCycleParkedRecordsAnUnreadableRecordAtError(t *testing.T) {
 		}
 	}
 	t.Fatalf("records = %+v, want the unreadable record at ERROR", log.Records())
+}
+
+// recordingSink records the faults it is told of, in order.
+type recordingSink struct{ events []string }
+
+func (r *recordingSink) FaultOpened(ws ids.WorkspaceID, line health.FaultLine) {
+	r.events = append(r.events, "open "+string(ws)+" "+string(line.ID))
+}
+
+func (r *recordingSink) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
+	r.events = append(r.events, "close "+string(ws)+" "+string(id))
+}
+
+func TestFaultSinksTellEverySinkOfEachFault(t *testing.T) {
+	// Arrange
+	a, b := &recordingSink{}, &recordingSink{}
+	sinks := faultSinks{a, b}
+
+	// Act
+	sinks.FaultOpened("ws-1", health.FaultLine{ID: "f-1"})
+	sinks.FaultClosed("ws-1", "f-1")
+
+	// Assert
+	want := []string{"open ws-1 f-1", "close ws-1 f-1"}
+	if !slices.Equal(a.events, want) || !slices.Equal(b.events, want) {
+		t.Fatalf("sinks told %v and %v, want both %v", a.events, b.events, want)
+	}
 }

@@ -832,12 +832,42 @@ editor\='s, so one answering an editor create is a breach."
   "Decode CreateWorkspaceResponse's `error' arm from JSON."
   (agent-repl-wire-decode-create-workspace-error json))
 
+(defun agent-repl-wire-decode-pending-create-ref (json)
+  "Decode PendingCreateRef from JSON into (:id ID).
+A pending create's identity, minted by the daemon and handed back as is."
+  (let ((message "PendingCreateRef"))
+    (agent-repl-wire-verbs--check-keys message json '(id))
+    (list :id (agent-repl-wire-verbs--require-string
+               message "id" (agent-repl-wire-verbs--decode-string message 'id json)))))
+
+(defun agent-repl-wire-decode-create-workspace-waiting-for-network (json)
+  "Decode CreateWorkspaceWaitingForNetwork from JSON into (:create REF).
+The create is held until the network is restored: an answer, never a
+failure.  REF is the pending create's `PendingCreateRef'."
+  (let ((message "CreateWorkspaceWaitingForNetwork"))
+    (agent-repl-wire-verbs--check-keys message json '(create))
+    (list :create (agent-repl-wire-decode-pending-create-ref
+                   (agent-repl-wire-verbs--require message "create" (cdr (assq 'create json)))))))
+
+(defun agent-repl-wire-decode-create-workspace-joined (json)
+  "Decode CreateWorkspaceJoined from JSON into (:create REF).
+The request was identical to a pending create, which it joined."
+  (let ((message "CreateWorkspaceJoined"))
+    (agent-repl-wire-verbs--check-keys message json '(create))
+    (list :create (agent-repl-wire-decode-pending-create-ref
+                   (agent-repl-wire-verbs--require message "create" (cdr (assq 'create json)))))))
+
 (defun agent-repl-wire-decode-create-workspace-accepted (json)
-  "Decode CreateWorkspaceAccepted from JSON into (:op-id ID).
+  "Decode CreateWorkspaceAccepted from JSON into (:op-id ID :joined J).
 The option-B ack: the create was accepted and detached to the background,
-so the real outcome arrives on the WatchDaemon progress channel, not here."
-  (list :op-id
-        (agent-repl-wire-verbs--decode-string "CreateWorkspaceAccepted" 'opId json)))
+so the real outcome arrives on the WatchDaemon progress channel, not here.
+J is nil for a create of its own, and the decoded `CreateWorkspaceJoined'
+when the request joined an identical pending create."
+  (let ((message "CreateWorkspaceAccepted"))
+    (agent-repl-wire-verbs--check-keys message json '(opId joined))
+    (list :op-id (agent-repl-wire-verbs--decode-string message 'opId json)
+          :joined (when-let ((joined (assq 'joined json)))
+                    (agent-repl-wire-decode-create-workspace-joined (cdr joined))))))
 
 (defun agent-repl-wire-decode-create-workspace-response-accepted (json)
   "Decode CreateWorkspaceResponse's `accepted' arm from JSON."
@@ -845,13 +875,18 @@ so the real outcome arrives on the WatchDaemon progress channel, not here."
 
 (defun agent-repl-wire-decode-create-workspace-response (json)
   "Decode CreateWorkspaceResponse from JSON into (:arm ARM :value V).
-THREE arms, not the standard two: `accepted' is the option-B ack answered
-when the request carried an op_id, in place of `success'/`error'."
-  (agent-repl-wire-verbs--decode-accepting-result
-   "CreateWorkspaceResponse" json
-   #'agent-repl-wire-decode-create-workspace-response-success
-   #'agent-repl-wire-decode-create-workspace-response-error
-   #'agent-repl-wire-decode-create-workspace-response-accepted))
+Beside `success' and `error': `accepted' is the option-B ack answered when
+the request carried an op_id, and `waiting-for-network' is the synchronous
+form's answer for a create held until the network is restored."
+  (let ((message "CreateWorkspaceResponse"))
+    (agent-repl-wire-verbs--check-keys message json '(success error accepted waitingForNetwork))
+    (agent-repl-wire-verbs--decode-oneof
+     message "result" json
+     (list (list 'success :success #'agent-repl-wire-decode-create-workspace-response-success)
+           (list 'error :error #'agent-repl-wire-decode-create-workspace-response-error)
+           (list 'accepted :accepted #'agent-repl-wire-decode-create-workspace-response-accepted)
+           (list 'waitingForNetwork :waiting-for-network
+                 #'agent-repl-wire-decode-create-workspace-waiting-for-network)))))
 
 
 ;;;; ---- OpenWorkspace --------------------------------------------------

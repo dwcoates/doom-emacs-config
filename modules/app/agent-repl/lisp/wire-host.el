@@ -55,6 +55,7 @@
 (declare-function agent-repl-wire-decode-workspace-parent-not-open "wire-common")
 (declare-function agent-repl-wire-decode-daemon-stream-ending "wire-common")
 (declare-function agent-repl-wire-decode-create-workspace-error "wire-verbs")
+(declare-function agent-repl-wire-decode-create-workspace-waiting-for-network "wire-verbs")
 (declare-function agent-repl-wire-decode-nuke-workspace-error "wire-verbs")
 (declare-function agent-repl-wire-decode-daemon-fault "wire-verbs")
 (declare-function agent-repl-wire-decode-persistent-wifi-state "wire-verbs")
@@ -1777,15 +1778,18 @@ would answer, or an `internal' sentence it would fail the rpc with."
 (defun agent-repl-wire-decode-workspace-create-progress (value)
   "Decode `WorkspaceCreateProgress' from VALUE into `(:arm STEP :value V)'.
 THE ARM IS THE STEP: an intermediate `entered_stage' (whose value is the
-stage keyword), or a terminal `succeeded' or `failed'.  The retired
+stage keyword), the create held for the network (`waiting_for_network',
+not terminal), or a terminal `succeeded' or `failed'.  The retired
 field-1 `stage' enum is not a key this codec holds, so a push in that
 shape is refused as an unknown field rather than misread."
   (let ((object (agent-repl-wire--object "WorkspaceCreateProgress" value)))
     (agent-repl-wire--check-keys "WorkspaceCreateProgress" object
-                                 '(enteredStage succeeded failed))
+                                 '(enteredStage succeeded failed waitingForNetwork))
     (agent-repl-wire--decode-oneof
      "WorkspaceCreateProgress" 'step object
      '((enteredStage :entered-stage agent-repl-wire-decode-workspace-create-stage)
+       (waitingForNetwork :waiting-for-network
+                          agent-repl-wire-decode-create-workspace-waiting-for-network)
        (succeeded :succeeded agent-repl-wire-decode-workspace-create-succeeded)
        (failed :failed agent-repl-wire-decode-workspace-create-failed)))))
 

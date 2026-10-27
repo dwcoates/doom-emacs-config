@@ -2616,3 +2616,129 @@ func TestSetWorkspaceNameAnswersTheRosterRevisionThatCarriesTheName(t *testing.T
 		t.Fatalf("SetWorkspaceName = %v, %v; want success at the sidebar's revision 42", resp, err)
 	}
 }
+
+// TestCreateWorkspaceAnswersAHeldCreateAsWaitingForTheNetwork pins the
+// synchronous form's answer for a create held for the network: the
+// waiting_for_network arm naming the pending create, never an error.
+func TestCreateWorkspaceAnswersAHeldCreateAsWaitingForTheNetwork(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createHeld = "create-held"
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(repoRef, "")))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if got := resp.Msg.GetWaitingForNetwork().GetCreate().GetId(); got != "create-held" {
+		t.Fatalf("result = %v, want waiting_for_network naming create-held", resp.Msg.GetResult())
+	}
+}
+
+// TestABackgroundCreateHeldForTheNetworkSaysSoOnItsOp pins the option-B
+// form: the op is told the create waits, and no terminal step follows it.
+func TestABackgroundCreateHeldForTheNetworkSaysSoOnItsOp(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createHeld = "create-held"
+	stream := proveDaemonSubscription(t, h)
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(repoRef, "op-held")))
+
+	// Assert
+	if err != nil || resp.Msg.GetAccepted() == nil || resp.Msg.GetAccepted().Joined != nil {
+		t.Fatalf("CreateWorkspace = %v, %v; want an ack of its own create", resp.Msg.GetResult(), err)
+	}
+	if !stream.Receive() {
+		t.Fatalf("receive the wait: %v", stream.Err())
+	}
+	prog := stream.Msg().GetMutationProgress()
+	if prog.GetOpId() != "op-held" || prog.GetCreate().GetWaitingForNetwork().GetCreate().GetId() != "create-held" {
+		t.Fatalf("progress = %v, want op-held waiting for the network as create-held", prog)
+	}
+}
+
+// TestCreateWorkspaceAcksAJoinedRequestWithTheCreateItJoined pins that an
+// identical request is acked naming the pending create it joined.
+func TestCreateWorkspaceAcksAJoinedRequestWithTheCreateItJoined(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	repoRef := registeredRepoRef(h)
+	h.Verbs.createJoined = "create-first"
+	h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+
+	// Act
+	resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(standardCreate(repoRef, "op-second")))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	accepted := resp.Msg.GetAccepted()
+	if accepted.GetOpId() != "op-second" || accepted.GetJoined().GetCreate().GetId() != "create-first" {
+		t.Fatalf("accepted = %v, want op-second joined to create-first", accepted)
+	}
+}
+
+// TestACreatesReporterPublishesEveryStepOnItsOp pins the reporter a held
+// create's op is answered through, from this daemon or a successor.
+func TestACreatesReporterPublishesEveryStepOnItsOp(t *testing.T) {
+	tests := []struct {
+		name   string
+		report func(r workspace.CreateProgress)
+		check  func(p *agentreplv1.WorkspaceCreateProgress) bool
+	}{
+		{name: "waiting for the network",
+			report: func(r workspace.CreateProgress) { r.WaitingForNetwork("create-1") },
+			check: func(p *agentreplv1.WorkspaceCreateProgress) bool {
+				return p.GetWaitingForNetwork().GetCreate().GetId() == "create-1"
+			}},
+		{name: "created",
+			report: func(r workspace.CreateProgress) { r.Created(wsm.Workspace{ID: "ws-1", Dir: "/d", Name: "minted"}) },
+			check: func(p *agentreplv1.WorkspaceCreateProgress) bool {
+				return p.GetSucceeded().GetName() == "minted" && p.GetSucceeded().GetWorkspace().GetId() == "ws-1"
+			}},
+		{name: "failed",
+			report: func(r workspace.CreateProgress) { r.Failed(errors.New("disk full")) },
+			check: func(p *agentreplv1.WorkspaceCreateProgress) bool {
+				return p.GetFailed().GetInternal() == "disk full"
+			}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			s := h.Server.(*server)
+			log := dlog.NewTestLogger()
+			s.log = log
+			stream := proveDaemonSubscription(t, h)
+			reporter := s.CreateProgress("op-r")
+
+			// Act
+			tc.report(reporter)
+
+			// Assert
+			if reporter.OpID() != "op-r" {
+				t.Fatalf("OpID = %q, want op-r", reporter.OpID())
+			}
+			if !stream.Receive() {
+				t.Fatalf("receive: %v", stream.Err())
+			}
+			prog := stream.Msg().GetMutationProgress()
+			if prog.GetOpId() != "op-r" || !tc.check(prog.GetCreate()) {
+				t.Fatalf("progress = %v", prog)
+			}
+			if tc.name == "failed" {
+				if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.server.create_workspace",
+					Message: "a background create failed"}); !ok {
+					t.Fatalf("no error record for the internal failure: %+v", log.Records())
+				}
+			}
+		})
+	}
+}

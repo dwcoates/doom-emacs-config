@@ -40,6 +40,29 @@
     ;; Assert.
     (should (eq got :deriving-name))))
 
+(ert-deftest agent-repl-test-mp-waiting-for-network-dispatches-and-keeps-the-op ()
+  "A create held for the network is told to its callback and is NOT terminal:
+its creation arrives later on the same op."
+  ;; Arrange.
+  (agent-repl-test-mp--reset)
+  (let (got)
+    (agent-repl-mutation-progress-register
+     "op-w" :on-waiting-for-network (lambda (v) (setq got v)))
+    ;; Act.
+    (agent-repl-mutation-progress-handle
+     (agent-repl-test-mp--progress "op-w" :waiting-for-network '(:create (:id "create-1"))))
+    ;; Assert.
+    (should (equal got '(:create (:id "create-1"))))
+    (should (gethash "op-w" agent-repl-mutation-progress--pending))))
+
+(ert-deftest agent-repl-test-mp-create-words-the-wait-and-the-join ()
+  "A held create and a joined one each have a sentence, and neither is FAILED."
+  ;; Arrange / Act / Assert.
+  (dolist (phase '(:waiting-for-network :joined))
+    (let ((template (alist-get phase (alist-get :create agent-repl-workspace-progress-phases))))
+      (should template)
+      (should-not (string-match-p "FAILED" template)))))
+
 (ert-deftest agent-repl-test-mp-succeeded-dispatches-and-forgets ()
   "A succeeded step calls on-succeeded with the value and drops the op."
   ;; Arrange.

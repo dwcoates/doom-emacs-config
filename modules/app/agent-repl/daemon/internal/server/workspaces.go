@@ -186,8 +186,15 @@ func (s *server) CreateWorkspace(
 	// (workspace_mutation_progress.proto). A create WITHOUT an op_id keeps the
 	// legacy synchronous contract: the same detached work, but this rpc waits
 	// for it and answers success/error itself.
+	//
+	// AN IDENTICAL REQUEST JOINS THE PENDING CREATE. The request enters the
+	// pending-create set before it is acked, so the ack can say it joined a
+	// create already running or held for the network; the joined op then
+	// receives that create's progress and outcome.
 	if opID := req.Msg.GetOpId(); opID != "" {
-		spec.Progress = createProgressReporter{server: s, opID: opID}
+		reporter := s.CreateProgress(opID)
+		spec.Progress = reporter
+		ticket := s.deps.Verbs.EnterCreate(spec)
 		go func() {
 			// The goroutine OWNS the cancel: cancelling in the handler would
 			// tear bgCtx down the instant the ack returns, which is the very
@@ -195,19 +202,30 @@ func (s *server) CreateWorkspace(
 			// released after the outcome is published.
 			defer cancel()
 			defer release()
-			s.runBackgroundCreate(bgCtx, rpc, spec, opID)
+			s.runBackgroundCreate(bgCtx, ticket, reporter)
 		}()
-		resp.Result = &agentreplv1.CreateWorkspaceResponse_Accepted{
-			Accepted: &agentreplv1.CreateWorkspaceAccepted{OpId: opID},
+		accepted := &agentreplv1.CreateWorkspaceAccepted{OpId: opID}
+		if ticket.Joined() {
+			accepted.Joined = &agentreplv1.CreateWorkspaceJoined{Create: pendingCreateRef(ticket.ID())}
 		}
+		resp.Result = &agentreplv1.CreateWorkspaceResponse_Accepted{Accepted: accepted}
 		s.log.Info("daemon.server.create_workspace", "accepted a create and detached it to the background",
-			dlog.Context{"op_id": opID})
+			dlog.Context{"op_id": opID, "create_id": string(ticket.ID()), "joined": ticket.Joined()})
 		return connect.NewResponse(resp), nil
 	}
 
 	defer cancel()
 	defer release()
-	created, err := s.deps.Verbs.Create(bgCtx, spec)
+	created, err := s.deps.Verbs.RunCreate(bgCtx, s.deps.Verbs.EnterCreate(spec))
+	var wait *workspace.NetworkWaitError
+	if errors.As(err, &wait) {
+		s.log.Info("daemon.server.create_workspace", "the create waits for the network; it completes once the network is restored",
+			dlog.Context{"create_id": string(wait.ID), "evidence": string(wait.Evidence)})
+		resp.Result = &agentreplv1.CreateWorkspaceResponse_WaitingForNetwork{
+			WaitingForNetwork: &agentreplv1.CreateWorkspaceWaitingForNetwork{Create: pendingCreateRef(wait.ID)},
+		}
+		return connect.NewResponse(resp), nil
+	}
 	if err != nil {
 		return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
 	}
@@ -277,27 +295,52 @@ func topologyOwner(t *agentreplv1.WorkspaceTopology) (*ids.WorkspaceID, string) 
 // runBackgroundCreate performs an option-B create to completion and publishes
 // its terminal outcome on the mutation-progress channel. It runs in its own
 // goroutine under a context detached from the accepting request, so nothing the
-// client does can cancel it; the daemon owns it to completion.
-func (s *server) runBackgroundCreate(ctx context.Context, rpc string, spec workspace.CreateSpec, opID string) {
-	created, err := s.deps.Verbs.Create(ctx, spec)
-	if err != nil {
-		s.publishCreateFailed(rpc, opID, err)
+// client does can cancel it; the daemon owns it to completion. A create held
+// for the network has already said so on the op, and its outcome follows on
+// the same op once the network is restored.
+func (s *server) runBackgroundCreate(ctx context.Context, ticket *workspace.CreateTicket, reporter workspace.CreateProgress) {
+	created, err := s.deps.Verbs.RunCreate(ctx, ticket)
+	if workspace.IsNetworkWait(err) {
+		s.log.Info("daemon.server.create_workspace", "the background create waits for the network; its outcome follows on its op",
+			dlog.Context{"op_id": reporter.OpID(), "create_id": string(ticket.ID())})
 		return
 	}
+	if err != nil {
+		reporter.Failed(err)
+		return
+	}
+	reporter.Created(created)
+}
+
+// pendingCreateRef is a pending create's wire identity.
+func pendingCreateRef(id workspace.PendingCreateID) *agentreplv1.PendingCreateRef {
+	return &agentreplv1.PendingCreateRef{Id: string(id)}
+}
+
+// CreateProgress answers the reporter of a create's op: what relays its
+// stages, its wait for the network and its outcome onto the mutation-progress
+// channel. A held create a previous daemon recorded is answered on its op
+// through it.
+func (s *server) CreateProgress(opID string) workspace.CreateProgress {
+	return createProgressReporter{server: s, opID: opID}
+}
+
+// publishCreated publishes a create's terminal success on OPID.
+func (s *server) publishCreated(opID string, created wsm.Workspace) {
 	s.log.Info("daemon.server.create_workspace", "created a workspace",
 		dlog.Context{"workspace": string(created.ID), "dir": created.Dir, "op_id": opID})
-	s.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
-		OpId: opID,
-		Event: &agentreplv1.WorkspaceMutationProgress_Create{
-			Create: &agentreplv1.WorkspaceCreateProgress{
-				Step: &agentreplv1.WorkspaceCreateProgress_Succeeded{
-					Succeeded: &agentreplv1.WorkspaceCreateSucceeded{
-						Workspace: created.Ref(),
-						Name:      created.Name,
-					},
-				},
-			},
+	s.publishCreateStep(opID, &agentreplv1.WorkspaceCreateProgress{
+		Step: &agentreplv1.WorkspaceCreateProgress_Succeeded{
+			Succeeded: &agentreplv1.WorkspaceCreateSucceeded{Workspace: created.Ref(), Name: created.Name},
 		},
+	})
+}
+
+// publishCreateStep publishes one step of OPID's create.
+func (s *server) publishCreateStep(opID string, step *agentreplv1.WorkspaceCreateProgress) {
+	s.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
+		OpId:  opID,
+		Event: &agentreplv1.WorkspaceMutationProgress_Create{Create: step},
 	})
 }
 
@@ -317,13 +360,8 @@ func (s *server) publishCreateFailed(rpc, opID string, err error) {
 			dlog.Context{"op_id": opID, "cause": err.Error()})
 		failed.Cause = &agentreplv1.WorkspaceCreateFailed_Internal{Internal: err.Error()}
 	}
-	s.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
-		OpId: opID,
-		Event: &agentreplv1.WorkspaceMutationProgress_Create{
-			Create: &agentreplv1.WorkspaceCreateProgress{
-				Step: &agentreplv1.WorkspaceCreateProgress_Failed{Failed: failed},
-			},
-		},
+	s.publishCreateStep(opID, &agentreplv1.WorkspaceCreateProgress{
+		Step: &agentreplv1.WorkspaceCreateProgress_Failed{Failed: failed},
 	})
 }
 
@@ -352,15 +390,32 @@ func (r createProgressReporter) Stage(stage workspace.CreateStage) {
 			dlog.Context{"op_id": r.opID, "stage": int(stage)})
 		return
 	}
-	r.server.MutationProgress(&agentreplv1.WorkspaceMutationProgress{
-		OpId: r.opID,
-		Event: &agentreplv1.WorkspaceMutationProgress_Create{
-			Create: &agentreplv1.WorkspaceCreateProgress{
-				Step: &agentreplv1.WorkspaceCreateProgress_EnteredStage{EnteredStage: wire},
-			},
+	r.server.publishCreateStep(r.opID, &agentreplv1.WorkspaceCreateProgress{
+		Step: &agentreplv1.WorkspaceCreateProgress_EnteredStage{EnteredStage: wire},
+	})
+}
+
+// WaitingForNetwork publishes the create's wait for the network on the op.
+func (r createProgressReporter) WaitingForNetwork(id workspace.PendingCreateID) {
+	r.server.publishCreateStep(r.opID, &agentreplv1.WorkspaceCreateProgress{
+		Step: &agentreplv1.WorkspaceCreateProgress_WaitingForNetwork{
+			WaitingForNetwork: &agentreplv1.CreateWorkspaceWaitingForNetwork{Create: pendingCreateRef(id)},
 		},
 	})
 }
+
+// Created publishes the create's workspace on the op.
+func (r createProgressReporter) Created(created wsm.Workspace) {
+	r.server.publishCreated(r.opID, created)
+}
+
+// Failed publishes the create's failure on the op.
+func (r createProgressReporter) Failed(err error) {
+	r.server.publishCreateFailed("CreateWorkspace", r.opID, err)
+}
+
+// OpID is the op the reporter answers.
+func (r createProgressReporter) OpID() string { return r.opID }
 
 // openProgressReporter relays an open's stage transitions onto the
 // mutation-progress channel, keyed on the op_id the request supplied. It

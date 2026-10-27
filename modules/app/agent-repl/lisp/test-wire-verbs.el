@@ -110,9 +110,10 @@ names its requester and placement as well, so the request tests read
   ;; the usual two: CreateWorkspaceResponse carries the option-B `accepted' ack
   ;; beside success and error.
   ;; CreateWorkspaceResponse's `async_merge_accepted' answers only an async
-  ;; merge, which is an agent's request and never the editor's.
+  ;; merge, which is an agent's request and never the editor's, and its
+  ;; `waiting_for_network' answers a synchronous create held for the network.
   '(("agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceResponse"
-     ("accepted" "asyncMergeAccepted" "error" "success"))
+     ("accepted" "asyncMergeAccepted" "error" "success" "waitingForNetwork"))
     ("agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceResponse")
     ("agentrepl/v1/endpoint_list_workspace_transcripts.pb.go" "ListWorkspaceTranscriptsResponse")
     ("agentrepl/v1/endpoint_bind_workspace_session.pb.go" "BindWorkspaceSessionResponse")
@@ -447,6 +448,44 @@ THE ARM IS THE REFUSAL, so a bare error says nothing the caller can act on."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-decode-create-workspace-response
                    (agent-repl-test-wire-verbs--parse "{\"success\":{},\"pending\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+
+(ert-deftest agent-repl-test-wire-verbs-create-response-accepted-own-create ()
+  "An ack for a create of its own carries the op id and no joined create."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-response
+                    (agent-repl-test-wire-verbs--parse "{\"accepted\":{\"opId\":\"op-7\"}}"))
+                   '(:arm :accepted :value (:op-id "op-7" :joined nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-response-accepted-joined ()
+  "An ack that joined an identical pending create names that create."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"accepted\":{\"opId\":\"op-8\",\"joined\":{\"create\":{\"id\":\"create-1\"}}}}"))
+                   '(:arm :accepted :value (:op-id "op-8" :joined (:create (:id "create-1"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-response-waiting-for-network ()
+  "The synchronous answer for a create held for the network names it."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"waitingForNetwork\":{\"create\":{\"id\":\"create-2\"}}}"))
+                   '(:arm :waiting-for-network :value (:create (:id "create-2")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-waiting-without-a-create-is-a-breach ()
+  "A held create with no pending ref says nothing a caller can follow."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-create-workspace-response
+                   (agent-repl-test-wire-verbs--parse "{\"waitingForNetwork\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-pending-create-ref-without-an-id-is-a-breach ()
+  "A pending ref with no id is no identity at all."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-pending-create-ref
+                   (agent-repl-test-wire-verbs--parse "{}"))
                   :type 'agent-repl-wire-error)))
 
 

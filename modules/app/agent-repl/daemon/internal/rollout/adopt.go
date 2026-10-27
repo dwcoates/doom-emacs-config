@@ -1117,6 +1117,12 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	if err := c.deps.Merges.ReviewQueues(c.lifetime(context.Background())); err != nil {
 		c.log.Error(opAdopt, "the merge queues could not be read again at the takeover; a queue change the outgoing daemon made waits for its queue's next change", dlog.WithCause(fields, err))
 	}
+	// THE CREATES THE OUTGOING DAEMON HELD FOR THE NETWORK ARE THIS DAEMON'S
+	// NOW: it is gone, so none of them can run there, and each resumes here on
+	// the network's restoration under its own key and pending ref.
+	if err := c.deps.QueuedCreates.RecoverQueuedCreates(c.lifetime(context.Background())); err != nil {
+		c.log.Error(opAdopt, "the creates the outgoing daemon held for the network could not be taken up; they wait until the next daemon takes them up", dlog.WithCause(fields, err))
+	}
 	// THE LANDING REPORTS THE HANDOVER'S DEPLOY COVERED ARE PAID NOW, after
 	// every adopted shim was judged: a stale one is bounced, or registered to
 	// be once its work ends, and the prompt queue takes a registered bounce

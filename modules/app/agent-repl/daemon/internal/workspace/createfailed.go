@@ -34,7 +34,9 @@ const BriefCreateFailed = "workspace-create-failed"
 // the repository's MAIN-WORKTREE workspace is opened when it is closed and
 // asked to find out why (reportCreateFailure). The report hangs off the verb
 // rather than any one caller, so no way of creating a workspace can fail
-// without it.
+// without it. The report is made per ATTEMPT (attemptCreate): a create held
+// for the network has not failed and is not reported, and a held create that
+// later fails for any other cause is.
 //
 // A CREATE HOLDS A TICKET FOR ITS WHOLE RUN (creategate), so a stand-down
 // waits for it rather than cutting it off part-built. A create the CreateWorkspace
@@ -43,19 +45,7 @@ const BriefCreateFailed = "workspace-create-failed"
 // closed, and ends with the daemon, before anything was named or built, if the
 // stand-down goes ahead.
 func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
-	ctx, release, err := v.deps.Creates.Hold(ctx)
-	if err != nil {
-		v.deps.Log.Global().Info(opCreate, "the daemon stood down before the create could start; nothing was named or built", dlog.Context{
-			"repo_dir": spec.RepoDir, "cause": err.Error(),
-		})
-		return wsm.Workspace{}, err
-	}
-	defer release()
-	created, err := v.create(ctx, spec)
-	if err != nil {
-		v.reportCreateFailure(ctx, spec, err)
-	}
-	return created, err
+	return v.RunCreate(ctx, v.EnterCreate(spec))
 }
 
 // reportCreateFailure hands a failed create to its repository's main-worktree

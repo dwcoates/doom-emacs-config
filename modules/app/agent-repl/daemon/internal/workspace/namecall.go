@@ -42,6 +42,10 @@ const (
 	// answered but no answer had the slug's shape. Every other cause is one
 	// of headless's own.
 	NamingCauseInvalidAnswer = headless.CauseInvalidAnswer
+	// NamingCauseNetwork is the cause a naming call is recorded with when it
+	// could not run because this machine cannot reach the network. It is
+	// never a refusal's cause: such a create is held, not refused.
+	NamingCauseNetwork = "network"
 	// CollisionSuffixLimit bounds the disambiguating -2/-3/... walk. A
 	// repository with this many workspaces of one name is a fault to surface,
 	// not a loop to keep spinning.
@@ -66,6 +70,14 @@ type namingFailure struct {
 
 func (f *namingFailure) Error() string {
 	return fmt.Sprintf("the workspace naming call failed after %d attempts (%s): %s", f.Attempts, f.Cause, f.Detail)
+}
+
+// networkMayExplain reports whether a naming call that failed with CAUSE can
+// have failed because the network is down: it ran and did not answer in time,
+// or the CLI exited failing. A guard refusal, a missing binary or an
+// unreadable envelope says nothing about the network.
+func networkMayExplain(cause string) bool {
+	return cause == headless.CauseTimeout || cause == headless.CauseExitStatus
 }
 
 // rejectedName is an answer the naming rule refused, which the retry hands
@@ -133,7 +145,21 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 			Timeout:   NamingTimeout,
 		})
 		if err != nil {
-			last = namingFailure{Cause: headless.CauseOf(err), Detail: err.Error(), Attempts: uint32(attempt)}
+			cause := headless.CauseOf(err)
+			// A CALL THE NETWORK BLOCKED IS NOT RETRIED INTO THE OUTAGE, and it
+			// is no timeout: the create is held until the network is restored
+			// (pendingcreates.go). Only a call that ran and did not answer can
+			// have been the network's; a refusal or a bad answer never is.
+			if networkMayExplain(cause) {
+				if verdict := v.deps.Network.Classify(ctx, err.Error()); verdict.Network {
+					log.Info(opNaming, "the workspace naming call could not reach the network; the create waits for it", dlog.Context{
+						"cause": NamingCauseNetwork, "headless_cause": cause, "evidence": string(verdict.Evidence),
+						"evidence_detail": verdict.Detail, "detail": err.Error(), "attempt": attempt,
+					})
+					return "", &namingNetworkError{verdict: verdict, cause: cause}
+				}
+			}
+			last = namingFailure{Cause: cause, Detail: err.Error(), Attempts: uint32(attempt)}
 			log.Info(opNaming, "the workspace naming call did not answer", dlog.Context{
 				"cause": last.Cause, "detail": last.Detail, "attempt": attempt,
 			})

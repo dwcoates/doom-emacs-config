@@ -29,6 +29,7 @@ import (
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/netstate"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/pullrefs"
@@ -52,6 +53,13 @@ var errFake = errors.New("workspace test: arranged failure")
 // outside that set nil-panics, which is the loud failure the test wants.
 type fakeDB struct {
 	wsm.DB
+
+	// queuedMu guards queued, the creates held for the network, by key;
+	// queuedPutErr fails holding one and queuedReadErr reading them.
+	queuedMu      sync.Mutex
+	queued        map[string]wsm.QueuedCreate
+	queuedPutErr  error
+	queuedReadErr error
 
 	// defaultModels is each login's chosen default model, by account root;
 	// defaultModelErr fails its read and putDefaultModelErr its write.
@@ -2855,6 +2863,14 @@ func (h *fakeHealth) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.
 type fixture struct {
 	// creates is the create gate the verbs hold a ticket from.
 	creates *creategate.Gate
+	// network is the network state a failed naming call is classified by.
+	network *fakeNetwork
+	// recovered are the reporters answered for a held create's ops, by op.
+	recovered map[string]*recordingProgress
+	// recoveredMu guards recovered.
+	recoveredMu sync.Mutex
+	// life is the daemon's lifetime, ended at the test's cleanup.
+	life context.Context
 	// home is the home directory a feed link's leading `~` expands to.
 	home    string
 	verbs   Verbs
@@ -2971,6 +2987,8 @@ func newFixture(t *testing.T) *fixture {
 		summaries:  &fakeSummaries{},
 		log:        newFakeSurfaces(),
 		headless:   &fakeHeadless{answers: []headlessAnswer{{text: FixtureMintedName}}},
+		network:    newFakeNetwork(),
+		recovered:  map[string]*recordingProgress{},
 		briefs:     map[string]prompts.Prompt{},
 		derived:    &fakeDerived{},
 	}
@@ -2988,9 +3006,21 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.hasSession = true
 
+	life, endLife := context.WithCancel(context.Background())
+	t.Cleanup(endLife)
+	f.life = life
 	verbs, err := New(Deps{
 		Instance: fixtureInstance,
-		DB:       f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
+		Network:  f.network,
+		Lifetime: life,
+		CreateProgressFor: func(opID string) CreateProgress {
+			f.recoveredMu.Lock()
+			defer f.recoveredMu.Unlock()
+			rec := &recordingProgress{op: opID, ended: make(chan struct{})}
+			f.recovered[opID] = rec
+			return rec
+		},
+		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads,
 		Headless:   f.headless,
@@ -3325,6 +3355,12 @@ type headlessAnswer struct {
 // vendor binary: the whole point of the headless.Runner seam is that the
 // workspace verbs are tested against answers, not processes.
 type fakeHeadless struct {
+	mu sync.Mutex
+	// entered, when set, is sent on by each call before it answers, and the
+	// call then waits for release: a test holds a create inside its naming
+	// call.
+	entered chan struct{}
+	release chan struct{}
 	answers []headlessAnswer
 	// calls records every request, so a test can assert the model, the site
 	// and the prompt the call was made with.
@@ -3334,6 +3370,15 @@ type fakeHeadless struct {
 func (h *fakeHeadless) Bin() string { return "fake-claude" }
 
 func (h *fakeHeadless) Run(_ context.Context, req headless.Request) (headless.Response, error) {
+	h.mu.Lock()
+	entered, release := h.entered, h.release
+	h.mu.Unlock()
+	if entered != nil {
+		entered <- struct{}{}
+		<-release
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.calls = append(h.calls, req)
 	if len(h.answers) == 0 {
 		return headless.Response{}, errors.New("fake headless: no answer scripted")
@@ -3542,4 +3587,115 @@ func (d *fakeDB) SetSubsectionFolded(_ context.Context, id ids.SubsectionID, fol
 		}
 	}
 	return &wsm.UnknownSubsectionError{ID: id}
+}
+
+// fakeNetwork is the network state a failed naming call is classified by. It
+// answers VERDICT to every classification and records the words it was asked
+// about; restore closes the restored latch.
+type fakeNetwork struct {
+	mu         sync.Mutex
+	verdict    netstate.Verdict
+	classified []string
+	restored   chan struct{}
+}
+
+func newFakeNetwork() *fakeNetwork { return &fakeNetwork{restored: make(chan struct{})} }
+
+func (n *fakeNetwork) Classify(_ context.Context, words string) netstate.Verdict {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.classified = append(n.classified, words)
+	return n.verdict
+}
+
+// Restored answers the latch, closed already while the network is up, as
+// netstate.Monitor's is.
+func (n *fakeNetwork) Restored() <-chan struct{} {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if !n.verdict.Network {
+		up := make(chan struct{})
+		close(up)
+		return up
+	}
+	return n.restored
+}
+
+// signalRestored closes the latch while classifications still say the
+// network is down: a restoration that does not last.
+func (n *fakeNetwork) signalRestored() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	close(n.restored)
+	n.restored = make(chan struct{})
+}
+
+// down makes every later classification say the network is down.
+func (n *fakeNetwork) down(evidence netstate.Evidence) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.verdict = netstate.Verdict{Network: true, Evidence: evidence, Detail: "the network is down"}
+}
+
+// restore says the network is back: the latch closes, the next one is armed,
+// and classifications say it is up.
+func (n *fakeNetwork) restore() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.verdict = netstate.Verdict{}
+	close(n.restored)
+	n.restored = make(chan struct{})
+}
+
+func (n *fakeNetwork) classifications() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.classified...)
+}
+
+// PutQueuedCreate holds a create in memory, or fails with queuedPutErr.
+func (d *fakeDB) PutQueuedCreate(_ context.Context, q wsm.QueuedCreate) error {
+	d.queuedMu.Lock()
+	defer d.queuedMu.Unlock()
+	if d.queuedPutErr != nil {
+		return d.queuedPutErr
+	}
+	if d.queued == nil {
+		d.queued = map[string]wsm.QueuedCreate{}
+	}
+	d.queued[q.Key] = q
+	return nil
+}
+
+// QueuedCreates answers every held create, or fails with queuedReadErr.
+func (d *fakeDB) QueuedCreates(context.Context) ([]wsm.QueuedCreate, error) {
+	d.queuedMu.Lock()
+	defer d.queuedMu.Unlock()
+	if d.queuedReadErr != nil {
+		return nil, d.queuedReadErr
+	}
+	out := make([]wsm.QueuedCreate, 0, len(d.queued))
+	for _, q := range d.queued {
+		out = append(out, q)
+	}
+	return out, nil
+}
+
+// DeleteQueuedCreate releases a held create.
+func (d *fakeDB) DeleteQueuedCreate(_ context.Context, key string) error {
+	d.queuedMu.Lock()
+	defer d.queuedMu.Unlock()
+	delete(d.queued, key)
+	return nil
+}
+
+// heldCreates answers the held creates' rows.
+func (d *fakeDB) heldCreates() []wsm.QueuedCreate {
+	d.queuedMu.Lock()
+	defer d.queuedMu.Unlock()
+	out := make([]wsm.QueuedCreate, 0, len(d.queued))
+	for _, q := range d.queued {
+		out = append(out, q)
+	}
+	return out
 }

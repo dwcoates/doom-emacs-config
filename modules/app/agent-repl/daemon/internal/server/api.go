@@ -254,6 +254,11 @@ type Server interface {
 	// the zoom the user last chose. It is the feed-zoom sibling of the drain
 	// controller's Republish.
 	SeedFeedTextScale(scale float64)
+	// CreateProgress answers the reporter of a create's op (workspace
+	// Deps.CreateProgressFor): a held create a previous daemon recorded is
+	// answered on its op through it.
+	CreateProgress(opID string) workspace.CreateProgress
+
 	// Close ends every open stream.
 	Close() error
 }
