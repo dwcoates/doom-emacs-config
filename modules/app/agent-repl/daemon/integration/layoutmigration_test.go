@@ -210,6 +210,7 @@ var layout3Undo = map[int][]string{
 	// Layout 79 drops stored rows and changes no shape: nothing to undo.
 	79: {},
 	80: {`ALTER TABLE subsections DROP COLUMN created_by`},
+	81: {`ALTER TABLE workspaces DROP COLUMN last_keepalive_at`},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by
