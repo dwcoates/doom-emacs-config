@@ -212,6 +212,7 @@ var layout3Undo = map[int][]string{
 	80: {`ALTER TABLE subsections DROP COLUMN created_by`},
 	81: {`ALTER TABLE workspaces DROP COLUMN last_keepalive_at`},
 	82: {`DROP TABLE reconnected_turns`},
+	85: {`DROP TABLE workspace_links`},
 	83: {
 		`ALTER TABLE merge_queue_repos DROP COLUMN paused_hard`,
 		`ALTER TABLE merge_queue_repos DROP COLUMN paused_by_name`,

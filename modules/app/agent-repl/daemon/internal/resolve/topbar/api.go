@@ -169,12 +169,12 @@ type Resolver interface {
 	// ai-title and the workspace name. An empty text retracts it. Its sole
 	// producer is the title synthesizer.
 	SetSynthesizedTitle(ws ids.WorkspaceID, title string)
-	// SetPrincipalLink installs the workspace's principal link, which the
-	// title carries for the summary to open (TopbarTitle.link). Nil clears
-	// it. It rides the title, so a workspace with no summary publishes
-	// no link. Its sole producer is the workspace verbs, at registration and
-	// on every SetWorkspacePrincipalLink.
-	SetPrincipalLink(ws ids.WorkspaceID, link *string)
+	// SetLinks installs the links the summary's menu shows, most recently
+	// set first, which the title carries for a click to open
+	// (TopbarTitle.links). Empty clears them. They ride the title, so a
+	// workspace with no summary publishes no links. Its sole producer is the
+	// workspace verbs, at registration and on every ChangeWorkspaceLinks.
+	SetLinks(ws ids.WorkspaceID, shown []Link)
 	// SetModelCatalog installs the switchable model set the selector renders,
 	// in display order.
 	SetModelCatalog(ws ids.WorkspaceID, models []*conversationv1.ModelOption)
@@ -327,4 +327,12 @@ type StatusFacts struct {
 	Model string
 	// PermissionMode is the mode in force, in its wire spelling.
 	PermissionMode string
+}
+
+// Link is one link the summary's menu shows.
+type Link struct {
+	// Label is the agent's label for it, drawn as the menu row's text.
+	Label string
+	// URL is the absolute http or https url a pick opens.
+	URL string
 }

@@ -2,6 +2,7 @@ package topbar
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -257,8 +258,8 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 // its own element (TopbarWorkspaceName), drawn beneath the summary, and a
 // workspace with no summary yet draws no title line at all.
 //
-// THE PRINCIPAL LINK RIDES THE TITLE, so a workspace with no summary has
-// nothing clickable: the link is attached only to a title that exists.
+// THE LINKS RIDE THE TITLE, so a workspace with no summary has nothing
+// clickable: the links are attached only to a title that exists.
 func title(s *wsState) *frontendv1.TopbarTitle {
 	var out *frontendv1.TopbarTitle
 	switch {
@@ -269,10 +270,27 @@ func title(s *wsState) *frontendv1.TopbarTitle {
 	default:
 		return nil
 	}
-	if s.principalLink != nil {
-		out.Link = &frontendv1.TopbarTitleLink{Url: *s.principalLink}
-	}
+	out.Links = titleLinks(s.links)
 	return out
+}
+
+// titleLinks resolves what a click on the summary opens: nothing with no
+// shown link, the link itself with one, and the menu of all of them, in the
+// order given, with two or more.
+func titleLinks(links []Link) *frontendv1.TopbarTitleLinks {
+	switch len(links) {
+	case 0:
+		return nil
+	case 1:
+		return &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Single{
+			Single: &frontendv1.TopbarTitleLink{Label: links[0].Label, Url: links[0].URL}}}
+	}
+	items := make([]*frontendv1.TopbarTitleLinkMenuItem, len(links))
+	for i, link := range links {
+		items[i] = &frontendv1.TopbarTitleLinkMenuItem{Label: link.Label, Url: link.URL}
+	}
+	return &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Menu{
+		Menu: &frontendv1.TopbarTitleLinkMenu{Items: items}}}
 }
 
 // sessionLine composes the identity line: which vendor session, which account
@@ -576,15 +594,15 @@ func (r *resolver) SetSynthesizedTitle(ws ids.WorkspaceID, title string) {
 		func(s *wsState) { s.synthesizedTitle = title })
 }
 
-// SetPrincipalLink installs the workspace's principal link, which the title
-// carries while a summary stands. Nil clears it.
-func (r *resolver) SetPrincipalLink(ws ids.WorkspaceID, link *string) {
-	ctx := dlog.Context{"present": link != nil}
-	if link != nil {
-		ctx["url"] = *link
+// SetLinks installs the links the summary's menu shows, which the title
+// carries while a summary stands. Empty clears them.
+func (r *resolver) SetLinks(ws ids.WorkspaceID, shown []Link) {
+	urls := make([]string, len(shown))
+	for i, link := range shown {
+		urls[i] = link.URL
 	}
-	r.mutate(ws, "daemon.topbar.set_principal_link", "the topbar took the principal link", ctx,
-		func(s *wsState) { s.principalLink = link })
+	r.mutate(ws, "daemon.topbar.set_links", "the topbar took the shown links", dlog.Context{"shown": len(shown), "urls": urls},
+		func(s *wsState) { s.links = slices.Clone(shown) })
 }
 
 // SetModelCatalog installs the switchable model set.

@@ -106,7 +106,7 @@ Layout:
 ```
 
 - Consequences:
-  - The daemon's `wsm` store gains a `workspace_links` table (layout 84,
+  - The daemon's `wsm` store gains a `workspace_links` table (layout 85,
     additive). The `workspaces.principal_link` column is left in place,
     unread and unwritten, because dropping it is a breaking step that would
     turn the deploy into a restart; `wsm/migrate.go`'s own rule ships a drop

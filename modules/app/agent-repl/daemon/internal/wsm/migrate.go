@@ -183,6 +183,7 @@ var migrations = []migration{
 	{To: 82, Name: "reconnected_turns", Kind: MigrationAdditive, DDL: reconnectedTurnsDDL},
 	{To: 83, Name: "merge_queue_pause_record", Kind: MigrationAdditive, DDL: mergeQueuePauseRecordDDL},
 	{To: 84, Name: "account_default_models", Kind: MigrationAdditive, DDL: accountDefaultModelsDDL},
+	{To: 85, Name: "workspace_links", Kind: MigrationAdditive, DDL: workspaceLinksDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

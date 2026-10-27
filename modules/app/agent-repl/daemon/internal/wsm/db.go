@@ -573,9 +573,21 @@ type DB interface {
 	// SetAwaiting marks a workspace awaiting correspondence from another, or
 	// clears the mark with nil (standings.go).
 	SetAwaiting(ctx context.Context, id WorkspaceID, awaited *WorkspaceID) error
-	// SetPrincipalLink records a workspace's principal link, or clears it
-	// with nil (principallink.go).
-	SetPrincipalLink(ctx context.Context, id WorkspaceID, link *string) error
+	// WorkspaceLinks answers every link a workspace holds, most recently set
+	// first (workspacelinks.go).
+	WorkspaceLinks(ctx context.Context, id WorkspaceID) ([]WorkspaceLink, error)
+	// SetWorkspaceLink stores a link under its label, or relabels a stored
+	// one, answering every link the workspace then holds.
+	SetWorkspaceLink(ctx context.Context, id WorkspaceID, url, label string) ([]WorkspaceLink, error)
+	// RemoveWorkspaceLink removes a stored link, answering the rest; a url
+	// the workspace does not hold is an *UnknownLinkError.
+	RemoveWorkspaceLink(ctx context.Context, id WorkspaceID, url string) ([]WorkspaceLink, error)
+	// ShowWorkspaceLinks names exactly the links the summary's menu shows,
+	// answering every link; a url the workspace does not hold is an
+	// *UnknownLinkError.
+	ShowWorkspaceLinks(ctx context.Context, id WorkspaceID, urls []string) ([]WorkspaceLink, error)
+	// ClearWorkspaceLinks removes every link a workspace holds.
+	ClearWorkspaceLinks(ctx context.Context, id WorkspaceID) error
 	// SetName records a workspace's new name, leaving its branch and
 	// directory as they are (rename.go). An empty name is refused.
 	SetName(ctx context.Context, id WorkspaceID, name string) error
