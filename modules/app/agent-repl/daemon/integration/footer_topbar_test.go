@@ -212,7 +212,7 @@ func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-1", "t-1", "write the tests", true)))
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-2", "t-2", "land the change", false)))
 	// One live monitor.
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftMonitorActivity("mon-1", "watching the build log")))
+	pushMonitor(f.shim, "mon-1", "watching the build log")
 	// A two-job cron listing.
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("cron-1"),
@@ -245,7 +245,7 @@ func TestFooterMonitorRowJumpsToTheMonitorsToolCallCard(t *testing.T) {
 	footer := f.d.WatchFooter(f.ws)
 
 	// Act
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftMonitorActivity("mon-1", "watching the build log")))
+	pushMonitor(f.shim, "mon-1", "watching the build log")
 
 	// Assert
 	card := awaitRow(t, f, feed, "the monitor's tool-call card", func(r *frontendv1.FeedRow) bool {
@@ -956,6 +956,23 @@ func ftMonitorActivity(id, description string) *conversationv1.AgentActivity {
 			}},
 		}},
 	}
+}
+
+// pushMonitor pushes a main-agent persistent monitor the way a producer
+// states one: its arming unit (the call's card), then the announcement that
+// the work is live. The watcher lists a monitor only from its announcement,
+// and the footer draws only what the watcher lists.
+func pushMonitor(shim *harness.ShimControl, id, description string) {
+	arming := ftMonitorActivity(id, description)
+	shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, arming))
+	shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, &conversationv1.AgentDetachedWork{
+		Work:  &conversationv1.DetachedWorkId{Value: id},
+		Owner: &conversationv1.AgentId{Value: mainAgent},
+		Kind:  &conversationv1.DetachedWorkKind{Kind: &conversationv1.DetachedWorkKind_Monitor{Monitor: &conversationv1.DetachedWorkKindMonitor{}}},
+		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
+			WorkCreated: &conversationv1.DetachableWork{Work: &conversationv1.DetachableWork_Monitor{Monitor: arming.GetMonitor()}},
+		}},
+	}))
 }
 
 // ftWakeupScheduleActivity builds a self-scheduled wakeup's start-then-answer
