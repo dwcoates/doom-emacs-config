@@ -216,6 +216,11 @@ func (r *resolver) agentRowsDrawn(s *wsState) []drawnAgent {
 		}
 	}
 	for _, row := range s.agents {
+		// A DETACHED run is drawn only while the set lists it; an in-turn
+		// subagent (no handle) is the turn's own progress, not the set's.
+		if row.work != "" && !s.listedLive(liveAgent, row.work, row.spawnUnit, row.createdAgent) {
+			continue
+		}
 		if !claimed[row] && r.drawsWork(s, "agent", row.work, row.spawnUnit, row.createdAgent) {
 			out = append(out, drawnAgent{row: row})
 		}

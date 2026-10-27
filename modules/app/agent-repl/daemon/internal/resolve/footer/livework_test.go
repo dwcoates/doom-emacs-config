@@ -143,6 +143,81 @@ func TestAnUnlistedDetachedRowIsRetiredByTheSet(t *testing.T) {
 	}
 }
 
+// describedBeforeListed is one detached item of each kind, described by its
+// frame after the watcher has stated a set that does not list it yet.
+var describedBeforeListed = []struct {
+	name     string
+	describe func(h *harness)
+	listed   LiveWorkSet
+	count    func(c *viewChips) uint32
+}{
+	{
+		name: "detached subagent",
+		describe: func(h *harness) {
+			h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "agent-2", "Explore"))
+		},
+		listed: liveSet([]string{"agent-2"}, nil, nil),
+		count:  func(c *viewChips) uint32 { return c.agents },
+	},
+	{
+		name:     "detached shell",
+		describe: func(h *harness) { h.r.OnDetachedWork(testWS, mainAgent, createdShell("work-1", "npm test")) },
+		listed:   liveSet(nil, []string{"work-1"}, nil),
+		count:    func(c *viewChips) uint32 { return c.shells },
+	},
+	{
+		name:     "monitor",
+		describe: func(h *harness) { h.r.OnActivity(testWS, mainAgent, monitorStart("work-1", "watch the build", false)) },
+		listed:   liveSet(nil, nil, []string{"work-1"}),
+		count:    func(c *viewChips) uint32 { return c.monitors },
+	},
+}
+
+// TestADetachedRowTheSetDoesNotListYetIsNotCounted is the 2026-10-26 e2e
+// TestFanWideCancel flake: a run's frame reached the footer before the
+// watcher admitted it, the chip counted it, and a fan-wide stop issued on
+// that count reached only what the set held.
+func TestADetachedRowTheSetDoesNotListYetIsNotCounted(t *testing.T) {
+	for _, tc := range describedBeforeListed {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the watcher has stated a set, without the item.
+			h := newHarness(t)
+			connected(h)
+			h.r.OnLiveWorkChanged(testWS, LiveWorkSet{})
+
+			// Act: the item's frame describes it.
+			tc.describe(h)
+
+			// Assert
+			if got := tc.count(chipsOf(h.view(t))); got != 0 {
+				t.Fatalf("chip = %d before the set lists the item, want it uncounted", got)
+			}
+		})
+	}
+}
+
+// TestADetachedRowDescribedFirstIsCountedOnceTheSetListsIt pins the other
+// half: the row its frame built is the one drawn once the set admits it.
+func TestADetachedRowDescribedFirstIsCountedOnceTheSetListsIt(t *testing.T) {
+	for _, tc := range describedBeforeListed {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.OnLiveWorkChanged(testWS, LiveWorkSet{})
+			tc.describe(h)
+
+			// Act
+			h.r.OnLiveWorkChanged(testWS, tc.listed)
+
+			// Assert
+			if got := tc.count(chipsOf(h.view(t))); got != 1 {
+				t.Fatalf("chip = %d once the set lists the item, want 1", got)
+			}
+		})
+	}
+}
+
 // TestAnEmptyLiveWorkSetFallsBackToIdle is the arm half of the same defect: the
 // strip reported a background task for a workspace the roster called ready.
 func TestAnEmptyLiveWorkSetFallsBackToIdle(t *testing.T) {

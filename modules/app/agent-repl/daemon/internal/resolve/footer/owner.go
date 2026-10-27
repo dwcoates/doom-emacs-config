@@ -25,6 +25,10 @@ import (
 // frame, a detached run's own frames, the live-work set's minimal row, or a
 // network-resume wait.
 //
+// WHOSE WORK IS NOT WHETHER IT IS LIVE. Once the watcher has stated its set,
+// a detached row is also drawn only while the set lists it
+// (wsState.listedLive): the frames describe a row, the set says it runs.
+//
 // THE ROWS THEMSELVES STAY. A nested row is still the DESCRIPTION its frames
 // built — the usage attribution and a transient's agent label read it — and it
 // is the drawing that refuses it. Counting is not drawing either: the
@@ -213,7 +217,7 @@ func (r *resolver) drawsWork(s *wsState, kind string, identities ...string) bool
 func (r *resolver) shellRowsDrawn(s *wsState) []*shellRow {
 	rows := make([]*shellRow, 0, len(s.shells))
 	for _, row := range s.shells {
-		if r.drawsWork(s, "shell", row.work) {
+		if s.listedLive(liveShell, row.work) && r.drawsWork(s, "shell", row.work) {
 			rows = append(rows, row)
 		}
 	}
@@ -226,7 +230,7 @@ func (r *resolver) shellRowsDrawn(s *wsState) []*shellRow {
 func (r *resolver) monitorRowsDrawn(s *wsState) []*monitorRow {
 	rows := make([]*monitorRow, 0, len(s.monitors))
 	for _, row := range s.monitors {
-		if r.drawsWork(s, "monitor", row.unit) {
+		if s.listedLive(liveMonitor, row.unit) && r.drawsWork(s, "monitor", row.unit) {
 			rows = append(rows, row)
 		}
 	}

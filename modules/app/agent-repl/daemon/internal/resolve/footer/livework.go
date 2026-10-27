@@ -1,6 +1,7 @@
 package footer
 
 import (
+	"fmt"
 	"sort"
 	"time"
 
@@ -163,6 +164,41 @@ func reconcileLiveWork(s *wsState, live LiveWorkSet, now time.Time) (dropped, ad
 	}
 	return dropped, added, readded
 }
+
+// listedLive reports whether the watcher's set lists a detached row of KIND
+// under any of its IDENTITIES: the one test of whether such a row is drawn
+// and counted. Until the watcher states a set at all, the footer's own rows
+// are all it has, so every row is (detachedCount reads the same authority).
+//
+// A ROW DESCRIBED BEFORE THE SET LISTS IT IS NOT YET LIVE. A detached run's
+// spawn frame can reach the footer before the watcher admits it, and drawn
+// from the frame alone the chip counted it, then dropped it when the set
+// came without it, then counted it again: a footer reading "2 agents" for a
+// live set of one (2026-10-26, e2e TestFanWideCancel, whose fan-wide stop
+// then reached the two items the set held).
+func (s *wsState) listedLive(kind liveKind, identities ...string) bool {
+	if !s.liveWorkSeen {
+		return true
+	}
+	switch kind {
+	case liveAgent:
+		return rowIsListed(agentIDSet(s.liveWork.Agents), identities...)
+	case liveShell:
+		return rowIsListed(workIDSet(s.liveWork.Shells), identities...)
+	case liveMonitor:
+		return rowIsListed(workIDSet(s.liveWork.Monitors), identities...)
+	}
+	panic(fmt.Sprintf("footer: listedLive asked of live-work kind %d, which it does not name", kind))
+}
+
+// liveKind is which part of the watcher's set a detached row is listed in.
+type liveKind int
+
+const (
+	liveAgent liveKind = iota
+	liveShell
+	liveMonitor
+)
 
 // rowIsListed reports whether the set lists any of the identities a row is
 // addressed by. An EMPTY identity never matches: a row with no handle is not
