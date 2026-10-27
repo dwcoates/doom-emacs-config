@@ -173,7 +173,7 @@ func linkifyLine(out *strings.Builder, line string, t Target, atEnd bool) {
 				continue
 			}
 			number := line[i+1 : j]
-			fmt.Fprintf(out, "[#%s](%s)", number, t.PullURL(number))
+			out.WriteString("[#" + number + "](" + t.PullURL(number) + ")")
 			i = j
 		default:
 			out.WriteByte(c)
