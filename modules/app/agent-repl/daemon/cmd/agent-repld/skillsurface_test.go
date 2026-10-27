@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // THE SKILLS AND THE AGENT CLI ARE ONE SURFACE (agent-repld-api.md): every
@@ -73,6 +75,37 @@ func readSkills(t *testing.T) map[string]string {
 		skills[filepath.Base(filepath.Dir(path))] = string(raw)
 	}
 	return skills
+}
+
+// EVERY SKILL'S FRONTMATTER IS YAML. Claude Code reads a skill's name and
+// description from it, and a description that does not parse is listed as
+// the body's first heading instead, so no agent learns when to load the skill.
+func TestSkillFrontmatterParses(t *testing.T) {
+	for name, raw := range readSkills(t) {
+		t.Run(name, func(t *testing.T) {
+			rest, ok := strings.CutPrefix(raw, "---\n")
+			if !ok {
+				t.Fatalf("SKILL.md does not open with a frontmatter fence")
+			}
+			block, _, ok := strings.Cut(rest, "\n---\n")
+			if !ok {
+				t.Fatalf("SKILL.md's frontmatter has no closing fence")
+			}
+			var front struct {
+				Name        string `yaml:"name"`
+				Description string `yaml:"description"`
+			}
+			if err := yaml.Unmarshal([]byte(block), &front); err != nil {
+				t.Fatalf("frontmatter does not parse: %v", err)
+			}
+			if front.Name != name {
+				t.Errorf("name = %q, want the skill's directory %q", front.Name, name)
+			}
+			if front.Description == "" {
+				t.Errorf("description is empty")
+			}
+		})
+	}
 }
 
 func TestMentionedCommandsReadsCodeSpans(t *testing.T) {

@@ -1,6 +1,6 @@
 ---
 name: agent-repl-tests
-description: Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage, and so every new or changed test obeys the host CPU governor. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or runs tests for a change: every run goes through `agent-repld test run`, naming only the tests needed. Holds the measured test-performance pitfalls and their fixes as a living list.
+description: 'Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage, and so every new or changed test obeys the host CPU governor. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or runs tests for a change: every run goes through `agent-repld test run`, naming only the tests needed. Holds the measured test-performance pitfalls and their fixes as a living list.'
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 

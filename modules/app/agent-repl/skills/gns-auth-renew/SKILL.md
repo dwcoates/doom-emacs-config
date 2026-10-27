@@ -1,6 +1,6 @@
 ---
 name: gns-auth-renew
-description: Renew an expired or missing GNS token yourself, without asking, signing in ONLY through the work account's own Chrome profile. Use whenever a gns command or the LLM gateway fails on authentication (for example `HTTP 401: Invalid or expired JWT`, "not logged in", "token expired"), whenever a GNS token is missing, and before any `gns auth login`, which must never be run with its default browser flow.
+description: 'Renew an expired or missing GNS token yourself, without asking, signing in ONLY through the work account''s own Chrome profile. Use whenever a gns command or the LLM gateway fails on authentication (for example `HTTP 401: Invalid or expired JWT`, "not logged in", "token expired"), whenever a GNS token is missing, and before any `gns auth login`, which must never be run with its default browser flow.'
 argument-hint: "[environment, default production]"
 allowed-tools: Bash(~/.claude/skills/gns-auth-renew/run.sh:*), Bash(.claude/skills/gns-auth-renew/run.sh:*)
 lineage_root: user.dodge.skills.gns-auth-renew
