@@ -1466,7 +1466,7 @@ func TestEveryQueueReorderingRunsThroughReorder(t *testing.T) {
 			t.Fatalf("read %s: %v", file, err)
 		}
 		// Act.
-		for _, call := range []string{"o.deps.DB.MoveMerge(", "o.deps.DB.PrioritizeMerge(", "o.reorder(ctx, ws, reordering{"} {
+		for _, call := range []string{"o.deps.DB.MoveMerge(", "o.deps.DB.MoveMergeTo(", "o.deps.DB.PrioritizeMerge(", "o.reorder(ctx, ws, reordering{"} {
 			for range strings.Count(string(code), call) {
 				calls = append(calls, file+":"+call)
 			}
@@ -1476,7 +1476,8 @@ func TestEveryQueueReorderingRunsThroughReorder(t *testing.T) {
 	// Assert: each store reorder is called once, inside the reordering its
 	// verb hands to reorder.
 	want := []string{
-		"queue.go:o.deps.DB.MoveMerge(", "queue.go:o.reorder(ctx, ws, reordering{",
+		"queue.go:o.deps.DB.MoveMerge(", "queue.go:o.deps.DB.MoveMergeTo(",
+		"queue.go:o.reorder(ctx, ws, reordering{", "queue.go:o.reorder(ctx, ws, reordering{",
 		"terminal.go:o.deps.DB.PrioritizeMerge(", "terminal.go:o.reorder(ctx, ws, reordering{",
 	}
 	if !slices.Equal(calls, want) {
