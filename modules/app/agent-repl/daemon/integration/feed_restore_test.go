@@ -47,8 +47,10 @@ func restarted(f *fixture, profile harness.ShimProfile) *fixture {
 	}
 	f.d.AwaitExit()
 
-	// WRITTEN BEFORE THE SUCCESSOR STARTS: its boot spawns the shim that reads it.
+	// WRITTEN BEFORE THE SUCCESSOR STARTS: its boot spawns the shim that reads
+	// it, and the store holds the book before any shim of it is up.
 	f.d.WriteShimProfile(f.repo.Dir, profile)
+	f.d.KeepResumedBook(f.ws.GetId(), profile)
 	d2 := harness.StartDaemon(t, f.d.SuccessorOpts())
 	// THE SUCCESSOR RUNS ON ITS PREDECESSOR'S ACCOUNT ROOT — the flag above
 	// overrides the one the harness minted for it — so its fixture names that
@@ -162,34 +164,20 @@ func TestARestartedWorkspaceWhoseVendorStartFailedOpensWithItsConversation(t *te
 	}
 }
 
-func TestARestartedWorkspaceWithNoShimServesWhatItHolds(t *testing.T) {
+func TestARestartedWorkspaceWithNoShimUpServesItsConversationFromTheStore(t *testing.T) {
 	t.Parallel()
 	// Arrange: the successor's shim withholds its first diagnostics, so the
-	// bring-up holds no client yet.
+	// bring-up holds no client yet; the book its predecessor's shim named is on
+	// record, and the store keeps it.
 	f := restartedWith(t, harness.ShimProfile{DelayDiagnostics: true})
 
 	// Act.
 	page, _ := f.openFeed(nil)
 
 	// Assert.
-	if pageCarriesTheConversation(page) {
-		t.Fatalf("the page = %v, want no history read with no shim up", page)
+	if !pageCarriesTheConversation(page) {
+		t.Fatalf("the page = %v, want the store's prompt and answer with no shim up", page)
 	}
-}
-
-func TestARestartedWorkspacesNewestPageReachesItsReaderWhenTheShimComesUp(t *testing.T) {
-	t.Parallel()
-	// Arrange: the reader opens while no shim is up.
-	f := restartedWith(t, harness.ShimProfile{DelayDiagnostics: true})
-	tail := f.watchRootFeed()
-
-	// Act.
-	f.d.Shim(f.ws).PushHealthyWhenSubscribed()
-
-	// Assert.
-	awaitRow(t, f, tail, "the store's answer pushed to the waiting reader", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetProse().GetSource().GetMarkdown() == relaunchAnswer
-	})
 }
 
 // THE SHAPE THE OWNER'S WORKSPACE REPLAYED ON EVERY BOOT (2026-10-02): an

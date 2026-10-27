@@ -49,7 +49,7 @@ func newBook() *book {
 // main agent's history under: the agent id the frames carry is the one
 // MainAgentID every workspace shares, and the book is the workspace's own.
 func mainBookFor(ws string) string {
-	return MainAgentID + "@" + ws
+	return fakestore.MainBook(ws)
 }
 
 // keepIn has every change of the book kept under DIR for the fake store, the
@@ -105,23 +105,9 @@ func bookAgent(agent string) string {
 func (b *book) seed(newestFirst [][]byte, turns []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	main := b.entries[MainAgentID][:0]
-	for i := len(newestFirst) - 1; i >= 0; i-- {
-		entry := &conversationv1.HistoryEntry{}
-		if err := proto.Unmarshal(newestFirst[i], entry); err != nil {
-			panic(sprintf("fakeshim: profile resume_history[%d] does not decode: %v", i, err))
-		}
-		at := &conversationv1.HistoryEntryAt{
-			At:    &conversationv1.HistoryPointer{Value: sprintf("resume-%d", i)},
-			Entry: entry,
-			Place: &conversationv1.HistoryEntryAt_RecordedPlace{RecordedPlace: &conversationv1.ConversationPlace{
-				AtMs: int64(len(newestFirst) - i),
-			}},
-		}
-		if i < len(turns) && turns[i] != "" {
-			at.Turn = &conversationv1.TurnId{Value: turns[i]}
-		}
-		main = append(main, at)
+	main, err := fakestore.ResumeEntries(newestFirst, turns)
+	if err != nil {
+		panic(sprintf("fakeshim: profile resume_history: %v", err))
 	}
 	b.entries[MainAgentID] = main
 	b.keepLocked(MainAgentID)

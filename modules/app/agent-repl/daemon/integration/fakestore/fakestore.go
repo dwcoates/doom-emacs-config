@@ -38,6 +38,42 @@ import (
 // store's.
 const DefaultPageSize = 50
 
+// MainAgentID is the agent id every fake shim's main agent carries in its
+// frames; MainBook is the workspace's own book it is kept under.
+const MainAgentID = "main"
+
+// MainBook is the book the fake shim of workspace WS states, and keeps its
+// main agent's history under: unique per workspace, as the real book is.
+func MainBook(ws string) string {
+	return MainAgentID + "@" + ws
+}
+
+// ResumeEntries files a resumed session's history, stated NEWEST FIRST as a
+// shim profile states it, as the book holds it: OLDEST FIRST, each entry at a
+// resume pointer and a recorded place in its order, and the turn TURNS names
+// at its index (newest first too; absent or "" is an unstamped entry).
+func ResumeEntries(newestFirst [][]byte, turns []string) ([]*conversationv1.HistoryEntryAt, error) {
+	var out []*conversationv1.HistoryEntryAt
+	for i := len(newestFirst) - 1; i >= 0; i-- {
+		entry := &conversationv1.HistoryEntry{}
+		if err := proto.Unmarshal(newestFirst[i], entry); err != nil {
+			return nil, fmt.Errorf("fakestore: resume history entry %d does not decode: %w", i, err)
+		}
+		at := &conversationv1.HistoryEntryAt{
+			At:    &conversationv1.HistoryPointer{Value: fmt.Sprintf("resume-%d", i)},
+			Entry: entry,
+			Place: &conversationv1.HistoryEntryAt_RecordedPlace{RecordedPlace: &conversationv1.ConversationPlace{
+				AtMs: int64(len(newestFirst) - i),
+			}},
+		}
+		if i < len(turns) && turns[i] != "" {
+			at.Turn = &conversationv1.TurnId{Value: turns[i]}
+		}
+		out = append(out, at)
+	}
+	return out, nil
+}
+
 // Dir is where the books of the store serving STORESOCKET are kept.
 func Dir(storeSocket string) string {
 	return storeSocket + ".books"

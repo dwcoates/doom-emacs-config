@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"agent-repld/integration/fakestore"
 )
 
 // The fake's default session facts. They are the ones SPEC.md fixes, so a
@@ -18,7 +20,7 @@ const (
 	// SDKVersion is the Agent SDK version the fake shim reports on every
 	// session start, as the real shim reports its installed package's.
 	SDKVersion  = "0.0.0-fakeshim"
-	MainAgentID = "main"
+	MainAgentID = fakestore.MainAgentID
 	// DefaultColdContextTokens is the context size the fake measures a model
 	// switch against, matching DefaultContextUsage's own figure. A switch is
 	// refused `cold` when the caller's stated threshold is BELOW it, which is

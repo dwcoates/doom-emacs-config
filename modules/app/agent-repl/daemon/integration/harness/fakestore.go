@@ -34,3 +34,19 @@ func serveFakeStore(t testing.TB, storeSocket string) {
 		}
 	})
 }
+
+// KeepResumedBook puts the conversation PROFILE resumes into the store as
+// workspace WS's book, as the real store holds a workspace's conversation
+// before any shim of a successor daemon is up. A test that boots a successor
+// onto a resumed book keeps it here before the boot, so a read made before
+// the successor's shim starts finds it.
+func (d *Daemon) KeepResumedBook(ws string, profile ShimProfile) {
+	d.t.Helper()
+	entries, err := fakestore.ResumeEntries(profile.ResumeHistory, profile.ResumeTurns)
+	if err != nil {
+		d.t.Fatalf("keep the resumed book: %v", err)
+	}
+	if err := fakestore.Write(fakestore.Dir(d.StoreSocket), fakestore.MainBook(ws), profile.HistoryPageSize, entries); err != nil {
+		d.t.Fatalf("keep the resumed book: %v", err)
+	}
+}

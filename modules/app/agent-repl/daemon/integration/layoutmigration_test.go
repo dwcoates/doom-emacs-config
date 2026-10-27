@@ -222,6 +222,7 @@ var layout3Undo = map[int][]string{
 	},
 	84: {`DROP TABLE account_default_models`},
 	86: {`DROP TABLE workspace_book`},
+	87: {`DROP TABLE cold_gate`},
 }
 
 // demoteToLayout3 takes a stopped daemon's state database back to layout 3 by
