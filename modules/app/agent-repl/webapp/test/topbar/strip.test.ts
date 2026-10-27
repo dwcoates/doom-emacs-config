@@ -24,7 +24,7 @@ import {
   drawTopbarTitle,
   drawTopbarWorkspaceName,
 } from "../../src/topbar/strip.js";
-import { cascadedValue, installStylesheet } from "../stylesheet.js";
+import { cascadedValue, cascadedValueIn, installStylesheet } from "../stylesheet.js";
 import { appContext, openPanel, topbarContext } from "./fixtures.js";
 
 const loggedIn = (email: string) =>
@@ -478,5 +478,19 @@ describe("drawTopbarTitle with several shown links", () => {
     const future = create(TopbarTitleSchema, { text: "t", links: {} });
     // Act / Assert
     expect(() => drawTopbarTitle(future, topbarContext().tc)).toThrow(/TopbarTitleLinks.opens/);
+  });
+});
+
+describe("a menu row's second line", () => {
+  const SECOND_LINES = ["topbar-account-option-dir", "topbar-model-description"];
+
+  it.each(["color", "font-size"])("draws %s the same in every menu", (property) => {
+    const teardown = installStylesheet();
+    try {
+      const values = SECOND_LINES.map((cls) => cascadedValueIn("topbar-reveal", cls, property));
+      expect(new Set(values).size).toBe(1);
+    } finally {
+      teardown();
+    }
   });
 });
