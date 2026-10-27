@@ -1,22 +1,14 @@
 /**
- * merge-queue-view — THE OPEN SECTION'S MERGE-QUEUE TOGGLE, and the queue a
- * repository section draws while it is on (owner request, 2026-10-24).
+ * merge-queue-view — THE MERGE QUEUES the Merge Queue section draws above its
+ * recently merged groups (owner requests, 2026-10-24 to 2026-10-26).
  *
- * The OPEN header line carries the merge glyph the feed's merge bubble draws
- * (`merge-glyph.ts`). In the purple of a merge in progress it says each
- * repository section shows its open workspaces, and a click asks for the
- * merge queues; the glyph takes the expanded repository names' colour while
- * every section lists its queue instead, and a click on it asks for the
- * workspaces again (owner request, 2026-10-25: the colour marks the way to
- * the queues). While a repository's merge queue is paused
- * (`frontend.v1.RosterOpenSection.merge_queue_paused`) the purple turns the
- * amber a paused merge bubble is framed in.
- *
- * WHAT THE SECTIONS SHOW IS THE DAEMON'S (`frontend.v1.RosterOpenSection.shows`,
- * restated on every `RosterRepoSection.shows`), like every fold, so every
- * page draws the same view. The glyph is painted at once and held until the
- * wire agrees (`view.ts`); the sections follow on the push that carries
- * their queues.
+ * ONE GROUP PER REPOSITORY HOLDING A MERGE (`frontend.v1.RosterMergedSection.queues`):
+ * the repository's label over its queue, in the repository sections' order.
+ * The section's own "Merge Queue" label is drawn in the purple of a merge in
+ * progress, and in the amber a paused merge bubble is framed in while a
+ * repository's merge queue is paused
+ * (`frontend.v1.RosterMergedSection.merge_queue_paused`), so a pause reads
+ * from the header even with the section folded.
  *
  * A QUEUE IS DRAWN AS A SMALL MERGE BUBBLE AND ITS LINE (owner request,
  * 2026-10-25): the merge at the head as a card -- who it is credited to, the
@@ -24,24 +16,22 @@
  * then every merge waiting behind it, numbered in the order it will run. A
  * merge is named as the rest of the roster credits it, so a hidden merge
  * workspace is never named here, and a click selects the credited workspace
- * and opens the merge's bubble in its feed. A queue with nothing in it draws
- * no body, and its header wears the folded header's faded grey.
+ * and opens the merge's bubble in its feed.
  */
 import { create } from "@bufbuild/protobuf";
 import type {
+  RosterMergedSection,
   RosterMergeQueueHead,
+  RosterMergeQueueRepoGroup,
   RosterMergeQueueStage,
   RosterMergeQueueSubject,
   RosterMergeQueueWaiting,
-  RosterOpenSection,
   RosterRepoMergeQueue,
-  RosterRepoSection,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   SelectWorkspaceRequestSchema,
   SelectWorkspaceResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
-import { createControl } from "../control.js";
 import { formatElapsed } from "../duration.js";
 import { roundSuffix, STATE_GLYPHS } from "../feed/merge/tab-strip.js";
 import { log } from "../log.js";
@@ -52,109 +42,49 @@ import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict
 import type { SidebarContext } from "./context.js";
 import { selectWorkspace, tickElapsed } from "./row.js";
 import { runVerb } from "./verbs.js";
-import { changeView } from "./view-change.js";
 
 /**
- * The key what the open section shows is held under (`view.ts`): TRUE while
- * the repository sections show their merge queues. FIXED, because the roster
- * carries exactly one open section.
- */
-export const OPEN_SHOWS_VIEW_KEY = "shows:open";
-
-/** The class of the merge-queue toggle on the OPEN header line. */
-export const MERGE_QUEUE_TOGGLE_CLASS = "sb-merge-queue-toggle";
-
-/**
- * The attribute the toggle says what the sections show in: `workspaces` or
- * `merge-queues`. The stylesheet colours the glyph from it.
- */
-export const SHOWS_ATTRIBUTE = "data-shows";
-
-/**
- * The attribute the toggle carries, valueless, while a repository's merge
- * queue is paused. The stylesheet colours the glyph from it.
+ * The attribute the Merge Queue section carries, valueless, while a
+ * repository's merge queue is paused. The stylesheet colours its label from it.
  */
 export const MERGE_QUEUE_PAUSED_ATTRIBUTE = "data-merge-queue-paused";
 
-/** The class of a repository section's body while it lists its merge queue. */
-export const MERGE_QUEUE_CLASS = "sb-merge-queue";
-
-/** Whether U's repository sections show their merge queues. EVERY arm is named; unset is malformed. */
-export function drawRosterOpenSectionShows(u: RosterOpenSection, path: string): boolean {
-  const arm = requireCase(u.shows, `${path}.shows`);
-  switch (arm.case) {
-    case "workspaces":
-      return false;
-    case "mergeQueues":
-      return true;
-    default: {
-      const other: { case: string } = arm;
-      return unreachableArm(`${path}.shows`, other.case);
-    }
-  }
-}
-
 /** Whether U says a repository's merge queue is paused: the marker's presence is the fact. */
-export function drawRosterOpenSectionMergeQueuePaused(u: RosterOpenSection): boolean {
+export function drawRosterMergedSectionMergeQueuePaused(u: RosterMergedSection): boolean {
   return u.mergeQueuePaused !== undefined;
 }
 
-/** What a repository section's body shows. */
-export type RepoShows = { case: "workspaces" } | { case: "mergeQueue"; queue: RosterRepoMergeQueue };
+/** The class of the box the section's queue groups are drawn in, above its merged groups. */
+export const MERGE_QUEUES_CLASS = "sb-merge-queues";
 
-/** What U's body shows. EVERY arm is named; unset is malformed. */
-export function drawRosterRepoShows(u: RosterRepoSection, path: string): RepoShows {
-  const arm = requireCase(u.shows, `${path}.shows`);
-  switch (arm.case) {
-    case "workspaces":
-      return { case: "workspaces" };
-    case "mergeQueue":
-      return { case: "mergeQueue", queue: arm.value };
-    default: {
-      const other: { case: string } = arm;
-      return unreachableArm(`${path}.shows`, other.case);
-    }
-  }
-}
+/** The class of one repository's queue group, and of its header. */
+export const MERGE_QUEUE_GROUP_CLASS = "mq-group";
+export const MERGE_QUEUE_GROUP_HEAD_CLASS = "mq-group-head";
 
-/** Paint TOGGLE as the sections stand: showing their merge queues or not. */
-export function paintMergeQueueToggle(toggle: HTMLElement, mergeQueues: boolean): void {
-  toggle.setAttribute(SHOWS_ATTRIBUTE, mergeQueues ? "merge-queues" : "workspaces");
-  toggle.setAttribute("aria-pressed", mergeQueues ? "true" : "false");
-  toggle.title = mergeQueues ? "show each repository's workspaces" : "show each repository's merge queue";
-}
+/** The class of a queue group's body: its head's card and its waiting merges. */
+export const MERGE_QUEUE_CLASS = "sb-merge-queue";
 
 /**
- * The merge-queue toggle, drawn as WIRE_MERGE_QUEUES says unless this page's
- * own ask is still in flight, and marked while a merge queue is PAUSED. A
- * click asks for the other view; it never reaches the header, whose click
- * folds the section.
+ * One repository's queue group: its label header (HEADER, drawn by the
+ * caller's group-header drawer so it reads as the merged groups' do) over
+ * its queue.
  */
-export function drawMergeQueueToggle(sc: SidebarContext, wireMergeQueues: boolean, paused: boolean): HTMLElement {
-  const toggle = createControl();
-  toggle.className = MERGE_QUEUE_TOGGLE_CLASS;
-  toggle.textContent = MERGE_GLYPH;
-  toggle.toggleAttribute(MERGE_QUEUE_PAUSED_ATTRIBUTE, paused);
-  paintMergeQueueToggle(toggle, sc.view.track(OPEN_SHOWS_VIEW_KEY, wireMergeQueues, (value) => paintMergeQueueToggle(toggle, value)));
-  toggle.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const mergeQueues = toggle.getAttribute(SHOWS_ATTRIBUTE) !== "merge-queues";
-    void changeView(sc, {
-      key: OPEN_SHOWS_VIEW_KEY,
-      value: mergeQueues,
-      control: toggle,
-      change: {
-        case: "showOpen",
-        value: { shows: mergeQueues ? { case: "mergeQueues", value: {} } : { case: "workspaces", value: {} } },
-      },
-    });
-  });
-  return toggle;
+export function drawRosterMergeQueueRepoGroup(
+  u: RosterMergeQueueRepoGroup,
+  sc: SidebarContext,
+  path: string,
+  header: (path: string) => HTMLElement,
+): HTMLElement {
+  const key = requireMessage(requireMessage(u.key, `${path}.key`).repository, `${path}.key.repository`);
+  const group = document.createElement("div");
+  group.className = MERGE_QUEUE_GROUP_CLASS;
+  group.setAttribute("data-repository", key.id);
+  const head = header(`${path}.header`);
+  head.classList.add(MERGE_QUEUE_GROUP_HEAD_CLASS);
+  group.appendChild(head);
+  group.appendChild(drawRosterMergeQueue(requireMessage(u.queue, `${path}.queue`), sc, `${path}.queue`));
+  return group;
 }
-
-/** The class a repository section wears while its merge queue holds nothing. */
-export const MERGE_QUEUE_EMPTY_CLASS = "sb-merge-queue-empty";
 
 /** The class of the head's card. Each card is one line of the band fit. */
 export const MERGE_QUEUE_HEAD_CLASS = "sb-mq-head";
@@ -162,15 +92,9 @@ export const MERGE_QUEUE_HEAD_CLASS = "sb-mq-head";
 /** The class of a waiting merge's line. Each is one line of the band fit. */
 export const MERGE_QUEUE_WAITING_CLASS = "sb-mq-waiting";
 
-/** Whether U, a section's merge queue, holds nothing to draw. */
-export function mergeQueueEmpty(u: RosterRepoMergeQueue): boolean {
-  return u.head === undefined && u.waiting.length === 0;
-}
-
 /**
- * A repository section's body while it shows its merge queue: the head's card,
- * then each waiting merge, front first. It is no arranged list (no bucket), so
- * nothing in it is a drag grip.
+ * A queue group's body: the head's card, then each waiting merge, front
+ * first. It is no arranged list (no bucket), so nothing in it is a drag grip.
  */
 export function drawRosterMergeQueue(u: RosterRepoMergeQueue, sc: SidebarContext, path: string): HTMLElement {
   const body = document.createElement("div");

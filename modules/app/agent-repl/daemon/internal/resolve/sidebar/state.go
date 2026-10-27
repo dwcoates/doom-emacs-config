@@ -511,7 +511,7 @@ func (r *rosterState) pausedMergeQueue(ws ids.WorkspaceID, arm string, async boo
 }
 
 // anyMergeQueuePaused reports whether any repository's merge queue is
-// paused, a merge on it or not (frontend.v1.RosterOpenSectionMergeQueuePaused).
+// paused, a merge on it or not (frontend.v1.RosterMergedSectionMergeQueuePaused).
 func (r *rosterState) anyMergeQueuePaused() bool {
 	for _, q := range r.queues {
 		if q.paused {

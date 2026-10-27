@@ -109,7 +109,6 @@ type fakeDB struct {
 	setMergedFoldedErr error
 	setHiddenFoldedErr error
 	setOpenFoldedErr   error
-	setOpenShowsErr    error
 	viewErr            error
 	// workspaceErr fails the one-workspace read, which the map cannot.
 	workspaceErr error
@@ -3318,17 +3317,6 @@ func (d *fakeDB) SetOpenSectionFolded(_ context.Context, folded bool) error {
 	}
 	view := d.currentView()
 	view.OpenFolded = folded
-	d.view = &view
-	return nil
-}
-
-// SetOpenShowsMergeQueues records what the open section shows.
-func (d *fakeDB) SetOpenShowsMergeQueues(_ context.Context, mergeQueues bool) error {
-	if d.setOpenShowsErr != nil {
-		return d.setOpenShowsErr
-	}
-	view := d.currentView()
-	view.OpenShowsMergeQueues = mergeQueues
 	d.view = &view
 	return nil
 }

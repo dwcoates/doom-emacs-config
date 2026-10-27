@@ -449,10 +449,6 @@ type Verbs interface {
 	// FoldOpenSection records whether the open-workspaces section is
 	// collapsed and republishes the roster.
 	FoldOpenSection(ctx context.Context, folded bool) error
-	// ShowOpenMergeQueues records whether the open-workspaces section's
-	// repository sections show their merge queues rather than their open
-	// workspaces, and republishes the roster.
-	ShowOpenMergeQueues(ctx context.Context, mergeQueues bool) error
 	// CreateSubsection adds a named subsection at the bottom of a
 	// repository's section and republishes the roster (arrange.go).
 	CreateSubsection(ctx context.Context, repo ids.RepoID, name string) (wsm.Subsection, error)

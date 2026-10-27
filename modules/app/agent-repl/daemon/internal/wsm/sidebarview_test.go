@@ -64,31 +64,6 @@ func TestSidebarViewWritesAreReadBack(t *testing.T) {
 			want: SidebarView{},
 		},
 		{
-			name:  "showing the merge queues keeps every fold",
-			write: func(s *store) error { return s.SetOpenShowsMergeQueues(context.Background(), true) },
-			want:  SidebarView{OpenShowsMergeQueues: true},
-		},
-		{
-			name: "showing the workspaces again replaces the merge queues",
-			write: func(s *store) error {
-				if err := s.SetOpenShowsMergeQueues(context.Background(), true); err != nil {
-					return err
-				}
-				return s.SetOpenShowsMergeQueues(context.Background(), false)
-			},
-			want: SidebarView{},
-		},
-		{
-			name: "folding the open section keeps the merge queues shown",
-			write: func(s *store) error {
-				if err := s.SetOpenShowsMergeQueues(context.Background(), true); err != nil {
-					return err
-				}
-				return s.SetOpenSectionFolded(context.Background(), true)
-			},
-			want: SidebarView{OpenFolded: true, OpenShowsMergeQueues: true},
-		},
-		{
 			name: "unfolding the hidden section again replaces its fold",
 			write: func(s *store) error {
 				if err := s.SetHiddenSectionFolded(context.Background(), true); err != nil {
@@ -145,9 +120,6 @@ func TestSidebarViewSurvivesAReopen(t *testing.T) {
 	if err := first.SetOpenSectionFolded(context.Background(), true); err != nil {
 		t.Fatalf("SetOpenSectionFolded: %v", err)
 	}
-	if err := first.SetOpenShowsMergeQueues(context.Background(), true); err != nil {
-		t.Fatalf("SetOpenShowsMergeQueues: %v", err)
-	}
 	if err := first.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -161,7 +133,7 @@ func TestSidebarViewSurvivesAReopen(t *testing.T) {
 	view, err := second.SidebarView(context.Background())
 
 	// Assert
-	want := SidebarView{HiddenFolded: true, OpenFolded: true, OpenShowsMergeQueues: true}
+	want := SidebarView{HiddenFolded: true, OpenFolded: true}
 	if err != nil || view != want {
 		t.Fatalf("view after reopen = %+v, %v; want %+v", view, err, want)
 	}
@@ -271,14 +243,9 @@ func TestTheMigrationAddsTheOpenSectionFold(t *testing.T) {
 	}
 }
 
-func TestTheDefaultViewShowsTheOpenWorkspaces(t *testing.T) {
-	// Arrange, Act, Assert
-	if DefaultSidebarView.OpenShowsMergeQueues {
-		t.Fatalf("DefaultSidebarView = %+v, want the open section showing its workspaces", DefaultSidebarView)
-	}
-}
-
-// TestTheMigrationAddsTheOpenSectionShows pins the layout-76 step.
+// TestTheMigrationAddsTheOpenSectionShows pins the layout-76 step, whose
+// column deployed files carry though no build reads it since the toggle was
+// retired.
 func TestTheMigrationAddsTheOpenSectionShows(t *testing.T) {
 	// Arrange
 	path := fixtureAt(t, 75)
@@ -294,13 +261,6 @@ func TestTheMigrationAddsTheOpenSectionShows(t *testing.T) {
 	s := handle.(*store)
 	if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('sidebar_view') WHERE name = 'open_shows_merge_queues'`); got != 1 {
 		t.Fatalf("sidebar_view.open_shows_merge_queues columns after the migration = %d, want 1", got)
-	}
-	view, err := s.SidebarView(context.Background())
-	if err != nil {
-		t.Fatalf("SidebarView after the migration: %v", err)
-	}
-	if view.OpenShowsMergeQueues {
-		t.Fatalf("SidebarView after the migration = %+v, want the open workspaces shown", view)
 	}
 }
 

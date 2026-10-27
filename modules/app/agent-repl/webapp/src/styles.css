@@ -897,10 +897,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    no fill, no border, and no focus ring, which WebKit otherwise draws as a
    grey bevelled box around the focused control. Every rail control drawn as
    a glyph floating on the background takes its bare look from here: the
-   search magnifier, and the merge-queue toggle (owner request, 2026-10-25),
-   whose glyph alone shows white or purple on the background. */
-#ws-sidebar .sb-search-btn,
-#ws-sidebar .repo-head > .sb-merge-queue-toggle {
+   search magnifier. */
+#ws-sidebar .sb-search-btn {
   background: none;
   border: none;
   outline: none;
@@ -1040,16 +1038,14 @@ html.webhost-sidebar #ws-sidebar[hidden] {
      section under OPEN shows it folded or not (owner request, 2026-10-15),
      and so does Hidden Workspaces, whose count is every row it holds,
      scrolled out of its viewport or not (owner request, 2026-10-19).
-   - The open Recently Merged band's "(K today)" counts the merges that landed
-     today, hidden rows included (src/sidebar/roster.ts drawMergedTodayCount),
-     drawn grey, present only while the band is unfolded, where the folded
-     count is not (owner request, 2026-10-11).
+   - The Merge Queue section's "(N)" counts the merges in line over every
+     queue (frontend.v1.RosterMergedSection.header), drawn grey whether the
+     section is folded or not (owner request, 2026-10-26).
    - The open workspaces section's "(N)" takes the same grey and shows whether
      the section is folded or not (owner request, 2026-10-13;
      src/sidebar/roster.ts drawRosterOpenSection), and so does Hidden
      Workspaces' (owner request, 2026-10-19). */
 #ws-sidebar .repo-head .sb-count,
-#ws-sidebar .repo-head .sb-today-count,
 #ws-sidebar .repo-head .sb-open-count { font-size: 0.85em; }
 #ws-sidebar .repo-head .sb-count {
   display: none;
@@ -1057,41 +1053,15 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 }
 #ws-sidebar .repo.folded > .repo-head .sb-count,
 #ws-sidebar .repo.repo-section > .repo-head .sb-count,
-#ws-sidebar .repo.hidden-section > .repo-head .sb-count { display: inline; }
-#ws-sidebar .repo-head .sb-today-count,
+#ws-sidebar .repo.hidden-section > .repo-head .sb-count,
+#ws-sidebar .repo.merged-section > .repo-head .sb-count { display: inline; }
 #ws-sidebar .repo-head .sb-open-count,
-#ws-sidebar .repo.hidden-section > .repo-head .sb-count { color: var(--muted); }
-#ws-sidebar .repo.folded > .repo-head .sb-today-count { display: none; }
-/* THE MERGE-QUEUE TOGGLE on the OPEN header line (owner request, 2026-10-24;
-   src/sidebar/merge-queue-view.ts): the feed's merge glyph at the line's
-   right end, in the canonical purple of a merge in progress (--blocked,
-   .tone-purple's) while the repository sections show their workspaces, the
-   amber a paused merge bubble is framed in (--merge-paused) while a merge
-   queue is paused, and in the expanded repository names' colour while they
-   show their merge queues (owner request, 2026-10-25).
-   It takes the click in the area around the glyph, as a triangle does, and
-   keeps the header's weight and case out of the glyph, bare as the rail's
-   glyph controls are. */
-#ws-sidebar .repo-head > .sb-merge-queue-toggle {
-  margin-left: auto;
-  padding: 0.3rem 0.35rem;
-  margin-top: -0.3rem;
-  margin-bottom: -0.3rem;
-  margin-right: -0.35rem;
-  font-size: 1.05rem;
-  line-height: 1;
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
-  cursor: pointer;
-  color: var(--blocked);
-}
-#ws-sidebar .repo-head > .sb-merge-queue-toggle[data-merge-queue-paused] { color: var(--merge-paused); }
-/* After the paused amber, at its specificity, so the queues' view wins. */
-#ws-sidebar .repo-head > .sb-merge-queue-toggle[data-shows="merge-queues"] { color: var(--repo-head-expanded); }
-/* THE MERGE QUEUE VIEW (owner request, 2026-10-25; src/sidebar/merge-queue-view.ts):
-   each repository section draws its queue as a small merge bubble for the
-   merge at its head and one line per merge waiting behind it. The head's
+#ws-sidebar .repo.hidden-section > .repo-head .sb-count,
+#ws-sidebar .repo.merged-section > .repo-head .sb-count { color: var(--muted); }
+/* THE MERGE QUEUES (owner requests, 2026-10-25 and 2026-10-26;
+   src/sidebar/merge-queue-view.ts): the Merge Queue section draws each
+   repository's queue, under the repository's label, as a small merge bubble
+   for the merge at its head and one line per merge waiting behind it. The head's
    card and each waiting line take a row's padding, so the queue lines up
    with the workspaces' rows, a row's hover, and a clock that reads as a
    row's when-column. */
@@ -1142,10 +1112,6 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   font-variant-numeric: tabular-nums;
 }
 #ws-sidebar .sb-mq-front { flex: 0 0 auto; color: var(--blocked); font-size: 0.65rem; }
-/* A REPOSITORY WHOSE QUEUE HOLDS NOTHING draws its header alone, in the
-   folded header's faded grey whether it is folded or not (owner request,
-   2026-10-25). */
-#ws-sidebar .repo.repo-section.sb-merge-queue-empty > .repo-head { color: var(--repo-head-collapsed); }
 /* A folded open workspaces section folds away every grouping section it
    holds, headers included; only its own header stays. */
 #ws-sidebar .repo.open-section.folded > .sb-sections { display: none; }
@@ -1367,8 +1333,8 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   font-variant-numeric: tabular-nums;
 }
 
-/* THE BANDS UNDER THE REPOSITORY SECTIONS -- Hidden Workspaces, then Recently
-   Merged -- hold no repository's section, so each is set off from the list above by
+/* THE BANDS UNDER THE REPOSITORY SECTIONS -- Hidden Workspaces, then Merge
+   Queue -- hold no repository's section, so each is set off from the list above by
    ONE shared light rule. Both bands' headers are drawn purple: Recently
    Merged's matches its rows' dots, and Hidden's matches Recently Merged's
    (owner request, 2026-10-11), and so is the open workspaces section's header
@@ -1422,10 +1388,11 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
      group header is as tall wherever it lands in the band's viewport. */
   --merged-group-head-h: 1.25rem;
 }
-/* A REPOSITORY'S GROUP inside Recently Merged: its label only, with no fold
-   toggle (the repository section above is the one place a repository folds),
+/* A REPOSITORY'S GROUP inside Merge Queue, a queue's or a merged one: its
+   label only, with no fold toggle (the repository section above is the one place a repository folds),
    drawn as a quieter repository header, indented to the band's label. */
-#ws-sidebar .merged-group-head {
+#ws-sidebar .merged-group-head,
+#ws-sidebar .sb-merged-label {
   height: var(--merged-group-head-h);
   line-height: var(--merged-group-head-h);
   padding: 0 0.7rem 0 1.75rem;
@@ -1441,6 +1408,18 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .repo.open-section > .repo-head,
 #ws-sidebar .repo.hidden-section > .repo-head,
 #ws-sidebar .repo.merged-section > .repo-head { color: var(--blocked); }
+/* A PAUSED MERGE QUEUE TURNS THE MERGE QUEUE HEADER from the purple to the
+   amber a paused merge bubble is framed in (owner request, 2026-10-26), folded
+   or not, so a pause reads from the header even with no merge on the queue
+   (frontend.v1.RosterMergedSection.merge_queue_paused). */
+#ws-sidebar .repo.merged-section[data-merge-queue-paused] > .repo-head { color: var(--merge-paused); }
+/* THE "RECENTLY MERGED" HEADING over the merged groups, below the queues:
+   drawn as a group header is (the rule above), set out to the left of the
+   groups and in the section's purple, so it rides with the first merged row
+   in the band fit. It is left out while
+   every group under it is (its repository collapsed). */
+#ws-sidebar .sb-merged-label { padding-left: 1.1rem; color: var(--blocked); }
+#ws-sidebar .sb-merged-label:not(:has(~ .merged-group:not([hidden]))) { display: none; }
 /* The LINE BOX is pinned, not the row height. Setting `height` drew every
    merged row taller than the content inside it, so the section stood taller
    than the entries it holds — ten merges reached about twelve rows' worth of

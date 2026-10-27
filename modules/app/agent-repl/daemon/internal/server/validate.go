@@ -865,10 +865,6 @@ func validateUpdateSidebarViewRequest(req *agentreplv1.UpdateSidebarViewRequest)
 		return invalid("change", "a change arm is required")
 	case *agentreplv1.UpdateSidebarViewRequest_FoldSection:
 		return validateSidebarViewFoldSection(change.FoldSection)
-	case *agentreplv1.UpdateSidebarViewRequest_ShowOpen:
-		if change.ShowOpen.GetShows() == nil {
-			return invalid("show_open.shows", "a shows arm is required")
-		}
 	}
 	return nil
 }

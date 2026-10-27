@@ -12,6 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { drawWorkspaceRoster } from "../../src/sidebar/roster.js";
+import { MERGE_QUEUES_CLASS } from "../../src/sidebar/merge-queue-view.js";
 import {
   BAND_LINES_ATTRIBUTE,
   BAND_MORE_ATTRIBUTE,
@@ -304,13 +305,13 @@ describe("regionLines", () => {
     expect(regionLines(box).map((el) => el.className)).toEqual(["sb-mq-head", "sb-mq-waiting"]);
   });
 
-  it("counts the header of a repository whose merge queue holds nothing as a line", () => {
-    // Arrange: an empty queue draws its header alone.
+  it("counts a queue group's header as no line", () => {
+    // Arrange
     const box = document.createElement("div");
-    box.innerHTML = '<div class="repo sb-merge-queue-empty"><div class="repo-head"></div><div class="rows sb-merge-queue"></div></div>';
-    for (const el of box.querySelectorAll<HTMLElement>(".repo-head")) el.getBoundingClientRect = () => rect(0, ROW);
+    box.innerHTML = '<div class="sb-merge-queues"><div class="mq-group"><div class="merged-group-head mq-group-head"></div><div class="rows sb-merge-queue"><div class="sb-mq-head"></div></div></div></div>';
+    for (const el of box.querySelectorAll<HTMLElement>(".mq-group-head, .sb-mq-head")) el.getBoundingClientRect = () => rect(0, ROW);
     // Act / Assert
-    expect(regionLines(box).map((el) => el.className)).toEqual(["repo-head"]);
+    expect(regionLines(box).map((el) => el.className)).toEqual(["sb-mq-head"]);
   });
 
   it("counts an expanded repository's header as no line", () => {
@@ -344,6 +345,25 @@ describe("mergedTodayLines", () => {
   ])("reaches $name", ({ at, want }) => {
     // Arrange / Act
     const got = mergedTodayLines(mergedLines(at), NOW);
+    // Assert
+    expect(got).toBe(want);
+  });
+
+  it.each([
+    { name: "every queue line ahead of older merges", queued: 2, at: [startOfToday() - 5], want: 2 },
+    { name: "every queue line and today's merges after them", queued: 1, at: [startOfToday() + 5, startOfToday() - 5], want: 2 },
+  ])("reaches $name", ({ queued, at, want }) => {
+    // Arrange: the queues' lines stand above the merged rows.
+    const queues = document.createElement("div");
+    queues.className = MERGE_QUEUES_CLASS;
+    const queueLines = Array.from({ length: queued }, () => {
+      const line = document.createElement("div");
+      line.className = "sb-mq-waiting";
+      queues.appendChild(line);
+      return line;
+    });
+    // Act
+    const got = mergedTodayLines([...queueLines, ...mergedLines(at)], NOW);
     // Assert
     expect(got).toBe(want);
   });

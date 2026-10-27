@@ -4488,12 +4488,11 @@ describe("the rail's mark column", () => {
  * did, and one breath takes exactly as long as one turn of a spinning glyph.
  */
 /** The selectors every rail glyph control wearing the bare look carries. */
-const BARE_GLYPH_CONTROLS = ["#ws-sidebar .sb-search-btn", "#ws-sidebar .repo-head > .sb-merge-queue-toggle"];
+const BARE_GLYPH_CONTROLS = ["#ws-sidebar .sb-search-btn"];
 
 /**
  * The one rule the rail's bare glyph controls share (styles.css "THE RAIL'S
- * BARE GLYPH CONTROLS"): the rule that strips the search and merge-queue
- * toggles' button look.
+ * BARE GLYPH CONTROLS"): the rule that strips the search button's look.
  */
 function isBareGlyphRule(rule: CssRule): boolean {
   return rule.selectors.includes("#ws-sidebar .sb-search-btn") && /appearance:\s*none/.test(rule.declarations);

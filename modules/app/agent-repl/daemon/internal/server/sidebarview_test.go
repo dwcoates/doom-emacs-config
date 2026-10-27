@@ -85,71 +85,6 @@ func TestUpdateSidebarViewHandsASectionFoldToTheVerb(t *testing.T) {
 	}
 }
 
-func showOpenChange(shows *agentreplv1.SidebarViewShowOpen) *agentreplv1.UpdateSidebarViewRequest {
-	return &agentreplv1.UpdateSidebarViewRequest{
-		Change: &agentreplv1.UpdateSidebarViewRequest_ShowOpen{ShowOpen: shows},
-	}
-}
-
-func TestUpdateSidebarViewHandsWhatTheOpenSectionShowsToTheVerb(t *testing.T) {
-	tests := []struct {
-		name  string
-		shows *agentreplv1.SidebarViewShowOpen
-		want  bool
-	}{
-		{"merge queues", &agentreplv1.SidebarViewShowOpen{Shows: &agentreplv1.SidebarViewShowOpen_MergeQueues{MergeQueues: &agentreplv1.SidebarViewShowMergeQueues{}}}, true},
-		{"workspaces", &agentreplv1.SidebarViewShowOpen{Shows: &agentreplv1.SidebarViewShowOpen_Workspaces{Workspaces: &agentreplv1.SidebarViewShowWorkspaces{}}}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
-
-			// Act
-			sent(t, h, showOpenChange(tt.shows))
-
-			// Assert
-			if len(h.Verbs.showOpen) != 1 || h.Verbs.showOpen[0] != tt.want {
-				t.Fatalf("open section shows = %v, want [%v]", h.Verbs.showOpen, tt.want)
-			}
-			if len(h.Verbs.sectionFolds) != 0 {
-				t.Fatalf("section folds = %+v, want none for a view change", h.Verbs.sectionFolds)
-			}
-		})
-	}
-}
-
-func TestUpdateSidebarViewFailsAShowOpenVerbError(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.Verbs.sectionFoldErr = errors.New("disk I/O error")
-
-	// Act
-	_, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(showOpenChange(
-		&agentreplv1.SidebarViewShowOpen{Shows: &agentreplv1.SidebarViewShowOpen_MergeQueues{MergeQueues: &agentreplv1.SidebarViewShowMergeQueues{}}})))
-
-	// Assert
-	if connect.CodeOf(err) != connect.CodeInternal {
-		t.Fatalf("UpdateSidebarView = %v, want an internal failure", err)
-	}
-}
-
-func TestUpdateSidebarViewRefusesAShowOpenWithNoArmBeforeTheVerb(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-
-	// Act
-	_, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(showOpenChange(&agentreplv1.SidebarViewShowOpen{})))
-
-	// Assert
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("UpdateSidebarView = %v, want InvalidArgument", err)
-	}
-	if len(h.Verbs.showOpen) != 0 {
-		t.Fatalf("open section shows = %v, want none for an invalid request", h.Verbs.showOpen)
-	}
-}
-
 func TestUpdateSidebarViewHandsTheResolvedRepositoryFoldToTheVerb(t *testing.T) {
 	tests := []struct {
 		name string
@@ -255,7 +190,6 @@ func TestValidateUpdateSidebarViewRequestRefusesAnIncompleteRequest(t *testing.T
 		{"a fold with no section arm", foldChange(&agentreplv1.SidebarViewFoldSection{Fold: expandFold()})},
 		{"a repository fold with no ref", foldChange(&agentreplv1.SidebarViewFoldSection{Section: &agentreplv1.SidebarViewFoldSection_Repository{}, Fold: expandFold()})},
 		{"a fold with no fold arm", foldChange(&agentreplv1.SidebarViewFoldSection{Section: mergedSection()})},
-		{"a show_open with no shows arm", showOpenChange(&agentreplv1.SidebarViewShowOpen{})},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
