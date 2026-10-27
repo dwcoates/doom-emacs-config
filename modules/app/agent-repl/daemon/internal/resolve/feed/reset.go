@@ -108,7 +108,7 @@ func (r *resolver) ResetWorkspace(ws ids.WorkspaceID, because string) {
 	}
 	r.closeAnswerFault(old, health.EdgeFeedReset, because)
 
-	fresh := newWSState(ws)
+	fresh := newWSState(ws, r.deps.Now())
 	rows := 0
 	for key, f := range old.feeds {
 		for _, id := range f.order {

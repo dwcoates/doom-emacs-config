@@ -809,7 +809,10 @@ the prompt's words return to, so the turn target always carries
 `roll_back_unanswered'.  When nothing has answered the running turn's
 prompt, the daemon stops the turn by rolling the prompt back and answers
 `rolled_back_unanswered': the composer is refilled exactly as after a
-rollback, and the feed draws no \"interrupted\" marker.
+rollback, and the feed draws no \"interrupted\" marker.  A HELD prompt
+the user sent behind the running turn, with nothing drawn in the feed since
+it was queued, is taken back first and the same way: it leaves the held
+section, its words refill the composer, and the turn runs on.
 
 THE OUTCOME IS THE ARM, and every arm reaches the user.  `interrupted_turn'
 says the turn was stopped, and why its prompt stayed when the rollback it

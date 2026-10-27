@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -189,6 +190,32 @@ func (r *resolver) PromptFollowed(ws ids.WorkspaceID, row *frontendv1.FeedId) bo
 		}
 	}
 	return false
+}
+
+// AnsweredSince reports whether agent output (a row PromptFollowed counts)
+// was first drawn live in the root feed at or after AT. It is true too when
+// the feed began watching WS at or after AT, or never has: what was drawn
+// before it was watching is unknown to it, so it is never taken as absent.
+func (r *resolver) AnsweredSince(ws ids.WorkspaceID, at time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.workspaces[ws]
+	if !ok {
+		return true
+	}
+	return !s.answeredAt.Before(at)
+}
+
+// noteAnswered records, at a row's first draw, that agent output landed in
+// the root feed as it happened: a live row of the root feed that answersPrompt
+// counts, and not a pinned one. A replayed history page draws what happened
+// before, so it moves nothing.
+func (r *resolver) noteAnswered(s *wsState, f *feedState, rank rowRank, row *frontendv1.FeedRow) {
+	if s.plane != planeLive || isPinKey(rank.key) || !answersPrompt(row) ||
+		f.key != r.feedKey(s.id, feedid.Feed{Root: true}) {
+		return
+	}
+	s.answeredAt = r.deps.Now()
 }
 
 // answersPrompt reports whether ROW is agent output a reader sees as the

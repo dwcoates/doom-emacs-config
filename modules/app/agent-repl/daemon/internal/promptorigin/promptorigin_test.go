@@ -163,3 +163,59 @@ func TestUserSent(t *testing.T) {
 		})
 	}
 }
+
+func TestNamedReadsTheStoredSpelling(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored string
+		want   conversationv1.PromptOrigin
+	}{
+		{name: "a user's prompt", stored: "PROMPT_ORIGIN_USER_SENT", want: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+		{name: "an agent-sent prompt", stored: "PROMPT_ORIGIN_AGENT_SENT", want: conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT},
+		{name: "a name no vocabulary holds", stored: "NO_SUCH_ORIGIN", want: conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED},
+		{name: "the empty name", stored: "", want: conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := Named(tt.stored)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Named(%q) = %s, want %s", tt.stored, got, tt.want)
+			}
+		})
+	}
+}
+
+// A STORED ORIGIN IS READ IN ONE PLACE: every layer reading the spelling a
+// hold or a turn stores asks Named, so a hand-rolled lookup in
+// conversation.v1.PromptOrigin_value outside this package fails here.
+func TestEveryStoredOriginIsReadByNamed(t *testing.T) {
+	// Arrange
+	handRolled := regexp.MustCompile(`PromptOrigin\(conversationv1\.PromptOrigin_value\[`)
+	var found []string
+
+	// Act
+	err := filepath.WalkDir("../..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if handRolled.Match(raw) && !strings.HasSuffix(path, "promptorigin.go") {
+			found = append(found, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walk the daemon's source: %v", err)
+	}
+	if len(found) > 0 {
+		t.Fatalf("these files read a stored origin by hand instead of asking Named: %v", found)
+	}
+}

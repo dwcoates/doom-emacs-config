@@ -747,6 +747,17 @@ type TurnStops interface {
 type Service interface {
 	Queue
 	TurnStops
+	HeldRollback
+}
+
+// HeldRollback is the stop key's take-back of a held prompt: the one part of
+// the queue the server's Interrupt needs beyond Queue.
+type HeldRollback interface {
+	// RollBackHeld takes back the newest prompt the user sent that stands
+	// held while a turn runs, when nothing answering has been drawn in the
+	// root feed since it was queued: it is retired as rolled back and
+	// answered with ok true. ok is false, and nothing changes, otherwise.
+	RollBackHeld(ctx context.Context, ws ids.WorkspaceID) (held wsm.HeldPrompt, ok bool, err error)
 }
 
 // New builds the queue.

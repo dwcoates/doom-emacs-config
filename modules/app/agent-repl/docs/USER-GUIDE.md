@@ -441,6 +441,12 @@ you are replying to. Sending ends the selection.
   - Once something has answered it, `C-c C-k` only stops the turn, as before.
   - With background agents running, `C-c C-k` only stops the turn, after asking about the agents.
   - Some prompts cannot be rolled back, such as the first prompt of a conversation. The turn is stopped anyway, the prompt stays, and the echo area says why.
+- **`C-c C-k` on a held prompt that nothing has answered yet takes it back, and the turn keeps running.**
+  - It takes the newest prompt you sent that is waiting in the held section behind the running turn.
+  - The prompt leaves the held section and its words land in the input window, as after any rollback.
+  - It counts as answered once a response bubble or a purple-titled card has landed in the feed after you sent it.
+  - Once something has landed after it, `C-c C-k` stops the turn instead, and the held prompt stays queued.
+  - Prompts that another workspace's agent or the daemon queued are never taken back.
 - **`C-c C-k` pressed again, with no turn running, rolls back too.**
   - When nothing has answered the latest prompt in the feed yet, that prompt is rolled back at once, with no question, and its words land in the input window.
     - A prompt counts as answered once a response bubble or a purple-titled card has landed after the prompt.

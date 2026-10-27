@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -914,5 +915,139 @@ func TestASettleWithNoOutcomeDrawsTheRowsBackAndRecordsTheBreach(t *testing.T) {
 	}
 	if !h.hasRecord("error", opRollbackApply) {
 		t.Fatalf("records = %+v, want the breach recorded at ERROR", h.records())
+	}
+}
+
+func TestAnsweredSince(t *testing.T) {
+	// afterBirth is a moment past the harness's own clock, when its feed state
+	// was born, so every moment below is one the feed was watching.
+	const afterBirth = int64(1_800_000_000_000)
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		// atMs is the moment asked about, after afterBirth.
+		atMs int64
+		want bool
+	}{
+		{
+			name: "output drawn live after the moment answered it",
+			arrange: func(h *harness) {
+				h.nowMs = afterBirth + 1_000
+				h.deliverPromptAt("t1", "first", 1_000)
+				h.nowMs = afterBirth + 2_000
+				h.sendAt(responseSuccessActivity("u1", "answer"), 2_000)
+			},
+			atMs: 1_500,
+			want: true,
+		},
+		{
+			name: "output drawn live the instant of the moment answered it",
+			arrange: func(h *harness) {
+				h.nowMs = afterBirth + 1_000
+				h.deliverPromptAt("t1", "first", 1_000)
+				h.nowMs = afterBirth + 2_000
+				h.sendAt(responseSuccessActivity("u1", "answer"), 2_000)
+			},
+			atMs: 2_000,
+			want: true,
+		},
+		{
+			name: "output drawn live before the moment did not answer it",
+			arrange: func(h *harness) {
+				h.nowMs = afterBirth + 1_000
+				h.deliverPromptAt("t1", "first", 1_000)
+				h.nowMs = afterBirth + 2_000
+				h.sendAt(responseSuccessActivity("u1", "answer"), 2_000)
+			},
+			atMs: 2_500,
+		},
+		{
+			name: "a prompt row alone is not an answer",
+			arrange: func(h *harness) {
+				h.nowMs = afterBirth + 1_000
+				h.deliverPromptAt("t1", "first", 1_000)
+				h.nowMs = afterBirth + 2_000
+				h.deliverPromptAt("t2", "second", 2_000)
+			},
+			atMs: 1_500,
+		},
+		{
+			name: "a turn's end marker is not an answer",
+			arrange: func(h *harness) {
+				h.nowMs = afterBirth + 1_000
+				h.deliverPromptAt("t1", "first", 1_000)
+				h.nowMs = afterBirth + 2_000
+				h.concludeWithoutAnswer("t1")
+			},
+			atMs: 1_500,
+		},
+		{
+			name: "a replayed history page draws what happened before, not an answer",
+			arrange: func(h *harness) {
+				h.nowMs = afterBirth + 1_000
+				h.deliverPromptAt("t9", "live", 1_000)
+				h.nowMs = afterBirth + 2_000
+				h.replay(placedPage(&conversationv1.HistoryFloor{},
+					pagedEntry{atMs: 200, entry: frameEntry(mainAgent(), &conversationv1.AgentUpdate{
+						Update: &conversationv1.AgentUpdate_Activity{Activity: settledResponse("unit-1", "the answer")},
+					})},
+					pagedEntry{atMs: 100, entry: promptEntry("turn-1", "the prompt")},
+				))
+			},
+			atMs: 1_500,
+		},
+		{
+			name: "a moment before a reset cannot be vouched for",
+			arrange: func(h *harness) {
+				h.nowMs = afterBirth + 1_000
+				h.deliverPromptAt("t1", "first", 1_000)
+				h.nowMs = afterBirth + 2_000
+				h.reset()
+			},
+			atMs: 1_500,
+			want: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tc.arrange(h)
+
+			// Act
+			got := h.resolver.AnsweredSince(testWorkspace, time.UnixMilli(afterBirth+tc.atMs))
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("AnsweredSince(%d) = %v, want %v", tc.atMs, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnsweredSinceCannotVouchForAMomentBeforeTheFeedBeganWatching(t *testing.T) {
+	// Arrange: the harness's feed state is born at its clock's reading.
+	h := newHarness(t)
+	h.deliverPromptAt("t1", "first", 1_000)
+
+	// Act
+	got := h.resolver.AnsweredSince(testWorkspace, time.UnixMilli(h.nowMs-1))
+
+	// Assert
+	if !got {
+		t.Fatal("AnsweredSince() = false for a moment before the feed was watching, want true")
+	}
+}
+
+func TestAnsweredSinceCannotVouchForAWorkspaceTheFeedNeverSaw(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	got := h.resolver.AnsweredSince(ids.WorkspaceID("never-seen"), time.UnixMilli(h.nowMs))
+
+	// Assert
+	if !got {
+		t.Fatal("AnsweredSince() = false for a workspace the feed never saw, want true")
 	}
 }

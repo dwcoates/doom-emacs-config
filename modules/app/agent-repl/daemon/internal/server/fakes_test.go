@@ -908,6 +908,13 @@ type fakeQueue struct {
 	// rollBackCalls records every call's since and drop, in order.
 	rollBackErr   error
 	rollBackCalls []rollBackCall
+
+	// heldRolledBack, heldRollBackOK and heldRollBackErr are what
+	// RollBackHeld answers; heldRollBackCalls counts its calls.
+	heldRolledBack    wsm.HeldPrompt
+	heldRollBackOK    bool
+	heldRollBackErr   error
+	heldRollBackCalls int
 }
 
 // rollBackCall is one fakeQueue.RollBack call's since and drop.
@@ -983,6 +990,12 @@ func (f *fakeQueue) RollBack(ctx context.Context, _ ids.WorkspaceID, since time.
 		return f.rollBackErr
 	}
 	return perform(ctx)
+}
+
+// RollBackHeld counts the call and answers the scripted held prompt.
+func (f *fakeQueue) RollBackHeld(context.Context, ids.WorkspaceID) (wsm.HeldPrompt, bool, error) {
+	f.heldRollBackCalls++
+	return f.heldRolledBack, f.heldRollBackOK, f.heldRollBackErr
 }
 
 // fakeMerge answers the orchestrator's four server-facing verbs.
@@ -1997,6 +2010,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		DB:                h.DB,
 		Prompts:           h.Prompts,
 		Queue:             h.Queue,
+		HeldRollback:      h.Queue,
 		Verbs:             h.Verbs,
 		Retarget:          h.Retarget,
 		Merge:             h.Merge,

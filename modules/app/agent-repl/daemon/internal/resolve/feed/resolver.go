@@ -76,6 +76,11 @@ type resolver struct {
 // wsState is one workspace's whole feed universe plus the accumulation every
 // piecemeal frame folds into.
 type wsState struct {
+	// answeredAt is when agent output a reader sees as the agent answering
+	// (answersPrompt) was last first drawn live in the root feed, or when this
+	// state was born if none has been since: the feed cannot vouch for what
+	// was drawn before it was watching (AnsweredSince).
+	answeredAt time.Time
 	// rolledBack is the turns rolled back (rollback.go): no row of one is
 	// drawn.
 	rolledBack map[ids.TurnID]bool
@@ -719,7 +724,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		r.logger(ws).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "ok"})
 		return s
 	}
-	s = newWSState(ws)
+	s = newWSState(ws, r.deps.Now())
 	r.workspaces[ws] = s
 	r.restoreDurable(s)
 	r.restoreRolledBack(s)
@@ -733,9 +738,13 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 // from the same zero. A field added to wsState is initialised here and is
 // therefore dropped by a reset without that reset having to name it — which is
 // what makes "the feed is as empty as one never opened" hold as the state grows.
-func newWSState(ws ids.WorkspaceID) *wsState {
+//
+// BORN is when the state begins watching the workspace: answeredAt starts
+// there, so output drawn before it is never taken as absent.
+func newWSState(ws ids.WorkspaceID, born time.Time) *wsState {
 	return &wsState{
 		id:                   ws,
+		answeredAt:           born,
 		feeds:                map[string]*feedState{},
 		feedAddrs:            map[string]feedid.Feed{},
 		subFeeds:             map[string]*subFeedHead{},
@@ -1140,6 +1149,7 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	if !seen {
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row condition", dlog.Context{"function": "feed", "condition": "!seen"})
 		f.insert(id, rank)
+		r.noteAnswered(s, f, rank, snapshot)
 		// THE ORDERING TRACE. A row's order key is fixed HERE, at first draw,
 		// and the feed sorts by it forever after — so this one line per row is
 		// the whole account of why any row landed where it did relative to

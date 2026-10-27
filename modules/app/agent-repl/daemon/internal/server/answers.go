@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // The four "act on what is on screen" verbs. Each one decodes the clicked row's
@@ -147,6 +148,15 @@ func (s *server) Interrupt(
 	case req.Msg.GetTurn() != nil:
 		target.Turn = true
 		if req.Msg.GetTurn().GetRollBackUnanswered() != nil {
+			// A PROMPT HELD BEHIND THE RUNNING TURN THAT NOTHING HAS ANSWERED
+			// SINCE is what the stop takes back first, and the turn runs on.
+			held, ok, err := s.deps.HeldRollback.RollBackHeld(ctx, subject.Record.ID)
+			if err != nil {
+				return nil, fail(subject.Log, rpc, err)
+			}
+			if ok {
+				return s.rolledBackHeld(subject.Log, held, resp)
+			}
 			plan, ok, err := s.unansweredRollback(ctx, subject.Record.ID, subject.Log)
 			if err != nil {
 				return nil, fail(subject.Log, rpc, err)
@@ -199,9 +209,7 @@ func (s *server) Interrupt(
 		}
 		// THE ROLLED-BACK PROMPT'S SELECTION ENDS WITH IT: its row is gone.
 		s.endSelection(subject.Log, subject.Record.ID, unanswered.row, returnToTail(), "rolled_back")
-		success.Outcome = &agentreplv1.InterruptSuccess_RolledBackUnanswered{
-			RolledBackUnanswered: &agentreplv1.InterruptRolledBackUnanswered{Prompt: replyquote.Words(unanswered.said)},
-		}
+		success.Outcome = rolledBackUnanswered(unanswered.said)
 	case outcome.Turn:
 		interrupted := &agentreplv1.InterruptedTurn{}
 		if outcome.RollbackRefused != nil {
@@ -224,6 +232,27 @@ func (s *server) Interrupt(
 			"rolled_back": outcome.RolledBack, "rollback_refused": outcome.RollbackRefused != nil})
 	resp.Result = &agentreplv1.InterruptResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
+}
+
+// rolledBackHeld answers a turn stop that took back the held prompt HELD
+// rather than stopping the turn: its words return to the composer exactly as
+// a rolled-back sent prompt's do (InterruptRolledBackUnanswered).
+func (s *server) rolledBackHeld(log dlog.Logger, held wsm.HeldPrompt, resp *agentreplv1.InterruptResponse) (*connect.Response[agentreplv1.InterruptResponse], error) {
+	log.Debug("daemon.server.interrupt", "answered that the stop took back a held prompt and left the turn running",
+		dlog.Context{"turn": string(held.Turn)})
+	resp.Result = &agentreplv1.InterruptResponse_Success{Success: &agentreplv1.InterruptSuccess{
+		Outcome: rolledBackUnanswered(held.Said),
+	}}
+	return connect.NewResponse(resp), nil
+}
+
+// rolledBackUnanswered is the ONE answer to a stop that took a prompt back,
+// the running turn's or a held one: SAID's words, its reply quote left out,
+// for the composer to hold again.
+func rolledBackUnanswered(said *conversationv1.UserSaid) *agentreplv1.InterruptSuccess_RolledBackUnanswered {
+	return &agentreplv1.InterruptSuccess_RolledBackUnanswered{
+		RolledBackUnanswered: &agentreplv1.InterruptRolledBackUnanswered{Prompt: replyquote.Words(said)},
+	}
 }
 
 // AnswerPermission delivers the permission card's verdict. `allow_standing`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -1279,4 +1280,140 @@ func TestRollBackResendIsRecordedAtInfo(t *testing.T) {
 		}
 	}
 	t.Fatalf("INFO records = %v, want one naming the resend's key", log.at("INFO"))
+}
+
+func TestInterruptRollingBackTakesBackAHeldPromptAndLeavesTheTurnRunning(t *testing.T) {
+	// Arrange: a held prompt nothing answered stands behind a running turn
+	// whose own prompt is answered.
+	h := newHarness(t)
+	seedUnanswered(h)
+	h.Feed.promptFollowed = true
+	h.Queue.heldRolledBack = wsm.HeldPrompt{Turn: "t2", Said: said("held prompt")}
+	h.Queue.heldRollBackOK = true
+
+	// Act.
+	resp, err := stopRollingBack(t, h)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	rolled := resp.Msg.GetSuccess().GetRolledBackUnanswered()
+	if rolled == nil || !proto.Equal(rolled.GetPrompt(), replyquote.Words(said("held prompt"))) {
+		t.Fatalf("result = %v, want rolled_back_unanswered carrying the held prompt", resp.Msg.GetResult())
+	}
+	if h.Verbs.interruptTarget.Turn {
+		t.Fatalf("verbs interrupted %+v, want the running turn left running", h.Verbs.interruptTarget)
+	}
+}
+
+func TestInterruptRollingBackStopsTheTurnWhenNoHeldPromptIsTakenBack(t *testing.T) {
+	// Arrange: the queue takes nothing back, and output follows the running
+	// turn's prompt.
+	h := newHarness(t)
+	seedUnanswered(h)
+	h.Feed.promptFollowed = true
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true}
+
+	// Act.
+	resp, err := stopRollingBack(t, h)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if h.Queue.heldRollBackCalls != 1 {
+		t.Fatalf("RollBackHeld calls = %d, want 1", h.Queue.heldRollBackCalls)
+	}
+	if !h.Verbs.interruptTarget.Turn || h.Verbs.interruptTarget.RollBack != nil {
+		t.Fatalf("verbs target = %+v, want a bare turn stop", h.Verbs.interruptTarget)
+	}
+	if resp.Msg.GetSuccess().GetInterruptedTurn() == nil {
+		t.Fatalf("result = %v, want interrupted_turn", resp.Msg.GetResult())
+	}
+}
+
+func TestInterruptWithoutRollingBackNeverTakesBackAHeldPrompt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Queue.heldRollBackOK = true
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true}
+
+	// Act.
+	_, err := h.Client.Interrupt(context.Background(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ref(),
+		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if h.Queue.heldRollBackCalls != 0 {
+		t.Fatalf("RollBackHeld calls = %d, want none", h.Queue.heldRollBackCalls)
+	}
+}
+
+func TestInterruptRollingBackFailsWhenTheHeldRollbackFails(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	seedUnanswered(h)
+	h.Queue.heldRollBackErr = errors.New("holds unreadable")
+
+	// Act.
+	resp, err := stopRollingBack(t, h)
+
+	// Assert.
+	if connectCode(t, err) != connect.CodeInternal || resp != nil {
+		t.Fatalf("Interrupt = %v, %v; want an internal failure and no answer", resp, err)
+	}
+	if h.Verbs.interruptTarget.Turn {
+		t.Fatalf("verbs interrupted %+v, want nothing stopped", h.Verbs.interruptTarget)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "Interrupt"})
+	if !ok || rec.Context["cause"] != "holds unreadable" {
+		t.Fatalf("ERROR record = %v (%v), want cause %q", rec.Context, ok, "holds unreadable")
+	}
+}
+
+func TestRolledBackUnansweredCarriesTheWordsWithoutTheQuote(t *testing.T) {
+	// Arrange: a prompt that replied quoting a response.
+	quoted := replyquote.Quote(said("my words"), "Paris.", false, "")
+
+	// Act.
+	got := rolledBackUnanswered(quoted)
+
+	// Assert.
+	if !proto.Equal(got.RolledBackUnanswered.GetPrompt(), said("my words")) {
+		t.Fatalf("prompt = %v, want the words alone", got.RolledBackUnanswered.GetPrompt())
+	}
+}
+
+// EVERY STOP THAT TOOK A PROMPT BACK ANSWERS THROUGH rolledBackUnanswered, so
+// a hand-built rolled_back_unanswered arm in the server's source fails here.
+func TestEveryRolledBackUnansweredAnswerIsBuiltByTheHelper(t *testing.T) {
+	// Arrange.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read the server's source: %v", err)
+	}
+	var builds int
+
+	// Act.
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(e.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		builds += strings.Count(string(raw), "&agentreplv1.InterruptSuccess_RolledBackUnanswered{")
+	}
+
+	// Assert.
+	if builds != 1 {
+		t.Fatalf("the rolled_back_unanswered arm is built %d times, want once, in rolledBackUnanswered", builds)
+	}
 }

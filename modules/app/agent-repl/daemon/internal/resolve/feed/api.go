@@ -339,6 +339,11 @@ type Resolver interface {
 	// purple-titled card) is drawn after the prompt row in the root feed:
 	// whether rolling back to it drops anything a reader has seen.
 	PromptFollowed(ws ids.WorkspaceID, row *frontendv1.FeedId) bool
+	// AnsweredSince reports whether such agent output was first drawn live
+	// in the root feed at or after a moment, or the feed began watching the
+	// workspace no earlier than it: whether a prompt held at that moment has
+	// been followed by anything a reader sees as an answer.
+	AnsweredSince(ws ids.WorkspaceID, at time.Time) bool
 	// RollBackTurns removes turns from the feed for good (rollback.go). The
 	// removal always happens; an error says only that recording it durably
 	// failed, already logged and raised.

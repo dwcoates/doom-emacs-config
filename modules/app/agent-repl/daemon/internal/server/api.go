@@ -64,6 +64,9 @@ type Deps struct {
 	Prompts prompthandler.Handler
 	// Queue backs UpdateHeldPrompt's three arms.
 	Queue promptqueue.Queue
+	// HeldRollback backs a turn stop's take-back of a held prompt nothing
+	// has answered since it was queued (Interrupt).
+	HeldRollback promptqueue.HeldRollback
 	// Verbs backs every workspace, task, answer and link verb.
 	Verbs workspace.Verbs
 	// Retarget backs SetWorkspaceParent: the retarget and its notice to the
