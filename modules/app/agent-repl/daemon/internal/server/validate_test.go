@@ -371,6 +371,13 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			field: "name",
 		},
 		{
+			name: "validate workspace name with a blank name",
+			check: func() *connect.Error {
+				return validateValidateWorkspaceNameRequest(&agentreplv1.ValidateWorkspaceNameRequest{Name: " "})
+			},
+			field: "name",
+		},
+		{
 			name: "change links with no workspace",
 			check: func() *connect.Error {
 				return validateChangeWorkspaceLinksRequest(&agentreplv1.ChangeWorkspaceLinksRequest{})

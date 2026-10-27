@@ -2426,6 +2426,86 @@ func TestFinishWorkspaceRefusesABehindPlacementNamingNoMerge(t *testing.T) {
 	}
 }
 
+// ---- ValidateWorkspaceName -------------------------------------------------
+
+// TestValidateWorkspaceNameJudgesByTheNamingRule pins each verdict: a legal
+// name answers legal, and a breach answers the create's invalid_name shape,
+// naming the component and its rule, each recorded at DEBUG.
+func TestValidateWorkspaceNameJudgesByTheNamingRule(t *testing.T) {
+	tests := []struct {
+		name      string
+		supplied  string
+		legal     bool
+		trimmed   string
+		component string
+		rule      func(*agentreplv1.CreateWorkspaceInvalidName) bool
+		message   string
+	}{
+		{name: "a legal slug", supplied: " fix-login ", legal: true, trimmed: "fix-login", message: "the supplied name keeps the naming rule"},
+		{name: "a legal prefixed slug", supplied: "ABC/fix-login", legal: true, trimmed: "ABC/fix-login", message: "the supplied name keeps the naming rule"},
+		{
+			name: "a paragraph breaks the slug rule", supplied: "Please fix the login page.", trimmed: "Please fix the login page.",
+			component: "Please fix the login page.", rule: func(m *agentreplv1.CreateWorkspaceInvalidName) bool { return m.GetSlug() != nil },
+			message: "the supplied name breaks the naming rule",
+		},
+		{
+			name: "a bad prefix breaks the prefix rule", supplied: "A B/fix-login", trimmed: "A B/fix-login",
+			component: "A B", rule: func(m *agentreplv1.CreateWorkspaceInvalidName) bool { return m.GetPrefix() != nil },
+			message: "the supplied name breaks the naming rule",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+
+			// Act
+			resp, err := h.Client.ValidateWorkspaceName(context.Background(),
+				connect.NewRequest(&agentreplv1.ValidateWorkspaceNameRequest{Name: tt.supplied}))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ValidateWorkspaceName: %v", err)
+			}
+			success := resp.Msg.GetSuccess()
+			if tt.legal {
+				if success.GetLegal() == nil {
+					t.Fatalf("result = %v, want legal", resp.Msg.GetResult())
+				}
+			} else {
+				invalid := success.GetInvalid()
+				if invalid.GetName() != tt.trimmed || invalid.GetComponent() != tt.component || !tt.rule(invalid) {
+					t.Fatalf("result = %v, want invalid %q at %q", resp.Msg.GetResult(), tt.trimmed, tt.component)
+				}
+			}
+			r, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.server.validate_workspace_name", Message: tt.message})
+			if !found || r.Context["name"] != tt.trimmed {
+				t.Fatalf("record = %+v, want DEBUG %q naming %q", r, tt.message, tt.trimmed)
+			}
+			if !tt.legal && r.Context["component"] != tt.component {
+				t.Fatalf("record context = %v, want component %q", r.Context, tt.component)
+			}
+		})
+	}
+}
+
+// TestValidateWorkspaceNameRefusesABlankName pins a blank name as a malformed
+// request, never a verdict.
+func TestValidateWorkspaceNameRefusesABlankName(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.Client.ValidateWorkspaceName(context.Background(),
+		connect.NewRequest(&agentreplv1.ValidateWorkspaceNameRequest{Name: "  "}))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("ValidateWorkspaceName err = %v, want InvalidArgument", err)
+	}
+}
+
 // ---- SetWorkspaceName ------------------------------------------------------
 
 // TestSetWorkspaceNameHandsTheNameToTheVerb pins the requested name reaching
