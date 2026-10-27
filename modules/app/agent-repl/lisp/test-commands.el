@@ -24,6 +24,8 @@
                                            (or load-file-name buffer-file-name)))
       nil t)
 
+(defvar agent-repl-roster--tab-numbers)
+
 ;;;; ---- Fixtures ----
 
 (defvar agent-repl-test-commands--sent nil
@@ -1006,11 +1008,29 @@ walk order, off the drawing.  Binds `agent-repl-test-commands--switched'
 to the workspace requested of the daemon, and fails nothing by itself on a
 local switch -- `agent-repl-test-commands--local-switched' records it."
   (declare (indent 3))
+  `(agent-repl-test-commands--with-numbered-bar ,tabs ,hidden nil ,current ,@body))
+
+(defun agent-repl-test-commands--daemon-numbers (tabs hidden)
+  "TABS numbered as the daemon numbers them: 1 up, HIDDEN ones skipped."
+  (let ((n 0))
+    (cl-loop for name in tabs
+             unless (member name hidden)
+             collect (cons name (cl-incf n)))))
+
+(defmacro agent-repl-test-commands--with-numbered-bar (tabs hidden held current &rest body)
+  "Run BODY with TABS on the roster, HIDDEN folded, HELD opening, CURRENT active.
+HIDDEN tabs have no number and are not drawn.  HELD tabs keep the number
+the daemon gives them but are not drawn yet, held for their open."
+  (declare (indent 4))
   `(let ((agent-repl-test-commands--switched nil)
-         (agent-repl-test-commands--local-switched nil))
+         (agent-repl-test-commands--local-switched nil)
+         (agent-repl-roster--tab-numbers
+          (agent-repl-test-commands--daemon-numbers ,tabs ,hidden)))
      (cl-letf (((symbol-function 'agent-repl-roster-tab-order) (lambda () ,tabs))
                ((symbol-function 'agent-repl-roster-drawn-tab-order)
-                (lambda () (cl-remove-if (lambda (name) (member name ,hidden)) ,tabs)))
+                (lambda () (cl-remove-if (lambda (name) (or (member name ,hidden)
+                                                            (member name ,held)))
+                                         ,tabs)))
                ((symbol-function 'agent-repl--ws-current-name) (lambda () ,current))
                ((symbol-function 'agent-repl--ws-current-log-name) (lambda () ,current))
                ((symbol-function 'agent-repl-host-request-switch)
@@ -1440,12 +1460,17 @@ scope, never nil: a nil scope is refused by the ladder as a routing error
 Binds `agent-repl-test-commands--swapped' to the (WS TARGET) pair requested
 of the daemon, nil when none was."
   (declare (indent 3))
+  `(agent-repl-test-commands--swapping-past ,tabs ,hidden nil ,current ,@body))
+
+(defmacro agent-repl-test-commands--swapping-past (tabs hidden held current &rest body)
+  "As `agent-repl-test-commands--swapping', HELD tabs numbered but still opening."
+  (declare (indent 4))
   `(let ((agent-repl-test-commands--swapped nil))
      (cl-letf (((symbol-function 'agent-repl-verb-swap)
                 (lambda (ws target) (setq agent-repl-test-commands--swapped (list ws target))))
                ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
                ((symbol-function 'message) (lambda (&rest _) nil)))
-       (agent-repl-test-commands--with-hidden-bar ,tabs ,hidden ,current ,@body))))
+       (agent-repl-test-commands--with-numbered-bar ,tabs ,hidden ,held ,current ,@body))))
 
 (ert-deftest agent-repl-test-commands-tab-slot-maps-digits ()
   "Digits 1-9 name slots 1-9 and 0 names slot 10."
@@ -1486,8 +1511,20 @@ of the daemon, nil when none was."
     (agent-repl-test-commands--swapping '("first" "second") nil "first"
       (agent-repl-workspace-swap 10)
       (should-not agent-repl-test-commands--swapped))
-    (should (member "elisp.commands.swap-out-of-range slot=10 tabs=2"
+    (should (member "elisp.commands.swap-out-of-range slot=10 last=2"
                     (agent-repl-test-commands--info-messages)))))
+
+(ert-deftest agent-repl-test-commands-swap-keeps-the-daemons-number-past-a-held-tab ()
+  "A tab held for its open keeps its number, so slot 3 is still the daemon's 3."
+  (agent-repl-test-commands--swapping-past '("first" "opening" "third") nil '("opening") "first"
+    (agent-repl-workspace-swap 3)
+    (should (equal agent-repl-test-commands--swapped '("first" "third")))))
+
+(ert-deftest agent-repl-test-commands-swap-onto-a-held-tab-is-requested ()
+  "A swap moves the daemon's arrangement, so a tab still opening is a target."
+  (agent-repl-test-commands--swapping-past '("first" "opening") nil '("opening") "first"
+    (agent-repl-workspace-swap 2)
+    (should (equal agent-repl-test-commands--swapped '("first" "opening")))))
 
 (ert-deftest agent-repl-test-commands-swap-on-its-own-slot-is-a-recorded-no-op ()
   "The current workspace's own slot requests nothing."
@@ -1610,7 +1647,7 @@ of the daemon, nil when none was."
     (agent-repl-test-commands--with-bar '("first" "second") "first"
       (agent-repl-switch-to-workspace 3))
     ;; Assert
-    (should (member "elisp.commands.switch-to-workspace-out-of-range n=3 tabs=2"
+    (should (member "elisp.commands.switch-to-workspace-out-of-range n=3 last=2"
                     (agent-repl-test-commands--info-messages)))))
 
 (ert-deftest agent-repl-test-commands-switch-to-workspace-records-an-empty-bar ()
@@ -1622,6 +1659,71 @@ of the daemon, nil when none was."
     ;; Assert
     (should (member "elisp.commands.switch-to-workspace-no-tabs n=1"
                     (agent-repl-test-commands--info-messages)))))
+
+(ert-deftest agent-repl-test-commands-switch-to-workspace-keeps-the-daemons-number-past-a-held-tab ()
+  "A tab held for its open keeps its number, so the next tab is still the daemon's 3."
+  (agent-repl-test-commands--with-numbered-bar '("first" "opening" "third") nil '("opening") "first"
+    (agent-repl-switch-to-workspace 3)
+    (should (equal agent-repl-test-commands--switched "third"))))
+
+(ert-deftest agent-repl-test-commands-switch-to-workspace-on-a-held-tab-is-a-no-op ()
+  "A tab still opening is not selectable, as its sidebar row is not."
+  (agent-repl-test-commands--with-numbered-bar '("first" "opening" "third") nil '("opening") "first"
+    (agent-repl-switch-to-workspace 2)
+    (should-not agent-repl-test-commands--switched)))
+
+(ert-deftest agent-repl-test-commands-switch-to-workspace-records-a-held-tab ()
+  "A press on a tab still opening records the tab it named."
+  ;; Arrange / Act
+  (agent-repl-test-commands--capturing-info
+    (agent-repl-test-commands--with-numbered-bar '("first" "opening") nil '("opening") "first"
+      (agent-repl-switch-to-workspace 2))
+    ;; Assert
+    (should (member "elisp.commands.switch-to-workspace-opening n=2 target=opening"
+                    (agent-repl-test-commands--info-messages)))))
+
+(ert-deftest agent-repl-test-commands-switch-to-last-skips-a-held-trailing-tab ()
+  "`M-0' lands on the last DRAWN tab when the daemon's last is still opening."
+  (agent-repl-test-commands--with-numbered-bar '("first" "second" "opening") nil '("opening") "first"
+    (agent-repl-switch-to-last-workspace)
+    (should (equal agent-repl-test-commands--switched "second"))))
+
+(ert-deftest agent-repl-test-commands-last-tab-slot-is-the-last-drawn-tabs-number ()
+  "The last-tab slot is the daemon's number of the last drawn tab, past a held one."
+  (agent-repl-test-commands--with-numbered-bar '("first" "opening" "third") nil '("opening") "first"
+    (should (= (agent-repl--last-tab-slot) 3))))
+
+(ert-deftest agent-repl-test-commands-numbered-tab-answers-a-drawn-tab ()
+  "The tab at a daemon number is answered with its drawn mark."
+  (let ((agent-repl-roster--tab-numbers '(("a" . 1) ("b" . 2))))
+    (should (equal (agent-repl--numbered-tab 2 '("a" "b")) '("b" . t)))))
+
+(ert-deftest agent-repl-test-commands-numbered-tab-answers-a-held-tab-undrawn ()
+  "A numbered tab missing from the drawn order is answered undrawn."
+  (let ((agent-repl-roster--tab-numbers '(("a" . 1) ("b" . 2))))
+    (should (equal (agent-repl--numbered-tab 2 '("a")) '("b")))))
+
+(ert-deftest agent-repl-test-commands-numbered-tab-is-nil-for-a-number-no-tab-has ()
+  "A number the daemon gave no tab answers nil."
+  (let ((agent-repl-roster--tab-numbers '(("a" . 1))))
+    (should-not (agent-repl--numbered-tab 2 '("a")))))
+
+(ert-deftest agent-repl-test-commands-last-drawn-tab-number-of-an-empty-bar-is-nil ()
+  "An empty bar has no last number."
+  (let ((agent-repl-roster--tab-numbers '(("a" . 1))))
+    (should-not (agent-repl--last-drawn-tab-number nil))))
+
+(ert-deftest agent-repl-test-commands-every-slot-gesture-resolves-through-numbered-tab ()
+  "The chords and the swap both read a slot through `agent-repl--numbered-tab'."
+  (let ((asked nil))
+    (cl-letf (((symbol-function 'agent-repl--numbered-tab)
+               (lambda (n _drawn) (push n asked) nil))
+              ((symbol-function 'agent-repl-verb-swap) #'ignore)
+              ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws)))
+      (agent-repl-test-commands--with-bar '("first" "second") "first"
+        (agent-repl-switch-to-workspace 2)
+        (agent-repl-workspace-swap 1))
+      (should (equal asked '(1 2))))))
 
 (ert-deftest agent-repl-test-commands-switch-to-workspace-records-the-picker-choice ()
   "The completing-read route records the workspace the user chose."

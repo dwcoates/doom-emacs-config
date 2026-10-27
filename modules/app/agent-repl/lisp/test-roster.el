@@ -3288,6 +3288,92 @@ saying the roster had been asked for one and declined."
       (funcall push nil)
       (should (equal (agent-repl-roster-drawn-tab-order) '("two"))))))
 
+;;;; ---- The daemon's tab numbers ----
+
+(defun agent-repl-test-roster--three-with-a-fold ()
+  "Reconcile tabs one, two and three, two in a collapsed repository."
+  (agent-repl-roster-reconcile
+   (agent-repl-test-roster--roster
+    :sections (list (agent-repl-test-roster--section
+                     "open" (list (agent-repl-test-roster--row "w1" "one" :ready)))
+                    (agent-repl-test-roster--section
+                     "shut" (list (agent-repl-test-roster--row "w2" "two" :ready)) t)
+                    (agent-repl-test-roster--section
+                     "late" (list (agent-repl-test-roster--row "w3" "three" :ready)))))))
+
+(ert-deftest agent-repl-test-roster-reconcile-records-the-daemons-tab-numbers ()
+  "Every numbered tab carries the number the daemon gives it."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-test-roster--three-with-a-fold)
+    ;; Assert
+    (should (equal (mapcar #'agent-repl-roster-tab-number-of '("one" "three")) '(1 2)))))
+
+(ert-deftest agent-repl-test-roster-a-folded-tab-has-no-number ()
+  "A tab of a collapsed repository has no number."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-test-roster--three-with-a-fold)
+    ;; Assert
+    (should-not (agent-repl-roster-tab-number-of "two"))))
+
+(ert-deftest agent-repl-test-roster-a-hidden-workspaces-tab-has-no-number ()
+  "A hidden workspace's undrawn tab has no number."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-roster-reconcile
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "w1" "one" :ready))))
+      :hidden (list (agent-repl-test-roster--row "w2" "two" :ready))))
+    ;; Assert
+    (should-not (agent-repl-roster-tab-number-of "two"))))
+
+(ert-deftest agent-repl-test-roster-numbered-tab-names-the-tab-at-a-number ()
+  "The tab at a daemon number is found by that number."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-test-roster--three-with-a-fold)
+    ;; Assert
+    (should (equal (agent-repl-roster-numbered-tab 2) "three"))))
+
+(ert-deftest agent-repl-test-roster-numbered-tab-is-nil-past-the-last-number ()
+  "No tab answers a number the daemon gave no tab."
+  (agent-repl-test-roster--with-editor
+    ;; Act
+    (agent-repl-test-roster--three-with-a-fold)
+    ;; Assert
+    (should-not (agent-repl-roster-numbered-tab 3))))
+
+(ert-deftest agent-repl-test-roster-the-next-push-replaces-the-tab-numbers ()
+  "A tab's number is the latest push's, and a tab gone from it has none."
+  (agent-repl-test-roster--with-editor
+    ;; Arrange
+    (agent-repl-test-roster--three-with-a-fold)
+    ;; Act
+    (agent-repl-roster-reconcile
+     (agent-repl-test-roster--one-section
+      (agent-repl-test-roster--row "w3" "three" :ready)))
+    ;; Assert
+    (should (equal (list (agent-repl-roster-tab-number-of "three")
+                         (agent-repl-roster-tab-number-of "one"))
+                   '(1 nil)))))
+
+(ert-deftest agent-repl-test-roster-drawn-tab-numbers-are-the-daemons ()
+  "The bar paints each drawn tab the daemon's number, a held tab's gap kept."
+  (let ((agent-repl-roster--tab-numbers '(("one" . 1) ("held" . 2) ("three" . 3))))
+    (should (equal (agent-repl-roster-drawn-tab-numbers '("one" "three")) '(1 3)))))
+
+(ert-deftest agent-repl-test-roster-drawn-tab-numbers-before-any-number-are-places ()
+  "A pre-roster boot paints each tab its 1-based place."
+  (let ((agent-repl-roster--tab-numbers nil))
+    (should (equal (agent-repl-roster-drawn-tab-numbers '("x" "y")) '(1 2)))))
+
+(ert-deftest agent-repl-test-roster-a-drawn-tab-with-no-number-is-an-error ()
+  "A drawn tab the daemon numbered nothing breaks the bar's numbering loudly."
+  (let ((agent-repl-roster--tab-numbers '(("one" . 1))))
+    (should-error (agent-repl-roster-drawn-tab-numbers '("one" "stray")))))
+
 ;;;; ---- A hidden workspace's tab is off the bar ----
 
 (ert-deftest agent-repl-test-roster-walk-marks-every-hidden-row-collapsed ()
