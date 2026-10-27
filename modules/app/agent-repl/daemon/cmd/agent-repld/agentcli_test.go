@@ -114,8 +114,8 @@ func (c *cliClient) SetWorkspaceCorrespondence(_ context.Context, req *connect.R
 	return connect.NewResponse(&agentreplv1.SetWorkspaceCorrespondenceResponse{}), c.record(req.Msg)
 }
 
-func (c *cliClient) SetWorkspacePrincipalLink(_ context.Context, req *connect.Request[agentreplv1.SetWorkspacePrincipalLinkRequest]) (*connect.Response[agentreplv1.SetWorkspacePrincipalLinkResponse], error) {
-	return connect.NewResponse(&agentreplv1.SetWorkspacePrincipalLinkResponse{}), c.record(req.Msg)
+func (c *cliClient) ChangeWorkspaceLinks(_ context.Context, req *connect.Request[agentreplv1.ChangeWorkspaceLinksRequest]) (*connect.Response[agentreplv1.ChangeWorkspaceLinksResponse], error) {
+	return connect.NewResponse(&agentreplv1.ChangeWorkspaceLinksResponse{}), c.record(req.Msg)
 }
 
 func (c *cliClient) SubmitPrompt(_ context.Context, req *connect.Request[agentreplv1.SubmitPromptRequest]) (*connect.Response[agentreplv1.SubmitPromptResponse], error) {
@@ -548,14 +548,24 @@ func TestSetNameSendsTheRename(t *testing.T) {
 	}
 }
 
-func TestSetSendsThePrincipalLinkChange(t *testing.T) {
+func TestLinkSendsTheChange(t *testing.T) {
 	tests := []struct {
-		name    string
-		args    []string
-		wantSet string
+		name string
+		args []string
+		want *agentreplv1.ChangeWorkspaceLinksRequest
 	}{
-		{name: "-principal-link sets the url", args: []string{"-principal-link", "https://example.com/pr/3"}, wantSet: "https://example.com/pr/3"},
-		{name: "-no-principal-link clears it", args: []string{"-no-principal-link"}},
+		{name: "-url with -label sets the link", args: []string{"-url", "https://example.com/pr/3", "-label", "The pull request"},
+			want: &agentreplv1.ChangeWorkspaceLinksRequest{Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{
+				Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://example.com/pr/3", Label: "The pull request"}}}},
+		{name: "-remove removes one", args: []string{"-remove", "https://example.com/pr/3"},
+			want: &agentreplv1.ChangeWorkspaceLinksRequest{Change: &agentreplv1.ChangeWorkspaceLinksRequest_Remove{
+				Remove: &agentreplv1.ChangeWorkspaceLinksRemove{Url: "https://example.com/pr/3"}}}},
+		{name: "-show repeated names each shown link in order", args: []string{"-show", "https://a", "-show", "https://b"},
+			want: &agentreplv1.ChangeWorkspaceLinksRequest{Change: &agentreplv1.ChangeWorkspaceLinksRequest_Show{
+				Show: &agentreplv1.ChangeWorkspaceLinksShow{Urls: []string{"https://a", "https://b"}}}}},
+		{name: "-clear clears them", args: []string{"-clear"},
+			want: &agentreplv1.ChangeWorkspaceLinksRequest{Change: &agentreplv1.ChangeWorkspaceLinksRequest_Clear{
+				Clear: &agentreplv1.ChangeWorkspaceLinksClear{}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -563,32 +573,61 @@ func TestSetSendsThePrincipalLinkChange(t *testing.T) {
 			f := newCLIFixture()
 
 			// Act
-			code := f.run(workspaceNoun, append([]string{"set", "here"}, tt.args...)...)
+			code := f.run(workspaceNoun, append([]string{"link", "here"}, tt.args...)...)
 
 			// Assert
 			if code != exitSuccess {
 				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 			}
-			req := only[*agentreplv1.SetWorkspacePrincipalLinkRequest](t, f)
+			req := only[*agentreplv1.ChangeWorkspaceLinksRequest](t, f)
 			if req.GetWorkspace() == nil {
 				t.Error("the request names no workspace")
 			}
-			if tt.wantSet != "" && req.GetSet().GetUrl() != tt.wantSet {
-				t.Errorf("change = %v, want a set of %q", req.GetChange(), tt.wantSet)
-			}
-			if tt.wantSet == "" && req.GetClear() == nil {
-				t.Errorf("change = %v, want a clear", req.GetChange())
+			req.Workspace = nil
+			if !proto.Equal(req, tt.want) {
+				t.Errorf("request = %v, want %v", req, tt.want)
 			}
 		})
 	}
 }
 
-func TestStatusPrintsThePrincipalLink(t *testing.T) {
+func TestLinkRefusesAMalformedChange(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "no change", args: nil},
+		{name: "a url with no label", args: []string{"-url", "https://example.com"}},
+		{name: "a label with no url", args: []string{"-label", "The design doc"}},
+		{name: "two changes at once", args: []string{"-remove", "https://a", "-clear"}},
+		{name: "a positional argument", args: []string{"-clear", "extra"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"link", "here"}, tt.args...)...)
+
+			// Assert
+			if code != exitFailure || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d, requests %v; want a usage failure and nothing sent", code, f.client.requests)
+			}
+			if f.errOut.Len() == 0 {
+				t.Error("stderr is empty, want the usage problem named")
+			}
+		})
+	}
+}
+
+func TestStatusPrintsTheLinks(t *testing.T) {
 	// Arrange
 	f := newCLIFixture()
 	link := "https://example.com/pr/4"
 	f.client.status = &agentreplv1.GetWorkspaceStatusResponse{Result: &agentreplv1.GetWorkspaceStatusResponse_Success{Success: &agentreplv1.GetWorkspaceStatusSuccess{
-		Status: &agentreplv1.WorkspaceStatus{Repository: &workspacev1.RepositoryRef{Id: "repo-1"}, PrincipalLink: &link}}}}
+		Status: &agentreplv1.WorkspaceStatus{Repository: &workspacev1.RepositoryRef{Id: "repo-1"},
+			Links: &agentreplv1.WorkspaceLinks{Links: []*agentreplv1.WorkspaceLink{{Url: link, Label: "The pull request"}}}}}}}
 
 	// Act
 	code := f.run(workspaceNoun, "status", "here")
@@ -597,21 +636,8 @@ func TestStatusPrintsThePrincipalLink(t *testing.T) {
 	if code != exitSuccess {
 		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 	}
-	if !strings.Contains(f.out.String(), link) {
-		t.Fatalf("stdout = %q, want it to carry the principal link", f.out.String())
-	}
-}
-
-func TestSetRefusesAPrincipalLinkSetAndClearedAtOnce(t *testing.T) {
-	// Arrange
-	f := newCLIFixture()
-
-	// Act
-	code := f.run(workspaceNoun, "set", "here", "-principal-link", "https://example.com", "-no-principal-link")
-
-	// Assert
-	if code != exitFailure || len(f.client.requests) != 0 {
-		t.Fatalf("exit %d, requests %v; want a usage failure and nothing sent", code, f.client.requests)
+	if !strings.Contains(f.out.String(), link) || !strings.Contains(f.out.String(), "The pull request") {
+		t.Fatalf("stdout = %q, want it to carry the link and its label", f.out.String())
 	}
 }
 
