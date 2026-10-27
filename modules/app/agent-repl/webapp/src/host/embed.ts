@@ -19,7 +19,7 @@ import { LEVEL_WINDOW_OPERATION, log } from "../log.js";
 import type { AppliedLevel, LevelWindow, WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { closeStandingNewsDigest } from "../news-digest/news-digest.js";
 import type { PresenceSource } from "../presence.js";
-import type { FocusLeftSource } from "../focus-left.js";
+import { FOCUS_LEFT_EMACS, type FocusLeftSource } from "../focus-left.js";
 import type { WebhostFailureView } from "../failure/webhost.js";
 import { HOST_CHANNEL, onHostChannel, parseHostToPage, type HostToPage, type PageToHost } from "./protocol.js";
 import { pageMutationObserver } from "../dom.js";
@@ -71,8 +71,7 @@ export interface EmbedEnv {
   readonly restyleTurns: RestyleTurnsSource;
 }
 
-/** Why the focus left the page when Emacs moved its own. */
-export const FOCUS_LEFT_EMACS = "Emacs moved its focus";
+export { FOCUS_LEFT_EMACS };
 
 /**
  * The class the page's root wears while the webhost draws the sidebar over the
