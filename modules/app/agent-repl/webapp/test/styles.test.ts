@@ -2770,20 +2770,24 @@ describe("the one bubble rule set", () => {
     expect(bubble).toMatch(/font-size:\s*calc\(var\(--bubble-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/);
   });
 
-  it.each([
-    ["size", /--bubble-font-rem:\s*var\(--tree-font-rem\)/],
-    ["leading", /--md-line-h:\s*var\(--tree-line-h\)/],
-  ] as const)("sets a prompt's %s from the metaprompt tree's token", (_label, pattern) => {
+  it("sets a prompt's leading from the metaprompt tree's token", () => {
     // Arrange / Act
     const prompt = declarationsOf('.bubble[data-role="prompt"]') ?? "";
     // Assert
-    expect(prompt).toMatch(pattern);
+    expect(prompt).toMatch(/--md-line-h:\s*var\(--tree-line-h\)/);
+  });
+
+  it("leaves a prompt at every bubble's one size", () => {
+    // Arrange / Act
+    const prompt = declarationsOf('.bubble[data-role="prompt"]') ?? "";
+    // Assert
+    expect(prompt).not.toMatch(/--bubble-font-rem\s*:/);
   });
 
   it.each([
-    ["size", /font-size:\s*calc\(var\(--tree-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/],
+    ["size", /font-size:\s*calc\(var\(--bubble-base-font-rem\) \* 1rem \* var\(--feed-text-scale\)\)/],
     ["leading", /line-height:\s*var\(--tree-line-h\)/],
-  ] as const)("sets a metaprompt tree's %s from the token a prompt reads", (_label, pattern) => {
+  ] as const)("sets a metaprompt tree's %s from the token a bubble reads", (_label, pattern) => {
     // Arrange / Act
     const tree = declarationsOf(".mp-tree") ?? "";
     // Assert
@@ -4962,6 +4966,14 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     expect([got, rootToken("--small-prose-font-rem")]).toEqual(["var(--small-prose-font-rem)", "0.8"]);
   });
 
+  it("scales an interim response's padding against the bubble size it was ruled at, not the moved base", () => {
+    // Arrange / Act
+    const got = [rootToken("--small-prose-pad-ref-rem"), rootToken("--bubble-base-font-rem")];
+
+    // Assert — 0.9 was every bubble's size on 2026-10-14; the base is now the tree's 0.85.
+    expect(got).toEqual(["0.9", "0.85"]);
+  });
+
   it("sets an interim response's prose at the thinking bubble's smaller size", () => {
     // Arrange / Act
     const got = [
@@ -4974,14 +4986,14 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
   });
 
   it("declares the smaller size once, on the rule both kinds share", () => {
-    // Arrange / Act: the prompt's rule narrows the token too, to the tree's
-    // size (2026-10-25), and is the one other rule that may.
+    // Arrange / Act: no other rule narrows the token (a prompt's override
+    // went when every bubble took the tree's size, 2026-10-27).
     const declaring = rulesOf(stylesheet)
       .filter((rule) => /(?:^|;)\s*--bubble-font-rem\s*:/.test(rule.declarations) && rule.selectors.some((sel) => sel !== ":root"))
       .map((rule) => rule.selectors);
 
     // Assert
-    expect(declaring).toEqual([['.bubble[data-role="prompt"]'], [...DIMMED_TEXT_SELECTORS]]);
+    expect(declaring).toEqual([[...DIMMED_TEXT_SELECTORS]]);
   });
 
   it("sets an interim response's prose in bold", () => {
@@ -5013,7 +5025,7 @@ describe("the dimmed prose of a thinking or interim bubble", () => {
     const got = [rootToken("--bubble-base-font-rem"), rootToken("--bubble-font-rem")];
 
     // Assert
-    expect(got).toEqual(["0.9", "var(--bubble-base-font-rem)"]);
+    expect(got).toEqual(["0.85", "var(--bubble-base-font-rem)"]);
   });
 
   it("leaves the turn's answer at every bubble's size", () => {
@@ -5416,8 +5428,8 @@ describe("the padding ladder", () => {
   const PROMPT_X = "calc(var(--bubble-pad-x-base)*0.7)";
   const USER_Y = "calc(var(--bubble-pad-y-base)*0.49*1.15*1.3*1.1)";
   const USER_X = "calc(var(--bubble-pad-x-base)*0.7*1.15)";
-  const INTERIM_Y = "calc(var(--bubble-pad-y-base)*0.49*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
-  const INTERIM_X = "calc(var(--bubble-pad-x-base)*var(--bubble-font-rem)/var(--bubble-base-font-rem))";
+  const INTERIM_Y = "calc(var(--bubble-pad-y-base)*0.49*var(--bubble-font-rem)/var(--small-prose-pad-ref-rem))";
+  const INTERIM_X = "calc(var(--bubble-pad-x-base)*var(--bubble-font-rem)/var(--small-prose-pad-ref-rem))";
   const BASE_X = "var(--bubble-pad-x-base)";
   const ANSWER_Y = "calc(var(--bubble-pad-y-base)*0.7*1.25*1.3*1.1)";
 
