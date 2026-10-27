@@ -628,6 +628,13 @@ type DB interface {
 	// when none is set.
 	FeedTextScale(ctx context.Context) (float64, error)
 
+	// PutAccountDefaultModel records the model new sessions on one account
+	// root start under when nobody names one.
+	PutAccountDefaultModel(ctx context.Context, configDir, model string) error
+	// AccountDefaultModel loads the default chosen for one account root,
+	// false when nobody chose one.
+	AccountDefaultModel(ctx context.Context, configDir string) (string, bool, error)
+
 	// RecordRolledBackTurns records that turns were rolled back, all or
 	// nothing; the feed never draws them again.
 	RecordRolledBackTurns(ctx context.Context, id WorkspaceID, turns []TurnID) error

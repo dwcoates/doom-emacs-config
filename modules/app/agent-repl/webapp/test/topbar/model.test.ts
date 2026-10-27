@@ -7,6 +7,11 @@ import {
   SetModelResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import {
+  SetDefaultModelErrorSchema,
+  SetDefaultModelResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_default_model_pb";
+import { cascadedValue, inDocument } from "../stylesheet.js";
+import {
   AgentEffortLevel,
   ModelMarker,
   ModelMarkerSchema,
@@ -20,11 +25,19 @@ import {
   COLD_ATTENTION_VALUE,
   COLD_NOTICE_ATTRIBUTE,
   COLD_REFUSAL_SENTENCE,
+  DEFAULT_MARK_ATTRIBUTE,
+  DEFAULT_MARK_LABEL,
+  MAKE_DEFAULT_ATTRIBUTE,
+  MAKE_DEFAULT_LABEL,
   MODEL_PLACEHOLDER,
   MODEL_TOOLTIP,
+  NOT_IN_CATALOG_SENTENCE,
+  SET_DEFAULT_MODEL_CAUSES,
+  SET_MODEL_CAUSES,
   SELECTED_MODEL_ATTRIBUTE,
   SELECTED_OPTION_ATTRIBUTE,
   drawModelCapabilities,
+  drawModelOptions,
   drawTopbarModelSelector,
   effortLevelName,
   pickModel,
@@ -42,10 +55,11 @@ const option = (name: string, init: Partial<{ displayName: string; description: 
     description: init.description ?? "",
   });
 
-const selector = (init: { selected?: ModelOption; options?: ModelOption[] }) =>
+const selector = (init: { selected?: ModelOption; options?: ModelOption[]; defaultModel?: string }) =>
   create(TopbarModelSelectorSchema, {
     selected: init.selected,
     options: init.options ?? [],
+    defaultModel: { name: init.defaultModel ?? "opus" },
   });
 
 /** Mount the selector on the host so its anchor is findable. */
@@ -538,6 +552,195 @@ describe("the pick", () => {
     // refusal with no words: it is reported through the failure sink, and no
     // sentence is invented at the control (src/rpc/refuse.ts).
     expect(host.querySelector(".refusal")).toBeNull();
+  });
+});
+
+describe("the default corner", () => {
+  /** Open the reveal of a selector offering opus and sonnet, opus the login's default. */
+  function openDefaults(ctx = appContext()): { host: HTMLElement; panel: HTMLElement } {
+    const { host, tc } = topbarContext(ctx);
+    const button = mountSelector(tc, host, selector({ options: [option("opus"), option("sonnet")], defaultModel: "opus" }));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    return { host, panel: openPanel(host)! };
+  }
+
+  /** Click sonnet's "Make default" and let the rpc settle. */
+  async function makeSonnetDefault(
+    setDefaultModel: () => ReturnType<typeof create<typeof SetDefaultModelResponseSchema>>,
+    setModel: () => ReturnType<typeof create<typeof SetModelResponseSchema>> = () =>
+      create(SetModelResponseSchema, { result: { case: "success", value: {} } }),
+  ): Promise<HTMLElement> {
+    const { host, panel } = openDefaults(appContext({ setDefaultModel, setModel }));
+    panel.querySelector(`[${MAKE_DEFAULT_ATTRIBUTE}="sonnet"]`)!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return host;
+  }
+
+  it("offers Make default on a row that is not the login's default", () => {
+    // ARRANGE / ACT
+    const { panel } = openDefaults();
+    // ASSERT
+    const control = panel.querySelector(`[data-model-option="sonnet"] [${MAKE_DEFAULT_ATTRIBUTE}]`);
+    expect(control?.textContent).toBe(MAKE_DEFAULT_LABEL);
+    expect(control?.getAttribute(MAKE_DEFAULT_ATTRIBUTE)).toBe("sonnet");
+  });
+
+  it("marks the login's default row instead of offering it", () => {
+    // ARRANGE / ACT
+    const { panel } = openDefaults();
+    const row = panel.querySelector('[data-model-option="opus"]')!;
+    // ASSERT
+    expect(row.querySelector(`[${MAKE_DEFAULT_ATTRIBUTE}]`)).toBeNull();
+    expect(row.querySelector(`[${DEFAULT_MARK_ATTRIBUTE}]`)?.textContent).toBe(DEFAULT_MARK_LABEL);
+  });
+
+  it("marks exactly one row as the default", () => {
+    // ARRANGE / ACT
+    const { panel } = openDefaults();
+    // ASSERT
+    expect(panel.querySelectorAll(`[${DEFAULT_MARK_ATTRIBUTE}]`)).toHaveLength(1);
+  });
+
+  it("refuses a selector carrying no default model rather than marking none", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    const view = create(TopbarModelSelectorSchema, { options: [option("opus")] });
+    // ACT / ASSERT
+    expect(() => drawModelOptions(view, tc, document.createElement("div"), createControl())).toThrow(/default_model/);
+  });
+
+  it("echoes the row's AgentModel verbatim", async () => {
+    // ARRANGE
+    let sent = "";
+    const { panel } = openDefaults(
+      appContext({
+        setDefaultModel: (req) => {
+          sent = req.model?.name ?? "";
+          return create(SetDefaultModelResponseSchema, { result: { case: "success", value: {} } });
+        },
+      }),
+    );
+    // ACT
+    panel.querySelector(`[${MAKE_DEFAULT_ATTRIBUTE}="sonnet"]`)!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // ASSERT
+    expect(sent).toBe("sonnet");
+  });
+
+  it("never switches this session's model", async () => {
+    // ARRANGE
+    let switched = false;
+    // ACT
+    await makeSonnetDefault(
+      () => create(SetDefaultModelResponseSchema, { result: { case: "success", value: {} } }),
+      () => {
+        switched = true;
+        return create(SetModelResponseSchema, { result: { case: "success", value: {} } });
+      },
+    );
+    // ASSERT
+    expect(switched).toBe(false);
+  });
+
+  it("closes the reveal on success, the new default arriving on the stream", async () => {
+    // ARRANGE / ACT
+    const host = await makeSonnetDefault(() =>
+      create(SetDefaultModelResponseSchema, { result: { case: "success", value: {} } }),
+    );
+    // ASSERT
+    expect(openPanel(host)).toBeNull();
+    expect(host.querySelector(".refusal")).toBeNull();
+  });
+
+  const causes: Readonly<Record<string, unknown>> = {
+    unknownWorkspace: {},
+    workspaceRefMismatch: { registryDir: "/elsewhere" },
+    transferringAway: { address: "127.0.0.1:9" },
+    notYetAdopted: {},
+    noSession: {},
+    notInCatalog: {},
+  };
+
+  // ENUMERATED FROM THE SCHEMA: an arm added to the proto fails this test
+  // rather than quietly going undrawn.
+  for (const arm of oneofArms(SetDefaultModelErrorSchema, "cause")) {
+    it(`states the ${arm} refusal at the selector`, async () => {
+      // ARRANGE / ACT
+      const host = await makeSonnetDefault(() =>
+        create(SetDefaultModelResponseSchema, {
+          result: { case: "error", value: { cause: { case: arm, value: causes[arm] } as never } },
+        }),
+      );
+      // ASSERT
+      expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe(arm);
+    });
+  }
+
+  it("gives the control back after a refusal, so it can be clicked again", async () => {
+    // ARRANGE / ACT
+    const host = await makeSonnetDefault(() =>
+      create(SetDefaultModelResponseSchema, {
+        result: { case: "error", value: { cause: { case: "notInCatalog", value: {} } } },
+      }),
+    );
+    // ASSERT
+    expect(openPanel(host)!.querySelector(`[${MAKE_DEFAULT_ATTRIBUTE}="sonnet"]`)?.getAttribute("aria-disabled")).toBeNull();
+  });
+
+  it("states a transport failure at the selector when the call never reached the daemon", async () => {
+    // ARRANGE / ACT
+    const host = await makeSonnetDefault(() => {
+      throw new Error("no route to the daemon");
+    });
+    // ASSERT
+    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("transport");
+  });
+
+  it("sits out of the row's flow, so the row keeps its height and width", () => {
+    // ARRANGE
+    const { panel } = openDefaults();
+    const row = panel.querySelector<HTMLElement>('[data-model-option="sonnet"]')!;
+    // ACT / ASSERT
+    inDocument(row, (drawn) => {
+      expect(cascadedValue(drawn, "position")).toBe("relative");
+      expect(cascadedValue(drawn.querySelector(`[${MAKE_DEFAULT_ATTRIBUTE}]`)!, "position")).toBe("absolute");
+      expect(cascadedValue(drawn.querySelector(`[${MAKE_DEFAULT_ATTRIBUTE}]`)!, "top")).toBe("0.4rem");
+      expect(cascadedValue(drawn.querySelector(`[${MAKE_DEFAULT_ATTRIBUTE}]`)!, "right")).toBe("0.7rem");
+    });
+  });
+
+  it("draws the default mark out of flow too", () => {
+    // ARRANGE
+    const { panel } = openDefaults();
+    const row = panel.querySelector<HTMLElement>('[data-model-option="opus"]')!;
+    // ACT / ASSERT
+    inDocument(row, (drawn) => {
+      expect(cascadedValue(drawn.querySelector(`[${DEFAULT_MARK_ATTRIBUTE}]`)!, "position")).toBe("absolute");
+    });
+  });
+
+  it("draws the control as small text, never a button's chrome", () => {
+    // ARRANGE
+    const { panel } = openDefaults();
+    const row = panel.querySelector<HTMLElement>('[data-model-option="sonnet"]')!;
+    // ACT / ASSERT
+    inDocument(row, (drawn) => {
+      const control = drawn.querySelector(`[${MAKE_DEFAULT_ATTRIBUTE}]`)!;
+      expect(cascadedValue(control, "font-size")).toBe("0.75em");
+      expect(cascadedValue(control, "border-style") || cascadedValue(control, "border")).toMatch(/none/);
+      expect(cascadedValue(control, "background-color") || cascadedValue(control, "background")).toMatch(/none|transparent|rgba\(0, 0, 0, 0\)/);
+    });
+  });
+});
+
+describe("NOT_IN_CATALOG_SENTENCE", () => {
+  it("is the one wording of an unserved model, for every rpc that echoes one", () => {
+    // ARRANGE
+    const tables = [SET_MODEL_CAUSES, SET_DEFAULT_MODEL_CAUSES] as unknown as Record<string, (value: unknown) => string>[];
+    // ACT
+    const said = tables.map((table) => table.notInCatalog({}));
+    // ASSERT
+    expect(said).toEqual([NOT_IN_CATALOG_SENTENCE, NOT_IN_CATALOG_SENTENCE]);
   });
 });
 

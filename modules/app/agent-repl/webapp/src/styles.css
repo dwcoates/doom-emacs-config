@@ -8033,6 +8033,38 @@ bubble-body.bubble-body { display: block; }
   color: var(--muted);
   font-size: 0.9em;
 }
+/* A model row's top-right corner (owner request, 2026-10-27): "Make default",
+   or "Default" on the login's default row. OUT OF FLOW, pinned inside the
+   row's own padding, so no row grows taller or wider for it. Small text with
+   no button chrome; the control is a muted red whose lightness sits between
+   the name's color and the description's grey, and the mark is that grey
+   alone. */
+.topbar-model-option {
+  position: relative;
+}
+.topbar-model-make-default,
+.topbar-model-default-mark {
+  --topbar-model-corner-grey: color-mix(in srgb, var(--fg) 50%, var(--muted));
+  position: absolute;
+  top: 0.4rem;
+  right: 0.7rem;
+  font-size: 0.75em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.topbar-model-make-default {
+  background: none;
+  border: none;
+  padding: 0;
+  color: color-mix(in srgb, #c0504d 60%, var(--topbar-model-corner-grey));
+  cursor: pointer;
+}
+.topbar-model-make-default:hover {
+  text-decoration: underline;
+}
+.topbar-model-default-mark {
+  color: var(--topbar-model-corner-grey);
+}
 .topbar-model-tags {
   display: inline-flex;
   flex-wrap: wrap;

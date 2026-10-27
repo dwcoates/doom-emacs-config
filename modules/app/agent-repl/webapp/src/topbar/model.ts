@@ -16,12 +16,20 @@
  * is the whole reason that extension exists: the spelling was re-declared six
  * times across three systems and kept aligned by review alone.
  *
+ * EVERY ROW CAN BE MADE THE LOGIN'S DEFAULT (owner request, 2026-10-27). A
+ * small text control in the row's top-right corner sends SetDefaultModel with
+ * the row's own echo token; the daemon files it against the account root the
+ * session spends as, so every new session on that login starts under it. The
+ * row that already IS the login's default
+ * (`TopbarModelSelector.default_model`) says so in the same corner instead.
+ * Both sit OUT OF FLOW, so the rows keep exactly the height and width they had.
+ *
  * CAPABILITIES RIDE THE OFFER because fast mode, auto mode and effort levels
  * are PER MODEL. They are drawn as small dim tags rather than controls: this
  * wave offers no way to set them, and a control that cannot be operated is
  * worse than a fact that can be read.
  */
-import { createControl, type Control } from "../control.js";
+import { createControl, labelledControl, type Control } from "../control.js";
 import { getExtension } from "@bufbuild/protobuf";
 import {
   AgentEffortLevel,
@@ -33,6 +41,7 @@ import {
   type ModelOption,
 } from "../../../proto/gen/ts/conversation/v1/api_pb";
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
+import { SetDefaultModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_default_model_pb";
 import type { TopbarModelSelector } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -135,10 +144,34 @@ export const SELECTED_MODEL_ATTRIBUTE = "data-model";
 /** The hook marking the offered row that is the current selection. */
 export const SELECTED_OPTION_ATTRIBUTE = "data-selected";
 
+/** The hook the "Make default" control carries: the row's echo token. */
+export const MAKE_DEFAULT_ATTRIBUTE = "data-make-default";
+
+/** What the "Make default" control says. */
+export const MAKE_DEFAULT_LABEL = "Make default";
+
+/** The hook marking the row that is already the login's default. */
+export const DEFAULT_MARK_ATTRIBUTE = "data-default-mark";
+
+/** What the login's default row says in the control's place. */
+export const DEFAULT_MARK_LABEL = "Default";
+
+/**
+ * The refusal of a model the selector never served, worded once for every rpc
+ * that echoes a served model (SetModel, SetDefaultModel).
+ */
+export const NOT_IN_CATALOG_SENTENCE = "that model is not in the served catalog";
+
+/** The causes only SetDefaultModel can answer with. */
+export const SET_DEFAULT_MODEL_CAUSES = {
+  noSession: () => "this workspace has no session to read a model catalog from",
+  notInCatalog: () => NOT_IN_CATALOG_SENTENCE,
+} as unknown as SentenceTable;
+
 /** The causes only SetModel can answer with. */
 export const SET_MODEL_CAUSES = {
   noSession: () => "this workspace has no session to set a model on",
-  notInCatalog: () => "that model is not in the served catalog",
+  notInCatalog: () => NOT_IN_CATALOG_SENTENCE,
   vendorRefused: (value: { detail: string }) => `the vendor refused: ${value.detail}`,
   cold: () => COLD_REFUSAL_SENTENCE,
 } as unknown as SentenceTable;
@@ -256,8 +289,10 @@ export function drawModelOptions(
   const list = document.createElement("div");
   list.className = "topbar-model-options list-rows";
   const selected = u.selected === undefined ? undefined : selectedModelName(u.selected);
+  const loginDefault = requireMessage(u.defaultModel, "TopbarModelSelector.default_model").name;
   for (const option of offerableOptions(u.options)) {
     const row = drawModelOption(option, tc, wrap, button);
+    row.append(drawDefaultCorner(option, loginDefault, tc, wrap, button));
     // The row that IS the selection, named by the same echo token the button
     // carries — so the reveal shows where the reader already is rather than
     // offering the current model as if it were a change.
@@ -304,6 +339,75 @@ export function drawModelOption(
     void pickModel(option, tc, wrap, button, row);
   });
   return row;
+}
+
+/**
+ * The row's top-right corner: "Make default", or "Default" on the row that
+ * already is the login's default.
+ *
+ * NESTED IN THE ROW, SO ITS CLICK STOPS THERE: a click that reached the row
+ * would also switch this session's model, which "Make default" never does.
+ */
+export function drawDefaultCorner(
+  option: ModelOption,
+  loginDefault: string,
+  tc: TopbarContext,
+  wrap: HTMLElement,
+  button: Control,
+): HTMLElement {
+  const model = requireMessage(option.model, "ModelOption.model");
+  if (model.name === loginDefault) {
+    const mark = document.createElement("span");
+    mark.className = "topbar-model-default-mark";
+    mark.setAttribute(DEFAULT_MARK_ATTRIBUTE, model.name);
+    mark.textContent = DEFAULT_MARK_LABEL;
+    return mark;
+  }
+  const control = labelledControl({
+    className: "topbar-model-make-default",
+    hook: [MAKE_DEFAULT_ATTRIBUTE, model.name],
+    label: MAKE_DEFAULT_LABEL,
+    onClick: (self) => {
+      void makeDefaultModel(option, tc, wrap, button, self);
+    },
+  });
+  control.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+  return control;
+}
+
+/**
+ * Send "Make default" for OPTION, with its control and the selector's button
+ * inert while it is unanswered. The new default arrives on the TOPBAR STREAM:
+ * `SetDefaultModelSuccess` is empty on purpose, as SetModel's is.
+ */
+export async function makeDefaultModel(
+  option: ModelOption,
+  tc: TopbarContext,
+  wrap: HTMLElement,
+  button: Control,
+  control: Control,
+): Promise<void> {
+  const model = requireMessage(option.model, "ModelOption.model");
+  log.info(`the reader made ${model.name} the login's default model`, {
+    operation: "topbar.model-made-default",
+    context: { model: model.name },
+  });
+  await sendPick(
+    {
+      rpc: "SetDefaultModel",
+      send: (client) => client.setDefaultModel({ workspace: tc.ctx.workspace, model }),
+      schema: SetDefaultModelResponseSchema,
+      causes: SET_DEFAULT_MODEL_CAUSES,
+      malformedOperation: "topbar.model-make-default",
+      unreadableOperation: "topbar.model-make-default-malformed-refusal",
+    },
+    tc,
+    wrap,
+    button,
+    control,
+  );
 }
 
 /** The capability tags: what this model can do, as the vendor declares it. */

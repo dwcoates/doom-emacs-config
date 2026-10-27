@@ -1,0 +1,71 @@
+// endpoint_set_default_model.proto — SetDefaultModel: a model selector row's
+// "Make default". TOPBAR section, SetModel's sibling.
+//
+// THE DEFAULT IS THE LOGIN'S, NOT THE WORKSPACE'S. The daemon resolves the
+// account root the named workspace's session spends as and records the model
+// as THAT root's default: every NEW session on that login (personal, work, ...)
+// starts under it when nobody names a model, and no running session changes.
+// The workspace only says which login is meant.
+//
+// THE MODEL IS THE ECHO TOKEN. The client sends back one of the selector's own
+// options (conversation.v1.ModelOption.model) unchanged; a model the selector
+// did not serve is `not_in_catalog`.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "conversation/v1/api.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetDefaultModelRequest {
+  // The workspace whose login's default changes.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The chosen model, verbatim from one of the selector's options.
+  conversation.v1.AgentModel model = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetDefaultModelResponse {
+  oneof result {
+    SetDefaultModelSuccess success = 1;
+    SetDefaultModelError error = 2;
+  }
+}
+
+// Recorded; every selector on that login is republished on the topbar stream
+// with the new frontend.v1.TopbarModelSelector.default_model.
+message SetDefaultModelSuccess {}
+
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message SetDefaultModelError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SetDefaultModelUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SetDefaultModelWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SetDefaultModelTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SetDefaultModelNotYetAdopted not_yet_adopted = 4;
+    // The workspace has no session, so no selector served a catalog to pick
+    // from.
+    SetDefaultModelNoSession no_session = 5;
+    // The model is not in the catalog the workspace's selector served.
+    SetDefaultModelNotInCatalog not_in_catalog = 6;
+  }
+}
+message SetDefaultModelUnknownWorkspace {}
+message SetDefaultModelWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SetDefaultModelTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message SetDefaultModelNotYetAdopted {}
+message SetDefaultModelNoSession {}
+message SetDefaultModelNotInCatalog {}

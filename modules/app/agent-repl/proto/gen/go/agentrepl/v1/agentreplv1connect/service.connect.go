@@ -215,6 +215,9 @@ const (
 	AgentReplWatchTopbarProcedure = "/agentrepl.v1.AgentRepl/WatchTopbar"
 	// AgentReplSetModelProcedure is the fully-qualified name of the AgentRepl's SetModel RPC.
 	AgentReplSetModelProcedure = "/agentrepl.v1.AgentRepl/SetModel"
+	// AgentReplSetDefaultModelProcedure is the fully-qualified name of the AgentRepl's SetDefaultModel
+	// RPC.
+	AgentReplSetDefaultModelProcedure = "/agentrepl.v1.AgentRepl/SetDefaultModel"
 	// AgentReplSetEffortProcedure is the fully-qualified name of the AgentRepl's SetEffort RPC.
 	AgentReplSetEffortProcedure = "/agentrepl.v1.AgentRepl/SetEffort"
 	// AgentReplSetPermissionModeProcedure is the fully-qualified name of the AgentRepl's
@@ -437,6 +440,7 @@ var (
 	agentReplSearchChatsMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SearchChats")
 	agentReplWatchTopbarMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchTopbar")
 	agentReplSetModelMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("SetModel")
+	agentReplSetDefaultModelMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SetDefaultModel")
 	agentReplSetEffortMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("SetEffort")
 	agentReplSetPermissionModeMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SetPermissionMode")
 	agentReplSelectAccountMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SelectAccount")
@@ -694,6 +698,9 @@ type AgentReplClient interface {
 	// The selector's pick: the typed echo token handed back. See
 	// endpoint_set_model.proto.
 	SetModel(context.Context, *connect.Request[v1.SetModelRequest]) (*connect.Response[v1.SetModelResponse], error)
+	// A selector row's "Make default": the model every NEW session on the
+	// workspace's login starts under. See endpoint_set_default_model.proto.
+	SetDefaultModel(context.Context, *connect.Request[v1.SetDefaultModelRequest]) (*connect.Response[v1.SetDefaultModelResponse], error)
 	// The effort selector's pick, SetModel's sibling. See
 	// endpoint_set_effort.proto.
 	SetEffort(context.Context, *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error)
@@ -1286,6 +1293,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSetModelMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		setDefaultModel: connect.NewClient[v1.SetDefaultModelRequest, v1.SetDefaultModelResponse](
+			httpClient,
+			baseURL+AgentReplSetDefaultModelProcedure,
+			connect.WithSchema(agentReplSetDefaultModelMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		setEffort: connect.NewClient[v1.SetEffortRequest, v1.SetEffortResponse](
 			httpClient,
 			baseURL+AgentReplSetEffortProcedure,
@@ -1704,6 +1717,7 @@ type agentReplClient struct {
 	searchChats                *connect.Client[v1.SearchChatsRequest, v1.SearchChatsResponse]
 	watchTopbar                *connect.Client[v1.WatchTopbarRequest, v1.WatchTopbarResponse]
 	setModel                   *connect.Client[v1.SetModelRequest, v1.SetModelResponse]
+	setDefaultModel            *connect.Client[v1.SetDefaultModelRequest, v1.SetDefaultModelResponse]
 	setEffort                  *connect.Client[v1.SetEffortRequest, v1.SetEffortResponse]
 	setPermissionMode          *connect.Client[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse]
 	selectAccount              *connect.Client[v1.SelectAccountRequest, v1.SelectAccountResponse]
@@ -2086,6 +2100,11 @@ func (c *agentReplClient) WatchTopbar(ctx context.Context, req *connect.Request[
 // SetModel calls agentrepl.v1.AgentRepl.SetModel.
 func (c *agentReplClient) SetModel(ctx context.Context, req *connect.Request[v1.SetModelRequest]) (*connect.Response[v1.SetModelResponse], error) {
 	return c.setModel.CallUnary(ctx, req)
+}
+
+// SetDefaultModel calls agentrepl.v1.AgentRepl.SetDefaultModel.
+func (c *agentReplClient) SetDefaultModel(ctx context.Context, req *connect.Request[v1.SetDefaultModelRequest]) (*connect.Response[v1.SetDefaultModelResponse], error) {
+	return c.setDefaultModel.CallUnary(ctx, req)
 }
 
 // SetEffort calls agentrepl.v1.AgentRepl.SetEffort.
@@ -2571,6 +2590,9 @@ type AgentReplHandler interface {
 	// The selector's pick: the typed echo token handed back. See
 	// endpoint_set_model.proto.
 	SetModel(context.Context, *connect.Request[v1.SetModelRequest]) (*connect.Response[v1.SetModelResponse], error)
+	// A selector row's "Make default": the model every NEW session on the
+	// workspace's login starts under. See endpoint_set_default_model.proto.
+	SetDefaultModel(context.Context, *connect.Request[v1.SetDefaultModelRequest]) (*connect.Response[v1.SetDefaultModelResponse], error)
 	// The effort selector's pick, SetModel's sibling. See
 	// endpoint_set_effort.proto.
 	SetEffort(context.Context, *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error)
@@ -3159,6 +3181,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSetModelMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplSetDefaultModelHandler := connect.NewUnaryHandler(
+		AgentReplSetDefaultModelProcedure,
+		svc.SetDefaultModel,
+		connect.WithSchema(agentReplSetDefaultModelMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplSetEffortHandler := connect.NewUnaryHandler(
 		AgentReplSetEffortProcedure,
 		svc.SetEffort,
@@ -3639,6 +3667,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplWatchTopbarHandler.ServeHTTP(w, r)
 		case AgentReplSetModelProcedure:
 			agentReplSetModelHandler.ServeHTTP(w, r)
+		case AgentReplSetDefaultModelProcedure:
+			agentReplSetDefaultModelHandler.ServeHTTP(w, r)
 		case AgentReplSetEffortProcedure:
 			agentReplSetEffortHandler.ServeHTTP(w, r)
 		case AgentReplSetPermissionModeProcedure:
@@ -4020,6 +4050,10 @@ func (UnimplementedAgentReplHandler) WatchTopbar(context.Context, *connect.Reque
 
 func (UnimplementedAgentReplHandler) SetModel(context.Context, *connect.Request[v1.SetModelRequest]) (*connect.Response[v1.SetModelResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetModel is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SetDefaultModel(context.Context, *connect.Request[v1.SetDefaultModelRequest]) (*connect.Response[v1.SetDefaultModelResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetDefaultModel is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SetEffort(context.Context, *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error) {

@@ -174,3 +174,64 @@ func TestSetPermissionModeRefusesAnEmptyMode(t *testing.T) {
 	// Assert.
 	asRefusal(t, err, ArmModeNotServed)
 }
+
+func TestRequireServedModel(t *testing.T) {
+	cases := []struct {
+		name      string
+		catalog   []string
+		hasModels bool
+		model     string
+		wantArm   string
+	}{
+		{name: "a served model passes", catalog: []string{"opus", "sonnet"}, hasModels: true, model: "sonnet"},
+		{name: "an unserved model is not in the catalog", catalog: []string{"opus"}, hasModels: true, model: "gpt", wantArm: ArmNotInCatalog},
+		{name: "no catalog is the caller's own arm", model: "opus", wantArm: ArmNoSession},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.cards.models, f.cards.hasModels = tc.catalog, tc.hasModels
+
+			// Act
+			err := f.verbs.(*verbs).requireServedModel(f.log.Global(), "Verb", "w1", tc.model, ArmNoSession)
+
+			// Assert
+			if tc.wantArm == "" {
+				if err != nil {
+					t.Fatalf("requireServedModel = %v, want nil", err)
+				}
+				return
+			}
+			asRefusal(t, err, tc.wantArm)
+		})
+	}
+}
+
+// TestEveryModelVerbChecksTheCatalogThroughRequireServedModel pins that
+// SetModel and SetDefaultModel refuse an unserved model with the shared
+// helper's own reason, so a hand-rolled check that drifted fails here.
+func TestEveryModelVerbChecksTheCatalogThroughRequireServedModel(t *testing.T) {
+	calls := map[string]func(*fixture) error{
+		"SetModel":        func(f *fixture) error { return f.verbs.SetModel(context.Background(), "w1", "gpt") },
+		"SetDefaultModel": func(f *fixture) error { return f.verbs.SetDefaultModel(context.Background(), "w1", "gpt") },
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.cards.models, f.cards.hasModels = []string{"opus"}, true
+			want := asRefusal(t, f.verbs.(*verbs).requireServedModel(f.log.Global(), name, "w1", "gpt", ArmNoSession), ArmNotInCatalog)
+
+			// Act
+			got := asRefusal(t, call(f), ArmNotInCatalog)
+
+			// Assert
+			if got.Reason != want.Reason {
+				t.Fatalf("%s reason = %q, want the shared helper's %q", name, got.Reason, want.Reason)
+			}
+		})
+	}
+}

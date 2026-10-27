@@ -209,6 +209,10 @@ func (s *fakeServer) SetModel(ctx context.Context, req *connect.Request[v1.SetMo
 	return handleUnary[v1.SetModelRequest, v1.SetModelResponse](ctx, s, "SetModel", req.Msg)
 }
 
+func (s *fakeServer) SetDefaultModel(ctx context.Context, req *connect.Request[v1.SetDefaultModelRequest]) (*connect.Response[v1.SetDefaultModelResponse], error) {
+	return handleUnary[v1.SetDefaultModelRequest, v1.SetDefaultModelResponse](ctx, s, "SetDefaultModel", req.Msg)
+}
+
 func (s *fakeServer) SetEffort(ctx context.Context, req *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error) {
 	return handleUnary[v1.SetEffortRequest, v1.SetEffortResponse](ctx, s, "SetEffort", req.Msg)
 }

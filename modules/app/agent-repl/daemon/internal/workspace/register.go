@@ -630,7 +630,16 @@ func (v *verbs) publishAccount(ctx context.Context, log dlog.Logger, record wsm.
 	}
 	// An EMPTY email is the logged-out arm, which the topbar draws as a
 	// warning rather than a blank label: it is an answer, never a gap.
-	v.deps.Topbar.SetAccount(record.ID, topbar.Account{Email: current.Email, Options: options})
+	defaultModel, err := loginDefaultModel(ctx, v.deps.DB, v.deps.Accounts, configDir)
+	if err != nil {
+		log.Error(opRegister, "the login's default model could not be read", dlog.Context{
+			"config_dir": configDir, "cause": err.Error(),
+		})
+		return err
+	}
+	v.deps.Topbar.SetAccount(record.ID, topbar.Account{
+		Email: current.Email, Options: options, ConfigDir: configDir, DefaultModel: defaultModel,
+	})
 	// THE SAME ACCOUNT, for the feed's failed-turn markers to name.
 	v.deps.Feed.SetAccount(record.ID, current.Email)
 	// THE SAME ROOT, for the footer's usage line: the usage is the ACCOUNT'S,

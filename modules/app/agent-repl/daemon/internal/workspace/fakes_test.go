@@ -52,6 +52,12 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// defaultModels is each login's chosen default model, by account root;
+	// defaultModelErr fails its read and putDefaultModelErr its write.
+	defaultModels      map[string]string
+	defaultModelErr    error
+	putDefaultModelErr error
+
 	// workspaceByDirErr fails WorkspaceByDir, at workspaceByDirErrAt alone
 	// when that is set.
 	workspaceByDirErr   error
@@ -828,6 +834,25 @@ func (d *fakeDB) CreationJob(_ context.Context, id ids.WorkspaceID) (wsm.Creatio
 func (d *fakeDB) PutSession(_ context.Context, s wsm.Session) error {
 	d.putSessions = append(d.putSessions, s)
 	d.sessions[s.Workspace] = s
+	return nil
+}
+
+func (d *fakeDB) AccountDefaultModel(_ context.Context, configDir string) (string, bool, error) {
+	if d.defaultModelErr != nil {
+		return "", false, d.defaultModelErr
+	}
+	model, ok := d.defaultModels[configDir]
+	return model, ok, nil
+}
+
+func (d *fakeDB) PutAccountDefaultModel(_ context.Context, configDir, model string) error {
+	if d.putDefaultModelErr != nil {
+		return d.putDefaultModelErr
+	}
+	if d.defaultModels == nil {
+		d.defaultModels = map[string]string{}
+	}
+	d.defaultModels[configDir] = model
 	return nil
 }
 
@@ -2796,6 +2821,9 @@ type fixture struct {
 	// topbarAccounts is every account cell the topbar seam was handed, in
 	// order.
 	topbarAccounts []topbar.Account
+	// topbarLoginDefaults is every login default the topbar seam was moved
+	// to, as {root, model}, in order.
+	topbarLoginDefaults [][2]string
 	// topbarEffortSettings is every effort settings read the topbar seam was
 	// handed; topbarWarnings every warning line it was asked to raise.
 	topbarEffortSettings []claudesettings.Effort
@@ -2886,7 +2914,7 @@ func newFixture(t *testing.T) *fixture {
 	verbs, err := New(Deps{
 		Instance: fixtureInstance,
 		DB:       f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, principalLinks: &f.topbarPrincipalLinks, names: &f.topbarNames}, Browser: f.browser,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, principalLinks: &f.topbarPrincipalLinks, names: &f.topbarNames}, Browser: f.browser,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -3086,6 +3114,8 @@ type stubTopbar struct {
 	coldGates *[]topbar.ColdGate
 	// accounts records every account cell the verbs installed, in order.
 	accounts *[]topbar.Account
+	// loginDefaults records every login default moved, as {root, model}.
+	loginDefaults *[][2]string
 	// principalLinks records every principal link the verbs installed, in
 	// order; an empty one is a clear.
 	principalLinks *[]string
@@ -3139,6 +3169,12 @@ func (s stubTopbar) SetPrincipalLink(_ ids.WorkspaceID, link *string) {
 	}
 	*s.principalLinks = append(*s.principalLinks, url)
 }
+func (s stubTopbar) SetLoginDefaultModel(configDir, model string) {
+	if s.loginDefaults != nil {
+		*s.loginDefaults = append(*s.loginDefaults, [2]string{configDir, model})
+	}
+}
+
 func (s stubTopbar) SetAccount(_ ids.WorkspaceID, account topbar.Account) {
 	if s.accounts != nil {
 		*s.accounts = append(*s.accounts, account)

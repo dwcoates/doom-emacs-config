@@ -111,7 +111,7 @@ daemon/
                    build-staleness bounce, asset origin, intent manifest, reload_webapp push
     workspace/     workspace verbs (create standard + one-shot, register, open, close, kill, nuke,
                    forget, restart{force}, select, priority), task verbs, cold gate answer,
-                   SetModel/SetPermissionMode/SetEffort
+                   SetModel/SetDefaultModel/SetPermissionMode/SetEffort
     health/        DaemonHealth / SessionHealth answers (unhealthy is an answer) + fault records
                    mapped onto the same internal paths as the rpcs
     heldingress/   the held-prompt ingress ($AGENT_REPL_STATE_DIR/held-prompts/held_*.json): prompts a

@@ -227,11 +227,15 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 	if !s.ready() {
 		return nil, nil
 	}
+	modelSelector, err := r.modelSelector(s)
+	if err != nil {
+		return nil, err
+	}
 	return &frontendv1.TopbarView{
 		Title:                title(s),
 		WorkspaceName:        &frontendv1.TopbarWorkspaceName{Text: s.naming.Name},
 		SessionLine:          &frontendv1.TopbarSessionLine{Text: r.sessionLine(s)},
-		ModelSelector:        r.modelSelector(s),
+		ModelSelector:        modelSelector,
 		EffortSelector:       effortSelector(s),
 		Connectivity:         connectivity,
 		Warnings:             r.warningStrip(s),
@@ -286,28 +290,38 @@ func (r *resolver) sessionLine(s *wsState) string {
 // still the selection — the vendor said it is what is running — and is served
 // as an option of its own rather than dropped, which would render the button as
 // having no selection at all.
-func (r *resolver) modelSelector(s *wsState) *frontendv1.TopbarModelSelector {
+//
+// THE LOGIN'S DEFAULT RIDES THE SELECTOR, and an account installed without one
+// is a daemon defect refused here rather than served as a selector with no
+// default row: every login has a default (the reader's, else the built-in).
+func (r *resolver) modelSelector(s *wsState) (*frontendv1.TopbarModelSelector, error) {
 	// ABSENT WITH NO SESSION. A stood-down, cold-gated or unstarted workspace
 	// has no model in force, and serving the catalog with no selection would
 	// draw a picker offering a switch that would be refused.
 	if s.sessionless() {
-		return nil
+		return nil, nil
 	}
-	out := &frontendv1.TopbarModelSelector{Options: s.catalog}
+	if s.defaultModel == "" {
+		return nil, fmt.Errorf("the account cell of login %q was installed without its default model", s.accountConfigDir)
+	}
+	out := &frontendv1.TopbarModelSelector{
+		Options:      s.catalog,
+		DefaultModel: &conversationv1.AgentModel{Name: s.defaultModel},
+	}
 	if s.model == "" {
-		return out
+		return out, nil
 	}
 	for _, option := range s.catalog {
 		if option.GetModel().GetName() == s.model {
 			out.Selected = option
-			return out
+			return out, nil
 		}
 	}
 	out.Selected = &conversationv1.ModelOption{
 		Model:       &conversationv1.AgentModel{Name: s.model},
 		DisplayName: s.model,
 	}
-	return out
+	return out, nil
 }
 
 // permissionModePicker renders the picker: the daemon serves EXACTLY the
@@ -588,7 +602,22 @@ func (r *resolver) SetAccount(ws ids.WorkspaceID, account Account) {
 		func(s *wsState) {
 			s.email = account.Email
 			s.accountOptions = account.Options
+			s.accountConfigDir = account.ConfigDir
+			s.defaultModel = account.DefaultModel
 			s.accountSet = true
+		})
+}
+
+// SetLoginDefaultModel moves the login's default model on every strip that
+// spends as it. A strip on another login is republished unchanged.
+func (r *resolver) SetLoginDefaultModel(configDir, model string) {
+	r.eachStrip("daemon.topbar.set_login_default_model", "the topbar took a login's default model",
+		dlog.Context{"config_dir": configDir, "model": model},
+		func() {},
+		func(s *wsState) {
+			if s.accountConfigDir == configDir {
+				s.defaultModel = model
+			}
 		})
 }
 

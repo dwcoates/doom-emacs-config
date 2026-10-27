@@ -278,6 +278,102 @@ func TestSetModelAnswersTheUnservedTokenByItsOwnArm(t *testing.T) {
 	}
 }
 
+// setDefaultModelRequest is a selector row's "Make default" on one served
+// model, echoed back as the typed catalog token.
+func setDefaultModelRequest(model string) *agentreplv1.SetDefaultModelRequest {
+	return &agentreplv1.SetDefaultModelRequest{
+		Workspace: ref(),
+		Model:     &conversationv1.AgentModel{Name: model},
+	}
+}
+
+func TestSetDefaultModelRelaysTheEchoedTokenToTheVerb(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.SetDefaultModel(context.Background(), connect.NewRequest(setDefaultModelRequest("sonnet")))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SetDefaultModel: %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+	}
+	if h.Verbs.setDefaultModel != "sonnet" {
+		t.Fatalf("verb saw model %q, want the echoed token \"sonnet\"", h.Verbs.setDefaultModel)
+	}
+}
+
+func TestSetDefaultModelAnswersEachRefusalByItsArm(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  string
+		want func(*agentreplv1.SetDefaultModelError) bool
+	}{
+		{
+			name: "a model outside the served catalog",
+			arm:  workspace.ArmNotInCatalog,
+			want: func(e *agentreplv1.SetDefaultModelError) bool { return e.GetNotInCatalog() != nil },
+		},
+		{
+			name: "a workspace with no session",
+			arm:  workspace.ArmNoSession,
+			want: func(e *agentreplv1.SetDefaultModelError) bool { return e.GetNoSession() != nil },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Verbs.setDefaultModelErr = &workspace.Refusal{Arm: tc.arm, Reason: "refused"}
+
+			// Act.
+			resp, err := h.Client.SetDefaultModel(context.Background(), connect.NewRequest(setDefaultModelRequest("gpt")))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("SetDefaultModel answered a transport error for a refusal: %v", err)
+			}
+			if !tc.want(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tc.arm)
+			}
+		})
+	}
+}
+
+func TestSetDefaultModelFailsAVerbError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.setDefaultModelErr = errors.New("disk full")
+
+	// Act.
+	_, err := h.Client.SetDefaultModel(context.Background(), connect.NewRequest(setDefaultModelRequest("sonnet")))
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("SetDefaultModel answered success for a failed verb")
+	}
+}
+
+func TestSetDefaultModelRefusesABlankModel(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.SetDefaultModel(context.Background(),
+		connect.NewRequest(&agentreplv1.SetDefaultModelRequest{Workspace: ref()}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", connect.CodeOf(err))
+	}
+	if h.Verbs.setDefaultModel != "" {
+		t.Fatalf("verb ran for an invalid request")
+	}
+}
+
 // TestSetModelRelaysAShimRefusalByName pins that a refusal the SHIM made
 // arrives on the response under the arm the contract spells it with, per
 // refusal arm the shim can raise. A shim refusal answered as a transport error

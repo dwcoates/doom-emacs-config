@@ -33,14 +33,8 @@ func (v *verbs) SetModel(ctx context.Context, ws ids.WorkspaceID, model string) 
 	// daemon accepts only what it offered, exactly as SetPermissionMode does
 	// with the picker. Forwarding an unoffered token would hand the vendor a
 	// model nobody chose.
-	served, ok := v.deps.Cards.Models(ws)
-	if !ok {
-		return refuse(log, "SetModel", ArmNotInCatalog,
-			fmt.Sprintf("workspace %q has served no model catalog", ws), false)
-	}
-	if !contains(served, model) {
-		return refuse(log, "SetModel", ArmNotInCatalog,
-			fmt.Sprintf("the model %q is not in the served catalog %v", model, served), false)
+	if err := v.requireServedModel(log, "SetModel", ws, model, ArmNotInCatalog); err != nil {
+		return err
 	}
 	if err := v.deps.Queue.SubmitSessionAct(ctx, ws, promptqueue.Act{Kind: actSetModel, Value: model}); err != nil {
 		log.Error(opSetModel, "the model change was not accepted", dlog.Context{
@@ -101,6 +95,23 @@ func (v *verbs) SetPermissionMode(ctx context.Context, ws ids.WorkspaceID, mode 
 }
 
 // contains reports membership in a served set.
+// requireServedModel refuses MODEL unless WS's selector served it: a workspace
+// that served no catalog under NO_CATALOG, a model outside the catalog under
+// ArmNotInCatalog. It is the ONE catalog check of every verb that takes a
+// model the selector offered (SetModel, SetDefaultModel).
+func (v *verbs) requireServedModel(log dlog.Logger, verb string, ws ids.WorkspaceID, model, noCatalog string) error {
+	served, ok := v.deps.Cards.Models(ws)
+	if !ok {
+		return refuse(log, verb, noCatalog,
+			fmt.Sprintf("workspace %q has served no model catalog", ws), false)
+	}
+	if !contains(served, model) {
+		return refuse(log, verb, ArmNotInCatalog,
+			fmt.Sprintf("the model %q is not in the served catalog %v", model, served), false)
+	}
+	return nil
+}
+
 func contains(set []string, want string) bool {
 	for _, s := range set {
 		if s == want {

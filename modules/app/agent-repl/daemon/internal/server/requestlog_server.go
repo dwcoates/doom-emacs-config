@@ -402,6 +402,13 @@ func (s *requestLoggingServer) SetModel(
 	return serveUnary(s, ctx, "SetModel", req, s.server.SetModel)
 }
 
+func (s *requestLoggingServer) SetDefaultModel(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SetDefaultModelRequest],
+) (*connect.Response[agentreplv1.SetDefaultModelResponse], error) {
+	return serveUnary(s, ctx, "SetDefaultModel", req, s.server.SetDefaultModel)
+}
+
 func (s *requestLoggingServer) SetEffort(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetEffortRequest],
