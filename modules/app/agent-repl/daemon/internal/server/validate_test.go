@@ -1000,3 +1000,63 @@ func TestValidateDistinctWorkspaceRefs(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateModelPick(t *testing.T) {
+	cases := []struct {
+		name  string
+		req   *agentreplv1.SetModelRequest
+		field string
+	}{
+		{name: "a well-formed pick", req: &agentreplv1.SetModelRequest{Workspace: ref(), Model: &conversationv1.AgentModel{Name: "opus"}}},
+		{name: "no workspace", req: &agentreplv1.SetModelRequest{Model: &conversationv1.AgentModel{Name: "opus"}}, field: "workspace"},
+		{name: "no model", req: &agentreplv1.SetModelRequest{Workspace: ref()}, field: "model"},
+		{name: "a nameless model", req: &agentreplv1.SetModelRequest{Workspace: ref(), Model: &conversationv1.AgentModel{}}, field: "model.name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			err := validateModelPick(tc.req)
+
+			// Assert
+			if tc.field == "" {
+				if err != nil {
+					t.Fatalf("validateModelPick = %v, want nil", err)
+				}
+				return
+			}
+			if connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(err.Error(), tc.field) {
+				t.Fatalf("validateModelPick = %v, want InvalidArgument naming %s", err, tc.field)
+			}
+		})
+	}
+}
+
+// TestEveryModelPickIsValidatedThroughValidateModelPick pins that SetModel and
+// SetDefaultModel answer the same malformed echo identically, so a hand-rolled
+// validator that drifted from the shared one fails here.
+func TestEveryModelPickIsValidatedThroughValidateModelPick(t *testing.T) {
+	malformed := []struct {
+		name      string
+		workspace *workspacev1.WorkspaceRef
+		model     *conversationv1.AgentModel
+	}{
+		{name: "no workspace", model: &conversationv1.AgentModel{Name: "opus"}},
+		{name: "no model", workspace: ref()},
+		{name: "a nameless model", workspace: ref(), model: &conversationv1.AgentModel{}},
+	}
+	for _, tc := range malformed {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			want := validateModelPick(&agentreplv1.SetModelRequest{Workspace: tc.workspace, Model: tc.model})
+
+			// Act
+			setModel := validateSetModelRequest(&agentreplv1.SetModelRequest{Workspace: tc.workspace, Model: tc.model})
+			setDefault := validateSetDefaultModelRequest(&agentreplv1.SetDefaultModelRequest{Workspace: tc.workspace, Model: tc.model})
+
+			// Assert
+			if setModel.Error() != want.Error() || setDefault.Error() != want.Error() {
+				t.Fatalf("SetModel = %v, SetDefaultModel = %v, want both %v", setModel, setDefault, want)
+			}
+		})
+	}
+}

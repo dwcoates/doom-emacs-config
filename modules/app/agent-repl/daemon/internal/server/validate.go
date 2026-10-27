@@ -726,21 +726,31 @@ func validateAssignWorkspaceTaskRequest(req *agentreplv1.AssignWorkspaceTaskRequ
 	return nil
 }
 
-// validateSetModelRequest is SetModelRequest's base function.
-func validateSetModelRequest(req *agentreplv1.SetModelRequest) *connect.Error {
+// modelPickRequest is a request echoing one model a workspace's selector
+// served: SetModel's and SetDefaultModel's.
+type modelPickRequest interface {
+	GetWorkspace() *workspacev1.WorkspaceRef
+	GetModel() *conversationv1.AgentModel
+}
+
+// validateModelPick is the ONE validation of a model pick, so SetModel and
+// SetDefaultModel cannot come to accept different shapes of the same echo.
+func validateModelPick(req modelPickRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
 	return validateAgentModel("model", req.GetModel())
 }
 
+// validateSetModelRequest is SetModelRequest's base function.
+func validateSetModelRequest(req *agentreplv1.SetModelRequest) *connect.Error {
+	return validateModelPick(req)
+}
+
 // validateSetDefaultModelRequest is SetDefaultModelRequest's base function:
 // the same echoed model SetModel takes.
 func validateSetDefaultModelRequest(req *agentreplv1.SetDefaultModelRequest) *connect.Error {
-	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
-		return err
-	}
-	return validateAgentModel("model", req.GetModel())
+	return validateModelPick(req)
 }
 
 // validateSetEffortRequest is SetEffortRequest's base function. The level is

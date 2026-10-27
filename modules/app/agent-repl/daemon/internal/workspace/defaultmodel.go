@@ -56,14 +56,8 @@ func (v *verbs) SetDefaultModel(ctx context.Context, ws ids.WorkspaceID, model s
 	if err != nil {
 		return err
 	}
-	served, ok := v.deps.Cards.Models(ws)
-	if !ok {
-		return refuse(log, "SetDefaultModel", ArmNoSession,
-			fmt.Sprintf("workspace %q has served no model catalog", ws), false)
-	}
-	if !contains(served, model) {
-		return refuse(log, "SetDefaultModel", ArmNotInCatalog,
-			fmt.Sprintf("the model %q is not in the served catalog %v", model, served), false)
+	if err := v.requireServedModel(log, "SetDefaultModel", ws, model, ArmNoSession); err != nil {
+		return err
 	}
 	configDir, err := v.accountRoot(ctx, record)
 	if err != nil {
