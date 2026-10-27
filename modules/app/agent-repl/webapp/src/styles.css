@@ -85,7 +85,13 @@
      the two kinds already shared the one token. #e0ecff -> #ccdfff, then
      the same step again (owner request, 2026-10-13, "just slightly
      darker"): #ccdfff -> #b8d2ff. */
-  --user: #b8d2ff;
+  --user: #ffffff;
+  /* PROMPT BUBBLES ARE GREY NOW (owner request, 2026-10-27): the fill every
+     prompt kind shares (user, held, agent-to-agent) is the feed's --bg
+     halfway to --sidebar-bg, written out as a hex because the suite reads
+     these tokens as hex. Light: #ffffff, since both ends are white. Dark:
+     #151514 and #111110 meet at #131312. The held, selected and code fills
+     below step off it in the same grey. */
   /* A KNOWN SLASH COMMAND in a user prompt (src/feed/rows/known-commands.ts):
      the purple the Emacs composer marks it in while it is typed
      (`agent-repl-command-completion-known`), deepened so it reads on the
@@ -120,14 +126,14 @@
      blue (owner request, 2026-10-19): clearly darker than the prompt's --user
      fill, but still that blue rather than a near-navy, so the code reads as
      set into the bubble. */
-  --prompt-code-bg: #8fb5f2;
+  --prompt-code-bg: #ebebeb;
   /* A HELD PROMPT'S FILL (owner request, 2026-10-25): a markedly darker blue
      than --user, so a prompt that has not reached the agent reads as the
      prompt it will become, still parked. Its code sits a step darker again,
      as a user prompt's does under --user. A step darker again (owner
      request, 2026-10-25): #7ea6e8 -> #6c97df. */
-  --held-prompt-bg: #6c97df;
-  --held-prompt-code-bg: #5583d2;
+  --held-prompt-bg: #e0e0e0;
+  --held-prompt-code-bg: #c8c8c8;
   /* --ok, the green status: render-colors.json#color_values (src/vocab.ts). */
   /* The cold gate's compact border: the success green, a touch darker
      (owner request, 2026-10-03). */
@@ -300,7 +306,7 @@
      that is not held is selected in a darker blue than the user prompt's own
      --user (#b8d2ff), rather than the grey every other selected bubble
      wears. */
-  --selected-prompt-bg: #8fb8ff;
+  --selected-prompt-bg: #e8e8e8;
   /* THE EXPANDED RESPONSE's border (owner ruling, 2026-09-27): eggshell white,
      worn by every response bubble while its scroll box is open, over whatever
      the ladder would otherwise draw. A shade deeper than true eggshell here,
@@ -583,14 +589,14 @@
        darker"): #0978ea -> #086ed6, the same small lightness step the light
        theme's pair takes. The same step again (owner request, 2026-10-13,
        "just slightly darker"): #086ed6 -> #0764c2. */
-    --user: #0764c2;
+    --user: #131312;
     /* A light purple, so a known command reads on the dark prompt blue. */
     --known-command: #f0c4ff;
     /* The same darker step under this theme's --user blue. */
-    --prompt-code-bg: #054a91;
+    --prompt-code-bg: #272726;
     /* The held prompt's darker blue, and its code's, under this theme's --user. */
-    --held-prompt-bg: #022f5e;
-    --held-prompt-code-bg: #012142;
+    --held-prompt-bg: #2a2a29;
+    --held-prompt-code-bg: #3a3a39;
     /* THE DARK ACCENTS ARE THE PASTEL SET (owner ruling, 2026-10-17): each hue
        kept, drawn at one lightness with its strength capped, as
        design-dark-accent-tuner.html beside this module derives them. The six
@@ -642,7 +648,7 @@
        --tool-card-bg, #191918). */
     --selected-bubble-bg: #313130;
     /* A darker blue than the dark --user (#0764c2). */
-    --selected-prompt-bg: #044a91;
+    --selected-prompt-bg: #333332;
     /* True eggshell for the dark theme, as the other state borders lift. */
     --expanded-response-border: #f0ead6;
     /* Brighter light purple for the dark theme, as the other state borders
@@ -4663,6 +4669,8 @@ html[data-page-unshown] {
    before the daemon has resolved anything. */
 #footer {
   flex: none;
+  /* The sidebar's own ground (owner request, 2026-10-27). */
+  background: var(--sidebar-bg);
   padding: 0.25rem 1rem 0.5rem;
 }
 #footer:empty { display: none; }

@@ -1614,15 +1614,15 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(rule.trim()).toBe("--bubble-bg: var(--selected-prompt-bg) !important;");
   });
 
-  it.each(THEME_BLOCKS)("fills a selected prompt a darker blue than a user prompt in the %s theme", (_theme, block) => {
+  it.each(THEME_BLOCKS)("fills a selected prompt a different grey from a user prompt in the %s theme", (_theme, block) => {
     // Arrange
     const css = block();
 
     // Act
     const [prompt, selected] = [themeRgbOf(css, "--user"), rgbOf(css, "--selected-prompt-bg")];
 
-    // Assert: darker, and still blue (its blue channel leads).
-    expect([luminance(selected) < luminance(prompt), selected[2] > selected[0] && selected[2] > selected[1]]).toEqual([true, true]);
+    // Assert: a different grey, with no hue (prompts are grey, 2026-10-27).
+    expect([selected.join() !== prompt.join(), Math.max(...selected) - Math.min(...selected) <= 4]).toEqual([true, true]);
   });
 
   it("defines the --selected-entry token so the blue rule resolves", () => {
@@ -3432,16 +3432,16 @@ describe("the held prompt's fill: a markedly darker blue than the user prompt's"
       return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
     };
     // Act
-    const step = lightness(themeRgbOf(block(), "--user")) - lightness(themeRgbOf(block(), "--held-prompt-bg"));
+    const step = Math.abs(lightness(themeRgbOf(block(), "--user")) - lightness(themeRgbOf(block(), "--held-prompt-bg")));
     // Assert
     expect(step).toBeGreaterThan(10);
   });
 
-  it.each(THEME_BLOCKS)("is still a blue in the %s theme", (_theme, block) => {
+  it.each(THEME_BLOCKS)("is a neutral grey in the %s theme", (_theme, block) => {
     // Arrange / Act
     const [r, g, b] = themeRgbOf(block(), "--held-prompt-bg");
     // Assert
-    expect(b > r && b > g).toBe(true);
+    expect(Math.max(r, g, b) - Math.min(r, g, b)).toBeLessThanOrEqual(4);
   });
 
   it("leaves the held variant at the one bubble width every prompt takes", () => {
@@ -3736,11 +3736,14 @@ const luminance = ([r, g, b]: [number, number, number]): number => {
 };
 
 describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
-  it("paints a prompt the iMessage dark-mode blue, two notches darker (owner rulings, 2026-10-08 and 2026-10-13)", () => {
-    // Arrange / Act
-    const user = rgbOf(darkThemeBlock(), "--user");
+  it("paints a prompt the feed's --bg halfway to --sidebar-bg (owner request, 2026-10-27)", () => {
+    // Arrange
+    const block = darkThemeBlock();
+    // Act
+    const [bg, sidebar] = [rgbOf(block, "--bg"), rgbOf(block, "--sidebar-bg")];
+    const user = rgbOf(block, "--user");
     // Assert
-    expect(user).toEqual([0x07, 0x64, 0xc2]);
+    expect(user).toEqual(bg.map((c, i) => Math.round((c + sidebar[i]!) / 2)));
   });
 
   it.each([
@@ -3755,12 +3758,15 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     expect(low).toBeLessThan(high);
   });
 
-  it("paints a prompt in the light theme one more step darker (owner request, 2026-10-13)", () => {
-    // Arrange / Act
-    const user = rgbOf(declarationsOf(":root") ?? "", "--user");
+  it("paints a prompt in the light theme the feed's --bg halfway to --sidebar-bg (owner request, 2026-10-27)", () => {
+    // Arrange
+    const root = declarationsOf(":root") ?? "";
+    // Act
+    const [bg, sidebar] = [rgbOf(root, "--bg"), rgbOf(root, "--sidebar-bg")];
+    const user = rgbOf(root, "--user");
 
     // Assert
-    expect(user).toEqual([0xb8, 0xd2, 0xff]);
+    expect(user).toEqual(bg.map((c, i) => Math.round((c + sidebar[i]!) / 2)));
   });
 
   it("paints a response a neutral grey rather than a hue", () => {
@@ -3862,7 +3868,7 @@ describe("code in a blue prompt bubble (owner request, 2026-10-19)", () => {
     ["dark", darkThemeBlock()],
   ])("sits clearly but not far darker than --user in the %s theme", (_theme, block) => {
     // Arrange / Act
-    const step = lightness(themeRgbOf(block, "--user")) - lightness(themeRgbOf(block, "--prompt-code-bg"));
+    const step = Math.abs(lightness(themeRgbOf(block, "--user")) - lightness(themeRgbOf(block, "--prompt-code-bg")));
     // Assert
     expect(step).toBeGreaterThan(6);
     expect(step).toBeLessThan(16);
@@ -3883,7 +3889,7 @@ describe("code in a blue prompt bubble (owner request, 2026-10-19)", () => {
     const [fill, code] = variant === "held" ? ["--held-prompt-bg", "--held-prompt-code-bg"] : ["--user", "--prompt-code-bg"];
     // Act
     const steps = [declarationsOf(":root") ?? "", darkThemeBlock()].map(
-      (block) => lightness(themeRgbOf(block, fill)) - lightness(themeRgbOf(block, code)),
+      (block) => Math.abs(lightness(themeRgbOf(block, fill)) - lightness(themeRgbOf(block, code))),
     );
     // Assert
     expect(steps.every((step) => step > 6)).toBe(true);
@@ -6104,5 +6110,15 @@ describe("the answered label's pastel orange", () => {
 
     // Assert
     expect(got).toBe(want);
+  });
+});
+
+describe("the footer's ground (owner request, 2026-10-27)", () => {
+  it("paints #footer the sidebar's background", () => {
+    // Arrange / Act
+    const rule = declarationsOf("#footer") ?? "";
+
+    // Assert
+    expect(rule).toMatch(/background:\s*var\(--sidebar-bg\)\s*;/);
   });
 });
