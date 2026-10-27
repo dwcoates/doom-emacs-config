@@ -34,6 +34,7 @@ import { onDiscard, stopTicking } from "../feed/ticking.js";
 import { entryTreeHtml } from "../feed/entries.js";
 import { RESPONSE_RUN_CLASS } from "../feed/response-run.js";
 import { applyTextReveal, clearTextReveal, fullTextOf } from "./text-reveal.js";
+import { onFeedTextScaleApplied } from "../feed/feed-text-scale.js";
 
 /** The webapp surfaces a wrap issue through the client logger. */
 const logTreeIssue: TreeIssue = (message, context) => {
@@ -568,6 +569,11 @@ function invariant(reason: string, context: Record<string, unknown>): never {
  * around a bubble below its cap — re-wraps only when the column's width moves
  * the budget. The same observer is what sees a hidden bubble come back. It is
  * torn down with the body through `stopTicking` (see ticking.ts).
+ *
+ * A FEED TEXT SCALE MOVES EVERY PIECE'S DRAWN WIDTH but not the budget, which
+ * the observer would never see: a tree is redrawn, its pieces measured again,
+ * whenever the page lands a new scale (feed-text-scale.ts), so the engine
+ * never breaks a line the wrap fitted at the old scale.
  */
 function armPainter(body: BubbleBody): Painter {
   let budgetPx: number | null = null;
@@ -642,6 +648,11 @@ function armPainter(body: BubbleBody): Painter {
     rewrap();
     if (deferred || drawsTree()) watch();
   });
+
+  const stopRescale = onFeedTextScaleApplied(body.ownerDocument, () => {
+    if (needsWidth()) paint();
+  });
+  onDiscard(body, stopRescale);
 
   return { paint };
 }

@@ -108,3 +108,29 @@ describe.each(FACES)("a metaprompt tree in $name, in WebKit", ({ styles, face })
     expect(lines.map((l) => Math.abs(l.textEnd - l.recordedEnd) <= 1)).toEqual(lines.map(() => true));
   });
 });
+
+describe("a metaprompt tree when the feed text scale moves, in WebKit", () => {
+  let feed: FeedPage;
+  let lines: DrawnLine[];
+  let bodyRight: number;
+
+  beforeAll(async () => {
+    const script = await bundlePage(path.join(here, "tree-face-page.ts"), "treeFacePage");
+    feed = await openFeedPage({ width: 700, height: 900 });
+    await feed.page.addScriptTag({ content: script });
+    await feed.page.evaluate((text) => window.treeFace.measure(text), TREE);
+    ({ lines, bodyRight } = await feed.page.evaluate(() => window.treeFace.rescale(1.3)));
+  });
+
+  afterAll(async () => {
+    await feed?.browser.close();
+  });
+
+  it("re-wraps so the engine breaks no line again", () => {
+    expect(lines.map((l) => l.textLines)).toEqual(lines.map(() => 1));
+  });
+
+  it("keeps every line inside the body", () => {
+    expect(lines.every((l) => l.railsLeft + l.textEnd <= bodyRight + NEAR)).toBe(true);
+  });
+});

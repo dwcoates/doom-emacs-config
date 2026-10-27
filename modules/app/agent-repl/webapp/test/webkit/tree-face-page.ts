@@ -9,6 +9,7 @@ import { drawFeedResponse } from "../../src/feed/cards/response.js";
 import { treeProse } from "../prose.js";
 import { pagedRowContext } from "../feed/harness.js";
 import { installPageLogger } from "./page-log";
+import { applyFeedTextScale } from "../../src/feed/feed-text-scale.js";
 
 installPageLogger("tree-face");
 
@@ -42,6 +43,8 @@ export interface DrawnLine {
 export interface TreeFacePage {
   /** Draw a final response saying TEXT, and measure its tree's lines and its body's right edge. */
   measure(text: string): { lines: DrawnLine[]; bodyRight: number; bubbleFace: string };
+  /** Land SCALE as a feed watch's push would, let two frames run, and measure the tree drawn last again. */
+  rescale(scale: number): Promise<{ lines: DrawnLine[]; bodyRight: number; bubbleFace: string }>;
 }
 
 declare global {
@@ -68,7 +71,15 @@ function glyphMiddles(el: Element, glyphs: string): number[] {
   return out;
 }
 
+/** The bubble `measure` drew last. */
+let drawn: HTMLElement | null = null;
+
 window.treeFace = {
+  async rescale(scale) {
+    applyFeedTextScale(scale);
+    for (let i = 0; i < 2; i++) await new Promise((resolve) => requestAnimationFrame(resolve));
+    return measureDrawn(drawn!);
+  },
   measure(text) {
     const bubble = drawFeedResponse(
       create(FeedResponseSchema, {
@@ -81,6 +92,14 @@ window.treeFace = {
     item.className = "feed-item";
     item.append(bubble);
     document.getElementById("feed")!.replaceChildren(item);
+    drawn = bubble;
+    return measureDrawn(bubble);
+  },
+};
+
+/** BUBBLE's tree lines, measured, with its body's right edge and its face. */
+function measureDrawn(bubble: HTMLElement): { lines: DrawnLine[]; bodyRight: number; bubbleFace: string } {
+  {
     const body = bubble.querySelector<HTMLElement>(".bubble-body")!;
     const lines = [...bubble.querySelectorAll<HTMLElement>(".mp-line[data-node]")].map((line): DrawnLine => {
       const rails = line.querySelector(".mp-connectors")!;
@@ -108,5 +127,5 @@ window.treeFace = {
     });
     const b = body.getBoundingClientRect();
     return { lines, bodyRight: b.right - Number.parseFloat(getComputedStyle(body).paddingRight), bubbleFace: getComputedStyle(bubble).fontFamily };
-  },
-};
+  }
+}

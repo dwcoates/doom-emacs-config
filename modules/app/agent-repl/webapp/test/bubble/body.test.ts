@@ -34,7 +34,8 @@ import {
 import { drawBubble } from "../../src/bubble/draw.js";
 import { RESPONSE_RUN_CLASS } from "../../src/feed/response-run.js";
 import { EXPANDED_CLASS } from "../../src/expand.js";
-import { useTreeLayout } from "../tree-layout.js";
+import { WIDE_TREE, stagedCols, treeLineWidths, useTreeLayout } from "../tree-layout.js";
+import { FEED_TEXT_SCALE_PROPERTY, applyFeedTextScale } from "../../src/feed/feed-text-scale.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { fireResize } from "../resize-observer.js";
 import { plainProse, promptProse, servedProse, treeProse } from "../prose.js";
@@ -676,6 +677,37 @@ describe("markdown slots", () => {
     paintBody(body, [badge, markdownSlot("prose", plainProse("text"))]);
     // Assert
     expect(body.firstChild).toBe(badge);
+  });
+});
+
+describe("a painted tree when the page lands a new feed text scale", () => {
+  const staged = useTreeLayout();
+  afterEach(() => {
+    document.documentElement.style.removeProperty(FEED_TEXT_SCALE_PROPERTY);
+  });
+
+  it("re-wraps every line to the budget at the new drawn widths", () => {
+    // Arrange — a tree painted at 8px a column.
+    const { bubble, slot } = slotted(WIDE_TREE);
+    mount(bubble);
+    const before = treeLineWidths(slot).length;
+    // Act — the text now draws at 12px a column, and the page lands its scale.
+    staged.layout.charPx = 12;
+    applyFeedTextScale(1.5);
+    // Assert — more lines, none past the columns the budget holds at 12px.
+    const after = treeLineWidths(slot);
+    expect([after.length > before, Math.max(...after) <= stagedCols(staged.layout)]).toEqual([true, true]);
+  });
+
+  it("leaves a slot holding no tree as it was painted", () => {
+    // Arrange
+    const { bubble, slot } = slotted("just prose");
+    mount(bubble);
+    const painted = slot.firstChild;
+    // Act
+    applyFeedTextScale(1.5);
+    // Assert — the same node: nothing was redrawn.
+    expect(slot.firstChild).toBe(painted);
   });
 });
 
