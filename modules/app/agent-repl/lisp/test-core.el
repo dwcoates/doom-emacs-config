@@ -318,13 +318,16 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "[agent-repl] No workspace tabs on the bar"
      "explains why the requested interactive switch did nothing")
     ("commands.el" agent-repl-switch-to-workspace
-     "[agent-repl] No workspace tab %d -- the bar draws %d"
+     "[agent-repl] No workspace tab %d -- the bar's last is %S"
+     "explains why the requested interactive switch did nothing")
+    ("commands.el" agent-repl-switch-to-workspace
+     "[agent-repl] Tab %d (%s) is still opening"
      "explains why the requested interactive switch did nothing")
     ("commands.el" agent-repl--act-on-tab-slot
      "[agent-repl] The current workspace has no tab to %s"
      "explains why the requested interactive swap or move did nothing")
     ("commands.el" agent-repl--act-on-tab-slot
-     "[agent-repl] No workspace tab %d -- the bar draws %d"
+     "[agent-repl] No workspace tab %d -- the bar's last is %S"
      "explains why the requested interactive swap or move did nothing")
     ("commands.el" agent-repl--act-on-tab-slot
      "[agent-repl] %s is already tab %d"
