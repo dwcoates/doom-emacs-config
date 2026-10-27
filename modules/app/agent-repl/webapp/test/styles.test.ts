@@ -6050,8 +6050,8 @@ describe("the response subtree box (feed/subtree-box.ts)", () => {
 /**
  * AN ANSWERED BRANCH'S LABEL IS PASTEL ORANGE (owner request, 2026-10-26): the
  * prompt's entry labels, its implied ancestors' labels, and the response's
- * linked labels all wear the one `--answer-label` token, an ancestor a dimmed
- * shade of it rather than the grey it was.
+ * linked labels all wear the one `--answer-label` token, an ancestor the very
+ * same shade, never dimmed (owner request, 2026-10-27).
  */
 describe("the answered label's pastel orange", () => {
   it.each([
@@ -6070,14 +6070,17 @@ describe("the answered label's pastel orange", () => {
   });
 
   it.each([
-    ["color", "var(--answer-label)"],
-    ["opacity", "0.55"],
-  ])("paints an implied ancestor's label's %s as a dimmed shade of the token", (property, want) => {
+    ["a prompt's entry label", (property: string) => cascadedValueIn("", `${TREE_LABEL_CLASS} ${ENTRY_LABEL_CLASS}`, property)],
+    ["an implied ancestor's label", (property: string) => cascadedValueIn(ENTRY_PATH_CLASS, TREE_LABEL_CLASS, property)],
+  ])("paints %s in the response's linked label's one shade, never dimmed", (_name, read) => {
+    // Arrange
+    const linked = (property: string): string => cascadedValueIn("", `${TREE_LABEL_CLASS} ${LABEL_LINK_CLASS}`, property);
+
     // Act
-    const got = cascadedValueIn(ENTRY_PATH_CLASS, TREE_LABEL_CLASS, property);
+    const got = [read("color"), read("opacity")];
 
     // Assert
-    expect(got).toBe(want);
+    expect(got).toEqual([linked("color"), linked("opacity")]);
   });
 
   it("keeps the response's linked label underlined", () => {
