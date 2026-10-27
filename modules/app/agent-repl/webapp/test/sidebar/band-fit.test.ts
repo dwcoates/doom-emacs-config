@@ -31,7 +31,7 @@ import {
   REGION_SELECTOR,
   sectionRegions,
 } from "../../src/sidebar/band-fit.js";
-import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { captureLogRecords, forwardedRecord, forwardedRecords } from "../log-capture.js";
 import { fireResize } from "../resize-observer.js";
 import {
   NOW,
@@ -1026,6 +1026,49 @@ describe("installBandFit", () => {
       { open: `${4 * ROW}px`, hidden: `${5 * ROW}px` },
       { open: `${4 * ROW}px`, hidden: `${2 * ROW}px` },
     ]);
+    fit.dispose();
+  });
+
+  it("keeps a stretched section's scroll across a re-fit that lets it shrink to its rows", async () => {
+    // Arrange — Hidden Workspaces, the lowest, stretched to six of its ten
+    // lines, scrolled three lines down. Its scroll clamps to whatever height it
+    // lays out at, and keeps the clamp, as the engine does.
+    const capture = captureLogRecords("debug");
+    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    laidOut(rail, 300, 100);
+    const fit = installBandFit(rail.scroller, fakeTicker());
+    fit.refit();
+    const rows = region(rail.pane, "hidden-section") as HTMLElement;
+    let top = 0;
+    const max = (): number => Math.max(0, rows.scrollHeight - rows.clientHeight);
+    Object.defineProperty(rows, "scrollTop", {
+      configurable: true,
+      get: () => (top = Math.min(top, max())),
+      set: (v: number) => {
+        top = Math.max(0, Math.min(v, max()));
+      },
+    });
+    rows.scrollTop = 3 * ROW;
+    // Act
+    fireResize(rail.scroller);
+    // Assert
+    expect(rows.scrollTop).toBe(3 * ROW);
+    const record = await forwardedRecord(capture, "sidebar.band-fit.scroll-kept");
+    expect(record.context).toMatchObject({ fitted_at: 0, kept: 3 * ROW, to: 3 * ROW });
+    fit.dispose();
+  });
+
+  it("leaves a section's scroll alone when the fit did not move it", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const rail = drawn({ open: 10, hidden: 10, merged: 10 });
+    laidOut(rail, 300, 100);
+    const fit = installBandFit(rail.scroller, fakeTicker());
+    // Act
+    fit.refit();
+    // Assert
+    const records = await forwardedRecords(capture);
+    expect(records.filter((r) => r.operation === "sidebar.band-fit.scroll-kept")).toEqual([]);
     fit.dispose();
   });
 

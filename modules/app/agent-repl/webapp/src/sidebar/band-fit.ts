@@ -87,6 +87,7 @@
 import { sameLocalDate, type Ticker } from "../clock.js";
 import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
+import { railScrollKept } from "../scroll.js";
 import {
   DEPLOY_QUEUE_LABEL_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
@@ -413,6 +414,22 @@ function sizeBand(band: Band, stops: BandStops, lines: number, stretch: number |
 }
 
 /**
+ * Put BAND's viewport back at TOP, where it stood before the fit let it go,
+ * and repaint whether rows lie below its edge. A viewport sized too short to
+ * scroll that far stops where it clamps.
+ */
+function restoreScroll(band: Band, top: number): void {
+  const found = band.region.scrollTop;
+  if (found === top) return;
+  railScrollKept(band.region, top);
+  paintBandMore(band.region);
+  log.debug("the band fit put a section's viewport back where it stood", {
+    operation: "sidebar.band-fit.scroll-kept",
+    context: { band: band.section.className, fitted_at: found, kept: top, to: band.region.scrollTop },
+  });
+}
+
+/**
  * Mark REGION's section `BAND_MORE_ATTRIBUTE` while rows lie below its
  * viewport's edge (half a pixel of rounding is no row), and clear it once
  * the viewport reaches its end.
@@ -484,6 +501,11 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     return null;
   }
   const bands = [openSection, mergedSection, hiddenSection].filter((band): band is Band => band !== null);
+  // THE FIT NEVER MOVES THE READER'S VIEW (owner report, 2026-10-27): letting
+  // a viewport go shrinks it to its rows, and the measuring that follows lays
+  // it out, clamping its scroll to its top. Each viewport's position is read
+  // first and put back once it is sized (`restoreScroll`).
+  const tops = bands.map((band) => band.region.scrollTop);
   // A stretched viewport stands taller than its rows, so it is let go before
   // the rows are measured: the stops are the rows' own, never the stretch's.
   for (const band of bands) band.region.style.height = "";
@@ -509,6 +531,7 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   // A rail shorter than the sections' headers leaves no room to stretch into.
   const stretch = Math.max(0, room - used);
   sized.forEach(([m, n], i) => sizeBand(m.band, m.stops, n, i === sized.length - 1 ? stretch : null));
+  bands.forEach((band, i) => restoreScroll(band, tops[i]));
   const context = {
     room,
     gate,
