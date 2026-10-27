@@ -43,6 +43,8 @@ import {
   standingClientFailure,
 } from "../../src/rpc/link.js";
 import { startPageStreams, type PageStreamsHandle } from "../../src/rpc/page-streams.js";
+import { createDaemonOrigin, type DaemonOrigin } from "../../src/rpc/daemon-origin.js";
+import { watchStream } from "../../src/rpc/streams.js";
 import { filesUnder } from "../files-under.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -1082,6 +1084,154 @@ const STREAMING_RPCS: readonly string[] = Object.entries(AgentRepl.method)
   )
   .map(([name]) => name);
 
+
+/** A context whose page stream runs against CLIENT, dialing DAEMON, which a test moves. */
+function movableContextFor(
+  client: ReturnType<typeof createAgentReplClient>,
+  failures: FailureSink,
+  daemon: DaemonOrigin,
+): AppContext {
+  return createAppContext({
+    client,
+    workspace: WORKSPACE,
+    ticker: createTicker(1000),
+    failures,
+    seen: fakePageSeen(),
+    composerEnabled: false,
+    page: "page-1",
+    daemon,
+  });
+}
+
+describe("the page's daemon moving", () => {
+  it("reopens the page's stream at once, its old one still standing", async () => {
+    // Arrange: the old daemon never ends the page's stream.
+    const { client, daemon } = fakeDaemon();
+    const origin = createDaemonOrigin("http://host.localhost:1");
+    const ctx = movableContextFor(client, new RecordingSink(), origin);
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    // Act
+    origin.set("http://host.localhost:2");
+    await settle();
+
+    // Assert: a second WatchPage with no clock advance.
+    expect(daemon.streamOpens.filter((name) => name === "WatchPage")).toHaveLength(2);
+    ctx.quiesce();
+  });
+
+  it("ends every subscription on the daemon being left", async () => {
+    // Arrange
+    const { client, daemon } = fakeDaemon();
+    const origin = createDaemonOrigin("http://host.localhost:1");
+    const ctx = movableContextFor(client, new RecordingSink(), origin);
+    await settle();
+    daemon.send(attached());
+    await settle();
+    let over = false;
+    void (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, new AbortController().signal)) {
+        // Nothing to draw.
+      }
+      over = true;
+    })();
+    await settle();
+
+    // Act
+    origin.set("http://host.localhost:2");
+    await settle();
+
+    // Assert
+    expect(over).toBe(true);
+    ctx.quiesce();
+  });
+
+  it("holds a subscription opened at the move until the reopened stream attaches", async () => {
+    // Arrange
+    const { client, daemon } = fakeDaemon();
+    const origin = createDaemonOrigin("http://host.localhost:1");
+    const ctx = movableContextFor(client, new RecordingSink(), origin);
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    // Act: a watch opened in the same turn as the move, then the old run ends
+    // late and the new one opens.
+    origin.set("http://host.localhost:2");
+    const controller = new AbortController();
+    void (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        // Nothing to draw.
+      }
+    })();
+    await settle();
+    const beforeAttach = daemon.subscribes.length;
+    daemon.send(attached());
+    await settle();
+
+    // Assert: nothing was subscribed on the generation the move ended, and
+    // the late end of the old run did not end the new generation either.
+    expect([beforeAttach, daemon.subscribes.length]).toEqual([0, 1]);
+    controller.abort();
+    ctx.quiesce();
+  });
+
+  it("files no unreachable failure for a component stream that rides the page across the move", async () => {
+    // Arrange: a component's standing stream on the page, subscribed.
+    const { client, daemon } = fakeDaemon();
+    const sink = new RecordingSink();
+    const origin = createDaemonOrigin("http://host.localhost:1");
+    const ctx = movableContextFor(client, sink, origin);
+    await settle();
+    daemon.send(attached());
+    await settle();
+    const handle = watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: (_client, signal) => ctx.streams.watch("footer", { workspace: WORKSPACE }, signal),
+      onPush: () => undefined,
+    });
+    await settle();
+
+    // Act
+    origin.set("http://host.localhost:2");
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    // Assert: it subscribed again on the reopened stream, and nothing called
+    // the daemon unreachable.
+    expect([daemon.subscribes.length, sink.reported]).toEqual([2, []]);
+    handle.cancel();
+    ctx.quiesce();
+  });
+
+  it("sends no UnsubscribePage to the daemon now named for a subscription the move ended", async () => {
+    // Arrange
+    const { client, daemon } = fakeDaemon();
+    const origin = createDaemonOrigin("http://host.localhost:1");
+    const ctx = movableContextFor(client, new RecordingSink(), origin);
+    await settle();
+    daemon.send(attached());
+    await settle();
+    void (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, new AbortController().signal)) {
+        // Nothing to draw.
+      }
+    })();
+    await settle();
+
+    // Act
+    origin.set("http://host.localhost:2");
+    await settle();
+
+    // Assert
+    expect(daemon.unsubscribes).toEqual([]);
+    ctx.quiesce();
+  });
+});
 
 describe("the page's connection budget", () => {
   it("opens a standing stream from nowhere but the page mux", () => {

@@ -6,27 +6,44 @@
  * it, because a handover moves the workspaces to a successor without
  * reloading the host (lisp/webhost.el, `setDaemon`), so the host's sidebar
  * dials whichever daemon Emacs last named. The transport reads the origin at
- * every call (rpc/transport.ts), so a stream that ends at the old daemon's
- * departure reopens at the successor.
+ * every call (rpc/transport.ts), and every standing stream is TOLD the origin
+ * moved (`onMoved`) and reopens at the successor at once.
+ *
+ * A STREAM NEVER WAITS FOR THE OLD DAEMON TO LEAVE. It used to: the sidebar's
+ * roster reopened at the successor only when its stream at the old daemon
+ * ended, and a handover a workspace refused to finish leaves the old daemon
+ * serving for good. Its roster stood still for every workspace that had moved,
+ * so a prompt sent to one turned no row red (2026-10-26, the 0.260.0 deploy).
  */
+import { createListeners } from "../listeners.js";
 
 /** The origin a document's daemon calls go to, and the one way to move it. */
 export interface DaemonOrigin {
   /** The origin every call goes to now. */
   current(): string;
-  /** Point every later call at ORIGIN. Answers whether it moved. */
+  /** Point every later call at ORIGIN, telling every `onMoved` listener. Answers whether it moved. */
   set(origin: string): boolean;
+  /**
+   * Run FN, synchronously inside `set`, every time the origin moves. Answers
+   * the unsubscribe.
+   */
+  onMoved(fn: () => void): () => void;
 }
 
 /** A daemon origin starting at INITIAL. */
 export function createDaemonOrigin(initial: string): DaemonOrigin {
   let origin = initial;
+  const listeners = createListeners();
   return {
     current: () => origin,
     set(next) {
       if (next === origin) return false;
       origin = next;
+      listeners.notify();
       return true;
+    },
+    onMoved(fn) {
+      return listeners.add(fn);
     },
   };
 }

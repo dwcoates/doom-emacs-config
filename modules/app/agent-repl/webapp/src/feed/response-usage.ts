@@ -21,6 +21,7 @@ import { createPointerRest } from "../pointer-rest.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireMessage } from "../rpc/strict.js";
 import { feedRowId, feedRowOf } from "./row-id.js";
+import { createListeners } from "../listeners.js";
 
 /** A response's usage stamp, read: what the footer draws while it is hovered. */
 export interface ResponseUsage {
@@ -67,7 +68,7 @@ export type ShowResponseUsage = (usage: ResponseUsage | null) => void;
 const usages = new WeakMap<Element, ResponseUsage>();
 
 /** Every installed hover's answer to a bubble's stamp being restated. */
-const restaters = new Set<(bubble: Element) => void>();
+const restaters = createListeners<[Element]>();
 
 /** The selector of a response bubble. */
 const RESPONSE_BUBBLE = `.${BUBBLE_CLASS}[${BUBBLE_ROLE_ATTRIBUTE}="response"]`;
@@ -76,7 +77,7 @@ const RESPONSE_BUBBLE = `.${BUBBLE_CLASS}[${BUBBLE_ROLE_ATTRIBUTE}="response"]`;
 export function setResponseUsage(bubble: HTMLElement, usage: ResponseUsage | undefined): void {
   if (usage === undefined) usages.delete(bubble);
   else usages.set(bubble, usage);
-  for (const restate of restaters) restate(bubble);
+  restaters.notify(bubble);
 }
 
 /** BUBBLE's recorded usage, or null when it has none. */
@@ -143,13 +144,13 @@ export function installResponseUsageHover(host: HTMLElement, show: ShowResponseU
   host.addEventListener("mousemove", onMove);
   host.addEventListener("mouseleave", onLeave);
   const stopFocus = focus.onLeft(onFocusLeft);
-  restaters.add(restate);
+  const unrestate = restaters.add(restate);
   return () => {
     host.removeEventListener("mouseover", onOver);
     host.removeEventListener("mousemove", onMove);
     host.removeEventListener("mouseleave", onLeave);
     stopFocus();
-    restaters.delete(restate);
+    unrestate();
     showFor(null);
   };
 }

@@ -53,6 +53,7 @@ import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { DROPPED_EVENT, type HeldPromptDroppedDetail } from "../held/held-prompt.js";
 import { queryAll } from "../dom.js";
+import { createListeners } from "../listeners.js";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -81,7 +82,7 @@ export interface ComposerGate {
 export function createComposerGate(): ComposerGate {
   let state: ComposerGateState = "open";
   let reason: string | undefined;
-  const listeners = new Set<(state: ComposerGateState, reason?: string) => void>();
+  const listeners = createListeners<[ComposerGateState, string | undefined]>();
   return {
     current: () => state,
     set(next: ComposerGateState, nextReason?: string): void {
@@ -91,13 +92,10 @@ export function createComposerGate(): ComposerGate {
         operation: "composer.gate",
         context: { state: next, reason: nextReason },
       });
-      for (const fn of [...listeners]) fn(state, reason);
+      listeners.notify(state, reason);
     },
     subscribe(fn: (state: ComposerGateState, reason?: string) => void): () => void {
-      listeners.add(fn);
-      return () => {
-        listeners.delete(fn);
-      };
+      return listeners.add(fn);
     },
   };
 }

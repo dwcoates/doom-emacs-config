@@ -45,6 +45,7 @@ import {
   type PageToHost,
 } from "./protocol.js";
 import { isDaemonOrigin, type DaemonOrigin } from "../rpc/daemon-origin.js";
+import { createListeners } from "../listeners.js";
 
 /** What the host needs from its environment, injectable for tests. */
 export interface HostEnv {
@@ -262,7 +263,7 @@ export function createHost(env: HostEnv): Host {
    */
   const incoming = new Map<string, { fresh: Frame; bound: number }>();
   /** Who is told every page shown (`onShown`): the webhost's sidebar. */
-  const shownListeners = new Set<(id: string) => void>();
+  const shownListeners = createListeners<[string]>();
   const note = (level: HostNote["level"], text: string): void => {
     notes.push({ level, text });
     if (notes.length > NOTE_LIMIT) notes = notes.slice(notes.length - NOTE_LIMIT);
@@ -696,15 +697,14 @@ export function createHost(env: HostEnv): Host {
       }
       placeSidebar();
       // THE SIDEBAR'S HIGHLIGHT MOVES WITH THE PAGE, in the same turn.
-      for (const listener of shownListeners) listener(id);
+      shownListeners.notify(id);
       // The keyboard follows the page on screen: Emacs focused this web view,
       // so the focus within it moves to the page now shown.
       if (doc.hasFocus()) next.iframe.focus();
       return answer("show", id, "shown", { previous: previous?.id ?? null, ...(jumped ? { jumped: true } : {}) });
     },
     onShown(listener) {
-      shownListeners.add(listener);
-      return () => shownListeners.delete(listener);
+      return shownListeners.add(listener);
     },
     remove(id) {
       return withFrame("remove", id, (frame) => {

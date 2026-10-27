@@ -105,7 +105,16 @@ export function startWebhostSidebar(
     // THE WEBHOST STATES ITS BUILD on its page stream: a handover no longer
     // reloads it, so a deploy that built another reloads it instead.
     const webhostBuild = (deps.webappBuild ?? (() => readWebappBuild(doc)))();
-    const ctx = createDaemonContext({ client, ticker: createTicker(), failures, page: connectionId, webhostBuild });
+    const ctx = createDaemonContext({
+      client,
+      ticker: createTicker(),
+      failures,
+      page: connectionId,
+      webhostBuild,
+      // THE ORIGIN THE TRANSPORT READS: the context reopens every standing
+      // stream when it moves (rpc/daemon-origin.ts).
+      daemon: deps.daemon,
+    });
     // An unloaded webhost stops at once: its requests, and its census.
     const unwatch = endPageAtPagehide(win);
     stopAtPageTeardown(() => census.stop());

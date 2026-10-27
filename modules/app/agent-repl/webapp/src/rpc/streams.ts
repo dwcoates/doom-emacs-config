@@ -42,6 +42,14 @@
  * for one. What a handle does subscribe to is `ctx.onQuiesced`: the workspace
  * has moved, so reopening would file a `daemon_unreachable` card every backoff
  * for a link that is correctly gone.
+ *
+ * THE WEB VIEW HOST IS THE ONE DOCUMENT WHOSE DAEMON MOVES (daemon-origin.ts):
+ * its transport reads a movable origin at every call. A handle subscribes to
+ * `ctx.onDaemonMoved` and, when it fires, ends its run and reopens at once at
+ * the daemon now named, filing nothing: the stream did not fail, it was
+ * pointed elsewhere. Waiting for the old daemon's stream to end instead left
+ * the host's sidebar reading a daemon that no longer served the workspaces it
+ * drew, for as long as that daemon stayed up.
  */
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
@@ -78,6 +86,13 @@ export interface StreamContext {
    * `daemon_unreachable` card every backoff for a link that is correctly gone.
    */
   onQuiesced(fn: () => void): () => void;
+  /**
+   * Run FN every time the daemon this context's client dials MOVES (the web
+   * view host's `setDaemon`), synchronously as it moves. Answers the
+   * unsubscribe. A workspace page's daemon is its own origin, which never
+   * moves, so its context never calls FN.
+   */
+  onDaemonMoved(fn: () => void): () => void;
   /**
    * Publish that a frame arrived and was read, for the page-wide observers of
    * the link's health (the lifecycle's restarting notice). Optional so a unit
@@ -164,6 +179,8 @@ export function watchStream<Res extends Message>(
   let unreachableFiled = false;
   /** Whether this run carried the planned-ending frame. Reset per run. */
   let endingSeen = false;
+  /** Whether the daemon moved under this run, which ends it to reopen there. Reset per run. */
+  let daemonMoved = false;
   /** Resolves the current backoff wait early when the stream is cancelled. */
   let wakeFromBackoff: (() => void) | null = null;
 
@@ -184,6 +201,19 @@ export function watchStream<Res extends Message>(
       context: { rpc: opts.name },
     });
     cancelSelf();
+  });
+  // THE DAEMON MOVED: this run is talking to a daemon nobody names any more,
+  // so it is ended now and reopened at the one named instead. The flag is set
+  // before the abort, so however the run then ends, it ends as a move.
+  const unsubscribeFromMove = ctx.onDaemonMoved(() => {
+    if (cancelled) return;
+    daemonMoved = true;
+    log.info(`${opts.name} is reopening: the daemon it dials moved`, {
+      operation: "rpc.stream-daemon-moved",
+      context: { rpc: opts.name },
+    });
+    controller.abort();
+    wakeFromBackoff?.();
   });
 
   /**
@@ -319,6 +349,7 @@ export function watchStream<Res extends Message>(
     while (!cancelled) {
       controller = new AbortController();
       endingSeen = false;
+      daemonMoved = false;
       let end: StreamEnd;
       // A DRAW THAT THREW is the page's defect, never the link's (owner
       // ruling, 2026-10-18): it ends this run apart from a transport failure,
@@ -349,6 +380,17 @@ export function watchStream<Res extends Message>(
       }
       opts.onEnd?.(end);
       if (cancelled) return;
+      // THE DAEMON MOVED UNDER THE RUN: however it ended, it was this end that
+      // ended it, to dial the daemon now named. Nothing is filed and it
+      // reopens at once.
+      if (daemonMoved) {
+        log.info(`the ${opts.name} stream ended at its daemon's move; reopening at the daemon now named`, {
+          operation: "rpc.stream-ended-daemon-moved",
+          context: { rpc: opts.name, end: end.kind },
+        });
+        backoffMs = initialMs;
+        continue;
+      }
       // THE DAEMON SAID SO FIRST: a clean end after the planned-ending frame
       // is a stand-down, not a fault. Nothing is filed; the stream reopens at
       // once and finds whichever daemon serves now. An ERROR after the frame
@@ -386,6 +428,7 @@ export function watchStream<Res extends Message>(
         context: { rpc: opts.name },
       });
       unsubscribeFromQuiesce();
+      unsubscribeFromMove();
       controller.abort();
       wakeFromBackoff?.();
     },

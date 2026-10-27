@@ -9,6 +9,7 @@ import { startWebhostSidebar, type WebhostSidebarStartDeps } from "../../src/hos
 import { ForwardingLogger, log, setLogger } from "../../src/log.js";
 import { daemonUnreachable } from "../../src/failure/sink.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
+import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import { captureLogRecords } from "../log-capture.js";
 import { clientLogRecorder } from "../rpc/client-log-recorder.js";
 import { dispatchPageTransition } from "../page-transition.js";
@@ -122,6 +123,28 @@ describe("startWebhostSidebar", () => {
 
     // Assert
     expect(told.failures.at(-1)?.map((f) => f.arm)).toEqual(["daemonUnreachable"]);
+  });
+
+  it("tells its context's streams when the daemon it dials moves", () => {
+    // Arrange
+    const { host } = recordingHost();
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    let ctx: DaemonContext | null = null;
+    start(host, {
+      daemon,
+      mount: (_nav, c) => {
+        ctx = c;
+        return { dispose: () => undefined, markShown: () => undefined };
+      },
+    });
+    let moves = 0;
+    (ctx as DaemonContext | null)?.onDaemonMoved(() => (moves += 1));
+
+    // Act
+    daemon.set("http://host.localhost:2");
+
+    // Assert
+    expect(moves).toBe(1);
   });
 
   it("lists a sidebar that failed to start in every page's chip", () => {

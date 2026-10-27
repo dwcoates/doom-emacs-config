@@ -34,6 +34,15 @@
  * to remove. A rejection reaches the caller's own `watchStream` as an ordinary
  * open failure, which files its card and retries on backoff, by which time the
  * page's stream has reopened and re-attached.
+ *
+ * A DAEMON MOVE ENDS THE GENERATION AT ONCE (the web view host's
+ * `setDaemon`, `StreamContext.onDaemonMoved`). Every subscription on the page
+ * belongs to the daemon being left, so the page detaches synchronously inside
+ * the move, before any reopen can run: a subscription reopened by the same
+ * move waits on the NEXT generation's attachment, which only the daemon now
+ * named can settle, and can never subscribe at a daemon the page holds no
+ * stream on. The run the move ended then ends late, and its own end detaches
+ * nothing, since the generation it opened for is already gone.
  */
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
@@ -43,6 +52,7 @@ import { ConnectError } from "@connectrpc/connect";
 // contracts for one wire. It is marked internal by the package, so the version
 // is pinned and an unparseable code is refused rather than defaulted (below).
 import { codeFromString } from "@connectrpc/connect/protocol-connect";
+import { createListeners } from "../listeners.js";
 import { log } from "../log.js";
 import {
   SubscribePageRequestSchema,
@@ -224,8 +234,10 @@ function newAttachment(): Attachment {
  */
 export function startPageStreams(ctx: PageStreamContext, page: string, webhostBuild?: string): PageStreamsHandle {
   const subscriptions = new Map<string, FrameQueue<PageFrame>>();
-  const attachedListeners = new Set<() => void>();
+  const attachedListeners = createListeners();
   let attachment = newAttachment();
+  /** The generation the page's current run was opened for; its end detaches only that one. */
+  let runAttachment = attachment;
   let nextId = 0;
 
   // THE PAGE'S OWN STREAM IS AN ORDINARY STANDING STREAM, so it gets the
@@ -236,26 +248,40 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhostBu
   const stream: StreamHandle = watchStream<WatchPageResponse>(ctx, {
     name: "WatchPage",
     schema: WatchPageResponseSchema,
-    open: (client, signal) =>
-      client.watchPage(webhostBuild === undefined ? { page } : { page, webhost: { webappBuild: webhostBuild } }, { signal }),
+    open: (client, signal) => {
+      runAttachment = attachment;
+      return client.watchPage(webhostBuild === undefined ? { page } : { page, webhost: { webappBuild: webhostBuild } }, { signal });
+    },
     // THE DAEMON'S PLANNED EXIT ENDS THE PAGE WITH `ending`, after every
     // subscription on it has sent its own last frame: the page reopens on the
     // daemon that serves next without filing the unreachable failure.
     plannedEnding: (response) => response.frame.case === "ending",
     onPush: (response) => routeFrame(response),
-    onEnd: () => detach(),
+    onEnd: () => {
+      // A run a daemon move ended has had its generation detached already
+      // (below); detaching again would end the generation the move began.
+      if (runAttachment === attachment) detach();
+    },
+  });
+  // SUBSCRIBED AFTER THE STREAM, and it does not matter: the detach is
+  // synchronous and every stream's reopen after the move is not, so no
+  // subscription reads a generation the move has ended.
+  const unsubscribeFromMove = ctx.onDaemonMoved(() => {
+    log.info("the page's daemon moved; every subscription on it ends and reopens there", {
+      operation: "rpc.page-daemon-moved",
+      context: { page, subscriptions: subscriptions.size },
+    });
+    detach();
   });
 
   return {
     page,
     watch,
     onAttached(fn: () => void): () => void {
-      attachedListeners.add(fn);
-      return () => {
-        attachedListeners.delete(fn);
-      };
+      return attachedListeners.add(fn);
     },
     cancel(): void {
+      unsubscribeFromMove();
       stream.cancel();
       detach();
     },
@@ -271,8 +297,7 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhostBu
           context: { page },
         });
         attachment.resolve();
-        // A copy: a listener may unsubscribe itself as it runs.
-        for (const fn of [...attachedListeners]) fn();
+        attachedListeners.notify();
         return;
       case "push": {
         const queue = subscriptions.get(frame.value.subscription);

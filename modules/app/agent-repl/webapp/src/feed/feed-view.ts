@@ -43,6 +43,7 @@ import {
   setWalkLoading,
 } from "./walk-control.js";
 import { log } from "../log.js";
+import { createListeners } from "../listeners.js";
 import { SELECTED_ROW_ATTRIBUTE, syncSelectedEntry } from "./selected-entry.js";
 import type { SelectionVisibility } from "./selection-visibility.js";
 import {
@@ -291,7 +292,7 @@ export function createFeedController(
 ): FeedController {
   const order: string[] = [];
   const states = new Map<string, RowState>();
-  const listeners = new Set<() => void>();
+  const listeners = createListeners();
   let crumbs: readonly FeedBreadcrumb[] = [];
   let disposed = false;
   // THE READER'S FOLDS ACROSS A PAGE REPLACE. A replace rebuilds every row from
@@ -393,14 +394,11 @@ export function createFeedController(
   }
 
   function onChange(fn: () => void): () => void {
-    listeners.add(fn);
-    return () => {
-      listeners.delete(fn);
-    };
+    return listeners.add(fn);
   }
 
   function announce(): void {
-    for (const fn of [...listeners]) fn();
+    listeners.notify();
     markLatestPrompt();
     stopEndedTurns();
     followTail();

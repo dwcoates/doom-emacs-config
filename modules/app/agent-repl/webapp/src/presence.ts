@@ -18,6 +18,7 @@
  * phase) reads this instead, because inside the host every page's document is
  * visible whenever the host is, shown or not.
  */
+import { createListeners } from "./listeners.js";
 import { perDocument } from "./per-document.js";
 
 /** What changed when a listener is told. */
@@ -70,12 +71,12 @@ export function createPresence(doc: Document, embedded: boolean): PresenceSource
   let hostShown = !embedded;
   let switchStartedAtMs: number | null = null;
   let reloadStartedAtMs: number | null = null;
-  const listeners = new Set<PresenceListener>();
+  const listeners = createListeners<Parameters<PresenceListener>>();
   const visible = (): boolean => doc.visibilityState === "visible";
   const seen = (): boolean => hostShown && visible();
   const tell = (cause: PresenceCause): void => {
     const now = seen();
-    for (const listener of [...listeners]) listener(now, cause);
+    listeners.notify(now, cause);
   };
   const onVisibility = (): void => tell("visibility");
   doc.addEventListener("visibilitychange", onVisibility);
@@ -86,10 +87,7 @@ export function createPresence(doc: Document, embedded: boolean): PresenceSource
     switchStartedAt: () => switchStartedAtMs,
     reloadStartedAt: () => reloadStartedAtMs,
     onChange(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+      return listeners.add(listener);
     },
     setShown(shown, startedAtMs = null) {
       if (shown === hostShown) return;

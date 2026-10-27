@@ -33,6 +33,65 @@ describe("createDaemonOrigin", () => {
   });
 });
 
+describe("createDaemonOrigin: onMoved", () => {
+  it("tells a listener the origin moved, already pointing at the new origin", () => {
+    // Arrange
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    const seen: string[] = [];
+    daemon.onMoved(() => seen.push(daemon.current()));
+
+    // Act
+    daemon.set("http://host.localhost:2");
+
+    // Assert
+    expect(seen).toEqual(["http://host.localhost:2"]);
+  });
+
+  it("tells no listener when told the origin it holds", () => {
+    // Arrange
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    let moves = 0;
+    daemon.onMoved(() => (moves += 1));
+
+    // Act
+    daemon.set("http://host.localhost:1");
+
+    // Assert
+    expect(moves).toBe(0);
+  });
+
+  it("stops telling a listener that unsubscribed", () => {
+    // Arrange
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    let moves = 0;
+    const unsubscribe = daemon.onMoved(() => (moves += 1));
+    unsubscribe();
+
+    // Act
+    daemon.set("http://host.localhost:2");
+
+    // Assert
+    expect(moves).toBe(0);
+  });
+
+  it("tells every listener, even when one unsubscribes itself as it runs", () => {
+    // Arrange
+    const daemon = createDaemonOrigin("http://host.localhost:1");
+    const told: string[] = [];
+    const unsubscribeFirst = daemon.onMoved(() => {
+      told.push("first");
+      unsubscribeFirst();
+    });
+    daemon.onMoved(() => told.push("second"));
+
+    // Act
+    daemon.set("http://host.localhost:2");
+
+    // Assert
+    expect(told).toEqual(["first", "second"]);
+  });
+});
+
 describe("isDaemonOrigin", () => {
   it.each([
     ["an http origin", "http://host.localhost:61048", true],

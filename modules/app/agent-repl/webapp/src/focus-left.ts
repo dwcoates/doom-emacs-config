@@ -15,6 +15,7 @@
  *     window without the web view ever losing the focus, so the page cannot
  *     see this one for itself.
  */
+import { createListeners } from "./listeners.js";
 import { log } from "./log.js";
 import { perDocument } from "./per-document.js";
 import { pagePresence, type Presence } from "./presence.js";
@@ -42,13 +43,13 @@ export const FOCUS_LEFT_HIDDEN = "the page was hidden";
 
 /** The focus-left signal of the page in WIN, whose presence is PRESENCE. */
 export function createFocusLeft(win: Window, presence: Presence): FocusLeftSource {
-  const listeners = new Set<FocusLeftListener>();
+  const listeners = createListeners<Parameters<FocusLeftListener>>();
   const tell = (why: string): void => {
     log.debug("the focus left the page; letting go of what the pointer raised", {
       operation: "page.focus-left",
       context: { why, listeners: listeners.size },
     });
-    for (const listener of [...listeners]) listener(why);
+    listeners.notify(why);
   };
   const onBlur = (): void => tell(FOCUS_LEFT_BLUR);
   win.addEventListener("blur", onBlur);
@@ -57,10 +58,7 @@ export function createFocusLeft(win: Window, presence: Presence): FocusLeftSourc
   });
   return {
     onLeft(listener) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+      return listeners.add(listener);
     },
     left: tell,
     dispose() {
