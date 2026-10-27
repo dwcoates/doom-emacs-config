@@ -24,7 +24,7 @@ import { agentIdPath } from "../../src/engine/identity.js";
 import { LockHeldError, LockHolderUnavailableError, workspaceLockKey } from "../../src/locks.js";
 import { textSaid } from "../../src/engine/turn.js";
 import { saidContent } from "../../src/engine/said-content.js";
-import { KEEPALIVE_INTERVAL_MS, KEEPALIVE_PROMPT_MARKER } from "../../src/engine/keepalive.js";
+import { KEEPALIVE_PROMPT_MARKER } from "../../src/engine/keepalive.js";
 import { toStanding } from "../../src/engine/permission-gate.js";
 import { sessionFault } from "../../src/service/failures.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
@@ -4046,10 +4046,6 @@ describe("the keep-alive spares live detached work", () => {
     await h.engine.onSdkMessage(answering(h, resultMessage(`${turnId}-result-uuid`)));
   }
 
-  /** The vendor's level, stating nothing live: the last item ended. */
-  const nothingLive = (): SdkMessage =>
-    ({ type: "system", subtype: "background_tasks_changed", tasks: [], uuid: "level-empty", session_id: "s" }) as never;
-
   it("schedules no keep-alive when a turn ends with its background shell still live", async () => {
     // Arrange
     const h = harness();
@@ -7300,25 +7296,6 @@ describe("the keep-alive cadence's anchor: the conversation's last request, not 
     (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
     await pending;
     return h;
-  }
-
-  /** A main-thread API response that bought `ttlMs`. */
-  function responseBuying(uuid: string, ttlMs: number): SdkMessage {
-    const message = assistantMessage(uuid) as unknown as { message: Record<string, unknown> };
-    return {
-      ...message,
-      message: {
-        ...message.message,
-        model: "claude-opus-5",
-        usage: {
-          input_tokens: 1,
-          cache_creation:
-            ttlMs === CACHE_TTL_1H_MS
-              ? { ephemeral_1h_input_tokens: 1, ephemeral_5m_input_tokens: 0 }
-              : { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 1 },
-        },
-      },
-    } as unknown as SdkMessage;
   }
 
   it("schedules no beat on a restart after the cache expired", async () => {
