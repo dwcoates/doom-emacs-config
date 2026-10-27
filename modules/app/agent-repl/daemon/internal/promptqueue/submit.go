@@ -77,6 +77,16 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		return q.holdBehindCall(ctx, d, sub, call, log)
 	}
 
+	// A PROMPT THAT WAITS OUT A STANDING GATE IS HELD THERE before any shim is
+	// looked for: the gate runs none until it is answered (owner ruling,
+	// 2026-10-27), and the answer, not a revival, is what serves it.
+	if sub.Target == nil {
+		if kind, why, waiting := q.sessionWait(sub.WS); waiting && kind == wsm.HoldColdGate {
+			log.Info(opSubmit, "the workspace's session does not serve yet; the prompt is held until it comes up",
+				dlog.Context{"hold": kind.String(), "why": why})
+			return q.hold(ctx, sub, "", &leaseHold{kind: kind}, log)
+		}
+	}
 	sender, ok := q.deps.Client(sub.WS)
 	if !ok {
 		// A HIBERNATED SESSION IS IDLE, NOT DEAD. The prompt is its revival,
@@ -431,6 +441,17 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 			// held and the tray keeps showing it.
 			log.Debug(opSubmit, "no revival hook is wired; the prompt stays held", nil)
 			return
+		}
+		// A REVIVAL THAT PARKED AT ITS COLD GATE HAS NO SHIM BY DESIGN: the gate
+		// runs none until it is answered (owner ruling, 2026-10-27), so no
+		// client is the gate's state, never a revival that lied. Its prompts
+		// move under the gate's hold (sessionWait) exactly as a session's
+		// would under its own.
+		if q.deps.ColdGate != nil {
+			if _, gated := q.deps.ColdGate(ws); gated {
+				q.releaseReconnectHolds(ctx, ws, log)
+				return
+			}
 		}
 		if _, ok := q.deps.Client(ws); !ok {
 			// A SESSION THAT CAME UP AND HAS SINCE DIED is not a revival that

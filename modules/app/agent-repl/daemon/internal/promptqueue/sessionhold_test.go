@@ -25,7 +25,9 @@ const gateDetail = "the conversation is cold at 90,000 context tokens"
 // parkAtGate states what a revival that parks at its cold gate leaves: a shim
 // client, no started session, no watcher, and the gate standing.
 func parkAtGate(h *harness) {
-	h.noSession = false
+	// A GATE RUNS NO SHIM until it is answered (owner ruling, 2026-10-27):
+	// its shim is stood down, so no client answers either.
+	h.noSession = true
 	h.notStarted = true
 	h.noWatcher = true
 	h.coldGate = gateDetail
@@ -35,6 +37,7 @@ func parkAtGate(h *harness) {
 // session up and watched.
 func answerGate(h *harness) {
 	h.coldGate = ""
+	h.noSession = false
 	h.notStarted = false
 	h.noWatcher = false
 }
@@ -546,5 +549,21 @@ func putRow(t *testing.T, h *harness, over wsm.HeldPrompt) {
 	over.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT.String()
 	if err := h.db.PutHeldPrompt(context.Background(), over); err != nil {
 		t.Fatalf("PutHeldPrompt: %v", err)
+	}
+}
+
+func TestANoticeSentToAGateWithNoShimIsHeldThereWithNoRevival(t *testing.T) {
+	// Arrange: the gate stands and runs no shim; a notice waits out a gate.
+	h := newHarness(t)
+	parkAtGate(h)
+	sub := submission("t1", "a merge landed")
+	sub.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE
+
+	// Act
+	_, err := h.q.Submit(context.Background(), sub)
+
+	// Assert
+	if err != nil || !heldUnder(h, "t1", wsm.HoldColdGate) || h.revivals != 0 {
+		t.Fatalf("Submit = %v, hold = %+v, revivals = %d; want t1 held at the gate and nothing revived", err, h.db.hold("t1"), h.revivals)
 	}
 }
