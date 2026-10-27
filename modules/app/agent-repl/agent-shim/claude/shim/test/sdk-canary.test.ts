@@ -92,7 +92,7 @@ const LOCKFILE = JSON.parse(
  * this suite reports. It is spelled out rather than read from the lockfile so
  * that a lockfile bump alone cannot slip through green.
  */
-const PINNED_SDK_VERSION = "0.3.280";
+const PINNED_SDK_VERSION = "0.3.311";
 
 /** The lockfile key the SDK is pinned under. */
 const LOCK_KEY = "node_modules/@anthropic-ai/claude-agent-sdk";
