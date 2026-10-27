@@ -313,7 +313,10 @@ describe("the band fit in WebKit", () => {
     // section, from a rail too short for the bands' share to one holding all.
     const heights = Array.from({ length: 701 }, (_, i) => 200 + i);
     expect(await unsettled(page, heights, { live: 12, hidden: 9, merged: 9, today: 4 })).toEqual([]);
-  });
+    // MEASURED: 1,402 fits in one page pass run 800-860ms healthy, at and over
+    // the suite's 850ms, since the Deploys section always draws its queue
+    // heading (2026-10-27). Its own bound is just over twice that.
+  }, 1_800);
 
   it("grows today's merges, not Hidden Workspaces, into the room a whole Open section leaves", async () => {
     const got = await fit(page, rail(880, { live: 2, hidden: 40, merged: 40 }));
