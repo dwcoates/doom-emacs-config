@@ -1,10 +1,11 @@
 /**
- * A METAPROMPT TREE IS SET IN THE BUBBLE'S SERIF WITH MONOSPACE RAILS, AND
- * STILL LINES UP, IN WEBKIT (owner ruling, 2026-10-26).
+ * A METAPROMPT TREE IS SET IN THE BUBBLE'S FACE WITH MONOSPACE RAILS, AND
+ * STILL LINES UP, IN WEBKIT (owner rulings, 2026-10-26 and 2026-10-27).
  *
- * The tree's labels and text are set in the bubble's proportional serif and
- * only its connectors in the monospace rail face, so the wrap measures every
- * piece as it draws (bubble/body.ts `treeMeasure`). jsdom lays nothing out, so
+ * The tree's labels and text are set in the bubble's face and its connectors
+ * in the monospace rail face, so the wrap measures every piece as it draws
+ * (bubble/body.ts `treeMeasure`); a proportional bubble face is held to the
+ * same lines by the `proportional` sheet below. jsdom lays nothing out, so
  * this draws a real final response holding a wrapping tree over the real
  * stylesheet in headless WebKit and measures its lines: a wrap line's text
  * hangs under its head line's, every rule runs straight down from the
@@ -31,7 +32,13 @@ const TREE = [
 /** Within half a CSS pixel. */
 const NEAR = 0.5;
 
-describe("a metaprompt tree's faces in WebKit", () => {
+/** The faces drawn: the stylesheet's own, and a proportional one put over it. */
+const FACES = [
+  { name: "the stylesheet's bubble face", styles: [], face: "monospace" },
+  { name: "a proportional bubble face", styles: [":root { --bubble-font-family: Georgia, serif; }"], face: "Georgia" },
+];
+
+describe.each(FACES)("a metaprompt tree in $name, in WebKit", ({ styles, face }) => {
   let feed: FeedPage;
   let lines: DrawnLine[];
   let bodyRight: number;
@@ -39,7 +46,7 @@ describe("a metaprompt tree's faces in WebKit", () => {
 
   beforeAll(async () => {
     const script = await bundlePage(path.join(here, "tree-face-page.ts"), "treeFacePage");
-    feed = await openFeedPage({ width: 700, height: 900 });
+    feed = await openFeedPage({ width: 700, height: 900, styles });
     await feed.page.addScriptTag({ content: script });
     ({ lines, bodyRight, bubbleFace } = await feed.page.evaluate((text) => window.treeFace.measure(text), TREE));
   });
@@ -59,11 +66,8 @@ describe("a metaprompt tree's faces in WebKit", () => {
     expect([wraps("1.1").length > 0, wraps("1.2").length > 0]).toEqual([true, true]);
   });
 
-  it("sets the bubble and the tree's text in the serif", () => {
-    expect([bubbleFace, ...new Set(lines.map((l) => l.textFace))]).toEqual([
-      expect.stringContaining("Source Serif 4 Variable"),
-      expect.stringContaining("Source Serif 4 Variable"),
-    ]);
+  it("sets the bubble and the tree's text in the bubble face", () => {
+    expect([bubbleFace, ...new Set(lines.map((l) => l.textFace))]).toEqual([expect.stringContaining(face), expect.stringContaining(face)]);
   });
 
   it("sets the rails in the monospace rail face", () => {
