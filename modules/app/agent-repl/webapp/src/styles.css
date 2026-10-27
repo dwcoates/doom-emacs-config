@@ -1094,6 +1094,9 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    merge is not numbered; its name keeps the indent the number held, under
    the head's name. */
 #ws-sidebar .sb-mq-head .sb-mq-name { font-weight: 700; }
+/* THE HEAD'S NAME IS ITS REPOSITORY'S TEXT SIZE AT MOST (owner request,
+   2026-10-27): ever so slightly under the group header above it. */
+#ws-sidebar .sb-mq-head .sb-mq-name { font-size: calc(var(--merged-group-head-font-size) * 0.96); }
 #ws-sidebar .sb-mq-waiting {
   color: color-mix(in srgb, var(--repo-head-expanded) 55%, var(--repo-head-collapsed));
   font-size: 0.9em;
@@ -1398,6 +1401,9 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   /* One repository group's header height, pinned for the same reason, so a
      group header is as tall wherever it lands in the band's viewport. */
   --merged-group-head-h: 1.25rem;
+  /* The repository group header's text size, which the queue's head name is
+     held just under. */
+  --merged-group-head-font-size: 0.68rem;
 }
 /* A REPOSITORY'S GROUP inside Deploys, a queue's or a merged one: its
    label only, with no fold toggle (the repository section above is the one place a repository folds),
@@ -1408,7 +1414,7 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   height: var(--merged-group-head-h);
   line-height: var(--merged-group-head-h);
   padding: 0 0.7rem 0 1.75rem;
-  font-size: 0.68rem;
+  font-size: var(--merged-group-head-font-size);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   font-weight: 700;
