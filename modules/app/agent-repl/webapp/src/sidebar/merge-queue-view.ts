@@ -46,6 +46,8 @@ import { roundSuffix, STATE_GLYPHS } from "../feed/merge/tab-strip.js";
 import { log } from "../log.js";
 import { MERGE_GLYPH } from "../merge-glyph.js";
 import { guardMalformed } from "../rpc/guard.js";
+import { updateMergeQueueRefusal } from "../rpc/merge-queue-refusal.js";
+import { userRequester } from "../rpc/requester.js";
 import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../rpc/refusal.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
@@ -141,20 +143,6 @@ export function pausedText(u: RosterMergeQueuePaused, nowMs: number, path: strin
   return `${text}. Click to resume.`;
 }
 
-/** The refusals of a queue action that are UpdateMergeQueue's own. */
-function updateMergeQueueRefusal(cause: { case: string }): string {
-  switch (cause.case) {
-    case "notPaused":
-      return "the queue is no longer paused";
-    case "unknownRepository":
-      return "the daemon no longer has that repository";
-    case "noSuchQueuedMerge":
-      return "that merge is no longer waiting on the queue";
-    default:
-      return unreachableArm("UpdateMergeQueueError.cause", cause.case);
-  }
-}
-
 /** Ask the daemon to resume REPOSITORY's queue, drawing a refusal at CONTROL. */
 function resumeQueue(control: HTMLElement, sc: SidebarContext, repository: { id: string; dir: string }): Promise<boolean> {
   log.info("resuming a merge queue from the sidebar", {
@@ -168,10 +156,10 @@ function resumeQueue(control: HTMLElement, sc: SidebarContext, repository: { id:
     call: (client) =>
       client.updateMergeQueue({
         action: { case: "resume", value: { repository: { id: repository.id, dir: repository.dir } } },
-        requester: { asker: { case: "user", value: {} } },
+        requester: userRequester(),
       }),
     schema: UpdateMergeQueueResponseSchema,
-    refusalText: (cause) => updateMergeQueueRefusal(cause as never),
+    refusalText: updateMergeQueueRefusal,
   });
 }
 
@@ -277,10 +265,10 @@ function moveInLine(sc: SidebarContext, workspace: WorkspaceRef, place: UpdateMe
     call: (client) =>
       client.updateMergeQueue({
         action: { case: "moveTo", value: { workspace, place } },
-        requester: { asker: { case: "user", value: {} } },
+        requester: userRequester(),
       }),
     schema: UpdateMergeQueueResponseSchema,
-    refusalText: (cause) => updateMergeQueueRefusal(cause as never),
+    refusalText: updateMergeQueueRefusal,
     // UpdateMergeQueue answers no roster revision: the hold lets go with the
     // answer, and the push already drawn or next drawn carries the order.
     revision: () => null,

@@ -76,6 +76,7 @@ import { WorkspacePrioritySchema } from "../../../proto/gen/ts/agentrepl/v1/work
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { log } from "../log.js";
 import { guardMalformed } from "../rpc/guard.js";
+import { userRequester } from "../rpc/requester.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { crossCuttingSentence, refusalOf, type SentenceTable } from "../rpc/refuse.js";
 import type { WorkspaceHasOpenChildren, WorkspaceParentNotOpen } from "../../../proto/gen/ts/agentrepl/v1/family_pb";
@@ -872,7 +873,7 @@ export function buildRevertMergeRequest(workspace: WorkspaceRef): OpenWorkspaceR
 export function buildCloseWorkspaceRequest(workspace: WorkspaceRef): CloseWorkspaceRequest {
   return create(CloseWorkspaceRequestSchema, {
     workspace,
-    requester: { asker: { case: "user", value: {} } },
+    requester: userRequester(),
   });
 }
 
@@ -898,7 +899,7 @@ export function buildNukeWorkspaceRequest(workspace: WorkspaceRef): NukeWorkspac
 export function buildFinishWorkspaceRequest(workspace: WorkspaceRef): FinishWorkspaceRequest {
   return create(FinishWorkspaceRequestSchema, {
     workspace,
-    requester: { asker: { case: "user", value: {} } },
+    requester: userRequester(),
     placement: { place: { case: "back", value: {} } },
   });
 }
