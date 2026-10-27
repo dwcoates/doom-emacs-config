@@ -53,6 +53,16 @@ import internalv1 "agentrepl/proto/store/v1"
 
 func New() *internalv1.Entry { return &internalv1.Entry{} }
 EOF
+    # The daemon's read-only view of the store, importing only the
+    # conversation vocabulary, as invariant I8 requires.
+    mkdir -p "$root/proto/src/storeread/v1"
+    cat >"$root/proto/src/storeread/v1/service.proto" <<'EOF'
+syntax = "proto3";
+package storeread.v1;
+// The storage half lives in store/v1/store.proto and is never imported here.
+import "conversation/v1/history.proto";
+import "storeread/v1/endpoint_read_history_page.proto";
+EOF
     printf '%s' "$root"
 }
 
@@ -124,6 +134,22 @@ before the split.
 func Block() {}
 EOF
 expect 0 "a mention inside a block comment is accepted" "$root"
+
+root="$(newFixture storeread-store-import)"
+cat >>"$root/proto/src/storeread/v1/service.proto" <<'EOF'
+import "store/v1/endpoint_write_batch.proto";
+EOF
+expect 1 "a storeread proto importing the store's storage package is refused" "$root"
+
+root="$(newFixture storeread-other-import)"
+cat >>"$root/proto/src/storeread/v1/service.proto" <<'EOF'
+import "agentrepl/v1/service.proto";
+EOF
+expect 1 "a storeread proto importing any package but the conversation vocabulary is refused" "$root"
+
+root="$(newFixture storeread-missing)"
+rm -rf "$root/proto/src/storeread"
+expect 2 "a tree without the storeread package is a setup failure rather than a pass" "$root"
 
 # A gate that scans nothing passes forever, so an empty tree is a SETUP failure
 # rather than a pass.

@@ -14,6 +14,7 @@ syntax = "proto3";
 
 package shim.v1;
 
+import "conversation/v1/agent_activity.proto";
 import "conversation/v1/api.proto";
 import "conversation/v1/permission.proto";
 import "conversation/v1/session.proto";
@@ -166,6 +167,18 @@ message StartSessionResponse {
     StartSessionSuccess success = 1;
     StartSessionFailure failure = 2;
   }
+  // THE WORKSPACE'S BOOK: the main agent its conversation is stored under in
+  // the store, stated on EVERY answer, a success or any failure (a cold gate,
+  // a vendor that would not start), because it is a fact of the workspace and
+  // not of the outcome. It is the original vendor session's identity, which a
+  // rotation (a /clear) or a rebind's adoption leaves as the book every turn
+  // is filed under.
+  //
+  // The daemon records it and reads the workspace's history from the store
+  // with it (storeread.v1.ReadHistoryPage, `newest.stated`), so showing a
+  // conversation never needs a shim up. UNSET when the workspace has no book:
+  // a fresh start whose vendor session never came up.
+  optional conversation.v1.AgentId book = 3;
 }
 
 // The session can accept a prompt.
