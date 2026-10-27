@@ -1,0 +1,74 @@
+// endpoint_validate_workspace_name.proto — ValidateWorkspaceName: would this
+// name be accepted as a supplied workspace name? SIDEBAR section.
+//
+// A CLIENT ASKS BEFORE IT CREATES. A supplied name becomes the workspace's
+// branch, its worktree directory and its tab label, so the daemon holds it to
+// the naming rule (CreateWorkspaceInvalidName states it). A client that reads
+// the name in a prompt the user can still edit asks here first, so a name the
+// create would refuse is answered while the user's text is still in front of
+// them, rather than after the prompt has closed and the text is gone.
+//
+// THE RULE LIVES IN THE DAEMON ALONE. The answer is computed by the very check
+// CreateWorkspace and SetWorkspaceName refuse with, so no client holds a copy
+// of the rule that could drift from it.
+//
+// A READ. It records nothing, reserves nothing, and says nothing about whether
+// the name is free: whether another workspace holds the name is decided by the
+// create itself, under its naming lock, because any earlier answer could be
+// stale by the time the create runs.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/endpoint_create_workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The name to check, exactly as the user typed it.
+message ValidateWorkspaceNameRequest {
+  // The supplied name, before any prefix is applied: the text a client would
+  // send as a create's or a rename's name. Surrounding whitespace is trimmed
+  // before the rule is applied. A blank name is a malformed request (Connect
+  // InvalidArgument), because a required name that is blank is the client's
+  // own refusal to make, before anything is sent.
+  string name = 1;
+}
+
+// THE ARM IS THE OUTCOME. error = the question could not be answered; a name
+// that breaks the rule is an ANSWER, carried in the success arm.
+message ValidateWorkspaceNameResponse {
+  // Whether the daemon answered the question at all.
+  oneof result {
+    // The daemon judged the name.
+    ValidateWorkspaceNameSuccess success = 1;
+    // The daemon could not judge it.
+    ValidateWorkspaceNameError error = 2;
+  }
+}
+
+// The daemon's judgment of the name.
+message ValidateWorkspaceNameSuccess {
+  // THE ARM IS THE VERDICT: the name keeps the rule, or it breaks it at one
+  // component. The two are exclusive, and the breach is only meaningful when
+  // the name breaks the rule, so it lives on its own arm.
+  oneof verdict {
+    // The name keeps the naming rule; a create supplying it is not refused
+    // as invalid_name.
+    ValidateWorkspaceNameLegal legal = 1;
+    // The name breaks the naming rule, exactly as CreateWorkspace would
+    // refuse it (CreateWorkspaceError.invalid_name): the same message, so a
+    // client words this answer and the create's refusal with one sentence.
+    CreateWorkspaceInvalidName invalid = 2;
+  }
+}
+
+// The name keeps the naming rule. DELIBERATELY EMPTY: a legal name is sent on
+// as the user typed it, and the daemon applies its prefix at the create.
+message ValidateWorkspaceNameLegal {}
+
+// The daemon could not judge the name. No cause is named by this revision of
+// the contract: the judgment is a pure function of the name, so nothing the
+// daemon holds can stop it. A client treats a set error as a failed check and
+// surfaces it, never as a legal name.
+message ValidateWorkspaceNameError {}
