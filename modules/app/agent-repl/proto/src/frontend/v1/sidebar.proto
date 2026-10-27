@@ -865,27 +865,61 @@ message RosterRepoSection {
 // workspaces view (RosterRow.async_merging). A hidden merge workspace is never
 // named, drawn or selected here.
 //
-// A queue with no head and nothing waiting is not drawn
-// (RosterMergedSection.queues).
+// A queue whose line holds no merge is not drawn
+// (RosterMergedSection.queues), paused or not.
 message RosterRepoMergeQueue {
   // Tag 1 (`rows`, every merge in line drawn as a workspace row) is RETIRED:
   // the queue is drawn as its head and its waiting merges.
   reserved 1;
   reserved "rows";
-  // The merge at the head: the merge at the front of the line, or, while the
-  // line is empty, the last merge on this queue that FAILED, until the next
-  // merge joins the line. UNSET when neither stands.
+  // The merge at the head: the merge at the front of the line. A queue is
+  // listed only while its line holds a merge, so a listed queue ALWAYS
+  // carries its head; an unset head there is malformed. (A failed merge no
+  // longer stands at the head of an empty line, owner request 2026-10-27:
+  // a repository leaves the section as soon as its line empties.)
   optional RosterMergeQueueHead head = 2;
-  // Every merge waiting behind the head, in the order it will run. Empty
-  // when the head is the failed merge, since nothing is in line then.
+  // Every merge waiting behind the head, in the order it will run.
   repeated RosterMergeQueueWaiting waiting = 3;
   // PRESENT while the queue is paused: merges still join it, but nothing
   // runs until it is resumed.
   optional RosterMergeQueuePaused paused = 4;
 }
 
-// The queue is paused. DELIBERATELY EMPTY: presence is the fact.
-message RosterMergeQueuePaused {}
+// The queue is paused: when, by whom, and whether the pause was a hard stop.
+// The sidebar draws the repository's label in the error red and the queue's
+// merge glyphs in `render-colors.json#paused_merge_mark`'s ink while it
+// stands, says who paused it and when on the label's hover, and resumes the
+// queue on a click of the label (owner request, 2026-10-27).
+message RosterMergeQueuePaused {
+  // When the queue was paused, epoch ms. A paused head's clock stops here.
+  // UNSET for a pause recorded before the daemon kept its instant
+  // (2026-10-27); the head's clock is then not drawn.
+  optional int64 paused_at_ms = 1;
+  // Who paused the queue. UNSET for a pause recorded before the daemon kept
+  // who asked (2026-10-27).
+  optional RosterMergeQueuePauser by = 2;
+  // TRUE for a hard stop (agentrepl.v1.UpdateMergeQueuePause.hard): the work
+  // the queue's merges were doing was stopped too.
+  bool hard = 3;
+}
+
+// WHO PAUSED A QUEUE. THE ARM IS THE ASKER. Never unset.
+message RosterMergeQueuePauser {
+  oneof asker {
+    // The user, from the editor or the webapp.
+    RosterMergeQueuePauserUser user = 1;
+    // A workspace's agent, from `agent-repld`'s command line.
+    RosterMergeQueuePauserWorkspace workspace = 2;
+  }
+}
+// The user paused the queue. DELIBERATELY EMPTY: the arm is the fact.
+message RosterMergeQueuePauserUser {}
+// A workspace's agent paused the queue.
+message RosterMergeQueuePauserWorkspace {
+  // The workspace's name as it stood when it paused the queue, drawn
+  // verbatim.
+  string name = 1;
+}
 
 // Which workspace a merge in the queue is credited to, and where a click on
 // it goes.
@@ -935,9 +969,11 @@ message RosterMergeQueueHead {
     RosterMergeQueueHeadWaiting waiting = 3;
     // Being worked on.
     RosterMergeQueueHeadMerging merging = 4;
-    // Gave up. Stands only while the line is empty.
-    RosterMergeQueueHeadFailed failed = 5;
   }
+  // Tag 5 (`failed`, the failed merge standing at the head of an empty line)
+  // is RETIRED (2026-10-27): a queue whose line is empty is not listed.
+  reserved 5;
+  reserved "failed";
 }
 
 // The head waits at the front of the line.
@@ -954,14 +990,18 @@ message RosterMergeQueueHeadMerging {
   // 2/3") and drawn verbatim. UNSET while the merge's facts have not named a
   // step yet.
   optional string step = 1;
+  // PRESENT while NOTHING of the merge's work runs: its queue is paused and
+  // no turn of the step it stands on is running. A pause suspends a merge's
+  // own steps but leaves a step's agent turn running until it ends or a hard
+  // stop interrupts it (agentrepl.v1.UpdateMergeQueuePause.hard), so a
+  // paused merge whose turn still runs is not suspended. The sidebar draws a
+  // suspended merge's live stage as a still grey dot rather than the
+  // breathing purple one (owner request, 2026-10-27).
+  optional RosterMergeQueueHeadSuspended suspended = 2;
 }
 
-// The head gave up.
-message RosterMergeQueueHeadFailed {
-  // The daemon's one-line account of the failure, the same one the merge
-  // bubble's head carries (FeedMergeFailed.summary), drawn verbatim.
-  string summary = 1;
-}
+// Nothing of the head's work runs. DELIBERATELY EMPTY: presence is the fact.
+message RosterMergeQueueHeadSuspended {}
 
 // ONE STAGE of the head's merge.
 message RosterMergeQueueStage {
@@ -1242,11 +1282,10 @@ message RosterRepoKey {
 // and expanding it puts the group back. The band's own fold still folds the
 // whole band.
 message RosterMergedSection {
-  // The section's label, "Merge Queue", and its count: THE MERGES IN LINE,
-  // every head being worked on or waiting at the front and every merge
-  // waiting behind one, over every queue in `queues` (a failed head is in no
-  // line and is not counted). Drawn beside the label whether the section is
-  // folded or not (owner request, 2026-10-26).
+  // The section's label, "Merge Queue", drawn in the purple of a merge in
+  // progress whatever its queues stand at. It carries NO COUNT (its `count`
+  // is unset): each queue group counts its own line
+  // (RosterMergeQueueRepoGroup.count, owner request 2026-10-27).
   RosterSectionHeader header = 1;
   reserved 2;
   reserved "rows";
@@ -1262,20 +1301,20 @@ message RosterMergedSection {
   // leaves the group undrawn.
   repeated RosterMergedRepoGroup groups = 5;
   // THE MERGE QUEUES, drawn at the top of the section above the merged
-  // groups (owner request, 2026-10-26): one group per repository whose queue
-  // has a head (RosterRepoMergeQueue.head) or merges waiting, in the
-  // repository sections' order. A repository whose queue holds nothing is
-  // not listed, paused or not: `merge_queue_paused` carries the pause. A queue group does NOT follow its
-  // repository's fold: a merge in flight is drawn whichever way its
-  // repository is folded.
+  // groups (owner request, 2026-10-26): one group per repository whose line
+  // holds a merge, in the repository sections' order. A repository whose
+  // line is empty is not listed, paused or not. A queue group does NOT
+  // follow its repository's fold: a merge in flight is drawn whichever way
+  // its repository is folded.
   repeated RosterMergeQueueRepoGroup queues = 6;
   // The heading drawn over the merged groups, below the queues, while any
   // group is drawn: "Recently Merged". Always set.
   RosterLabel merged_label = 7;
-  // The MERGE-QUEUE-PAUSED marker: present exactly while the merge queue of
-  // at least one repository is paused, whether or not a merge is on it. See
-  // RosterMergedSectionMergeQueuePaused, which carries the marker's contract.
-  optional RosterMergedSectionMergeQueuePaused merge_queue_paused = 8;
+  // Tag 8 (`merge_queue_paused`, the section-wide pause marker) is RETIRED
+  // (2026-10-27): each queue carries its own pause
+  // (RosterRepoMergeQueue.paused), drawn on its own group.
+  reserved 8;
+  reserved "merge_queue_paused";
   // WHETHER THE BAND IS FOLDED. DAEMON-HELD (UpdateSidebarView), because a
   // fold is no page's own: opening it in one workspace's page opens it in
   // every page (owner ruling, 2026-10-06). Never folded or unfolded by
@@ -1289,15 +1328,6 @@ message RosterMergedSection {
   }
 }
 
-// The MERGE-QUEUE-PAUSED marker of the merge queue section: a repository's
-// merge queue is paused, so nothing it holds lands until it resumes. Empty:
-// presence is the fact. The sidebar draws the section's "Merge Queue" label
-// in the purple of a merge in progress, and in
-// `render-colors.json#paused_merge_mark`'s ink while the marker stands (owner
-// request, 2026-10-26), so a paused queue reads from the header even with no
-// merge on it and the section folded. The Emacs tab bar draws nothing for it.
-message RosterMergedSectionMergeQueuePaused {}
-
 // ONE REPOSITORY'S MERGE QUEUE inside the merge queue section: the
 // repository's label over its queue.
 message RosterMergeQueueRepoGroup {
@@ -1308,6 +1338,10 @@ message RosterMergeQueueRepoGroup {
   RosterMergedRepoGroupHeader header = 2;
   // The repository's queue.
   RosterRepoMergeQueue queue = 3;
+  // THE MERGES IN LINE on this queue, the head and every merge waiting
+  // behind it, drawn as "(N)" beside the repository's label (owner request,
+  // 2026-10-27). Always set.
+  RosterSectionCount count = 4;
 }
 
 // An expanded recently-merged band. DELIBERATELY EMPTY: the arm is the fact.
@@ -1404,17 +1438,14 @@ message RosterSectionHeader {
   // label while the section is FOLDED (owner request, 2026-10-08: the folded
   // count equals the rows the unfolded section shows). The client shows or
   // hides this resolved value by the section's fold; it never counts a
-  // repository's rows itself. Always set.
-  //
-  // THE MERGE QUEUE SECTION'S is the merges in line over every queue it
-  // lists (RosterMergedSection.header), drawn whether the section is folded
-  // or not.
+  // repository's rows itself. Set on every header but the Merge Queue
+  // section's, which carries none (RosterMergedSection.header).
   RosterSectionCount count = 2;
 }
 
 // A section's workspace count. A repository section's is every open row of
-// its rows regions, nested family rows included. The merge queue section's is
-// the merges in line. Drawn smaller than the label, in the label's own color.
+// its rows regions, nested family rows included. A merge queue group's is the
+// merges in its line. Drawn smaller than the label, in the label's own color.
 message RosterSectionCount {
   uint32 workspaces = 1;
 }
