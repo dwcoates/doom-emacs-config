@@ -110,6 +110,111 @@ func TestMoveLeavesAMergeWithNoNeighborWhereItIs(t *testing.T) {
 	}
 }
 
+// TestMoveToRedrawsTheQueueInItsNewOrder covers a move to a place: the
+// merge lands beside its anchor and every merge on the queue is told its new
+// place.
+func TestMoveToRedrawsTheQueueInItsNewOrder(t *testing.T) {
+	tests := []struct {
+		name       string
+		ws, anchor wsm.WorkspaceID
+		side       wsm.MergeSide
+		wantPlaces map[wsm.WorkspaceID]int
+	}{
+		{name: "ahead of the first", ws: "ws-3", anchor: theWorkspace, side: wsm.MergeSideAheadOf,
+			wantPlaces: map[wsm.WorkspaceID]int{"ws-3": 1, theWorkspace: 2, "ws-2": 3}},
+		{name: "behind the last", ws: theWorkspace, anchor: "ws-3", side: wsm.MergeSideBehind,
+			wantPlaces: map[wsm.WorkspaceID]int{"ws-2": 1, "ws-3": 2, theWorkspace: 3}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: three merges wait.
+			h := newHarness(t)
+			enqueue(t, h)
+			queueAnother(t, h, "ws-2", "two")
+			queueAnother(t, h, "ws-3", "three")
+
+			// Act.
+			moved, err := h.o.MoveTo(context.Background(), tt.ws, tt.anchor, tt.side)
+
+			// Assert.
+			if err != nil || !moved {
+				t.Fatalf("MoveTo = %v, %v; want moved", moved, err)
+			}
+			for ws, want := range tt.wantPlaces {
+				if got := h.factsOf(ws).QueuePlace; got != want {
+					t.Fatalf("%s's place = %d, want %d", ws, got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestMoveToLeavesAMergeAlreadyInPlaceWhereItIs covers the success answer for
+// a merge that already stands where it is asked to go.
+func TestMoveToLeavesAMergeAlreadyInPlaceWhereItIs(t *testing.T) {
+	// Arrange: two merges wait.
+	h := newHarness(t)
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "two")
+
+	// Act.
+	moved, err := h.o.MoveTo(context.Background(), theWorkspace, "ws-2", wsm.MergeSideAheadOf)
+
+	// Assert.
+	if err != nil || moved {
+		t.Fatalf("MoveTo = %v, %v; want unmoved", moved, err)
+	}
+	if got := h.factsOf(theWorkspace); got.QueuePlace != 1 {
+		t.Fatalf("place = %d, want 1", got.QueuePlace)
+	}
+}
+
+// TestMoveToRefusesAnAnchorWithNothingQueued covers the refusal a move gets
+// for an anchor that is not on the queue.
+func TestMoveToRefusesAnAnchorWithNothingQueued(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	enqueue(t, h)
+	h.register("ws-9", "nine")
+
+	// Act.
+	moved, err := h.o.MoveTo(context.Background(), theWorkspace, "ws-9", wsm.MergeSideBehind)
+
+	// Assert.
+	if err == nil || moved {
+		t.Fatalf("MoveTo = %v, %v; want a refusal", moved, err)
+	}
+	if !errors.Is(err, wsm.ErrNotFound) {
+		t.Fatalf("MoveTo = %v, want the store's not-found", err)
+	}
+}
+
+// TestMoveToRecordsAFailedMoveAndRedrawsNothing covers the store failing the
+// move: the error reaches the caller and is recorded at ERROR with its context.
+func TestMoveToRecordsAFailedMoveAndRedrawsNothing(t *testing.T) {
+	// Arrange: two merges wait, and the store fails every move.
+	h := newHarness(t)
+	enqueue(t, h)
+	queueAnother(t, h, "ws-2", "two")
+	h.db.moveErr = errors.New("database is locked")
+
+	// Act.
+	moved, err := h.o.MoveTo(context.Background(), "ws-2", theWorkspace, wsm.MergeSideAheadOf)
+
+	// Assert.
+	if err == nil || moved {
+		t.Fatalf("MoveTo = %v, %v; want the store's failure", moved, err)
+	}
+	record, logged := h.recordFor("error", "daemon.merge.move_to")
+	if !logged || record.Context["error"] != "database is locked" || record.Context["workspace"] != "ws-2" ||
+		record.Context["anchor"] != string(theWorkspace) || record.Context["side"] != "ahead_of" {
+		t.Fatalf("the failed move was not recorded at ERROR with its context: %+v", h.logs.Records())
+	}
+	if got := h.factsOf("ws-2"); got.QueuePlace != 2 {
+		t.Fatalf("place = %d, want 2", got.QueuePlace)
+	}
+}
+
 func TestAWaitingMergeCountsFromWhenItJoinedTheQueue(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -1361,7 +1466,7 @@ func TestEveryQueueReorderingRunsThroughReorder(t *testing.T) {
 			t.Fatalf("read %s: %v", file, err)
 		}
 		// Act.
-		for _, call := range []string{"o.deps.DB.MoveMerge(", "o.deps.DB.PrioritizeMerge(", "o.reorder(ctx, ws, reordering{"} {
+		for _, call := range []string{"o.deps.DB.MoveMerge(", "o.deps.DB.MoveMergeTo(", "o.deps.DB.PrioritizeMerge(", "o.reorder(ctx, ws, reordering{"} {
 			for range strings.Count(string(code), call) {
 				calls = append(calls, file+":"+call)
 			}
@@ -1371,7 +1476,8 @@ func TestEveryQueueReorderingRunsThroughReorder(t *testing.T) {
 	// Assert: each store reorder is called once, inside the reordering its
 	// verb hands to reorder.
 	want := []string{
-		"queue.go:o.deps.DB.MoveMerge(", "queue.go:o.reorder(ctx, ws, reordering{",
+		"queue.go:o.deps.DB.MoveMerge(", "queue.go:o.deps.DB.MoveMergeTo(",
+		"queue.go:o.reorder(ctx, ws, reordering{", "queue.go:o.reorder(ctx, ws, reordering{",
 		"terminal.go:o.deps.DB.PrioritizeMerge(", "terminal.go:o.reorder(ctx, ws, reordering{",
 	}
 	if !slices.Equal(calls, want) {
@@ -2151,7 +2257,7 @@ func hardStopAt(t *testing.T, h *harness, mutate func(*progressDoc), how *wsm.Tu
 	t.Helper()
 	interruptedAt(t, h, mutate)
 	recordTurn(h, how)
-	return h.o.HardStop(context.Background(), nil)
+	return h.o.HardStop(context.Background(), nil, userPauser)
 }
 
 // interruptedWorkspaces answers the workspaces whose turn was interrupted.
@@ -2272,7 +2378,7 @@ func TestAHardStopOfAPausedQueueIsNotRefused(t *testing.T) {
 	h.db.paused[h.repoKey()] = true
 
 	// Act.
-	err := h.o.HardStop(context.Background(), nil)
+	err := h.o.HardStop(context.Background(), nil, userPauser)
 
 	// Assert.
 	if err != nil {
@@ -2291,7 +2397,7 @@ func TestAHardStopOfAPausedQueueWritesNoWarning(t *testing.T) {
 	h.db.paused[h.repoKey()] = true
 
 	// Act.
-	if err := h.o.HardStop(context.Background(), nil); err != nil {
+	if err := h.o.HardStop(context.Background(), nil, userPauser); err != nil {
 		t.Fatalf("HardStop: %v", err)
 	}
 
@@ -2334,7 +2440,7 @@ func TestAHardStopInterruptsAWaitingMergesBackgroundRebase(t *testing.T) {
 	}()
 
 	// Act.
-	if err := h.o.HardStop(context.Background(), nil); err != nil {
+	if err := h.o.HardStop(context.Background(), nil, userPauser); err != nil {
 		t.Fatalf("HardStop: %v", err)
 	}
 

@@ -10,7 +10,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
 
@@ -242,13 +241,13 @@ func TestPausingTheQueueTellsTheRosterItIsPaused(t *testing.T) {
 	enqueue(t, h)
 
 	// Act
-	if err := h.o.Pause(context.Background(), nil); err != nil {
+	if err := h.o.Pause(context.Background(), nil, userPauser); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 
 	// Assert
 	got := h.sidebar.queueOf(h.repoKey())
-	if !got.Paused || !slices.Equal(got.Workspaces, []ids.WorkspaceID{theWorkspace}) {
+	if got.Pause == nil || !slices.Equal(got.Workspaces, []ids.WorkspaceID{theWorkspace}) {
 		t.Fatalf("roster queue = %+v, want paused with the merging workspace on it", got)
 	}
 }
@@ -257,7 +256,7 @@ func TestResumingTheQueueTellsTheRosterItIsNoLongerPaused(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	enqueue(t, h)
-	if err := h.o.Pause(context.Background(), nil); err != nil {
+	if err := h.o.Pause(context.Background(), nil, userPauser); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 
@@ -267,7 +266,7 @@ func TestResumingTheQueueTellsTheRosterItIsNoLongerPaused(t *testing.T) {
 	}
 
 	// Assert
-	if got := h.sidebar.queueOf(h.repoKey()); got.Paused {
+	if got := h.sidebar.queueOf(h.repoKey()); got.Pause != nil {
 		t.Fatalf("roster queue = %+v, want it no longer paused", got)
 	}
 }
@@ -286,15 +285,15 @@ func TestPausingOneRepositoryTellsTheRosterOnlyThatQueueIsPaused(t *testing.T) {
 	h.o.publishRosterQueue(context.Background(), other)
 
 	// Act
-	if err := h.o.Pause(context.Background(), &RepositoryScope{ID: "target"}); err != nil {
+	if err := h.o.Pause(context.Background(), &RepositoryScope{ID: "target"}, userPauser); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 
 	// Assert
-	if !h.sidebar.queueOf(h.repoKey()).Paused {
+	if h.sidebar.queueOf(h.repoKey()).Pause == nil {
 		t.Fatal("the paused repository's roster queue is not paused")
 	}
-	if h.sidebar.queueOf(other).Paused {
+	if h.sidebar.queueOf(other).Pause != nil {
 		t.Fatal("the other repository's roster queue is paused")
 	}
 }
@@ -330,7 +329,7 @@ func TestAFailedPauseWriteTellsTheRosterNothing(t *testing.T) {
 	h.db.mu.Unlock()
 
 	// Act
-	err := h.o.deps.DB.SetMergeQueuePaused(context.Background(), h.repoKey(), true)
+	err := h.o.deps.DB.SetMergeQueuePaused(context.Background(), h.repoKey(), &wsm.MergeQueuePause{At: time.Now(), By: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser}})
 
 	// Assert
 	if err == nil {
@@ -702,7 +701,7 @@ func TestAnUnreadableLedgerTellsTheRosterNothingAndIsAnError(t *testing.T) {
 	}
 }
 
-func TestAFailedMergeStandsOnTheRosterQueueWithItsAccount(t *testing.T) {
+func TestAFailedMergeLeavesNothingStandingOnTheRosterQueue(t *testing.T) {
 	// Arrange: the merge's conflict resolution gives up.
 	h := newHarness(t)
 	landing(h, 1)
@@ -715,86 +714,94 @@ func TestAFailedMergeStandsOnTheRosterQueueWithItsAccount(t *testing.T) {
 		t.Fatalf("admit: %v", err)
 	}
 
-	// Assert
-	queue := h.sidebar.queueOf(h.repoKey())
-	if len(queue.Line) != 0 {
-		t.Fatalf("roster line = %v, want the failed merge gone from it", queue.Line)
-	}
-	if queue.Failed == nil {
-		t.Fatal("the roster was told no failed merge")
-	}
-	if queue.Failed.Entry.Workspace != theWorkspace || queue.Failed.Entry.Credited != theWorkspace || queue.Failed.Summary == "" {
-		t.Fatalf("failed merge = %+v, want %s credited to itself with its account", queue.Failed, theWorkspace)
-	}
-	if queue.Failed.Entry.Reveal == nil || len(queue.Failed.Entry.Stages) == 0 {
-		t.Fatalf("failed merge = %+v, want its bubble and its stages", queue.Failed.Entry)
+	// Assert: the line is empty, so the Merge Queue section lists nothing for
+	// the repository (owner request, 2026-10-27).
+	if queue := h.sidebar.queueOf(h.repoKey()); len(queue.Line) != 0 || len(queue.Workspaces) != 0 {
+		t.Fatalf("roster queue = %+v, want the failed merge gone from it", queue)
 	}
 }
 
-func TestTheFailedMergeRetiresOnlyWhenAnotherMergeIsInLine(t *testing.T) {
+func TestAPauseTellsTheRosterItsRecord(t *testing.T) {
 	tests := []struct {
-		name string
-		line []wsm.MergeQueueEntry
-		want bool
+		name   string
+		act    func(h *harness) error
+		wantBy wsm.MergeQueuePauser
+		hard   bool
 	}{
-		{name: "an empty line keeps it", line: nil, want: true},
-		{name: "the failed merge still in line keeps it", line: []wsm.MergeQueueEntry{{Workspace: "ws-a", Ledger: "lease-a"}}, want: true},
-		{name: "another workspace's merge retires it", line: []wsm.MergeQueueEntry{{Workspace: "ws-b", Ledger: "lease-b"}}, want: false},
-		{name: "the same workspace under a new ledger retires it", line: []wsm.MergeQueueEntry{{Workspace: "ws-a", Ledger: "lease-a2"}}, want: false},
+		{
+			name:   "the user's pause",
+			act:    func(h *harness) error { return h.o.Pause(context.Background(), nil, userPauser) },
+			wantBy: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser},
+		},
+		{
+			name:   "a workspace's pause names the workspace",
+			act:    func(h *harness) error { return h.o.Pause(context.Background(), nil, Pauser{By: RequestedByAgent, Asker: theWorkspace}) },
+			wantBy: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "ws-one"},
+		},
+		{
+			name:   "a hard stop",
+			act:    func(h *harness) error { return h.o.HardStop(context.Background(), nil, userPauser) },
+			wantBy: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser},
+			hard:   true,
+		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
-			h.o.failed[h.repoKey()] = failedMerge{entry: sidebar.QueueEntry{Workspace: "ws-a"}, lease: "lease-a", summary: "it failed"}
+			enqueue(t, h)
 
 			// Act
-			h.o.retireFailed(h.repoKey(), tc.line)
+			if err := tt.act(h); err != nil {
+				t.Fatalf("pause: %v", err)
+			}
 
 			// Assert
-			if _, kept := h.o.failed[h.repoKey()]; kept != tc.want {
-				t.Fatalf("failed merge kept = %v, want %v", kept, tc.want)
+			pause := h.sidebar.queueOf(h.repoKey()).Pause
+			if pause == nil || pause.By != tt.wantBy || pause.Hard != tt.hard || pause.At.IsZero() {
+				t.Fatalf("roster pause = %+v, want by %+v, hard %v, at an instant", pause, tt.wantBy, tt.hard)
 			}
 		})
 	}
 }
 
-func TestAMergePutInLineRetiresTheFailedMergeOnTheRoster(t *testing.T) {
-	// Arrange: a failed merge stands, and another merge is requested.
+func TestAHardStopOfAPausedQueueRecordsTheHardStop(t *testing.T) {
+	// Arrange
 	h := newHarness(t)
-	h.register("ws-b", "b")
-	h.o.failed[h.repoKey()] = failedMerge{entry: sidebar.QueueEntry{Workspace: theWorkspace, Credited: theWorkspace}, summary: "it failed"}
-	h.db.mu.Lock()
-	h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{{Repo: h.repoKey(), Workspace: "ws-b", State: wsm.MergeRequested, Source: wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}}}
-	h.db.mu.Unlock()
+	enqueue(t, h)
+	if err := h.o.Pause(context.Background(), nil, userPauser); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
 
 	// Act
-	if _, err := h.o.deps.DB.QueueMerge(context.Background(), h.repoKey(), "ws-b", "lease-b"); err != nil {
-		t.Fatalf("QueueMerge: %v", err)
+	if err := h.o.HardStop(context.Background(), nil, Pauser{By: RequestedByAgent, Asker: theWorkspace}); err != nil {
+		t.Fatalf("HardStop: %v", err)
 	}
 
 	// Assert
-	if failed := h.sidebar.queueOf(h.repoKey()).Failed; failed != nil {
-		t.Fatalf("failed merge = %+v, want it retired", failed)
+	pause := h.sidebar.queueOf(h.repoKey()).Pause
+	if pause == nil || !pause.Hard || pause.By.Kind != wsm.MergeQueuePauserWorkspace {
+		t.Fatalf("roster pause = %+v, want the workspace's hard stop", pause)
 	}
 }
 
-func TestAFailedMergeWhoseCreditCannotBeReadIsRecordedAndNotDrawn(t *testing.T) {
-	// Arrange: the failed merge's workspace has no record.
+func TestAPauseByAWorkspaceTheRegistryCannotReadIsRefusedAndPausesNothing(t *testing.T) {
+	// Arrange
 	h := newHarness(t)
+	enqueue(t, h)
 
 	// Act
-	h.o.noteFailed(context.Background(), h.repoKey(), "ws-gone", "lease-gone", "it failed")
+	err := h.o.Pause(context.Background(), nil, Pauser{By: RequestedByAgent, Asker: "ws-gone"})
 
 	// Assert
-	if _, kept := h.o.failed[h.repoKey()]; kept {
-		t.Fatal("a failed merge with no credit was kept")
+	if err == nil {
+		t.Fatal("Pause = nil, want the unreadable asker refused")
 	}
-	rec, ok := h.recordFor(dlog.LevelError, "daemon.merge.roster_queue")
-	if !ok {
-		t.Fatal("the unreadable credit was not recorded at ERROR")
+	if paused, _ := h.db.MergeQueuePaused(context.Background(), h.repoKey()); paused {
+		t.Fatal("the queue was paused")
 	}
-	if rec.Context["workspace"] != "ws-gone" || rec.Context["repo"] != string(h.repoKey()) || rec.Context["error"] == nil {
-		t.Fatalf("record context = %v, want the workspace, the repo and the cause", rec.Context)
+	rec, ok := h.recordFor(dlog.LevelError, "daemon.merge.pause")
+	if !ok || rec.Context["asker"] != "ws-gone" || rec.Context["error"] == nil {
+		t.Fatalf("record = %+v (%v), want the asker and the cause at ERROR", rec, ok)
 	}
 }

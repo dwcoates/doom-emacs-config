@@ -2584,7 +2584,7 @@ export function roster(init?: {
       fold: { case: "expanded", value: {} },
     },
     recentlyMerged: {
-      header: { label: { text: "merge queue" }, count: { workspaces: 0 } },
+      header: { label: { text: "merge queue" } },
       mergedLabel: { text: "recently merged" },
       groups: [
         {

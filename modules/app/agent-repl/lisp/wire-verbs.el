@@ -3560,6 +3560,27 @@ required: an arm without one is incomplete and errors before send."
   (agent-repl-wire-verbs--encode-merge-queue-workspace-arm
    "UpdateMergeQueueMoveDown" value #'agent-repl-wire-encode-update-merge-queue-move-down-workspace))
 
+(defun agent-repl-wire-encode-update-merge-queue-move-to-workspace (ref)
+  "Encode UpdateMergeQueueMoveTo's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-update-merge-queue-move-to-anchor (ref)
+  "Encode UpdateMergeQueueMoveTo's `place' anchor use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-update-merge-queue-move-to (value)
+  "Encode UpdateMergeQueueMoveTo from plist VALUE.
+VALUE is (:workspace REF :place (:arm ARM :value ANCHOR)), ARM `:ahead-of'
+or `:behind': the waiting merge to move, and the waiting merge it goes
+directly ahead of or behind.  Both are required."
+  (append
+   (agent-repl-wire-verbs--encode-merge-queue-workspace-arm
+    "UpdateMergeQueueMoveTo" value #'agent-repl-wire-encode-update-merge-queue-move-to-workspace)
+   (list (agent-repl-wire-verbs--encode-oneof
+          "UpdateMergeQueueMoveTo" "place" (plist-get value :place)
+          (list (list :ahead-of 'aheadOf #'agent-repl-wire-encode-update-merge-queue-move-to-anchor)
+                (list :behind 'behind #'agent-repl-wire-encode-update-merge-queue-move-to-anchor))))))
+
 (defun agent-repl-wire-encode-update-merge-queue-disable-racing (_value)
   "Encode UpdateMergeQueueDisableRacing.  Empty: the switch is daemon-wide."
   nil)
@@ -3588,6 +3609,10 @@ required: an arm without one is incomplete and errors before send."
   "Encode UpdateMergeQueueRequest's `move_down' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-move-down value))
 
+(defun agent-repl-wire-encode-update-merge-queue-request-move-to (value)
+  "Encode UpdateMergeQueueRequest's `move_to' action arm from VALUE."
+  (agent-repl-wire-encode-update-merge-queue-move-to value))
+
 (defun agent-repl-wire-encode-update-merge-queue-request-disable-racing (value)
   "Encode UpdateMergeQueueRequest's `disable_racing' action arm from VALUE."
   (agent-repl-wire-encode-update-merge-queue-disable-racing value))
@@ -3611,6 +3636,7 @@ queue action names who asked, so the daemon records it."
                (list :evict 'evict #'agent-repl-wire-encode-update-merge-queue-request-evict)
                (list :move-up 'moveUp #'agent-repl-wire-encode-update-merge-queue-request-move-up)
                (list :move-down 'moveDown #'agent-repl-wire-encode-update-merge-queue-request-move-down)
+               (list :move-to 'moveTo #'agent-repl-wire-encode-update-merge-queue-request-move-to)
                (list :disable-racing 'disableRacing #'agent-repl-wire-encode-update-merge-queue-request-disable-racing)
                (list :enable-racing 'enableRacing #'agent-repl-wire-encode-update-merge-queue-request-enable-racing)))))
 

@@ -394,9 +394,9 @@ func TestAPauseAndAResumeAreReportedWithTheQueuesPausedState(t *testing.T) {
 		wantKind   QueueChangeKind
 		wantPaused bool
 	}{
-		{name: "pause", act: func(h *harness) error { return h.o.Pause(context.Background(), nil) }, wantKind: QueueChangePaused, wantPaused: true},
+		{name: "pause", act: func(h *harness) error { return h.o.Pause(context.Background(), nil, userPauser) }, wantKind: QueueChangePaused, wantPaused: true},
 		{name: "resume", act: func(h *harness) error {
-			if err := h.o.Pause(context.Background(), nil); err != nil {
+			if err := h.o.Pause(context.Background(), nil, userPauser); err != nil {
 				return err
 			}
 			return h.o.Unpause(context.Background(), nil)

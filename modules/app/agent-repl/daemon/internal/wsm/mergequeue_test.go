@@ -58,13 +58,50 @@ func TestMergeQueueReportsAnEmptyQueue(t *testing.T) {
 	}
 }
 
-func TestMergeQueuePausedRoundTrips(t *testing.T) {
+// testPause is a pause record a writer may write: the user's, at instant.
+func testPause() *MergeQueuePause {
+	return &MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserUser}}
+}
+
+func TestMergeQueuePauseRoundTripsItsRecord(t *testing.T) {
+	tests := []struct {
+		name  string
+		pause MergeQueuePause
+	}{
+		{name: "the user's pause", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserUser}}},
+		{name: "a workspace's hard stop", pause: MergeQueuePause{At: instant.Add(time.Minute), By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Name: "doom"}, Hard: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			pause := tt.pause
+
+			// Act
+			if err := s.SetMergeQueuePaused(context.Background(), repo, &pause); err != nil {
+				t.Fatalf("SetMergeQueuePaused: %v", err)
+			}
+			got, err := s.MergeQueuePause(context.Background(), repo)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("MergeQueuePause: %v", err)
+			}
+			if got == nil || !got.At.Equal(tt.pause.At) || got.By != tt.pause.By || got.Hard != tt.pause.Hard {
+				t.Fatalf("pause = %+v, want %+v", got, tt.pause)
+			}
+		})
+	}
+}
+
+func TestMergeQueuePausedReportsAPauseWithItsRecord(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	repo := RepoKey(t.TempDir())
 
 	// Act
-	if err := s.SetMergeQueuePaused(context.Background(), repo, true); err != nil {
+	if err := s.SetMergeQueuePaused(context.Background(), repo, testPause()); err != nil {
 		t.Fatalf("SetMergeQueuePaused: %v", err)
 	}
 	paused, err := s.MergeQueuePaused(context.Background(), repo)
@@ -74,7 +111,106 @@ func TestMergeQueuePausedRoundTrips(t *testing.T) {
 		t.Fatalf("MergeQueuePaused: %v", err)
 	}
 	if !paused {
-		t.Fatalf("paused = false after SetMergeQueuePaused(true)")
+		t.Fatalf("paused = false after a pause was written")
+	}
+}
+
+func TestMergeQueuePauseReplacesTheRecordOfAStandingPause(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	if err := s.SetMergeQueuePaused(context.Background(), repo, testPause()); err != nil {
+		t.Fatalf("SetMergeQueuePaused: %v", err)
+	}
+	hard := MergeQueuePause{At: instant.Add(time.Hour), By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace, Name: "w"}, Hard: true}
+
+	// Act
+	if err := s.SetMergeQueuePaused(context.Background(), repo, &hard); err != nil {
+		t.Fatalf("SetMergeQueuePaused: %v", err)
+	}
+	got, err := s.MergeQueuePause(context.Background(), repo)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("MergeQueuePause: %v", err)
+	}
+	if got == nil || !got.At.Equal(hard.At) || got.By != hard.By || !got.Hard {
+		t.Fatalf("pause = %+v, want %+v", got, hard)
+	}
+}
+
+func TestMergeQueuePauseReadsAPauseWrittenBeforeItsRecordAsUnrecorded(t *testing.T) {
+	// Arrange: the previous build's write names none of the record's columns.
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		t.Fatalf("normalizeRepoKey: %v", err)
+	}
+	corrupt(t, s, `INSERT INTO merge_queue_repos (repo_key, paused) VALUES (?, 1)`, string(key))
+
+	// Act
+	got, err := s.MergeQueuePause(context.Background(), repo)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("MergeQueuePause: %v", err)
+	}
+	if got == nil || !got.At.IsZero() || got.By.Kind != MergeQueuePauserUnrecorded || got.Hard {
+		t.Fatalf("pause = %+v, want an unrecorded pause", got)
+	}
+}
+
+func TestMergeQueuePauseRefusesAnUndeclaredPauser(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		t.Fatalf("normalizeRepoKey: %v", err)
+	}
+	corrupt(t, s, `INSERT INTO merge_queue_repos (repo_key, paused, paused_by) VALUES (?, 1, 'robot')`, string(key))
+
+	// Act
+	_, err = s.MergeQueuePause(context.Background(), repo)
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "paused_by" {
+		t.Fatalf("MergeQueuePause = %v, want a DecodeError on paused_by", err)
+	}
+}
+
+func TestSetMergeQueuePausedRefusesAMalformedRecordAndWritesNothing(t *testing.T) {
+	tests := []struct {
+		name  string
+		pause MergeQueuePause
+	}{
+		{name: "no instant", pause: MergeQueuePause{By: MergeQueuePauser{Kind: MergeQueuePauserUser}}},
+		{name: "no pauser", pause: MergeQueuePause{At: instant}},
+		{name: "a workspace with no name", pause: MergeQueuePause{At: instant, By: MergeQueuePauser{Kind: MergeQueuePauserWorkspace}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			repo := RepoKey(t.TempDir())
+			pause := tt.pause
+
+			// Act
+			err := s.SetMergeQueuePaused(context.Background(), repo, &pause)
+
+			// Assert
+			if err == nil {
+				t.Fatal("SetMergeQueuePaused = nil, want a refusal")
+			}
+			if !loggedOperation(log, "daemon.wsm.set_merge_queue_paused", "error") {
+				t.Fatalf("the refusal was not logged at error: %v", log.Records())
+			}
+			if paused, err := s.MergeQueuePaused(context.Background(), repo); err != nil || paused {
+				t.Fatalf("MergeQueuePaused = %v, %v; want false", paused, err)
+			}
+		})
 	}
 }
 
@@ -82,12 +218,12 @@ func TestMergeQueuePausedResumes(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	repo := RepoKey(t.TempDir())
-	if err := s.SetMergeQueuePaused(context.Background(), repo, true); err != nil {
+	if err := s.SetMergeQueuePaused(context.Background(), repo, testPause()); err != nil {
 		t.Fatalf("SetMergeQueuePaused: %v", err)
 	}
 
 	// Act
-	if err := s.SetMergeQueuePaused(context.Background(), repo, false); err != nil {
+	if err := s.SetMergeQueuePaused(context.Background(), repo, nil); err != nil {
 		t.Fatalf("SetMergeQueuePaused: %v", err)
 	}
 	paused, err := s.MergeQueuePaused(context.Background(), repo)
@@ -631,6 +767,178 @@ func TestMoveMergeRefusesAnUndeclaredMoveAndMovesNothing(t *testing.T) {
 		t.Fatalf("the refusal was not logged at error: %v", log.Records())
 	}
 	if got, want := lettersOf(t, s, repo, named), []string{"a", "m"}; !slices.Equal(got, want) {
+		t.Fatalf("queue = %v, want %v", got, want)
+	}
+}
+
+func TestMoveMergeToPlacesTheMerge(t *testing.T) {
+	// Each case builds a queue, then moves "m" beside "x".
+	tests := []struct {
+		name      string
+		steps     []moveStep
+		side      MergeSide
+		wantOrder []string
+		wantMoved bool
+	}{
+		{
+			name:      "ahead of a merge several places ahead",
+			steps:     []moveStep{{"a", "queued"}, {"x", "queued"}, {"b", "queued"}, {"m", "queued"}},
+			side:      MergeSideAheadOf,
+			wantOrder: []string{"a", "m", "x", "b"},
+			wantMoved: true,
+		},
+		{
+			name:      "behind a merge several places behind",
+			steps:     []moveStep{{"m", "queued"}, {"a", "queued"}, {"x", "queued"}, {"b", "queued"}},
+			side:      MergeSideBehind,
+			wantOrder: []string{"a", "x", "m", "b"},
+			wantMoved: true,
+		},
+		{
+			name:      "behind the last merge",
+			steps:     []moveStep{{"m", "queued"}, {"a", "queued"}, {"x", "queued"}},
+			side:      MergeSideBehind,
+			wantOrder: []string{"a", "x", "m"},
+			wantMoved: true,
+		},
+		{
+			name:      "a merge already in that place stays put",
+			steps:     []moveStep{{"m", "queued"}, {"x", "queued"}},
+			side:      MergeSideAheadOf,
+			wantOrder: []string{"m", "x"},
+			wantMoved: false,
+		},
+		{
+			name:      "the admitted merge and a request keep their places",
+			steps:     []moveStep{{"r", "admitted"}, {"x", "queued"}, {"p", "requested"}, {"m", "queued"}},
+			side:      MergeSideAheadOf,
+			wantOrder: []string{"r", "m", "p", "x"},
+			wantMoved: true,
+		},
+		{
+			name:      "an admitted anchor is no place",
+			steps:     []moveStep{{"x", "admitted"}, {"a", "queued"}, {"m", "queued"}},
+			side:      MergeSideAheadOf,
+			wantOrder: []string{"x", "a", "m"},
+			wantMoved: false,
+		},
+		{
+			name:      "a merge only requested stays put",
+			steps:     []moveStep{{"x", "queued"}, {"m", "requested"}},
+			side:      MergeSideAheadOf,
+			wantOrder: []string{"x", "m"},
+			wantMoved: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, tt.steps)
+
+			// Act
+			moved, err := s.MoveMergeTo(context.Background(), repo, named["m"], named["x"], tt.side)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("MoveMergeTo: %v", err)
+			}
+			if moved != tt.wantMoved {
+				t.Fatalf("moved = %v, want %v", moved, tt.wantMoved)
+			}
+			if got := lettersOf(t, s, repo, named); !slices.Equal(got, tt.wantOrder) {
+				t.Fatalf("queue = %v, want %v", got, tt.wantOrder)
+			}
+		})
+	}
+}
+
+func TestMoveMergeToGivesTheMovedMergeTheAnchorsFrontMark(t *testing.T) {
+	tests := []struct {
+		name      string
+		steps     []moveStep
+		side      MergeSide
+		wantFront bool
+	}{
+		{name: "an ordinary merge put ahead of a front merge becomes a front merge", steps: []moveStep{{"x", "front"}, {"a", "queued"}, {"m", "queued"}}, side: MergeSideAheadOf, wantFront: true},
+		{name: "an ordinary merge put behind a front merge becomes a front merge", steps: []moveStep{{"x", "front"}, {"a", "queued"}, {"m", "queued"}}, side: MergeSideBehind, wantFront: true},
+		{name: "a front merge put behind an ordinary merge becomes ordinary", steps: []moveStep{{"m", "front"}, {"a", "queued"}, {"x", "queued"}}, side: MergeSideBehind, wantFront: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, tt.steps)
+
+			// Act
+			if _, err := s.MoveMergeTo(context.Background(), repo, named["m"], named["x"], tt.side); err != nil {
+				t.Fatalf("MoveMergeTo: %v", err)
+			}
+
+			// Assert
+			entries, err := s.MergeQueue(context.Background(), repo)
+			if err != nil {
+				t.Fatalf("MergeQueue: %v", err)
+			}
+			for _, entry := range entries {
+				if entry.Workspace == named["m"] && entry.Source.Front != tt.wantFront {
+					t.Fatalf("m's front mark = %v, want %v", entry.Source.Front, tt.wantFront)
+				}
+			}
+		})
+	}
+}
+
+func TestMoveMergeToRefusesAMergeOrAnchorNotInTheQueue(t *testing.T) {
+	tests := []struct {
+		name   string
+		moving string
+		anchor string
+	}{
+		{name: "the moved merge", moving: "stranger", anchor: "x"},
+		{name: "the anchor", moving: "m", anchor: "stranger"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, []moveStep{{"x", "queued"}, {"m", "queued"}})
+			named["stranger"] = testWorkspace(t, s).ID
+
+			// Act
+			_, err := s.MoveMergeTo(context.Background(), repo, named[tt.moving], named[tt.anchor], MergeSideAheadOf)
+
+			// Assert
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("MoveMergeTo = %v, want ErrNotFound", err)
+			}
+			if got, want := lettersOf(t, s, repo, named), []string{"x", "m"}; !slices.Equal(got, want) {
+				t.Fatalf("queue = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestMoveMergeToRefusesAnUndeclaredSideAndMovesNothing(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	repo := RepoKey(t.TempDir())
+	named := buildMoveQueue(t, s, repo, []moveStep{{"x", "queued"}, {"m", "queued"}})
+
+	// Act
+	moved, err := s.MoveMergeTo(context.Background(), repo, named["m"], named["x"], MergeSide(0))
+
+	// Assert
+	if err == nil || moved {
+		t.Fatalf("MoveMergeTo(0) = %v, %v; want a refusal", moved, err)
+	}
+	if !loggedOperation(log, "daemon.wsm.move_merge_to", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+	if got, want := lettersOf(t, s, repo, named), []string{"x", "m"}; !slices.Equal(got, want) {
 		t.Fatalf("queue = %v, want %v", got, want)
 	}
 }
@@ -1562,9 +1870,9 @@ func TestEveryReorderingReadsItsPlaceThroughEntryPlace(t *testing.T) {
 	calls := strings.Count(string(code), "entryPlace(ctx, tx, key, id)")
 
 	// Assert: the helper's own query, and one call per reordering (move,
-	// prioritize, and the yield's read of both racers).
-	if reads != 1 || calls != 3 {
-		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 3", reads, calls)
+	// move to a place, prioritize, and the yield's read of both racers).
+	if reads != 1 || calls != 4 {
+		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 4", reads, calls)
 	}
 }
 

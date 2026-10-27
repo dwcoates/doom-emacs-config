@@ -125,7 +125,7 @@ func TestRetireRepositoryDeletesTheMergeQueuePauseRow(t *testing.T) {
 	s, _ := testStore(t)
 	ws := closedUnder(t, s, t.TempDir())
 	key := RepoKey(scalar[string](t, s, `SELECT dir FROM repositories WHERE id = ?`, ws.Repo))
-	if err := s.SetMergeQueuePaused(context.Background(), key, true); err != nil {
+	if err := s.SetMergeQueuePaused(context.Background(), key, testPause()); err != nil {
 		t.Fatalf("SetMergeQueuePaused: %v", err)
 	}
 

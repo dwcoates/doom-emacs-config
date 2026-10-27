@@ -962,9 +962,13 @@ func (f *fakeQueue) RollBack(ctx context.Context, _ ids.WorkspaceID, since time.
 // fakeMerge answers the orchestrator's four server-facing verbs.
 type fakeMerge struct {
 	merge.Orchestrator
-	enqueueErr          error
-	pauseErr            error
-	pauseScope          *merge.RepositoryScope
+	enqueueErr error
+	pauseErr   error
+	pauseScope *merge.RepositoryScope
+	// pauser is who the last pause or hard stop was asked by.
+	pauser *merge.Pauser
+	// movesTo are the moves to a place asked of the queue, in order.
+	movesTo             []fakeMoveTo
 	hardStopScope       *merge.RepositoryScope
 	hardStopped         bool
 	answerQueueOfferErr error
@@ -1111,6 +1115,17 @@ type fakeMove struct {
 	move wsm.MergeMove
 }
 
+// fakeMoveTo is one move to a place the fake was asked for.
+type fakeMoveTo struct {
+	ws, anchor ids.WorkspaceID
+	side       wsm.MergeSide
+}
+
+func (f *fakeMerge) MoveTo(_ context.Context, ws, anchor ids.WorkspaceID, side wsm.MergeSide) (bool, error) {
+	f.movesTo = append(f.movesTo, fakeMoveTo{ws: ws, anchor: anchor, side: side})
+	return f.moveErr == nil, f.moveErr
+}
+
 func (f *fakeMerge) Move(_ context.Context, ws ids.WorkspaceID, move wsm.MergeMove) (bool, error) {
 	f.moves = append(f.moves, fakeMove{ws: ws, move: move})
 	return f.moveErr == nil, f.moveErr
@@ -1146,13 +1161,13 @@ func (f *fakeMerge) EnableRacing(context.Context) error {
 	return f.enableRacingErr
 }
 
-func (f *fakeMerge) Pause(_ context.Context, scope *merge.RepositoryScope) error {
-	f.pauseScope = scope
+func (f *fakeMerge) Pause(_ context.Context, scope *merge.RepositoryScope, by merge.Pauser) error {
+	f.pauseScope, f.pauser = scope, &by
 	return f.pauseErr
 }
 
-func (f *fakeMerge) HardStop(_ context.Context, scope *merge.RepositoryScope) error {
-	f.hardStopScope, f.hardStopped = scope, true
+func (f *fakeMerge) HardStop(_ context.Context, scope *merge.RepositoryScope, by merge.Pauser) error {
+	f.hardStopScope, f.hardStopped, f.pauser = scope, true, &by
 	return f.pauseErr
 }
 

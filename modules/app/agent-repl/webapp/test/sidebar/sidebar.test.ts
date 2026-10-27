@@ -195,7 +195,7 @@ describe("the preferences a page stored before the view was the daemon's", () =>
 
   it("never reach the view: a page with stored folds draws the daemon's", async () => {
     const host = document.createElement("nav");
-    mountSidebar(host, ctxFor([roster({ merged: mergedSection([row({ id: "ws-9" })], 1, true) })]), {
+    mountSidebar(host, ctxFor([roster({ merged: mergedSection([row({ id: "ws-9" })], true) })]), {
       storage: memoryStorage({ [PREFS_KEY]: JSON.stringify({ grouping: "task", folded: { merged: false } }) }),
       timers: fakeTimers(),
     });
@@ -283,7 +283,7 @@ describe("mounting the rail: the view is the daemon's", () => {
     const pushes = [
       roster({
         repos: [repoSection({ id: "repo-1", collapsed: true, rows: [row({ id: "ws-1" })] })],
-        merged: mergedSection([row({ id: "ws-9" })], 1, false),
+        merged: mergedSection([row({ id: "ws-9" })], false),
       }),
     ];
     const one = document.createElement("nav");
@@ -299,8 +299,8 @@ describe("mounting the rail: the view is the daemon's", () => {
     mountSidebar(
       host,
       ctxFor([
-        roster({ merged: mergedSection([row({ id: "ws-9" })], 1, true) }),
-        roster({ merged: mergedSection([row({ id: "ws-9" })], 1, false) }),
+        roster({ merged: mergedSection([row({ id: "ws-9" })], true) }),
+        roster({ merged: mergedSection([row({ id: "ws-9" })], false) }),
       ]),
       { timers: fakeTimers() },
     );
@@ -354,7 +354,7 @@ describe("mounting the rail: the Recently Merged fit", () => {
   it("watches the rail's scroller, so a resize re-fits the band", async () => {
     // Arrange
     const host = document.createElement("nav");
-    mountSidebar(host, ctxFor([roster({ merged: mergedSection([row({ id: "ws-9" })], 1, false) })]), {
+    mountSidebar(host, ctxFor([roster({ merged: mergedSection([row({ id: "ws-9" })], false) })]), {
       timers: fakeTimers(),
     });
     await settle();
@@ -1449,7 +1449,7 @@ describe("mounting the rail: a merged row drawn when it comes into view", () => 
     const host = document.createElement("nav");
     const rows = Array.from({ length: MERGED_DRAWN_AT_ONCE }, (_, i) => row({ id: `ws-${i}`, name: "kept" }));
     rows.push(row({ id: "ws-late", name }));
-    mountSidebar(host, ctxFor([roster({ merged: mergedSection(rows, rows.length, false) })]), {
+    mountSidebar(host, ctxFor([roster({ merged: mergedSection(rows, false) })]), {
       storage: null,
       timers: fakeTimers(),
     });
@@ -1486,7 +1486,7 @@ describe("mounting the rail: a merged row drawn when it comes into view", () => 
     // Arrange
     const host = document.createElement("nav");
     const rows = Array.from({ length: MERGED_DRAWN_AT_ONCE + 1 }, (_, i) => row({ id: `ws-${i}` }));
-    const handle = mountSidebar(host, ctxFor([roster({ merged: mergedSection(rows, rows.length, false) })]), {
+    const handle = mountSidebar(host, ctxFor([roster({ merged: mergedSection(rows, false) })]), {
       storage: null,
       timers: fakeTimers(),
     });

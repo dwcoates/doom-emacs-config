@@ -1630,6 +1630,36 @@ never sent as an empty ref, because unset is what means every queue."
                                     '(:requester (:arm :user) :action (:arm :enable-racing :value nil))))
                    "{\"requester\":{\"user\":{}},\"enableRacing\":{}}"))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-move-to-encodes-each-side ()
+  "A move to a place names the merge to move and the merge it goes beside."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (case '((:ahead-of . "aheadOf") (:behind . "behind")))
+      (should (equal (json-serialize
+                      (agent-repl-wire-encode-update-merge-queue-request
+                       (list :requester '(:arm :user)
+                             :action (list :arm :move-to
+                                           :value (list :workspace agent-repl-test-wire-verbs--ref
+                                                        :place (list :arm (car case) :value agent-repl-test-wire-verbs--ref))))))
+                     (format "{\"requester\":{\"user\":{}},\"moveTo\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"%s\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"
+                             (cdr case)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-move-to-without-place ()
+  "A move to a place with no place is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-merge-queue-request
+                   (list :requester '(:arm :user)
+                         :action (list :arm :move-to :value (list :workspace agent-repl-test-wire-verbs--ref))))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-move-to-without-workspace ()
+  "A move to a place with no merge to move is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-merge-queue-request
+                   (list :requester '(:arm :user)
+                         :action (list :arm :move-to
+                                       :value (list :place (list :arm :behind :value agent-repl-test-wire-verbs--ref)))))
+                  :type 'agent-repl-wire-error)))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-workspace-arm-encodes-the-ref ()
   "The shared workspace-arm encoder hands the required ref to its use site."
   (agent-repl-test-wire-verbs--with-common
@@ -1650,7 +1680,8 @@ never sent as an empty ref, because unset is what means every queue."
 helper, so a hand-rolled arm cannot drift from the others."
   (dolist (fn '(agent-repl-wire-encode-update-merge-queue-evict
                 agent-repl-wire-encode-update-merge-queue-move-up
-                agent-repl-wire-encode-update-merge-queue-move-down))
+                agent-repl-wire-encode-update-merge-queue-move-down
+                agent-repl-wire-encode-update-merge-queue-move-to))
     (should (string-match-p
              "agent-repl-wire-verbs--encode-merge-queue-workspace-arm"
              (prin1-to-string (symbol-function fn))))))
@@ -1926,13 +1957,13 @@ encoded here."
                  '("cancel" "now" "schedule"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
-  "UpdateMergeQueueRequest's action oneof has exactly the seven arms encoded
+  "UpdateMergeQueueRequest's action oneof has exactly the eight arms encoded
 here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("disableRacing" "enableRacing" "evict" "moveDown" "moveUp" "pause" "resume"))))
+                 '("disableRacing" "enableRacing" "evict" "moveDown" "moveTo" "moveUp" "pause" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded

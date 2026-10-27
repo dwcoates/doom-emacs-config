@@ -123,7 +123,7 @@ func TestReleasingKeepsTheRepositorysQueuePause(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	repo := RepoKey(t.TempDir())
-	if err := s.SetMergeQueuePaused(context.Background(), repo, true); err != nil {
+	if err := s.SetMergeQueuePaused(context.Background(), repo, testPause()); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetDeployHold(context.Background(), repo, true, time.Unix(100, 0)); err != nil {

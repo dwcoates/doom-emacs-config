@@ -87,12 +87,7 @@ import {
   type RosterSectionFold,
 } from "./section-fold.js";
 import { openScope, type DrawScope } from "./scope.js";
-import {
-  drawRosterMergedSectionMergeQueuePaused,
-  drawRosterMergeQueueRepoGroup,
-  MERGE_QUEUE_PAUSED_ATTRIBUTE,
-  MERGE_QUEUES_CLASS,
-} from "./merge-queue-view.js";
+import { drawRosterMergeQueueRepoGroup, MERGE_QUEUES_CLASS } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
   drawRosterRowDetailCommits,
@@ -191,7 +186,8 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
     draw: (scoped: SidebarContext) => D,
     discarded: Array<DrawnSection<unknown>>,
   ): DrawnSection<W, D> => {
-    if (section !== null && same(section.wire, wire)) {
+    // A BOX A DRAG REARRANGED IS DRAWN ANEW (drag.ts), whatever its wire.
+    if (section !== null && !section.drawn.element.hasAttribute(REARRANGED_ATTRIBUTE) && same(section.wire, wire)) {
       section.scope.remark(rail.attention);
       return section;
     }
@@ -598,6 +594,11 @@ export interface HeadedBoxShape {
   /** Anything the kind adds to its header, after the folded count. */
   decorateHeader?: (header: HTMLElement, section: HTMLElement) => void;
   /**
+   * The header carries NO count, and one on the wire is malformed: the Merge
+   * Queue section's, whose queue groups count their own lines.
+   */
+  countless?: true;
+  /**
    * A section the rail leaves out while it draws nothing: WHEN says so from the
    * wire, and ATTRIBUTE marks the undrawn box. Absent, the section always draws
    * (a repository with no rows still draws, so the grouping does not flicker).
@@ -658,6 +659,7 @@ export function drawHeadedBox(
     sectionFold(sc, shape.foldKey, shape.target),
     shape.foldBy,
     `${path}.header`,
+    shape.countless === true,
   );
   const drawnBody = body();
   if (shape.leftOut?.when(header, `${path}.header`) === true) {
@@ -682,10 +684,11 @@ export function drawRosterRepoKey(u: RosterRepoKey, path: string): RepositoryRef
  * Merged" heading, the settled merges hoisted out of every grouping, in one
  * group per repository.
  *
- * ITS HEADER COUNTS THE MERGES IN LINE: "(N)" beside the label, folded or
- * not, is the daemon's count over every queue. Its label is drawn in the
- * purple of a merge in progress, and in the paused merge bubble's amber while
- * a repository's merge queue is paused (`MERGE_QUEUE_PAUSED_ATTRIBUTE`).
+ * ITS HEADER COUNTS NOTHING (owner request, 2026-10-27): each queue group
+ * counts the merges in its own line, and the "Recently Merged" heading counts
+ * today's merges, "(K today)", with the commits they brought in on its hover.
+ * Its label is always the purple of a merge in progress; a paused queue is
+ * drawn on its own group (`merge-queue-view.ts`).
  *
  * A SECTION THAT SHOWS NOTHING IS NOT DRAWN. The wire always carries the
  * section -- the roster's `recently_merged` is a plain field with a
@@ -725,12 +728,10 @@ export function drawRosterMergedSection(
       className: MERGED_SECTION_CLASS,
       target: { case: "recentlyMerged", value: {} },
       foldBy: "header",
+      countless: true,
       leftOut: {
         when: () => queues.length === 0 && groups.every((g) => g.shownMerges.length === 0),
         attribute: "data-merged-empty",
-      },
-      decorateHeader: (header) => {
-        tickMergedTodayCommits(header, groups.flatMap((g) => g.shownMerges), sc);
       },
     },
     () => {
@@ -745,14 +746,15 @@ export function drawRosterMergedSection(
       if (groups.length > 0) {
         const heading = document.createElement("div");
         heading.className = MERGED_LABEL_CLASS;
-        heading.appendChild(mergedLabel);
+        const merges = groups.flatMap((g) => g.shownMerges);
+        heading.append(mergedLabel, drawMergedTodayCount(merges, sc));
+        tickMergedTodayCommits(heading, merges, sc);
         region.appendChild(heading);
       }
       for (const group of groups) region.appendChild(group.element);
       return region;
     },
   );
-  section.toggleAttribute(MERGE_QUEUE_PAUSED_ATTRIBUTE, drawRosterMergedSectionMergeQueuePaused(u));
   return section;
 }
 
@@ -885,18 +887,38 @@ export function paintMergedRepoGroup(group: HTMLElement, collapsed: boolean): vo
   group.setAttribute(MERGED_REPOSITORY_COLLAPSED_ATTRIBUTE, collapsed ? "true" : "false");
 }
 
+/** The class of the "Recently Merged" heading's today count. */
+export const MERGED_TODAY_COUNT_CLASS = "sb-today-count";
+
+/**
+ * The "Recently Merged" heading's "(K today)": how many of its merges landed
+ * TODAY (local date), counted over every row of its SHOWN groups the daemon
+ * sent, including those scrolled out of view (owner requests, 2026-10-11 and
+ * 2026-10-27). The shared ticker recounts it, so it drops at midnight
+ * together with the green names.
+ */
+export function drawMergedTodayCount(merges: MergedRowFacts[], sc: SidebarContext): HTMLElement {
+  const count = document.createElement("span");
+  count.className = `sb-count ${MERGED_TODAY_COUNT_CLASS}`;
+  tickPaint(sc, (nowMs) => {
+    count.textContent = `(${todaysMerges(merges, nowMs).length} today)`;
+  });
+  return count;
+}
+
 /**
  * The merges among MERGES that landed today (local date): the ONE filter the
- * header's commit hover counts over.
+ * heading's "(K today)" and its commit hover both count over, so the hover
+ * always sums exactly the merges the count names.
  */
 export function todaysMerges(merges: MergedRowFacts[], nowMs: number): MergedRowFacts[] {
   return merges.filter((m) => mergedToday(m.atMs, nowMs));
 }
 
 /**
- * Paint the section header's hover now and on every tick: the commits today's
- * merges brought in, summed (owner request, 2026-10-14). The ticker drops a
- * merge from the sum at midnight.
+ * Paint the "Recently Merged" heading's hover now and on every tick: the
+ * commits today's merges brought in, summed (owner request, 2026-10-14). The
+ * ticker drops a merge from the sum at midnight.
  */
 function tickMergedTodayCommits(header: HTMLElement, merges: MergedRowFacts[], sc: SidebarContext): void {
   tickPaint(sc, (nowMs) => {
@@ -972,6 +994,7 @@ export function drawRosterSectionHeader(
   gesture: FoldGesture,
   hit: FoldHitArea,
   path: string,
+  countless = false,
 ): HTMLElement {
   const header = drawFoldHeader(
     drawSectionLabel(requireMessage(u.label, `${path}.label`), `${path}.label`),
@@ -979,6 +1002,10 @@ export function drawRosterSectionHeader(
     gesture,
     hit,
   );
+  if (countless) {
+    if (u.count !== undefined) throw new MalformedView(`${path}.count`, "this section's header carries no count");
+    return header;
+  }
   // THE FOLDED COUNT, "(N)", sits between the label and the add control the
   // repo section appends after this header. The daemon resolves N (the rows
   // the unfolded section shows, nested family rows included); the stylesheet

@@ -50,12 +50,9 @@ import { liveElapsedClock } from "../../elapsed-clock.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { guardMalformed } from "../../rpc/guard.js";
-import {
-  drawMalformedRefusal,
-  drawTransportRefusal,
-  drawTypedRefusal,
-  type SentenceTable,
-} from "../../rpc/refuse.js";
+import { UPDATE_MERGE_QUEUE_SENTENCES } from "../../rpc/merge-queue-refusal.js";
+import { drawMalformedRefusal, drawTransportRefusal, drawTypedRefusal } from "../../rpc/refuse.js";
+import { userRequester } from "../../rpc/requester.js";
 import { callUnary } from "../../rpc/unary.js";
 import { UpdateMergeQueueResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
 import type {
@@ -250,11 +247,6 @@ export function openQueueEntryBubble(
   return jumpToWorkspace(entry, rc, requester, QUEUE_JUMP, bubble.row);
 }
 
-/** The refusals of a move request that are this endpoint's own. */
-const MOVE_SENTENCES: SentenceTable = {
-  noSuchQueuedMerge: () => "this merge is no longer waiting on the queue",
-};
-
 /**
  * One move control: a chevron pointing MOVE's way, named for screen readers
  * and hover by its label, disabled when there is no waiting merge to pass
@@ -316,7 +308,7 @@ export async function moveInQueue(
       (client) =>
         client.updateMergeQueue({
           action: moveAction(workspace, move),
-          requester: { asker: { case: "user", value: {} } },
+          requester: userRequester(),
         }),
       UpdateMergeQueueResponseSchema,
     );
@@ -331,7 +323,7 @@ export async function moveInQueue(
           "UpdateMergeQueueError.cause",
           "UpdateMergeQueue",
           result.value.cause,
-          MOVE_SENTENCES,
+          UPDATE_MERGE_QUEUE_SENTENCES,
         );
         log.warn(`UpdateMergeQueue refused a move request: ${arm}`, {
           operation: "merge.queue-move-refused",

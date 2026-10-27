@@ -1346,7 +1346,7 @@ func TestForgetDeletesTheRepositorysMergeQueuePauseRow(t *testing.T) {
 	repoDir := t.TempDir()
 	ws := registerMain(t, s, repoDir)
 	key := RepoKey(scalar[string](t, s, `SELECT dir FROM repositories WHERE id = ?`, ws.Repo))
-	if err := s.SetMergeQueuePaused(context.Background(), key, true); err != nil {
+	if err := s.SetMergeQueuePaused(context.Background(), key, testPause()); err != nil {
 		t.Fatalf("SetMergeQueuePaused: %v", err)
 	}
 
@@ -1368,7 +1368,7 @@ func TestForgetLeavesAReferencedRepositorysPauseRow(t *testing.T) {
 	ws := registerUnder(t, s, repoDir)
 	registerUnder(t, s, repoDir)
 	key := RepoKey(scalar[string](t, s, `SELECT dir FROM repositories WHERE id = ?`, ws.Repo))
-	if err := s.SetMergeQueuePaused(context.Background(), key, true); err != nil {
+	if err := s.SetMergeQueuePaused(context.Background(), key, testPause()); err != nil {
 		t.Fatalf("SetMergeQueuePaused: %v", err)
 	}
 

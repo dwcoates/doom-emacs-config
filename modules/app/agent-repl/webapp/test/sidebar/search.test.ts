@@ -82,7 +82,7 @@ describe("applySearch", () => {
   });
 
   it("narrows Recently Merged", () => {
-    const root = drawn({ merged: mergedSection([row({ id: "ws-m", name: "alpha" })], 1, false) });
+    const root = drawn({ merged: mergedSection([row({ id: "ws-m", name: "alpha" })], false) });
     applySearch(root, "beta");
     expect(missed(root, "ws-m")).toEqual([true]);
   });
@@ -125,7 +125,6 @@ describe("applySearch", () => {
           mergedGroup({ id: "repo-1", rows: [row({ id: "ws-1", name: "alpha" })] }),
           mergedGroup({ id: "repo-2", rows: [row({ id: "ws-2", name: "beta" })] }),
         ],
-        2,
         false,
       ),
     });

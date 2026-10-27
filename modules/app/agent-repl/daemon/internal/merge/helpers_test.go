@@ -81,6 +81,8 @@ type fakeDB struct {
 	ledger  map[ids.WorkspaceID][]wsm.MergeLedgerEntry
 	queues  map[wsm.RepoKey][]wsm.MergeQueueEntry
 	paused  map[wsm.RepoKey]bool
+	// pauses are the records SetMergeQueuePaused wrote, by repository.
+	pauses map[wsm.RepoKey]*wsm.MergeQueuePause
 	// allQueuesErr fails AllMergeQueues, the read a workspace's take-back
 	// (AdoptWorkspace) starts from.
 	allQueuesErr error
@@ -194,6 +196,7 @@ func newFakeDB() *fakeDB {
 		ledger:        map[ids.WorkspaceID][]wsm.MergeLedgerEntry{},
 		queues:        map[wsm.RepoKey][]wsm.MergeQueueEntry{},
 		paused:        map[wsm.RepoKey]bool{},
+		pauses:        map[wsm.RepoKey]*wsm.MergeQueuePause{},
 		mergedAt:      map[ids.WorkspaceID]time.Time{},
 		landedCommits: map[ids.WorkspaceID]uint32{},
 		closed:        map[ids.WorkspaceID]bool{},
@@ -636,6 +639,46 @@ func (f *fakeDB) MoveMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspace
 	return false, fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
 }
 
+func (f *fakeDB) MoveMergeTo(_ context.Context, repo wsm.RepoKey, id, anchor ids.WorkspaceID, side wsm.MergeSide) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.moveErr != nil {
+		return false, f.moveErr
+	}
+	queue := f.queues[repo]
+	at := func(ws ids.WorkspaceID) int {
+		for i, entry := range queue {
+			if entry.Workspace == ws {
+				return i
+			}
+		}
+		return -1
+	}
+	from, to := at(id), at(anchor)
+	if from < 0 || to < 0 {
+		return false, fmt.Errorf("no queue entry for %s or %s: %w", id, anchor, wsm.ErrNotFound)
+	}
+	if queue[from].State != wsm.MergeQueued || queue[to].State != wsm.MergeQueued || id == anchor {
+		return false, nil
+	}
+	moved := queue[from]
+	moved.Source.Front = queue[to].Source.Front
+	rest := append(append([]wsm.MergeQueueEntry(nil), queue[:from]...), queue[from+1:]...)
+	place := to
+	if from < to {
+		place--
+	}
+	if side == wsm.MergeSideBehind {
+		place++
+	}
+	if place == from {
+		return false, nil
+	}
+	f.queues[repo] = append(rest[:place:place], append([]wsm.MergeQueueEntry{moved}, rest[place:]...)...)
+	f.renumber(repo)
+	return true, nil
+}
+
 // PrioritizeMerge moves a waiting entry ahead of every other waiting entry,
 // marked front, exactly as the durable queue re-sequences it.
 func (f *fakeDB) PrioritizeMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) (bool, error) {
@@ -863,14 +906,34 @@ func (f *fakeDB) AllMergeQueues(_ context.Context) (map[wsm.RepoKey][]wsm.MergeQ
 	return out, nil
 }
 
-func (f *fakeDB) SetMergeQueuePaused(_ context.Context, repo wsm.RepoKey, paused bool) error {
+// userPauser is the user's pause, which records no workspace.
+var userPauser = Pauser{By: RequestedByUser}
+
+func (f *fakeDB) SetMergeQueuePaused(_ context.Context, repo wsm.RepoKey, pause *wsm.MergeQueuePause) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.pauseWriteErr != nil {
 		return f.pauseWriteErr
 	}
-	f.paused[repo] = paused
+	f.paused[repo] = pause != nil
+	f.pauses[repo] = pause
 	return nil
+}
+
+// MergeQueuePause answers the record the last pause wrote; a queue a test
+// paused by setting `paused` alone answers an unrecorded pause, as a pause the
+// previous build wrote does.
+func (f *fakeDB) MergeQueuePause(ctx context.Context, repo wsm.RepoKey) (*wsm.MergeQueuePause, error) {
+	paused, err := f.MergeQueuePaused(ctx, repo)
+	if err != nil || !paused {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if pause := f.pauses[repo]; pause != nil {
+		return pause, nil
+	}
+	return &wsm.MergeQueuePause{}, nil
 }
 
 func (f *fakeDB) SetDeployHold(_ context.Context, _ wsm.RepoKey, held bool, at time.Time) error {

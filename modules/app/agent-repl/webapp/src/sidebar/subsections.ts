@@ -69,6 +69,7 @@ import { openNamePopup } from "./name-popup.js";
 import { subsectionFoldKey, type SidebarContext } from "./context.js";
 import { drawFoldToggle, drawRosterSectionFold, neverFolds, sectionFold, trackDaemonFold } from "./section-fold.js";
 import { pressToDrag, type DragSpec } from "./drag.js";
+import { userRequester } from "../rpc/requester.js";
 
 /** The class of one subsection. */
 export const SUBSECTION_CLASS = "sb-subsection";
@@ -280,7 +281,7 @@ export function markOneShot(sc: SidebarContext, workspace: WorkspaceRef): Promis
   return sendHeld(sc, sc.arrange.status, {
     rpc: "SetWorkspaceOneShot",
     call: (client) =>
-      client.setWorkspaceOneShot({ workspace, requester: { asker: { case: "user", value: {} } }, oneShot: true }),
+      client.setWorkspaceOneShot({ workspace, requester: userRequester(), oneShot: true }),
     schema: SetWorkspaceOneShotResponseSchema,
     refusalText: (cause) => setWorkspaceOneShotRefusal(cause as never),
     revision: (response: SetWorkspaceOneShotResponse) =>

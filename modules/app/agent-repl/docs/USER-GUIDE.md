@@ -676,13 +676,22 @@ The top bar's effort selector sits between the model selector and the permission
 - **"OPEN" shows how many workspaces it lists, folded or not.**
   - The number counts every row, children of other workspaces included, and the rows of a folded repository too.
 - **"MERGE QUEUE", the last section, shows every repository's merge queue, then what recently merged.**
-  - Each repository with a merge in its queue is listed under its name.
-    - The merge at the head comes first, as a small merge bubble: its stages and the step it stands on, or why it failed.
-    - Each waiting merge follows, numbered in the order it will run.
+  - Each repository with a merge in its queue is listed under its name, between two grey rules.
+    - The number beside the name counts the merges in that repository's line.
+    - A repository leaves the list as soon as its line is empty.
+    - The merge at the head comes first, as a small merge bubble: its stages and the step it stands on.
+    - Each waiting merge follows, in the order it will run.
     - Clicking a merge selects its workspace and opens the merge's bubble.
-  - The workspaces that merged recently are listed below, under "RECENTLY MERGED".
-  - The number beside "MERGE QUEUE" counts the merges in line, folded or not.
-  - The heading is purple, and turns amber while a repository's merge queue is paused.
+    - Dragging a waiting merge to another place in its line moves it there.
+  - A paused queue shows on its own repository.
+    - The repository's name turns red, and its merge icons amber.
+    - The head's clock stops at the moment of the pause.
+    - The head's running stage shows a still grey dot once nothing of its work runs.
+    - Resting the pointer on the name says who paused the queue and how long ago.
+    - Clicking the name resumes the queue.
+  - The workspaces that merged recently are listed below a grey rule, under "RECENTLY MERGED".
+    - The number beside "RECENTLY MERGED" counts today's merges.
+  - The "MERGE QUEUE" heading is always purple.
 - **The time at the right of an open workspace's row is its running turn's duration.**
   - It reads the same number as the footer's turn clock.
   - A workspace with no turn running reads `0s`.

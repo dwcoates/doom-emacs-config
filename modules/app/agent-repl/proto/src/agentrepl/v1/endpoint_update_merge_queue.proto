@@ -30,6 +30,10 @@ message UpdateMergeQueueRequest {
     // Move ONE workspace's waiting merge one place DOWN its queue, swapping it
     // with the waiting merge directly behind it.
     UpdateMergeQueueMoveDown move_down = 8;
+    // Move ONE workspace's waiting merge to a place in its queue directly
+    // ahead of or behind another waiting merge on the same queue: the
+    // sidebar's drag of a waiting merge. (Added 2026-10-27.)
+    UpdateMergeQueueMoveTo move_to = 14;
     // DISABLE THE RACE, daemon-wide: every queue works its head alone, as on
     // battery, whatever the host's power source. On AC power a queue otherwise
     // works its top two merges, which race to land and take turns at the
@@ -105,6 +109,26 @@ message UpdateMergeQueueMoveUp {
 message UpdateMergeQueueMoveDown {
   // Whose merge to move one place toward the back.
   workspace.v1.WorkspaceRef workspace = 1;
+}
+// A MOVE TO A PLACE passes only WAITING merges, as a one-place move does: the
+// merge running and a merge only requested are never passed, and never the
+// anchor. The moved merge takes the ANCHOR's front mark, so every merge put
+// at the front still stands ahead of every ordinary merge waiting: directly
+// ahead of a front merge or behind one is a front place, and directly ahead
+// of or behind an ordinary merge an ordinary one. A merge already standing
+// in that place is answered with success and left where it is. A moved
+// merge or an anchor that is no waiting merge, or two merges on different
+// queues, is `no_such_queued_merge`.
+message UpdateMergeQueueMoveTo {
+  // Whose merge to move.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHERE IT GOES. THE ARM IS THE SIDE OF THE ANCHOR. Never unset.
+  oneof place {
+    // Directly ahead of this workspace's waiting merge.
+    workspace.v1.WorkspaceRef ahead_of = 2;
+    // Directly behind this workspace's waiting merge.
+    workspace.v1.WorkspaceRef behind = 3;
+  }
 }
 
 // THE ARM IS THE OUTCOME.

@@ -140,7 +140,6 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 		})
 	}
 	r.concluded(MergeFacts{State: StateFailed, FailedArea: area, Detail: summary})
-	r.o.noteFailed(ctx, r.repo, r.ws, r.lease.ID, summary)
 	// AN OUTCOME, NOT A FAULT: every failed merge is shown to the user as
 	// "merge failed" with its area. A fault behind a failure is recorded at
 	// its own site (daemon.merge.fault for an abort, the gate's and the

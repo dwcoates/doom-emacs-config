@@ -80,7 +80,7 @@ function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {} }: Dra
         repos: open === 0 ? [] : [repoSection({ id: "alpha", rows: openRows })],
         open: openSection(folded.open ?? false),
         hidden: hiddenSection(hiddenRows, hidden, folded.hidden ?? false),
-        merged: mergedSection(mergedRows, merged, folded.merged ?? false),
+        merged: mergedSection(mergedRows, folded.merged ?? false),
       }),
       sidebarContext(),
     ),
@@ -714,7 +714,7 @@ describe("fitBands", () => {
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(band(rail.pane, "merged-section").querySelector("[data-section-count]")?.textContent).toBe("(10)");
+    expect(band(rail.pane, "hidden-section").querySelector("[data-section-count]")?.textContent).toBe("(10)");
   });
 
   it("leaves a pane that is not laid out as drawn", () => {

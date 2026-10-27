@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_merge_queue.proto.
  */
 export const file_agentrepl_v1_endpoint_update_merge_queue: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX21lcmdlX3F1ZXVlLnByb3RvEgxhZ2VudHJlcGwudjEi3AQKF1VwZGF0ZU1lcmdlUXVldWVSZXF1ZXN0EjQKBXBhdXNlGAEgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVQYXVzZUgAEjYKBnJlc3VtZRgCIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlUmVzdW1lSAASNAoFZXZpY3QYAyABKAsyIy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUV2aWN0SAASNwoHbW92ZV91cBgHIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTW92ZVVwSAASOwoJbW92ZV9kb3duGAggASgLMiYuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlRG93bkgAEkUKDmRpc2FibGVfcmFjaW5nGAkgASgLMisuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVEaXNhYmxlUmFjaW5nSAASQwoNZW5hYmxlX3JhY2luZxgKIAEoCzIqLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlRW5hYmxlUmFjaW5nSAASMwoJcmVxdWVzdGVyGA0gASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlckIICgZhY3Rpb25KBAgEEAVKBAgFEAZKBAgGEAdKBAgLEAxKBAgMEA1SBWZyb250Ug1ob2xkX3JvbGxvdXRzUhByZWxlYXNlX3JvbGxvdXRzUglzdWJzY3JpYmVSC3Vuc3Vic2NyaWJlImoKFVVwZGF0ZU1lcmdlUXVldWVQYXVzZRI0CgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIAIgBARIMCgRoYXJkGAIgASgIQg0KC19yZXBvc2l0b3J5Il0KFlVwZGF0ZU1lcmdlUXVldWVSZXN1bWUSNAoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmSACIAQFCDQoLX3JlcG9zaXRvcnkiRgoVVXBkYXRlTWVyZ2VRdWV1ZUV2aWN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiHwodVXBkYXRlTWVyZ2VRdWV1ZURpc2FibGVSYWNpbmciHgocVXBkYXRlTWVyZ2VRdWV1ZUVuYWJsZVJhY2luZyJHChZVcGRhdGVNZXJnZVF1ZXVlTW92ZVVwEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiSQoYVXBkYXRlTWVyZ2VRdWV1ZU1vdmVEb3duEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYilAEKGFVwZGF0ZU1lcmdlUXVldWVSZXNwb25zZRI4CgdzdWNjZXNzGAEgASgLMiUuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVTdWNjZXNzSAASNAoFZXJyb3IYAiABKAsyIy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUVycm9ySABCCAoGcmVzdWx0IhkKF1VwZGF0ZU1lcmdlUXVldWVTdWNjZXNzIosHChVVcGRhdGVNZXJnZVF1ZXVlRXJyb3ISSwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLi5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVVua25vd25Xb3Jrc3BhY2VIABJUChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjIuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEksKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi4uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVUcmFuc2ZlcnJpbmdBd2F5SAASRgoPbm90X3lldF9hZG9wdGVkGAQgASgLMisuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVOb3RZZXRBZG9wdGVkSAASRQoOYWxyZWFkeV9wYXVzZWQYBSABKAsyKy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUFscmVhZHlQYXVzZWRIABI9Cgpub3RfcGF1c2VkGAYgASgLMicuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVOb3RQYXVzZWRIABJPChRub19zdWNoX3F1ZXVlZF9tZXJnZRgHIAEoCzIvLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTm9TdWNoUXVldWVkTWVyZ2VIABJNChJ1bmtub3duX3JlcG9zaXRvcnkYCCABKAsyLy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVVua25vd25SZXBvc2l0b3J5SAASVgoXcmFjaW5nX2FscmVhZHlfZGlzYWJsZWQYCyABKAsyMy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVJhY2luZ0FscmVhZHlEaXNhYmxlZEgAEk4KE3JhY2luZ19ub3RfZGlzYWJsZWQYDCABKAsyLy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVJhY2luZ05vdERpc2FibGVkSABCBwoFY2F1c2VKBAgJEApKBAgKEAtKBAgNEA5KBAgOEA9SFXJvbGxvdXRzX2FscmVhZHlfaGVsZFIRcm9sbG91dHNfbm90X2hlbGRSDm5vdF9zdWJzY3JpYmVkUhFzdWJzY3JpYmVyX2Nsb3NlZCIiCiBVcGRhdGVNZXJnZVF1ZXVlVW5rbm93bldvcmtzcGFjZSI8CiRVcGRhdGVNZXJnZVF1ZXVlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjMKIFVwZGF0ZU1lcmdlUXVldWVUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHwodVXBkYXRlTWVyZ2VRdWV1ZU5vdFlldEFkb3B0ZWQiHwodVXBkYXRlTWVyZ2VRdWV1ZUFscmVhZHlQYXVzZWQiGwoZVXBkYXRlTWVyZ2VRdWV1ZU5vdFBhdXNlZCIjCiFVcGRhdGVNZXJnZVF1ZXVlTm9TdWNoUXVldWVkTWVyZ2UiIwohVXBkYXRlTWVyZ2VRdWV1ZVVua25vd25SZXBvc2l0b3J5IicKJVVwZGF0ZU1lcmdlUXVldWVSYWNpbmdBbHJlYWR5RGlzYWJsZWQiIwohVXBkYXRlTWVyZ2VRdWV1ZVJhY2luZ05vdERpc2FibGVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_workspace_topology, file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX21lcmdlX3F1ZXVlLnByb3RvEgxhZ2VudHJlcGwudjEilQUKF1VwZGF0ZU1lcmdlUXVldWVSZXF1ZXN0EjQKBXBhdXNlGAEgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVQYXVzZUgAEjYKBnJlc3VtZRgCIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlUmVzdW1lSAASNAoFZXZpY3QYAyABKAsyIy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUV2aWN0SAASNwoHbW92ZV91cBgHIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTW92ZVVwSAASOwoJbW92ZV9kb3duGAggASgLMiYuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVNb3ZlRG93bkgAEjcKB21vdmVfdG8YDiABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU1vdmVUb0gAEkUKDmRpc2FibGVfcmFjaW5nGAkgASgLMisuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVEaXNhYmxlUmFjaW5nSAASQwoNZW5hYmxlX3JhY2luZxgKIAEoCzIqLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlRW5hYmxlUmFjaW5nSAASMwoJcmVxdWVzdGVyGA0gASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVJlcXVlc3RlckIICgZhY3Rpb25KBAgEEAVKBAgFEAZKBAgGEAdKBAgLEAxKBAgMEA1SBWZyb250Ug1ob2xkX3JvbGxvdXRzUhByZWxlYXNlX3JvbGxvdXRzUglzdWJzY3JpYmVSC3Vuc3Vic2NyaWJlImoKFVVwZGF0ZU1lcmdlUXVldWVQYXVzZRI0CgpyZXBvc2l0b3J5GAEgASgLMhsud29ya3NwYWNlLnYxLlJlcG9zaXRvcnlSZWZIAIgBARIMCgRoYXJkGAIgASgIQg0KC19yZXBvc2l0b3J5Il0KFlVwZGF0ZU1lcmdlUXVldWVSZXN1bWUSNAoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmSACIAQFCDQoLX3JlcG9zaXRvcnkiRgoVVXBkYXRlTWVyZ2VRdWV1ZUV2aWN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiHwodVXBkYXRlTWVyZ2VRdWV1ZURpc2FibGVSYWNpbmciHgocVXBkYXRlTWVyZ2VRdWV1ZUVuYWJsZVJhY2luZyJHChZVcGRhdGVNZXJnZVF1ZXVlTW92ZVVwEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiSQoYVXBkYXRlTWVyZ2VRdWV1ZU1vdmVEb3duEi0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYirgEKFlVwZGF0ZU1lcmdlUXVldWVNb3ZlVG8SLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIuCghhaGVhZF9vZhgCIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIABIsCgZiZWhpbmQYAyABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmSABCBwoFcGxhY2UilAEKGFVwZGF0ZU1lcmdlUXVldWVSZXNwb25zZRI4CgdzdWNjZXNzGAEgASgLMiUuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVTdWNjZXNzSAASNAoFZXJyb3IYAiABKAsyIy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUVycm9ySABCCAoGcmVzdWx0IhkKF1VwZGF0ZU1lcmdlUXVldWVTdWNjZXNzIosHChVVcGRhdGVNZXJnZVF1ZXVlRXJyb3ISSwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLi5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVVua25vd25Xb3Jrc3BhY2VIABJUChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjIuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEksKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi4uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVUcmFuc2ZlcnJpbmdBd2F5SAASRgoPbm90X3lldF9hZG9wdGVkGAQgASgLMisuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVOb3RZZXRBZG9wdGVkSAASRQoOYWxyZWFkeV9wYXVzZWQYBSABKAsyKy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUFscmVhZHlQYXVzZWRIABI9Cgpub3RfcGF1c2VkGAYgASgLMicuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVOb3RQYXVzZWRIABJPChRub19zdWNoX3F1ZXVlZF9tZXJnZRgHIAEoCzIvLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTm9TdWNoUXVldWVkTWVyZ2VIABJNChJ1bmtub3duX3JlcG9zaXRvcnkYCCABKAsyLy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVVua25vd25SZXBvc2l0b3J5SAASVgoXcmFjaW5nX2FscmVhZHlfZGlzYWJsZWQYCyABKAsyMy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVJhY2luZ0FscmVhZHlEaXNhYmxlZEgAEk4KE3JhY2luZ19ub3RfZGlzYWJsZWQYDCABKAsyLy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZVJhY2luZ05vdERpc2FibGVkSABCBwoFY2F1c2VKBAgJEApKBAgKEAtKBAgNEA5KBAgOEA9SFXJvbGxvdXRzX2FscmVhZHlfaGVsZFIRcm9sbG91dHNfbm90X2hlbGRSDm5vdF9zdWJzY3JpYmVkUhFzdWJzY3JpYmVyX2Nsb3NlZCIiCiBVcGRhdGVNZXJnZVF1ZXVlVW5rbm93bldvcmtzcGFjZSI8CiRVcGRhdGVNZXJnZVF1ZXVlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjMKIFVwZGF0ZU1lcmdlUXVldWVUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHwodVXBkYXRlTWVyZ2VRdWV1ZU5vdFlldEFkb3B0ZWQiHwodVXBkYXRlTWVyZ2VRdWV1ZUFscmVhZHlQYXVzZWQiGwoZVXBkYXRlTWVyZ2VRdWV1ZU5vdFBhdXNlZCIjCiFVcGRhdGVNZXJnZVF1ZXVlTm9TdWNoUXVldWVkTWVyZ2UiIwohVXBkYXRlTWVyZ2VRdWV1ZVVua25vd25SZXBvc2l0b3J5IicKJVVwZGF0ZU1lcmdlUXVldWVSYWNpbmdBbHJlYWR5RGlzYWJsZWQiIwohVXBkYXRlTWVyZ2VRdWV1ZVJhY2luZ05vdERpc2FibGVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_workspace_topology, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueRequest
@@ -75,6 +75,16 @@ export type UpdateMergeQueueRequest = Message<"agentrepl.v1.UpdateMergeQueueRequ
      */
     value: UpdateMergeQueueMoveDown;
     case: "moveDown";
+  } | {
+    /**
+     * Move ONE workspace's waiting merge to a place in its queue directly
+     * ahead of or behind another waiting merge on the same queue: the
+     * sidebar's drag of a waiting merge. (Added 2026-10-27.)
+     *
+     * @generated from field: agentrepl.v1.UpdateMergeQueueMoveTo move_to = 14;
+     */
+    value: UpdateMergeQueueMoveTo;
+    case: "moveTo";
   } | {
     /**
      * DISABLE THE RACE, daemon-wide: every queue works its head alone, as on
@@ -276,6 +286,58 @@ export const UpdateMergeQueueMoveDownSchema: GenMessage<UpdateMergeQueueMoveDown
   messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 7);
 
 /**
+ * A MOVE TO A PLACE passes only WAITING merges, as a one-place move does: the
+ * merge running and a merge only requested are never passed, and never the
+ * anchor. The moved merge takes the ANCHOR's front mark, so every merge put
+ * at the front still stands ahead of every ordinary merge waiting: directly
+ * ahead of a front merge or behind one is a front place, and directly ahead
+ * of or behind an ordinary merge an ordinary one. A merge already standing
+ * in that place is answered with success and left where it is. A moved
+ * merge or an anchor that is no waiting merge, or two merges on different
+ * queues, is `no_such_queued_merge`.
+ *
+ * @generated from message agentrepl.v1.UpdateMergeQueueMoveTo
+ */
+export type UpdateMergeQueueMoveTo = Message<"agentrepl.v1.UpdateMergeQueueMoveTo"> & {
+  /**
+   * Whose merge to move.
+   *
+   * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
+   */
+  workspace?: WorkspaceRef | undefined;
+
+  /**
+   * WHERE IT GOES. THE ARM IS THE SIDE OF THE ANCHOR. Never unset.
+   *
+   * @generated from oneof agentrepl.v1.UpdateMergeQueueMoveTo.place
+   */
+  place: {
+    /**
+     * Directly ahead of this workspace's waiting merge.
+     *
+     * @generated from field: workspace.v1.WorkspaceRef ahead_of = 2;
+     */
+    value: WorkspaceRef;
+    case: "aheadOf";
+  } | {
+    /**
+     * Directly behind this workspace's waiting merge.
+     *
+     * @generated from field: workspace.v1.WorkspaceRef behind = 3;
+     */
+    value: WorkspaceRef;
+    case: "behind";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateMergeQueueMoveTo.
+ * Use `create(UpdateMergeQueueMoveToSchema)` to create a new message.
+ */
+export const UpdateMergeQueueMoveToSchema: GenMessage<UpdateMergeQueueMoveTo> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 8);
+
+/**
  * THE ARM IS THE OUTCOME.
  *
  * @generated from message agentrepl.v1.UpdateMergeQueueResponse
@@ -304,7 +366,7 @@ export type UpdateMergeQueueResponse = Message<"agentrepl.v1.UpdateMergeQueueRes
  * Use `create(UpdateMergeQueueResponseSchema)` to create a new message.
  */
 export const UpdateMergeQueueResponseSchema: GenMessage<UpdateMergeQueueResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 8);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 9);
 
 /**
  * Done; the bubbles and roster reflect it.
@@ -319,7 +381,7 @@ export type UpdateMergeQueueSuccess = Message<"agentrepl.v1.UpdateMergeQueueSucc
  * Use `create(UpdateMergeQueueSuccessSchema)` to create a new message.
  */
 export const UpdateMergeQueueSuccessSchema: GenMessage<UpdateMergeQueueSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 9);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 10);
 
 /**
  * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -421,7 +483,7 @@ export type UpdateMergeQueueError = Message<"agentrepl.v1.UpdateMergeQueueError"
  * Use `create(UpdateMergeQueueErrorSchema)` to create a new message.
  */
 export const UpdateMergeQueueErrorSchema: GenMessage<UpdateMergeQueueError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 10);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 11);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueUnknownWorkspace
@@ -434,7 +496,7 @@ export type UpdateMergeQueueUnknownWorkspace = Message<"agentrepl.v1.UpdateMerge
  * Use `create(UpdateMergeQueueUnknownWorkspaceSchema)` to create a new message.
  */
 export const UpdateMergeQueueUnknownWorkspaceSchema: GenMessage<UpdateMergeQueueUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 11);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 12);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
@@ -453,7 +515,7 @@ export type UpdateMergeQueueWorkspaceRefMismatch = Message<"agentrepl.v1.UpdateM
  * Use `create(UpdateMergeQueueWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const UpdateMergeQueueWorkspaceRefMismatchSchema: GenMessage<UpdateMergeQueueWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 12);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 13);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueTransferringAway
@@ -472,7 +534,7 @@ export type UpdateMergeQueueTransferringAway = Message<"agentrepl.v1.UpdateMerge
  * Use `create(UpdateMergeQueueTransferringAwaySchema)` to create a new message.
  */
 export const UpdateMergeQueueTransferringAwaySchema: GenMessage<UpdateMergeQueueTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 13);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 14);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueNotYetAdopted
@@ -485,7 +547,7 @@ export type UpdateMergeQueueNotYetAdopted = Message<"agentrepl.v1.UpdateMergeQue
  * Use `create(UpdateMergeQueueNotYetAdoptedSchema)` to create a new message.
  */
 export const UpdateMergeQueueNotYetAdoptedSchema: GenMessage<UpdateMergeQueueNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 14);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 15);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueAlreadyPaused
@@ -498,7 +560,7 @@ export type UpdateMergeQueueAlreadyPaused = Message<"agentrepl.v1.UpdateMergeQue
  * Use `create(UpdateMergeQueueAlreadyPausedSchema)` to create a new message.
  */
 export const UpdateMergeQueueAlreadyPausedSchema: GenMessage<UpdateMergeQueueAlreadyPaused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 15);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 16);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueNotPaused
@@ -511,7 +573,7 @@ export type UpdateMergeQueueNotPaused = Message<"agentrepl.v1.UpdateMergeQueueNo
  * Use `create(UpdateMergeQueueNotPausedSchema)` to create a new message.
  */
 export const UpdateMergeQueueNotPausedSchema: GenMessage<UpdateMergeQueueNotPaused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 16);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 17);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
@@ -524,7 +586,7 @@ export type UpdateMergeQueueNoSuchQueuedMerge = Message<"agentrepl.v1.UpdateMerg
  * Use `create(UpdateMergeQueueNoSuchQueuedMergeSchema)` to create a new message.
  */
 export const UpdateMergeQueueNoSuchQueuedMergeSchema: GenMessage<UpdateMergeQueueNoSuchQueuedMerge> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 17);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 18);
 
 /**
  * The unknown-repository refusal. Empty on purpose (see the arm).
@@ -539,7 +601,7 @@ export type UpdateMergeQueueUnknownRepository = Message<"agentrepl.v1.UpdateMerg
  * Use `create(UpdateMergeQueueUnknownRepositorySchema)` to create a new message.
  */
 export const UpdateMergeQueueUnknownRepositorySchema: GenMessage<UpdateMergeQueueUnknownRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 18);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 19);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueRacingAlreadyDisabled
@@ -552,7 +614,7 @@ export type UpdateMergeQueueRacingAlreadyDisabled = Message<"agentrepl.v1.Update
  * Use `create(UpdateMergeQueueRacingAlreadyDisabledSchema)` to create a new message.
  */
 export const UpdateMergeQueueRacingAlreadyDisabledSchema: GenMessage<UpdateMergeQueueRacingAlreadyDisabled> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 19);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 20);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueRacingNotDisabled
@@ -565,5 +627,5 @@ export type UpdateMergeQueueRacingNotDisabled = Message<"agentrepl.v1.UpdateMerg
  * Use `create(UpdateMergeQueueRacingNotDisabledSchema)` to create a new message.
  */
 export const UpdateMergeQueueRacingNotDisabledSchema: GenMessage<UpdateMergeQueueRacingNotDisabled> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 20);
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 21);
 

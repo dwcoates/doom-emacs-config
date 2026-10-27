@@ -1108,6 +1108,35 @@ func (m MergeMove) valid() bool {
 	return m == MergeMoveUp || m == MergeMoveDown
 }
 
+// MergeSide is which side of its anchor a move to a place puts a waiting
+// merge (agentrepl.v1.UpdateMergeQueueMoveTo.place).
+type MergeSide int
+
+// The sides. The zero value is no side, so a side left unset is refused
+// rather than read as one of them.
+const (
+	// MergeSideAheadOf puts the merge directly ahead of its anchor.
+	MergeSideAheadOf MergeSide = iota + 1
+	// MergeSideBehind puts the merge directly behind its anchor.
+	MergeSideBehind
+)
+
+// String names the side in log records.
+func (m MergeSide) String() string {
+	switch m {
+	case MergeSideAheadOf:
+		return "ahead_of"
+	case MergeSideBehind:
+		return "behind"
+	}
+	return fmt.Sprintf("MergeSide(%d)", int(m))
+}
+
+// valid reports whether the side is one of the declared sides.
+func (m MergeSide) valid() bool {
+	return m == MergeSideAheadOf || m == MergeSideBehind
+}
+
 // MergeSourceKind is WHAT a merge lands: the requesting workspace's own
 // branch, another workspace's, or a branch that is no workspace.
 type MergeSourceKind int

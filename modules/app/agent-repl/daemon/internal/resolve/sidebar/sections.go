@@ -90,34 +90,27 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 }
 
 // repoQueue is one repository's merge queue as the merge queue section draws
-// it: the merges in line front first, the failed merge standing, and the
-// pause.
+// it: the merges in line front first, and the pause.
 type repoQueue struct {
-	line   []QueueEntry
-	failed *FailedMerge
-	paused bool
+	line  []QueueEntry
+	pause *wsm.MergeQueuePause
 }
 
-// listed reports whether the merge queue section lists Q: it has a head (a
-// merge in line or the failed merge) or merges waiting. A paused queue
-// holding nothing is placed under no repository (repoQueues places a queue by
-// its merges' workspaces), and the section's header carries its pause
-// (frontend.v1.RosterMergedSection.merge_queue_paused).
+// listed reports whether the merge queue section lists Q: its line holds a
+// merge (owner request, 2026-10-27: a repository leaves the section as soon
+// as its line empties). A paused queue holding nothing is not listed either.
 func (q repoQueue) listed() bool {
-	return len(q.line) > 0 || q.failed != nil
+	return len(q.line) > 0
 }
 
 // drawMergeQueue composes one repository's merge queue: the merge at the
-// front of the line as its head, or the failed merge while the line is empty,
-// and every merge behind the front as waiting. EVERY MERGE IS CREDITED AS THE
-// ROSTER CREDITS IT (QueueEntry.Credited), so a hidden merge workspace is
-// never named here.
+// front of the line as its head, every merge behind the front as waiting,
+// and the pause. EVERY MERGE IS CREDITED AS THE ROSTER CREDITS IT
+// (QueueEntry.Credited), so a hidden merge workspace is never named here.
+// Q is listed (repoQueue.listed), so its line holds a merge.
 func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.RosterRepoMergeQueue {
 	const op = "daemon.sidebar.merge_queue"
-	out := &frontendv1.RosterRepoMergeQueue{}
-	if q.paused {
-		out.Paused = &frontendv1.RosterMergeQueuePaused{}
-	}
+	out := &frontendv1.RosterRepoMergeQueue{Paused: drawMergeQueuePause(q.pause)}
 	byID := r.workspacesByID()
 	subject := func(entry QueueEntry) (*frontendv1.RosterMergeQueueSubject, bool) {
 		credited, ok := byID[entry.Credited]
@@ -129,38 +122,64 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		}
 		return queueSubject(credited, entry), true
 	}
-	switch {
-	case len(q.line) > 0:
-		front := q.line[0]
-		if sub, ok := subject(front); ok {
-			head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages}
-			if front.Admitted {
-				merging := &frontendv1.RosterMergeQueueHeadMerging{}
-				if words, ok := mergeStepWords(r.mergeFacts(front.Workspace)); ok {
-					merging.Step = &words
-				}
-				head.Standing = &frontendv1.RosterMergeQueueHead_Merging{Merging: merging}
-			} else {
-				head.Standing = &frontendv1.RosterMergeQueueHead_Waiting{Waiting: &frontendv1.RosterMergeQueueHeadWaiting{QueuedAtMs: front.QueuedAt.UnixMilli()}}
+	front := q.line[0]
+	if sub, ok := subject(front); ok {
+		head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages}
+		if front.Admitted {
+			merging := &frontendv1.RosterMergeQueueHeadMerging{}
+			if words, ok := mergeStepWords(r.mergeFacts(front.Workspace)); ok {
+				merging.Step = &words
 			}
-			out.Head = head
-		}
-		for _, entry := range q.line[1:] {
-			sub, ok := subject(entry)
-			if !ok {
-				continue
+			if r.headSuspended(q, front.Workspace) {
+				merging.Suspended = &frontendv1.RosterMergeQueueHeadSuspended{}
 			}
-			out.Waiting = append(out.Waiting, &frontendv1.RosterMergeQueueWaiting{
-				Subject: sub, QueuedAtMs: entry.QueuedAt.UnixMilli(), PlacedAtFront: entry.PlacedAtFront})
+			head.Standing = &frontendv1.RosterMergeQueueHead_Merging{Merging: merging}
+		} else {
+			head.Standing = &frontendv1.RosterMergeQueueHead_Waiting{Waiting: &frontendv1.RosterMergeQueueHeadWaiting{QueuedAtMs: front.QueuedAt.UnixMilli()}}
 		}
-	case q.failed != nil:
-		if sub, ok := subject(q.failed.Entry); ok {
-			out.Head = &frontendv1.RosterMergeQueueHead{
-				Subject:  sub,
-				Stages:   q.failed.Entry.Stages,
-				Standing: &frontendv1.RosterMergeQueueHead_Failed{Failed: &frontendv1.RosterMergeQueueHeadFailed{Summary: q.failed.Summary}},
-			}
+		out.Head = head
+	}
+	for _, entry := range q.line[1:] {
+		sub, ok := subject(entry)
+		if !ok {
+			continue
 		}
+		out.Waiting = append(out.Waiting, &frontendv1.RosterMergeQueueWaiting{
+			Subject: sub, QueuedAtMs: entry.QueuedAt.UnixMilli(), PlacedAtFront: entry.PlacedAtFront})
+	}
+	return out
+}
+
+// headSuspended reports whether NOTHING of the head's merge in WS runs: Q is
+// paused, which suspends the merge's own steps, and no turn runs in WS, which
+// a pause leaves running until it ends or a hard stop interrupts it
+// (frontend.v1.RosterMergeQueueHeadMerging.suspended).
+func (r *resolver) headSuspended(q repoQueue, ws ids.WorkspaceID) bool {
+	if q.pause == nil {
+		return false
+	}
+	s, ok := r.state.workspaces[ws]
+	return !ok || s.turn == nil
+}
+
+// drawMergeQueuePause renders a queue's standing pause as the roster draws
+// it, nil while the queue runs. A pause recorded before its record was kept
+// carries neither its instant nor its pauser.
+func drawMergeQueuePause(pause *wsm.MergeQueuePause) *frontendv1.RosterMergeQueuePaused {
+	if pause == nil {
+		return nil
+	}
+	out := &frontendv1.RosterMergeQueuePaused{Hard: pause.Hard}
+	if !pause.At.IsZero() {
+		at := pause.At.UnixMilli()
+		out.PausedAtMs = &at
+	}
+	switch pause.By.Kind {
+	case wsm.MergeQueuePauserUser:
+		out.By = &frontendv1.RosterMergeQueuePauser{Asker: &frontendv1.RosterMergeQueuePauser_User{User: &frontendv1.RosterMergeQueuePauserUser{}}}
+	case wsm.MergeQueuePauserWorkspace:
+		out.By = &frontendv1.RosterMergeQueuePauser{Asker: &frontendv1.RosterMergeQueuePauser_Workspace{
+			Workspace: &frontendv1.RosterMergeQueuePauserWorkspace{Name: pause.By.Name}}}
 	}
 	return out
 }
@@ -255,24 +274,8 @@ func (r *resolver) repoQueues(log dlog.Logger) map[ids.RepoID]repoQueue {
 			claim(key, ws.Repo, entry.Workspace)
 			rq := out[ws.Repo]
 			rq.line = append(rq.line, entry)
-			rq.paused = rq.paused || q.paused
+			rq.pause = q.pause
 			out[ws.Repo] = rq
-		}
-		if q.failed != nil {
-			ws, ok := byID[q.failed.Entry.Workspace]
-			if !ok {
-				ws, ok = byID[q.failed.Entry.Credited]
-			}
-			if !ok {
-				log.Info(op, "the failed merge's workspaces have left the registry, so it is not drawn", dlog.Context{
-					"repo": string(key), "workspace_id": string(q.failed.Entry.Workspace), "credited": string(q.failed.Entry.Credited)})
-			} else {
-				claim(key, ws.Repo, q.failed.Entry.Workspace)
-				rq := out[ws.Repo]
-				rq.failed = q.failed
-				rq.paused = rq.paused || q.paused
-				out[ws.Repo] = rq
-			}
 		}
 	}
 	return out
@@ -410,8 +413,8 @@ func (r *resolver) assertRepositoryInvariant(byRepo map[ids.RepoID][]wsm.Workspa
 }
 
 // mergedSection resolves the merge queue section: every repository's merge
-// queue it lists (repoQueue.listed), its header counting the merges in line
-// over them, and below them the recently merged rows hoisted out of every
+// queue it lists (repoQueue.listed), each counting its own line under a
+// header that counts nothing, and below them the recently merged rows hoisted out of every
 // grouping, ONE GROUP PER REPOSITORY in the repository grouping's order,
 // each group's rows in merge order, the latest merge first
 // (sortMergedNewestFirst, owner request 2026-10-13). It is rendered under every grouping
@@ -428,19 +431,21 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 		byRepo[ws.Repo] = append(byRepo[ws.Repo], ws)
 	}
 	queues := r.repoQueues(log)
-	section := &frontendv1.RosterMergedSection{MergedLabel: &frontendv1.RosterLabel{Text: RecentlyMergedLabel}}
-	inLine := 0
+	section := &frontendv1.RosterMergedSection{
+		Header:      &frontendv1.RosterSectionHeader{Label: &frontendv1.RosterLabel{Text: MergedSectionLabel}},
+		MergedLabel: &frontendv1.RosterLabel{Text: RecentlyMergedLabel},
+	}
 	for _, repo := range sortRepositories(r.state.reg.Repositories) {
 		q, ok := queues[repo.ID]
 		delete(queues, repo.ID)
 		if !ok || !q.listed() {
 			continue
 		}
-		inLine += len(q.line)
 		section.Queues = append(section.Queues, &frontendv1.RosterMergeQueueRepoGroup{
 			Key:    repoKey(repo),
 			Header: repoGroupHeader(repo),
 			Queue:  r.drawMergeQueue(q, log.With(dlog.Context{"repo_id": string(repo.ID)})),
+			Count:  &frontendv1.RosterSectionCount{Workspaces: uint32(len(q.line))},
 		})
 	}
 	for repo := range queues {
@@ -466,10 +471,6 @@ func (r *resolver) mergedSection(merged []wsm.Workspace, rc rowContext, log dlog
 		section.Groups = append(section.Groups, group)
 	}
 	r.assertRepositoryInvariant(byRepo, "daemon.sidebar.merged_section", "the recently-merged band", log)
-	section.Header = sectionHeader(MergedSectionLabel, inLine)
-	if r.state.anyMergeQueuePaused() {
-		section.MergeQueuePaused = &frontendv1.RosterMergedSectionMergeQueuePaused{}
-	}
 	setMergedFold(section, r.state.reg.View.MergedFolded)
 	return section
 }

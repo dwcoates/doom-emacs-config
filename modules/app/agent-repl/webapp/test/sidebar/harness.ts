@@ -369,40 +369,37 @@ function sectionFold(
  * The Merge Queue section with no queue listed. Its daemon-held fold is
  * COLLAPSED unless said, as the daemon draws a section nobody has unfolded.
  */
-export function mergedSection(
-  rows: RosterRow[] = [],
-  count: number = 0,
-  collapsed: boolean = true,
-): RosterMergedSection {
-  return mergedBand(rows.length === 0 ? [] : [mergedGroup({ id: "repo-1", rows })], count, collapsed);
+export function mergedSection(rows: RosterRow[] = [], collapsed: boolean = true): RosterMergedSection {
+  return mergedBand(rows.length === 0 ? [] : [mergedGroup({ id: "repo-1", rows })], collapsed);
 }
 
 /**
- * The Merge Queue section carrying merged GROUPS, its header COUNT and its
- * fold stated, and the QUEUES and PAUSED marker unless said none.
+ * The Merge Queue section carrying merged GROUPS and its fold stated, and the
+ * QUEUES unless said none. Its header counts nothing, as the daemon draws it.
  */
 export function mergedBand(
   groups: RosterMergedRepoGroup[],
-  count: number = 0,
   collapsed: boolean = true,
-  queues: { queues?: RosterMergeQueueRepoGroup[]; paused?: boolean } = {},
+  queues: { queues?: RosterMergeQueueRepoGroup[] } = {},
 ): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
-    header: { label: { text: "Merge Queue" }, count: { workspaces: count } },
+    header: { label: { text: "Merge Queue" } },
     groups,
     queues: queues.queues ?? [],
     mergedLabel: { text: "Recently Merged" },
-    mergeQueuePaused: queues.paused === true ? {} : undefined,
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });
 }
 
 /** One repository's queue group inside the Merge Queue section. */
 export function queueGroup(init: { id: string; label?: string; queue?: MessageInitShape<typeof RosterRepoMergeQueueSchema> }): RosterMergeQueueRepoGroup {
+  const queue = create(RosterRepoMergeQueueSchema, init.queue ?? {});
   return create(RosterMergeQueueRepoGroupSchema, {
     key: { repository: { id: init.id, dir: `/r/${init.id}` } },
     header: { label: { text: init.label ?? init.id } },
-    queue: create(RosterRepoMergeQueueSchema, init.queue ?? {}),
+    queue,
+    // The daemon counts the line: the head and every merge waiting behind it.
+    count: { workspaces: (queue.head === undefined ? 0 : 1) + queue.waiting.length },
   });
 }
 
@@ -542,12 +539,17 @@ export function queueSubject(id: string, init: { name?: string; async?: boolean;
 /** A merge queue head being worked on, credited to ID, at STEP when given, with STAGES. */
 export function mergingHead(
   id: string,
-  init: { step?: string; stages?: MessageInitShape<typeof RosterMergeQueueHeadSchema>["stages"]; subject?: RosterMergeQueueSubject } = {},
+  init: {
+    step?: string;
+    stages?: MessageInitShape<typeof RosterMergeQueueHeadSchema>["stages"];
+    subject?: RosterMergeQueueSubject;
+    suspended?: boolean;
+  } = {},
 ): RosterMergeQueueHead {
   return create(RosterMergeQueueHeadSchema, {
     subject: init.subject ?? queueSubject(id),
     stages: init.stages ?? [],
-    standing: { case: "merging", value: { step: init.step } },
+    standing: { case: "merging", value: { step: init.step, suspended: init.suspended === true ? {} : undefined } },
   });
 }
 
