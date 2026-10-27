@@ -1553,34 +1553,62 @@ describe("KillTurn", () => {
 });
 
 describe("keep-alives", () => {
-  // KEEP-ALIVES ARE ENTIRELY SHIM-INTERNAL: nothing keep-alive-shaped exists on
-  // the wire (no PromptOrigin value, no rpc, no control-plane signal), so the
-  // only producer is the shim's OWN cadence. Its interval is a module constant
-  // (fifty-two minutes against subscription billing's ~1-hour cache window),
-  // and waiting fifty-two real minutes is the sleep this suite refuses to write
-  // — so `main.ts`
-  // honors `AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS` under `--fake` and ONLY
-  // under `--fake`, which is what makes both obligations below observable.
-  // Every wait here is on the shim's own records, never on a clock.
+  // THE DAEMON DRIVES EVERY KEEP-ALIVE (owner ruling, 2026-10-26): every shim
+  // session is born held, so the shim schedules no beat of its own, and each
+  // beat here is asked for over shim.v1.SendKeepalive exactly as the daemon's
+  // Keeper asks for it. Nothing keep-alive-shaped reaches the store or a page,
+  // which is what these obligations are about. Every wait here is on the
+  // shim's own records, never on a clock.
 
-  /** A shim whose keep-alive cadence beats fast enough to observe. */
-  const spawnBeating = async (): Promise<Awaited<ReturnType<typeof spawnShim>>> =>
-    spawnShim({ env: { AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS: "200" } });
+  /** True on the shim's record that it submitted a keep-alive. */
+  const isSubmitted = (record: { context: Record<string, unknown> }): boolean =>
+    record.context.outcome === "keepalive_submitted";
 
-  /** Resolves on the shim's record that it submitted a keep-alive. */
-  const keepaliveSubmitted = async (
+  /** Resolves on the COUNT-th distinct record matching `predicate`. */
+  const nthRecord = async (
     shim: Awaited<ReturnType<typeof spawnShim>>,
-  ): Promise<void> => {
-    await shim.log.record((record) => record.context.outcome === "keepalive_submitted");
+    count: number,
+    predicate: (record: { message: string; context: Record<string, unknown> }) => boolean,
+  ) => {
+    const seen = new Set<unknown>();
+    return shim.log.record((record) => {
+      if (predicate(record)) seen.add(record);
+      return seen.size >= count;
+    });
   };
 
-  /** Resolves once the shim has CLOSED a keep-alive turn, debt booked. */
-  const keepaliveTurnClosed = async (
-    shim: Awaited<ReturnType<typeof spawnShim>>,
-  ): Promise<void> => {
-    await shim.log.record(
-      (record) => record.message === "closed a turn" && record.context.keepalive === true,
-    );
+  /** The arm a SendKeepalive answer took, named for a failure message. */
+  const keepaliveOutcome = (response: shimv1.SendKeepaliveResponse): string => {
+    if (response.result.case === "success") {
+      const outcome = response.result.value.outcome;
+      return outcome.case === "skipped" ? `skipped.${outcome.value.reason.case ?? "unset"}` : (outcome.case ?? "unset");
+    }
+    return `error.${response.result.value?.kind.case ?? "unset"}`;
+  };
+
+  /** Asks for one keep-alive as the daemon does (shim.v1.SendKeepalive), answering how the shim judged it. */
+  const askKeepalive = async (shim: Awaited<ReturnType<typeof spawnShim>>): Promise<string> =>
+    keepaliveOutcome(await shim.clients.h1.sendKeepalive(create(shimv1.SendKeepaliveRequestSchema, {})));
+
+  /**
+   * Asks for one keep-alive, requires that it went out, and answers its turn
+   * id once the shim has recorded submitting it.
+   */
+  const beat = async (shim: Awaited<ReturnType<typeof spawnShim>>): Promise<string> => {
+    const before = shim.log.records().filter(isSubmitted).length;
+    expect(await askKeepalive(shim)).toBe("sent");
+    const submitted = await nthRecord(shim, before + 1, isSubmitted);
+    return String(submitted.context.turn);
+  };
+
+  /** Resolves once the shim has CLOSED the turn TURN, its keep-alive debt booked when it is one. */
+  const turnClosed = async (shim: Awaited<ReturnType<typeof spawnShim>>, turn: string): Promise<void> => {
+    await shim.log.record((record) => record.message === "closed a turn" && record.context.turn_id === turn);
+  };
+
+  /** One keep-alive asked for and run to its close. */
+  const beatAndClose = async (shim: Awaited<ReturnType<typeof spawnShim>>): Promise<void> => {
+    await turnClosed(shim, await beat(shim));
   };
 
   /**
@@ -1618,14 +1646,15 @@ describe("keep-alives", () => {
       return toJsonString(conversationv1.AgentFrameSchema, item.item.value).includes(needle);
     }) ?? Promise.reject(new Error("this shim has no store"));
 
-  test("a restarted shim schedules its keep-alive from the transcript's last request, not its own start", async () => {
+  test("a restarted shim anchors its cache's lapse at the transcript's last request, not its own start", async () => {
     // THE 2026-10-06 CHAIN: deploy bounces restarted the cadence each time, and
     // the first beat fell after the 1-hour cache's expiry. A restarted shim
-    // reads the last request off the vendor's transcript and schedules from it.
+    // reads the last request off the vendor's transcript and projects the
+    // lapse from it, which the daemon times its beats from.
     const first = await spawnShim();
     const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
     turnStarted(await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello" })));
-    await first.log.record((record) => record.message === "closed a turn" && record.context.keepalive === false);
+    await turnClosed(first, "t1");
     await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
     await first.exited;
     // The transcript's last API request: its last assistant record with usage.
@@ -1635,24 +1664,20 @@ describe("keep-alives", () => {
         .at(-1)?.timestamp ?? "",
     );
 
-    const second = await spawnShim({ reuse: first.dirs, env: { AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS: "1800000" } });
+    const second = await spawnShim({ reuse: first.dirs });
     // THIS shim's record: the reused directories replay the first shim's log.
-    const scheduled = second.log.record(
-      (record) => record.message === "keep-alive scheduled from the conversation's last request" && record.pid === second.child.pid,
+    const projected = second.log.record(
+      (record) => record.message === "projected the held cache's lapse" && record.pid === second.child.pid,
     );
     sessionStarted(await second.clients.h1.startSession(resumeSession(started.vendorSessionId)));
 
-    const context = (await scheduled).context;
-    expect([context.anchor_at, context.next_beat_at]).toEqual([
-      new Date(lastRequestAtMs).toISOString(),
-      new Date(lastRequestAtMs + 1_800_000).toISOString(),
-    ]);
+    expect((await projected).context.anchor_at).toBe(new Date(lastRequestAtMs).toISOString());
   });
 
   test("a keep-alive turn works end to end and stores nothing", async () => {
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    await keepaliveTurnClosed(shim);
+    await beatAndClose(shim);
 
     turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "after the keep-alive" })));
     await servedLanded(shim, "after the keep-alive");
@@ -1665,10 +1690,11 @@ describe("keep-alives", () => {
     // turn the engine saw go by, and the rewound query reads the vendor's own
     // transcript. So the rewind lands exactly as before while the store holds
     // nothing of what it discarded.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello" }));
-    await keepaliveTurnClosed(shim);
+    await turnClosed(shim, "t1");
+    await beatAndClose(shim);
     const landed = shim.log.record(
       (record) =>
         record.message === "the keep-alive rewind LANDED: the vendor resumed at the anchor and is answering the real prompt",
@@ -1683,9 +1709,9 @@ describe("keep-alives", () => {
 
   test("no keep-alive prompt appears in any page", async () => {
     // Nothing of a keep-alive is stored, so no page can return one.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    await keepaliveSubmitted(shim);
+    await beat(shim);
 
     const page = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
 
@@ -1699,14 +1725,15 @@ describe("keep-alives", () => {
   test("a real prompt after keep-alives is delivered with the context rolled back", async () => {
     // A real prompt must never build on keep-alive context, so the query is
     // replaced by one that resumes only THROUGH the last real record.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello" }));
+    await turnClosed(shim, "t1");
     // THE DEBT IS BOOKED AT THE KEEP-ALIVE TURN'S CLOSE, not at its submission.
     // A StartTurn arriving while that turn is still open waits for it inside
     // the shim, so this wait is only what makes the rewind's record the one
     // this test asserts on.
-    await keepaliveTurnClosed(shim);
+    await beatAndClose(shim);
 
     const rewound = shim.log.record((record) => record.context.resume_session_at !== undefined);
     // What the VENDOR received, not merely what the shim intended: the mock
@@ -1736,10 +1763,11 @@ describe("keep-alives", () => {
     // `No message found with message.uuid of: 19e047a0-…` and the prompt was
     // lost. The target must be a record the transcript actually holds, and an
     // assistant one, which is the only kind `resumeSessionAt` declares.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello" }));
-    await keepaliveTurnClosed(shim);
+    await turnClosed(shim, "t1");
+    await beatAndClose(shim);
     const atVendor = shim.log.record(
       (record) => record.context.vendor_resume_session_at !== undefined,
     );
@@ -1758,10 +1786,11 @@ describe("keep-alives", () => {
   test("a keep-alive stores nothing when the vendor runs a turn of its own first", async () => {
     // THE 2026-09-23 LEAK: a turn the vendor ran by itself ended first, its
     // result closed the keep-alive, and the keep-alive's answer was served.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
-    await keepaliveTurnClosed(shim);
+    await turnClosed(shim, "t1");
+    await beatAndClose(shim);
 
     turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "after the keep-alive" })));
     await servedLanded(shim, "after the keep-alive");
@@ -1770,19 +1799,21 @@ describe("keep-alives", () => {
   });
 
   test("a keep-alive the first prompt carried costs the next keep-alive no rewind", async () => {
-    // THE E2E FLAKE OF 2026-10-03. The cadence starts with the session, so a
-    // StartTurn landing after the first beat finds a keep-alive with NO anchor
-    // to rewind to, and the prompt carries it. That keep-alive lies behind the
-    // real turn's anchor; counting it as debt made the next keep-alive replace
-    // the query, and the vendor's turn queued on the replaced query never ran.
-    const shim = await spawnBeating();
+    // THE E2E FLAKE OF 2026-10-03. A keep-alive before the first prompt has
+    // NO anchor to rewind to, and the prompt carries it. That keep-alive lies
+    // behind the real turn's anchor; counting it as debt made the next
+    // keep-alive replace the query, and the vendor's turn queued on the
+    // replaced query never ran.
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    await keepaliveTurnClosed(shim);
+    await beatAndClose(shim);
     const vendorTurnRan = shim.log.record(
       (record) => record.message === "fake vendor runs a turn of its OWN before the next send; nothing in it is stamped",
     );
-
     turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" })));
+    await turnClosed(shim, "t1");
+
+    await beat(shim);
     await vendorTurnRan;
 
     const rewoundBeforeAKeepalive = shim.log
@@ -1795,9 +1826,11 @@ describe("keep-alives", () => {
   test("the vendor's own turn ahead of a keep-alive is still served", async () => {
     // The fix must not overcorrect: a turn nobody's send started is real
     // conversation, and hiding it with the keep-alive would lose it.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
+    await turnClosed(shim, "t1");
+    await beat(shim);
 
     const answer = await servedLanded(shim, "A background task finished.");
 
@@ -1808,9 +1841,11 @@ describe("keep-alives", () => {
     // A TURN NOBODY'S SEND STARTED IS A REAL TURN. The shim mints its id and
     // writes a VENDOR_STARTED prompt row as its first row, so the daemon learns
     // it opened and its rows and terminal are attributable to it.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
+    await turnClosed(shim, "t1");
+    await beat(shim);
 
     const answer = await servedLanded(shim, "A background task finished.");
 
@@ -1820,24 +1855,8 @@ describe("keep-alives", () => {
     expect(answer.turn?.value).toBe(opened[0]?.turn?.value);
   });
 
-  /** The INFO the cadence states when it spares live detached work. */
-  const SPARED = "no keep-alive is scheduled: detached work is live, and the rewind a keep-alive owes would kill it";
-
   /** The message the span invariant's refusal is recorded under. */
   const REFUSED = "the keep-alive rewind is REFUSED";
-
-  /** Resolves on the COUNT-th distinct record matching `predicate`. */
-  const nthRecord = async (
-    shim: Awaited<ReturnType<typeof spawnShim>>,
-    count: number,
-    predicate: (record: { message: string; context: Record<string, unknown> }) => boolean,
-  ) => {
-    const seen = new Set<unknown>();
-    return shim.log.record((record) => {
-      if (predicate(record)) seen.add(record);
-      return seen.size >= count;
-    });
-  };
 
   /** True on the record of a rewind performed before a keep-alive beat. */
   const rewoundBeforeBeat = (record: { message: string; context: Record<string, unknown> }): boolean =>
@@ -1846,10 +1865,14 @@ describe("keep-alives", () => {
   test("a task completing beside a keep-alive anchors the next rewind, which keeps its served turn", async () => {
     // A completed task's turn is real conversation: it anchors (ruled
     // 2026-10-06), so the rewind after it discards only the keep-alive.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
+    await turnClosed(shim, "t1");
+    await beatAndClose(shim);
 
+    // The second beat is the first with keep-alive debt to rewind past.
+    await beat(shim);
     const rewound = await shim.log.record(rewoundBeforeBeat);
 
     expect([
@@ -1859,9 +1882,12 @@ describe("keep-alives", () => {
   });
 
   test("a task completing beside a keep-alive trips no refusal, and the next prompt is served", async () => {
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" }));
+    await turnClosed(shim, "t1");
+    await beatAndClose(shim);
+    await beatAndClose(shim);
     await shim.log.record(rewoundBeforeBeat);
 
     turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "after the completed task" })));
@@ -1872,10 +1898,13 @@ describe("keep-alives", () => {
 
   test("a stop every rewind replays never loops: each rewind resumes at the same real anchor", async () => {
     // THE SHIP-GNS LOOP (2026-10-02), driven by the mock's own replay lever.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!stop-on-rewind" }));
+    await turnClosed(shim, "t1");
 
+    // The first beat has no keep-alive debt behind it; each one after rewinds.
+    for (let beats = 0; beats < 4; beats++) await beatAndClose(shim);
     await nthRecord(shim, 3, rewoundBeforeBeat);
 
     const anchors = shim.log.records().filter(rewoundBeforeBeat).map((record) => record.context.resume_session_at);
@@ -1883,9 +1912,11 @@ describe("keep-alives", () => {
   });
 
   test("a stop every rewind replays stores no turn", async () => {
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!stop-on-rewind" }));
+    await turnClosed(shim, "t1");
+    for (let beats = 0; beats < 3; beats++) await beatAndClose(shim);
     await nthRecord(
       shim,
       2,
@@ -1902,9 +1933,11 @@ describe("keep-alives", () => {
   });
 
   test("a stop every rewind replays never trips the span invariant", async () => {
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!stop-on-rewind" }));
+    await turnClosed(shim, "t1");
+    for (let beats = 0; beats < 3; beats++) await beatAndClose(shim);
     await nthRecord(shim, 2, rewoundBeforeBeat);
 
     turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "after the replays" })));
@@ -1913,51 +1946,53 @@ describe("keep-alives", () => {
     expect(shim.log.records().filter((record) => record.message.startsWith(REFUSED))).toEqual([]);
   });
 
-  test("a background shell outlives what used to be a rewind: no keep-alive beats over it, and the cadence resumes when it ends", async () => {
+  test("a background shell outlives what used to be a rewind: no keep-alive goes out over it, and one goes out once it ends", async () => {
     // THE 2026-10-14 LOSS: a rewind replaced the vendor's query and a live
     // watcher shell ended with it. The shell here parks on its gate after its
     // turn ends, with a keep-alive's debt already behind the real turn before
-    // it, so the old cadence would beat and then rewind over it.
+    // it, so a keep-alive asked for over it would rewind over it.
     const gate = detachGate();
     try {
       // Arrange: a real turn, a keep-alive after it, then the turn that backgrounds the shell.
-      const shim = await spawnShim({
-        env: { AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS: "200", AGENT_REPL_FAKE_DETACH_GATE: gate.path },
-      });
+      const shim = await spawnShim({ env: { AGENT_REPL_FAKE_DETACH_GATE: gate.path } });
       await shim.clients.h1.startSession(freshSession());
       turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "before the shell" })));
       await servedLanded(shim, "before the shell");
-      await keepaliveTurnClosed(shim);
+      await turnClosed(shim, "t1");
+      await beatAndClose(shim);
       turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!bash-detach" })));
-      const spared = await shim.log.record((record) => record.message === SPARED);
+      await shim.log.record((record) => record.message.includes("recorded a live detached-work item"));
+      await turnClosed(shim, "t2");
 
-      // Act: the shell goes on, finishes, and leaves the live set.
+      // Act: a keep-alive is asked for over the live shell, then the shell
+      // goes on, finishes and leaves the live set, and one is asked for again.
+      const spared = await askKeepalive(shim);
+      const skipped = await shim.log.record((record) => record.message === "SendKeepalive sent no keep-alive");
       gate.release();
       const concluded = await shim.log.record(
         (record) => record.message === "a detached-work item concluded and left the live set",
       );
-      let past = false;
-      await shim.log.record((record) => {
-        if (record === concluded) past = true;
-        return past && record.context.outcome === "keepalive_submitted";
-      });
+      const after = await askKeepalive(shim);
 
-      // Assert: the one rewind before the shell ended was t2's, with nothing live; between the spare
-      // and the shell's end no keep-alive went out and no process ended; and
-      // the shell concluded on its own.
+      // Assert: the one ask over the shell was skipped and the one after it
+      // went out; the one rewind before the shell ended was t2's, with
+      // nothing live; between the skip and the shell's end no keep-alive went
+      // out and no process ended; and the shell concluded on its own.
       const records = shim.log.records();
       const untilConcluded = records.slice(0, records.indexOf(concluded));
-      const window = untilConcluded.slice(untilConcluded.indexOf(spared));
+      const window = untilConcluded.slice(untilConcluded.indexOf(skipped));
       expect([
+        spared,
+        after,
         untilConcluded.filter((record) => record.message.startsWith("REWINDING the vendor context")).map((record) => record.context.before),
         window.filter(
           (record) =>
-            record.context.outcome === "keepalive_submitted" ||
+            isSubmitted(record) ||
             record.message.startsWith("the vendor process ended") ||
             record.message.startsWith("INVARIANT VIOLATED"),
         ),
         concluded.context.status,
-      ]).toEqual([["real_prompt"], [], "completed"]);
+      ]).toEqual(["skipped.detachedWorkLive", "sent", ["real_prompt"], [], "completed"]);
     } finally {
       gate.dispose();
     }
@@ -1974,9 +2009,10 @@ describe("keep-alives", () => {
     await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
     await first.exited;
 
-    const second = await spawnShim({ reuse: first.dirs, env: { AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS: "200" } });
+    const second = await spawnShim({ reuse: first.dirs });
     sessionStarted(await second.clients.h1.startSession(resumeSession(started.vendorSessionId)));
-    await nthRecord(second, 2, (record) => record.message === "closed a turn" && record.context.keepalive === true);
+    await beatAndClose(second);
+    await beatAndClose(second);
 
     expect(second.log.records().filter((record) => record.message.startsWith("REWINDING the vendor context"))).toEqual([]);
   });
@@ -1992,14 +2028,18 @@ describe("keep-alives", () => {
     await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
     await first.exited;
     const before = new Set(readTranscript(first.dirs, started.vendorSessionId).map((record) => record.uuid));
-    const second = await spawnShim({ reuse: first.dirs, env: { AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS: "200" } });
+    const second = await spawnShim({ reuse: first.dirs });
     sessionStarted(await second.clients.h1.startSession(resumeSession(started.vendorSessionId)));
     const resumedWatch = openStream((options) => second.clients.h1.watchAgent(watchAgentRequest(), options));
     await resumedWatch.next();
     turnStarted(await second.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "after the restart" })));
     await untilTerminal(resumedWatch);
     resumedWatch.close();
+    await turnClosed(second, "t2");
 
+    // The second beat is the first with keep-alive debt to rewind past.
+    await beatAndClose(second);
+    await beat(second);
     const rewound = await second.log.record(rewoundBeforeBeat);
 
     // An assistant record the RESUMED shim saw: none from before the restart.
@@ -2013,9 +2053,9 @@ describe("keep-alives", () => {
     // THE KEEP-ALIVE IS INVISIBLE OUTSIDE THE SHIM. A StartTurn landing while
     // the keep-alive is still open is not refused: it waits inside the shim
     // and is accepted, and the vendor receives its prompt exactly once.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    await keepaliveSubmitted(shim);
+    await beat(shim);
 
     turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "during the keep-alive" })));
     await servedLanded(shim, "during the keep-alive");
@@ -2028,11 +2068,11 @@ describe("keep-alives", () => {
 
   test("a prompt sent during a keep-alive rewinds past that keep-alive alone, to the last real turn", async () => {
     // Arrange: a real turn, then a keep-alive in flight.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello" })));
-    await shim.log.record((record) => record.message === "closed a turn" && record.context.keepalive === false);
-    await keepaliveSubmitted(shim);
+    await turnClosed(shim, "t1");
+    await beat(shim);
     const rewind = shim.log.record(
       (record) => record.message.startsWith("REWINDING the vendor context") && record.context.before === "real_prompt",
     );
@@ -2049,7 +2089,7 @@ describe("keep-alives", () => {
   test("an interrupted turn's own tool result anchors the next rewind, and nothing is refused", async () => {
     // Arrange: a turn stopped mid-tool, whose tool result lands after its last
     // assistant record.
-    const shim = await spawnBeating();
+    const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const watch = openStream((options) => shim.clients.h1.watchAgent(watchAgentRequest(), options));
     await watch.next();
@@ -2058,8 +2098,11 @@ describe("keep-alives", () => {
     updateAccepted(await shim.clients.h1.updateAgent(stopAgent()));
     await untilTerminal(watch);
     watch.close();
+    await turnClosed(shim, "t1");
+    await beatAndClose(shim);
 
     // Act: the next beat rewinds.
+    await beat(shim);
     const record = await shim.log.record(rewoundBeforeBeat);
 
     // Assert: the interrupted turn is the anchor, only keep-alive material is
