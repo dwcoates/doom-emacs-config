@@ -77,22 +77,30 @@ func TestReaderAsksThePositionItWasGiven(t *testing.T) {
 	}{
 		{
 			name: "the newest page of a stated book",
-			read: func(r *Reader) (*conversationv1.HistoryPage, error) { return r.Newest(context.Background(), "book-1", true) },
+			read: func(r *Reader) (*conversationv1.HistoryPage, error) {
+				return r.Newest(context.Background(), "book-1", true)
+			},
 			want: &storereadv1.ReadHistoryPageRequest{Book: &conversationv1.AgentId{Value: "book-1"}, Position: &storereadv1.ReadHistoryPageRequest_Newest{Newest: stated}},
 		},
 		{
 			name: "the newest page of a named book",
-			read: func(r *Reader) (*conversationv1.HistoryPage, error) { return r.Newest(context.Background(), "book-1", false) },
+			read: func(r *Reader) (*conversationv1.HistoryPage, error) {
+				return r.Newest(context.Background(), "book-1", false)
+			},
 			want: &storereadv1.ReadHistoryPageRequest{Book: &conversationv1.AgentId{Value: "book-1"}, Position: &storereadv1.ReadHistoryPageRequest_Newest{Newest: named}},
 		},
 		{
 			name: "the page before a pointer",
-			read: func(r *Reader) (*conversationv1.HistoryPage, error) { return r.Before(context.Background(), "book-1", after) },
+			read: func(r *Reader) (*conversationv1.HistoryPage, error) {
+				return r.Before(context.Background(), "book-1", after)
+			},
 			want: &storereadv1.ReadHistoryPageRequest{Book: &conversationv1.AgentId{Value: "book-1"}, Position: &storereadv1.ReadHistoryPageRequest_After{After: after}},
 		},
 		{
 			name: "the book as it stood at an instant",
-			read: func(r *Reader) (*conversationv1.HistoryPage, error) { return r.Through(context.Background(), "book-1", 1800) },
+			read: func(r *Reader) (*conversationv1.HistoryPage, error) {
+				return r.Through(context.Background(), "book-1", 1800)
+			},
 			want: &storereadv1.ReadHistoryPageRequest{Book: &conversationv1.AgentId{Value: "book-1"}, Position: &storereadv1.ReadHistoryPageRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 1800}}},
 		},
 	}

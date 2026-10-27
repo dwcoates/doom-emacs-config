@@ -133,4 +133,3 @@ func failureArm(failure *storereadv1.ReadHistoryPageFailure) string {
 		return ArmUnnamed
 	}
 }
-
