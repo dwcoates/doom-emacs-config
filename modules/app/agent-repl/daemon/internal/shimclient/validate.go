@@ -188,6 +188,16 @@ func validateSendKeepaliveRequest(req *shimv1.SendKeepaliveRequest) error {
 	return nil
 }
 
+// validateNetworkChangedRequest is NetworkChangedRequest's base function: the
+// request is empty by design, so only its absence is refused.
+func validateNetworkChangedRequest(req *shimv1.NetworkChangedRequest) error {
+	const m = "NetworkChangedRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	return nil
+}
+
 // validateRetryVendorErrorNowRequest is RetryVendorErrorNowRequest's base
 // function: the request is empty by design, so only its absence is refused.
 func validateRetryVendorErrorNowRequest(req *shimv1.RetryVendorErrorNowRequest) error {

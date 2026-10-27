@@ -163,6 +163,11 @@ export function validateRetryVendorErrorNowRequest(_request: shimv1.RetryVendorE
   // No fields. Nothing to refuse.
 }
 
+/** `shim.v1.NetworkChangedRequest` — empty by design; the call is the request. */
+export function validateNetworkChangedRequest(_request: shimv1.NetworkChangedRequest): void {
+  // No fields. Nothing to refuse.
+}
+
 /** `shim.v1.SendKeepaliveRequest` — empty by design; the call is the request. */
 export function validateSendKeepaliveRequest(_request: shimv1.SendKeepaliveRequest): void {
   // No fields. Nothing to refuse.

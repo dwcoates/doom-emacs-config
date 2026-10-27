@@ -285,6 +285,11 @@ func (f *fakeShim) RetryVendorErrorNow(_ context.Context, _ *connect.Request[shi
 	return connect.NewResponse(&shimv1.RetryVendorErrorNowResponse{}), nil
 }
 
+func (f *fakeShim) NetworkChanged(_ context.Context, _ *connect.Request[shimv1.NetworkChangedRequest]) (*connect.Response[shimv1.NetworkChangedResponse], error) {
+	f.record("NetworkChanged")
+	return connect.NewResponse(&shimv1.NetworkChangedResponse{}), nil
+}
+
 func (f *fakeShim) SendKeepalive(_ context.Context, _ *connect.Request[shimv1.SendKeepaliveRequest]) (*connect.Response[shimv1.SendKeepaliveResponse], error) {
 	f.record("SendKeepalive")
 	return connect.NewResponse(&shimv1.SendKeepaliveResponse{}), nil

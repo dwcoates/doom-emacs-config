@@ -11,6 +11,7 @@ import {
   NETWORK_RESUME_WINDOW_MS,
   NetworkResume,
   classifyAgentFailure,
+  networkChangedResponse,
   type FailureEvidence,
   type ResumeDelivery,
 } from "../../src/engine/network-resume.js";
@@ -1912,5 +1913,184 @@ describe("the session's network fault on the one probe loop", () => {
         .filter((r) => r.message === "the API answered the reachability probe; the network fault resolves")
         .map((r) => r.level),
     ).toEqual(["info"]);
+  });
+});
+
+/** Let every probe a network change started without awaiting it run to its end. */
+async function settled(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+describe("a network change", () => {
+  it("probes nothing when nothing waits on the API", async () => {
+    // Arrange.
+    const h = harness();
+
+    // Act.
+    const outcome = h.resume.networkChanged();
+    await settled();
+
+    // Assert.
+    expect({ outcome, calls: h.probe.calls }).toEqual({ outcome: "idle", calls: 0 });
+  });
+
+  it("probes at once while the network fault stands, resolving it without a beat", async () => {
+    // Arrange.
+    const h = harness();
+    h.resume.faultOpened();
+
+    // Act.
+    const outcome = h.resume.networkChanged();
+    await settled();
+
+    // Assert.
+    expect({ outcome, calls: h.probe.calls, recovered: h.recovered }).toEqual({
+      outcome: "probing",
+      calls: 1,
+      recovered: ["scripted"],
+    });
+  });
+
+  it("resumes a waiting agent at once, without a beat", async () => {
+    // Arrange.
+    const h = harness();
+    failWithOutage(h, "a1", "toolu_spawn");
+
+    // Act.
+    h.resume.networkChanged();
+    await settled();
+
+    // Assert.
+    expect({ prompts: h.prompts.length, waiting: h.resume.waitingTaskIds() }).toEqual({ prompts: 1, waiting: [] });
+  });
+
+  it("probes at once while a request stands unanswered", async () => {
+    // Arrange.
+    const h = harness();
+    h.probe.reachable = false;
+    h.resume.suspect("No response from API within 60000ms");
+
+    // Act.
+    h.resume.networkChanged();
+    await settled();
+
+    // Assert.
+    expect(h.unreachable).toEqual(["No response from API within 60000ms"]);
+  });
+
+  it("probes again once the probe that was out ends, when the change landed during it", async () => {
+    // Arrange.
+    const h = harness();
+    const answers: ((value: { reachable: boolean; detail: string }) => void)[] = [];
+    const resume = new NetworkResume({
+      probe: () => new Promise((resolve) => answers.push(resolve)),
+      deliver: () => Promise.resolve({ kind: "delivered" }),
+      nowMs: () => h.clock.now,
+      scheduler: h.scheduler,
+      recovered: () => undefined,
+      unreachable: () => undefined,
+      emit: () => undefined,
+    });
+    resume.faultOpened();
+    const beat = resume.tick();
+
+    // Act.
+    const outcome = resume.networkChanged();
+    answers[0]?.({ reachable: false, detail: "too early" });
+    await settled();
+
+    // Assert.
+    expect({ outcome, probes: answers.length }).toEqual({ outcome: "probing", probes: 2 });
+    answers[1]?.({ reachable: false, detail: "still down" });
+    await beat;
+  });
+
+  it("folds several changes during one probe into one more probe", async () => {
+    // Arrange.
+    const h = harness();
+    const answers: ((value: { reachable: boolean; detail: string }) => void)[] = [];
+    const resume = new NetworkResume({
+      probe: () => new Promise((resolve) => answers.push(resolve)),
+      deliver: () => Promise.resolve({ kind: "delivered" }),
+      nowMs: () => h.clock.now,
+      scheduler: h.scheduler,
+      recovered: () => undefined,
+      unreachable: () => undefined,
+      emit: () => undefined,
+    });
+    resume.faultOpened();
+    const beat = resume.tick();
+
+    // Act.
+    resume.networkChanged();
+    resume.networkChanged();
+    resume.networkChanged();
+    answers[0]?.({ reachable: false, detail: "too early" });
+    await settled();
+    answers[1]?.({ reachable: false, detail: "still down" });
+    await beat;
+    await settled();
+
+    // Assert.
+    expect(answers).toHaveLength(2);
+  });
+
+  it("queues no second probe when no change landed during the probe", async () => {
+    // Arrange.
+    const h = harness();
+    h.probe.reachable = false;
+    h.resume.faultOpened();
+
+    // Act.
+    await h.resume.tick();
+    await settled();
+
+    // Assert.
+    expect(h.probe.calls).toBe(1);
+  });
+
+  it("probes nothing after stand-down", async () => {
+    // Arrange.
+    const h = harness();
+    h.resume.faultOpened();
+    h.resume.stop("the session was killed");
+
+    // Act.
+    const outcome = h.resume.networkChanged();
+    await settled();
+
+    // Assert.
+    expect({ outcome, calls: h.probe.calls }).toEqual({ outcome: "idle", calls: 0 });
+  });
+
+  it("records the probe it makes at INFO", async () => {
+    // Arrange.
+    const h = harness();
+    h.resume.faultOpened();
+    const mark = logSinkMark();
+
+    // Act.
+    h.resume.networkChanged();
+    await settled();
+
+    // Assert.
+    expect(
+      logRecordsSince(mark)
+        .filter((r) => r.message === "the network changed while something waits on the API; it is probed now instead of at the next beat")
+        .map((r) => ({ level: r.level, fault_standing: r.context.fault_standing })),
+    ).toEqual([{ level: "info", fault_standing: true }]);
+  });
+});
+
+describe("networkChangedResponse", () => {
+  it.each([
+    ["probing", "probing"],
+    ["idle", "idle"],
+  ] as const)("answers %s with the %s arm", (outcome, arm) => {
+    // Arrange, Act.
+    const response = networkChangedResponse(outcome);
+
+    // Assert.
+    expect(response.outcome.case).toBe(arm);
   });
 });

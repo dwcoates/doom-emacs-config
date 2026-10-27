@@ -299,6 +299,15 @@ describe("validateRetryVendorErrorNowRequest", () => {
   });
 });
 
+describe("validateNetworkChangedRequest", () => {
+  it("accepts the empty request the contract declares", () => {
+    // Arrange, Act, Assert.
+    expect(
+      codeOf(() => validate.validateNetworkChangedRequest(requests.networkChangedRequest())),
+    ).toBeUndefined();
+  });
+});
+
 describe("validateKillSessionRequest", () => {
   it("accepts force:false, which is a value and not an absence", () => {
     // Arrange.

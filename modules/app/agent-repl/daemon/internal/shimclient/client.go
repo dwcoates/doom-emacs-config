@@ -1640,6 +1640,11 @@ func (c *client) RetryVendorErrorNow(ctx context.Context, req *shimv1.RetryVendo
 	return unary(ctx, c, "retry_vendor_error_now", req, validateRetryVendorErrorNowRequest, c.rpc.RetryVendorErrorNow)
 }
 
+// NetworkChanged tells the shim this machine's network changed.
+func (c *client) NetworkChanged(ctx context.Context, req *shimv1.NetworkChangedRequest) (*shimv1.NetworkChangedResponse, error) {
+	return unary(ctx, c, "network_changed", req, validateNetworkChangedRequest, c.rpc.NetworkChanged)
+}
+
 // KillSession ends the session, gracefully unless forced.
 //
 // The stand-down is latched BEFORE the verb goes, not after it answers: the

@@ -190,7 +190,13 @@ import { SessionPushes } from "./pushes.js";
 import { probeVendorFact } from "./vendor-probe.js";
 import { VendorCadence } from "./vendor-cadence.js";
 import { type LoopPark, loopParkFields } from "./loop-park.js";
-import { classifyAgentFailure, NetworkResume, type ReachabilityProbe, type ResumeDelivery } from "./network-resume.js";
+import {
+  classifyAgentFailure,
+  NetworkResume,
+  networkChangedResponse,
+  type ReachabilityProbe,
+  type ResumeDelivery,
+} from "./network-resume.js";
 import { NETWORK_RESUME_SOURCE, VENDOR_ERROR_RETRY_SOURCE, type ShimPromptDelivery, type ShimPromptSource } from "./shim-prompt.js";
 import {
   VendorErrorRetry,
@@ -7103,6 +7109,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     return retryVendorErrorNowResponse(await vendorErrorRetry.retryNow());
   }
 
+  /**
+   * This machine's network changed (shim.v1.NetworkChanged): whatever waits
+   * on the API is probed now. A probe needs no vendor, so it does not wait
+   * for a rollback's restart to settle.
+   */
+  function networkChanged(): shimv1.NetworkChangedResponse {
+    return networkChangedResponse(networkResume.networkChanged());
+  }
+
   /** The skipped answer, recorded once at INFO with its reason. */
   function skippedKeepalive(reason: AskedBeatRefusal | SendKeepaliveSkipReason): shimv1.SendKeepaliveResponse {
     const skip: SendKeepaliveSkipReason =
@@ -7924,6 +7939,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     hibernate: afterRestart(hibernate),
     sendKeepalive: afterRestart(sendKeepalive),
     retryVendorErrorNow: afterRestart(retryVendorErrorNow),
+    networkChanged: () => Promise.resolve(networkChanged()),
     killSession: afterRestart(killSession),
     startTurn: afterRestart((request: shimv1.StartTurnRequest, signal?: AbortSignal) => turns.startTurn(request, signal)),
     watchAgent: (request, signal) => turns.watchAgent(request, signal),

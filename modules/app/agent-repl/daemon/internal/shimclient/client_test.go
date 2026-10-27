@@ -2353,3 +2353,26 @@ func TestPublishExitUnlinksTheGoneShimsSocket(t *testing.T) {
 		})
 	}
 }
+
+// TestNetworkChangedReachesTheShim pins that NetworkChanged is a unary call
+// on the shim's NetworkChanged verb, recorded under its own operation.
+func TestNetworkChangedReachesTheShim(t *testing.T) {
+	// Arrange.
+	f, uds := startFakeShim(t, shortDir(t))
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+
+	// Act.
+	_, err := c.NetworkChanged(context.Background(), &shimv1.NetworkChangedRequest{})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("NetworkChanged() error = %v", err)
+	}
+	if got := f.count("NetworkChanged"); got != 1 {
+		t.Fatalf("the shim saw %d NetworkChanged calls, want 1", got)
+	}
+	if !hasRecordAt(log, "debug", "daemon.shimclient.network_changed") {
+		t.Fatalf("no record under daemon.shimclient.network_changed: %+v", log.Records())
+	}
+}

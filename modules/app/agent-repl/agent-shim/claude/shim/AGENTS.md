@@ -1399,6 +1399,12 @@ every shim-authored prompt shares, `src/engine/shim-prompt.ts`).
 - **One probe loop per process**, shared by every waiting agent, on a FIXED
   five-second beat with no backoff. It exists only while something waits, and
   stand-down or the vendor query dying cancels it.
+- **A network change probes at once** (`shim.v1.NetworkChanged`, 2026-10-27).
+  The daemon hears the operating system's network events and calls it on
+  every shim it holds; while something waits, the shim probes now instead of
+  at the next beat and answers `probing`, otherwise `idle`. A change landing
+  while a probe is out queues exactly one more probe after it. The beat stays,
+  because an outage that ends on the API's side changes nothing locally.
 - **The probe spends no tokens.** It is a `HEAD` of the host the vendor is
   configured for: `ANTHROPIC_BASE_URL` or the default, through
   `HTTPS_PROXY`/`HTTP_PROXY` unless `NO_PROXY` exempts the host.

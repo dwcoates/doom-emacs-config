@@ -568,6 +568,34 @@ func TestValidateRetryVendorErrorNowRequest(t *testing.T) {
 	}
 }
 
+// TestValidateNetworkChangedRequest asserts the empty network-change request
+// is sent, and only its absence refused.
+func TestValidateNetworkChangedRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     *shimv1.NetworkChangedRequest
+		invalid string
+	}{
+		{"nil", nil, "NetworkChangedRequest"},
+		{"empty", &shimv1.NetworkChangedRequest{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			err := validateNetworkChangedRequest(tt.req)
+
+			// Assert.
+			if tt.invalid == "" {
+				if err != nil {
+					t.Fatalf("validateNetworkChangedRequest = %v, want nil", err)
+				}
+				return
+			}
+			assertInvalidField(t, err, tt.invalid)
+		})
+	}
+}
+
 // TestValidateNilRequestIsRefused asserts a nil request body is refused rather
 // than sent.
 func TestValidateNilRequestIsRefused(t *testing.T) {
