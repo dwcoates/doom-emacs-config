@@ -28,6 +28,13 @@
  *     (owner request, 2026-10-27: Deploys stands above Hidden, and a merge
  *     in flight matters more than a workspace put away), down to no lines,
  *     and only then Deploys, and shows the Open section no lines.
+ *   - A STANDING GATE NEVER SHRINKS THE OPEN SECTION (owner request,
+ *     2026-10-27). A docked gate band takes its height from under the rail
+ *     (the webhost ends the rail above it), and that height comes out of
+ *     Deploys and Hidden Workspaces alone: the Open section shows the lines
+ *     it would show with no gate (`gate` in `allocateSectionLines`), and the
+ *     bands share what room is left, in their usual order. Only an Open
+ *     section that cannot fit the rail even alone gives up lines.
  *   - THE LOWEST OPEN SECTION REACHES THE RAIL'S FOOT (owner request,
  *     2026-10-19). Whatever room is left once every section shows its whole
  *     lines, less than one more line of any section, is added to the
@@ -180,9 +187,11 @@ export function bandShare(today: number, hidden: number): { merged: number; hidd
 
 /**
  * Split ROOM pixels between the three sections, as the module note says.
- * Returns the number of lines each section's viewport shows.
+ * GATE is the height a standing gate band takes from under the rail: the Open
+ * section is given the lines it would have in ROOM + GATE, and only the bands
+ * lose to the gate. Returns the number of lines each section's viewport shows.
  */
-export function allocateSectionLines(room: number, stops: SectionStops): SectionLines {
+export function allocateSectionLines(room: number, stops: SectionStops, gate = 0): SectionLines {
   const { open, merged, hidden, mergedToday: today } = stops;
   assertStops(open, "open");
   assertStops(merged, "merged");
@@ -193,17 +202,34 @@ export function allocateSectionLines(room: number, stops: SectionStops): Section
   if (!Number.isInteger(today) || today < 0 || today > totalM) {
     throw new RangeError(`band fit: ${today} lines of today's merges in a band of ${totalM}`);
   }
+  if (!Number.isFinite(gate) || gate < 0) {
+    throw new RangeError(`band fit: a gate band of ${gate}px`);
+  }
   const fits = (o: number, m: number, h: number): boolean => open[o] + merged[m] + hidden[h] <= room;
   if (fits(totalO, totalM, totalH)) return { open: totalO, merged: totalM, hidden: totalH };
+  if (gate > 0) {
+    let o = allocateSectionLines(room + gate, stops).open;
+    while (o > 0 && !fits(o, 0, 0)) o -= 1;
+    return { open: o, ...fillBands(o, 0, 0) };
+  }
   let { merged: m, hidden: h } = bandShare(today, totalH);
   while (!fits(0, m, h) && h > 0) h -= 1;
   while (!fits(0, m, h) && m > 0) m -= 1;
   let o = 0;
   while (o < totalO && fits(o + 1, m, h)) o += 1;
-  while (m < today && fits(o, m + 1, h)) m += 1;
-  while (h < totalH && fits(o, m, h + 1)) h += 1;
-  while (m < totalM && fits(o, m + 1, h)) m += 1;
-  return { open: o, merged: m, hidden: h };
+  return { open: o, ...fillBands(o, m, h) };
+
+  /**
+   * Grow the bands from M and H lines beside an Open section of O lines, in
+   * the room it leaves: Deploys through today's merges, then Hidden
+   * Workspaces, then Deploys' older merges.
+   */
+  function fillBands(o: number, m: number, h: number): { merged: number; hidden: number } {
+    while (m < today && fits(o, m + 1, h)) m += 1;
+    while (h < totalH && fits(o, m, h + 1)) h += 1;
+    while (m < totalM && fits(o, m + 1, h)) m += 1;
+    return { merged: m, hidden: h };
+  }
 }
 
 /** A computed length, which a laid-out element always reports in px. */
@@ -395,7 +421,7 @@ function measure(band: Band | null): Measured | null {
  * when none is open or the pane is not laid out (left as drawn; see the
  * module note).
  */
-export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number): SectionLines | null {
+export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number, gate = 0): SectionLines | null {
   const [openSection, mergedSection, hiddenSection] = SECTION_REGIONS.map(([className, regionClass]) =>
     openBand(pane, className, regionClass),
   );
@@ -423,7 +449,7 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     merged: merged?.stops ?? [0],
     hidden: hidden?.stops ?? [0],
     mergedToday: today,
-  });
+  }, gate);
   const sized = [
     [open, lines.open],
     [merged, lines.merged],
@@ -435,6 +461,7 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   sized.forEach(([m, n], i) => sizeBand(m.band, m.stops, n, i === sized.length - 1 ? stretch : null));
   const context = {
     room,
+    gate,
     open_total: (open?.stops.length ?? 1) - 1,
     open_shown: lines.open,
     hidden_total: (hidden?.stops.length ?? 1) - 1,
@@ -456,9 +483,20 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   return lines;
 }
 
-/** Fit the sections of every pane in SCROLLER at NOW_MS (the shown one lays out; the other is left). */
-export function fitAllBands(scroller: HTMLElement, nowMs: number): void {
-  for (const pane of queryAll<HTMLElement>(scroller, ".sb-pane")) fitBands(scroller, pane, nowMs);
+/**
+ * Fit the sections of every pane in SCROLLER at NOW_MS (the shown one lays out;
+ * the other is left), GATE px of the rail taken by a standing gate band.
+ */
+export function fitAllBands(scroller: HTMLElement, nowMs: number, gate = 0): void {
+  for (const pane of queryAll<HTMLElement>(scroller, ".sb-pane")) fitBands(scroller, pane, nowMs, gate);
+}
+
+/** What the rail's re-fit reads and tells beside its scroller and clock. */
+export interface BandFitOptions {
+  /** Told after every fit a resize provoked. */
+  onResized?: () => void;
+  /** The height a standing gate band takes from under the rail, in px: 0 while none stands. */
+  gateBand?: () => number;
 }
 
 /** The rail's re-fit: on every draw, whenever the scroller or a pane changes size, and at midnight. */
@@ -488,14 +526,18 @@ function watchedBoxes(pane: HTMLElement): HTMLElement[] {
  * exactly that layout, and so does TICKER's first tick of a new local date,
  * because which merges are today's is part of it. The fit never moves its
  * own room (see the module note), so the re-fit its own resize of the pane
- * provokes draws the same lines and stops there. ON_RESIZED runs after every
- * fit a resize provoked.
+ * provokes draws the same lines and stops there. A gate band docking or
+ * leaving resizes the rail, so the re-fit it provokes reads the band anew.
  */
-export function installBandFit(scroller: HTMLElement, ticker: Ticker, onResized: () => void = () => undefined): BandFit {
+export function installBandFit(
+  scroller: HTMLElement,
+  ticker: Ticker,
+  { onResized = () => undefined, gateBand = () => 0 }: BandFitOptions = {},
+): BandFit {
   let fittedAtMs = ticker.now();
   const fitAt = (nowMs: number): void => {
     fittedAtMs = nowMs;
-    fitAllBands(scroller, nowMs);
+    fitAllBands(scroller, nowMs, gateBand());
   };
   const fitNow = (): void => fitAt(ticker.now());
   // A RESIZE IS TOLD ONCE THE SECTIONS ARE FITTED TO IT, so what reads them

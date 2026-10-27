@@ -37,7 +37,8 @@ import { createPageTransport } from "../rpc/transport.js";
 import type { DaemonOrigin } from "../rpc/daemon-origin.js";
 import { readWebappBuild } from "../webapp-build.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
-import type { Host } from "./host.js";
+import { SIDEBAR_BOTTOM_PROPERTY, type Host } from "./host.js";
+import { computedPx } from "../dom.js";
 import { installLoadCensus, type LoadCensus } from "./load-census.js";
 
 /** The id the webhost's sidebar element wears: the page's own, so one stylesheet draws both. */
@@ -119,6 +120,9 @@ export function startWebhostSidebar(
     const unwatch = endPageAtPagehide(win);
     stopAtPageTeardown(() => census.stop());
     const sidebar = (deps.mount ?? mountWebhostSidebar)(nav, ctx, {
+      // THE GATE BAND COMES OUT OF THE BANDS, NOT THE OPEN SECTION
+      // (band-fit.ts): the rail ends above it (host.ts `placeSidebar`).
+      gateBand: () => sidebarGateBand(doc),
       // THE PAGES RESERVE THE COLUMN ONLY ONCE THERE IS A SIDEBAR TO FILL IT,
       // so a webhost whose sidebar never draws leaves the pages' layout as a
       // page on its own would have it.
@@ -155,4 +159,24 @@ export function startWebhostSidebar(
       stop();
     },
   };
+}
+
+/**
+ * The height, in px, the gate band of the page on screen takes from under the
+ * webhost's sidebar: the bottom the webhost ends the sidebar at (host.ts
+ * `placeSidebar`), 0 before it first placed it. A value that is not px is a
+ * fault in whatever wrote it, and is reported and thrown rather than guessed.
+ */
+export function sidebarGateBand(doc: Document): number {
+  const value = doc.documentElement.style.getPropertyValue(SIDEBAR_BOTTOM_PROPERTY).trim();
+  if (value === "") return 0;
+  const px = computedPx(value);
+  if (px === null || px < 0) {
+    log.error("the webhost's sidebar bottom is not a length in px; the sidebar cannot charge the gate band", {
+      operation: "webhost.sidebar-gate-band.unreadable",
+      context: { property: SIDEBAR_BOTTOM_PROPERTY, value },
+    });
+    throw new RangeError(`webhost sidebar: ${SIDEBAR_BOTTOM_PROPERTY} '${value}' is not a length in px`);
+  }
+  return px;
 }
