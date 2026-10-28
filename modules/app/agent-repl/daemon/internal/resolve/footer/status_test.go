@@ -1121,6 +1121,25 @@ func TestAKeepaliveCycleParkIsIdleOverADeadLink(t *testing.T) {
 	}
 }
 
+// TestAParkedSessionComingBackIsStarting pins the owner ruling of 2026-10-28:
+// every shim start shows, a keep-alive cycle's or a prompt's restore of a
+// parked session included.
+func TestAParkedSessionComingBackIsStarting(t *testing.T) {
+	// Arrange: parked between keep-alives, its link dead.
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, true)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+
+	// Act: the restore dials the new shim.
+	h.r.OnLink(testWS, shimclient.LinkDialing)
+
+	// Assert
+	if got := h.status(t); got != "starting" {
+		t.Fatalf("status = %q, want starting", got)
+	}
+}
+
 func TestLiftingAParkDrawsTheDeadLinkAgain(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
