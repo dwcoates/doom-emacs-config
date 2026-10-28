@@ -51,13 +51,13 @@
 </head>
 <body>
 <h1>Darker accents</h1>
-<p class="lede">Drag any card by its title to put it beside another. Round two, built around the custom scheme you picked (lightness −0.20, chroma ×0.90). Each option lowers OKLCH lightness for every color at once, keeping hue; the variations move the step a little either way and trade chroma for punch. The grounds are the current ones: feed <code>#121212</code>, sidebar and footer <code>#1a1a1a</code>, prompt <code>#212121</code>, tool card <code>#181818</code>. The sliders set the last column to any step.</p>
+<p class="lede">Drag any card by its title to put it beside another. Round three, built around D, "a touch lighter" (lightness −0.17, chroma ×0.90): one step lighter and darker, richer and quieter, and each corner. Each option lowers OKLCH lightness for every color at once, keeping hue; the variations move the step a little either way and trade chroma for punch. The grounds are the current ones: feed <code>#121212</code>, sidebar and footer <code>#1a1a1a</code>, prompt <code>#212121</code>, tool card <code>#181818</code>. The sliders set the last column to any step.</p>
 <div class="controls">
-  <label>custom lightness step <input id="dl" type="range" min="0" max="0.30" step="0.01" value="0.20"></label><output id="dlo"></output>
+  <label>custom lightness step <input id="dl" type="range" min="0" max="0.30" step="0.01" value="0.17"></label><output id="dlo"></output>
   <label>chroma scale <input id="cs" type="range" min="0.6" max="1.2" step="0.05" value="0.9"></label><output id="cso"></output>
 </div>
 <h1 style="font-size:14px">Response code blocks</h1>
-<p class="lede">The fenced block and inline code inside a <em>response</em> bubble (the prompt's code stays as it is). Today the block is the ink mixed 6% over the bubble's <code>#181818</code>, so it sits lighter than the bubble; the options take it down toward the bubble and below it. They are the last six cards below, and drag like the rest.</p>
+<p class="lede">The fenced block and inline code inside a <em>response</em> bubble (the prompt's code stays as it is). Today the block is the ink mixed 6% over the bubble's <code>#181818</code>, so it sits lighter than the bubble; the options take it down toward the bubble and below it. You locked in "a little darker" for both, now built; the last two cards compare it with today's.</p>
 <div class="options" id="options"></div>
 <script>
 // The colors, as the theme declares them today (render-colors.json's dark
@@ -149,12 +149,8 @@ function panel(title, note, dl, cs) {
 }
 
 const CODE = [
-  ["Code · current", "block: ink 6% over the bubble", "color-mix(in srgb, #f1efe9 6%, #181818)", "color-mix(in srgb, #ffffff 12%, #181818)"],
-  ["Code · a little darker", "block: ink 4%", "color-mix(in srgb, #f1efe9 4%, #181818)", "color-mix(in srgb, #ffffff 9%, #181818)"],
-  ["Code · darker", "block: ink 2%", "color-mix(in srgb, #f1efe9 2%, #181818)", "color-mix(in srgb, #ffffff 7%, #181818)"],
-  ["Code · the bubble's own", "block: no wash, its border alone", "#181818", "color-mix(in srgb, #ffffff 6%, #181818)"],
-  ["Code · below the bubble", "block: the feed's #121212", "#121212", "#121212"],
-  ["Code · well below", "block: black 35% over the bubble", "color-mix(in srgb, #000000 35%, #181818)", "color-mix(in srgb, #000000 35%, #181818)"],
+  ["Code · current", "block: ink 6% over the bubble; inline: white 12%", "color-mix(in srgb, #f1efe9 6%, #181818)", "color-mix(in srgb, #ffffff 12%, #181818)"],
+  ["Code · locked in", "block and inline: ink 4% over the bubble", "color-mix(in srgb, #f1efe9 4%, #181818)", "color-mix(in srgb, #f1efe9 4%, #181818)"],
 ];
 
 function codeCard(title, note, block, inline) {
@@ -171,13 +167,15 @@ const cards = () => {
   const dl = Number(dlIn.value), cs = Number(csIn.value);
   return [
     ["cur", () => panel("Current", "today's colors, for reference", 0, 1)],
-    ["pick", () => panel("Your pick", "lightness −0.20, chroma ×0.90", 0.20, 0.9)],
-    ["d", () => panel("D · a touch lighter", "lightness −0.17, chroma ×0.90", 0.17, 0.9)],
-    ["e", () => panel("E · a touch darker", "lightness −0.23, chroma ×0.90", 0.23, 0.9)],
-    ["f", () => panel("F · same depth, richer", "lightness −0.20, chroma ×1.00", 0.20, 1.0)],
-    ["g", () => panel("G · same depth, quieter", "lightness −0.20, chroma ×0.80", 0.20, 0.8)],
-    ["h", () => panel("H · darker and richer", "lightness −0.23, chroma ×1.00", 0.23, 1.0)],
-    ["i", () => panel("I · lighter and quieter", "lightness −0.17, chroma ×0.80", 0.17, 0.8)],
+    ["d", () => panel("D · a touch lighter (center)", "lightness −0.17, chroma ×0.90", 0.17, 0.9)],
+    ["d-lighter", () => panel("D · lighter", "lightness −0.14, chroma ×0.90", 0.14, 0.9)],
+    ["d-darker", () => panel("D · darker", "lightness −0.20, chroma ×0.90", 0.20, 0.9)],
+    ["d-richer", () => panel("D · richer", "lightness −0.17, chroma ×1.00", 0.17, 1.0)],
+    ["d-quieter", () => panel("D · quieter", "lightness −0.17, chroma ×0.80", 0.17, 0.8)],
+    ["d-lighter-richer", () => panel("D · lighter, richer", "lightness −0.14, chroma ×1.00", 0.14, 1.0)],
+    ["d-lighter-quieter", () => panel("D · lighter, quieter", "lightness −0.14, chroma ×0.80", 0.14, 0.8)],
+    ["d-darker-richer", () => panel("D · darker, richer", "lightness −0.20, chroma ×1.00", 0.20, 1.0)],
+    ["d-darker-quieter", () => panel("D · darker, quieter", "lightness −0.20, chroma ×0.80", 0.20, 0.8)],
     ["custom", () => panel("Custom", `lightness −${dl.toFixed(2)}, chroma ×${cs.toFixed(2)}`, dl, cs)],
     ...CODE.map((c, k) => [`code${k}`, () => codeCard(...c)]),
   ];
