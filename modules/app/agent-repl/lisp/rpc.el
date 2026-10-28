@@ -124,6 +124,8 @@
 (declare-function agent-repl-wire-encode-select-feed-row-request "wire-verbs" (request))
 (declare-function agent-repl-wire-encode-edit-held-prompt-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-edit-held-prompt-response "wire-verbs" (alist))
+(declare-function agent-repl-wire-encode-update-held-prompt-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-update-held-prompt-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-decode-select-feed-row-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-open-feed-image-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-open-feed-image-response "wire-verbs" (alist))
@@ -524,6 +526,14 @@ edit carried, and its `action' arm is the step: `commit' replaces the
 prompt's content whole (it keeps its queue place and is reclassified),
 `cancel' ends the edit with the content unchanged.  The begin is the
 webapp tray card's own; the resulting state arrives on the host stream.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-update-held-prompt
+  "UpdateHeldPrompt"
+  agent-repl-wire-encode-update-held-prompt-request
+  agent-repl-wire-decode-update-held-prompt-response
+  "Release (\"Send now\") or drop a held prompt, named by its TurnId.
+The request's `action' arm is the action: `release' delivers the prompt at
+once, `drop' discards it.  The held section's new state arrives on the feed.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-update-question-draft
   "UpdateQuestionDraft"

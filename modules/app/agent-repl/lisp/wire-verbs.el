@@ -5359,6 +5359,88 @@ THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
    #'agent-repl-wire-decode-edit-held-prompt-success
    #'agent-repl-wire-decode-edit-held-prompt-error))
 
+;;;; ---- UpdateHeldPrompt -----------------------------------------------
+;;
+;; The held card's two actions on a held PROMPT: release (the card's "Send
+;; now") and drop.  THE ARM IS THE ACTION on the request and THE ARM IS THE
+;; OUTCOME on the response.  See endpoint_update_held_prompt.proto.
+
+(defun agent-repl-wire-encode-update-held-prompt-empty-action (_value)
+  "Encode the empty UpdateHeldPromptRelease / UpdateHeldPromptDrop action."
+  nil)
+
+(defun agent-repl-wire-encode-update-held-prompt-request-action (value)
+  "Encode UpdateHeldPromptRequest's `action' oneof from VALUE.
+VALUE is (:arm KEYWORD :value V), KEYWORD one of `:release' and `:drop'."
+  (agent-repl-wire-verbs--encode-oneof
+   "UpdateHeldPromptRequest" "action" value
+   (list (list :release 'release #'agent-repl-wire-encode-update-held-prompt-empty-action)
+         (list :drop 'drop #'agent-repl-wire-encode-update-held-prompt-empty-action))))
+
+(defun agent-repl-wire-encode-update-held-prompt-request (request)
+  "Encode UpdateHeldPromptRequest from plist REQUEST (:workspace :turn :action).
+All three are required; an incomplete request errors here rather than
+reaching the wire."
+  (let ((message "UpdateHeldPromptRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-workspace-ref
+                 (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))
+          (cons 'turn
+                (agent-repl-wire-encode-turn-id
+                 (agent-repl-wire-verbs--require message "turn" (plist-get request :turn))))
+          (agent-repl-wire-encode-update-held-prompt-request-action
+           (agent-repl-wire-verbs--require message "action" (plist-get request :action))))))
+
+(defun agent-repl-wire-decode-update-held-prompt-success (json)
+  "Decode UpdateHeldPromptSuccess from JSON.  Empty: the action was taken."
+  (agent-repl-wire-verbs--decode-empty "UpdateHeldPromptSuccess" json))
+
+(defun agent-repl-wire-decode-update-held-prompt-workspace-ref-mismatch (json)
+  "Decode UpdateHeldPromptWorkspaceRefMismatch from JSON into (:registry-dir)."
+  (let ((message "UpdateHeldPromptWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string message 'registryDir json))))
+
+(defun agent-repl-wire-decode-update-held-prompt-transferring-away (json)
+  "Decode UpdateHeldPromptTransferringAway from JSON into (:address)."
+  (let ((message "UpdateHeldPromptTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string message 'address json))))
+
+(defun agent-repl-wire-decode-update-held-prompt-error (json)
+  "Decode UpdateHeldPromptError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
+  (let ((message "UpdateHeldPromptError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted
+                    noSuchHold alreadyDelivered releaseRefused beingDelivered))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace
+                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptUnknownWorkspace"))
+                 (list 'workspaceRefMismatch :workspace-ref-mismatch
+                       #'agent-repl-wire-decode-update-held-prompt-workspace-ref-mismatch)
+                 (list 'transferringAway :transferring-away
+                       #'agent-repl-wire-decode-update-held-prompt-transferring-away)
+                 (list 'notYetAdopted :not-yet-adopted
+                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptNotYetAdopted"))
+                 (list 'noSuchHold :no-such-hold
+                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptNoSuchHold"))
+                 (list 'alreadyDelivered :already-delivered
+                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptAlreadyDelivered"))
+                 (list 'releaseRefused :release-refused
+                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptReleaseRefused"))
+                 (list 'beingDelivered :being-delivered
+                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptBeingDelivered")))))))
+
+(defun agent-repl-wire-decode-update-held-prompt-response (json)
+  "Decode UpdateHeldPromptResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "UpdateHeldPromptResponse" json
+   #'agent-repl-wire-decode-update-held-prompt-success
+   #'agent-repl-wire-decode-update-held-prompt-error))
+
 ;; AdjustFeedTextScale — the feed text zoom nudge. The request is a bare
 ;; DIRECTION (the scale is daemon-global, so there is no workspace ref); the
 ;; response is a bare `scale' double (no result oneof, because the preference
