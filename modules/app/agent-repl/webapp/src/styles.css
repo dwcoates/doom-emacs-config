@@ -467,6 +467,10 @@
      it. Resolved where it is declared, on :root, so the dark theme's own --fg
      carries through without a dark override of this token. */
   --code-block-bg: color-mix(in srgb, var(--fg) 6%, transparent);
+  /* A RESPONSE'S CODE, fenced and inline alike (owner request, 2026-10-28): a
+     fainter --fg wash than the shared block's, so it sits a little darker on
+     the response fill, and the one wash for both kinds of code. */
+  --response-code-bg: color-mix(in srgb, var(--fg) 4%, transparent);
   /* Feed search (search.ts). Two washes, the isearch split: --search-match is
      every other match (Emacs' lazy-highlight), --search-current is the one the
      user is ON (Emacs' isearch face), and the gap between them has to be big
@@ -2354,6 +2358,9 @@ pre {
 }
 .bubble[data-role="response"] {
   --bubble-bg: var(--assistant);
+  /* A response's code, fenced and inline, wears the one response wash. */
+  --code-bg: var(--response-code-bg);
+  --code-block-bg: var(--response-code-bg);
   margin-left: var(--agent-rail-inset);
   margin-right: auto;
 }
