@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/prose"
 	"agent-repld/internal/pullrefs"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -182,7 +183,7 @@ func TestDrawUserBlocksLinksAPromptsReferences(t *testing.T) {
 	}}
 
 	// Act.
-	blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, chessComTarget, dlog.NewTestLogger())
+	blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, chessComTarget, nil, dlog.NewTestLogger())
 
 	// Assert.
 	parsed := blocks[0].GetText().GetProse()
@@ -191,5 +192,84 @@ func TestDrawUserBlocksLinksAPromptsReferences(t *testing.T) {
 	}
 	if got := parsed.GetSource().GetMarkdown(); got != "review #12" {
 		t.Fatalf("prompt source = %q, want the text as written", got)
+	}
+}
+
+func TestDrawUserBlocksMarksUpRecentCodeSpans(t *testing.T) {
+	tests := []struct {
+		name  string
+		text  string
+		spans []string
+		want  string
+	}{
+		{"plain prompt", "check foo() please", []string{"foo()"}, "check `foo()` please"},
+		{"no spans", "check foo() please", nil, "check foo() please"},
+		{"already code", "check `foo()` please", []string{"foo()"}, "check `foo()` please"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			content := &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+				{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: tc.text}}},
+			}}
+
+			// Act.
+			blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, nil, tc.spans, dlog.NewTestLogger())
+
+			// Assert.
+			parsed := blocks[0].GetText().GetProse()
+			if got := plainMarkdown(t, parsed); got != tc.want {
+				t.Fatalf("drawn prompt = %q, want %q", got, tc.want)
+			}
+			if got := parsed.GetSource().GetMarkdown(); got != tc.text {
+				t.Fatalf("prompt source = %q, want the text as written", got)
+			}
+		})
+	}
+}
+
+func TestMarkCodeSpansMarksUpEntryAnswers(t *testing.T) {
+	// Arrange.
+	parsed := prose.ParsePrompt(dlog.NewTestLogger(), "1 - run foo() now")
+
+	// Act.
+	markCodeSpans(parsed, []string{"foo()"})
+
+	// Assert.
+	var got string
+	for _, b := range parsed.GetBlocks() {
+		for _, n := range b.GetEntries().GetNodes() {
+			if t := n.GetAnswer().GetText(); t != nil {
+				got = t.GetMarkdown()
+			}
+		}
+	}
+	if got != "run `foo()` now" {
+		t.Fatalf("entry answer = %q, want the span marked up", got)
+	}
+}
+
+func TestRecentCodeSpansReadsOnlyTheLastFinalResponses(t *testing.T) {
+	// Arrange.
+	ids3 := []*frontendv1.FeedId{{Value: "a"}, {Value: "b"}, {Value: "c"}}
+	s := &wsState{
+		finalAnswers:   ids3,
+		answerMarkdown: map[string]string{"a": "old `oldspan`", "b": "mid `midspan`", "c": "new `newspan` `midspan`"},
+	}
+	r := &resolver{}
+
+	// Act.
+	got := r.recentCodeSpans(s)
+
+	// Assert.
+	want := []string{"newspan", "midspan"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("recentCodeSpans = %q, want %q", got, want)
+	}
+}
+
+func TestRecentCodeSpansWithoutFinalResponsesIsEmpty(t *testing.T) {
+	if got := (&resolver{}).recentCodeSpans(&wsState{}); len(got) != 0 {
+		t.Fatalf("recentCodeSpans = %q, want none", got)
 	}
 }
