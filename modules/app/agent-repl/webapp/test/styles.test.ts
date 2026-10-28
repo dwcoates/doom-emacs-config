@@ -1560,12 +1560,12 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(rule.trim()).toBe("--bubble-bg: var(--selected-final-response-bg) !important;");
   });
 
-  it("dims the selected final response's fill to 37.5% of the way from its own fill, the feed's, to the selected grey", () => {
+  it("dims the selected final response's fill to 37.5% of the way from its own fill to the selected grey", () => {
     // Arrange / Act — declared once on :root, so each theme mixes its own two tokens.
     const declaration = themeValueOf(declarationsOf(":root") ?? "", "--selected-final-response-bg");
 
     // Assert — the half-strength grey, 25% dimmer again (0.75 of 50%).
-    expect(declaration).toBe("color-mix(in srgb, var(--selected-bubble-bg) 37.5%, var(--bg))");
+    expect(declaration).toBe("color-mix(in srgb, var(--selected-bubble-bg) 37.5%, var(--assistant))");
   });
 
   it("never overrides the dimmed final response fill in the dark theme", () => {
@@ -2996,9 +2996,8 @@ describe("the one bubble rule set", () => {
     // so do the owner-named fills: the held variant's (2026-09-23), the
     // page-colored thinking and interim fill (2026-10-08), the selected
     // bubble's grey (2026-10-11), the agent-to-agent bubbles' prompt fill
-    // (2026-10-28), the selected prompt's darker blue (2026-10-19), the
-    // selected final response's dimmed grey (2026-10-20) and every response's
-    // page-colored fill (2026-10-28).
+    // (2026-10-28), the selected prompt's darker blue (2026-10-19) and the
+    // selected final response's dimmed grey (2026-10-20).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
       [
         ".bubble",
@@ -3011,7 +3010,6 @@ describe("the one bubble rule set", () => {
         '.bubble[data-variant="peer"]',
         '.bubble[data-variant="held"]',
         '.bubble[data-variant="thinking"]',
-        '.bubble[data-variant="response"]',
         ".bubble.interim-response",
       ].sort(),
     );
@@ -4657,12 +4655,12 @@ describe("the page-colored fill", () => {
     expect(got).toBe("var(--bg)");
   });
 
-  it("fills the turn's answer with the page background (owner request, 2026-10-28)", () => {
+  it("fills the turn's answer with the tool card's fill (owner request, 2026-10-28)", () => {
     // Arrange / Act
     const got = fillOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "final-response"]);
 
     // Assert
-    expect(got).toBe("var(--bg)");
+    expect(got).toBe("var(--assistant)");
   });
 
   it("paints the page itself with the same background token", () => {
