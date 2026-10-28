@@ -1776,9 +1776,12 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    light to dark and back, and never changes size. The fade is 35% shallower
    than the 0.35 trough it once had (owner request, 2026-10-14): a busy name
    dims by 0.65 x 0.65 = 0.42 of its ink, so it bottoms out at 0.58. */
+/* THE BREATH'S SWING IS 40% NARROWER (owner request, 2026-10-28): it once ran
+   from 1 down to 0.58, a 0.42 swing; it now runs 0.252 about the same middle,
+   0.79, so the name neither brightens nor fades as far. */
 @keyframes ws-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.58; }
+  0%, 100% { opacity: 0.916; }
+  50% { opacity: 0.664; }
 }
 
 #topbar {
