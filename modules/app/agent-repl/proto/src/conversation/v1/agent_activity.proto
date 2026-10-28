@@ -1270,6 +1270,27 @@ message AgentResponseProse {
   string markdown = 1;
 }
 
+// A settled response block, rewritten whole after it settled
+// (conversation.v1.AgentUpdate.response_revision).
+//
+// THE REVISION OUTRANKS EVERY RESTATEMENT OF THE ORIGINAL. The block's own
+// settled frame may be delivered again after it (the file plane converting
+// the transcript, where the original words still stand), and a consumer keeps
+// the newest revision's prose over it. A later revision of the same block
+// replaces an earlier one whole.
+//
+// THE CONVERSATION ITSELF IS NOT REWRITTEN: the revision is written by a side
+// query on a fork that persists nothing, so the agent's own transcript still
+// holds the original words.
+message AgentResponseRevision {
+  // The response block revised: the activity id its own frames carry.
+  AgentActivityId response = 1;
+  // What the response says now, whole.
+  AgentResponseProse prose = 2;
+  // When the revision landed.
+  AgentActivitySettledAt settled_at = 3;
+}
+
 // ==========================================================================
 // The plain file and search tools. None carries an update arm: a read, a write,
 // an edit or a search either returns or fails, and nothing draws a partial one.

@@ -1,0 +1,101 @@
+// endpoint_select_response_text.proto — SelectResponseText: hold or clear the
+// words highlighted in a final response. FEED section.
+//
+// THE DAEMON IS THE ONLY HOLDER of a workspace's highlight. While words of a
+// final response are highlighted, the next prompt the user sends is NOT a
+// turn: the daemon asks the shim to revise that response so it answers the
+// prompt about those words (shim.v1.ReviseResponse), answers the submission
+// `response_revising`, and clears the highlight. Nothing new appears in the
+// feed: the response's own bubble is redrawn with the revision.
+//
+// The webapp reports the highlight as the reader's text selection settles
+// (a drag-select released, a keyboard extension of it) and clears it when the
+// selection leaves the response or collapses.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "frontend/v1/feed.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Hold or clear the workspace's highlight.
+message SelectResponseTextRequest {
+  // The workspace the response is in.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The new highlight, or its absence.
+  SelectResponseTextSelection selection = 2;
+}
+
+// A workspace's highlight. The set arm IS the state.
+message SelectResponseTextSelection {
+  // Some words highlighted, or none.
+  oneof state {
+    SelectResponseTextHighlighted highlighted = 1;
+    SelectResponseTextCleared cleared = 2;
+  }
+}
+
+// Words are highlighted in one final response.
+message SelectResponseTextHighlighted {
+  // The final response's row on the workspace's root feed.
+  frontend.v1.FeedId row = 1;
+  // The highlighted words, verbatim as the page reads them. Never blank.
+  string words = 2;
+}
+
+// Nothing is highlighted.
+message SelectResponseTextCleared {}
+
+// THE ARM IS THE OUTCOME.
+message SelectResponseTextResponse {
+  // Success or the refusal; exactly one is set.
+  oneof result {
+    SelectResponseTextSuccess success = 1;
+    SelectResponseTextError error = 2;
+  }
+}
+
+// The highlight is held (or cleared).
+message SelectResponseTextSuccess {}
+
+// Why the request was refused. Validation failures (an unset field, a blank
+// string) are Connect InvalidArgument, never an arm.
+message SelectResponseTextError {
+  // The cause of the refusal.
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SelectResponseTextUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SelectResponseTextWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SelectResponseTextTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SelectResponseTextNotYetAdopted not_yet_adopted = 4;
+    // The row is not a final response of the workspace's root feed.
+    SelectResponseTextNotAFinalResponse not_a_final_response = 5;
+  }
+}
+
+// The workspace id is not in the daemon's registry.
+message SelectResponseTextUnknownWorkspace {}
+
+// The echoed dir disagrees with the registry's dir for this id.
+message SelectResponseTextWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+// This daemon released the workspace to a successor; dial `address`.
+message SelectResponseTextTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+
+// A joining daemon has not finished adopting this workspace yet.
+message SelectResponseTextNotYetAdopted {}
+
+// The row is not a final response of the workspace's root feed.
+message SelectResponseTextNotAFinalResponse {}

@@ -139,7 +139,20 @@ message SubmitPromptSuccess {
     // text as the reason relayed to the agent. Empty: the visible effect is
     // the card's re-push.
     SubmitPromptAskAnswered ask_answered = 5;
+    // It REVISED A FINAL RESPONSE instead of minting a turn: words of a final
+    // response were highlighted as it was sent (SelectResponseText), so the
+    // daemon asked the shim to rewrite that response to answer it
+    // (shim.v1.ReviseResponse) and cleared the highlight. Nothing new
+    // appears in the feed: the response's bubble shows the revision pending,
+    // then the revised prose.
+    SubmitPromptResponseRevising response_revising = 6;
   }
+}
+
+// The revising-a-response answer.
+message SubmitPromptResponseRevising {
+  // The final response being revised.
+  frontend.v1.FeedId row = 1;
 }
 // The answered-a-standing-ask answer. Empty on purpose (see the arm).
 message SubmitPromptAskAnswered {}

@@ -16,6 +16,7 @@ import "agentrepl/v1/endpoint_run_tests.proto";
 import "agentrepl/v1/endpoint_submit_prompt.proto";
 import "agentrepl/v1/endpoint_retry_vendor_error.proto";
 import "agentrepl/v1/endpoint_select_feed_row.proto";
+import "agentrepl/v1/endpoint_select_response_text.proto";
 import "agentrepl/v1/endpoint_report_composer_entries.proto";
 import "agentrepl/v1/endpoint_find_entry_neighbor.proto";
 import "agentrepl/v1/endpoint_fold_merge_bubble.proto";
@@ -148,6 +149,11 @@ service AgentRepl {
   // its ordered rows, pushes it to the webapp and Emacs, and acks it here.
   // See endpoint_select_feed_row.proto.
   rpc SelectFeedRow(SelectFeedRowRequest) returns (SelectFeedRowResponse);
+
+  // Hold or clear the words highlighted in a final response: while they are
+  // held, the next prompt revises that response instead of starting a turn.
+  // See endpoint_select_response_text.proto.
+  rpc SelectResponseText(SelectResponseTextRequest) returns (SelectResponseTextResponse);
 
   // The entries the composer holds while the person types, and the one point
   // is on: the daemon pushes the node it answers to the webapp, and the labels
