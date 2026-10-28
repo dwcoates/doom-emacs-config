@@ -142,8 +142,18 @@ func (f *fixture) open() {
 	if resp.Msg.GetSuccess() == nil {
 		f.t.Fatalf("OpenWorkspace = %v, want a success", resp.Msg)
 	}
-	// OpenedShim, not Shim: at a short idle cutoff the shim this open brought
-	// up can be hibernated and gone before the control socket is dialed.
+	// AN OPEN STARTS NO SHIM (owner ruling, 2026-10-28), and a restart starts
+	// one at once: the fixture's workspace is opened with its shim up.
+	restart, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
+	if err != nil {
+		f.t.Fatalf("RestartWorkspace = error %v, want a success", err)
+	}
+	if restart.Msg.GetSuccess() == nil {
+		f.t.Fatalf("RestartWorkspace = %v, want a success", restart.Msg)
+	}
+	// OpenedShim, not Shim: at a short idle cutoff the shim the restart
+	// brought up can be hibernated and gone before the control socket is
+	// dialed.
 	f.shim = f.d.OpenedShim(f.ws)
 }
 

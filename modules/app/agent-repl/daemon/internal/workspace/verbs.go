@@ -76,8 +76,6 @@ type verbs struct {
 	// land whole, one after the other, and WSM's current and the roster's
 	// selection can never be left naming different workspaces.
 	selection sync.Mutex
-	// revivals holds at most one revival in flight per workspace.
-	revivals revivalFlights
 	// names are the workspace names claimed in this process (mergenames.go).
 	names nameClaims
 	// pending is the pending-create set: every create running or held for

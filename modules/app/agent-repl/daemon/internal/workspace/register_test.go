@@ -14,7 +14,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/topbar"
-	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -402,80 +401,31 @@ func registeredWithAConversation(t *testing.T, f *fixture, terminal *wsm.Session
 	return dir, record
 }
 
-// TestRegisterRevivesAKnownWorkspacesRecordedConversation is THE RELAUNCH.
-// Emacs re-announces every workspace it holds when the link comes up, and for
-// a workspace whose panel was already mounted that announcement is the only
-// edge a fresh daemon gets — no OpenWorkspace follows it. Without the revival
-// the session never comes up, no watcher opens, and the feed serves nothing
-// for a conversation the store still holds whole.
-func TestRegisterRevivesAKnownWorkspacesRecordedConversation(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	dir, record := registeredWithAConversation(t, f, nil)
-
-	// Act.
-	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
-		t.Fatalf("the re-announcement: %v", err)
-	}
-
-	// Assert.
-	if got := f.fleet.started; len(got) != 1 || got[0] != record.ID {
-		t.Fatalf("sessions started by the re-announcement = %v, want the known workspace %q brought back up", got, record.ID)
-	}
-}
-
-// TestRegisterRevivesNoWithheldWorkspace holds a deploy to the shims that were
-// up before it (owner ruling, 2026-10-27): a workspace the daemon withholds
-// starts when it is shown, as the rollout's bring-up withholds it, and an
-// announcement that cannot tell revives nothing.
-func TestRegisterRevivesNoWithheldWorkspace(t *testing.T) {
-	tests := []struct {
-		name    string
-		arrange func(f *fixture, dir string, record wsm.Workspace)
-		wantLog dlog.RecordQuery
+// TestRegisterStartsNoShim pins the owner ruling of 2026-10-28: Emacs's
+// announcement of a workspace starts no shim, whatever its record holds. The
+// conversation is read from the store, and the next prompt brings the shim
+// up.
+func TestRegisterStartsNoShim(t *testing.T) {
+	cases := []struct {
+		name     string
+		terminal *wsm.SessionTerminal
 	}{
-		{
-			name: "a hidden workspace",
-			arrange: func(f *fixture, dir string, record wsm.Workspace) {
-				record.Hidden = true
-				f.db.workspaces[record.ID] = record
-				f.db.byDir[dir] = record
-			},
-			wantLog: dlog.RecordQuery{Level: "debug", Message: "the announced workspace is withheld; its conversation is revived when it is shown"},
-		},
-		{
-			name: "a workspace in a collapsed section",
-			arrange: func(f *fixture, _ string, record wsm.Workspace) {
-				f.db.repositories = []wsm.Repository{{ID: record.Repo, Folded: true}}
-			},
-			wantLog: dlog.RecordQuery{Level: "debug", Message: "the announced workspace is withheld; its conversation is revived when it is shown"},
-		},
-		{
-			name: "a workspace whose merge queues cannot be read",
-			arrange: func(f *fixture, _ string, _ wsm.Workspace) {
-				f.db.mergeQueuesErr = errFake
-			},
-			wantLog: dlog.RecordQuery{Level: "error", Message: "could not read whether the announced workspace is withheld; its conversation is not revived"},
-		},
+		{name: "a recorded conversation with no terminal"},
+		{name: "a hibernated session", terminal: &wsm.SessionTerminal{Kind: "hibernated", Detail: "idle past the cutoff"}},
+		{name: "a deleted session", terminal: &wsm.SessionTerminal{Kind: "deleted", Detail: "NukeWorkspace"}},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			f := newFixture(t)
-			dir, record := registeredWithAConversation(t, f, nil)
-			tt.arrange(f, dir, record)
+			dir, _ := registeredWithAConversation(t, f, tc.terminal)
 
 			// Act.
-			if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
-				t.Fatalf("the re-announcement: %v", err)
-			}
+			_, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
 
 			// Assert.
-			if got := f.fleet.started; len(got) != 0 {
-				t.Fatalf("sessions started by the re-announcement = %v, want none", got)
-			}
-			if _, ok := dlog.FindRecord(f.log.logger.Records(), tt.wantLog); !ok {
-				t.Fatalf("records = %+v, want %+v", f.log.logger.Records(), tt.wantLog)
+			if err != nil || len(f.fleet.started) != 0 || len(f.fleet.startCalls) != 0 {
+				t.Fatalf("Register = %v after starts %v; want the row and no start", err, f.fleet.startCalls)
 			}
 		})
 	}
@@ -543,73 +493,6 @@ func TestRegisterSpawnsNothingForAWorkspaceThatNeverHadAConversation(t *testing.
 	// Assert.
 	if got := f.fleet.started; len(got) != 0 {
 		t.Fatalf("sessions started for a workspace with no conversation = %v, want none", got)
-	}
-}
-
-// TestRegisterDoesNotReviveADeletedSession covers the one death that refuses
-// resurrection: an announcement must not resurrect what a delete ended.
-func TestRegisterDoesNotReviveADeletedSession(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	dir, _ := registeredWithAConversation(t, f, &wsm.SessionTerminal{Kind: "deleted", Detail: "NukeWorkspace"})
-
-	// Act.
-	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
-		t.Fatalf("the re-announcement: %v", err)
-	}
-
-	// Assert.
-	if got := f.fleet.started; len(got) != 0 {
-		t.Fatalf("sessions started for a deleted session = %v, want none", got)
-	}
-}
-
-// TestRegisterDoesNotReviveAHibernatedSession covers the deliberate
-// stand-down: the idle sweep parked this session on purpose and a PROMPT is
-// what revives it, so an announcement must not undo the policy.
-func TestRegisterDoesNotReviveAHibernatedSession(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	dir, _ := registeredWithAConversation(t, f, &wsm.SessionTerminal{Kind: "hibernated", Detail: "idle past the cutoff"})
-
-	// Act.
-	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
-		t.Fatalf("the re-announcement: %v", err)
-	}
-
-	// Assert.
-	if got := f.fleet.started; len(got) != 0 {
-		t.Fatalf("sessions started for a hibernated session = %v, want none", got)
-	}
-}
-
-// TestRegisterStillAnswersWhenTheRevivalFails covers the announcement's own
-// contract: the roster row is durable and must land whatever the bring-up
-// does, and the failure is recorded rather than absorbed.
-func TestRegisterStillAnswersWhenTheRevivalFails(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	dir, record := registeredWithAConversation(t, f, nil)
-	f.fleet.startErr = errors.New("the shim would not spawn")
-
-	// Act.
-	again, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Register = %v, want the roster row despite a failed revival", err)
-	}
-	if again.ID != record.ID {
-		t.Fatalf("Register = %q, want the known workspace %q", again.ID, record.ID)
-	}
-	recorded := false
-	for _, r := range f.log.logger.Records() {
-		if r.Level == "error" && r.Operation == opRegister {
-			recorded = true
-		}
-	}
-	if !recorded {
-		t.Fatalf("records = %+v, want the failed revival recorded at error", f.log.logger.Records())
 	}
 }
 
@@ -832,99 +715,6 @@ func TestRegisterSurfacesAFailedReopen(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Register answered success though the re-open failed")
 	}
-}
-
-// TestRegisterLevelsACancelledRevivalAtInfo is the other side of the test
-// above: a bring-up that ended because the DAEMON'S OWN CONTEXT was cancelled
-// is the process leaving, not a session that failed to come up. Nothing is
-// left to serve the revived conversation, and the next boot revives it again.
-func TestRegisterLevelsACancelledRevivalAtInfo(t *testing.T) {
-	tests := []struct {
-		name      string
-		startErr  error
-		wantLevel string
-	}{
-		{
-			name:      "the bring-up was cancelled",
-			startErr:  context.Canceled,
-			wantLevel: "info",
-		},
-		{
-			name:      "the shim would not spawn",
-			startErr:  errors.New("the shim would not spawn"),
-			wantLevel: "error",
-		},
-		{
-			// The same answer reached from the other side: the bring-up
-			// refused before it spawned because this daemon is standing down.
-			// Measured at realtest 2026-09-13T18:32:16, where it was recorded
-			// as a conversation that did not come back up.
-			name:      "this daemon is standing down",
-			startErr:  shimclient.ErrStandingDown,
-			wantLevel: "info",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			f := newFixture(t)
-			dir, _ := registeredWithAConversation(t, f, nil)
-			f.fleet.startErr = tt.startErr
-
-			// Act.
-			if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
-				t.Fatalf("Register = %v, want the roster row despite the revival", err)
-			}
-
-			// Assert.
-			var level string
-			for _, r := range f.log.logger.Records() {
-				if r.Operation == opRegister && strings.Contains(r.Message, "revival") ||
-					r.Operation == opRegister && strings.Contains(r.Message, "did not come back up") {
-					level = r.Level
-				}
-			}
-			if level != tt.wantLevel {
-				t.Fatalf("the revival record is %q, want %q: %+v", level, tt.wantLevel, f.log.logger.Records())
-			}
-		})
-	}
-}
-
-// TestRegisterAnswersWhileTheRevivalIsStillStarting is the whole point of
-// detaching the revival: the announcement's answer is the ROSTER ROW, and the
-// row is written before the session start is anywhere near done.
-//
-// MEASURED, realtest run 2026-09-13T16:20:34. The revival ran inline, so the
-// register waited on `Sessions.Start` — which takes the workspace's start gate
-// and therefore waited on the boot's own bring-up of the SAME workspace, whose
-// StartSession the shim never answered. Emacs abandoned RegisterWorkspace at
-// its 10s bound on three daemon generations running and reported
-// `link-up-register-failed`, then `call-on-closed-connection SelectWorkspace`,
-// for a workspace whose row the daemon had already written and could have
-// answered from immediately.
-func TestRegisterAnswersWhileTheRevivalIsStillStarting(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	dir, record := registeredWithAConversation(t, f, nil)
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-	f.fleet.detachEntered = entered
-	f.fleet.detachHold = release
-
-	// Act.
-	answered, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("the re-announcement: %v", err)
-	}
-	if answered.ID != record.ID {
-		t.Fatalf("Register answered %q, want the known workspace %q", answered.ID, record.ID)
-	}
-	<-entered
 }
 
 // TestRegisterPrimesTheFooter pins the reconnect fix's wiring: registration —

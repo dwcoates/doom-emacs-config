@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -57,10 +58,10 @@ func TestAFailedCreateIsReportedToTheMainWorktree(t *testing.T) {
 		// closed arranges the main worktree closed, with no session.
 		closed bool
 		// wantStarted is whether the report's open starts a session.
-		wantStarted bool
+		wantReopened bool
 	}{
-		{name: "a closed main worktree is opened and asked", closed: true, wantStarted: true},
-		{name: "a live main worktree is asked as it is", closed: false, wantStarted: false},
+		{name: "a closed main worktree is reopened and asked", closed: true, wantReopened: true},
+		{name: "a live main worktree is asked as it is", closed: false, wantReopened: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,8 +80,11 @@ func TestAFailedCreateIsReportedToTheMainWorktree(t *testing.T) {
 			if err == nil {
 				t.Fatal("Create with a failing worktree add = success, want its failure")
 			}
-			if started := len(f.fleet.started) == 1 && f.fleet.started[0] == mainWorkspaceID; started != tc.wantStarted {
-				t.Fatalf("started sessions = %v, want the main worktree started: %v", f.fleet.started, tc.wantStarted)
+			if reopened := slices.Contains(f.db.reopened, mainWorkspaceID); reopened != tc.wantReopened {
+				t.Fatalf("reopened = %v, want the main worktree reopened: %v", f.db.reopened, tc.wantReopened)
+			}
+			if len(f.fleet.started) != 0 {
+				t.Fatalf("started sessions = %v, want none: the report's prompt brings the shim up", f.fleet.started)
 			}
 			if f.db.closedFlags[mainWorkspaceID] {
 				t.Fatal("the main worktree is still closed after the report")
@@ -320,8 +324,8 @@ func TestAFailedCreatesReportThatCannotBeDeliveredIsAnError(t *testing.T) {
 		name    string
 		arrange func(f *fixture)
 		message string
-		// wantStarted is whether the report got as far as opening.
-		wantStarted bool
+		// wantReopened is whether the report got as far as opening.
+		wantReopened bool
 	}{
 		{
 			name:    "the main worktree cannot be read",
@@ -329,21 +333,21 @@ func TestAFailedCreatesReportThatCannotBeDeliveredIsAnError(t *testing.T) {
 			message: "could not read the main-worktree workspace to report a failed create to",
 		},
 		{
-			name:    "the main worktree's session will not start",
-			arrange: func(f *fixture) { f.fleet.startErr = errors.New("the shim did not come up") },
+			name:    "the main worktree will not reopen",
+			arrange: func(f *fixture) { f.db.setClosedErr = errors.New("sql: database is locked") },
 			message: "could not open the main-worktree workspace to report a failed create to",
 		},
 		{
-			name:        "the queue fails the submission",
-			arrange:     func(f *fixture) { f.queue.submitErr = errors.New("the queue is closed") },
-			message:     "the main-worktree workspace's queue did not accept the failed create's report",
-			wantStarted: true,
+			name:         "the queue fails the submission",
+			arrange:      func(f *fixture) { f.queue.submitErr = errors.New("the queue is closed") },
+			message:      "the main-worktree workspace's queue did not accept the failed create's report",
+			wantReopened: true,
 		},
 		{
-			name:        "the queue refuses the submission",
-			arrange:     func(f *fixture) { f.queue.submitRefusedArm = "workspace_closed" },
-			message:     "the main-worktree workspace's queue refused the failed create's report",
-			wantStarted: true,
+			name:         "the queue refuses the submission",
+			arrange:      func(f *fixture) { f.queue.submitRefusedArm = "workspace_closed" },
+			message:      "the main-worktree workspace's queue refused the failed create's report",
+			wantReopened: true,
 		},
 		{
 			name:    "the brief is missing",
@@ -374,8 +378,11 @@ func TestAFailedCreatesReportThatCannotBeDeliveredIsAnError(t *testing.T) {
 			if len(f.queue.submissions) != 0 {
 				t.Fatalf("submissions = %+v, want none", f.queue.submissions)
 			}
-			if started := len(f.fleet.started) > 0; started != tc.wantStarted {
-				t.Fatalf("started = %v, want the main worktree started: %v", f.fleet.started, tc.wantStarted)
+			if reopened := slices.Contains(f.db.reopened, mainWorkspaceID); reopened != tc.wantReopened {
+				t.Fatalf("reopened = %v, want the main worktree reopened: %v", f.db.reopened, tc.wantReopened)
+			}
+			if len(f.fleet.started) != 0 {
+				t.Fatalf("started = %v, want none: the report's prompt brings the shim up", f.fleet.started)
 			}
 		})
 	}

@@ -2398,38 +2398,28 @@ func (f *fakeClassifierPrompt) Update(_ context.Context, req classifierupdate.Re
 	return f.result, f.err
 }
 
-// fakeOpenWorld is the OpenTabs coordinator's collaborators: which
-// workspaces are live, the bring-ups it asked for, and the roster's opening
-// edges.
+// fakeOpenWorld is the OpenTabs coordinator's collaborators: the roster's
+// opening edges.
 type fakeOpenWorld struct {
-	mu       sync.Mutex
-	live     map[ids.WorkspaceID]bool
-	bringUps chan []ids.WorkspaceID
-	opening  []string
+	mu      sync.Mutex
+	opening []string
 }
 
 func newFakeOpenWorld() *fakeOpenWorld {
-	return &fakeOpenWorld{live: map[ids.WorkspaceID]bool{}, bringUps: make(chan []ids.WorkspaceID, 8)}
+	return &fakeOpenWorld{}
 }
 
 func (f *fakeOpenWorld) deps() opentabs.Deps {
 	return opentabs.Deps{
-		Live: func(ws ids.WorkspaceID) bool {
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			return f.live[ws]
-		},
-		BringUp: func(pending []ids.WorkspaceID, _ func(ids.WorkspaceID, error)) { f.bringUps <- pending },
 		Opening: func(ws ids.WorkspaceID, opening bool) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			f.opening = append(f.opening, fmt.Sprintf("%s:%v", ws, opening))
 		},
-		// The conversation reads at once, nothing is owed, and the roster
+		// The conversation reads at once, and the roster
 		// answers a bare row naming the workspace: the server's own tests are
 		// about the stream, not the open's work (internal/opentabs covers it).
 		ReadConversation: func(context.Context, ids.WorkspaceID) error { return nil },
-		Owed:             func(context.Context, ids.WorkspaceID) (bool, error) { return false, nil },
 		Row: func(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool) {
 			return &frontendv1.RosterRow{Workspace: &frontendv1.RosterRowWorkspace{
 				Workspace: &workspacev1.WorkspaceRef{Id: string(ws)}}}, 1, true
@@ -2439,12 +2429,6 @@ func (f *fakeOpenWorld) deps() opentabs.Deps {
 		Now:    time.Now,
 		Log:    dlog.NewTestLogger(),
 	}
-}
-
-func (f *fakeOpenWorld) setLive(ws ids.WorkspaceID) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.live[ws] = true
 }
 
 // fakeEditorInstances answers a scripted verdict on every Emacs instance and

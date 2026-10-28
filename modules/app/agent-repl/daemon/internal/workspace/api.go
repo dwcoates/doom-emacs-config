@@ -185,13 +185,6 @@ const (
 	// OpenStageRestoringWorktree when its branch survives, and is refused at
 	// this stage when there is nothing to restore it from.
 	OpenStageCheckingWorktree OpenStage = iota
-	// OpenStageStartingSession: the daemon is bringing the session up —
-	// spawning the shim and resuming the vendor conversation. THE SLOW STAGE,
-	// and the reason this vocabulary exists.
-	OpenStageStartingSession
-	// OpenStageReviving: the daemon is lifting a hibernation park. Reported
-	// only for a workspace that was actually parked.
-	OpenStageReviving
 	// OpenStageClearingClosed: the daemon is clearing the closed flag, which
 	// is what puts the row back among the open ones. Reported only for a
 	// workspace that was actually closed.
