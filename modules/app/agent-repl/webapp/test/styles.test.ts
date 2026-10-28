@@ -4959,12 +4959,14 @@ describe("the rail's marks", () => {
     expect(keyframes).not.toMatch(/transform|scale|width|height|font-size/);
   });
 
-  it("fades a breathing name to 58% opacity at mid-breath, 35% shallower than the 0.35 it once reached", () => {
-    // Arrange / Act
+  it("swings a breathing name's opacity 40% narrower about the old middle (owner request, 2026-10-28)", () => {
+    // Arrange
     const keyframes = keyframesOf("ws-pulse");
-
-    // Assert
-    expect(keyframes).toMatch(/50%\s*\{[^}]*opacity:\s*0\.58\s*;/);
+    const at = (stop: string): number => Number(new RegExp(`${stop}\\s*\\{[^}]*opacity:\\s*([0-9.]+)\\s*;`).exec(keyframes)?.[1]);
+    // Act
+    const [bright, faded] = [at("0%, 100%"), at("50%")];
+    // Assert — the old swing ran 1 to 0.58: 0.42 wide about 0.79.
+    expect([bright - faded, (bright + faded) / 2].map((n) => Number(n.toFixed(3)))).toEqual([0.252, 0.79]);
   });
 
   it("breathes once every 2s, 30% slower than the 1.4s it once took", () => {
