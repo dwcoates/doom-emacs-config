@@ -4480,7 +4480,7 @@ describe("the tool card's command grey", () => {
     ["--muted", [0x89, 0x87, 0x82]],
     ["--card", [0x2c, 0x2c, 0x2c]],
     ["--border", [0x2a, 0x2a, 0x2a]],
-    ["--selected-entry", [0x61, 0x92, 0xd0]],
+    ["--selected-entry", [0x4f, 0x82, 0xc3]],
   ] as const)("defines the dark theme's %s as the Settings page's", (token, want) => {
     // Arrange
     const block = darkThemeBlock();
@@ -6274,7 +6274,7 @@ describe("the answered label's pastel orange", () => {
 
   it.each([
     ["light", () => rootToken("--answer-label"), "#e08a4c"],
-    ["dark", () => /--answer-label:\s*([^;]+);/.exec(darkThemeBlock())?.[1]?.trim(), "#d09364"],
+    ["dark", () => /--answer-label:\s*([^;]+);/.exec(darkThemeBlock())?.[1]?.trim(), "#c28351"],
   ])("defines the %s theme's pastel orange", (_theme, read, want) => {
     // Act
     const got = read();
