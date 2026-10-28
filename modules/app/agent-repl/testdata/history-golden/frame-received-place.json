@@ -1,0 +1,14 @@
+{
+  "line": {
+    "at": {"value": "p-42"},
+    "line": {"pageAgentId": {"value": "agent-main"}, "agentItem": {"agentFrame": {}}},
+    "turn": {"value": "turn-7"},
+    "receivedPlace": {"atMs": "1800000000500"}
+  },
+  "entry": {
+    "at": {"value": "p-42"},
+    "entry": {"agentFrame": {}},
+    "turn": {"value": "turn-7"},
+    "receivedPlace": {"atMs": "1800000000500"}
+  }
+}
