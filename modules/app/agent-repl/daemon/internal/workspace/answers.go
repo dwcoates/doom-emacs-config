@@ -270,6 +270,7 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 // refused before the re-open starts. The step that failed recorded its own
 // failure at ERROR; WHY names it for this record.
 func (v *verbs) reraiseRefusedColdGate(log dlog.Logger, ws ids.WorkspaceID, vendorSessionID, choice, why string, cause error) {
+	v.deps.ColdGateAnswers.CountColdGateAnswer(ws, choice, GateAnswerRefused)
 	stood := v.deps.Cards.ReraiseColdGate(ws, vendorSessionID)
 	log.Info(opColdGate, why+"; the answer is refused", dlog.Context{
 		"choice": choice, "gate_stands_again": stood, "cause": cause.Error(),
@@ -307,12 +308,15 @@ func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.Wor
 		// the topbar's own session facts arrive on its heels and the full view
 		// returns; retiring the gate here is what lets them.
 		v.deps.Topbar.SetColdGate(ws, topbar.ColdGate{Standing: false})
+		v.deps.ColdGateAnswers.CountColdGateAnswer(ws, choice, GateAnswerResumed)
 		log.Info(opColdGate, "answered the cold gate", dlog.Context{"choice": choice})
 	case ctx.Err() != nil:
+		v.deps.ColdGateAnswers.CountColdGateAnswer(ws, choice, GateAnswerAbandoned)
 		v.deps.Footer.SetColdGateAnswer(ws, nil)
 		log.Info(opColdGate, "the answered cold gate's re-open was abandoned as the daemon stood down",
 			dlog.Context{"choice": choice, "cause": err.Error()})
 	default:
+		v.deps.ColdGateAnswers.CountColdGateAnswer(ws, choice, GateAnswerFailed)
 		v.deps.Footer.SetColdGateAnswer(ws, nil)
 		var refusal *Refusal
 		if !errors.As(err, &refusal) {

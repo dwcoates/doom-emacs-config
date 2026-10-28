@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"agent-repld/internal/shimlife"
 	"context"
 	"fmt"
 	"os"
@@ -106,7 +107,7 @@ func (v *verbs) CreateThread(ctx context.Context, question string) (wsm.Workspac
 		log.Error(opCreateThread, "could not record the thread's spawn facts", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, fmt.Errorf("create thread %q: record the spawn facts: %w", name, err)
 	}
-	if err := v.deps.Sessions.Start(ctx, record.ID); err != nil {
+	if err := v.deps.Sessions.Start(shimlife.WithStart(ctx, shimlife.StartThread), record.ID); err != nil {
 		log.Error(opCreateThread, "the thread's session did not come up", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, fmt.Errorf("create thread %q: start the session: %w", name, err)
 	}

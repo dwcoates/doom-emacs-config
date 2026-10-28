@@ -73,6 +73,7 @@ import (
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/shimidentity"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/signin"
 	"agent-repld/internal/stallbeat"
 	"agent-repld/internal/startslots"
@@ -802,7 +803,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// bring-up retires the park's terminal under; the views' park is
 		// lifted once it is back, as a revival lifts it.
 		Restore: func(ws ids.WorkspaceID, done func(error)) {
-			fleet.StartDetached(ws, func(err error) {
+			fleet.StartDetached(ws, shimlife.StartKeepalive, func(err error) {
 				if err == nil {
 					footerResolver.SetParked(ws, wsm.ParkNone)
 					topbarResolver.SetParked(ws, wsm.ParkNone)
@@ -852,7 +853,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// THE STORE'S READ-ONLY FACE, dialled beside the store socket every
 		// shim is handed: the daemon reads every workspace's history there,
 		// and never writes the store.
-		StoreHistory:   storereader.New(p.Opts.storeSocket),
+		StoreHistory: storereader.New(p.Opts.storeSocket),
+		// Every shim start and deliberate stand-down lands in the metrics
+		// surface, by its cause or reason.
+		ShimLife:       p.Metrics,
 		NetworkChanged: networkWatch.Changed,
 		// A WORKSPACE WITH NO RECORDED BOOK takes the one its shim persisted.
 		PersistedBook: func(dir string) (string, bool, error) { return shimidentity.Book(p.Layout.ShimDir(), dir) },
@@ -1381,7 +1385,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A NUKED THREAD'S GRAPH is deleted through the chat service, which
 		// also forgets what it held of the thread.
 		Threads: chatService,
-		Creates: creates,
+		// Every cold gate answered lands in the metrics surface.
+		ColdGateAnswers: p.Metrics,
+		Creates:         creates,
 		// A CREATE THE NETWORK BLOCKS IS HELD and resumes on the network's
 		// restoration; its ops are answered through the server, bound below.
 		Network:           network,

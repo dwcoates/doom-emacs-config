@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -104,7 +105,7 @@ func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) e
 		log.Debug(opKill, "no live session to kill", nil)
 	}
 
-	if err := v.deps.Sessions.Stop(ctx, ws, true); err != nil {
+	if err := v.deps.Sessions.Stop(shimlife.WithStandDown(ctx, shimlife.StandDownKill), ws, true); err != nil {
 		log.Error(opKill, "could not stop the shim process", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("kill %q: stop the shim: %w", ws, err)
 	}

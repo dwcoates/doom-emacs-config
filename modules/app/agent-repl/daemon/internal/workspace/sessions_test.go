@@ -34,6 +34,7 @@ import (
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/shimsocket"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
@@ -603,6 +604,8 @@ type fleetFixture struct {
 	store *fakeStoreHistory
 	// restarts records every restart observation the fleet makes.
 	restarts restarttimingtest.Recorder
+	// shimLife records every shim start and stand-down the fleet counts.
+	shimLife fakeShimLife
 	// chatPrompt and chatPromptErr answer the fleet's ChatSystemPrompt.
 	chatPrompt    string
 	chatPromptErr error
@@ -869,6 +872,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		},
 		Now:        func() time.Time { return f.now },
 		Restarts:   &f.restarts,
+		ShimLife:   &f.shimLife,
 		AdoptBound: f.adoptBound,
 		Clock:      &fleetStepClock{now: fixedNow},
 		RetryAfter: func(d time.Duration) <-chan time.Time {
@@ -2711,7 +2715,7 @@ func TestDrainStartsEndsAnInFlightStartAndJoinsIt(t *testing.T) {
 	f.client.entered = entered
 	f.client.startHold = make(chan struct{}) // never closed: only the drain ends it.
 	settled := make(chan error, 1)
-	f.fleet.StartDetached(ws.ID, func(err error) { settled <- err })
+	f.fleet.StartDetached(ws.ID, shimlife.StartKeepalive, func(err error) { settled <- err })
 	<-entered
 
 	// Act.
@@ -2739,7 +2743,7 @@ func TestDrainStartsReportsAStartThatOutlivesItsBound(t *testing.T) {
 	f.client.entered = entered
 	// The START finishes; what outlives the drain is the SETTLEMENT, which
 	// blocks on `stuck` and never looks at a context at all.
-	f.fleet.StartDetached(ws.ID, func(error) { <-stuck })
+	f.fleet.StartDetached(ws.ID, shimlife.StartKeepalive, func(error) { <-stuck })
 	<-entered
 
 	// Act.

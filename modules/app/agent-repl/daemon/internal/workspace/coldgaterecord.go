@@ -7,6 +7,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/opentabs"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -94,7 +95,7 @@ func (f *Fleet) standDownAtGate(ctx context.Context, ws ids.WorkspaceID) {
 	delete(f.sessions, ws)
 	f.movedLocked()
 	f.mu.Unlock()
-	if err := f.teardown(ctx, ws, session, false, "the workspace stands at its cold gate, which runs no shim until it is answered"); err != nil {
+	if err := f.teardown(shimlife.WithStandDown(ctx, shimlife.StandDownColdGate), ws, session, false, "the workspace stands at its cold gate, which runs no shim until it is answered"); err != nil {
 		log.Error(opColdGate, "the cold gate's shim could not be stood down", dlog.Context{"cause": err.Error()})
 		return
 	}

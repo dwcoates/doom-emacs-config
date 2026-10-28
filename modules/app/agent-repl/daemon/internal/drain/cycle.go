@@ -8,6 +8,7 @@ import (
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -47,6 +48,7 @@ var cycleReason = standDownReason{
 	detail: "stood down between keep-alives with its cache warm; the transcript was left as it stood",
 	done:   "stood an idle session down until its next keep-alive",
 	park:   wsm.ParkKeepaliveCycle,
+	life:   shimlife.StandDownKeepaliveCycle,
 }
 
 // CycleDown asks for the stand-down of WS's session after the keep-alive asked

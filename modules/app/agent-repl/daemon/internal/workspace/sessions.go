@@ -35,6 +35,7 @@ import (
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/shimsocket"
 	"agent-repld/internal/startingshim"
 	"agent-repld/internal/startslots"
@@ -204,6 +205,10 @@ type FleetDeps struct {
 	// Restarts records how long each step of a session's start took
 	// (restarttiming.SessionStart). Required.
 	Restarts restarttiming.Recorder
+	// ShimLife records every shim start by its cause and every deliberate
+	// stand-down by its reason, each read off the context its caller stated
+	// it on (shimlife). Required.
+	ShimLife ShimLifeTelemetry
 	// Now supplies the instants the fleet stamps; nil means time.Now.
 	Now func() time.Time
 	// AdoptBound bounds ONE adoption of an already-running shim. Zero means
@@ -412,28 +417,14 @@ type Fleet struct {
 // StartDetached brings a workspace's session up WITHOUT the caller waiting for
 // it, reporting the outcome to `done` on the start's own goroutine.
 //
-// A SESSION START IS NOT PART OF AN ANNOUNCEMENT'S ANSWER. RegisterWorkspace
-// records a row; reviving the conversation that row names is work the row
-// occasions, not work the answer contains. Running it inline made the answer
-// wait for the start, and Start takes the workspace's start gate -- so a
-// register that arrived while the boot's own bring-up held that gate waited
-// for the WHOLE of the boot's start.
-//
-// MEASURED, realtest run 2026-09-13T16:20:34: three daemon generations in a
-// row (pids 58458, 68787, 80526) had the boot bring-up's StartSession for
-// `2b81f45a724642ef` hang -- the shim never answered -- and Emacs's
-// re-announcement of that same workspace parked behind it on the gate. Emacs
-// timed RegisterWorkspace out at 10s all three times and reported
-// `link-up-register-failed` and then `call-on-closed-connection
-// SelectWorkspace`, for a row the daemon had already written: the register
-// answer was ready and the start was what was late.
+// CAUSE is why it starts (shimlife), stated on the start's context.
 //
 // THE CONTEXT IS THE FLEET'S, NOT THE CALLER'S. The caller's dies with its
 // answer, which would cancel the very start being detached from it. The
 // fleet's own is ended by DrainStarts at the exit, so an in-flight start is
 // ended and joined rather than left writing into a closing state client.
-func (f *Fleet) StartDetached(ws ids.WorkspaceID, done func(error)) {
-	f.runDetached(func(ctx context.Context) error { return f.Start(ctx, ws) },
+func (f *Fleet) StartDetached(ws ids.WorkspaceID, cause shimlife.StartCause, done func(error)) {
+	f.runDetached(func(ctx context.Context) error { return f.Start(shimlife.WithStart(ctx, cause), ws) },
 		func(_ context.Context, err error) {
 			if done != nil {
 				done(err)
@@ -547,6 +538,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs a bring-up step sink; the editor's startup is told each step by it")
 	case deps.Restarts == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs a restart recorder; each step of a session's start is timed into it")
+	case deps.ShimLife == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs the shim lifecycle telemetry; every start and stand-down is counted into it")
 	case deps.ChatSystemPrompt == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs the chat system prompt; every chat thread's session starts under it")
 	case deps.NetworkChanged == nil:
@@ -1263,8 +1256,10 @@ func (f *Fleet) start(ctx context.Context, ws ids.WorkspaceID, rebind bool) erro
 	defer f.deps.BringUps(ws, false)
 	f.markStarting(ws, true)
 	defer f.markStarting(ws, false)
+	began := f.now()
 	err := f.startUp(ctx, ws, rebind)
 	f.noteStartEnded(ws, err)
+	f.observeShimStart(ctx, ws, began, err)
 	return err
 }
 
@@ -1654,6 +1649,14 @@ func (f *Fleet) sessionUp(
 // what the resume must be filed against, so both are read here exactly as
 // Fleet.Start reads them.
 func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdResume) error {
+	began := f.now()
+	err := f.resumeCold(ctx, ws, resume)
+	f.observeShimStart(shimlife.WithStart(ctx, shimlife.StartColdGateAnswer), ws, began, err)
+	return err
+}
+
+// resumeCold is ResumeCold's body; ResumeCold counts it as a shim start.
+func (f *Fleet) resumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdResume) error {
 	record, err := f.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		return fmt.Errorf("re-open session for %q: %w", ws, err)
@@ -1910,7 +1913,7 @@ func (f *Fleet) reuseOrBringUp(ctx context.Context, log dlog.Logger, ws ids.Work
 		log.Info(opBringUp, "the held shim with no session runs another account's root; replacing it", dlog.Context{
 			"shim_pid": held.client.PID(), "held_config_dir": held.configDir, "config_dir": configDir,
 		})
-		if err := f.Stop(ctx, ws, true); err != nil {
+		if err := f.Stop(shimlife.WithStandDown(ctx, shimlife.StandDownReplaced), ws, true); err != nil {
 			log.Error(opBringUp, "the held shim of another account's root could not be stopped", dlog.Context{"cause": err.Error()})
 			return nil, pathNone, fmt.Errorf("start session for %q: stop the held shim of another root: %w", ws, err)
 		}
@@ -3037,6 +3040,7 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 // the views told the link is dead. REASON attributes the kill. It is Stop's
 // body, and a gate's stand-down's (standDownAtGate).
 func (f *Fleet) teardown(ctx context.Context, ws ids.WorkspaceID, session *live, force bool, reason string) error {
+	f.countStandDown(ctx, ws)
 	f.logTransition(ws, "session_live", true, false, dlog.Context{"force": force})
 	// THE SESSION IS GONE from this daemon's point of view the moment it
 	// leaves the map: the host view's session arm changes here, whatever the

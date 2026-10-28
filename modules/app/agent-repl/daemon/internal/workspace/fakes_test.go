@@ -38,6 +38,7 @@ import (
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -2307,6 +2308,8 @@ type fakeSessions struct {
 	startHold    chan struct{}
 	startMu      sync.Mutex
 	startCalls   []ids.WorkspaceID
+	// startCauses are the start causes the starts' contexts stated.
+	startCauses []shimlife.StartCause
 
 	// resumeHold, when set, holds a detached cold re-open until it is closed,
 	// for the tests whose subject is that the answer does NOT wait on it;
@@ -2381,6 +2384,9 @@ func (s *fakeSessions) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	defer s.startMu.Unlock()
 	s.startCtxErr = ctx.Err()
 	s.startCalls = append(s.startCalls, ws)
+	if cause, ok := shimlife.StartOf(ctx); ok {
+		s.startCauses = append(s.startCauses, cause)
+	}
 	if s.startErr != nil {
 		return s.startErr
 	}
@@ -2397,31 +2403,6 @@ func (s *fakeSessions) StartRebound(ctx context.Context, ws ids.WorkspaceID) err
 	s.rebound = append(s.rebound, ws)
 	s.startMu.Unlock()
 	return s.Start(ctx, ws)
-}
-
-// StartDetached runs the start INLINE and reports its outcome, which is what
-// keeps a test's assertions deterministic: the fake stands for the fleet's
-// contract (the caller does not wait on the answer), not for its goroutine.
-// The one test whose subject IS the detachment drives the real Fleet.
-func (s *fakeSessions) StartDetached(ws ids.WorkspaceID, done func(error)) {
-	if s.detachHold == nil {
-		err := s.Start(context.Background(), ws)
-		if done != nil {
-			done(err)
-		}
-		return
-	}
-	hold, entered := s.detachHold, s.detachEntered
-	go func() {
-		if entered != nil {
-			close(entered)
-		}
-		<-hold
-		err := s.Start(context.Background(), ws)
-		if done != nil {
-			done(err)
-		}
-	}()
 }
 
 func (s *fakeSessions) Stop(_ context.Context, ws ids.WorkspaceID, force bool) error {
@@ -2917,6 +2898,8 @@ func (h *fakeHealth) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.
 // fixture is one arranged verb surface plus every fake behind it, so a test
 // arranges by mutating fields and asserts by reading them.
 type fixture struct {
+	// gateAnswers records every cold gate answer the verbs counted.
+	gateAnswers fakeGateAnswers
 	// creates is the create gate the verbs hold a ticket from.
 	creates *creategate.Gate
 	// network is the network state a failed naming call is classified by.
@@ -3078,7 +3061,7 @@ func newFixture(t *testing.T) *fixture {
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames}, Browser: f.browser,
-		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads,
+		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers,
 		Headless:   f.headless,
 		Health:     f.health,
 		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, HomeDir: f.home, Log: f.log,
@@ -3777,4 +3760,35 @@ func (s *fakeStoreHistory) Before(_ context.Context, book string, after *convers
 func (s *fakeStoreHistory) Through(_ context.Context, book string, throughMs int64) (*conversationv1.HistoryPage, error) {
 	s.asked = append(s.asked, fmt.Sprintf("through %s %d", book, throughMs))
 	return s.page, s.err
+}
+
+// fakeShimLife records the shim starts and stand-downs the fleet counts.
+type fakeShimLife struct {
+	mu         sync.Mutex
+	starts     []string
+	standDowns []string
+}
+
+func (f *fakeShimLife) ObserveShimStart(ws ids.WorkspaceID, cause, outcome string, _ time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.starts = append(f.starts, string(ws)+" "+cause+" "+outcome)
+}
+
+func (f *fakeShimLife) CountShimStandDown(ws ids.WorkspaceID, reason string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.standDowns = append(f.standDowns, string(ws)+" "+reason)
+}
+
+// fakeGateAnswers records the cold gate answers the verbs count.
+type fakeGateAnswers struct {
+	mu      sync.Mutex
+	answers []string
+}
+
+func (f *fakeGateAnswers) CountColdGateAnswer(ws ids.WorkspaceID, choice, outcome string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.answers = append(f.answers, string(ws)+" "+choice+" "+outcome)
 }

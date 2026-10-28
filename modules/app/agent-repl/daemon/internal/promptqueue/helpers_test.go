@@ -27,6 +27,7 @@ import (
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -1682,7 +1683,9 @@ type harness struct {
 	banners *fakeTurnBanners
 	commits *fakeRecounter
 	clocks  *fakeCacheClocks
-	log     *dlog.TestSurfaces
+	// reviveCauses are the start causes the revivals stated.
+	reviveCauses []shimlife.StartCause
+	log          *dlog.TestSurfaces
 
 	// noSession, when set, makes the client resolver report no session.
 	revivals   int
@@ -1762,8 +1765,11 @@ func newHarness(t *testing.T) *harness {
 		Merges:  h.leases,
 		Holds:   h.holds,
 		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession && !h.clientReaped },
-		Revive: func(context.Context, ids.WorkspaceID) error {
+		Revive: func(ctx context.Context, _ ids.WorkspaceID) error {
 			h.revivals++
+			if cause, ok := shimlife.StartOf(ctx); ok {
+				h.reviveCauses = append(h.reviveCauses, cause)
+			}
 			if h.reviveErr != nil {
 				return h.reviveErr
 			}

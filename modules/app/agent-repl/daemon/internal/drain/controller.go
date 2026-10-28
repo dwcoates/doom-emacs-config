@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -386,7 +387,7 @@ func (c *controller) standEverySessionDown(ctx context.Context) {
 	}
 	for _, ws := range workspaces {
 		fields := dlog.Context{"workspace": string(ws.ID)}
-		standDown, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.deps.StandBound)
+		standDown, cancel := context.WithTimeout(shimlife.WithStandDown(context.WithoutCancel(ctx), shimlife.StandDownShutdown), c.deps.StandBound)
 		err := c.deps.Stand.KillSession(standDown, ws.ID, true)
 		cancel()
 		if err != nil {

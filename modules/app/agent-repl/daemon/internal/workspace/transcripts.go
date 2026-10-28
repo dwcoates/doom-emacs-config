@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -243,7 +244,7 @@ func (v *verbs) BindSession(ctx context.Context, ws ids.WorkspaceID, vendorSessi
 	swap := context.WithoutCancel(ctx)
 
 	reportBindStage(progress, BindStageStoppingSession)
-	if err := v.deps.Sessions.Stop(swap, ws, false); err != nil {
+	if err := v.deps.Sessions.Stop(shimlife.WithStandDown(swap, shimlife.StandDownRebind), ws, false); err != nil {
 		return refuseWith(log, rpc, ArmStopFailed,
 			fmt.Sprintf("the current session would not end: %s", err.Error()), false,
 			map[string]any{"detail": err.Error()})
@@ -285,7 +286,7 @@ func (v *verbs) BindSession(ctx context.Context, ws ids.WorkspaceID, vendorSessi
 	// one's pages entirely, so the bind's own start tells the shim to adopt
 	// the chosen conversation's identity instead.
 	reportBindStage(progress, BindStageStartingSession)
-	if err := v.deps.Sessions.StartRebound(swap, ws); err != nil {
+	if err := v.deps.Sessions.StartRebound(shimlife.WithStart(swap, shimlife.StartRebind), ws); err != nil {
 		return refuseWith(log, rpc, ArmStartFailed,
 			fmt.Sprintf("the session on the bound conversation would not come up: %s", err.Error()), false,
 			map[string]any{"detail": err.Error()})

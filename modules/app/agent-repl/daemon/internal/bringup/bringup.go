@@ -27,6 +27,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -235,7 +236,7 @@ func one(ctx context.Context, deps Deps, ws wsm.Workspace) (Outcome, error) {
 		phase = restarttiming.StartWake
 	}
 	began := deps.Now()
-	err = deps.StartSession(startCtx, ws.ID)
+	err = deps.StartSession(shimlife.WithStart(startCtx, startCause(deps.Via)), ws.ID)
 	took := deps.Now().Sub(began)
 	if err != nil {
 		fields["error"] = err.Error()
@@ -264,4 +265,13 @@ func one(ctx context.Context, deps Deps, ws wsm.Workspace) (Outcome, error) {
 	}
 	log.Debug(deps.Operation, "an open workspace's session was started", fields)
 	return Started, nil
+}
+
+// startCause is the shim lifecycle's cause for a bring-up started VIA: a
+// boot's, or a handover successor's.
+func startCause(via restarttiming.StartVia) shimlife.StartCause {
+	if via == restarttiming.StartTakeover {
+		return shimlife.StartTakeover
+	}
+	return shimlife.StartBoot
 }

@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/shimsocket"
 	"agent-repld/internal/wsm"
 )
@@ -1232,7 +1233,7 @@ func (f *Fleet) standCarriedColdGate(ws ids.WorkspaceID, vendorSessionID string,
 // the same path -- watcher told first, terminals written, then the process --
 // as every other stand-down in the daemon.
 func (f *Fleet) StandDown(ctx context.Context, ws ids.WorkspaceID) error {
-	return f.KillSession(ctx, ws, true)
+	return f.KillSession(shimlife.WithStandDown(ctx, shimlife.StandDownHandover), ws, true)
 }
 
 // The fleet IS the rollout's shim fleet, the drain's stand and the verbs'

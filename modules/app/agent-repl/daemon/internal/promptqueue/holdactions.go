@@ -353,7 +353,7 @@ func (q *queue) deliverHeld(ctx context.Context, d *delivery, held wsm.HeldPromp
 		var revived bool
 		var err error
 		d.outside(shimCall{what: "revival", turn: held.Turn, holds: []ids.TurnID{held.Turn}}, log, func() {
-			revived, err = q.revive(ctx, ws, log)
+			revived, err = q.revive(ctx, ws, revivalLoad, log)
 		})
 		if err != nil {
 			return false, err

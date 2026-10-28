@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimlife"
 )
 
 // DefaultRestartStopBound bounds the ONE stop a restart asks of the shim before
@@ -101,7 +102,7 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 // shim up, answering the outcome as the restart's.
 func (v *verbs) startForRestart(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
 	log.Info(opRestart, "no shim is up; the restart starts the session", nil)
-	if err := v.deps.Sessions.Start(ctx, ws); err != nil {
+	if err := v.deps.Sessions.Start(shimlife.WithStart(ctx, shimlife.StartRestart), ws); err != nil {
 		if why, notOurs := startNotAgentReplFault(err); notOurs {
 			log.Info(opRestart, "the restart's start "+why, dlog.Context{"cause": err.Error()})
 		} else {

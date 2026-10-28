@@ -7,6 +7,7 @@ import (
 	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -122,6 +123,7 @@ var withheldReason = standDownReason{
 	detail: "hidden, collapsed or closed by the user; the transcript was left as it stood",
 	done:   "stood a withheld workspace's session down",
 	park:   wsm.ParkHibernated,
+	life:   shimlife.StandDownCacheLapse,
 }
 
 // standDownWithheld is one attempt.

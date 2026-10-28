@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/drain"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimlife"
 )
 
 // standDownReason is why the serving lifetime ended. It is TYPED so the one
@@ -73,7 +74,7 @@ func stopEveryShim(fleet shimStopFleet, supervisor shimclient.Supervisor, bound 
 		var stopped int
 		var errs []error
 		for _, ws := range fleet.Workspaces() {
-			stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), bound)
+			stop, cancel := context.WithTimeout(shimlife.WithStandDown(context.WithoutCancel(ctx), shimlife.StandDownShutdown), bound)
 			err := fleet.KillSession(stop, ws, true)
 			cancel()
 			if err != nil {

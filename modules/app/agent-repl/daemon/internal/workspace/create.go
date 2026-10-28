@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/titlesynth"
 	"agent-repld/internal/wsm"
 )
@@ -448,7 +449,11 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		log.Info(opCreate, "created a merge workspace whose session comes up when its merge first needs a turn", dlog.Context{
 			"requester": string(spec.MergeOf.Requester), "maker": string(spec.MergeOf.Maker)})
 	case spec.ForkFrom != nil || strings.TrimSpace(spec.InitialPrompt) != "":
-		if err := v.deps.Sessions.Start(ctx, record.ID); err != nil {
+		cause := shimlife.StartCreate
+		if spec.ForkFrom != nil {
+			cause = shimlife.StartFork
+		}
+		if err := v.deps.Sessions.Start(shimlife.WithStart(ctx, cause), record.ID); err != nil {
 			log.Error(opCreate, "the session did not come up", dlog.Context{"cause": err.Error()})
 			return wsm.Workspace{}, fmt.Errorf("create %q: start the session: %w", branch, err)
 		}
@@ -904,7 +909,7 @@ func (v *verbs) StartMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) err
 		log.Error(opCreate, "a merge workspace start named a workspace that is none", dlog.Context{"cause": err.Error()})
 		return err
 	}
-	if err := v.deps.Sessions.Start(ctx, ws); err != nil {
+	if err := v.deps.Sessions.Start(shimlife.WithStart(ctx, shimlife.StartMerge), ws); err != nil {
 		log.Error(opCreate, "the merge workspace's session did not come up", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start merge workspace %q: %w", ws, err)
 	}

@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -442,7 +443,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 				"state": "reviving", "before": before, "after": false,
 			})
 		}()
-		revived, err := q.revive(ctx, ws, log)
+		revived, err := q.revive(ctx, ws, cause, log)
 		if err != nil {
 			// THE BRING-UP FAILED, and feed_held.proto settles what that
 			// means for the entries waiting on it: "A FAILED BRING-UP NEVER
@@ -747,14 +748,18 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 // revive brings a parked session back up for a submission that found none.
 // It reports whether a revival was attempted AND succeeded; a revival that
 // fails is the submission's failure, never a silent refusal.
-func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (bool, error) {
+func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, cause revivalCause, log dlog.Logger) (bool, error) {
 	if q.deps.Revive == nil {
 		return false, nil
 	}
 	log.Debug(opSubmit, "no session is live; reviving the workspace for the submission", nil)
 	q.noteBringUp(ws, 1, log)
 	defer q.noteBringUp(ws, -1, log)
-	if err := q.deps.Revive(ctx, ws); err != nil {
+	life := shimlife.StartPrompt
+	if cause == revivalRelaunch {
+		life = shimlife.StartRelaunch
+	}
+	if err := q.deps.Revive(shimlife.WithStart(ctx, life), ws); err != nil {
 		log.Error(opSubmit, "the revival failed; the submission cannot be delivered",
 			dlog.Context{"cause": err.Error()})
 		return false, fmt.Errorf("submit to %q: revive the session: %w", ws, err)
