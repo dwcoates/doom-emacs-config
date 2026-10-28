@@ -16,7 +16,8 @@ import (
 // cards leaving the feed, and a card still on screen would report a fault
 // that no longer stands.
 //
-// ONLY A FAULT WAITING CURES IS ANSWERED (waitCuredEnding). A refusal of the
+// ONLY A FAULT WAITING CURES IS ANSWERED (waitCuredCard), whether it ended its
+// turn on a vendor-fault card or stands as a vendor notice of its own. A refusal of the
 // request itself (a 400, an auth, permission or billing refusal, a model that
 // does not exist, an output ceiling) stays: the vendor serving the next turn
 // says nothing about it. An account cause has its own answer, a sign-in
@@ -46,6 +47,13 @@ const opVendorRecovered = "daemon.feed.vendor_recovered"
 type servedEvidence struct {
 	key  string
 	turn string
+}
+
+// waitCuredCard reports whether ROW is a card an outage drew that a later
+// turn's service answers: a turn's vendor-fault ending whose cause waiting
+// can cure, or a vendor notice the producer classed as trouble waiting cures.
+func waitCuredCard(row *frontendv1.FeedRow) bool {
+	return waitCuredEnding(row) || transientNotice(row)
 }
 
 // waitCuredEnding reports whether ROW is a turn's vendor-fault ending whose
@@ -108,7 +116,7 @@ func (r *resolver) settleVendorRecovery(s *wsState, addr feedid.Feed, id string)
 		var answered []string
 		for _, other := range f.order {
 			ending := f.rows[other]
-			if !waitCuredEnding(ending) || ending.GetTurn().GetValue() == turn || f.rank[other].key >= key {
+			if !waitCuredCard(ending) || ending.GetTurn().GetValue() == turn || f.rank[other].key >= key {
 				continue
 			}
 			answered = append(answered, other)
@@ -121,7 +129,7 @@ func (r *resolver) settleVendorRecovery(s *wsState, addr feedid.Feed, id string)
 				"the vendor served a later turn; the outage's vendor-error cards before it were retired",
 				dlog.Context{"feed": f.key, "evidence_row": id, "turn": turn, "retired": len(answered), "first": answered[0]})
 		}
-	case waitCuredEnding(row):
+	case waitCuredCard(row):
 		if f.served.key <= key || f.served.turn == turn {
 			return
 		}

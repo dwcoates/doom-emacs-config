@@ -207,3 +207,103 @@ func TestAnOutageCardThatSortsBeforeTheNewestServiceIsRetiredAsItIsDrawn(t *test
 		t.Fatalf("records = %+v, want the retirement recorded naming the service's turn", h.records())
 	}
 }
+
+// transientNotice hands the resolver one settled vendor notice of TURN that
+// its producer classed as trouble waiting cures.
+func (h *harness) transientNotice(unit, text, turn string) {
+	h.t.Helper()
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame(unit, &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: text},
+			Authorship: &conversationv1.AgentResponseSuccess_SynthesizedNotice{
+				SynthesizedNotice: &conversationv1.AgentResponseSynthesizedNotice{
+					Subject: &conversationv1.AgentResponseSynthesizedNotice_VendorTransient{VendorTransient: &conversationv1.AgentNoticeVendorTransient{}},
+				},
+			},
+		}, nil), &conversationv1.TurnId{Value: turn}, nil)
+}
+
+func TestAVendorServingALaterTurnRetiresATransientNoticeBeforeIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("t1", "question")
+	h.transientNotice("u-t1", "API Error: Connection dropped (ECONNRESET)", "t1")
+	if !h.noticeRowDrawn("u-t1") {
+		t.Fatal("the transient notice was not drawn before the vendor served again")
+	}
+
+	// Act
+	h.liveResponse("u-t2", "back again", "t2")
+
+	// Assert
+	if h.noticeRowDrawn("u-t1") {
+		t.Fatal("a transient notice stood after the vendor served a later turn")
+	}
+	if !h.hasRecord("info", opVendorRecovered) {
+		t.Fatalf("records = %+v, want the recovery recorded at INFO", h.records())
+	}
+}
+
+func TestATransientNoticeStandsWhileNoLaterTurnIsServed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("t1", "question")
+
+	// Act
+	h.transientNotice("u-t1", "API Error: 529 overloaded", "t1")
+
+	// Assert
+	if !h.noticeRowDrawn("u-t1") {
+		t.Fatal("a transient notice was retired with no later service")
+	}
+}
+
+func TestANoticeNoOutageCuredStandsAfterTheVendorServes(t *testing.T) {
+	cases := []struct {
+		name string
+		draw func(h *harness)
+	}{
+		{name: "an unclassified notice", draw: func(h *harness) { h.notice("u-t1", "API Error: 400 bad request", "t1") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.deliverPrompt("t1", "question")
+			tc.draw(h)
+
+			// Act
+			h.liveResponse("u-t2", "served", "t2")
+
+			// Assert
+			if !h.noticeRowDrawn("u-t1") {
+				t.Fatal("a notice that waiting does not cure was retired by service")
+			}
+		})
+	}
+}
+
+func TestATransientNoticeOlderThanTheNewestServiceIsRetiredAsItIsDrawn(t *testing.T) {
+	// Arrange: the service of t2 sits later in the conversation than t1's
+	// notice, which arrives after it, as a page loaded on scroll-back does.
+	h := newHarness(t)
+	h.deliverPromptAt("t1", "question", 1_000)
+	h.resolver.OnActivity(testWorkspace, mainAgent(), responseSuccessActivity("u-t2", "served"),
+		&conversationv1.TurnId{Value: "t2"}, placeAt(3_000))
+
+	// Act
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("u-t1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "API Error: 503"},
+			Authorship: &conversationv1.AgentResponseSuccess_SynthesizedNotice{
+				SynthesizedNotice: &conversationv1.AgentResponseSynthesizedNotice{
+					Subject: &conversationv1.AgentResponseSynthesizedNotice_VendorTransient{VendorTransient: &conversationv1.AgentNoticeVendorTransient{}},
+				},
+			},
+		}, nil), &conversationv1.TurnId{Value: "t1"}, placeAt(2_000))
+
+	// Assert
+	if h.noticeRowDrawn("u-t1") {
+		t.Fatal("a transient notice older than the feed's newest service was drawn")
+	}
+}

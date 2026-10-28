@@ -577,13 +577,13 @@ describe("a content_block_delta the vendor sent with no index", () => {
 // ---------------------------------------------------------------------------
 
 /** The notice subject the settled prose block ended up carrying. */
-function noticeSubjectOf(record: Record<string, unknown>): string | undefined {
+function noticeSubjectOf(record: Record<string, unknown>, text = "API Error"): string | undefined {
   const entries = [
     ...createFold().onSdkMessage(
       {
         ...(assistantMessage({
           id: "msg_notice",
-          content: [{ type: "text", text: "API Error" }],
+          content: [{ type: "text", text }],
         }) as unknown as Record<string, unknown>),
         ...record,
       } as unknown as SdkMessage,
@@ -597,6 +597,26 @@ function noticeSubjectOf(record: Record<string, unknown>): string | undefined {
     ? authorship.value.subject.case
     : undefined;
 }
+
+describe("prose the vendor synthesized for trouble waiting cures", () => {
+  it.each([
+    ["an overloaded API", { error: "unknown" }, "API Error: 529 overloaded_error"],
+    ["a server status", { error: "unknown" }, "API Error: 503 service unavailable"],
+    ["a dropped connection", { error: "unknown" }, "API Error: Connection dropped (ECONNRESET)"],
+    ["a timeout", { error: "unknown" }, "API Error: Request timed out."],
+    ["the vendor's server_error class", { error: "server_error" }, "API Error: something went wrong"],
+  ])("classifies %s as vendor-transient", (_name, record, text) => {
+    expect(noticeSubjectOf(record, text)).toBe("vendorTransient");
+  });
+
+  it.each([
+    ["an invalid request", { error: "invalid_request" }, "API Error: 400 invalid_request_error"],
+    ["a rejected credential", { error: "authentication_failed" }, "API Error: 401 authentication_error"],
+    ["unremarkable words", { error: "unknown" }, "API Error: nothing recognizable"],
+  ])("leaves %s unclassified", (_name, record, text) => {
+    expect(noticeSubjectOf(record, text)).toBe("unclassified");
+  });
+});
 
 describe("prose the vendor synthesized for a rate limit", () => {
   it("classifies the notice as a USAGE LIMIT, not as an unclassified failure", () => {
