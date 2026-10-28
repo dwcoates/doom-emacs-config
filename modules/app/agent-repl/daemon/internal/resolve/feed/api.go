@@ -156,6 +156,10 @@ type Resolver interface {
 	// PullTarget answers a copy of the installed target, nil for none. The
 	// prompt queue's mirror of an accepted prompt links through it.
 	PullTarget(ws ids.WorkspaceID) *pullrefs.Target
+	// RecentCodeSpans answers the inline code spans of the workspace's last
+	// RecentFinalResponses final responses (codespans.go). The prompt queue's
+	// mirror of an accepted prompt marks them up through it.
+	RecentCodeSpans(ws ids.WorkspaceID) []string
 	// OutputAddress answers a copy of the address standing for one
 	// workspace, nil when none stands. The prompt queue reads it as it
 	// records a turn the lease holder started.

@@ -326,7 +326,7 @@ func TestDrawUserBlocksSkipsTextTheStripEmptied(t *testing.T) {
 	strip := func(string) string { return "" }
 
 	// Act.
-	blocks := DrawUserBlocks(content, strip, refusingResolver, nil, dlog.NewTestLogger())
+	blocks := DrawUserBlocks(content, strip, refusingResolver, nil, nil, dlog.NewTestLogger())
 
 	// Assert.
 	if len(blocks) != 0 {
@@ -349,7 +349,7 @@ func TestDrawUserBlocksKeepsTheComposedOrder(t *testing.T) {
 	}
 
 	// Act.
-	blocks := DrawUserBlocks(content, func(s string) string { return s }, resolve, nil, dlog.NewTestLogger())
+	blocks := DrawUserBlocks(content, func(s string) string { return s }, resolve, nil, nil, dlog.NewTestLogger())
 
 	// Assert.
 	if len(blocks) != 2 {
@@ -373,7 +373,7 @@ func TestDrawUserBlocksNamesAnUnresolvableImage(t *testing.T) {
 	log := dlog.NewTestLogger()
 
 	// Act.
-	blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, nil, log)
+	blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, nil, nil, log)
 
 	// Assert.
 	if len(blocks) != 1 {

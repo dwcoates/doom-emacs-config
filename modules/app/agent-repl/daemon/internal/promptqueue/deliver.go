@@ -333,7 +333,7 @@ func (q *queue) retractAccepted(ws ids.WorkspaceID, turn ids.TurnID) {
 // THAN THE PERSON SAID, for the whole session. It dropped every image block.
 func (q *queue) mirrorBlocks(ws ids.WorkspaceID, said *conversationv1.UserSaid) []*frontendv1.FeedUserPromptBlock {
 	return feed.DrawUserBlocks(said.GetContent(), q.deps.StripSentinels, q.deps.ResolveImage,
-		q.deps.Feed.PullTarget(ws), q.deps.Log.Global())
+		q.deps.Feed.PullTarget(ws), q.deps.Feed.RecentCodeSpans(ws), q.deps.Log.Global())
 }
 
 // interruptionNote is what the agent is told, alone, with a prompt that

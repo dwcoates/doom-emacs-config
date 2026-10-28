@@ -1868,6 +1868,9 @@ type fakeFeed struct {
 	pullTargets map[ids.WorkspaceID]*pullrefs.Target
 }
 
+// RecentCodeSpans answers no spans.
+func (f *fakeFeed) RecentCodeSpans(ids.WorkspaceID) []string { return nil }
+
 // SetPullTarget records the pull request target installed for a workspace.
 func (f *fakeFeed) SetPullTarget(ws ids.WorkspaceID, target *pullrefs.Target) {
 	if f.pullTargets == nil {

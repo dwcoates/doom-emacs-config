@@ -453,14 +453,16 @@ func PromptRowHidden(origin conversationv1.PromptOrigin) bool {
 // drawUserBlocks resolves what a person composed into drawable blocks, with
 // this resolver's own strip, image resolution and pull request target.
 func (r *resolver) drawUserBlocks(s *wsState, content *conversationv1.UserContent) []*frontendv1.FeedUserPromptBlock {
-	return DrawUserBlocks(content, r.deps.StripSentinels, r.resolveImage, r.pullTarget(s.id), r.logger(s.id))
+	return DrawUserBlocks(content, r.deps.StripSentinels, r.resolveImage, r.pullTarget(s.id), r.recentCodeSpans(s), r.logger(s.id))
 }
 
 // DrawUserBlocks resolves what a person composed into drawable blocks: the
 // text with the host's sentinel spans STRIPPED (the full text stays on the
 // record), each image reference resolved to a src the webview can load, and
 // anything unmodeled named rather than dropped. Its pull request references
-// are linked into PULLS, nil for none (linkPulls).
+// are linked into PULLS, nil for none (linkPulls), and every plain occurrence
+// of an inline code span in SPANS, the recent final responses' (RecentCodeSpans),
+// is marked up as inline code (markCodeSpans).
 //
 // IT IS EXPORTED BECAUSE TWO PRODUCERS DRAW THE SAME ROW. The resolver draws
 // a user prompt when history replays it; the prompt queue MIRRORS the same
@@ -475,6 +477,7 @@ func DrawUserBlocks(
 	strip func(string) string,
 	resolveImage ImageResolver,
 	pulls *pullrefs.Target,
+	spans []string,
 	log dlog.Logger,
 ) []*frontendv1.FeedUserPromptBlock {
 	blocks := make([]*frontendv1.FeedUserPromptBlock, 0, len(content.GetBlocks()))
@@ -488,6 +491,7 @@ func DrawUserBlocks(
 				continue
 			}
 			parsed := prose.ParsePrompt(log, drawn)
+			markCodeSpans(parsed, spans)
 			linkPulls(parsed, pulls, false)
 			blocks = append(blocks, &frontendv1.FeedUserPromptBlock{
 				Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Prose: parsed}},

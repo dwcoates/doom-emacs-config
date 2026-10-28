@@ -951,7 +951,7 @@ func TestAQuoteTextBlockDidNotComposeIsRecordedAndPanics(t *testing.T) {
 	// Act.
 	panicked := func() (recovered any) {
 		defer func() { recovered = recover() }()
-		DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, nil, log)
+		DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, nil, nil, log)
 		return nil
 	}()
 

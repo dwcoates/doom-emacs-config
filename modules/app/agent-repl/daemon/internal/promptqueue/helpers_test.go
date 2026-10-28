@@ -1094,6 +1094,9 @@ func (f *fakeFeed) AnsweredSince(_ ids.WorkspaceID, at time.Time) bool {
 	return !f.answeredAt.IsZero() && !f.answeredAt.Before(at)
 }
 
+// RecentCodeSpans answers no spans: the fixture draws plain prompts.
+func (f *fakeFeed) RecentCodeSpans(ids.WorkspaceID) []string { return nil }
+
 // PullTarget answers the fixture's pull request target.
 func (f *fakeFeed) PullTarget(ids.WorkspaceID) *pullrefs.Target { return f.pullTarget }
 
