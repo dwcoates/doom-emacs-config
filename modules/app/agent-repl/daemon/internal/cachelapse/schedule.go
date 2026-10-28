@@ -195,15 +195,18 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		return
 	}
 	fields := dlog.Context{"due": due}
+	observe := func(outcome string) { k.deps.Telemetry.ObserveBeat(outcome, now.Sub(due)) }
 	shim, served := k.deps.Shim(ws)
 	if !served {
 		if parked {
+			observe(BeatOutcomeSessionParked)
 			// THE RESTORE IS LATE OR STILL RUNNING: the beat goes out when its
 			// session comes up (SessionUp schedules it, already due).
 			log.Info(opDrive, "the keep-alive is due and its session is still parked; it goes out once the session is restored", fields)
 			k.requestRestore(ctx, ws, due)
 			return
 		}
+		observe(BeatOutcomeNotServed)
 		log.Debug(opDrive, "the keep-alive is due and no session is served; the session's coming up sends it", fields)
 		return
 	}
@@ -212,12 +215,15 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		var failed *BeatSubmitFailed
 		switch {
 		case errors.Is(err, ErrNoSession):
+			observe(BeatOutcomeNoSession)
 			log.Debug(opDrive, "the shim holds no session; the session's coming up sends the keep-alive", fields)
 			return
 		case errors.As(err, &failed):
+			observe(BeatOutcomeSubmitFailed)
 			log.Error(opDrive, "the keep-alive's submission failed; it is asked again shortly",
 				dlog.WithCause(dlog.Merge(fields, dlog.Context{"retry_in": BeatRetry.String()}), err))
 		default:
+			observe(BeatOutcomeShimUnreachable)
 			shimCallFailed(ctx, log, opDrive, shimFailure{
 				doing:     "asking the shim for its keep-alive",
 				died:      "the shim died under the keep-alive; the death is recorded by daemon.shimclient.exit, and the next session's coming up sends it",
@@ -230,6 +236,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 	}
 	switch {
 	case answer.GetSent() != nil:
+		observe(BeatOutcomeSent)
 		log.Info(opDrive, "sent the workspace's keep-alive; its session is stood down until the next one once it is free", fields)
 		// THE BEAT MOVES THE CACHE CLOCK, and it is recorded before the
 		// stand-down, whose edges re-time the next beat from that clock.
@@ -251,6 +258,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		}
 		k.beats[ws] = now.Add(k.deps.Interval)
 	case answer.GetSkipped().GetMainAgentBusy() != nil:
+		observe(BeatOutcomeMainAgentBusy)
 		// NOT EVERY BUSY SLOT ENDS IN A FREE EDGE. A turn the daemon serves
 		// does, and re-times the beat from its own end; the shim's own
 		// keep-alive turn and a vendor turn it never serves hold the slot
@@ -261,9 +269,11 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		log.Info(opDrive, "the main agent is busy, which keeps the cache warm itself; the next beat falls one interval on, or is timed when it falls free",
 			dlog.Merge(fields, dlog.Context{"detail": answer.GetSkipped().GetMainAgentBusy().GetDetail(), "next": k.beats[ws]}))
 	case answer.GetSkipped().GetDetachedWorkLive() != nil:
+		observe(BeatOutcomeDetachedWorkLive)
 		log.Info(opDrive, "detached work is live, and the rewind a keep-alive owes would kill it; the keep-alive goes out when it ends",
 			dlog.Merge(fields, dlog.Context{"live_items": answer.GetSkipped().GetDetachedWorkLive().GetLiveItems()}))
 	case answer.GetSkipped().GetCacheLapsed() != nil:
+		observe(BeatOutcomeCacheLapsed)
 		record, err := k.deps.DB.Workspace(ctx, ws)
 		if err == nil && record.LastTurnEndedAt != nil {
 			k.lapsedAt[ws] = *record.LastTurnEndedAt
@@ -271,6 +281,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		log.Info(opDrive, "the cache had already lapsed; no keep-alive is sent until a turn moves its clock",
 			dlog.Merge(fields, dlog.Context{"lapsed_at_ms": answer.GetSkipped().GetCacheLapsed().GetLapsedAtMs()}))
 	default:
+		observe(BeatOutcomeUnnamedJudgment)
 		log.Error(opDrive, "the shim answered the keep-alive with a judgment this daemon does not name", dlog.Merge(fields, dlog.Context{
 			"invariant_violation": "every SendKeepaliveSuccess arm is handled",
 		}))

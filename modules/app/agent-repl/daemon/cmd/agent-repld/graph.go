@@ -823,6 +823,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		},
 		Clock: clock.System{},
 		Log:   p.Surfaces,
+		// Every beat, lapse and cold gate lands in the metrics surface.
+		Telemetry: p.Metrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the cache keeper: %w", err)
