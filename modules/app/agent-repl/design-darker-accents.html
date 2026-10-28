@@ -18,7 +18,7 @@
   .controls { display: flex; gap: 18px; align-items: center; margin-bottom: 18px; color: var(--muted); }
   .controls input[type=range] { width: 220px; }
   .controls output { color: var(--fg); font: 12px ui-monospace, monospace; }
-  .options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  .options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
   .option { background: var(--bg); border: 1px solid #000; border-radius: 8px; overflow: hidden; }
   .option h2 { margin: 0; padding: 10px 12px 2px; font-size: 13px; }
   .option .note { padding: 0 12px 8px; color: var(--muted); font-size: 11px; }
@@ -44,7 +44,7 @@
 </head>
 <body>
 <h1>Darker accents</h1>
-<p class="lede">Every non-grey color the dark theme paints today, then the same colors darker. Each option lowers OKLCH lightness by one step for all colors at once, keeping hue and scaling chroma so the darker colors don't turn muddy. The grounds are the current ones: feed <code>#121212</code>, sidebar and footer <code>#1a1a1a</code>, prompt <code>#212121</code>, tool card <code>#181818</code>. The slider sets the fourth column to any step.</p>
+<p class="lede">Round two, built around the custom scheme you picked (lightness −0.20, chroma ×0.90). Each option lowers OKLCH lightness for every color at once, keeping hue; the variations move the step a little either way and trade chroma for punch. The grounds are the current ones: feed <code>#121212</code>, sidebar and footer <code>#1a1a1a</code>, prompt <code>#212121</code>, tool card <code>#181818</code>. The sliders set the last column to any step.</p>
 <div class="controls">
   <label>custom lightness step <input id="dl" type="range" min="0" max="0.30" step="0.01" value="0.20"></label><output id="dlo"></output>
   <label>chroma scale <input id="cs" type="range" min="0.6" max="1.2" step="0.05" value="0.9"></label><output id="cso"></output>
@@ -145,10 +145,15 @@ function draw() {
   document.getElementById("dlo").textContent = dl.toFixed(2);
   document.getElementById("cso").textContent = cs.toFixed(2);
   document.getElementById("options").innerHTML = [
-    panel("Current", "today's colors", 0, 1),
-    panel("A · a little darker", "lightness −0.06, chroma ×0.95", 0.06, 0.95),
-    panel("B · darker", "lightness −0.12, chroma ×0.9", 0.12, 0.9),
-    panel("C · custom", `lightness −${dl.toFixed(2)}, chroma ×${cs.toFixed(2)}`, dl, cs),
+    panel("Current", "today's colors, for reference", 0, 1),
+    panel("Your pick", "lightness −0.20, chroma ×0.90", 0.20, 0.9),
+    panel("D · a touch lighter", "lightness −0.17, chroma ×0.90", 0.17, 0.9),
+    panel("E · a touch darker", "lightness −0.23, chroma ×0.90", 0.23, 0.9),
+    panel("F · same depth, richer", "lightness −0.20, chroma ×1.00", 0.20, 1.0),
+    panel("G · same depth, quieter", "lightness −0.20, chroma ×0.80", 0.20, 0.8),
+    panel("H · darker and richer", "lightness −0.23, chroma ×1.00", 0.23, 1.0),
+    panel("I · lighter and quieter", "lightness −0.17, chroma ×0.80", 0.17, 0.8),
+    panel("Custom", `lightness −${dl.toFixed(2)}, chroma ×${cs.toFixed(2)}`, dl, cs),
   ].join("");
 }
 dlIn.addEventListener("input", draw);
