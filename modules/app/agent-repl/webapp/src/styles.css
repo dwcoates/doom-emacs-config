@@ -270,22 +270,9 @@
      the softer sibling of the --clear-divider red, because a compaction
      summarizes the context above rather than dropping it the way a clear does. */
   /* --compact-rule: render-colors.json#color_values's orange (src/vocab.ts). */
-  /* The border around a turn's final response: green, the palette's success
-     hue, so the answer a turn actually landed on is findable at a glance among
-     the commentary bubbles the agent emitted between its tool calls. */
-  --final-response: #16a34a;
-  /* A FINISHED response the agent wrote MID-TURN (prose between tool calls:
-     settled, but not the turn's answer) wears NO border (owner request,
-     2026-10-14, retiring the pear edge of 2026-09-23), as a thinking bubble
-     wears none. */
-  /* THE GREEN ANSWER EDGE IS DRAWN AT 35% STRENGTH (owner ruling,
-     2026-10-08; owner requests, 2026-10-14: the final response's green border
-     must read thin, and 2026-10-24: half strength still read too prominent).
-     Every bubble border is already 0.3px, which a Retina WebKit rounds up to
-     one device pixel, the thinnest line it draws, so a narrower width changes
-     nothing on screen. A fainter line is what reads thinner: the hue at this
-     share of its strength, in both themes. */
-  --response-border-strength: 35%;
+  /* NO RESPONSE WEARS A BORDER OR A FILL (owner request, 2026-10-28, retiring
+     the final response's green edge of 2026-09-23): a turn's answer, like the
+     prose the agent wrote mid-turn and its thinking, is text on the feed. */
   /* THE SELECTED ENTRY's color: the ring on a non-bubble card a footer
      detached-work jump landed on. A selected BUBBLE is marked by its fill
      instead (--selected-bubble-bg, below). */
@@ -304,11 +291,12 @@
   --selected-bubble-bg: #f5f5f7;
   /* THE SELECTED FINAL RESPONSE's fill (owner requests, 2026-10-20): dimmed
      to halfway between the selected grey and an unselected final response's
-     own --assistant, so the answer's highlight reads softer than the other
-     selected bubbles', then 25% dimmer again: the grey keeps 37.5% (0.75 of
-     the half). Declared once: both themes resolve it from their own two
+     own fill, so the answer's highlight reads softer than the other selected
+     bubbles', then 25% dimmer again: the grey keeps 37.5% (0.75 of the
+     half). That fill is the feed's --bg since the answer lost its own
+     (2026-10-28). Declared once: both themes resolve it from their own two
      tokens. */
-  --selected-final-response-bg: color-mix(in srgb, var(--selected-bubble-bg) 37.5%, var(--assistant));
+  --selected-final-response-bg: color-mix(in srgb, var(--selected-bubble-bg) 37.5%, var(--bg));
   /* THE SELECTED PROMPT's fill (owner request, 2026-10-19): a prompt bubble
      that is not held is selected in a darker blue than the user prompt's own
      --user (#b8d2ff), rather than the grey every other selected bubble
@@ -325,7 +313,7 @@
      being in flight and vanish at the turn's terminal; the name is kept
      because the token is the vocabulary other surfaces are written in. Reads
      clearly against the blue --user fill in this theme; the dark theme lifts
-     it the same way --final-response lifts for its own dark fill. */
+     it for its own dark fill. */
   /* The async-quiescence border (and the in-bubble catalog + topbar monitoring
      datapoint):
      a warm AMBER sitting between the idle orange/yellow indicators and the
@@ -545,7 +533,12 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --reference: #f5a25d;
-    --bg: #151514;
+    /* THE GROUNDS FOLLOW THE CLAUDE DESKTOP APP'S DARKER SURFACES (owner
+       requests, 2026-10-28), sampled from two screenshots of it: the feed a
+       near-black #0e0e0e, and the sidebar the very #212121 every prompt
+       bubble wears. The topbar, the composer and the tool card each sit a
+       touch above the feed, in that order. */
+    --bg: #0e0e0e;
     --fg: #f1efe9;
     --diff-add-bg: #12351f;
     --diff-del-bg: #3d1a1a;
@@ -556,26 +549,29 @@
     --repo-head-expanded: #d2cfc8;
     --repo-head-collapsed: #898782;
     --merged-today-gutter: #ece8df;
-    --border: #2c2c2b;
-    --card: #232322;
+    --border: #2a2a2a;
+    /* Above the #212121 sidebar, so its hover and detail washes still lift
+       off the rail. */
+    --card: #2c2c2c;
     /* THE DARK NEUTRALS FOLLOW THE CLAUDE DESKTOP APP'S DARK THEME (owner
        ruling, 2026-10-17), sampled from a screenshot of it: near-pure gray
        grounds, with the warmth carried by the text at a yellow-leaning hue.
        Each token takes the lightness of its Claude counterpart, named on it.
        design-dark-palette-tuner.html beside this module tunes the set. */
     /* The shared panel fill, Claude's code block. */
-    --panel-bg: #1a1a19;
-    /* The tool card and the response bubble (--assistant): --panel-bg
-       (Claude's code block) moved 20% of the way to --bg (owner request,
-       2026-10-25, meeting the 40% tool card and the --panel-bg response in
-       the middle), #1a1a19 toward #151514, so it still lifts off the feed. */
-    --tool-card-bg: #181817;
-    /* Claude's sidebar, darker than the feed, so the rail recedes behind the
-       conversation while its --card hover/detail washes lift off it. */
-    --sidebar-bg: #111110;
-    --topbar-bg: #171716;
+    --panel-bg: #181818;
+    /* The tool card and --assistant: --panel-bg moved 40% of the way to --bg,
+       #181818 toward #0e0e0e, a touch above the composer, so a card still
+       lifts off the feed (2026-10-28). */
+    --tool-card-bg: #141414;
+    /* Claude's sidebar, the prompt bubble's own #212121 (owner request,
+       2026-10-28), lighter than the feed. */
+    --sidebar-bg: #212121;
+    /* Only a touch above the feed, between it and the composer (owner
+       request, 2026-10-28). */
+    --topbar-bg: #101010;
     /* A little lighter than the rail, and below --card's hover wash. */
-    --sidebar-menu-bg: #1b1b1a;
+    --sidebar-menu-bg: #262626;
     /* Deeper than the light theme's shadow: a faint drop shadow reads as
        nothing against the dark feed, so the rail's lift needs a heavier black
        to still register. */
@@ -597,14 +593,16 @@
        darker"): #0978ea -> #086ed6, the same small lightness step the light
        theme's pair takes. The same step again (owner request, 2026-10-13,
        "just slightly darker"): #086ed6 -> #0764c2. */
-    --user: #131312;
+    /* The Claude desktop app's prompt bubble (owner request, 2026-10-28). */
+    --user: #212121;
     /* A light purple, so a known command reads on the dark prompt blue. */
     --known-command: #f0c4ff;
-    /* The same darker step under this theme's --user blue. */
-    --prompt-code-bg: #272726;
-    /* The held prompt's darker blue, and its code's, under this theme's --user. */
-    --held-prompt-bg: #2a2a29;
-    --held-prompt-code-bg: #3a3a39;
+    /* A step below this theme's --user, a touch above the feed. */
+    --prompt-code-bg: #121212;
+    /* A held prompt wears the prompt's own fill and code wash (owner request,
+       2026-10-28): its glimmer, not its fill, tells it apart. */
+    --held-prompt-bg: var(--user);
+    --held-prompt-code-bg: var(--prompt-code-bg);
     /* THE DARK ACCENTS ARE THE PASTEL SET (owner ruling, 2026-10-17): each hue
        kept, drawn at one lightness with its strength capped, as
        design-dark-accent-tuner.html beside this module derives them. The six
@@ -626,11 +624,10 @@
     --info-tasks: #f69ea9;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
-    /* A touch above the feed's #151514, still told apart from it (owner
-       requests, 2026-10-17: halfway from the Claude composer's #20201f, then a
-       touch closer to the feed). Emacs's input window
+    /* A touch above the feed's #0e0e0e, still told apart from it (owner
+       request, 2026-10-28). Emacs's input window
        (agent-repl-input-background, lisp/input.el) wears this same color. */
-    --composer-bg: #181817;
+    --composer-bg: #121212;
     /* Both washes stay bright in the dark theme rather than being dimmed to
        suit it: the mark is the thing the user is hunting for, so it is the one
        place the stylesheet WANTS to shout against the background. --search-fg
@@ -646,7 +643,6 @@
     /* --compact-rule, apart from the cleared rule's red at a glance (owner
        ruling, 2026-10-17: the two blurred as neighboring oranges), is
        render-colors.json#color_values's dark orange (src/vocab.ts). */
-    --final-response: var(--ok);
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-entry ring still reads against the dark page. */
     --selected-entry: #8bbeff;
@@ -2366,13 +2362,52 @@ pre {
 .bubble[data-variant="held"] {
   --bubble-bg: var(--held-prompt-bg);
 }
-/* AN AGENT-TO-AGENT BUBBLE takes the final response's fill (owner request,
-   2026-10-17): the RESPONSE bubble's own token, `--assistant`, exactly, as the
-   held prompt does. The agent-addressed prompt and the peer message are
-   prompt-role bubbles, so this is the one place their fill leaves the blue. */
+/* AN AGENT-TO-AGENT BUBBLE takes the user prompt's fill (owner request,
+   2026-10-28, superseding 2026-10-17's response fill): every prompt bubble,
+   the user's, an agent-addressed prompt, a peer message and a held one, wears
+   `--user`. */
 .bubble[data-variant="agent"],
 .bubble[data-variant="peer"] {
-  --bubble-bg: var(--assistant);
+  --bubble-bg: var(--user);
+}
+/* THE HELD GLIMMER (owner request, 2026-10-28): a held prompt wears the
+   prompt's fill, and a short, faint arc of light travels around its edge, one
+   lap every four seconds, so a prompt waiting its turn reads apart from the
+   sent ones. The arc is a conic gradient masked to a 1px ring outside the
+   padding box: it paints over the bubble's own transparent 0.3px border and
+   reflows nothing. `--fg` at 22% reads as a light glint in the dark theme and
+   a dark one in the light. */
+@property --held-glimmer-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+.bubble[data-variant="held"] {
+  position: relative;
+}
+.bubble[data-variant="held"]::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from var(--held-glimmer-angle),
+    transparent 0deg,
+    color-mix(in srgb, var(--fg) 22%, transparent) 30deg,
+    transparent 70deg,
+    transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+@keyframes held-glimmer {
+  to { --held-glimmer-angle: 360deg; }
+}
+/* The arc travels only where motion is welcome; under reduced motion it rests
+   at the top. */
+@media (prefers-reduced-motion: no-preference) {
+  .bubble[data-variant="held"]::before { animation: held-glimmer 4s linear infinite; }
 }
 /* THE VERTICAL PADDING LADDER: the gap between a bubble's top and bottom edge
    and its content, as a share of the base. Vertical only: the left and right
@@ -2439,8 +2474,13 @@ pre {
    around these two kinds even with no fill — it is turned off here so
    neither reads as a bubble, while the 0.3px transparent border the base
    rule reserves is untouched: nothing here reflows, since box-shadow paints
-   outside the layout box. */
+   outside the layout box.
+   EVERY RESPONSE IS DRAWN SO (owner request, 2026-10-28): the turn's final
+   answer too drops its fill and its shadow, so `[data-variant="response"]`
+   covers the interim and the final response alike. The agentic card and the
+   compaction summary keep the response fill. */
 .bubble[data-variant="thinking"],
+.bubble[data-variant="response"],
 .bubble.interim-response {
   --bubble-bg: var(--bg);
   box-shadow: none;
@@ -2715,13 +2755,8 @@ html[data-page-unshown] {
    reserved, and nothing reflows; it can never take the green below.
    AN INTERIM RESPONSE, settled but not the turn's answer, wears no border
    either (owner request, 2026-10-14): no rule here colors it. */
-/* The answer the turn landed on, as against the commentary above it: green.
-   `:not([data-variant="thinking"])` keeps it off reasoning — the structural
-   half is that the daemon never names a thinking row as the answer. */
-.bubble.final-response:not([data-variant="thinking"]),
-.feed-item > .response-run {
-  border-color: color-mix(in srgb, var(--final-response) var(--response-border-strength), transparent);
-}
+/* THE ANSWER THE TURN LANDED ON wears no border either (owner request,
+   2026-10-28, retiring its green edge): no rule here colors it. */
 /* A TURN THAT ENDED any way but a normal completed answer (owner ruling,
    2026-09-24): its bubble keeps the response's purple fill and wears red. */
 /* THE SELECTED ENTRY (src/feed/selected-entry.ts): the one mark a feed entry
@@ -2762,9 +2797,11 @@ html[data-page-unshown] {
   --bubble-bg: var(--selected-final-response-bg) !important;
 }
 /* A COALESCED RUN OF FINAL RESPONSES (src/feed/response-run.ts): contiguous
-   green answers drawn as ONE tabless bubble. The run hangs on the response's
-   rail at the response's width cap and wears the bubble's corners, shadow and
-   green border once (its color is the answer's own rule above); each member bubble inside it drops its own and stretches
+   answers drawn as ONE tabless bubble. The run hangs on the response's rail
+   at the response's width cap and wears the bubble's corners and its
+   reserved, transparent 0.3px border once, with no shadow or color, as a lone
+   answer wears none (2026-10-28); each member bubble inside it drops its own
+   and stretches
    to the run's width, so the members read as one message. Each member keeps
    its own fill, so a selected member greys only its own part. A subtle grey
    line separates each member from the one above it (a concluded turn ending
@@ -2776,10 +2813,8 @@ html[data-page-unshown] {
   max-width: var(--bubble-max-width);
   display: flex;
   flex-direction: column;
-  border-width: 0.3px;
-  border-style: solid;
+  border: 0.3px solid transparent;
   border-radius: 8px;
-  box-shadow: var(--bubble-shadow);
   overflow: hidden;
 }
 .response-run > .feed-item > .bubble {

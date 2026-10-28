@@ -64,14 +64,6 @@ function selectorsSuppressingSelection(css: string): string[] {
   return suppressing;
 }
 
-
-/** A response border: the given hue at the one strength every response border is drawn at. */
-const responseBorder = (hue: string): string =>
-  `border-color: color-mix(in srgb, var(${hue}) var(--response-border-strength), transparent)`;
-
-/** The turn's answer's border: the green hue at its drawn strength. */
-const FINAL_BORDER = responseBorder("--final-response");
-
 /** The one selector that suppresses selection: everything, while a sidebar drag stands. */
 const DRAGGING_SELECTOR = `html.${DRAGGING_CLASS} *`;
 
@@ -1293,23 +1285,18 @@ describe("the thinking bubble", () => {
     expect(borders).toEqual([]);
   });
 
-  it("keeps the green on the turn's answer", () => {
+  it("gives the turn's answer no border (owner request, 2026-10-28)", () => {
     // Arrange / Act
     const borders = bordersOn(responseBubble("response", "success"), ["assistant", "final-response"]);
 
-    // Assert
-    expect(borders).toEqual([FINAL_BORDER]);
+    // Assert — none: it keeps the base's transparent 0.3px reservation.
+    expect(borders).toEqual([]);
   });
 
-  it("keeps the green at the base's reserved thickness", () => {
-    // Arrange / Act — the rule sets no width or `border` shorthand; it
-    // changes only the COLOR of the base `.bubble { border: 0.3px solid transparent }`.
-    const green = declarationsOf('.bubble.final-response:not([data-variant="thinking"])') ?? "";
-
-    // Assert
-    expect(green).not.toMatch(/border-width/);
-    expect(green).not.toMatch(/(?:^|[\s;])border\s*:/);
-    expect(green).toMatch(/border-color/);
+  it("carries no final-response border token any more", () => {
+    // Arrange / Act / Assert — the retired green and its strength are defined in neither theme.
+    expect(stylesheet).not.toMatch(/--final-response\s*:/);
+    expect(stylesheet).not.toMatch(/--response-border-strength\s*:/);
   });
 
   it("carries no interim-response-border token any more", () => {
@@ -1352,14 +1339,6 @@ describe("the thinking bubble", () => {
     // Arrange / Act / Assert
     expect(declarationsOf('.bubble[data-cap-lines="2"]')).toBeUndefined();
   });
-
-  it("excludes the thinking bubble from the green final-answer rule", () => {
-    // Arrange / Act — the green rule's own selector carries the exclusion.
-    const rule = declarationsOf('.bubble.final-response:not([data-variant="thinking"])');
-
-    // Assert — the green declaration exists and applies only to non-thinking.
-    expect(rule).toContain(FINAL_BORDER);
-  });
 });
 
 /**
@@ -1384,21 +1363,12 @@ describe("the removed amber async border", () => {
       }
     }
   });
-
-  it("settles a final-response bubble to the green border unconditionally", () => {
-    // Arrange / Act — the only border color the settled answer bubble can take.
-    const rule = declarationsOf('.bubble.final-response:not([data-variant="thinking"])');
-
-    // Assert — green, with nothing amber able to outrank it on settle.
-    expect(rule).toContain(FINAL_BORDER);
-  });
 });
 
 describe("a coalesced run of final responses (response-run.ts)", () => {
-  it("draws the run's border in the answer's own green rule", () => {
-    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".feed-item > .response-run") && r.declarations.includes("border-color"));
-    expect(rule?.selectors).toContain('.bubble.final-response:not([data-variant="thinking"])');
-    expect(rule?.declarations).toContain(FINAL_BORDER);
+  it("colors no border on the run, as a lone answer wears none (owner request, 2026-10-28)", () => {
+    const colored = rulesOf(stylesheet).filter((r) => r.selectors.includes(".feed-item > .response-run") && r.declarations.includes("border-color"));
+    expect(colored).toEqual([]);
   });
 
   it("hangs the run on the response's rail at the bubble cap", () => {
@@ -1408,11 +1378,11 @@ describe("a coalesced run of final responses (response-run.ts)", () => {
     expect(rule).toMatch(/width:\s*fit-content/);
   });
 
-  it("wears the bubble's border thickness, corners and shadow once, on the run", () => {
+  it("reserves the bubble's transparent border and corners once, on the run, with no shadow", () => {
     const rule = rulesOfSelector(".feed-item > .response-run");
-    expect(rule).toMatch(/border-width:\s*0\.3px/);
+    expect(rule).toMatch(/border:\s*0\.3px solid transparent/);
     expect(rule).toMatch(/border-radius:\s*8px/);
-    expect(rule).toMatch(/box-shadow:\s*var\(--bubble-shadow\)/);
+    expect(rule).not.toMatch(/box-shadow/);
   });
 
   it("strips each member bubble's own border, corners, shadow and margins", () => {
@@ -1590,12 +1560,12 @@ describe("the selected-entry mark (a jump's landing, the feed selection)", () =>
     expect(rule.trim()).toBe("--bubble-bg: var(--selected-final-response-bg) !important;");
   });
 
-  it("dims the selected final response's fill to 37.5% of the way from its own fill to the selected grey", () => {
+  it("dims the selected final response's fill to 37.5% of the way from its own fill, the feed's, to the selected grey", () => {
     // Arrange / Act — declared once on :root, so each theme mixes its own two tokens.
     const declaration = themeValueOf(declarationsOf(":root") ?? "", "--selected-final-response-bg");
 
     // Assert — the half-strength grey, 25% dimmer again (0.75 of 50%).
-    expect(declaration).toBe("color-mix(in srgb, var(--selected-bubble-bg) 37.5%, var(--assistant))");
+    expect(declaration).toBe("color-mix(in srgb, var(--selected-bubble-bg) 37.5%, var(--bg))");
   });
 
   it("never overrides the dimmed final response fill in the dark theme", () => {
@@ -2072,8 +2042,65 @@ describe("the reviving shimmer's stylesheet contract", () => {
  * done there"). The thinking wave that once crossed a working prompt's fill is
  * gone, and nothing replaces it: no rule that paints a bubble element itself
  * declares an animation, so no prompt state (in flight, awaiting the user, at
- * rest) can move it.
+ * rest) can move it. The one exception is the HELD GLIMMER (owner request,
+ * 2026-10-28): a held prompt's edge ring, its `::before`, travels a faint arc.
  */
+/**
+ * THE HELD GLIMMER (owner request, 2026-10-28): a faint arc of light travels
+ * around a held prompt's edge, a 1px ring that reflows nothing.
+ */
+describe("the held glimmer", () => {
+  const RING = '.bubble[data-variant="held"]::before';
+
+  it("anchors the ring on the held bubble itself", () => {
+    // Arrange / Act
+    const held = rulesOf(stylesheet).filter((rule) => isOwnRule(rule, '.bubble[data-variant="held"]'));
+    // Assert
+    expect(held.some((rule) => /position:\s*relative/.test(rule.declarations))).toBe(true);
+  });
+
+  it.each([
+    ["sits the ring 1px outside the bubble's padding box", /inset:\s*-1px/],
+    ["draws the ring 1px wide", /padding:\s*1px/],
+    ["follows the bubble's corners", /border-radius:\s*inherit/],
+    ["masks the gradient to the ring alone", /mask-composite:\s*exclude/],
+    ["draws the arc from the --fg ink at 22%", /color-mix\(in srgb, var\(--fg\) 22%, transparent\)/],
+    ["turns the arc by the animated angle", /conic-gradient\(from var\(--held-glimmer-angle\)/],
+    ["never takes a click", /pointer-events:\s*none/],
+  ])("%s", (_label, pattern) => {
+    // Arrange / Act
+    const ring = declarationsOf(RING) ?? "";
+    // Assert
+    expect(ring).toMatch(pattern);
+  });
+
+  it("registers the angle so the browser can animate it", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).toMatch(/@property --held-glimmer-angle\s*\{[^}]*syntax:\s*"<angle>"/);
+  });
+
+  it("turns the angle one full lap", () => {
+    // Arrange / Act
+    const keyframes = keyframesOf("held-glimmer");
+    // Assert
+    expect(keyframes).toMatch(/to\s*\{\s*--held-glimmer-angle:\s*360deg;?\s*\}/);
+  });
+
+  it("travels one lap every four seconds, only where motion is welcome", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).toMatch(
+      /@media \(prefers-reduced-motion: no-preference\)\s*\{\s*\.bubble\[data-variant="held"\]::before\s*\{\s*animation:\s*held-glimmer 4s linear infinite;\s*\}/,
+    );
+  });
+
+  it("declares the animation nowhere outside the motion query", () => {
+    // Arrange / Act
+    const ring = declarationsOf(RING) ?? "";
+    // Assert
+    expect(ring).not.toMatch(/(?:^|;)\s*animation/);
+  });
+});
+
 describe("the still prompt bubble", () => {
   /** The rightmost compound of SELECTOR: the element the rule paints. */
   function subjectOf(selector: string): string {
@@ -2081,7 +2108,7 @@ describe("the still prompt bubble", () => {
     return parts[parts.length - 1] ?? "";
   }
 
-  it("declares no animation on any rule painting a bubble element", () => {
+  it("declares no animation on any rule painting a bubble element but the held glimmer", () => {
     // Arrange / Act
     const animated = rulesOf(stylesheet).filter(
       (rule) =>
@@ -2090,7 +2117,7 @@ describe("the still prompt bubble", () => {
     );
 
     // Assert
-    expect(animated.flatMap((rule) => rule.selectors)).toEqual([]);
+    expect(animated.flatMap((rule) => rule.selectors)).toEqual(['.bubble[data-variant="held"]::before']);
   });
 
   it.each([
@@ -2352,7 +2379,9 @@ describe("the held prompt's collapse", () => {
   it("frames a held prompt with no border of its variant's", () => {
     // Arrange / Act — a held prompt is not yet received (owner ruling, 2026-09-23).
     const frames = rulesOf(stylesheet).filter(
-      (rule) => rule.selectors.some((sel) => sel.includes('[data-variant="held"]')) && /border/.test(rule.declarations),
+      (rule) =>
+        rule.selectors.some((sel) => sel.includes('[data-variant="held"]')) &&
+        /(?:^|;)\s*border(?:-(?:width|style|color))?\s*:/.test(rule.declarations),
     );
     // Assert
     expect(frames.map((rule) => rule.selectors.join(", "))).toEqual([]);
@@ -2575,32 +2604,6 @@ describe("the expanded response's eggshell border", () => {
 });
 
 describe("the response border ladder", () => {
-  it("draws the response edges at 35% strength, so they read thinner than every other bubble border", () => {
-    // Arrange / Act
-    const strengths = [...stylesheet.matchAll(/--response-border-strength:\s*([0-9.]+)%/g)].map((m) => Number(m[1]));
-    // Assert — one value, shared by both themes, at 35% of the hue's strength.
-    expect(strengths).toEqual([35]);
-  });
-
-  it("draws the green answer edge on the shared strength token", () => {
-    // Arrange — every border declaration mixing a hue at a strength.
-    const mixes = [...stylesheet.matchAll(/border-color:\s*color-mix\(in srgb, var\((--[a-z-]+)\) var\((--[a-z-]+)\), transparent\)/g)];
-    const strengthOf = (hue: string): string[] => mixes.filter((m) => m[1] === hue).map((m) => m[2]);
-
-    // Act
-    const green = strengthOf("--final-response");
-
-    // Assert
-    expect(green).toEqual(["--response-border-strength"]);
-  });
-
-  it("keeps the turn's answer green", () => {
-    // Arrange / Act
-    const rule = declarationsOf('.bubble.final-response:not([data-variant="thinking"])');
-    // Assert
-    expect(rule).toContain(FINAL_BORDER);
-  });
-
   it("draws no bubble for a turn that ended abnormally: its outcome marker replaced it (owner ruling 2026-10-06)", () => {
     // Arrange / Act
     const rule = declarationsOf('.bubble[data-variant="turn-ended"]');
@@ -2822,8 +2825,8 @@ describe("a card head's clock holds a fixed footprint", () => {
  * response narrow only the `--bubble-font-rem` token it reads, 2026-10-14).
  */
 describe("the one bubble rule set", () => {
-  /** Whether SELECTOR styles a bubble ITSELF (not its strip, box or content). */
-  const onBubble = (selector: string): boolean => /^\.bubble(?![-\w])[^\s>+~]*$/.test(selector);
+  /** Whether SELECTOR styles a bubble ITSELF (not its strip, box, content or pseudo-element). */
+  const onBubble = (selector: string): boolean => /^\.bubble(?![-\w])[^\s>+~]*$/.test(selector) && !selector.includes("::");
 
   it("sets the response's 1.5 leading on the base bubble rule", () => {
     // Arrange / Act
@@ -2992,9 +2995,10 @@ describe("the one bubble rule set", () => {
     // Assert — the base rule paints the role's token; the roles choose it, and
     // so do the owner-named fills: the held variant's (2026-09-23), the
     // page-colored thinking and interim fill (2026-10-08), the selected
-    // bubble's grey (2026-10-11), the agent-to-agent bubbles' final-response
-    // fill (2026-10-17), the selected prompt's darker blue (2026-10-19) and
-    // the selected final response's dimmed grey (2026-10-20).
+    // bubble's grey (2026-10-11), the agent-to-agent bubbles' prompt fill
+    // (2026-10-28), the selected prompt's darker blue (2026-10-19), the
+    // selected final response's dimmed grey (2026-10-20) and every response's
+    // page-colored fill (2026-10-28).
     expect(placing.flatMap((rule) => rule.selectors).sort()).toEqual(
       [
         ".bubble",
@@ -3007,6 +3011,7 @@ describe("the one bubble rule set", () => {
         '.bubble[data-variant="peer"]',
         '.bubble[data-variant="held"]',
         '.bubble[data-variant="thinking"]',
+        '.bubble[data-variant="response"]',
         ".bubble.interim-response",
       ].sort(),
     );
@@ -3043,11 +3048,15 @@ describe("the one bubble rule set", () => {
               rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))
             ) &&
             !(prop === "font-style" && isOwnRule(rule, THINKING_SELECTOR)) &&
+            // THE HELD GLIMMER (owner request, 2026-10-28) anchors its ring
+            // on the held bubble; "the held glimmer" pins it.
+            !(prop === "position" && isOwnRule(rule, '.bubble[data-variant="held"]')) &&
             // NO BUBBLE AT ALL (owner ruling, 2026-10-08): the same two
             // selectors also turn off the base rule's box-shadow, the one
             // remaining visible highlight once their fill is already the
-            // page's own --bg; its own suite below pins it.
-            !(prop === "box-shadow" && rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))) &&
+            // page's own --bg; its own suite below pins it. Every response
+            // drops it too (owner request, 2026-10-28).
+            !(prop === "box-shadow" && rule.selectors.every((sel) => ON_FEED_SELECTORS.includes(sel))) &&
             // THE WORKING PROSE ENDS AT THE CARDS' EDGE (owner request,
             // 2026-10-27): the same two widen to the cards' cap and drop the
             // gap beside the bar; "the working prose's right edge" pins both.
@@ -3443,7 +3452,7 @@ describe("the response bubble's fill", () => {
     expect(card).toEqual(panel.map((channel, i) => Math.round(channel + (bg[i] - channel) * share)));
   });
 
-  it("paints the dark theme's response 40% of the way from Claude's code-block fill to --bg (owner request, 2026-10-27)", () => {
+  it("paints the dark theme's --assistant a touch above the composer (owner request, 2026-10-28)", () => {
     // Arrange
     const css = darkThemeBlock();
 
@@ -3451,7 +3460,7 @@ describe("the response bubble's fill", () => {
     const response = themeRgbOf(css, "--assistant");
 
     // Assert
-    expect(response).toEqual([0x18, 0x18, 0x17]);
+    expect(response).toEqual([0x14, 0x14, 0x14]);
   });
 
   it("is what a response bubble paints", () => {
@@ -3480,12 +3489,12 @@ function rgbOf(block: string, token: string): [number, number, number] {
 }
 
 /**
- * THE HELD PROMPT'S FILL IS A DARKER BLUE (owner request, 2026-10-25,
- * superseding 2026-10-08's response grey): a held prompt looks like the user
- * prompt it becomes, on a blue markedly darker than the user prompt's --user,
- * through one token per theme.
+ * THE HELD PROMPT'S FILL (owner requests, 2026-10-25 and 2026-10-28): a held
+ * prompt looks like the user prompt it becomes, through one token per theme.
+ * The light theme draws it on a markedly darker blue than --user; the dark
+ * theme on --user itself, its glimmer telling it apart.
  */
-describe("the held prompt's fill: a markedly darker blue than the user prompt's", () => {
+describe("the held prompt's fill", () => {
   it("feeds --bubble-bg from --held-prompt-bg", () => {
     // Arrange / Act
     const held = declarationsOf('.bubble[data-variant="held"]') ?? "";
@@ -3500,16 +3509,23 @@ describe("the held prompt's fill: a markedly darker blue than the user prompt's"
     expect(rule).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(/);
   });
 
-  it.each(THEME_BLOCKS)("sits markedly darker than --user in the %s theme", (_theme, block) => {
+  it("sits markedly darker than --user in the light theme", () => {
     // Arrange
-    const lightness = (rgb: [number, number, number]): number => {
-      const y = luminance(rgb);
-      return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
-    };
+    const block = declarationsOf(":root") ?? "";
     // Act
-    const step = Math.abs(lightness(themeRgbOf(block(), "--user")) - lightness(themeRgbOf(block(), "--held-prompt-bg")));
+    const step = Math.abs(lightness(themeRgbOf(block, "--user")) - lightness(themeRgbOf(block, "--held-prompt-bg")));
     // Assert
     expect(step).toBeGreaterThan(10);
+  });
+
+  it.each([
+    ["--held-prompt-bg", "var(--user)"],
+    ["--held-prompt-code-bg", "var(--prompt-code-bg)"],
+  ])("feeds the dark theme's %s from %s (owner request, 2026-10-28)", (token, want) => {
+    // Arrange / Act
+    const got = themeValueOf(darkThemeBlock(), token);
+    // Assert
+    expect(got).toBe(want);
   });
 
   it.each(THEME_BLOCKS)("is a neutral grey in the %s theme", (_theme, block) => {
@@ -3557,19 +3573,20 @@ describe("the held prompt's fill: a markedly darker blue than the user prompt's"
 });
 
 /**
- * AN AGENT-TO-AGENT BUBBLE TAKES THE FINAL RESPONSE'S FILL (owner request,
- * 2026-10-17): the agent-addressed prompt and the peer message both feed
- * --bubble-bg from the response bubble's own token, never a copied value.
+ * AN AGENT-TO-AGENT BUBBLE TAKES THE USER PROMPT'S FILL (owner request,
+ * 2026-10-28, superseding 2026-10-17's response fill): the agent-addressed
+ * prompt and the peer message both feed --bubble-bg from --user, never a
+ * copied value.
  */
-describe("the agent-to-agent bubbles' fill: the final response's own token", () => {
-  it.each([["agent"], ["peer"]] as const)("feeds the %s variant's --bubble-bg from --assistant", (variant) => {
+describe("the agent-to-agent bubbles' fill: the user prompt's own token", () => {
+  it.each([["agent"], ["peer"]] as const)("feeds the %s variant's --bubble-bg from --user", (variant) => {
     // Arrange / Act
     const fills = rulesOf(stylesheet)
       .filter((rule) => rule.selectors.some((sel) => sel.trim() === `.bubble[data-variant="${variant}"]`))
       .map((rule) => /--bubble-bg:\s*([^;]+);/.exec(rule.declarations)?.[1]?.trim())
       .filter((fill) => fill !== undefined);
     // Assert
-    expect(fills).toEqual(["var(--assistant)"]);
+    expect(fills).toEqual(["var(--user)"]);
   });
 });
 
@@ -3810,15 +3827,60 @@ const luminance = ([r, g, b]: [number, number, number]): number => {
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 };
 
+/**
+ * An RGB triple's CIE L*, so "clearly darker, but not much darker" is one step
+ * size in both themes rather than a luminance ratio that reads differently at
+ * each end of the scale.
+ */
+const lightness = (rgb: [number, number, number]): number => {
+  const y = luminance(rgb);
+  return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
+};
+
+describe("lightness, the CIE L* every fill-step test measures in", () => {
+  it.each([
+    ["black", [0, 0, 0], 0],
+    ["white", [255, 255, 255], 100],
+  ] as const)("puts %s at L* %d", (_name, rgb, want) => {
+    // Arrange / Act
+    const got = lightness([...rgb]);
+    // Assert
+    expect(got).toBeCloseTo(want, 1);
+  });
+
+  it("takes the linear segment below the CIE threshold", () => {
+    // Arrange — #0e0e0e's luminance, 0.00439, sits below 0.008856.
+    // Act
+    const got = lightness([0x0e, 0x0e, 0x0e]);
+    // Assert
+    expect(got).toBeCloseTo(903.3 * luminance([0x0e, 0x0e, 0x0e]), 6);
+  });
+
+  it("takes the cube-root segment above the CIE threshold", () => {
+    // Arrange / Act
+    const got = lightness([0x80, 0x80, 0x80]);
+    // Assert — mid grey is L* 53.6.
+    expect(got).toBeCloseTo(53.6, 1);
+  });
+
+  it("is the one L* formula in this suite", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    // Act — the formula's cube-root segment, written out.
+    const copies = source.split("116 * Math." + "cbrt").length - 1;
+    // Assert
+    expect(copies).toBe(1);
+  });
+});
+
 describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
-  it("paints a prompt the feed's --bg halfway to --sidebar-bg (owner request, 2026-10-27)", () => {
+  it("paints a prompt the sidebar's own color (owner request, 2026-10-28)", () => {
     // Arrange
     const block = darkThemeBlock();
     // Act
-    const [bg, sidebar] = [rgbOf(block, "--bg"), rgbOf(block, "--sidebar-bg")];
-    const user = rgbOf(block, "--user");
+    const [user, sidebar] = [rgbOf(block, "--user"), rgbOf(block, "--sidebar-bg")];
     // Assert
-    expect(user).toEqual(bg.map((c, i) => Math.round((c + sidebar[i]) / 2)));
+    expect(user).toEqual(sidebar);
   });
 
   it.each([
@@ -3864,7 +3926,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     expect([collapsed < expanded, expanded < fg]).toEqual([true, true]);
   });
 
-  it("sits the rail darker than the feed, as Claude's sidebar (owner ruling, 2026-10-17)", () => {
+  it("sits the rail lighter than the feed (owner request, 2026-10-28)", () => {
     // Arrange
     const block = darkThemeBlock();
 
@@ -3872,7 +3934,7 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     const [rail, feed] = [luminance(rgbOf(block, "--sidebar-bg")), luminance(rgbOf(block, "--bg"))];
 
     // Assert
-    expect(rail).toBeLessThan(feed);
+    expect(rail).toBeGreaterThan(feed);
   });
 
   it.each([
@@ -3930,13 +3992,6 @@ describe("a link in a prompt bubble (owner request, 2026-10-19)", () => {
 });
 
 describe("code in a blue prompt bubble (owner request, 2026-10-19)", () => {
-  // CIE L*, so "clearly darker, but not much darker" is one step size in
-  // both themes rather than a luminance ratio that reads differently at each
-  // end of the scale.
-  const lightness = (rgb: [number, number, number]): number => {
-    const y = luminance(rgb);
-    return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
-  };
 
   it.each([
     ["light", ""],
@@ -4334,7 +4389,7 @@ describe("the tool card's command grey", () => {
   // Emacs's input window is the host-native composer, so its
   // `agent-repl-input-background' (lisp/input.el) wears this same color.
   // Neither suite may read the other's file, so lisp/test-input.el pins it too.
-  it("defines the dark theme's composer as Emacs's input background, #181817", () => {
+  it("defines the dark theme's composer as Emacs's input background, #121212", () => {
     // Arrange
     const block = darkThemeBlock();
 
@@ -4342,14 +4397,14 @@ describe("the tool card's command grey", () => {
     const got = /--composer-bg:\s*(#[0-9a-fA-F]{6})/.exec(block)?.[1];
 
     // Assert
-    expect(got).toBe("#181817");
+    expect(got).toBe("#121212");
   });
 
   // The composer's help bar (lisp/input-help.el) is grounded with the dark
   // sidebar's color, and its buttons are filled a little darker than the
   // sidebar's selected row. Neither suite may read the other's file, so
   // lisp/test-input-help.el pins both colors too.
-  it("defines the dark theme's sidebar as the help bar's ground, #111110", () => {
+  it("defines the dark theme's sidebar as the help bar's ground, #212121", () => {
     // Arrange
     const block = darkThemeBlock();
 
@@ -4357,10 +4412,10 @@ describe("the tool card's command grey", () => {
     const got = rgbOf(block, "--sidebar-bg");
 
     // Assert
-    expect(got).toEqual([0x11, 0x11, 0x10]);
+    expect(got).toEqual([0x21, 0x21, 0x21]);
   });
 
-  it("fills the dark theme's selected sidebar row with #1d1d1c, lighter than a help button", () => {
+  it("fills the dark theme's selected sidebar row with #292929, lighter than a help button", () => {
     // Arrange
     const block = darkThemeBlock();
     const card = rgbOf(block, "--card");
@@ -4374,7 +4429,7 @@ describe("the tool card's command grey", () => {
     expect(withoutBlockComments(stylesheet)).toContain(
       "--row-highlight-tint: color-mix(in srgb, var(--card) 69%, var(--sidebar-bg));",
     );
-    expect(tint).toEqual([0x1d, 0x1d, 0x1c]);
+    expect(tint).toEqual([0x29, 0x29, 0x29]);
   });
 
   // The Settings page (lisp/settings.el, agent-repl-settings--colors) wears the
@@ -4384,8 +4439,8 @@ describe("the tool card's command grey", () => {
   it.each([
     ["--fg", [0xf1, 0xef, 0xe9]],
     ["--muted", [0x89, 0x87, 0x82]],
-    ["--card", [0x23, 0x23, 0x22]],
-    ["--border", [0x2c, 0x2c, 0x2b]],
+    ["--card", [0x2c, 0x2c, 0x2c]],
+    ["--border", [0x2a, 0x2a, 0x2a]],
     ["--selected-entry", [0x8b, 0xbe, 0xff]],
   ] as const)("defines the dark theme's %s as the Settings page's", (token, want) => {
     // Arrange
@@ -4574,6 +4629,9 @@ const THINKING_SELECTOR = variantSelector("thinking");
 /** The two bubble kinds whose prose is dimmed: the interim's `--interim-text`, the thinking bubble's greyer `--thinking-text`. */
 const DIMMED_TEXT_SELECTORS: readonly string[] = [THINKING_SELECTOR, ".bubble.interim-response"];
 
+/** The bubbles drawn as text on the feed, with no fill or shadow: the dimmed pair and every response (owner request, 2026-10-28). */
+const ON_FEED_SELECTORS: readonly string[] = [THINKING_SELECTOR, '.bubble[data-variant="response"]', ".bubble.interim-response"];
+
 describe("the page-colored fill", () => {
   /** The `--bubble-bg` the cascade hands a bubble with ATTRS and HOOKS. */
   function fillOf(attrs: Readonly<Record<string, string>>, hooks: readonly string[]): string {
@@ -4599,12 +4657,12 @@ describe("the page-colored fill", () => {
     expect(got).toBe("var(--bg)");
   });
 
-  it("keeps the purple fill on the turn's answer", () => {
+  it("fills the turn's answer with the page background (owner request, 2026-10-28)", () => {
     // Arrange / Act
     const got = fillOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "final-response"]);
 
     // Assert
-    expect(got).toBe("var(--assistant)");
+    expect(got).toBe("var(--bg)");
   });
 
   it("paints the page itself with the same background token", () => {
@@ -4653,13 +4711,12 @@ describe("the box-shadow neither a thinking nor an interim bubble may carry", ()
     expect(got).toBe("none");
   });
 
-  it("keeps the bubble shadow on the turn's final answer", () => {
-    // Arrange / Act — only the two dimmed kinds drop it; every other kind,
-    // final response included, still reads as a raised, top-lit card.
+  it("drops the bubble shadow on the turn's final answer (owner request, 2026-10-28)", () => {
+    // Arrange / Act
     const got = shadowOf({ "data-role": "response", "data-variant": "response", "data-state": "success" }, ["assistant", "final-response"]);
 
     // Assert
-    expect(got).toBe("var(--bubble-shadow)");
+    expect(got).toBe("none");
   });
 
   it("keeps the bubble shadow on a user prompt", () => {
@@ -4675,9 +4732,9 @@ describe("the box-shadow neither a thinking nor an interim bubble may carry", ()
     const shadowRules = rulesOf(stylesheet).filter((rule) => /(?:^|;)\s*box-shadow\s*:/.test(rule.declarations));
     const onABubble = shadowRules.filter((rule) => rule.selectors.some(onBubble));
 
-    // Assert — the base rule (every bubble's default) plus the dimmed pair.
+    // Assert — the base rule (every bubble's default) plus the bubbles drawn on the feed.
     expect(onABubble.flatMap((rule) => rule.selectors).sort()).toEqual(
-      [".bubble", ...DIMMED_TEXT_SELECTORS].sort(),
+      [".bubble", ...ON_FEED_SELECTORS].sort(),
     );
   });
 });
@@ -5438,7 +5495,7 @@ describe("washOf, a token's transparent wash", () => {
 describe("THEME_BLOCKS, the per-theme token table", () => {
   it.each([
     ["light", "#ffffff"],
-    ["dark", "#151514"],
+    ["dark", "#0e0e0e"],
   ] as const)("hands the %s theme its own token block", (theme, bg) => {
     // Arrange
     const block = THEME_BLOCKS.find(([name]) => name === theme)?.[1];
@@ -6231,14 +6288,14 @@ describe("the topbar's ground (owner request, 2026-10-27)", () => {
     expect(rule).toMatch(/background:\s*var\(--topbar-bg\)\s*;/);
   });
 
-  it("sits the dark topbar a little lighter than the sidebar", () => {
+  it("sits the dark topbar between the feed and the composer (owner request, 2026-10-28)", () => {
     // Arrange
     const block = darkThemeBlock();
 
     // Act
-    const [topbar, sidebar] = [luminance(rgbOf(block, "--topbar-bg")), luminance(rgbOf(block, "--sidebar-bg"))];
+    const [feed, topbar, composer] = ["--bg", "--topbar-bg", "--composer-bg"].map((token) => luminance(rgbOf(block, token)));
 
     // Assert
-    expect(topbar).toBeGreaterThan(sidebar);
+    expect([feed < topbar, topbar < composer]).toEqual([true, true]);
   });
 });

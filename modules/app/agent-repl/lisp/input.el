@@ -202,13 +202,12 @@ Pre-formatted once so the common case costs no formatting.")
 
 ;;;; ---- The input buffer ------------------------------------------------
 
-(defcustom agent-repl-input-background "#181817"
+(defcustom agent-repl-input-background "#121212"
   "The input buffer's background, a #rrggbb hex string.
 The webapp's dark `--composer-bg' (webapp/src/styles.css): the input
 window is the host-native composer, so the two wear one color.  A touch
-above the feed's #151514, still told apart from it (owner requests,
-2026-10-17: halfway from the Claude composer's #20201f, then a touch
-closer to the feed)."
+above the feed's #0e0e0e, still told apart from it (owner request,
+2026-10-28)."
   :type 'string
   :group 'agent-repl)
 
