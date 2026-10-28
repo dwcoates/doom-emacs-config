@@ -3947,6 +3947,18 @@ describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
     // Assert
     expect(rule?.declarations).toMatch(new RegExp(`background:\\s*var\\(${token}\\)`));
   });
+
+  it("paints the footer's own box from --sidebar-bg alone, so it always matches the sidebar (owner request, 2026-10-28)", () => {
+    // Arrange — every rule that paints the footer box itself.
+    const painting = rulesOf(stylesheet).filter(
+      (r) => r.selectors.some((sel) => /(?:^|[\s>])\.pfooter(?![-\w])[^\s>+~]*$/.test(sel)) && /(^|;)\s*background(?:-color)?\s*:/.test(r.declarations),
+    );
+    // Act
+    const grounds = painting.map((r) => /background(?:-color)?\s*:\s*([^;]+);/.exec(r.declarations)?.[1]?.trim());
+    // Assert
+    expect([painting.length > 0, grounds.every((ground) => ground === "var(--sidebar-bg)")]).toEqual([true, true]);
+  });
+
   it("gives a merge bubble no fill of its own, so it wears the tool card's (owner request, 2026-10-24)", () => {
     // Arrange / Act
     const painting = rulesOf(stylesheet).filter(
@@ -4402,7 +4414,7 @@ describe("the tool card's command grey", () => {
   // sidebar's color, and its buttons are filled a little darker than the
   // sidebar's selected row. Neither suite may read the other's file, so
   // lisp/test-input-help.el pins both colors too.
-  it("defines the dark theme's sidebar as the help bar's ground, #1d1d1d", () => {
+  it("defines the dark theme's sidebar as the help bar's ground, #1a1a1a", () => {
     // Arrange
     const block = darkThemeBlock();
 
@@ -4410,10 +4422,10 @@ describe("the tool card's command grey", () => {
     const got = rgbOf(block, "--sidebar-bg");
 
     // Assert
-    expect(got).toEqual([0x1d, 0x1d, 0x1d]);
+    expect(got).toEqual([0x1a, 0x1a, 0x1a]);
   });
 
-  it("fills the dark theme's selected sidebar row with #272727, lighter than a help button", () => {
+  it("fills the dark theme's selected sidebar row with #262626, lighter than a help button", () => {
     // Arrange
     const block = darkThemeBlock();
     const card = rgbOf(block, "--card");
@@ -4427,7 +4439,7 @@ describe("the tool card's command grey", () => {
     expect(withoutBlockComments(stylesheet)).toContain(
       "--row-highlight-tint: color-mix(in srgb, var(--card) 69%, var(--sidebar-bg));",
     );
-    expect(tint).toEqual([0x27, 0x27, 0x27]);
+    expect(tint).toEqual([0x26, 0x26, 0x26]);
   });
 
   // The Settings page (lisp/settings.el, agent-repl-settings--colors) wears the
