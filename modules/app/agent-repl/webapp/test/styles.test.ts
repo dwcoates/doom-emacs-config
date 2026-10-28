@@ -4001,6 +4001,35 @@ describe("a link in a prompt bubble (owner request, 2026-10-19)", () => {
   });
 });
 
+describe("code in a response bubble (owner request, 2026-10-28)", () => {
+  it.each(["--code-bg", "--code-block-bg"])("feeds %s from --response-code-bg on the response role", (token) => {
+    // Arrange / Act
+    const decls = rulesOf(stylesheet)
+      .filter((r) => isOwnRule(r, '.bubble[data-role="response"]'))
+      .map((r) => r.declarations)
+      .join(";");
+    // Assert — fenced and inline code wear the one wash.
+    expect(decls).toMatch(new RegExp(`${token}:\\s*var\\(--response-code-bg\\)`));
+  });
+
+  it("draws the response wash a little fainter than the shared block's, from the ink", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root") ?? "";
+    // Assert
+    expect([
+      root.includes("--response-code-bg: color-mix(in srgb, var(--fg) 4%, transparent);"),
+      root.includes("--code-block-bg: color-mix(in srgb, var(--fg) 6%, transparent);"),
+    ]).toEqual([true, true]);
+  });
+
+  it("is declared once, on :root, for both themes", () => {
+    // Arrange / Act
+    const declarations = withoutBlockComments(stylesheet).match(/--response-code-bg\s*:/g) ?? [];
+    // Assert
+    expect(declarations).toHaveLength(1);
+  });
+});
+
 describe("code in a blue prompt bubble (owner request, 2026-10-19)", () => {
 
   it.each([
