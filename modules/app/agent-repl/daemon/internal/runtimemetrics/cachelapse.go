@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	"agent-repld/internal/ids"
 )
 
 // The prompt cache's series (cachelapse.Telemetry).
@@ -39,37 +41,37 @@ func newCacheTelemetry() cacheTelemetry {
 	return cacheTelemetry{
 		lateness: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: KeepaliveLatenessName, Help: "How long after it came due a keep-alive went out, by how it ended.", Buckets: latenessBuckets,
-		}, []string{"outcome"}),
+		}, []string{"outcome", "workspace"}),
 		lapses: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: CacheLapsesName, Help: "Recorded cache lapses that came due, by what became of them.",
-		}, []string{"outcome"}),
+		}, []string{"outcome", "workspace"}),
 		coldIdle: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: ColdGateIdleName, Help: "How long a cache sat idle before a cold gate was raised over it, by the gate's kind.", Buckets: idleBuckets,
-		}, []string{"outcome"}),
+		}, []string{"outcome", "workspace"}),
 	}
 }
 
 // ObserveBeat implements cachelapse.Telemetry. The off surface records nothing.
-func (s *Surface) ObserveBeat(outcome string, late time.Duration) {
+func (s *Surface) ObserveBeat(ws ids.WorkspaceID, outcome string, late time.Duration) {
 	if s == nil {
 		return
 	}
-	s.cache.lateness.WithLabelValues(outcome).Observe(late.Seconds())
+	s.cache.lateness.WithLabelValues(outcome, string(ws)).Observe(late.Seconds())
 }
 
 // CountLapse implements cachelapse.Telemetry. The off surface records nothing.
-func (s *Surface) CountLapse(outcome string) {
+func (s *Surface) CountLapse(ws ids.WorkspaceID, outcome string) {
 	if s == nil {
 		return
 	}
-	s.cache.lapses.WithLabelValues(outcome).Inc()
+	s.cache.lapses.WithLabelValues(outcome, string(ws)).Inc()
 }
 
 // ObserveColdGate implements cachelapse.Telemetry. The off surface records
 // nothing.
-func (s *Surface) ObserveColdGate(outcome string, idle time.Duration) {
+func (s *Surface) ObserveColdGate(ws ids.WorkspaceID, outcome string, idle time.Duration) {
 	if s == nil {
 		return
 	}
-	s.cache.coldIdle.WithLabelValues(outcome).Observe(idle.Seconds())
+	s.cache.coldIdle.WithLabelValues(outcome, string(ws)).Observe(idle.Seconds())
 }

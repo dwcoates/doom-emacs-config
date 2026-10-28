@@ -896,8 +896,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// the eviction waits for that run to stop.
 		// A HIDDEN OR CLOSED WORKSPACE PARKED AT ITS GATE takes the gate's
 		// lapse (cachelapse.Keeper.ColdGateRaised).
-		ColdGateRaised: func(ws ids.WorkspaceID) {
-			cacheKeeper.ColdGateRaised(ws)
+		ColdGateRaised: func(ws ids.WorkspaceID, judged bool) {
+			cacheKeeper.ColdGateRaised(ws, judged)
 			if eject := ejectCold; eject != nil {
 				go eject(ws)
 			}

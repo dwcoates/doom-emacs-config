@@ -1011,7 +1011,7 @@ func TestRunStandsDownAHiddenWorkspaceWhoseSessionParkedAtItsGate(t *testing.T) 
 
 	// Act: the gate's lapse is already due, so it is taken at once, with no
 	// timer asked of the clock.
-	h.keeper.ColdGateRaised(theWorkspace)
+	h.keeper.ColdGateRaised(theWorkspace, true)
 
 	// Assert
 	if got := <-h.standDowns.stood; got != theWorkspace {

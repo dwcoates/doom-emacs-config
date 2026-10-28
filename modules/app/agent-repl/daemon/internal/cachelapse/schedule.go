@@ -195,7 +195,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		return
 	}
 	fields := dlog.Context{"due": due}
-	observe := func(outcome string) { k.deps.Telemetry.ObserveBeat(outcome, now.Sub(due)) }
+	observe := func(outcome string) { k.deps.Telemetry.ObserveBeat(ws, outcome, now.Sub(due)) }
 	shim, served := k.deps.Shim(ws)
 	if !served {
 		if parked {

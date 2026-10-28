@@ -254,8 +254,10 @@ type FleetDeps struct {
 	// ColdGateRaised is told that a workspace's session parked at its cold
 	// gate, so a merge it has in the queue leaves it (owner ruling,
 	// 2026-10-13: a queued merge whose session went cold is ejected). Nil
-	// tells nobody.
-	ColdGateRaised func(ws ids.WorkspaceID)
+	// tells nobody. JUDGED is a gate a shim judged just now, as opposed to
+	// one raised again (from its record, after a failed answer, carried over
+	// a handover).
+	ColdGateRaised func(ws ids.WorkspaceID, judged bool)
 }
 
 // live is one workspace's live session: the client, its watcher, and the facts
@@ -835,7 +837,7 @@ func (f *Fleet) ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool
 	if cold == nil || !stood {
 		return false
 	}
-	f.raiseColdGate(ws, vendorSessionID, cold, held.configDir)
+	f.raiseColdGate(ws, vendorSessionID, cold, held.configDir, false)
 	// THE GATE RUNS NO SHIM AGAIN: the one the failed answer spawned, or found
 	// still held, is stood down.
 	f.Detach(func(ctx context.Context) { f.standDownAtGate(ctx, ws) })
@@ -2605,7 +2607,7 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 					return f.askToStartSession(ctx, log, ws, client, src, session, configDir)
 				}
 			}
-			f.raiseColdGate(ws, src.VendorSessionID, cold, configDir)
+			f.raiseColdGate(ws, src.VendorSessionID, cold, configDir, true)
 			f.recordGate(ctx, log, ws, wsm.ColdGateRecord{VendorSessionID: src.VendorSessionID, Cold: cold, ConfigDir: configDir})
 			// AN ANSWER, NOT A FAILURE -- as this function's own doc says. The
 			// gate is a designed product state: the shim states the cost of
@@ -2731,7 +2733,7 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 // The compact menu is the summarizers the session could be compacted by (see
 // coldCompactMenu). Every scope but the unspecified one is offered, because an
 // unspecified scope is not a choice.
-func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *conversationv1.SessionCold, configDir string) {
+func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *conversationv1.SessionCold, configDir string, judged bool) {
 	// EVERY ACCOUNT IS OFFERED COMPACTION (owner ruling 2026-10-06, reversing
 	// the 2026-09-30 work-account exclusion): the work account's gate offers
 	// compact too.
@@ -2759,7 +2761,7 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	f.logTransition(ws, "cold_gate_standing", stood, true,
 		dlog.Context{"vendor_session_id": vendorSessionID, "compaction_offered": compact != nil})
 	if f.deps.ColdGateRaised != nil {
-		f.deps.ColdGateRaised(ws)
+		f.deps.ColdGateRaised(ws, judged)
 	}
 
 	f.publishColdGateRow(ws)

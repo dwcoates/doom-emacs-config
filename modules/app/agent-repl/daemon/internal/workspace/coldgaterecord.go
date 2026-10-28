@@ -49,7 +49,7 @@ func (f *Fleet) raiseRecordedGate(ctx context.Context, ws ids.WorkspaceID) (bool
 	if !found {
 		return false, nil
 	}
-	f.raiseColdGate(ws, rec.VendorSessionID, rec.Cold, rec.ConfigDir)
+	f.raiseColdGate(ws, rec.VendorSessionID, rec.Cold, rec.ConfigDir, false)
 	f.deps.Steps(ws, opentabs.Step{Kind: opentabs.StepColdGate})
 	log.Info(opColdGate, "raised the workspace's recorded cold gate; no shim is started until it is answered",
 		dlog.Context{"vendor_session_id": rec.VendorSessionID, "context_tokens": rec.Cold.GetContextTokens()})
