@@ -274,6 +274,11 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame, at 
 		case *conversationv1.AgentUpdate_ContextCut:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ContextCut"})
 			r.drawContextCut(s, agent, update.ContextCut, at)
+		case *conversationv1.AgentUpdate_ResponseRevision:
+			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ResponseRevision"})
+			// A REPLAYED REVISION IS DRAWN WHOLE: it was typed out when it
+			// landed, and a reload re-reads what the bubble says now.
+			r.applyRevision(s, agent, update.ResponseRevision, false)
 		case *conversationv1.AgentUpdate_ApiError:
 			r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "replayFrame", "branch": "case *conversationv1.AgentUpdate_ApiError"})
 			// Mid-turn evidence, replayed as evidence: it was never a terminal

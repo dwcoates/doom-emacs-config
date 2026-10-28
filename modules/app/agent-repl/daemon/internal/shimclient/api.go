@@ -166,6 +166,11 @@ type Client interface {
 	// StartTurn opens a turn with the daemon's minted TurnId and the required
 	// origin, which the shim persists onto the AgentPrompt.
 	StartTurn(ctx context.Context, req *shimv1.StartTurnRequest) (*shimv1.StartTurnResponse, error)
+	// ReviseResponse rewrites one settled response on an ephemeral fork of the
+	// conversation; the revised prose arrives as the response_revision page
+	// line on the main agent's stream. It returns once the revision is written
+	// or refused, and cancelling ctx abandons it with nothing written.
+	ReviseResponse(ctx context.Context, req *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error)
 	// WatchAgent opens one agent's frame stream, opening with a catch-up page.
 	WatchAgent(ctx context.Context, req *shimv1.WatchAgentRequest) (Stream[*shimv1.WatchAgentResponse], error)
 	// UpdateAgent delivers an answer, a consent, a prompt or a stop to an

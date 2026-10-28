@@ -415,6 +415,14 @@ type Resolver interface {
 	// whether it is a prompt, whether or not the reader can select it. A miss
 	// is a feedid that names no such bubble.
 	BubbleText(ws ids.WorkspaceID, id *frontendv1.FeedId) (RowText, bool)
+	// RevisableFinalResponse answers the settled final response a row of the
+	// root feed names, with its unit and what it says now, and false for any
+	// other row (revision.go).
+	RevisableFinalResponse(ws ids.WorkspaceID, row *frontendv1.FeedId) (RevisableResponse, bool)
+	// SetResponseRevision states where a revision of a response row stands
+	// (pending, failed, nil for neither) and restates the row. False is a row
+	// that is no drawn response.
+	SetResponseRevision(ws ids.WorkspaceID, row *frontendv1.FeedId, state *frontendv1.FeedResponseRevision) bool
 	// SetMergeFold records the reader's fold on a merge bubble's head row and
 	// restates the row with it (mergefold.go). False is a row that is not a
 	// merge head this daemon holds.

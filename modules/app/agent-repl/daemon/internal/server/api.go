@@ -130,6 +130,9 @@ type Deps struct {
 	Sidebar sidebar.Resolver
 	// Chat backs the chat verbs and WatchChat (internal/chat).
 	Chat Chat
+	// Revisions revises a final response a highlighted prompt asks about
+	// (internal/revision).
+	Revisions Revisions
 	// LoudFaults is the daemon's standing loud faults, the `faults_standing`
 	// state every Emacs WatchDaemon stream subscribes to (a webview's never
 	// does: its topbar and footer views carry the same faults).
@@ -408,6 +411,10 @@ type server struct {
 	// holder: Emacs and the webapp move it (SelectFeedRow) and are pushed it,
 	// and a sent prompt and a rollback read it here. Guarded by selectionMu.
 	selections map[ids.WorkspaceID]*selectionState
+	// highlights is each workspace's held response highlight
+	// (response_text.go): while one is held, the next prompt revises the
+	// highlighted final response.
+	highlights responseHighlights
 	// rollbackPlans are the rollbacks planned and not yet performed, by the
 	// token PlanRollback minted (rollback.go). In memory: a daemon restart
 	// forgets them, and a token it never minted is refused as a stale plan.
@@ -515,6 +522,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a sidebar resolver")
 	case deps.Chat == nil:
 		return nil, missing("a chat service")
+	case deps.Revisions == nil:
+		return nil, missing("the response reviser")
 	case deps.LoudFaults == nil:
 		return nil, missing("the standing loud faults")
 	case deps.Focus == nil:
@@ -599,6 +608,7 @@ func New(deps Deps) (Server, error) {
 		selectionTopics:     make(map[ids.WorkspaceID]*publish.Topic[*selectionState]),
 		imageOverlayTopics:  make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedImageOverlay]),
 		composerReports:     make(map[ids.WorkspaceID]composerReport),
+		highlights:          responseHighlights{held: map[ids.WorkspaceID]responseHighlight{}},
 		composerUnanswered:  make(map[ids.WorkspaceID][]string),
 		composerEntryTopics: make(map[ids.WorkspaceID]*publish.Topic[*frontendv1.FeedComposerEntry]),
 		// The zoom starts at the persistence default; Prime seeds the stored

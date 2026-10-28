@@ -434,6 +434,13 @@ type wsState struct {
 	// silent empty prefix.
 	answerMarkdown map[string]string
 
+	// revisions files each revised response's prose by its response unit, and
+	// revisionStates each unit's pending or failed revision (revision.go).
+	// Every draw of the response consults both, so a revision stands whatever
+	// order it and its response arrive in.
+	revisions      map[string]string
+	revisionStates map[string]*frontendv1.FeedResponseRevision
+
 	// liveEndings files each turn that ended LIVE with what its end said, for
 	// the desktop banner (liveending.go). The prompt queue's turn end takes
 	// each entry once.
@@ -797,6 +804,8 @@ func newWSState(ws ids.WorkspaceID, born time.Time) *wsState {
 		outlivedReported:     map[ids.TurnID]bool{},
 		endedTurns:           map[ids.TurnID]bool{},
 		answerMarkdown:       map[string]string{},
+		revisions:            map[string]string{},
+		revisionStates:       map[string]*frontendv1.FeedResponseRevision{},
 		liveEndings:          map[ids.TurnID]TurnEnding{},
 		stalls:               map[string]*stallState{},
 		replayTail:           map[string]string{},

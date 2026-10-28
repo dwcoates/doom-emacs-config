@@ -513,6 +513,10 @@ func (c *fakeClient) NetworkChanged(context.Context, *shimv1.NetworkChangedReque
 	panic("sessionwatcher must not call NetworkChanged")
 }
 
+func (c *fakeClient) ReviseResponse(context.Context, *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
+	panic("sessionwatcher must not call ReviseResponse")
+}
+
 func (c *fakeClient) SendKeepalive(context.Context, *shimv1.SendKeepaliveRequest) (*shimv1.SendKeepaliveResponse, error) {
 	panic("sessionwatcher must not call SendKeepalive")
 }
@@ -789,6 +793,10 @@ func (s *feedSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId
 
 func (s *feedSink) OnApiError(_ ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, _ *conversationv1.TurnId, place *conversationv1.ConversationPlace) {
 	s.rec.emit(event{sink: "feed", method: "OnApiError", agent: agent.GetValue(), detail: failed.GetMessage(), place: place})
+}
+
+func (s *feedSink) OnResponseRevision(_ ids.WorkspaceID, agent *conversationv1.AgentId, revision *conversationv1.AgentResponseRevision) {
+	s.rec.emit(event{sink: "feed", method: "OnResponseRevision", agent: agent.GetValue(), detail: revision.GetResponse().GetValue()})
 }
 
 func (s *feedSink) OnAgentTerminal(_ ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, _ *conversationv1.AgentSuccess, _ *conversationv1.AgentFailure, place *conversationv1.ConversationPlace) {

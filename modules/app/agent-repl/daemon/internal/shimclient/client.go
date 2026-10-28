@@ -1629,6 +1629,11 @@ func (c *client) Hibernate(ctx context.Context, req *shimv1.HibernateRequest) (*
 	return unary(ctx, c, "hibernate", req, validateHibernateRequest, c.rpc.Hibernate)
 }
 
+// ReviseResponse rewrites one settled response on an ephemeral fork.
+func (c *client) ReviseResponse(ctx context.Context, req *shimv1.ReviseResponseRequest) (*shimv1.ReviseResponseResponse, error) {
+	return unary(ctx, c, "revise_response", req, validateReviseResponseRequest, c.rpc.ReviseResponse)
+}
+
 // SendKeepalive asks the session for one keep-alive now.
 func (c *client) SendKeepalive(ctx context.Context, req *shimv1.SendKeepaliveRequest) (*shimv1.SendKeepaliveResponse, error) {
 	return unary(ctx, c, "send_keepalive", req, validateSendKeepaliveRequest, c.rpc.SendKeepalive)

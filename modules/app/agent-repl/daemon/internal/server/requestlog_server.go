@@ -118,6 +118,13 @@ func (s *requestLoggingServer) SelectFeedRow(
 	return serveUnary(s, ctx, "SelectFeedRow", req, s.server.SelectFeedRow)
 }
 
+func (s *requestLoggingServer) SelectResponseText(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.SelectResponseTextRequest],
+) (*connect.Response[agentreplv1.SelectResponseTextResponse], error) {
+	return serveUnary(s, ctx, "SelectResponseText", req, s.server.SelectResponseText)
+}
+
 func (s *requestLoggingServer) PlanRollback(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.PlanRollbackRequest],

@@ -504,6 +504,19 @@ func validateStopBashRequest(req *shimv1.StopBashRequest) error {
 	return validateDetachedWorkID(m+".work", req.GetWork())
 }
 
+// validateReviseResponseRequest is ReviseResponseRequest's base function: the
+// response revised and the instruction the side query is given.
+func validateReviseResponseRequest(req *shimv1.ReviseResponseRequest) error {
+	const m = "ReviseResponseRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	if req.GetResponse().GetValue() == "" {
+		return invalid(m, m+".response.value", "is empty")
+	}
+	return validateUserSaid(m+".instruction", req.GetInstruction())
+}
+
 // validateDetachForegroundRequest is DetachForegroundRequest's base function.
 func validateDetachForegroundRequest(req *shimv1.DetachForegroundRequest) error {
 	const m = "DetachForegroundRequest"

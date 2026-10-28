@@ -34,6 +34,7 @@ const (
 	RPCResolveVendorTask        = "ResolveVendorTask"
 	RPCGetForkPoint             = "GetForkPoint"
 	RPCForkSession              = "ForkSession"
+	RPCReviseResponse           = "ReviseResponse"
 )
 
 // newResponse mints the empty response message for one verb, so `answer`
@@ -82,6 +83,8 @@ func newResponse(rpc string) proto.Message {
 		return &shimv1.GetForkPointResponse{}
 	case RPCForkSession:
 		return &shimv1.ForkSessionResponse{}
+	case RPCReviseResponse:
+		return &shimv1.ReviseResponseResponse{}
 	default:
 		return nil
 	}
