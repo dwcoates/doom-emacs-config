@@ -255,6 +255,36 @@ func TestTheWhenColumnReadsNoTurnRunning(t *testing.T) {
 	}
 }
 
+func TestTheIdleWhenColumnCarriesTheDurableLastTurnEnd(t *testing.T) {
+	tests := []struct {
+		name  string
+		ended *time.Time
+		want  *int64
+	}{
+		{name: "no turn has ended", ended: nil, want: nil},
+		{name: "a turn ended long before this daemon started", ended: at(-72 * time.Hour), want: ptr(epoch.Add(-72 * time.Hour).UnixMilli())},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the record alone, no live footer clock.
+			ws := workspace(string(theWS), "one")
+			ws.LastTurnEndedAt = tc.ended
+			r := arrange(t, ws)
+
+			// Act.
+			idle := onlyRow(t, r).GetWhen().GetNoTurnRunning()
+
+			// Assert.
+			if idle == nil {
+				t.Fatalf("when = %v, want no_turn_running", onlyRow(t, r).GetWhen())
+			}
+			if (idle.LastTurnEndedAtMs == nil) != (tc.want == nil) || (tc.want != nil && *idle.LastTurnEndedAtMs != *tc.want) {
+				t.Fatalf("last_turn_ended_at_ms = %v, want %v", idle.LastTurnEndedAtMs, tc.want)
+			}
+		})
+	}
+}
+
 func TestTheWhenColumnStartsCountingOnceTheTurnsLinkIsSeen(t *testing.T) {
 	// Arrange: the turn is accepted before the shim link is seen, so the
 	// strip's clock has not started.

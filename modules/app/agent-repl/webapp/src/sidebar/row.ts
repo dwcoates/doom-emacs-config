@@ -591,7 +591,8 @@ export function drawRosterRowPriorityBadge(
  * A sync merge ticks its elapsed time from when it joined its queue, and a
  * running turn from the start instant the daemon read off the footer's turn
  * clock, both with that clock's own reading, so the row and the strip read
- * the same number; with neither the column reads the zero reading, "0s".
+ * the same number; with neither the column counts from the durable instant the
+ * last turn ended, or reads the zero reading, "0s", when none has.
  */
 export function drawRosterRowWhen(
   u: RosterRowWhen,
@@ -600,10 +601,17 @@ export function drawRosterRowWhen(
 ): HTMLElement {
   const shown = requireCase(u.shown, `${path}.shown`);
   if (shown.case === "noTurnRunning") {
-    drawRosterRowWhenNoTurnRunning(shown.value, `${path}.no_turn_running`);
-    const idle = settledElapsedClock("when", 0);
-    idle.setAttribute("data-when", shown.case);
-    return idle;
+    const endedMs = drawRosterRowWhenNoTurnRunning(shown.value, `${path}.no_turn_running`);
+    if (endedMs === undefined) {
+      const idle = settledElapsedClock("when", 0);
+      idle.setAttribute("data-when", shown.case);
+      return idle;
+    }
+    const since = document.createElement("span");
+    since.className = "when";
+    since.setAttribute("data-when", shown.case);
+    tickElapsed(since, sc, endedMs);
+    return since;
   }
   const when = document.createElement("span");
   when.className = "when";
@@ -649,10 +657,17 @@ export function drawRosterRowWhenTurnRunning(u: RosterRowWhenTurnRunning, path: 
   return msOf(u.startedAtMs, `${path}.started_at_ms`);
 }
 
-/** No turn is running. EMPTY: the arm is the fact. */
-export function drawRosterRowWhenNoTurnRunning(u: RosterRowWhenNoTurnRunning, path: string): void {
-  void u;
-  void path;
+/**
+ * No turn is running: when the last turn ended, as an epoch instant, or
+ * undefined when none has ended (the column then reads "0s").
+ */
+export function drawRosterRowWhenNoTurnRunning(
+  u: RosterRowWhenNoTurnRunning,
+  path: string,
+): number | undefined {
+  return u.lastTurnEndedAtMs === undefined
+    ? undefined
+    : msOf(u.lastTurnEndedAtMs, `${path}.last_turn_ended_at_ms`);
 }
 
 /** When the workspace's merge settled, as an epoch instant. */

@@ -9062,12 +9062,18 @@ func (x *RosterRowWhenTurnRunning) GetStartedAtMs() int64 {
 	return 0
 }
 
-// No turn is running: the open workspaces section draws "0s". DELIBERATELY
-// EMPTY: the arm is the fact.
+// No turn is running: the open workspaces section counts the time since the
+// workspace's last turn ENDED, from the daemon's durable turn record
+// (RosterRow.last_turn_ended, the workspace record's LastTurnEndedAt), so the
+// count is right after a daemon restart and after a long shutdown: the
+// client ticks from the instant and never from when it started.
 type RosterRowWhenNoTurnRunning struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When the workspace's most recent turn ended, epoch ms on the daemon's
+	// clock. UNSET = no turn of the workspace has ended yet, drawn "0s".
+	LastTurnEndedAtMs *int64 `protobuf:"varint,1,opt,name=last_turn_ended_at_ms,json=lastTurnEndedAtMs,proto3,oneof" json:"last_turn_ended_at_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *RosterRowWhenNoTurnRunning) Reset() {
@@ -9098,6 +9104,13 @@ func (x *RosterRowWhenNoTurnRunning) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RosterRowWhenNoTurnRunning.ProtoReflect.Descriptor instead.
 func (*RosterRowWhenNoTurnRunning) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{132}
+}
+
+func (x *RosterRowWhenNoTurnRunning) GetLastTurnEndedAtMs() int64 {
+	if x != nil && x.LastTurnEndedAtMs != nil {
+		return *x.LastTurnEndedAtMs
+	}
+	return 0
 }
 
 // A SYNC merge stands in the workspace -- waiting in its repository's queue or
@@ -11196,8 +11209,10 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x13RosterRowWhenMerged\x12\x13\n" +
 	"\x05at_ms\x18\x01 \x01(\x03R\x04atMs\">\n" +
 	"\x18RosterRowWhenTurnRunning\x12\"\n" +
-	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMs\"\x1c\n" +
-	"\x1aRosterRowWhenNoTurnRunning\">\n" +
+	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMs\"m\n" +
+	"\x1aRosterRowWhenNoTurnRunning\x125\n" +
+	"\x15last_turn_ended_at_ms\x18\x01 \x01(\x03H\x00R\x11lastTurnEndedAtMs\x88\x01\x01B\x18\n" +
+	"\x16_last_turn_ended_at_ms\">\n" +
 	"\x18RosterRowWhenSyncMerging\x12\"\n" +
 	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMs\"\xea\x02\n" +
 	"\x0fRosterRowDetail\x12:\n" +
@@ -11816,6 +11831,7 @@ func file_frontend_v1_sidebar_proto_init() {
 		(*RosterRowWhen_SyncMerging)(nil),
 	}
 	file_frontend_v1_sidebar_proto_msgTypes[128].OneofWrappers = []any{}
+	file_frontend_v1_sidebar_proto_msgTypes[132].OneofWrappers = []any{}
 	file_frontend_v1_sidebar_proto_msgTypes[134].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

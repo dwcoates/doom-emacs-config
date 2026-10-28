@@ -78,7 +78,7 @@ status arm and whatever else the case is about."
                    :name (:text "fix-flaky")
                    :status (:arm :ready :value nil)
                    :current (:current nil)
-                   :when (:arm :no-turn-running :value nil)
+                   :when (:arm :no-turn-running :value (:last-turn-ended-at-ms nil))
                    :detail (:branch nil :parent-branch nil :summary nil :commits nil :children nil)
                    :closed (:closed nil)))))
 
@@ -552,7 +552,7 @@ reserved."
 (defconst agent-repl-test-wire-roster--when-arm-samples
   '((syncMerging "{\"startedAtMs\":\"1\"}" (:started-at-ms 1))
     (turnRunning "{\"startedAtMs\":\"1\"}" (:started-at-ms 1))
-    (noTurnRunning "{}" nil)
+    (noTurnRunning "{}" (:last-turn-ended-at-ms nil))
     (merged "{\"atMs\":\"1\"}" (:at-ms 1))
     (hidden "{\"atMs\":\"1\"}" (:at-ms 1 :cache nil)))
   "One payload per when arm and the value it decodes to.")
@@ -667,7 +667,21 @@ stale blue status."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-row-when
                   "{\"noTurnRunning\":{}}")
-                 '(:arm :no-turn-running :value nil))))
+                 '(:arm :no-turn-running :value (:last-turn-ended-at-ms nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-when-no-turn-running-carries-the-last-turn-end ()
+  "The idle arm carries the durable instant the last turn ended."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-when
+                  "{\"noTurnRunning\":{\"lastTurnEndedAtMs\":\"1756400000000\"}}")
+                 '(:arm :no-turn-running :value (:last-turn-ended-at-ms 1756400000000)))))
+
+(ert-deftest agent-repl-test-wire-roster-when-no-turn-running-refuses-an-unknown-field ()
+  "The idle arm carries the last turn end alone."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-when-no-turn-running
+                  "{\"atMs\":\"1\"}")
+                 '("RosterRowWhenNoTurnRunning" atMs "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-when-unset-is-a-breach ()
   "The when-column's oneof is never unset."

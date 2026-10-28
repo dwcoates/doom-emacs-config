@@ -10,7 +10,7 @@ import { SelectInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { RosterRowSchema, type RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { liveElapsedClock } from "../../src/elapsed-clock.js";
+import { liveElapsedClock, liveElapsedReading } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { heatColor } from "../../src/heat.js";
 import { HOVER_CLOSE_GRACE_MS } from "../../src/sidebar/row-hover.js";
@@ -389,6 +389,28 @@ describe("the when-column", () => {
     expect([drawn.querySelector(".when")?.getAttribute("data-when"), drawn.querySelector(".when")?.textContent]).toEqual([
       "noTurnRunning",
       "0s",
+    ]);
+  });
+
+  it("counts from the durable last turn end with no turn running", () => {
+    // Arrange: the turn ended three days before the page loaded.
+    const ticker = fakeTicker();
+    const sc = sidebarContext(appContext({}, ticker));
+    const endedMs = NOW - 3 * 24 * 3_600_000;
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", when: { case: "noTurnRunning", value: { lastTurnEndedAtMs: BigInt(endedMs) } } }),
+      sc,
+      "R",
+    );
+    const text = () => drawn.querySelector(".when")?.textContent;
+    const before = text();
+    // Act
+    ticker.tick(NOW + 60_000);
+    // Assert
+    expect([drawn.querySelector(".when")?.getAttribute("data-when"), before, text()]).toEqual([
+      "noTurnRunning",
+      liveElapsedReading(endedMs, NOW),
+      liveElapsedReading(endedMs, NOW + 60_000),
     ]);
   });
 
