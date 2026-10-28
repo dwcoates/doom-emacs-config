@@ -3512,10 +3512,6 @@ describe("the held prompt's fill", () => {
   it("sits markedly darker than --user in the light theme", () => {
     // Arrange
     const block = declarationsOf(":root") ?? "";
-    const lightness = (rgb: [number, number, number]): number => {
-      const y = luminance(rgb);
-      return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
-    };
     // Act
     const step = Math.abs(lightness(themeRgbOf(block, "--user")) - lightness(themeRgbOf(block, "--held-prompt-bg")));
     // Assert
@@ -3831,6 +3827,52 @@ const luminance = ([r, g, b]: [number, number, number]): number => {
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 };
 
+/**
+ * An RGB triple's CIE L*, so "clearly darker, but not much darker" is one step
+ * size in both themes rather than a luminance ratio that reads differently at
+ * each end of the scale.
+ */
+const lightness = (rgb: [number, number, number]): number => {
+  const y = luminance(rgb);
+  return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
+};
+
+describe("lightness, the CIE L* every fill-step test measures in", () => {
+  it.each([
+    ["black", [0, 0, 0], 0],
+    ["white", [255, 255, 255], 100],
+  ] as const)("puts %s at L* %d", (_name, rgb, want) => {
+    // Arrange / Act
+    const got = lightness([...rgb]);
+    // Assert
+    expect(got).toBeCloseTo(want, 1);
+  });
+
+  it("takes the linear segment below the CIE threshold", () => {
+    // Arrange — #0e0e0e's luminance, 0.00439, sits below 0.008856.
+    // Act
+    const got = lightness([0x0e, 0x0e, 0x0e]);
+    // Assert
+    expect(got).toBeCloseTo(903.3 * luminance([0x0e, 0x0e, 0x0e]), 6);
+  });
+
+  it("takes the cube-root segment above the CIE threshold", () => {
+    // Arrange / Act
+    const got = lightness([0x80, 0x80, 0x80]);
+    // Assert — mid grey is L* 53.6.
+    expect(got).toBeCloseTo(53.6, 1);
+  });
+
+  it("is the one L* formula in this suite", () => {
+    // Arrange
+    const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    // Act — the formula's cube-root segment, written out.
+    const copies = source.split("116 * Math." + "cbrt").length - 1;
+    // Assert
+    expect(copies).toBe(1);
+  });
+});
+
 describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
   it("paints a prompt the sidebar's own color (owner request, 2026-10-28)", () => {
     // Arrange
@@ -3950,13 +3992,6 @@ describe("a link in a prompt bubble (owner request, 2026-10-19)", () => {
 });
 
 describe("code in a blue prompt bubble (owner request, 2026-10-19)", () => {
-  // CIE L*, so "clearly darker, but not much darker" is one step size in
-  // both themes rather than a luminance ratio that reads differently at each
-  // end of the scale.
-  const lightness = (rgb: [number, number, number]): number => {
-    const y = luminance(rgb);
-    return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
-  };
 
   it.each([
     ["light", ""],
