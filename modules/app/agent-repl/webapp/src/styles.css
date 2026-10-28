@@ -270,9 +270,8 @@
      the softer sibling of the --clear-divider red, because a compaction
      summarizes the context above rather than dropping it the way a clear does. */
   /* --compact-rule: render-colors.json#color_values's orange (src/vocab.ts). */
-  /* NO RESPONSE WEARS A BORDER OR A FILL (owner request, 2026-10-28, retiring
-     the final response's green edge of 2026-09-23): a turn's answer, like the
-     prose the agent wrote mid-turn and its thinking, is text on the feed. */
+  /* NO RESPONSE WEARS A BORDER (owner request, 2026-10-28, retiring the final
+     response's green edge of 2026-09-23). */
   /* THE SELECTED ENTRY's color: the ring on a non-bubble card a footer
      detached-work jump landed on. A selected BUBBLE is marked by its fill
      instead (--selected-bubble-bg, below). */
@@ -293,10 +292,9 @@
      to halfway between the selected grey and an unselected final response's
      own fill, so the answer's highlight reads softer than the other selected
      bubbles', then 25% dimmer again: the grey keeps 37.5% (0.75 of the
-     half). That fill is the feed's --bg since the answer lost its own
-     (2026-10-28). Declared once: both themes resolve it from their own two
+     half). Declared once: both themes resolve it from their own two
      tokens. */
-  --selected-final-response-bg: color-mix(in srgb, var(--selected-bubble-bg) 37.5%, var(--bg));
+  --selected-final-response-bg: color-mix(in srgb, var(--selected-bubble-bg) 37.5%, var(--assistant));
   /* THE SELECTED PROMPT's fill (owner request, 2026-10-19): a prompt bubble
      that is not held is selected in a darker blue than the user prompt's own
      --user (#b8d2ff), rather than the grey every other selected bubble
@@ -2477,14 +2475,15 @@ pre {
    neither reads as a bubble, while the 0.3px transparent border the base
    rule reserves is untouched: nothing here reflows, since box-shadow paints
    outside the layout box.
-   EVERY RESPONSE IS DRAWN SO (owner request, 2026-10-28): the turn's final
-   answer too drops its fill and its shadow, so `[data-variant="response"]`
-   covers the interim and the final response alike. The agentic card and the
-   compaction summary keep the response fill. */
+   THE TURN'S FINAL ANSWER IS FILLED AS A TOOL CARD IS (owner requests,
+   2026-10-28): the response role's `--assistant`, the tool card's own fill,
+   with no shadow and no border, so it reads as one of the cards around it. */
 .bubble[data-variant="thinking"],
-.bubble[data-variant="response"],
 .bubble.interim-response {
   --bubble-bg: var(--bg);
+  box-shadow: none;
+}
+.bubble[data-variant="response"] {
   box-shadow: none;
 }
 .bubble.interim-response {
