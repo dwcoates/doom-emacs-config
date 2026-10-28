@@ -55,6 +55,7 @@ func TestANoticeOnItsOwnIsHeadedByTheNeutralMarkerNamingItsSubject(t *testing.T)
 		{name: "an exhausted allowance", subject: &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_UsageLimit{UsageLimit: &conversationv1.AgentNoticeUsageLimit{}}}, detail: "allowance exhausted"},
 		{name: "a changed allowance window", subject: &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_UsageTransition{UsageTransition: &conversationv1.AgentNoticeUsageTransition{}}}, detail: "allowance window changed"},
 		{name: "an approaching limit", subject: &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_UsageWarning{UsageWarning: &conversationv1.AgentNoticeUsageWarning{}}}, detail: "approaching an allowance limit"},
+		{name: "trouble waiting cures", subject: &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_VendorTransient{VendorTransient: &conversationv1.AgentNoticeVendorTransient{}}}, detail: "temporary vendor trouble"},
 		{name: "an unclassified notice names no detail", subject: &conversationv1.AgentResponseSynthesizedNotice{Subject: &conversationv1.AgentResponseSynthesizedNotice_Unclassified{Unclassified: &conversationv1.AgentNoticeUnclassified{}}}},
 	}
 	for _, tc := range cases {

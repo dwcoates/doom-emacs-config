@@ -325,6 +325,61 @@ func TestSynthesizedNoticeSubjectsTable(t *testing.T) {
 	}
 }
 
+func TestTransientVendorNoticeIsClassifiedAsTransient(t *testing.T) {
+	// Arrange. A notice reporting trouble that waiting cures is classified by
+	// its producer, so the daemon can retire it once the vendor serves again.
+	tests := []struct {
+		name      string
+		text      string
+		transient bool
+	}{
+		{name: "overloaded", text: "API Error: 529 overloaded_error", transient: true},
+		{name: "server status", text: "API Error: 503 service unavailable", transient: true},
+		{name: "gateway timeout status", text: "API Error: 504", transient: true},
+		{name: "request timeout status", text: "API Error: 408 request timeout", transient: true},
+		{name: "rate limit status", text: "API Error: 429 too many requests", transient: true},
+		{name: "dropped connection", text: "API Error: Connection dropped (ECONNRESET)", transient: true},
+		{name: "unable to connect", text: "API Error: Unable to connect to API", transient: true},
+		{name: "request timed out", text: "API Error: Request timed out.", transient: true},
+		{name: "invalid request stands", text: "API Error: 400 invalid_request_error", transient: false},
+		{name: "authentication stands", text: "API Error: 401 authentication_error", transient: false},
+		{name: "spend limit is not transient", text: "You've hit your monthly spend limit", transient: false},
+		{name: "unrelated vendor notice", text: "Claude's response was interrupted", transient: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestConverter(t)
+			line := `{"type":"assistant","uuid":"a1","isSidechain":false,"isApiErrorMessage":true,"timestamp":"` + ts1 +
+				`","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"` + tc.text + `"}]}}`
+
+			// Act.
+			entries := convertLines(t, c, line)
+
+			// Assert.
+			notice := activityOf(entries[0]).GetResponse().GetSuccess().GetSynthesizedNotice()
+			if got := notice.GetVendorTransient() != nil; got != tc.transient {
+				t.Fatalf("text %q transient = %v, want %v", tc.text, got, tc.transient)
+			}
+		})
+	}
+}
+
+func TestServerErrorRecordNoticeIsTransient(t *testing.T) {
+	// Arrange. The vendor's own error class on the record decides even when the
+	// words state nothing recognizable.
+	c := newTestConverter(t)
+	line := `{"type":"assistant","uuid":"a1","isSidechain":false,"isApiErrorMessage":true,"error":"server_error","timestamp":"` + ts1 +
+		`","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"API Error: something went wrong"}]}}`
+
+	// Act.
+	entries := convertLines(t, c, line)
+
+	// Assert.
+	if activityOf(entries[0]).GetResponse().GetSuccess().GetSynthesizedNotice().GetVendorTransient() == nil {
+		t.Fatal("a server_error notice must classify as transient")
+	}
+}
+
 func TestSyntheticNoResponseRecordIsWithheld(t *testing.T) {
 	// Arrange. No model wrote these words; it is the vendor's own placeholder for
 	// a turn that produced nothing.

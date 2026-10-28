@@ -32,6 +32,7 @@ const (
 	noticeDetailUsageLimit     = "allowance exhausted"
 	noticeDetailUsageTransit   = "allowance window changed"
 	noticeDetailUsageWarning   = "approaching an allowance limit"
+	noticeDetailVendorTrouble  = "temporary vendor trouble"
 	opNoticeFolded             = "daemon.feed.notice_folded"
 	opNoticeFoldedAfterEnding  = "daemon.feed.notice_folded_after_ending"
 	opNoticeRepeatsVendorWords = "daemon.feed.notice_repeats_vendor_message"
@@ -48,6 +49,8 @@ func noticeMarker(notice *conversationv1.AgentResponseSynthesizedNotice) *fronte
 		return neutralMarker(noticeLabel, noticeDetailUsageTransit)
 	case *conversationv1.AgentResponseSynthesizedNotice_UsageWarning:
 		return neutralMarker(noticeLabel, noticeDetailUsageWarning)
+	case *conversationv1.AgentResponseSynthesizedNotice_VendorTransient:
+		return neutralMarker(noticeLabel, noticeDetailVendorTrouble)
 	}
 	return neutralMarker(noticeLabel, "")
 }
@@ -61,6 +64,8 @@ func noticeSubject(notice *conversationv1.AgentResponseSynthesizedNotice) string
 		return "usage_transition"
 	case *conversationv1.AgentResponseSynthesizedNotice_UsageWarning:
 		return "usage_warning"
+	case *conversationv1.AgentResponseSynthesizedNotice_VendorTransient:
+		return "vendor_transient"
 	}
 	return "unclassified"
 }
@@ -75,6 +80,16 @@ func noticeText(row *frontendv1.FeedRow) (string, bool) {
 		return success.GetProse().GetProse().GetSource().GetMarkdown(), true
 	}
 	return resp.GetUpdate().GetProse().GetProse().GetSource().GetMarkdown(), true
+}
+
+// transientNotice reports whether ROW is a notice drawn on its own that
+// reports trouble waiting cures (an overload, a timeout, a dropped
+// connection), which the producer classified and noticeMarker states in the
+// card's head. The head is the row's own record of it, so a replayed or
+// scrolled-back row says the same.
+func transientNotice(row *frontendv1.FeedRow) bool {
+	notice := row.GetActivity().GetResponse().GetNotice()
+	return notice != nil && notice.GetMarker().GetDetail().GetText() == noticeDetailVendorTrouble
 }
 
 // faultEndingMarker is ROW's marker when ROW is a turn ending that raised a

@@ -1187,6 +1187,12 @@ message AgentResponseSynthesizedNotice {
     // The producer recognized the prose as synthesized but matched it to no
     // known subject. The text is all a consumer has.
     AgentNoticeUnclassified unclassified = 4;
+    // The notice reports TROUBLE THAT WAITING CURES: the API was overloaded or
+    // failed internally, the request timed out, or the connection to the API
+    // dropped. The producer classifies it, with the same reading it gives a
+    // failed request's kind, so a consumer can retire the notice once the
+    // vendor serves again.
+    AgentNoticeVendorTransient vendor_transient = 6;
   }
 
   // The HTTP status the vendor attached to the notice, when it attached one.
@@ -1198,6 +1204,7 @@ message AgentNoticeUsageLimit {}
 message AgentNoticeUsageTransition {}
 message AgentNoticeUsageWarning {}
 message AgentNoticeUnclassified {}
+message AgentNoticeVendorTransient {}
 
 // The block ended without completing.
 message AgentResponseFailure {

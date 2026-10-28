@@ -13,6 +13,7 @@ package convert
 // the number of blocks.
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 
@@ -321,8 +322,39 @@ func synthesizedNotice(record map[string]any, text string) *conversationv1.Agent
 		notice.Subject = &conversationv1.AgentResponseSynthesizedNotice_UsageWarning{UsageWarning: &conversationv1.AgentNoticeUsageWarning{}}
 	case containsFold(text, "switched to"), containsFold(text, "resets at"):
 		notice.Subject = &conversationv1.AgentResponseSynthesizedNotice_UsageTransition{UsageTransition: &conversationv1.AgentNoticeUsageTransition{}}
+	case transientNoticeRecord(record, text):
+		notice.Subject = &conversationv1.AgentResponseSynthesizedNotice_VendorTransient{VendorTransient: &conversationv1.AgentNoticeVendorTransient{}}
 	}
 	return notice
+}
+
+// transientNoticeStatus reads an HTTP status a vendor notice states, when it
+// is one waiting cures: a timeout (408), a rate limit (429) or a server-side
+// failure (5xx).
+var transientNoticeStatus = regexp.MustCompile(`(?i)\bAPI Error:?\s*(408|429|5\d\d)\b`)
+
+// transientNoticeWords are the vendor's words for trouble that waiting cures
+// but that states no status: an overloaded API, a timeout, a dropped
+// connection.
+var transientNoticeWords = []string{
+	"overloaded", "timed out", "timeout", "connection error", "connection closed", "connection dropped",
+	"unable to connect", "can't reach", "cannot reach", "could not reach", "socket hang up",
+	"econnreset", "econnrefused", "etimedout", "enotfound", "eai_again", "enetunreach", "ehostunreach", "enetdown",
+}
+
+// transientNoticeRecord reports whether a synthesized notice reports trouble
+// that waiting cures: the vendor classed it a server error, it states a
+// transient status, or its words name an overload or a dropped connection.
+func transientNoticeRecord(record map[string]any, text string) bool {
+	if str(record["error"]) == "server_error" || transientNoticeStatus.MatchString(text) {
+		return true
+	}
+	for _, words := range transientNoticeWords {
+		if containsFold(text, words) {
+			return true
+		}
+	}
+	return false
 }
 
 // noticePrefixes are the vendor's own openings for prose no model wrote.
