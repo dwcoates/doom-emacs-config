@@ -79,11 +79,11 @@
     "row is the light theme's set as it stood. The dark red and blue are the",
     "pastel ones taken 0.12 darker in OKLCH lightness, hue and strength kept",
     "(owner ruling, 2026-10-18; design-red-blue-darker.html beside this",
-    "module). Then EVERY dark color was taken 0.10 darker in OKLCH",
+    "module). Then EVERY dark color was taken 0.12 darker in OKLCH",
     "lightness with its chroma times 1.05, hue kept, chroma lowered only",
     "to stay in gamut (owner rulings, 2026-10-28: the custom option of",
-    "design-darker-accents.html, its step then halved from 0.19); the",
-    "webapp's dark accents took the same step.",
+    "design-darker-accents.html, its step then eased from 0.19 to 0.10,",
+    "then to 0.12); the webapp's dark accents took the same step.",
     "",
     "A glyph-only ink with one drawn value is here too: 'orange', the",
     "compaction orange a compacting turn's dot is inked with and the feed's",
@@ -104,13 +104,13 @@
       "orange": "#ea580c"
     },
     "dark": {
-      "blue": "#5376b9",
-      "purple": "#8252d6",
-      "red": "#a41f27",
-      "turquoise": "#0cafc6",
-      "yellow": "#c39206",
-      "green": "#026e07",
-      "orange": "#df7409"
+      "blue": "#4e70b3",
+      "purple": "#7d4bcf",
+      "red": "#9e1621",
+      "turquoise": "#0fa8be",
+      "yellow": "#bc8d05",
+      "green": "#016705",
+      "orange": "#d76f04"
     }
   },
   "colors": [

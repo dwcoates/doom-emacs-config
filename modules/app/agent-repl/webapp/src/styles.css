@@ -540,7 +540,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --reference: #d68135;
+    --reference: #cf7b2d;
     /* THE GROUNDS FOLLOW THE CLAUDE DESKTOP APP'S DARKER SURFACES (owner
        requests, 2026-10-28), sampled from two screenshots of it, then the
        feed a touch lighter and the sidebar a touch darker (owner request, the
@@ -606,7 +606,7 @@
     /* The Claude desktop app's prompt bubble (owner request, 2026-10-28). */
     --user: #212121;
     /* A light purple, so a known command reads on the dark prompt blue. */
-    --known-command: #d0a3df;
+    --known-command: #ca9dd9;
     /* A step below this theme's --user, at the feed's own ground. */
     --prompt-code-bg: #121212;
     /* A held prompt wears the prompt's own fill and code wash (owner request,
@@ -620,7 +620,7 @@
        and EVERY PURPLE IS THE ONE PURPLE, the purple status --blocked, the
        tool title's purple. The greens are THE ONE GREEN, the green status
        --ok (owner ruling, 2026-10-17). */
-    --thinking: #df8030;
+    --thinking: #d97928;
     --tool-command: #898782;
     --tool-title: var(--blocked);
     /* The accent is the blue status's blue (owner ruling, 2026-10-18). */
@@ -631,9 +631,9 @@
     --info-model: var(--turquoise);
     /* The token readout is the yellow status's own token, never a copy. */
     --info-tokens: var(--async);
-    --info-time: #6c9fd8;
+    --info-time: #6699d2;
     --info-agents: var(--blocked);
-    --info-tasks: #d67d8a;
+    --info-tasks: #d07784;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
     /* THE COMPOSER WEARS THE FEED'S GROUND (owner request, 2026-10-28,
@@ -647,11 +647,11 @@
        place the stylesheet WANTS to shout against the background. --search-fg
        does not flip with the theme for the same reason the wash does not —
        dark text on a bright wash is the readable pair in both. */
-    --search-match: #c49503;
-    --search-current: #cd5b05;
-    --remediation: #bb980a;
-    --interrupted: #bb980a;
-    --suite-running: #bb980a;
+    --search-match: #bc8f02;
+    --search-current: #c45601;
+    --remediation: #b39209;
+    --interrupted: #b39209;
+    --suite-running: #b39209;
     /* The cleared rule is the red status's red (owner ruling, 2026-10-17). */
     --clear-divider: var(--err);
     /* --compact-rule, apart from the cleared rule's red at a glance (owner
@@ -659,9 +659,9 @@
        render-colors.json#color_values's dark orange (src/vocab.ts). */
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-entry ring still reads against the dark page. */
-    --selected-entry: #6a9ee0;
+    --selected-entry: #6498da;
     /* The answered label's pastel orange, lifted for the dark page. */
-    --answer-label: #df9e6d;
+    --answer-label: #d99866;
     /* A moderate grey a little lighter than the dark --assistant (the dark
        --tool-card-bg, #191918). */
     --selected-bubble-bg: #313130;
@@ -673,22 +673,22 @@
        lift, so the hairline still reads against the dark --user navy fill. */
     /* Brighter token yellow for the dark theme, so the figure reads on the
        deep ground the same way the light one does on white. */
-    --token-yellow: #c19308;
+    --token-yellow: #ba8e07;
     /* Brighter teal for the dark theme, for the same reason --async lifts. */
-    --hibernated: #03b4a1;
+    --hibernated: #06ad9b;
     /* The gate stays a SOLID yellow card in the dark theme too, but a deep
        yellow rather than the light theme's bright one, so --fg still reads on
        it. The frame lifts to the brighter orange the dark theme already gives
        --compact-rule. */
     --revival-gate-bg: #5c4a10;
     --revival-gate-border: var(--compact-rule);
-    --q-border: #bb980a;
-    --news-digest-ipo: #c9714e;
+    --q-border: #b39209;
+    --news-digest-ipo: #c26b48;
     --async-card: #09433b;
-    --async-border: #13a591;
+    --async-border: #099e8b;
     --merge-card: #3a2e0a;
-    --merge-border: #bb980a;
-    --merge-paused: #cb8309;
+    --merge-border: #b39209;
+    --merge-paused: #c37d07;
     /* A white wash, lighter than the dark bubble (see the :root note). */
     --code-bg: color-mix(in srgb, #ffffff 12%, transparent);
     /* Lighter than this theme's `--muted`, as in the :root note. */
