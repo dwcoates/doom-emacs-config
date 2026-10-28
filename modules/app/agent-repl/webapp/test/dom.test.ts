@@ -76,7 +76,7 @@ describe("computedPx", () => {
     const callers = [...code].filter(([, text]) => /\bcomputedPx\(/.test(text)).map(([p]) => p).sort();
     const rolled = [...code].filter(([, text]) => /px\$\//.test(text)).map(([p]) => p);
     // Assert
-    expect([callers, rolled]).toEqual([["bubble/body.ts", "dom.ts", "feed/collapsed-width.ts", "feed/ellipsis-trim.ts", "host/sidebar.ts", "sidebar/band-fit.ts", "sidebar/selection-scroll.ts"], ["dom.ts"]]);
+    expect([callers, rolled]).toEqual([["bubble/body.ts", "dom.ts", "feed/collapsed-width.ts", "feed/ellipsis-trim.ts", "sidebar/band-fit.ts", "sidebar/selection-scroll.ts"], ["dom.ts"]]);
   });
 });
 
