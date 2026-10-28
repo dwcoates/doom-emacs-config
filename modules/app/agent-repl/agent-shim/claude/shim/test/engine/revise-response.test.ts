@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { reviseResponse, type ReviseResponseDeps, type RevisionCut } from "../../src/engine/revise-response.js";
 import type { PromptQueue } from "../../src/engine/prompt-queue.js";
+import { textSaid } from "../../src/engine/turn.js";
 import { errorResultMessage, initMessage, resultMessage, ScriptedQuery } from "./fakes.js";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 
@@ -48,7 +49,7 @@ function harness(
 function request(response = "msg_1:0", instruction = "Revise the response."): shimv1.ReviseResponseRequest {
   return create(shimv1.ReviseResponseRequestSchema, {
     response: create(conversationv1.AgentActivityIdSchema, { value: response }),
-    instruction,
+    instruction: textSaid(instruction),
   });
 }
 
@@ -124,6 +125,15 @@ describe("revising a response", () => {
 });
 
 describe("a revision that cannot be written", () => {
+  it("fails hard when a request with no instruction reaches it", async () => {
+    // Arrange
+    const h = harness(answering("revised"));
+    const bare = create(shimv1.ReviseResponseRequestSchema, { response: request().response });
+    // Act, Assert
+    await expect(reviseResponse(h.deps, bare)).rejects.toThrow(/no instruction/);
+    expect(h.built).toEqual([]);
+  });
+
   it("refuses no_session, building nothing, when no session is started", async () => {
     // Arrange
     const h = harness(answering("revised"), { vendorSessionId: undefined });

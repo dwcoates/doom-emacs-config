@@ -4,8 +4,9 @@
 // THE USER ASKED ABOUT WORDS THEY HIGHLIGHTED in a final response, and the
 // answer is a revised version of that response rather than a new turn. The
 // daemon composes the whole instruction (the response, the highlighted words
-// and what the user asked); the shim runs it on a SIDE QUERY and writes the
-// answer as the page line conversation.v1.AgentUpdate.response_revision.
+// and what the user said, images included); the shim runs it on a SIDE QUERY
+// and writes the answer as the page line
+// conversation.v1.AgentUpdate.response_revision.
 //
 // THE SIDE QUERY IS A THROWAWAY FORK THAT PERSISTS NOTHING. It resumes the
 // session's own conversation through the newest finished turn (the same point
@@ -28,13 +29,15 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { AgentActivityId } from "../../conversation/v1/agent_activity_pb";
 import { file_conversation_v1_agent_activity } from "../../conversation/v1/agent_activity_pb";
+import type { UserSaid } from "../../conversation/v1/user_pb";
+import { file_conversation_v1_user } from "../../conversation/v1/user_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file shim/v1/endpoint_revise_response.proto.
  */
 export const file_shim_v1_endpoint_revise_response: GenFile = /*@__PURE__*/
-  fileDesc("CiZzaGltL3YxL2VuZHBvaW50X3JldmlzZV9yZXNwb25zZS5wcm90bxIHc2hpbS52MSJgChVSZXZpc2VSZXNwb25zZVJlcXVlc3QSMgoIcmVzcG9uc2UYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkEhMKC2luc3RydWN0aW9uGAIgASgJIoQBChZSZXZpc2VSZXNwb25zZVJlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5zaGltLnYxLlJldmlzZVJlc3BvbnNlU3VjY2Vzc0gAEi0KBWVycm9yGAIgASgLMhwuc2hpbS52MS5SZXZpc2VSZXNwb25zZUVycm9ySABCCAoGcmVzdWx0IiYKFVJldmlzZVJlc3BvbnNlU3VjY2VzcxINCgVtb2RlbBgBIAEoCSKNAgoTUmV2aXNlUmVzcG9uc2VFcnJvchI2Cgpub19zZXNzaW9uGAEgASgLMiAuc2hpbS52MS5SZXZpc2VSZXNwb25zZU5vU2Vzc2lvbkgAEjsKDW5vX2ZvcmtfcG9pbnQYAiABKAsyIi5zaGltLnYxLlJldmlzZVJlc3BvbnNlTm9Gb3JrUG9pbnRIABI8Cg12ZW5kb3JfZmFpbGVkGAMgASgLMiMuc2hpbS52MS5SZXZpc2VSZXNwb25zZVZlbmRvckZhaWxlZEgAEjoKDGVtcHR5X2Fuc3dlchgEIAEoCzIiLnNoaW0udjEuUmV2aXNlUmVzcG9uc2VFbXB0eUFuc3dlckgAQgcKBWNhdXNlIhkKF1JldmlzZVJlc3BvbnNlTm9TZXNzaW9uIisKGVJldmlzZVJlc3BvbnNlTm9Gb3JrUG9pbnQSDgoGZGV0YWlsGAEgASgJIiwKGlJldmlzZVJlc3BvbnNlVmVuZG9yRmFpbGVkEg4KBmRldGFpbBgBIAEoCSIbChlSZXZpc2VSZXNwb25zZUVtcHR5QW5zd2VyQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_agent_activity]);
+  fileDesc("CiZzaGltL3YxL2VuZHBvaW50X3JldmlzZV9yZXNwb25zZS5wcm90bxIHc2hpbS52MSJ7ChVSZXZpc2VSZXNwb25zZVJlcXVlc3QSMgoIcmVzcG9uc2UYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkEi4KC2luc3RydWN0aW9uGAIgASgLMhkuY29udmVyc2F0aW9uLnYxLlVzZXJTYWlkIoQBChZSZXZpc2VSZXNwb25zZVJlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5zaGltLnYxLlJldmlzZVJlc3BvbnNlU3VjY2Vzc0gAEi0KBWVycm9yGAIgASgLMhwuc2hpbS52MS5SZXZpc2VSZXNwb25zZUVycm9ySABCCAoGcmVzdWx0IiYKFVJldmlzZVJlc3BvbnNlU3VjY2VzcxINCgVtb2RlbBgBIAEoCSKNAgoTUmV2aXNlUmVzcG9uc2VFcnJvchI2Cgpub19zZXNzaW9uGAEgASgLMiAuc2hpbS52MS5SZXZpc2VSZXNwb25zZU5vU2Vzc2lvbkgAEjsKDW5vX2ZvcmtfcG9pbnQYAiABKAsyIi5zaGltLnYxLlJldmlzZVJlc3BvbnNlTm9Gb3JrUG9pbnRIABI8Cg12ZW5kb3JfZmFpbGVkGAMgASgLMiMuc2hpbS52MS5SZXZpc2VSZXNwb25zZVZlbmRvckZhaWxlZEgAEjoKDGVtcHR5X2Fuc3dlchgEIAEoCzIiLnNoaW0udjEuUmV2aXNlUmVzcG9uc2VFbXB0eUFuc3dlckgAQgcKBWNhdXNlIhkKF1JldmlzZVJlc3BvbnNlTm9TZXNzaW9uIisKGVJldmlzZVJlc3BvbnNlTm9Gb3JrUG9pbnQSDgoGZGV0YWlsGAEgASgJIiwKGlJldmlzZVJlc3BvbnNlVmVuZG9yRmFpbGVkEg4KBmRldGFpbBgBIAEoCSIbChlSZXZpc2VSZXNwb25zZUVtcHR5QW5zd2VyQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_user]);
 
 /**
  * Revise one response of the main agent's conversation.
@@ -52,12 +55,12 @@ export type ReviseResponseRequest = Message<"shim.v1.ReviseResponseRequest"> & {
   response?: AgentActivityId | undefined;
 
   /**
-   * The whole prompt the side query is given, composed by the daemon. Never
-   * empty.
+   * The whole prompt the side query is given, composed by the daemon: the
+   * revision brief ahead of every block the user sent. Never empty.
    *
-   * @generated from field: string instruction = 2;
+   * @generated from field: conversation.v1.UserSaid instruction = 2;
    */
-  instruction: string;
+  instruction?: UserSaid | undefined;
 };
 
 /**

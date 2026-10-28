@@ -539,15 +539,15 @@ describe("validateReviseResponseRequest", () => {
 
   it("refuses a revision naming no response", () => {
     // Arrange.
-    const request = create(shimv1.ReviseResponseRequestSchema, { instruction: "Revise it." });
+    const request = create(shimv1.ReviseResponseRequestSchema, { instruction: requests.reviseResponseRequest().instruction });
 
     // Act, Assert.
     expect(codeOf(() => validate.validateReviseResponseRequest(request))).toBe(Code.InvalidArgument);
   });
 
-  it("refuses a blank instruction", () => {
+  it("refuses a revision with no instruction", () => {
     // Arrange.
-    const request = { ...requests.reviseResponseRequest(), instruction: "  \n " };
+    const request = create(shimv1.ReviseResponseRequestSchema, { response: requests.reviseResponseRequest().response });
 
     // Act, Assert.
     expect(codeOf(() => validate.validateReviseResponseRequest(request))).toBe(Code.InvalidArgument);

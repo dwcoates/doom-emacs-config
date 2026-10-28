@@ -18,6 +18,7 @@ import { conversationv1, shimv1 } from "../proto.js";
 import type { QueryLike } from "../sdk/types.js";
 import type { PromptQueue } from "./prompt-queue.js";
 import { askSideQuery } from "./side-query.js";
+import { saidContent } from "./said-content.js";
 
 const LOGGER = bindLog({ component: "shim-engine-revise-response", operation: "shim.engine.revise_response" });
 
@@ -57,6 +58,9 @@ export async function reviseResponse(
 ): Promise<shimv1.ReviseResponseResponse> {
   const response = request.response?.value ?? "";
   const context = { response };
+  // THE VALIDATOR REFUSED A REQUEST WITH NO INSTRUCTION before the engine.
+  const instruction = request.instruction;
+  if (instruction === undefined) throw new Error("revise response: a request with no instruction reached the engine");
   const parentSessionId = deps.vendorSessionId();
   if (parentSessionId === undefined) {
     LOGGER.info(context, "refused ReviseResponse: no session is started");
@@ -78,7 +82,9 @@ export async function reviseResponse(
       signal?.addEventListener("abort", () => controller.abort(), { once: true });
       return deps.build({ parentSessionId, upTo: cut.upTo }, prompt, controller);
     },
-    request.instruction,
+    // THE USER'S IMAGES RIDE ALONG: the instruction is a said, converted as
+    // every prompt the shim sends is.
+    saidContent(instruction),
   );
   const failed = (detail: string): shimv1.ReviseResponseResponse => {
     LOGGER.error({ ...context, vendor_session_id: parentSessionId, outcome: asked.kind, cause: detail }, "the revising side query failed; no revision was written");

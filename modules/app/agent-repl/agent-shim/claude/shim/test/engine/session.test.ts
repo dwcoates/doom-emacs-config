@@ -17541,7 +17541,7 @@ describe("ReviseResponse", () => {
   function revision(instruction = "Revise the response."): shimv1.ReviseResponseRequest {
     return create(shimv1.ReviseResponseRequestSchema, {
       response: create(conversationv1.AgentActivityIdSchema, { value: "msg_1:0" }),
-      instruction,
+      instruction: textSaid(instruction),
     });
   }
 

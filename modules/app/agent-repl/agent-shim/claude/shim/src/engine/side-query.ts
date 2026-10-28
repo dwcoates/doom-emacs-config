@@ -11,7 +11,7 @@
  * is and on how a query that ends without one is told apart from one whose
  * result is an error.
  */
-import type { QueryLike } from "../sdk/types.js";
+import type { QueryLike, SdkUserMessage } from "../sdk/types.js";
 import { normalizeApiUsage, type NormalizedApiUsage } from "../api-usage.js";
 import { PromptQueue } from "./prompt-queue.js";
 
@@ -46,13 +46,13 @@ export type SideQueryOutcome =
   | { readonly kind: "broken"; readonly error: string };
 
 /**
- * Build one query with `build`, prompt it with `text`, and read it to its first
- * result. The query, its prompt queue and its abort controller are closed
+ * Build one query with `build`, prompt it with `content` (text, or the blocks
+ * a said converts to), and read it to its first result. The query, its prompt queue and its abort controller are closed
  * however it ends.
  */
 export async function askSideQuery(
   build: (prompt: PromptQueue, controller: AbortController) => Promise<QueryLike>,
-  text: string,
+  content: SdkUserMessage["message"]["content"],
 ): Promise<SideQueryOutcome> {
   const queue = new PromptQueue();
   const controller = new AbortController();
@@ -63,7 +63,7 @@ export async function askSideQuery(
     } catch (err) {
       return { kind: "unbuilt", error: messageOf(err) };
     }
-    queue.push({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null });
+    queue.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
     let model: string | undefined;
     try {
       for await (const message of query) {

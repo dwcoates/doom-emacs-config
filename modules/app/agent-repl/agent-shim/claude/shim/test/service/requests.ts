@@ -94,7 +94,7 @@ export function startTurnRequest(): shimv1.StartTurnRequest {
 export function reviseResponseRequest(): shimv1.ReviseResponseRequest {
   return create(shimv1.ReviseResponseRequestSchema, {
     response: create(conversationv1.AgentActivityIdSchema, { value: "msg_1:0" }),
-    instruction: "Revise the response.",
+    instruction: said(),
   });
 }
 

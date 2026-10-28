@@ -4,8 +4,9 @@
 // THE USER ASKED ABOUT WORDS THEY HIGHLIGHTED in a final response, and the
 // answer is a revised version of that response rather than a new turn. The
 // daemon composes the whole instruction (the response, the highlighted words
-// and what the user asked); the shim runs it on a SIDE QUERY and writes the
-// answer as the page line conversation.v1.AgentUpdate.response_revision.
+// and what the user said, images included); the shim runs it on a SIDE QUERY
+// and writes the answer as the page line
+// conversation.v1.AgentUpdate.response_revision.
 //
 // THE SIDE QUERY IS A THROWAWAY FORK THAT PERSISTS NOTHING. It resumes the
 // session's own conversation through the newest finished turn (the same point
@@ -51,9 +52,9 @@ type ReviseResponseRequest struct {
 	// revision writes. The shim never resolves it: the instruction carries the
 	// response's words.
 	Response *v1.AgentActivityId `protobuf:"bytes,1,opt,name=response,proto3" json:"response,omitempty"`
-	// The whole prompt the side query is given, composed by the daemon. Never
-	// empty.
-	Instruction   string `protobuf:"bytes,2,opt,name=instruction,proto3" json:"instruction,omitempty"`
+	// The whole prompt the side query is given, composed by the daemon: the
+	// revision brief ahead of every block the user sent. Never empty.
+	Instruction   *v1.UserSaid `protobuf:"bytes,2,opt,name=instruction,proto3" json:"instruction,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -95,11 +96,11 @@ func (x *ReviseResponseRequest) GetResponse() *v1.AgentActivityId {
 	return nil
 }
 
-func (x *ReviseResponseRequest) GetInstruction() string {
+func (x *ReviseResponseRequest) GetInstruction() *v1.UserSaid {
 	if x != nil {
 		return x.Instruction
 	}
-	return ""
+	return nil
 }
 
 // THE ARM IS THE OUTCOME.
@@ -520,10 +521,10 @@ var File_shim_v1_endpoint_revise_response_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_revise_response_proto_rawDesc = "" +
 	"\n" +
-	"&shim/v1/endpoint_revise_response.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\"w\n" +
+	"&shim/v1/endpoint_revise_response.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a\x1aconversation/v1/user.proto\"\x92\x01\n" +
 	"\x15ReviseResponseRequest\x12<\n" +
-	"\bresponse\x18\x01 \x01(\v2 .conversation.v1.AgentActivityIdR\bresponse\x12 \n" +
-	"\vinstruction\x18\x02 \x01(\tR\vinstruction\"\x94\x01\n" +
+	"\bresponse\x18\x01 \x01(\v2 .conversation.v1.AgentActivityIdR\bresponse\x12;\n" +
+	"\vinstruction\x18\x02 \x01(\v2\x19.conversation.v1.UserSaidR\vinstruction\"\x94\x01\n" +
 	"\x16ReviseResponseResponse\x12:\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1e.shim.v1.ReviseResponseSuccessH\x00R\asuccess\x124\n" +
 	"\x05error\x18\x02 \x01(\v2\x1c.shim.v1.ReviseResponseErrorH\x00R\x05errorB\b\n" +
@@ -567,20 +568,22 @@ var file_shim_v1_endpoint_revise_response_proto_goTypes = []any{
 	(*ReviseResponseVendorFailed)(nil), // 6: shim.v1.ReviseResponseVendorFailed
 	(*ReviseResponseEmptyAnswer)(nil),  // 7: shim.v1.ReviseResponseEmptyAnswer
 	(*v1.AgentActivityId)(nil),         // 8: conversation.v1.AgentActivityId
+	(*v1.UserSaid)(nil),                // 9: conversation.v1.UserSaid
 }
 var file_shim_v1_endpoint_revise_response_proto_depIdxs = []int32{
 	8, // 0: shim.v1.ReviseResponseRequest.response:type_name -> conversation.v1.AgentActivityId
-	2, // 1: shim.v1.ReviseResponseResponse.success:type_name -> shim.v1.ReviseResponseSuccess
-	3, // 2: shim.v1.ReviseResponseResponse.error:type_name -> shim.v1.ReviseResponseError
-	4, // 3: shim.v1.ReviseResponseError.no_session:type_name -> shim.v1.ReviseResponseNoSession
-	5, // 4: shim.v1.ReviseResponseError.no_fork_point:type_name -> shim.v1.ReviseResponseNoForkPoint
-	6, // 5: shim.v1.ReviseResponseError.vendor_failed:type_name -> shim.v1.ReviseResponseVendorFailed
-	7, // 6: shim.v1.ReviseResponseError.empty_answer:type_name -> shim.v1.ReviseResponseEmptyAnswer
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	9, // 1: shim.v1.ReviseResponseRequest.instruction:type_name -> conversation.v1.UserSaid
+	2, // 2: shim.v1.ReviseResponseResponse.success:type_name -> shim.v1.ReviseResponseSuccess
+	3, // 3: shim.v1.ReviseResponseResponse.error:type_name -> shim.v1.ReviseResponseError
+	4, // 4: shim.v1.ReviseResponseError.no_session:type_name -> shim.v1.ReviseResponseNoSession
+	5, // 5: shim.v1.ReviseResponseError.no_fork_point:type_name -> shim.v1.ReviseResponseNoForkPoint
+	6, // 6: shim.v1.ReviseResponseError.vendor_failed:type_name -> shim.v1.ReviseResponseVendorFailed
+	7, // 7: shim.v1.ReviseResponseError.empty_answer:type_name -> shim.v1.ReviseResponseEmptyAnswer
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_revise_response_proto_init() }

@@ -4,8 +4,9 @@
 // THE USER ASKED ABOUT WORDS THEY HIGHLIGHTED in a final response, and the
 // answer is a revised version of that response rather than a new turn. The
 // daemon composes the whole instruction (the response, the highlighted words
-// and what the user asked); the shim runs it on a SIDE QUERY and writes the
-// answer as the page line conversation.v1.AgentUpdate.response_revision.
+// and what the user said, images included); the shim runs it on a SIDE QUERY
+// and writes the answer as the page line
+// conversation.v1.AgentUpdate.response_revision.
 //
 // THE SIDE QUERY IS A THROWAWAY FORK THAT PERSISTS NOTHING. It resumes the
 // session's own conversation through the newest finished turn (the same point
@@ -25,6 +26,7 @@ syntax = "proto3";
 package shim.v1;
 
 import "conversation/v1/agent_activity.proto";
+import "conversation/v1/user.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
@@ -34,9 +36,9 @@ message ReviseResponseRequest {
   // revision writes. The shim never resolves it: the instruction carries the
   // response's words.
   conversation.v1.AgentActivityId response = 1;
-  // The whole prompt the side query is given, composed by the daemon. Never
-  // empty.
-  string instruction = 2;
+  // The whole prompt the side query is given, composed by the daemon: the
+  // revision brief ahead of every block the user sent. Never empty.
+  conversation.v1.UserSaid instruction = 2;
 }
 
 // THE ARM IS THE OUTCOME.
