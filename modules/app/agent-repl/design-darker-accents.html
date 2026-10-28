@@ -19,7 +19,14 @@
   .controls input[type=range] { width: 220px; }
   .controls output { color: var(--fg); font: 12px ui-monospace, monospace; }
   .options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-  .option { background: var(--bg); border: 1px solid #000; border-radius: 8px; overflow: hidden; }
+  .option { background: var(--bg); border: 1px solid #000; border-radius: 8px; overflow: hidden; cursor: grab; }
+  .option.dragging { opacity: 0.4; }
+  .option.drop-before { box-shadow: -4px 0 0 #8bbeff; }
+  .option h2::before { content: "⠿ "; color: var(--muted); }
+  /* A response bubble with a fenced block and inline code, as the feed draws one. */
+  .code-demo { margin: 6px 12px 12px; background: var(--card); border-radius: 8px; padding: 8px 10px; font: 11px/1.5 ui-monospace, monospace; }
+  .code-demo pre { margin: 6px 0; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; white-space: pre; overflow: hidden; }
+  .code-demo code.inline { border-radius: 3px; padding: 0 3px; }
   .option h2 { margin: 0; padding: 10px 12px 2px; font-size: 13px; }
   .option .note { padding: 0 12px 8px; color: var(--muted); font-size: 11px; }
   .swatches { padding: 4px 12px 10px; display: grid; grid-template-columns: 1fr; gap: 3px; }
@@ -44,11 +51,13 @@
 </head>
 <body>
 <h1>Darker accents</h1>
-<p class="lede">Round two, built around the custom scheme you picked (lightness −0.20, chroma ×0.90). Each option lowers OKLCH lightness for every color at once, keeping hue; the variations move the step a little either way and trade chroma for punch. The grounds are the current ones: feed <code>#121212</code>, sidebar and footer <code>#1a1a1a</code>, prompt <code>#212121</code>, tool card <code>#181818</code>. The sliders set the last column to any step.</p>
+<p class="lede">Drag any card by its title to put it beside another. Round two, built around the custom scheme you picked (lightness −0.20, chroma ×0.90). Each option lowers OKLCH lightness for every color at once, keeping hue; the variations move the step a little either way and trade chroma for punch. The grounds are the current ones: feed <code>#121212</code>, sidebar and footer <code>#1a1a1a</code>, prompt <code>#212121</code>, tool card <code>#181818</code>. The sliders set the last column to any step.</p>
 <div class="controls">
   <label>custom lightness step <input id="dl" type="range" min="0" max="0.30" step="0.01" value="0.20"></label><output id="dlo"></output>
   <label>chroma scale <input id="cs" type="range" min="0.6" max="1.2" step="0.05" value="0.9"></label><output id="cso"></output>
 </div>
+<h1 style="font-size:14px">Response code blocks</h1>
+<p class="lede">The fenced block and inline code inside a <em>response</em> bubble (the prompt's code stays as it is). Today the block is the ink mixed 6% over the bubble's <code>#181818</code>, so it sits lighter than the bubble; the options take it down toward the bubble and below it. They are the last six cards below, and drag like the rest.</p>
 <div class="options" id="options"></div>
 <script>
 // The colors, as the theme declares them today (render-colors.json's dark
@@ -139,23 +148,78 @@ function panel(title, note, dl, cs) {
   </div>`;
 }
 
-const dlIn = document.getElementById("dl"), csIn = document.getElementById("cs");
-function draw() {
-  const dl = Number(dlIn.value), cs = Number(csIn.value);
-  document.getElementById("dlo").textContent = dl.toFixed(2);
-  document.getElementById("cso").textContent = cs.toFixed(2);
-  document.getElementById("options").innerHTML = [
-    panel("Current", "today's colors, for reference", 0, 1),
-    panel("Your pick", "lightness −0.20, chroma ×0.90", 0.20, 0.9),
-    panel("D · a touch lighter", "lightness −0.17, chroma ×0.90", 0.17, 0.9),
-    panel("E · a touch darker", "lightness −0.23, chroma ×0.90", 0.23, 0.9),
-    panel("F · same depth, richer", "lightness −0.20, chroma ×1.00", 0.20, 1.0),
-    panel("G · same depth, quieter", "lightness −0.20, chroma ×0.80", 0.20, 0.8),
-    panel("H · darker and richer", "lightness −0.23, chroma ×1.00", 0.23, 1.0),
-    panel("I · lighter and quieter", "lightness −0.17, chroma ×0.80", 0.17, 0.8),
-    panel("Custom", `lightness −${dl.toFixed(2)}, chroma ×${cs.toFixed(2)}`, dl, cs),
-  ].join("");
+const CODE = [
+  ["Code · current", "block: ink 6% over the bubble", "color-mix(in srgb, #f1efe9 6%, #181818)", "color-mix(in srgb, #ffffff 12%, #181818)"],
+  ["Code · a little darker", "block: ink 4%", "color-mix(in srgb, #f1efe9 4%, #181818)", "color-mix(in srgb, #ffffff 9%, #181818)"],
+  ["Code · darker", "block: ink 2%", "color-mix(in srgb, #f1efe9 2%, #181818)", "color-mix(in srgb, #ffffff 7%, #181818)"],
+  ["Code · the bubble's own", "block: no wash, its border alone", "#181818", "color-mix(in srgb, #ffffff 6%, #181818)"],
+  ["Code · below the bubble", "block: the feed's #121212", "#121212", "#121212"],
+  ["Code · well below", "block: black 35% over the bubble", "color-mix(in srgb, #000000 35%, #181818)", "color-mix(in srgb, #000000 35%, #181818)"],
+];
+
+function codeCard(title, note, block, inline) {
+  return `<div class="option"><h2>${title}</h2><div class="note">${note}</div>
+    <div class="code-demo">Run <code class="inline" style="background:${inline}">doom sync</code> after editing <code class="inline" style="background:${inline}">packages.el</code>:
+<pre style="background:${block}"><span style="color:#9f74f4">(package!</span> evil-snipe :disable t)
+<span style="color:#898782">;; then</span> doom sync</pre>The block keeps its 1px border in every option.</div></div>`;
 }
+
+const dlIn = document.getElementById("dl"), csIn = document.getElementById("cs");
+const grid = document.getElementById("options");
+// Every card, keyed, so a redraw keeps the order the reader dragged them into.
+const cards = () => {
+  const dl = Number(dlIn.value), cs = Number(csIn.value);
+  return [
+    ["cur", () => panel("Current", "today's colors, for reference", 0, 1)],
+    ["pick", () => panel("Your pick", "lightness −0.20, chroma ×0.90", 0.20, 0.9)],
+    ["d", () => panel("D · a touch lighter", "lightness −0.17, chroma ×0.90", 0.17, 0.9)],
+    ["e", () => panel("E · a touch darker", "lightness −0.23, chroma ×0.90", 0.23, 0.9)],
+    ["f", () => panel("F · same depth, richer", "lightness −0.20, chroma ×1.00", 0.20, 1.0)],
+    ["g", () => panel("G · same depth, quieter", "lightness −0.20, chroma ×0.80", 0.20, 0.8)],
+    ["h", () => panel("H · darker and richer", "lightness −0.23, chroma ×1.00", 0.23, 1.0)],
+    ["i", () => panel("I · lighter and quieter", "lightness −0.17, chroma ×0.80", 0.17, 0.8)],
+    ["custom", () => panel("Custom", `lightness −${dl.toFixed(2)}, chroma ×${cs.toFixed(2)}`, dl, cs)],
+    ...CODE.map((c, k) => [`code${k}`, () => codeCard(...c)]),
+  ];
+};
+let order = cards().map(([key]) => key);
+
+function draw() {
+  document.getElementById("dlo").textContent = Number(dlIn.value).toFixed(2);
+  document.getElementById("cso").textContent = Number(csIn.value).toFixed(2);
+  const byKey = new Map(cards());
+  grid.innerHTML = order.map((key) => byKey.get(key)().replace('<div class="option">', `<div class="option" draggable="true" data-key="${key}">`)).join("");
+}
+
+// Dragging a card drops it before the card under the pointer (or last).
+let dragged = null;
+grid.addEventListener("dragstart", (e) => {
+  const card = e.target.closest(".option");
+  if (!card) return;
+  dragged = card.dataset.key;
+  card.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move";
+});
+grid.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  grid.querySelectorAll(".drop-before").forEach((el) => el.classList.remove("drop-before"));
+  const over = e.target.closest(".option");
+  if (over && over.dataset.key !== dragged) over.classList.add("drop-before");
+});
+grid.addEventListener("drop", (e) => {
+  e.preventDefault();
+  const over = e.target.closest(".option");
+  order = order.filter((k) => k !== dragged);
+  const at = over ? order.indexOf(over.dataset.key) : order.length;
+  order.splice(at < 0 ? order.length : at, 0, dragged);
+  dragged = null;
+  draw();
+});
+grid.addEventListener("dragend", () => {
+  dragged = null;
+  grid.querySelectorAll(".dragging, .drop-before").forEach((el) => el.classList.remove("dragging", "drop-before"));
+});
+
 dlIn.addEventListener("input", draw);
 csIn.addEventListener("input", draw);
 draw();
