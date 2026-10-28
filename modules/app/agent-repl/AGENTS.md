@@ -21,6 +21,24 @@ The repo-wide rules in the top-level `AGENTS.md` apply here in full; this file
 covers deploying and running THIS module, plus the color vocabulary every one
 of its surfaces shares.
 
+## Developer docs: `docs/developer/`
+
+`docs/developer/` holds the developer reference for how agent-repl's subsystems
+behave across their code, one file per subsystem. `shim-lifecycle.md` covers
+when a shim runs, and the keep-alives. These files are living documents.
+
+- Read the file for a subsystem before complex work on it, and work from what it
+  states.
+- Every change that alters what a file states updates it in the same change.
+  A subsystem that has grown a cross-cutting behavior the code alone does not
+  explain gets a file of its own.
+- Surface every issue you find in these docs to the user, such as a statement the
+  code contradicts, a gap, or a stale ruling. Put them in your response as one
+  top-level tree entry headed `📚 Developer docs`, placed just before the
+  memory entry. Each issue is one child naming the file and what is wrong. Fix
+  an issue in the same change when your work covers it, and say so in the
+  child.
+
 ## Tests NEVER run real git or a real vendor
 
 Owner rule, reaffirmed 2026-10-06: no test of any form — unit, integration, e2e, e2e-emacs, harness, hook test — runs real `git` or reaches a real vendor (the Claude API, the Agent SDK against Anthropic, any network vendor). Git is the fake git executable (`bin/fake-git.sh`, `daemon/integration/fakegit`); the vendor is the mocked SDK. A test that needs either and cannot use the fake is a gap to report, never an exception to take.
