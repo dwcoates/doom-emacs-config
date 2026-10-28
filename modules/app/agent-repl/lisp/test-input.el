@@ -1690,7 +1690,7 @@ pinned on both sides: here, and in webapp/test/styles.test.ts."
   ;; Arrange / Act.
   (let ((background (eval (car (get 'agent-repl-input-background 'standard-value)))))
     ;; Assert.
-    (should (equal background "#121212"))))
+    (should (equal background "#161616"))))
 
 (ert-deftest agent-repl-input-mode-wraps-at-word-boundaries ()
   "The composer soft-wraps long lines at word boundaries."

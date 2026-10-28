@@ -437,13 +437,13 @@
   "The page's ground and text are the webapp's dark sidebar and ink."
   (agent-repl-test-settings--with-page
     (with-current-buffer (agent-repl-settings--buffer)
-      (should (member '(:background "#212121") (cdr (assq 'default face-remapping-alist))))
+      (should (member '(:background "#1d1d1d") (cdr (assq 'default face-remapping-alist))))
       (should (member '(:foreground "#f1efe9") (cdr (assq 'default face-remapping-alist)))))))
 
 (ert-deftest agent-repl-test-settings-colors-are-the-webapp-tokens ()
   "The page's colors are the webapp dark theme's, pinned by styles.test.ts too."
   (should (equal agent-repl-settings--colors
-                 '((ground . "#212121") (band . "#292929") (card . "#2c2c2c") (border . "#2a2a2a")
+                 '((ground . "#1d1d1d") (band . "#272727") (card . "#2c2c2c") (border . "#2a2a2a")
                    (keycap-edge . "#3a3a38") (text . "#f1efe9") (muted . "#898782") (accent . "#8bbeff")))))
 
 (ert-deftest agent-repl-test-settings-color-unknown-name-is-fatal ()

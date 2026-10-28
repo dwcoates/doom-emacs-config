@@ -3460,7 +3460,7 @@ describe("the response bubble's fill", () => {
     const response = themeRgbOf(css, "--assistant");
 
     // Assert
-    expect(response).toEqual([0x14, 0x14, 0x14]);
+    expect(response).toEqual([0x18, 0x18, 0x18]);
   });
 
   it("is what a response bubble paints", () => {
@@ -3874,13 +3874,13 @@ describe("lightness, the CIE L* every fill-step test measures in", () => {
 });
 
 describe("the dark theme's iMessage fills (owner ruling, 2026-09-27)", () => {
-  it("paints a prompt the sidebar's own color (owner request, 2026-10-28)", () => {
+  it("paints a prompt a step above the sidebar (owner requests, 2026-10-28)", () => {
     // Arrange
     const block = darkThemeBlock();
     // Act
-    const [user, sidebar] = [rgbOf(block, "--user"), rgbOf(block, "--sidebar-bg")];
+    const [user, sidebar] = [luminance(rgbOf(block, "--user")), luminance(rgbOf(block, "--sidebar-bg"))];
     // Assert
-    expect(user).toEqual(sidebar);
+    expect(user).toBeGreaterThan(sidebar);
   });
 
   it.each([
@@ -4389,7 +4389,7 @@ describe("the tool card's command grey", () => {
   // Emacs's input window is the host-native composer, so its
   // `agent-repl-input-background' (lisp/input.el) wears this same color.
   // Neither suite may read the other's file, so lisp/test-input.el pins it too.
-  it("defines the dark theme's composer as Emacs's input background, #121212", () => {
+  it("defines the dark theme's composer as Emacs's input background, #161616", () => {
     // Arrange
     const block = darkThemeBlock();
 
@@ -4397,14 +4397,14 @@ describe("the tool card's command grey", () => {
     const got = /--composer-bg:\s*(#[0-9a-fA-F]{6})/.exec(block)?.[1];
 
     // Assert
-    expect(got).toBe("#121212");
+    expect(got).toBe("#161616");
   });
 
   // The composer's help bar (lisp/input-help.el) is grounded with the dark
   // sidebar's color, and its buttons are filled a little darker than the
   // sidebar's selected row. Neither suite may read the other's file, so
   // lisp/test-input-help.el pins both colors too.
-  it("defines the dark theme's sidebar as the help bar's ground, #212121", () => {
+  it("defines the dark theme's sidebar as the help bar's ground, #1d1d1d", () => {
     // Arrange
     const block = darkThemeBlock();
 
@@ -4412,10 +4412,10 @@ describe("the tool card's command grey", () => {
     const got = rgbOf(block, "--sidebar-bg");
 
     // Assert
-    expect(got).toEqual([0x21, 0x21, 0x21]);
+    expect(got).toEqual([0x1d, 0x1d, 0x1d]);
   });
 
-  it("fills the dark theme's selected sidebar row with #292929, lighter than a help button", () => {
+  it("fills the dark theme's selected sidebar row with #272727, lighter than a help button", () => {
     // Arrange
     const block = darkThemeBlock();
     const card = rgbOf(block, "--card");
@@ -4429,7 +4429,7 @@ describe("the tool card's command grey", () => {
     expect(withoutBlockComments(stylesheet)).toContain(
       "--row-highlight-tint: color-mix(in srgb, var(--card) 69%, var(--sidebar-bg));",
     );
-    expect(tint).toEqual([0x29, 0x29, 0x29]);
+    expect(tint).toEqual([0x27, 0x27, 0x27]);
   });
 
   // The Settings page (lisp/settings.el, agent-repl-settings--colors) wears the
@@ -5495,7 +5495,7 @@ describe("washOf, a token's transparent wash", () => {
 describe("THEME_BLOCKS, the per-theme token table", () => {
   it.each([
     ["light", "#ffffff"],
-    ["dark", "#0e0e0e"],
+    ["dark", "#121212"],
   ] as const)("hands the %s theme its own token block", (theme, bg) => {
     // Arrange
     const block = THEME_BLOCKS.find(([name]) => name === theme)?.[1];
