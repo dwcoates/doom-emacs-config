@@ -594,7 +594,7 @@
        theme's pair takes. The same step again (owner request, 2026-10-13,
        "just slightly darker"): #086ed6 -> #0764c2. */
     /* The Claude desktop app's prompt bubble (owner request, 2026-10-28). */
-    --user: #222222;
+    --user: #252525;
     /* A light purple, so a known command reads on the dark prompt blue. */
     --known-command: #ca9dd9;
     /* A held prompt wears the prompt's own fill (owner request, 2026-10-28):
