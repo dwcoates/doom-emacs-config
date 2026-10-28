@@ -360,36 +360,31 @@ func TestUnknownAgentOnUpdateAgent(t *testing.T) {
 // SAME workspace recovers and serves a real turn once the refusal clears.
 // ===========================================================================
 
-// rfAwaitVendorStartFailed drives OpenWorkspace and asserts the typed
-// vendor_start_failed arm carrying the shim's own detail.
+// rfAwaitVendorStartFailed drives a session start and asserts the typed
+// relaunch_failed arm carrying the shim's own detail.
 //
-// The neighbouring arm is named and failed EXPLICITLY rather than lumped in
-// with "some other error": OpenWorkspaceError.spawn_failed says the shim
-// PROCESS never came up, which is a broken harness (a mis-staged bundle,
-// missing vendor deps), not the refusal this lever provokes. Accepting it
-// would let this test pass green on a world where the shim never ran at all.
+// AN OPEN STARTS NO SHIM (owner ruling, 2026-10-28: a workspace's shim runs
+// only when a session must), so the start this lever refuses is a
+// RestartWorkspace, the verb that brings a session up on demand; the open
+// before it must succeed without one. The daemon integration suite pins the
+// same arm the same way (TestAVendorStartFailureIsRelayedByNameAndNeverEscapesAsInternal).
 func rfAwaitVendorStartFailed(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
-	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a typed OpenWorkspaceResponse", err)
+	opened, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
+	if err != nil || opened.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace = (%v, %v), want a success: an open starts no session, so the refused vendor start cannot fail it", opened, err)
 	}
-	oerr := resp.Msg.GetError()
-	if oerr == nil {
-		t.Fatalf("OpenWorkspace = %v, want error.vendor_start_failed: a refused vendor start must never "+
+	resp, err := w.Client().RestartWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("RestartWorkspace = error %v, want a typed RestartWorkspaceResponse", err)
+	}
+	failed := resp.Msg.GetError().GetRelaunchFailed()
+	if failed == nil {
+		t.Fatalf("RestartWorkspace = %v, want error.relaunch_failed: a refused vendor start must never "+
 			"present as a silently healthy, usable session", resp.Msg)
 	}
-	if oerr.GetSpawnFailed() != nil {
-		t.Fatalf("OpenWorkspace = spawn_failed (%v), want vendor_start_failed: the shim PROCESS "+
-			"never came up, so this test never reached the arm it exists to cover — the harness or "+
-			"the shim's own bring-up is broken, not the vendor", oerr)
-	}
-	failed := oerr.GetVendorStartFailed()
-	if failed == nil {
-		t.Fatalf("OpenWorkspace error = %v, want the typed vendor_start_failed arm", oerr)
-	}
 	if failed.GetDetail() == "" {
-		t.Fatal("vendor_start_failed.detail is empty, want the shim's own account of the refused start")
+		t.Fatal("relaunch_failed.detail is empty, want the shim's own account of the refused start")
 	}
 }
 
