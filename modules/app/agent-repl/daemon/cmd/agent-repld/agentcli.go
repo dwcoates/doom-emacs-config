@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -35,13 +36,14 @@ import (
 	"agent-repld/internal/stateroot"
 )
 
-// THE AGENT API'S COMMANDS: five nouns over the serving daemon's rpcs.
+// THE AGENT API'S COMMANDS: six nouns over the serving daemon's rpcs.
 //
 //	agent-repld workspace    create | async-merge | prompt | set | finished | open | close | kill
 //	                         compact | status | list | subscribe | unsubscribe | gate
 //	                         subsections | place
 //	agent-repld merge-queue  status | dequeue | move-up | move-down | pause | resume
 //	                         disable-racing | enable-racing | subscribe | unsubscribe
+//	agent-repld repository   register
 //	agent-repld editor       eval
 //	agent-repld runtime      deploy-hold | roll-out-landing | health | prune-storage
 //	                         reap-worktrees
@@ -68,6 +70,7 @@ import (
 const (
 	workspaceNoun  = "workspace"
 	mergeQueueNoun = "merge-queue"
+	repositoryNoun = "repository"
 	editorNoun     = "editor"
 	runtimeNoun    = "runtime"
 )
@@ -175,6 +178,9 @@ var cliNouns = map[string]map[string]cliCommand{
 		"enable-racing":  {usage: "enable-racing", run: queueRacing(true)},
 		"subscribe":      {usage: "subscribe -detail every_change|deploys|advances|depletes [-repository here|DIR]", run: queueSubscribe},
 		"unsubscribe":    {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
+	},
+	repositoryNoun: {
+		"register": {usage: "register here|PATH", run: repositoryRegister},
 	},
 	editorNoun: {
 		"eval": {usage: "eval [-workspace WS] TEXT", run: editorEval},
@@ -1813,6 +1819,41 @@ func runtimeDeployHold(c *cliCall, args []string) int {
 	}
 	req.Repository = scope
 	resp, err := c.client.UpdateDeployHold(c.ctx, connect.NewRequest(req))
+	return answer(c, resp, err)
+}
+
+// repositoryRegister registers the repository PATH is inside with agent-repl,
+// and opens its main worktree as a workspace. PATH is any path inside the
+// repository, a relative one counted from the working directory, and `here` is
+// the working directory itself. It needs no calling workspace: registering a
+// repository is how an agent in a directory agent-repl does not yet know gets
+// it known. The daemon resolves the main worktree through git and answers
+// `already_known` for a repository it has; its error arms exit refused.
+func repositoryRegister(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(positionals) != 1 {
+		return c.usageFailed("the command names the one path inside the repository, or here")
+	}
+	cwd, err := c.deps.getwd()
+	if err != nil {
+		c.failed("read the working directory: %v", err)
+		return exitFailure
+	}
+	path := cwd
+	if positionals[0] != here {
+		path = positionals[0]
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(cwd, path)
+		}
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	resp, err := c.client.RegisterRepository(c.ctx, connect.NewRequest(&agentreplv1.RegisterRepositoryRequest{Path: filepath.Clean(path)}))
 	return answer(c, resp, err)
 }
 
