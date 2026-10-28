@@ -6133,7 +6133,7 @@ describe("the response subtree box (feed/subtree-box.ts)", () => {
     const strength = (token: string): number =>
       Number(new RegExp(`${token}: color-mix\\(in srgb, var\\(--fg\\) (\\d+(?:\\.\\d+)?)%, transparent\\);`).exec(root)?.[1]);
     // Assert
-    expect([strength("--composer-entry-bg"), strength("--code-bg")]).toEqual([9, 4]);
+    expect([strength("--composer-entry-bg"), strength("--code-bg")]).toEqual([12, 4]);
   });
 
   // Owner request, 2026-10-26: a highlighted tree entry carries no accent bar

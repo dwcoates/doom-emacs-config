@@ -117,11 +117,11 @@
   /* The box over a tree's node: the one the composer is answering while its
      entry is typed (feed/composer-entry.ts), a revealed node and a hovered
      branch. GREYSCALE (owner request, 2026-10-28, retiring the accent blue):
-     the ink at 9% (7% until a slightly lighter request the same day), a
-     little stronger than the code wash
-     (--code-bg, 4%), so the box reads a shade lighter than a code
-     block on the dark theme's bubbles. */
-  --composer-entry-bg: color-mix(in srgb, var(--fg) 9%, transparent);
+     the ink at 12% (owner requests the same day: 7%, then 9%, then
+     lighter again), well over the code wash (--code-bg, 4%). Transparent,
+     so the box lifts a response's fill and a prompt's by the same share of
+     the way to the ink: one highlight, equally lighter than either bubble. */
+  --composer-entry-bg: color-mix(in srgb, var(--fg) 12%, transparent);
   /* A CITATION IN A RESPONSE'S TREE (`(1.3.1)`, metaprompt-tree.ts) and the
      box over the node it cites while the pointer is on it
      (feed/branch-hover.ts): a light, subtle orange (owner request,
