@@ -604,7 +604,7 @@
        theme's pair takes. The same step again (owner request, 2026-10-13,
        "just slightly darker"): #086ed6 -> #0764c2. */
     /* The Claude desktop app's prompt bubble (owner request, 2026-10-28). */
-    --user: #212121;
+    --user: #222222;
     /* A light purple, so a known command reads on the dark prompt blue. */
     --known-command: #ca9dd9;
     /* A step below this theme's --user, at the feed's own ground. */
@@ -2355,11 +2355,14 @@ pre {
   --md-line-h: var(--tree-line-h);
   margin-left: auto;
   margin-right: var(--agent-rail-inset);
-  /* A VERY SUBTLE LIGHT HIGHLIGHT ON THE EDGE (owner request, 2026-10-27):
-     the grey fill sits close to the feed's ground, so a faint --fg glow
-     fades inward from the top and right edges, biased off the bubble's axis
-     toward the top right. A shadow, not a border: a prompt is never
-     bordered. */
+}
+/* THE EDGE HIGHLIGHT IS THE HELD PROMPT'S ALONE (owner requests, 2026-10-27
+   and 2026-10-28): a faint --fg glow fading inward from the top and right
+   edges, biased toward the top right, once worn by every prompt and now
+   left only on a held one, beside its glimmer; every other prompt wears the
+   shared bubble shadow. A shadow, not a border: a prompt is never
+   bordered. */
+.bubble[data-role="prompt"][data-variant="held"] {
   --bubble-shadow: var(--prompt-bubble-shadow);
 }
 .bubble[data-role="response"] {
