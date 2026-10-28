@@ -281,7 +281,7 @@
                   "markdown": "The service raised."
                 },
                 "synthesizedNotice": {
-                  "unclassified": {}
+                  "vendorTransient": {}
                 },
                 "settledAt": {
                   "atMs": "1800000000004"
