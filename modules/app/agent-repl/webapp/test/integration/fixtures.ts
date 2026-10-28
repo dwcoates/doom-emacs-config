@@ -2637,7 +2637,7 @@ export const HOLD_CLASSIFICATION_ARMS = [
 ] as const;
 export type HoldClassificationArm = (typeof HOLD_CLASSIFICATION_ARMS)[number];
 
-export const HOLD_ARMS = ["shutdown", "reconnect", "buildRefresh", "merge", "coldGate", "coldGateAnswered"] as const;
+export const HOLD_ARMS = ["shutdown", "reconnect", "loading", "buildRefresh", "merge", "coldGate", "coldGateAnswered"] as const;
 export type HoldArm = (typeof HOLD_ARMS)[number];
 
 type HeldPromptInit = MessageInitShape<typeof HeldPromptSchema>;
@@ -2671,6 +2671,8 @@ const holdValue = (arm: HoldArm): NonNullable<HeldPromptInit["hold"]> => {
       return { case: "shutdown", value: { scheduleId: "sched-1" } };
     case "reconnect":
       return { case: "reconnect", value: {} };
+    case "loading":
+      return { case: "loading", value: {} };
     case "buildRefresh":
       return { case: "buildRefresh", value: {} };
     case "merge":
