@@ -118,7 +118,7 @@
      entry is typed (feed/composer-entry.ts), a revealed node and a hovered
      branch. GREYSCALE (owner request, 2026-10-28, retiring the accent blue):
      the ink a little stronger than a response's code wash
-     (--response-code-bg, 4%), so the box reads a shade lighter than a code
+     (--code-bg, 4%), so the box reads a shade lighter than a code
      block on the dark theme's bubbles. */
   --composer-entry-bg: color-mix(in srgb, var(--fg) 7%, transparent);
   /* A CITATION IN A RESPONSE'S TREE (`(1.3.1)`, metaprompt-tree.ts) and the
@@ -133,20 +133,13 @@
      read in one color. Resolved through --known-command, so each theme's
      own purple carries through without a dark override of this token. */
   --prompt-link: var(--known-command);
-  /* Inline code and a code block inside a blue prompt bubble sit on a darker
-     blue (owner request, 2026-10-19): clearly darker than the prompt's --user
-     fill, but still that blue rather than a near-navy, so the code reads as
-     set into the bubble. */
-  --prompt-code-bg: #ebebeb;
   /* A HELD PROMPT'S FILL (owner request, 2026-10-25): a markedly darker blue
      than --user, so a prompt that has not reached the agent reads as the
-     prompt it will become, still parked. Its code sits a step darker again,
-     as a user prompt's does under --user. A step darker again (owner
+     prompt it will become, still parked. A step darker again (owner
      request, 2026-10-25): #7ea6e8 -> #6c97df. */
   --prompt-edge: color-mix(in srgb, var(--fg) 8%, transparent);
   --prompt-bubble-shadow: inset -1px 1px 3px var(--prompt-edge), var(--bubble-shadow);
   --held-prompt-bg: #e0e0e0;
-  --held-prompt-code-bg: #c8c8c8;
   /* --ok, the green status: render-colors.json#color_values (src/vocab.ts). */
   /* The cold gate's compact border: the success green, a touch darker
      (owner request, 2026-10-03). */
@@ -460,21 +453,17 @@
      orange, so a stopped queue reads at a glance apart from the purple of a
      merge at work. */
   --merge-paused: #d97706;
-  /* Inline-code chip wash, so a `token` inside a sentence of prose reads as
-     typeable at a glance. The light theme's chip SINKS INTO its pale bubble: a
-     transparent BLACK wash, never a --fg one, since --fg flips light in the
-     dark theme. The dark theme's chip instead LIFTS off its dark bubble with a
-     WHITE wash (owner ruling, 2026-10-14): black over the dark grey bubble was
-     all but invisible. */
-  --code-bg: color-mix(in srgb, #000000 13%, transparent);
-  /* A fenced code block's fill: a faint --fg wash over whatever bubble holds
-     it. Resolved where it is declared, on :root, so the dark theme's own --fg
-     carries through without a dark override of this token. */
-  --code-block-bg: color-mix(in srgb, var(--fg) 6%, transparent);
-  /* A RESPONSE'S CODE, fenced and inline alike (owner request, 2026-10-28): a
-     fainter --fg wash than the shared block's, so it sits a little darker on
-     the response fill, and the one wash for both kinds of code. */
-  --response-code-bg: color-mix(in srgb, var(--fg) 4%, transparent);
+  /* THE ONE CODE WASH (owner request, 2026-10-28): inline code and a fenced
+     block alike, in every bubble, are this faint --fg wash over the bubble
+     that holds them. Transparent, so the code sits the same small step from
+     its own fill in any bubble: lighter than a dark bubble by 4% of the way
+     to the ink, a prompt's as much as a response's, and inline and block
+     code inside one bubble are one color by construction. Resolved where it
+     is declared, on :root, so the dark theme's own --fg carries through. */
+  --code-bg: color-mix(in srgb, var(--fg) 4%, transparent);
+  /* A sidebar menu row's hover wash: the light theme sinks the row with a
+     BLACK wash, the dark theme lifts it with a WHITE one (the dark block). */
+  --menu-hover-bg: color-mix(in srgb, #000000 13%, transparent);
   /* Feed search (search.ts). Two washes, the isearch split: --search-match is
      every other match (Emacs' lazy-highlight), --search-current is the one the
      user is ON (Emacs' isearch face), and the gap between them has to be big
@@ -607,12 +596,9 @@
     --user: #222222;
     /* A light purple, so a known command reads on the dark prompt blue. */
     --known-command: #ca9dd9;
-    /* A step below this theme's --user, at the feed's own ground. */
-    --prompt-code-bg: #121212;
-    /* A held prompt wears the prompt's own fill and code wash (owner request,
-       2026-10-28): its glimmer, not its fill, tells it apart. */
+    /* A held prompt wears the prompt's own fill (owner request, 2026-10-28):
+       its glimmer, not its fill, tells it apart. */
     --held-prompt-bg: var(--user);
-    --held-prompt-code-bg: var(--prompt-code-bg);
     /* THE DARK ACCENTS ARE THE PASTEL SET (owner ruling, 2026-10-17): each hue
        kept, drawn at one lightness with its strength capped, as
        design-dark-accent-tuner.html beside this module derives them. The six
@@ -689,8 +675,8 @@
     --merge-card: #3a2e0a;
     --merge-border: #b39209;
     --merge-paused: #c37d07;
-    /* A white wash, lighter than the dark bubble (see the :root note). */
-    --code-bg: color-mix(in srgb, #ffffff 12%, transparent);
+    /* A white wash, lifting a menu row off the dark rail (see the :root note). */
+    --menu-hover-bg: color-mix(in srgb, #ffffff 12%, transparent);
     /* Lighter than this theme's `--muted`, as in the :root note. */
     --cold-gate-hide-grey: #bdbbb5;
   }
@@ -2370,9 +2356,6 @@ pre {
 }
 .bubble[data-role="response"] {
   --bubble-bg: var(--assistant);
-  /* A response's code, fenced and inline, wears the one response wash. */
-  --code-bg: var(--response-code-bg);
-  --code-block-bg: var(--response-code-bg);
   margin-left: var(--agent-rail-inset);
   margin-right: auto;
 }
@@ -2925,7 +2908,7 @@ html[data-page-unshown] {
 .md eqn .katex-display > .katex { white-space: normal; }
 .md .katex { color: inherit; background: none; }
 .md code, .q-text code, .q-opt code { background: var(--code-bg); border-radius: 4px; padding: 0.05em 0.35em; font-family: ui-monospace, monospace; font-size: 0.85em; }
-.md pre.md-code { background: var(--code-block-bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; clear: right; }
+.md pre.md-code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.6em 0.8em; margin: 0.5em 0; clear: right; }
 .md pre.md-code code { background: none; padding: 0; font-size: calc(0.85rem * var(--feed-text-scale)); }
 /* THE ONE COPY CONTROL (src/copy-control.ts, owner requests 2026-10-20): a
    small muted icon that copies a piece of the feed. Once it copied, the check
@@ -3045,18 +3028,6 @@ html[data-page-unshown] {
 .md a { color: var(--accent); }
 /* A link in a blue prompt bubble takes the prompt's own link color. */
 .bubble[data-role="prompt"] a { color: var(--prompt-link); }
-/* Inline code and code blocks in a blue prompt bubble take the prompt's own
-   darker blue, by feeding the two tokens the one markdown rule set above
-   reads. Only the user's prompt and a held one are blue: an agent or peer
-   prompt wears the response's fill, so its code keeps the shared washes. */
-.bubble[data-variant="user"] {
-  --code-bg: var(--prompt-code-bg);
-  --code-block-bg: var(--prompt-code-bg);
-}
-.bubble[data-variant="held"] {
-  --code-bg: var(--held-prompt-code-bg);
-  --code-block-bg: var(--held-prompt-code-bg);
-}
 /* A REPLY'S QUOTED RESPONSE IS GREY (owner request, 2026-10-24: it was blue
    like the prompt): an opened reply draws the response it quotes as a code
    block (src/feed/rows/blocks.ts `drawFeedQuoteBlock`), filled with the
@@ -3064,7 +3035,7 @@ html[data-page-unshown] {
    answer it came from rather than as the person's own code. */
 .bubble[data-variant="user"] .prompt-block-quote,
 .bubble[data-variant="held"] .prompt-block-quote {
-  --code-block-bg: var(--assistant);
+  --code-bg: var(--assistant);
 }
 /* A known slash command the prompt names, marked as the composer marks it. */
 .bubble[data-variant="user"] .known-command,
@@ -6663,7 +6634,7 @@ bubble-body.bubble-body { display: block; }
   padding: 0.3rem 0.6rem;
   cursor: pointer;
 }
-#ws-sidebar:not(.sb-hover-suspended) .sb-menu-item:hover { background: var(--code-bg); }
+#ws-sidebar:not(.sb-hover-suspended) .sb-menu-item:hover { background: var(--menu-hover-bg); }
 #ws-sidebar .sb-menu-item[aria-disabled="true"] { color: var(--muted); cursor: default; }
 #ws-sidebar .sb-menu-destructive .sb-menu-item { color: var(--err); }
 #ws-sidebar .sb-confirm { padding: 0.3rem 0.6rem 0.5rem; }
@@ -6748,7 +6719,7 @@ bubble-body.bubble-body { display: block; }
   padding: 0.1rem 0.5rem;
   cursor: pointer;
 }
-#ws-sidebar:not(.sb-hover-suspended) .sb-form-go:hover { background: var(--code-bg); }
+#ws-sidebar:not(.sb-hover-suspended) .sb-form-go:hover { background: var(--menu-hover-bg); }
 #ws-sidebar .sb-task-create { padding: 0.35rem 0.7rem 0; }
 #ws-sidebar .task-rename { font: inherit; font-size: 0.75rem; }
 /* ---- footer (src/footer) ------------------------------------------------

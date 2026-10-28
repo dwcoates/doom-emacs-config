@@ -369,7 +369,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
       // Act
       const parts = el.querySelector(`.${QUOTE_PARTS_CLASS}`) as Element;
       // Assert
-      expect([cascadedValue(parts, "--code-block-bg"), parts.querySelector("pre.md-code") !== null]).toEqual([
+      expect([cascadedValue(parts, "--code-bg"), parts.querySelector("pre.md-code") !== null]).toEqual([
         "var(--assistant)",
         true,
       ]);
@@ -379,7 +379,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
     }
   });
 
-  it("leaves the person's own code blocks the prompt's blue", () => {
+  it("leaves the person's own code blocks on the one code wash", () => {
     // Arrange
     const restore = installStylesheet();
     const el = drawFeedUserPrompt(reply());
@@ -388,7 +388,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
       // Act
       const words = el.querySelector(".prompt-block-text") as Element;
       // Assert
-      expect(cascadedValue(words, "--code-block-bg")).toBe("var(--prompt-code-bg)");
+      expect(cascadedValue(words, "--code-bg").replace(/\s+/g, "")).toBe("color-mix(insrgb,var(--fg)4%,transparent)");
     } finally {
       el.remove();
       restore();

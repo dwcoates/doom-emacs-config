@@ -2422,9 +2422,9 @@ describe("a held prompt folded", () => {
     withTallHeld((card) => expect(cascadedValue(card, "--bubble-bg")).toBe("var(--held-prompt-bg)"));
   });
 
-  it("sets its code on the held prompt's code blue", () => {
+  it("leaves its code on the one code wash, as every bubble's", () => {
     // Arrange / Act / Assert
-    withTallHeld((card) => expect(cascadedValue(card, "--code-bg")).toBe("var(--held-prompt-code-bg)"));
+    withTallHeld((card) => expect(cascadedValue(card, "--code-bg").replace(/\s+/g, "")).toBe("color-mix(insrgb,var(--fg)4%,transparent)"));
   });
 
   it.each(["--bubble-pad-y", "--bubble-pad-x"])("pads the bubble as a user prompt does (%s)", (property) => {
