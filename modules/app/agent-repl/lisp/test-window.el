@@ -1097,9 +1097,8 @@ next show reads the gate (`agent-repl--frontend-display-webview')."
       (cl-letf (((symbol-function 'agent-repl-window--panel-window)
                  (lambda (_kind &optional _ws _frame) (selected-window)))
                 ((symbol-function 'window-pixel-height) (lambda (&optional _w) 137))
-                ((symbol-function 'agent-repl-window--input-background) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl-webhost-set-gate-dock)
-                 (lambda (_ws pixels _bg) (push pixels docks) t)))
+                 (lambda (_ws pixels) (push pixels docks) t)))
         ;; Act
         (agent-repl-window-tell-gate-dock "ws")
         ;; Assert
@@ -1120,7 +1119,6 @@ next show reads the gate (`agent-repl--frontend-display-webview')."
   (agent-repl-test--with-clean-state
     (let ((said nil))
       (cl-letf (((symbol-function 'agent-repl-window--gate-dock-pixels) (lambda (_ws) 10))
-                ((symbol-function 'agent-repl-window--input-background) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl-webhost-set-gate-dock) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--info)
                  (agent-repl-test--record-into said)))
@@ -1129,142 +1127,30 @@ next show reads the gate (`agent-repl--frontend-display-webview')."
         ;; Assert
         (should (equal said '("elisp.gate.dock-slot-held ws=ws reason=no-host")))))))
 
-(defmacro agent-repl-window-test--with-told-host (background &rest body)
-  "Run BODY with the host's calls collected in `told' and the INFO records
-in `said', the input painting BACKGROUND (nil: no input buffer)."
-  (declare (indent 1))
-  `(agent-repl-test--with-clean-state
-     (let ((told nil)
-           (said nil))
-       (cl-letf (((symbol-function 'agent-repl-window--gate-dock-pixels) (lambda (_ws) 137))
-                 ((symbol-function 'agent-repl-window--input-background) (lambda (_ws) ,background))
-                 ((symbol-function 'agent-repl-webhost-set-input-background)
-                  (lambda (ws bg) (push (list :input-background ws bg) told) t))
-                 ((symbol-function 'agent-repl-webhost-set-gate-dock)
-                  (lambda (ws pixels bg) (push (list :gate-dock ws pixels bg) told) t))
-                 ((symbol-function 'agent-repl--info)
-                  (agent-repl-test--record-into said)))
-         ,@body))))
-
-(ert-deftest agent-repl-window-test-a-page-load-tells-the-input-background ()
-  "The gate's color is told on its own, docked or not."
-  (agent-repl-window-test--with-told-host "#14141a"
-    ;; Act
-    (agent-repl-window-tell-input-background "ws")
-    ;; Assert
-    (should (equal told '((:input-background "ws" "#14141a"))))))
-
-(ert-deftest agent-repl-window-test-a-page-load-without-an-input-buffer-tells-nothing ()
-  "No input buffer, no color to tell: nothing is sent."
-  (agent-repl-window-test--with-told-host nil
-    ;; Act
-    (agent-repl-window-tell-input-background "ws")
-    ;; Assert
-    (should-not told)))
-
-(ert-deftest agent-repl-window-test-an-input-background-with-no-host-is-held ()
-  "No host yet: the color is kept for it, and that is recorded."
-  (agent-repl-window-test--with-told-host "#14141a"
-    ;; Arrange
-    (let ((logged nil))
-      (cl-letf (((symbol-function 'agent-repl-webhost-set-input-background) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--log)
-                 (agent-repl-test--record-into logged)))
+(ert-deftest agent-repl-window-test-the-dock-slot-tells-the-height-alone ()
+  "The slot is its height alone: the page paints the gate in the feed's ground."
+  (agent-repl-test--with-clean-state
+    (let ((told nil))
+      (cl-letf (((symbol-function 'agent-repl-window--gate-dock-pixels) (lambda (_ws) 137))
+                ((symbol-function 'agent-repl-webhost-set-gate-dock)
+                 (lambda (ws pixels) (push (list ws pixels) told) t)))
         ;; Act
-        (agent-repl-window-tell-input-background "ws"))
-      ;; Assert
-      (should (cl-some (lambda (m) (string-match-p "input-bg-held.*no-host" m)) logged)))))
+        (agent-repl-window-tell-gate-dock "ws")
+        ;; Assert
+        (should (equal told '(("ws" 137))))))))
 
-(ert-deftest agent-repl-window-test-the-dock-slot-tells-the-input-background ()
-  "The input's background rides the same call as its height."
-  (agent-repl-window-test--with-told-host "#1d1f21"
-    ;; Act
-    (agent-repl-window-tell-gate-dock "ws")
-    ;; Assert
-    (should (equal told '((:gate-dock "ws" 137 "#1d1f21"))))))
-
-(ert-deftest agent-repl-window-test-the-dock-slot-without-an-input-buffer-tells-no-background ()
-  "No input buffer to read tells the height alone; the page keeps its own."
-  (agent-repl-window-test--with-told-host nil
-    ;; Act
-    (agent-repl-window-tell-gate-dock "ws")
-    ;; Assert
-    (should (equal told '((:gate-dock "ws" 137 nil))))))
-
-(ert-deftest agent-repl-window-test-the-dock-slot-records-the-background-told ()
-  "The told background is on the INFO record."
-  (agent-repl-window-test--with-told-host "#1d1f21"
-    ;; Act
-    (agent-repl-window-tell-gate-dock "ws")
-    ;; Assert
-    (should (equal said '("elisp.gate.dock-slot ws=ws pixels=137 background=#1d1f21")))))
-
-(ert-deftest agent-repl-window-test-the-dock-slot-records-an-untold-background ()
-  "A background it could not read is recorded as untold."
-  (agent-repl-window-test--with-told-host nil
-    ;; Act
-    (agent-repl-window-tell-gate-dock "ws")
-    ;; Assert
-    (should (equal said '("elisp.gate.dock-slot ws=ws pixels=137 background=untold")))))
-
-(ert-deftest agent-repl-window-test-the-input-background-is-the-buffers-remapped-one ()
-  "The composer's tint, remapped in the input buffer, is what the input paints."
+(ert-deftest agent-repl-window-test-the-dock-slot-records-its-height ()
+  "The told height is on the INFO record."
   (agent-repl-test--with-clean-state
-    (with-temp-buffer
-      (let ((buf (current-buffer)))
-        (face-remap-add-relative 'default :background "#14141a")
-        (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) buf))
-                  ((symbol-function 'face-background) (lambda (&rest _) "#1d1f21")))
-          ;; Act / Assert
-          (with-temp-buffer
-            (should (equal (agent-repl-window--input-background "ws") "#14141a"))))))))
-
-(ert-deftest agent-repl-window-test-the-input-background-without-a-remap-is-the-frames ()
-  "An input buffer that remaps nothing paints the frame's default background."
-  (agent-repl-test--with-clean-state
-    (with-temp-buffer
-      (let ((buf (current-buffer)))
-        (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) buf))
-                  ((symbol-function 'face-background) (lambda (&rest _) "#1d1f21")))
-          ;; Act / Assert
-          (should (equal (agent-repl-window--input-background "ws") "#1d1f21")))))))
-
-(ert-deftest agent-repl-window-test-the-input-background-without-an-input-buffer-is-nil ()
-  "No input buffer, no background to tell."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil)))
-      ;; Act / Assert
-      (should-not (agent-repl-window--input-background "ws")))))
-
-(ert-deftest agent-repl-window-test-the-newest-remap-background-wins ()
-  "The highest-priority remapping is first, and it wins."
-  ;; Act / Assert
-  (should (equal (agent-repl-window--remapped-background
-                  '((:background "#222222") (:background "#111111") default))
-                 "#222222")))
-
-(ert-deftest agent-repl-window-test-a-remap-that-sets-no-background-is-skipped ()
-  "A spec that sets no background (or `default' itself) defers to the next."
-  ;; Act / Assert
-  (should (equal (agent-repl-window--remapped-background
-                  '((:foreground "#ffffff") default (:background "#111111")))
-                 "#111111")))
-
-(ert-deftest agent-repl-window-test-a-single-plist-remap-is-read ()
-  "A remapping that is one property list, not a list of specs, is read."
-  ;; Act / Assert
-  (should (equal (agent-repl-window--remapped-background '(:background "#111111"))
-                 "#111111")))
-
-(ert-deftest agent-repl-window-test-a-face-remap-counts-by-its-own-background ()
-  "A face in the remapping paints its own background."
-  (let ((face (make-symbol "agent-repl-window-test-face")))
-    ;; Arrange
-    (make-face face)
-    (set-face-attribute face nil :background "#123456")
-    ;; Act / Assert
-    (should (equal (agent-repl-window--remapped-background (list face 'default))
-                   "#123456"))))
+    (let ((said nil))
+      (cl-letf (((symbol-function 'agent-repl-window--gate-dock-pixels) (lambda (_ws) 137))
+                ((symbol-function 'agent-repl-webhost-set-gate-dock) (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--info)
+                 (agent-repl-test--record-into said)))
+        ;; Act
+        (agent-repl-window-tell-gate-dock "ws")
+        ;; Assert
+        (should (equal said '("elisp.gate.dock-slot ws=ws pixels=137")))))))
 
 ;;;; ---- Focus when the panels stand alone ----
 

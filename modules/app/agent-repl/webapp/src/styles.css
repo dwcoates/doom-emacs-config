@@ -7570,12 +7570,10 @@ bubble-body.bubble-body { display: block; }
 
 /* THE GATE'S VISUAL ANCESTOR IS THE REVIVAL GATE: its SOLID orange frame and
    its classes for every element inside. Its fill is NOT the revival gate's
-   yellow: it is ALWAYS the Emacs input window's background, docked or not
-   (owner, 2026-10-06), which Emacs tells every page on load (--input-bg,
-   lisp/window.el). A page Emacs never told falls back to the page's own dark
-   background, never to yellow. */
+   yellow: it is ALWAYS THE FEED'S OWN GROUND, docked or not (owner request,
+   2026-10-28, superseding 2026-10-06's input-window color). */
 .cold-gate {
-  background: var(--input-bg, var(--bg));
+  background: var(--bg);
   /* The frame -- the separator line when docked -- wears the token figure's
      heat (--cold-gate-heat, set on the card by cold-gate.ts). */
   border: 1px solid var(--cold-gate-heat, var(--revival-gate-border));
@@ -7692,14 +7690,12 @@ bubble-body.bubble-body { display: block; }
   padding-bottom: 1px;
 }
 #gate-dock[hidden] { display: none; }
-/* The docked card wears the Emacs input window's background, as the card does
-   everywhere (--input-bg, lisp/window.el), so the banner reads as the slot the
-   input had; the page's dark background stands in only for a page Emacs never
-   told, which gate-dock.ts records. Its controls are the card's own, and so
+/* The docked card wears the feed's ground, as the card does everywhere
+   (owner request, 2026-10-28). Its controls are the card's own, and so
    is its frame: a border AROUND the gate in the token figure's heat, not a
    rule between it and the rest of the page (owner, 2026-10-06). */
 #gate-dock > .cold-gate.cold-gate-docked {
-  background: var(--input-bg, var(--bg));
+  background: var(--bg);
   box-sizing: border-box;
   border-radius: 0;
   border-width: 1px;

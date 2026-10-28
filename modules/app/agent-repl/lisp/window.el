@@ -49,8 +49,7 @@
 (declare-function agent-repl--ws-log-name "workspace")
 (declare-function agent-repl--info "core")
 (declare-function agent-repl-host-state "host")
-(declare-function agent-repl-webhost-set-input-background "webhost" (ws background))
-(declare-function agent-repl-webhost-set-gate-dock "webhost" (ws pixels background))
+(declare-function agent-repl-webhost-set-gate-dock "webhost" (ws pixels))
 (declare-function agent-repl--input-buffer "input" (ws))
 (declare-function json-encode-string "json" (string))
 
@@ -655,60 +654,15 @@ the height a mount would give it, its line count on the frame
         (window-pixel-height win)
       (* (agent-repl-window--input-height nil ws) (frame-char-height)))))
 
-(defun agent-repl-window--remapped-background (specs)
-  "The background the first of SPECS that sets one paints, or nil.
-SPECS are a `face-remapping-alist' entry's remapping, highest priority
-first: a property list, a face, or a list of those.  A face counts by its
-own background, never `default''s."
-  (cl-some (lambda (spec)
-             (cond ((and (consp spec) (keywordp (car spec)))
-                    (plist-get spec :background))
-                   ((and spec (symbolp spec) (not (eq spec 'default)) (facep spec))
-                    (let ((bg (face-attribute spec :background)))
-                      (and (stringp bg) bg)))))
-           (if (keywordp (car-safe specs)) (list specs) specs)))
-
-(defun agent-repl-window--input-background (ws)
-  "The background WS's input window paints, or nil when it has no input buffer.
-Read in the input buffer itself: its `default' face remapping (the
-composer's tint, `agent-repl--set-buffer-background') wins, else the
-frame's `default' background, (face-background \='default nil t)."
-  (let ((buf (agent-repl--input-buffer ws)))
-    (and buf
-         (with-current-buffer buf
-           (or (agent-repl-window--remapped-background
-                (cdr (assq 'default face-remapping-alist)))
-               (face-background 'default nil t))))))
-
-(defun agent-repl-window-tell-input-background (ws)
-  "Tell WS's page the background its input window paints.
-The host keeps it and hands it to the page on every load of the page
-\(webhost.el), so a gate the page draws -- docked or not, and after a
-reload -- always wears the input window's color, never the card's old
-yellow (owner, 2026-10-06).  A workspace with no input buffer or no page
-tells nothing, and says so at DEBUG."
-  (let ((background (agent-repl-window--input-background ws)))
-    (cond
-     ((null background)
-      (agent-repl--log ws "elisp.gate.input-bg-skipped ws=%s reason=no-input-buffer" ws))
-     ((agent-repl-webhost-set-input-background ws background)
-      (agent-repl--log ws "elisp.gate.input-bg ws=%s background=%s" ws background))
-     (t
-      (agent-repl--log ws "elisp.gate.input-bg-held ws=%s reason=no-host" ws)))
-    background))
-
 (defun agent-repl-window-tell-gate-dock (ws)
-  "Tell WS's page the slot its docked gate takes: the input window's.
-Its pixel height and its background, sent before the input window hides,
-so the banner fills exactly the slot the input had and wears its color.
-A workspace with no input buffer tells the height alone, and the page
-keeps the card's own background.  The host keeps the slot for the page's
-reloads (webhost.el)."
-  (let ((pixels (agent-repl-window--gate-dock-pixels ws))
-        (background (agent-repl-window--input-background ws)))
-    (if (agent-repl-webhost-set-gate-dock ws pixels background)
-        (agent-repl--info ws "elisp.gate.dock-slot ws=%s pixels=%d background=%s"
-                          ws pixels (or background "untold"))
+  "Tell WS's page the slot its docked gate takes: the input window's height.
+Sent before the input window hides, so the banner fills exactly the slot
+the input had.  The page paints the banner in the feed's own ground
+\(owner request, 2026-10-28), so no color is told.  The host keeps the
+slot for the page's reloads (webhost.el)."
+  (let ((pixels (agent-repl-window--gate-dock-pixels ws)))
+    (if (agent-repl-webhost-set-gate-dock ws pixels)
+        (agent-repl--info ws "elisp.gate.dock-slot ws=%s pixels=%d" ws pixels)
       (agent-repl--info ws "elisp.gate.dock-slot-held ws=%s reason=no-host" ws))
     pixels))
 

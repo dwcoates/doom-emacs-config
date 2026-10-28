@@ -82,7 +82,6 @@ export const SIDEBAR_BOTTOM_PROPERTY = "--webhost-sidebar-bottom";
 /** The slot the docked gate takes, as Emacs last told it. */
 interface GateDockState {
   readonly pixels: number;
-  readonly background: string | null;
 }
 
 /** One workspace's page, and everything the host knows and holds for it. */
@@ -91,7 +90,6 @@ interface Frame {
   url: string;
   readonly iframe: HTMLIFrameElement;
   /** Desired state Emacs gave, replayed to the page on every hello. */
-  inputBackground: string | null;
   gateDock: GateDockState | null;
   /** The editor's held-prompt ingress entries for the workspace; null until stated. */
   heldIngress: readonly HeldIngressWireEntry[] | null;
@@ -156,10 +154,8 @@ export interface Host {
    * the reload began, handed to the page it loads.
    */
   reload(id: string, reloadStartedAtMs?: number | null): string;
-  /** Tell ID's page the background its Emacs input window paints. */
-  setInputBackground(id: string, background: string): string;
-  /** Tell ID's page the slot its docked gate takes. */
-  setGateDock(id: string, pixels: number, background: string | null): string;
+  /** Tell ID's page the slot its docked gate takes: the input window's height. */
+  setGateDock(id: string, pixels: number): string;
   /**
    * Tell ID's page the editor's held-prompt ingress entries for its
    * workspace, the whole list. An entry that is not one (host/protocol.ts
@@ -335,15 +331,11 @@ export function createHost(env: HostEnv): Host {
     post(frame, presenceOf(frame, switchStartedAtMs, reloadStartedAtMs));
     post(frame, dockMessage());
     post(frame, failuresMessage());
-    if (frame.inputBackground !== null) {
-      post(frame, { channel: HOST_CHANNEL, kind: "inputBackground", background: frame.inputBackground });
-    }
     if (frame.gateDock !== null) {
       post(frame, {
         channel: HOST_CHANNEL,
         kind: "gateDock",
         pixels: frame.gateDock.pixels,
-        background: frame.gateDock.background,
       });
     }
     if (logLevel !== null && logLevel.untilMs > now()) {
@@ -639,7 +631,6 @@ export function createHost(env: HostEnv): Host {
    * keeps what the page it replaces held.
    */
   const carryDesiredState = (from: Frame, to: Frame): void => {
-    to.inputBackground = from.inputBackground;
     to.gateDock = from.gateDock;
     to.heldIngress = from.heldIngress;
     to.gateBand = from.gateBand;
@@ -658,7 +649,6 @@ export function createHost(env: HostEnv): Host {
       id,
       url,
       iframe,
-      inputBackground: null,
       gateDock: null,
       heldIngress: null,
       drawn: null,
@@ -811,17 +801,10 @@ export function createHost(env: HostEnv): Host {
         return "reloaded";
       });
     },
-    setInputBackground(id, background) {
-      return withFrame("setInputBackground", id, (frame) => {
-        frame.inputBackground = background;
-        post(frame, { channel: HOST_CHANNEL, kind: "inputBackground", background });
-        return "sent";
-      });
-    },
-    setGateDock(id, pixels, background) {
+    setGateDock(id, pixels) {
       return withFrame("setGateDock", id, (frame) => {
-        frame.gateDock = { pixels, background };
-        post(frame, { channel: HOST_CHANNEL, kind: "gateDock", pixels, background });
+        frame.gateDock = { pixels };
+        post(frame, { channel: HOST_CHANNEL, kind: "gateDock", pixels });
         return "sent";
       });
     },

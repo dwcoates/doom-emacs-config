@@ -213,11 +213,11 @@ Binds `reloads' and `records', newest first."
     (should (string-search "id:\"id-a\",outcome:\"queued\"" script))))
 
 (ert-deftest agent-repl-test-wh-a-null-argument-is-encoded-as-null ()
-  "A gate given no background sends JSON null, not a string."
+  "A nil argument is sent as JSON null, not a string."
   ;; Act
-  (let ((script (agent-repl--webhost-script "setGateDock" "id-a" 90 nil)))
+  (let ((script (agent-repl--webhost-script "reload" "id-a" nil)))
     ;; Assert
-    (should (string-search "h.setGateDock(\"id-a\",90,null)" script))))
+    (should (string-search "h.reload(\"id-a\",null)" script))))
 
 ;;;; ---- Answers ----
 
@@ -487,12 +487,12 @@ Binds `reloads' and `records', newest first."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl-webhost-set-input-background "alpha" "#000")
+    (agent-repl-webhost-set-gate-dock "alpha" 90)
     ;; Act
     (agent-repl-webhost-remove "alpha")
     ;; Assert
     (should-not (gethash "id-alpha" agent-repl--webhost-pages))
-    (should-not (gethash "id-alpha" agent-repl--webhost-input-backgrounds))))
+    (should-not (gethash "id-alpha" agent-repl--webhost-gate-docks))))
 
 (ert-deftest agent-repl-test-wh-removing-the-shown-page-shows-none ()
   "The host shows nothing it no longer holds."
@@ -642,23 +642,26 @@ Binds `reloads' and `records', newest first."
       ;; Assert
       (should (null agent-repl--webhost-url)))))
 
-(ert-deftest agent-repl-test-wh-an-input-background-is-kept-for-reloads ()
-  "The background is recorded, so a reloaded host gets it again."
-  ;; Arrange
-  (agent-repl-test-wh--with-host
-    ;; Act
-    (agent-repl-webhost-set-input-background "alpha" "#101010")
-    ;; Assert
-    (should (equal (gethash "id-alpha" agent-repl--webhost-input-backgrounds) "#101010"))))
-
 (ert-deftest agent-repl-test-wh-a-gate-dock-is-kept-for-reloads ()
   "The gate's slot is recorded, so a reloaded host gets it again."
   ;; Arrange
   (agent-repl-test-wh--with-host
     ;; Act
-    (agent-repl-webhost-set-gate-dock "alpha" 90 nil)
+    (agent-repl-webhost-set-gate-dock "alpha" 90)
     ;; Assert
-    (should (equal (gethash "id-alpha" agent-repl--webhost-gate-docks) '(90)))))
+    (should (equal (gethash "id-alpha" agent-repl--webhost-gate-docks) 90))))
+
+(ert-deftest agent-repl-test-wh-a-gate-dock-sends-its-height-alone ()
+  "The host is told the slot's height and nothing else (owner request, 2026-10-28)."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (setq agent-repl-test-wh--calls nil)
+    ;; Act
+    (agent-repl-webhost-set-gate-dock "alpha" 90)
+    ;; Assert
+    (should (equal (mapcar (lambda (script) (and (string-search "h.setGateDock(\"id-alpha\",90)" script) t))
+                           (agent-repl-test-wh--sent "setGateDock"))
+                   '(t)))))
 
 (ert-deftest agent-repl-test-wh-held-ingress-entries-are-sent-and-kept-for-reloads ()
   "The editor's ingress entries reach the page, and a reloaded host gets them again."
@@ -949,18 +952,16 @@ The current tab's page, not shown here, is the nearest of all."
       (should (null (agent-repl-test-wh--sent "setLogLevel"))))))
 
 (ert-deftest agent-repl-test-wh-a-load-replays-each-pages-state ()
-  "A loaded host gets every page's input background and gate slot again."
+  "A loaded host gets every page's gate slot again."
   ;; Arrange
   (agent-repl-test-wh--with-host
     (agent-repl-webhost-ensure-page "alpha")
-    (agent-repl-webhost-set-input-background "alpha" "#101010")
-    (agent-repl-webhost-set-gate-dock "alpha" 90 "#101010")
+    (agent-repl-webhost-set-gate-dock "alpha" 90)
     (agent-repl-webhost-set-held-ingress "alpha" [])
     (setq agent-repl-test-wh--calls nil)
     ;; Act
     (agent-repl-test-wh--load "load-committed")
     ;; Assert
-    (should (= 1 (length (agent-repl-test-wh--sent "setInputBackground"))))
     (should (= 1 (length (agent-repl-test-wh--sent "setGateDock"))))
     (should (= 1 (length (agent-repl-test-wh--sent "setHeldIngress"))))))
 

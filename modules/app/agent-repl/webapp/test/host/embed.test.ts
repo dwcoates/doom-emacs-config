@@ -6,7 +6,7 @@ import { levelApplyShapeOf } from "./level-apply-shape.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
-import { DOCK_BACKGROUND_PROPERTY, DOCK_HEIGHT_PROPERTY } from "../../src/feed/gate-dock.js";
+import { DOCK_HEIGHT_PROPERTY } from "../../src/feed/gate-dock.js";
 import { FOCUS_LEFT_EMACS, WEBHOST_SIDEBAR_CLASS, connectToHost, type HostLink } from "../../src/host/embed.js";
 import { fireResize } from "../resize-observer.js";
 import { HOST_CHANNEL, type PageToHost } from "../../src/host/protocol.js";
@@ -211,39 +211,12 @@ describe("presence", () => {
 
 
 describe("commands", () => {
-  it("paints the input window's background where the gate reads it", () => {
-    // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "inputBackground", background: "#123456" });
-
-    // Assert
-    expect(pageDoc.documentElement.style.getPropertyValue(DOCK_BACKGROUND_PROPERTY)).toBe("#123456");
-  });
-
   it("sizes the docked gate's slot", () => {
     // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "gateDock", pixels: 132, background: null });
+    fromHost({ channel: HOST_CHANNEL, kind: "gateDock", pixels: 132 });
 
     // Assert
     expect(pageDoc.documentElement.style.getPropertyValue(DOCK_HEIGHT_PROPERTY)).toBe("132px");
-  });
-
-  it("paints the docked gate's background when one is given", () => {
-    // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "gateDock", pixels: 132, background: "#222222" });
-
-    // Assert
-    expect(pageDoc.documentElement.style.getPropertyValue(DOCK_BACKGROUND_PROPERTY)).toBe("#222222");
-  });
-
-  it("leaves the background alone for a docked gate given none", () => {
-    // Arrange
-    fromHost({ channel: HOST_CHANNEL, kind: "inputBackground", background: "#111111" });
-
-    // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "gateDock", pixels: 132, background: null });
-
-    // Assert
-    expect(pageDoc.documentElement.style.getPropertyValue(DOCK_BACKGROUND_PROPERTY)).toBe("#111111");
   });
 
   it("closes a standing news digest", () => {

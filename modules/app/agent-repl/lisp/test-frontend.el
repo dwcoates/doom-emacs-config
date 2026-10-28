@@ -121,7 +121,6 @@ test is the mount's own binding of the slot to its workspace."
              ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
              ((symbol-function 'agent-repl-webhost-ensure-page) (lambda (_ws) "id"))
              ((symbol-function 'agent-repl--frontend-adopt-webview-buffer) (lambda (&rest _) nil))
-             ((symbol-function 'agent-repl-window-tell-input-background) #'ignore)
              ((symbol-function 'agent-repl--align-buffer-to-ws-dir) (lambda (&rest _) nil))
              ((symbol-function 'agent-repl--frontend-make-slot-buffer) (lambda (_name _xw) ,slot)))
      ,@body))
@@ -169,22 +168,6 @@ test is the mount's own binding of the slot to its workspace."
               (agent-repl--frontend-ensure-webview-buffer "ws1")
               ;; Assert
               (should (equal held '("ws1" "ws1")))))
-        (when (buffer-live-p buf) (kill-buffer buf))))))
-
-(ert-deftest agent-repl-test-frontend-a-fresh-slot-tells-the-input-background ()
-  "The page's gate wears the input window's color from its first load."
-  ;; Arrange
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*fake-webview*"))
-          (told nil))
-      (unwind-protect
-          (agent-repl-test-frontend--with-slot-mount buf
-            (cl-letf (((symbol-function 'agent-repl-window-tell-input-background)
-                       (lambda (ws) (push ws told))))
-              ;; Act
-              (agent-repl--frontend-ensure-webview-buffer "ws1")
-              ;; Assert
-              (should (equal told '("ws1")))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
 (ert-deftest agent-repl-test-frontend-a-fresh-slot-is-noted-mounted-once ()

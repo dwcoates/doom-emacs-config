@@ -49,7 +49,6 @@
 (declare-function agent-repl-refill-keymap "core" (map fill))
 (declare-function agent-repl--sanitize-ws-name "core" (name))
 (declare-function agent-repl-window-tell-gate-dock "window" (ws))
-(declare-function agent-repl-window-tell-input-background "window" (ws))
 (declare-function agent-repl--fatal "core")
 (declare-function agent-repl-refill-keymap "core" (map fill))
 (declare-function agent-repl--log-level-window "core" (level until now))
@@ -877,11 +876,6 @@ webview window resolves against the worktree the REPL is attached to."
     (agent-repl-webhost-ensure-page ws)
     (when (and fresh (fboundp 'agent-repl-page-unload-note-mounted))
       (agent-repl-page-unload-note-mounted ws))
-    (when fresh
-      ;; The page's gate wears the input window's color; the host keeps it
-      ;; and hands it to the page on every load of the page.
-      (when (fboundp 'agent-repl-window-tell-input-background)
-        (agent-repl-window-tell-input-background ws)))
     (agent-repl--align-buffer-to-ws-dir buf ws)
     buf))
 
