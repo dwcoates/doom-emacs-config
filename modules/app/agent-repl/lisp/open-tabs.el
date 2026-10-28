@@ -445,7 +445,7 @@ once a daemon is serving."
              (agent-repl-roster-note-row (plist-get listing :value)
                                          (or (plist-get value :roster-revision) 0))))
          (when (eq (plist-get outcome :arm) :failed)
-           (agent-repl-open-tabs--say "%s: session failed to start: %s."
+           (agent-repl-open-tabs--say "%s: could not be opened: %s."
                                       ws (plist-get (plist-get outcome :value) :reason)))
          (agent-repl-open-tabs--show id ws))))
       (:hidden
@@ -591,7 +591,7 @@ no workspace while the rest come up."
         (total (plist-get finished :total)))
     (if (null failed)
         (agent-repl-open-tabs--say "all %d workspaces ready." total)
-      (agent-repl-open-tabs--say "%d of %d workspaces ready; %s failed to start."
+      (agent-repl-open-tabs--say "%d of %d workspaces ready; %s could not be opened."
                                  (plist-get finished :ready) total
                                  (mapconcat (lambda (f) (plist-get f :name)) failed ", ")))))
 

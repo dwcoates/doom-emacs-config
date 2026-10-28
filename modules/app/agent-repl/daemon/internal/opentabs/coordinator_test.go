@@ -22,39 +22,25 @@ import (
 // fails: a small multiple of an in-process channel hop.
 const waitBound = 5 * time.Second
 
-// bringUpCall is one BringUp the coordinator asked for.
-type bringUpCall struct {
-	pending []ids.WorkspaceID
-	done    func(ws ids.WorkspaceID, err error)
-}
-
 // world is a coordinator over fake collaborators.
 type world struct {
-	c       *Coordinator
-	log     *dlog.TestLogger
-	bringUp chan bringUpCall
-	frames  chan *agentreplv1.OpenTabsResponse
+	c      *Coordinator
+	log    *dlog.TestLogger
+	frames chan *agentreplv1.OpenTabsResponse
+	// readBegun is told the workspace of every conversation read as it
+	// begins.
+	readBegun chan ids.WorkspaceID
 
 	mu      sync.Mutex
-	live    map[ids.WorkspaceID]bool
 	opening []string
-	// leaveDuringOwed makes the owed read the moment the client goes away:
-	// it cancels the open and fails the read with the cancellation.
-	leaveDuringOwed bool
-	// cancel ends the running open (startEmitting sets it).
-	cancel context.CancelFunc
-	// owed are the workspaces owed a cut turn; owedErr fails the read.
-	owed    map[ids.WorkspaceID]bool
-	owedErr error
-	// readErr fails every conversation read; reads counts them; readGate,
-	// when set, holds each read until the test sends on it.
-	readErr  error
-	reads    map[ids.WorkspaceID]int
-	readGate chan struct{}
+	// readErr fails every conversation read; reads counts them; readGates,
+	// when one is set for a workspace, holds that workspace's reads until
+	// the test closes it.
+	readErr   error
+	reads     map[ids.WorkspaceID]int
+	readGates map[ids.WorkspaceID]chan struct{}
 	// revision is the fake roster's revision, raised by every opening edge.
 	revision uint64
-	// owedReads counts the owed-resumption reads.
-	owedReads int
 	// threads are the workspaces the fake roster lists as chat threads, with
 	// no row.
 	threads map[ids.WorkspaceID]bool
@@ -63,20 +49,13 @@ type world struct {
 func newWorld(t *testing.T) *world {
 	t.Helper()
 	w := &world{
-		log:     dlog.NewTestLogger(),
-		live:    map[ids.WorkspaceID]bool{},
-		owed:    map[ids.WorkspaceID]bool{},
-		reads:   map[ids.WorkspaceID]int{},
-		bringUp: make(chan bringUpCall, 4),
-		frames:  make(chan *agentreplv1.OpenTabsResponse, 256),
+		log:       dlog.NewTestLogger(),
+		reads:     map[ids.WorkspaceID]int{},
+		readGates: map[ids.WorkspaceID]chan struct{}{},
+		frames:    make(chan *agentreplv1.OpenTabsResponse, 256),
+		readBegun: make(chan ids.WorkspaceID, 64),
 	}
 	c, err := New(Deps{
-		Live: func(ws ids.WorkspaceID) bool {
-			w.mu.Lock()
-			defer w.mu.Unlock()
-			return w.live[ws]
-		},
-		BringUp: func(p []ids.WorkspaceID, done func(ids.WorkspaceID, error)) { w.bringUp <- bringUpCall{p, done} },
 		Opening: func(ws ids.WorkspaceID, opening bool) {
 			w.mu.Lock()
 			defer w.mu.Unlock()
@@ -85,10 +64,11 @@ func newWorld(t *testing.T) *world {
 		},
 		ReadConversation: func(ctx context.Context, ws ids.WorkspaceID) error {
 			w.mu.Lock()
-			gate := w.readGate
+			gate := w.readGates[ws]
 			w.reads[ws]++
 			err := w.readErr
 			w.mu.Unlock()
+			w.readBegun <- ws
 			if gate != nil {
 				select {
 				case <-gate:
@@ -97,16 +77,6 @@ func newWorld(t *testing.T) *world {
 				}
 			}
 			return err
-		},
-		Owed: func(_ context.Context, ws ids.WorkspaceID) (bool, error) {
-			w.mu.Lock()
-			defer w.mu.Unlock()
-			w.owedReads++
-			if w.leaveDuringOwed {
-				w.cancel()
-				return false, context.Canceled
-			}
-			return w.owed[ws], w.owedErr
 		},
 		Row: func(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool) {
 			w.mu.Lock()
@@ -134,16 +104,19 @@ func newWorld(t *testing.T) *world {
 	return w
 }
 
-func (w *world) setLive(ws ids.WorkspaceID) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.live[ws] = true
-}
-
 func (w *world) openingEdges() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return append([]string(nil), w.opening...)
+}
+
+// gateRead makes WS's conversation reads wait until the answer is closed.
+func (w *world) gateRead(ws ids.WorkspaceID) chan struct{} {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	gate := make(chan struct{})
+	w.readGates[ws] = gate
+	return gate
 }
 
 // none and loading build a request's workspaces.
@@ -165,9 +138,6 @@ func (w *world) start(workspaces ...Workspace) (context.CancelFunc, <-chan struc
 
 func (w *world) startEmitting(emit Emit, workspaces ...Workspace) (context.CancelFunc, <-chan struct{}) {
 	ctx, cancel := context.WithCancel(context.Background())
-	w.mu.Lock()
-	w.cancel = cancel
-	w.mu.Unlock()
 	returned := make(chan struct{})
 	go func() {
 		defer close(returned)
@@ -198,15 +168,24 @@ func (w *world) expect(t *testing.T, want ...string) {
 	}
 }
 
-// awaitBringUp answers the BringUp the open asked for.
-func (w *world) awaitBringUp(t *testing.T) bringUpCall {
+// awaitRead waits until WS's conversation read has begun.
+func (w *world) awaitRead(t *testing.T, ws ids.WorkspaceID) {
 	t.Helper()
-	select {
-	case call := <-w.bringUp:
-		return call
-	case <-time.After(waitBound):
-		t.Fatal("the open asked for no bring-up")
-		return bringUpCall{}
+	w.awaitReads(t, ws, 1)
+}
+
+// awaitReads waits until N of WS's conversation reads have begun.
+func (w *world) awaitReads(t *testing.T, ws ids.WorkspaceID, n int) {
+	t.Helper()
+	for seen := 0; seen < n; {
+		select {
+		case got := <-w.readBegun:
+			if got == ws {
+				seen++
+			}
+		case <-time.After(waitBound):
+			t.Fatalf("%d of %s's conversation reads began, want %d", seen, ws, n)
+		}
 	}
 }
 
@@ -281,11 +260,8 @@ func describe(f *agentreplv1.OpenTabsResponse) string {
 func TestNewRefusesAMissingCollaborator(t *testing.T) {
 	full := func() Deps {
 		return Deps{
-			Live:             func(ids.WorkspaceID) bool { return false },
-			BringUp:          func([]ids.WorkspaceID, func(ids.WorkspaceID, error)) {},
 			Opening:          func(ids.WorkspaceID, bool) {},
 			ReadConversation: func(context.Context, ids.WorkspaceID) error { return nil },
-			Owed:             func(context.Context, ids.WorkspaceID) (bool, error) { return false, nil },
 			Row:              func(ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool) { return nil, 0, false },
 			Thread:           func(ids.WorkspaceID) (uint64, bool) { return 0, false },
 			Now:              time.Now,
@@ -296,11 +272,8 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		name  string
 		strip func(*Deps)
 	}{
-		{"liveness", func(d *Deps) { d.Live = nil }},
-		{"bring-up", func(d *Deps) { d.BringUp = nil }},
 		{"opening marker", func(d *Deps) { d.Opening = nil }},
 		{"conversation read", func(d *Deps) { d.ReadConversation = nil }},
-		{"owed read", func(d *Deps) { d.Owed = nil }},
 		{"roster row", func(d *Deps) { d.Row = nil }},
 		{"roster thread listing", func(d *Deps) { d.Thread = nil }},
 		{"clock", func(d *Deps) { d.Now = nil }},
@@ -336,12 +309,12 @@ func TestARefusedWorkspaceIsAnsweredAtOnce(t *testing.T) {
 	// Assert
 	w.expect(t, "a refused unknown_workspace", "finished 0/1 failed=")
 	awaitReturned(t, returned)
-	if len(w.bringUp) != 0 || len(w.openingEdges()) != 0 {
-		t.Fatalf("a refused workspace was started or marked opening: %v", w.openingEdges())
+	if len(w.openingEdges()) != 0 {
+		t.Fatalf("a refused workspace was marked opening: %v", w.openingEdges())
 	}
 }
 
-func TestAHiddenWorkspaceIsAnsweredHiddenAndNothingStarts(t *testing.T) {
+func TestAHiddenWorkspaceIsAnsweredHiddenAndNothingIsRead(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
 	ws := loading("a")
@@ -353,32 +326,32 @@ func TestAHiddenWorkspaceIsAnsweredHiddenAndNothingStarts(t *testing.T) {
 	// Assert
 	w.expect(t, "a hidden", "finished 0/1 failed=")
 	awaitReturned(t, returned)
-	if len(w.bringUp) != 0 || len(w.openingEdges()) != 0 {
-		t.Fatalf("a hidden workspace was started or marked opening: %v", w.openingEdges())
+	if len(w.openingEdges()) != 0 || w.reads["a"] != 0 {
+		t.Fatalf("a hidden workspace was marked opening (%v) or read (%d)", w.openingEdges(), w.reads["a"])
 	}
 }
 
-func TestALiveWorkspaceWithNoPageIsReadyOnceServed(t *testing.T) {
+// TestAWorkspaceIsReadyOnceItsConversationIsRead pins that an open waits on no
+// shim: nothing but the store read stands between the open and its answer.
+func TestAWorkspaceIsReadyOnceItsConversationIsRead(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.setLive("a")
 
 	// Act
 	_, returned := w.start(none("a"))
 
 	// Assert
-	w.expect(t, "a served", "a conversation_read", "a ready", "finished 1/1 failed=")
+	w.expect(t, "a conversation_read", "a ready", "finished 1/1 failed=")
 	awaitReturned(t, returned)
 }
 
-func TestALiveWorkspaceWithAPageLoadingWaitsForItToDraw(t *testing.T) {
+func TestAWorkspaceWithAPageLoadingWaitsForItToDraw(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.setLive("a")
 	w.c.PageAttached("p")
 	cancel, _ := w.start(loading("a"))
 	defer cancel()
-	w.expect(t, "a served", "a conversation_read")
+	w.expect(t, "a conversation_read")
 
 	// Act
 	w.c.PageServes("p", "a")
@@ -394,7 +367,6 @@ func TestALiveWorkspaceWithAPageLoadingWaitsForItToDraw(t *testing.T) {
 func TestAPageThatDrewBeforeTheOpenIsTakenAtOnce(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.setLive("a")
 	w.c.PageAttached("p")
 	w.c.PageServes("p", "a")
 	if err := w.c.PageDrawn("p", "a"); err != nil {
@@ -405,17 +377,16 @@ func TestAPageThatDrewBeforeTheOpenIsTakenAtOnce(t *testing.T) {
 	w.start(loading("a"))
 
 	// Assert
-	w.expect(t, "a served", "a page_connected", "a page_drawn", "a conversation_read", "a ready", "finished 1/1 failed=")
+	w.expect(t, "a page_connected", "a page_drawn", "a conversation_read", "a ready", "finished 1/1 failed=")
 }
 
 func TestAPageThatDrewWithoutServingIsConnectedFirst(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.setLive("a")
 	w.c.PageAttached("p")
 	cancel, _ := w.start(loading("a"))
 	defer cancel()
-	w.expect(t, "a served", "a conversation_read")
+	w.expect(t, "a conversation_read")
 
 	// Act
 	if err := w.c.PageDrawn("p", "a"); err != nil {
@@ -434,21 +405,17 @@ func TestAWorkspaceWithNoPageIsToldNoPageStep(t *testing.T) {
 	if err := w.c.PageDrawn("p", "a"); err != nil {
 		t.Fatalf("PageDrawn: %v", err)
 	}
-	cancel, _ := w.start(none("a"))
-	defer cancel()
-	call := w.awaitBringUp(t)
 
 	// Act
-	call.done("a", nil)
+	w.start(none("a"))
 
 	// Assert
-	w.expect(t, "a served", "a conversation_read", "a ready", "finished 1/1 failed=")
+	w.expect(t, "a conversation_read", "a ready", "finished 1/1 failed=")
 }
 
 func TestADetachedPagesDrawnReportIsForgotten(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.setLive("a")
 	w.c.PageAttached("p")
 	if err := w.c.PageDrawn("p", "a"); err != nil {
 		t.Fatalf("PageDrawn: %v", err)
@@ -459,8 +426,8 @@ func TestADetachedPagesDrawnReportIsForgotten(t *testing.T) {
 	cancel, _ := w.start(loading("a"))
 	defer cancel()
 
-	// Assert: served, and then nothing until a page draws again.
-	w.expect(t, "a served", "a conversation_read")
+	// Assert: read, and then nothing until a page draws again.
+	w.expect(t, "a conversation_read")
 	w.c.PageAttached("q")
 	if err := w.c.PageDrawn("q", "a"); err != nil {
 		t.Fatalf("PageDrawn: %v", err)
@@ -512,71 +479,7 @@ func TestPageDetachedOfAnUnknownPageIsAnInvariantViolation(t *testing.T) {
 	t.Fatalf("records = %+v, want an ERROR naming the unknown detach", w.log.Records())
 }
 
-func TestAWorkspaceNotLiveIsBroughtUp(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-
-	// Act
-	w.start(none("a"), none("b"))
-
-	// Assert
-	call := w.awaitBringUp(t)
-	if !slices.Equal(call.pending, []ids.WorkspaceID{"a", "b"}) {
-		t.Fatalf("pending = %v, want both workspaces", call.pending)
-	}
-}
-
-func TestABroughtUpWorkspaceIsReadyWhenItsStartReturns(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.start(none("a"))
-	call := w.awaitBringUp(t)
-
-	// Act
-	call.done("a", nil)
-
-	// Assert
-	w.expect(t, "a served", "a conversation_read", "a ready", "finished 1/1 failed=")
-}
-
-func TestAStartThatFailsWithNoStepOpensFailed(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.start(none("a"))
-	call := w.awaitBringUp(t)
-
-	// Act
-	call.done("a", errors.New("boom"))
-
-	// Assert
-	w.expect(t, "a failed boom", "finished 0/1 failed=a")
-}
-
-func TestAFailedStepOpensFailedWithItsReason(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.start(loading("a"))
-	w.awaitBringUp(t)
-
-	// Act
-	w.c.Step("a", Step{Kind: StepFailed, Text: "the shim never answered"})
-
-	// Assert: a failure does not wait for the page.
-	w.expect(t, "a failed the shim never answered", "finished 0/1 failed=a")
-}
-
-func TestAVendorThatRefusesStillOpensReady(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.start(none("a"))
-	w.awaitBringUp(t)
-
-	// Act
-	w.c.Step("a", Step{Kind: StepVendorRejected, Text: "logged out"})
-
-	// Assert
-	w.expect(t, "a vendor_rejected logged out", "a served", "a conversation_read", "a ready")
-}
+// ---- a bring-up in flight is relayed, never waited for ----
 
 func TestEveryRelayedStepIsTold(t *testing.T) {
 	cases := []struct {
@@ -587,17 +490,19 @@ func TestEveryRelayedStepIsTold(t *testing.T) {
 		{Step{Kind: StepWaking}, "a waking"},
 		{Step{Kind: StepResuming}, "a resuming"},
 		{Step{Kind: StepVendorRetrying, Attempt: 2}, "a vendor_retrying 2"},
+		{Step{Kind: StepVendorRejected, Text: "logged out"}, "a vendor_rejected logged out"},
 		{Step{Kind: StepVendorFailed}, "a vendor_failed"},
 		{Step{Kind: StepColdGate}, "a cold_gate"},
 		{Step{Kind: StepOffline}, "a offline"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.step.Kind.String(), func(t *testing.T) {
-			// Arrange
+			// Arrange: the read is held, so the open is still answering.
 			w := newWorld(t)
+			w.gateRead("a")
 			cancel, _ := w.start(loading("a"))
 			defer cancel()
-			w.awaitBringUp(t)
+			w.awaitRead(t, "a")
 
 			// Act
 			w.c.Step("a", tc.step)
@@ -608,61 +513,106 @@ func TestEveryRelayedStepIsTold(t *testing.T) {
 	}
 }
 
-func TestTheServingStepIsToldAsServed(t *testing.T) {
+func TestTheServingStepIsToldAsServedOnce(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	cancel, _ := w.start(loading("a"))
-	defer cancel()
-	w.awaitBringUp(t)
+	release := w.gateRead("a")
+	w.start(none("a"))
+	w.awaitRead(t, "a")
 
 	// Act
 	w.c.Step("a", Step{Kind: StepServing})
+	w.c.Step("a", Step{Kind: StepUp})
+	close(release)
 
 	// Assert
-	w.expect(t, "a served")
+	w.expect(t, "a served", "a conversation_read", "a ready")
+}
+
+func TestAFailedBringUpDoesNotFailTheOpen(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	release := w.gateRead("a")
+	w.start(none("a"))
+	w.awaitRead(t, "a")
+
+	// Act
+	w.c.Step("a", Step{Kind: StepFailed, Text: "the shim never answered"})
+	close(release)
+
+	// Assert
+	w.expect(t, "a conversation_read", "a ready", "finished 1/1 failed=")
+}
+
+func TestAResumptionStartingIsRelayed(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	release := w.gateRead("a")
+	w.start(none("a"))
+	w.awaitRead(t, "a")
+
+	// Act
+	w.c.Resumption("a", Resume{Kind: ResumeStarting})
+	w.c.Resumption("a", Resume{Kind: ResumeStarting})
+	close(release)
+
+	// Assert: told once.
+	w.expect(t, "a resuming_cut_turn", "a conversation_read", "a ready")
+}
+
+func TestAnOpenDoesNotWaitOnAResumptionUnderWay(t *testing.T) {
+	// Arrange: a resumption is being delivered as the open begins.
+	w := newWorld(t)
+	w.c.Resumption("a", Resume{Kind: ResumeStarting})
+
+	// Act
+	w.start(none("a"))
+
+	// Assert
+	w.expect(t, "a conversation_read", "a ready", "finished 1/1 failed=")
+}
+
+func TestAStepOfAWorkspaceTheOpenDoesNotNameIsNotTold(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	release := w.gateRead("a")
+	w.start(none("a"))
+	w.awaitRead(t, "a")
+
+	// Act
+	w.c.Step("b", Step{Kind: StepStartingSession})
+	close(release)
+
+	// Assert
+	w.expect(t, "a conversation_read", "a ready")
 }
 
 func TestNoWorkspaceWaitsOnAnEarlierOne(t *testing.T) {
-	// Arrange
+	// Arrange: the first workspace's read is held.
 	w := newWorld(t)
-	w.start(none("a"), none("b"))
-	call := w.awaitBringUp(t)
-
-	// Act: the second one opens first.
-	call.done("b", nil)
-
-	// Assert
-	w.expect(t, "b served", "b conversation_read", "b ready")
-}
-
-func TestAnotherBringUpInFlightIsFollowedNotRepeated(t *testing.T) {
-	// Arrange: the boot's own bring-up of the workspace is under way.
-	w := newWorld(t)
-	w.c.Step("a", Step{Kind: StepStartingSession})
-	w.start(none("a"))
+	w.gateRead("a")
 
 	// Act
-	w.c.Step("a", Step{Kind: StepServing})
+	cancel, _ := w.start(none("a"), none("b"))
+	defer cancel()
 
 	// Assert
-	w.expect(t, "a served", "a conversation_read", "a ready", "finished 1/1 failed=")
-	if len(w.bringUp) != 0 {
-		t.Fatal("the open started a workspace another bring-up was already starting")
-	}
+	w.expect(t, "b conversation_read", "b ready")
 }
 
 func TestTheOpeningMarkerStandsUntilTheWorkspaceIsAnswered(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
+	release := w.gateRead("a")
 	w.start(none("a"))
-	call := w.awaitBringUp(t)
+	w.awaitRead(t, "a")
 	if got := w.openingEdges(); !slices.Equal(got, []string{"a:true"}) {
 		t.Fatalf("opening edges before the answer = %v, want the raise", got)
 	}
 
 	// Act
-	call.done("a", nil)
-	w.expect(t, "a served", "a conversation_read", "a ready")
+	close(release)
+	w.expect(t, "a conversation_read", "a ready")
 
 	// Assert
 	if got := w.openingEdges(); !slices.Equal(got, []string{"a:true", "a:false"}) {
@@ -673,10 +623,11 @@ func TestTheOpeningMarkerStandsUntilTheWorkspaceIsAnswered(t *testing.T) {
 func TestTwoOpensOfOneWorkspaceLowerTheMarkerOnlyOnTheLast(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
+	w.gateRead("a")
 	cancelFirst, firstReturned := w.start(none("a"))
-	w.awaitBringUp(t)
-	w.start(none("a"))
-	w.awaitBringUp(t)
+	cancelSecond, _ := w.start(none("a"))
+	defer cancelSecond()
+	w.awaitReads(t, "a", 2)
 
 	// Act
 	cancelFirst()
@@ -691,8 +642,9 @@ func TestTwoOpensOfOneWorkspaceLowerTheMarkerOnlyOnTheLast(t *testing.T) {
 func TestAnOpenWhoseClientWentAwayLowersItsMarker(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
+	w.gateRead("a")
 	cancel, returned := w.start(none("a"))
-	w.awaitBringUp(t)
+	w.awaitRead(t, "a")
 
 	// Act
 	cancel()
@@ -707,7 +659,6 @@ func TestAnOpenWhoseClientWentAwayLowersItsMarker(t *testing.T) {
 func TestAnOpenEndsWhenItsFrameCannotBeSent(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.setLive("a")
 
 	// Act
 	_, returned := w.startEmitting(func(*agentreplv1.OpenTabsResponse) error { return errors.New("gone") }, loading("a"))
@@ -719,11 +670,10 @@ func TestAnOpenEndsWhenItsFrameCannotBeSent(t *testing.T) {
 func TestTheOpenedFrameIsLoggedAtInfo(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.setLive("a")
 
 	// Act
 	w.start(none("a"))
-	w.expect(t, "a served", "a conversation_read", "a ready", "finished 1/1 failed=")
+	w.expect(t, "a conversation_read", "a ready", "finished 1/1 failed=")
 
 	// Assert
 	for _, r := range w.log.Records() {
@@ -750,43 +700,21 @@ func (w *world) nextOpened(t *testing.T) *agentreplv1.OpenTabsOpened {
 	}
 }
 
-// owe records a cut turn the workspace is owed.
-func (w *world) owe(ws ids.WorkspaceID) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.owed[ws] = true
-}
-
-// gateReads makes every conversation read wait for a send on the answer.
-func (w *world) gateReads() chan struct{} {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.readGate = make(chan struct{})
-	return w.readGate
-}
-
-func (w *world) owedReadCount() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.owedReads
-}
-
 // ---- the conversation read ----
 
 func TestReadyWaitsForTheConversationRead(t *testing.T) {
 	// Arrange: the page drew before the open, so only the read is left.
 	w := newWorld(t)
-	w.setLive("a")
-	gate := w.gateReads()
+	release := w.gateRead("a")
 	w.c.PageAttached("p")
 	if err := w.c.PageDrawn("p", "a"); err != nil {
 		t.Fatalf("PageDrawn: %v", err)
 	}
 	w.start(loading("a"))
-	w.expect(t, "a served", "a page_connected", "a page_drawn")
+	w.expect(t, "a page_connected", "a page_drawn")
 
 	// Act
-	close(gate)
+	close(release)
 
 	// Assert
 	w.expect(t, "a conversation_read", "a ready")
@@ -795,27 +723,27 @@ func TestReadyWaitsForTheConversationRead(t *testing.T) {
 func TestAConversationReadThatFailsOpensFailed(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.setLive("a")
 	w.readErr = errors.New("store unreachable")
 
 	// Act
 	w.start(none("a"))
 
 	// Assert
-	w.expect(t, "a served", "a failed the conversation could not be read: store unreachable", "finished 0/1 failed=a")
+	w.expect(t, "a failed the conversation could not be read: store unreachable", "finished 0/1 failed=a")
 }
 
 func TestTheConversationIsReadOncePerOpen(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
+	release := w.gateRead("a")
 	w.start(none("a"))
-	call := w.awaitBringUp(t)
-	w.c.Step("a", Step{Kind: StepServing})
-	w.expect(t, "a served", "a conversation_read")
+	w.awaitRead(t, "a")
 
-	// Act: the start returning serves it again.
-	call.done("a", nil)
-	w.expect(t, "a ready")
+	// Act: a bring-up's steps arrive while the read runs.
+	w.c.Step("a", Step{Kind: StepServing})
+	w.c.Step("a", Step{Kind: StepUp})
+	close(release)
+	w.expect(t, "a served", "a conversation_read", "a ready")
 
 	// Assert
 	w.mu.Lock()
@@ -825,222 +753,13 @@ func TestTheConversationIsReadOncePerOpen(t *testing.T) {
 	}
 }
 
-// ---- the cut turn ----
-
-func TestReadyWaitsForTheCutTurnToStart(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.owe("a")
-	w.start(none("a"))
-	w.awaitBringUp(t)
-	w.c.Step("a", Step{Kind: StepServing})
-	w.expect(t, "a served", "a conversation_read")
-	w.c.Resumption("a", Resume{Kind: ResumeStarting})
-	w.expect(t, "a resuming_cut_turn")
-
-	// Act
-	w.c.Resumption("a", Resume{Kind: ResumeStarted})
-
-	// Assert
-	w.expect(t, "a ready", "finished 1/1 failed=")
-}
-
-func TestAWorkspaceOwedNoCutTurnSendsNoResumeStep(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.start(none("a"))
-	call := w.awaitBringUp(t)
-
-	// Act
-	call.done("a", nil)
-
-	// Assert
-	w.expect(t, "a served", "a conversation_read", "a ready", "finished 1/1 failed=")
-}
-
-func TestAResumptionThatFailsOpensFailed(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.owe("a")
-	w.start(none("a"))
-	w.awaitBringUp(t)
-	w.c.Step("a", Step{Kind: StepServing})
-	w.expect(t, "a served", "a conversation_read")
-	w.c.Resumption("a", Resume{Kind: ResumeStarting})
-	w.expect(t, "a resuming_cut_turn")
-
-	// Act
-	w.c.Resumption("a", Resume{Kind: ResumeFailed, Text: "no watcher"})
-
-	// Assert
-	w.expect(t, "a failed the turn the restart cut could not be resumed: no watcher", "finished 0/1 failed=a")
-}
-
-func TestAReleaseThatResumesNothingNowLetsTheOpenAnswer(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.owe("a")
-	w.start(none("a"))
-	w.awaitBringUp(t)
-	w.c.Step("a", Step{Kind: StepServing})
-	w.expect(t, "a served", "a conversation_read")
-
-	// Act
-	w.c.Resumption("a", Resume{Kind: ResumeNotNow, Text: "a turn already runs"})
-
-	// Assert
-	w.expect(t, "a ready")
-}
-
-func TestABringUpParkedAtItsColdGateDoesNotWaitOnTheCutTurn(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.owe("a")
-	w.start(none("a"))
-	w.awaitBringUp(t)
-
-	// Act
-	w.c.Step("a", Step{Kind: StepColdGate})
-
-	// Assert
-	w.expect(t, "a cold_gate", "a served", "a conversation_read", "a ready")
-}
-
-func TestAnOfflineVendorDoesNotHoldTheOpenOnItsCutTurn(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.owe("a")
-	w.start(none("a"))
-	w.awaitBringUp(t)
-	w.c.Step("a", Step{Kind: StepServing})
-	w.expect(t, "a served", "a conversation_read")
-
-	// Act
-	w.c.Step("a", Step{Kind: StepOffline})
-
-	// Assert
-	w.expect(t, "a offline", "a ready")
-}
-
-func TestARetryingVendorDoesNotHoldAClaimedResumption(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.owe("a")
-	w.start(none("a"))
-	w.awaitBringUp(t)
-	w.c.Step("a", Step{Kind: StepServing})
-	w.expect(t, "a served", "a conversation_read")
-	w.c.Resumption("a", Resume{Kind: ResumeStarting})
-	w.expect(t, "a resuming_cut_turn")
-
-	// Act
-	w.c.Step("a", Step{Kind: StepVendorRetrying, Attempt: 1})
-
-	// Assert
-	w.expect(t, "a vendor_retrying 1", "a ready")
-}
-
-func TestAnOpenJoiningADeliveredResumptionWaitsForItsStart(t *testing.T) {
-	// Arrange: the boot's bring-up is resuming the cut turn as the open joins.
-	w := newWorld(t)
-	w.c.Step("a", Step{Kind: StepStartingSession})
-	w.c.Step("a", Step{Kind: StepServing})
-	w.c.Resumption("a", Resume{Kind: ResumeStarting})
-	w.start(none("a"))
-	w.expect(t, "a served", "a resuming_cut_turn", "a conversation_read")
-
-	// Act
-	w.c.Resumption("a", Resume{Kind: ResumeStarted})
-
-	// Assert
-	w.expect(t, "a ready")
-}
-
-func TestAnAlreadyServingWorkspaceDoesNotWaitOnWhatItStillOwes(t *testing.T) {
-	// Arrange: its session-up release already ran and left the debt.
-	w := newWorld(t)
-	w.setLive("a")
-	w.owe("a")
-
-	// Act
-	w.start(none("a"))
-
-	// Assert
-	w.expect(t, "a served", "a conversation_read", "a ready")
-}
-
-func TestAnOwedReadThatFailsOpensFailed(t *testing.T) {
-	// Arrange
-	w := newWorld(t)
-	w.owedErr = errors.New("database is locked")
-
-	// Act
-	w.start(none("a"))
-
-	// Assert
-	w.expect(t, "a failed whether a turn the restart cut is owed could not be read: database is locked")
-}
-
-func TestAnOwedReadTheClientLeftIsNoFailure(t *testing.T) {
-	// Arrange: the client goes away while the owed read is in flight.
-	w := newWorld(t)
-	w.leaveDuringOwed = true
-
-	// Act
-	_, returned := w.start(none("a"))
-	awaitReturned(t, returned)
-
-	// Assert: recorded at INFO with its cause, and no ERROR at all.
-	for _, r := range w.log.Records() {
-		if r.Level == dlog.LevelError {
-			t.Fatalf("records = %+v, want no error for a client that left", w.log.Records())
-		}
-	}
-	found := false
-	for _, r := range w.log.Records() {
-		if r.Level == dlog.LevelInfo && r.Context[dlog.KeyWorkspaceID] == "a" && r.Context["cause"] == context.Canceled.Error() &&
-			strings.Contains(r.Message, "went away while whether the workspace is owed a cut turn was read") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("records = %+v, want the INFO naming the workspace and the cancellation", w.log.Records())
-	}
-}
-
-func TestAHiddenWorkspacesCutTurnIsKeptAndPaidWhenItIsOpened(t *testing.T) {
-	// Arrange: hidden, its debt is not even read.
-	w := newWorld(t)
-	w.owe("a")
-	hidden := none("a")
-	hidden.Hidden = true
-	_, returned := w.start(hidden)
-	w.expect(t, "a hidden", "finished 0/1 failed=")
-	awaitReturned(t, returned)
-	if got := w.owedReadCount(); got != 0 {
-		t.Fatalf("owed reads = %d, want a hidden workspace's debt left alone", got)
-	}
-
-	// Act: shown and opened.
-	w.start(none("a"))
-	w.awaitBringUp(t)
-	w.c.Step("a", Step{Kind: StepServing})
-	w.expect(t, "a served", "a conversation_read")
-	w.c.Resumption("a", Resume{Kind: ResumeStarting})
-	w.c.Resumption("a", Resume{Kind: ResumeStarted})
-
-	// Assert
-	w.expect(t, "a resuming_cut_turn", "a ready")
-}
-
 // ---- the roster row ----
 
 func TestReadyCarriesTheWorkspacesRosterRow(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.setLive("a")
 	w.start(none("a"))
-	w.expect(t, "a served", "a conversation_read")
+	w.expect(t, "a conversation_read")
 
 	// Act
 	opened := w.nextOpened(t)
@@ -1057,9 +776,8 @@ func TestAThreadIsAnsweredReadyAsAThread(t *testing.T) {
 	w.mu.Lock()
 	w.threads = map[ids.WorkspaceID]bool{"t": true}
 	w.mu.Unlock()
-	w.setLive("t")
 	w.start(none("t"))
-	w.expect(t, "t served", "t conversation_read")
+	w.expect(t, "t conversation_read")
 
 	// Act
 	opened := w.nextOpened(t)
@@ -1073,11 +791,10 @@ func TestAThreadIsAnsweredReadyAsAThread(t *testing.T) {
 func TestFailedCarriesTheWorkspacesRosterRow(t *testing.T) {
 	// Arrange
 	w := newWorld(t)
-	w.start(none("a"))
-	call := w.awaitBringUp(t)
+	w.readErr = errors.New("boom")
 
 	// Act
-	call.done("a", errors.New("boom"))
+	w.start(none("a"))
 	opened := w.nextOpened(t)
 
 	// Assert
@@ -1089,9 +806,8 @@ func TestFailedCarriesTheWorkspacesRosterRow(t *testing.T) {
 func TestTheAnswersRevisionIsThatOfTheRosterItsRowCameFrom(t *testing.T) {
 	// Arrange: the fake roster names its row by the revision it resolved at.
 	w := newWorld(t)
-	w.setLive("a")
 	w.start(none("a"))
-	w.expect(t, "a served", "a conversation_read")
+	w.expect(t, "a conversation_read")
 
 	// Act
 	ready := w.nextOpened(t).GetReady()
@@ -1105,9 +821,8 @@ func TestTheAnswersRevisionIsThatOfTheRosterItsRowCameFrom(t *testing.T) {
 func TestTheAnswersRowIsTakenAfterTheOpeningIsLowered(t *testing.T) {
 	// Arrange: raising the opening is revision 1, lowering it revision 2.
 	w := newWorld(t)
-	w.setLive("a")
 	w.start(none("a"))
-	w.expect(t, "a served", "a conversation_read")
+	w.expect(t, "a conversation_read")
 
 	// Act
 	ready := w.nextOpened(t).GetReady()

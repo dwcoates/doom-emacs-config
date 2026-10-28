@@ -70,7 +70,9 @@ func hide(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 	}
 }
 
-func TestOpenTabsBringsEachWorkspaceUpAndAnswersItReady(t *testing.T) {
+// TestOpenTabsAnswersEachWorkspaceReadyWithNoShim pins the owner ruling of
+// 2026-10-28: an open reads the conversation from the store and starts no shim.
+func TestOpenTabsAnswersEachWorkspaceReadyWithNoShim(t *testing.T) {
 	t.Parallel()
 	// Arrange: two registered workspaces, neither opened.
 	d := newDaemon(t, harness.Opts{})
@@ -87,6 +89,9 @@ func TestOpenTabsBringsEachWorkspaceUpAndAnswersItReady(t *testing.T) {
 	}
 	if done := frames[len(frames)-1].GetFinished(); done.GetReady() != 2 || done.GetTotal() != 2 || len(done.GetFailed()) != 0 {
 		t.Fatalf("finished = %v, want 2 of 2 ready", done)
+	}
+	if d.ShimSpawned(first) || d.ShimSpawned(second) {
+		t.Fatal("the open spawned a shim, want none")
 	}
 }
 
@@ -105,11 +110,11 @@ func TestOpenTabsWaitsForTheWorkspacesPageToDraw(t *testing.T) {
 	open := d.OpenTabs(loadingPageOpen(ws))
 	waitCtx, cancel := d.WaitCtx()
 	defer cancel()
-	harness.AwaitView(t, waitCtx, open, "the workspace served", func(r *agentreplv1.OpenTabsResponse) bool {
+	harness.AwaitView(t, waitCtx, open, "the conversation read", func(r *agentreplv1.OpenTabsResponse) bool {
 		if r.GetOpened() != nil {
 			t.Fatalf("the workspace opened %v before its page drew", r.GetOpened())
 		}
-		return r.GetStep().GetServed() != nil
+		return r.GetStep().GetConversationRead() != nil
 	})
 
 	// Act: the page watches the workspace's footer, then reports it drawn.
@@ -293,40 +298,19 @@ func cutWhileHidden(t *testing.T) *fixture {
 	return f
 }
 
-func TestAHiddenWorkspacesCutTurnIsResumedInsideItsLaterOpen(t *testing.T) {
-	t.Parallel()
-	// Arrange: the successor leaves the hidden workspace down; it is shown.
-	f := cutWhileHidden(t)
-	show(t, f.d, f.ws)
-
-	// Act
-	frames := openLog(t, f.d, f.d.OpenTabs(noPageOpen(f.ws)))
-
-	// Assert: the resume is told, and ready follows it.
-	resuming := stepIndex(frames, f.ws.GetId(), func(s *agentreplv1.OpenTabsStep) bool { return s.GetResumingCutTurn() != nil })
-	opened := openedIndex(frames, f.ws.GetId())
-	if resuming < 0 || opened < resuming || frames[opened].GetOpened().GetReady() == nil {
-		t.Fatalf("resuming_cut_turn at %d, ready at %d; want the resume told before ready", resuming, opened)
-	}
-}
-
-func TestTheResumedTurnHasStartedWhenTheOpenAnswersReady(t *testing.T) {
+// TestAHiddenWorkspacesCutTurnIsResumedByTheSuccessorsBoot: an open starts no
+// shim, so the successor's boot brings a hidden workspace owed a cut turn up
+// itself, and the resumption is the turn it starts (bringup.OnlyOwed).
+func TestAHiddenWorkspacesCutTurnIsResumedByTheSuccessorsBoot(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := cutWhileHidden(t)
-	show(t, f.d, f.ws)
 
-	// Act
-	openLog(t, f.d, f.d.OpenTabs(noPageOpen(f.ws)))
-
-	// Assert: the shim already holds the resumption's StartTurn.
-	shim := f.d.OpenedShim(f.ws)
+	// Act: nothing opens it.
 	st := &shimv1.StartTurnRequest{}
-	if n := shim.Count(harness.RPCStartTurn); n != 1 {
-		t.Fatalf("the shim was asked to start %d turns by the time the open answered, want the resumption", n)
-	}
-	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartTurn, st)
-	if st.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART {
-		t.Fatalf("the started turn has origin %v, want the resumption after restart", st.GetOrigin())
-	}
+
+	// Assert: the successor's shim is asked to start the resumption.
+	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartTurn, "the resumption's StartTurn", st, func() bool {
+		return st.GetOrigin() == conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART
+	})
 }

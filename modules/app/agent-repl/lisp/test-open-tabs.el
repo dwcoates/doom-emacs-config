@@ -254,7 +254,7 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
     (agent-repl-test-open-tabs--frame
      (agent-repl-test-open-tabs--opened "a" :failed '(:reason "spawn refused")))
     ;; Assert
-    (should (member "a: session failed to start: spawn refused." agent-repl-test-open-tabs--lines))))
+    (should (member "a: could not be opened: spawn refused." agent-repl-test-open-tabs--lines))))
 
 (ert-deftest agent-repl-test-open-tabs-one-answer-releases-only-its-own-tab ()
   "A ready answer for one workspace never releases another's tab."
@@ -1254,7 +1254,7 @@ leaves the tab open."
     (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--finished 1 2 "b"))
     ;; Assert
     (should (equal (car (last agent-repl-test-open-tabs--lines))
-                   "1 of 2 workspaces ready; b failed to start."))))
+                   "1 of 2 workspaces ready; b could not be opened."))))
 
 (ert-deftest agent-repl-test-open-tabs-the-startups-finish-arms-doom-setup ()
   "The startup's finish arms Doom's one-time setup."

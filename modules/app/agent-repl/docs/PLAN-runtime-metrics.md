@@ -275,7 +275,7 @@ for metrics that show where restart time goes and when it regressed):
 | `deploy` | `handover`, `total` of a deploy that moved the daemon | | the successor, from the instants the intent manifest carries (judgement call 10) |
 | `daemon_boot` | `claim`, `reconciled`, `serving`, `sessions_up`, each from the process start | `cold`, `successor` | the booting daemon |
 | `service_restart` | `store` (its sidecar with it), `sidecar` | | `deploy.Restarter`, for a deploy and a boot alike |
-| `workspace_start` | `start`, `wake` | `boot`, `takeover`, `editor_open` | the bring-up, per workspace |
+| `workspace_start` | `start`, `wake` | `boot`, `takeover` | the bring-up, per workspace |
 | `session_start` | `shim`, `slot_wait`, `vendor`, `watch`, `total`, each its own duration (`slot_wait` and `vendor` once per attempt) | `fresh`, `resume`, `wake`, `adopted`, `relaunch`, `cold_answer` | the session fleet, per workspace, whoever asked for the start |
 | `editor_start` | `init`, `daemon_linked`, `first_tab`, `all_tabs`, each from the Emacs process's start | `spawned`, `running` | Emacs, reported through `ReportLatencies` once its startup's open ends |
 | `shim_restart` | `wait`, `prelaunch`, `stand_down`, `resume`, `run` | the relaunch reason (`build_stale`, `restart_verb`, `query_died`, `shim_log_hard_ceiling`) | the rollout's bounce engine, per workspace |

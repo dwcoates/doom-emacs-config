@@ -17,7 +17,6 @@ import (
 	"agent-repld/internal/agentreplsession"
 	"agent-repld/internal/boot"
 	"agent-repld/internal/branchcommits"
-	"agent-repld/internal/bringup"
 	"agent-repld/internal/buildid"
 	"agent-repld/internal/cachelapse"
 	"agent-repld/internal/chat"
@@ -64,7 +63,6 @@ import (
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
-	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/retarget"
 	"agent-repld/internal/revealpace"
 	"agent-repld/internal/rollout"
@@ -74,6 +72,7 @@ import (
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimidentity"
 	"agent-repld/internal/signin"
 	"agent-repld/internal/stallbeat"
 	"agent-repld/internal/startslots"
@@ -750,27 +749,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	})
 
 	// THE EDITOR'S OPENS (internal/opentabs) are told every bring-up step the
-	// fleet takes, so they are built first; an open reaches the fleet only
-	// once the daemon serves, by which time the fleet below exists.
+	// fleet takes, so they are built first. AN OPEN STARTS NO SHIM (owner
+	// ruling, 2026-10-28): it answers once the conversation is read from the
+	// store and the page drew; a prompt brings the shim up.
 	opens, err := opentabs.New(opentabs.Deps{
-		// A SESSION THE KEEP-ALIVE CYCLE PARKED IS SERVED (owner ruling,
-		// 2026-10-26): it is drawn live and idle, and the cache keeper brings
-		// it back before its next beat, so an open never wakes every parked
-		// shim at once.
-		Live: func(ws ids.WorkspaceID) bool { return fleet.Live(ws) || cycleParked(p.DB, log, ws) },
-		BringUp: func(pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
-			editorBringUp(fleet, p.DB, ownership, bringingUp, p.Metrics, log, pending, done)
-		},
 		Opening:          sidebarResolver.SetOpening,
 		ReadConversation: feedResolver.ReadNewest,
-		Owed: func(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
-			owed, err := p.DB.OwedTurns(ctx, ws)
-			return len(owed) > 0, err
-		},
-		Row:    sidebarResolver.Row,
-		Thread: sidebarResolver.Thread,
-		Now:    time.Now,
-		Log:    log,
+		Row:              sidebarResolver.Row,
+		Thread:           sidebarResolver.Thread,
+		Now:              time.Now,
+		Log:              log,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the editor's opens: %w", err)
@@ -866,13 +854,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// and never writes the store.
 		StoreHistory:   storereader.New(p.Opts.storeSocket),
 		NetworkChanged: networkWatch.Changed,
-		RestoreParked:  cacheKeeper.RestoreParked,
-		StartSlots:     startSlots,
-		PublishHost:    relay.PublishHostWorkspace,
-		DB:             p.DB,
-		Instance:       p.Instance,
-		Accounts:       accounts,
-		Supervisor:     supervisor,
+		// A WORKSPACE WITH NO RECORDED BOOK takes the one its shim persisted.
+		PersistedBook: func(dir string) (string, bool, error) { return shimidentity.Book(p.Layout.ShimDir(), dir) },
+		StartSlots:    startSlots,
+		PublishHost:   relay.PublishHostWorkspace,
+		DB:            p.DB,
+		Instance:      p.Instance,
+		Accounts:      accounts,
+		Supervisor:    supervisor,
 		Sinks: sessionwatcher.Sinks{
 			Feed:       feedResolver,
 			Footer:     footerResolver,
@@ -2294,95 +2283,6 @@ func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	}
 }
 
-// opEditorBringUp names the editor's opens' own bring-up records.
-const opEditorBringUp = "daemon.opentabs.bring_up"
-
-// editorBringUp starts the named workspaces' sessions for an editor's open
-// through THE ONE BRING-UP (bringup.Run, and through it Fleet.Start), on the
-// fleet's own detached lifetime so the exit drains and joins it. Each
-// workspace's bring-up marker is raised before any start, as the boot and the
-// takeover raise theirs; a workspace whose record cannot be read is told done
-// with that error at once and never started.
-// editorFleet is the slice of the fleet the editor's bring-up drives: the one
-// start path, and the fleet's detached lifetime it runs on.
-type editorFleet interface {
-	Start(ctx context.Context, ws ids.WorkspaceID) error
-	Detach(run func(context.Context))
-}
-
-// editorRecords is what the editor's bring-up reads: each workspace's record,
-// and (through bringup.Run) its session record.
-type editorRecords interface {
-	bringup.SessionReader
-	Workspace(ctx context.Context, ws ids.WorkspaceID) (wsm.Workspace, error)
-}
-
-func editorBringUp(fleet editorFleet, db editorRecords, ownership workspace.Ownership, marker func(ids.WorkspaceID, bool), restarts restarttiming.Recorder, log dlog.Logger,
-	pending []ids.WorkspaceID, done func(ids.WorkspaceID, error)) {
-	records := make([]wsm.Workspace, 0, len(pending))
-	for _, ws := range pending {
-		// ONLY A WORKSPACE THIS DAEMON SERVES IS STARTED HERE. One handed to a
-		// successor, or not yet adopted by this joining daemon, is the other
-		// daemon's to start: starting it here races that daemon's shim (a
-		// StartSession it answers `already_started`). It is told done, so its
-		// tab is not held behind a start that is not this daemon's.
-		standing, err := ownership.Standing(context.Background(), ws)
-		if err != nil {
-			log.Error(opEditorBringUp, "a workspace's serving standing could not be read; it is not brought up", dlog.Context{
-				dlog.KeyWorkspaceID: string(ws), "error": err.Error(),
-			})
-			done(ws, fmt.Errorf("read the serving standing of %q: %w", ws, err))
-			continue
-		}
-		if standing != workspace.StandingOwned {
-			log.Info(opEditorBringUp, "a workspace another daemon serves is not brought up here", dlog.Context{
-				dlog.KeyWorkspaceID: string(ws), "standing": int(standing),
-			})
-			done(ws, nil)
-			continue
-		}
-		record, err := db.Workspace(context.Background(), ws)
-		if err != nil {
-			log.Error(opEditorBringUp, "a workspace an editor's open names could not be read; it is not brought up", dlog.Context{
-				dlog.KeyWorkspaceID: string(ws), "error": err.Error(),
-			})
-			done(ws, fmt.Errorf("read the workspace record of %q: %w", ws, err))
-			continue
-		}
-		marker(ws, true)
-		records = append(records, record)
-	}
-	fleet.Detach(func(ctx context.Context) {
-		bringup.Run(ctx, bringup.Deps{
-			DB: db,
-			StartSession: func(ctx context.Context, ws ids.WorkspaceID) error {
-				err := fleet.Start(ctx, ws)
-				if err == nil {
-					return nil
-				}
-				// A HANDOVER CAN TAKE THE WORKSPACE WHILE ITS START RUNS: the
-				// successor's shim then refuses this daemon's start. Re-read
-				// the standing; one no longer this daemon's is stood down.
-				standing, standingErr := ownership.Standing(ctx, ws)
-				if standingErr != nil {
-					return errors.Join(err, fmt.Errorf("read the serving standing of %q: %w", ws, standingErr))
-				}
-				if standing != workspace.StandingOwned {
-					return fmt.Errorf("%w: %w", bringup.ErrNotServed, err)
-				}
-				return err
-			},
-			BringingUp: marker,
-			Log:        log,
-			Operation:  opEditorBringUp,
-			Via:        restarttiming.StartEditor,
-			Restarts:   restarts,
-			Now:        time.Now,
-			Done:       done,
-		}, records)
-	})
-}
-
 // resumeKind translates the prompt queue's account of an owed resumption into
 // the editor's opens' own.
 func resumeKind(kind promptqueue.ResumeKind) opentabs.ResumeKind {
@@ -2409,20 +2309,4 @@ func freshBootSettle(joining bool, controller rollout.Controller) func(ctx conte
 		return nil
 	}
 	return controller.SettleBoot
-}
-
-// cycleParked reports whether WS's session is parked by the keep-alive cycle.
-// A record that cannot be read is recorded at ERROR and answers false, so the
-// open brings the session up rather than leaving it down unexplained.
-func cycleParked(db interface {
-	Session(context.Context, wsm.WorkspaceID) (wsm.Session, bool, error)
-}, log dlog.Logger, ws ids.WorkspaceID) bool {
-	session, found, err := db.Session(context.Background(), ws)
-	if err != nil {
-		log.Error("daemon.cmd.open", "could not read whether the keep-alive cycle parked the session; the open brings it up", dlog.Context{
-			"workspace": string(ws), "error": err.Error(),
-		})
-		return false
-	}
-	return found && session.KeepaliveCycled()
 }
