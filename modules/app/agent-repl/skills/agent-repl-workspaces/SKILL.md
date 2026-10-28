@@ -1,13 +1,13 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (the topbar summary''s menu), rename a workspace, hide or show a workspace, set its priority, retarget its parent, read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close. Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
-argument-hint: "create | async-merge | prompt | status | list | find | set | link | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe | subsections | place"
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (the topbar summary''s menu), rename a workspace, hide or show a workspace, set its priority, retarget its parent, read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+argument-hint: "create | async-merge | prompt | status | list | find | set | link | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe | subsections | place | repository register"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
 ## What This Skill Does
 
-Every operation is one `agent-repld workspace <verb>` command over the serving
+Every operation is one `agent-repld workspace <verb>` (or `agent-repld repository register`) command over the serving
 daemon's RPCs, run through `~/.claude/skills/agent-repl-workspaces/agent-repld`.
 The DAEMON owns each command's meaning, flags and refusals: run
 `agent-repld workspace` with no verb for the usage of every verb, and read a
@@ -44,6 +44,23 @@ a main-checkout directory), its topology and its context:
     the forked context misleads more than it helps.
   - The daemon refuses a cross-repository fork (as `unknown_fork_source`),
     so trying one only costs a round trip.
+- **Cross-repository work goes through a workspace in the other repository.**
+  When workspace A in repository foo needs work in both foo and another
+  repository baz:
+  - A does the foo work itself in its own workspace, and does the baz work
+    by creating a workspace B with `workspace create -repository <baz>`.
+    A NEVER edits baz's checkout or cuts branches in it by hand.
+  - If baz is not yet registered with agent-repl, A first registers it with
+    `repository register` (see "Registering a repository" below), then
+    creates B.
+  - B is created `-context fresh` (per the cross-repository rule above),
+    with everything B needs carried in its `-prompt`.
+  - A coordinates with B through `workspace prompt`, `workspace subscribe`
+    and the awaiting mark (`workspace set -await`), e.g. integrating B's
+    result. Example: baz owns the protobufs and foo holds the C++
+    implementation: A asks B for the protobuf change, subscribes and marks
+    itself awaiting, then builds A's C++ integration against B's protobufs.
+  - B lands its own change through baz's merge queue, and A lands foo's.
 
 Choose the combination from what the work needs (every `fork` row is within
 one repository):
@@ -161,6 +178,22 @@ one repository):
   it goes on following WS if WS is opened again. A notice that waited
   behind your turns lists every change since the last one you were told,
   oldest first, and its status is WS as it stands when the notice is made.
+
+## Registering a repository (`repository register`)
+
+Use it when work is in a repository agent-repl does not know yet, BEFORE
+creating workspaces there with `-repository DIR`.
+
+- `agent-repld repository register here|PATH`: PATH is any path inside a git
+  repository (relative paths count from the cwd); `here` is the cwd, which
+  need NOT be an agent-repl workspace.
+- One unary call to the daemon's RegisterRepository: it resolves the
+  repository's main worktree through git and is idempotent by that dir
+  (success prints `already_known: true` when it was already registered). It
+  also opens the main worktree as a workspace (`workspace_already_known`).
+- Output is protojson. Refusals print an arm and exit 6: `not_in_a_repository`,
+  `unreadable_path`, `inside_temporary_directory` (a path under the temp root).
+- `-dry-run` prints the request without sending it.
 
 ## Filing a workspace into a subsection
 

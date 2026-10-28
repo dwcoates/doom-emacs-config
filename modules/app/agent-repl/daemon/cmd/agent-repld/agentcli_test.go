@@ -42,6 +42,23 @@ type cliClient struct {
 	// ArrangeSidebar, a success when nil.
 	arrangement *agentreplv1.GetSidebarArrangementResponse
 	arrange     *agentreplv1.ArrangeSidebarResponse
+	// registered answers RegisterRepository, a new repository's success when nil.
+	registered *agentreplv1.RegisterRepositoryResponse
+}
+
+func (c *cliClient) RegisterRepository(_ context.Context, req *connect.Request[agentreplv1.RegisterRepositoryRequest]) (*connect.Response[agentreplv1.RegisterRepositoryResponse], error) {
+	if err := c.record(req.Msg); err != nil {
+		return nil, err
+	}
+	if c.registered != nil {
+		return connect.NewResponse(c.registered), nil
+	}
+	return connect.NewResponse(registerSuccess(false)), nil
+}
+
+func registerSuccess(alreadyKnown bool) *agentreplv1.RegisterRepositoryResponse {
+	return &agentreplv1.RegisterRepositoryResponse{Result: &agentreplv1.RegisterRepositoryResponse_Success{Success: &agentreplv1.RegisterRepositorySuccess{
+		Repository: &workspacev1.RepositoryRef{Id: "repo-9", Dir: "/repos/new"}, AlreadyKnown: alreadyKnown}}}
 }
 
 func (c *cliClient) GetSidebarArrangement(_ context.Context, req *connect.Request[agentreplv1.GetSidebarArrangementRequest]) (*connect.Response[agentreplv1.GetSidebarArrangementResponse], error) {
@@ -1921,5 +1938,109 @@ func TestParseWhenRefusesWhatItCannotRead(t *testing.T) {
 				t.Fatalf("parseWhen(%q) = %v, want a refusal", value, err)
 			}
 		})
+	}
+}
+
+func TestRepositoryRegisterSendsTheResolvedPathAndPrintsTheAnswer(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantPath    string
+		registered  *agentreplv1.RegisterRepositoryResponse
+		wantAlready bool
+	}{
+		{name: "a new repository by an absolute path", args: []string{"/repos/new/src"}, wantPath: "/repos/new/src"},
+		{name: "here is the working directory", args: []string{"here"}, wantPath: "/wt/caller/src"},
+		{name: "a relative path counts from the working directory", args: []string{"../lib"}, wantPath: "/wt/caller/lib"},
+		{name: "an already known repository", args: []string{"/repos/new"}, wantPath: "/repos/new", registered: registerSuccess(true), wantAlready: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.registered = tt.registered
+
+			// Act
+			code := f.run(repositoryNoun, append([]string{"register"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q; want success", code, f.errOut.String())
+			}
+			if req := only[*agentreplv1.RegisterRepositoryRequest](t, f); req.GetPath() != tt.wantPath {
+				t.Fatalf("path %q, want %q", req.GetPath(), tt.wantPath)
+			}
+			var printed agentreplv1.RegisterRepositoryResponse
+			if err := protojson.Unmarshal(f.out.Bytes(), &printed); err != nil {
+				t.Fatalf("stdout %q is no protojson answer: %v", f.out.String(), err)
+			}
+			if printed.GetSuccess().GetRepository().GetId() != "repo-9" || printed.GetSuccess().GetAlreadyKnown() != tt.wantAlready {
+				t.Fatalf("printed %v, want repo-9 with already_known %v", &printed, tt.wantAlready)
+			}
+		})
+	}
+}
+
+func TestRepositoryRegisterSurfacesTheDaemonsErrorArms(t *testing.T) {
+	tests := []struct {
+		name  string
+		cause *agentreplv1.RegisterRepositoryError
+		want  string
+	}{
+		{name: "not in a repository", cause: &agentreplv1.RegisterRepositoryError{Cause: &agentreplv1.RegisterRepositoryError_NotInARepository{NotInARepository: &agentreplv1.RegisterRepositoryNotInARepository{}}}, want: "notInARepository"},
+		{name: "an unreadable path", cause: &agentreplv1.RegisterRepositoryError{Cause: &agentreplv1.RegisterRepositoryError_UnreadablePath{UnreadablePath: &agentreplv1.RegisterRepositoryUnreadablePath{}}}, want: "unreadablePath"},
+		{name: "inside a temporary directory", cause: &agentreplv1.RegisterRepositoryError{Cause: &agentreplv1.RegisterRepositoryError_InsideTemporaryDirectory{InsideTemporaryDirectory: &agentreplv1.RegisterRepositoryInsideTemporaryDirectory{Dir: "/tmp/x", TemporaryRoot: "/tmp"}}}, want: "insideTemporaryDirectory"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.registered = &agentreplv1.RegisterRepositoryResponse{Result: &agentreplv1.RegisterRepositoryResponse_Error{Error: tt.cause}}
+
+			// Act
+			code := f.run(repositoryNoun, "register", "/nowhere")
+
+			// Assert
+			if code != exitRefused || !strings.Contains(f.out.String(), tt.want) || !strings.Contains(f.errOut.String(), "the daemon refused") {
+				t.Fatalf("exit %d, stdout %q, stderr %q; want refused naming %s", code, f.out.String(), f.errOut.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestRepositoryRegisterNeedsExactlyOnePath(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "no path", args: nil},
+		{name: "two paths", args: []string{"/a", "/b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(repositoryNoun, append([]string{"register"}, tt.args...)...)
+
+			// Assert
+			if code != exitFailure || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d with %d request(s), want a usage failure and none", code, len(f.client.requests))
+			}
+		})
+	}
+}
+
+func TestTheRepositoryNounListsRegisterInItsUsage(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(repositoryNoun, "teleport")
+
+	// Assert
+	if code != exitFailure || !strings.Contains(f.errOut.String(), "agent-repld repository register here|PATH") {
+		t.Fatalf("exit %d, stderr %q; want the usage listing register", code, f.errOut.String())
 	}
 }
