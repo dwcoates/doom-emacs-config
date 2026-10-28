@@ -613,20 +613,26 @@ export function readResponseRevision(u: FeedResponseRevision | undefined, path: 
 
 /** The line saying why a revision failed, under the prose that stands. */
 function revisionFailedMarker(text: string): HTMLElement {
-  const marker = document.createElement("span");
-  marker.className = RESPONSE_REVISION_FAILED_CLASS;
-  marker.textContent = text;
-  return marker;
+  return footerNote(RESPONSE_REVISION_FAILED_CLASS, text);
 }
 
 /** The class of the broken bubble's action row. */
 export const RESPONSE_CUT_SHORT_ACTIONS_CLASS = "response-cut-short-actions";
 
 function cutShortMarker(): HTMLElement {
-  const marker = document.createElement("span");
-  marker.className = "response-cut-short-marker";
-  marker.textContent = "cut short";
-  return marker;
+  return footerNote("response-cut-short-marker", "cut short");
+}
+
+/**
+ * A short italic note under a response's prose, wearing CLASSNAME: the cut-short
+ * marker and the failed-revision line are both one, and the stylesheet draws
+ * both from one rule.
+ */
+export function footerNote(className: string, text: string): HTMLElement {
+  const note = document.createElement("span");
+  note.className = className;
+  note.textContent = text;
+  return note;
 }
 
 /**

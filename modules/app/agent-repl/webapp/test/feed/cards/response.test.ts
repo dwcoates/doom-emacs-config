@@ -33,6 +33,7 @@ import {
   revealedSoFar,
   RESPONSE_REVISING_CLASS,
   RESPONSE_REVISION_FAILED_CLASS,
+  footerNote,
 } from "../../../src/feed/cards/response.js";
 import { proseHtml } from "../../../src/bubble/body.js";
 import {
@@ -2723,5 +2724,28 @@ describe("a final response revised from highlighted words", () => {
     const rule = /\.bubble\.final-response:not\(\.thinking-bubble\) \.response-prose ::selection \{([^}]*)\}/.exec(stylesheet);
     // Assert
     expect(rule?.[1]).toContain("background: var(--blocked)");
+  });
+});
+
+describe("a footer note under a response's prose", () => {
+  it("is a span wearing its class and saying its text", () => {
+    // Act
+    const note = footerNote("some-note", "said");
+    // Assert
+    expect([note.tagName, note.className, note.textContent]).toEqual(["SPAN", "some-note", "said"]);
+  });
+
+  it("is drawn for both notes by the one stylesheet rule", () => {
+    // Arrange
+    const rule = /\.response-cut-short-marker,\s*\.response-revision-failed\s*\{([^}]*)\}/.exec(stylesheet);
+    // Assert
+    expect(rule?.[1]).toContain("color: var(--err)");
+  });
+
+  it("is the only way the response card makes a note", () => {
+    // Arrange: the card's own source, every note going through footerNote.
+    const made = responseSource.match(/document\.createElement\("span"\)/g) ?? [];
+    // Assert
+    expect(made).toHaveLength(1);
   });
 });

@@ -5843,7 +5843,10 @@ bubble-body.bubble-body { display: block; }
 .bubble.response-cut-short {
   border-color: var(--err);
 }
-.response-cut-short-marker {
+/* A NOTE UNDER A RESPONSE'S PROSE (feed/cards/response.ts footerNote): the
+   cut-short marker, and the line saying why a revision failed. */
+.response-cut-short-marker,
+.response-revision-failed {
   display: block;
   color: var(--err);
   font-size: 0.7rem;
@@ -9648,11 +9651,5 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 }
 
 /* A REVISION THAT FAILED says why under the prose, which stands as it was
-   (FeedResponse.revision `failed`), in the cut-short marker's register. */
-.response-revision-failed {
-  display: block;
-  color: var(--err);
-  font-size: 0.7rem;
-  font-style: italic;
-  margin-top: 0.2rem;
-}
+   (FeedResponse.revision `failed`): it is a footer note, drawn by the
+   cut-short marker's rule. */
