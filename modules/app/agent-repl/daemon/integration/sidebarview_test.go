@@ -73,4 +73,3 @@ func TestTheSidebarViewSurvivesADaemonRestart(t *testing.T) {
 		t.Fatalf("band fold after restart = %v, want collapsed", got.GetRecentlyMerged().GetFold())
 	}
 }
-
