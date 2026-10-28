@@ -31,6 +31,7 @@ import {
   validateHibernateRequest,
   validateRetryVendorErrorNowRequest,
   validateNetworkChangedRequest,
+  validateReviseResponseRequest,
   validateSendKeepaliveRequest,
   validateKillSessionRequest,
   validateKillTurnRequest,
@@ -237,6 +238,14 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
       },
 
       // ---- Agent ----
+
+      async reviseResponse(request, context) {
+        entered("ReviseResponse");
+        validateReviseResponseRequest(request);
+        // THE CALL'S LIFETIME IS THE REVISION'S: the daemon going away aborts
+        // the side query, and nothing is written.
+        return answering("ReviseResponse", () => engine.reviseResponse(request, context.signal));
+      },
 
       async startTurn(request, context) {
         entered("StartTurn");

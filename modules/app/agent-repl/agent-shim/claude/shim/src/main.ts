@@ -78,7 +78,7 @@ import {
   DEFAULT_RETRY_POLICY,
   type PersistenceRetryPolicy,
 } from "./store/persistence.js";
-import { createRealQuery, PER_TASK_STOP_AFFORDANCE } from "./sdk/real-query.js";
+import { boundSessionId, createRealQuery, PER_TASK_STOP_AFFORDANCE } from "./sdk/real-query.js";
 import { createFakeQuery } from "./fake/index.js";
 import { forkFakeSession } from "./fake/fork.js";
 import { forkRealSession } from "./sdk/real-fork.js";
@@ -842,13 +842,17 @@ export function queryFactory(
         profile: spec.profile,
         cwd,
         configDir: environment.claudeConfigDir,
-        sessionId:
-          spec.binding.kind === "fresh" ? spec.binding.sessionId : spec.binding.resumeSessionId,
+        sessionId: boundSessionId(spec.binding),
         newUuid: () => randomUUID(),
         abortSignal: spec.abortController.signal,
         permissionMode: spec.permissionMode,
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.binding.kind === "resume" ? { resume: spec.binding.resumeSessionId } : {}),
+        // AN EPHEMERAL FORK READS THE PARENT AND WRITES NOTHING, as the real
+        // vendor's unpersisted fork does.
+        ...(spec.binding.kind === "ephemeral_fork"
+          ? { resume: spec.binding.parentSessionId, ephemeralFork: true }
+          : {}),
         // THE REWIND TARGET REACHES THE MOCK TOO. It was dropped here, so the
         // keep-alive rewind was unobservable on the vendor side: the shim's own
         // log said what it intended, which is not evidence the value arrived.

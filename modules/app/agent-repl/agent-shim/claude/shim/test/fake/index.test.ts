@@ -1563,6 +1563,46 @@ describe("a truncating resume and file checkpointing", () => {
     expect(lines.find((line) => line.uuid === "p2")?.parentUuid).toBe("a0");
   });
 
+  it("leaves the parent's transcript untouched when it answers as an ephemeral fork", async () => {
+    // Arrange
+    const where = world(twoTurns());
+    const before = readFileSync(where.file, "utf8");
+
+    // Act
+    const messages = await drain(
+      createFakeQuery(
+        (async function* () {
+          yield prompt("p2");
+        })(),
+        ALLOW,
+        { cwd: where.cwd, configDir: where.configDir, sessionId: "sess-r", resume: "sess-r", ephemeralFork: true, newUuid: () => "fork-1", nowMs: () => HARNESS_NOW_MS },
+      ),
+    );
+
+    // Assert
+    expect(messages.some((message) => message.type === "result")).toBe(true);
+    expect(readFileSync(where.file, "utf8")).toBe(before);
+  });
+
+  it("answers an ephemeral fork under a session id of its own, never the parent's", async () => {
+    // Arrange
+    const where = world(twoTurns());
+
+    // Act
+    const messages = await drain(
+      createFakeQuery(
+        (async function* () {
+          yield prompt("p2");
+        })(),
+        ALLOW,
+        { cwd: where.cwd, configDir: where.configDir, sessionId: "sess-r", resume: "sess-r", ephemeralFork: true, newUuid: () => "fork-1", nowMs: () => HARNESS_NOW_MS },
+      ),
+    );
+
+    // Assert
+    expect(new Set(messages.map((message) => message.session_id))).toEqual(new Set(["fork-1"]));
+  });
+
   it("answers a file rewind with the files the edit tools touched from the prompt on", async () => {
     // Arrange
     const where = world([

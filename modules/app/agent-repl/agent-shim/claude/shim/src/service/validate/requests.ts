@@ -348,3 +348,15 @@ export function validateForkSessionRequest(request: shimv1.ForkSessionRequest): 
     refuse("ForkSession", err);
   }
 }
+
+/** `shim.v1.ReviseResponseRequest` — the response revised, and the instruction the side query is given. */
+export function validateReviseResponseRequest(request: shimv1.ReviseResponseRequest): void {
+  try {
+    validateAgentActivityId(request.response, "revise_response.response");
+    if (request.instruction.trim() === "") {
+      throw invalidArgument("revise_response.instruction is blank; the side query is given nothing to answer");
+    }
+  } catch (err) {
+    refuse("ReviseResponse", err);
+  }
+}

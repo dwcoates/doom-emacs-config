@@ -17535,3 +17535,114 @@ describe("StartSession names the workspace's book", () => {
     expect(response.book).toBeUndefined();
   });
 });
+
+describe("ReviseResponse", () => {
+  /** The revision request the daemon sends. */
+  function revision(instruction = "Revise the response."): shimv1.ReviseResponseRequest {
+    return create(shimv1.ReviseResponseRequestSchema, {
+      response: create(conversationv1.AgentActivityIdSchema, { value: "msg_1:0" }),
+      instruction,
+    });
+  }
+
+  /** A harness whose SECOND query (the revising side query) answers TEXT. */
+  const revising = (text = "1 🔎 revised"): Harness =>
+    harness({
+      onQueryCreated: (query, _spec, index) => {
+        if (index !== 1) return;
+        query.emit(initMessage({ model: "claude-sonnet-5" }));
+        query.emit({ ...(resultMessage() as object), result: text } as never);
+      },
+    });
+
+  /** The session's vendor id, as StartSession answered it. */
+  function vendorSessionIdOf(response: shimv1.StartSessionResponse): string {
+    if (response.result.case !== "success") throw new Error("the session did not start");
+    return response.result.value.session?.vendorSessionId ?? "";
+  }
+
+  it("refuses no_session, creating no query, before a session starts", async () => {
+    // Arrange
+    const h = revising();
+
+    // Act
+    const answered = await h.engine.reviseResponse(revision());
+
+    // Assert
+    expect(answered.result).toMatchObject({ case: "error", value: { cause: { case: "noSession" } } });
+    expect(h.queries).toEqual([]);
+  });
+
+  it("revises on an ephemeral fork of the session that takes no tools", async () => {
+    // Arrange
+    const h = revising();
+    const vendorSessionId = vendorSessionIdOf(await started(h));
+
+    // Act
+    await h.engine.reviseResponse(revision());
+
+    // Assert
+    const spec = h.queries[1]?.spec;
+    expect(spec?.binding).toEqual({ kind: "ephemeral_fork", parentSessionId: vendorSessionId });
+    expect(spec?.permissionMode).toBe("plan");
+    expect(await spec?.canUseTool("Bash", {}, { signal: new AbortController().signal } as never)).toMatchObject({ behavior: "deny" });
+  });
+
+  it("forks the whole live conversation when no turn has concluded", async () => {
+    // Arrange
+    const h = revising();
+    await started(h);
+
+    // Act
+    await h.engine.reviseResponse(revision());
+
+    // Assert
+    expect(h.queries[1]?.spec.resumeSessionAt).toBeUndefined();
+  });
+
+  it("forks through the newest concluded turn's final record", async () => {
+    // Arrange
+    const h = revising();
+    const vendorSessionId = vendorSessionIdOf(await started(h));
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+      }),
+    );
+    await h.engine.onSdkMessage(answering(h, assistantMessage("00000000-0000-4000-8000-0000000000a1")));
+    h.queries[0]?.query.emit(answering(h, resultMessage()));
+    await new Promise((resolve) => setImmediate(resolve));
+    writeTranscript(h.configDir, h.cwd, vendorSessionId, [
+      { type: "user", uuid: "00000000-0000-4000-8000-0000000000a0" },
+      { type: "assistant", uuid: "00000000-0000-4000-8000-0000000000a1" },
+    ]);
+
+    // Act
+    await h.engine.reviseResponse(revision());
+
+    // Assert
+    expect(h.queries[1]?.spec.resumeSessionAt).toBe("00000000-0000-4000-8000-0000000000a1");
+  });
+
+  it("writes the revision as a page line of the main agent's book, stamped with no turn", async () => {
+    // Arrange
+    const h = revising("1 🔎 the revised tree");
+    await started(h);
+    const before = h.persistence.durable.length + h.persistence.buffered.length;
+
+    // Act
+    const answered = await h.engine.reviseResponse(revision());
+
+    // Assert
+    expect(answered.result).toMatchObject({ case: "success", value: { model: "claude-sonnet-5" } });
+    const written = [...h.persistence.durable, ...h.persistence.buffered].slice(before);
+    const line = written.find((entry) => entry.source.discriminator === "agent_frame.update.response_revision");
+    expect(line?.turn).toBeUndefined();
+    const frame = line?.item.kind === "frame" ? line.item.frame : undefined;
+    const update = frame?.result.case === "update" ? frame.result.value.update : undefined;
+    expect(update?.case).toBe("responseRevision");
+    expect(update?.case === "responseRevision" ? update.value.prose?.markdown : "").toBe("1 🔎 the revised tree");
+  });
+});

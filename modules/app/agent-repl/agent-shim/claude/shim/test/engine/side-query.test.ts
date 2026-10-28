@@ -157,7 +157,8 @@ describe("the side query's call sites", () => {
     const source = readFileSync(path.join(import.meta.dirname, "../../src/engine/session.ts"), "utf8");
     // Act
     const built = source.split("deps.createQuery(").length - 1;
-    const asked = source.split("askSideQuery(").length - 1;
+    // A revision's query is built for reviseResponse, which asks it as a side query.
+    const asked = source.split("askSideQuery(").length - 1 + (source.split("reviseResponse(").length - 1);
     // Assert: the live session builds ONE query of its own; every other is a side query's.
     expect(built).toBe(asked + 1);
   });

@@ -11,6 +11,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { logRecordsSince } from "../log-records.js";
 import {
   asQueryLike,
+  boundSessionId,
   realQueryOptions,
   vendorSpawner,
   type RealQuerySpec,
@@ -770,4 +771,62 @@ describe("asQueryLike", () => {
       expect([record?.level, record?.context.cause]).toEqual(["error", `the vendor query's ${member} is not a function`]);
     });
   }
+});
+
+describe("realQueryOptions on an ephemeral fork", () => {
+  it("resumes the parent, forks it and persists nothing, all three together", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec({ binding: { kind: "ephemeral_fork", parentSessionId: "vendor-parent" } }), NO_SERVERS);
+
+    // Assert.
+    expect({ resume: options.resume, forkSession: options.forkSession, persistSession: options.persistSession }).toEqual({
+      resume: "vendor-parent",
+      forkSession: true,
+      persistSession: false,
+    });
+  });
+
+  it("mints no session id of its own", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec({ binding: { kind: "ephemeral_fork", parentSessionId: "vendor-parent" } }), NO_SERVERS);
+
+    // Assert.
+    expect(options.sessionId).toBeUndefined();
+  });
+
+  it("carries the cut the fork ends at", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(
+      spec({ binding: { kind: "ephemeral_fork", parentSessionId: "vendor-parent" }, resumeSessionAt: "record-9" }),
+      NO_SERVERS,
+    );
+
+    // Assert.
+    expect(options.resumeSessionAt).toBe("record-9");
+  });
+
+  it.each([
+    [{ kind: "fresh", sessionId: "vendor-42" }, "vendor-42"],
+    [{ kind: "resume", resumeSessionId: "vendor-old" }, "vendor-old"],
+    [{ kind: "ephemeral_fork", parentSessionId: "vendor-parent" }, "vendor-parent"],
+  ] as const)("names the session %o binds to", (binding, named) => {
+    // Arrange, Act, Assert.
+    expect(boundSessionId(binding)).toBe(named);
+  });
+});
+
+describe("realQueryOptions on a resume or a fresh start", () => {
+  it.each([
+    { kind: "fresh", sessionId: "vendor-42" },
+    { kind: "resume", resumeSessionId: "vendor-old" },
+  ] as const)("never forks or skips persisting on %o", (binding) => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec({ binding }), NO_SERVERS);
+
+    // Assert.
+    expect({ forkSession: options.forkSession, persistSession: options.persistSession }).toEqual({
+      forkSession: undefined,
+      persistSession: undefined,
+    });
+  });
 });

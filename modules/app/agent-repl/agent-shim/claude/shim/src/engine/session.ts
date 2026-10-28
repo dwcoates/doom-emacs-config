@@ -45,6 +45,8 @@ import { appliedEffortOf, effortLevelOf, vendorEffortLevel } from "../convert/ef
 import { boundaryChange } from "./boundary-change.js";
 import { PromptQueue } from "./prompt-queue.js";
 import { askSideQuery } from "./side-query.js";
+import { reviseResponse, type RevisionCut } from "./revise-response.js";
+import type { VendorBinding } from "../sdk/real-query.js";
 import { mainAgentId, promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
 import { redactVendorMessage } from "../convert/terminals.js";
@@ -161,7 +163,12 @@ import {
   type AgentIdentityStore,
 } from "./identity.js";
 import { ForkPointTracker, type OpenForkTurn } from "./fork-point.js";
-import { forkSession as forkVendorConversation, type ForkVendorSession } from "./fork-session.js";
+import {
+  forkableRecords,
+  forkSession as forkVendorConversation,
+  resolveUpTo,
+  type ForkVendorSession,
+} from "./fork-session.js";
 import {
   conversationRecordUuid,
   detachedWorkContext,
@@ -225,9 +232,7 @@ const LOGGER = bindLog({ component: "shim-engine-session", operation: "shim.engi
 export interface QuerySpec {
   /** The kind of session: what the vendor is given (settings, tools, prompt). */
   readonly profile: SessionProfile;
-  readonly binding:
-    | { readonly kind: "fresh"; readonly sessionId: string }
-    | { readonly kind: "resume"; readonly resumeSessionId: string };
+  readonly binding: VendorBinding;
   /**
    * The workspace's name, as StartSession stated it
    * (`shim.v1.StartSessionRequest.workspace_name`). Every query of the session
@@ -1870,6 +1875,57 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
     return forkPointAnswered(answer);
+  }
+
+  /**
+   * Revise one settled response on an ephemeral fork of the conversation
+   * (shim.v1.ReviseResponse). The fork ends where GetForkPoint says a fork
+   * taken now would, so a turn in flight is never part of it, and it takes no
+   * tools: the answer is prose about the conversation, never work in it.
+   */
+  function reviseSettledResponse(
+    request: shimv1.ReviseResponseRequest,
+    signal?: AbortSignal,
+  ): Promise<shimv1.ReviseResponseResponse> {
+    return reviseResponse(
+      {
+        vendorSessionId: () => (started && identity !== undefined ? identity.vendorSessionId : undefined),
+        cut: revisionCut,
+        build: ({ parentSessionId, upTo }, prompt, abortController) =>
+          deps.createQuery({
+            profile: sessionProfile(),
+            binding: { kind: "ephemeral_fork", parentSessionId },
+            workspaceName: requireWorkspaceName(),
+            ...(upTo === undefined ? {} : { resumeSessionAt: upTo }),
+            permissionMode: "plan",
+            canUseTool: () => Promise.resolve({ behavior: "deny", message: "a response revision takes no tools" }),
+            abortController,
+            prompt,
+            ...(effectiveModel === "" ? {} : { model: effectiveModel }),
+          }),
+        writeRevision: writeResponseRevision,
+        nowMs: deps.nowMs,
+      },
+      request,
+      signal,
+    );
+  }
+
+  /**
+   * Where a revision's fork ends: the record a fork taken now would end on,
+   * resolved in the session's transcript, or the live end of a conversation
+   * with no concluded turn to name (rolled-back turns excluded).
+   */
+  function revisionCut(vendorSessionId: string): RevisionCut {
+    const answered = getForkPoint();
+    if (answered.result.case !== "success") {
+      return { kind: "unresolved", detail: answered.result.value?.detail ?? "GetForkPoint answered no arm" };
+    }
+    const point = answered.result.value.point;
+    if (point === undefined) throw new Error("shim session: GetForkPoint answered success without a point");
+    if (point.extent.case === "whole") return { kind: "cut", upTo: resumeAtLiveEnd(vendorSessionId).resumeSessionAt };
+    const resolved = resolveUpTo(forkableRecords(transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId)), point);
+    return resolved.kind === "ok" ? { kind: "cut", upTo: resolved.upTo } : { kind: "unresolved", detail: resolved.detail };
   }
 
   /**
@@ -6180,6 +6236,42 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * Write a response revision as a page line of the main agent's book. It is
+   * no turn's work, so it is stamped with no turn.
+   */
+  function writeResponseRevision(revision: conversationv1.AgentResponseRevision): void {
+    if (identity === undefined) {
+      throw new Error("shim session: a response revision was written before the session had an identity");
+    }
+    const agentId = identity.agentId;
+    const atMs = deps.nowMs();
+    deps.persistence.write([
+      {
+        agentId,
+        upsertKey: terminalUpsertKey(agentId, `response-revision-${atMs}`),
+        source: {
+          vendorUuid: `response-revision-${identity.vendorSessionId}-${atMs}`,
+          discriminator: "agent_frame.update.response_revision",
+        },
+        keepalive: false,
+        turn: undefined,
+        item: {
+          kind: "frame",
+          frame: create(conversationv1.AgentFrameSchema, {
+            agentId,
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: { case: "responseRevision", value: revision },
+              }),
+            },
+          }),
+        },
+      },
+    ]);
+  }
+
+  /**
    * The book, read from its newest page back until every unit in `units` has
    * been found or the book's floor is reached.
    *
@@ -7877,6 +7969,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     resolveVendorTask: (request) => resolveVendorTaskHere(request),
     gatherTitleDigest: () => Promise.resolve(gatherTitleDigest()),
     getForkPoint: () => Promise.resolve(getForkPoint()),
+    reviseResponse: afterRestart(reviseSettledResponse),
     forkSession: afterRestart(forkSession),
     resetKeepalives: afterRestart(resetKeepalives),
     standDown: async (reason: string) => {

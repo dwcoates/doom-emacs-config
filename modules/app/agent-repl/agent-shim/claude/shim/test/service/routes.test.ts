@@ -82,6 +82,10 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("startTurn")(request);
       return create(shimv1.StartTurnResponseSchema, {});
     },
+    async reviseResponse(request) {
+      record("reviseResponse")(request);
+      return create(shimv1.ReviseResponseResponseSchema, {});
+    },
     async *watchAgent(request) {
       record("watchAgent")(request);
       yield create(shimv1.WatchAgentResponseSchema, {});
@@ -160,6 +164,7 @@ describe("shimRoutes unary delegation", () => {
     ["networkChanged", requests.networkChangedRequest],
     ["killSession", requests.killSessionRequest],
     ["startTurn", requests.startTurnRequest],
+    ["reviseResponse", requests.reviseResponseRequest],
     ["updateAgent", requests.updateAgentRequest],
     ["killTurn", requests.killTurnRequest],
     ["rollBackSession", requests.rollBackSessionRequest],
