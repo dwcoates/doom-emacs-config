@@ -124,6 +124,10 @@ func TestRecoveryAfterStoreRestart(t *testing.T) {
 	ws := openWorkspace(t, w)
 	topbar := w.WatchTopbar(ws)
 	t.Cleanup(topbar.Close)
+	// THE OUTAGE MUST MEET A RUNNING SHIM. An open starts no shim (owner
+	// ruling, 2026-10-28), so a first turn brings the session up and ends
+	// before the store goes down, as the shim this test is about was up.
+	AwaitTurnEnded(t, w, ws, SubmitPrompt(t, w, ws, "!prose-streamed"))
 
 	// No terminal is awaited inside the outage — see
 	// TestDegradedDuringRealStoreOutage's own note: the daemon's turn
