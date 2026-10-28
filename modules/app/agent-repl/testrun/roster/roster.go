@@ -320,8 +320,10 @@ var Suites = []Suite{
 		}}},
 	{Name: "store", Kind: GoModule, Path: "agent-shim/shim-store", TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 1}},
 		Programs: map[string][]string{"integration": {"shim-store"}},
-		// internal/testclose's scan walks the store's own tree.
-		Reuse: &Reuse{Inputs: []string{"agent-shim/shim-store/"}}},
+		// internal/testclose's scan walks the store's own tree, and
+		// internal/history renders the stored-line cases the shim's reader
+		// renders too.
+		Reuse: &Reuse{Inputs: []string{"agent-shim/shim-store/", "testdata/history-golden/"}}},
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock", Reuse: &Reuse{}},
 	{Name: "zettel", Kind: GoModule, Path: "zettel", Programs: map[string][]string{"integration": {"zettel"}},
 		Reuse: &Reuse{Inputs: []string{"zettel/"}}},
