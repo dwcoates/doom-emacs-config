@@ -1824,6 +1824,19 @@ describe("the Merge Queue section's queues", () => {
     expect(inRail(drawn, () => cascadedValue(drawn.querySelector(".sb-mq-glyph")!, "color"))).toBe(want);
   });
 
+  it("draws the head's live stage in the open repository names' ink (owner request, 2026-10-28)", () => {
+    const drawn = drawWorkspaceRoster(
+      withQueues([
+        queueGroup({
+          id: "a",
+          queue: { head: mergingHead("w1", { stages: [{ label: "deploy", round: 1, state: { case: "live", value: { startedAtMs: 1n } } }] }) },
+        }),
+      ]),
+      sidebarContext(),
+    );
+    expect(inRail(drawn, () => cascadedValue(drawn.querySelector('.sb-mq-stage[data-state="live"]')!, "color"))).toBe("var(--repo-head-expanded)");
+  });
+
   it.each([
     { name: "a suspended head's live stage as a still grey dot", suspended: true, color: "var(--muted)", animation: "none" },
     { name: "a running head's live stage breathing in the merge purple", suspended: false, color: "var(--blocked)", animation: "merge-breathe 1.8s ease-in-out infinite" },
@@ -1856,6 +1869,7 @@ describe("the Merge Queue section's queues", () => {
     { name: "draws a waiting merge a step smaller", selector: ".sb-mq-waiting", property: "font-size", want: "0.9em" },
     { name: "indents a waiting merge's name under the head's", selector: ".sb-mq-waiting", property: "padding-left", want: "calc(0.9rem + var(--ws-mark-width) + 0.45rem)" },
     { name: "draws the head's card in the foreground colour", selector: ".sb-mq-head", property: "color", want: "var(--fg)" },
+    { name: "names the head's merge in the open repository names' ink", selector: ".sb-mq-head .sb-mq-name", property: "color", want: "var(--repo-head-expanded)" },
   ])("$name", ({ selector, property, want }) => {
     const drawn = drawWorkspaceRoster(
       withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1"), waiting: [waitingMerge("w2")] } })]),

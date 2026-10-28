@@ -1106,6 +1106,12 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    (owner request, 2026-10-27), in the name's own color, and its name follows
    the bullet. */
 #ws-sidebar .sb-mq-head .sb-mq-name { font-weight: 700; }
+/* THE HEAD'S NAME AND ITS LIVE STAGE WEAR THE OPEN REPOSITORY NAMES' INK
+   (owner request, 2026-10-28): at the full --fg they read brighter than
+   the repository headers they sit among; --repo-head-expanded is that
+   header's own step down from --fg. */
+#ws-sidebar .sb-mq-head .sb-mq-name,
+#ws-sidebar .sb-mq-stage[data-state="live"] { color: var(--repo-head-expanded); }
 /* THE HEAD'S NAME IS ITS REPOSITORY'S TEXT SIZE AT MOST (owner request,
    2026-10-27): ever so slightly under the group header above it, and every
    waiting merge's name is the head's size (owner request, 2026-10-27). */
@@ -1130,7 +1136,6 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   color: var(--muted);
 }
 #ws-sidebar .sb-mq-stage { display: inline-flex; align-items: center; gap: 0.2rem; white-space: nowrap; }
-#ws-sidebar .sb-mq-stage[data-state="live"] { color: var(--fg); }
 #ws-sidebar .sb-mq-detail {
   font-size: 0.7rem;
   color: var(--muted);
