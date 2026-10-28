@@ -444,7 +444,7 @@
   "The page's colors are the webapp dark theme's, pinned by styles.test.ts too."
   (should (equal agent-repl-settings--colors
                  '((ground . "#1a1a1a") (band . "#262626") (card . "#2c2c2c") (border . "#2a2a2a")
-                   (keycap-edge . "#3a3a38") (text . "#f1efe9") (muted . "#898782") (accent . "#8bbeff")))))
+                   (keycap-edge . "#3a3a38") (text . "#f1efe9") (muted . "#898782") (accent . "#6192d0")))))
 
 (ert-deftest agent-repl-test-settings-color-unknown-name-is-fatal ()
   "Asking for a color the page does not have signals, naming it."

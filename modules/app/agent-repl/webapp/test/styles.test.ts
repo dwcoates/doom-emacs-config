@@ -4480,7 +4480,7 @@ describe("the tool card's command grey", () => {
     ["--muted", [0x89, 0x87, 0x82]],
     ["--card", [0x2c, 0x2c, 0x2c]],
     ["--border", [0x2a, 0x2a, 0x2a]],
-    ["--selected-entry", [0x8b, 0xbe, 0xff]],
+    ["--selected-entry", [0x61, 0x92, 0xd0]],
   ] as const)("defines the dark theme's %s as the Settings page's", (token, want) => {
     // Arrange
     const block = darkThemeBlock();
@@ -6274,7 +6274,7 @@ describe("the answered label's pastel orange", () => {
 
   it.each([
     ["light", () => rootToken("--answer-label"), "#e08a4c"],
-    ["dark", () => /--answer-label:\s*([^;]+);/.exec(darkThemeBlock())?.[1]?.trim(), "#ffbf8f"],
+    ["dark", () => /--answer-label:\s*([^;]+);/.exec(darkThemeBlock())?.[1]?.trim(), "#d09364"],
   ])("defines the %s theme's pastel orange", (_theme, read, want) => {
     // Act
     const got = read();
@@ -6336,5 +6336,17 @@ describe("the topbar's ground (owner request, 2026-10-27)", () => {
 
     // Assert
     expect(feed < topbar).toBe(true);
+  });
+});
+
+describe("footer readouts that wear a status color (2026-10-28)", () => {
+  it.each([
+    ["--info-model", "var(--turquoise)"],
+    ["--info-tokens", "var(--async)"],
+  ])("feeds the dark theme's %s from the status token %s, never a copied hex", (token, want) => {
+    // Arrange / Act
+    const got = themeValueOf(darkThemeBlock(), token);
+    // Assert
+    expect(got).toBe(want);
   });
 });
