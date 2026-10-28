@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { coldGateFiguredLine, statusWords, textLine } from "../../src/footer/parts.js";
+import { coldGateFiguredLine, statusCellWord, statusWords, textLine } from "../../src/footer/parts.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { coldGatePercentColor } from "../../src/pressure-color.js";
 import { FOOTER_STATUS_CASES } from "../../src/footer/tones.js";
@@ -13,6 +13,16 @@ describe("statusWords", () => {
 
   it("puts spaces where the schema spelling has underscores", () => {
     expect(statusWords("networkResume")).toBe("network resume");
+  });
+});
+
+describe("statusCellWord", () => {
+  it("draws a booting session as loading", () => {
+    expect(statusCellWord("starting")).toBe("loading");
+  });
+
+  it("draws every other arm as its name", () => {
+    expect(statusCellWord("networkFault")).toBe("network fault");
   });
 });
 

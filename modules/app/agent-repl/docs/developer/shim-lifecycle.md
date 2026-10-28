@@ -54,7 +54,11 @@ never up.
 - A prompt sent while the shim is coming up is held, never refused. The held
   badge says why: "after loading" for any start, "after reconnect" for a dead
   shim's relaunch, "after reloading" for a stale-build replacement.
-- The footer reads "loading" for every shim start.
+- The footer reads "loading" for every shim start (the `starting` status arm,
+  worded "loading" by the page, `statusCellWord`), a parked session's restore
+  included: the booting rung stands while parked (`ladder.Resolve`).
+- The sidebar row's name wears the reviving shimmer (`RosterRow.reviving`) from
+  a bring-up's first step to its last (`shimLoading` in `cmd/agent-repld`).
 
 ## Book naming
 

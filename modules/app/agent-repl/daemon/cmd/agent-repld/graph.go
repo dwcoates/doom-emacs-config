@@ -892,7 +892,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// section, whose prompts read "after loading" while a shim loads.
 		Steps: func(ws ids.WorkspaceID, step opentabs.Step) {
 			opens.Step(ws, step)
-			shimLoading(feedResolver, ws, step)
+			shimLoading(feedResolver, sidebarResolver, ws, step)
 		},
 		SessionsUp: lifecycle.SessionUp,
 		// OFF THE BRING-UP'S GOROUTINE: the merge being ejected may itself be
@@ -2294,15 +2294,18 @@ func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	}
 }
 
-// shimLoading tells the held section a bring-up began or ended, from the
-// fleet's step: a prompt held for the session reads "after loading" while a
-// shim loads (owner ruling, 2026-10-28).
-func shimLoading(held interface{ SetShimLoading(ids.WorkspaceID, bool) }, ws ids.WorkspaceID, step opentabs.Step) {
+// shimLoading tells the held section and the roster a bring-up began or
+// ended, from the fleet's step (owner rulings, 2026-10-28): a prompt held for
+// the session reads "after loading", and the row's name wears the reviving
+// shimmer, while a shim loads.
+func shimLoading(held interface{ SetShimLoading(ids.WorkspaceID, bool) }, roster interface{ SetReviving(ids.WorkspaceID, bool) }, ws ids.WorkspaceID, step opentabs.Step) {
 	switch {
 	case step.Begins():
 		held.SetShimLoading(ws, true)
+		roster.SetReviving(ws, true)
 	case step.Ends():
 		held.SetShimLoading(ws, false)
+		roster.SetReviving(ws, false)
 	}
 }
 

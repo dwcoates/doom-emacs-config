@@ -2284,11 +2284,10 @@ replaces it."
                #'agent-repl-wire-decode-workspace-open-stage "{\"startingSession\":{}}")
               :starting-session)))
 
-(ert-deftest agent-repl-test-wire-host-open-stage-reviving ()
-  "The conditional reviving arm decodes to `:reviving'."
-  (should (eq (agent-repl-test-wire-host--decode
-               #'agent-repl-wire-decode-workspace-open-stage "{\"reviving\":{}}")
-              :reviving)))
+(ert-deftest agent-repl-test-wire-host-open-stage-reviving-is-retired ()
+  "The retired reviving arm is refused, never decoded."
+  (should-error (agent-repl-test-wire-host--decode
+                 #'agent-repl-wire-decode-workspace-open-stage "{\"reviving\":{}}")))
 
 (ert-deftest agent-repl-test-wire-host-open-stage-clearing-closed ()
   "The conditional clearing_closed arm decodes to `:clearing-closed'."

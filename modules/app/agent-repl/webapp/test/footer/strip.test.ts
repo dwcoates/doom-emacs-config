@@ -41,7 +41,7 @@ import {
   type StripInit,
 } from "./harness.js";
 import { createStopControls } from "../../src/footer/stop.js";
-import { statusWords } from "../../src/footer/parts.js";
+import { statusCellWord, statusWords } from "../../src/footer/parts.js";
 import { TOOLTIP_KEY_ATTR, TOOLTIP_TEXT_ATTR } from "../../src/tooltip.js";
 
 /** Every test's clock reads from here, so a countdown's arithmetic is exact. */
@@ -959,7 +959,7 @@ describe("the footer status word's letter wave", () => {
       const { row } = drawStrip({ status: armStatus(arm) });
 
       // Assert
-      expect(letterDelays(row)).toHaveLength(statusWords(arm).length);
+      expect(letterDelays(row)).toHaveLength(statusCellWord(arm).length);
     },
   );
 

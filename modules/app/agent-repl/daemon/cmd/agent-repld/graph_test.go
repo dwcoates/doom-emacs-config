@@ -701,11 +701,15 @@ func TestFaultSinksTellEverySinkOfEachFault(t *testing.T) {
 	}
 }
 
-// loadingRecorder records every SetShimLoading.
-type loadingRecorder struct{ marks []bool }
+// loadingRecorder records every SetShimLoading and SetReviving.
+type loadingRecorder struct{ marks, reviving []bool }
 
 func (r *loadingRecorder) SetShimLoading(_ ids.WorkspaceID, loading bool) {
 	r.marks = append(r.marks, loading)
+}
+
+func (r *loadingRecorder) SetReviving(_ ids.WorkspaceID, reviving bool) {
+	r.reviving = append(r.reviving, reviving)
 }
 
 func TestShimLoadingFollowsTheBringUpsSteps(t *testing.T) {
@@ -727,11 +731,11 @@ func TestShimLoadingFollowsTheBringUpsSteps(t *testing.T) {
 			rec := &loadingRecorder{}
 
 			// Act
-			shimLoading(rec, "ws-1", opentabs.Step{Kind: tt.step})
+			shimLoading(rec, rec, "ws-1", opentabs.Step{Kind: tt.step})
 
 			// Assert
-			if !slices.Equal(rec.marks, tt.want) {
-				t.Fatalf("marks = %v, want %v", rec.marks, tt.want)
+			if !slices.Equal(rec.marks, tt.want) || !slices.Equal(rec.reviving, tt.want) {
+				t.Fatalf("loading marks = %v, reviving marks = %v, want %v for both", rec.marks, rec.reviving, tt.want)
 			}
 		})
 	}

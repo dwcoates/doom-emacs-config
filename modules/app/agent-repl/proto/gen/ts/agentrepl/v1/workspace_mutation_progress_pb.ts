@@ -30,7 +30,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/workspace_mutation_progress.proto.
  */
 export const file_agentrepl_v1_workspace_mutation_progress: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvd29ya3NwYWNlX211dGF0aW9uX3Byb2dyZXNzLnByb3RvEgxhZ2VudHJlcGwudjEiiwIKGVdvcmtzcGFjZU11dGF0aW9uUHJvZ3Jlc3MSDQoFb3BfaWQYASABKAkSNwoGY3JlYXRlGAIgASgLMiUuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVByb2dyZXNzSAASMwoEb3BlbhgDIAEoCzIjLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuUHJvZ3Jlc3NIABIzCgRraWxsGAQgASgLMiMuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUtpbGxQcm9ncmVzc0gAEjMKBG51a2UYBSABKAsyIy5hZ2VudHJlcGwudjEuV29ya3NwYWNlTnVrZVByb2dyZXNzSABCBwoFZXZlbnQijwEKFVdvcmtzcGFjZUtpbGxQcm9ncmVzcxI5CglzdWNjZWVkZWQYASABKAsyJC5hZ2VudHJlcGwudjEuV29ya3NwYWNlS2lsbFN1Y2NlZWRlZEgAEjMKBmZhaWxlZBgCIAEoCzIhLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VLaWxsRmFpbGVkSABCBgoEc3RlcCIYChZXb3Jrc3BhY2VLaWxsU3VjY2VlZGVkIicKE1dvcmtzcGFjZUtpbGxGYWlsZWQSEAoIaW50ZXJuYWwYASABKAkijwEKFVdvcmtzcGFjZU51a2VQcm9ncmVzcxI5CglzdWNjZWVkZWQYASABKAsyJC5hZ2VudHJlcGwudjEuV29ya3NwYWNlTnVrZVN1Y2NlZWRlZEgAEjMKBmZhaWxlZBgCIAEoCzIhLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VOdWtlRmFpbGVkSABCBgoEc3RlcCIYChZXb3Jrc3BhY2VOdWtlU3VjY2VlZGVkImcKE1dvcmtzcGFjZU51a2VGYWlsZWQSMwoHcmVmdXNhbBgBIAEoCzIgLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlRXJyb3JIABISCghpbnRlcm5hbBgCIAEoCUgAQgcKBWNhdXNlIl0KFVdvcmtzcGFjZU9wZW5Qcm9ncmVzcxI3Cg1lbnRlcmVkX3N0YWdlGAIgASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZU9wZW5TdGFnZUoECAEQAlIFc3RhZ2Ui3AMKEldvcmtzcGFjZU9wZW5TdGFnZRJNChFjaGVja2luZ193b3JrdHJlZRgBIAEoCzIwLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuU3RhZ2VDaGVja2luZ1dvcmt0cmVlSAASSwoQc3RhcnRpbmdfc2Vzc2lvbhgCIAEoCzIvLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuU3RhZ2VTdGFydGluZ1Nlc3Npb25IABI8CghyZXZpdmluZxgDIAEoCzIoLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuU3RhZ2VSZXZpdmluZ0gAEkkKD2NsZWFyaW5nX2Nsb3NlZBgEIAEoCzIuLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuU3RhZ2VDbGVhcmluZ0Nsb3NlZEgAEkcKDmNoZWNraW5nX2J1aWxkGAUgASgLMi0uYWdlbnRyZXBsLnYxLldvcmtzcGFjZU9wZW5TdGFnZUNoZWNraW5nQnVpbGRIABJPChJyZXN0b3Jpbmdfd29ya3RyZWUYBiABKAsyMS5hZ2VudHJlcGwudjEuV29ya3NwYWNlT3BlblN0YWdlUmVzdG9yaW5nV29ya3RyZWVIAEIHCgVzdGFnZSIkCiJXb3Jrc3BhY2VPcGVuU3RhZ2VDaGVja2luZ1dvcmt0cmVlIiMKIVdvcmtzcGFjZU9wZW5TdGFnZVN0YXJ0aW5nU2Vzc2lvbiIcChpXb3Jrc3BhY2VPcGVuU3RhZ2VSZXZpdmluZyIiCiBXb3Jrc3BhY2VPcGVuU3RhZ2VDbGVhcmluZ0Nsb3NlZCIhCh9Xb3Jrc3BhY2VPcGVuU3RhZ2VDaGVja2luZ0J1aWxkIiUKI1dvcmtzcGFjZU9wZW5TdGFnZVJlc3RvcmluZ1dvcmt0cmVlIq4CChdXb3Jrc3BhY2VDcmVhdGVQcm9ncmVzcxI7Cg1lbnRlcmVkX3N0YWdlGAQgASgLMiIuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVN0YWdlSAASOwoJc3VjY2VlZGVkGAIgASgLMiYuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVN1Y2NlZWRlZEgAEjUKBmZhaWxlZBgDIAEoCzIjLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVGYWlsZWRIABJNChN3YWl0aW5nX2Zvcl9uZXR3b3JrGAUgASgLMi4uYWdlbnRyZXBsLnYxLkNyZWF0ZVdvcmtzcGFjZVdhaXRpbmdGb3JOZXR3b3JrSABCBgoEc3RlcEoECAEQAlIFc3RhZ2UiawoVV29ya3NwYWNlQ3JlYXRlRmFpbGVkEjUKB3JlZnVzYWwYASABKAsyIi5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlRXJyb3JIABISCghpbnRlcm5hbBgCIAEoCUgAQgcKBWNhdXNlIogCChRXb3Jrc3BhY2VDcmVhdGVTdGFnZRJHCg1kZXJpdmluZ19uYW1lGAEgASgLMi4uYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVN0YWdlRGVyaXZpbmdOYW1lSAASTwoRY3JlYXRpbmdfd29ya3RyZWUYAiABKAsyMi5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlU3RhZ2VDcmVhdGluZ1dvcmt0cmVlSAASTQoQc3RhcnRpbmdfc2Vzc2lvbhgDIAEoCzIxLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVTdGFnZVN0YXJ0aW5nU2Vzc2lvbkgAQgcKBXN0YWdlIiIKIFdvcmtzcGFjZUNyZWF0ZVN0YWdlRGVyaXZpbmdOYW1lIiYKJFdvcmtzcGFjZUNyZWF0ZVN0YWdlQ3JlYXRpbmdXb3JrdHJlZSIlCiNXb3Jrc3BhY2VDcmVhdGVTdGFnZVN0YXJ0aW5nU2Vzc2lvbiJXChhXb3Jrc3BhY2VDcmVhdGVTdWNjZWVkZWQSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_endpoint_create_workspace, file_agentrepl_v1_endpoint_nuke_workspace, file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvd29ya3NwYWNlX211dGF0aW9uX3Byb2dyZXNzLnByb3RvEgxhZ2VudHJlcGwudjEiiwIKGVdvcmtzcGFjZU11dGF0aW9uUHJvZ3Jlc3MSDQoFb3BfaWQYASABKAkSNwoGY3JlYXRlGAIgASgLMiUuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVByb2dyZXNzSAASMwoEb3BlbhgDIAEoCzIjLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuUHJvZ3Jlc3NIABIzCgRraWxsGAQgASgLMiMuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUtpbGxQcm9ncmVzc0gAEjMKBG51a2UYBSABKAsyIy5hZ2VudHJlcGwudjEuV29ya3NwYWNlTnVrZVByb2dyZXNzSABCBwoFZXZlbnQijwEKFVdvcmtzcGFjZUtpbGxQcm9ncmVzcxI5CglzdWNjZWVkZWQYASABKAsyJC5hZ2VudHJlcGwudjEuV29ya3NwYWNlS2lsbFN1Y2NlZWRlZEgAEjMKBmZhaWxlZBgCIAEoCzIhLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VLaWxsRmFpbGVkSABCBgoEc3RlcCIYChZXb3Jrc3BhY2VLaWxsU3VjY2VlZGVkIicKE1dvcmtzcGFjZUtpbGxGYWlsZWQSEAoIaW50ZXJuYWwYASABKAkijwEKFVdvcmtzcGFjZU51a2VQcm9ncmVzcxI5CglzdWNjZWVkZWQYASABKAsyJC5hZ2VudHJlcGwudjEuV29ya3NwYWNlTnVrZVN1Y2NlZWRlZEgAEjMKBmZhaWxlZBgCIAEoCzIhLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VOdWtlRmFpbGVkSABCBgoEc3RlcCIYChZXb3Jrc3BhY2VOdWtlU3VjY2VlZGVkImcKE1dvcmtzcGFjZU51a2VGYWlsZWQSMwoHcmVmdXNhbBgBIAEoCzIgLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlRXJyb3JIABISCghpbnRlcm5hbBgCIAEoCUgAQgcKBWNhdXNlIl0KFVdvcmtzcGFjZU9wZW5Qcm9ncmVzcxI3Cg1lbnRlcmVkX3N0YWdlGAIgASgLMiAuYWdlbnRyZXBsLnYxLldvcmtzcGFjZU9wZW5TdGFnZUoECAEQAlIFc3RhZ2UirgMKEldvcmtzcGFjZU9wZW5TdGFnZRJNChFjaGVja2luZ193b3JrdHJlZRgBIAEoCzIwLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuU3RhZ2VDaGVja2luZ1dvcmt0cmVlSAASSwoQc3RhcnRpbmdfc2Vzc2lvbhgCIAEoCzIvLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuU3RhZ2VTdGFydGluZ1Nlc3Npb25IABJJCg9jbGVhcmluZ19jbG9zZWQYBCABKAsyLi5hZ2VudHJlcGwudjEuV29ya3NwYWNlT3BlblN0YWdlQ2xlYXJpbmdDbG9zZWRIABJHCg5jaGVja2luZ19idWlsZBgFIAEoCzItLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VPcGVuU3RhZ2VDaGVja2luZ0J1aWxkSAASTwoScmVzdG9yaW5nX3dvcmt0cmVlGAYgASgLMjEuYWdlbnRyZXBsLnYxLldvcmtzcGFjZU9wZW5TdGFnZVJlc3RvcmluZ1dvcmt0cmVlSABCBwoFc3RhZ2VKBAgDEARSCHJldml2aW5nIiQKIldvcmtzcGFjZU9wZW5TdGFnZUNoZWNraW5nV29ya3RyZWUiIwohV29ya3NwYWNlT3BlblN0YWdlU3RhcnRpbmdTZXNzaW9uIiIKIFdvcmtzcGFjZU9wZW5TdGFnZUNsZWFyaW5nQ2xvc2VkIiEKH1dvcmtzcGFjZU9wZW5TdGFnZUNoZWNraW5nQnVpbGQiJQojV29ya3NwYWNlT3BlblN0YWdlUmVzdG9yaW5nV29ya3RyZWUirgIKF1dvcmtzcGFjZUNyZWF0ZVByb2dyZXNzEjsKDWVudGVyZWRfc3RhZ2UYBCABKAsyIi5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlU3RhZ2VIABI7CglzdWNjZWVkZWQYAiABKAsyJi5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlU3VjY2VlZGVkSAASNQoGZmFpbGVkGAMgASgLMiMuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZUZhaWxlZEgAEk0KE3dhaXRpbmdfZm9yX25ldHdvcmsYBSABKAsyLi5hZ2VudHJlcGwudjEuQ3JlYXRlV29ya3NwYWNlV2FpdGluZ0Zvck5ldHdvcmtIAEIGCgRzdGVwSgQIARACUgVzdGFnZSJrChVXb3Jrc3BhY2VDcmVhdGVGYWlsZWQSNQoHcmVmdXNhbBgBIAEoCzIiLmFnZW50cmVwbC52MS5DcmVhdGVXb3Jrc3BhY2VFcnJvckgAEhIKCGludGVybmFsGAIgASgJSABCBwoFY2F1c2UiiAIKFFdvcmtzcGFjZUNyZWF0ZVN0YWdlEkcKDWRlcml2aW5nX25hbWUYASABKAsyLi5hZ2VudHJlcGwudjEuV29ya3NwYWNlQ3JlYXRlU3RhZ2VEZXJpdmluZ05hbWVIABJPChFjcmVhdGluZ193b3JrdHJlZRgCIAEoCzIyLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VDcmVhdGVTdGFnZUNyZWF0aW5nV29ya3RyZWVIABJNChBzdGFydGluZ19zZXNzaW9uGAMgASgLMjEuYWdlbnRyZXBsLnYxLldvcmtzcGFjZUNyZWF0ZVN0YWdlU3RhcnRpbmdTZXNzaW9uSABCBwoFc3RhZ2UiIgogV29ya3NwYWNlQ3JlYXRlU3RhZ2VEZXJpdmluZ05hbWUiJgokV29ya3NwYWNlQ3JlYXRlU3RhZ2VDcmVhdGluZ1dvcmt0cmVlIiUKI1dvcmtzcGFjZUNyZWF0ZVN0YWdlU3RhcnRpbmdTZXNzaW9uIlcKGFdvcmtzcGFjZUNyZWF0ZVN1Y2NlZWRlZBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEgwKBG5hbWUYAiABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_endpoint_create_workspace, file_agentrepl_v1_endpoint_nuke_workspace, file_workspace_v1_workspace]);
 
 /**
  * One staged-progress push for one in-flight workspace mutation.
@@ -270,9 +270,8 @@ export const WorkspaceOpenProgressSchema: GenMessage<WorkspaceOpenProgress> = /*
 
 /**
  * The stages an open passes through while its rpc is in flight. Emitted only
- * for the stages the open actually reaches: a workspace that was not
- * hibernated never emits `REVIVING`, and one that was not closed never emits
- * `CLEARING_CLOSED`.
+ * for the stages the open actually reaches: a workspace that was not closed
+ * never emits `CLEARING_CLOSED`.
  * A stage an open passes through. THE SET ARM IS THE STAGE. A client words each
  * arm as one minibuffer line; a stage that is entered replaces the line of the
  * one before it.
@@ -282,8 +281,7 @@ export const WorkspaceOpenProgressSchema: GenMessage<WorkspaceOpenProgress> = /*
 export type WorkspaceOpenStage = Message<"agentrepl.v1.WorkspaceOpenStage"> & {
   /**
    * The stage just entered. An open enters only the stages its workspace
-   * needs: a workspace that is not parked never enters `reviving`, and one
-   * that is not closed never enters `clearing_closed`.
+   * needs: one that is not closed never enters `clearing_closed`.
    *
    * @generated from oneof agentrepl.v1.WorkspaceOpenStage.stage
    */
@@ -300,7 +298,8 @@ export type WorkspaceOpenStage = Message<"agentrepl.v1.WorkspaceOpenStage"> & {
   } | {
     /**
      * The daemon is bringing the session up — spawning the shim and resuming
-     * the vendor conversation. Usually the slowest stage.
+     * the vendor conversation. Usually the slowest stage. An open itself
+     * starts no shim (owner ruling, 2026-10-28); a rebind's start reports it.
      *
      * @generated from field: agentrepl.v1.WorkspaceOpenStageStartingSession starting_session = 2;
      */
@@ -308,14 +307,8 @@ export type WorkspaceOpenStage = Message<"agentrepl.v1.WorkspaceOpenStage"> & {
     case: "startingSession";
   } | {
     /**
-     * The daemon is lifting a hibernation park off the workspace.
-     *
-     * @generated from field: agentrepl.v1.WorkspaceOpenStageReviving reviving = 3;
-     */
-    value: WorkspaceOpenStageReviving;
-    case: "reviving";
-  } | {
-    /**
+     * Tag 3 (`reviving`) is RETIRED: an open lifts no park, because it starts
+     * no shim (owner ruling, 2026-10-28).
      * The daemon is clearing the workspace's closed flag, which is what puts
      * its row back among the open ones.
      *
@@ -384,22 +377,6 @@ export const WorkspaceOpenStageStartingSessionSchema: GenMessage<WorkspaceOpenSt
   messageDesc(file_agentrepl_v1_workspace_mutation_progress, 10);
 
 /**
- * The hibernation revival. It carries nothing: the arm being set is the whole
- * fact.
- *
- * @generated from message agentrepl.v1.WorkspaceOpenStageReviving
- */
-export type WorkspaceOpenStageReviving = Message<"agentrepl.v1.WorkspaceOpenStageReviving"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.WorkspaceOpenStageReviving.
- * Use `create(WorkspaceOpenStageRevivingSchema)` to create a new message.
- */
-export const WorkspaceOpenStageRevivingSchema: GenMessage<WorkspaceOpenStageReviving> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 11);
-
-/**
  * The closed-flag clear. It carries nothing: the arm being set is the whole
  * fact.
  *
@@ -413,7 +390,7 @@ export type WorkspaceOpenStageClearingClosed = Message<"agentrepl.v1.WorkspaceOp
  * Use `create(WorkspaceOpenStageClearingClosedSchema)` to create a new message.
  */
 export const WorkspaceOpenStageClearingClosedSchema: GenMessage<WorkspaceOpenStageClearingClosed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 12);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 11);
 
 /**
  * The build check. It carries nothing: the arm being set is the whole fact.
@@ -428,7 +405,7 @@ export type WorkspaceOpenStageCheckingBuild = Message<"agentrepl.v1.WorkspaceOpe
  * Use `create(WorkspaceOpenStageCheckingBuildSchema)` to create a new message.
  */
 export const WorkspaceOpenStageCheckingBuildSchema: GenMessage<WorkspaceOpenStageCheckingBuild> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 13);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 12);
 
 /**
  * The worktree restore. It carries nothing: the arm being set is the whole
@@ -444,7 +421,7 @@ export type WorkspaceOpenStageRestoringWorktree = Message<"agentrepl.v1.Workspac
  * Use `create(WorkspaceOpenStageRestoringWorktreeSchema)` to create a new message.
  */
 export const WorkspaceOpenStageRestoringWorktreeSchema: GenMessage<WorkspaceOpenStageRestoringWorktree> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 14);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 13);
 
 /**
  * The progress of one CreateWorkspace, from just after the ack to the terminal
@@ -514,7 +491,7 @@ export type WorkspaceCreateProgress = Message<"agentrepl.v1.WorkspaceCreateProgr
  * Use `create(WorkspaceCreateProgressSchema)` to create a new message.
  */
 export const WorkspaceCreateProgressSchema: GenMessage<WorkspaceCreateProgress> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 15);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 14);
 
 /**
  * The terminal failure of a background create. THE ARM IS THE KIND OF FAILURE,
@@ -555,7 +532,7 @@ export type WorkspaceCreateFailed = Message<"agentrepl.v1.WorkspaceCreateFailed"
  * Use `create(WorkspaceCreateFailedSchema)` to create a new message.
  */
 export const WorkspaceCreateFailedSchema: GenMessage<WorkspaceCreateFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 16);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 15);
 
 /**
  * A stage a create passes through between the ack and its terminal outcome.
@@ -614,7 +591,7 @@ export type WorkspaceCreateStage = Message<"agentrepl.v1.WorkspaceCreateStage"> 
  * Use `create(WorkspaceCreateStageSchema)` to create a new message.
  */
 export const WorkspaceCreateStageSchema: GenMessage<WorkspaceCreateStage> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 17);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 16);
 
 /**
  * The naming stage. It carries nothing: the arm being set is the whole fact.
@@ -629,7 +606,7 @@ export type WorkspaceCreateStageDerivingName = Message<"agentrepl.v1.WorkspaceCr
  * Use `create(WorkspaceCreateStageDerivingNameSchema)` to create a new message.
  */
 export const WorkspaceCreateStageDerivingNameSchema: GenMessage<WorkspaceCreateStageDerivingName> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 18);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 17);
 
 /**
  * The worktree stage. It carries nothing: the arm being set is the whole fact.
@@ -644,7 +621,7 @@ export type WorkspaceCreateStageCreatingWorktree = Message<"agentrepl.v1.Workspa
  * Use `create(WorkspaceCreateStageCreatingWorktreeSchema)` to create a new message.
  */
 export const WorkspaceCreateStageCreatingWorktreeSchema: GenMessage<WorkspaceCreateStageCreatingWorktree> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 19);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 18);
 
 /**
  * The session bring-up stage. It carries nothing: the arm being set is the
@@ -660,7 +637,7 @@ export type WorkspaceCreateStageStartingSession = Message<"agentrepl.v1.Workspac
  * Use `create(WorkspaceCreateStageStartingSessionSchema)` to create a new message.
  */
 export const WorkspaceCreateStageStartingSessionSchema: GenMessage<WorkspaceCreateStageStartingSession> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 20);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 19);
 
 /**
  * The terminal success of a create, on the progress channel.
@@ -692,5 +669,5 @@ export type WorkspaceCreateSucceeded = Message<"agentrepl.v1.WorkspaceCreateSucc
  * Use `create(WorkspaceCreateSucceededSchema)` to create a new message.
  */
 export const WorkspaceCreateSucceededSchema: GenMessage<WorkspaceCreateSucceeded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 21);
+  messageDesc(file_agentrepl_v1_workspace_mutation_progress, 20);
 
