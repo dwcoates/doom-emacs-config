@@ -92,20 +92,36 @@ export function unboxAll(scope: ParentNode, box: SubtreeBox): void {
  */
 export function boxSubtree(scope: ParentNode, label: string, box: SubtreeBox): void {
   for (const tree of queryAll<HTMLElement>(scope, `.${TREE_CLASS}`)) {
-    const lines = queryAll<HTMLElement>(tree, `.${TREE_LINE_CLASS}`).filter((l) =>
-      inSubtree(l.getAttribute(TREE_NODE_ATTRIBUTE), label),
-    );
-    const head = lines.find((l) => l.getAttribute(TREE_NODE_ATTRIBUTE) === label);
-    if (head === undefined) continue;
-    const left = labelColumn(head);
-    const ends = lines.map((l) => edgeOf(l, TREE_TEXT_END_ATTRIBUTE));
-    const right = cssLength(Math.max(...ends.map((e) => e.n)), ends[0].unit);
-    for (const line of lines) {
+    const span = subtreeSpan(tree, label);
+    if (span === null) continue;
+    for (const line of span.lines) {
       line.classList.add(box.className);
-      line.style.setProperty(box.leftProperty, left);
-      line.style.setProperty(box.rightProperty, right);
+      line.style.setProperty(box.leftProperty, span.left);
+      line.style.setProperty(box.rightProperty, span.right);
     }
   }
+}
+
+/** The lines a node's box covers in one tree, and its edges as CSS lengths. */
+export interface SubtreeSpan {
+  readonly lines: readonly HTMLElement[];
+  readonly left: string;
+  readonly right: string;
+}
+
+/**
+ * Where the box over LABEL's subtree stands in TREE (one drawn tree), as
+ * the module note describes it, or null when TREE draws no line of LABEL.
+ * Every highlight draws its box from this.
+ */
+export function subtreeSpan(tree: HTMLElement, label: string): SubtreeSpan | null {
+  const lines = queryAll<HTMLElement>(tree, `.${TREE_LINE_CLASS}`).filter((l) =>
+    inSubtree(l.getAttribute(TREE_NODE_ATTRIBUTE), label),
+  );
+  const head = lines.find((l) => l.getAttribute(TREE_NODE_ATTRIBUTE) === label);
+  if (head === undefined) return null;
+  const ends = lines.map((l) => edgeOf(l, TREE_TEXT_END_ATTRIBUTE));
+  return { lines, left: labelColumn(head), right: cssLength(Math.max(...ends.map((e) => e.n)), ends[0].unit) };
 }
 
 /** A node of a drawn response's tree: the response's row and the node's label. */

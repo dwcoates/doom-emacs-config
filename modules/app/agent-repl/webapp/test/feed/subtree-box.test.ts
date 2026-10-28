@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { boxSubtree, inSubtree, labelColumn, standingBox, unboxAll, type SubtreeBox } from "../../src/feed/subtree-box.js";
+import { boxSubtree, inSubtree, labelColumn, standingBox, subtreeSpan, unboxAll, type SubtreeBox } from "../../src/feed/subtree-box.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { boxedBy, drawnRow, exampleSubtreeWidth, exampleTree, labelledTree, lineOf } from "./tree-fixture.js";
 
@@ -220,5 +220,53 @@ describe("the edges a box is drawn from", () => {
     // Assert
     const record = await forwardedRecord(capture, "feed.subtree-box.edge");
     expect(record).toMatchObject({ level: { case: "error" }, context: { attribute: "data-text-end", value: "", node: "2" } });
+  });
+});
+
+/** The one drawn tree of ROW. */
+const treeOf = (row: HTMLElement): HTMLElement => {
+  const tree = row.querySelector<HTMLElement>(".mp-tree");
+  if (tree === null) throw new Error("the row draws no tree");
+  return tree;
+};
+
+describe("subtreeSpan", () => {
+  it("spans a node's subtree from its label's column to its widest line", () => {
+    // Arrange
+    const row = drawnRow("r1", exampleTree);
+    // Act
+    const span = subtreeSpan(treeOf(row), "1.1");
+    // Assert
+    expect([span?.lines.map((l) => l.getAttribute("data-node")), span?.left, span?.right]).toEqual([
+      ["1.1", "1.1.1"],
+      "4ch",
+      `${exampleSubtreeWidth}ch`,
+    ]);
+  });
+
+  it("answers null for a node the tree does not draw", () => {
+    // Arrange
+    const row = drawnRow("r1", exampleTree);
+    // Act + Assert
+    expect(subtreeSpan(treeOf(row), "9")).toBeNull();
+  });
+
+  it.each(["1", "1.1", "1.1.1", "1.2", "1.10"])("is the very box boxSubtree draws over %s", (label) => {
+    // Arrange — one place decides a box's edges, for the highlight and the hit test alike.
+    const row = drawnRow("r1", exampleTree);
+    const span = subtreeSpan(treeOf(row), label);
+    // Act
+    boxSubtree(row, label, box);
+    // Assert
+    expect(boxedBy(row, box)).toEqual(span?.lines.map((l) => [l.getAttribute("data-node"), span.left, span.right]));
+  });
+
+  it("is the only place subtree-box reads a box's edges from the lines", () => {
+    // Arrange
+    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/feed/subtree-box.ts"), "utf8");
+    // Act — reading every line's text end is how a box's right edge is found.
+    const reads = source.split("edgeOf(l, TREE_TEXT_END_ATTRIBUTE)").length - 1;
+    // Assert
+    expect(reads).toBe(1);
   });
 });
