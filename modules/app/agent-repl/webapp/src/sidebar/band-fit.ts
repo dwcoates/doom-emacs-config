@@ -47,6 +47,13 @@
  *     it is folded), so no strip of the rail is ever left under it. That
  *     viewport may cut its last line through, scrolling it into view; the
  *     section's rows region stands that tall even when it holds fewer rows.
+ *   - NO BLANK STRIP ABOVE A FOLDED SECTION (owner request, 2026-10-28). A
+ *     section whose lines all show, under which a folded section's header is
+ *     drawn (Deploys over a folded Hidden Workspaces), never takes the room
+ *     left over: the lowest section above it that cuts a line through takes
+ *     it instead, and with none, it lies under the pane at the rail's foot.
+ *     So "Recently Deployed", expanded or not, always stands off the rule
+ *     below it by the same gap.
  *   - A LINE CUT AT THE FOOT FADES OUT (owner request, 2026-10-19). While the
  *     stretched viewport has more below its edge, the section is marked
  *     `BAND_MORE_ATTRIBUTE` and the stylesheet fades the viewport's last
@@ -477,6 +484,30 @@ function measure(band: Band | null): Measured | null {
   return { band, lines, stops: regionStops(band.region, lines) };
 }
 
+/** PANE's lowest section that is drawn, folded or not, or null when it draws none. */
+function lowestDrawnSection(pane: HTMLElement): HTMLElement | null {
+  const drawn = SECTION_REGIONS.map(([className]) => pane.querySelector<HTMLElement>(`:scope > .${className}`)).filter(
+    (section): section is HTMLElement => section !== null && !section.hidden,
+  );
+  return drawn.at(-1) ?? null;
+}
+
+/**
+ * Which of SIZED, the open sections top to bottom each with the lines it
+ * shows, takes the room left over, or -1 for none: the lowest that is LOWEST,
+ * the pane's lowest drawn section, or that cuts a line through. A section
+ * whose lines all show under which a folded section's header is drawn never
+ * takes it, so no blank strip stands between its last line and the rule
+ * below (owner request, 2026-10-28).
+ */
+function stretchedEntry(sized: ReadonlyArray<readonly [Measured, number]>, lowest: HTMLElement | null): number {
+  for (let i = sized.length - 1; i >= 0; i -= 1) {
+    const [m, n] = sized[i];
+    if (m.band.section === lowest || n < m.stops.length - 1) return i;
+  }
+  return -1;
+}
+
 /**
  * Fit the sections in PANE, which hangs in the rail's SCROLLER, NOW_MS
  * deciding which merges are today's. Returns the lines each shows, or null
@@ -527,7 +558,8 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   const used = sized.reduce((sum, [m, n]) => sum + m.stops[n], 0);
   // A rail shorter than the sections' headers leaves no room to stretch into.
   const stretch = Math.max(0, room - used);
-  sized.forEach(([m, n], i) => sizeBand(m.band, m.stops, n, i === sized.length - 1 ? stretch : null));
+  const stretched = stretchedEntry(sized, lowestDrawnSection(pane));
+  sized.forEach(([m, n], i) => sizeBand(m.band, m.stops, n, i === stretched ? stretch : null));
   bands.forEach((band, i) => restoreScroll(band, tops[i]));
   const context = {
     room,
