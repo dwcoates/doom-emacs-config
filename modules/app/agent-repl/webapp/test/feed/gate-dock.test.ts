@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  DOCK_BACKGROUND_PROPERTY,
   DOCK_HEIGHT_PROPERTY,
-  toldDockBackground,
   toldDockHeight,
   DOCKED_CARD_CLASS,
   DOCKED_ROW_CLASS,
@@ -12,7 +10,6 @@ import {
 } from "../../src/feed/gate-dock.js";
 import { shellElements } from "../../src/shell.js";
 import { shellHTML } from "../shell-html.js";
-import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 // Imported at collection, not inside a test, so the transform never counts
 // against a test's timeout.
@@ -47,7 +44,6 @@ afterEach(() => {
   installed?.dispose();
   installed = null;
   document.documentElement.style.removeProperty(DOCK_HEIGHT_PROPERTY);
-  document.documentElement.style.removeProperty(DOCK_BACKGROUND_PROPERTY);
 });
 
 /** The feed as feed-view.ts builds it: every row inside one body. */
@@ -300,28 +296,16 @@ describe("installGateDock", () => {
   });
 });
 
-describe("the docked gate's background", () => {
-  it("takes the background Emacs told it", () => {
+describe("the gate's background (owner request, 2026-10-28)", () => {
+  it.each([
+    ["the docked card", /#gate-dock > \.cold-gate\.cold-gate-docked\s*\{[^}]*\}/],
+    ["the undocked card", /\n\.cold-gate\s*\{[^}]*\}/],
+  ])("paints %s the feed's own ground, never a told color or the revival yellow", (_name, selector) => {
     // Arrange
-    document.documentElement.style.setProperty(DOCK_BACKGROUND_PROPERTY, "#1d1f21");
-
-    // Act / Assert
-    expect(toldDockBackground(document)).toBe("#1d1f21");
-  });
-
-  it("is untold when Emacs never told a background", () => {
-    // Arrange / Act / Assert
-    expect(toldDockBackground(document)).toBeNull();
-  });
-
-  it("paints the docked card from the told property, the card's own background only as fallback", () => {
-    // Arrange
-
     // Act
-    const rule = /#gate-dock > \.cold-gate\.cold-gate-docked\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
-
+    const rule = selector.exec(css)?.[0] ?? "";
     // Assert
-    expect(rule).toContain("background: var(--input-bg, var(--bg))");
+    expect([rule.includes("background: var(--bg);"), rule.includes("--input-bg"), rule.includes("revival-gate-bg")]).toEqual([true, false, false]);
   });
 
   it("frames the docked gate on every side, not only above it", () => {
@@ -340,42 +324,9 @@ describe("the docked gate's background", () => {
     expect(rule.includes("padding-bottom: 1px;")).toBe(true);
   });
 
-  it("paints the undocked card the input window's color too, never the revival yellow", () => {
-    // Arrange
-    // Act
-    const rule = /\n\.cold-gate\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
-    // Assert
-    expect([rule.includes("background: var(--input-bg, var(--bg))"), rule.includes("revival-gate-bg")]).toEqual([true, false]);
-  });
-
-  it("records at INFO a dock Emacs never told its background", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    const { feed, dock } = page();
-    const { row } = gateRow("standing");
-    feed.append(row);
-
-    // Act
-    installed = installGateDock(feed, dock);
-
-    // Assert
-    expect((await forwardedRecord(capture, "feed.gate-dock.background-fallback")).level.case).toBe("info");
-  });
-
-  it("records the told background on the docking record", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    document.documentElement.style.setProperty(DOCK_BACKGROUND_PROPERTY, "#1d1f21");
-    const { feed, dock } = page();
-    const { row } = gateRow("standing");
-    feed.append(row);
-
-    // Act
-    installed = installGateDock(feed, dock);
-
-    // Assert
-    expect((await forwardedRecord(capture, "feed.gate-dock.docked")).context).toMatchObject({
-      background: "#1d1f21",
-    });
+  it("is told by no property any more", () => {
+    // Arrange / Act / Assert
+    expect(css.includes("--input-bg")).toBe(false);
   });
 });
+

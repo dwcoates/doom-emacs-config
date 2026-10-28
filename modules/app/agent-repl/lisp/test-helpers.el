@@ -819,7 +819,6 @@ re-routes their frontend resolution instead."
          (agent-repl--webhost-buffer nil)
          (agent-repl--webhost-pages (make-hash-table :test 'equal))
          (agent-repl--webhost-shown nil)
-         (agent-repl--webhost-input-backgrounds (make-hash-table :test 'equal))
          (agent-repl--webhost-gate-docks (make-hash-table :test 'equal))
          (agent-repl--webhost-held-ingress (make-hash-table :test 'equal))
          (agent-repl--held-ingress-pushed (make-hash-table :test 'equal))

@@ -358,8 +358,7 @@ describe("ensure", () => {
   it("keeps the desired state Emacs gave across a re-point", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");
-    host.setInputBackground("a", "#123456");
-    host.setGateDock("a", 40, "#abcdef");
+    host.setGateDock("a", 40);
 
     // Act
     host.ensure("a", "http://ws-a.localhost:2/");
@@ -370,13 +369,8 @@ describe("ensure", () => {
     expect(posted).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          kind: "inputBackground",
-          background: "#123456",
-        }),
-        expect.objectContaining({
           kind: "gateDock",
           pixels: 40,
-          background: "#abcdef",
         }),
       ]),
     );
@@ -633,36 +627,19 @@ describe("reload", () => {
 });
 
 describe("commands", () => {
-  it("sends the input window's background to the page", () => {
-    // Arrange
-    host.ensure("a", "http://ws-a.localhost:1/");
-    const posted = postsTo("a");
-
-    // Act
-    host.setInputBackground("a", "#101010");
-
-    // Assert
-    expect(posted).toContainEqual({
-      channel: HOST_CHANNEL,
-      kind: "inputBackground",
-      background: "#101010",
-    });
-  });
-
   it("sends the docked gate's slot to the page", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");
     const posted = postsTo("a");
 
     // Act
-    host.setGateDock("a", 140, null);
+    host.setGateDock("a", 140);
 
     // Assert
     expect(posted).toContainEqual({
       channel: HOST_CHANNEL,
       kind: "gateDock",
       pixels: 140,
-      background: null,
     });
   });
 
@@ -716,7 +693,7 @@ describe("commands", () => {
   });
 
   it("answers absent for a command to a workspace it holds no page for", () => {
-    expect(parsed(host.setInputBackground("nobody", "#000")).outcome).toBe(
+    expect(parsed(host.setGateDock("nobody", 10)).outcome).toBe(
       "absent",
     );
   });
@@ -726,8 +703,7 @@ describe("hello", () => {
   it("replays the state Emacs gave to a page that says hello", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");
-    host.setInputBackground("a", "#202020");
-    host.setGateDock("a", 90, "#202020");
+    host.setGateDock("a", 90);
     host.show("a");
     const posted = postsTo("a");
 
@@ -739,12 +715,10 @@ describe("hello", () => {
       { channel: HOST_CHANNEL, kind: "presence", shown: true },
       { channel: HOST_CHANNEL, kind: "sidebarDock", docked: false },
       { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] },
-      { channel: HOST_CHANNEL, kind: "inputBackground", background: "#202020" },
       {
         channel: HOST_CHANNEL,
         kind: "gateDock",
         pixels: 90,
-        background: "#202020",
       },
     ]);
   });
@@ -1722,7 +1696,7 @@ describe("a shown page re-pointed at another daemon", () => {
     host.show("a");
     host.ensure("a", "http://ws-a.localhost:2/");
     const [, fresh] = framesOf("a");
-    host.setInputBackground("a", "#123456");
+    host.setGateDock("a", 120);
     const posted = (() => {
       const got: HostToPage[] = [];
       const target = fresh.contentWindow;
@@ -1739,8 +1713,8 @@ describe("a shown page re-pointed at another daemon", () => {
     // Assert
     expect(posted).toContainEqual({
       channel: HOST_CHANNEL,
-      kind: "inputBackground",
-      background: "#123456",
+      kind: "gateDock",
+      pixels: 120,
     });
   });
 
@@ -1875,8 +1849,7 @@ describe("a page re-pointed into a fresh frame", () => {
     // Arrange
     pages(host, "a", "b");
     host.show(shown ? "a" : "b");
-    host.setInputBackground("a", "#123456");
-    host.setGateDock("a", 120, "#000");
+    host.setGateDock("a", 120);
     host.ensure("a", "http://ws-a.localhost:2/");
     const fresh = lastFrame("a");
     const posted = postsInto(fresh);
@@ -1889,14 +1862,8 @@ describe("a page re-pointed into a fresh frame", () => {
     // Assert
     expect(posted).toContainEqual({
       channel: HOST_CHANNEL,
-      kind: "inputBackground",
-      background: "#123456",
-    });
-    expect(posted).toContainEqual({
-      channel: HOST_CHANNEL,
       kind: "gateDock",
       pixels: 120,
-      background: "#000",
     });
   });
 });

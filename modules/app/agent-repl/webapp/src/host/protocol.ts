@@ -60,20 +60,11 @@ interface PresenceMessage {
   readonly reloadStartedAtMs?: number;
 }
 
-/** host -> page: the background the workspace's Emacs input window paints. */
-interface InputBackgroundMessage {
-  readonly channel: typeof HOST_CHANNEL;
-  readonly kind: "inputBackground";
-  readonly background: string;
-}
-
 /** host -> page: the slot a docked gate takes, the input window's. */
 interface GateDockMessage {
   readonly channel: typeof HOST_CHANNEL;
   readonly kind: "gateDock";
   readonly pixels: number;
-  /** The input window's background, or null when Emacs has none to give. */
-  readonly background: string | null;
 }
 
 /** host -> page: close the standing news digest, as its close control does. */
@@ -176,7 +167,6 @@ export type HostToPage =
   | HeldIngressMessage
   | LogLevelMessage
   | PresenceMessage
-  | InputBackgroundMessage
   | GateDockMessage
   | DismissDigestMessage
   | FocusMovedMessage
@@ -288,15 +278,9 @@ export function parseHostToPage(data: unknown): HostToPage | null {
         ...(reloadStartedAtMs === undefined ? {} : { reloadStartedAtMs }),
       };
     }
-    case "inputBackground":
-      return typeof data.background === "string"
-        ? { channel: HOST_CHANNEL, kind: "inputBackground", background: data.background }
-        : null;
     case "gateDock":
-      return typeof data.pixels === "number" &&
-        Number.isFinite(data.pixels) &&
-        (data.background === null || typeof data.background === "string")
-        ? { channel: HOST_CHANNEL, kind: "gateDock", pixels: data.pixels, background: data.background }
+      return typeof data.pixels === "number" && Number.isFinite(data.pixels)
+        ? { channel: HOST_CHANNEL, kind: "gateDock", pixels: data.pixels }
         : null;
     case "dismissDigest":
       return { channel: HOST_CHANNEL, kind: "dismissDigest" };

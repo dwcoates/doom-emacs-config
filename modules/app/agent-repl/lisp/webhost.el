@@ -83,11 +83,8 @@ workspace's own.")
 (defvar agent-repl--webhost-shown nil
   "The workspace id whose page the host should show, or nil.")
 
-(defvar agent-repl--webhost-input-backgrounds (make-hash-table :test #'equal)
-  "Workspace id -> the background its Emacs input window paints.")
-
 (defvar agent-repl--webhost-gate-docks (make-hash-table :test #'equal)
-  "Workspace id -> (PIXELS . BACKGROUND), the slot its docked gate takes.")
+  "Workspace id -> PIXELS, the height of the slot its docked gate takes.")
 
 (defvar agent-repl--webhost-follow-conn nil
   "The connection to the daemon the host's calls were last pointed at, or nil.
@@ -487,7 +484,6 @@ show, so the page can measure it."
   "Drop WS's page from the host, and everything held for it."
   (when-let ((id (agent-repl--webhost-id ws)))
     (remhash id agent-repl--webhost-pages)
-    (remhash id agent-repl--webhost-input-backgrounds)
     (remhash id agent-repl--webhost-gate-docks)
     (remhash id agent-repl--webhost-held-ingress)
     (when (equal id agent-repl--webhost-shown)
@@ -539,18 +535,11 @@ calls go moves (`setDaemon')."
   (let ((parsed (url-generic-parse-url url)))
     (format "%s://%s:%d" (url-type parsed) (url-host parsed) (url-port parsed))))
 
-(defun agent-repl-webhost-set-input-background (ws background)
-  "Tell WS's page the BACKGROUND its input window paints; kept for its reloads."
+(defun agent-repl-webhost-set-gate-dock (ws pixels)
+  "Tell WS's page the PIXELS tall slot its docked gate takes; kept for its reloads."
   (when-let ((id (agent-repl--webhost-id ws)))
-    (puthash id background agent-repl--webhost-input-backgrounds)
-    (agent-repl--webhost-call "setInputBackground" id background)))
-
-(defun agent-repl-webhost-set-gate-dock (ws pixels background)
-  "Tell WS's page the slot its docked gate takes; kept for its reloads.
-BACKGROUND is the input window's, or nil when it has none."
-  (when-let ((id (agent-repl--webhost-id ws)))
-    (puthash id (cons pixels background) agent-repl--webhost-gate-docks)
-    (agent-repl--webhost-call "setGateDock" id pixels background)))
+    (puthash id pixels agent-repl--webhost-gate-docks)
+    (agent-repl--webhost-call "setGateDock" id pixels)))
 
 (defun agent-repl-webhost-set-held-ingress (ws entries)
   "Tell WS's page the held-prompt ingress ENTRIES for WS; kept for its reloads.
@@ -639,10 +628,8 @@ A replay after a reload hands the reload's start with the page
 \(`agent-repl--webhost-reload-started-ms')."
   (when-let ((url (gethash id agent-repl--webhost-pages)))
     (agent-repl--webhost-call "ensure" id url lane agent-repl--webhost-reload-started-ms)
-    (when-let ((background (gethash id agent-repl--webhost-input-backgrounds)))
-      (agent-repl--webhost-call "setInputBackground" id background))
-    (when-let ((dock (gethash id agent-repl--webhost-gate-docks)))
-      (agent-repl--webhost-call "setGateDock" id (car dock) (cdr dock)))
+    (when-let ((pixels (gethash id agent-repl--webhost-gate-docks)))
+      (agent-repl--webhost-call "setGateDock" id pixels))
     (when-let ((entries (gethash id agent-repl--webhost-held-ingress)))
       (agent-repl--webhost-call "setHeldIngress" id entries))))
 

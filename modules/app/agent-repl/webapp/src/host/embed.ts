@@ -11,7 +11,7 @@
  * parent, and nothing else may steer it.
  */
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../feed/conversation-drawn.js";
-import { DOCK_BACKGROUND_PROPERTY, DOCK_HEIGHT_PROPERTY } from "../feed/gate-dock.js";
+import { DOCK_HEIGHT_PROPERTY } from "../feed/gate-dock.js";
 
 /** The id of the page's docked gate band (index.html). */
 const GATE_DOCK_ID = "gate-dock";
@@ -114,12 +114,8 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         if (message.reloadStartedAtMs !== undefined) presence.setReloadStartedAt(message.reloadStartedAtMs);
         presence.setShown(message.shown, message.switchStartedAtMs ?? null);
         return;
-      case "inputBackground":
-        root.setProperty(DOCK_BACKGROUND_PROPERTY, message.background);
-        return;
       case "gateDock":
         root.setProperty(DOCK_HEIGHT_PROPERTY, `${message.pixels}px`);
-        if (message.background !== null) root.setProperty(DOCK_BACKGROUND_PROPERTY, message.background);
         return;
       case "sidebarDock":
         if (doc.documentElement.classList.contains(WEBHOST_SIDEBAR_CLASS) !== message.docked) {
