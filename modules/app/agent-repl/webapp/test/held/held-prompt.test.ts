@@ -505,6 +505,12 @@ describe("drawHeldPrompt hold arms", () => {
       line: "wire reconnect",
     },
     {
+      name: "loading",
+      prompt: heldPrompt({ hold: { case: "loading", value: {} } }),
+      arm: "loading",
+      line: "wire loading",
+    },
+    {
       name: "build_refresh",
       prompt: heldPrompt({ hold: { case: "buildRefresh", value: {} } }),
       arm: "buildRefresh",
@@ -661,6 +667,10 @@ describe("drawHeldPrompt release availability", () => {
     {
       name: "reconnect",
       prompt: heldPrompt({ hold: { case: "reconnect", value: {} } }),
+    },
+    {
+      name: "loading",
+      prompt: heldPrompt({ hold: { case: "loading", value: {} } }),
     },
   ];
 
@@ -1444,6 +1454,7 @@ const EXPECTED_BADGES: Readonly<Record<HeldStatus, string>> = {
   buildRefresh: "amber",
   merge: "amber",
   reconnect: "teal",
+  loading: "teal",
   coldGate: "teal",
   awaitingDelivery: "muted",
   coldGateAnswered: "muted",

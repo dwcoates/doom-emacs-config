@@ -67,6 +67,7 @@ import type {
   HeldPromptInterject,
   HeldPromptMergeHold,
   HeldPromptQueuedAt,
+  HeldPromptLoadingHold,
   HeldPromptReconnectHold,
   HeldPromptShutdownHold,
   HeldPromptUninterruptibleTurn,
@@ -153,6 +154,8 @@ export const NO_RELEASE_TITLES: Readonly<Record<string, string>> = {
     "a context cut is never interrupted for a queued prompt, so it cannot be sent ahead of it — it is delivered the moment that turn ends",
   reconnect:
     "the session is not up, so a prompt sent now would have nowhere to be delivered — it is delivered when the session reconnects",
+  loading:
+    "the session is still loading, so a prompt sent now would have nowhere to be delivered — it is delivered once it has loaded",
   merge:
     "a merge is driving the session, so a prompt sent now would run inside it — it is delivered the moment the merge ends",
   coldGate:
@@ -330,6 +333,7 @@ function holdCardHooks(hold: string | null): string[] {
     case "merge":
       return ["held-right", "lease-card"];
     case "reconnect":
+    case "loading":
     case "coldGate":
     case "coldGateAnswered":
       // The card's `data-hold` names the wait; it wears no hook of its own.
@@ -575,6 +579,8 @@ function drawHold(
         hold.value,
         `${path}.reconnect`,
       );
+    case "loading":
+      return drawHeldPromptLoadingHold(hold.value, `${path}.loading`);
     case "buildRefresh":
       return drawHeldPromptBuildRefreshHold(
         hold.value,
@@ -618,6 +624,21 @@ export function drawHeldPromptReconnectHold(
     context: { path },
   });
   return "reconnect";
+}
+
+/**
+ * Held until the session finishes loading (owner ruling, 2026-10-28). Empty on
+ * the wire: presence is the fact.
+ */
+export function drawHeldPromptLoadingHold(
+  _u: HeldPromptLoadingHold,
+  path: string,
+): HeldStatus {
+  log.debug("drawing a loading hold", {
+    operation: "held.held-prompt.loading-hold",
+    context: { path },
+  });
+  return "loading";
 }
 
 /** Held for the build refresh. Empty on the wire: presence is the fact. */
@@ -1187,7 +1208,7 @@ export type HeldBadgeTone = "ok" | "err" | "run" | "muted" | "amber" | "teal";
  *   - an uninterruptible turn: the prompt WAITS for the cut's end, so red;
  *   - a classification error: a failure, the error red;
  *   - a shutdown, build-refresh or merge hold: coordinated daemon work, amber;
- *   - a reconnect hold: the machinery bringing a session up, the
+ *   - a reconnect or loading hold: the machinery bringing a session up, the
  *     hibernation teal;
  *   - a cold-gate hold: the session is not up either, waiting on the gate's
  *     answer, so the same teal;
@@ -1208,6 +1229,7 @@ export const HELD_STATUS_BADGES = {
   buildRefresh: "amber",
   merge: "amber",
   reconnect: "teal",
+  loading: "teal",
   coldGate: "teal",
   awaitingDelivery: "muted",
   coldGateAnswered: "muted",

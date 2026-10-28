@@ -1066,6 +1066,37 @@ func TestADeathWithNoBounceIsRecordedAtInfo(t *testing.T) {
 	}
 }
 
+// TestADeathsRevivalIsARelaunchForTheHeldSection pins the owner ruling of
+// 2026-10-28: the prompts held while a shim that died is relaunched read
+// "after reconnect", for exactly as long as the relaunch runs.
+func TestADeathsRevivalIsARelaunchForTheHeldSection(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	dieAndRevive(h, departedUnasked)
+
+	// Assert
+	if got := h.holds.relaunchMarks(); len(got) != 2 || !got[0] || got[1] {
+		t.Fatalf("relaunch marks = %v, want raised for the revival and lowered after it", got)
+	}
+}
+
+func TestAPromptsRevivalIsNoRelaunch(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+
+	// Act
+	h.q.reviveInBackground(context.Background(), "ws-1", revivalLoad, h.log.Global())
+	h.waitRevivals()
+
+	// Assert
+	if got := h.holds.relaunchMarks(); len(got) != 0 {
+		t.Fatalf("relaunch marks = %v, want none for a load", got)
+	}
+}
+
 func TestADeathWhoseWorkspaceCannotBeReadIsRecordedAtError(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

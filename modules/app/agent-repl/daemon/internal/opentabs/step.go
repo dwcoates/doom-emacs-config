@@ -106,6 +106,19 @@ type Step struct {
 	Text string
 }
 
+// Begins reports whether the step begins a bring-up: a shim being started or
+// adopted, or a parked session waking.
+func (s Step) Begins() bool { return s.Kind == StepStartingSession || s.Kind == StepWaking }
+
+// Ends reports whether the step ends a bring-up, however it ended.
+func (s Step) Ends() bool {
+	switch s.Kind {
+	case StepUp, StepFailed, StepColdGate, StepVendorRejected, StepVendorFailed:
+		return true
+	}
+	return false
+}
+
 // serves reports whether the step proves agent-repl's services serve the
 // workspace: everything after the shim answered, whatever the vendor did.
 func (s Step) serves() bool {

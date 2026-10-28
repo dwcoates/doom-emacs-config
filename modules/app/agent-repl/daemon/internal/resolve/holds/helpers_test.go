@@ -39,15 +39,17 @@ var queuedAt = time.UnixMilli(1_700_000_000_000)
 type renderer struct {
 	held    []wsm.HeldPrompt
 	editing ids.TurnID
-	log     dlog.Logger
-	cards   []holds.Card
+	// loading and relaunching are the shim start facts it was told.
+	loading, relaunching bool
+	log                  dlog.Logger
+	cards                []holds.Card
 }
 
 // SetHeldPrompts records the standing holds, as the prompt queue states them,
 // and renders them at once, as the feed resolver does on every change.
 func (r *renderer) SetHeldPrompts(_ ids.WorkspaceID, held []wsm.HeldPrompt) {
 	r.held = held
-	r.cards = holds.Prompts(r.held, r.editing, textBody, r.log)
+	r.render()
 }
 
 // FoldHeldPrompts records the standing holds a fold left, and renders them
@@ -59,7 +61,26 @@ func (r *renderer) FoldHeldPrompts(ws ids.WorkspaceID, held []wsm.HeldPrompt, _ 
 // SetEditing records the hold being edited, and renders again.
 func (r *renderer) SetEditing(_ ids.WorkspaceID, turn ids.TurnID) {
 	r.editing = turn
-	r.cards = holds.Prompts(r.held, r.editing, textBody, r.log)
+	r.render()
+}
+
+// SetShimLoading records whether a shim start is under way, and renders again.
+func (r *renderer) SetShimLoading(_ ids.WorkspaceID, loading bool) {
+	r.loading = loading
+	r.render()
+}
+
+// SetRelaunching records whether the start relaunches a shim that died, and
+// renders again.
+func (r *renderer) SetRelaunching(_ ids.WorkspaceID, relaunching bool) {
+	r.relaunching = relaunching
+	r.render()
+}
+
+// render draws the cards from what the renderer was told, as the feed
+// resolver does on every change.
+func (r *renderer) render() {
+	r.cards = holds.Prompts(r.held, r.editing, holds.StartOf(r.loading, r.relaunching), textBody, r.log)
 }
 
 // newRenderer builds a renderer plus the surfaces its records land in.

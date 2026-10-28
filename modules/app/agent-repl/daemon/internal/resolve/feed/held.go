@@ -42,6 +42,9 @@ type heldState struct {
 	// editing is the held prompt an EditHeldPrompt claim stands on, empty when
 	// none does.
 	editing ids.TurnID
+	// loading and relaunching are the shim start facts the Sink is told
+	// (holds.StartOf).
+	loading, relaunching bool
 	// published is the section as last published; nil until the first.
 	published *frontendv1.FeedHeld
 	// ingress are the held-prompt ingress's unaccepted entries as the ingress
@@ -107,6 +110,37 @@ func (r *resolver) SetEditing(ws ids.WorkspaceID, turn ids.TurnID) {
 	r.publishHeld(s, nil, nil)
 }
 
+// SetShimLoading says whether a start of the workspace's shim is under way,
+// which badges the prompts held for its session.
+func (r *resolver) SetShimLoading(ws ids.WorkspaceID, loading bool) {
+	r.setShimStart(ws, func(h *heldState) { h.loading = loading })
+}
+
+// SetRelaunching says whether the start under way relaunches a shim that
+// died, which badges the prompts held for its session.
+func (r *resolver) SetRelaunching(ws ids.WorkspaceID, relaunching bool) {
+	r.setShimStart(ws, func(h *heldState) { h.relaunching = relaunching })
+}
+
+// setShimStart applies one shim start fact, republishing the section when the
+// start it answers moved.
+func (r *resolver) setShimStart(ws ids.WorkspaceID, set func(*heldState)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	h := r.heldOf(ws)
+	before := holds.StartOf(h.loading, h.relaunching)
+	set(h)
+	after := holds.StartOf(h.loading, h.relaunching)
+	if before == after {
+		return
+	}
+	r.logger(ws).Debug(opHeld, "the held section took the shim start under way", dlog.Context{
+		"before": before.String(), "after": after.String(),
+	})
+	r.publishHeld(s, nil, nil)
+}
+
 // currentHeld answers the section as it stands at this moment of the root
 // feed's log: the one last published, or the empty section when none ever was
 // (which it then records as published, so the next change is judged against
@@ -163,7 +197,7 @@ func (r *resolver) renderHeld(s *wsState, h *heldState) *frontendv1.FeedHeld {
 	draw := func(content *conversationv1.UserContent) *frontendv1.FeedUserPromptBody {
 		return &frontendv1.FeedUserPromptBody{Blocks: r.drawUserBlocks(s, content)}
 	}
-	for _, card := range holds.Prompts(h.prompts, h.editing, draw, log) {
+	for _, card := range holds.Prompts(h.prompts, h.editing, holds.StartOf(h.loading, h.relaunching), draw, log) {
 		id, drawn := r.promptRowDrawn(s, card.Turn)
 		if drawn {
 			log.Debug(opHeld, "a standing hold's prompt row is drawn; it has settled out of the section", dlog.Context{

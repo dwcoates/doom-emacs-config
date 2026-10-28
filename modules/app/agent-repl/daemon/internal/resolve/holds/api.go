@@ -37,6 +37,54 @@ type Sink interface {
 	// clears it with the empty turn. Its card carries HeldPrompt.editing. The
 	// prompt queue is the only caller.
 	SetEditing(ws ids.WorkspaceID, turn ids.TurnID)
+	// SetShimLoading says whether a start of the workspace's shim is under
+	// way, as the fleet reports every bring-up's steps.
+	SetShimLoading(ws ids.WorkspaceID, loading bool)
+	// SetRelaunching says whether the start under way, or about to be, is
+	// relaunching a shim that DIED. The prompt queue is the only caller.
+	SetRelaunching(ws ids.WorkspaceID, relaunching bool)
+}
+
+// ShimStart is the start of a workspace's shim under way, as the prompts held
+// for its session are badged by it.
+type ShimStart int
+
+const (
+	// ShimStartNone is no start under way: the session is up, or down until
+	// something brings it up.
+	ShimStartNone ShimStart = iota
+	// ShimStartLoading is a start under way for a prompt, a keep-alive, a
+	// cold gate's answer, a boot or a restart (owner ruling, 2026-10-28).
+	ShimStartLoading
+	// ShimStartRelaunching is a shim that DIED being relaunched.
+	ShimStartRelaunching
+)
+
+// StartOf answers the start under way from the two facts the Sink is told: a
+// relaunch of a shim that died outranks a load, and neither is no start.
+func StartOf(loading, relaunching bool) ShimStart {
+	switch {
+	case relaunching:
+		return ShimStartRelaunching
+	case loading:
+		return ShimStartLoading
+	default:
+		return ShimStartNone
+	}
+}
+
+// String names the start for the records.
+func (s ShimStart) String() string {
+	switch s {
+	case ShimStartNone:
+		return "none"
+	case ShimStartLoading:
+		return "loading"
+	case ShimStartRelaunching:
+		return "relaunching"
+	default:
+		return "unknown"
+	}
 }
 
 // DrawBody resolves what a person said into the body a card draws: the very
@@ -48,18 +96,19 @@ type DrawBody func(content *conversationv1.UserContent) *frontendv1.FeedUserProm
 // Prompts renders the standing holds as the held section's prompt cards, in
 // delivery order: oldest first, a retired hold skipped, each card's "fold
 // above" button naming the standing card drawn just before it. EDITING names
-// the hold an EditHeldPrompt claim stands on, empty when none does. DRAW
+// the hold an EditHeldPrompt claim stands on, empty when none does.
+// START is the workspace's shim start under way (StartOf). DRAW
 // resolves each card's body.
 //
 // The answer pairs each card with the hold it was drawn from, because the
 // section's caller keys each item by the hold's turn.
-func Prompts(held []wsm.HeldPrompt, editing ids.TurnID, draw DrawBody, log dlog.Logger) []Card {
+func Prompts(held []wsm.HeldPrompt, editing ids.TurnID, start ShimStart, draw DrawBody, log dlog.Logger) []Card {
 	cards := make([]Card, 0, len(held))
 	// ahead is the standing entry drawn just before this one: what its "fold
 	// above" button would fold it into.
 	var ahead *wsm.HeldPrompt
 	for _, h := range orderedHolds(held) {
-		prompt := heldPrompt(h, editing != "" && h.Turn == editing, draw, log)
+		prompt := heldPrompt(h, editing != "" && h.Turn == editing, start, draw, log)
 		if prompt == nil {
 			continue
 		}

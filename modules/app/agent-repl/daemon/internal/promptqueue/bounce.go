@@ -648,7 +648,7 @@ func (q *queue) reviveAfterDeath(ws ids.WorkspaceID, state *wsState, record wsm.
 		return
 	}
 	log.Info(opRevive, "the shim died on its own; its session is brought back now", nil)
-	q.reviveInBackground(q.lifetime(), ws, log)
+	q.reviveInBackground(q.lifetime(), ws, revivalRelaunch, log)
 }
 
 // unregisterReplacementLocked drops the registered bounce's REPLACEMENT stage

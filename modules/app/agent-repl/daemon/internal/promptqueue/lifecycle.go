@@ -592,7 +592,7 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 		log.Debug(opLeaseChange, "no standing hold changed under the new lease",
 			dlog.Context{"holds": len(standing)})
 		if revivalPending {
-			q.reviveInBackground(ctx, ws, log)
+			q.reviveInBackground(ctx, ws, revivalLoad, log)
 			return
 		}
 		// AN UNCHANGED TRAY CAN STILL HOLD AN ENTRY NOTHING DRIVES: a free
@@ -611,7 +611,7 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	if revivalPending {
 		log.Debug(opLeaseChange, "the lease ended with no session up; the holds wait on a revival",
 			dlog.Context{"holds": len(standing)})
-		q.reviveInBackground(ctx, ws, log)
+		q.reviveInBackground(ctx, ws, revivalLoad, log)
 		return
 	}
 

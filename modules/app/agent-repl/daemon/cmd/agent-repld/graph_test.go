@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/opentabs"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
@@ -697,5 +698,41 @@ func TestFaultSinksTellEverySinkOfEachFault(t *testing.T) {
 	want := []string{"open ws-1 f-1", "close ws-1 f-1"}
 	if !slices.Equal(a.events, want) || !slices.Equal(b.events, want) {
 		t.Fatalf("sinks told %v and %v, want both %v", a.events, b.events, want)
+	}
+}
+
+// loadingRecorder records every SetShimLoading.
+type loadingRecorder struct{ marks []bool }
+
+func (r *loadingRecorder) SetShimLoading(_ ids.WorkspaceID, loading bool) {
+	r.marks = append(r.marks, loading)
+}
+
+func TestShimLoadingFollowsTheBringUpsSteps(t *testing.T) {
+	tests := []struct {
+		name string
+		step opentabs.StepKind
+		want []bool
+	}{
+		{name: "a shim being started is loading", step: opentabs.StepStartingSession, want: []bool{true}},
+		{name: "a parked session waking is loading", step: opentabs.StepWaking, want: []bool{true}},
+		{name: "a session up ends it", step: opentabs.StepUp, want: []bool{false}},
+		{name: "a failed start ends it", step: opentabs.StepFailed, want: []bool{false}},
+		{name: "a cold gate ends it", step: opentabs.StepColdGate, want: []bool{false}},
+		{name: "a step inside the bring-up says nothing", step: opentabs.StepServing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			rec := &loadingRecorder{}
+
+			// Act
+			shimLoading(rec, "ws-1", opentabs.Step{Kind: tt.step})
+
+			// Assert
+			if !slices.Equal(rec.marks, tt.want) {
+				t.Fatalf("marks = %v, want %v", rec.marks, tt.want)
+			}
+		})
 	}
 }

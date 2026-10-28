@@ -884,8 +884,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Topbar:       topbarResolver,
 		BringUps:     bringingUp,
 		VendorStarts: sidebarResolver.SetVendorStart,
-		Steps:        opens.Step,
-		SessionsUp:   lifecycle.SessionUp,
+		// EVERY BRING-UP'S STEPS reach the editor's opens and the held
+		// section, whose prompts read "after loading" while a shim loads.
+		Steps: func(ws ids.WorkspaceID, step opentabs.Step) {
+			opens.Step(ws, step)
+			shimLoading(feedResolver, ws, step)
+		},
+		SessionsUp: lifecycle.SessionUp,
 		// OFF THE BRING-UP'S GOROUTINE: the merge being ejected may itself be
 		// what is bringing the session up (its repair's ensureSession), and
 		// the eviction waits for that run to stop.
@@ -2280,6 +2285,18 @@ func (f *faultSurfaces) FaultClosed(ws ids.WorkspaceID, id ids.FaultID) {
 	if raised {
 		f.topbar.RetractDaemonWarning(string(id))
 		f.loud.Closed(id)
+	}
+}
+
+// shimLoading tells the held section a bring-up began or ended, from the
+// fleet's step: a prompt held for the session reads "after loading" while a
+// shim loads (owner ruling, 2026-10-28).
+func shimLoading(held interface{ SetShimLoading(ids.WorkspaceID, bool) }, ws ids.WorkspaceID, step opentabs.Step) {
+	switch {
+	case step.Begins():
+		held.SetShimLoading(ws, true)
+	case step.Ends():
+		held.SetShimLoading(ws, false)
 	}
 }
 

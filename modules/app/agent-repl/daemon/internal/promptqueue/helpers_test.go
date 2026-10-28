@@ -1502,6 +1502,21 @@ type fakeHolds struct {
 	folds []holds.Fold
 	// editing records every SetEditing, in order.
 	editing []ids.TurnID
+	// relaunching records every SetRelaunching, in order.
+	relaunching []bool
+}
+
+func (h *fakeHolds) SetRelaunching(_ ids.WorkspaceID, relaunching bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.relaunching = append(h.relaunching, relaunching)
+}
+
+// relaunchMarks answers every recorded SetRelaunching.
+func (h *fakeHolds) relaunchMarks() []bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]bool(nil), h.relaunching...)
 }
 
 func (h *fakeHolds) SetEditing(_ ids.WorkspaceID, turn ids.TurnID) {

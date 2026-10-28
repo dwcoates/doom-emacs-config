@@ -50,7 +50,7 @@ func TestQueueStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
 					<-release
 					h.noSession = false
 				}
-				h.q.reviveInBackground(context.Background(), "ws-1", log)
+				h.q.reviveInBackground(context.Background(), "ws-1", revivalLoad, log)
 				<-entered
 				return func() { close(release); h.waitRevivals() }
 			},
@@ -60,7 +60,7 @@ func TestQueueStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
 			act: func(h *harness, log dlog.Logger) func() {
 				h.noSession = true
 				h.reviveHook = func() { h.noSession = false }
-				h.q.reviveInBackground(context.Background(), "ws-1", log)
+				h.q.reviveInBackground(context.Background(), "ws-1", revivalLoad, log)
 				h.waitRevivals()
 				return func() {}
 			},

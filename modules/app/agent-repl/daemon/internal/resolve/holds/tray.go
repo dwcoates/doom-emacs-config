@@ -45,7 +45,7 @@ func orderedHolds(held []wsm.HeldPrompt) []wsm.HeldPrompt {
 // the entry is still emitted: a prompt the daemon is really holding must be
 // visible even when its explanation is defective, and dropping it would hide
 // pending work.
-func heldPrompt(h wsm.HeldPrompt, editing bool, draw DrawBody, log dlog.Logger) *frontendv1.HeldPrompt {
+func heldPrompt(h wsm.HeldPrompt, editing bool, start ShimStart, draw DrawBody, log dlog.Logger) *frontendv1.HeldPrompt {
 	if h.Tombstone != nil {
 		log.Debug("daemon.holds.convert", "a retired hold was skipped: the tray draws standing holds only",
 			dlog.Context{"turn_id": string(h.Turn), "tombstone": h.Tombstone.Kind})
@@ -73,7 +73,7 @@ func heldPrompt(h wsm.HeldPrompt, editing bool, draw DrawBody, log dlog.Logger) 
 		QueuedAt: &frontendv1.HeldPromptQueuedAt{AtMs: h.QueuedAt.UnixMilli()},
 	}
 	setClassification(out, h, log)
-	setHold(out, h, log)
+	setHold(out, h, start, log)
 	if editing {
 		log.Debug("daemon.holds.editing", "the hold is being edited", dlog.Context{"turn_id": string(h.Turn)})
 		out.Editing = &frontendv1.HeldPromptEditing{}
@@ -206,7 +206,12 @@ func setClassification(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Lo
 // setHold projects the daemon-side condition onto the tray's oneof. NO ARM is
 // the ordinary case — a turn is running and the classifier decides delivery —
 // so a nil condition leaves the oneof unset rather than inventing a reason.
-func setHold(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Logger) {
+//
+// A PROMPT HELD FOR THE SESSION (wsm.HoldReconnect) IS "AFTER LOADING" WHILE A
+// SHIM LOADS (owner ruling, 2026-10-28): START says which start is under way.
+// A shim that died and is relaunched, and a session that is down or whose
+// vendor refuses it, keep "after reconnect".
+func setHold(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, start ShimStart, log dlog.Logger) {
 	ctx := dlog.Context{"turn_id": string(h.Turn)}
 	if h.Hold == nil {
 		log.Debug("daemon.holds.hold", "the hold is held by the running turn alone", ctx)
@@ -226,6 +231,13 @@ func setHold(out *frontendv1.HeldPrompt, h wsm.HeldPrompt, log dlog.Logger) {
 		out.Hold = &frontendv1.HeldPrompt_Shutdown{
 			Shutdown: &frontendv1.HeldPromptShutdownHold{ScheduleId: h.ScheduleID}}
 	case wsm.HoldReconnect:
+		ctx["shim_start"] = start.String()
+		if start == ShimStartLoading {
+			ctx["hold"] = "loading"
+			log.Debug("daemon.holds.hold", "the hold waits for the shim to finish loading", ctx)
+			out.Hold = &frontendv1.HeldPrompt_Loading{Loading: &frontendv1.HeldPromptLoadingHold{}}
+			return
+		}
 		ctx["hold"] = "reconnect"
 		log.Debug("daemon.holds.hold", "the hold waits for the session to reconnect", ctx)
 		out.Hold = &frontendv1.HeldPrompt_Reconnect{
@@ -369,12 +381,16 @@ func holdBadge(p *frontendv1.HeldPrompt, ctx dlog.Context, log dlog.Logger) *fro
 			b.StandsFor = &frontendv1.HeldPromptBadge_Shutdown{Shutdown: &frontendv1.HeldPromptBadgeShutdown{}}
 		})
 	case *frontendv1.HeldPrompt_BuildRefresh:
-		return badge("build refresh", "held for the build refresh", func(b *frontendv1.HeldPromptBadge) {
+		return badge("after reloading", "held until the session reloads onto the new build, then sent", func(b *frontendv1.HeldPromptBadge) {
 			b.StandsFor = &frontendv1.HeldPromptBadge_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBadgeBuildRefresh{}}
 		})
 	case *frontendv1.HeldPrompt_Reconnect:
 		return badge("after reconnect", "held until the session reconnects", func(b *frontendv1.HeldPromptBadge) {
 			b.StandsFor = &frontendv1.HeldPromptBadge_Reconnect{Reconnect: &frontendv1.HeldPromptBadgeReconnect{}}
+		})
+	case *frontendv1.HeldPrompt_Loading:
+		return badge("after loading", "held until the session finishes loading, then sent", func(b *frontendv1.HeldPromptBadge) {
+			b.StandsFor = &frontendv1.HeldPromptBadge_Loading{Loading: &frontendv1.HeldPromptBadgeLoading{}}
 		})
 	case *frontendv1.HeldPrompt_Merge:
 		return badge("after the merge", "held until the merge ends; the workspace stays open for it", func(b *frontendv1.HeldPromptBadge) {

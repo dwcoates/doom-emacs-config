@@ -387,9 +387,20 @@ func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Log
 	// outranks this while the route is coming up, so the walk is now
 	// `none` -> `init` -> `submitting` -> `thinking`.
 	q.setTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt})
-	q.reviveInBackground(context.WithoutCancel(ctx), sub.WS, log)
+	q.reviveInBackground(context.WithoutCancel(ctx), sub.WS, revivalLoad, log)
 	return disposition, nil
 }
+
+// revivalCause is why a revival brings a session up: a load (a prompt, a
+// lease's holds) or the relaunch of a shim that died, which badges the
+// prompts held for it "after reconnect" rather than "after loading"
+// (holds.Sink.SetRelaunching).
+type revivalCause int
+
+const (
+	revivalLoad revivalCause = iota
+	revivalRelaunch
+)
 
 // reviveInBackground brings one workspace's session up off the request path and
 // releases every revival-pending hold once it is up.
@@ -397,7 +408,7 @@ func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Log
 // EXACTLY ONE REVIVAL RUNS PER WORKSPACE: a second submission arriving while
 // the first one's bring-up is still running joins its outcome rather than
 // spawning a second bring-up, and its own hold is released by the same sweep.
-func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
+func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, cause revivalCause, log dlog.Logger) {
 	s := q.state(ws)
 	q.mu.Lock()
 	if s.reviving {
@@ -411,12 +422,18 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 	log.Debug("daemon.promptqueue.state_transition", "the workspace revival state changed", dlog.Context{
 		"state": "reviving", "before": beforeReviving, "after": true,
 	})
-	log.Info(opSubmit, "started the background session revival", nil)
+	log.Info(opSubmit, "started the background session revival", dlog.Context{"relaunch": cause == revivalRelaunch})
+	if cause == revivalRelaunch {
+		q.deps.Holds.SetRelaunching(ws, true)
+	}
 
 	q.reviving.Add(1)
 	go func() {
 		defer q.reviving.Done()
 		defer func() {
+			if cause == revivalRelaunch {
+				q.deps.Holds.SetRelaunching(ws, false)
+			}
 			q.mu.Lock()
 			before := s.reviving
 			s.reviving = false

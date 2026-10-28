@@ -215,6 +215,40 @@ func TestTrayConvertsEachHoldArm(t *testing.T) {
 	}
 }
 
+// TestASessionHoldIsAfterLoadingWhileAShimLoads pins the owner ruling of
+// 2026-10-28: a prompt held for the session reads "after loading" while a shim
+// loads, and "after reconnect" while a shim that died is relaunched or no
+// start is under way (a vendor refusing a session that is up included).
+func TestASessionHoldIsAfterLoadingWhileAShimLoads(t *testing.T) {
+	tests := []struct {
+		name                 string
+		loading, relaunching bool
+		want                 string
+	}{
+		{name: "a shim loading", loading: true, want: "loading"},
+		{name: "a shim that died being relaunched", loading: true, relaunching: true, want: "reconnect"},
+		{name: "no start under way", want: "reconnect"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newRenderer(t)
+			held := hold("t1", "queued")
+			held.Hold = kindOf(wsm.HoldReconnect)
+			r.SetHeldPrompts(testWS, []wsm.HeldPrompt{held})
+
+			// Act.
+			r.SetShimLoading(testWS, tc.loading)
+			r.SetRelaunching(testWS, tc.relaunching)
+
+			// Assert.
+			if got := holdName(onlyPrompt(t, latest(t, r))); got != tc.want {
+				t.Fatalf("hold arm = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTrayCarriesTheShutdownSchedule(t *testing.T) {
 	// Arrange.
 	r, _ := newRenderer(t)
@@ -397,6 +431,8 @@ func holdName(p *frontendv1.HeldPrompt) string {
 		return "shutdown"
 	case *frontendv1.HeldPrompt_Reconnect:
 		return "reconnect"
+	case *frontendv1.HeldPrompt_Loading:
+		return "loading"
 	case *frontendv1.HeldPrompt_BuildRefresh:
 		return "build_refresh"
 	case *frontendv1.HeldPrompt_Merge:
@@ -504,7 +540,7 @@ func TestHeldStatusComposesEveryStatus(t *testing.T) {
 			p: &frontendv1.HeldPrompt{Turn: turn, Classification: holdForTurnEnd(), Editing: &frontendv1.HeldPromptEditing{},
 				Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}, Coalesced: &frontendv1.HeldPromptCoalesced{}},
 			want: wantStatus{badge: wantBadge{"editing", ""}, fact: "editing",
-				notes: []string{"held for the build refresh", "after this turn", "later prompts were folded into this one"}},
+				notes: []string{"held until the session reloads onto the new build, then sent", "after this turn", "later prompts were folded into this one"}},
 		},
 		{
 			name: "a hold outranks the verdict",
@@ -514,7 +550,7 @@ func TestHeldStatusComposesEveryStatus(t *testing.T) {
 		{
 			name: "build refresh hold",
 			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_BuildRefresh{BuildRefresh: &frontendv1.HeldPromptBuildRefreshHold{}}},
-			want: wantStatus{badge: wantBadge{"build refresh", "held for the build refresh"}, fact: "build_refresh", notes: []string{"after this turn"}},
+			want: wantStatus{badge: wantBadge{"after reloading", "held until the session reloads onto the new build, then sent"}, fact: "build_refresh", notes: []string{"after this turn"}},
 		},
 		{
 			name: "the reported card: a merge hold over a turn-end verdict shows the merge",
@@ -530,6 +566,11 @@ func TestHeldStatusComposesEveryStatus(t *testing.T) {
 			name: "reconnect hold",
 			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_Reconnect{Reconnect: &frontendv1.HeldPromptReconnectHold{}}},
 			want: wantStatus{badge: wantBadge{"after reconnect", "held until the session reconnects"}, fact: "reconnect", notes: []string{"after this turn"}},
+		},
+		{
+			name: "loading hold",
+			p:    &frontendv1.HeldPrompt{Classification: holdForTurnEnd(), Hold: &frontendv1.HeldPrompt_Loading{Loading: &frontendv1.HeldPromptLoadingHold{}}},
+			want: wantStatus{badge: wantBadge{"after loading", "held until the session finishes loading, then sent"}, fact: "loading", notes: []string{"after this turn"}},
 		},
 		{
 			name: "cold-gate hold under daemon_held draws the hold's badge alone",
