@@ -190,12 +190,12 @@ a completion, as company and `completion-at-point' both do."
     (should (equal (funcall table "" nil 'metadata)
                    `(metadata (category . ,agent-repl--command-completion-category))))))
 
-(ert-deftest agent-repl-test-command-completion-category-default-is-substring ()
+(ert-deftest agent-repl-test-command-completion-category-default-is-substring-then-flex ()
   "The table's category is registered in `completion-category-defaults', not
-in `completion-category-overrides', with the `substring' style."
+in `completion-category-overrides', with the `substring' then `flex' styles."
   (should (equal (cdr (assq agent-repl--command-completion-category
                             completion-category-defaults))
-                 '((styles substring basic))))
+                 '((styles substring flex basic))))
   (should-not (assq agent-repl--command-completion-category
                      completion-category-overrides)))
 
@@ -222,6 +222,18 @@ in `completion-category-overrides', with the `substring' style."
   (should (equal (agent-repl-test-command-completion--all
                   "/sta" '("/usage" "/cost" "/stats"))
                  '("/stats"))))
+
+(ert-deftest agent-repl-test-command-completion-table-completes-fuzzily ()
+  "`/arinst' -- characters in order, not contiguous -- completes by the flex style."
+  (should (equal (agent-repl-test-command-completion--all
+                  "/arinst" '("/agent-repl-install" "/clear"))
+                 '("/agent-repl-install"))))
+
+(ert-deftest agent-repl-test-command-completion-table-substring-outranks-flex ()
+  "A contiguous substring is answered by the substring style alone, without flex's looser matches."
+  (should (equal (agent-repl-test-command-completion--all
+                  "/install" '("/agent-repl-install" "/i-n-s-t-a-l-l"))
+                 '("/agent-repl-install"))))
 
 ;; A completion UI keeps the field's typed `/' -- outside the boundary --
 ;; and replaces only what follows it, so the table answers bare names.

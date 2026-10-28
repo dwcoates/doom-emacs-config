@@ -138,13 +138,14 @@ next character.  Point sits inside it or at its end."
 (defconst agent-repl--command-completion-category 'agent-repl-slash-command
   "This capf's own completion category, named to no other table's.
 Registered just below, in `completion-category-defaults', with the
-`substring' style -- so `/profile' offers `/agent-repl-profile' by
-substring, not only by prefix -- without touching the user's own
+`substring' style, then `flex' -- so `/profile' offers `/agent-repl-profile'
+by substring, not only by prefix, and `/arinst' offers `/agent-repl-install'
+by its characters in order -- without touching the user's own
 `completion-styles' or reaching for `completion-category-overrides',
 which is the user's to set.")
 
 (add-to-list 'completion-category-defaults
-             (list agent-repl--command-completion-category '(styles substring basic)))
+             (list agent-repl--command-completion-category '(styles substring flex basic)))
 
 (defun agent-repl--command-completion-table (candidates)
   "Return a completion table over CANDIDATES, in this capf's own category.
