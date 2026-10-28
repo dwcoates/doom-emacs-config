@@ -4428,7 +4428,7 @@ describe("the tool card's command grey", () => {
   // Emacs's input window is the host-native composer, so its
   // `agent-repl-input-background' (lisp/input.el) wears this same color.
   // Neither suite may read the other's file, so lisp/test-input.el pins it too.
-  it("defines the dark theme's composer as Emacs's input background, the sidebar's #1a1a1a", () => {
+  it("defines the dark theme's composer as Emacs's input background, the feed's #121212", () => {
     // Arrange
     const block = darkThemeBlock();
 
@@ -4436,14 +4436,14 @@ describe("the tool card's command grey", () => {
     const got = [themeValueOf(block, "--composer-bg"), themeRgbOf(block, "--composer-bg")];
 
     // Assert — the token itself, never a copied value, resolving to Emacs's pinned color.
-    expect(got).toEqual(["var(--sidebar-bg)", [0x1a, 0x1a, 0x1a]]);
+    expect(got).toEqual(["var(--bg)", [0x12, 0x12, 0x12]]);
   });
 
-  // The composer's help bar (lisp/input-help.el) is grounded with the dark
-  // sidebar's color, and its buttons are filled a little darker than the
-  // sidebar's selected row. Neither suite may read the other's file, so
-  // lisp/test-input-help.el pins both colors too.
-  it("defines the dark theme's sidebar as the help bar's ground, #1a1a1a", () => {
+  // The Settings page (lisp/settings.el) is grounded with the dark sidebar's
+  // color, and the help bar's buttons are filled a little darker than the
+  // sidebar's selected row. Neither suite may read the other's file, so the
+  // lisp suites pin both colors too.
+  it("defines the dark theme's sidebar as the Settings page's ground, #1a1a1a", () => {
     // Arrange
     const block = darkThemeBlock();
 
@@ -6327,14 +6327,14 @@ describe("the topbar's ground (owner request, 2026-10-27)", () => {
     expect(rule).toMatch(/background:\s*var\(--topbar-bg\)\s*;/);
   });
 
-  it("sits the dark topbar between the feed and the composer (owner request, 2026-10-28)", () => {
+  it("sits the dark topbar a touch above the feed (owner request, 2026-10-28)", () => {
     // Arrange
     const block = darkThemeBlock();
 
     // Act
-    const [feed, topbar, composer] = ["--bg", "--topbar-bg", "--composer-bg"].map((token) => luminance(themeRgbOf(block, token)));
+    const [feed, topbar] = ["--bg", "--topbar-bg"].map((token) => luminance(themeRgbOf(block, token)));
 
     // Assert
-    expect([feed < topbar, topbar < composer]).toEqual([true, true]);
+    expect(feed < topbar).toBe(true);
   });
 });
