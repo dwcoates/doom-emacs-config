@@ -10,10 +10,8 @@ import (
 	"time"
 
 	"agent-repld/integration/harness"
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
-	"connectrpc.com/connect"
 )
 
 // TestAKilledDaemonLeavesNoProcessNamingItsStateDir proves the harness bounds
@@ -201,9 +199,8 @@ func TestOpenedShimAnswersTheShimAnOpenBroughtUpEvenOnceItHasLeft(t *testing.T) 
 	t.Parallel()
 	// Arrange: open, then let the idle sweep hibernate the shim away.
 	f := newRegistered(t, harness.Opts{IdleCutoffMS: 50})
-	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenWorkspace = %v, %v; want a success", resp, err)
+	if resp, err := f.startRaw(); err != nil || resp.GetSuccess() == nil {
+		t.Fatalf("the start = %v, %v; want a success", resp, err)
 	}
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
 	// Either orderly stop: the daemon's kill lands ("supervised shim stopped

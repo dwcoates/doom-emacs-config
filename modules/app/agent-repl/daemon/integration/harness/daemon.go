@@ -1914,6 +1914,29 @@ func Register(t testing.TB, d *Daemon, dir string) *workspacev1.WorkspaceRef {
 	return ref
 }
 
+// OpenAndStart opens ws and starts its session. AN OPEN STARTS NO SHIM (owner
+// ruling, 2026-10-28), and a restart with no shim up starts one at once, so a
+// test that needs ws's shim up asks for both, as the user would by opening
+// the workspace and restarting it.
+func OpenAndStart(t testing.TB, d *Daemon, ws *workspacev1.WorkspaceRef) {
+	t.Helper()
+	opened, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
+	if err != nil || opened.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace = (%v, %v), want a success", opened, err)
+	}
+	StartSession(t, d, ws)
+}
+
+// StartSession starts ws's session through the restart verb, which starts one
+// at once when no shim is up, and requires its success.
+func StartSession(t testing.TB, d *Daemon, ws *workspacev1.WorkspaceRef) {
+	t.Helper()
+	resp, err := d.Client().RestartWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: ws}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("RestartWorkspace = (%v, %v), want a success", resp, err)
+	}
+}
+
 // SocketPath is the per-workspace shim UDS the daemon spawns against.
 func (d *Daemon) SocketPath(ws *workspacev1.WorkspaceRef) string {
 	return filepath.Join(d.StateDir, "sock", ws.GetId()+".sock")

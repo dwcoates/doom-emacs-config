@@ -274,17 +274,19 @@ func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
+	// The start under test is the restart's, whose failure is its own ERROR.
+	f.d.ExpectWarnings("daemon.workspace.restart")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
 		ExitOn: harness.ExitOnStartup, ExitCode: 3, Stderr: "boom: workspace-bound warn",
 	})
 
 	// Act: bring-up dies, which drives the workspace-scoped WARN.
-	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+	resp, err := f.startRaw()
 	if err != nil {
-		t.Fatalf("OpenWorkspace onto a dying shim = transport error %v, want the spawn_failed arm", err)
+		t.Fatalf("a start onto a dying shim = transport error %v, want the relaunch_failed arm", err)
 	}
-	if resp.Msg.GetError().GetSpawnFailed() == nil {
-		t.Fatalf("OpenWorkspace onto a dying shim = %v, want OpenWorkspaceError.spawn_failed", resp.Msg)
+	if resp.GetError().GetRelaunchFailed() == nil {
+		t.Fatalf("a start onto a dying shim = %v, want RestartWorkspaceError.relaunch_failed", resp)
 	}
 
 	// Assert: the WARN record IS in the workspace's own daemon.log. The

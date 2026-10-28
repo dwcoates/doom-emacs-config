@@ -135,22 +135,9 @@ func newOpenedWorktree(t *testing.T, opts harness.Opts, name string) *fixture {
 // open sends OpenWorkspace and attaches to the spawned fake shim.
 func (f *fixture) open() {
 	f.t.Helper()
-	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
-	if err != nil {
-		f.t.Fatalf("OpenWorkspace = error %v, want a success", err)
-	}
-	if resp.Msg.GetSuccess() == nil {
-		f.t.Fatalf("OpenWorkspace = %v, want a success", resp.Msg)
-	}
-	// AN OPEN STARTS NO SHIM (owner ruling, 2026-10-28), and a restart starts
-	// one at once: the fixture's workspace is opened with its shim up.
-	restart, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
-	if err != nil {
-		f.t.Fatalf("RestartWorkspace = error %v, want a success", err)
-	}
-	if restart.Msg.GetSuccess() == nil {
-		f.t.Fatalf("RestartWorkspace = %v, want a success", restart.Msg)
-	}
+	// AN OPEN STARTS NO SHIM (owner ruling, 2026-10-28): the fixture's
+	// workspace is opened with its shim started (harness.OpenAndStart).
+	harness.OpenAndStart(f.t, f.d, f.ws)
 	// OpenedShim, not Shim: at a short idle cutoff the shim the restart
 	// brought up can be hibernated and gone before the control socket is
 	// dialed.
