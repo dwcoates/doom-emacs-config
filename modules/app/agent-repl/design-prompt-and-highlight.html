@@ -35,7 +35,7 @@
 </head>
 <body>
 <h1>Prompt fill and a shared tree highlight</h1>
-<p class="lede">Round two, from E (<code>#282828</code>) and lighter. Each card puts a prompt fill beside the one tree highlight it implies: an opaque grey exactly halfway in brightness between that prompt fill and the response fill <code>#181818</code>. Both the prompt's tree and the response's tree use that same highlight, so it reads a touch darker than the prompt it sits in and a touch lighter than the response. Code keeps today's wash, 4% of the ink over its bubble. The first card is today's: prompt <code>#222222</code>, and a highlight that is 9% of the ink laid over each bubble. Drag cards by their title to put them side by side.</p>
+<p class="lede">Round three, in single steps up from today's <code>#222222</code>. Each card puts a prompt fill beside the one tree highlight it implies: an opaque grey exactly halfway in brightness between that prompt fill and the response fill <code>#181818</code>. Both the prompt's tree and the response's tree use that same highlight, so it reads a touch darker than the prompt it sits in and a touch lighter than the response. Code keeps today's wash, 4% of the ink over its bubble. The first card is today's: prompt <code>#222222</code>, and a highlight that is 9% of the ink laid over each bubble. Drag cards by their title to put them side by side.</p>
 <div class="options" id="options"></div>
 <script>
 const RESPONSE = [0x18, 0x18, 0x18];
@@ -70,11 +70,11 @@ function card(title, promptHex, mode) {
 
 const CARDS = [
   ["today", () => card("Today", "#222222", "today")],
-  ["p28", () => card("E · #282828 (your pick)", "#282828", "shared")],
-  ["p2a", () => card("F · #2a2a2a", "#2a2a2a", "shared")],
-  ["p2c", () => card("G · #2c2c2c", "#2c2c2c", "shared")],
-  ["p2e", () => card("H · #2e2e2e", "#2e2e2e", "shared")],
-  ["p30", () => card("I · #303030", "#303030", "shared")],
+  ["p23", () => card("A · #232323", "#232323", "shared")],
+  ["p24", () => card("B · #242424", "#242424", "shared")],
+  ["p25", () => card("C · #252525", "#252525", "shared")],
+  ["p26", () => card("D · #262626", "#262626", "shared")],
+  ["p27", () => card("E · #272727", "#272727", "shared")],
 ];
 let order = CARDS.map(([key]) => key);
 const grid = document.getElementById("options");
