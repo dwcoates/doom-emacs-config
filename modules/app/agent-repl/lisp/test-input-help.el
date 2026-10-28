@@ -180,17 +180,17 @@ map's `[intercept-state] all'."
   (mapcar (lambda (i) (string-to-number (substring hex i (+ i 2)) 16)) '(1 3 5)))
 
 (ert-deftest agent-repl-test-input-help-bar-is-the-sidebar-ground ()
-  "The bar's ground is the webapp sidebar's dark --sidebar-bg, #1d1d1d.
+  "The bar's ground is the webapp sidebar's dark --sidebar-bg, #1a1a1a.
 The ert suite may not read webapp/src/styles.css, so the shared value is
 pinned on both sides: here, and in webapp/test/styles.test.ts."
-  (should (equal agent-repl-input-help-bar-background "#1d1d1d")))
+  (should (equal agent-repl-input-help-bar-background "#1a1a1a")))
 
 (ert-deftest agent-repl-test-input-help-button-is-darker-than-the-selected-row ()
   "A button's fill sits between the bar's ground and the selected-row tint.
-The sidebar's selected row is #272727 in the dark theme, pinned by
+The sidebar's selected row is #262626 in the dark theme, pinned by
 webapp/test/styles.test.ts."
   (let ((button (agent-repl-test-input-help--rgb agent-repl-input-help-button-background)))
-    (should (cl-every #'< button (agent-repl-test-input-help--rgb "#272727")))
+    (should (cl-every #'< button (agent-repl-test-input-help--rgb "#262626")))
     (should (cl-every #'> button (agent-repl-test-input-help--rgb agent-repl-input-help-bar-background)))))
 
 (ert-deftest agent-repl-test-input-help-faces-take-the-bar-colors ()

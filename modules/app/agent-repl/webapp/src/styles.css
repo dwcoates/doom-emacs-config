@@ -53,7 +53,9 @@
      the lightness ceiling — so the lift only shows in the dark theme, where
      --bg has headroom; the border-right still delimits the rail in both. Kept
      BELOW --card so the row-hover and detail-panel washes (both --card) still
-     read as a further lift over the rail instead of inverting against it. */
+     read as a further lift over the rail instead of inverting against it.
+     THE ONE GROUND OF THE SIDEBAR AND THE FOOTER: `.pfooter` paints this same
+     token, so the two always match in both themes. */
   --sidebar-bg: #ffffff;
   /* The topbar's ground (owner request, 2026-10-27): a little lighter than
      --sidebar-bg, which in the light theme is already white. */
@@ -534,7 +536,8 @@
     /* THE GROUNDS FOLLOW THE CLAUDE DESKTOP APP'S DARKER SURFACES (owner
        requests, 2026-10-28), sampled from two screenshots of it, then the
        feed a touch lighter and the sidebar a touch darker (owner request, the
-       same day): the feed #121212, the sidebar #1d1d1d, a step below the
+       same day, then the sidebar a touch darker again): the feed #121212,
+       the sidebar #1a1a1a, a step below the
        #212121 every prompt bubble wears. The topbar, the composer and the
        tool card each sit a touch above the feed, in that order. */
     --bg: #121212;
@@ -549,7 +552,7 @@
     --repo-head-collapsed: #898782;
     --merged-today-gutter: #ece8df;
     --border: #2a2a2a;
-    /* Above the #1d1d1d sidebar, so its hover and detail washes still lift
+    /* Above the #1a1a1a sidebar, so its hover and detail washes still lift
        off the rail. */
     --card: #2c2c2c;
     /* THE DARK NEUTRALS FOLLOW THE CLAUDE DESKTOP APP'S DARK THEME (owner
@@ -563,10 +566,9 @@
        #1c1c1c toward #121212, a touch above the composer, so a card still
        lifts off the feed (2026-10-28). */
     --tool-card-bg: #181818;
-    /* Claude's sidebar, and the footer that wears it: a step below the
-       prompt bubble's #212121, still lighter than the feed (owner requests,
-       2026-10-28). */
-    --sidebar-bg: #1d1d1d;
+    /* Claude's sidebar: a step below the prompt bubble's #212121, still
+       lighter than the feed (owner requests, 2026-10-28). */
+    --sidebar-bg: #1a1a1a;
     /* Only a touch above the feed, between it and the composer (owner
        request, 2026-10-28). */
     --topbar-bg: #141414;
@@ -4819,7 +4821,10 @@ html[data-page-unshown] {
 .pfooter {
   max-width: var(--agent-bubble-cap);
   margin: 0 auto;
-  /* The sidebar's own ground inside the dock (owner request, 2026-10-27). */
+  /* THE FOOTER AND THE SIDEBAR ALWAYS SHARE ONE GROUND (owner requests,
+     2026-10-27 and 2026-10-28): both paint `--sidebar-bg` and nothing else,
+     so retuning the one token moves both. Never give the footer a color of
+     its own. */
   background: var(--sidebar-bg);
   border: 1px solid var(--border);
   border-radius: 10px;
