@@ -2254,6 +2254,28 @@ the answering response block BEFORE the terminal that names it: a real producer
 never names an answer it did not emit, and a fake that pushes the terminal alone
 trips rule 2(b) — correctly.
 
+## A final response revised from highlighted words
+
+While the user's text selection holds words of one final response
+(`agentrepl.v1.SelectResponseText`, held by `internal/server/response_text.go`),
+the user's next prompt to the root feed takes the highlight and revises that
+response instead of minting a turn (`SubmitPromptSuccess.response_revising`).
+An agent's prompt never takes it.
+
+- **`internal/revision` runs the revision**, one lane per workspace, so a
+  second revision of a response revises the first's result. It marks the row
+  pending before `SubmitPrompt` answers, composes
+  `prompts/response-revision-from-highlight.md` ahead of what the user said,
+  and asks the shim's `ReviseResponse`. Any refusal or transport failure marks
+  the row failed with its cause and is recorded once at ERROR.
+- **The feed files each `response_revision` page line by its response unit**
+  (`internal/resolve/feed/revision.go`), and every draw of the response
+  consults it. The revised prose therefore stands whatever order the revision
+  and its response arrive in: an older page loaded after the revision's, or the
+  file plane re-delivering the original settle. A live revision is restated
+  with the response's reveal pace; a replayed one is drawn whole. The page line
+  itself ends the pending state; the RPC's success does not.
+
 ## A thinking row is superseded once a later response lands in its feed
 
 Owner rule, 2026-09-23. `FeedResponse.superseded` is set on a THINKING row

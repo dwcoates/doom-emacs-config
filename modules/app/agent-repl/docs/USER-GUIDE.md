@@ -430,6 +430,24 @@ Select a final response with `M-s-k` / `M-s-j` and send a prompt with `RET`. The
 agent receives a copy of that response ahead of your prompt, so it knows what
 you are replying to. Sending ends the selection.
 
+## Asking about words in a final response
+
+Highlight words in a final response (drag across them, or extend a selection with the keyboard) and, while they are highlighted, send a prompt from the input window. The prompt does not start a turn: the agent rewrites that response so it answers your prompt about those words, and the response's own bubble shows the result.
+
+- **The highlight is purple** in a final response, and nowhere else. The purple says a prompt sent now revises that response.
+- **The branch boxes that follow the pointer stand down** over a bubble you are highlighting in, so the highlight is the only thing marked.
+- **While the revision is on its way, the bubble wears a breathing purple ring,** and the highlight clears.
+- **When the revision lands, only what changed types out.** The text before and after the change stays as it was.
+  - For "what does this mean" about one word, expect a new branch under the branch that holds the word.
+- **Nothing new appears in the feed.** No prompt bubble is drawn for what you sent, and no turn runs.
+- **A revision runs beside a running turn.** It reads the conversation up to the last finished turn, and the turn in flight never sees it.
+- **The agent's own conversation keeps the original words.** A later reply to the response quotes the revised text, so the agent sees the revision when you reply to it.
+- **A revision that fails says why under the response,** in red, and the response stands as it was. Highlight and send again to retry.
+- **Limits:**
+  - Only a final response can be revised. A highlight in an interim response, a thinking bubble, or a prompt sends the prompt as an ordinary turn.
+  - A highlight that reaches across two bubbles is not a highlight of either, so the prompt is an ordinary turn.
+  - Revisions of one workspace run one after another. A second revision of the same response revises the first one's result.
+
 ## Rolling the conversation back
 
 | Key (input window) | With a prompt selected | With nothing selected |
