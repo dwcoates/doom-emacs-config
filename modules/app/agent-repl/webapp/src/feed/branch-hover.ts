@@ -20,13 +20,29 @@
  * is on it (owner request, 2026-10-27), in the box a response's own branch
  * takes, drawn as the composer's is while the person types that entry: the
  * label (`entries.ts`'s `answeredNodeAt`) names the response row and node.
+ *
+ * THE AREA THAT BOXES A BRANCH IS THE BOX IT DRAWS (owner request,
+ * 2026-10-28): on a tree line the pointer boxes the deepest node whose box
+ * covers it (`branchAt`'s rule, the one a click answers by), so it is
+ * followed across a line as well as onto one. A line's boxes are measured
+ * once while the pointer stays on it.
  */
 import { log } from "../log.js";
-import { branchAt, governedRowAt, isResponseRow } from "./bubble-selection.js";
+import { branchLineAt, governedRowAt, isResponseRow } from "./bubble-selection.js";
 import { TREE_CLASS, TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
 import { answeredNodeAt } from "./entries.js";
 import { feedRowId } from "./row-id.js";
-import { boxSubtree, unboxAll, type SubtreeBox } from "./subtree-box.js";
+import {
+  boxSubtree,
+  boxesOverLine,
+  lengthInLine,
+  nodeBoxedAt,
+  unboxAll,
+  xInLine,
+  type LengthResolver,
+  type LineBox,
+  type SubtreeBox,
+} from "./subtree-box.js";
 
 /** The class every line of the hovered branch's box wears. */
 export const BRANCH_HOVER_CLASS = "mp-line-hovered";
@@ -80,12 +96,21 @@ interface Hovered {
   readonly box: SubtreeBox;
 }
 
+/** The boxes over a tree line, measured once per line the pointer stands on. */
+type LineBoxes = (line: HTMLElement) => readonly LineBox[];
+
 /**
- * What the pointer on TARGET, in the governed ROW of the feed HOST, boxes: a
- * branch it is on, the node a citation it is on cites, or the response node
- * a prompt's entry label it is on answers.
+ * What the pointer at CLIENT_X on TARGET, in the governed ROW of the feed
+ * HOST, boxes: a branch whose box it is in, the node a citation it is on
+ * cites, or the response node a prompt's entry label it is on answers.
  */
-function boxUnder(host: HTMLElement, row: HTMLElement, target: Element): (Hovered & { operation: string; record: string }) | null {
+function boxUnder(
+  host: HTMLElement,
+  row: HTMLElement,
+  target: Element,
+  clientX: number,
+  boxesOf: LineBoxes,
+): (Hovered & { operation: string; record: string }) | null {
   const cited = citationAt(row, target);
   if (cited !== null) {
     return {
@@ -105,14 +130,21 @@ function boxUnder(host: HTMLElement, row: HTMLElement, target: Element): (Hovere
       record: "boxed the response branch the prompt entry under the pointer answers",
     };
   }
-  const branch = branchAt(row, target);
-  if (branch === null) return null;
-  return { row, label: branch.label, box: HOVER_BOX, operation: "feed.branch-hover", record: "boxed the response branch under the pointer" };
+  const line = branchLineAt(row, target);
+  if (line === null) return null;
+  const label = nodeBoxedAt(boxesOf(line), xInLine(line, clientX));
+  if (label === null) return null;
+  return { row, label, box: HOVER_BOX, operation: "feed.branch-hover", record: "boxed the response branch under the pointer" };
 }
 
-/** Arm the hover box on the root feed HOST. Answers the uninstall. */
-export function installBranchHover(host: HTMLElement): () => void {
+/** Arm the hover box on the root feed HOST, RESOLVE measuring box edges. Answers the uninstall. */
+export function installBranchHover(host: HTMLElement, resolve: LengthResolver = lengthInLine): () => void {
   let hovered: Hovered | undefined;
+  let measured: { line: HTMLElement; boxes: readonly LineBox[] } | undefined;
+  const boxesOf: LineBoxes = (line) => {
+    if (measured?.line !== line) measured = { line, boxes: boxesOverLine(line, resolve) };
+    return measured.boxes;
+  };
   const clear = (): void => {
     if (hovered === undefined) return;
     unboxAll(hovered.row, hovered.box);
@@ -120,7 +152,7 @@ export function installBranchHover(host: HTMLElement): () => void {
   };
   const onOver = (event: MouseEvent): void => {
     const row = governedRowAt(event.target, host);
-    const under = row !== null && event.target instanceof Element ? boxUnder(host, row, event.target) : null;
+    const under = row !== null && event.target instanceof Element ? boxUnder(host, row, event.target, event.clientX, boxesOf) : null;
     if (under === null) {
       clear();
       return;
@@ -143,9 +175,11 @@ export function installBranchHover(host: HTMLElement): () => void {
     });
   };
   host.addEventListener("mouseover", onOver);
+  host.addEventListener("mousemove", onOver);
   host.addEventListener("mouseleave", clear);
   return () => {
     host.removeEventListener("mouseover", onOver);
+    host.removeEventListener("mousemove", onOver);
     host.removeEventListener("mouseleave", clear);
     clear();
   };

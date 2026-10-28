@@ -279,7 +279,7 @@ describe("a click on a copy control and the bubble it sits in", () => {
     const control = row.querySelector(`.${COPY_CONTROL_CLASS}`);
     if (control === null) throw new Error("no copy control drawn");
     // Act
-    const click = bubbleClick({ row, target: control, selectedText: "" });
+    const click = bubbleClick({ row, target: control, selectedText: "", clientX: 0 });
     // Assert
     expect(click).toEqual({ case: "ignore", reason: "interactive" });
   });

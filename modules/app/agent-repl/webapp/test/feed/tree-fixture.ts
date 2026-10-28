@@ -4,7 +4,7 @@
  */
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { ProseTreeNodeSchema, ProseTreeSchema, type ProseTree } from "../../../proto/gen/ts/frontend/v1/prose_pb";
-import type { SubtreeBox } from "../../src/feed/subtree-box.js";
+import type { LengthResolver, SubtreeBox } from "../../src/feed/subtree-box.js";
 import { TREE_CLASS, renderTreeHtml, columnMeasure } from "../../src/metaprompt-tree.js";
 
 /** A node's place: a root with no PARENT, else a branch under it. */
@@ -38,6 +38,19 @@ export const exampleTree = labelledTree([
 
 /** The width of the widest line of exampleTree's 1.1 subtree: its grandchild's. */
 export const exampleSubtreeWidth = `    └── 1.1.1 It goes live with the next rollout`.length;
+
+/** The px of one drawn column under `TEN_PX_COLUMNS`. */
+export const COLUMN_PX = 10;
+
+/**
+ * A box edge resolved as a 10px-column page lays it out: jsdom lays nothing
+ * out, so a hit test is handed this in place of the real probe.
+ */
+export const TEN_PX_COLUMNS: LengthResolver = (_line, length) => {
+  const m = /^(-?\d+(?:\.\d+)?)(ch|px)$/.exec(length);
+  if (m === null) throw new Error(`no length in ${length}`);
+  return m[2] === "ch" ? Number(m[1]) * COLUMN_PX : Number(m[1]);
+};
 
 /** A row ROW drawing TREES, each in its own tree container, as the document's whole body. */
 export function drawnRow(row: string, ...trees: ProseTree[]): HTMLElement {

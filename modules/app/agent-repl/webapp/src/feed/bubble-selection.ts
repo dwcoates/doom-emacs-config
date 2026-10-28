@@ -53,6 +53,7 @@ import {
   LABEL_LINK_CLASS,
 } from "./entries.js";
 import { TREE_CLASS, TREE_LABEL_ATTRIBUTE, TREE_LINE_CLASS, TREE_NODE_ATTRIBUTE } from "../metaprompt-tree.js";
+import { boxesOverLine, lengthInLine, nodeBoxedAt, xInLine, type LengthResolver } from "./subtree-box.js";
 import { feedRowId, feedRowOf } from "./row-id.js";
 
 /** The attribute a root-feed row wears while the selection owns its bubble's expansion. */
@@ -133,17 +134,35 @@ export function isResponseRow(row: HTMLElement): boolean {
 }
 
 /**
- * The node of a response's tree TARGET is on, inside the governed ROW, or
- * null: a line drawing a node, in a drawn tree, of a response the daemon says
- * can be selected. What a hover boxes (branch-hover.ts) and a click answers.
+ * The tree line TARGET is on, inside the governed ROW, or null: a line drawing
+ * a node, in a drawn tree, of a response the daemon says can be selected.
  */
-export function branchAt(row: HTMLElement, target: Element): { line: HTMLElement; label: string } | null {
+export function branchLineAt(row: HTMLElement, target: Element): HTMLElement | null {
   if (!isResponseRow(row) || !row.hasAttribute(SELECTABLE_ATTRIBUTE)) return null;
   const line = target.closest<HTMLElement>(`.${TREE_CLASS} .${TREE_LINE_CLASS}[${TREE_NODE_ATTRIBUTE}]`);
-  if (line === null || !row.contains(line)) return null;
-  const label = line.getAttribute(TREE_NODE_ATTRIBUTE);
-  if (label === null) throw new Error("a line the node selector matched names no node");
-  return { line, label };
+  return line === null || !row.contains(line) ? null : line;
+}
+
+/**
+ * The node of a response's tree the pointer at CLIENT_X on TARGET boxes,
+ * inside the governed ROW, or null. What a hover boxes (branch-hover.ts) and
+ * a click answers.
+ * THE AREA THAT BOXES A NODE IS THE BOX IT DRAWS (owner request, 2026-10-28):
+ * on a tree line (`branchLineAt`), the node is the deepest of the line's own
+ * node and the nodes above it whose box covers the pointer (subtree-box.ts
+ * `nodeBoxedAt`), so the pointer on a line's rails or past its box's right
+ * edge boxes nothing there, or the enclosing node whose box it is in.
+ */
+export function branchAt(
+  row: HTMLElement,
+  target: Element,
+  clientX: number,
+  resolve: LengthResolver = lengthInLine,
+): { line: HTMLElement; label: string } | null {
+  const line = branchLineAt(row, target);
+  if (line === null) return null;
+  const label = nodeBoxedAt(boxesOverLine(line, resolve), xInLine(line, clientX));
+  return label === null ? null : { line, label };
 }
 
 /** What a click on a governed bubble asks of the daemon. */
@@ -161,7 +180,14 @@ export type BubbleClick =
  * selectable row, the selected one included, is sent as selected (the daemon
  * toggles the selected one off).
  */
-export function bubbleClick(opts: { row: HTMLElement; target: Element; selectedText: string }): BubbleClick {
+export function bubbleClick(opts: {
+  row: HTMLElement;
+  target: Element;
+  selectedText: string;
+  /** The pointer's viewport x, which decides the node a branch click answers (`branchAt`). */
+  clientX: number;
+  resolve?: LengthResolver;
+}): BubbleClick {
   if (opts.target.closest(CLICK_THROUGH_SELECTOR) !== null) return { case: "ignore", reason: "interactive" };
   if (opts.selectedText.trim() !== "") return { case: "ignore", reason: "text-selection" };
   // A LINKED LABEL SELECTS THE PROMPT THAT ANSWERED IT, not the response it is
@@ -185,7 +211,7 @@ export function bubbleClick(opts: { row: HTMLElement; target: Element; selectedT
   // A RESPONSE'S BRANCH IS ANSWERED: Emacs opens a blank entry answering the
   // node in the composer, and the bubble is never selected by the click
   // (branch-hover.ts).
-  const branch = branchAt(opts.row, opts.target);
+  const branch = branchAt(opts.row, opts.target, opts.clientX, opts.resolve);
   if (branch !== null) return { case: "branch", row, label: branch.label };
   return { case: "select", row };
 }
@@ -195,11 +221,12 @@ export function installBubbleSelect(
   host: HTMLElement,
   ctx: AppContext,
   selection: () => string = () => selectedText(),
+  resolve: LengthResolver = lengthInLine,
 ): () => void {
   const onClick = (event: MouseEvent): void => {
     const row = governedRowAt(event.target, host);
     if (row === null || !(event.target instanceof Element)) return;
-    const click = bubbleClick({ row, target: event.target, selectedText: selection() });
+    const click = bubbleClick({ row, target: event.target, selectedText: selection(), clientX: event.clientX, resolve });
     switch (click.case) {
       case "ignore":
         log.debug("a click on a governed bubble selects nothing", {

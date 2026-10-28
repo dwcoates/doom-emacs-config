@@ -112,7 +112,9 @@ export interface SubtreeSpan {
 /**
  * Where the box over LABEL's subtree stands in TREE (one drawn tree), as
  * the module note describes it, or null when TREE draws no line of LABEL.
- * Every highlight draws its box from this.
+ * Every highlight draws its box from this, and the pointer's hit test
+ * (`nodeBoxedAt`) reads the very same edges, so the area that boxes a node is
+ * the box it draws.
  */
 export function subtreeSpan(tree: HTMLElement, label: string): SubtreeSpan | null {
   const lines = queryAll<HTMLElement>(tree, `.${TREE_LINE_CLASS}`).filter((l) =>
@@ -122,6 +124,73 @@ export function subtreeSpan(tree: HTMLElement, label: string): SubtreeSpan | nul
   if (head === undefined) return null;
   const ends = lines.map((l) => edgeOf(l, TREE_TEXT_END_ATTRIBUTE));
   return { lines, left: labelColumn(head), right: cssLength(Math.max(...ends.map((e) => e.n)), ends[0].unit) };
+}
+
+/** Resolves LENGTH (a box edge) to px from LINE's own left edge, in LINE's own face. */
+export type LengthResolver = (line: HTMLElement, length: string) => number;
+
+/**
+ * The px LENGTH draws in LINE: a probe as wide as LENGTH, laid out in LINE so
+ * a `ch` is LINE's own column, measured and taken out again.
+ */
+export function lengthInLine(line: HTMLElement, length: string): number {
+  const probe = line.ownerDocument.createElement("span");
+  probe.style.cssText = `position:absolute;visibility:hidden;height:0;padding:0;border:0;width:${length}`;
+  line.append(probe);
+  const px = probe.getBoundingClientRect().width;
+  probe.remove();
+  if (!Number.isFinite(px)) {
+    log.error("a tree box's edge cannot be measured in px", {
+      operation: "feed.subtree-box.unmeasurable",
+      context: { length, node: line.getAttribute(TREE_NODE_ATTRIBUTE) },
+    });
+    throw new RangeError(`subtree box: the edge ${length} measured ${String(px)}px`);
+  }
+  return px;
+}
+
+/** LABEL, then each node it sits beneath, nearest first: `1.2.3`, `1.2`, `1`. */
+export function selfAndAncestors(label: string): string[] {
+  const parts = label.split(".");
+  return parts.map((_, i) => parts.slice(0, parts.length - i).join("."));
+}
+
+/** One node whose box covers a line, and that box's px span across it. */
+export interface LineBox {
+  readonly label: string;
+  readonly left: number;
+  readonly right: number;
+}
+
+/**
+ * Every box that covers LINE (a drawn tree line naming its node), deepest
+ * first: the box of LINE's own node and of each node above it, each in px
+ * from LINE's left edge as RESOLVE measures it.
+ */
+export function boxesOverLine(line: HTMLElement, resolve: LengthResolver = lengthInLine): LineBox[] {
+  const node = line.getAttribute(TREE_NODE_ATTRIBUTE);
+  const tree = line.closest<HTMLElement>(`.${TREE_CLASS}`);
+  if (node === null || tree === null) {
+    log.error("a tree line cannot be hit-tested: it names no node or hangs in no tree", {
+      operation: "feed.subtree-box.unplaced-line",
+      context: { node, in_tree: tree !== null },
+    });
+    throw new Error("subtree box: a hit-tested line names no node or hangs in no tree");
+  }
+  return selfAndAncestors(node).flatMap((label) => {
+    const span = subtreeSpan(tree, label);
+    return span === null ? [] : [{ label, left: resolve(line, span.left), right: resolve(line, span.right) }];
+  });
+}
+
+/** The deepest of BOXES (`boxesOverLine`) covering X px from its line's left edge, or null. */
+export function nodeBoxedAt(boxes: readonly LineBox[], x: number): string | null {
+  return boxes.find((box) => box.left <= x && x < box.right)?.label ?? null;
+}
+
+/** X, a pointer's viewport x, as px from LINE's left edge (the box's own origin). */
+export function xInLine(line: HTMLElement, clientX: number): number {
+  return clientX - (line.getBoundingClientRect().left + line.clientLeft);
 }
 
 /** A node of a drawn response's tree: the response's row and the node's label. */
