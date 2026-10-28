@@ -118,10 +118,10 @@ type FleetDeps struct {
 	// StoreHistory is the store's read-only face, which every workspace's
 	// history is read from (ReadHistory). REQUIRED.
 	StoreHistory StoreHistory
-	// RestoreParked asks for a session the keep-alive cycle parked to be
-	// brought back (cachelapse.Keeper.RestoreParked): a reader asked for
-	// history that only a shim serves. Nil wires no keeper.
-	RestoreParked func(ws ids.WorkspaceID)
+	// PersistedBook answers the book the shim persisted for the workspace at
+	// a directory (shimidentity.Book), read for a workspace with no recorded
+	// book; found false is a workspace with no conversation yet. REQUIRED.
+	PersistedBook func(workspaceDir string) (book string, found bool, err error)
 	// StartSlots caps the vendor starts in flight. It is the SAME pool the
 	// bounce registry takes a shim restart's slot from, so a restart's resume
 	// is answered from the slot its restart holds. Nil gives the fleet a pool
@@ -519,6 +519,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs a state client")
 	case deps.StoreHistory == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs the store's read-only face")
+	case deps.PersistedBook == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs the shim's persisted book")
 	case deps.Instance == "":
 		return nil, fmt.Errorf("workspace: the session fleet needs this daemon's instance id; every session it holds is claimed for it")
 	case deps.Accounts == nil:

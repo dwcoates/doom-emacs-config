@@ -2,17 +2,14 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
-	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/sessionwatcher"
-	"agent-repld/internal/shimclient"
 )
 
 // THE FEED'S HISTORY SOURCE (feed.HistorySource). History is loaded only on a
@@ -30,10 +27,11 @@ import (
 // all show their conversation, and none is started to show it. The daemon's
 // relationship with the store is read-only (storereader).
 //
-// A WORKSPACE WITH NO RECORDED BOOK is read through its shim as before: one
-// whose shim has not answered a start since the book was first recorded.
-// Every such read is recorded at INFO, so the fallback's retirement is
-// evidenced once every workspace has started under a build that records it.
+// A WORKSPACE WITH NO RECORDED BOOK takes the book its shim persisted
+// (shimidentity), records it, and is read from the store like any other: one
+// whose shim has not answered a start since the book was first recorded, or
+// whose record could not be written. One whose shim persisted none has no
+// conversation yet, and its newest page is empty, at its floor.
 
 // StoreHistory is the store's read-only face as the fleet reads it
 // (storereader.Reader).
@@ -47,30 +45,32 @@ type StoreHistory interface {
 	Through(ctx context.Context, book string, throughMs int64) (*conversationv1.HistoryPage, error)
 }
 
-// historyReader is the one shim call a read through a shim needs.
-type historyReader interface {
-	ReadHistory(ctx context.Context, req *shimv1.ReadHistoryRequest) (*shimv1.ReadHistoryResponse, error)
-}
-
 // ReadHistory reads TARGET's newest page (AFTER nil) or the page before AFTER,
 // TARGET nil being the workspace's own book.
 //
-// A FRESH START'S BOOK IS NO SOURCE until its session starts: the book on
+// A FRESH START'S NEWEST PAGE IS EMPTY until its session starts: the book on
 // record names the conversation the fresh one replaces, and the new session's
 // answer records its own.
 func (f *Fleet) ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
-	if f.freshStartPending(ws) {
-		return nil, fmt.Errorf("%w: the workspace's fresh session has not started, and its recorded book names the conversation it replaces", feed.ErrNoHistorySource)
+	if after == nil && target == nil && f.freshStartPending(ws) {
+		f.deps.Log.Global().Debug("daemon.workspace.history_fresh",
+			"the workspace's fresh session has not started; its newest page is empty",
+			dlog.Context{"workspace": string(ws)})
+		return emptyHistory(), nil
 	}
 	book, stated, recorded, err := f.historyBook(ctx, ws, target)
 	if err != nil {
 		return nil, err
 	}
 	if !recorded {
-		f.deps.Log.Global().Info("daemon.workspace.history_through_shim",
-			"the workspace has no recorded book yet; its history is read through its shim until a start records it",
-			dlog.Context{"workspace": string(ws)})
-		return f.readHistoryThroughShim(ctx, ws, target, after)
+		book, recorded, err = f.adoptPersistedBook(ctx, ws)
+		if err != nil {
+			return nil, err
+		}
+		if !recorded {
+			return emptyHistory(), nil
+		}
+		stated = true
 	}
 	var page *conversationv1.HistoryPage
 	if after != nil {
@@ -83,6 +83,44 @@ func (f *Fleet) ReadHistory(ctx context.Context, ws ids.WorkspaceID, target *con
 	}
 	f.notePage(ws, target, page, after == nil)
 	return page, nil
+}
+
+// emptyHistory is the newest page of a conversation that holds nothing yet:
+// no entries, at its floor.
+func emptyHistory() *conversationv1.HistoryPage {
+	return &conversationv1.HistoryPage{Boundary: &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}}}
+}
+
+// adoptPersistedBook answers the book WS's shim persisted, for a workspace
+// with no recorded book, and records it. FOUND false is a workspace whose
+// shim persisted none: it has no conversation yet. A record that cannot be
+// written is an ERROR and the read goes on with the book: the next read
+// adopts it again.
+func (f *Fleet) adoptPersistedBook(ctx context.Context, ws ids.WorkspaceID) (string, bool, error) {
+	log := f.logFor(ctx, ws)
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		log.Error("daemon.workspace.history_book", "could not read the workspace's record to find the book its shim persisted; its history is not read",
+			dlog.Context{"cause": err.Error()})
+		return "", false, fmt.Errorf("read the record of %q: %w", ws, err)
+	}
+	book, found, err := f.deps.PersistedBook(record.Dir)
+	if err != nil {
+		log.Error("daemon.workspace.history_book", "could not read the book the workspace's shim persisted; its history is not read",
+			dlog.Context{"cause": err.Error()})
+		return "", false, fmt.Errorf("read the book %q's shim persisted: %w", ws, err)
+	}
+	if !found {
+		log.Debug("daemon.workspace.history_book", "the workspace has no recorded book and its shim persisted none; it has no conversation yet", nil)
+		return "", false, nil
+	}
+	if err := f.deps.DB.SetWorkspaceBook(ctx, ws, book); err != nil {
+		log.Error("daemon.workspace.history_book", "could not record the book the workspace's shim persisted; it is read with it, and the next read adopts it again",
+			dlog.Context{"book": book, "cause": err.Error()})
+		return book, true, nil
+	}
+	log.Info("daemon.workspace.history_book", "recorded the book the workspace's shim persisted", dlog.Context{"book": book})
+	return book, true, nil
 }
 
 // historyBook answers the book a read of TARGET reads: TARGET itself, or the
@@ -119,43 +157,6 @@ func (f *Fleet) notePage(ws ids.WorkspaceID, target *conversationv1.AgentId, pag
 		return
 	}
 	f.noteHistoryWithoutWatcher(ws, target, page)
-}
-
-// readHistoryThroughShim reads through the workspace's shim, for a workspace
-// with no recorded book.
-//
-// THE SHIM SERVES THE WORKSPACE'S PERSISTED BOOK whether or not a session was
-// started on it, so any shim client the fleet can reach reads history: a
-// started session's, one parked at its cold gate, one whose start is being
-// answered or retried, a failed start's. Only a workspace with no shim at all
-// answers feed.ErrNoHistorySource.
-func (f *Fleet) readHistoryThroughShim(ctx context.Context, ws ids.WorkspaceID, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
-	client, ok := f.historyClient(ws)
-	if !ok {
-		f.restoreParked(ws)
-		return nil, feed.ErrNoHistorySource
-	}
-	page, err := readHistory(ctx, client, target, after)
-	_, watched := f.sessionWatcher(ws)
-	if errors.Is(err, shimclient.ErrStandDownOrdered) {
-		return nil, f.readEndedInStandDown(ws, err)
-	}
-	if err != nil {
-		if !watched && target == nil && isUnknownAgent(err) {
-			// NO BOOK YET IS NO SOURCE YET: a shim with no session settled
-			// serves the workspace's persisted book, and a workspace that
-			// never ran one has none. The reader is served what the feed
-			// holds, and its newest page is loaded when the session's watch
-			// opens (the feed's kick), exactly as for a workspace with no shim.
-			f.deps.Log.Global().Info("daemon.workspace.history_no_book",
-				"the workspace's shim holds no book yet and no session is up; the reader waits for the session",
-				dlog.Context{"workspace": string(ws), "cause": err.Error()})
-			return nil, fmt.Errorf("%w: %w", feed.ErrNoHistorySource, err)
-		}
-		return nil, err
-	}
-	f.notePage(ws, target, page, after == nil)
-	return page, nil
 }
 
 // ReadInherited reads one page of BOOK — a generation of a fork's inherited
@@ -209,82 +210,4 @@ func (f *Fleet) noteHistoryWithoutWatcher(ws ids.WorkspaceID, target *conversati
 		"a history page was read with no session watcher up; the views were told its main agent",
 		dlog.Context{"workspace": string(ws), "agent_id": agent.GetValue(), "entries": len(page.GetEntries()), "targeted": target != nil})
 	f.deps.Footer.OnHistoryPage(ws, agent, page)
-}
-
-// historyClient answers the shim client history is read through: the one the
-// fleet holds, whatever the vendor session is doing. The fleet holds every shim
-// from its spawn, so a start being answered or retried, a failed start's shim
-// and a cold gate's all serve the workspace's book.
-//
-// A FRESH START'S SHIM IS NO SOURCE until its session starts: the book it
-// persisted names the conversation the fresh one replaces.
-func (f *Fleet) historyClient(ws ids.WorkspaceID) (historyReader, bool) {
-	client, ok := f.Client(ws)
-	if !ok {
-		return nil, false
-	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	if session, held := f.sessions[ws]; held && session.freshStart {
-		return nil, false
-	}
-	return client, true
-}
-
-// isUnknownAgent reports a ReadHistory the shim refused unknown_agent.
-func isUnknownAgent(err error) bool {
-	var refusal *ShimRefusal
-	return errors.As(err, &refusal) && refusal.Arm == "unknown_agent"
-}
-
-// readHistory makes the one ReadHistory call and unwraps its outcome.
-func readHistory(ctx context.Context, client historyReader, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
-	req := &shimv1.ReadHistoryRequest{Target: target}
-	if after != nil {
-		req.Position = &shimv1.ReadHistoryRequest_After{After: after}
-	} else {
-		req.Position = &shimv1.ReadHistoryRequest_First{First: &shimv1.ReadHistoryFirst{}}
-	}
-	return readHistoryPage(ctx, client, req)
-}
-
-// readHistoryPage makes one ReadHistory call and unwraps its outcome: the one
-// unwrapping ReadHistory's own reads and a fork's inherited reads share.
-func readHistoryPage(ctx context.Context, client historyReader, req *shimv1.ReadHistoryRequest) (*conversationv1.HistoryPage, error) {
-	response, err := client.ReadHistory(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	if failure := response.GetFailure(); failure != nil {
-		return nil, &ShimRefusal{Verb: "ReadHistory", Arm: readHistoryArm(failure), Detail: failure.GetDetail()}
-	}
-	success := response.GetSuccess()
-	if success == nil || success.GetPage() == nil {
-		return nil, fmt.Errorf("shim ReadHistory answered neither a page nor a failure for agent %q", req.GetTarget().GetValue())
-	}
-	return success.GetPage(), nil
-}
-
-// readHistoryArm names a ReadHistory refusal's arm.
-func readHistoryArm(failure *shimv1.ReadHistoryFailure) string {
-	switch {
-	case failure.GetUnknownAgent() != nil:
-		return "unknown_agent"
-	case failure.GetStalePointer() != nil:
-		return "stale_pointer"
-	case failure.GetStoreUnavailable() != nil:
-		return "store_unavailable"
-	default:
-		return ArmShimUnspecified
-	}
-}
-
-// restoreParked asks for WS's session back when the keep-alive cycle parked it:
-// a reader wants history only a shim serves. The keeper judges whether it is
-// parked and brings it back a few at a time; the reader waits for the session
-// exactly as for a workspace with no shim.
-func (f *Fleet) restoreParked(ws ids.WorkspaceID) {
-	if f.deps.RestoreParked != nil {
-		f.deps.RestoreParked(ws)
-	}
 }

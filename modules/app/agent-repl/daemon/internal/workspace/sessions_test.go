@@ -602,8 +602,10 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
-	// restoreAsked are the parked sessions a history read asked back.
-	restoreAsked []ids.WorkspaceID
+	// persisted are the books the shims persisted, by workspace directory;
+	// persistedErr fails every such read.
+	persisted    map[string]string
+	persistedErr error
 	// store is the store's read-only face history is read from.
 	store *fakeStoreHistory
 	// restarts records every restart observation the fleet makes.
@@ -797,8 +799,14 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 	f.bundle = &fakeBundle{build: "installed-build"}
 
 	fleet, err := NewFleet(FleetDeps{
-		StoreHistory:  f.store,
-		RestoreParked: func(ws ids.WorkspaceID) { f.restoreAsked = append(f.restoreAsked, ws) },
+		StoreHistory: f.store,
+		PersistedBook: func(dir string) (string, bool, error) {
+			if f.persistedErr != nil {
+				return "", false, f.persistedErr
+			}
+			book, ok := f.persisted[dir]
+			return book, ok, nil
+		},
 		NetworkChanged: func() <-chan struct{} {
 			if f.networkChanged != nil {
 				return f.networkChanged
