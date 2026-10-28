@@ -755,8 +755,6 @@ func openStageArm(stage *agentreplv1.WorkspaceOpenStage) string {
 		return "checking_worktree"
 	case *agentreplv1.WorkspaceOpenStage_StartingSession:
 		return "starting_session"
-	case *agentreplv1.WorkspaceOpenStage_Reviving:
-		return "reviving"
 	case *agentreplv1.WorkspaceOpenStage_ClearingClosed:
 		return "clearing_closed"
 	case *agentreplv1.WorkspaceOpenStage_CheckingBuild:
