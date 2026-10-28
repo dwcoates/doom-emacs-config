@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/shimclient"
 )
 
 // DefaultRestartStopBound bounds the ONE stop a restart asks of the shim before
@@ -42,8 +43,10 @@ const DefaultRestartStopBound = 2 * time.Second
 //  3. once the bounce is done, the webview is told to reload, so the user is
 //     not left on a page built against a different shim.
 //
-// A workspace with no shim or no session is restarted by the same bounce: the
-// engine prelaunches a shim and resumes the session on it.
+// A WORKSPACE WITH NO SHIM UP HAS ITS SESSION STARTED AT ONCE (owner ruling,
+// 2026-10-28: the restart is an explicit start, like a prompt). The bounce
+// would find nothing to replace, so the session is started through the one
+// start path (Sessions.Start) and the restart answers its outcome.
 func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "RestartWorkspace", ws)
 	if err != nil {
@@ -51,6 +54,9 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 	}
 	if v.deps.Sessions.CancelVendorStart(ctx, ws) {
 		log.Info(opRestart, "ended the vendor-start retry run in flight; the restart begins a fresh one", nil)
+	}
+	if _, up := v.deps.Shim(ws); !up {
+		return v.startForRestart(ctx, log, ws)
 	}
 	// THE WORKSPACE'S MERGE LETS GO FIRST (owner ruling, 2026-10-08). A merge
 	// drives this workspace's session, so it is brought to a stopping point
@@ -88,6 +94,22 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 		})
 		return fmt.Errorf("restart %q: the caller left before the restart finished: %w", ws, ctx.Err())
 	}
+}
+
+// startForRestart starts the session of a workspace a restart found with no
+// shim up, answering the outcome as the restart's.
+func (v *verbs) startForRestart(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
+	log.Info(opRestart, "no shim is up; the restart starts the session", nil)
+	if err := v.deps.Sessions.Start(ctx, ws); err != nil {
+		if errors.Is(err, shimclient.ErrStandingDown) {
+			log.Info(opRestart, "the session was not started: this daemon is standing down", nil)
+		} else {
+			log.Error(opRestart, "the restart could not start the session", dlog.Context{"cause": err.Error()})
+		}
+		return relaunchFailed(ws, "the session did not start: "+err.Error())
+	}
+	log.Info(opRestart, "the restart started the session", nil)
+	return nil
 }
 
 // resumeMerges takes the workspace's merges back after a restart, on a context

@@ -291,9 +291,9 @@ func TestRestartEndsTheVendorStartRunFirst(t *testing.T) {
 	}
 }
 
-// A WORKSPACE WITH NO SESSION IS RESTARTED BY BRINGING ONE UP: the forced
-// bounce runs (the engine prelaunches and resumes), never a refusal.
-func TestRestartOfAWorkspaceWithNoSessionBouncesItUp(t *testing.T) {
+// A WORKSPACE WITH NO SHIM UP IS RESTARTED BY STARTING ITS SESSION at once
+// (owner ruling, 2026-10-28); there is nothing for a bounce to replace.
+func TestRestartOfAWorkspaceWithNoShimStartsItsSession(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -303,12 +303,28 @@ func TestRestartOfAWorkspaceWithNoSessionBouncesItUp(t *testing.T) {
 	err := f.verbs.Restart(context.Background(), "w1")
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("Restart = %v, want a workspace with no session restarted, never refused", err)
+	if err != nil || len(f.fleet.started) != 1 || f.fleet.started[0] != "w1" {
+		t.Fatalf("Restart = %v after starts %v, want w1's session started", err, f.fleet.started)
 	}
-	f.rollout.awaitRelaunch(t)
-	if got := f.rollout.relaunchCalls(); len(got) != 1 {
-		t.Fatalf("relaunches = %+v, want the bounce that brings the session up", got)
+	if got := f.rollout.relaunchCalls(); len(got) != 0 {
+		t.Fatalf("relaunches = %+v, want no bounce of a shim that is not up", got)
+	}
+}
+
+func TestARestartWhoseStartFailsAnswersRelaunchFailed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+	f.fleet.startErr = errFake
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	asRefusal(t, err, "relaunch_failed")
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRestart}); !ok {
+		t.Fatalf("records = %+v, want the failed start at ERROR", f.log.logger.Records())
 	}
 }
 
