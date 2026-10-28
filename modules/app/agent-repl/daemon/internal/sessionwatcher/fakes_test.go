@@ -549,10 +549,6 @@ func (c *fakeClient) DetachForeground(context.Context, *shimv1.DetachForegroundR
 	panic("sessionwatcher must not call DetachForeground")
 }
 
-func (c *fakeClient) ReadHistory(context.Context, *shimv1.ReadHistoryRequest) (*shimv1.ReadHistoryResponse, error) {
-	panic("sessionwatcher must not call ReadHistory")
-}
-
 func (c *fakeClient) ReadTranscripts(context.Context, *shimv1.ReadTranscriptsRequest) (*shimv1.ReadTranscriptsResponse, error) {
 	panic("sessionwatcher must not call ReadTranscripts")
 }

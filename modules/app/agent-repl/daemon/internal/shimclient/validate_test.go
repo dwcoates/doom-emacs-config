@@ -313,44 +313,6 @@ func TestValidateUpdateAgentRequest(t *testing.T) {
 	}
 }
 
-// TestValidateReadHistoryRequest covers the paged read's illegal shapes.
-func TestValidateReadHistoryRequest(t *testing.T) {
-	tests := []struct {
-		name  string
-		req   *shimv1.ReadHistoryRequest
-		field string
-	}{
-		{
-			name:  "no position arm",
-			req:   &shimv1.ReadHistoryRequest{},
-			field: "ReadHistoryRequest.position",
-		},
-		{
-			name: "empty after pointer",
-			req: &shimv1.ReadHistoryRequest{
-				Position: &shimv1.ReadHistoryRequest_After{After: &conversationv1.HistoryPointer{}},
-			},
-			field: "ReadHistoryRequest.after.value",
-		},
-		{
-			name: "a bound that names no instant",
-			req: &shimv1.ReadHistoryRequest{
-				Position: &shimv1.ReadHistoryRequest_Through{Through: &conversationv1.ConversationThrough{}},
-			},
-			field: "ReadHistoryRequest.through.at_ms",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange, Act.
-			err := validateReadHistoryRequest(tc.req)
-
-			// Assert.
-			assertInvalidField(t, err, tc.field)
-		})
-	}
-}
-
 // TestValidateResolvePeerDeliveryRequest covers the delivery lookup's illegal
 // shapes.
 func TestValidateResolvePeerDeliveryRequest(t *testing.T) {
@@ -404,24 +366,6 @@ func TestValidateResolvePeerDeliveryRequestAcceptsADeliveryID(t *testing.T) {
 	// Assert.
 	if err != nil {
 		t.Fatalf("validateResolvePeerDeliveryRequest = %v, want a delivery id accepted", err)
-	}
-}
-
-// TestValidateReadHistoryRequestAcceptsABoundedRead pins the read a fork's
-// inherited past is paged by.
-func TestValidateReadHistoryRequestAcceptsABoundedRead(t *testing.T) {
-	// Arrange.
-	req := &shimv1.ReadHistoryRequest{
-		Target:   &conversationv1.AgentId{Value: "book-parent"},
-		Position: &shimv1.ReadHistoryRequest_Through{Through: &conversationv1.ConversationThrough{AtMs: 42}},
-	}
-
-	// Act.
-	err := validateReadHistoryRequest(req)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("validateReadHistoryRequest = %v, want a bounded read accepted", err)
 	}
 }
 

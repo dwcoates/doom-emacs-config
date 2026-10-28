@@ -200,21 +200,14 @@ func (b *book) openAsks() []*conversationv1.SessionOpenAsk {
 	return out
 }
 
-// page answers one ReadHistory page of AGENT's book: the newest page with no
-// AFTER, else the entries placed before AFTER. False is a pointer the book
-// never served. The fake store pages its kept copy the same way.
+// page answers one page of AGENT's book, for a test reading what the fake
+// wrote: the newest page with no AFTER, else the entries placed before AFTER.
+// False is a pointer the book never served. The fake store pages its kept copy
+// the same way, and it is what the daemon reads.
 func (b *book) page(agent string, after *conversationv1.HistoryPointer, size int) (*conversationv1.HistoryPage, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return fakestore.Page(b.entries[bookAgent(agent)], after, size)
-}
-
-// pageThrough answers one ReadHistory page of AGENT's book read THROUGH an
-// instant, as the store's bounded read serves a fork's inherited past.
-func (b *book) pageThrough(agent string, throughMs int64, size int) *conversationv1.HistoryPage {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return fakestore.PageThrough(b.entries[bookAgent(agent)], throughMs, size)
 }
 
 // since answers AGENT's entries written after the one KNOWN names, newest

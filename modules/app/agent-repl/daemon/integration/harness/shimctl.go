@@ -155,7 +155,6 @@ const (
 	RPCWatchBash                = "WatchBash"
 	RPCStopBash                 = "StopBash"
 	RPCDetachForeground         = "DetachForeground"
-	RPCReadHistory              = "ReadHistory"
 	RPCReadTranscripts          = "ReadTranscripts"
 	RPCGetForkPoint             = "GetForkPoint"
 	RPCForkSession              = "ForkSession"

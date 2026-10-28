@@ -1243,12 +1243,6 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       return reader.readAgentPage(agent, after);
     },
 
-    readPageThrough(
-      agent: conversationv1.AgentId,
-      through: conversationv1.ConversationThrough,
-    ): Promise<conversationv1.HistoryPage> {
-      return reader.readPageThrough(agent, through);
-    },
 
     liveWork(session: conversationv1.AgentId): Promise<storev1.GetLiveWorkSuccess> {
       return reconciler.liveWork(session);

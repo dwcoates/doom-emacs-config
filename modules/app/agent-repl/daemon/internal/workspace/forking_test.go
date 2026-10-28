@@ -335,9 +335,6 @@ func TestFleetReadInheritedReadsTheBookFromTheStoreAndTellsNoView(t *testing.T) 
 			if len(f.store.asked) != 1 || f.store.asked[0] != tc.want {
 				t.Fatalf("store asked %v, want %q", f.store.asked, tc.want)
 			}
-			if len(f.client.historyRequests) != 0 {
-				t.Fatalf("shim asked %v, want no shim read", f.client.historyRequests)
-			}
 			if len(f.feed.mainAgents) != 0 {
 				t.Fatalf("feed main agents = %v, want an inherited page to name none", f.feed.mainAgents)
 			}

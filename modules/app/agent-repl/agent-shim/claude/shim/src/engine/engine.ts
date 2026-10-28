@@ -129,11 +129,6 @@ export interface Engine {
     request: shimv1.DetachForegroundRequest,
   ): Promise<shimv1.DetachForegroundResponse>;
 
-  // ---- History ----
-
-  /** One page of one agent's durable past, newest first. */
-  readHistory(request: shimv1.ReadHistoryRequest): Promise<shimv1.ReadHistoryResponse>;
-
   /**
    * Every vendor conversation filed under this shim's working directory, read
    * from the transcripts' own lines. Starts no query and makes no model call.
@@ -283,10 +278,6 @@ export class NotImplementedEngine implements Engine {
 
   detachForeground(): Promise<shimv1.DetachForegroundResponse> {
     return Promise.reject(unimplemented("DetachForeground"));
-  }
-
-  readHistory(): Promise<shimv1.ReadHistoryResponse> {
-    return Promise.reject(unimplemented("ReadHistory"));
   }
 
   readTranscripts(): Promise<shimv1.ReadTranscriptsResponse> {

@@ -107,18 +107,6 @@ describe("validation refuses before the engine", () => {
     expect(code).toBe(Code.InvalidArgument);
   });
 
-  test("an unset ReadHistory position is InvalidArgument", async () => {
-    const shim = await spawnShim();
-
-    const code = await connectCode(
-      shim.clients.h1.readHistory(
-        create(shimv1.ReadHistoryRequestSchema, {}),
-      ),
-    );
-
-    expect(code).toBe(Code.InvalidArgument);
-  });
-
   test("an unset UpdateAgent input is InvalidArgument", async () => {
     const shim = await spawnShim();
 

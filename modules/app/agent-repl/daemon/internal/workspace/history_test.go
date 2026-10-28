@@ -17,36 +17,16 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-func pageResponse() *shimv1.ReadHistoryResponse {
-	return &shimv1.ReadHistoryResponse{Result: &shimv1.ReadHistoryResponse_Success{Success: &shimv1.ReadHistorySuccess{
-		Page: &conversationv1.HistoryPage{Boundary: &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}}},
-	}}}
-}
-
-// ReadHistory answers the scripted page and counts the read.
-func (c *fakeClient) ReadHistory(_ context.Context, req *shimv1.ReadHistoryRequest) (*shimv1.ReadHistoryResponse, error) {
-	c.historyReads++
-	c.historyRequests = append(c.historyRequests, req)
-	if c.historyErr != nil {
-		return nil, c.historyErr
+// storePromptPage is a root page of one prompt AGENT was sent, as the store
+// serves it.
+func storePromptPage(agent string) *conversationv1.HistoryPage {
+	return &conversationv1.HistoryPage{
+		Entries: []*conversationv1.HistoryEntryAt{{
+			At:    &conversationv1.HistoryPointer{Value: "p-0"},
+			Entry: &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: &conversationv1.AgentPrompt{Agent: &conversationv1.AgentId{Value: agent}}}},
+		}},
+		Boundary: &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}},
 	}
-	if c.history != nil {
-		return c.history, nil
-	}
-	return pageResponse(), nil
-}
-
-// promptPageResponse is a root page of one prompt the main agent was sent.
-func promptPageResponse(agent string) *shimv1.ReadHistoryResponse {
-	return &shimv1.ReadHistoryResponse{Result: &shimv1.ReadHistoryResponse_Success{Success: &shimv1.ReadHistorySuccess{
-		Page: &conversationv1.HistoryPage{
-			Entries: []*conversationv1.HistoryEntryAt{{
-				At:    &conversationv1.HistoryPointer{Value: "p-0"},
-				Entry: &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: &conversationv1.AgentPrompt{Agent: &conversationv1.AgentId{Value: agent}}}},
-			}},
-			Boundary: &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}},
-		},
-	}}}
 }
 
 // resumable records W1 with a session to resume, so its bring-up is a RESUME.
@@ -121,8 +101,8 @@ func TestFleetReadHistoryOfAColdGatedWorkspaceReadsTheStoreAndSpawnsNothing(t *t
 	page, err := f.fleet.ReadHistory(context.Background(), ws, nil, nil)
 
 	// Assert.
-	if err != nil || page == nil || f.client.historyReads != 0 || len(f.supervisor.spawns) != spawned {
-		t.Fatalf("ReadHistory = %v, %v after %d shim reads and %d spawns; want the store's page and no shim", page, err, f.client.historyReads, len(f.supervisor.spawns)-spawned)
+	if err != nil || page == nil || len(f.supervisor.spawns) != spawned {
+		t.Fatalf("ReadHistory = %v, %v after %d spawns; want the store's page and no shim", page, err, len(f.supervisor.spawns)-spawned)
 	}
 }
 
@@ -234,8 +214,8 @@ func TestFleetReadHistoryReadsAStartBeingRetried(t *testing.T) {
 	}
 
 	// Assert.
-	if readErr != nil || len(f.store.asked) != 1 || f.client.historyReads != 0 {
-		t.Fatalf("read during the retry = %v after store reads %v and %d shim reads, want the store's page", readErr, f.store.asked, f.client.historyReads)
+	if readErr != nil || len(f.store.asked) != 1 {
+		t.Fatalf("read during the retry = %v after store reads %v, want the store's page", readErr, f.store.asked)
 	}
 }
 
@@ -399,12 +379,6 @@ func TestFleetReadInheritedSurfacesAFailedStoreRead(t *testing.T) {
 	}
 }
 
-// storePromptPage is a root page of one prompt AGENT was sent, as the store
-// serves it.
-func storePromptPage(agent string) *conversationv1.HistoryPage {
-	return promptPageResponse(agent).GetSuccess().GetPage()
-}
-
 // recordedBook records W1 with BOOK on record and the store serving a root
 // page of one prompt BOOK's agent was sent; no shim is up.
 func recordedBook(f *fleetFixture, book string) ids.WorkspaceID {
@@ -522,8 +496,8 @@ func TestFleetReadHistoryOfARecordedBookReadsTheStore(t *testing.T) {
 			if len(f.store.asked) != 1 || f.store.asked[0] != tc.want {
 				t.Fatalf("store asked %v, want %q", f.store.asked, tc.want)
 			}
-			if f.client.historyReads != 0 || len(f.supervisor.spawns) != 0 {
-				t.Fatalf("shim reads %d, spawns %d; want no shim involved", f.client.historyReads, len(f.supervisor.spawns))
+			if len(f.supervisor.spawns) != 0 {
+				t.Fatalf("spawns %d; want no shim involved", len(f.supervisor.spawns))
 			}
 		})
 	}

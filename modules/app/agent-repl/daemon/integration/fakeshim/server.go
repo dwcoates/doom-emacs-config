@@ -1274,35 +1274,6 @@ func (s *server) DetachForeground(ctx context.Context, req *connect.Request[shim
 	}), nil
 }
 
-func (s *server) ReadHistory(ctx context.Context, req *connect.Request[shimv1.ReadHistoryRequest]) (*connect.Response[shimv1.ReadHistoryResponse], error) {
-	if err := s.enter(ctx, RPCReadHistory, req.Msg); err != nil {
-		return nil, err
-	}
-	if resp, done, err := scripted[shimv1.ReadHistoryResponse, *shimv1.ReadHistoryResponse](s, RPCReadHistory); done {
-		return resp, err
-	}
-	if through := req.Msg.GetThrough(); through != nil {
-		return connect.NewResponse(&shimv1.ReadHistoryResponse{
-			Result: &shimv1.ReadHistoryResponse_Success{Success: &shimv1.ReadHistorySuccess{
-				Page: s.book.pageThrough(req.Msg.GetTarget().GetValue(), through.GetAtMs(), s.historyPageSize()),
-			}},
-		}), nil
-	}
-	after := req.Msg.GetAfter()
-	page, served := s.book.page(req.Msg.GetTarget().GetValue(), after, s.historyPageSize())
-	if !served {
-		return connect.NewResponse(&shimv1.ReadHistoryResponse{
-			Result: &shimv1.ReadHistoryResponse_Failure{Failure: &shimv1.ReadHistoryFailure{
-				Detail: sprintf("fakeshim: the pointer %q names no entry of the book", after.GetValue()),
-				Kind:   &shimv1.ReadHistoryFailure_StalePointer{StalePointer: &shimv1.ReadHistoryStalePointer{}},
-			}},
-		}), nil
-	}
-	return connect.NewResponse(&shimv1.ReadHistoryResponse{
-		Result: &shimv1.ReadHistoryResponse_Success{Success: &shimv1.ReadHistorySuccess{Page: page}},
-	}), nil
-}
-
 // GatherTitleDigest answers an EMPTY digest by default: boundary NONE with no
 // prompts. The daemon's title synthesizer skips synthesis when the digest has
 // nothing to summarize, so a fake with no scripted answer never provokes a

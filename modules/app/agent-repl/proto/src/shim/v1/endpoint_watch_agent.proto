@@ -34,8 +34,8 @@ message WatchAgentRequest {
     // No history: the opening page carries no entries and the stream carries
     // only what is written from now on. The daemon opens every watch this way
     // when it holds nothing of the agent's history, and loads history only
-    // when a reader asks for it (ReadHistory). An entry read that way and also
-    // received on this stream is absorbed by its identity.
+    // when a reader asks for it, from the store (storeread.v1). An entry read
+    // that way and also received on this stream is absorbed by its identity.
     WatchAgentTailOnly tail_only = 4;
   }
 }
@@ -47,7 +47,8 @@ message WatchAgentRequest {
 message WatchAgentResponse {
   oneof frame {
     // The first frame of every watch: the opening page (bounded by
-    // known_through when given; `more` walks older via ReadHistory).
+    // known_through when given; `more` walks older through the store,
+    // storeread.v1).
     conversation.v1.HistoryPage page = 1;
     // Every later frame: one entry as written.
     conversation.v1.HistoryEntryAt entry = 2;

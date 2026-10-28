@@ -39,7 +39,8 @@
  * prompt that was never recorded.
  *
  * HISTORY IS SERVED FROM THE STORE, NEVER FROM MEMORY. `WatchAgent` opens with
- * a page and then tails; `ReadHistory` reads one page. The engine keeps no
+ * a page and then tails; the daemon reads older pages from the store itself
+ * (storeread.v1), never through a shim. The engine keeps no
  * conversation of its own to serve from, which is why a shim bounce loses
  * nothing a consumer can see.
  */
@@ -49,7 +50,6 @@ import { conversationv1, shimv1 } from "../proto.js";
 import { promptUpsertKey } from "../store/keys.js";
 import {
   PersistenceError,
-  REPAINT,
   openingOf,
   type AgentOpening,
   type AgentPageSession,
@@ -57,7 +57,6 @@ import {
   type Persistence,
 } from "../store/persistence.js";
 import { isAgentTaskType } from "../convert/detached.js";
-import { storeItemPointerValue } from "../convert/ids.js";
 import {
   detachForegroundDetached,
   detachForegroundRefused,
@@ -65,8 +64,6 @@ import {
   killTurnKilled,
   killTurnRefused,
   notFound,
-  readHistoryPage,
-  readHistoryRefused,
   emptyOpeningPage,
   startTurnAccepted,
   startTurnRefused,
@@ -130,14 +127,6 @@ export interface SessionContext {
   retireUserDetach(toolUseId: string, why: string): void;
   /** The session's identity, or absence before StartSession. */
   identity(): SessionIdentity | undefined;
-  /**
-   * The workspace's PERSISTED main agent (`agent-id.json`), or absence when
-   * this workspace never settled one. It is what ReadHistory serves before a
-   * session is up: the book is the workspace's, not the vendor session's, so a
-   * start that has not run, is retried, was refused or is parked at its cold
-   * gate never hides the conversation already in the store.
-   */
-  persistedAgent(): Promise<conversationv1.AgentId | undefined>;
   /** The one live query, or absence when it is dead or not yet started. */
   query(): QueryLike | undefined;
   readonly nowMs: () => number;
@@ -269,24 +258,6 @@ export interface SessionContext {
    *     ambiguity, and this answers it there too.
    */
   knowsAgent(agent: conversationv1.AgentId): boolean;
-  /**
-   * Report that the record plane could not be reached.
-   *
-   * A REFUSAL IS NOT A REPORT. The caller of the verb learns its own call was
-   * refused; every OTHER consumer -- the daemon watching this session's health,
-   * deciding whether to trust what it is painting -- learns nothing from that.
-   * The fault is what tells them, and without it an unreachable store looked
-   * like a session in perfect health serving one odd refusal.
-   */
-  reportStoreUnreachable(detail: string): void;
-  /**
-   * A store read this shim SERVED, which is the recovery for the fault above.
-   *
-   * Declared beside the refusal on purpose: a fault channel with no recovery
-   * channel makes a transient outage permanent, and the pair is what keeps the
-   * session's health a statement about now rather than about ever.
-   */
-  reportStoreReadable(): void;
 }
 
 /** A `UserSaid` carrying one text block — how the shim spells its own prompts. */
@@ -1500,7 +1471,7 @@ export class TurnEngine {
     return detachForegroundDetached();
   }
 
-  // -- WatchAgent / ReadHistory --------------------------------------------
+  // -- WatchAgent -----------------------------------------------------------
 
   /**
    * One agent's page then its tail, served FROM THE STORE.
@@ -1672,87 +1643,6 @@ export class TurnEngine {
           "the WatchAgent tail ended without anything asking it to; the daemon will see a standing stream end while the session lives",
         );
       }
-    }
-  }
-
-  /** One page of one agent's durable past, newest first. */
-  async readHistory(request: shimv1.ReadHistoryRequest): Promise<shimv1.ReadHistoryResponse> {
-    // THE BOOK IS THE WORKSPACE'S, NOT THE VENDOR SESSION'S. Before a session
-    // is settled (no StartSession yet, one being retried, one refused, one
-    // parked at its cold gate) the main agent is the identity this workspace
-    // persisted, and its store pages are served exactly as a started session's
-    // are: the vendor's state never gates showing the conversation. A
-    // workspace that never settled an identity has no book to name.
-    const mainAgent = this.session.identity()?.agentId ?? (await this.session.persistedAgent());
-    if (mainAgent === undefined) {
-      return readHistoryRefused(
-        { kind: "unknownAgent" },
-        "no session has been started on this shim and the workspace holds no persisted main agent",
-      );
-    }
-    if (this.session.identity() === undefined) {
-      LOGGER.debug(
-        { agent_id: mainAgent.value, targeted: request.target !== undefined },
-        "ReadHistory before a session is up: serving the workspace's persisted book",
-      );
-    }
-    const target = request.target ?? mainAgent;
-    try {
-      if (request.position.case === "after") {
-        const after = request.position.value;
-        // Validated at the wire; read back through ids.ts so an empty pointer
-        // cannot reach the store as a legal-looking cursor.
-        storeItemPointerValue(after);
-        const older = readHistoryPage(
-          await this.session.persistence.readAgentPage(target, after),
-        );
-        this.session.reportStoreReadable();
-        return older;
-      }
-      if (request.position.case === "through") {
-        // THE BOOK AS IT STOOD AT AN INSTANT, forwarded to the store's own
-        // `through` read. It never vouches for the book: any book the store
-        // holds may be named (a fork reads its parent's this way), and one the
-        // store never heard of is the typed unknown-agent refusal.
-        const asItStood = readHistoryPage(
-          await this.session.persistence.readPageThrough(target, request.position.value),
-        );
-        this.session.reportStoreReadable();
-        return asItStood;
-      }
-      // THE SAME PRODUCER VERDICT `WatchAgent` GIVES. An agent this shim
-      // announced whose first row has not landed has an EMPTY past, not an
-      // unknown one — a keep-alive-only session writes nothing to any book, and
-      // refusing there told a consumer its own agent did not exist.
-      //
-      // READ, NOT WATCH: this verb serves one page and stands no tail, so it
-      // goes through the reader that ALWAYS ASKS THE STORE. The watch-side open
-      // may serve a minted-but-unwritten book without asking — sound there,
-      // because the value of that open is the tail — but here the ask is the
-      // only thing that tells an empty book apart from a store that is down or
-      // failing reads, and this endpoint owes a typed refusal for both.
-      const page = readHistoryPage(
-        await this.session.persistence.readFirstPage(target, REPAINT, () =>
-          this.session.knowsAgent(target),
-        ),
-      );
-      this.session.reportStoreReadable();
-      return page;
-    } catch (err) {
-      if (err instanceof PersistenceError) {
-        const kind =
-          err.kind === "unknown_agent"
-            ? ({ kind: "unknownAgent" } as const)
-            : err.kind === "stale_pointer"
-              ? ({ kind: "stalePointer" } as const)
-              : ({ kind: "storeUnavailable" } as const);
-        LOGGER.debug({ agent_id: target.value, kind: err.kind }, "ReadHistory refused");
-        if (kind.kind === "storeUnavailable") {
-          this.session.reportStoreUnreachable(`ReadHistory(${target.value}): ${err.message}`);
-        }
-        return readHistoryRefused(kind, err.message);
-      }
-      throw err;
     }
   }
 

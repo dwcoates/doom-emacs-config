@@ -36,7 +36,6 @@ import {
   connectCode,
   freshSession,
   openSessionUpdates,
-  readHistoryFirst,
 } from "../integration-support/client.js";
 import {
   sessionStarted,
@@ -540,7 +539,7 @@ describe("the durable log sink", () => {
     // Act: close the READ end, so the next log write takes EPIPE.
     (shim.logPipe as unknown as { destroy: () => void } | null)?.destroy();
     // Provoke log traffic: every rpc logs its entry.
-    await shim.clients.h1.readHistory(readHistoryFirst());
+    await shim.clients.h1.readTranscripts(create(shimv1.ReadTranscriptsRequestSchema, {}));
 
     const faulted = await watch.until((frame) => {
       const update = sessionUpdate(frame);
@@ -553,7 +552,7 @@ describe("the durable log sink", () => {
     });
     expect(sessionUpdate(faulted).update.case).toBe("diagnostics");
     // Still answering: the fault is a report, not a death.
-    expect(await connectCode(shim.clients.h1.readHistory(readHistoryFirst()))).not.toBe(
+    expect(await connectCode(shim.clients.h1.readTranscripts(create(shimv1.ReadTranscriptsRequestSchema, {})))).not.toBe(
       Code.Unavailable,
     );
     expect(shim.child.exitCode).toBeNull();

@@ -53,10 +53,6 @@ interface Harness {
   /** What `SessionContext.adoptedTurn()` answers: a turn the vendor started beside the slot. */
   adopted: OpenTurn | undefined;
   identity: SessionIdentity | undefined;
-  /** What `SessionContext.persistedAgent()` answers: the workspace's persisted main agent. */
-  persisted: conversationv1.AgentId | undefined;
-  /** When set, `SessionContext.persistedAgent()` rejects with it, as an unreadable record does. */
-  persistedRejects: Error | undefined;
   submitRejects: Error | undefined;
   /** Every prompt sent to join the running turn, with the turn it joins. */
   readonly joins: { prompt: conversationv1.AgentPrompt; turn: string; into: string }[];
@@ -68,10 +64,6 @@ interface Harness {
   askOpen: boolean;
   /** The sender every join was pushed with, in order. */
   readonly joinSentBys: (shimv1.StartTurnSentBy | undefined)[];
-  /** Every store_unreachable the turn verbs reported to the session. */
-  readonly storeFaults: string[];
-  /** How many reads this shim SERVED, which is what lifts a store fault. */
-  readonly storeRecoveries: number[];
   /** What this session's `knowsAgent` answers. */
   knows: boolean;
   /** When set, `SessionContext.query()` answers absence, as a dead query does. */
@@ -136,16 +128,12 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     open: undefined,
     adopted: undefined,
     identity,
-    persisted: undefined,
-    persistedRejects: undefined,
     submitRejects: undefined,
     joins: [],
     joinRejects: undefined,
     joinAdmissionRejects: undefined,
     joinSentBys: [],
     askOpen: false,
-    storeFaults: [] as string[],
-    storeRecoveries: [] as number[],
     knows: true,
     queryDead: false,
     keepaliveEnd: undefined,
@@ -165,8 +153,6 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     gate,
     live,
     identity: () => state.identity,
-    persistedAgent: () =>
-      state.persistedRejects !== undefined ? Promise.reject(state.persistedRejects) : Promise.resolve(state.persisted),
     query: () => (state.queryDead ? undefined : query),
     nowMs: () => 1,
     openTurn: () => state.open,
@@ -186,8 +172,6 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     shellRunStart: (work) => state.shellStarts.get(work.value),
     concludeStoppedRuns: () => undefined,
     knowsAgent: () => state.knows,
-    reportStoreUnreachable: (detail: string) => state.storeFaults.push(detail),
-    reportStoreReadable: () => state.storeRecoveries.push(1),
     submit: (said, turn, sentBy) => {
       if (state.submitRejects !== undefined) return Promise.reject(state.submitRejects);
       state.submitted.push({ said, keepalive: turn.keepalive, sentBy });
@@ -2384,136 +2368,6 @@ describe("DetachForeground", () => {
 
 });
 
-describe("ReadHistory", () => {
-  const first = (): shimv1.ReadHistoryRequest =>
-    create(shimv1.ReadHistoryRequestSchema, {
-      position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
-    });
-
-  it("serves the first page from the store", async () => {
-    const h = await harness();
-
-    expect((await h.turns.readHistory(first())).result.case).toBe("success");
-  });
-
-  it("closes the reading session it opened, because ReadHistory has no tail", async () => {
-    const h = await harness();
-
-    await h.turns.readHistory(first());
-
-    expect(h.persistence.closedPages).toBe(1);
-  });
-
-  it("reads the first page as a repaint: no caller states a page size or an opening", async () => {
-    // Arrange.
-    const h = await harness();
-
-    // Act.
-    await h.turns.readHistory(first());
-
-    // Assert.
-    expect(h.persistence.openings).toEqual([{ case: "repaint" }]);
-  });
-
-  it("maps an unknown agent onto the ReadHistory arm for it", async () => {
-    const h = await harness();
-    h.persistence.openError = new PersistenceError("unknown_agent", "no such book");
-
-    expect(failureKind(await h.turns.readHistory(first()))).toBe("unknownAgent");
-  });
-
-  it("maps a stale pointer onto its own arm", async () => {
-    const h = await harness();
-    h.persistence.readError = new PersistenceError("stale_pointer", "that pointer is gone");
-
-    const response = await h.turns.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: {
-          case: "after",
-          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
-        },
-      }),
-    );
-
-    expect(failureKind(response)).toBe("stalePointer");
-  });
-
-  it("maps an unreachable store onto its own arm", async () => {
-    const h = await harness();
-    h.persistence.openError = new PersistenceError("store_unavailable", "the store is down");
-
-    expect(failureKind(await h.turns.readHistory(first()))).toBe("storeUnavailable");
-  });
-
-  it("forwards a through read's bound to the store's own through read", async () => {
-    // Arrange.
-    const h = await harness();
-
-    // Act.
-    const response = await h.turns.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }) },
-      }),
-    );
-
-    // Assert.
-    expect([response.result.case, h.persistence.throughBounds]).toEqual(["success", [2_500n]]);
-  });
-
-  it("maps a through read of a book the store never heard of onto the unknown-agent arm", async () => {
-    // Arrange.
-    const h = await harness();
-    h.persistence.readError = new PersistenceError("unknown_agent", "no such book");
-
-    // Act.
-    const response = await h.turns.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }) },
-      }),
-    );
-
-    // Assert.
-    expect(failureKind(response)).toBe("unknownAgent");
-  });
-
-  it("REPORTS an unreachable store as a session fault, not only to its caller", async () => {
-    // A refusal tells the caller its own call failed; every other consumer --
-    // the daemon deciding whether to trust what it is painting -- learns
-    // nothing from that.
-    const h = await harness();
-    h.persistence.openError = new PersistenceError("store_unavailable", "the store is down");
-
-    await h.turns.readHistory(first());
-
-    expect(h.storeFaults).toHaveLength(1);
-  });
-
-  it("serves the page's turn heads with it", async () => {
-    // Arrange.
-    const h = await harness();
-    h.persistence.page = pageWithHead("prompt-1");
-
-    // Act.
-    const response = await h.turns.readHistory(first());
-
-    // Assert.
-    const success = response.result.value as shimv1.ReadHistorySuccess;
-    expect(success.page?.heads.map((head) => [head.entry?.at?.value, head.between.case])).toEqual([
-      ["prompt-1", "stepsBetween"],
-    ]);
-  });
-
-  it("does NOT report a session fault for an unknown agent", async () => {
-    // A caller error is not the record plane being unreachable.
-    const h = await harness();
-    h.persistence.openError = new PersistenceError("unknown_agent", "no such agent");
-
-    await h.turns.readHistory(first());
-
-    expect(h.storeFaults).toEqual([]);
-  });
-});
-
 describe("WatchAgent", () => {
   it("opens with the page", async () => {
     const h = await harness();
@@ -3758,131 +3612,6 @@ describe("WatchAgent's non-persistence failures", () => {
           break;
         }
       })(),
-    ).rejects.toBe("the store threw a string");
-  });
-});
-
-describe("ReadHistory before a session is up", () => {
-  it("serves the workspace's persisted book's newest page", async () => {
-    // Arrange.
-    const h = await harness();
-    h.identity = undefined;
-    h.persisted = create(conversationv1.AgentIdSchema, { value: "persisted-agent" });
-    h.persistence.page = create(conversationv1.HistoryPageSchema, {
-      entries: [create(conversationv1.HistoryEntryAtSchema, {})],
-      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
-    });
-
-    // Act.
-    const response = await h.turns.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
-      }),
-    );
-
-    // Assert.
-    expect(response.result.case).toBe("success");
-    expect(h.persistence.firstPageAgents).toEqual(["persisted-agent"]);
-  });
-
-  it("reads an older page of the persisted book", async () => {
-    // Arrange.
-    const h = await harness();
-    h.identity = undefined;
-    h.persisted = create(conversationv1.AgentIdSchema, { value: "persisted-agent" });
-
-    // Act.
-    const response = await h.turns.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: {
-          case: "after",
-          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
-        },
-      }),
-    );
-
-    // Assert.
-    expect(response.result.case).toBe("success");
-    expect(h.persistence.olderPageAfter).toEqual(["p-1"]);
-  });
-
-  it("prefers the settled session's identity over the persisted one", async () => {
-    // Arrange.
-    const h = await harness();
-    h.persisted = create(conversationv1.AgentIdSchema, { value: "persisted-agent" });
-
-    // Act.
-    await h.turns.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
-      }),
-    );
-
-    // Assert.
-    expect(h.persistence.firstPageAgents).toEqual([h.identity?.agentId.value]);
-  });
-
-  it("rejects loudly when the persisted record cannot be read", async () => {
-    // Arrange.
-    const h = await harness();
-    h.identity = undefined;
-    h.persistedRejects = new Error("agent-id.json holds no original_vendor_session_id");
-
-    // Act.
-    const reading = h.turns.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
-      }),
-    );
-
-    // Assert.
-    await expect(reading).rejects.toThrow("agent-id.json holds no original_vendor_session_id");
-  });
-});
-
-describe("ReadHistory's remaining arms", () => {
-  it("refuses unknown_agent when no session has been started", async () => {
-    const h = await harness();
-    h.identity = undefined;
-
-    const response = await h.turns.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
-      }),
-    );
-
-    expect(failureKind(response)).toBe("unknownAgent");
-  });
-
-  it("serves the page a cursored read answers with", async () => {
-    const h = await harness();
-    h.persistence.page = create(conversationv1.HistoryPageSchema, {
-      entries: [create(conversationv1.HistoryEntryAtSchema, {})],
-    });
-
-    const response = await h.turns.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: {
-          case: "after",
-          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
-        },
-      }),
-    );
-
-    expect(
-      response.result.case === "success" ? response.result.value.page?.entries.length : undefined,
-    ).toBe(1);
-  });
-
-  it("lets a failure that is not a store refusal out rather than mapping it to an arm", async () => {
-    const h = await harness(new NonErrorPageStore());
-
-    await expect(
-      h.turns.readHistory(
-        create(shimv1.ReadHistoryRequestSchema, {
-          position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
-        }),
-      ),
     ).rejects.toBe("the store threw a string");
   });
 });

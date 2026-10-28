@@ -958,8 +958,8 @@ The rule is structural:
   announcement.
 - `workspace/opening_test.go`'s `TestFirstPageRequestsHaveNamedSitesOnly`
   fails the moment another production site builds a replay opening, a
-  `WatchAgentRequest`, a `StartTurnRequest` or a `ReadHistory` first-page
-  request.
+  `WatchAgentRequest`, a `StartTurnRequest` or a store newest-page request
+  (`storereader.Newest`).
 
 A successor daemon's adoption (handover, crash boot) is that process's first
 open of the workspace: its feed holds nothing, so it still replays the first
@@ -1016,38 +1016,13 @@ starting or gone, and none is started to show it
   is STATED, so a book nothing is written under yet reads as the empty page;
   a read naming any other book (a subagent's, a fork's parent's) is NAMED,
   and the store refuses one it never heard of.
-- **A fresh start's book is no source** until its session starts: the book on
-  record names the conversation it replaces.
-- **A workspace with no recorded book** is read through its shim as below,
-  recorded at INFO (`daemon.workspace.history_through_shim`), until a start
-  records its book. That path, and the parked-session restore it asks for,
-  retire once every workspace has started under a build that records books.
-
-The shim path, for a workspace with no recorded book (owner principle,
-2026-10-02: the vendor and its state never gate agent-repl's own functions):
-
-- **Every held shim**: the fleet holds every shim from the moment it is
-  spawned or adopted (see "The fleet holds every shim from its spawn"), so a
-  started session's, a cold gate's, a start being answered or retried, and a
-  failed start's are all sources. The shim serves the workspace's PERSISTED
-  book (`agent-id.json`) before any StartSession. With no watcher up, the
-  fleet names the page's main agent for the feed and the footer itself and
-  hands the footer the page (`noteHistoryWithoutWatcher`).
-- **A FRESH start's shim is no source** until its session starts
-  (`live.freshStart`): the book it persisted names the conversation the fresh
-  one replaces.
-- **No shim at all** (or a shim that holds no book yet before any session:
-  `unknown_agent` with no watcher, INFO `daemon.workspace.history_no_book`)
-  is `feed.ErrNoHistorySource`: the reader is served what the feed holds and
-  waits (`awaitingSource`). A shim held with no session started (and not a
-  fresh start's) calls `feed.SourceUp`, which loads and pushes every
-  waiting feed's newest page; a started session's readers are kicked by its
-  watch opening, because a fresh book is not written until its first turn.
-- **The daemon's own rows never stand in for the newest page**: while a
-  book's newest page is unloaded, a row the daemon makes follows the moment it
-  was made when that is later than the row before it (`order.go`
-  `awaitsNewestPage`), so a cold gate made after a restart is not drawn above
-  turns run since an older merge row.
+- **A fresh start's newest page is empty** until its session starts: the book
+  on record names the conversation it replaces.
+- **A workspace with no recorded book** takes the book its shim persisted
+  (`shimidentity`, `<state>/shim/<workspace key>/agent-id.json`), records it,
+  and is read like any other. One whose shim persisted none has no
+  conversation yet, and its newest page is empty, at its floor. No history is
+  ever read through a shim: `shim.v1.ReadHistory` is retired (2026-10-28).
 
 ## A page carries the prompts of the turns it touches
 
@@ -1797,7 +1772,7 @@ resume it refuses cold:
 - **Raised from the record ever after.** Every later start, the boot's, a
   handover successor's and a prompt's revival included, raises the recorded
   gate with no shim (`raiseRecordedGate`); nothing is spawned for it. The
-  conversation is read from the store (`ReadHistory`), so the gated workspace
+  conversation is read from the store (`Fleet.ReadHistory`), so the gated workspace
   shows it whole.
 - **A gate is a quiet session that exists.** `Live`, `Running` and `Health`
   read a standing gate with no shim as a session that exists, runs nothing and

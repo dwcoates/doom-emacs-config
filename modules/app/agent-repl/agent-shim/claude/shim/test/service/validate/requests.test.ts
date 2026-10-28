@@ -531,56 +531,6 @@ describe("validateDetachForegroundRequest", () => {
   });
 });
 
-describe("validateReadHistoryRequest", () => {
-  it("accepts a read from the newest page", () => {
-    // Arrange, Act, Assert.
-    expect(
-      codeOf(() => validate.validateReadHistoryRequest(requests.readHistoryRequest())),
-    ).toBeUndefined();
-  });
-
-  it("accepts a read continuing from a served pointer", () => {
-    // Arrange.
-    const request = create(shimv1.ReadHistoryRequestSchema, {
-      position: {
-        case: "after",
-        value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
-      },
-    });
-
-    // Act, Assert.
-    expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBeUndefined();
-  });
-
-  it("refuses a read that states no position", () => {
-    // Arrange.
-    const request = create(shimv1.ReadHistoryRequestSchema, {});
-
-    // Act, Assert.
-    expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBe(Code.InvalidArgument);
-  });
-
-  it("accepts a read of the book as it stood at an instant", () => {
-    // Arrange.
-    const request = create(shimv1.ReadHistoryRequestSchema, {
-      position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 1_000n }) },
-    });
-
-    // Act, Assert.
-    expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBeUndefined();
-  });
-
-  it("refuses a read through a bound that names no instant", () => {
-    // Arrange.
-    const request = create(shimv1.ReadHistoryRequestSchema, {
-      position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs: 0n }) },
-    });
-
-    // Act, Assert.
-    expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBe(Code.InvalidArgument);
-  });
-});
-
 describe("validateStartSessionRequest cold remediation", () => {
   /** The refusal's message, so a field path can be asserted. */
   function messageOf(act: () => void): string | undefined {
@@ -688,30 +638,6 @@ describe("validateUpdateAgentRequest target", () => {
 
     // Act, Assert.
     expect(codeOf(() => validate.validateUpdateAgentRequest(request))).toBeUndefined();
-  });
-});
-
-describe("validateReadHistoryRequest target", () => {
-  it("refuses a target that is present but empty", () => {
-    // Arrange.
-    const request = create(shimv1.ReadHistoryRequestSchema, {
-      target: create(conversationv1.AgentIdSchema, { value: "" }),
-      position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
-    });
-
-    // Act, Assert.
-    expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBe(Code.InvalidArgument);
-  });
-
-  it("accepts a read scoped to a named sub-agent", () => {
-    // Arrange.
-    const request = create(shimv1.ReadHistoryRequestSchema, {
-      target: create(conversationv1.AgentIdSchema, { value: "a-1" }),
-      position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
-    });
-
-    // Act, Assert.
-    expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBeUndefined();
   });
 });
 

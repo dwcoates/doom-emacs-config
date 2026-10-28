@@ -34,7 +34,6 @@ import {
   resumeSession,
   startTurnRequest,
   startTurnRequest as turnFor,
-  readHistoryFirst,
   turnId,
   watchAgentRequest,
   workId,
@@ -44,7 +43,6 @@ import {
   detachForegroundAccepted,
   detachForegroundKind,
   entryFrame,
-  historyPage,
   sessionStarted,
   sessionStartedFrame,
   stopBashAccepted,
@@ -1106,14 +1104,22 @@ describe("subagents", () => {
     });
     stream.close();
     child.close();
-    const parentPage = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
+    // A FRESH WATCH'S OPENING PAGE is the book's newest page, as the store
+    // serves it.
+    const newestPage = async (target?: conversationv1.AgentId) => {
+      const fresh = openStream((options) =>
+        shim.clients.h1.watchAgent(watchAgentRequest(target === undefined ? {} : { target }), options),
+      );
+      const page = watchAgentPage(await fresh.next());
+      fresh.close();
+      return page;
+    };
+    const parentPage = await newestPage();
     expect(
       parentPage.entries.map((entry) => entryFrame(entry)?.agentId?.value ?? ""),
     ).not.toContain(created);
     // And the child's OWN book is where they are.
-    const childPage = historyPage(
-      await shim.clients.h1.readHistory(readHistoryFirst({ target: agentId(created) })),
-    );
+    const childPage = await newestPage(agentId(created));
     const childAgents = new Set(
       childPage.entries.map((entry) => entryFrame(entry)?.agentId?.value ?? ""),
     );

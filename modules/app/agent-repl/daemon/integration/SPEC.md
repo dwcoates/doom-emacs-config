@@ -52,7 +52,7 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   `diagnostics{healthy}` then stays open; StartTurn answers success with
   the AgentPrompt echo and an empty page; WatchAgent answers an empty page
   and stays open; UpdateAgent/KillTurn/KillSession succeed; Hibernate
-  succeeds; ReadHistory answers an empty floor page. Every request is
+  succeeds. Every request is
   recorded and retrievable via `expect`.
 - The harness exposes `d.Shim(ws)` (the fake's control client for that
   workspace's UDS) and helpers to read views: `d.WatchFooter(ws)` etc.

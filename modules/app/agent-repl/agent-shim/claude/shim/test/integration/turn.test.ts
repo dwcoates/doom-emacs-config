@@ -21,9 +21,6 @@ import {
   openStream, openSessionUpdates,
   pointer,
   promptAgent,
-  readHistoryAfter,
-  readHistoryFirst,
-  readHistoryThrough,
   resumeSession,
   startTurnRequest,
   stopAgent,
@@ -34,9 +31,7 @@ import {
 import {
   entryFrame,
   entryPrompt,
-  historyPage,
   killTurnCause,
-  readHistoryKind,
   sessionStarted,
   sessionUpdate,
   startTurnKind,
@@ -1015,228 +1010,6 @@ describe("WatchAgent", () => {
   });
 });
 
-describe("ReadHistory", () => {
-  test("first serves the NEWEST page", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const watch = openStream((options) =>
-      shim.clients.h1.watchAgent(watchAgentRequest(), options),
-    );
-    await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
-    const terminal = await untilTerminal(watch);
-    watch.close();
-
-    const page = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
-
-    expect(page.entries[0]?.at?.value).toBe(terminal.at?.value);
-  });
-
-  test("after(last_entry) walks older until the floor", async () => {
-    const shim = await spawnShim({ storePageSize: 2 });
-    await shim.clients.h1.startSession(freshSession());
-    const watch = openStream((options) =>
-      shim.clients.h1.watchAgent(watchAgentRequest(), options),
-    );
-    await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
-    await untilTerminal(watch);
-    watch.close();
-    const firstPage = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
-    if (firstPage.boundary.case !== "more") {
-      throw new Error("the fixture produced too few entries to page over");
-    }
-    let older = historyPage(
-      await shim.clients.h1.readHistory(readHistoryAfter(firstPage.boundary.value.lastEntry ?? pointer("0"))),
-    );
-    const walked = [...older.entries];
-    while (older.boundary.case === "more") {
-      older = historyPage(
-        await shim.clients.h1.readHistory(readHistoryAfter(older.boundary.value.lastEntry ?? pointer("0"))),
-      );
-      walked.push(...older.entries);
-    }
-
-    expect(older.boundary.case).toBe("floor");
-    // "OLDER" WITHOUT READING A POINTER: the walk is disjoint from the page it
-    // continued, and it stopped at the floor. Parsing the marks as integers
-    // would assert against a store that happens to mint numbers.
-    const firstMarks = new Set(firstPage.entries.map((entry) => entry.at?.value ?? ""));
-    expect(walked.map((entry) => entry.at?.value ?? "").filter((at) => firstMarks.has(at))).toEqual([]);
-    expect(walked.length).toBeGreaterThan(0);
-  });
-
-  test("every page of a walk is the store's page, and only the last runs short", async () => {
-    // No caller picks a budget: first and after both serve the store's page, so
-    // every page but the floor's is exactly the store's size.
-    const shim = await spawnShim({ storePageSize: 2 });
-    await shim.clients.h1.startSession(freshSession());
-    const watch = openStream((options) =>
-      shim.clients.h1.watchAgent(watchAgentRequest(), options),
-    );
-    await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
-    await untilTerminal(watch);
-    watch.close();
-    const pages = [historyPage(await shim.clients.h1.readHistory(readHistoryFirst()))];
-    for (let last = pages[0]; last?.boundary.case === "more"; last = pages[pages.length - 1]) {
-      pages.push(
-        historyPage(
-          await shim.clients.h1.readHistory(readHistoryAfter(last.boundary.value.lastEntry ?? pointer("0"))),
-        ),
-      );
-    }
-
-    const sizes = pages.map((page) => page.entries.length);
-
-    expect(pages.length).toBeGreaterThan(1);
-    expect(sizes.slice(0, -1).every((size) => size === 2)).toBe(true);
-    expect(pages[pages.length - 1]?.boundary.case).toBe("floor");
-  });
-
-  test("every entry it serves carries the place the shim observed it at", async () => {
-    // Arrange.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const watch = openStream((options) =>
-      shim.clients.h1.watchAgent(watchAgentRequest(), options),
-    );
-    await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
-    await untilTerminal(watch);
-    watch.close();
-
-    // Act.
-    const page = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
-
-    // Assert.
-    expect(new Set(page.entries.map((entry) => entry.place.case))).toEqual(new Set(["recordedPlace"]));
-  });
-
-  test("through reads the book as it stood at an instant", async () => {
-    // Arrange: the bound is the place of the book's oldest entry.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const watch = openStream((options) =>
-      shim.clients.h1.watchAgent(watchAgentRequest(), options),
-    );
-    await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
-    await untilTerminal(watch);
-    watch.close();
-    const whole = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
-    const oldest = whole.entries[whole.entries.length - 1];
-    const bound = oldest?.place.value?.atMs ?? 0n;
-
-    // Act.
-    const asItStood = historyPage(await shim.clients.h1.readHistory(readHistoryThrough(bound)));
-
-    // Assert.
-    const expected = whole.entries.filter((entry) => (entry.place.value?.atMs ?? 0n) <= bound);
-    expect(asItStood.entries.map((entry) => entry.at?.value)).toEqual(expected.map((entry) => entry.at?.value));
-  });
-
-  test("through a book the store never heard of is refused unknown_agent", async () => {
-    // Arrange.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-
-    // Act.
-    const response = await shim.clients.h1.readHistory(
-      readHistoryThrough(1_000n, { target: agentId("no-such-agent") }),
-    );
-
-    // Assert.
-    expect(readHistoryKind(response)).toBe("unknownAgent");
-  });
-
-  test("an unknown agent is refused unknown_agent", async () => {
-    // THE STORE DECIDES, AND IT SAYS SO IN A TYPED ARM. The shim does not know
-    // which books exist — it asks — so this refusal only happens if the store
-    // states it. The fake used to serve an empty page for a book nobody had
-    // written, which made the shim look wrong when it was the fake that never
-    // refused; it is now armed with the arm a real store would send.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    shim.store?.failReads("OpenAgentSession", "invalid_request", "no book named that");
-
-    const response = await shim.clients.h1.readHistory(
-      readHistoryFirst({ target: agentId("no-such-agent") }),
-    );
-
-    expect(readHistoryKind(response)).toBe("unknownAgent");
-  });
-
-  test("a stale pointer is refused stale_pointer", async () => {
-    // The pointer is the STORE's to recognize: it minted it, and only it can
-    // say the mark names no line of this book.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    // A pointer-bearing read WALKS OLDER through ReadAgentPage; only the
-    // pointerless first read goes through OpenAgentSession, so arming the
-    // opening verb here would arm one the request never reaches.
-    shim.store?.failReads("ReadAgentPage", "stale_pointer", "that mark is not in this book");
-
-    const response = await shim.clients.h1.readHistory(
-      readHistoryAfter(pointer("pointer-from-a-previous-store")),
-    );
-
-    expect(readHistoryKind(response)).toBe("stalePointer");
-  });
-
-  test("the refusal follows the ARM, not the store's prose", async () => {
-    // The negative that gives the two above their meaning: a detail saying the
-    // opposite of the arm must not change the answer. An earlier reader
-    // classified by substring, so a storage failure whose driver text happened
-    // to mention a pointer was reported as a stale pointer and the engine
-    // re-read a book that was actually unreachable.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    shim.store?.failReads("OpenAgentSession", "storage_failure", "that pointer names no such agent");
-
-    const response = await shim.clients.h1.readHistory(readHistoryFirst());
-
-    expect(readHistoryKind(response)).toBe("storeUnavailable");
-  });
-
-  test("an unreachable store is refused store_unavailable", async () => {
-    // The shim serves history FROM THE STORE, so a store that is down is a
-    // refusal with a cause and never an empty page — an empty page would read
-    // as "this conversation has no history".
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await shim.store?.close();
-
-    const response = await shim.clients.h1.readHistory(readHistoryFirst());
-
-    expect(readHistoryKind(response)).toBe("storeUnavailable");
-  });
-
-  test("an unreachable store also raises a store_unreachable fault", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const watch = openSessionUpdates((options) =>
-      shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
-    );
-    await watch.next();
-
-    await shim.store?.close();
-    await shim.clients.h1.readHistory(readHistoryFirst());
-    const faulted = await watch.until((frame) => {
-      const update = sessionUpdate(frame);
-      if (update.update.case !== "diagnostics") return false;
-      const health = update.update.value.health;
-      return (
-        health.case === "unhealthy" &&
-        health.value.faults.some((fault) => fault.kind.case === "storeUnreachable")
-      );
-    });
-
-    expect(sessionUpdate(faulted).update.case).toBe("diagnostics");
-    watch.close();
-  });
-});
-
 describe("UpdateAgent", () => {
   test("stop on the main agent during a held turn interrupts it", async () => {
     const shim = await spawnShim();
@@ -1705,21 +1478,6 @@ describe("keep-alives", () => {
     await servedLanded(shim, "and again");
 
     expect(storedCarrying(shim, KEEPALIVE_MARKER)).toEqual([]);
-  });
-
-  test("no keep-alive prompt appears in any page", async () => {
-    // Nothing of a keep-alive is stored, so no page can return one.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await beat(shim);
-
-    const page = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
-
-    const said = page.entries
-      .map(entryPrompt)
-      .flatMap((prompt) => prompt?.said?.content?.blocks ?? [])
-      .map((block) => (block.block.case === "text" ? block.block.value.text : ""));
-    expect(said.some((text) => text.startsWith(KEEPALIVE_MARKER))).toBe(false);
   });
 
   test("a real prompt after keep-alives is delivered with the context rolled back", async () => {

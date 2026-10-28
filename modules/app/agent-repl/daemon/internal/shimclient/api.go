@@ -183,8 +183,6 @@ type Client interface {
 	StopBash(ctx context.Context, req *shimv1.StopBashRequest) (*shimv1.StopBashResponse, error)
 	// DetachForeground detaches a running foreground unit.
 	DetachForeground(ctx context.Context, req *shimv1.DetachForegroundRequest) (*shimv1.DetachForegroundResponse, error)
-	// ReadHistory pages an agent's history without opening a watch.
-	ReadHistory(ctx context.Context, req *shimv1.ReadHistoryRequest) (*shimv1.ReadHistoryResponse, error)
 	// ResolvePeerDelivery answers which sessions hold the two ends of one
 	// cross-session message, read from the host's one store; any running shim
 	// answers for any session.

@@ -83,8 +83,6 @@ const (
 	ShimStopWorkflowProcedure = "/shim.v1.Shim/StopWorkflow"
 	// ShimDetachForegroundProcedure is the fully-qualified name of the Shim's DetachForeground RPC.
 	ShimDetachForegroundProcedure = "/shim.v1.Shim/DetachForeground"
-	// ShimReadHistoryProcedure is the fully-qualified name of the Shim's ReadHistory RPC.
-	ShimReadHistoryProcedure = "/shim.v1.Shim/ReadHistory"
 	// ShimReadTranscriptsProcedure is the fully-qualified name of the Shim's ReadTranscripts RPC.
 	ShimReadTranscriptsProcedure = "/shim.v1.Shim/ReadTranscripts"
 	// ShimResolvePeerDeliveryProcedure is the fully-qualified name of the Shim's ResolvePeerDelivery
@@ -124,7 +122,6 @@ var (
 	shimWatchWorkflowMethodDescriptor            = shimServiceDescriptor.Methods().ByName("WatchWorkflow")
 	shimStopWorkflowMethodDescriptor             = shimServiceDescriptor.Methods().ByName("StopWorkflow")
 	shimDetachForegroundMethodDescriptor         = shimServiceDescriptor.Methods().ByName("DetachForeground")
-	shimReadHistoryMethodDescriptor              = shimServiceDescriptor.Methods().ByName("ReadHistory")
 	shimReadTranscriptsMethodDescriptor          = shimServiceDescriptor.Methods().ByName("ReadTranscripts")
 	shimResolvePeerDeliveryMethodDescriptor      = shimServiceDescriptor.Methods().ByName("ResolvePeerDelivery")
 	shimResolveVendorTaskMethodDescriptor        = shimServiceDescriptor.Methods().ByName("ResolveVendorTask")
@@ -206,10 +203,6 @@ type ShimClient interface {
 	// Move in-flight turn work onto its own stream (Ctrl-B). The turn then
 	// announces it as detached, and the consumer opens the matching Watch.
 	DetachForeground(context.Context, *connect.Request[v1.DetachForegroundRequest]) (*connect.Response[v1.DetachForegroundResponse], error)
-	// One page of one agent's history, newest first, from the newest or from
-	// a page already received. Serves cold open, scroll-back, and the daemon's
-	// own catch-up after a restart alike.
-	ReadHistory(context.Context, *connect.Request[v1.ReadHistoryRequest]) (*connect.Response[v1.ReadHistoryResponse], error)
 	// Every conversation filed under this shim's working directory, read off
 	// the transcripts themselves. Spends nothing; see
 	// endpoint_read_transcripts.proto.
@@ -373,12 +366,6 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			connect.WithSchema(shimDetachForegroundMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
-		readHistory: connect.NewClient[v1.ReadHistoryRequest, v1.ReadHistoryResponse](
-			httpClient,
-			baseURL+ShimReadHistoryProcedure,
-			connect.WithSchema(shimReadHistoryMethodDescriptor),
-			connect.WithClientOptions(opts...),
-		),
 		readTranscripts: connect.NewClient[v1.ReadTranscriptsRequest, v1.ReadTranscriptsResponse](
 			httpClient,
 			baseURL+ShimReadTranscriptsProcedure,
@@ -441,7 +428,6 @@ type shimClient struct {
 	watchWorkflow            *connect.Client[v1.WatchWorkflowRequest, v1.WatchWorkflowResponse]
 	stopWorkflow             *connect.Client[v1.StopWorkflowRequest, v1.StopWorkflowResponse]
 	detachForeground         *connect.Client[v1.DetachForegroundRequest, v1.DetachForegroundResponse]
-	readHistory              *connect.Client[v1.ReadHistoryRequest, v1.ReadHistoryResponse]
 	readTranscripts          *connect.Client[v1.ReadTranscriptsRequest, v1.ReadTranscriptsResponse]
 	resolvePeerDelivery      *connect.Client[v1.ResolvePeerDeliveryRequest, v1.ResolvePeerDeliveryResponse]
 	resolveVendorTask        *connect.Client[v1.ResolveVendorTaskRequest, v1.ResolveVendorTaskResponse]
@@ -555,11 +541,6 @@ func (c *shimClient) DetachForeground(ctx context.Context, req *connect.Request[
 	return c.detachForeground.CallUnary(ctx, req)
 }
 
-// ReadHistory calls shim.v1.Shim.ReadHistory.
-func (c *shimClient) ReadHistory(ctx context.Context, req *connect.Request[v1.ReadHistoryRequest]) (*connect.Response[v1.ReadHistoryResponse], error) {
-	return c.readHistory.CallUnary(ctx, req)
-}
-
 // ReadTranscripts calls shim.v1.Shim.ReadTranscripts.
 func (c *shimClient) ReadTranscripts(ctx context.Context, req *connect.Request[v1.ReadTranscriptsRequest]) (*connect.Response[v1.ReadTranscriptsResponse], error) {
 	return c.readTranscripts.CallUnary(ctx, req)
@@ -663,10 +644,6 @@ type ShimHandler interface {
 	// Move in-flight turn work onto its own stream (Ctrl-B). The turn then
 	// announces it as detached, and the consumer opens the matching Watch.
 	DetachForeground(context.Context, *connect.Request[v1.DetachForegroundRequest]) (*connect.Response[v1.DetachForegroundResponse], error)
-	// One page of one agent's history, newest first, from the newest or from
-	// a page already received. Serves cold open, scroll-back, and the daemon's
-	// own catch-up after a restart alike.
-	ReadHistory(context.Context, *connect.Request[v1.ReadHistoryRequest]) (*connect.Response[v1.ReadHistoryResponse], error)
 	// Every conversation filed under this shim's working directory, read off
 	// the transcripts themselves. Spends nothing; see
 	// endpoint_read_transcripts.proto.
@@ -826,12 +803,6 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		connect.WithSchema(shimDetachForegroundMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
-	shimReadHistoryHandler := connect.NewUnaryHandler(
-		ShimReadHistoryProcedure,
-		svc.ReadHistory,
-		connect.WithSchema(shimReadHistoryMethodDescriptor),
-		connect.WithHandlerOptions(opts...),
-	)
 	shimReadTranscriptsHandler := connect.NewUnaryHandler(
 		ShimReadTranscriptsProcedure,
 		svc.ReadTranscripts,
@@ -912,8 +883,6 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimStopWorkflowHandler.ServeHTTP(w, r)
 		case ShimDetachForegroundProcedure:
 			shimDetachForegroundHandler.ServeHTTP(w, r)
-		case ShimReadHistoryProcedure:
-			shimReadHistoryHandler.ServeHTTP(w, r)
 		case ShimReadTranscriptsProcedure:
 			shimReadTranscriptsHandler.ServeHTTP(w, r)
 		case ShimResolvePeerDeliveryProcedure:
@@ -1017,10 +986,6 @@ func (UnimplementedShimHandler) StopWorkflow(context.Context, *connect.Request[v
 
 func (UnimplementedShimHandler) DetachForeground(context.Context, *connect.Request[v1.DetachForegroundRequest]) (*connect.Response[v1.DetachForegroundResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.DetachForeground is not implemented"))
-}
-
-func (UnimplementedShimHandler) ReadHistory(context.Context, *connect.Request[v1.ReadHistoryRequest]) (*connect.Response[v1.ReadHistoryResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.ReadHistory is not implemented"))
 }
 
 func (UnimplementedShimHandler) ReadTranscripts(context.Context, *connect.Request[v1.ReadTranscriptsRequest]) (*connect.Response[v1.ReadTranscriptsResponse], error) {

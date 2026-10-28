@@ -614,35 +614,3 @@ func validateForkSessionRequest(req *shimv1.ForkSessionRequest) error {
 		return invalid(m, m+".point.extent", "has no arm set")
 	}
 }
-
-// validateReadHistoryRequest is ReadHistoryRequest's base function.
-func validateReadHistoryRequest(req *shimv1.ReadHistoryRequest) error {
-	const m = "ReadHistoryRequest"
-	if req == nil {
-		return invalid(m, m, "request is nil")
-	}
-	if req.Target != nil {
-		if err := validateAgentID(m+".target", req.GetTarget()); err != nil {
-			return err
-		}
-	}
-	switch position := req.GetPosition().(type) {
-	case *shimv1.ReadHistoryRequest_First:
-		if position.First == nil {
-			return invalid(m, m+".first", "arm is nil")
-		}
-		return nil
-	case *shimv1.ReadHistoryRequest_After:
-		return validateHistoryPointer(m+".after", position.After)
-	case *shimv1.ReadHistoryRequest_Through:
-		// A BOUNDED READ, a fork's inherited past from its fork point: the
-		// bound is a positive instant, or the book as it stood before anything
-		// was said, which is a malformed request rather than an empty page.
-		if position.Through.GetAtMs() <= 0 {
-			return invalid(m, m+".through.at_ms", "is not a positive instant")
-		}
-		return nil
-	default:
-		return invalid(m, m+".position", "oneof is unset")
-	}
-}
