@@ -3095,7 +3095,7 @@ workspaces will exhaust a machine. `-idle-timeout` is the mitigation: after a
 workspace has been left alone for that long, the sweeper SIGTERMs its shim and
 leaves the registry record rehydratable, so the next act pays one bring-up and
 gets everything back. It defaults to the keep-alive policy's own idle cutoff,
-**6 hours**, and `0` disables hibernation entirely.
+**24 hours** (owner ruling, 2026-10-28), and `0` disables hibernation entirely.
 
 IT IS FLOORED AT THAT CUTOFF AND CANNOT GO BELOW IT. `-idle-timeout` and
 `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` answer the same question — how long has
