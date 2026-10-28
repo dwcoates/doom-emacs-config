@@ -17,6 +17,7 @@ import { DOCK_BACKGROUND_PROPERTY, DOCK_HEIGHT_PROPERTY } from "../feed/gate-doc
 const GATE_DOCK_ID = "gate-dock";
 import { LEVEL_WINDOW_OPERATION, log } from "../log.js";
 import type { AppliedLevel, LevelWindow, WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
+import { BUBBLE_OVERLAY_ATTRIBUTE, closeStandingBubbleOverlay } from "../bubble/overlay.js";
 import { closeStandingNewsDigest } from "../news-digest/news-digest.js";
 import type { PresenceSource } from "../presence.js";
 import { FOCUS_LEFT_EMACS, type FocusLeftSource } from "../focus-left.js";
@@ -148,6 +149,13 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         // Escape in Emacs's composer (or a sent prompt) closing the digest is
         // a person's action, recorded at INFO; a page with none standing has
         // nothing to record above DEBUG.
+        // The same escape closes a bubble expanded over the webapp.
+        if (closeStandingBubbleOverlay(doc)) {
+          log.info("escape in Emacs closed the standing bubble overlay", {
+            operation: "page.host-dismissed-bubble-overlay",
+            context: {},
+          });
+        }
         if (closeStandingNewsDigest(doc)) {
           log.info("escape in Emacs closed the standing news digest", {
             operation: "page.host-dismissed-digest",
@@ -264,6 +272,17 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
 
   const drawnWatch = pageMutationObserver(doc, reportDrawn);
   drawnWatch.observe(doc.documentElement, { attributes: true, attributeFilter: [CONVERSATION_DRAWN_ATTRIBUTE] });
+  // A BUBBLE EXPANDED OVER THE WEBAPP: the webhost lifts this page's iframe
+  // above its sidebar while the root says one stands.
+  let overlayOpen = false;
+  const reportOverlay = (): void => {
+    const now = doc.documentElement.hasAttribute(BUBBLE_OVERLAY_ATTRIBUTE);
+    if (now === overlayOpen) return;
+    overlayOpen = now;
+    send({ channel: HOST_CHANNEL, kind: "bubbleOverlay", open: now });
+  };
+  const overlayWatch = pageMutationObserver(doc, reportOverlay);
+  overlayWatch.observe(doc.documentElement, { attributes: true, attributeFilter: [BUBBLE_OVERLAY_ATTRIBUTE] });
 
   win.addEventListener("message", onMessage);
   doc.addEventListener("selectionchange", reportSelection);
@@ -274,6 +293,7 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
 
   send({ channel: HOST_CHANNEL, kind: "hello" });
   reportDrawn();
+  reportOverlay();
   if (gateDock !== null) reportGateBand(gateDock.getBoundingClientRect().height);
   log.info("the page joined its host", { operation: "page.host-joined", context: {} });
 
@@ -281,6 +301,7 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
     dispose() {
       gateWatch?.disconnect();
       drawnWatch.disconnect();
+      overlayWatch.disconnect();
       win.removeEventListener("message", onMessage);
       doc.removeEventListener("selectionchange", reportSelection);
       win.removeEventListener("focus", reportSelection);

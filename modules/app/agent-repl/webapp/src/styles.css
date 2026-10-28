@@ -5439,8 +5439,8 @@ html[data-page-unshown] {
    affirmative color: Evict is the one answer that throws work away, so it
    must not look like the safe default. Prioritize and Cancel stay outlined,
    and Cancel takes the focus. */
-.bubble-overlay { display: block; padding: 0.6rem 0.85rem; }
-.bubble-overlay[hidden] { display: none; }
+.expand-overlay { display: block; padding: 0.6rem 0.85rem; }
+.expand-overlay[hidden] { display: none; }
 .merge-queue-offer { font-size: 0.85rem; color: var(--fg); }
 .merge-queue-offer-head { font-weight: 700; }
 .merge-queue-offer-actions {
@@ -9524,3 +9524,59 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 #ws-sidebar .sb-thread-snippet mark { background: none; color: var(--fg); font-weight: 600; }
+
+/* ---- bubble overlay (src/bubble/overlay.ts) ---- */
+
+/* A BUBBLE EXPANDED OVER THE WHOLE WEBAPP (owner request, 2026-10-28): a
+   double click draws the bubble's body large so a table reads at the window's
+   width. Fixed over the whole page, the sidebar column included (the webhost
+   lifts this page's iframe above its sidebar, host.css), a margin of scrim
+   around the panel. Under the login overlay (50). A click on the scrim,
+   Escape, or the close control takes it down. */
+.expand-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 46;
+  box-sizing: border-box;
+  padding: 3vh 3vw;
+  display: flex;
+  background: rgb(0 0 0 / 0.55);
+}
+.expand-overlay[hidden] {
+  display: none;
+}
+.expand-pane {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--assistant);
+  color: var(--fg);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 0.45);
+}
+.expand-pane[data-role="prompt"] {
+  background: var(--user);
+}
+.expand-pane .bubble-body {
+  padding-right: 0;
+}
+.expand-pane .md table {
+  max-width: none;
+}
+.expand-close {
+  position: absolute;
+  top: calc(3vh + 0.5rem);
+  right: calc(3vw + 1.5rem);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  padding: 0.15rem 0.6rem;
+}
+.expand-close:hover {
+  color: var(--fg);
+}

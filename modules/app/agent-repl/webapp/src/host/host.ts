@@ -222,6 +222,8 @@ interface Lane {
 const FRAME_CLASS = "workspace-frame";
 /** The attribute naming the workspace an iframe holds. */
 export const FRAME_WORKSPACE_ATTRIBUTE = "data-workspace-id";
+/** The attribute an iframe wears while its page has a bubble expanded over the window. */
+export const FRAME_OVERLAY_ATTRIBUTE = "data-bubble-overlay";
 /** The attribute the shown iframe wears. */
 export const FRAME_SHOWN_ATTRIBUTE = "data-shown";
 
@@ -530,6 +532,7 @@ export function createHost(env: HostEnv): Host {
   const take = (frame: Frame, message: PageToHost): void => {
     switch (message.kind) {
       case "hello":
+        frame.iframe.removeAttribute(FRAME_OVERLAY_ATTRIBUTE);
         resetFacts(frame);
         frame.attached = true;
         dropRestyle(frame);
@@ -562,6 +565,10 @@ export function createHost(env: HostEnv): Host {
       case "gateBand":
         frame.gateBand = message.pixels;
         if (frame.id === shownId) placeSidebar();
+        return;
+      case "bubbleOverlay":
+        // The iframe rises above the sidebar while its page has a bubble open.
+        frame.iframe.toggleAttribute(FRAME_OVERLAY_ATTRIBUTE, message.open);
         return;
     }
   };

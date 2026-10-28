@@ -233,6 +233,16 @@ interface RestyleTurnMessage {
   readonly kind: "restyleTurn";
 }
 
+/**
+ * page -> host: whether the page has a bubble expanded over the whole webapp.
+ * The webhost lifts the page's iframe above its sidebar while one stands.
+ */
+interface BubbleOverlayMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "bubbleOverlay";
+  readonly open: boolean;
+}
+
 /** page -> host: the page's restyle turn is over; the next page's may begin. */
 interface RestyledMessage {
   readonly channel: typeof HOST_CHANNEL;
@@ -246,6 +256,7 @@ export type PageToHost =
   | SelectionMessage
   | EditingMessage
   | GateBandMessage
+  | BubbleOverlayMessage
   | RestyleTurnMessage
   | RestyledMessage;
 
@@ -368,6 +379,8 @@ export function parsePageToHost(data: unknown): PageToHost | null {
       return typeof data.pixels === "number" && Number.isFinite(data.pixels) && data.pixels >= 0
         ? { channel: HOST_CHANNEL, kind: "gateBand", pixels: data.pixels }
         : null;
+    case "bubbleOverlay":
+      return typeof data.open === "boolean" ? { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: data.open } : null;
     case "restyleTurn":
       return { channel: HOST_CHANNEL, kind: "restyleTurn" };
     case "restyled":

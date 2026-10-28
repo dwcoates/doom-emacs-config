@@ -99,6 +99,8 @@ describe("parsePageToHost", () => {
     ["gateBand", { channel: HOST_CHANNEL, kind: "gateBand", pixels: 120 }],
     ["restyleTurn", { channel: HOST_CHANNEL, kind: "restyleTurn" }],
     ["restyled", { channel: HOST_CHANNEL, kind: "restyled" }],
+    ["bubbleOverlay open", { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: true }],
+    ["bubbleOverlay closed", { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: false }],
     ["gateBand with no band", { channel: HOST_CHANNEL, kind: "gateBand", pixels: 0 }],
   ])("reads a %s message", (_name, data) => {
     // Arrange / Act
@@ -114,6 +116,7 @@ describe("parsePageToHost", () => {
     ["a drawn of an unknown sort", { channel: HOST_CHANNEL, kind: "drawn", what: "half" }],
     ["a selection without focus", { channel: HOST_CHANNEL, kind: "selection", text: "abc" }],
     ["an editing without a boolean", { channel: HOST_CHANNEL, kind: "editing", editing: 1 }],
+    ["a bubbleOverlay with no flag", { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: "yes" }],
     ["a gateBand below zero", { channel: HOST_CHANNEL, kind: "gateBand", pixels: -1 }],
     ["a gateBand that is not finite", { channel: HOST_CHANNEL, kind: "gateBand", pixels: NaN }],
   ])("refuses %s", (_name, data) => {
