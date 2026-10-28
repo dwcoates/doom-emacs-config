@@ -6293,13 +6293,27 @@ describe("the answered label's pastel orange", () => {
   });
 });
 
-describe("the prompt bubble's edge highlight (owner request, 2026-10-27)", () => {
-  it("feeds a prompt's --bubble-shadow from --prompt-bubble-shadow", () => {
+describe("the prompt bubble's edge highlight (owner requests, 2026-10-27 and 2026-10-28)", () => {
+  it("feeds only a held prompt's --bubble-shadow from --prompt-bubble-shadow", () => {
     // Arrange / Act
-    const rule = declarationsOf('.bubble[data-role="prompt"]') ?? "";
+    const feeding = rulesOf(stylesheet)
+      .filter((r) => /--bubble-shadow:\s*var\(--prompt-bubble-shadow\)/.test(r.declarations))
+      .flatMap((r) => r.selectors);
 
     // Assert
-    expect(rule).toMatch(/--bubble-shadow:\s*var\(--prompt-bubble-shadow\)\s*;/);
+    expect(feeding).toEqual(['.bubble[data-role="prompt"][data-variant="held"]']);
+  });
+
+  it.each(["user", "agent", "peer"])("leaves a %s prompt the shared bubble shadow", (variant) => {
+    // Arrange
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.setAttribute("data-role", "prompt");
+    bubble.setAttribute("data-variant", variant);
+    // Act
+    const shadow = inDocument(bubble, (el) => cascadedValue(el, "--bubble-shadow"));
+    // Assert
+    expect(shadow).not.toBe("var(--prompt-bubble-shadow)");
   });
 
   it("fades a faint inset glow in from the top right, ahead of the shared shadow", () => {
