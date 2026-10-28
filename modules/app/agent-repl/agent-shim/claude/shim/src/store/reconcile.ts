@@ -48,6 +48,7 @@ import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
 import { activityUpsertKey, bashTerminalUpsertKey, terminalUpsertKey } from "./keys.js";
 import { PersistenceError, type PersistEntry } from "./persistence.js";
+import { updateEntry } from "./update-entry.js";
 import { readFailure, transportFailure } from "./reader.js";
 import { readWithRetry, type ReadRetryOptions } from "./retry.js";
 
@@ -198,7 +199,7 @@ export function closingSubagentTerminal(
       },
     }),
   });
-  return {
+  return updateEntry({
     agentId: agent,
     upsertKey: activityUpsertKey(spawn),
     source: {
@@ -208,19 +209,8 @@ export function closingSubagentTerminal(
     keepalive: false,
     // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
     turn: undefined,
-    item: {
-      kind: "frame",
-      frame: create(conversationv1.AgentFrameSchema, {
-        agentId: agent,
-        result: {
-          case: "update",
-          value: create(conversationv1.AgentUpdateSchema, {
-            update: { case: "activity", value: activity },
-          }),
-}
-      }),
-}
-  };
+    update: { case: "activity", value: activity },
+  });
 }
 
 /**
@@ -248,7 +238,7 @@ export function closingMonitorTerminal(
       result: { case: "ended", value: create(conversationv1.AgentMonitorEndedSchema, { call }) },
     }),
   });
-  return {
+  return updateEntry({
     agentId: agent,
     upsertKey: activityUpsertKey(monitor),
     source: {
@@ -258,19 +248,8 @@ export function closingMonitorTerminal(
     keepalive: false,
     // A BOOT SWEEP RUNS OUTSIDE ANY TURN; the store keeps a swept row's stamp.
     turn: undefined,
-    item: {
-      kind: "frame",
-      frame: create(conversationv1.AgentFrameSchema, {
-        agentId: agent,
-        result: {
-          case: "update",
-          value: create(conversationv1.AgentUpdateSchema, {
-            update: { case: "activity", value: activity },
-          }),
-        },
-      }),
-    },
-  };
+    update: { case: "activity", value: activity },
+  });
 }
 
 /**

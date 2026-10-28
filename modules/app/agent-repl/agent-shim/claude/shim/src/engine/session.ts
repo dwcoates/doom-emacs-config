@@ -58,6 +58,7 @@ import {
   type VendorStartBound,
 } from "./start-failure.js";
 import { terminalUpsertKey } from "../store/keys.js";
+import { updateEntry } from "../store/update-entry.js";
 import { PersistenceError, REPAINT } from "../store/persistence.js";
 import { describeDetachedWorkAnswer } from "../store/detached-work.js";
 import { describeVendorTaskAnswer } from "../store/locator.js";
@@ -6210,29 +6211,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return;
     }
     const agentId = identity.agentId;
-    const entry: PersistEntry = {
-      agentId,
-      upsertKey: terminalUpsertKey(agentId, `context-cut-${deps.nowMs()}`),
-      source: {
-        vendorUuid: `context-cut-${identity.vendorSessionId}-${deps.nowMs()}`,
-        discriminator: `agent_frame.update.context_cut.${cut.cut.case ?? ""}`,
-      },
-      keepalive: false,
-      turn: turnFor(false),
-      item: {
-        kind: "frame",
-        frame: create(conversationv1.AgentFrameSchema, {
-          agentId,
-          result: {
-            case: "update",
-            value: create(conversationv1.AgentUpdateSchema, {
-              update: { case: "contextCut", value: cut },
-            }),
-          },
-        }),
-      },
-    };
-    deps.persistence.write([entry]);
+    deps.persistence.write([
+      updateEntry({
+        agentId,
+        upsertKey: terminalUpsertKey(agentId, `context-cut-${deps.nowMs()}`),
+        source: {
+          vendorUuid: `context-cut-${identity.vendorSessionId}-${deps.nowMs()}`,
+          discriminator: `agent_frame.update.context_cut.${cut.cut.case ?? ""}`,
+        },
+        keepalive: false,
+        turn: turnFor(false),
+        update: { case: "contextCut", value: cut },
+      }),
+    ]);
   }
 
   /**
@@ -6246,7 +6237,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const agentId = identity.agentId;
     const atMs = deps.nowMs();
     deps.persistence.write([
-      {
+      updateEntry({
         agentId,
         upsertKey: terminalUpsertKey(agentId, `response-revision-${atMs}`),
         source: {
@@ -6255,19 +6246,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         },
         keepalive: false,
         turn: undefined,
-        item: {
-          kind: "frame",
-          frame: create(conversationv1.AgentFrameSchema, {
-            agentId,
-            result: {
-              case: "update",
-              value: create(conversationv1.AgentUpdateSchema, {
-                update: { case: "responseRevision", value: revision },
-              }),
-            },
-          }),
-        },
-      },
+        update: { case: "responseRevision", value: revision },
+      }),
     ]);
   }
 
