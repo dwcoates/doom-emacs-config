@@ -149,6 +149,8 @@ type Deps struct {
 	Restore func(ws ids.WorkspaceID, done func(error))
 	Clock   clock.Clock
 	Log     dlog.Surfaces
+	// Telemetry receives every beat, lapse and cold gate (telemetry.go).
+	Telemetry Telemetry
 }
 
 // edgeKind is what one queued event is.
@@ -248,6 +250,8 @@ func New(deps Deps) (*Keeper, error) {
 		return nil, errors.New("cachelapse: the keeper needs a clock")
 	case deps.Log == nil:
 		return nil, errors.New("cachelapse: the keeper needs log surfaces")
+	case deps.Telemetry == nil:
+		return nil, errors.New("cachelapse: the keeper needs telemetry")
 	}
 	return &Keeper{
 		deps: deps, wake: make(chan struct{}, 1),
@@ -309,6 +313,10 @@ func (k *Keeper) ClosureChanged(ws ids.WorkspaceID) {
 // ColdGateRaised is WS's session parking at its cold gate: a hidden or closed
 // workspace takes the gate's lapse. It never blocks.
 func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID) {
+	if cold, gated := k.deps.ColdGate(ws); gated {
+		idle := k.deps.Clock.Now().Sub(time.UnixMilli(cold.GetLastRequestAtMs()))
+		k.deps.Telemetry.ObserveColdGate(coldGateOutcome(cold), idle)
+	}
 	k.enqueue(edge{ws: ws, why: "the session parked at its cold gate"})
 }
 
@@ -611,6 +619,7 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 		return false
 	}
 	if !record.LetsCacheLapse() || record.CacheLapse == nil {
+		k.deps.Telemetry.CountLapse(LapseShownFirst)
 		log.Info(opLapse, "the workspace was shown, selected or reopened before its cache lapsed; it keeps running", nil)
 		return false
 	}
@@ -622,14 +631,17 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 		return false
 	}
 	if queued {
+		k.deps.Telemetry.CountLapse(LapseMergeQueued)
 		log.Info(opLapse, "the workspace has a merge queued, so its session and cache are kept until the merge leaves its queue", nil)
 		return false
 	}
 	if !record.CacheLapse.Lapsed(now) {
 		k.deadlines[ws] = record.CacheLapse.LapsesAt
+		k.deps.Telemetry.CountLapse(LapseMovedLater)
 		log.Debug(opLapse, "the recorded lapse moved later; it is re-armed", lapseFields(*record.CacheLapse))
 		return false
 	}
+	k.deps.Telemetry.CountLapse(LapseStoodDown)
 	log.Info(opLapse, "the workspace's cache lapsed; its session is stood down", dlog.Merge(lapseFields(*record.CacheLapse), dlog.Context{"hidden": record.InHiddenSection(), "closed": record.Closed}))
 	k.deps.StandDowns.StandDownWithheld(ws)
 	return true

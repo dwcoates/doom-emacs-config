@@ -173,6 +173,7 @@ type harness struct {
 	publishes  int
 	clock      *clocktest.Scripted
 	log        *dlog.TestSurfaces
+	telemetry  *fakeTelemetry
 	// cycled are the keep-alive cycle stand-downs asked for.
 	cycled []cycleCall
 	// restoring are the restores asked for, each with the done that ends it.
@@ -231,6 +232,7 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		standDowns: &fakeStandDowns{stood: make(chan ids.WorkspaceID, 4)},
 		clock:      clocktest.New(now),
 		log:        dlog.NewTestSurfaces(),
+		telemetry:  &fakeTelemetry{},
 	}
 	keeper, err := New(Deps{
 		DB: h.db,
@@ -257,8 +259,9 @@ func newHarness(t *testing.T, rec wsm.Workspace) *harness {
 		Restore: func(ws ids.WorkspaceID, done func(error)) {
 			h.restoring = append(h.restoring, restoreCall{ws: ws, done: done})
 		},
-		Clock: h.clock,
-		Log:   h.log,
+		Clock:     h.clock,
+		Log:       h.log,
+		Telemetry: h.telemetry,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -304,6 +307,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 			Restore:         func(ids.WorkspaceID, func(error)) {},
 			Clock:           clocktest.New(now),
 			Log:             dlog.NewTestSurfaces(),
+			Telemetry:       &fakeTelemetry{},
 		}
 	}
 	tests := []struct {
@@ -319,6 +323,7 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		{name: "keep-alive cycle's stand-down", strip: func(d *Deps) { d.CycleDown = nil }},
 		{name: "parked sessions' restore", strip: func(d *Deps) { d.Restore = nil }},
 		{name: "clock", strip: func(d *Deps) { d.Clock = nil }},
+		{name: "telemetry", strip: func(d *Deps) { d.Telemetry = nil }},
 		{name: "log", strip: func(d *Deps) { d.Log = nil }},
 	}
 	for _, tt := range tests {

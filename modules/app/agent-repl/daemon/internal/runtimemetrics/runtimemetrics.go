@@ -37,6 +37,7 @@ type Surface struct {
 	rpcs      *prometheus.HistogramVec
 	records   *prometheus.CounterVec
 	merges    merges
+	cache     cacheTelemetry
 	// emacs is the Emacs whose WatchDaemon stream stands, which the process
 	// collector measures.
 	emacs *procmetrics.EmacsProcess
@@ -56,9 +57,10 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 	rpcs := newRPCs()
 	records := newRecords()
 	mrg := newMerges()
+	cache := newCacheTelemetry()
 	srv, err := metrics.OpenRunning(metrics.ProgramDaemon, root, func(op string, err error) {
 		log.Error(Operation, "the metrics surface failed", dlog.Context{"step": op, "error": err.Error()})
-	}, version, lat, rst, rpcs, records, mrg.steps, mrg.spans)
+	}, version, lat, rst, rpcs, records, mrg.steps, mrg.spans, cache.lateness, cache.lapses, cache.coldIdle)
 	if err != nil {
 		return nil, fmt.Errorf("runtimemetrics: %w", err)
 	}
@@ -66,7 +68,7 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 		"address": srv.Addr(),
 		"target":  srv.TargetPath(),
 	})
-	return &Surface{root: root, srv: srv, log: log, version: version, latencies: lat, restarts: rst, rpcs: rpcs, records: records, merges: mrg,
+	return &Surface{root: root, srv: srv, log: log, version: version, latencies: lat, restarts: rst, rpcs: rpcs, records: records, merges: mrg, cache: cache,
 		emacs: procmetrics.NewEmacsProcess(log)}, nil
 }
 
