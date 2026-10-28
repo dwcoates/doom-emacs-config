@@ -265,6 +265,7 @@
   - It ranks them by the same lens for the stakeholders the developer reports the work to.
 - The workspace does this proactively and at once, without asking me any questions.
   - The verb, its flags, and how to read the standing links are `/agent-repl-workspaces`'.
+- When I refer to something that lives at a URL ("update the thread", "publish the app", "check the link") and the referent is unclear, the workspace reads its stored links first.
 
 ## Deleted worktrees
 
