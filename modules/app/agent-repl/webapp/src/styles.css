@@ -623,8 +623,10 @@
     --accent: var(--init);
     --retry: var(--blocked);
     --info-ws: var(--ok);
-    --info-model: #1cd1ec;
-    --info-tokens: #eab00b;
+    /* The model readout is the turquoise status's own token, never a copy. */
+    --info-model: var(--turquoise);
+    /* The token readout is the yellow status's own token, never a copy. */
+    --info-tokens: var(--async);
     --info-time: #8dbff7;
     --info-agents: var(--blocked);
     --info-tasks: #f69ea9;

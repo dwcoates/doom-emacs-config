@@ -6338,3 +6338,15 @@ describe("the topbar's ground (owner request, 2026-10-27)", () => {
     expect(feed < topbar).toBe(true);
   });
 });
+
+describe("footer readouts that wear a status color (2026-10-28)", () => {
+  it.each([
+    ["--info-model", "var(--turquoise)"],
+    ["--info-tokens", "var(--async)"],
+  ])("feeds the dark theme's %s from the status token %s, never a copied hex", (token, want) => {
+    // Arrange / Act
+    const got = themeValueOf(darkThemeBlock(), token);
+    // Assert
+    expect(got).toBe(want);
+  });
+});
