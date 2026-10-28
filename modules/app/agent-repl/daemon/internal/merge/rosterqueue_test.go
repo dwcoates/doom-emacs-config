@@ -734,8 +734,10 @@ func TestAPauseTellsTheRosterItsRecord(t *testing.T) {
 			wantBy: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserUser},
 		},
 		{
-			name:   "a workspace's pause names the workspace",
-			act:    func(h *harness) error { return h.o.Pause(context.Background(), nil, Pauser{By: RequestedByAgent, Asker: theWorkspace}) },
+			name: "a workspace's pause names the workspace",
+			act: func(h *harness) error {
+				return h.o.Pause(context.Background(), nil, Pauser{By: RequestedByAgent, Asker: theWorkspace})
+			},
 			wantBy: wsm.MergeQueuePauser{Kind: wsm.MergeQueuePauserWorkspace, Name: "ws-one"},
 		},
 		{
