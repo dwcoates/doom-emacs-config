@@ -3103,8 +3103,9 @@ A WORKSPACE AT ITS COLD GATE RUNS NO SHIM until the user answers the gate: the
 gate is recorded and raised from the record, and only the answer spawns a shim
 (daemon/AGENTS.md "A workspace at its cold gate runs no shim").
 A BOOT OR A DEPLOY BRINGS BACK ONLY THE SHIMS THAT WERE UP when the last
-daemon stopped (`bringup.OnlyWasUp`), and any workspace owed a turn the stop
-cut (`bringup.OnlyOwed`); Emacs's re-announcement starts nothing.
+daemon stopped (`bringup.OnlyWasUp`), hidden or not: the session record states
+each workspace's shim at every park and unpark, and nothing else decides.
+Emacs's re-announcement starts nothing.
 
 A live session costs a node+CLI process pair of roughly 500MB, and dozens of
 workspaces will exhaust a machine. `-idle-timeout` is the mitigation: after a

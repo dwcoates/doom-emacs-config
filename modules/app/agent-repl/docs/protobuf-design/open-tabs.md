@@ -28,7 +28,9 @@ workspace's web page was checked by Emacs alone, never by the daemon.
    it holds, and spares the session of a one-shot or of a workspace with a
    merge pending (`wsm.Workspace.FoldSpare`); see "Hide and collapse stand
    sessions down".
-   - Consequence: boot's bring-up and every open skip invisible workspaces;
+   - Consequence: every open skips invisible workspaces (a boot's bring-up
+     follows only the record of which shims were up, owner ruling
+     2026-10-28: see shim-lifecycle.md);
      hide and collapse stand sessions down; show and expand start nothing by
      themselves, the editor asks with OpenTabs.
    - Reopens: the 2026-09-13 / 2026-10-02 ruling "an open workspace is never

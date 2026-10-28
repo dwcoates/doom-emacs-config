@@ -8,12 +8,13 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// ONLY OPEN AND VISIBLE WORKSPACES RUN (owner principle 1,
-// docs/protobuf-design/open-tabs.md). A workspace the user hid, or whose
-// repository section is collapsed, has no session started for it by a boot, a
-// takeover or an open; it is started when shown, by the editor's OpenTabs. A
-// hidden workspace's session already running is kept until its cache lapses
-// (cachelapse.Keeper), which this file does not decide.
+// ONLY OPEN AND VISIBLE WORKSPACES ARE OPENED AND KEPT WARM (owner principle
+// 1, docs/protobuf-design/open-tabs.md). A workspace the user hid, or whose
+// repository section is collapsed, is answered hidden by an open and beats no
+// keep-alive. Whether a boot or a takeover brings a shim back is NOT this
+// file's: only the record of which shims were up decides that (wasup.go,
+// owner ruling 2026-10-28). A hidden workspace's session already running is
+// kept until its cache lapses (cachelapse.Keeper).
 // Every site that decides what to start reads this file, and this file reads
 // the one statement of visibility (wsm.Workspace.Runs).
 

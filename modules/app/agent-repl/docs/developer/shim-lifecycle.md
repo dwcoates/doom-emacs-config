@@ -25,7 +25,6 @@ shim still draws its whole conversation.
 | The restart verb, which starts one at once when none is up | `workspace.verbs.Restart` (`startForRestart`) |
 | A rebind to another transcript | `workspace.Fleet.StartRebound` |
 | A boot or a handover, only for a shim that was up when the last daemon stopped | `bringup.OnlyWasUp`, in `boot` and `rollout` |
-| A boot or a handover, for a workspace owed a turn the stop cut, whatever its visibility or park | `bringup.OnlyOwed` |
 
 ### What never starts a shim
 
@@ -40,12 +39,16 @@ shim still draws its whole conversation.
 
 ### "Was up at the last stop"
 
-A boot or a handover brings back only shims that were up. A workspace's
-session record says so: every stand-down the daemon makes on purpose writes a
-terminal (a keep-alive cycle's park, a hibernation, a kill). So a session on
+A boot or a handover brings back exactly the shims that were up, hidden or
+not, and nothing else decides. The state is recorded at every park and unpark,
+never only at shutdown, so a crash leaves it true too: the session record in
+wsm. Every stand-down the daemon makes on purpose writes a terminal (a
+keep-alive cycle's park, a hibernation, a cache lapse, a kill), and every
+session coming up clears it. The daemon's own shutdown, restart or hot reload
+writes nothing, so the record still says how each shim stood. A session on
 record with a vendor session and no terminal was up. A record with no vendor
 session is the spawn-facts row a create writes before any start, and it was
-never up.
+never up. A turn a restart cut had its shim up, so it comes back and resumes.
 
 ## No UX waits on a shim
 

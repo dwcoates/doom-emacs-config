@@ -735,8 +735,8 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		return err
 	}
 	// A WORKSPACE ADOPTED WITH NO SHIM BEHIND IT HAS ITS SESSION STARTED
-	// (sessionless.go) when a takeover brings it up (bringUpFilter): visible
-	// with its shim up at the last stop, or owed a cut turn. The marker is
+	// (sessionless.go) when a takeover brings it up (bringUpFilter): its shim
+	// was up at the last stop. The marker is
 	// raised here, before the views are published, so the roster never draws
 	// the adopted row idle and usable while nothing serves it; the start
 	// itself runs once the adoption is complete and the workspace is this

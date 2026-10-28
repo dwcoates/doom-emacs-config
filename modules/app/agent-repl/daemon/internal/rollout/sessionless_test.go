@@ -135,47 +135,50 @@ func TestBringUpSessionlessGoesThroughTheSharedBringUp(t *testing.T) {
 	}
 }
 
-func TestBringUpSessionlessDoesNotStartAHiddenWorkspace(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	ws, _ := h.workspace(t)
-	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+// TestBringUpSessionlessStartsAShimThatWasUpHiddenOrNot pins the owner ruling
+// of 2026-10-28: the session record alone decides, so a hidden or collapsed
+// workspace whose shim was up comes back.
+func TestBringUpSessionlessStartsAShimThatWasUpHiddenOrNot(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, record wsm.Workspace)
+	}{
+		{name: "a hidden workspace", arrange: func(t *testing.T, h *harness, record wsm.Workspace) {
+			if err := h.db.SetHidden(context.Background(), record.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
+				t.Fatalf("SetHidden: %v", err)
+			}
+		}},
+		{name: "a collapsed workspace", arrange: func(t *testing.T, h *harness, record wsm.Workspace) {
+			if err := h.db.SetRepositoryFolded(context.Background(), record.Repo, true); err != nil {
+				t.Fatalf("SetRepositoryFolded: %v", err)
+			}
+		}},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			record := sessionlessRecord(t, h, ws)
+			tc.arrange(t, h, record)
 
-	// Act
-	h.c.bringUpSessionless([]wsm.Workspace{sessionlessRecord(t, h, ws)}, nil)
+			// Act
+			h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
 
-	// Assert
-	if got := h.Started(); len(got) != 0 {
-		t.Fatalf("started = %v, want nothing for a hidden workspace", got)
+			// Assert
+			if got := h.Started(); len(got) != 1 || got[0] != ws {
+				t.Fatalf("started = %v, want %v", got, ws)
+			}
+		})
 	}
 }
 
-func TestBringUpSessionlessDoesNotStartACollapsedWorkspace(t *testing.T) {
+func TestBringUpSessionlessNeverMarksAShimThatWasNotUp(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	record := sessionlessRecord(t, h, ws)
-	if err := h.db.SetRepositoryFolded(context.Background(), record.Repo, true); err != nil {
-		t.Fatalf("SetRepositoryFolded: %v", err)
-	}
-
-	// Act
-	h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
-
-	// Assert
-	if got := h.Started(); len(got) != 0 {
-		t.Fatalf("started = %v, want nothing for a collapsed workspace", got)
-	}
-}
-
-func TestBringUpSessionlessNeverMarksAHiddenWorkspace(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	ws, _ := h.workspace(t)
-	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle, At: time.Unix(1_700_000_000, 0)}); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
 	}
 
 	// Act
@@ -183,7 +186,7 @@ func TestBringUpSessionlessNeverMarksAHiddenWorkspace(t *testing.T) {
 
 	// Assert
 	if got := h.Marker(); len(got) != 0 {
-		t.Fatalf("marker edges = %v, want none for a hidden workspace", got)
+		t.Fatalf("marker edges = %v, want none for a shim that was not up", got)
 	}
 }
 
@@ -191,8 +194,8 @@ func TestBringUpSessionlessStatesTheWithheldWorkspacesAtInfo(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle, At: time.Unix(1_700_000_000, 0)}); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
 	}
 
 	// Act
@@ -201,7 +204,7 @@ func TestBringUpSessionlessStatesTheWithheldWorkspacesAtInfo(t *testing.T) {
 	// Assert
 	infos := levelRecords(records(h.log, opBringUp), dlog.LevelInfo)
 	if len(infos) != 1 || !slices.Contains(infos[0].Context["workspaces"].([]string), string(ws)) {
-		t.Fatalf("bring-up info records = %+v, want one naming the hidden workspace", infos)
+		t.Fatalf("bring-up info records = %+v, want one naming the workspace left as it is", infos)
 	}
 }
 
@@ -231,26 +234,5 @@ func TestBringUpSessionlessDoesNotStartAShimThatWasNotUp(t *testing.T) {
 				t.Fatalf("started = %v, want nothing for a shim that was not up", got)
 			}
 		})
-	}
-}
-
-func TestBringUpSessionlessStartsAWorkspaceOwedACutTurn(t *testing.T) {
-	// Arrange: hidden, and owed a turn the last stop cut.
-	h := newHarness(t)
-	ws, _ := h.workspace(t)
-	record := sessionlessRecord(t, h, ws)
-	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("SetHidden: %v", err)
-	}
-	if err := h.db.OweResumption(context.Background(), ws, "turn-cut", time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("OweResumption: %v", err)
-	}
-
-	// Act
-	h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
-
-	// Assert
-	if got := h.Started(); len(got) != 1 || got[0] != ws {
-		t.Fatalf("started = %v, want %v brought up to resume its cut turn", got, ws)
 	}
 }

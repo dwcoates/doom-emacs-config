@@ -2688,7 +2688,11 @@ func TestTheBootFailsWhenTheCarriesCannotBeTakenUp(t *testing.T) {
 	}
 }
 
-func TestTheBringUpWithholdsAWorkspaceTheUserCannotSee(t *testing.T) {
+// TestAShimThatWasUpComesBackHiddenOrNot pins the owner ruling of 2026-10-28:
+// the session record alone decides the bring-up, and a hidden or collapsed
+// workspace whose shim was up comes back (it was up for a reason: a turn, a
+// one-shot, a merge, a cache not yet lapsed).
+func TestAShimThatWasUpComesBackHiddenOrNot(t *testing.T) {
 	cases := []struct {
 		name    string
 		arrange func(t *testing.T, h *harness, ws wsm.Workspace)
@@ -2718,23 +2722,18 @@ func TestTheBringUpWithholdsAWorkspaceTheUserCannotSee(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Run: %v", err)
 			}
-			if len(report.PendingBringUp) != 0 {
-				t.Fatalf("PendingBringUp = %v, want none", report.PendingBringUp)
-			}
-			if len(report.WithheldBringUp) != 1 || report.WithheldBringUp[0].ID != ws.ID {
-				t.Fatalf("WithheldBringUp = %v, want %v", report.WithheldBringUp, ws.ID)
+			if len(report.PendingBringUp) != 1 || report.PendingBringUp[0].ID != ws.ID {
+				t.Fatalf("PendingBringUp = %v, want %v", report.PendingBringUp, ws.ID)
 			}
 		})
 	}
 }
 
 func TestAWithheldWorkspaceIsNeverMarkedBringingUp(t *testing.T) {
-	// Arrange.
+	// Arrange: parked between keep-alives, so not up at the last stop.
 	h := newHarness(t)
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
-	if err := h.db.SetHidden(context.Background(), ws.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("SetHidden: %v", err)
-	}
+	h.cycleParked(t, ws)
 
 	// Act.
 	if _, err := h.seq.Run(context.Background()); err != nil {
@@ -2745,7 +2744,7 @@ func TestAWithheldWorkspaceIsNeverMarkedBringingUp(t *testing.T) {
 	h.bringingMu.Lock()
 	defer h.bringingMu.Unlock()
 	if len(h.bringing) != 0 {
-		t.Fatalf("bring-up marker edges = %v, want none for a hidden workspace", h.bringing)
+		t.Fatalf("bring-up marker edges = %v, want none for a workspace whose shim was not up", h.bringing)
 	}
 }
 
@@ -2753,9 +2752,7 @@ func TestTheWithheldWorkspacesAreStatedAtInfo(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
-	if err := h.db.SetHidden(context.Background(), ws.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("SetHidden: %v", err)
-	}
+	h.cycleParked(t, ws)
 
 	// Act.
 	if _, err := h.seq.Run(context.Background()); err != nil {
@@ -2764,32 +2761,11 @@ func TestTheWithheldWorkspacesAreStatedAtInfo(t *testing.T) {
 
 	// Assert.
 	for _, r := range h.log.Records() {
-		if r.Level == "info" && r.Operation == "daemon.boot.run" && strings.Contains(r.Message, "hidden or collapsed") {
+		if r.Level == "info" && r.Operation == "daemon.boot.run" && strings.Contains(r.Message, "was not up") {
 			return
 		}
 	}
-	t.Fatalf("records = %+v, want an info record naming the withheld workspaces", h.log.Records())
-}
-
-func TestAVisibleWorkspaceBesideAHiddenOneIsStillBroughtUp(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	hidden := h.register(t, t.TempDir(), sessionlock.StateFree)
-	shown := h.register(t, t.TempDir(), sessionlock.StateFree)
-	if err := h.db.SetHidden(context.Background(), hidden.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("SetHidden: %v", err)
-	}
-
-	// Act.
-	report, err := h.seq.Run(context.Background())
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if len(report.PendingBringUp) != 1 || report.PendingBringUp[0].ID != shown.ID {
-		t.Fatalf("PendingBringUp = %v, want only %v", report.PendingBringUp, shown.ID)
-	}
+	t.Fatalf("records = %+v, want an info record naming the workspaces left as they are", h.log.Records())
 }
 
 // TestTheZettelStepRunsBesideTheBringUp pins that zettel's service step runs
@@ -2881,35 +2857,3 @@ func TestAJoiningDaemonOpensNoThread(t *testing.T) {
 	}
 }
 
-func TestABootBringsUpAWorkspaceOwedACutTurn(t *testing.T) {
-	cases := []struct {
-		name    string
-		arrange func(t *testing.T, h *harness, ws wsm.Workspace)
-	}{
-		{name: "a hidden one", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) {
-			if err := h.db.SetHidden(context.Background(), ws.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
-				t.Fatalf("SetHidden: %v", err)
-			}
-		}},
-		{name: "a parked one", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) { h.cycleParked(t, ws) }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			h := newHarness(t)
-			ws := h.register(t, t.TempDir(), sessionlock.StateFree)
-			tc.arrange(t, h, ws)
-			if err := h.db.OweResumption(context.Background(), ws.ID, "turn-cut", instant); err != nil {
-				t.Fatalf("OweResumption: %v", err)
-			}
-
-			// Act.
-			h.runAndBringUp(t)
-
-			// Assert.
-			if len(h.started) != 1 || h.started[0] != ws.ID {
-				t.Fatalf("started = %v, want %v brought up to resume its cut turn", h.started, ws.ID)
-			}
-		})
-	}
-}

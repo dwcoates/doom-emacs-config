@@ -299,8 +299,9 @@ func cutWhileHidden(t *testing.T) *fixture {
 }
 
 // TestAHiddenWorkspacesCutTurnIsResumedByTheSuccessorsBoot: an open starts no
-// shim, so the successor's boot brings a hidden workspace owed a cut turn up
-// itself, and the resumption is the turn it starts (bringup.OnlyOwed).
+// shim, and the hidden workspace's shim was up when its turn was cut, so the
+// successor's boot brings it back (bringup.OnlyWasUp) and the resumption is
+// the turn it starts.
 func TestAHiddenWorkspacesCutTurnIsResumedByTheSuccessorsBoot(t *testing.T) {
 	t.Parallel()
 	// Arrange
