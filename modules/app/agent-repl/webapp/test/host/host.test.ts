@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   IN_TURN_BOUND_MS,
+  FRAME_OVERLAY_ATTRIBUTE,
   FRAME_SHOWN_ATTRIBUTE,
   FRAME_WORKSPACE_ATTRIBUTE,
   SIDEBAR_BOTTOM_PROPERTY,
@@ -991,6 +992,35 @@ describe("hostHasFocus", () => {
 
     // Act / Assert
     expect(hostHasFocus(doc, host)).toBe(false);
+  });
+});
+
+describe("a page's bubble overlay", () => {
+  it.each([
+    ["lifts the frame while a bubble stands", true],
+    ["lowers it when the bubble closes", false],
+  ])("%s", (_name, open) => {
+    // Arrange
+    pages(host, "a");
+    if (!open) fromPage("a", { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: true });
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "bubbleOverlay", open });
+
+    // Assert
+    expect(frame("a").hasAttribute(FRAME_OVERLAY_ATTRIBUTE)).toBe(open);
+  });
+
+  it("drops the lift when the page says hello again (a reload)", () => {
+    // Arrange
+    pages(host, "a");
+    fromPage("a", { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: true });
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
+
+    // Assert
+    expect(frame("a").hasAttribute(FRAME_OVERLAY_ATTRIBUTE)).toBe(false);
   });
 });
 

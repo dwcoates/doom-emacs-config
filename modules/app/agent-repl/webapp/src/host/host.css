@@ -54,6 +54,12 @@ html.agent-repl-host #ws-sidebar {
   pointer-events: none;
 }
 
+/* A page with a bubble expanded draws over the sidebar too: its iframe rises
+   above the sidebar (z-index 1) while the overlay stands. */
+.workspace-frame[data-bubble-overlay] {
+  z-index: 2;
+}
+
 .workspace-frame[data-shown] {
   visibility: visible;
   pointer-events: auto;

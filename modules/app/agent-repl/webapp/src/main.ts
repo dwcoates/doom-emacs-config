@@ -55,6 +55,7 @@ import { createRevealRelay } from "./lifecycle/reveal-relay.js";
 import { mountLoginOverlay } from "./login/login.js";
 import { answerLoginRequests } from "./login/request.js";
 import { mountNewsDigest } from "./news-digest/news-digest.js";
+import { mountBubbleOverlay } from "./bubble/overlay.js";
 import { mountImageOverlay } from "./image-overlay/image-overlay.js";
 import { drawCommandPanel } from "./panels/panels.js";
 import { liveUnshownAnimationsEnv, pauseAnimationsWhileUnshown } from "./host/unshown-animations.js";
@@ -390,6 +391,8 @@ export async function boot(): Promise<void> {
     // exactly as the structured links do. Hung here, at the feed/markdown seam,
     // once — every markdown-bearing surface lives inside `feedScroll`.
     installProseLinkRouting(ctx, shell.feedScroll);
+    // A DOUBLE CLICK ON A BUBBLE EXPANDS IT over the whole webapp (bubble/overlay.ts).
+    mountBubbleOverlay(document, shell.feedScroll);
     // AND NO OUTWARD LINK ANYWHERE ON THE PAGE NAVIGATES THE WEBVIEW: what no
     // surface routed opens externally too (link.ts, installNavigationGuard).
     installNavigationGuard(ctx, document);

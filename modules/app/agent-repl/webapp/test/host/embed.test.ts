@@ -267,6 +267,47 @@ describe("commands", () => {
   });
 });
 
+describe("a bubble expanded over the webapp", () => {
+  it("dismissDigest closes a standing bubble overlay", () => {
+    // Arrange
+    const close = pageDoc.createElement("button");
+    close.setAttribute("data-bubble-overlay-close", "");
+    let clicked = false;
+    close.addEventListener("click", () => {
+      clicked = true;
+    });
+    pageDoc.body.append(close);
+
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "dismissDigest" });
+
+    // Assert
+    expect(clicked).toBe(true);
+  });
+
+  it.each([
+    ["opens", true],
+    ["closes", false],
+  ])("reports the overlay when it %s", async (_name, open) => {
+    // Arrange
+    if (!open) pageDoc.documentElement.setAttribute("data-bubble-overlay", "response");
+    link?.dispose();
+    received = [];
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns });
+    await delivered();
+    received = [];
+
+    // Act
+    if (open) pageDoc.documentElement.setAttribute("data-bubble-overlay", "response");
+    else pageDoc.documentElement.removeAttribute("data-bubble-overlay");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Assert
+    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "bubbleOverlay", open });
+    pageDoc.documentElement.removeAttribute("data-bubble-overlay");
+  });
+});
+
 describe("Emacs moving its focus", () => {
   it("tells the page's focus-left signal that Emacs moved its focus", () => {
     // Act
