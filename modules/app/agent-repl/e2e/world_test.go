@@ -282,6 +282,7 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	daemonOpts.ShimNode = node
 	daemonOpts.ShimMain = shimMain
 	daemonOpts.StoreSocket = store.Socket
+	daemonOpts.RealStore = true
 	daemonOpts.StateDir = stateRoot
 	// A root this world minted is fresh, so its state lives in memory unless
 	// the test asked for DurableState (harness.Opts.FreshStateDir).
@@ -1133,6 +1134,7 @@ func (w *World) SuccessorOpts(t testing.TB) harness.Opts {
 		ShimNode:        requireNode(t),
 		ShimMain:        requireShimBundle(t),
 		StoreSocket:     w.Store.Socket,
+		RealStore:       true,
 		ServiceBinaries: w.ServiceBinaries(),
 		ExtraEnv:        worldDaemonEnv([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, w.Sidecar.SpoolRoot, requireLockBinary(t)),
 	}

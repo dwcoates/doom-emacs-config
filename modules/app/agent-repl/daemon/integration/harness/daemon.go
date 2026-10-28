@@ -426,6 +426,12 @@ type Opts struct {
 	// REAL running shim-store, so shims spawned by this daemon persist and
 	// read real events.
 	StoreSocket string
+	// RealStore says the store at StoreSocket is a running shim-store, which
+	// serves its own read-only face beside the socket
+	// (storesocket.ReadPath), so the harness serves no fake one there. The
+	// e2e suite sets it; a successor daemon on its predecessor's fake store
+	// leaves it unset and shares that fake face.
+	RealStore bool
 }
 
 // Daemon is one running agent-repld process and the client dialed to it.
@@ -699,7 +705,9 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	if d.StoreSocket == "" {
 		d.StoreSocket = filepath.Join(sockRoot, "store.sock")
 	}
-	serveFakeStore(t, d.StoreSocket)
+	if !opts.RealStore {
+		serveFakeStore(t, d.StoreSocket)
+	}
 	// THE COVERAGE TEARDOWN IS REGISTERED FIRST, SO IT RUNS LAST. A coverage
 	// run has to let the daemon leave through SIGTERM — a SIGKILLed process
 	// writes no counters — and a graceful shutdown emits records an abruptly
