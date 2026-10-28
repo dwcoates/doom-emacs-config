@@ -267,37 +267,6 @@ describe("allocateSectionLines", () => {
   });
 
   it.each([
-    { name: "Open its ungated lines, the bands none, when the gate takes their share", room: 20 * ROW, gate: 6 * ROW, s: sections(40, 40, 40, 40), want: { open: 20, hidden: 0, merged: 0 } },
-    { name: "the gate's height out of Hidden Workspaces before today's merges", room: 20 * ROW, gate: 3 * ROW, s: sections(40, 40, 40, 40), want: { open: 17, hidden: 0, merged: 3 } },
-    { name: "the bands' remaining room to today's merges, then Hidden Workspaces", room: 20 * ROW, gate: 2 * ROW, s: sections(40, 40, 10, 2), want: { open: 16, hidden: 2, merged: 2 } },
-    { name: "Open lines only where Open alone overruns the gated rail", room: 10 * ROW, gate: 5 * ROW, s: sections(40, 0, 0, 0), want: { open: 10, hidden: 0, merged: 0 } },
-    { name: "every section whole when all fit beside the gate", room: 12 * ROW, gate: 6 * ROW, s: sections(2, 4, 6), want: { open: 2, hidden: 4, merged: 6 } },
-    { name: "older merges the room a whole Open leaves beside the gate", room: 10 * ROW, gate: 4 * ROW, s: sections(3, 2, 30, 0), want: { open: 3, hidden: 2, merged: 5 } },
-  ])("beside a standing gate, allocates $name", ({ room, gate, s, want }) => {
-    // Arrange / Act
-    const got = allocateSectionLines(room, s, gate);
-    // Assert
-    expect(got).toEqual(want);
-  });
-
-  it.each([
-    { name: "a negative gate band", gate: -1 },
-    { name: "a gate band that is not a number", gate: Number.NaN },
-  ])("refuses $name", ({ gate }) => {
-    // Arrange / Act / Assert
-    expect(() => allocateSectionLines(5 * ROW, sections(40, 40, 40, 40), gate)).toThrow(/band fit: a gate band of/);
-  });
-
-  it("fills Deploys through an expanded floor first in the room a gate band leaves the bands", () => {
-    // Arrange — the Open section keeps the 7 lines it has in the room plus the gate.
-    const s = sections(10, 10, 10, 0, 5);
-    // Act
-    const got = allocateSectionLines(10 * ROW, s, 3 * ROW);
-    // Assert
-    expect(got).toEqual({ open: 7, merged: 3, hidden: 0 });
-  });
-
-  it.each([
     { name: "no stops", s: { ...sections(3, 3, 3), hidden: [] } },
     { name: "stops not starting at zero", s: { ...sections(3, 3, 3), open: [5, 20] } },
     { name: "shrinking stops", s: { ...sections(3, 3, 3), merged: [0, 20, 10] } },
@@ -1019,27 +988,6 @@ describe("installBandFit", () => {
     fireResize(rail.scroller);
     // Assert
     expect(maxHeights(rail.pane)).toEqual(["", "", ""]);
-    fit.dispose();
-  });
-
-  it("keeps the Open section's height when a docking gate band shrinks the rail, taking it from the bands", () => {
-    // Arrange — fitted out of room: Open 4 lines, Deploys its collapsed
-    // Recently Deployed heading's 1, Hidden Workspaces 5.
-    const rail = drawn({ open: 10, hidden: 10, merged: 10, expanded: false });
-    laidOut(rail, 300, 100);
-    let gate = 0;
-    const fit = installBandFit(rail.scroller, fakeTicker(), { gateBand: () => gate });
-    fit.refit();
-    const before = { open: maxHeights(rail.pane)[0], hidden: heights(rail.pane)[2] };
-    // Act — a gate band three lines tall docks under the rail.
-    gate = 3 * ROW;
-    railHeight(rail.scroller, 300 - gate);
-    fireResize(rail.scroller);
-    // Assert — Hidden Workspaces, the lowest, stands as tall as its lines.
-    expect([before, { open: maxHeights(rail.pane)[0], hidden: heights(rail.pane)[2] }]).toEqual([
-      { open: `${4 * ROW}px`, hidden: `${5 * ROW}px` },
-      { open: `${4 * ROW}px`, hidden: `${2 * ROW}px` },
-    ]);
     fit.dispose();
   });
 

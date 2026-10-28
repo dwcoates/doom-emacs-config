@@ -372,8 +372,6 @@ export async function boot(): Promise<void> {
     } else {
       mountSidebar(shell.sidebar, ctx, {
         workspaceSelected: () => feed.workspaceSelected(),
-        // A page's own rail ends above its docked gate band (styles.css body grid).
-        gateBand: () => shell.gateDock.getBoundingClientRect().height,
       });
     }
 
