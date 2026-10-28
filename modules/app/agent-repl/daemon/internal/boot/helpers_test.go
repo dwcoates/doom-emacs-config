@@ -524,7 +524,7 @@ func (h *harness) register(t *testing.T, dir string, state sessionlock.State) ws
 	// no terminal, which is what a boot brings back (bringup.OnlyWasUp). A test
 	// of a parked, killed or never-started workspace says so itself.
 	if err := h.db.PutSession(context.Background(), wsm.Session{
-		Workspace: ws.ID, HostSessionID: "host-" + string(ws.ID), StartedAt: instant,
+		Workspace: ws.ID, HostSessionID: "host-" + string(ws.ID), VendorSessionID: "vendor-" + string(ws.ID), StartedAt: instant,
 	}); err != nil {
 		t.Fatalf("PutSession(%s): %v", ws.ID, err)
 	}

@@ -11,9 +11,11 @@ import (
 // (owner ruling, 2026-10-28). Each session's record says so already: every
 // stand-down this daemon makes on purpose writes its terminal (a keep-alive
 // cycle's park, a hibernation, a kill), and a session nothing stood down has
-// none. So a workspace whose session is on record with no terminal was up,
-// and is brought up again; one parked just before the restart, one killed,
-// and one that never started stay as they are, until a prompt (or a
+// none. So a workspace whose session is on record with a conversation (a
+// vendor session) and no terminal was up, and is brought up again; one parked
+// just before the restart, one killed, and one that never started -- no
+// record, or the spawn-facts record a create writes before any start -- stay
+// as they are, until a prompt (or a
 // keep-alive, or a cold gate's answer) brings each up. A boot no longer
 // starts every shim it once served.
 
@@ -37,7 +39,7 @@ func OnlyWasUp(ctx context.Context, sessions SessionLister, pending []wsm.Worksp
 	}
 	wasUp := make(map[wsm.WorkspaceID]bool, len(all))
 	for _, s := range all {
-		wasUp[s.Workspace] = s.Terminal == nil
+		wasUp[s.Workspace] = s.Terminal == nil && s.VendorSessionID != ""
 	}
 	for _, ws := range pending {
 		if wasUp[ws.ID] {

@@ -17,14 +17,15 @@ type fakeSessionList struct {
 func (f fakeSessionList) Sessions(context.Context) ([]wsm.Session, error) { return f.sessions, f.err }
 
 func TestOnlyWasUp(t *testing.T) {
-	up := wsm.Session{Workspace: "ws-up"}
+	up := wsm.Session{Workspace: "ws-up", VendorSessionID: "vendor-up"}
+	created := wsm.Session{Workspace: "ws-created"}
 	parked := wsm.Session{Workspace: "ws-parked", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle}}
 	hibernated := wsm.Session{Workspace: "ws-hibernated", Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalHibernated}}
 	killed := wsm.Session{Workspace: "ws-killed", Terminal: &wsm.SessionTerminal{Kind: "killed"}}
-	pending := []wsm.Workspace{{ID: "ws-up"}, {ID: "ws-parked"}, {ID: "ws-hibernated"}, {ID: "ws-killed"}, {ID: "ws-never-started"}}
+	pending := []wsm.Workspace{{ID: "ws-up"}, {ID: "ws-parked"}, {ID: "ws-hibernated"}, {ID: "ws-killed"}, {ID: "ws-created"}, {ID: "ws-never-started"}}
 
 	// Act
-	gotUp, gotLeft, err := OnlyWasUp(context.Background(), fakeSessionList{sessions: []wsm.Session{up, parked, hibernated, killed}}, pending)
+	gotUp, gotLeft, err := OnlyWasUp(context.Background(), fakeSessionList{sessions: []wsm.Session{up, parked, hibernated, killed, created}}, pending)
 
 	// Assert
 	if err != nil {
@@ -33,8 +34,8 @@ func TestOnlyWasUp(t *testing.T) {
 	if ids := IDs(gotUp); !slices.Equal(ids, []string{"ws-up"}) {
 		t.Fatalf("up = %v, want only the session with no terminal", ids)
 	}
-	if ids := IDs(gotLeft); !slices.Equal(ids, []string{"ws-parked", "ws-hibernated", "ws-killed", "ws-never-started"}) {
-		t.Fatalf("left = %v, want the parked, hibernated, killed and never-started workspaces", ids)
+	if ids := IDs(gotLeft); !slices.Equal(ids, []string{"ws-parked", "ws-hibernated", "ws-killed", "ws-created", "ws-never-started"}) {
+		t.Fatalf("left = %v, want the parked, hibernated, killed, created-unstarted and never-started workspaces", ids)
 	}
 }
 
