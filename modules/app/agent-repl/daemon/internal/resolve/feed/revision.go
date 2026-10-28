@@ -153,7 +153,9 @@ func (r *resolver) restateRevised(s *wsState, fold *proseState, unit string, rev
 	})
 }
 
-// foldOfRow is the response unit and fold whose row ROW names.
+// foldOfRow is the response unit and fold whose row ROW names. It is THE ONE
+// row-to-fold lookup (foldOfAnswer reads through it), so a fold retired from
+// its row and a fold that drew none are missed the same way everywhere.
 func (s *wsState) foldOfRow(row *frontendv1.FeedId) (string, *proseState, bool) {
 	value := row.GetValue()
 	if value == "" {

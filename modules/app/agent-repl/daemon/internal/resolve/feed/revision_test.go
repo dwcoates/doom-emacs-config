@@ -1,6 +1,9 @@
 package feed
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -290,5 +293,78 @@ func TestAMalformedRevisionIsRecordedAndNotApplied(t *testing.T) {
 	}
 	if got := shownMarkdown(h.revised()); got != "1 🔎 the original" {
 		t.Fatalf("a malformed revision changed the prose to %q", got)
+	}
+}
+
+func TestFoldOfRowFindsTheFoldThatDrewTheRow(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "explain")
+	h.concludeAnswer("turn-1", "unit-1", "the answer")
+	row := h.answerRow()
+
+	// Act.
+	unit, fold, ok := h.resolver.workspaces[testWorkspace].foldOfRow(row)
+
+	// Assert.
+	if !ok || unit != "unit-1" || fold.markdown != "the answer" {
+		t.Fatalf("foldOfRow = %q %+v %v, want unit-1's fold", unit, fold, ok)
+	}
+}
+
+func TestFoldOfRowMissesARowNoFoldDrew(t *testing.T) {
+	tests := []struct {
+		name string
+		row  *frontendv1.FeedId
+	}{
+		{name: "an unknown row", row: &frontendv1.FeedId{Value: "no-such-row"}},
+		{name: "an empty row", row: &frontendv1.FeedId{}},
+		{name: "no row at all", row: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "explain")
+			h.concludeAnswer("turn-1", "unit-1", "the answer")
+
+			// Act.
+			_, _, ok := h.resolver.workspaces[testWorkspace].foldOfRow(tt.row)
+
+			// Assert.
+			if ok {
+				t.Fatal("foldOfRow found a fold for a row no fold drew")
+			}
+		})
+	}
+}
+
+// TestEveryRowToFoldLookupGoesThroughFoldOfRow fails a resolver file that walks
+// the response folds comparing their rows by hand instead of asking foldOfRow.
+func TestEveryRowToFoldLookupGoesThroughFoldOfRow(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	var offenders []string
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(raw), "fold.row.GetValue() == "); n > 0 && (file != "revision.go" || n > 1) {
+			offenders = append(offenders, file)
+		}
+	}
+
+	// Assert.
+	if len(offenders) != 0 {
+		t.Fatalf("hand-rolled row-to-fold lookups in %v; ask foldOfRow", offenders)
 	}
 }
