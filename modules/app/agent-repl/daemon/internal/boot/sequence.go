@@ -179,12 +179,12 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 			})
 			return Report{}, fmt.Errorf("boot: decide the bring-up: %w", err)
 		}
-		// A SESSION THE KEEP-ALIVE CYCLE PARKED STAYS PARKED (owner ruling,
-		// 2026-10-26): it is drawn live and idle, a look or a prompt revives
-		// it, and the cache keeper restores it a minute before its next beat,
-		// a few at a time. Waking it here would bring every parked shim up at
-		// once on every daemon start.
-		visible, err = s.leaveCycleParked(ctx, log, visible)
+		// ONLY A SHIM THAT WAS UP WHEN THE LAST DAEMON STOPPED COMES BACK
+		// (owner ruling, 2026-10-28; bringup.OnlyWasUp): one parked between
+		// keep-alives or hibernated stays parked until a prompt, a keep-alive
+		// or a cold gate's answer brings it up, and a killed or never-started
+		// one stays as it is.
+		visible, err = s.leaveNotUp(ctx, log, visible)
 		if err != nil {
 			return Report{}, err
 		}
@@ -1085,30 +1085,22 @@ func (s *sequence) shimAlive(pid int) bool {
 	return startingshim.Alive(pid)
 }
 
-// leaveCycleParked drops from PENDING every workspace whose session the
-// keep-alive cycle parked. A session record that cannot be read stops the
-// boot: reading it as live would wake a parked shim, and reading it as parked
-// would leave a live one down.
-func (s *sequence) leaveCycleParked(ctx context.Context, log dlog.Logger, pending []wsm.Workspace) ([]wsm.Workspace, error) {
-	sessions, err := wsm.SessionsByWorkspace(ctx, s.deps.DB)
+// leaveNotUp keeps the PENDING workspaces whose shim was up when the last
+// daemon stopped. A session record that cannot be read stops the boot:
+// reading it as up would wake a parked shim, and reading it as parked would
+// leave a live one down.
+func (s *sequence) leaveNotUp(ctx context.Context, log dlog.Logger, pending []wsm.Workspace) ([]wsm.Workspace, error) {
+	up, left, err := bringup.OnlyWasUp(ctx, s.deps.DB, pending)
 	if err != nil {
-		log.Error("daemon.boot.run", "could not read the sessions to leave the keep-alive cycle's parked ones parked; the boot stops", dlog.Context{
+		log.Error("daemon.boot.run", "could not read the sessions to tell which shims were up; the boot stops", dlog.Context{
 			"error": err.Error(),
 		})
-		return nil, fmt.Errorf("boot: read the sessions: %w", err)
+		return nil, fmt.Errorf("boot: %w", err)
 	}
-	var run, parked []wsm.Workspace
-	for _, ws := range pending {
-		if session, found := sessions[ws.ID]; found && session.KeepaliveCycled() {
-			parked = append(parked, ws)
-			continue
-		}
-		run = append(run, ws)
-	}
-	if len(parked) > 0 {
-		log.Info("daemon.boot.run", "sessions the keep-alive cycle parked are left parked; each is restored before its next keep-alive", dlog.Context{
-			"workspaces": bringup.IDs(parked),
+	if len(left) > 0 {
+		log.Info("daemon.boot.run", "workspaces whose shim was not up when the last daemon stopped are left as they are; a prompt brings each up", dlog.Context{
+			"workspaces": bringup.IDs(left),
 		})
 	}
-	return run, nil
+	return up, nil
 }

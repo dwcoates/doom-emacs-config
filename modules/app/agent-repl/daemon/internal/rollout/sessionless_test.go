@@ -204,3 +204,32 @@ func TestBringUpSessionlessStatesTheWithheldWorkspacesAtInfo(t *testing.T) {
 		t.Fatalf("bring-up info records = %+v, want one naming the hidden workspace", infos)
 	}
 }
+
+func TestBringUpSessionlessDoesNotStartAShimThatWasNotUp(t *testing.T) {
+	cases := []struct {
+		name string
+		kind string
+	}{
+		{name: "parked between keep-alives", kind: wsm.TerminalKeepaliveCycle},
+		{name: "hibernated", kind: wsm.TerminalHibernated},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			record := sessionlessRecord(t, h, ws)
+			if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: tc.kind, At: time.Unix(1_700_000_000, 0)}); err != nil {
+				t.Fatalf("SetSessionTerminal: %v", err)
+			}
+
+			// Act
+			h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
+
+			// Assert
+			if got := h.Started(); len(got) != 0 {
+				t.Fatalf("started = %v, want nothing for a shim that was not up", got)
+			}
+		})
+	}
+}

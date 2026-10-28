@@ -55,11 +55,30 @@ func (c *controller) visibleOnly(ctx context.Context, pending []wsm.Workspace, f
 	return run
 }
 
+// wasUpOnly keeps the pending workspaces whose shim was up when the last
+// daemon stopped (bringup.OnlyWasUp, owner ruling 2026-10-28): a parked,
+// hibernated, killed or never-started one is left as it is until a prompt
+// brings it up. A session read that fails starts none of them, at ERROR.
+func (c *controller) wasUpOnly(ctx context.Context, pending []wsm.Workspace, fields dlog.Context) []wsm.Workspace {
+	up, left, err := bringup.OnlyWasUp(ctx, c.deps.DB, pending)
+	if err != nil {
+		c.log.Error(opBringUp, "could not tell which session-less workspaces' shims were up; none of them is started",
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspaces": bringup.IDs(pending)}), err))
+		return nil
+	}
+	if len(left) > 0 {
+		c.log.Info(opBringUp, "workspaces whose shim was not up when the last daemon stopped are not started; a prompt brings each up",
+			dlog.Merge(fields, dlog.Context{"workspaces": bringup.IDs(left)}))
+	}
+	return up
+}
+
 // bringUpSessionless raises the bring-up marker on each pending VISIBLE
 // workspace AT ONCE -- before the caller publishes its views, so no surface
 // draws it idle and usable -- and starts their sessions (startSessionless).
 func (c *controller) bringUpSessionless(pending []wsm.Workspace, fields dlog.Context) {
 	pending = c.visibleOnly(c.lifetime(context.Background()), pending, fields)
+	pending = c.wasUpOnly(c.lifetime(context.Background()), pending, fields)
 	for _, ws := range pending {
 		c.deps.BringingUp(ws.ID, true)
 	}

@@ -1339,21 +1339,37 @@ func TestABootTimesEachWorkspaceItStarts(t *testing.T) {
 // TestABootWakesAHibernatedWorkspace pins the owner's ruling of 2026-09-30:
 // Emacs never opens a workspace asleep, so the boot starts a hibernated
 // workspace's session and counts it as woken.
-func TestABootWakesAHibernatedWorkspace(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
-	h.hibernate(t, ws)
-
-	// Act.
-	_, brought := h.runAndBringUp(t)
-
-	// Assert.
-	if len(h.started) != 1 || h.started[0] != ws.ID {
-		t.Fatalf("started = %v, want [%v]: a hibernated workspace is woken at boot", h.started, ws.ID)
+func TestABootLeavesAWorkspaceWhoseShimWasNotUpAsItIs(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws wsm.Workspace)
+	}{
+		{name: "a hibernated workspace stays hibernated", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) { h.hibernate(t, ws) }},
+		{name: "a killed workspace stays down", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) {
+			if err := h.db.SetSessionTerminal(context.Background(), ws.ID, wsm.SessionTerminal{Kind: "killed", At: instant}); err != nil {
+				t.Fatalf("SetSessionTerminal: %v", err)
+			}
+		}},
+		{name: "a workspace that never started stays unstarted"},
 	}
-	if len(brought.Woken) != 1 || brought.Woken[0] != ws.ID {
-		t.Fatalf("Woken = %v, want [%v]", brought.Woken, ws.ID)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tc.arrange == nil {
+				h.registerNeverStarted(t, t.TempDir(), sessionlock.StateFree)
+			} else {
+				tc.arrange(t, h, h.register(t, t.TempDir(), sessionlock.StateFree))
+			}
+
+			// Act.
+			_, brought := h.runAndBringUp(t)
+
+			// Assert.
+			if len(h.started) != 0 || len(brought.Woken) != 0 {
+				t.Fatalf("started = %v, woken = %v; want nothing brought up: only a shim that was up comes back", h.started, brought.Woken)
+			}
+		})
 	}
 }
 
