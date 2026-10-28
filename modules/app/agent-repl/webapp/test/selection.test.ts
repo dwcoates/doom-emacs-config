@@ -4,7 +4,14 @@ import { createControl, type Control } from "../src/control.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { installSelectionClickGuard, selectedText, type SelectionSource } from "../src/selection.js";
+import {
+  clearSelectionIn,
+  installSelectionClickGuard,
+  selectedSpan,
+  selectedText,
+  selectionTouches,
+  type SelectionSource,
+} from "../src/selection.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeUnder } from "./files-under.js";
 
@@ -196,5 +203,85 @@ describe("installSelectionClickGuard", () => {
     release(button);
     // Assert
     expect(reached()).toBe(1);
+  });
+});
+
+/** A fresh paragraph holding TEXT, unselected. */
+function paragraph(text: string): HTMLElement {
+  const host = document.createElement("p");
+  host.textContent = text;
+  document.body.append(host);
+  return host;
+}
+
+/** Select the whole of EL. */
+function selectAll(el: Node): void {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  document.getSelection()?.removeAllRanges();
+  document.getSelection()?.addRange(range);
+}
+
+describe("selectedSpan", () => {
+  it("answers the selected text and the nodes it starts and ends in", () => {
+    // Arrange
+    const host = paragraph("entropy");
+    selectAll(host);
+    // Act
+    const span = selectedSpan();
+    // Assert
+    expect([span?.text, span?.anchor === host, span?.focus === host]).toEqual(["entropy", true, true]);
+  });
+
+  it("answers null when nothing is selected", () => {
+    // Arrange, Act, Assert
+    expect(selectedSpan()).toBeNull();
+  });
+
+  it("answers null for a source with no selection object", () => {
+    // Arrange
+    const none: SelectionSource = { getSelection: () => null };
+    // Act, Assert
+    expect(selectedSpan(none)).toBeNull();
+  });
+});
+
+describe("selectionTouches", () => {
+  it("answers true for a selection inside the root", () => {
+    // Arrange
+    const host = paragraph("entropy");
+    selectAll(host);
+    // Act, Assert
+    expect(selectionTouches(document.body)).toBe(true);
+  });
+
+  it("answers false for a selection elsewhere", () => {
+    // Arrange
+    const inside = paragraph("inside");
+    selectAll(paragraph("elsewhere"));
+    // Act, Assert
+    expect(selectionTouches(inside)).toBe(false);
+  });
+});
+
+describe("clearSelectionIn", () => {
+  it("drops a selection that touches the root", () => {
+    // Arrange
+    const host = paragraph("entropy");
+    selectAll(host);
+    // Act
+    const cleared = clearSelectionIn(host);
+    // Assert
+    expect([cleared, selectedText()]).toEqual([true, ""]);
+  });
+
+  it("leaves a selection elsewhere standing", () => {
+    // Arrange
+    const inside = paragraph("inside");
+    selectAll(paragraph("elsewhere"));
+    // Act
+    const cleared = clearSelectionIn(inside);
+    // Assert
+    expect([cleared, selectedText()]).toEqual([false, "elsewhere"]);
   });
 });

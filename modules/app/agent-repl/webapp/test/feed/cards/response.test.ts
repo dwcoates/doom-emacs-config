@@ -31,6 +31,8 @@ import {
   responseCapLines,
   carriedNumber,
   revealedSoFar,
+  RESPONSE_REVISING_CLASS,
+  RESPONSE_REVISION_FAILED_CLASS,
 } from "../../../src/feed/cards/response.js";
 import { proseHtml } from "../../../src/bubble/body.js";
 import {
@@ -2593,5 +2595,133 @@ describe("the interim response's hook class", () => {
     );
     // Assert
     expect(after.classList.contains(INTERIM_RESPONSE_CLASS)).toBe(false);
+  });
+});
+
+describe("a final response revised from highlighted words", () => {
+  /** A settled final response saying MARKDOWN, with REVISION and PACE. */
+  function settled(
+    markdown: string,
+    extra: Pick<MessageInitShape<typeof FeedResponseSchema>, "revision"> = {},
+    pace?: typeof PACE,
+  ): FeedResponse {
+    return response({
+      finalAnswer: true,
+      result: { case: "success", value: { prose: { prose: plainProse(markdown) }, ...(pace === undefined ? {} : { revealPace: pace }) } },
+      ...(extra.revision === undefined ? {} : { revision: extra.revision }),
+    });
+  }
+
+  /** The prose a bubble shows now. */
+  function shownProse(el: HTMLElement): string {
+    return el.querySelector(`.${RESPONSE_PROSE_CLASS}`)?.textContent ?? "";
+  }
+
+  /** A drawn, mounted final response saying "alpha omega" in full. */
+  function original(): HTMLElement {
+    const el = drawFeedResponse(settled("alpha omega"), rowContext());
+    mount(el);
+    return el;
+  }
+
+  it("keeps the shared head and tail shown while only the inserted middle types out", () => {
+    // Arrange
+    const before = original();
+    // Act
+    const el = drawFeedResponse(settled("alpha the inserted beta omega", {}, PACE), rowContext(before));
+    vi.advanceTimersByTime(48);
+    // Assert
+    const shown = shownProse(el);
+    expect(shown.startsWith("alpha ")).toBe(true);
+    expect(shown.endsWith("omega\n")).toBe(true);
+    expect(shown.includes("inserted beta")).toBe(false);
+  });
+
+  it("ends showing the whole revised prose", () => {
+    // Arrange
+    const before = original();
+    // Act
+    const el = drawFeedResponse(settled("alpha the inserted beta omega", {}, PACE), rowContext(before));
+    vi.advanceTimersByTime(5000);
+    // Assert
+    expect(shownProse(el)).toBe("alpha the inserted beta omega\n");
+  });
+
+  it("draws the same text restated whole at once", () => {
+    // Arrange
+    const before = original();
+    // Act
+    const el = drawFeedResponse(settled("alpha omega", {}, PACE), rowContext(before));
+    // Assert
+    expect(shownProse(el)).toBe("alpha omega\n");
+  });
+
+  it("rings the bubble while a revision is pending", () => {
+    // Act
+    const el = drawFeedResponse(settled("alpha omega", { revision: { state: { case: "pending", value: {} } } }), rowContext());
+    // Assert
+    expect(el.classList.contains(RESPONSE_REVISING_CLASS)).toBe(true);
+  });
+
+  it("drops the ring once no revision is pending", () => {
+    // Arrange
+    const before = drawFeedResponse(settled("alpha omega", { revision: { state: { case: "pending", value: {} } } }), rowContext());
+    mount(before);
+    // Act
+    const el = drawFeedResponse(settled("alpha omega"), rowContext(before));
+    // Assert
+    expect(el.classList.contains(RESPONSE_REVISING_CLASS)).toBe(false);
+  });
+
+  it("clears the highlight inside the bubble when its revision is pending", () => {
+    // Arrange
+    const before = original();
+    const range = document.createRange();
+    range.selectNodeContents(before.querySelector(`.${RESPONSE_PROSE_CLASS}`) as Node);
+    document.getSelection()?.addRange(range);
+    // Act
+    drawFeedResponse(settled("alpha omega", { revision: { state: { case: "pending", value: {} } } }), rowContext(before));
+    // Assert
+    expect(document.getSelection()?.toString()).toBe("");
+  });
+
+  it("leaves a highlight elsewhere on the page standing", () => {
+    // Arrange
+    const elsewhere = document.createElement("p");
+    elsewhere.textContent = "other words";
+    document.body.append(elsewhere);
+    const range = document.createRange();
+    range.selectNodeContents(elsewhere);
+    document.getSelection()?.addRange(range);
+    // Act
+    drawFeedResponse(settled("alpha omega", { revision: { state: { case: "pending", value: {} } } }), rowContext(original()));
+    // Assert
+    expect(document.getSelection()?.toString()).toBe("other words");
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("says why a revision failed under the prose that stands", () => {
+    // Act
+    const el = drawFeedResponse(
+      settled("alpha omega", { revision: { state: { case: "failed", value: { text: "Couldn't revise: overloaded" } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(`.${RESPONSE_REVISION_FAILED_CLASS}`)?.textContent).toBe("Couldn't revise: overloaded");
+    expect(shownProse(el)).toBe("alpha omega\n");
+  });
+
+  it("refuses a revision that states no arm", () => {
+    // Act
+    const draw = (): HTMLElement => drawFeedResponse(settled("alpha omega", { revision: {} }), rowContext());
+    // Assert
+    expect(draw).toThrow(MalformedView);
+  });
+
+  it("highlights a final response's words in the one purple", () => {
+    // Arrange
+    const rule = /\.bubble\.final-response:not\(\.thinking-bubble\) \.response-prose ::selection \{([^}]*)\}/.exec(stylesheet);
+    // Assert
+    expect(rule?.[1]).toContain("background: var(--blocked)");
   });
 });

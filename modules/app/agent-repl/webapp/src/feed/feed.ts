@@ -41,6 +41,7 @@ import {
 } from "./out-of-view-collapse.js";
 import { installBackgroundClear } from "./background-click.js";
 import { installBranchHover } from "./branch-hover.js";
+import { installResponseHighlight } from "./response-highlight.js";
 import { installImageOpen } from "./feed-image.js";
 import type { ImageOverlayHandle } from "../image-overlay/image-overlay.js";
 import type { FeedImageOverlay } from "../../../proto/gen/ts/frontend/v1/feed_image_overlay_pb";
@@ -356,6 +357,10 @@ export function mountFeed(
   // THE POINTER BOXES THE RESPONSE BRANCH UNDER IT, the node a click answers
   // (owner ruling, 2026-10-24).
   const uninstallBranchHover = installBranchHover(host);
+
+  // WORDS HIGHLIGHTED IN A FINAL RESPONSE are told to the daemon, which holds
+  // them: the next prompt revises that response (response-highlight.ts).
+  const uninstallResponseHighlight = installResponseHighlight(host, ctx);
 
   // A CLICK ON THE FEED OUTSIDE ANY BUBBLE ends the feed's selection
   // (owner ruling, 2026-09-23). It asks the daemon, which owns the selection;
@@ -1184,6 +1189,7 @@ export function mountFeed(
     uninstallExpand();
     uninstallSelect();
     uninstallBranchHover();
+    uninstallResponseHighlight();
     host.removeEventListener(READER_TOGGLE_EVENT, onReaderToggle);
     held?.dispose();
     uninstallClear?.();

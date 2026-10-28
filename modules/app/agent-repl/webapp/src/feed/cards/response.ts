@@ -74,6 +74,7 @@ import type {
   FeedResponseError,
   FeedResponseNotice,
   FeedResponseProse,
+  FeedResponseRevision,
   FeedResponseSuccess,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawSignInAction } from "../../login/request.js";
@@ -109,6 +110,8 @@ import { bubbleCopyControl, reserveCopyRoom } from "../../bubble/copy-room.js";
 import { readResponseUsage, setResponseUsage } from "../response-usage.js";
 import { markComposerEntry } from "../composer-entry.js";
 import { markRevealedNode } from "../revealed-node.js";
+import { revisedWindow, type RevealWindow } from "../../bubble/text-reveal.js";
+import { clearSelectionIn } from "../../selection.js";
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
@@ -190,6 +193,12 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
 
   if (result.case === "error") hooks.push("response-cut-short");
 
+  // WHERE A REVISION OF THIS RESPONSE STANDS is read before anything is
+  // drawn too (FeedResponse.revision): pending rings the bubble, failed says
+  // why under the prose.
+  const revision = readResponseRevision(u.revision, `${path}.revision`);
+  if (revision.pending) hooks.push(RESPONSE_REVISING_CLASS);
+
   // The usage stamp is read before anything is drawn too, so a stamp the
   // wire got wrong refuses the row here rather than at the hover.
   const usage = u.usage === undefined ? undefined : readResponseUsage(u.usage, `${path}.usage`);
@@ -238,6 +247,10 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   }
   // Read off the previous draw BEFORE the in-place redraw below reuses it.
   const resumed = revealedSoFar(rc.previous);
+  // A SETTLED BUBBLE REDRAWN SETTLED (a revision, or the same block restated)
+  // types out only what changed: the text it showed is read now, before the
+  // redraw replaces it.
+  const settledBefore = result.case === "success" ? settledTextOf(rc.previous) : undefined;
   // A WHOLE RESPONSE TURNING INTERIM EASES INTO IT (collapse-motion.ts): the
   // whole bubble's look is read here, while it still stands, and the interim
   // bubble that replaces it animates from it.
@@ -281,7 +294,12 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
       hooks,
       corner: copy === undefined ? [] : [copy],
       content: [prose],
-      footer: result.case === "error" ? cutShortFooter(result.value) : [],
+      footer:
+        result.case === "error"
+          ? cutShortFooter(result.value)
+          : revision.failed === undefined
+            ? []
+            : [revisionFailedMarker(revision.failed)],
       ...responseCap(u),
     },
     rc.previous,
@@ -307,10 +325,36 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
     });
   }
   const slot = content[0] as HTMLElement;
-  if (pace !== undefined) {
+  // A REVISION ON ITS WAY ENDS THE HIGHLIGHT that asked for it: the daemon
+  // took the words with the prompt, and the purple would otherwise stay up
+  // over words nothing now acts on.
+  if (revision.pending && clearSelectionIn(bubble)) {
+    log.debug("a revision is on its way; the highlight that asked for it was cleared", {
+      operation: "feed.cards.response.revising",
+      context: { row: rc.row.id?.value ?? "unset" },
+    });
+  }
+  if (pace !== undefined && settledBefore !== undefined) {
     revealSlot(body, slot, resumed);
     markRevealed(bubble, resumed);
-    animate(bubble, box, body, slot, resumed, pace, rc);
+    whenSlotPainted(slot, () => {
+      const window = revisedWindow(settledBefore, renderedText(slot), resumed);
+      if (window.shown >= window.tailFrom) {
+        showWhole(bubble, body, slot);
+        return;
+      }
+      log.debug("a settled bubble was redrawn with different text; only the change types out", {
+        operation: "feed.cards.response.revised",
+        context: { row: rc.row.id?.value ?? "unset", shown: window.shown, tail_from: window.tailFrom },
+      });
+      revealSlot(body, slot, window);
+      markRevealed(bubble, window.shown);
+      animate(bubble, box, body, slot, window, pace, rc);
+    });
+  } else if (pace !== undefined) {
+    revealSlot(body, slot, resumed);
+    markRevealed(bubble, resumed);
+    animate(bubble, box, body, slot, { shown: resumed, tailFrom: Number.POSITIVE_INFINITY }, pace, rc);
   } else {
     showWhole(bubble, body, slot);
   }
@@ -502,6 +546,16 @@ function showWhole(bubble: HTMLElement, body: BubbleBody, slot: HTMLElement): vo
   whenSlotPainted(slot, () => markRevealed(bubble, renderedText(slot).length));
 }
 
+/**
+ * The rendered text a SETTLED previous draw showed, whole, or undefined when
+ * there is no previous draw, it was not settled, or its prose never painted.
+ */
+function settledTextOf(previous: HTMLElement | undefined): string | undefined {
+  if (previous?.getAttribute("data-state") !== "success") return undefined;
+  const slot = previous.querySelector<HTMLElement>(`.${RESPONSE_PROSE_CLASS}`);
+  return slot === null ? undefined : slotText(slot);
+}
+
 /** SLOT's whole rendered text; only asked once it has painted. */
 function renderedText(slot: HTMLElement): string {
   const text = slotText(slot);
@@ -526,6 +580,43 @@ function cutShortFooter(u: FeedResponseError): HTMLElement[] {
     footer.push(actions);
   }
   return footer;
+}
+
+/** The class a bubble wears while a revision of it is on its way. */
+export const RESPONSE_REVISING_CLASS = "response-revising";
+
+/** The class of the line saying why a revision failed. */
+export const RESPONSE_REVISION_FAILED_CLASS = "response-revision-failed";
+
+/** Where a revision of a response stands, as the bubble draws it. */
+interface DrawnRevision {
+  readonly pending: boolean;
+  /** Why the last revision failed, in the daemon's words. */
+  readonly failed?: string;
+}
+
+/** Read FeedResponse.revision; an arm a newer daemon set is refused. */
+export function readResponseRevision(u: FeedResponseRevision | undefined, path: string): DrawnRevision {
+  if (u === undefined) return { pending: false };
+  const state = requireCase(u.state, `${path}.state`);
+  switch (state.case) {
+    case "pending":
+      return { pending: true };
+    case "failed":
+      return { pending: false, failed: state.value.text };
+    default: {
+      const other: { case: string } = state;
+      return unreachableArm(`${path}.state`, other.case);
+    }
+  }
+}
+
+/** The line saying why a revision failed, under the prose that stands. */
+function revisionFailedMarker(text: string): HTMLElement {
+  const marker = document.createElement("span");
+  marker.className = RESPONSE_REVISION_FAILED_CLASS;
+  marker.textContent = text;
+  return marker;
 }
 
 /** The class of the broken bubble's action row. */
@@ -559,7 +650,7 @@ function animate(
   box: HTMLElement,
   body: BubbleBody,
   slot: HTMLElement,
-  resumed: number,
+  from: RevealWindow,
   pace: RevealPace,
   rc: RowContext,
 ): void {
@@ -567,15 +658,19 @@ function animate(
   typeOut({
     ctx: rc.ctx,
     pace,
-    resumed,
+    resumed: from.shown,
     operation: "feed.cards.response",
     logContext: { row: rc.row.id?.value ?? "unset" },
     element: bubble,
     reowned: () => paintGeneration(body) !== generation,
-    total: () => slotText(slot)?.length,
+    // A KEPT TAIL IS ALREADY SHOWN, so the type-out ends where it begins.
+    total: () => {
+      const length = slotText(slot)?.length;
+      return length === undefined ? undefined : Math.min(length, from.tailFrom);
+    },
     whenRendered: (fn) => whenSlotPainted(slot, fn),
     reveal: (shown) => {
-      revealSlot(body, slot, shown);
+      revealSlot(body, slot, { shown, tailFrom: from.tailFrom });
       markRevealed(bubble, shown);
     },
     showWhole: () => showWhole(bubble, body, slot),
