@@ -599,37 +599,6 @@ func TestARestoreOfASessionServedAgainIsDropped(t *testing.T) {
 	}
 }
 
-func TestRestoreParked(t *testing.T) {
-	tests := []struct {
-		name    string
-		session wsm.Session
-		current bool
-		want    int
-	}{
-		{name: "a parked session the user looks at is restored", session: parkedSession(theWorkspace), current: true, want: 1},
-		{name: "a parked session the user does not look at waits", session: parkedSession(theWorkspace), want: 0},
-		{name: "a live session is left alone", session: liveSession(theWorkspace), current: true, want: 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			rec := beatable(visible(), 10*time.Minute)
-			rec.Current = tt.current
-			h := newHarness(t, rec)
-			h.db.sessions[theWorkspace] = tt.session
-			h.serving = false
-
-			// Act
-			h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeRestoreAsked, why: "test"})
-
-			// Assert
-			if len(h.restoring) != tt.want {
-				t.Fatalf("restores = %+v, want %d", h.restoring, tt.want)
-			}
-		})
-	}
-}
-
 func TestRunArmsEveryWorkspacesBeatAtTheStart(t *testing.T) {
 	// Arrange
 	h := newHarness(t, beatable(visible(), KeepaliveInterval+time.Minute))

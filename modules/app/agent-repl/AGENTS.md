@@ -3092,21 +3092,19 @@ live detached work) a whole interval, so the user has about an hour after
 the work ends to prompt with no shim start; never under a turn or live
 detached work, nor for the selected workspace, nor once a real turn ran
 since the beat. A parked
-session is drawn as the live idle session it stands in for (`wsm.Park`); a
-look, a prompt or a history read of the selected workspace brings it back,
-the boot and the editor's opens leave it parked, and past the idle cutoff the
-sweep deepens its park into a hibernation. A history read of a workspace the
-user is not looking at restores nothing: the read waits, and selecting the
-workspace restores it. One a history read brought back is parked again once
-the user is not looking at it, unless a prompt engaged it since it came up
-(owner ruling, 2026-10-27; `cachelapse/viewed.go`). So neither flicking
-through workspaces nor every page reloading after a rollout keeps shims up.
+session is drawn as the live idle session it stands in for (`wsm.Park`).
+ONLY A PROMPT, A KEEP-ALIVE, A COLD GATE'S ANSWER OR A RESTART BRINGS A SHIM UP
+(owner ruling, 2026-10-28): a look, an open, a history read, a boot and a
+deploy leave a parked session parked, because every conversation is read from
+the store. Past the idle cutoff the sweep deepens the park into a
+hibernation. `docs/developer/shim-lifecycle.md` is the reference for when a
+shim runs.
 A WORKSPACE AT ITS COLD GATE RUNS NO SHIM until the user answers the gate: the
 gate is recorded and raised from the record, and only the answer spawns a shim
 (daemon/AGENTS.md "A workspace at its cold gate runs no shim").
-A DEPLOY STARTS NO SHIM THAT WAS DOWN BEFORE IT: Emacs's re-announcement
-after a relaunch revives no withheld workspace (`workspace/register.go`),
-exactly as the rollout's bring-up withholds it (`bringup.OnlyVisible`).
+A BOOT OR A DEPLOY BRINGS BACK ONLY THE SHIMS THAT WERE UP when the last
+daemon stopped (`bringup.OnlyWasUp`), and any workspace owed a turn the stop
+cut (`bringup.OnlyOwed`); Emacs's re-announcement starts nothing.
 
 A live session costs a node+CLI process pair of roughly 500MB, and dozens of
 workspaces will exhaust a machine. `-idle-timeout` is the mitigation: after a

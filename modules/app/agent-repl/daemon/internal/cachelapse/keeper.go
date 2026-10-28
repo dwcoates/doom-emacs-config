@@ -166,8 +166,6 @@ const (
 	edgeFree
 	// edgeRestored is a parked session's restore ending.
 	edgeRestored
-	// edgeRestoreAsked is a restore asked for out of turn (RestoreParked).
-	edgeRestoreAsked
 )
 
 // edge is one queued event.
@@ -216,15 +214,6 @@ type Keeper struct {
 	// detached work), as this Keeper saw it. A beat stands a session down
 	// only once it has been free StandDownGrace (owner ruling, 2026-10-26).
 	freeSince map[ids.WorkspaceID]time.Time
-	// viewed are the parked sessions restored only because a reader asked for
-	// their history (viewed.go): each is stood down again once the user is not
-	// looking at it, unless a prompt engaged it. The instant is when its
-	// restore came up, zero while it is in line or in flight.
-	viewed map[ids.WorkspaceID]time.Time
-	// deferred are the parked sessions a reader asked for while the user was
-	// not looking at the workspace (viewed.go): restored only once it is
-	// selected.
-	deferred map[ids.WorkspaceID]bool
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -262,8 +251,6 @@ func New(deps Deps) (*Keeper, error) {
 		lapsedAt:  map[ids.WorkspaceID]time.Time{},
 		sent:      map[ids.WorkspaceID]time.Time{},
 		freeSince: map[ids.WorkspaceID]time.Time{},
-		viewed:    map[ids.WorkspaceID]time.Time{},
-		deferred:  map[ids.WorkspaceID]bool{},
 	}, nil
 }
 
@@ -288,14 +275,6 @@ func (k *Keeper) SessionFree(ws ids.WorkspaceID, workEnded bool) {
 // blocks.
 func (k *Keeper) TurnClosed(ws ids.WorkspaceID) {
 	k.enqueue(edge{ws: ws, why: "a turn's close was recorded"})
-}
-
-// RestoreParked asks for a session the keep-alive cycle parked to be brought
-// back now, through the same restore slots the beats use: a reader needs its
-// history, which only a shim serves. A workspace not parked is no change. It
-// never blocks.
-func (k *Keeper) RestoreParked(ws ids.WorkspaceID) {
-	k.enqueue(edge{ws: ws, kind: edgeRestoreAsked, why: "a reader asked for the parked session's history"})
 }
 
 // VisibilityChanged is a hide or a show of WS, or the selection moving onto
@@ -443,15 +422,10 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 	case edgeFree:
 		if e.workEnded {
 			k.freeSince[e.ws] = k.deps.Clock.Now()
-			// WORK RAN, so the session was used, not only viewed: the cycle
-			// parks it at a beat after the grace, as any other.
-			delete(k.viewed, e.ws)
 		}
 		k.schedule(ctx, e.ws, e.why)
 	case edgeRestored:
 		k.restored(ctx, e.ws, e.err)
-	case edgeRestoreAsked:
-		k.restoreAsked(ctx, e.ws)
 	default:
 		k.reconcile(ctx, e.ws, e.why)
 	}
@@ -521,8 +495,6 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 		log.Error(opCadence, "could not read the workspace's visibility; its keep-alives are left as they are", dlog.Context{"cause": err.Error()})
 		return
 	}
-	k.releaseViewed(log, record)
-	k.restoreDeferred(ctx, log, record)
 	if !record.LetsCacheLapse() {
 		delete(k.deadlines, ws)
 	}
@@ -553,8 +525,6 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.lapsedAt, ws)
 	delete(k.sent, ws)
 	delete(k.freeSince, ws)
-	delete(k.viewed, ws)
-	delete(k.deferred, ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace
