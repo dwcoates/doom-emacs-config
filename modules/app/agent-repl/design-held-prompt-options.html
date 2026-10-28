@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Darker Claude-desktop theme with a held-prompt glimmer</title>
+<!-- A mock of the dark theme retuned darker (owner requests, 2026-10-28):
+     feed #0e0e0e, sidebar and every prompt bubble #212121, topbar between
+     the two, final responses with no fill and no green border, the composer
+     and tool cards a touch above the feed. A held prompt wears the prompt
+     fill plus a faint glimmer that travels around its edge. Each panel varies
+     only the glimmer's strength. -->
+<style>
+  :root {
+    --bg: #0e0e0e;
+    --sidebar-bg: #212121;
+    --topbar-bg: #101010;
+    --border: #2a2a2a;
+    --fg: #f1efe9;
+    --muted: #898782;
+    --user: #212121;
+    --composer-bg: #121212;
+    --tool-card-bg: #141414;
+    --tool-title: #c4a7f5;
+    --card: #2c2c2c;
+    --ok: #86d99a;
+    --bubble-shadow: 0 1px 3px color-mix(in srgb, #000000 30%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 5%, transparent);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: #000; color: var(--fg); font: 14px -apple-system, system-ui, sans-serif; }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+  p.lede { color: var(--muted); margin: 0 0 20px; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+  .option > h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+  .option > p { color: var(--muted); margin: 0 0 10px; font-size: 12px; }
+  .app { display: grid; grid-template-columns: 170px 1fr; height: 540px; border: 1px solid #000; border-radius: 8px; overflow: hidden; }
+  .sidebar { background: var(--sidebar-bg); border-right: 1px solid var(--border); padding: 12px 8px; font-size: 13px; }
+  .sidebar .head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin: 6px 6px 8px; }
+  .sidebar .row { padding: 6px; border-radius: 6px; display: flex; gap: 8px; align-items: center; }
+  .sidebar .row.selected { background: var(--card); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+  .dot.blue { background: #8dbff7; }
+  .main { display: flex; flex-direction: column; background: var(--bg); min-width: 0; }
+  .topbar { background: var(--topbar-bg); border-bottom: 1px solid var(--border); padding: 10px 16px; font-size: 13px; }
+  .feed { flex: 1; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+  .bubble { font: 12px/1.45 ui-monospace, monospace; padding: 7px 11px; border-radius: 8px; max-width: 78%; border: 0.3px solid transparent; }
+  .prompt { margin-left: auto; background: var(--user); box-shadow: var(--bubble-shadow); }
+  .response { margin-right: auto; background: var(--bg); line-height: 1.5; }
+  .tool { align-self: center; width: 86%; background: var(--tool-card-bg); border-radius: 6px; padding: 6px 10px; font: 11px ui-monospace, monospace; color: var(--muted); }
+  .tool b { color: var(--tool-title); font-weight: 500; }
+  .label { font: 10px -apple-system, system-ui, sans-serif; color: var(--muted); margin-bottom: 2px; text-align: right; }
+  .composer { background: var(--composer-bg); border-top: 1px solid var(--border); padding: 12px 16px; color: var(--muted); font: 12px ui-monospace, monospace; }
+
+  /* THE HELD GLIMMER: a short bright arc of a conic gradient, masked to a 1px
+     ring around the bubble, turning once every few seconds so the light runs
+     around the edge. The fill stays the prompt's own. */
+  @property --glimmer-angle { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+  .held { position: relative; }
+  .held::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(from var(--glimmer-angle),
+      transparent 0deg,
+      color-mix(in srgb, #ffffff var(--glimmer-strength), transparent) 30deg,
+      transparent 70deg,
+      transparent 360deg);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: glimmer var(--glimmer-period) linear infinite;
+    pointer-events: none;
+  }
+  @keyframes glimmer { to { --glimmer-angle: 360deg; } }
+  @media (prefers-reduced-motion: reduce) { .held::before { animation: none; } }
+</style>
+</head>
+<body>
+<h1>Darker theme with a held-prompt glimmer</h1>
+<p class="lede">Feed <code>#0e0e0e</code>, sidebar and prompts <code>#212121</code>, topbar <code>#101010</code>, composer <code>#121212</code>, tool cards <code>#141414</code>. Final responses have no fill or border. The held prompt (the last bubble) uses the prompt fill plus a moving glimmer on its edge. The two panels differ only in how bright the glimmer is.</p>
+<div class="grid" id="grid"></div>
+<template id="panel">
+  <div class="app">
+    <aside class="sidebar">
+      <div class="head">doom</div>
+      <div class="row selected"><span class="dot"></span>agent-repl-theme-update</div>
+      <div class="row"><span class="dot blue"></span>merge-queue-sidebar-2</div>
+      <div class="row"><span class="dot"></span>canonical-links-topbar</div>
+      <div class="head">Message bubbles</div>
+      <div class="row"><span class="dot"></span>agent-repl-bubble-font</div>
+    </aside>
+    <section class="main">
+      <div class="topbar">agent-repl-theme-update</div>
+      <div class="feed">
+        <div class="bubble prompt">let's update the agent-repl theme</div>
+        <div class="tool"><b>Read</b> webapp/src/styles.css</div>
+        <div class="bubble response">The sidebar and prompt bubbles share #212121, and the feed is #0e0e0e. The final response drops its fill and its green border.</div>
+        <div class="bubble prompt">looks good, now land it</div>
+        <div class="bubble response">Landing it as an async merge.</div>
+        <div><div class="label">held</div><div class="bubble prompt held" style="width:fit-content">and then bump the version</div></div>
+      </div>
+      <div class="composer">Prompt…</div>
+    </section>
+  </div>
+</template>
+<script>
+  const options = [
+    ["A · Very subtle (recommended)", "A 22% white arc, once around every 4 seconds", "22%", "4s"],
+    ["B · A touch brighter", "A 40% white arc, once around every 3 seconds", "40%", "3s"],
+  ];
+  const grid = document.getElementById("grid");
+  const tpl = document.getElementById("panel");
+  for (const [title, note, strength, period] of options) {
+    const wrap = document.createElement("div");
+    wrap.className = "option";
+    wrap.innerHTML = `<h2>${title}</h2><p>${note}</p>`;
+    const panel = tpl.content.cloneNode(true);
+    const held = panel.querySelector(".held");
+    held.style.setProperty("--glimmer-strength", strength);
+    held.style.setProperty("--glimmer-period", period);
+    wrap.appendChild(panel);
+    grid.appendChild(wrap);
+  }
+</script>
+</body>
+</html>
