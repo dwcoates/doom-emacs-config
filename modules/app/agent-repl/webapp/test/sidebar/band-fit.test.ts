@@ -676,36 +676,66 @@ describe("fitBands", () => {
     expect([...maxHeights(rail.pane), ...heights(rail.pane)]).toEqual(["", "", "", "", "", "760px"]);
   });
 
-  it("stretches Deploys when Hidden Workspaces is folded", () => {
+  it("stretches no Deploys whose lines all show over a folded Hidden Workspaces", () => {
     // Arrange
     const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { hidden: true } });
     laidOut(rail, 1000, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(heights(rail.pane)).toEqual(["", "840px", ""]);
+    expect([...heights(rail.pane), ...maxHeights(rail.pane)]).toEqual(["", "", "", "", "", ""]);
   });
 
-  it("stretches the Open section when both bands are folded", () => {
+  it("stretches no collapsed Recently Deployed over a folded Hidden Workspaces", () => {
+    // Arrange — the Open section capped, room for half a line more.
+    const rail = drawn({ open: 30, hidden: 3, merged: 4, expanded: false, folded: { hidden: true } });
+    laidOut(rail, 510, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(heights(rail.pane)[1]).toBe("");
+  });
+
+  it("stretches the Open section cutting a line when Deploys over a folded Hidden Workspaces shows whole", () => {
+    // Arrange — the Open section capped, room for half a line more.
+    const rail = drawn({ open: 30, hidden: 3, merged: 4, expanded: false, folded: { hidden: true } });
+    laidOut(rail, 510, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect([heights(rail.pane)[0], band(rail.pane, "open-section").hasAttribute(BAND_STRETCHED_ATTRIBUTE)]).toEqual(["390px", true]);
+  });
+
+  it("stretches Deploys cutting a line over a folded Hidden Workspaces", () => {
+    // Arrange — 410px of room: Deploys' older merges take what the Open section leaves.
+    const rail = drawn({ open: 3, hidden: 3, merged: 30, folded: { hidden: true } });
+    laidOut(rail, 510, 100);
+    // Act
+    fitBands(rail.scroller, rail.pane, NOW);
+    // Assert
+    expect(heights(rail.pane)).toEqual(["", "350px", ""]);
+  });
+
+  it("stretches no Open section whose lines all show over folded bands", () => {
     // Arrange
     const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { hidden: true, merged: true } });
     laidOut(rail, 1000, 100);
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(heights(rail.pane)).toEqual(["900px", "", ""]);
+    expect(heights(rail.pane)).toEqual(["", "", ""]);
   });
 
   it("lets go of a stretch once a band below unfolds", () => {
-    // Arrange — fitted with Hidden Workspaces folded, Deploys stretched.
-    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { hidden: true } });
-    laidOut(rail, 1000, 100);
+    // Arrange — fitted with Hidden Workspaces folded, Deploys stretched through a cut line.
+    const rail = drawn({ open: 3, hidden: 3, merged: 50, folded: { hidden: true } });
+    laidOut(rail, 1010, 100);
     fitBands(rail.scroller, rail.pane, NOW);
     band(rail.pane, "hidden-section").classList.remove("folded");
     // Act
     fitBands(rail.scroller, rail.pane, NOW);
     // Assert
-    expect(heights(rail.pane)).toEqual(["", "", "760px"]);
+    expect(heights(rail.pane)[1]).toBe("");
   });
 
   it("measures a stretched band from its rows, not its stretch", () => {
@@ -772,9 +802,9 @@ describe("fitBands", () => {
   });
 
   it("clears the foot mark from a band that is no longer lowest", () => {
-    // Arrange — fitted with Hidden Workspaces folded, Deploys lowest.
-    const rail = drawn({ open: 3, hidden: 3, merged: 4, folded: { hidden: true } });
-    laidOut(rail, 1000, 100);
+    // Arrange — fitted with Hidden Workspaces folded, Deploys lowest and cutting a line.
+    const rail = drawn({ open: 3, hidden: 3, merged: 50, folded: { hidden: true } });
+    laidOut(rail, 1010, 100);
     fitBands(rail.scroller, rail.pane, NOW);
     band(rail.pane, "hidden-section").classList.remove("folded");
     // Act
