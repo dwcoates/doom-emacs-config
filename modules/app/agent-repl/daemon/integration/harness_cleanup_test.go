@@ -11,7 +11,6 @@ import (
 
 	"agent-repld/integration/harness"
 	shimv1 "agentrepl/proto/shim/v1"
-
 )
 
 // TestAKilledDaemonLeavesNoProcessNamingItsStateDir proves the harness bounds
