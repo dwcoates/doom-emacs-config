@@ -2880,3 +2880,36 @@ func TestAJoiningDaemonOpensNoThread(t *testing.T) {
 		t.Fatalf("OpenThreads calls = %d on a joining daemon, want 0", got)
 	}
 }
+
+func TestABootBringsUpAWorkspaceOwedACutTurn(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws wsm.Workspace)
+	}{
+		{name: "a hidden one", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) {
+			if err := h.db.SetHidden(context.Background(), ws.ID, true, time.Unix(1_700_000_000, 0)); err != nil {
+				t.Fatalf("SetHidden: %v", err)
+			}
+		}},
+		{name: "a parked one", arrange: func(t *testing.T, h *harness, ws wsm.Workspace) { h.cycleParked(t, ws) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+			tc.arrange(t, h, ws)
+			if err := h.db.OweResumption(context.Background(), ws.ID, "turn-cut", instant); err != nil {
+				t.Fatalf("OweResumption: %v", err)
+			}
+
+			// Act.
+			h.runAndBringUp(t)
+
+			// Assert.
+			if len(h.started) != 1 || h.started[0] != ws.ID {
+				t.Fatalf("started = %v, want %v brought up to resume its cut turn", h.started, ws.ID)
+			}
+		})
+	}
+}

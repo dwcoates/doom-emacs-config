@@ -184,10 +184,17 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		// keep-alives or hibernated stays parked until a prompt, a keep-alive
 		// or a cold gate's answer brings it up, and a killed or never-started
 		// one stays as it is.
-		visible, err = s.leaveNotUp(ctx, log, visible)
+		visible, left, err := s.leaveNotUp(ctx, log, visible)
 		if err != nil {
 			return Report{}, err
 		}
+		// A WORKSPACE OWED A CUT TURN COMES BACK WHATEVER ITS VISIBILITY OR
+		// PARK (bringup.OnlyOwed): the owed turn is a prompt.
+		owed, withheld, err := s.bringBackOwed(ctx, log, withheld, left)
+		if err != nil {
+			return Report{}, err
+		}
+		visible = append(visible, owed...)
 		report.PendingBringUp, report.WithheldBringUp = visible, withheld
 		if len(withheld) > 0 {
 			log.Info("daemon.boot.run", "hidden or collapsed workspaces are not brought up; each starts when shown", dlog.Context{
@@ -1089,18 +1096,42 @@ func (s *sequence) shimAlive(pid int) bool {
 // daemon stopped. A session record that cannot be read stops the boot:
 // reading it as up would wake a parked shim, and reading it as parked would
 // leave a live one down.
-func (s *sequence) leaveNotUp(ctx context.Context, log dlog.Logger, pending []wsm.Workspace) ([]wsm.Workspace, error) {
-	up, left, err := bringup.OnlyWasUp(ctx, s.deps.DB, pending)
+func (s *sequence) leaveNotUp(ctx context.Context, log dlog.Logger, pending []wsm.Workspace) (up, left []wsm.Workspace, err error) {
+	up, left, err = bringup.OnlyWasUp(ctx, s.deps.DB, pending)
 	if err != nil {
 		log.Error("daemon.boot.run", "could not read the sessions to tell which shims were up; the boot stops", dlog.Context{
 			"error": err.Error(),
 		})
-		return nil, fmt.Errorf("boot: %w", err)
+		return nil, nil, fmt.Errorf("boot: %w", err)
 	}
 	if len(left) > 0 {
 		log.Info("daemon.boot.run", "workspaces whose shim was not up when the last daemon stopped are left as they are; a prompt brings each up", dlog.Context{
 			"workspaces": bringup.IDs(left),
 		})
 	}
-	return up, nil
+	return up, left, nil
+}
+
+// bringBackOwed answers which of the WITHHELD (hidden or collapsed) and LEFT
+// (not up at the last stop) workspaces are owed a cut turn, to be brought up
+// with the rest, and the withheld ones that stay withheld. A read that fails
+// stops the boot at ERROR.
+func (s *sequence) bringBackOwed(ctx context.Context, log dlog.Logger, withheld, left []wsm.Workspace) (owed, stillWithheld []wsm.Workspace, err error) {
+	owedWithheld, stillWithheld, err := bringup.OnlyOwed(ctx, s.deps.DB, withheld)
+	if err != nil {
+		log.Error("daemon.boot.run", "could not read which workspaces are owed a cut turn; the boot stops", dlog.Context{"error": err.Error()})
+		return nil, nil, fmt.Errorf("boot: %w", err)
+	}
+	owedLeft, _, err := bringup.OnlyOwed(ctx, s.deps.DB, left)
+	if err != nil {
+		log.Error("daemon.boot.run", "could not read which workspaces are owed a cut turn; the boot stops", dlog.Context{"error": err.Error()})
+		return nil, nil, fmt.Errorf("boot: %w", err)
+	}
+	owed = append(owedWithheld, owedLeft...)
+	if len(owed) > 0 {
+		log.Info("daemon.boot.run", "workspaces owed a turn the last stop cut are brought up to resume it, whatever their visibility or park", dlog.Context{
+			"workspaces": bringup.IDs(owed),
+		})
+	}
+	return owed, stillWithheld, nil
 }

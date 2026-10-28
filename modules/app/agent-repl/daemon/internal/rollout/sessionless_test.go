@@ -233,3 +233,24 @@ func TestBringUpSessionlessDoesNotStartAShimThatWasNotUp(t *testing.T) {
 		})
 	}
 }
+
+func TestBringUpSessionlessStartsAWorkspaceOwedACutTurn(t *testing.T) {
+	// Arrange: hidden, and owed a turn the last stop cut.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	record := sessionlessRecord(t, h, ws)
+	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
+		t.Fatalf("SetHidden: %v", err)
+	}
+	if err := h.db.OweResumption(context.Background(), ws, "turn-cut", time.Unix(1_700_000_000, 0)); err != nil {
+		t.Fatalf("OweResumption: %v", err)
+	}
+
+	// Act
+	h.c.bringUpSessionless([]wsm.Workspace{record}, nil)
+
+	// Assert
+	if got := h.Started(); len(got) != 1 || got[0] != ws {
+		t.Fatalf("started = %v, want %v brought up to resume its cut turn", got, ws)
+	}
+}
