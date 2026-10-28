@@ -4399,15 +4399,15 @@ describe("the tool card's command grey", () => {
   // Emacs's input window is the host-native composer, so its
   // `agent-repl-input-background' (lisp/input.el) wears this same color.
   // Neither suite may read the other's file, so lisp/test-input.el pins it too.
-  it("defines the dark theme's composer as Emacs's input background, #161616", () => {
+  it("defines the dark theme's composer as Emacs's input background, the sidebar's #1a1a1a", () => {
     // Arrange
     const block = darkThemeBlock();
 
     // Act
-    const got = /--composer-bg:\s*(#[0-9a-fA-F]{6})/.exec(block)?.[1];
+    const got = [themeValueOf(block, "--composer-bg"), themeRgbOf(block, "--composer-bg")];
 
-    // Assert
-    expect(got).toBe("#161616");
+    // Assert — the token itself, never a copied value, resolving to Emacs's pinned color.
+    expect(got).toEqual(["var(--sidebar-bg)", [0x1a, 0x1a, 0x1a]]);
   });
 
   // The composer's help bar (lisp/input-help.el) is grounded with the dark
@@ -6303,7 +6303,7 @@ describe("the topbar's ground (owner request, 2026-10-27)", () => {
     const block = darkThemeBlock();
 
     // Act
-    const [feed, topbar, composer] = ["--bg", "--topbar-bg", "--composer-bg"].map((token) => luminance(rgbOf(block, token)));
+    const [feed, topbar, composer] = ["--bg", "--topbar-bg", "--composer-bg"].map((token) => luminance(themeRgbOf(block, token)));
 
     // Assert
     expect([feed < topbar, topbar < composer]).toEqual([true, true]);

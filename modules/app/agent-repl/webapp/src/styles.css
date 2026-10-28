@@ -626,10 +626,12 @@
     --info-tasks: #f69ea9;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
-    /* A touch above the feed's #121212, still told apart from it (owner
-       request, 2026-10-28). Emacs's input window
-       (agent-repl-input-background, lisp/input.el) wears this same color. */
-    --composer-bg: #161616;
+    /* THE COMPOSER WEARS THE SIDEBAR'S AND THE FOOTER'S ONE GROUND (owner
+       request, 2026-10-28), through the token itself, so the three never
+       drift. Emacs's input window (agent-repl-input-background,
+       lisp/input.el) wears this same color; it cannot read this sheet, so
+       both suites pin the value. */
+    --composer-bg: var(--sidebar-bg);
     /* Both washes stay bright in the dark theme rather than being dimmed to
        suit it: the mark is the thing the user is hunting for, so it is the one
        place the stylesheet WANTS to shout against the background. --search-fg

@@ -27,6 +27,7 @@ import {
 } from "../../src/feed/bubble-selection.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { harness, type FeedScript } from "./harness.js";
+import { TEN_PX_COLUMNS } from "./tree-fixture.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -171,8 +172,8 @@ function feed() {
       <div class="mp-entry" data-entry-label="2"><span class="mp-entry-label" id="entry-unlanded">2</span></div></div></article>
     <article data-feed-row="r3" data-unit="response" data-selection-governed data-selectable>
       <div class="bubble"><p id="response-prose">said</p><div class="mp-tree">
-        <div class="mp-line" data-node="2"><span class="mp-prefix"><span class="mp-connectors"></span><span class="mp-label" data-label="2" id="branch-label">2</span> </span><span class="mp-content" id="branch">a point</span></div>
-        <div class="mp-line" data-node="2.1"><span class="mp-prefix"><span class="mp-connectors">└── </span><span class="mp-label mp-label-linked" data-label="2.1" data-answer-prompt="p8" id="branch-linked">2.1</span> </span><span class="mp-content" id="branch-child">a finer point</span></div>
+        <div class="mp-line" data-node="2" data-label-at="0ch" data-text-end="10ch"><span class="mp-prefix"><span class="mp-connectors"></span><span class="mp-label" data-label="2" id="branch-label">2</span> </span><span class="mp-content" id="branch">a point</span></div>
+        <div class="mp-line" data-node="2.1" data-label-at="4ch" data-text-end="20ch"><span class="mp-prefix"><span class="mp-connectors">└── </span><span class="mp-label mp-label-linked" data-label="2.1" data-answer-prompt="p8" id="branch-linked">2.1</span> </span><span class="mp-content" id="branch-child">a finer point</span></div>
       </div></div>
     </article>
     <article data-feed-row="r4" data-unit="response" data-selection-governed><div class="mp-tree">
@@ -186,6 +187,15 @@ function feed() {
   };
   return { host, at };
 }
+
+/**
+ * Where the fixture's tree words sit under `TEN_PX_COLUMNS`: inside the box
+ * of the node each names (2's spans 0 to 200px, 2.1's 40 to 200px).
+ */
+const BRANCH_X: Readonly<Record<string, number>> = { "#branch-label": 5, "#branch": 50, "#branch-child": 100, "#branch-linked": 45 };
+
+/** The pointer's x for a click on SELECTOR: its tree words' place, else 0. */
+const xOf = (selector: string): number => BRANCH_X[selector] ?? 0;
 
 describe("isResponseRow", () => {
   it.each([
@@ -239,6 +249,7 @@ describe("bubbleClick", () => {
     ["an entry of a bubble that has not landed", "#entry-unlanded", "", { case: "ignore", reason: "not-landed" }],
     ["a response branch's words", "#branch", "", { case: "branch", row: "r3", label: "2" }],
     ["a response branch's label", "#branch-label", "", { case: "branch", row: "r3", label: "2" }],
+    ["a child branch's words, inside its own box", "#branch-child", "", { case: "branch", row: "r3", label: "2.1" }],
     ["a response's prose outside its tree", "#response-prose", "", { case: "select", row: "r3" }],
     ["a linked label on a response branch", "#branch-linked", "", { case: "answer", prompt: "p8", label: "2.1" }],
     ["a response branch ending a text highlight", "#branch", "a point", { case: "ignore", reason: "text-selection" }],
@@ -250,7 +261,24 @@ describe("bubbleClick", () => {
     const row = governedRowAt(target, f.host);
     if (row === null) throw new Error("the fixture's target is in no governed row");
     // Act
-    const click = bubbleClick({ row, target, selectedText });
+    const click = bubbleClick({ row, target, selectedText, clientX: xOf(selector), resolve: TEN_PX_COLUMNS });
+    // Assert
+    expect(click).toEqual(want);
+  });
+});
+
+describe("bubbleClick on a tree line answers the box the pointer is in (owner request, 2026-10-28)", () => {
+  it.each([
+    ["on a child's rails, inside its parent's box", 10, { case: "branch", row: "r3", label: "2" }],
+    ["past every box's right edge, which selects the bubble", 250, { case: "select", row: "r3" }],
+  ] as const)("decides a click %s", (_name, clientX, want) => {
+    // Arrange
+    const f = feed();
+    const target = f.at("#branch-child");
+    const row = governedRowAt(target, f.host);
+    if (row === null) throw new Error("the fixture's target is in no governed row");
+    // Act
+    const click = bubbleClick({ row, target, selectedText: "", clientX, resolve: TEN_PX_COLUMNS });
     // Assert
     expect(click).toEqual(want);
   });
@@ -265,12 +293,12 @@ describe("installBubbleSelect", () => {
     vi.spyOn(h.sink, "report").mockImplementation((kind) => {
       reported.push(kind);
     });
-    const uninstall = installBubbleSelect(f.host, h.ctx, () => "");
+    const uninstall = installBubbleSelect(f.host, h.ctx, () => "", TEN_PX_COLUMNS);
     return { ...f, h, reported, uninstall };
   }
 
-  const click = (el: Element): void => {
-    el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  const click = (el: Element, clientX = el.id === "" ? 0 : xOf(`#${el.id}`)): void => {
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX }));
   };
 
   it("asks the daemon to select the clicked bubble", async () => {

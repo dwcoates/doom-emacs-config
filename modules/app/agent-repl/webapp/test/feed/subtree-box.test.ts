@@ -2,10 +2,23 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
-import { boxSubtree, inSubtree, labelColumn, standingBox, unboxAll, type SubtreeBox } from "../../src/feed/subtree-box.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  boxSubtree,
+  boxesOverLine,
+  inSubtree,
+  labelColumn,
+  lengthInLine,
+  nodeBoxedAt,
+  selfAndAncestors,
+  standingBox,
+  subtreeSpan,
+  unboxAll,
+  xInLine,
+  type SubtreeBox,
+} from "../../src/feed/subtree-box.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import { boxedBy, drawnRow, exampleSubtreeWidth, exampleTree, labelledTree, lineOf } from "./tree-fixture.js";
+import { COLUMN_PX, TEN_PX_COLUMNS, boxedBy, drawnRow, exampleSubtreeWidth, exampleTree, labelledTree, lineOf } from "./tree-fixture.js";
 
 const box: SubtreeBox = { className: "box-a", leftProperty: "--a-left", rightProperty: "--a-right" };
 const other: SubtreeBox = { className: "box-b", leftProperty: "--b-left", rightProperty: "--b-right" };
@@ -220,5 +233,173 @@ describe("the edges a box is drawn from", () => {
     // Assert
     const record = await forwardedRecord(capture, "feed.subtree-box.edge");
     expect(record).toMatchObject({ level: { case: "error" }, context: { attribute: "data-text-end", value: "", node: "2" } });
+  });
+});
+
+/** The one drawn tree of ROW. */
+const treeOf = (row: HTMLElement): HTMLElement => {
+  const tree = row.querySelector<HTMLElement>(".mp-tree");
+  if (tree === null) throw new Error("the row draws no tree");
+  return tree;
+};
+
+describe("subtreeSpan", () => {
+  it("spans a node's subtree from its label's column to its widest line", () => {
+    // Arrange
+    const row = drawnRow("r1", exampleTree);
+    // Act
+    const span = subtreeSpan(treeOf(row), "1.1");
+    // Assert
+    expect([span?.lines.map((l) => l.getAttribute("data-node")), span?.left, span?.right]).toEqual([
+      ["1.1", "1.1.1"],
+      "4ch",
+      `${exampleSubtreeWidth}ch`,
+    ]);
+  });
+
+  it("answers null for a node the tree does not draw", () => {
+    // Arrange
+    const row = drawnRow("r1", exampleTree);
+    // Act + Assert
+    expect(subtreeSpan(treeOf(row), "9")).toBeNull();
+  });
+
+  it.each(["1", "1.1", "1.1.1", "1.2", "1.10"])("is the very box boxSubtree draws over %s", (label) => {
+    // Arrange — one place decides a box's edges, for the highlight and the hit test alike.
+    const row = drawnRow("r1", exampleTree);
+    const span = subtreeSpan(treeOf(row), label);
+    // Act
+    boxSubtree(row, label, box);
+    // Assert
+    expect(boxedBy(row, box)).toEqual(span?.lines.map((l) => [l.getAttribute("data-node"), span.left, span.right]));
+  });
+
+  it("is the only place subtree-box reads a box's edges from the lines", () => {
+    // Arrange
+    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/feed/subtree-box.ts"), "utf8");
+    // Act — reading every line's text end is how a box's right edge is found.
+    const reads = source.split("edgeOf(l, TREE_TEXT_END_ATTRIBUTE)").length - 1;
+    // Assert
+    expect(reads).toBe(1);
+  });
+});
+
+describe("selfAndAncestors", () => {
+  it.each([
+    ["a root", "2", ["2"]],
+    ["a child", "2.1", ["2.1", "2"]],
+    ["a great-grandchild", "1.2.3.4", ["1.2.3.4", "1.2.3", "1.2", "1"]],
+  ])("lists %s and every node above it, nearest first", (_name, label, want) => {
+    // Act + Assert
+    expect(selfAndAncestors(label)).toEqual(want);
+  });
+});
+
+describe("boxesOverLine", () => {
+  it("lists the line's own node's box and every enclosing node's, deepest first, in px", () => {
+    // Arrange
+    const row = drawnRow("r1", exampleTree);
+    const w = exampleSubtreeWidth * COLUMN_PX;
+    // Act
+    const boxes = boxesOverLine(lineOf(row, "1.1.1"), TEN_PX_COLUMNS);
+    // Assert — 1's box reaches as far as its widest line, 1.1.1's.
+    expect(boxes).toEqual([
+      { label: "1.1.1", left: 80, right: w },
+      { label: "1.1", left: 40, right: w },
+      { label: "1", left: 0, right: w },
+    ]);
+  });
+
+  it("refuses a line hanging in no tree, recording it through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const line = document.createElement("div");
+    line.setAttribute("data-node", "2");
+    document.body.replaceChildren(line);
+    // Act
+    expect(() => boxesOverLine(line, TEN_PX_COLUMNS)).toThrow(/subtree box/);
+    // Assert
+    const record = await forwardedRecord(capture, "feed.subtree-box.unplaced-line");
+    expect(record).toMatchObject({ level: { case: "error" }, context: { node: "2", in_tree: false } });
+  });
+});
+
+describe("nodeBoxedAt", () => {
+  const boxes = [
+    { label: "1.1.1", left: 80, right: 300 },
+    { label: "1.1", left: 40, right: 300 },
+    { label: "1", left: 0, right: 300 },
+  ];
+
+  it.each([
+    ["inside the deepest box", 120, "1.1.1"],
+    ["on the deepest box's left edge", 80, "1.1.1"],
+    ["on the rails left of the line's label, inside its parent's box", 50, "1.1"],
+    ["on the outermost rail", 10, "1"],
+    ["on a box's right edge, which is outside it", 300, null],
+    ["past every box's right edge", 400, null],
+    ["left of every box", -1, null],
+  ] as const)("answers %s", (_name, x, want) => {
+    // Act + Assert
+    expect(nodeBoxedAt(boxes, x)).toBe(want);
+  });
+});
+
+describe("xInLine", () => {
+  it("measures the pointer from the line's padding edge, the box's own origin", () => {
+    // Arrange
+    const line = document.createElement("div");
+    line.getBoundingClientRect = () => ({ left: 100 }) as DOMRect;
+    Object.defineProperty(line, "clientLeft", { value: 2 });
+    // Act + Assert
+    expect(xInLine(line, 150)).toBe(48);
+  });
+});
+
+describe("lengthInLine", () => {
+  it("measures a probe as wide as the length laid out in the line, and takes it out again", () => {
+    // Arrange
+    const line = document.createElement("div");
+    document.body.replaceChildren(line);
+    const widths: string[] = [];
+    const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      widths.push(this.style.width);
+      return { width: 42 } as DOMRect;
+    });
+    try {
+      // Act
+      const px = lengthInLine(line, "4ch");
+      // Assert
+      expect([px, widths, line.children.length]).toEqual([42, ["4ch"], 0]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("refuses a length that measures no number, recording it through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const line = document.createElement("div");
+    line.setAttribute("data-node", "3");
+    document.body.replaceChildren(line);
+    const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: Number.NaN } as DOMRect);
+    try {
+      // Act
+      expect(() => lengthInLine(line, "bogus")).toThrow(/subtree box/);
+    } finally {
+      spy.mockRestore();
+    }
+    // Assert
+    const record = await forwardedRecord(capture, "feed.subtree-box.unmeasurable");
+    expect([record.level.case, record.context, line.children.length]).toEqual(["error", expect.objectContaining({ length: "bogus", node: "3" }), 0]);
+  });
+});
+
+describe("every hit test of a response's node", () => {
+  it.each(["src/feed/branch-hover.ts", "src/feed/bubble-selection.ts"])("decides the node through subtree-box in %s", (file) => {
+    // Arrange
+    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../..", file), "utf8");
+    // Act + Assert: the hover and the click both answer by the drawn box's own edges, never a hand-rolled area.
+    expect([source.includes("nodeBoxedAt("), source.includes("xInLine("), source.includes("subtreeSpan(")]).toEqual([true, true, false]);
   });
 });

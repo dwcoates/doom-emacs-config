@@ -19,7 +19,7 @@ import { FeedResponseAnswerSchema } from "../../../proto/gen/ts/frontend/v1/feed
 import { columnMeasure } from "../../src/metaprompt-tree.js";
 import { inline } from "../../src/markdown.js";
 import { promptProse } from "../prose.js";
-import { boxedBy, drawnRow, exampleSubtreeWidth, exampleTree, labelOf, labelledTree, lineOf } from "./tree-fixture.js";
+import { COLUMN_PX, TEN_PX_COLUMNS, boxedBy, drawnRow, exampleSubtreeWidth, exampleTree, labelOf, labelledTree, lineOf } from "./tree-fixture.js";
 
 const HOVER_BOX = { className: BRANCH_HOVER_CLASS, leftProperty: HOVER_LEFT_PROPERTY, rightProperty: HOVER_RIGHT_PROPERTY };
 const REFERENCE_BOX = {
@@ -50,9 +50,27 @@ function response(opts: { unit?: string; selectable?: boolean } = {}, tree = exa
   return row;
 }
 
-/** The pointer moves onto EL. */
-const over = (el: Element): void => {
-  el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+/**
+ * Where the pointer stands on EL by default: one column into the box of the
+ * node EL's tree line draws (its head line's label column, under
+ * `TEN_PX_COLUMNS`), or 0 off a tree line.
+ */
+function insideBoxX(el: Element): number {
+  const line = el.closest<HTMLElement>("[data-node]");
+  const node = line?.getAttribute("data-node");
+  const head = node == null ? null : line?.closest(`.${TREE_CLASS}`)?.querySelector(`[data-node="${node}"][data-label-at]`);
+  const at = head?.getAttribute("data-label-at");
+  return at == null ? 0 : (Number.parseFloat(at) + 1) * COLUMN_PX;
+}
+
+/** The pointer moves onto EL, at CLIENT_X. */
+const over = (el: Element, clientX = insideBoxX(el)): void => {
+  el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX }));
+};
+
+/** The pointer moves across EL to CLIENT_X. */
+const move = (el: Element, clientX: number): void => {
+  el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX }));
 };
 
 /** The words of NODE's line in ROW. */
@@ -75,11 +93,79 @@ afterEach(() => {
   uninstall = undefined;
 });
 
+describe("the area that boxes a branch is the box it draws (owner request, 2026-10-28)", () => {
+  it.each([
+    ["inside 1.1.1's own box", 9, "1.1.1"],
+    ["on 1.1.1's rails, inside 1.1's box", 5, "1.1"],
+    ["on the outermost rail, inside 1's box", 1, "1"],
+  ] as const)("boxes the deepest node whose box covers the pointer %s", (_name, column, want) => {
+    // Arrange
+    const row = response();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    // Act
+    over(lineOf(row, "1.1.1"), column * COLUMN_PX);
+    // Assert
+    expect(boxedBy(row, HOVER_BOX).find(([node]) => node === "1.1.1")?.[1]).toBe(`${labelColumnOf(want)}ch`);
+  });
+
+  it("boxes nothing past the right edge of every box over the line", () => {
+    // Arrange
+    const row = response();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    // Act
+    over(lineOf(row, "1.2"), (exampleSubtreeWidth + 1) * COLUMN_PX);
+    // Assert
+    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+  });
+
+  it("follows the pointer across a line, outward onto the enclosing node's box", () => {
+    // Arrange
+    const row = response();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    over(lineOf(row, "1.1.1"), 9 * COLUMN_PX);
+    // Act
+    move(lineOf(row, "1.1.1"), 5 * COLUMN_PX);
+    // Assert
+    expect(boxedBy(row, HOVER_BOX).map(([node]) => node)).toEqual(["1.1", "1.1.1"]);
+  });
+
+  it("takes the box down when the pointer moves across the line out of every box", () => {
+    // Arrange
+    const row = response();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    over(lineOf(row, "1.1.1"), 9 * COLUMN_PX);
+    // Act
+    move(lineOf(row, "1.1.1"), (exampleSubtreeWidth + 2) * COLUMN_PX);
+    // Assert
+    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+  });
+
+  it("measures a line's boxes once while the pointer stays on it", () => {
+    // Arrange
+    const row = response();
+    let measured = 0;
+    uninstall = installBranchHover(document.body, (line, length) => {
+      measured += 1;
+      return TEN_PX_COLUMNS(line, length);
+    });
+    over(lineOf(row, "1.1.1"), 9 * COLUMN_PX);
+    const once = measured;
+    // Act
+    move(lineOf(row, "1.1.1"), 5 * COLUMN_PX);
+    move(lineOf(row, "1.1.1"), 1 * COLUMN_PX);
+    // Assert — three boxes over 1.1.1, two edges each, measured on the first move alone.
+    expect([once, measured]).toEqual([6, 6]);
+  });
+});
+
+/** The column NODE's label starts at in exampleTree. */
+const labelColumnOf = (node: string): number => ({ "1": 0, "1.1": 4, "1.1.1": 8 })[node] ?? Number.NaN;
+
 describe("the pointer's box over a response branch", () => {
   it("boxes the hovered node's subtree from its label's column to the widest line", () => {
     // Arrange
     const row = response();
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(words(row, "1.1"));
     // Assert
@@ -92,7 +178,7 @@ describe("the pointer's box over a response branch", () => {
   it("moves to the next node the pointer moves onto", () => {
     // Arrange
     const row = response();
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     over(words(row, "1.1"));
     // Act
     over(words(row, "1.2"));
@@ -103,7 +189,7 @@ describe("the pointer's box over a response branch", () => {
   it("is taken down when the pointer moves off the tree", () => {
     // Arrange
     const row = response();
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     over(words(row, "1.1"));
     // Act
     over(row.querySelector("#prose") as Element);
@@ -114,7 +200,7 @@ describe("the pointer's box over a response branch", () => {
   it("is taken down when the pointer leaves the feed", () => {
     // Arrange
     const row = response();
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     over(words(row, "1.1"));
     // Act
     document.body.dispatchEvent(new MouseEvent("mouseleave"));
@@ -125,7 +211,7 @@ describe("the pointer's box over a response branch", () => {
   it("is drawn again on the same node after the row's prose repaints", () => {
     // Arrange
     const row = response();
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     over(words(row, "1.1"));
     const tree = row.querySelector(`.${TREE_CLASS}`) as HTMLElement;
     tree.replaceWith(tree.cloneNode(true));
@@ -142,7 +228,7 @@ describe("the pointer's box over a response branch", () => {
   ])("boxes nothing in %s", (_name, opts) => {
     // Arrange
     const row = response(opts);
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(words(row, "1.1"));
     // Assert
@@ -152,7 +238,7 @@ describe("the pointer's box over a response branch", () => {
   it("takes the box down and stops boxing once uninstalled", () => {
     // Arrange
     const row = response();
-    const off = installBranchHover(document.body);
+    const off = installBranchHover(document.body, TEN_PX_COLUMNS);
     over(words(row, "1.1"));
     // Act
     off();
@@ -165,7 +251,7 @@ describe("the pointer's box over a response branch", () => {
     // Arrange
     const capture = captureLogRecords("debug");
     const row = response();
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(words(row, "1.1"));
     // Assert
@@ -178,7 +264,7 @@ describe("the box over the node a hovered citation cites", () => {
   it("boxes the cited node's subtree in the citation's box", () => {
     // Arrange
     const row = response({}, citingTree);
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(citation(row));
     // Assert
@@ -188,7 +274,7 @@ describe("the box over the node a hovered citation cites", () => {
   it("does not box the branch holding the citation", () => {
     // Arrange
     const row = response({}, citingTree);
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(citation(row));
     // Assert
@@ -198,7 +284,7 @@ describe("the box over the node a hovered citation cites", () => {
   it("takes the pointer's box off the holding branch when the pointer moves onto its citation", () => {
     // Arrange
     const row = response({}, citingTree);
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     over(words(row, "2.1"));
     // Act
     over(citation(row));
@@ -209,7 +295,7 @@ describe("the box over the node a hovered citation cites", () => {
   it("gives way to the holding branch's box when the pointer moves off the citation onto its words", () => {
     // Arrange
     const row = response({}, citingTree);
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     over(citation(row));
     // Act
     over(words(row, "2.1"));
@@ -220,7 +306,7 @@ describe("the box over the node a hovered citation cites", () => {
   it("is taken down when the pointer leaves the feed", () => {
     // Arrange
     const row = response({}, citingTree);
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     over(citation(row));
     // Act
     document.body.dispatchEvent(new MouseEvent("mouseleave"));
@@ -231,7 +317,7 @@ describe("the box over the node a hovered citation cites", () => {
   it("boxes nothing in a row that is not a response", () => {
     // Arrange
     const row = response({ unit: "tool" }, citingTree);
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(citation(row));
     // Assert
@@ -242,7 +328,7 @@ describe("the box over the node a hovered citation cites", () => {
     // Arrange
     const capture = captureLogRecords("debug");
     const row = response({}, citingTree);
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(citation(row));
     // Assert
@@ -305,7 +391,7 @@ describe("the box over the response node a hovered prompt entry answers", () => 
   it("boxes the answered node's subtree in the response, as the composer's box is drawn", () => {
     // Arrange
     const { response: row, prompt } = answeredFeed();
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(labelOf(prompt, "3.1"));
     // Assert
@@ -319,7 +405,7 @@ describe("the box over the response node a hovered prompt entry answers", () => 
   it("boxes an implied ancestor's own subtree", () => {
     // Arrange
     const { response: row, prompt } = answeredFeed();
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(labelOf(prompt, "3"));
     // Assert
@@ -329,7 +415,7 @@ describe("the box over the response node a hovered prompt entry answers", () => 
   it("boxes nothing in the prompt itself", () => {
     // Arrange
     const { prompt } = answeredFeed();
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(labelOf(prompt, "3.1"));
     // Assert
@@ -339,7 +425,7 @@ describe("the box over the response node a hovered prompt entry answers", () => 
   it("is taken down when the pointer moves off the label onto the entry's words", () => {
     // Arrange
     const { response: row, prompt } = answeredFeed();
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     over(labelOf(prompt, "3.1"));
     // Act
     over(words(prompt, "3.1"));
@@ -350,7 +436,7 @@ describe("the box over the response node a hovered prompt entry answers", () => 
   it("boxes nothing for an entry no drawn response is answered by", () => {
     // Arrange
     const { response: row, prompt } = answeredFeed("3.1 - a\n4.2 - **b**\n5.5.1 - c");
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(labelOf(prompt, "4.2"));
     // Assert
@@ -361,7 +447,7 @@ describe("the box over the response node a hovered prompt entry answers", () => 
     // Arrange
     const capture = captureLogRecords("debug");
     const { prompt } = answeredFeed();
-    uninstall = installBranchHover(document.body);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
     // Act
     over(labelOf(prompt, "3.1"));
     // Assert
