@@ -102,12 +102,6 @@ export interface SidebarDeps {
   drawTiming?: DrawTimingEnv;
   /** Schedules a callback for the next animation frame, where a push is drawn. Defaults to the page's. */
   frame?: (callback: () => void) => void;
-  /**
-   * The height a standing gate band takes from under the rail, in px, which
-   * comes out of Deploys and Hidden Workspaces and never the Open section
-   * (`band-fit.ts`). Omitted: no gate band is ever under the rail.
-   */
-  gateBand?: () => number;
   /** Where the page hears that the user's focus left it (`focus-left.ts`). Defaults to the page's. */
   focusLeft?: FocusLeft;
 }
@@ -179,7 +173,7 @@ export function mountWebhostSidebar(
 }
 
 /** What the webhost's sidebar may have injected, beside the shared deps. */
-export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallPhase" | "frame" | "gateBand"> & {
+export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallPhase" | "frame"> & {
   /** Told once, when the first push reveals the sidebar. */
   revealed?: () => void;
 };
@@ -270,11 +264,10 @@ function mountSidebarIn(
   // THE BAND FIT (band-fit.ts): the Open, Hidden Workspaces and Recently
   // Merged viewports, re-fitted after every draw, on every resize of the rail
   // or a pane, and when the local date turns over.
-  // A RESIZE KEEPS THE SELECTED ROW IN VIEW (selection-scroll.ts): a gate
-  // docking under the rail shrinks its sections with no push and no switch.
+  // A RESIZE KEEPS THE SELECTED ROW IN VIEW (selection-scroll.ts): the
+  // window resizing shrinks its sections with no push and no switch.
   const bandFit = installBandFit(body, ctx.ticker, {
     onResized: () => selectionScroll.resized(body),
-    gateBand: deps.gateBand,
   });
   // Every viewport's scroll, the reader's or the rail's, notes whether the
   // selected row still shows, which decides whether a resize brings it back.

@@ -1,13 +1,13 @@
 /**
  * THE DOCKED GATE TAKES THE INPUT WINDOW'S HEIGHT, ITS CONTENT CENTERED,
- * IN WEBKIT (owner request, 2026-10-13), AND GROWS RATHER THAN SCROLLS
- * (owner request, 2026-10-17).
+ * IN WEBKIT (owner request, 2026-10-13), AND NEVER MORE: A TALLER GATE
+ * SCROLLS INSIDE THE SLOT (owner request, 2026-10-28, superseding
+ * 2026-10-17's growing dock).
  *
  * While a cold gate stands, its card is moved into `#gate-dock`
  * (src/feed/gate-dock.ts), the slot the hidden Emacs input window had. The
- * dock is the height Emacs told (--gate-dock-height) while the gate fits,
- * grows to a taller gate without scrolling, and shrinks back once the gate
- * fits again; the card fills it, its title, token and model line and button row each centered on the
+ * dock is always the height Emacs told (--gate-dock-height), scrolling a
+ * taller gate from its top; the card fills it, its title, token and model line and button row each centered on the
  * card's middle, and the spare height split evenly above the title and below
  * the buttons while the gaps between them stay what the undocked card draws.
  * jsdom lays nothing out, so this draws the card in the shape cold-gate.ts
@@ -165,14 +165,14 @@ describe("the docked gate in WebKit", () => {
     expect(extraAbove).toBeCloseTo(extraBelow, 0);
   });
 
-  it("grows past the input window's height for a taller gate", async () => {
+  it("keeps exactly the input window's height for a taller gate", async () => {
     const got = await draw(page, true, true);
-    expect(got.dockHeight).toBeGreaterThan(TOLD_HEIGHT);
+    expect(got.dockHeight).toBeCloseTo(TOLD_HEIGHT, 1);
   });
 
-  it("never scrolls a taller gate", async () => {
+  it("scrolls a taller gate inside the slot", async () => {
     const got = await draw(page, true, true);
-    expect(got.dockScrolls).toBe(false);
+    expect(got.dockScrolls).toBe(true);
   });
 
   it("shows a taller gate's top", async () => {
@@ -180,7 +180,7 @@ describe("the docked gate in WebKit", () => {
     expect(got.card.top).toBeCloseTo(got.dockTop, 1);
   });
 
-  it("shrinks back to the input window's height once the submenu closes", async () => {
+  it("stands at the input window's height once the submenu closes", async () => {
     await draw(page, true, true);
     const height = await page.evaluate(() => {
       const dock = document.getElementById("gate-dock")!;

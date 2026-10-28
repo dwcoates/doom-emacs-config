@@ -269,34 +269,34 @@ describe("installGateDock", () => {
     expect(toldDockHeight(document)).toBeNull();
   });
 
-  it("floors the dock at the told property (the fraction only as fallback)", () => {
+  it("fixes the dock at exactly the told property (the fraction only as fallback)", () => {
     // Arrange
 
     // Act
     const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 
     // Assert
-    expect(rule).toMatch(/(?<![-\w])min-height: var\(--gate-dock-height, 18\.4vh\)/);
+    expect(rule).toMatch(/(?<![-\w])height: var\(--gate-dock-height, 18\.4vh\)/);
   });
 
-  it("never fixes the dock's height, so a taller gate grows it", () => {
+  it("never lets a taller gate grow the dock past the input's slot (owner request, 2026-10-28)", () => {
     // Arrange
 
     // Act
     const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 
     // Assert
-    expect(rule).not.toMatch(/(?<![-\w])(max-)?height:/);
+    expect(rule).not.toMatch(/(?:min|max)-height:/);
   });
 
-  it("never scrolls the dock", () => {
+  it("scrolls a gate taller than the slot inside it", () => {
     // Arrange
 
     // Act
     const rule = /#gate-dock\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 
     // Assert
-    expect(rule).not.toMatch(/overflow(-y)?:\s*(auto|scroll)/);
+    expect(rule).toMatch(/overflow-y:\s*auto/);
   });
 });
 

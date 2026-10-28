@@ -33,13 +33,10 @@
  *     (owner request, 2026-10-27: Deploys stands above Hidden, and a merge
  *     in flight matters more than a workspace put away), down to no lines,
  *     and only then Deploys, and shows the Open section no lines.
- *   - A STANDING GATE NEVER SHRINKS THE OPEN SECTION (owner request,
- *     2026-10-27). A docked gate band takes its height from under the rail
- *     (the webhost ends the rail above it), and that height comes out of
- *     Deploys and Hidden Workspaces alone: the Open section shows the lines
- *     it would show with no gate (`gate` in `allocateSectionLines`), and the
- *     bands share what room is left, in their usual order. Only an Open
- *     section that cannot fit the rail even alone gives up lines.
+ *   - A STANDING GATE CHANGES NOTHING HERE (owner request, 2026-10-28,
+ *     retiring 2026-10-27's gate rule): the docked gate takes exactly the
+ *     slot Emacs's input window gave up (gate-dock.ts), so the rail above it
+ *     is as tall as it is beside the input, and the fit draws the same lines.
  *   - THE LOWEST OPEN SECTION REACHES THE RAIL'S FOOT (owner request,
  *     2026-10-19). Whatever room is left once every section shows its whole
  *     lines, less than one more line of any section, is added to the
@@ -210,11 +207,9 @@ export function bandShare(today: number, hidden: number): { merged: number; hidd
 
 /**
  * Split ROOM pixels between the three sections, as the module note says.
- * GATE is the height a standing gate band takes from under the rail: the Open
- * section is given the lines it would have in ROOM + GATE, and only the bands
- * lose to the gate. Returns the number of lines each section's viewport shows.
+ * Returns the number of lines each section's viewport shows.
  */
-export function allocateSectionLines(room: number, stops: SectionStops, gate = 0): SectionLines {
+export function allocateSectionLines(room: number, stops: SectionStops): SectionLines {
   const { open, merged, hidden, mergedToday: today, mergedFloor: floor } = stops;
   assertStops(open, "open");
   assertStops(merged, "merged");
@@ -228,16 +223,8 @@ export function allocateSectionLines(room: number, stops: SectionStops, gate = 0
   if (!Number.isInteger(floor) || floor < 0 || floor > totalM) {
     throw new RangeError(`band fit: a floor of ${floor} lines in a band of ${totalM}`);
   }
-  if (!Number.isFinite(gate) || gate < 0) {
-    throw new RangeError(`band fit: a gate band of ${gate}px`);
-  }
   const fits = (o: number, m: number, h: number): boolean => open[o] + merged[m] + hidden[h] <= room;
   if (fits(totalO, totalM, totalH)) return { open: totalO, merged: totalM, hidden: totalH };
-  if (gate > 0) {
-    let o = allocateSectionLines(room + gate, stops).open;
-    while (o > 0 && !fits(o, 0, 0)) o -= 1;
-    return { open: o, ...fillBands(o, 0, 0) };
-  }
   let { merged: m, hidden: h } = bandShare(today, totalH);
   // AN EXPANDED "RECENTLY DEPLOYED" KEEPS ITS FLOOR, taking the lines from
   // Hidden Workspaces' share first and then from the Open section's room.
@@ -514,7 +501,7 @@ function stretchedEntry(sized: ReadonlyArray<readonly [Measured, number]>, lowes
  * when none is open or the pane is not laid out (left as drawn; see the
  * module note).
  */
-export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number, gate = 0): SectionLines | null {
+export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number): SectionLines | null {
   const [openSection, mergedSection, hiddenSection] = SECTION_REGIONS.map(([className, regionClass]) =>
     openBand(pane, className, regionClass),
   );
@@ -549,7 +536,7 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     hidden: hidden?.stops ?? [0],
     mergedToday: today,
     mergedFloor: floor,
-  }, gate);
+  });
   const sized = [
     [open, lines.open],
     [merged, lines.merged],
@@ -563,7 +550,6 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   bands.forEach((band, i) => restoreScroll(band, tops[i]));
   const context = {
     room,
-    gate,
     open_total: (open?.stops.length ?? 1) - 1,
     open_shown: lines.open,
     hidden_total: (hidden?.stops.length ?? 1) - 1,
@@ -586,20 +572,15 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   return lines;
 }
 
-/**
- * Fit the sections of every pane in SCROLLER at NOW_MS (the shown one lays out;
- * the other is left), GATE px of the rail taken by a standing gate band.
- */
-export function fitAllBands(scroller: HTMLElement, nowMs: number, gate = 0): void {
-  for (const pane of queryAll<HTMLElement>(scroller, ".sb-pane")) fitBands(scroller, pane, nowMs, gate);
+/** Fit the sections of every pane in SCROLLER at NOW_MS (the shown one lays out; the other is left). */
+export function fitAllBands(scroller: HTMLElement, nowMs: number): void {
+  for (const pane of queryAll<HTMLElement>(scroller, ".sb-pane")) fitBands(scroller, pane, nowMs);
 }
 
 /** What the rail's re-fit reads and tells beside its scroller and clock. */
 export interface BandFitOptions {
   /** Told after every fit a resize provoked. */
   onResized?: () => void;
-  /** The height a standing gate band takes from under the rail, in px: 0 while none stands. */
-  gateBand?: () => number;
 }
 
 /** The rail's re-fit: on every draw, whenever the scroller or a pane changes size, and at midnight. */
@@ -629,18 +610,17 @@ function watchedBoxes(pane: HTMLElement): HTMLElement[] {
  * exactly that layout, and so does TICKER's first tick of a new local date,
  * because which merges are today's is part of it. The fit never moves its
  * own room (see the module note), so the re-fit its own resize of the pane
- * provokes draws the same lines and stops there. A gate band docking or
- * leaving resizes the rail, so the re-fit it provokes reads the band anew.
+ * provokes draws the same lines and stops there.
  */
 export function installBandFit(
   scroller: HTMLElement,
   ticker: Ticker,
-  { onResized = () => undefined, gateBand = () => 0 }: BandFitOptions = {},
+  { onResized = () => undefined }: BandFitOptions = {},
 ): BandFit {
   let fittedAtMs = ticker.now();
   const fitAt = (nowMs: number): void => {
     fittedAtMs = nowMs;
-    fitAllBands(scroller, nowMs, gateBand());
+    fitAllBands(scroller, nowMs);
   };
   const fitNow = (): void => fitAt(ticker.now());
   // A RESIZE IS TOLD ONCE THE SECTIONS ARE FITTED TO IT, so what reads them

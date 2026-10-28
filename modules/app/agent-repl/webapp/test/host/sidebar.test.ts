@@ -4,9 +4,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { WebhostFailure } from "../../src/host/protocol.js";
-import { sidebarGateBand, startWebhostSidebar, type WebhostSidebarStartDeps } from "../../src/host/sidebar.js";
-import { SIDEBAR_BOTTOM_PROPERTY, type Host } from "../../src/host/host.js";
-import { forwardedRecord } from "../log-capture.js";
+import { startWebhostSidebar, type WebhostSidebarStartDeps } from "../../src/host/sidebar.js";
+import type { Host } from "../../src/host/host.js";
 import { ForwardingLogger, log, setLogger } from "../../src/log.js";
 import { daemonUnreachable } from "../../src/failure/sink.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
@@ -307,56 +306,3 @@ describe("startWebhostSidebar", () => {
   });
 });
 
-describe("sidebarGateBand", () => {
-  afterEach(() => {
-    document.documentElement.style.removeProperty(SIDEBAR_BOTTOM_PROPERTY);
-  });
-
-  it("reads the gate band the webhost ends its sidebar above", () => {
-    // Arrange
-    document.documentElement.style.setProperty(SIDEBAR_BOTTOM_PROPERTY, "184px");
-    // Act / Assert
-    expect(sidebarGateBand(document)).toBe(184);
-  });
-
-  it("reads no gate band before the webhost first placed its sidebar", () => {
-    // Arrange / Act / Assert
-    expect(sidebarGateBand(document)).toBe(0);
-  });
-
-  it("refuses a sidebar bottom that is not a length in px, logging it at ERROR", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    document.documentElement.style.setProperty(SIDEBAR_BOTTOM_PROPERTY, "2rem");
-    // Act
-    const act = (): unknown => sidebarGateBand(document);
-    // Assert
-    expect(act).toThrow(/'2rem' is not a length in px/);
-    const record = await forwardedRecord(capture, "webhost.sidebar-gate-band.unreadable");
-    expect(record.level.case).toBe("error");
-    expect(record.context).toMatchObject({ property: SIDEBAR_BOTTOM_PROPERTY, value: "2rem" });
-  });
-});
-
-describe("startWebhostSidebar hands its sidebar the gate band", () => {
-  afterEach(() => {
-    document.documentElement.style.removeProperty(SIDEBAR_BOTTOM_PROPERTY);
-  });
-
-  it("reads the gate band from the property the webhost ends the sidebar at", () => {
-    // Arrange
-    const { host } = recordingHost();
-    let gateBand: (() => number) | undefined;
-    start(host, {
-      mount: (_nav, _ctx, deps) => {
-        gateBand = deps?.gateBand;
-        return { dispose: () => undefined, markShown: () => undefined };
-      },
-    });
-    document.documentElement.style.setProperty(SIDEBAR_BOTTOM_PROPERTY, "96px");
-    // Act
-    const read = gateBand?.();
-    // Assert
-    expect(read).toBe(96);
-  });
-});
