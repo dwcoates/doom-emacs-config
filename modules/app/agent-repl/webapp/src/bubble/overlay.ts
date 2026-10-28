@@ -18,6 +18,7 @@
  * composer's escape as `dismissDigest`, which `closeStandingBubbleOverlay`
  * answers). A click on the scrim or on the close control closes it too.
  */
+import { createControl } from "../control.js";
 import { log } from "../log.js";
 
 /** The attribute the page's root wears while an overlay stands. */
@@ -64,8 +65,7 @@ export function mountBubbleOverlay(doc: Document, feedScroll: HTMLElement): Bubb
     panel.setAttribute("role", "dialog");
     panel.setAttribute("data-role", role);
     panel.append(body.cloneNode(true));
-    const control = doc.createElement("button");
-    control.type = "button";
+    const control = createControl();
     control.className = "expand-close";
     control.setAttribute(BUBBLE_OVERLAY_CLOSE_ATTRIBUTE, "");
     control.setAttribute("aria-label", "close");
