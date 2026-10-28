@@ -179,11 +179,9 @@ map's `[intercept-state] all'."
   "Return HEX, a #rrggbb string, as a list of three channel integers."
   (mapcar (lambda (i) (string-to-number (substring hex i (+ i 2)) 16)) '(1 3 5)))
 
-(ert-deftest agent-repl-test-input-help-bar-is-the-sidebar-ground ()
-  "The bar's ground is the webapp sidebar's dark --sidebar-bg, #1a1a1a.
-The ert suite may not read webapp/src/styles.css, so the shared value is
-pinned on both sides: here, and in webapp/test/styles.test.ts."
-  (should (equal agent-repl-input-help-bar-background "#1a1a1a")))
+(ert-deftest agent-repl-test-input-help-bar-is-the-composer-ground ()
+  "The bar's ground is the composer's own, so the two never drift."
+  (should (equal agent-repl-input-help-bar-background agent-repl-input-background)))
 
 (ert-deftest agent-repl-test-input-help-button-is-darker-than-the-selected-row ()
   "A button's fill sits between the bar's ground and the selected-row tint.

@@ -323,11 +323,12 @@ binding form of the module and every one of its keymaps.")
     (agent-repl-verbs-name-minibuffer-exit . "RET in a creation's name minibuffer, not the composer, which checks the name with the daemon before it closes"))
   "Commands agent-repl binds that no help topic lists, each with why.")
 
-(defconst agent-repl-input-help-bar-background "#1a1a1a"
-  "The help bar's ground: the webapp sidebar's dark `--sidebar-bg'.
-Copied from webapp/src/styles.css, as `agent-repl-input-background' copies
-`--composer-bg', and pinned by both test-input-help.el and
-webapp/test/styles.test.ts so the two cannot drift.")
+(defconst agent-repl-input-help-bar-background "#121212"
+  "The help bar's ground: the composer's own, `agent-repl-input-background'.
+The bar heads the composer, so the two are one color (owner request,
+2026-10-28), the webapp feed's dark `--bg'.  input.el loads after this
+file (config.el), so the value is spelled here and test-input-help.el
+pins it equal to the composer's.")
 
 (defconst agent-repl-input-help-button-background "#202020"
   "A help button's fill: a little darker than the sidebar's selected row.
