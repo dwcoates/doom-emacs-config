@@ -3061,16 +3061,7 @@ describe("the one bubble rule set", () => {
             !(
               (prop === "max-width" || prop === "--bubble-scroll-gap") &&
               rule.selectors.every((sel) => DIMMED_TEXT_SELECTORS.includes(sel))
-            ) &&
-            // THE BLUE PROMPT'S CODE (owner request, 2026-10-19): the user
-            // prompt feeds the two code fills their darker blue; the suite
-            // "code in a blue prompt bubble" pins both.
-            // A held prompt's code sits on its own darker blue (owner request,
-            // 2026-10-25); the same suite pins it.
-            !(
-              (prop === "--code-bg" || prop === "--code-block-bg") &&
-              (isOwnRule(rule, '.bubble[data-variant="user"]') || isOwnRule(rule, '.bubble[data-variant="held"]'))
-            ),
+            )
         ),
     );
     // Assert
@@ -3518,7 +3509,6 @@ describe("the held prompt's fill", () => {
 
   it.each([
     ["--held-prompt-bg", "var(--user)"],
-    ["--held-prompt-code-bg", "var(--prompt-code-bg)"],
   ])("feeds the dark theme's %s from %s (owner request, 2026-10-28)", (token, want) => {
     // Arrange / Act
     const got = themeValueOf(darkThemeBlock(), token);
@@ -4001,105 +3991,48 @@ describe("a link in a prompt bubble (owner request, 2026-10-19)", () => {
   });
 });
 
-describe("code in a response bubble (owner request, 2026-10-28)", () => {
-  it.each(["--code-bg", "--code-block-bg"])("feeds %s from --response-code-bg on the response role", (token) => {
+describe("the one code wash (owner request, 2026-10-28)", () => {
+  it("is the ink at 4% over whatever bubble holds the code, declared once on :root", () => {
     // Arrange / Act
-    const decls = rulesOf(stylesheet)
-      .filter((r) => isOwnRule(r, '.bubble[data-role="response"]'))
-      .map((r) => r.declarations)
-      .join(";");
-    // Assert — fenced and inline code wear the one wash.
-    expect(decls).toMatch(new RegExp(`${token}:\\s*var\\(--response-code-bg\\)`));
+    const declarations = withoutBlockComments(stylesheet).match(/--code-bg\s*:[^;]+;/g) ?? [];
+    // Assert — no theme or bubble restates it, so every bubble's code is the
+    // same step from its own fill; only a reply's quoted response (below)
+    // fills its quote as the response it came from.
+    expect(declarations).toEqual(["--code-bg: color-mix(in srgb, var(--fg) 4%, transparent);", "--code-bg: var(--assistant);"]);
   });
-
-  it("draws the response wash a little fainter than the shared block's, from the ink", () => {
-    // Arrange / Act
-    const root = declarationsOf(":root") ?? "";
-    // Assert
-    expect([
-      root.includes("--response-code-bg: color-mix(in srgb, var(--fg) 4%, transparent);"),
-      root.includes("--code-block-bg: color-mix(in srgb, var(--fg) 6%, transparent);"),
-    ]).toEqual([true, true]);
-  });
-
-  it("is declared once, on :root, for both themes", () => {
-    // Arrange / Act
-    const declarations = withoutBlockComments(stylesheet).match(/--response-code-bg\s*:/g) ?? [];
-    // Assert
-    expect(declarations).toHaveLength(1);
-  });
-});
-
-describe("code in a blue prompt bubble (owner request, 2026-10-19)", () => {
 
   it.each([
-    ["light", ""],
-    ["dark", darkThemeBlock()],
-  ])("sits clearly but not far darker than --user in the %s theme", (_theme, block) => {
+    ["inline code", ".md code"],
+    ["a fenced block", ".md pre.md-code"],
+  ])("paints %s from the one wash", (_name, selector) => {
     // Arrange / Act
-    const step = Math.abs(lightness(themeRgbOf(block, "--user")) - lightness(themeRgbOf(block, "--prompt-code-bg")));
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(selector) && /background:/.test(r.declarations));
     // Assert
-    expect(step).toBeGreaterThan(6);
-    expect(step).toBeLessThan(16);
+    expect(rule?.declarations).toMatch(/background:\s*var\(--code-bg\)/);
   });
 
-  it.each(["--code-bg", "--code-block-bg"])("feeds %s from --prompt-code-bg on the user prompt", (token) => {
-    // Arrange / Act
-    const decls = rulesOf(stylesheet)
-      .filter((r) => isOwnRule(r, '.bubble[data-variant="user"]'))
-      .map((r) => r.declarations)
-      .join(";");
-    // Assert
-    expect(decls).toMatch(new RegExp(`${token}:\\s*var\\(--prompt-code-bg\\)`));
-  });
-
-  it.each(["held", "user"])("sits the %s prompt's code clearly darker than its fill in both themes", (variant) => {
+  it.each(["user", "held", "agent", "peer"])("lets a %s prompt's code take the same wash as a response's", (variant) => {
     // Arrange
-    const [fill, code] = variant === "held" ? ["--held-prompt-bg", "--held-prompt-code-bg"] : ["--user", "--prompt-code-bg"];
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.setAttribute("data-role", "prompt");
+    bubble.setAttribute("data-variant", variant);
     // Act
-    const steps = [declarationsOf(":root") ?? "", darkThemeBlock()].map(
-      (block) => Math.abs(lightness(themeRgbOf(block, fill)) - lightness(themeRgbOf(block, code))),
-    );
-    // Assert
-    expect(steps.every((step) => step > 6)).toBe(true);
+    const set = inDocument(bubble, (el) => cascadedValue(el, "--code-bg"));
+    // Assert — no prompt rule restates the wash: it inherits the root's.
+    expect(set.replace(/\s+/g, "")).toBe("color-mix(insrgb,var(--fg)4%,transparent)");
   });
 
-  it.each(["--code-bg", "--code-block-bg"])("feeds %s from --held-prompt-code-bg on the held prompt", (token) => {
-    // Arrange / Act
-    const decls = rulesOf(stylesheet)
-      .filter((r) => isOwnRule(r, '.bubble[data-variant="held"]'))
-      .map((r) => r.declarations)
-      .join(";");
-    // Assert
-    expect(decls).toMatch(new RegExp(`${token}:\\s*var\\(--held-prompt-code-bg\\)`));
+  it("keeps no per-bubble code token", () => {
+    // Arrange / Act / Assert
+    expect(withoutBlockComments(stylesheet)).not.toMatch(/--(?:code-block-bg|prompt-code-bg|held-prompt-code-bg|response-code-bg)\s*:/);
   });
 
-  it.each(['.bubble[data-variant="agent"]', '.bubble[data-variant="peer"]'])(
-    "leaves %s on the shared code washes",
-    (selector) => {
-      // Arrange / Act
-      const decls = rulesOf(stylesheet)
-        .filter((r) => r.selectors.includes(selector))
-        .map((r) => r.declarations)
-        .join(";");
-      // Assert
-      expect(decls).not.toMatch(/--prompt-code-bg/);
-    },
-  );
-
-  it("paints a code block through the --code-block-bg token", () => {
+  it("fills a reply's quoted response as the response it came from", () => {
     // Arrange / Act
-    const rule = declarationsOf(".md pre.md-code") ?? "";
+    const rule = declarationsOf('.bubble[data-variant="user"] .prompt-block-quote') ?? "";
     // Assert
-    expect(rule).toMatch(/background:\s*var\(--code-block-bg\)/);
-  });
-
-  it("keeps the code block's shared wash on :root alone", () => {
-    // Arrange / Act
-    const root = declarationsOf(":root") ?? "";
-    // Assert
-    expect(root).toContain("--code-block-bg: color-mix(in srgb, var(--fg) 6%, transparent)");
-    expect(darkThemeBlock()).not.toMatch(/--code-block-bg:/);
+    expect(rule.trim()).toBe("--code-bg: var(--assistant);");
   });
 
   it("leaves a code block's inner code unfilled", () => {
@@ -6200,7 +6133,7 @@ describe("the response subtree box (feed/subtree-box.ts)", () => {
     const strength = (token: string): number =>
       Number(new RegExp(`${token}: color-mix\\(in srgb, var\\(--fg\\) (\\d+(?:\\.\\d+)?)%, transparent\\);`).exec(root)?.[1]);
     // Assert
-    expect([strength("--composer-entry-bg"), strength("--response-code-bg")]).toEqual([7, 4]);
+    expect([strength("--composer-entry-bg"), strength("--code-bg")]).toEqual([7, 4]);
   });
 
   // Owner request, 2026-10-26: a highlighted tree entry carries no accent bar
