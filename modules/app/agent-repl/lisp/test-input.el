@@ -4849,8 +4849,8 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
                       :edit (:arm :confirm :value (:question-text "Which?"))))))
     (should-not agent-repl-test-input--submitted)))
 
-(ert-deftest agent-repl-test-input-control-return-otherwise-sends-with-postfix ()
-  "`C-RET' with no multi-select standing, or with text, is the postfix send."
+(ert-deftest agent-repl-test-input-control-return-otherwise-sends-held-now ()
+  "`C-RET' with no multi-select standing, or with text, sends the held prompt now."
   (dolist (case `((,(agent-repl-test-input--question-ask :single-select '("a")) "")
                   (,(agent-repl-test-input--permission-ask nil) "")
                   (,(agent-repl-test-input--question-ask :multi-select '("a")) "words")
@@ -4858,11 +4858,97 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
     (pcase-let ((`(,ask ,text) case))
       (agent-repl-test-input--with-ask ask
         (insert text)
-        (let ((sent nil))
-          (cl-letf (((symbol-function 'agent-repl-send-with-postfix) (lambda () (setq sent t))))
+        (let ((sent nil) (posted nil))
+          (cl-letf (((symbol-function 'agent-repl-send-held-now) (lambda () (setq sent t)))
+                    ((symbol-function 'agent-repl-send-with-postfix) (lambda () (setq posted t))))
             (agent-repl-input-control-return))
           (should sent)
+          (should-not posted)
           (should-not agent-repl-test-input--answer-requests))))))
+
+(defmacro agent-repl-test-input--with-release (answer &rest body)
+  "Run BODY with `agent-repl-verbs--send' stubbed to record its requests and answer ANSWER."
+  (declare (indent 1))
+  `(let ((agent-repl-test-input--release-requests nil)
+         (agent-repl--input-last-sent-turns (make-hash-table :test #'equal)))
+     (cl-letf (((symbol-function 'agent-repl-verbs--conn) (lambda (&optional _ws) 'conn))
+               ((symbol-function 'agent-repl-host-ref) (lambda (_ws) '(:id "ws-id")))
+               ((symbol-function 'agent-repl-verbs--send)
+                (lambda (rpc _conn request &rest keys)
+                  (push (list rpc request) agent-repl-test-input--release-requests)
+                  (let ((answer ,answer))
+                    (if (eq (car answer) :success)
+                        (funcall (plist-get keys :on-success) nil)
+                      (funcall (plist-get keys :on-error) (cdr answer)))))))
+       ,@body)))
+
+(defvar agent-repl-test-input--release-requests nil
+  "The UpdateHeldPrompt requests `agent-repl-test-input--with-release' recorded.")
+
+(ert-deftest agent-repl-test-input-send-held-now-releases-the-latest-sent-turn ()
+  "`C-RET' releases the turn the composer last sent and leaves the composer alone."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-release '(:success)
+      (with-current-buffer agent-repl-test-input--buffer
+        (insert "half written")
+        (agent-repl--input-remember-sent-turn (agent-repl--ws-current-name) '(:value "t1"))
+        (agent-repl--input-remember-sent-turn (agent-repl--ws-current-name) '(:value "t2"))
+        (agent-repl-send-held-now)
+        (should (equal (buffer-string) "half written"))
+        (should (equal agent-repl-test-input--release-requests
+                       '((agent-repl-rpc-update-held-prompt
+                          (:workspace (:id "ws-id") :turn (:value "t2")
+                           :action (:arm :release :value nil))))))))))
+
+(ert-deftest agent-repl-test-input-send-held-now-with-nothing-sent-says-so ()
+  "With no prompt sent from the composer, `C-RET' says so and calls nothing."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-release '(:success)
+      (with-current-buffer agent-repl-test-input--buffer
+        (let ((said nil))
+          (cl-letf (((symbol-function 'message) (lambda (fmt &rest args) (push (apply #'format fmt args) said))))
+            (agent-repl-send-held-now))
+          (should (null agent-repl-test-input--release-requests))
+          (should (cl-some (lambda (m) (string-match-p "no prompt sent" m)) said)))))))
+
+(ert-deftest agent-repl-test-input-send-held-now-refusals-are-said-and-logged ()
+  "Each refusal of the release is logged with its cause and worded in the echo area."
+  (dolist (case '((:no-such-hold "no longer held")
+                  (:already-delivered "already delivered")
+                  (:being-delivered "being delivered")
+                  (:release-refused "will not send")))
+    (pcase-let ((`(,arm ,text) case))
+      (agent-repl-test-input--with
+        (agent-repl-test-input--with-release `(:error :cause (:arm ,arm :value nil))
+          (with-current-buffer agent-repl-test-input--buffer
+            (agent-repl--input-remember-sent-turn (agent-repl--ws-current-name) '(:value "t1"))
+            (let ((said nil) (logged nil))
+              (cl-letf (((symbol-function 'message) (lambda (fmt &rest args) (push (apply #'format fmt args) said)))
+                        ((symbol-function 'agent-repl--info) (agent-repl-test--record-into logged)))
+                (agent-repl-send-held-now))
+              (should (cl-some (lambda (m) (string-match-p text m)) said))
+              (should (cl-some (lambda (m) (string-match-p "send-held-now-refused .*t1" m)) logged)))))))))
+
+(ert-deftest agent-repl-test-input-send-held-now-leaves-handover-refusals-to-the-dispatcher ()
+  "A handover arm is not claimed, so the verbs dispatcher routes it."
+  (agent-repl-test-input--with
+    (agent-repl-test-input--with-release '(:error :cause (:arm :transferring-away :value (:address "a")))
+      (with-current-buffer agent-repl-test-input--buffer
+        (agent-repl--input-remember-sent-turn (agent-repl--ws-current-name) '(:value "t1"))
+        (let ((said nil))
+          (cl-letf (((symbol-function 'message) (lambda (fmt &rest args) (push (apply #'format fmt args) said))))
+            (agent-repl-send-held-now))
+          (should-not (cl-some (lambda (m) (string-match-p "send now:" m)) said)))))))
+
+(ert-deftest agent-repl-test-input-only-a-composer-send-is-remembered ()
+  "A minted turn from the composer is remembered, one from a canned send is not."
+  (let ((agent-repl--input-last-sent-turns (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'agent-repl--input-accepted) #'ignore)
+              ((symbol-function 'agent-repl--run-send-posthooks) #'ignore))
+      (agent-repl--input-on-success "w" "x" :user-sent '(:arm :turn :value (:turn (:value "c"))) nil)
+      (should-not (gethash "w" agent-repl--input-last-sent-turns))
+      (agent-repl--input-on-success "w" "x" :user-sent '(:arm :turn :value (:turn (:value "t"))) t)
+      (should (equal (gethash "w" agent-repl--input-last-sent-turns) '(:value "t"))))))
 
 (ert-deftest agent-repl-test-input-a-settled-card-refusal-says-so ()
   "A card that settled before the answer is refused, logged and flashed."

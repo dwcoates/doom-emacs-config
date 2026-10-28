@@ -121,6 +121,9 @@
 (declare-function agent-repl-host-selection "agent-repl-host" (ws))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-update-held-prompt "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-verbs--send "verbs" (rpc conn request &rest keys))
+(declare-function agent-repl-verbs--conn "verbs" (&optional ws))
 (declare-function agent-repl-rpc-select-feed-row "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-open-feed-image "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-plan-rollback-sync "agent-repl-rpc" (conn request &optional timeout))
@@ -1835,6 +1838,8 @@ it."
      (agent-repl--info ws "elisp.input.turn-minted ws=%s origin=%S turn=%S"
                        ws origin (plist-get (plist-get success :value) :turn))
      (agent-repl--input-accepted ws raw :turn from-buffer)
+     (when from-buffer
+       (agent-repl--input-remember-sent-turn ws (plist-get (plist-get success :value) :turn)))
      (agent-repl--run-send-posthooks ws raw))
     ((and (or :command-panel :command-refused :command-acted) arm)
      ;; Answered, nothing to await.  The webapp draws the panel or the
@@ -2440,7 +2445,7 @@ choices."
 (defun agent-repl--input-confirm-choice (ws)
   "Return the confirm `C-RET' sends for WS's standing ask, or nil.
 Only a multi-select question is confirmed, and only from an empty
-composer: with text in it `C-RET' sends that text as usual."
+composer: with text in it `C-RET' sends the latest held prompt now."
   (let* ((ask (agent-repl-host-standing-ask ws))
          (kind (plist-get ask :kind))
          (question (plist-get kind :value)))
@@ -2506,17 +2511,67 @@ inserted as `self-insert-command' would."
       (setq this-command #'self-insert-command)
       (call-interactively #'self-insert-command))))
 
+(defvar agent-repl--input-last-sent-turns (make-hash-table :test #'equal)
+  "Map a workspace name to the TurnId of its composer's latest accepted send.
+A plist as `agent-repl-wire-decode-turn-id' decodes it.  Only a send read
+out of the composer is recorded, so `C-RET' releases the prompt the person
+typed and never one a canned command or a queue re-drive composed.")
+
+(defun agent-repl--input-remember-sent-turn (ws turn)
+  "Record TURN as the latest turn WS's composer sent."
+  (puthash ws turn agent-repl--input-last-sent-turns))
+
+(defun agent-repl--input-release-refusal-text (value)
+  "Return the echo-area text for the refusal VALUE of a held prompt's release."
+  (pcase (plist-get (plist-get value :cause) :arm)
+    (:no-such-hold "that prompt is no longer held")
+    (:already-delivered "that prompt was already delivered")
+    (:being-delivered "that prompt is being delivered right now")
+    (:release-refused "the daemon will not send that prompt now")
+    (arm (format "refused (%s)" arm))))
+
+(defun agent-repl-send-held-now ()
+  "Send now the composer's most recently sent held prompt.
+The composer is never read, cleared or altered: text standing in it stays
+where it is and is not sent.  The daemon answers `already delivered' or
+`no such hold' when the prompt is no longer held, said in the echo area."
+  (interactive)
+  (let* ((ws (agent-repl--ws-current-name))
+         (turn (gethash ws agent-repl--input-last-sent-turns)))
+    (if (null turn)
+        (progn
+          (agent-repl--info ws "elisp.input.send-held-now ws=%s outcome=nothing-sent" ws)
+          (message "agent-repl: no prompt sent from this composer to send now"))
+      (agent-repl--info ws "elisp.input.send-held-now ws=%s turn=%s" ws (plist-get turn :value))
+      (agent-repl-verbs--send
+       #'agent-repl-rpc-update-held-prompt (agent-repl-verbs--conn ws)
+       (list :workspace (agent-repl-host-ref ws) :turn turn
+             :action '(:arm :release :value nil))
+       :ws ws :op "release-held-prompt"
+       :on-success
+       (lambda (_)
+         (agent-repl--info ws "elisp.input.send-held-now-acked ws=%s turn=%s"
+                           ws (plist-get turn :value)))
+       :on-error
+       (lambda (value)
+         (if (memq (plist-get (plist-get value :cause) :arm) agent-repl--input-handover-arms)
+             nil
+           (agent-repl--info ws "elisp.input.send-held-now-refused ws=%s turn=%s cause=%S"
+                             ws (plist-get turn :value) (plist-get value :cause))
+           (message "agent-repl: send now: %s" (agent-repl--input-release-refusal-text value))
+           t))))))
+
 (defun agent-repl-input-control-return ()
-  "Confirm a standing multi-select from an empty composer, else send with postfix.
+  "Confirm a standing multi-select from an empty composer, else send held now.
 `C-RET' finalizes the ticks a multi-select question was given by number;
 with no multi-select standing, or with text in the composer, it is
-`agent-repl-send-with-postfix'."
+`agent-repl-send-held-now' (the composer's text is untouched)."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (confirm (agent-repl--input-confirm-choice ws)))
     (if confirm
         (agent-repl--input-answer-choice ws confirm)
-      (agent-repl-send-with-postfix))))
+      (agent-repl-send-held-now))))
 
 ;;;; ---- Keybindings -----------------------------------------------------
 

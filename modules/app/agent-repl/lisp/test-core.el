@@ -460,6 +460,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("input.el" agent-repl--input-hold
      "agent-repl: the prompt could not be saved for the daemon (%s); it is in the input history: %s"
      "tells the user their prompt could not be held, with its words")
+    ("input.el" agent-repl-send-held-now
+     "agent-repl: no prompt sent from this composer to send now"
+     "tells the user the send-now chord had no sent prompt to release")
+    ("input.el" agent-repl-send-held-now
+     "agent-repl: send now: %s"
+     "tells the user why the daemon refused to send their held prompt now")
     ("keybindings.el" agent-repl-reload-config "[agent-repl] Reloaded %s"
      "confirms the interactive source reload")
     ("magit.el" agent-repl-magit-copy-commit-link
