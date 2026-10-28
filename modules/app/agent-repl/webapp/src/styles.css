@@ -534,11 +534,12 @@
   :root {
     --reference: #f5a25d;
     /* THE GROUNDS FOLLOW THE CLAUDE DESKTOP APP'S DARKER SURFACES (owner
-       requests, 2026-10-28), sampled from two screenshots of it: the feed a
-       near-black #0e0e0e, and the sidebar the very #212121 every prompt
-       bubble wears. The topbar, the composer and the tool card each sit a
-       touch above the feed, in that order. */
-    --bg: #0e0e0e;
+       requests, 2026-10-28), sampled from two screenshots of it, then the
+       feed a touch lighter and the sidebar a touch darker (owner request, the
+       same day): the feed #121212, the sidebar #1d1d1d, a step below the
+       #212121 every prompt bubble wears. The topbar, the composer and the
+       tool card each sit a touch above the feed, in that order. */
+    --bg: #121212;
     --fg: #f1efe9;
     --diff-add-bg: #12351f;
     --diff-del-bg: #3d1a1a;
@@ -550,7 +551,7 @@
     --repo-head-collapsed: #898782;
     --merged-today-gutter: #ece8df;
     --border: #2a2a2a;
-    /* Above the #212121 sidebar, so its hover and detail washes still lift
+    /* Above the #1d1d1d sidebar, so its hover and detail washes still lift
        off the rail. */
     --card: #2c2c2c;
     /* THE DARK NEUTRALS FOLLOW THE CLAUDE DESKTOP APP'S DARK THEME (owner
@@ -559,17 +560,18 @@
        Each token takes the lightness of its Claude counterpart, named on it.
        design-dark-palette-tuner.html beside this module tunes the set. */
     /* The shared panel fill, Claude's code block. */
-    --panel-bg: #181818;
+    --panel-bg: #1c1c1c;
     /* The tool card and --assistant: --panel-bg moved 40% of the way to --bg,
-       #181818 toward #0e0e0e, a touch above the composer, so a card still
+       #1c1c1c toward #121212, a touch above the composer, so a card still
        lifts off the feed (2026-10-28). */
-    --tool-card-bg: #141414;
-    /* Claude's sidebar, the prompt bubble's own #212121 (owner request,
-       2026-10-28), lighter than the feed. */
-    --sidebar-bg: #212121;
+    --tool-card-bg: #181818;
+    /* Claude's sidebar, and the footer that wears it: a step below the
+       prompt bubble's #212121, still lighter than the feed (owner requests,
+       2026-10-28). */
+    --sidebar-bg: #1d1d1d;
     /* Only a touch above the feed, between it and the composer (owner
        request, 2026-10-28). */
-    --topbar-bg: #101010;
+    --topbar-bg: #141414;
     /* A little lighter than the rail, and below --card's hover wash. */
     --sidebar-menu-bg: #262626;
     /* Deeper than the light theme's shadow: a faint drop shadow reads as
@@ -597,7 +599,7 @@
     --user: #212121;
     /* A light purple, so a known command reads on the dark prompt blue. */
     --known-command: #f0c4ff;
-    /* A step below this theme's --user, a touch above the feed. */
+    /* A step below this theme's --user, at the feed's own ground. */
     --prompt-code-bg: #121212;
     /* A held prompt wears the prompt's own fill and code wash (owner request,
        2026-10-28): its glimmer, not its fill, tells it apart. */
@@ -624,10 +626,10 @@
     --info-tasks: #f69ea9;
     --turn-complete-bg: #3a3116;
     --turn-complete-border: #6b5a22;
-    /* A touch above the feed's #0e0e0e, still told apart from it (owner
+    /* A touch above the feed's #121212, still told apart from it (owner
        request, 2026-10-28). Emacs's input window
        (agent-repl-input-background, lisp/input.el) wears this same color. */
-    --composer-bg: #121212;
+    --composer-bg: #161616;
     /* Both washes stay bright in the dark theme rather than being dimmed to
        suit it: the mark is the thing the user is hunting for, so it is the one
        place the stylesheet WANTS to shout against the background. --search-fg
