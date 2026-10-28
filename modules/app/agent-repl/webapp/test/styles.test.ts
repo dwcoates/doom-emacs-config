@@ -6192,6 +6192,15 @@ describe("a response's level-2 sections", () => {
 });
 
 describe("the response subtree box (feed/subtree-box.ts)", () => {
+  it("fills the box in greyscale, the ink a little stronger than a response's code wash (owner request, 2026-10-28)", () => {
+    // Arrange / Act
+    const root = declarationsOf(":root") ?? "";
+    const strength = (token: string): number =>
+      Number(new RegExp(`${token}: color-mix\\(in srgb, var\\(--fg\\) (\\d+(?:\\.\\d+)?)%, transparent\\);`).exec(root)?.[1]);
+    // Assert
+    expect([strength("--composer-entry-bg"), strength("--response-code-bg")]).toEqual([7, 4]);
+  });
+
   // Owner request, 2026-10-26: a highlighted tree entry carries no accent bar
   // on its left margin, whichever highlight draws it.
   it.each([
