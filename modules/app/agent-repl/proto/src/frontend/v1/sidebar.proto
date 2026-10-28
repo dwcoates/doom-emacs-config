@@ -1979,9 +1979,16 @@ message RosterRowWhenTurnRunning {
   int64 started_at_ms = 1;
 }
 
-// No turn is running: the open workspaces section draws "0s". DELIBERATELY
-// EMPTY: the arm is the fact.
-message RosterRowWhenNoTurnRunning {}
+// No turn is running: the open workspaces section counts the time since the
+// workspace's last turn ENDED, from the daemon's durable turn record
+// (RosterRow.last_turn_ended, the workspace record's LastTurnEndedAt), so the
+// count is right after a daemon restart and after a long shutdown: the
+// client ticks from the instant and never from when it started.
+message RosterRowWhenNoTurnRunning {
+  // When the workspace's most recent turn ended, epoch ms on the daemon's
+  // clock. UNSET = no turn of the workspace has ended yet, drawn "0s".
+  optional int64 last_turn_ended_at_ms = 1;
+}
 
 // A SYNC merge stands in the workspace -- waiting in its repository's queue or
 // being worked on -- and the row counts how long: from when the merge joined

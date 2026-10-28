@@ -281,7 +281,8 @@ func recedes(rec wsm.Workspace, session *wsm.Session) bool {
 // request, 2026-10-14), counted from when it joined the queue, else the TURN
 // CLOCK the strip shows (owner request, 2026-10-13): a running turn counts
 // from the clock's own start instant, so the row and the strip read the same
-// duration, and a workspace with no turn running draws "0s".
+// duration, and a workspace with no turn running counts from its durable last turn end
+// (wsm LastTurnEndedAt), and draws "0s" if none has ended.
 //
 // THE MERGE OUTRANKS THE TURN: the turns a merge runs (its prompts, conflict
 // resolution, fixing) are the merge's work, so the row counts the whole merge
@@ -313,7 +314,15 @@ func when(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv1.FooterCloc
 		out.Shown = &frontendv1.RosterRowWhen_TurnRunning{
 			TurnRunning: &frontendv1.RosterRowWhenTurnRunning{StartedAtMs: *clock.TurnStartedAtMs}}
 	default:
-		out.Shown = &frontendv1.RosterRowWhen_NoTurnRunning{NoTurnRunning: &frontendv1.RosterRowWhenNoTurnRunning{}}
+		// THE DURABLE END INSTANT, never the footer clock's: the clock is
+		// restated only from a history page, while the workspace record
+		// survives any shutdown, so the count is right after a long one.
+		idle := &frontendv1.RosterRowWhenNoTurnRunning{}
+		if rec.LastTurnEndedAt != nil {
+			ended := rec.LastTurnEndedAt.UnixMilli()
+			idle.LastTurnEndedAtMs = &ended
+		}
+		out.Shown = &frontendv1.RosterRowWhen_NoTurnRunning{NoTurnRunning: idle}
 	}
 	return out
 }
