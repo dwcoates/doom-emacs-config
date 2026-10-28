@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"agent-repld/internal/bounce"
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/rollout"
@@ -101,8 +102,8 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 func (v *verbs) startForRestart(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
 	log.Info(opRestart, "no shim is up; the restart starts the session", nil)
 	if err := v.deps.Sessions.Start(ctx, ws); err != nil {
-		if errors.Is(err, shimclient.ErrStandingDown) {
-			log.Info(opRestart, "the session was not started: this daemon is standing down", nil)
+		if why, notOurs := startNotAgentReplFault(err); notOurs {
+			log.Info(opRestart, "the restart's start "+why, dlog.Context{"cause": err.Error()})
 		} else {
 			log.Error(opRestart, "the restart could not start the session", dlog.Context{"cause": err.Error()})
 		}
@@ -253,4 +254,29 @@ func (v *verbs) forceEndTurn(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	log.Debug(opRestart, "force-ended the running turn before the relaunch", dlog.Context{
 		"turn": string(*running.Turn),
 	})
+}
+
+// startNotAgentReplFault reports whether a start ended for a reason that is no
+// agent-repl failure of the session coming up, and says which: this daemon
+// leaving (its context ending, or a standing-down refusal), its shim taken by
+// a handover or a kill, or a VENDOR FAULT -- the vendor would not start, or
+// this machine could not reach the network -- which the start itself recorded
+// as that fault, on the footer and the roster (owner rule: vendor faults never
+// gate agent-repl's own functions, and are not agent-repl's errors).
+func startNotAgentReplFault(err error) (string, bool) {
+	var label *startLabel
+	switch {
+	case errors.As(err, &label) && label.network:
+		return "met a network this machine cannot reach; its network fault stands", true
+	case errors.As(err, &label) && label.vendor:
+		return "met a vendor that would not start; its vendor fault stands", true
+	case ctxend.Is(err):
+		return "ended when its context was cancelled", true
+	case errors.Is(err, shimclient.ErrStandingDown):
+		return "stopped because this daemon is standing down", true
+	case errors.Is(err, ErrShimTaken):
+		return "ended when its shim was taken from it (handed to a successor, or stopped)", true
+	default:
+		return "", false
+	}
 }
