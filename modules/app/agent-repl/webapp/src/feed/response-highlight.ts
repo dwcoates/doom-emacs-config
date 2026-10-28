@@ -15,17 +15,13 @@
  * response clears the held one exactly once.
  */
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
-import { ConnectError } from "@connectrpc/connect";
 import {
   SelectResponseTextRequestSchema,
   SelectResponseTextResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_response_text_pb";
-import { controlPlaneFailed } from "../failure/sink.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
-import { callFailure, refusalOf } from "../rpc/refuse.js";
-import { requireCase } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
+import { controlCall } from "../rpc/control-call.js";
 import { selectedSpan, type SelectionSource } from "../selection.js";
 import { RESPONSE_PROSE_CLASS } from "./cards/response.js";
 import { feedRowId, feedRowOf } from "./row-id.js";
@@ -75,39 +71,22 @@ type HighlightState = NonNullable<
 
 /** Tell the daemon STATE; a refusal or a transport failure reaches the chip. */
 async function selectResponseText(ctx: AppContext, state: HighlightState, what: string): Promise<void> {
-  let response;
-  try {
-    response = await callUnary(
-      ctx,
-      "SelectResponseText",
-      (client) =>
-        client.selectResponseText(create(SelectResponseTextRequestSchema, { workspace: ctx.workspace, selection: { state } })),
-      SelectResponseTextResponseSchema,
-    );
-  } catch (err) {
-    // `callUnary` already logged the transport failure; the chip is told here.
-    if (!(err instanceof ConnectError)) throw err;
-    ctx.failures.report(controlPlaneFailed(what, callFailure(err).text));
-    return;
-  }
-  const result = requireCase(response.result, "SelectResponseTextResponse.result");
-  switch (result.case) {
-    case "success":
-      log.debug(`the daemon took the response highlight (${what})`, {
-        operation: "feed.response-highlight.answered",
-        context: { state: state?.case ?? "unset" },
-      });
-      return;
-    case "error": {
-      const said = refusalOf(result.value.cause, SELECT_RESPONSE_TEXT_REFUSALS, "SelectResponseTextError.cause");
-      log.error(`the daemon refused to ${what}: ${said.text}`, {
-        operation: "feed.response-highlight.refused",
-        context: { state: state?.case ?? "unset", arm: said.arm },
-      });
-      ctx.failures.report(controlPlaneFailed(what, said.text));
-      return;
-    }
-  }
+  const success = await controlCall(ctx, {
+    rpc: "SelectResponseText",
+    what,
+    send: (client) =>
+      client.selectResponseText(create(SelectResponseTextRequestSchema, { workspace: ctx.workspace, selection: { state } })),
+    schema: SelectResponseTextResponseSchema,
+    result: (response) => response.result,
+    refusals: SELECT_RESPONSE_TEXT_REFUSALS,
+    refusedOperation: "feed.response-highlight.refused",
+    context: { state: state?.case ?? "unset" },
+  });
+  if (success === undefined) return;
+  log.debug(`the daemon took the response highlight (${what})`, {
+    operation: "feed.response-highlight.answered",
+    context: { state: state?.case ?? "unset" },
+  });
 }
 
 /**
