@@ -4912,14 +4912,14 @@ describe("the rail's marks", () => {
     expect(keyframes).not.toMatch(/transform|scale|width|height|font-size/);
   });
 
-  it("swings a breathing name between the unviewed ink and the full text color, never dimmer (owner request, 2026-10-29)", () => {
+  it("swings a breathing name between its resting ink and its peak, never dimmer (owner request, 2026-10-29)", () => {
     // Arrange
     const keyframes = keyframesOf("ws-pulse");
     const at = (stop: string): string => new RegExp(`${stop}\\s*\\{[^}]*color:\\s*([^;]+);`).exec(keyframes)?.[1] ?? "";
     // Act
     const [rest, peak] = [at("0%, 100%"), at("50%")];
     // Assert
-    expect([rest, peak, keyframes.includes("opacity")]).toEqual(["var(--repo-head-expanded)", "var(--fg)", false]);
+    expect([rest, peak, keyframes.includes("opacity")]).toEqual(["var(--name-rest)", "var(--name-peak)", false]);
   });
 
   it("breathes once every 2s, 30% slower than the 1.4s it once took", () => {
