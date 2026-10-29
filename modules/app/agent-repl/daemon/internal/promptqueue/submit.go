@@ -401,6 +401,10 @@ type revivalCause int
 const (
 	revivalLoad revivalCause = iota
 	revivalRelaunch
+	// revivalSettings is a model, permission-mode or effort pick on a
+	// workspace with no shim: the shim it starts is stood down on the switch
+	// away unless a turn runs meanwhile (Deps.SettingsStarted).
+	revivalSettings
 )
 
 // reviveInBackground brings one workspace's session up off the request path and
@@ -423,9 +427,12 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 	log.Debug("daemon.promptqueue.state_transition", "the workspace revival state changed", dlog.Context{
 		"state": "reviving", "before": beforeReviving, "after": true,
 	})
-	log.Info(opSubmit, "started the background session revival", dlog.Context{"relaunch": cause == revivalRelaunch})
+	log.Info(opSubmit, "started the background session revival", dlog.Context{"relaunch": cause == revivalRelaunch, "settings": cause == revivalSettings})
 	if cause == revivalRelaunch {
 		q.deps.Holds.SetRelaunching(ws, true)
+	}
+	if cause == revivalSettings && q.deps.SettingsStarted != nil {
+		q.deps.SettingsStarted(ws, q.deps.Now())
 	}
 
 	q.reviving.Add(1)
@@ -756,8 +763,11 @@ func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, cause revivalCau
 	q.noteBringUp(ws, 1, log)
 	defer q.noteBringUp(ws, -1, log)
 	life := shimlife.StartPrompt
-	if cause == revivalRelaunch {
+	switch cause {
+	case revivalRelaunch:
 		life = shimlife.StartRelaunch
+	case revivalSettings:
+		life = shimlife.StartSettings
 	}
 	if err := q.deps.Revive(shimlife.WithStart(ctx, life), ws); err != nil {
 		log.Error(opSubmit, "the revival failed; the submission cannot be delivered",
@@ -815,4 +825,22 @@ func (q *queue) isReviving(ws ids.WorkspaceID) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return s.reviving || s.bringUps > 0
+}
+
+// ReviveForSettings starts WS's shim for an effort pick (Queue).
+func (q *queue) ReviveForSettings(ctx context.Context, ws ids.WorkspaceID) error {
+	log, err := q.logger(ctx, ws)
+	if err != nil {
+		return err
+	}
+	if _, shim := q.deps.Client(ws); shim {
+		log.Debug(opSubmit, "the shim is up; the effort pick needs no revival", nil)
+		return nil
+	}
+	if q.deps.Revive == nil {
+		refusalLevel(ctx, log, log.Warn)(opSubmit, "the workspace has no shim and no revival is wired for an effort pick", nil)
+		return ErrNoSession
+	}
+	q.reviveInBackground(context.WithoutCancel(ctx), ws, revivalSettings, log)
+	return nil
 }

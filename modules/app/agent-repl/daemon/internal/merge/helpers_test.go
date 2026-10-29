@@ -1748,6 +1748,8 @@ func (q *fakeQueue) Editing(ids.WorkspaceID) (promptqueue.Edit, bool) {
 func (q *fakeQueue) Fold(context.Context, ids.WorkspaceID, ids.TurnID, ids.TurnID) error {
 	return nil
 }
+func (q *fakeQueue) ReviveForSettings(context.Context, ids.WorkspaceID) error { return nil }
+
 func (q *fakeQueue) SubmitSessionAct(context.Context, ids.WorkspaceID, promptqueue.Act) error {
 	return nil
 }

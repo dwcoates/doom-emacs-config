@@ -983,28 +983,32 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE ORCHESTRATOR, through the forwarder: it is built below, and is
 	// told each lease change through the queue's lease sink.
 	mergeMover := &mergeForwarder{}
+	// A SETTINGS PICK'S SHIM IS A VISIT: the queue notes its start, and a
+	// switch away stands it down (workspace/settingsvisits.go).
+	settingsVisits := workspace.NewSettingsVisits()
 	queue, err = promptqueue.New(promptqueue.Deps{
-		Leases:         mergeMover,
-		Merges:         mergeMover,
-		RestartSlots:   startSlots,
-		TurnBanners:    turnBanners,
-		Commits:        commitRecounter,
-		CacheClocks:    cacheKeeper,
-		StripSentinels: stripSentinels,
-		ResolveImage:   resolveImage,
-		DB:             p.DB,
-		Judge:          judge,
-		Feed:           feedResolver,
-		Footer:         footerResolver,
-		Sidebar:        sidebarResolver,
-		Edges:          edges,
-		Holds:          feedResolver,
-		Client:         fleet.Sender,
-		Revive:         fleet.Start,
-		Watcher:        fleet.Watcher,
-		SessionStarted: fleet.Serving,
-		SessionAbsent:  fleet.SessionAbsent,
-		StandingDown:   supervisor.StandingDown,
+		SettingsStarted: settingsVisits.Note,
+		Leases:          mergeMover,
+		Merges:          mergeMover,
+		RestartSlots:    startSlots,
+		TurnBanners:     turnBanners,
+		Commits:         commitRecounter,
+		CacheClocks:     cacheKeeper,
+		StripSentinels:  stripSentinels,
+		ResolveImage:    resolveImage,
+		DB:              p.DB,
+		Judge:           judge,
+		Feed:            feedResolver,
+		Footer:          footerResolver,
+		Sidebar:         sidebarResolver,
+		Edges:           edges,
+		Holds:           feedResolver,
+		Client:          fleet.Sender,
+		Revive:          fleet.Start,
+		Watcher:         fleet.Watcher,
+		SessionStarted:  fleet.Serving,
+		SessionAbsent:   fleet.SessionAbsent,
+		StandingDown:    supervisor.StandingDown,
 		// AN OPEN WAITS FOR THE CUT TURN ITS BRING-UP RESUMES (opentabs).
 		Resumptions: func(ws ids.WorkspaceID, report promptqueue.ResumeReport) {
 			opens.Resumption(ws, opentabs.Resume{Kind: resumeKind(report.Kind), Text: report.Text})
@@ -1391,6 +1395,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Threads: chatService,
 		// Every cold gate answered lands in the metrics surface.
 		ColdGateAnswers: p.Metrics,
+		SettingsVisits:  settingsVisits,
 		Creates:         creates,
 		// A CREATE THE NETWORK BLOCKS IS HELD and resumes on the network's
 		// restoration; its ops are answered through the server, bound below.

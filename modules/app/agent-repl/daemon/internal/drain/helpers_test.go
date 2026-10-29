@@ -1,6 +1,7 @@
 package drain
 
 import (
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
 	"errors"
@@ -252,6 +253,8 @@ type killCall struct {
 	// stand-down was BOUNDED without timing the whole call on a wall clock.
 	Budget  time.Duration
 	Bounded bool
+	// Life is the stand-down reason the context carried (shimlife).
+	Life shimlife.StandDownReason
 }
 
 func newFakeStand() *fakeStand {
@@ -319,6 +322,7 @@ func (s *fakeStand) KillSession(ctx context.Context, ws ids.WorkspaceID, force b
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	call := killCall{WS: ws, Force: force}
+	call.Life, _ = shimlife.StandDownOf(ctx)
 	if deadline, ok := ctx.Deadline(); ok {
 		call.Budget, call.Bounded = time.Until(deadline), true
 	}

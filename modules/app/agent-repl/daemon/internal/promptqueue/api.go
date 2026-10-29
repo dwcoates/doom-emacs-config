@@ -253,6 +253,12 @@ type Act struct {
 
 // Queue is the delivery path's whole surface.
 type Queue interface {
+	// ReviveForSettings starts WS's shim for an effort pick, which holds no
+	// row (a model or permission-mode pick is held by SubmitSessionAct and
+	// starts it there). It returns at once; a shim already up is no change,
+	// and a revival in flight is joined. ErrNoSession when the queue has no
+	// revival wired.
+	ReviveForSettings(ctx context.Context, ws ids.WorkspaceID) error
 	// HeldSince answers the held prompts queued at or after a time, in queue
 	// order: what a rollback to a prompt sent then drops. Session acts are
 	// never included.
@@ -476,6 +482,12 @@ type Deps struct {
 	// dead: the prompt is the revival, exactly as mounting the frontend is.
 	// Nil means a workspace with no live session simply refuses.
 	Revive ReviveFunc
+	// SettingsStarted is told when a settings pick starts a workspace's shim
+	// (a model, permission-mode or effort pick with no shim), with the
+	// instant: the workspace verbs stand that shim down again on the switch
+	// away unless a turn has run since (owner request, 2026-10-29). Nil
+	// follows no such start.
+	SettingsStarted func(ws ids.WorkspaceID, at time.Time)
 	// Watcher resolves a workspace's session watcher, which is what answers
 	// the in-flight turn and what an accepted turn is handed over to.
 	Watcher WatcherFunc

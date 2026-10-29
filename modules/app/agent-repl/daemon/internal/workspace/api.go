@@ -689,7 +689,10 @@ type Deps struct {
 	Merge     merge.Orchestrator
 	Rollout   rollout.Controller
 	Drain     drain.Controller
-	Health    health.Reporter
+	// SettingsVisits holds the workspaces whose shim a settings pick
+	// started, which a switch away stands down (settingsvisits.go).
+	SettingsVisits *SettingsVisits
+	Health         health.Reporter
 	// Derived tells a created, landed or closed workspace's sources about it.
 	Derived DerivedReporter
 	Feed    feed.Resolver
@@ -1071,6 +1074,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a state client")
 	case deps.ColdGateAnswers == nil:
 		return nil, missing("the cold gate answers' telemetry")
+	case deps.SettingsVisits == nil:
+		return nil, missing("the settings visits")
 	case deps.Derived == nil:
 		return nil, missing("a derived-workspace reporter")
 	case deps.Git == nil:

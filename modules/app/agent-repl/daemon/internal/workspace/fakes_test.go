@@ -23,6 +23,7 @@ import (
 	"agent-repld/internal/claudesettings"
 	"agent-repld/internal/creategate"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/drain"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/headless"
@@ -1581,6 +1582,10 @@ func (a *fakeAccounts) MoveTranscript(_ context.Context, path, toConfigDir, work
 type fakeQueue struct {
 	promptqueue.Queue
 
+	// settingsRevivals is every ReviveForSettings asked; reviveErr its answer.
+	settingsRevivals []ids.WorkspaceID
+	reviveErr        error
+
 	submissions []promptqueue.Submission
 	submitErr   error
 	// submitRefusedArm makes Submit answer a refusal disposition.
@@ -2900,6 +2905,12 @@ func (h *fakeHealth) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.
 type fixture struct {
 	// gateAnswers records every cold gate answer the verbs counted.
 	gateAnswers fakeGateAnswers
+	// visits is the settings visits a switch stands down, and visitDrain
+	// the drain they are handed to.
+	visits     *SettingsVisits
+	visitDrain fakeVisitDrain
+	// topbarPicked is the effort the topbar seam was handed as picked.
+	topbarPicked conversationv1.AgentEffortLevel
 	// creates is the create gate the verbs hold a ticket from.
 	creates *creategate.Gate
 	// network is the network state a failed naming call is classified by.
@@ -3060,8 +3071,8 @@ func newFixture(t *testing.T) *fixture {
 			return rec
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames}, Browser: f.browser,
-		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames}, Browser: f.browser,
+		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers, SettingsVisits: f.ensureVisits(), Drain: &f.visitDrain,
 		Headless:   f.headless,
 		Health:     f.health,
 		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, HomeDir: f.home, Log: f.log,
@@ -3807,4 +3818,35 @@ func (f *fakeGateAnswers) CountColdGateAnswer(ws ids.WorkspaceID, choice, outcom
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.answers = append(f.answers, string(ws)+" "+choice+" "+outcome)
+}
+
+// ensureVisits answers the fixture's settings visits, made on first use.
+func (f *fixture) ensureVisits() *SettingsVisits {
+	if f.visits == nil {
+		f.visits = NewSettingsVisits()
+	}
+	return f.visits
+}
+
+// ReviveForSettings records the ask and answers reviveErr.
+func (q *fakeQueue) ReviveForSettings(_ context.Context, ws ids.WorkspaceID) error {
+	q.settingsRevivals = append(q.settingsRevivals, ws)
+	return q.reviveErr
+}
+
+// visitDown is one VisitDown asked of the drain.
+type visitDown struct {
+	WS    ids.WorkspaceID
+	Since time.Time
+}
+
+// fakeVisitDrain records every settings visit's stand-down asked.
+type fakeVisitDrain struct {
+	drain.Controller
+	visits []visitDown
+}
+
+// VisitDown records the ask.
+func (d *fakeVisitDrain) VisitDown(ws ids.WorkspaceID, since time.Time) {
+	d.visits = append(d.visits, visitDown{WS: ws, Since: since})
 }
