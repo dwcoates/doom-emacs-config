@@ -1261,6 +1261,58 @@ Emacs's report that it is about to unload the workspace's page on purpose."
   "Decode VALUE as `ReportPageUnloadingResponse'.  THE ARM IS THE OUTCOME."
   (agent-repl-wire--decode-subject-response "ReportPageUnloading" value))
 
+;;;; ---- ReportPageResidency ----
+
+(defun agent-repl-wire-encode-page-residency-release (value)
+  "Encode VALUE as `PageResidencyRelease': the oneof `when', as
+`(:arm :held|:on-leave|:at :value V)', V being `(:unix-ms MS)' for `:at'
+and nil for the empty arms."
+  (agent-repl-wire--encoded
+   "PageResidencyRelease"
+   (agent-repl-wire--encode-oneof
+    "PageResidencyRelease" 'when value
+    `((:held held ,(lambda (v) (agent-repl-wire--encode-empty "PageResidencyReleaseHeld" v)))
+      (:on-leave onLeave ,(lambda (v) (agent-repl-wire--encode-empty "PageResidencyReleaseOnLeave" v)))
+      (:at at ,(lambda (v)
+                 (let ((ms (plist-get v :unix-ms)))
+                   (unless (integerp ms)
+                     (agent-repl-wire--fail "PageResidencyReleaseAt" 'unix_ms "expected an integer"))
+                   (agent-repl-wire--encoded "PageResidencyReleaseAt" (list (cons 'unixMs ms))))))))))
+
+(defun agent-repl-wire-encode-page-residency (value)
+  "Encode VALUE as `PageResidency': the oneof `state', as
+`(:arm :loaded :value (:release RELEASE))' or `(:arm :not-loaded :value nil)'."
+  (agent-repl-wire--encoded
+   "PageResidency"
+   (agent-repl-wire--encode-oneof
+    "PageResidency" 'state value
+    `((:loaded loaded
+               ,(lambda (v)
+                  (unless (plist-member v :release)
+                    (agent-repl-wire--fail "PageResidencyLoaded" 'release "required message field is absent"))
+                  (agent-repl-wire--encoded
+                   "PageResidencyLoaded"
+                   (list (cons 'release (agent-repl-wire-encode-page-residency-release
+                                         (plist-get v :release)))))))
+      (:not-loaded notLoaded ,(lambda (v) (agent-repl-wire--encode-empty "PageResidencyNotLoaded" v)))))))
+
+(defun agent-repl-wire-encode-report-page-residency-request (value)
+  "Encode ReportPageResidencyRequest VALUE `(:workspace REF :residency R)'.
+Emacs's statement of what it holds of the workspace's page and when it
+lets go (page-unload.el)."
+  (dolist (field '(:workspace :residency))
+    (unless (plist-member value field)
+      (agent-repl-wire--fail "ReportPageResidencyRequest" (intern (substring (symbol-name field) 1))
+                             "required message field is absent")))
+  (agent-repl-wire--encoded
+   "ReportPageResidencyRequest"
+   (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
+         (cons 'residency (agent-repl-wire-encode-page-residency (plist-get value :residency))))))
+
+(defun agent-repl-wire-decode-report-page-residency-response (value)
+  "Decode VALUE as `ReportPageResidencyResponse'.  THE ARM IS THE OUTCOME."
+  (agent-repl-wire--decode-subject-response "ReportPageResidency" value))
+
 ;;;; ---- MarkWorkspaceViewed ----
 
 (defun agent-repl-wire-encode-mark-workspace-viewed-request (value)

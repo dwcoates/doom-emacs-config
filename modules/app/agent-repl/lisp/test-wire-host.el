@@ -243,6 +243,62 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                    (agent-repl-test-wire-host--decode
                     #'agent-repl-wire-decode-report-page-unloading-response json)))))
 
+;;;; ---- ReportPageResidency ----
+
+(defun agent-repl-test-wire-host--residency-json (residency)
+  "RESIDENCY's request encoded for workspace ws-7, as JSON text."
+  (agent-repl-test-wire-host--quiet
+   (json-serialize
+    (agent-repl-wire-encode-report-page-residency-request
+     (list :workspace '(:id "ws-7" :dir "/w/fix") :residency residency)))))
+
+(ert-deftest agent-repl-test-wire-host-page-residency-encodes-each-release-rule ()
+  "Each release rule, and a page not loaded, encodes to its protojson arm."
+  (dolist (case '(((:arm :loaded :value (:release (:arm :held :value nil)))
+                   . "{\"loaded\":{\"release\":{\"held\":{}}}}")
+                  ((:arm :loaded :value (:release (:arm :on-leave :value nil)))
+                   . "{\"loaded\":{\"release\":{\"onLeave\":{}}}}")
+                  ((:arm :loaded :value (:release (:arm :at :value (:unix-ms 1800000000000))))
+                   . "{\"loaded\":{\"release\":{\"at\":{\"unixMs\":1800000000000}}}}")
+                  ((:arm :not-loaded :value nil) . "{\"notLoaded\":{}}")))
+    (should (equal (agent-repl-test-wire-host--residency-json (car case))
+                   (concat "{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"},\"residency\":"
+                           (cdr case) "}")))))
+
+(ert-deftest agent-repl-test-wire-host-page-residency-without-a-residency-is-refused ()
+  "A request naming no residency errors before send."
+  (should (equal (car (agent-repl-test-wire-host--quiet
+                       (condition-case err
+                           (progn (agent-repl-wire-encode-report-page-residency-request
+                                   '(:workspace (:id "ws-7" :dir "/w"))) nil)
+                         (agent-repl-wire-error (cdr err)))))
+                 "ReportPageResidencyRequest")))
+
+(ert-deftest agent-repl-test-wire-host-page-residency-loaded-without-a-rule-is-refused ()
+  "A loaded page naming no release rule errors before send."
+  (should (equal (car (agent-repl-test-wire-host--quiet
+                       (condition-case err
+                           (progn (agent-repl-test-wire-host--residency-json '(:arm :loaded :value nil)) nil)
+                         (agent-repl-wire-error (cdr err)))))
+                 "PageResidencyLoaded")))
+
+(ert-deftest agent-repl-test-wire-host-page-residency-at-without-an-integer-is-refused ()
+  "An unload instant that is not an integer errors before send."
+  (should (equal (car (agent-repl-test-wire-host--quiet
+                       (condition-case err
+                           (progn (agent-repl-test-wire-host--residency-json
+                                   '(:arm :loaded :value (:release (:arm :at :value (:unix-ms "soon"))))) nil)
+                         (agent-repl-wire-error (cdr err)))))
+                 "PageResidencyReleaseAt")))
+
+(ert-deftest agent-repl-test-wire-host-page-residency-response-shares-the-subject-codec ()
+  "ReportPageResidency decodes every answer as every subject verb does."
+  (dolist (json '("{\"success\":{}}" "{\"error\":{\"notYetAdopted\":{}}}"))
+    (should (equal (agent-repl-test-wire-host--decode
+                    #'agent-repl-wire-decode-report-page-residency-response json)
+                   (agent-repl-test-wire-host--decode
+                    #'agent-repl-wire-decode-report-page-unloading-response json)))))
+
 ;;;; ---- ReportPageUnloading ----
 
 (ert-deftest agent-repl-test-wire-host-page-unloading-request-echoes-the-ref ()

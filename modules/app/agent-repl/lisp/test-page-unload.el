@@ -45,6 +45,12 @@
 (defvar agent-repl-test-pu--opening nil
   "Workspaces whose tab's open the harness answers in flight.")
 
+(defvar agent-repl-test-pu--residencies nil
+  "Every residency report sent, newest first, as (WS RESIDENCY).")
+
+(defvar agent-repl-test-pu--residency-lands t
+  "Whether the harness's daemon takes a residency report.")
+
 (defvar agent-repl-test-pu--logged nil
   "Every INFO record's text, newest first.")
 
@@ -70,6 +76,8 @@
            (agent-repl-test-pu--turn-ended nil)
            (agent-repl-test-pu--current nil)
            (agent-repl-test-pu--opening nil)
+           (agent-repl-test-pu--residencies nil)
+           (agent-repl-test-pu--residency-lands t)
            (agent-repl-test-pu--logged nil)
            (agent-repl-test-pu--report 'reported)
            (agent-repl-test-pu--pending nil)
@@ -90,6 +98,10 @@
                        ((symbol-function 'agent-repl--ws-current-name)
                         (lambda () agent-repl-test-pu--current))
                        ((symbol-function 'agent-repl--webhost-id) (lambda (ws) (concat "id-" ws)))
+                       ((symbol-function 'agent-repl-host-report-page-residency)
+                        (lambda (ws residency on-reported)
+                          (push (list ws residency) agent-repl-test-pu--residencies)
+                          (when agent-repl-test-pu--residency-lands (funcall on-reported))))
                        ((symbol-function 'agent-repl-open-tabs-holds-p)
                         (lambda (id) (member (substring id 3) agent-repl-test-pu--opening)))
                        ((symbol-function 'agent-repl-roster-status-for-ws)
@@ -792,6 +804,155 @@ naming a dead buffer, and every switch back found its panels closed."
     (agent-repl-page-unload-note-shown "alpha")
     ;; Assert
     (should-not agent-repl-test-pu--dropped)))
+
+;;;; ---- Residency, as reported to the daemon ----
+
+(defun agent-repl-test-pu--release (ws)
+  "WS's residency's release arm, or `:not-loaded'."
+  (let ((residency (agent-repl-page-unload-residency ws)))
+    (if (eq (plist-get residency :arm) :not-loaded)
+        :not-loaded
+      (plist-get (plist-get (plist-get residency :value) :release) :arm))))
+
+(ert-deftest agent-repl-test-pu-a-page-not-held-is-not-loaded ()
+  "A workspace whose page the host does not hold reports it not loaded."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil)
+    ;; Act / Assert
+    (should (eq (agent-repl-test-pu--release "alpha") :not-loaded))))
+
+(ert-deftest agent-repl-test-pu-a-working-page-is-held-in-its-residency ()
+  "A working workspace's loaded page reports held."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :thinking)))
+    ;; Act / Assert
+    (should (eq (agent-repl-test-pu--release "alpha") :held))))
+
+(ert-deftest agent-repl-test-pu-a-page-with-no-status-is-held-in-its-residency ()
+  "A workspace with no roster row yet reports held: nothing decides it."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . nil)))
+    ;; Act / Assert
+    (should (eq (agent-repl-test-pu--release "alpha") :held))))
+
+(ert-deftest agent-repl-test-pu-an-idle-page-reports-its-holds-end ()
+  "An idle page that is no visit reports the instant its hold ends."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-loaded-at 900)
+    ;; Act
+    (let ((residency (agent-repl-page-unload-residency "alpha")))
+      ;; Assert
+      (should (equal (plist-get (plist-get residency :value) :release)
+                     '(:arm :at :value (:unix-ms 1400000)))))))
+
+(ert-deftest agent-repl-test-pu-an-idle-visit-reports-on-leave ()
+  "An idle page loaded only for a visit reports that it goes on the switch away."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-visit t)
+    ;; Act / Assert
+    (should (eq (agent-repl-test-pu--release "alpha") :on-leave))))
+
+(ert-deftest agent-repl-test-pu-a-faulted-page-reports-on-leave ()
+  "A page its status holds only while shown reports on the switch away."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :severed)))
+    ;; Act / Assert
+    (should (eq (agent-repl-test-pu--release "alpha") :on-leave))))
+
+(ert-deftest agent-repl-test-pu-a-hidden-working-page-reports-on-leave ()
+  "A hidden workspace holds its page only while shown, working or not."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :thinking))
+          agent-repl-test-pu--hidden '("alpha"))
+    ;; Act / Assert
+    (should (eq (agent-repl-test-pu--release "alpha") :on-leave))))
+
+(ert-deftest agent-repl-test-pu-a-pass-reports-each-residency-once ()
+  "A pass reports every live workspace's residency, and the next sends nothing unchanged."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :thinking)))
+    (agent-repl-page-unload-pass)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal (mapcar #'car agent-repl-test-pu--residencies) '("alpha")))))
+
+(ert-deftest agent-repl-test-pu-a-changed-residency-is-reported-again ()
+  "A residency that changed since its report is sent again."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :thinking)))
+    (agent-repl-page-unload-pass)
+    (setq agent-repl-test-pu--status '(("alpha" . :severed)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (eq (plist-get (cadr (car agent-repl-test-pu--residencies)) :arm) :not-loaded))))
+
+(ert-deftest agent-repl-test-pu-a-report-that-did-not-land-is-sent-again ()
+  "A residency the daemon did not take is not marked sent."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :thinking))
+          agent-repl-test-pu--residency-lands nil)
+    (agent-repl-page-unload-pass)
+    (setq agent-repl-test-pu--residency-lands t)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (= (length agent-repl-test-pu--residencies) 2))))
+
+(ert-deftest agent-repl-test-pu-a-workspace-with-no-slot-reports-nothing ()
+  "A workspace with no slot has no page to report."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (kill-buffer (agent-repl--ws-get "alpha" :frontend-buffer))
+    ;; Act
+    (agent-repl-page-unload-report-all)
+    ;; Assert
+    (should-not agent-repl-test-pu--residencies)))
+
+(ert-deftest agent-repl-test-pu-an-unload-reports-the-page-not-loaded ()
+  "The drop's landing reports the page not loaded."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :severed)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal (car agent-repl-test-pu--residencies) '("alpha" (:arm :not-loaded :value nil))))))
+
+(ert-deftest agent-repl-test-pu-a-show-reports-the-shown-page ()
+  "Showing a workspace reports its residency."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil)
+    ;; Act
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Assert
+    (should (eq (plist-get (cadr (car agent-repl-test-pu--residencies)) :arm) :loaded))))
+
+(ert-deftest agent-repl-test-pu-a-link-up-forgets-every-report ()
+  "A link-up may reach a daemon holding no residency, so every report is sent again."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :thinking)))
+    (agent-repl-page-unload-pass)
+    (let ((agent-repl-page-unload--timer 'running))
+      (cl-letf (((symbol-function 'timerp) (lambda (x) (eq x 'running))))
+        (agent-repl-page-unload-start)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (= (length agent-repl-test-pu--residencies) 2))))
 
 (ert-deftest agent-repl-test-pu-start-keeps-a-running-timer ()
   "Starting twice keeps the one timer."

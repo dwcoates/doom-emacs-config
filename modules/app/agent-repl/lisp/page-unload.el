@@ -76,6 +76,7 @@
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-roster-status-for-ws "roster" (ws))
+(declare-function agent-repl-host-report-page-residency "host" (ws residency on-reported))
 (declare-function agent-repl-roster-last-turn-ended-ms "roster" (ws))
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-roster-update-functions)
@@ -172,7 +173,8 @@ is unloaded the moment the user switches away from it."
     (unless (equal previous ws)
       (setq agent-repl-page-unload--shown ws)
       (when previous
-        (agent-repl-page-unload--judge previous (agent-repl-page-unload--now))))))
+        (agent-repl-page-unload--judge previous (agent-repl-page-unload--now))))
+    (agent-repl-page-unload--report ws)))
 
 (defun agent-repl-page-unload-note-mounted (ws)
   "Record that WS's page was just loaded: the start of its idle hold."
@@ -277,6 +279,7 @@ the report was in flight."
      ;; THE PAGE GOES, THE SLOT STAYS: its windows are the panels.
      (agent-repl-webhost-remove ws)
      (agent-repl--ws-put ws :page-visit nil)
+     (agent-repl-page-unload--report ws)
      (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s held-s=%d"
                        ws reason
                        (round (- now (or (agent-repl--ws-get ws :page-loaded-at) now)))))
@@ -307,6 +310,48 @@ before anyone switches to it (owner ruling, 2026-10-29)."
     (agent-repl-webhost-ensure-page ws)
     t))
 
+(defun agent-repl-page-unload-residency (ws)
+  "What Emacs holds of WS\='s page now, as a `PageResidency' plist.
+Not loaded, or loaded with the rule that lets it go: held while working
+(or with no status yet), unloaded at the idle hold\='s end for an idle
+page that is not a visit, and unloaded on the switch away for everything
+else (`agent-repl-page-unload--reason').  The daemon serves it on the
+rail\='s workspace memory hover (endpoint_report_page_residency.proto)."
+  (if (not (agent-repl-webhost-has-page-p ws))
+      (list :arm :not-loaded :value nil)
+    (let ((bucket (agent-repl-page-unload--ws-bucket ws)))
+      (list :arm :loaded
+            :value (list :release
+                         (cond
+                          ((and (memq bucket '(nil working))
+                                (not (agent-repl-page-unload--withheld-p ws)))
+                           (list :arm :held :value nil))
+                          ((and (eq bucket 'idle)
+                                (not (agent-repl-page-unload--withheld-p ws))
+                                (not (agent-repl--ws-get ws :page-visit)))
+                           (list :arm :at
+                                 :value (list :unix-ms
+                                              (round (* 1000 (+ (agent-repl-page-unload--idle-since ws)
+                                                                agent-repl-page-unload-after))))))
+                          (t (list :arm :on-leave :value nil))))))))
+
+(defun agent-repl-page-unload--report (ws)
+  "Report WS\='s residency to the daemon when it differs from the last report.
+A workspace with no slot has nothing to report.  The report is marked sent
+only once the daemon has taken it, so one that does not land is sent again
+on the next change or pass."
+  (when (buffer-live-p (agent-repl--ws-get ws :frontend-buffer))
+    (let ((residency (agent-repl-page-unload-residency ws)))
+      (unless (equal residency (agent-repl--ws-get ws :page-residency-reported))
+        (agent-repl-host-report-page-residency
+         ws residency
+         (lambda () (agent-repl--ws-put ws :page-residency-reported residency)))))))
+
+(defun agent-repl-page-unload-report-all ()
+  "Report every live workspace\='s residency that changed since its last report."
+  (dolist (ws (agent-repl--live-ws-names))
+    (agent-repl-page-unload--report ws)))
+
 (defun agent-repl-page-unload-pass ()
   "Load every working workspace\='s page, and unload every page no status holds.
 Each unload waits on the daemon being told (`agent-repl-page-unload--unload').
@@ -322,11 +367,17 @@ Answers how many unloads were started."
     (when (> (+ started loaded) 0)
       (agent-repl--info agent-repl--page-unload-central
                         "elisp.page-unload.pass started=%d loaded=%d" started loaded))
+    (agent-repl-page-unload-report-all)
     started))
 
 (defun agent-repl-page-unload-start (&optional _conn)
   "Run the pass every `agent-repl-page-unload-interval' seconds.
-Registered on `agent-repl-link-up-functions'; a timer already running is kept."
+Registered on `agent-repl-link-up-functions'; a timer already running is kept.
+A link-up may be to a daemon that holds no residency (a successor, a
+restart), so every workspace\='s last report is forgotten and the next pass
+reports them all again."
+  (dolist (ws (agent-repl--live-ws-names))
+    (agent-repl--ws-put ws :page-residency-reported nil))
   (unless (timerp agent-repl-page-unload--timer)
     (setq agent-repl-page-unload--timer
           (run-with-timer agent-repl-page-unload-interval agent-repl-page-unload-interval

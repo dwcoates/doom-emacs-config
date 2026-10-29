@@ -63,6 +63,8 @@
 (declare-function agent-repl-wire-decode-select-workspace-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-mark-workspace-viewed-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-mark-workspace-viewed-response "wire-host" (alist))
+(declare-function agent-repl-wire-encode-report-page-residency-request "wire-host" (request))
+(declare-function agent-repl-wire-decode-report-page-residency-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-report-page-unloading-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-report-page-unloading-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-adopt-host-workspace-request "wire-host" (request))
@@ -348,6 +350,15 @@ as the tab bar recedes the tab's — until the row's STATUS CHANGES, which
 the daemon detects itself.  There is no companion verb to undo it, and no
 notification on the restore: the daemon originated the status change that
 restores FULL, so it already knows.  Idempotent.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-report-page-residency
+  "ReportPageResidency"
+  agent-repl-wire-encode-report-page-residency-request
+  agent-repl-wire-decode-report-page-residency-response
+  "Tell the daemon what Emacs holds of this workspace's page, and when it
+lets go: loaded and held, unloaded on the switch away, or unloaded at an
+instant; or not loaded.  The daemon serves it on the rail's workspace
+memory hover.  Idempotent.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-report-page-unloading
   "ReportPageUnloading"

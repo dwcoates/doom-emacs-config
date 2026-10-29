@@ -65,6 +65,7 @@
 (declare-function agent-repl-rpc-register-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-mark-workspace-viewed "rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-report-page-residency "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-report-page-unloading "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-adopt-host-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-answer-editor-evaluation "rpc" (conn request &rest keys))
@@ -955,6 +956,24 @@ The outcomes are recorded by `agent-repl-host--send-subject-verb\='."
      (agent-repl--log ws "elisp.host.page-unloading-reported ws=%s" ws)
      (funcall on-reported))
    on-not-reported))
+
+(defun agent-repl-host-report-page-residency (ws residency on-reported)
+  "Tell the daemon what Emacs holds of workspace WS\='s page: RESIDENCY.
+RESIDENCY is a `PageResidency' plist (`agent-repl-wire-encode-page-residency').
+ON-REPORTED is called with no argument once the daemon has answered
+success.  FIRE AND FORGET otherwise: the residency only feeds the rail\='s
+memory hover, so a report that does not land is recorded and the next
+change, or the next link-up, reports again.  Answers nil without calling
+anything when WS has no ref or no connection yet."
+  (agent-repl-host--send-subject-verb
+   ws "page-residency"
+   (lambda (conn request &rest args)
+     (apply #'agent-repl-rpc-report-page-residency conn
+            (append request (list :residency residency)) args))
+   (lambda ()
+     (agent-repl--log ws "elisp.host.page-residency-reported ws=%s residency=%S" ws residency)
+     (funcall on-reported))
+   #'ignore))
 
 (defun agent-repl-host-mark-viewed (ws)
   "Tell the daemon the user has now SEEN workspace WS.
