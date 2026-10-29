@@ -20,8 +20,10 @@
  *   host -> page   presence, the commands Emacs gives a workspace page, and
  *                  what the webhost's own sidebar needs the page to know
  *                  (that it is docked over the page, and its failures);
- *   page -> host   hello (replay my state), the facts Emacs reads back, and
- *                  how tall the page's docked gate band is.
+ *   page -> host   hello (replay my state), and the facts Emacs reads back.
+ *
+ * The cold gate is the webhost's own (host/gate.ts), so no gate message
+ * passes between the two.
  *
  * Emacs reads the host synchronously (a script evaluation answers at once), so
  * every fact Emacs reads about a page is PUSHED to the host by the page when
@@ -58,13 +60,6 @@ interface PresenceMessage {
    * first host load), and on every message but the one its hello replays.
    */
   readonly reloadStartedAtMs?: number;
-}
-
-/** host -> page: the slot a docked gate takes, the input window's. */
-interface GateDockMessage {
-  readonly channel: typeof HOST_CHANNEL;
-  readonly kind: "gateDock";
-  readonly pixels: number;
 }
 
 /** host -> page: close the standing news digest, as its close control does. */
@@ -167,7 +162,6 @@ export type HostToPage =
   | HeldIngressMessage
   | LogLevelMessage
   | PresenceMessage
-  | GateDockMessage
   | DismissDigestMessage
   | FocusMovedMessage
   | SidebarDockMessage
@@ -203,18 +197,6 @@ interface EditingMessage {
 }
 
 /**
- * page -> host: how tall the page's docked gate band is now, in CSS pixels; 0
- * while no gate stands. The band spans the whole window's width under the
- * sidebar column, so the webhost ends its sidebar above the band of the page
- * on screen, exactly where the page's own sidebar would end.
- */
-interface GateBandMessage {
-  readonly channel: typeof HOST_CHANNEL;
-  readonly kind: "gateBand";
-  readonly pixels: number;
-}
-
-/**
  * page -> host: the page, not shown, has work that restyles it, and asks for a
  * turn to run it in (host/restyle-turn.ts).
  */
@@ -245,7 +227,6 @@ export type PageToHost =
   | DrawnMessage
   | SelectionMessage
   | EditingMessage
-  | GateBandMessage
   | BubbleOverlayMessage
   | RestyleTurnMessage
   | RestyledMessage;
@@ -278,10 +259,6 @@ export function parseHostToPage(data: unknown): HostToPage | null {
         ...(reloadStartedAtMs === undefined ? {} : { reloadStartedAtMs }),
       };
     }
-    case "gateDock":
-      return typeof data.pixels === "number" && Number.isFinite(data.pixels)
-        ? { channel: HOST_CHANNEL, kind: "gateDock", pixels: data.pixels }
-        : null;
     case "dismissDigest":
       return { channel: HOST_CHANNEL, kind: "dismissDigest" };
     case "restyleGranted":
@@ -359,10 +336,6 @@ export function parsePageToHost(data: unknown): PageToHost | null {
         : null;
     case "editing":
       return typeof data.editing === "boolean" ? { channel: HOST_CHANNEL, kind: "editing", editing: data.editing } : null;
-    case "gateBand":
-      return typeof data.pixels === "number" && Number.isFinite(data.pixels) && data.pixels >= 0
-        ? { channel: HOST_CHANNEL, kind: "gateBand", pixels: data.pixels }
-        : null;
     case "bubbleOverlay":
       return typeof data.open === "boolean" ? { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: data.open } : null;
     case "restyleTurn":

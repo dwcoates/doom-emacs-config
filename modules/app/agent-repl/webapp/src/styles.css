@@ -7746,7 +7746,8 @@ bubble-body.bubble-body { display: block; }
    (owner request, 2026-10-28). Its controls are the card's own, and so
    is its frame: a border AROUND the gate in the token figure's heat, not a
    rule between it and the rest of the page (owner, 2026-10-06). */
-#gate-dock > .cold-gate.cold-gate-docked {
+#gate-dock > .cold-gate.cold-gate-docked,
+#webhost-gate > .cold-gate.cold-gate-docked {
   background: var(--bg);
   box-sizing: border-box;
   border-radius: 0;
@@ -7766,11 +7767,18 @@ bubble-body.bubble-body { display: block; }
 }
 /* The button row centers within the actions too, so opening the wider
    compact submenu below it does not shift it off the card's middle. */
-#gate-dock > .cold-gate-docked .cold-gate-buttons { margin-inline: auto; }
+#gate-dock > .cold-gate-docked .cold-gate-buttons,
+#webhost-gate > .cold-gate-docked .cold-gate-buttons { margin-inline: auto; }
 /* The submenu's radio lists stay a left-aligned list: centered, the radios
    would not line up under one another. */
-#gate-dock > .cold-gate-docked .cold-gate-submenu { text-align: start; }
+#gate-dock > .cold-gate-docked .cold-gate-submenu,
+#webhost-gate > .cold-gate-docked .cold-gate-submenu { text-align: start; }
 #feed > .gate-docked-row { display: none; }
+/* IN THE WEBHOST THE GATE IS THE WEBHOST'S (src/host/gate.ts, owner request
+   2026-10-29): it is drawn while the page may still be loading, so the page
+   draws no standing gate, and keeps no slot for one; a resolved gate is the
+   feed's row as ever. */
+html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="standing"]) { display: none; }
 /* ---- tool card input forms (src/feed/cards/tool-call.ts) ---- */
 /* The daemon names the drawn form of the card's one input line and the client
    applies the treatment that shape of line has always worn: the shell command

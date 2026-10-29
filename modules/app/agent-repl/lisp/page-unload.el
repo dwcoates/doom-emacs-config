@@ -67,7 +67,7 @@
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key value))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
-(declare-function agent-repl-webhost-remove "webhost" (ws))
+(declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
@@ -282,7 +282,7 @@ the report was in flight."
    (lambda () (agent-repl-page-unload--holdable-p ws))
    (lambda ()
      ;; THE PAGE GOES, THE SLOT STAYS: its windows are the panels.
-     (agent-repl-webhost-remove ws)
+     (agent-repl-webhost-remove ws 'unloading)
      (agent-repl--ws-put ws :page-visit nil)
      (agent-repl-page-unload--report ws)
      (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s held-s=%d"

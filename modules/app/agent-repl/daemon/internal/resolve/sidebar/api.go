@@ -89,6 +89,11 @@ type Resolver interface {
 	// orchestrator is the one caller, on every change of the queue's rows and
 	// of its pause.
 	SetMergeQueue(repo wsm.RepoKey, queue MergeQueue)
+	// SetColdGate installs WS's shown cold gate as the webhost's dock draws
+	// it (WorkspaceRoster.cold_gates): its feed row id and standing card, or
+	// nil for both when none is shown. The fleet is the one caller, on every
+	// edge of the gate.
+	SetColdGate(ws ids.WorkspaceID, row *frontendv1.FeedId, gate *frontendv1.FeedColdGate)
 	// SetSelected records the user's selection, which also clears that
 	// workspace's attention marker.
 	SetSelected(ws ids.WorkspaceID)

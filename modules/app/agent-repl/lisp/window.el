@@ -655,11 +655,11 @@ the height a mount would give it, its line count on the frame
       (* (agent-repl-window--input-height nil ws) (frame-char-height)))))
 
 (defun agent-repl-window-tell-gate-dock (ws)
-  "Tell WS's page the slot its docked gate takes: the input window's height.
-Sent before the input window hides, so the banner fills exactly the slot
-the input had.  The page paints the banner in the feed's own ground
-\(owner request, 2026-10-28), so no color is told.  The host keeps the
-slot for the page's reloads (webhost.el)."
+  "Tell the host the slot WS's gate takes: the input window's height.
+Sent before the input window hides, so the gate fills exactly the slot
+the input had.  The host draws the gate (webapp/src/host/gate.ts) in the
+feed's own ground (owner request, 2026-10-28), so no color is told, and
+keeps the slot for its reloads, whether or not WS's page is loaded."
   (let ((pixels (agent-repl-window--gate-dock-pixels ws)))
     (if (agent-repl-webhost-set-gate-dock ws pixels)
         (agent-repl--info ws "elisp.gate.dock-slot ws=%s pixels=%d" ws pixels)

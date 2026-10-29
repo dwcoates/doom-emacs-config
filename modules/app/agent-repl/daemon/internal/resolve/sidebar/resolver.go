@@ -292,6 +292,7 @@ func (r *resolver) render(log dlog.Logger, cause string) *frontendv1.WorkspaceRo
 		Closed:         r.closedRows(closed, rc, log),
 		AppSwitcher:    r.appSwitcher(),
 		Threads:        r.threadSection(threads),
+		ColdGates:      r.coldGates(),
 	}
 	if cur := r.currentWorkspace(); cur != nil {
 		out.Current = cur
@@ -442,6 +443,39 @@ func (r *resolver) SetMergeQueue(repo wsm.RepoKey, queue MergeQueue) {
 			}
 			r.state.queues[repo] = q
 		})
+}
+
+// SetColdGate installs, or with nil lifts, WS's shown cold gate.
+func (r *resolver) SetColdGate(ws ids.WorkspaceID, row *frontendv1.FeedId, gate *frontendv1.FeedColdGate) {
+	if (row == nil) != (gate == nil) {
+		panic(fmt.Sprintf("sidebar: SetColdGate(%s) was handed a row id without a card, or a card without one", ws))
+	}
+	r.mutateWorkspace(ws, "daemon.sidebar.set_cold_gate", "the roster took the workspace's shown cold gate",
+		dlog.Context{"standing": gate != nil}, func(*wsState) {
+			if gate == nil {
+				delete(r.state.gates, ws)
+				return
+			}
+			r.state.gates[ws] = coldGate{row: row, gate: gate}
+		})
+}
+
+// coldGates resolves the shown cold gates of the workspaces listed open, in
+// the registry's order: a closed or hidden workspace's gate has no page to be
+// shown over.
+func (r *resolver) coldGates() []*frontendv1.RosterColdGate {
+	var out []*frontendv1.RosterColdGate
+	for _, ws := range r.state.reg.Workspaces {
+		if ws.Closed || ws.Hidden || ws.IsThread() {
+			continue
+		}
+		g, ok := r.state.gates[ws.ID]
+		if !ok {
+			continue
+		}
+		out = append(out, &frontendv1.RosterColdGate{Workspace: ws.Ref(), Row: g.row, Gate: g.gate})
+	}
+	return out
 }
 
 // SetRepoDivergence installs a repository's latest ahead/behind measure.

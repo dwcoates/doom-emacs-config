@@ -45,6 +45,9 @@
 (defvar agent-repl-test-pu--opening nil
   "Workspaces whose tab's open the harness answers in flight.")
 
+(defvar agent-repl-test-pu--removals nil
+  "Each page removal the pass made, newest first: (WS . UNLOADING).")
+
 (defvar agent-repl-test-pu--successor nil
   "The handover successor the harness's link answers, nil outside a handover.")
 
@@ -81,6 +84,7 @@
            (agent-repl-test-pu--opening nil)
            (agent-repl-test-pu--residencies nil)
            (agent-repl-test-pu--successor nil)
+           (agent-repl-test-pu--removals nil)
            (agent-repl-test-pu--residency-lands t)
            (agent-repl-test-pu--logged nil)
            (agent-repl-test-pu--report 'reported)
@@ -123,8 +127,9 @@
                        ((symbol-function 'agent-repl-webhost-has-page-p)
                         (lambda (ws) (and (member ws agent-repl-test-pu--pages) t)))
                        ((symbol-function 'agent-repl-webhost-remove)
-                        (lambda (ws)
+                        (lambda (ws &optional unloading)
                           (push (list 'drop ws) agent-repl-test-pu--events)
+                          (push (cons ws unloading) agent-repl-test-pu--removals)
                           (push ws agent-repl-test-pu--dropped)
                           (setq agent-repl-test-pu--pages (delete ws agent-repl-test-pu--pages))))
                        ((symbol-function 'agent-repl-webhost-ensure-page)
@@ -616,6 +621,16 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
     (agent-repl-page-unload-pass)
     ;; Assert
     (should-not agent-repl-test-pu--dropped)))
+
+(ert-deftest agent-repl-test-pu-an-unload-keeps-the-gate-slot ()
+  "An unload removes the page as unloading, so the host keeps the gate's slot."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :inactive)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal agent-repl-test-pu--removals '(("alpha" . unloading))))))
 
 (ert-deftest agent-repl-test-pu-nothing-is-unloaded-during-a-handover ()
   "While a handover's successor is attached, no page is unloaded: the successor awaits it."

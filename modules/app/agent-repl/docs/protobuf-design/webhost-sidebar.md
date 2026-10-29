@@ -47,7 +47,9 @@ view Emacs shows that holds every workspace page as an iframe.
   (webapp/src/host/sidebar.ts); a page in the webhost mounts no sidebar. The
   page/webhost messages (webapp/src/host/protocol.ts, not a proto) gained
   `sidebarDock` and `webhostFailures` (webhost to page) and `gateBand` (page to
-  webhost).
+  webhost). `gateBand`, and the `gateDock` slot the webhost relayed to the
+  page, were retired on 2026-10-29, when the webhost took over drawing the
+  cold gate itself (memory-popups-and-shimless-settings.md).
 - CONSEQUENCES:
   - The webapp's context splits: `DaemonContext` (no workspace) under
     `AppContext`; the sidebar takes a `DaemonContext` and a parent-workspace

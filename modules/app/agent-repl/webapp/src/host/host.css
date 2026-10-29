@@ -25,24 +25,50 @@ html.agent-repl-host body::after {
   content: none;
 }
 
-/* The stack of workspace pages fills the window; the sidebar floats over it. */
+/* The stack of workspace pages fills the window above the gate's band; the
+   sidebar floats over it. */
 .webhost-frames {
   position: absolute;
   inset: 0;
+  bottom: var(--webhost-gate-band, 0px);
 }
 
 /* THE ONE SIDEBAR (host/sidebar.ts), drawn over the sidebar column every page
    keeps empty for it, so it sits exactly where a page's own sidebar would: the
    page's stylesheet gives it its width, inset, rounding and shadow, and this
-   places it over the window instead of in a grid cell. It ends above the gate
-   band of the page on screen, as a page's own sidebar ends above its band. */
+   places it over the window instead of in a grid cell. It ends above the gate's
+   band, as a page's own sidebar ended above its docked gate. */
 html.agent-repl-host #ws-sidebar {
   position: fixed;
   top: 0;
   left: 0;
-  bottom: var(--webhost-sidebar-bottom, 0px);
+  bottom: var(--webhost-gate-band, 0px);
   z-index: 1;
 }
+
+/* THE SHOWN WORKSPACE'S COLD GATE (host/gate.ts), a full-width band at the
+   window's bottom, in the slot the hidden input window gave up: at least the
+   composer's height Emacs told (--gate-dock-height; 18.4vh,
+   `agent-repl-input-height-fraction`, only for a slot never told), growing to
+   fit a selection such as the compact submenu and shrinking back, never
+   scrolling (owner, 2026-10-29). The pages and the sidebar end above it, so
+   it covers nothing. One pixel of lift keeps the card's bottom border on
+   screen (owner, 2026-10-06). */
+html.agent-repl-host #webhost-gate {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  min-height: var(--gate-dock-height, 18.4vh);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding-bottom: 1px;
+  overflow: visible;
+  background: var(--bg);
+}
+html.agent-repl-host #webhost-gate[hidden] { display: none; }
 
 .workspace-frame {
   position: absolute;

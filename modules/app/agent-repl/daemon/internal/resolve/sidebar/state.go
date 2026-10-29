@@ -429,9 +429,18 @@ type rosterState struct {
 	// (SetMergeQueue). Each repository's queue is replaced WHOLE, so a merge
 	// that left the queue, or a pause that was lifted, can never linger.
 	queues map[wsm.RepoKey]mergeQueue
+	// gates are the shown cold gates by workspace (SetColdGate), each
+	// carried to the webhost's dock while its workspace is listed open.
+	gates map[ids.WorkspaceID]coldGate
 	// version is the agent-repl release the rail's header states
 	// (DeployedVersion), nil while none is resolved.
 	version *semver.Version
+}
+
+// coldGate is one workspace's shown cold gate: its feed row id and card.
+type coldGate struct {
+	row  *frontendv1.FeedId
+	gate *frontendv1.FeedColdGate
 }
 
 // mergeQueue is one repository's merge queue, indexed for the row lookups.
@@ -471,6 +480,7 @@ func newRosterState() *rosterState {
 	return &rosterState{
 		workspaces: map[ids.WorkspaceID]*wsState{},
 		divergence: map[ids.RepoID]repodivergence.Measure{},
+		gates:      map[ids.WorkspaceID]coldGate{},
 		queues:     map[wsm.RepoKey]mergeQueue{},
 	}
 }

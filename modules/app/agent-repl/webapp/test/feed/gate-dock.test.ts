@@ -6,6 +6,8 @@ import {
   DOCKED_CARD_CLASS,
   DOCKED_ROW_CLASS,
   installGateDock,
+  installPageGate,
+  WEBHOST_GATE_CLASS,
   type GateDock,
 } from "../../src/feed/gate-dock.js";
 import { shellElements } from "../../src/shell.js";
@@ -44,6 +46,7 @@ afterEach(() => {
   installed?.dispose();
   installed = null;
   document.documentElement.style.removeProperty(DOCK_HEIGHT_PROPERTY);
+  document.documentElement.classList.remove(WEBHOST_GATE_CLASS);
 });
 
 /** The feed as feed-view.ts builds it: every row inside one body. */
@@ -298,7 +301,8 @@ describe("installGateDock", () => {
 
 describe("the gate's background (owner request, 2026-10-28)", () => {
   it.each([
-    ["the docked card", /#gate-dock > \.cold-gate\.cold-gate-docked\s*\{[^}]*\}/],
+    ["the docked card", /#gate-dock > \.cold-gate\.cold-gate-docked[^{]*\{[^}]*\}/],
+    ["the webhost's card", /#webhost-gate > \.cold-gate\.cold-gate-docked[^{]*\{[^}]*\}/],
     ["the undocked card", /\n\.cold-gate\s*\{[^}]*\}/],
   ])("paints %s the feed's own ground, never a told color or the revival yellow", (_name, selector) => {
     // Arrange
@@ -308,10 +312,13 @@ describe("the gate's background (owner request, 2026-10-28)", () => {
     expect([rule.includes("background: var(--bg);"), rule.includes("--input-bg"), rule.includes("revival-gate-bg")]).toEqual([true, false, false]);
   });
 
-  it("frames the docked gate on every side, not only above it", () => {
+  it.each([
+    ["the page's dock", /#gate-dock > \.cold-gate\.cold-gate-docked[^{]*\{[^}]*\}/],
+    ["the webhost's gate", /#webhost-gate > \.cold-gate\.cold-gate-docked[^{]*\{[^}]*\}/],
+  ])("frames the docked gate on every side, not only above it, in %s", (_name, selector) => {
     // Arrange
     // Act
-    const rule = /#gate-dock > \.cold-gate\.cold-gate-docked\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+    const rule = selector.exec(css)?.[0] ?? "";
     // Assert
     expect([rule.includes("border-width: 1px;"), rule.includes("border-width: 1px 0 0")]).toEqual([true, false]);
   });
@@ -330,3 +337,43 @@ describe("the gate's background (owner request, 2026-10-28)", () => {
   });
 });
 
+describe("installPageGate", () => {
+  it("in the webhost, marks the page as one whose gate the webhost draws", () => {
+    // Arrange
+    const { feed, dock } = page();
+
+    // Act
+    installed = installPageGate(document, true, feed, dock);
+
+    // Assert
+    expect([installed, document.documentElement.classList.contains(WEBHOST_GATE_CLASS)]).toEqual([null, true]);
+  });
+
+  it("in the webhost, docks no standing gate in the page", async () => {
+    // Arrange
+    const { feed, dock } = page();
+    installed = installPageGate(document, true, feed, dock);
+    const { row, card } = gateRow("standing");
+
+    // Act
+    feed.append(row);
+    await settle();
+
+    // Assert
+    expect([card.parentElement, dock.hidden]).toEqual([row, true]);
+  });
+
+  it("on its own, docks the page's standing gate", async () => {
+    // Arrange
+    const { feed, dock } = page();
+    installed = installPageGate(document, false, feed, dock);
+    const { row, card } = gateRow("standing");
+
+    // Act
+    feed.append(row);
+    await settle();
+
+    // Assert
+    expect([card.parentElement, document.documentElement.classList.contains(WEBHOST_GATE_CLASS)]).toEqual([dock, false]);
+  });
+});

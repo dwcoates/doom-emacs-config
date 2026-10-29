@@ -5,11 +5,16 @@
  * The sidebar is drawn once, by the webhost, over every workspace page
  * (src/host/sidebar.ts). The page keeps its sidebar column, empty and
  * invisible (`html.webhost-sidebar`), and the webhost places its sidebar over
- * that column, ending above the gate band of the page on screen
- * (`--webhost-sidebar-bottom`). Nothing about the look may change, so this
- * lays out all three in real headless WebKit over the real stylesheets and
- * compares the boxes: the webhost's sidebar against a page's own, and a
- * docked page's main column against a page drawing its own sidebar.
+ * that column, ending above the webhost's own gate band (`#webhost-gate`,
+ * src/host/gate.ts, measured into `--webhost-gate-band`). Nothing about the
+ * look may change, so this lays out all three in real headless WebKit over the
+ * real stylesheets and compares the boxes: the webhost's sidebar against a
+ * page's own, and a docked page's main column against a page drawing its own
+ * sidebar.
+ *
+ * THE GATE IS THE COMPOSER'S EXACT HEIGHT (owner, 2026-10-29): the webhost's
+ * gate lays out exactly the slot Emacs told, grows to fit a taller selection
+ * without scrolling, and the pages and the sidebar end exactly at its top.
  */
 import path from "node:path";
 import { readFile } from "node:fs/promises";
@@ -18,7 +23,7 @@ import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DOCK_HEIGHT_PROPERTY } from "../../src/feed/gate-dock.js";
 import { WEBHOST_SIDEBAR_CLASS } from "../../src/host/embed.js";
-import { SIDEBAR_BOTTOM_PROPERTY } from "../../src/host/host.js";
+import { GATE_BAND_PROPERTY } from "../../src/host/gate.js";
 import { HOST_ROOT_CLASS } from "../../src/host/main.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -60,6 +65,8 @@ describe("the webhost's sidebar in WebKit", () => {
   const covered = new Map<boolean, { own: Box; webhost: Box }>();
   let column: { own: Box; docked: Box };
   let reservedVisibility: string;
+  /** The webhost's gate, the pages above it and the sidebar, with content SHORT or TALL. */
+  const gated = new Map<"short" | "tall", { gate: Box; scrolls: boolean; frames: Box; sidebar: Box }>();
 
   beforeAll(async () => {
     const styles = await readFile(path.join(here, "../../src/styles.css"), "utf8");
@@ -76,7 +83,7 @@ describe("the webhost's sidebar in WebKit", () => {
         css,
         `<div class="webhost-frames"></div><nav id="ws-sidebar">rows</nav>`,
         HOST_ROOT_CLASS,
-        `${SIDEBAR_BOTTOM_PROPERTY}: ${gate ? BAND : 0}px`,
+        `${GATE_BAND_PROPERTY}: ${gate ? BAND : 0}px`,
         "#ws-sidebar",
       );
       covered.set(gate, { own, webhost });
@@ -92,6 +99,37 @@ describe("the webhost's sidebar in WebKit", () => {
     );
     await page.addStyleTag({ content: css });
     reservedVisibility = await page.evaluate(() => getComputedStyle(document.getElementById("ws-sidebar")!).visibility);
+
+    // THE WEBHOST'S GATE, laid out over the real stylesheets with content
+    // shorter and taller than the told slot; the band is set as gate.ts sets
+    // it, from the gate's own measured height.
+    for (const [kind, contentHeight] of [["short", 40], ["tall", BAND + 120]] as const) {
+      await page.setContent(
+        `<!doctype html><html class="${HOST_ROOT_CLASS}"><head></head><body>
+          <div class="webhost-frames"></div><nav id="ws-sidebar">rows</nav>
+          <div id="webhost-gate" style="${DOCK_HEIGHT_PROPERTY}: ${BAND}px">
+            <div class="cold-gate cold-gate-docked" data-state="standing"><div style="height: ${contentHeight}px"></div></div>
+          </div></body></html>`,
+      );
+      await page.addStyleTag({ content: css });
+      gated.set(
+        kind,
+        await page.evaluate((property) => {
+          const box = (el: Element) => {
+            const r = el.getBoundingClientRect();
+            return { left: r.left, top: r.top, width: r.width, height: r.height };
+          };
+          const gate = document.getElementById("webhost-gate")!;
+          document.documentElement.style.setProperty(property, `${gate.getBoundingClientRect().height}px`);
+          return {
+            gate: box(gate),
+            scrolls: gate.scrollHeight > gate.clientHeight || gate.scrollWidth > gate.clientWidth,
+            frames: box(document.querySelector(".webhost-frames")!),
+            sidebar: box(document.getElementById("ws-sidebar")!),
+          };
+        }, GATE_BAND_PROPERTY),
+      );
+    }
   });
 
   afterAll(async () => {
@@ -115,5 +153,30 @@ describe("the webhost's sidebar in WebKit", () => {
 
   it("draws nothing in a docked page's reserved column", () => {
     expect(reservedVisibility).toBe("hidden");
+  });
+
+  it("lays the webhost's gate out exactly the composer's told height", () => {
+    expect(gated.get("short")!.gate.height).toBeCloseTo(BAND, 1);
+  });
+
+  it("grows the webhost's gate to fit a taller selection", () => {
+    expect(gated.get("tall")!.gate.height).toBeGreaterThan(BAND + 100);
+  });
+
+  it.each(["short", "tall"] as const)("never scrolls the webhost's gate, with %s content", (kind) => {
+    expect(gated.get(kind)!.scrolls).toBe(false);
+  });
+
+  it.each(["short", "tall"] as const)("ends the pages exactly at the gate's top, with %s content", (kind) => {
+    const { gate, frames } = gated.get(kind)!;
+    expect(frames.top + frames.height).toBeCloseTo(gate.top, 1);
+  });
+
+  it.each(["short", "tall"] as const)("ends the sidebar its own inset above the gate's top, with %s content", (kind) => {
+    // The inset a sidebar keeps from the bottom with no gate standing.
+    const free = covered.get(false)!.webhost;
+    const inset = 800 - (free.top + free.height);
+    const { gate, sidebar } = gated.get(kind)!;
+    expect(sidebar.top + sidebar.height).toBeCloseTo(gate.top - inset, 1);
   });
 });

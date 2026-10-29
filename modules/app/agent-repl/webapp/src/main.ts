@@ -32,7 +32,7 @@
  * it did not, which is the documented exception to "no direct console".
  */
 import { pageRestyleTurns } from "./host/restyle-turn.js";
-import { installGateDock } from "./feed/gate-dock.js";
+import { installPageGate } from "./feed/gate-dock.js";
 import { installAskTray } from "./feed/ask-tray.js";
 import "./styles.css";
 // The chat's serif (styles.css, `.chat-col`), bundled so every machine draws
@@ -376,8 +376,10 @@ export async function boot(): Promise<void> {
     }
 
     // A STANDING GATE DOCKS AT THE BOTTOM EDGE while Emacs hides the input
-    // window over it; both read the daemon's one cold-gate standing.
-    installGateDock(shell.feed, shell.gateDock);
+    // window over it; both read the daemon's one cold-gate standing. IN THE
+    // WEBHOST the gate is the webhost's (host/gate.ts), drawn while this page
+    // may still be loading, so the page draws no standing gate at all.
+    installPageGate(document, pagePresence().embedded, shell.feed, shell.gateDock);
     // AN OPEN QUESTION OR PERMISSION IS DRAWN BELOW THE HELD PROMPTS, the
     // scroll zone's last region.
     installAskTray(shell.feed, shell.askTray);

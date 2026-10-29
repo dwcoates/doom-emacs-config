@@ -20,7 +20,8 @@ import {
   type SidebarDeps,
   type WebhostSidebarDeps,
 } from "../../src/sidebar/sidebar.js";
-import { RosterVersionSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { RosterColdGateSchema, RosterVersionSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createRailSearch } from "../../src/sidebar/search.js";
 import { createAppSwitcher } from "../../src/sidebar/threads.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
@@ -1085,6 +1086,29 @@ function twoRows(current: string): WorkspaceRoster {
     ],
   });
 }
+
+describe("the webhost's cold gates", () => {
+  it("hands every drawn roster's cold gates on", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const handed: string[][] = [];
+    const gated = twoRows("ws-1");
+    gated.coldGates = [
+      create(RosterColdGateSchema, { workspace: create(WorkspaceRefSchema, { id: "ws-2", dir: "/w/ws-2" }) }),
+    ];
+
+    // Act
+    mountWebhostSidebar(host, ctxFor([gated]), {
+      storage: null,
+      timers: fakeTimers(),
+      coldGates: (gates) => void handed.push(gates.map((g) => g.workspace?.id ?? "")),
+    });
+    await settle();
+
+    // Assert
+    expect(handed).toEqual([["ws-2"]]);
+  });
+});
 
 describe("the webhost's page on screen leads the roster", () => {
   it("moves the highlight to the shown page's row at once", async () => {

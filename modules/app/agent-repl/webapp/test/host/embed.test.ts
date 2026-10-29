@@ -6,9 +6,7 @@ import { levelApplyShapeOf } from "./level-apply-shape.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
-import { DOCK_HEIGHT_PROPERTY } from "../../src/feed/gate-dock.js";
 import { FOCUS_LEFT_EMACS, WEBHOST_SIDEBAR_CLASS, connectToHost, type HostLink } from "../../src/host/embed.js";
-import { fireResize } from "../resize-observer.js";
 import { HOST_CHANNEL, type PageToHost } from "../../src/host/protocol.js";
 import { createPresence, type PresenceSource } from "../../src/presence.js";
 import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
@@ -211,14 +209,6 @@ describe("presence", () => {
 
 
 describe("commands", () => {
-  it("sizes the docked gate's slot", () => {
-    // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "gateDock", pixels: 132 });
-
-    // Assert
-    expect(pageDoc.documentElement.style.getPropertyValue(DOCK_HEIGHT_PROPERTY)).toBe("132px");
-  });
-
   it("closes a standing news digest", () => {
     // Arrange
     const digest = pageDoc.createElement("div");
@@ -500,62 +490,6 @@ describe("the editor's held-prompt ingress", () => {
     // Assert
     expect(editorIngress.entries().map((e) => e.key)).toEqual(["k-1"]);
     expect(await operations()).toContain("page.held-ingress-undecodable");
-  });
-});
-
-describe("the gate band", () => {
-  /** A page whose shell carries a gate dock BAND pixels tall, joined to its host afresh. */
-  function joinWithDock(band: number): HTMLElement {
-    link?.dispose();
-    const dock = pageDoc.createElement("div");
-    dock.id = "gate-dock";
-    dock.getBoundingClientRect = () => ({ height: band }) as DOMRect;
-    pageDoc.body.append(dock);
-    received = [];
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns });
-    return dock;
-  }
-
-  it("reports how tall the band is when it joins", async () => {
-    // Act
-    joinWithDock(120.4);
-
-    // Assert
-    await delivered();
-    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "gateBand", pixels: 120 });
-  });
-
-  it("reports the band again when its height changes", async () => {
-    // Arrange
-    const dock = joinWithDock(0);
-    dock.getBoundingClientRect = () => ({ height: 90 }) as DOMRect;
-    received = [];
-
-    // Act
-    fireResize(dock);
-
-    // Assert
-    await delivered();
-    expect(received).toEqual([{ channel: HOST_CHANNEL, kind: "gateBand", pixels: 90 }]);
-  });
-
-  it("reports nothing when the band's height stays the same", async () => {
-    // Arrange
-    const dock = joinWithDock(90);
-    received = [];
-
-    // Act
-    fireResize(dock);
-
-    // Assert
-    await delivered();
-    expect(received).toEqual([]);
-  });
-
-  it("reports no band for a page with no gate dock", async () => {
-    // Assert
-    await delivered();
-    expect(received.some((m) => m.kind === "gateBand")).toBe(false);
   });
 });
 

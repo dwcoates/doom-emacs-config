@@ -23,6 +23,7 @@
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { createHost, hostHasFocus, type Host } from "./host.js";
 import { WEBHOST_SIDEBAR_ID, startWebhostSidebar } from "./sidebar.js";
+import { WEBHOST_GATE_ID } from "./gate.js";
 import { installColorValues } from "../vocab.js";
 import { createDaemonOrigin, type DaemonOrigin } from "../rpc/daemon-origin.js";
 import "./host.css";
@@ -53,7 +54,7 @@ export interface StartHostDeps {
     win: Window,
     host: Host,
     nav: HTMLElement,
-    deps: { level: LevelWindow; daemon: DaemonOrigin },
+    deps: { level: LevelWindow; daemon: DaemonOrigin; gate: HTMLElement },
   ) => unknown;
 }
 
@@ -73,7 +74,11 @@ export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}):
   nav.hidden = true;
   const frames = doc.createElement("div");
   frames.className = WEBHOST_FRAMES_CLASS;
-  doc.body.append(frames, nav);
+  // THE SHOWN WORKSPACE'S COLD GATE, drawn by the webhost (host/gate.ts).
+  const gate = doc.createElement("div");
+  gate.id = WEBHOST_GATE_ID;
+  gate.hidden = true;
+  doc.body.append(frames, nav, gate);
   // THE WEBHOST'S OWN LOG LEVEL, raised with every page's by a profiling
   // session (`Host.setLogLevel`); its logger is the sidebar's.
   const level = LevelWindow.fixed("info");
@@ -85,7 +90,7 @@ export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}):
   const pending = win.__agentReplHostPending ?? [];
   delete win.__agentReplHostPending;
   for (const call of pending) call(host);
-  (deps.startSidebar ?? startWebhostSidebar)(doc, win, host, nav, { level, daemon });
+  (deps.startSidebar ?? startWebhostSidebar)(doc, win, host, nav, { level, daemon, gate });
   const answerFocus = (): boolean => hostHasFocus(doc, host);
   win.xwHasFocus = answerFocus;
   // Emacs injects its own definition as a user script, which can run after

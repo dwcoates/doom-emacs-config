@@ -866,10 +866,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PersistedBook: func(dir string) (string, bool, error) { return shimidentity.Book(p.Layout.ShimDir(), dir) },
 		StartSlots:    startSlots,
 		PublishHost:   relay.PublishHostWorkspace,
-		DB:            p.DB,
-		Instance:      p.Instance,
-		Accounts:      accounts,
-		Supervisor:    supervisor,
+		// THE WEBHOST DRAWS THE SHOWN WORKSPACE'S GATE from the roster, so the
+		// gate is on screen while the workspace's page is still loading.
+		GateDock:   sidebarResolver.SetColdGate,
+		DB:         p.DB,
+		Instance:   p.Instance,
+		Accounts:   accounts,
+		Supervisor: supervisor,
 		Sinks: sessionwatcher.Sinks{
 			Feed:       feedResolver,
 			Footer:     footerResolver,
