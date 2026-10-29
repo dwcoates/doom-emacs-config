@@ -11,6 +11,8 @@ var work = Target{Owner: "ChessCom", Repo: "explanation-engine"}
 
 const pull12 = "[#12](https://github.com/ChessCom/explanation-engine/pull/12)"
 
+const gnsPull = "[gns-server#3617](https://github.com/ChessCom/gns-server/pull/3617)"
+
 func TestLinkify(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -39,6 +41,32 @@ func TestLinkify(t *testing.T) {
 		{name: "an arriving text leaves its last reference", in: "see #12", arriving: true, want: "see #12"},
 		{name: "an arriving text links an earlier reference", in: "#12 and #3", arriving: true, want: pull12 + " and #3"},
 		{name: "an arriving text links a reference before its last newline", in: "see #12\n", arriving: true, want: "see " + pull12 + "\n"},
+		{name: "a reference in link text with a parenthesis is left alone",
+			in:   "[Run Torch Human requests (#8045)](https://github.com/ChessCom/explanation-engine/pull/8045)",
+			want: "[Run Torch Human requests (#8045)](https://github.com/ChessCom/explanation-engine/pull/8045)"},
+		{name: "a spaced reference in link text is left alone", in: "[see #12 here](https://x.dev) #12", want: "[see #12 here](https://x.dev) " + pull12},
+		{name: "a repo reference in link text is left alone", in: "[gns-server#3617](https://x.dev)", want: "[gns-server#3617](https://x.dev)"},
+		{name: "a repo reference in a link destination is left alone", in: "[a](https://x.dev/gns-server#3617)", want: "[a](https://x.dev/gns-server#3617)"},
+		{name: "a link with a code span holding a bracket stays whole", in: "[a `]` #12](u) #12", want: "[a `]` #12](u) " + pull12},
+		{name: "nested brackets in link text stay whole", in: "[a [b] #12](u) #12", want: "[a [b] #12](u) " + pull12},
+		{name: "a bracket that opens no link leaves its reference linked", in: "[see #12]", want: "[see " + pull12 + "]"},
+		{name: "a destination still arriving stays whole", in: "[a](https://x.dev/#12", want: "[a](https://x.dev/#12"},
+		{name: "a reference after a link is linked", in: "[a](u) (#12)", want: "[a](u) (" + pull12 + ")"},
+		{name: "a repo reference is linked", in: "see gns-server#3617 now", want: "see " + gnsPull + " now"},
+		{name: "a repo reference opening the text is linked", in: "gns-server#3617", want: gnsPull},
+		{name: "a parenthesized repo reference is linked", in: "fixed (gns-server#3617).", want: "fixed (" + gnsPull + ")."},
+		{name: "a repo name with dots and underscores is linked", in: "my_repo.js#5", want: "[my_repo.js#5](https://github.com/ChessCom/my_repo.js/pull/5)"},
+		{name: "a repo reference in a code span is left alone", in: "`gns-server#3617` x", want: "`gns-server#3617` x"},
+		{name: "a repo reference in a fence is left alone", in: "```\ngns-server#3617\n```", want: "```\ngns-server#3617\n```"},
+		{name: "a repo reference glued to a url is left alone", in: "https://x.dev/gns-server#3617", want: "https://x.dev/gns-server#3617"},
+		{name: "an owner-qualified reference is left alone", in: "ChessCom/gns-server#3617", want: "ChessCom/gns-server#3617"},
+		{name: "a repo reference with a leading zero is left alone", in: "gns-server#012", want: "gns-server#012"},
+		{name: "a repo reference followed by a letter is left alone", in: "gns-server#12a", want: "gns-server#12a"},
+		{name: "a repo name without a number is left alone", in: "gns-server# and gns-server", want: "gns-server# and gns-server"},
+		{name: "a dot-only name is not a repository", in: "..#12", want: "..#12"},
+		{name: "an arriving text leaves its last repo reference", in: "gns-server#36", arriving: true, want: "gns-server#36"},
+		{name: "an arriving text links an earlier repo reference", in: "gns-server#3617 and a#3", arriving: true, want: gnsPull + " and a#3"},
+		{name: "a settled text links its last repo reference", in: "gns-server#3617", want: gnsPull},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,6 +78,20 @@ func TestLinkify(t *testing.T) {
 				t.Fatalf("Linkify(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLinkifyRepoReferenceUsesTheTargetsOwner(t *testing.T) {
+	// Arrange
+	target := Target{Owner: "someone", Repo: "doom"}
+
+	// Act
+	got := Linkify("see gns-server#7 and #8", target, false)
+
+	// Assert
+	want := "see [gns-server#7](https://github.com/someone/gns-server/pull/7) and [#8](https://github.com/someone/doom/pull/8)"
+	if got != want {
+		t.Fatalf("Linkify = %q, want %q", got, want)
 	}
 }
 

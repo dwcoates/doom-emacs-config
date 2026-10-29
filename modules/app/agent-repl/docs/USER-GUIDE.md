@@ -320,9 +320,14 @@ A `#<number>` in a prompt or response bubble is drawn as a link to that pull req
   - The repository is the name of the workspace's main checkout's directory.
   - The owner is that of the account the workspace's directory is routed to: `ChessCom` for the work account, and whatever `AGENT_REPL_GITHUB_OWNERS` names for any other (see Setup).
   - A workspace whose account has no owner draws `#<number>` as plain text.
-- **Only a `#<number>` standing as its own word is linked.**
+- **A `<repository>#<number>`, such as `gns-server#3617`, links to that repository's pull request under the same owner.**
+  - The link is `github.com/<owner>/<repository>/pull/<number>`, with the owner decided as above.
+  - The repository name may hold letters, digits, `-`, `_` and `.`, and must start its word.
+  - An `<owner>/<repository>#<number>` is not linked.
+- **Only a `#<number>` or `<repository>#<number>` standing as its own word is linked.**
   - One inside inline code or a code block is not.
-  - Neither is one glued to what comes before it, such as a web address's `#12` or a link already written.
+  - Neither is one inside a link's text or its address, so `[Fix (#12)](https://...)` stays one link.
+  - Nor is one glued to what comes before it, such as a web address's `#12`.
   - One followed by a letter, such as `#12a`, is not.
 - **The bubble's text is unchanged.**
   - Copying it, searching it or replying to it reads `#<number>` as written.
