@@ -584,6 +584,19 @@ type DB interface {
 	// ClearColdGate retires a workspace's recorded cold gate, answering
 	// whether one stood.
 	ClearColdGate(ctx context.Context, id WorkspaceID) (bool, error)
+	// WorkspaceSelections answers a workspace's last-known topbar controls,
+	// false when none was recorded (selections.go).
+	WorkspaceSelections(ctx context.Context, id WorkspaceID) (Selections, bool, error)
+	// PutWorkspaceModel records a workspace's last model in force.
+	PutWorkspaceModel(ctx context.Context, id WorkspaceID, model string) error
+	// PutWorkspacePermissionMode records a workspace's last permission mode.
+	PutWorkspacePermissionMode(ctx context.Context, id WorkspaceID, mode string) error
+	// PutWorkspaceEffort records the effort last picked on a workspace.
+	PutWorkspaceEffort(ctx context.Context, id WorkspaceID, level conversationv1.AgentEffortLevel) error
+	// AccountModelCatalog answers the catalog an account root last served.
+	AccountModelCatalog(ctx context.Context, configDir string) (*conversationv1.ModelCatalog, bool, error)
+	// PutAccountModelCatalog records the catalog an account root served.
+	PutAccountModelCatalog(ctx context.Context, configDir string, catalog *conversationv1.ModelCatalog) error
 	// WorkspaceBook answers the book a workspace's shim last stated
 	// (shim.v1.StartSessionResponse.book), false when none has been
 	// (workspacebook.go).
