@@ -74,6 +74,29 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 	d := q.lockDelivery(ws)
 	defer d.unlock()
 
+	// A PICK WITH NO SHIM STARTS ONE (owner request, 2026-10-29): the topbar
+	// draws its remembered controls while the shim is down, so a model or
+	// permission-mode pick is held, as a prompt would be, and the shim started
+	// for it; the session coming up delivers it. A standing cold gate refuses
+	// it by the gate's own name: the gate's answer comes first.
+	if _, shim := q.deps.Client(ws); !cut && !shim && q.deps.Revive != nil {
+		if q.deps.ColdGate != nil {
+			if detail, gated := q.deps.ColdGate(ws); gated {
+				refusalLevel(ctx, log, log.Info)(opAct, "the session is parked at its cold gate, so the pick is refused by the gate's own name",
+					dlog.Context{"detail": detail})
+				return &ColdGateRefusal{Detail: detail}
+			}
+		}
+		sub := heldActSubmission(ws, act)
+		if _, err := q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldReconnect}, log); err != nil {
+			return err
+		}
+		log.Info(opAct, "the workspace has no shim; the pick is held and the shim started for it",
+			dlog.Context{"held_turn": string(sub.Turn)})
+		q.reviveInBackground(context.WithoutCancel(ctx), ws, revivalSettings, log)
+		return nil
+	}
+
 	if _, shim := q.deps.Client(ws); cut && shim {
 		if kind, why, waiting := q.sessionWait(ws); waiting {
 			sub := heldActSubmission(ws, act)

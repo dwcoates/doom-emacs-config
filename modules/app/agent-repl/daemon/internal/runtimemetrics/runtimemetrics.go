@@ -11,6 +11,7 @@ package runtimemetrics
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/procmetrics"
@@ -39,6 +40,9 @@ type Surface struct {
 	merges    merges
 	cache     cacheTelemetry
 	shimLife  shimLifeTelemetry
+	// processes is the registered process collector, whose latest scrape the
+	// rail's memory popups read (Latest); nil until RegisterProcesses.
+	processes atomic.Pointer[procmetrics.Collector]
 	// emacs is the Emacs whose WatchDaemon stream stands, which the process
 	// collector measures.
 	emacs *procmetrics.EmacsProcess
@@ -142,5 +146,20 @@ func (s *Surface) RegisterProcesses(reader procmetrics.Reader, sockDir, diskPath
 	if err := s.srv.Registry().Register(c); err != nil {
 		return fmt.Errorf("runtimemetrics: register the process collector: %w", err)
 	}
+	s.processes.Store(c)
 	return nil
+}
+
+// Latest answers the process collector's latest scrape, false while none has
+// run: before the metrics store's first scrape, with no collector registered,
+// and on the off surface, which measures nothing.
+func (s *Surface) Latest() (procmetrics.Snapshot, bool) {
+	if s == nil {
+		return procmetrics.Snapshot{}, false
+	}
+	c := s.processes.Load()
+	if c == nil {
+		return procmetrics.Snapshot{}, false
+	}
+	return c.Latest()
 }

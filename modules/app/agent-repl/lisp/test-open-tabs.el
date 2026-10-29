@@ -26,6 +26,8 @@
 (defvar agent-repl-test-open-tabs--lines nil "The lines said, in order.")
 (defvar agent-repl-test-open-tabs--paged nil "Workspaces that have a live page.")
 (defvar agent-repl-test-open-tabs--no-page nil "Workspaces this Emacs makes no page for.")
+(defvar agent-repl-test-open-tabs--slot-only nil
+  "Workspaces whose slot is made with no page: not wanted (page-unload.el).")
 (defvar agent-repl-test-open-tabs--dropped nil "Workspaces whose page was dropped.")
 (defvar agent-repl-test-open-tabs--switches nil "Every switch asked, as (WS . TRIGGER).")
 (defvar agent-repl-test-open-tabs--undrawn nil "Workspaces the bar never draws.")
@@ -66,6 +68,7 @@ A ref id names the workspace of the same name."
            (agent-repl-test-open-tabs--lines nil)
            (agent-repl-test-open-tabs--paged nil)
            (agent-repl-test-open-tabs--no-page nil)
+           (agent-repl-test-open-tabs--slot-only nil)
            (agent-repl-test-open-tabs--dropped nil)
            (agent-repl-test-open-tabs--report 'reported)
            (agent-repl-test-open-tabs--pending nil)
@@ -93,6 +96,9 @@ A ref id names the workspace of the same name."
                            (and (member ws agent-repl-test-open-tabs--paged)
                                 agent-repl-test-open-tabs--buffer)))))
                      ((symbol-function 'agent-repl--ensure-input-buffer) #'ignore)
+                     ((symbol-function 'agent-repl-webhost-has-page-p)
+                      (lambda (ws) (and (member ws agent-repl-test-open-tabs--paged)
+                                        (not (member ws agent-repl-test-open-tabs--slot-only)))))
                      ((symbol-function 'agent-repl--frontend-precreate-webview)
                       (lambda (ws)
                         (unless (member ws agent-repl-test-open-tabs--no-page)
@@ -290,6 +296,17 @@ collapsed section: both are `:collapsed', only the first `:hidden'."
     (should (equal (list agent-repl-test-open-tabs--paged
                          (agent-repl-test-open-tabs--page-arm "a"))
                    '(("a") :loading)))))
+
+(ert-deftest agent-repl-test-open-tabs-asks-a-slot-made-with-no-page-none ()
+  "A row whose slot is made with no page, its page not wanted, is asked `none'."
+  (agent-repl-test-open-tabs--with
+    (setq agent-repl-test-open-tabs--slot-only '("a"))
+    ;; Act
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Assert
+    (should (equal (list agent-repl-test-open-tabs--paged
+                         (agent-repl-test-open-tabs--page-arm "a"))
+                   '(("a") :none)))))
 
 (ert-deftest agent-repl-test-open-tabs-makes-a-visible-rows-input-buffer-as-it-asks ()
   "A visible row's input buffer is made when it is asked for."

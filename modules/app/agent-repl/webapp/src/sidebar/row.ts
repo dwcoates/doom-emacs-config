@@ -25,6 +25,7 @@
  * daemon chose), and `no_turn_running` reads "0s" and never ticks (owner
  * request, 2026-10-13).
  */
+import { addRowMemory, showRowMemory } from "./memory.js";
 import { createControl } from "../control.js";
 import { renameOnDoubleClick } from "./rename.js";
 import type {
@@ -356,6 +357,9 @@ export function drawRosterRow(
   }
 
   const detail = drawRosterRowDetail(requireMessage(u.detail, `${path}.detail`), `${path}.detail`);
+  // AN OPEN ROW'S PANEL STATES ITS WORKSPACE'S MEMORY (memory.ts), fetched
+  // while the panel is open; the bands' rows name none.
+  if (place === "grouping") addRowMemory(sc, ws, detail, workspace);
   ws.appendChild(detail);
   // The hover wiring listens on the panel too, so the pointer can travel from
   // the row into it without it closing.
@@ -900,6 +904,7 @@ function installHoverPanel(
  */
 export function paintRowDetail(ws: HTMLElement, open: boolean): void {
   ws.classList.toggle("open", open);
+  showRowMemory(ws, open);
   if (open) placeRowDetail(ws);
 }
 

@@ -130,6 +130,13 @@ func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.Works
 	}
 	if !reselected {
 		v.deps.Host.ReturnFeedToTail(ws)
+		// THE SWITCH ENDS EVERY SETTINGS VISIT IT LEAVES: the shim a pick
+		// started is stood down unless a turn has run since (settingsvisits.go).
+		for visited, since := range v.deps.SettingsVisits.LeftFor(ws) {
+			log.Info(opSelect, "the switch left a workspace whose shim a settings pick started; it is asked to stand down",
+				dlog.Context{"visited": string(visited), "since": since.UTC()})
+			v.deps.Drain.VisitDown(visited, since)
+		}
 		// THE SELECTION IS A VISIBILITY EDGE (wsm.Workspace.Runs): the
 		// workspace the user looks at runs even hidden, and the one they left
 		// is withheld again if it is. The row is written above, before either

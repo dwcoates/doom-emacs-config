@@ -267,8 +267,8 @@ func TestEffortLevelsReportsFalseForAModelThatTakesNoLevel(t *testing.T) {
 	}
 }
 
-func TestEffortLevelsReportsFalseWithNoSession(t *testing.T) {
-	// Arrange.
+func TestEffortLevelsAnswersWhileParked(t *testing.T) {
+	// Arrange: the controls outlive the shim (owner request, 2026-10-29).
 	h := newHarness(t)
 	h.ready(t)
 	h.r.SetModelCatalog(testWS, []*conversationv1.ModelOption{effortCatalogOption("claude-opus-5", effortLow)})
@@ -278,8 +278,24 @@ func TestEffortLevelsReportsFalseWithNoSession(t *testing.T) {
 	_, ok := h.r.EffortLevels(testWS)
 
 	// Assert.
+	if !ok {
+		t.Errorf("EffortLevels ok = false, want the remembered levels while parked")
+	}
+}
+
+func TestEffortLevelsReportsFalseAtAColdGate(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetModelCatalog(testWS, []*conversationv1.ModelOption{effortCatalogOption("claude-opus-5", effortLow)})
+
+	// Act.
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 100_000})
+	_, ok := h.r.EffortLevels(testWS)
+
+	// Assert.
 	if ok {
-		t.Errorf("EffortLevels ok = true, want false while parked")
+		t.Errorf("EffortLevels ok = true, want false at a standing cold gate")
 	}
 }
 

@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -54,7 +55,23 @@ func (v *verbs) SetEffort(ctx context.Context, ws ids.WorkspaceID, level convers
 		return refuse(log, "SetEffort", ArmEffortNotSupported,
 			fmt.Sprintf("the selector served %v and never offered %v", served, level), false)
 	}
-	if err := v.deps.Sessions.SetEffort(ctx, log, ws, level); err != nil {
+	err = v.deps.Sessions.SetEffort(ctx, log, ws, level)
+	var refusal *ShimRefusal
+	if errors.As(err, &refusal) && refusal.Arm == ArmShimNoSession {
+		// A PICK WITH NO SHIM STARTS ONE (owner request, 2026-10-29). The
+		// topbar holds the pick, which every start puts back in force
+		// (reapplyEffort), so the shim started for it runs at the pick.
+		v.deps.Topbar.SetPickedEffort(ws, level)
+		if err := v.deps.Queue.ReviveForSettings(ctx, ws); err != nil {
+			log.Error(opSetEffort, "the effort pick could not start the workspace's shim", dlog.Context{
+				"effort": level.String(), "cause": err.Error(),
+			})
+			return fmt.Errorf("set effort on %q: start the shim: %w", ws, err)
+		}
+		log.Info(opSetEffort, "the workspace has no shim; the pick is kept and the shim started for it", dlog.Context{"effort": level.String()})
+		return nil
+	}
+	if err != nil {
 		return err
 	}
 	log.Info(opSetEffort, "the effort change landed", dlog.Context{"effort": level.String()})

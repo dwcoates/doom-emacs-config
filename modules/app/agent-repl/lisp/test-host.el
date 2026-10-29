@@ -89,6 +89,9 @@
 (defvar agent-repl-test-host--unloading-answer nil
   "What the stubbed ReportPageUnloading answers; see the harness.")
 
+(defvar agent-repl-test-host--residency-answer nil
+  "What the stubbed ReportPageResidency answers; see the harness.")
+
 (defvar agent-repl-test-host--effects nil
   "W2-B surface calls, newest first: `(NAME . ARGS)'.")
 
@@ -232,6 +235,8 @@ unary rpc can produce, which the contract never collapses into one."
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--unloading-answer
           (list :response (list :arm :success :value nil)))
+         (agent-repl-test-host--residency-answer
+          (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--adopt-answer
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--evaluation-answer
@@ -254,6 +259,12 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (conn request &rest keys)
                   (push (list "MarkWorkspaceViewed" conn request) agent-repl-test-host--calls)
                   (agent-repl-test-host--answer agent-repl-test-host--mark-viewed-answer
+                                                (plist-get keys :on-response)
+                                                (plist-get keys :on-failure))))
+               ((symbol-function 'agent-repl-rpc-report-page-residency)
+                (lambda (conn request &rest keys)
+                  (push (list "ReportPageResidency" conn request) agent-repl-test-host--calls)
+                  (agent-repl-test-host--answer agent-repl-test-host--residency-answer
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
                ((symbol-function 'agent-repl-rpc-report-page-unloading)
@@ -638,9 +649,41 @@ A hand-rolled copy of either would not be recorded here."
                  (lambda (_ws op &rest _) (push op ops) t)))
         ;; Act
         (agent-repl-host-mark-viewed "ws-1")
-        (agent-repl-host-report-page-unloading "ws-1" #'ignore #'ignore))
+        (agent-repl-host-report-page-unloading "ws-1" #'ignore #'ignore)
+        (agent-repl-host-report-page-residency "ws-1" '(:arm :not-loaded :value nil) #'ignore))
       ;; Assert
-      (should (equal (reverse ops) '("mark-viewed" "page-unloading"))))))
+      (should (equal (reverse ops) '("mark-viewed" "page-unloading" "page-residency"))))))
+
+;;;; ---- Report page residency ----
+
+(ert-deftest agent-repl-test-host-page-residency-carries-the-ref-and-the-residency ()
+  "ReportPageResidency carries the daemon-minted ref and the residency, and success is reported."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--calls nil)
+    (let ((residency '(:arm :not-loaded :value nil))
+          reported)
+      ;; Act
+      (agent-repl-host-report-page-residency "ws-1" residency (lambda () (setq reported t)))
+      ;; Assert
+      (should reported)
+      (should (equal (nth 2 (car agent-repl-test-host--calls))
+                     (list :workspace (agent-repl-test-host--ref) :residency residency))))))
+
+(ert-deftest agent-repl-test-host-page-residency-refused-is-not-reported ()
+  "A refused residency report is surfaced and does not count as reported."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--residency-answer
+          (list :response (list :arm :error :value nil)))
+    (let (reported)
+      ;; Act
+      (agent-repl-host-report-page-residency "ws-1" '(:arm :not-loaded :value nil) (lambda () (setq reported t)))
+      ;; Assert
+      (should-not reported)
+      (should (agent-repl-test-host--logged-p :error "elisp.host.page-residency-refused")))))
 
 ;;;; ---- Report page unloading ----
 

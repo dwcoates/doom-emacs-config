@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/sourcescan"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -292,9 +293,10 @@ func TestARefusedClearRetiresItsDivider(t *testing.T) {
 	}
 }
 
-func TestSubmitSessionActRefusesAWorkspaceWithNoSession(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
+func TestSubmitSessionActRefusesAWorkspaceWithNoSessionAndNoRevival(t *testing.T) {
+	// Arrange: with a revival wired, a pick with no shim starts one instead
+	// (TestAPickWithNoShimIsHeldAndStartsTheShim).
+	h := newHarnessWithoutRevival(t)
 	h.noSession = true
 	// Act
 	err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetModel, Value: "opus"})
@@ -728,5 +730,114 @@ func TestSubmitSessionActGatesAContextCutOnTheSession(t *testing.T) {
 				t.Fatalf("turns started = %d, want %d", got, tc.wantTurns)
 			}
 		})
+	}
+}
+
+func TestAPickWithNoShimIsHeldAndStartsTheShim(t *testing.T) {
+	tests := []struct {
+		name string
+		act  Act
+		kind string
+	}{
+		{"a model pick", Act{Kind: ActSetModel, Value: "opus"}, wsm.ActModel},
+		{"a permission-mode pick", Act{Kind: ActSetPermissionMode, Value: "plan"}, wsm.ActPermissionMode},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.noSession = true
+
+			// Act
+			err := h.q.SubmitSessionAct(context.Background(), theWorkspace, tc.act)
+			h.waitRevivals()
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SubmitSessionAct: %v", err)
+			}
+			standing, _ := h.db.HeldPrompts(context.Background(), theWorkspace)
+			if len(standing) != 1 || standing[0].Act == nil || standing[0].Act.Kind != tc.kind ||
+				standing[0].Hold == nil || *standing[0].Hold != wsm.HoldReconnect {
+				t.Fatalf("standing = %+v, want the pick held under the reconnect hold", standing)
+			}
+			if len(h.reviveCauses) != 1 || h.reviveCauses[0] != shimlife.StartSettings {
+				t.Fatalf("revival causes = %v, want one settings start", h.reviveCauses)
+			}
+		})
+	}
+}
+
+func TestAPickWithNoShimTellsTheSettingsStart(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+
+	// Act
+	_ = h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetModel, Value: "opus"})
+	h.waitRevivals()
+
+	// Assert
+	if len(h.settingsStarts) != 1 || !h.settingsStarts[0].Equal(instant) {
+		t.Fatalf("settings starts = %v, want one at the queue's now", h.settingsStarts)
+	}
+}
+
+func TestAPickWithNoShimAtAColdGateIsRefusedByTheGate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.coldGate = "cold for 2h"
+
+	// Act
+	err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{Kind: ActSetModel, Value: "opus"})
+
+	// Assert
+	var gate *ColdGateRefusal
+	if !errors.As(err, &gate) || h.revivals != 0 {
+		t.Fatalf("err = %v, revivals %d: want the gate's refusal and no start", err, h.revivals)
+	}
+}
+
+func TestReviveForSettingsStartsAMissingShim(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+
+	// Act
+	err := h.q.ReviveForSettings(context.Background(), theWorkspace)
+	h.waitRevivals()
+
+	// Assert
+	if err != nil || len(h.reviveCauses) != 1 || h.reviveCauses[0] != shimlife.StartSettings || len(h.settingsStarts) != 1 {
+		t.Fatalf("err %v, causes %v, settings starts %v: want one settings start", err, h.reviveCauses, h.settingsStarts)
+	}
+}
+
+func TestReviveForSettingsLeavesARunningShim(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	err := h.q.ReviveForSettings(context.Background(), theWorkspace)
+	h.waitRevivals()
+
+	// Assert
+	if err != nil || h.revivals != 0 {
+		t.Fatalf("err %v, revivals %d: want no revival for a running shim", err, h.revivals)
+	}
+}
+
+func TestReviveForSettingsWithNoRevivalIsNoSession(t *testing.T) {
+	// Arrange
+	h := newHarnessWithoutRevival(t)
+	h.noSession = true
+
+	// Act
+	err := h.q.ReviveForSettings(context.Background(), theWorkspace)
+
+	// Assert
+	if !errors.Is(err, ErrNoSession) {
+		t.Fatalf("err = %v, want ErrNoSession", err)
 	}
 }

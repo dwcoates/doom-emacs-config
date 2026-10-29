@@ -1,6 +1,7 @@
 package topbar
 
 import (
+	"context"
 	"slices"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -51,6 +52,9 @@ func (r *resolver) SetPickedEffort(ws ids.WorkspaceID, level conversationv1.Agen
 	r.mutate(ws, "daemon.topbar.set_picked_effort", "the topbar took the effort level the shim confirmed",
 		dlog.Context{"effort": level.String()},
 		func(s *wsState) { s.pickedEffort = level })
+	if level != conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_UNSPECIFIED {
+		r.remember(ws, "effort", func(ctx context.Context, st SelectionStore) error { return st.PutWorkspaceEffort(ctx, ws, level) })
+	}
 }
 
 // PickedEffort answers the level a pick put in force, false before any pick.
@@ -69,7 +73,7 @@ func (r *resolver) EffortLevels(ws ids.WorkspaceID) ([]conversationv1.AgentEffor
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.stateLocked(ws)
-	if s.sessionless() {
+	if s.controlsWithheld() {
 		return nil, false
 	}
 	levels, supported := acceptedLevels(selectedOption(s))
@@ -130,7 +134,7 @@ func effortCurrent(s *wsState) (conversationv1.AgentEffortLevel, string) {
 // show: no session, a model whose capabilities were never stated, or a model
 // that takes a level with no level known to be in force.
 func effortSelector(s *wsState) *frontendv1.TopbarEffortSelector {
-	if s.sessionless() {
+	if s.controlsWithheld() {
 		return nil
 	}
 	option := selectedOption(s)
@@ -173,8 +177,8 @@ func effortDisplayName(level conversationv1.AgentEffortLevel) string {
 // effortStanding is what the selector states and why, for the edge record: a
 // change in it is what a reader asking "why does the selector show this" needs.
 func effortStanding(s *wsState) string {
-	if s.sessionless() {
-		return "no_session"
+	if s.controlsWithheld() {
+		return "cold_gate"
 	}
 	option := selectedOption(s)
 	switch {

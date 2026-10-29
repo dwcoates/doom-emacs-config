@@ -32,6 +32,7 @@ import {
   drawStatusMark,
   placeOpenRowDetails,
   placeRowDetail,
+  paintRowDetail,
   toggleRowMenu,
   type RowPlace,
   drawRosterFamily,
@@ -42,6 +43,7 @@ import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
 import { codeOf } from "../source-text.js";
 import { GLYPH_IMAGES, NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { GetWorkspaceMemoryResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_workspace_memory_pb";
 import {
   NOW,
   appContext,
@@ -734,6 +736,45 @@ describe("the detail panel", () => {
       "R",
     );
     expect([...panelOf(drawn).children].map((el) => el.className)).toEqual(["summary", "children"]);
+  });
+
+  it("asks an open row's workspace memory when its panel opens", async () => {
+    const asked: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        getWorkspaceMemory: (request) => {
+          asked.push(request.workspace?.id ?? "");
+          return create(GetWorkspaceMemoryResponseSchema, {
+            result: { case: "success", value: { memory: { agent: { state: { case: "notRunning", value: {} } } } } },
+          });
+        },
+      }),
+    );
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
+
+    paintRowDetail(drawn, true);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+
+    expect([asked, panelOf(drawn).querySelector(".memory dd")?.textContent]).toEqual([["ws-1"], "not running"]);
+    paintRowDetail(drawn, false);
+  });
+
+  it("asks no memory for a band's row", async () => {
+    const asked: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        getWorkspaceMemory: (request) => {
+          asked.push(request.workspace?.id ?? "");
+          return create(GetWorkspaceMemoryResponseSchema, {});
+        },
+      }),
+    );
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R", "merged");
+
+    paintRowDetail(drawn, true);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+
+    expect(asked).toEqual([]);
   });
 
   it("is closed until the row is expanded", () => {

@@ -24,6 +24,7 @@ shim still draws its whole conversation.
 | A create with an initial prompt, and every fork | `workspace.verbs.Create`, `CreateThread` |
 | The restart verb, which starts one at once when none is up | `workspace.verbs.Restart` (`startForRestart`) |
 | A rebind to another transcript | `workspace.Fleet.StartRebound` |
+| A model, permission-mode or effort pick on a workspace with no shim | `promptqueue` settings revival (`SubmitSessionAct`, `ReviveForSettings`) |
 | A boot or a handover, only for a shim that was up when the last daemon stopped | `bringup.OnlyWasUp`, in `boot` and `rollout` |
 
 ### What never starts a shim
@@ -49,6 +50,28 @@ writes nothing, so the record still says how each shim stood. A session on
 record with a vendor session and no terminal was up. A record with no vendor
 session is the spawn-facts row a create writes before any start, and it was
 never up. A turn a restart cut had its shim up, so it comes back and resumes.
+
+### A settings pick's shim is a visit
+
+The topbar's model, permission-mode and effort controls are drawn while a
+workspace has no shim (owner request, 2026-10-29): the last model and mode in
+force, the effort last picked, and the catalog the login last served are kept
+in wsm (`workspace_selections`, `account_model_catalogs`, layout 89) and seeded
+when the workspace registers (`topbar.WithSelectionStore`). Only a standing
+cold gate withholds them, because its answer comes first.
+
+A pick with no shim starts one, start cause `settings`:
+
+- A model or permission-mode pick is held as a prompt is, under the reconnect
+  hold, and delivered once the session is up.
+- An effort pick holds no row: the topbar keeps the pick, and every start puts
+  it back in force (`reapplyEffort`).
+
+The switch away from that workspace stands the shim down again, reason
+`settings_visit` (`workspace.SettingsVisits`, `drain.VisitDown`), under the
+keep-alive cycle's rules: never under a turn, never for the workspace in view,
+and never once a real turn has run since the pick. It leaves the keep-alive
+cycle's park, so the workspace is drawn as the idle session it was.
 
 ## No UX waits on a shim
 

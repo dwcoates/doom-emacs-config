@@ -79,6 +79,11 @@ type Controller interface {
 	// never once a real turn has run since the beat. A busy one is stood down
 	// once it falls free. It returns at once.
 	CycleDown(ws ids.WorkspaceID, beat time.Time)
+	// VisitDown stands down the shim a settings pick started at SINCE, on the
+	// user's switch away (owner request, 2026-10-29; cycle.go), under
+	// CycleDown's rules: never under a turn, never for the workspace in view,
+	// and never once a real turn has run since. It returns at once.
+	VisitDown(ws ids.WorkspaceID, since time.Time)
 }
 
 // Deps are the controller's collaborators.

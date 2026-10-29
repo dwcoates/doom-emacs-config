@@ -150,11 +150,10 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 	apply(s)
 	view, err := r.render(s)
 	missing := s.missing()
-	// THE SESSION-LESS EDGE IS READ OFF THE VIEW ITSELF, under the same lock
-	// that built it, so the record cannot disagree with what was published. A
-	// view with no model selector is a strip drawn with dashes where its
-	// controls belong, which is exactly what the reader sees.
-	sessionlessPublished := view != nil && view.GetModelSelector() == nil
+	// THE SESSION-LESS EDGE IS READ UNDER THE SAME LOCK that built the view,
+	// so the record cannot disagree with what was published: a view drawn
+	// with no session behind it, its controls the remembered ones or dashes.
+	sessionlessPublished := view != nil && s.sessionless()
 	returnedToFull := view != nil && s.sessionlessPublished && !sessionlessPublished
 	if view != nil {
 		s.sessionlessPublished = sessionlessPublished
@@ -313,10 +312,10 @@ func (r *resolver) sessionLine(s *wsState) string {
 // is a daemon defect refused here rather than served as a selector with no
 // default row: every login has a default (the reader's, else the built-in).
 func (r *resolver) modelSelector(s *wsState) (*frontendv1.TopbarModelSelector, error) {
-	// ABSENT WITH NO SESSION. A stood-down, cold-gated or unstarted workspace
-	// has no model in force, and serving the catalog with no selection would
-	// draw a picker offering a switch that would be refused.
-	if s.sessionless() {
+	// ABSENT AT A COLD GATE, whose answer comes first, and while nothing is
+	// known: a workspace with no shim draws the model it last ran and the
+	// catalog its login last served (selections.go), and a pick starts it.
+	if s.controlsWithheld() || (s.model == "" && len(s.catalog) == 0) {
 		return nil, nil
 	}
 	if s.defaultModel == "" {
@@ -350,9 +349,9 @@ func (r *resolver) modelSelector(s *wsState) (*frontendv1.TopbarModelSelector, e
 // — it IS what is running — while staying absent from the options, so the
 // picker never offers a switch the daemon would refuse.
 func (r *resolver) permissionModePicker(s *wsState) *frontendv1.TopbarPermissionModePicker {
-	// ABSENT WITH NO SESSION, for the same reason the model selector is, and
+	// ABSENT AT A COLD GATE, for the same reason the model selector is, and
 	// absent until the served set exists at all.
-	if s.sessionless() || s.picker == nil {
+	if s.controlsWithheld() || s.picker == nil {
 		return nil
 	}
 	out := &frontendv1.TopbarPermissionModePicker{
@@ -610,6 +609,7 @@ func (r *resolver) SetModelCatalog(ws ids.WorkspaceID, models []*conversationv1.
 	r.mutate(ws, "daemon.topbar.set_model_catalog", "the topbar took the model catalog",
 		dlog.Context{"options": len(models)},
 		func(s *wsState) { s.catalog = models })
+	r.rememberCatalog(ws, models)
 }
 
 // SetAccount installs the account cell: the root in force, and every root the
@@ -624,6 +624,15 @@ func (r *resolver) SetAccount(ws ids.WorkspaceID, account Account) {
 			s.defaultModel = account.DefaultModel
 			s.accountSet = true
 		})
+	r.seedSelections(ws, account.ConfigDir)
+	// A SESSION THAT STARTED BEFORE ITS LOGIN WAS INSTALLED served a catalog
+	// no root could key; it is kept under the root now.
+	r.mu.Lock()
+	started, catalog := r.stateLocked(ws).started, r.stateLocked(ws).catalog
+	r.mu.Unlock()
+	if started {
+		r.rememberCatalog(ws, catalog)
+	}
 }
 
 // SetLoginDefaultModel moves the login's default model on every strip that
@@ -719,6 +728,11 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 	if started == nil {
 		return
 	}
+	defer func() {
+		r.rememberModel(ws, started.GetEffectiveModel().GetName())
+		r.rememberMode(ws, permissionModeName(started.GetPermissionMode()))
+		r.rememberCatalog(ws, started.GetModelCatalog())
+	}()
 	r.mutate(ws, "daemon.topbar.on_session_started", "the topbar took the session's opening facts",
 		dlog.Context{
 			"vendor_session_id": started.GetVendorSessionId(),
@@ -956,6 +970,12 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 	arm, apply := r.sessionArm(update)
 	r.mutate(ws, "daemon.topbar.on_session_update", "the topbar took a session update",
 		dlog.Context{"arm": arm}, apply)
+	switch u := update.GetUpdate().(type) {
+	case *conversationv1.SessionUpdate_ModelChanged:
+		r.rememberModel(ws, u.ModelChanged.GetEffectiveModel().GetName())
+	case *conversationv1.SessionUpdate_PermissionModeChanged:
+		r.rememberMode(ws, permissionModeName(u.PermissionModeChanged.GetPermissionMode()))
+	}
 }
 
 // sessionArm names the update's arm and returns what it changes. Every arm has

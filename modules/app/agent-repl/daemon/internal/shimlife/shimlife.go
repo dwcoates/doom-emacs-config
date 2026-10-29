@@ -39,6 +39,10 @@ const (
 	StartMerge StartCause = "merge"
 	// StartRebind is a workspace rebound to another conversation.
 	StartRebind StartCause = "rebind"
+	// StartSettings is a model, effort or permission-mode pick on a
+	// workspace with no shim: the pick is applied once the shim is up, and
+	// the shim is stood down on the switch away unless a prompt ran meanwhile.
+	StartSettings StartCause = "settings"
 	// StartUnstated is a start no caller stated a cause for: a wiring gap,
 	// which the fleet records at INFO so it is seen.
 	StartUnstated StartCause = "unstated"
@@ -65,6 +69,9 @@ const (
 	StandDownHandover StandDownReason = "handover"
 	// StandDownShutdown is the daemon's own exit stopping its shims.
 	StandDownShutdown StandDownReason = "shutdown"
+	// StandDownSettingsVisit is a shim a settings pick started, stood down on
+	// the switch away from its workspace with no prompt run since.
+	StandDownSettingsVisit StandDownReason = "settings_visit"
 	// StandDownReplaced is a held shim replaced by a fresh one inside a start
 	// (it runs another account's root).
 	StandDownReplaced StandDownReason = "replaced"

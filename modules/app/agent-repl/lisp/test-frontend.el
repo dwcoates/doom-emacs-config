@@ -153,16 +153,25 @@ test is the mount's own binding of the slot to its workspace."
             (should (eq (agent-repl--ws-get "ws1" :frontend-buffer) buf)))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
-(ert-deftest agent-repl-test-frontend-ensure-webview-holds-the-page-in-the-host ()
-  "Every ensure asks the host to hold the workspace's page."
+(defmacro agent-repl-test-frontend--with-host-pages (wanted &rest body)
+  "Run BODY with page-unload answering WANTED, and a host holding `held'.
+`held' lists every page ensured, newest first; `noted' every mount noted."
+  (declare (indent 1))
+  `(let ((held nil) (noted nil))
+     (cl-letf (((symbol-function 'agent-repl-page-unload-wanted-p) (lambda (_ws) ,wanted))
+               ((symbol-function 'agent-repl-webhost-has-page-p) (lambda (ws) (member ws held)))
+               ((symbol-function 'agent-repl-webhost-ensure-page) (lambda (ws) (push ws held)))
+               ((symbol-function 'agent-repl-page-unload-note-mounted) (lambda (ws) (push ws noted))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-frontend-ensure-webview-holds-a-wanted-page-in-the-host ()
+  "Every ensure of a wanted workspace asks the host to hold its page."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*fake-webview*"))
-          (held nil))
+    (let ((buf (generate-new-buffer "*fake-webview*")))
       (unwind-protect
           (agent-repl-test-frontend--with-slot-mount buf
-            (cl-letf (((symbol-function 'agent-repl-webhost-ensure-page)
-                       (lambda (ws) (push ws held))))
+            (agent-repl-test-frontend--with-host-pages t
               ;; Act
               (agent-repl--frontend-ensure-webview-buffer "ws1")
               (agent-repl--frontend-ensure-webview-buffer "ws1")
@@ -170,16 +179,28 @@ test is the mount's own binding of the slot to its workspace."
               (should (equal held '("ws1" "ws1")))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
-(ert-deftest agent-repl-test-frontend-a-fresh-slot-is-noted-mounted-once ()
-  "A fresh mount, and only a fresh one, is noted to page-unload.el."
+(ert-deftest agent-repl-test-frontend-ensure-webview-makes-an-unwanted-slot-with-no-page ()
+  "A workspace whose page is not wanted gets its slot and no page (owner ruling, 2026-10-29)."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((buf (generate-new-buffer "*fake-webview*"))
-          (noted nil))
+    (let ((buf (generate-new-buffer "*fake-webview*")))
       (unwind-protect
           (agent-repl-test-frontend--with-slot-mount buf
-            (cl-letf (((symbol-function 'agent-repl-page-unload-note-mounted)
-                       (lambda (ws) (push ws noted))))
+            (agent-repl-test-frontend--with-host-pages nil
+              ;; Act
+              (let ((slot (agent-repl--frontend-ensure-webview-buffer "ws1")))
+                ;; Assert
+                (should (equal (list (eq slot buf) held noted) '(t nil nil))))))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-frontend-a-page-newly-held-is-noted-mounted-once ()
+  "A page the host did not hold is noted to page-unload.el when held, and only then."
+  ;; Arrange
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((buf (generate-new-buffer "*fake-webview*")))
+      (unwind-protect
+          (agent-repl-test-frontend--with-slot-mount buf
+            (agent-repl-test-frontend--with-host-pages t
               ;; Act
               (agent-repl--frontend-ensure-webview-buffer "ws1")
               (agent-repl--frontend-ensure-webview-buffer "ws1")

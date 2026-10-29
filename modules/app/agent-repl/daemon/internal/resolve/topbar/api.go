@@ -279,6 +279,9 @@ type Option func(*options)
 type options struct {
 	clock      Clock
 	warningCap int
+	// selections keeps the controls for when the shim is down; nil keeps
+	// nothing (WithSelectionStore).
+	selections SelectionStore
 }
 
 // WithClock injects the clock every warning's ordering instant is taken from.

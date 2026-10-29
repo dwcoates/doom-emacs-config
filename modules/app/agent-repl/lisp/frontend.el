@@ -128,6 +128,8 @@
 (declare-function agent-repl-webhost-ensure "webhost" (conn))
 (declare-function agent-repl-webhost-xwidget "webhost" ())
 (declare-function agent-repl-page-unload-note-mounted "page-unload" (ws))
+(declare-function agent-repl-page-unload-wanted-p "page-unload" (ws))
+(declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-remove "webhost" (ws))
 (declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
@@ -845,8 +847,10 @@ browser header-line, and arms the copy chords, and is told the input
 window's background its page's gate wears.
 
 Either way the host is asked to hold WS's page
-\(`agent-repl-webhost-ensure-page'), which is idempotent: a page already
-held at WS's URL is left alone, so this is safe on every open and show.
+\(`agent-repl-webhost-ensure-page') when it is wanted
+\(`agent-repl-page-unload-wanted-p': on screen, or working), which is
+idempotent: a page already held at WS's URL is left alone, so this is safe
+on every open and show.  A slot that is not wanted is made with no page.
 
 Whichever buffer is returned, its `default-directory' is realigned to WS's
 project root via `agent-repl--align-buffer-to-ws-dir', so `SPC .' from the
@@ -873,9 +877,13 @@ webview window resolves against the worktree the REPL is attached to."
                     (agent-repl--ws-put ws :frontend-buffer buf)
                     (agent-repl--info ws "elisp.frontend.slot-mounted ws=%s buffer=%s" ws name)
                     buf)))))
-    (agent-repl-webhost-ensure-page ws)
-    (when (and fresh (fboundp 'agent-repl-page-unload-note-mounted))
-      (agent-repl-page-unload-note-mounted ws))
+    ;; A PAGE IS LOADED ONLY WHERE IT IS WANTED (owner ruling, 2026-10-29):
+    ;; on screen, or working.  Any other slot is made with no page, and its
+    ;; show loads it (`agent-repl-page-unload-note-shown').
+    (when (agent-repl-page-unload-wanted-p ws)
+      (unless (agent-repl-webhost-has-page-p ws)
+        (agent-repl-page-unload-note-mounted ws))
+      (agent-repl-webhost-ensure-page ws))
     (agent-repl--align-buffer-to-ws-dir buf ws)
     buf))
 

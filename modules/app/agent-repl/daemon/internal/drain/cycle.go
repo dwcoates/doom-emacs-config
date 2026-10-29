@@ -32,10 +32,32 @@ const opCycle = "daemon.drain.keepalive_cycle"
 // turn has run since the beat -- that turn is engagement, and the next beat
 // decides again.
 
+// THE SAME STAND-DOWN ENDS A SETTINGS VISIT (owner request, 2026-10-29). A
+// model, permission-mode or effort pick on a workspace with no shim starts
+// one (promptqueue's revivalSettings); the switch away stands it down again
+// through this path (VisitDown), under the same rules, unless a real turn has
+// run since the pick started it. It leaves the keep-alive cycle's park, so the
+// workspace is drawn as the idle session it was.
+
+// opVisit is the operation a settings visit's stand-down records under.
+const opVisit = "daemon.drain.settings_visit"
+
+// visitReason is a settings visit's stand-down reason.
+var visitReason = standDownReason{
+	op:     opVisit,
+	detail: "stood down on the switch away from a settings pick; the transcript was left as it stood",
+	done:   "stood down the shim a settings pick started",
+	park:   wsm.ParkKeepaliveCycle,
+	life:   shimlife.StandDownSettingsVisit,
+}
+
 // cycleState is one pending cycle stand-down's bookkeeping, under c.mu.
 type cycleState struct {
-	// beat is when the keep-alive this stand-down follows was asked.
+	// beat is the instant a real turn since which keeps the session up: the
+	// keep-alive this stand-down follows, or the settings pick's start.
 	beat time.Time
+	// reason is why it stands down: the keep-alive cycle, or a settings visit.
+	reason standDownReason
 	// running is an attempt in flight on the detached lifetime.
 	running bool
 	// again is an edge that arrived while an attempt ran.
@@ -55,6 +77,18 @@ var cycleReason = standDownReason{
 // at BEAT. It returns at once; the attempt runs on the detached lifetime. A
 // later beat's ask replaces the earlier one's instant.
 func (c *controller) CycleDown(ws ids.WorkspaceID, beat time.Time) {
+	c.askDown(ws, beat, cycleReason)
+}
+
+// VisitDown asks for the stand-down of WS's session, a settings pick having
+// started it at SINCE, the user having switched away. It returns at once.
+func (c *controller) VisitDown(ws ids.WorkspaceID, since time.Time) {
+	c.askDown(ws, since, visitReason)
+}
+
+// askDown asks for WS's stand-down for REASON unless a real turn has run
+// since BEAT. A later ask replaces the earlier one's instant and reason.
+func (c *controller) askDown(ws ids.WorkspaceID, beat time.Time, reason standDownReason) {
 	c.mu.Lock()
 	if c.cycles == nil {
 		c.cycles = map[ids.WorkspaceID]*cycleState{}
@@ -64,9 +98,9 @@ func (c *controller) CycleDown(ws ids.WorkspaceID, beat time.Time) {
 		st = &cycleState{}
 		c.cycles[ws] = st
 	}
-	st.beat = beat
+	st.beat, st.reason = beat, reason
 	c.mu.Unlock()
-	c.log.Debug(opCycle, "a keep-alive cycle's stand-down was asked for", dlog.Context{"workspace": string(ws), "beat": beat})
+	c.log.Debug(reason.op, "a stand-down was asked for", dlog.Context{"workspace": string(ws), "since": beat})
 	c.kickCycle(ws, st)
 }
 
@@ -97,9 +131,9 @@ func (c *controller) kickCycle(ws ids.WorkspaceID, st *cycleState) {
 	c.deps.Detach(func(ctx context.Context) {
 		for {
 			c.mu.Lock()
-			beat := st.beat
+			beat, reason := st.beat, st.reason
 			c.mu.Unlock()
-			outcome := c.cycleDown(ctx, ws, beat)
+			outcome := c.cycleDown(ctx, ws, beat, reason)
 			c.mu.Lock()
 			if st.again && ctx.Err() == nil {
 				st.again = false
@@ -117,72 +151,73 @@ func (c *controller) kickCycle(ws ids.WorkspaceID, st *cycleState) {
 }
 
 // cycleDown is one attempt.
-func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat time.Time) withheldOutcome {
-	fields := dlog.Context{"workspace": string(ws), "beat": beat}
+func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat time.Time, reason standDownReason) withheldOutcome {
+	op := reason.op
+	fields := dlog.Context{"workspace": string(ws), "since": beat}
 	if err := ctx.Err(); err != nil {
-		c.log.Info(opCycle, "the daemon is leaving; a keep-alive cycle's stand-down is not taken", dlog.WithCause(fields, err))
+		c.log.Info(op, "the daemon is leaving; the stand-down is not taken", dlog.WithCause(fields, err))
 		return withheldPending
 	}
 	record, err := c.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		if errors.Is(err, wsm.ErrNotFound) {
-			c.log.Info(opCycle, "the workspace is no longer registered; nothing is stood down", fields)
+			c.log.Info(op, "the workspace is no longer registered; nothing is stood down", fields)
 			return withheldSettled
 		}
-		c.log.Error(opCycle, "could not read the workspace's record; its keep-alive cycle's stand-down is dropped", dlog.WithCause(fields, err))
+		c.log.Error(op, "could not read the workspace's record; its stand-down is dropped", dlog.WithCause(fields, err))
 		return withheldSettled
 	}
 	log := c.workspaceLog(record)
 	if record.Current {
-		log.Info(opCycle, "the user is looking at the workspace; its session is kept up between keep-alives", fields)
+		log.Info(op, "the user is looking at the workspace; its session is kept up", fields)
 		return withheldSettled
 	}
 	if record.Closed {
-		log.Debug(opCycle, "the workspace is closed; its cache's lapse stands it down, not the keep-alive cycle", fields)
+		log.Debug(op, "the workspace is closed; its cache's lapse stands it down", fields)
 		return withheldSettled
 	}
 	visible, err := bringup.Visible(ctx, c.deps.DB, ws)
 	if err != nil {
-		log.Error(opCycle, "could not read whether the workspace is visible; its keep-alive cycle's stand-down is dropped", dlog.WithCause(fields, err))
+		log.Error(op, "could not read whether the workspace is visible; its stand-down is dropped", dlog.WithCause(fields, err))
 		return withheldSettled
 	}
 	if !visible {
-		log.Debug(opCycle, "the workspace is withheld; its cache's lapse stands it down, not the keep-alive cycle", fields)
+		log.Debug(op, "the workspace is withheld; its cache's lapse stands it down", fields)
 		return withheldSettled
 	}
 	session, found, err := c.deps.DB.Session(ctx, ws)
 	if err != nil {
-		log.Error(opCycle, "could not read the workspace's session; its keep-alive cycle's stand-down is dropped", dlog.WithCause(fields, err))
+		log.Error(op, "could not read the workspace's session; its stand-down is dropped", dlog.WithCause(fields, err))
 		return withheldSettled
 	}
 	if !found || session.Terminal != nil {
-		log.Debug(opCycle, "the workspace has no live session; nothing to stand down", fields)
+		log.Debug(op, "the workspace has no live session; nothing to stand down", fields)
 		return withheldSettled
 	}
 	if session.LastEngagementAt.After(beat) {
-		log.Info(opCycle, "a real turn ran since the keep-alive; the session is kept up, and the next beat decides again",
+		log.Info(op, "a real turn ran since; the session is kept up",
 			dlog.Merge(fields, dlog.Context{"engaged_at": session.LastEngagementAt}))
 		return withheldSettled
 	}
 	switch gate := c.gate(ws); gate {
 	case gateOpen:
 	case gateNotServing:
-		log.Debug(opCycle, "the workspace has no shim to address; nothing to stand down", fields)
+		log.Debug(op, "the workspace has no shim to address; nothing to stand down", fields)
 		return withheldSettled
 	case gateBusy, gateStarting, gateReviving:
-		log.Info(opCycle, "the session is busy; its keep-alive cycle's stand-down waits for it to fall free",
+		log.Info(op, "the session is busy; its stand-down waits for it to fall free",
 			dlog.Merge(fields, dlog.Context{"gate": gate.String()}))
 		return withheldPending
 	default:
-		log.Error(opCycle, "the stand-down gate answered a value this stand-down cannot read; it is dropped",
+		log.Error(op, "the stand-down gate answered a value this stand-down cannot read; it is dropped",
 			dlog.Merge(fields, dlog.Context{"gate": gate.String(), "invariant_violation": "every gate value is handled"}))
 		return withheldSettled
 	}
-	switch c.hibernate(ctx, log, ws, fields, cycleReason) {
+	switch c.hibernate(ctx, log, ws, fields, reason) {
 	case hibernateDone:
 		return withheldSettled
 	case hibernateDeferred:
-		log.Info(opCycle, "the keep-alive cycle's stand-down was deferred; it is taken when the session falls free", fields)
+		log.Info(op, "the stand-down was deferred; it is taken when the session falls free", fields)
 		return withheldPending
 	default:
 		// hibernate recorded the failure at its own level; the next beat asks

@@ -56,6 +56,7 @@
 (declare-function agent-repl--ensure-input-buffer "panels" (ws))
 (declare-function agent-repl--frontend-precreate-webview "frontend" (ws))
 (declare-function agent-repl--frontend-detach-webview "frontend" (ws buf))
+(declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
 (declare-function agent-repl-open-progress-note-loaded "open-progress" (ws))
 (declare-function agent-repl-rpc-open-tabs "rpc" (conn workspaces on-push on-close))
@@ -218,12 +219,15 @@ Returns nil, sending nothing, when there is no daemon connection."
       t)))
 
 (defun agent-repl-open-tabs--page (name hidden)
-  "Load workspace NAME's web page unless it is HIDDEN; return the page arm.
-`:loading' when NAME has a live page now (made here, or already standing),
-`:none' when it is HIDDEN or this Emacs makes it no page.  A FOLDED one
-loads its page as a drawn one does: a fold withholds nothing.  A page that
-FAILS to load is recorded at ERROR and asked `:none', so the workspace
-still opens (its tab shows no page) and no other row's open is lost."
+  "Make workspace NAME's slot unless it is HIDDEN; return the page arm.
+`:loading' when the host holds NAME's page now (made here, or already
+standing), `:none' when it is HIDDEN or holds no page: a slot is made with
+a page only where one is wanted (`agent-repl-page-unload-wanted-p': on
+screen, or working), so most tabs open with none and load it at their
+show.  A FOLDED one is made as a drawn one is: a fold withholds nothing.  A
+page that FAILS to load is recorded at ERROR and asked `:none', so the
+workspace still opens (its tab shows no page) and no other row's open is
+lost."
   (unless hidden
     (condition-case err
         (progn
@@ -232,8 +236,7 @@ still opens (its tab shows no page) and no other row's open is lost."
       (error
        (agent-repl--error name "elisp.open-tabs.page-failed ws=%s error=%s"
                           name (error-message-string err)))))
-  (list :arm (if (and (not hidden)
-                      (buffer-live-p (agent-repl--ws-get name :frontend-buffer)))
+  (list :arm (if (and (not hidden) (agent-repl-webhost-has-page-p name))
                  :loading
                :none)))
 

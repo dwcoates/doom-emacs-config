@@ -143,3 +143,35 @@ func TestNewRequiresALogger(t *testing.T) {
 		t.Fatal("New with no logger succeeded, want an error")
 	}
 }
+
+func TestRecentCountsTheWindowsStallsAndTheirBlockedTime(t *testing.T) {
+	// Arrange
+	d, _ := newDetector(t)
+	start := time.Unix(1_800_000_000, 0)
+	d.Observe(start, 100)
+	d.Observe(start.Add(time.Minute), 250)
+
+	// Act
+	count, blocked := d.Recent(start.Add(2 * time.Minute))
+
+	// Assert
+	if count != 2 || blocked != 350 {
+		t.Fatalf("Recent = (%d, %d), want (2, 350)", count, blocked)
+	}
+}
+
+func TestRecentLeavesOutAStallOlderThanTheWindow(t *testing.T) {
+	// Arrange
+	d, _ := newDetector(t)
+	start := time.Unix(1_800_000_000, 0)
+	d.Observe(start, 100)
+	d.Observe(start.Add(9*time.Minute), 250)
+
+	// Act
+	count, blocked := d.Recent(start.Add(Window + time.Second))
+
+	// Assert
+	if count != 1 || blocked != 250 {
+		t.Fatalf("Recent = (%d, %d), want only the stall inside the window", count, blocked)
+	}
+}

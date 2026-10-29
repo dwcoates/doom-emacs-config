@@ -44,6 +44,7 @@ import (
 	"agent-repld/internal/imageorigin"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/login"
+	"agent-repld/internal/memorypopup"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/mergenotice"
 	"agent-repld/internal/mergeworkspace"
@@ -500,7 +501,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE TOPBAR IS BUILT BEFORE THE FEED, which raises onto its warning chip
 	// every row it cannot place, and before the fault hook, which raises the
 	// faults the topbar carries (a failed deploy) onto every strip.
-	topbarResolver, err := topbar.New(colors, p.Surfaces)
+	// THE CONTROLS OUTLIVE THE SHIM: the topbar keeps them in wsm (layout 89).
+	topbarResolver, err := topbar.New(colors, p.Surfaces, topbar.WithSelectionStore(p.DB))
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the topbar resolver: %w", err)
 	}
@@ -981,28 +983,32 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE ORCHESTRATOR, through the forwarder: it is built below, and is
 	// told each lease change through the queue's lease sink.
 	mergeMover := &mergeForwarder{}
+	// A SETTINGS PICK'S SHIM IS A VISIT: the queue notes its start, and a
+	// switch away stands it down (workspace/settingsvisits.go).
+	settingsVisits := workspace.NewSettingsVisits()
 	queue, err = promptqueue.New(promptqueue.Deps{
-		Leases:         mergeMover,
-		Merges:         mergeMover,
-		RestartSlots:   startSlots,
-		TurnBanners:    turnBanners,
-		Commits:        commitRecounter,
-		CacheClocks:    cacheKeeper,
-		StripSentinels: stripSentinels,
-		ResolveImage:   resolveImage,
-		DB:             p.DB,
-		Judge:          judge,
-		Feed:           feedResolver,
-		Footer:         footerResolver,
-		Sidebar:        sidebarResolver,
-		Edges:          edges,
-		Holds:          feedResolver,
-		Client:         fleet.Sender,
-		Revive:         fleet.Start,
-		Watcher:        fleet.Watcher,
-		SessionStarted: fleet.Serving,
-		SessionAbsent:  fleet.SessionAbsent,
-		StandingDown:   supervisor.StandingDown,
+		SettingsStarted: settingsVisits.Note,
+		Leases:          mergeMover,
+		Merges:          mergeMover,
+		RestartSlots:    startSlots,
+		TurnBanners:     turnBanners,
+		Commits:         commitRecounter,
+		CacheClocks:     cacheKeeper,
+		StripSentinels:  stripSentinels,
+		ResolveImage:    resolveImage,
+		DB:              p.DB,
+		Judge:           judge,
+		Feed:            feedResolver,
+		Footer:          footerResolver,
+		Sidebar:         sidebarResolver,
+		Edges:           edges,
+		Holds:           feedResolver,
+		Client:          fleet.Sender,
+		Revive:          fleet.Start,
+		Watcher:         fleet.Watcher,
+		SessionStarted:  fleet.Serving,
+		SessionAbsent:   fleet.SessionAbsent,
+		StandingDown:    supervisor.StandingDown,
 		// AN OPEN WAITS FOR THE CUT TURN ITS BRING-UP RESUMES (opentabs).
 		Resumptions: func(ws ids.WorkspaceID, report promptqueue.ResumeReport) {
 			opens.Resumption(ws, opentabs.Resume{Kind: resumeKind(report.Kind), Text: report.Text})
@@ -1389,6 +1395,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Threads: chatService,
 		// Every cold gate answered lands in the metrics surface.
 		ColdGateAnswers: p.Metrics,
+		SettingsVisits:  settingsVisits,
 		Creates:         creates,
 		// A CREATE THE NETWORK BLOCKS IS HELD and resumes on the network's
 		// restoration; its ops are answered through the server, bound below.
@@ -1584,6 +1591,23 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the editor instance tracker: %w", err)
 	}
 
+	// THE RAIL'S MEMORY POPUPS (owner request, 2026-10-29): the collector's
+	// latest sample, the page process's stalls and the residency Emacs
+	// reports, resolved per hover (internal/memorypopup).
+	memoryPopups, err := memorypopup.New(memorypopup.Deps{
+		Processes:   p.Metrics,
+		Stalls:      stallBeat,
+		StallWindow: stallbeat.Window,
+		Running: func(ws ids.WorkspaceID) bool {
+			_, ok := fleet.Client(ws)
+			return ok
+		},
+		Now: time.Now,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the memory popups: %w", err)
+	}
+
 	background := []backgroundLoop{
 		{Name: "drain", Run: drainController.Run},
 		{Name: "deployed_version", Run: deployedVersion.Run},
@@ -1663,6 +1687,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Footer:           footerResolver,
 			Topbar:           topbarResolver,
 			Sidebar:          sidebarResolver,
+			Memory:           memoryPopups,
 			Chat:             chatService,
 			Revisions: revision.New(revision.Deps{
 				Shims: fleet, Feed: feedResolver, PromptsDir: paths.PromptsDir, Life: ctx, Log: log,

@@ -1124,6 +1124,54 @@ func (x *AgentModel) GetName() string {
 	return ""
 }
 
+// A login's switchable model set kept as one record: the catalog the last
+// session on that login served (SessionStarted.model_catalog), stored by the
+// daemon so the topbar's model selector offers it while no session runs.
+type ModelCatalog struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The options, in the vendor's order.
+	Options       []*ModelOption `protobuf:"bytes,1,rep,name=options,proto3" json:"options,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelCatalog) Reset() {
+	*x = ModelCatalog{}
+	mi := &file_conversation_v1_api_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelCatalog) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelCatalog) ProtoMessage() {}
+
+func (x *ModelCatalog) ProtoReflect() protoreflect.Message {
+	mi := &file_conversation_v1_api_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelCatalog.ProtoReflect.Descriptor instead.
+func (*ModelCatalog) Descriptor() ([]byte, []int) {
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ModelCatalog) GetOptions() []*ModelOption {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
 // One model a session may run under, as offered by the vendor for this account.
 // Served as a list for a selector to draw; a selection echoes back the embedded
 // identity rather than any of the display text, so a client never constructs a
@@ -1150,7 +1198,7 @@ type ModelOption struct {
 
 func (x *ModelOption) Reset() {
 	*x = ModelOption{}
-	mi := &file_conversation_v1_api_proto_msgTypes[16]
+	mi := &file_conversation_v1_api_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1162,7 +1210,7 @@ func (x *ModelOption) String() string {
 func (*ModelOption) ProtoMessage() {}
 
 func (x *ModelOption) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[16]
+	mi := &file_conversation_v1_api_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1175,7 +1223,7 @@ func (x *ModelOption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelOption.ProtoReflect.Descriptor instead.
 func (*ModelOption) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{16}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ModelOption) GetModel() *AgentModel {
@@ -1235,7 +1283,7 @@ type ModelCapabilities struct {
 
 func (x *ModelCapabilities) Reset() {
 	*x = ModelCapabilities{}
-	mi := &file_conversation_v1_api_proto_msgTypes[17]
+	mi := &file_conversation_v1_api_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1247,7 +1295,7 @@ func (x *ModelCapabilities) String() string {
 func (*ModelCapabilities) ProtoMessage() {}
 
 func (x *ModelCapabilities) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[17]
+	mi := &file_conversation_v1_api_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1260,7 +1308,7 @@ func (x *ModelCapabilities) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCapabilities.ProtoReflect.Descriptor instead.
 func (*ModelCapabilities) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{17}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ModelCapabilities) GetResolvedModel() *AgentModel {
@@ -1344,7 +1392,7 @@ type ModelEffortUnsupported struct {
 
 func (x *ModelEffortUnsupported) Reset() {
 	*x = ModelEffortUnsupported{}
-	mi := &file_conversation_v1_api_proto_msgTypes[18]
+	mi := &file_conversation_v1_api_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1356,7 +1404,7 @@ func (x *ModelEffortUnsupported) String() string {
 func (*ModelEffortUnsupported) ProtoMessage() {}
 
 func (x *ModelEffortUnsupported) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[18]
+	mi := &file_conversation_v1_api_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1369,7 +1417,7 @@ func (x *ModelEffortUnsupported) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelEffortUnsupported.ProtoReflect.Descriptor instead.
 func (*ModelEffortUnsupported) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{18}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{19}
 }
 
 // The model takes a reasoning-effort level.
@@ -1384,7 +1432,7 @@ type ModelEffortSupported struct {
 
 func (x *ModelEffortSupported) Reset() {
 	*x = ModelEffortSupported{}
-	mi := &file_conversation_v1_api_proto_msgTypes[19]
+	mi := &file_conversation_v1_api_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1396,7 +1444,7 @@ func (x *ModelEffortSupported) String() string {
 func (*ModelEffortSupported) ProtoMessage() {}
 
 func (x *ModelEffortSupported) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[19]
+	mi := &file_conversation_v1_api_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1409,7 +1457,7 @@ func (x *ModelEffortSupported) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelEffortSupported.ProtoReflect.Descriptor instead.
 func (*ModelEffortSupported) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{19}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ModelEffortSupported) GetLevels() []AgentEffortLevel {
@@ -1478,7 +1526,7 @@ type TokenUsage struct {
 
 func (x *TokenUsage) Reset() {
 	*x = TokenUsage{}
-	mi := &file_conversation_v1_api_proto_msgTypes[20]
+	mi := &file_conversation_v1_api_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1490,7 +1538,7 @@ func (x *TokenUsage) String() string {
 func (*TokenUsage) ProtoMessage() {}
 
 func (x *TokenUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[20]
+	mi := &file_conversation_v1_api_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1503,7 +1551,7 @@ func (x *TokenUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenUsage.ProtoReflect.Descriptor instead.
 func (*TokenUsage) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{20}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *TokenUsage) GetInputHits() *TokenCacheHits {
@@ -1547,7 +1595,7 @@ type TokenCacheHits struct {
 
 func (x *TokenCacheHits) Reset() {
 	*x = TokenCacheHits{}
-	mi := &file_conversation_v1_api_proto_msgTypes[21]
+	mi := &file_conversation_v1_api_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1559,7 +1607,7 @@ func (x *TokenCacheHits) String() string {
 func (*TokenCacheHits) ProtoMessage() {}
 
 func (x *TokenCacheHits) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[21]
+	mi := &file_conversation_v1_api_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1572,7 +1620,7 @@ func (x *TokenCacheHits) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenCacheHits.ProtoReflect.Descriptor instead.
 func (*TokenCacheHits) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{21}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *TokenCacheHits) GetRead() uint64 {
@@ -1600,7 +1648,7 @@ type TokenCacheMisses struct {
 
 func (x *TokenCacheMisses) Reset() {
 	*x = TokenCacheMisses{}
-	mi := &file_conversation_v1_api_proto_msgTypes[22]
+	mi := &file_conversation_v1_api_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1612,7 +1660,7 @@ func (x *TokenCacheMisses) String() string {
 func (*TokenCacheMisses) ProtoMessage() {}
 
 func (x *TokenCacheMisses) ProtoReflect() protoreflect.Message {
-	mi := &file_conversation_v1_api_proto_msgTypes[22]
+	mi := &file_conversation_v1_api_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1625,7 +1673,7 @@ func (x *TokenCacheMisses) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenCacheMisses.ProtoReflect.Descriptor instead.
 func (*TokenCacheMisses) Descriptor() ([]byte, []int) {
-	return file_conversation_v1_api_proto_rawDescGZIP(), []int{22}
+	return file_conversation_v1_api_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *TokenCacheMisses) GetWritten() uint64 {
@@ -1711,7 +1759,9 @@ const file_conversation_v1_api_proto_rawDesc = "" +
 	"\x04type\x18\x01 \x01(\tR\x04type\" \n" +
 	"\n" +
 	"AgentModel\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\xe3\x01\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"F\n" +
+	"\fModelCatalog\x126\n" +
+	"\aoptions\x18\x01 \x03(\v2\x1c.conversation.v1.ModelOptionR\aoptions\"\xe3\x01\n" +
 	"\vModelOption\x121\n" +
 	"\x05model\x18\x01 \x01(\v2\x1b.conversation.v1.AgentModelR\x05model\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12 \n" +
@@ -1767,7 +1817,7 @@ func file_conversation_v1_api_proto_rawDescGZIP() []byte {
 }
 
 var file_conversation_v1_api_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_conversation_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_conversation_v1_api_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_conversation_v1_api_proto_goTypes = []any{
 	(AgentEffortLevel)(0),                 // 0: conversation.v1.AgentEffortLevel
 	(ModelMarker)(0),                      // 1: conversation.v1.ModelMarker
@@ -1787,14 +1837,15 @@ var file_conversation_v1_api_proto_goTypes = []any{
 	(*ApiUnreachable)(nil),                // 15: conversation.v1.ApiUnreachable
 	(*ApiUnmodeledError)(nil),             // 16: conversation.v1.ApiUnmodeledError
 	(*AgentModel)(nil),                    // 17: conversation.v1.AgentModel
-	(*ModelOption)(nil),                   // 18: conversation.v1.ModelOption
-	(*ModelCapabilities)(nil),             // 19: conversation.v1.ModelCapabilities
-	(*ModelEffortUnsupported)(nil),        // 20: conversation.v1.ModelEffortUnsupported
-	(*ModelEffortSupported)(nil),          // 21: conversation.v1.ModelEffortSupported
-	(*TokenUsage)(nil),                    // 22: conversation.v1.TokenUsage
-	(*TokenCacheHits)(nil),                // 23: conversation.v1.TokenCacheHits
-	(*TokenCacheMisses)(nil),              // 24: conversation.v1.TokenCacheMisses
-	(*descriptorpb.EnumValueOptions)(nil), // 25: google.protobuf.EnumValueOptions
+	(*ModelCatalog)(nil),                  // 18: conversation.v1.ModelCatalog
+	(*ModelOption)(nil),                   // 19: conversation.v1.ModelOption
+	(*ModelCapabilities)(nil),             // 20: conversation.v1.ModelCapabilities
+	(*ModelEffortUnsupported)(nil),        // 21: conversation.v1.ModelEffortUnsupported
+	(*ModelEffortSupported)(nil),          // 22: conversation.v1.ModelEffortSupported
+	(*TokenUsage)(nil),                    // 23: conversation.v1.TokenUsage
+	(*TokenCacheHits)(nil),                // 24: conversation.v1.TokenCacheHits
+	(*TokenCacheMisses)(nil),              // 25: conversation.v1.TokenCacheMisses
+	(*descriptorpb.EnumValueOptions)(nil), // 26: google.protobuf.EnumValueOptions
 }
 var file_conversation_v1_api_proto_depIdxs = []int32{
 	4,  // 0: conversation.v1.ApiRequestFailed.rate_limited:type_name -> conversation.v1.ApiRateLimited
@@ -1811,20 +1862,21 @@ var file_conversation_v1_api_proto_depIdxs = []int32{
 	16, // 11: conversation.v1.ApiRequestFailed.unmodeled:type_name -> conversation.v1.ApiUnmodeledError
 	15, // 12: conversation.v1.ApiRequestFailed.unreachable:type_name -> conversation.v1.ApiUnreachable
 	3,  // 13: conversation.v1.ApiRequestFailed.retry:type_name -> conversation.v1.ApiRetry
-	17, // 14: conversation.v1.ModelOption.model:type_name -> conversation.v1.AgentModel
-	19, // 15: conversation.v1.ModelOption.capabilities:type_name -> conversation.v1.ModelCapabilities
-	17, // 16: conversation.v1.ModelCapabilities.resolved_model:type_name -> conversation.v1.AgentModel
-	20, // 17: conversation.v1.ModelCapabilities.effort_unsupported:type_name -> conversation.v1.ModelEffortUnsupported
-	21, // 18: conversation.v1.ModelCapabilities.effort_supported:type_name -> conversation.v1.ModelEffortSupported
-	0,  // 19: conversation.v1.ModelEffortSupported.levels:type_name -> conversation.v1.AgentEffortLevel
-	23, // 20: conversation.v1.TokenUsage.input_hits:type_name -> conversation.v1.TokenCacheHits
-	24, // 21: conversation.v1.TokenUsage.input_misses:type_name -> conversation.v1.TokenCacheMisses
-	25, // 22: conversation.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
-	23, // [23:23] is the sub-list for method output_type
-	23, // [23:23] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	22, // [22:23] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	19, // 14: conversation.v1.ModelCatalog.options:type_name -> conversation.v1.ModelOption
+	17, // 15: conversation.v1.ModelOption.model:type_name -> conversation.v1.AgentModel
+	20, // 16: conversation.v1.ModelOption.capabilities:type_name -> conversation.v1.ModelCapabilities
+	17, // 17: conversation.v1.ModelCapabilities.resolved_model:type_name -> conversation.v1.AgentModel
+	21, // 18: conversation.v1.ModelCapabilities.effort_unsupported:type_name -> conversation.v1.ModelEffortUnsupported
+	22, // 19: conversation.v1.ModelCapabilities.effort_supported:type_name -> conversation.v1.ModelEffortSupported
+	0,  // 20: conversation.v1.ModelEffortSupported.levels:type_name -> conversation.v1.AgentEffortLevel
+	24, // 21: conversation.v1.TokenUsage.input_hits:type_name -> conversation.v1.TokenCacheHits
+	25, // 22: conversation.v1.TokenUsage.input_misses:type_name -> conversation.v1.TokenCacheMisses
+	26, // 23: conversation.v1.model_marker_literal:extendee -> google.protobuf.EnumValueOptions
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	23, // [23:24] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_api_proto_init() }
@@ -1849,8 +1901,8 @@ func file_conversation_v1_api_proto_init() {
 	}
 	file_conversation_v1_api_proto_msgTypes[2].OneofWrappers = []any{}
 	file_conversation_v1_api_proto_msgTypes[3].OneofWrappers = []any{}
-	file_conversation_v1_api_proto_msgTypes[16].OneofWrappers = []any{}
-	file_conversation_v1_api_proto_msgTypes[17].OneofWrappers = []any{
+	file_conversation_v1_api_proto_msgTypes[17].OneofWrappers = []any{}
+	file_conversation_v1_api_proto_msgTypes[18].OneofWrappers = []any{
 		(*ModelCapabilities_EffortUnsupported)(nil),
 		(*ModelCapabilities_EffortSupported)(nil),
 	}
@@ -1860,7 +1912,7 @@ func file_conversation_v1_api_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conversation_v1_api_proto_rawDesc), len(file_conversation_v1_api_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   23,
+			NumMessages:   24,
 			NumExtensions: 1,
 			NumServices:   0,
 		},

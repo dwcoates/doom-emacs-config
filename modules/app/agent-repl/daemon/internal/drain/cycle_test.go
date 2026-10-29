@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -250,5 +251,48 @@ func TestTheSweepLeavesACycleParkThatIsComingBackUp(t *testing.T) {
 	// Assert
 	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalKeepaliveCycle {
 		t.Fatalf("terminal = %+v, want the park left to the restore", term)
+	}
+}
+
+func TestAVisitStandDownStandsTheSessionDownForItsOwnReason(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+
+	// Act
+	h.c.VisitDown(ws, beatAfter)
+
+	// Assert
+	killed := h.stand.Killed()
+	if len(killed) != 1 || killed[0].WS != ws || killed[0].Force || killed[0].Life != shimlife.StandDownSettingsVisit {
+		t.Fatalf("kills = %+v, want one graceful settings_visit stand-down", killed)
+	}
+}
+
+func TestAVisitStandDownRecordsItsOwnReason(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+
+	// Act
+	h.c.VisitDown(ws, beatAfter)
+
+	// Assert
+	if term := h.terminal(t, ws); term == nil || !strings.Contains(term.Detail, "settings pick") {
+		t.Fatalf("terminal = %+v, want the settings visit's reason", term)
+	}
+}
+
+func TestAVisitStandDownSkipsASessionATurnEngagedSinceThePick(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, beatAfter.Add(time.Minute))
+
+	// Act
+	h.c.VisitDown(ws, beatAfter)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("kills = %+v, want none after a prompt ran since the pick", killed)
 	}
 }
