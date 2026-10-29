@@ -73,6 +73,7 @@
 (declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
 (declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
 (declare-function agent-repl--webhost-id "webhost" (ws))
+(declare-function agent-repl-link-successor "daemon-link" ())
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-roster-status-for-ws "roster" (ws))
@@ -228,9 +229,13 @@ Neither the page the host shows nor the current workspace\='s is ever
 unloaded, nor one already unloaded, nor one whose unload is already being
 reported, nor one whose tab's open is in flight: the daemon answers that
 open once the page has drawn, so a page dropped under it left the tab
-unanswered for good (2026-10-29)."
+unanswered for good (2026-10-29).  NOTHING IS UNLOADED WHILE A HANDOVER\='S
+SUCCESSOR IS ATTACHED: the successor awaits every page whose stream stood
+at the announcement (rollout's rendezvous), and the statuses a transfer
+moves through would otherwise drop pages it is waiting on."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-    (and (buffer-live-p buf)
+    (and (null (agent-repl-link-successor))
+         (buffer-live-p buf)
          (agent-repl-webhost-has-page-p ws)
          (not (agent-repl-page-unload--on-screen-p ws))
          (not (agent-repl--ws-get ws :page-unloading))

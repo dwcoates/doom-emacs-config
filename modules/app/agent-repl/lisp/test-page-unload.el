@@ -45,6 +45,9 @@
 (defvar agent-repl-test-pu--opening nil
   "Workspaces whose tab's open the harness answers in flight.")
 
+(defvar agent-repl-test-pu--successor nil
+  "The handover successor the harness's link answers, nil outside a handover.")
+
 (defvar agent-repl-test-pu--residencies nil
   "Every residency report sent, newest first, as (WS RESIDENCY).")
 
@@ -77,6 +80,7 @@
            (agent-repl-test-pu--current nil)
            (agent-repl-test-pu--opening nil)
            (agent-repl-test-pu--residencies nil)
+           (agent-repl-test-pu--successor nil)
            (agent-repl-test-pu--residency-lands t)
            (agent-repl-test-pu--logged nil)
            (agent-repl-test-pu--report 'reported)
@@ -98,6 +102,7 @@
                        ((symbol-function 'agent-repl--ws-current-name)
                         (lambda () agent-repl-test-pu--current))
                        ((symbol-function 'agent-repl--webhost-id) (lambda (ws) (concat "id-" ws)))
+                       ((symbol-function 'agent-repl-link-successor) (lambda () agent-repl-test-pu--successor))
                        ((symbol-function 'agent-repl-host-report-page-residency)
                         (lambda (ws residency on-reported)
                           (push (list ws residency) agent-repl-test-pu--residencies)
@@ -609,6 +614,30 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
           agent-repl-test-pu--opening '("alpha"))
     ;; Act
     (agent-repl-page-unload-pass)
+    ;; Assert
+    (should-not agent-repl-test-pu--dropped)))
+
+(ert-deftest agent-repl-test-pu-nothing-is-unloaded-during-a-handover ()
+  "While a handover's successor is attached, no page is unloaded: the successor awaits it."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :inactive))
+          agent-repl-test-pu--successor 'successor-connection)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should-not agent-repl-test-pu--dropped)))
+
+(ert-deftest agent-repl-test-pu-a-drop-a-handover-overtook-is-kept ()
+  "A drop whose report lands after a handover's successor attached keeps the page."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :severed))
+          agent-repl-test-pu--report 'pending)
+    (agent-repl-page-unload-pass)
+    (setq agent-repl-test-pu--successor 'successor-connection)
+    ;; Act
+    (funcall (nth 1 (car agent-repl-test-pu--pending)))
     ;; Assert
     (should-not agent-repl-test-pu--dropped)))
 
