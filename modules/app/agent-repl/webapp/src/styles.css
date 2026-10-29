@@ -560,10 +560,10 @@
        design-dark-palette-tuner.html beside this module tunes the set. */
     /* The shared panel fill, Claude's code block. */
     --panel-bg: #1c1c1c;
-    /* The tool card and --assistant: --panel-bg moved 40% of the way to --bg,
-       #1c1c1c toward #121212, a touch above the composer, so a card still
-       lifts off the feed (2026-10-28). */
-    --tool-card-bg: #181818;
+    /* The tool card and --assistant: --panel-bg moved 60% of the way to --bg,
+       #1c1c1c toward #121212, so a card still lifts off the feed (2026-10-28),
+       a touch dimmer than the first 40% (2026-10-29). */
+    --tool-card-bg: #161616;
     /* Claude's sidebar: a step below the prompt bubble's #212121, still
        lighter than the feed (owner requests, 2026-10-28). */
     --sidebar-bg: #1a1a1a;
@@ -593,8 +593,9 @@
        darker"): #0978ea -> #086ed6, the same small lightness step the light
        theme's pair takes. The same step again (owner request, 2026-10-13,
        "just slightly darker"): #086ed6 -> #0764c2. */
-    /* The Claude desktop app's prompt bubble (owner request, 2026-10-28). */
-    --user: #252525;
+    /* The Claude desktop app's prompt bubble (owner request, 2026-10-28), a
+       touch brighter (2026-10-29). */
+    --user: #292929;
     /* A light purple, so a known command reads on the dark prompt blue. */
     --known-command: #ca9dd9;
     /* A held prompt wears the prompt's own fill (owner request, 2026-10-28):
@@ -1537,6 +1538,10 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 }
 
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* WORKSPACE NAMES ARE GREYSCALE (owner request, 2026-10-29): the repository
+   headers' ink while unviewed, the muted grey once viewed (below), and a cold
+   gate strikes the name in that muted grey whether or not it was viewed. */
+#ws-sidebar .row .name { color: var(--repo-head-expanded); }
 /* PARTIAL display mode (frontend.v1.RosterRowViewed): the user has already
    seen this workspace, so its NAME recedes to the secondary text colour. The
    status dot keeps its tone (owner ruling, 2026-10-13: a viewed done workspace
@@ -6511,7 +6516,7 @@ bubble-body.bubble-body { display: block; }
 /* A COLD GATE STRIKES THE NAME (owner ruling, 2026-10-13): the workspace is
    parked on its cold gate's choice. The name alone, in every section, never
    the mark or the when-column. */
-#ws-sidebar .ws[data-arm="coldGate"] > .row > .name { text-decoration: line-through; }
+#ws-sidebar .ws[data-arm="coldGate"] > .row > .name { text-decoration: line-through; color: var(--muted); }
 /* The glyph statuses are not discs: a box that centers a picture, so a
    breathing glyph shrinks about its own center. The box is the DOT'S width,
    not the picture's (owner request, 2026-10-08), and the picture is drawn at

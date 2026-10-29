@@ -1978,9 +1978,9 @@ describe("the unread turn end under an idle_async row", () => {
   const idle = { case: "idleAsync", value: {} } as const;
 
   it.each([
-    { name: "an unread done inks the name green", end: "done", want: "var(--ok)" },
-    { name: "an unread interrupted inks the name green", end: "interrupted", want: "var(--ok)" },
-    { name: "an unread failed turn inks the name turquoise", end: "turnFailed", want: "var(--turquoise)" },
+    { name: "an unread done leaves the name greyscale", end: "done", want: "var(--repo-head-expanded)" },
+    { name: "an unread interrupted leaves the name greyscale", end: "interrupted", want: "var(--repo-head-expanded)" },
+    { name: "an unread failed turn leaves the name greyscale", end: "turnFailed", want: "var(--repo-head-expanded)" },
   ] as const)("$name", ({ end, want }) => {
     // Arrange, Act.
     const drawn = drawRosterRow(
@@ -2006,12 +2006,12 @@ describe("the unread turn end under an idle_async row", () => {
     expect(paintOf(drawn, ":scope > .row > .st")).toBe("var(--async)");
   });
 
-  it("leaves a read idle_async row's name on the background's yellow", () => {
+  it("leaves a read idle_async row's name greyscale", () => {
     // Arrange, Act.
     const drawn = drawRosterRow(row({ id: "ws-1", status: idle }), sidebarContext(), "R");
 
     // Assert.
-    expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--async)");
+    expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--repo-head-expanded)");
     expect(drawn.hasAttribute("data-unread-turn-end")).toBe(false);
   });
 
@@ -2118,6 +2118,22 @@ describe("the row's display mode", () => {
     it("paints a viewed row's name grey while its dot keeps its tone", () => {
       // Arrange, Act.
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} }, viewed: true }), sidebarContext(), "R");
+
+      // Assert.
+      expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--muted)");
+    });
+
+    it("paints an unviewed row's name in the repository headers' ink", () => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} } }), sidebarContext(), "R");
+
+      // Assert.
+      expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--repo-head-expanded)");
+    });
+
+    it.each([true, false])("paints a cold-gate name muted and struck when viewed is %s", (viewed) => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "coldGate", value: {} }, viewed }), sidebarContext(), "R");
 
       // Assert.
       expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--muted)");
