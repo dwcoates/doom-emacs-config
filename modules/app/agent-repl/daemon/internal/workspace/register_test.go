@@ -212,7 +212,7 @@ func TestRegisterMatchesTheNamedRepositoryInAnySpelling(t *testing.T) {
 	}
 }
 
-func TestRegisterDerivesTheDisplayNameFromTheDirectory(t *testing.T) {
+func TestRegisterNamesTheMainWorktreeAfterItsRepository(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	dir := f.git.mainWorktree
@@ -223,8 +223,27 @@ func TestRegisterDerivesTheDisplayNameFromTheDirectory(t *testing.T) {
 	}
 
 	// Assert.
-	if f.db.registered[0].Name != filepath.Base(dir) {
-		t.Fatalf("registered name = %q, want %q", f.db.registered[0].Name, filepath.Base(dir))
+	want := wsm.MainWorkspaceName(filepath.Base(dir))
+	if f.db.registered[0].Name != want {
+		t.Fatalf("registered name = %q, want %q", f.db.registered[0].Name, want)
+	}
+}
+
+func TestRegisterDerivesALinkedWorktreesNameFromItsDirectory(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+	f.git.belongsTo(t, dir, f.git.mainWorktree)
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Assert.
+	got := f.db.registered[len(f.db.registered)-1].Name
+	if got != filepath.Base(dir) {
+		t.Fatalf("registered name = %q, want %q", got, filepath.Base(dir))
 	}
 }
 
@@ -1127,9 +1146,9 @@ func TestEnsureMainWorktreesRegistersEveryMissingOneBornClosed(t *testing.T) {
 	missing := worktreeDir(t)
 	held := worktreeDir(t)
 	f.db.repositories = append(f.db.repositories,
-		wsm.Repository{ID: "repo-missing", Dir: missing, DefaultBranch: "trunk"},
-		wsm.Repository{ID: "repo-held", Dir: held, DefaultBranch: "master"})
-	f.db.with(wsm.Workspace{ID: "ws-held", Dir: held, Repo: "repo-held"})
+		wsm.Repository{ID: "repo-missing", Dir: missing, Name: "missing", DefaultBranch: "trunk"},
+		wsm.Repository{ID: "repo-held", Dir: held, Name: "held", DefaultBranch: "master"})
+	f.db.with(wsm.Workspace{ID: "ws-held", Dir: held, Repo: "repo-held", Name: "main (held)"})
 	f.git.belongsTo(t, missing, missing)
 
 	// Act.
@@ -1153,8 +1172,8 @@ func TestEnsureMainWorktreesPublishesNothingWhenNothingWasMissing(t *testing.T) 
 	// Arrange.
 	f := newFixture(t)
 	held := worktreeDir(t)
-	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-held", Dir: held})
-	f.db.with(wsm.Workspace{ID: "ws-held", Dir: held, Repo: "repo-held"})
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-held", Dir: held, Name: "held"})
+	f.db.with(wsm.Workspace{ID: "ws-held", Dir: held, Repo: "repo-held", Name: "main (held)"})
 
 	// Act.
 	if err := f.verbs.EnsureMainWorktrees(context.Background()); err != nil {
@@ -1307,5 +1326,81 @@ func TestRegistrationRefusesWhenTheLinksCannotBeRead(t *testing.T) {
 		Message: "could not read the workspace's links for its title"})
 	if !ok || r.Context["workspace"] != "w1" {
 		t.Errorf("record = %+v, want an ERROR naming the workspace", r)
+	}
+}
+
+func TestEnsureMainWorktreesRenamesAMainWorkspaceRegisteredBeforeTheRule(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	held := worktreeDir(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-held", Dir: held, Name: "held"})
+	f.db.with(wsm.Workspace{ID: "ws-held", Dir: held, Repo: "repo-held", Name: "held"})
+
+	// Act.
+	if err := f.verbs.EnsureMainWorktrees(context.Background()); err != nil {
+		t.Fatalf("EnsureMainWorktrees: %v", err)
+	}
+
+	// Assert.
+	if got := f.db.workspaces["ws-held"].Name; got != "main (held)" {
+		t.Fatalf("main workspace name = %q, want %q", got, "main (held)")
+	}
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+	}
+}
+
+func TestEnsureMainWorktreesLeavesAnAlreadyRuleNamedMainWorkspaceAlone(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	held := worktreeDir(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-held", Dir: held, Name: "held"})
+	f.db.with(wsm.Workspace{ID: "ws-held", Dir: held, Repo: "repo-held", Name: "main (held)"})
+
+	// Act.
+	if err := f.verbs.EnsureMainWorktrees(context.Background()); err != nil {
+		t.Fatalf("EnsureMainWorktrees: %v", err)
+	}
+
+	// Assert.
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none", len(f.sidebar.registries))
+	}
+}
+
+func TestEnsureMainWorktreesFailsWhenTheRuleNameIsHeldByAnotherWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	held := worktreeDir(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-held", Dir: held, Name: "held"})
+	f.db.with(wsm.Workspace{ID: "ws-held", Dir: held, Repo: "repo-held", Name: "held"})
+	f.db.with(wsm.Workspace{ID: "ws-squatter", Dir: worktreeDir(t), Repo: "repo-held", Name: "main (held)"})
+
+	// Act.
+	err := f.verbs.EnsureMainWorktrees(context.Background())
+
+	// Assert.
+	if err == nil || !hasRecord(f, "error", opRegister) {
+		t.Fatalf("EnsureMainWorktrees = %v, want a failure recorded at ERROR", err)
+	}
+	if got := f.db.workspaces["ws-held"].Name; got != "held" {
+		t.Fatalf("main workspace name = %q, want it untouched", got)
+	}
+}
+
+func TestEnsureMainWorktreesSurfacesARenameThatFailed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	held := worktreeDir(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-held", Dir: held, Name: "held"})
+	f.db.with(wsm.Workspace{ID: "ws-held", Dir: held, Repo: "repo-held", Name: "held"})
+	f.db.setNameErr = errFake
+
+	// Act.
+	err := f.verbs.EnsureMainWorktrees(context.Background())
+
+	// Assert.
+	if !errors.Is(err, errFake) || !hasRecord(f, "error", opRegister) {
+		t.Fatalf("EnsureMainWorktrees = %v, want the rename's failure recorded at ERROR", err)
 	}
 }

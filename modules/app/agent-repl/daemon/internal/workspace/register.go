@@ -147,6 +147,9 @@ func (v *verbs) registerRow(ctx context.Context, dir string, facts wsm.RegisterF
 	}
 	if facts.Name == "" {
 		facts.Name = filepath.Base(normalized)
+		if wsm.IsMainWorktree(normalized, facts.RepoDir) {
+			facts.Name = wsm.MainWorkspaceName(filepath.Base(facts.RepoDir))
+		}
 		global.Debug(opRegister, "derived the display name from the directory", dlog.Context{"name": facts.Name})
 	}
 	// THE MAIN WORKTREE IS REGISTERED FIRST. A repository is known exactly as
@@ -414,6 +417,13 @@ func (v *verbs) EnsureMainWorktrees(ctx context.Context) error {
 		if registered {
 			ensured++
 		}
+		renamed, err := v.nameMainWorktree(ctx, global, repo)
+		if err != nil {
+			return fmt.Errorf("ensure the main worktrees: %w", err)
+		}
+		if renamed {
+			ensured++
+		}
 	}
 	// ONE ROSTER for every main worktree the walk registered, and none when it
 	// registered nothing.
@@ -424,6 +434,45 @@ func (v *verbs) EnsureMainWorktrees(ctx context.Context) error {
 		"repositories": len(repositories), "registered": ensured,
 	})
 	return nil
+}
+
+// nameMainWorktree gives REPO's main worktree workspace its rule name
+// (wsm.MainWorkspaceName) when it holds another, and answers whether it
+// renamed it. It is how a main workspace registered before the rule is brought
+// under it. The name is written directly: the rule's name is not one a user
+// may supply, so the supplied-name check (SetName) would refuse it. A name
+// another workspace already holds is a defect and fails the boot.
+func (v *verbs) nameMainWorktree(ctx context.Context, log dlog.Logger, repo wsm.Repository) (bool, error) {
+	main, err := v.deps.DB.WorkspaceByDir(ctx, repo.Dir)
+	if err != nil {
+		log.Error(opRegister, "could not read the repository's main-worktree workspace to name it", dlog.Context{
+			"repository": string(repo.ID), "dir": repo.Dir, "cause": err.Error(),
+		})
+		return false, fmt.Errorf("name the main worktree %q: %w", repo.Dir, err)
+	}
+	name := wsm.MainWorkspaceName(repo.Name)
+	if main.Name == name {
+		return false, nil
+	}
+	fields := dlog.Context{"workspace": string(main.ID), "name": name, "previous": main.Name, "repo_dir": repo.Dir}
+	v.names.mu.Lock()
+	defer v.names.mu.Unlock()
+	held, err := v.holdersLocked(ctx, "")
+	if err != nil {
+		log.Error(opRegister, "could not read the names already taken; the main workspace is not renamed", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("name the main worktree %q: %w", repo.Dir, err)
+	}
+	if holder, taken := held[name]; taken && holder.Workspace != main.ID {
+		err := fmt.Errorf("the name %q is already held by workspace %s", name, holder.Workspace)
+		log.Error(opRegister, "the main workspace's rule name is already taken", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("name the main worktree %q: %w", repo.Dir, err)
+	}
+	if err := v.deps.DB.SetName(ctx, main.ID, name); err != nil {
+		log.Error(opRegister, "could not record the main workspace's rule name", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("name the main worktree %q: %w", repo.Dir, err)
+	}
+	log.Info(opRegister, "renamed the repository's main workspace to its rule name", fields)
+	return true, nil
 }
 
 // The session terminal registration reads beside a park. `deleted` refuses

@@ -32,6 +32,19 @@ func TestIsMainWorktree(t *testing.T) {
 	}
 }
 
+func TestMainWorkspaceName(t *testing.T) {
+	// Arrange
+	repository := "doom"
+
+	// Act
+	got := MainWorkspaceName(repository)
+
+	// Assert
+	if got != "main (doom)" {
+		t.Fatalf("MainWorkspaceName(%q) = %q, want %q", repository, got, "main (doom)")
+	}
+}
+
 // TestNoSiteHandRollsTheMainWorktreeRule pins that the registry and the
 // workspace verbs ask IsMainWorktree rather than comparing a directory with a
 // repository directory themselves.
