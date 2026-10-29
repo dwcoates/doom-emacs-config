@@ -2301,7 +2301,8 @@ func TestTheShippedSubsectionPlacementBriefNamesTheVerbs(t *testing.T) {
 		t.Fatalf("Splice: %v", err)
 	}
 	for _, want := range []string{"agent-repld workspace subsections here", "agent-repld workspace place here -subsection NAME",
-		"agent-repld workspace place here WS... -new-subsection NAME"} {
+		"agent-repld workspace place here WS... -new-subsection NAME",
+		"read what it points at"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("brief = %q, want it to name %q", text, want)
 		}
