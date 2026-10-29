@@ -501,7 +501,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE TOPBAR IS BUILT BEFORE THE FEED, which raises onto its warning chip
 	// every row it cannot place, and before the fault hook, which raises the
 	// faults the topbar carries (a failed deploy) onto every strip.
-	topbarResolver, err := topbar.New(colors, p.Surfaces)
+	// THE CONTROLS OUTLIVE THE SHIM: the topbar keeps them in wsm (layout 89).
+	topbarResolver, err := topbar.New(colors, p.Surfaces, topbar.WithSelectionStore(p.DB))
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the topbar resolver: %w", err)
 	}

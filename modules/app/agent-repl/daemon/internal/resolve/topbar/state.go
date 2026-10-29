@@ -350,6 +350,15 @@ func (s *wsState) sessionless() bool {
 	return s.park == wsm.ParkHibernated || s.coldGate || !s.started
 }
 
+// controlsWithheld reports whether the three session controls (model,
+// permission mode, effort) are withheld. Only a standing cold gate withholds
+// them: its answer comes before anything else the workspace does. A workspace
+// with no shim otherwise draws the controls it last knew, and a pick starts
+// the shim (owner request, 2026-10-29; selections.go).
+func (s *wsState) controlsWithheld() bool {
+	return s.coldGate
+}
+
 // ready reports whether the view can be resolved at all. THE GATE IS THE
 // WORKSPACE FACTS AND NOTHING ELSE — the naming (WSM's) and the account (the
 // config root's) — under the FIXED SCHEMA ruling of 2026-09-13.

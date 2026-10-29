@@ -813,28 +813,36 @@ func TestTheSessionLessStripDrawsEveryCellItAlwaysDraws(t *testing.T) {
 	}
 }
 
-func TestTheSessionLessStripLeavesItsTwoControlsAbsent(t *testing.T) {
-	// Arrange: a fully resolved workspace, so every control HAS been resolved
-	// and could have been carried through the park.
+func TestTheParkedStripKeepsItsTwoControls(t *testing.T) {
+	// Arrange: a fully resolved workspace whose shim then stands down. The
+	// controls outlive the shim (owner request, 2026-10-29): a pick starts it.
 	h := newHarness(t)
 	h.ready(t)
 
 	// Act
 	h.r.SetParked(testWS, wsm.ParkHibernated)
 
-	// Assert: absence is how "no session has stated this" is said; the client
-	// draws the dash in the slot.
+	// Assert
 	view := h.view(t)
-	for _, tc := range []struct {
-		element string
-		present bool
-	}{
-		{"model_selector", view.GetModelSelector() != nil},
-		{"permission_mode_picker", view.GetPermissionModePicker() != nil},
-	} {
-		if tc.present {
-			t.Errorf("%s is present on the session-less strip, want absent", tc.element)
-		}
+	if view.GetModelSelector() == nil || view.GetPermissionModePicker() == nil {
+		t.Fatalf("model selector %v, permission picker %v: want both kept on the parked strip",
+			view.GetModelSelector(), view.GetPermissionModePicker())
+	}
+}
+
+func TestTheColdGatedStripLeavesItsTwoControlsAbsent(t *testing.T) {
+	// Arrange: the gate's answer comes before anything else the workspace does.
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 100_000})
+
+	// Assert
+	view := h.view(t)
+	if view.GetModelSelector() != nil || view.GetPermissionModePicker() != nil {
+		t.Fatalf("model selector %v, permission picker %v: want both absent at the cold gate",
+			view.GetModelSelector(), view.GetPermissionModePicker())
 	}
 }
 
