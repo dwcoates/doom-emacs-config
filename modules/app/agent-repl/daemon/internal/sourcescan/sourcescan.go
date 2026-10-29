@@ -66,6 +66,21 @@ func Count(t testing.TB, substr string) int {
 	return n
 }
 
+// Sites names the production file of each occurrence of substr, once per
+// occurrence and in file order: the one-home tests' list, which reads
+// ["keeper.go"] when the rule holds and names every stray site when it does
+// not.
+func Sites(t testing.TB, substr string) []string {
+	t.Helper()
+	var sites []string
+	for _, f := range Production(t) {
+		for range strings.Count(string(f.Source), substr) {
+			sites = append(sites, f.Name)
+		}
+	}
+	return sites
+}
+
 // DaemonRoot answers the daemon module's root: the nearest directory at or
 // above the package under test that holds go.mod.
 func DaemonRoot(t testing.TB) string {

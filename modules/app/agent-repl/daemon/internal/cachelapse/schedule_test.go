@@ -82,8 +82,10 @@ func TestScheduleArmsNoBeat(t *testing.T) {
 		arrange func(h *harness)
 	}{
 		{name: "when no turn has ended", arrange: func(h *harness) { h.db.records[theWorkspace] = visible() }},
-		{name: "when the cache lapsed and no turn moved its clock", arrange: func(h *harness) {
-			h.keeper.lapsedAt[theWorkspace] = *h.db.records[theWorkspace].LastTurnEndedAt
+		{name: "when its cache is known cold and no turn has closed since", arrange: func(h *harness) {
+			rec := h.db.records[theWorkspace]
+			rec.CacheColdTurnAt = rec.LastTurnEndedAt
+			h.db.records[theWorkspace] = rec
 		}},
 		{name: "when the session stands at its cold gate", arrange: func(h *harness) { h.gate = coldLapsed() }},
 		{name: "when there is no session", arrange: func(h *harness) { delete(h.db.sessions, theWorkspace) }},
@@ -120,17 +122,19 @@ func TestScheduleArmsNoBeat(t *testing.T) {
 	}
 }
 
-func TestScheduleBeatsAgainOnceATurnMovesALapsedClock(t *testing.T) {
+func TestScheduleBeatsAgainOnceATurnClosesAfterTheColdMark(t *testing.T) {
 	// Arrange
-	h := newHarness(t, beatable(visible(), 10*time.Minute))
-	h.keeper.lapsedAt[theWorkspace] = now.Add(-time.Hour)
+	rec := beatable(visible(), 10*time.Minute)
+	marked := now.Add(-time.Hour)
+	rec.CacheColdTurnAt = &marked
+	h := newHarness(t, rec)
 
 	// Act
 	h.keeper.schedule(context.Background(), theWorkspace, "test")
 
 	// Assert
 	if _, armed := h.keeper.beats[theWorkspace]; !armed {
-		t.Fatal("no beat was armed after a turn moved the clock past the lapse")
+		t.Fatal("no beat was armed after a turn closed past the cold mark")
 	}
 }
 

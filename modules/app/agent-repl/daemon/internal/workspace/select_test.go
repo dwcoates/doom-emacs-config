@@ -731,16 +731,8 @@ func TestRecordHiddenSurfacesAFailedWriteAtError(t *testing.T) {
 // hand instead of through recordHidden, which would skip the roster push or
 // the cache keeper's edge.
 func TestTheHiddenFlagHasOneWrite(t *testing.T) {
-	// Arrange
-	files := sourcescan.Production(t)
-
 	// Act
-	var sites []string
-	for _, file := range files {
-		for range strings.Count(string(file.Source), "v.deps.DB.SetHidden(") {
-			sites = append(sites, file.Name)
-		}
-	}
+	sites := sourcescan.Sites(t, "v.deps.DB.SetHidden(")
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "select.go" {

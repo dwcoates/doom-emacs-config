@@ -114,7 +114,6 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	if record.LastTurnEndedAt == nil {
 		return none("no turn has ended, so there is no cache to keep")
 	}
-	ended := *record.LastTurnEndedAt
 	// THE CACHE CLOCK, NOT THE TURNS': a keep-alive writes the cache as a
 	// turn does, and timed from the turns alone the beat after one was already
 	// overdue (2026-10-26).
@@ -125,8 +124,12 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	if record.Closed && !queued && (record.Closure == nil || !clock.Before(record.Closure.At)) {
 		return none("it is closed and its last keep-alive is spent")
 	}
-	if lapsed, ok := k.lapsedAt[ws]; ok && !ended.After(lapsed) {
-		return none("its cache lapsed and no turn has moved its clock since; the cold gate owns the next request")
+	// A CACHE KNOWN COLD IS NEVER BEATEN (owner ruling, 2026-10-29): its cold
+	// gate was raised or answered, or its shim judged it lapsed, and no turn
+	// has closed since. Passing the gate makes no request of its own, so the
+	// first keep-alive is owed an interval after the next real turn's end.
+	if record.CacheKnownCold() {
+		return none("its cache is known cold and no turn has closed since; the next turn's end owes the next keep-alive")
 	}
 	if _, gated := k.deps.ColdGate(ws); gated {
 		return none("its session stands at the cold gate")
@@ -274,12 +277,14 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			dlog.Merge(fields, dlog.Context{"live_items": answer.GetSkipped().GetDetachedWorkLive().GetLiveItems()}))
 	case answer.GetSkipped().GetCacheLapsed() != nil:
 		observe(BeatOutcomeCacheLapsed)
-		record, err := k.deps.DB.Workspace(ctx, ws)
-		if err == nil && record.LastTurnEndedAt != nil {
-			k.lapsedAt[ws] = *record.LastTurnEndedAt
-		}
 		log.Info(opDrive, "the cache had already lapsed; no keep-alive is sent until a turn moves its clock",
 			dlog.Merge(fields, dlog.Context{"lapsed_at_ms": answer.GetSkipped().GetCacheLapsed().GetLapsedAtMs()}))
+		if k.markCold(ctx, ws, "the shim judged the cache lapsed") != nil {
+			// UNMARKED, the beat would be asked again at once and judged lapsed
+			// again: it is asked again shortly instead, and markCold recorded
+			// why at ERROR.
+			k.beats[ws] = now.Add(BeatRetry)
+		}
 	default:
 		observe(BeatOutcomeUnnamedJudgment)
 		log.Error(opDrive, "the shim answered the keep-alive with a judgment this daemon does not name", dlog.Merge(fields, dlog.Context{

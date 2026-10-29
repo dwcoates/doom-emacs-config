@@ -3091,7 +3091,11 @@ its own. It is stood down only once the session has been free (no turn, no
 live detached work) a whole interval, so the user has about an hour after
 the work ends to prompt with no shim start; never under a turn or live
 detached work, nor for the selected workspace, nor once a real turn ran
-since the beat. A parked
+since the beat. A CACHE KNOWN COLD IS NEVER BEATEN (owner ruling,
+2026-10-29): passing the cold gate by any answer makes no LLM request of its
+own. A gate's raise and answer, and a shim judging a beat's cache lapsed,
+mark the row (`cache_cold_turn_at`, `wsm.Workspace.CacheKnownCold`), and no
+keep-alive is owed until a real turn closes after the mark. A parked
 session is drawn as the live idle session it stands in for (`wsm.Park`).
 ONLY A PROMPT, A KEEP-ALIVE, A COLD GATE'S ANSWER OR A RESTART BRINGS A SHIM UP
 (owner ruling, 2026-10-28): a look, an open, a history read, a boot and a

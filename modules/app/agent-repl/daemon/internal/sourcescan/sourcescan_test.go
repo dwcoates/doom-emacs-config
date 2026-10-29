@@ -76,6 +76,66 @@ func TestCountSumsAcrossProductionFilesAndIgnoresTests(t *testing.T) {
 	}
 }
 
+func TestSitesNamesEachOccurrencesFileInOrderAndIgnoresTests(t *testing.T) {
+	// Arrange
+	packageDir(t, map[string]string{"b.go": "x.Rollback()", "a.go": "x.Rollback() x.Rollback()", "a_test.go": "x.Rollback()"})
+
+	// Act
+	sites := Sites(t, ".Rollback()")
+
+	// Assert
+	if !slices.Equal(sites, []string{"a.go", "a.go", "b.go"}) {
+		t.Fatalf("Sites = %v, want a.go twice then b.go, from production files only", sites)
+	}
+}
+
+func TestSitesOfAnAbsentPatternIsEmpty(t *testing.T) {
+	// Arrange
+	packageDir(t, map[string]string{"a.go": "x.Commit()"})
+
+	// Act
+	sites := Sites(t, ".Rollback()")
+
+	// Assert
+	if len(sites) != 0 {
+		t.Fatalf("Sites = %v, want none", sites)
+	}
+}
+
+// Every one-home test lists its sites through Sites, so no hand-rolled copy
+// can drift from it.
+func TestNoDaemonTestHandRollsASitesList(t *testing.T) {
+	// Arrange
+	root := filepath.Join("..", "..")
+	var offenders []string
+
+	// Act
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, "_test.go") || strings.Contains(path, string(filepath.Separator)+"sourcescan"+string(filepath.Separator)) {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(body), "sites = append(sites, file.Name)") {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("WalkDir: %v", err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("these tests list their sites by hand instead of with sourcescan.Sites: %v", offenders)
+	}
+}
+
 // Every daemon test that reads its package's production sources goes through
 // this package, so no hand-rolled copy can drift from the skip-the-tests rule.
 func TestNoDaemonTestHandRollsAProductionSourceScan(t *testing.T) {
