@@ -1190,6 +1190,38 @@ CURRENT is shown.  Binds `requests' to the (WS TRIGGER) pairs requested."
                 (lambda (ws trigger) (push (list ws trigger) requests) t)))
        ,@body)))
 
+(defmacro agent-repl-test-commands--with-working (states current &rest body)
+  "Run BODY on bar a b c d with STATES, an alist of name to status arm, CURRENT active."
+  (declare (indent 2))
+  `(agent-repl-test-commands--with-bar '("a" "b" "c" "d") ,current
+     (cl-letf (((symbol-function 'agent-repl-status-tab-state)
+                (lambda (ws) (cdr (assoc ws ,states)))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-switch-working-right-skips-idle-tabs ()
+  "`M-s-]' lands on the next working tab, passing idle ones."
+  (agent-repl-test-commands--with-working '(("a" . :thinking) ("b" . :done) ("c" . :done) ("d" . :compacting)) "a"
+    (agent-repl-switch-working-right)
+    (should (equal agent-repl-test-commands--switched "d"))))
+
+(ert-deftest agent-repl-test-commands-switch-working-left-wraps ()
+  "`M-s-[' from the first working tab wraps to the last."
+  (agent-repl-test-commands--with-working '(("b" . :thinking) ("d" . :submitting)) "b"
+    (agent-repl-switch-working-left)
+    (should (equal agent-repl-test-commands--switched "d"))))
+
+(ert-deftest agent-repl-test-commands-switch-working-from-idle-current ()
+  "An idle current tab still steps to the nearest working tab."
+  (agent-repl-test-commands--with-working '(("a" . :thinking) ("c" . :thinking)) "b"
+    (agent-repl-switch-working-right)
+    (should (equal agent-repl-test-commands--switched "c"))))
+
+(ert-deftest agent-repl-test-commands-switch-working-alone-stays-put ()
+  "With no other working tab the walk wraps back to the current tab."
+  (agent-repl-test-commands--with-working '(("a" . :done)) "a"
+    (agent-repl-switch-working-right)
+    (should (equal agent-repl-test-commands--switched "a"))))
+
 (ert-deftest agent-repl-test-commands-switch-older-lands-on-the-previously-viewed ()
   "`s-[' from the most recent goes to the workspace viewed before it."
   (agent-repl-test-commands--with-history '("a" "b" "c") nil '("c" "a" "b") "c"

@@ -160,6 +160,10 @@ the module."
 (map! "s-{" #'agent-repl-switch-left
       "s-}" #'agent-repl-switch-right)
 
+;; The same steps narrowed to the WORKING tabs (those a turn is running in).
+(map! "M-s-[" #'agent-repl-switch-working-left
+      "M-s-]" #'agent-repl-switch-working-right)
+
 ;; The same steps over the SELECTION HISTORY rather than the bar: `s-[' goes
 ;; to the workspace viewed before, and again to the one before that; `s-]'
 ;; walks back toward the most recent.  A step records no view, so the
