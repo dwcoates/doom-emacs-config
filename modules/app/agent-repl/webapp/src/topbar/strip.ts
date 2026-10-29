@@ -229,7 +229,7 @@ export function bindTitleLinkMenu(element: HTMLElement, menu: TopbarTitleLinkMen
  * The summary's menu: one row per shown link, in the served order (most
  * recently set first), each the label drawn as its link with the url beneath
  * it as the row's dim second line, the way a model's description sits under
- * its name. A pick closes the menu as it opens the link.
+ * its name. A click anywhere in a row closes the menu as it opens the link.
  */
 export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext): HTMLElement {
   const list = document.createElement("div");
@@ -244,6 +244,14 @@ export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext):
     row.title = item.url;
     const link = renderExternalLink(tc.ctx, { text: item.label, url: item.url });
     link.addEventListener("click", () => tc.reveals.close());
+    // The whole row opens its link: a click on the row's padding or its url
+    // line is relayed to the label's own click, so the one open path (and its
+    // refusal drawing) is the link's. A click on the label itself already
+    // opened it.
+    row.addEventListener("click", (event) => {
+      if (link.contains(event.target as Node)) return;
+      link.click();
+    });
     const url = document.createElement("span");
     url.className = "topbar-title-link-url";
     url.textContent = item.url;

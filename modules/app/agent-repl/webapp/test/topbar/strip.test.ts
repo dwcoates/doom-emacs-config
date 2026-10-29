@@ -459,6 +459,33 @@ describe("drawTopbarTitle with several shown links", () => {
     }
   });
 
+  it("opens a row's link when its url line is clicked", async () => {
+    const { ctx, opened } = recordingContext();
+    const { host, title } = drawn(ctx);
+    click(title);
+    click(openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-url")[1]!);
+    await vi.waitFor(() => expect(opened.map((req) => req.url)).toEqual([DOC]));
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("opens a row's link when the row's own background is clicked", async () => {
+    const { ctx, opened } = recordingContext();
+    const { host, title } = drawn(ctx);
+    click(title);
+    click(openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")[0]!);
+    await vi.waitFor(() => expect(opened.map((req) => req.url)).toEqual([PR]));
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("opens a label click's link exactly once", async () => {
+    const { ctx, opened } = recordingContext();
+    const { host, title } = drawn(ctx);
+    click(title);
+    click(openPanel(host)!.querySelectorAll("a")[0]!);
+    await vi.waitFor(() => expect(opened.length).toBeGreaterThan(0));
+    expect(opened.map((req) => req.url)).toEqual([PR]);
+  });
+
   it("draws each row's label like a model selector's name: white, the same size, never underlined", () => {
     // Arrange
     const teardown = installStylesheet();
