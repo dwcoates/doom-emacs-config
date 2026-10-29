@@ -3564,6 +3564,42 @@ describe("the held prompt's fill", () => {
     expect(got).toBe(value);
   });
 
+  it("draws the held status badge a little bolder than the plain badge", () => {
+    // Arrange / Act
+    const got = [valueOf(allDeclarationsOf(".badge.held-badge"), "font-weight"), valueOf(allDeclarationsOf(".badge"), "font-weight")];
+    // Assert
+    expect(got).toEqual(["500", undefined]);
+  });
+
+  it.each(["font-size", "color"])("keeps the held status badge at the plain badge's %s", (property) => {
+    // Arrange / Act
+    const got = valueOf(allDeclarationsOf(".badge.held-badge"), property);
+    // Assert
+    expect(got).toBeUndefined();
+  });
+
+  it("draws a held prompt's queued age smaller than the status badge", () => {
+    // Arrange / Act
+    const age = valueOf(allDeclarationsOf(".queued-age"), "font-size");
+    const badge = valueOf(allDeclarationsOf(".badge"), "font-size");
+    // Assert
+    expect([age, badge]).toEqual(["0.62rem", "calc(0.7rem * var(--feed-text-scale))"]);
+  });
+
+  it("inks a held prompt's queued age with the darker queued-age token", () => {
+    // Arrange / Act
+    const got = valueOf(allDeclarationsOf(".queued-age"), "color");
+    // Assert
+    expect(got).toBe("var(--queued-age-ink)");
+  });
+
+  it("derives the queued-age ink from --muted mixed toward black, so it is darker in either theme", () => {
+    // Arrange / Act
+    const got = valueOf(declarationsOf(":root") ?? "", "--queued-age-ink");
+    // Assert
+    expect(got).toBe("color-mix(in srgb, var(--muted) 65%, #000000)");
+  });
+
   it("keeps the outline on every other badge, a further fact's quiet note pill among them", () => {
     // Arrange / Act / Assert
     expect([valueOf(allDeclarationsOf(".badge"), "border"), allDeclarationsOf(".badge.queued-status-note")]).toEqual([
