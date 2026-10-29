@@ -379,6 +379,9 @@ type Verbs interface {
 	// CarryOutSelfClose carries out the close a workspace asked of itself,
 	// when one is marked (SelfCloses calls it at each turn's end).
 	CarryOutSelfClose(ctx context.Context, ws ids.WorkspaceID) error
+	// UnfoldSubsectionForWork expands the collapsed subsection a workspace
+	// sits in, when its turn starts (SubsectionUnfolds calls it).
+	UnfoldSubsectionForWork(ctx context.Context, ws ids.WorkspaceID) error
 	// Kill is the big red button: forced session death, never blocks, data
 	// survives. It is BeginKill and its Teardown, run in one call.
 	Kill(ctx context.Context, ws ids.WorkspaceID) error

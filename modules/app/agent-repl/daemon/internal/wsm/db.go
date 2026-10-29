@@ -62,6 +62,9 @@ type DB interface {
 	// SetSubsectionFolded records whether a subsection is collapsed; an
 	// unknown subsection is UnknownSubsectionError (subsectionfolds.go).
 	SetSubsectionFolded(ctx context.Context, id SubsectionID, folded bool) error
+	// ExpandSubsectionHolding expands the subsection a workspace's family sits
+	// in, answering whether it was collapsed (workspaces.go).
+	ExpandSubsectionHolding(ctx context.Context, id WorkspaceID) (bool, error)
 	// MarkClosed records that a workspace's editor state is torn down, when,
 	// and by whom; the first close's record stands (see the store's doc).
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error
