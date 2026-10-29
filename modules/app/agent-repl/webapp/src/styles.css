@@ -12,6 +12,10 @@
      taken a slight step darker, mixed toward black so it is darker in either
      theme (owner request, 2026-10-26). */
   --detail-value: color-mix(in srgb, var(--muted) 82%, #000000);
+  /* A held prompt's ticking "queued 12s ago" age: `--muted` taken a clear
+     step darker, mixed toward black so it is darker in either theme and
+     reads apart from the status badge beside it (owner request, 2026-10-29). */
+  --queued-age-ink: color-mix(in srgb, var(--muted) 65%, #000000);
   /* The gutter bar a Recently Merged row merged TODAY carries: a slight
      off-white beside the selection's accent bar (owner request, 2026-10-11).
      The light theme cannot draw off-white on its white ground, so it takes a
@@ -6240,10 +6244,12 @@ bubble-body.bubble-body { display: block; }
 }
 
 /* The ticking queued-at age, last in the strip after the badges. Tabular so
-   the number does not shuffle once a second. */
+   the number does not shuffle once a second.
+   Smaller and darker than the status badge so the two never read as one
+   (owner request, 2026-10-29). */
 .queued-age {
-  font-size: 0.7rem;
-  color: var(--muted);
+  font-size: 0.62rem;
+  color: var(--queued-age-ink);
   font-variant-numeric: tabular-nums;
 }
 /* THE HELD STATUS BADGES (src/held/held-prompt.ts `HELD_STATUS_BADGES`, owner
@@ -6256,7 +6262,9 @@ bubble-body.bubble-body { display: block; }
    widening the card. */
 /* THE HELD STATUS IS ITS WORDS ALONE (owner request, 2026-10-25): no
    outline, and no side padding, so its text starts at the strip's edge. */
-.badge.held-badge { border: none; padding-left: 0; padding-right: 0; }
+/* A LITTLE BOLDER than every other badge (owner request, 2026-10-29), at the
+   badge's own size and tone, so the status leads the strip. */
+.badge.held-badge { border: none; padding-left: 0; padding-right: 0; font-weight: 500; }
 .badge.held-badge.amber { color: var(--merge-border); }
 .badge.held-badge.teal { color: var(--hibernated); }
 /* A classifier still deciding: a slow breath, which is how every other
