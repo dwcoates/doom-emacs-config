@@ -19,6 +19,7 @@
  * preferences it once stored in `localStorage` starts from the daemon's view
  * instead, says so once at INFO, and drops what it stored.
  */
+import { installVersionHover } from "./memory.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { createDrawnStatusLog } from "../drawn-status.js";
 import { log } from "../log.js";
@@ -295,6 +296,8 @@ function mountSidebarIn(
     bandFit.refit();
   });
   const head = drawRailHead(search, createAppSwitcher(ctx, dropdowns));
+  // THE VERSION HOVERS AGENT-REPL'S MEMORY (memory.ts), naming no workspace.
+  installVersionHover(ctx, head.version, head.element);
   host.replaceChildren(head.element, search.bar, arrangeStatus, body, arrangeLayer);
   // THE RAIL'S LOOPS RUN ON THE WALL CLOCK (wall-phase.ts), so neither a
   // redraw nor a switch to another workspace's page restarts one.
@@ -502,6 +505,8 @@ function mountSidebarIn(
 /** The rail's header. */
 export interface RailHead {
   element: HTMLElement;
+  /** The version's element, which hovers the memory overview (memory.ts). */
+  version: HTMLElement;
   /** State the roster's agent-repl version at the head's right; none hides it. */
   showVersion(version: RosterVersion | undefined): void;
   /** The title, which is the app switcher (threads.ts). */
@@ -525,6 +530,7 @@ export function drawRailHead(search: RailSearch, switcher: AppSwitcher): RailHea
   return {
     element: head,
     switcher,
+    version,
     showVersion(next: RosterVersion | undefined): void {
       version.hidden = next === undefined;
       version.textContent = next?.text ?? "";

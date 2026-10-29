@@ -1742,7 +1742,10 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    max-content` is what lets it grow into the feed only as far as its own
    content asks; the max-width is the window's own last word on that. */
 #ws-sidebar .detail { display: none; }
-#ws-sidebar .ws.open > .detail {
+/* THE VERSION'S MEMORY HOVER (sidebar/memory.ts) is a detail panel of its own,
+   placed under the version by `clampReveal`. */
+#ws-sidebar .ws.open > .detail,
+#ws-sidebar .detail.sb-memory.open {
   display: block;
   position: fixed;
   z-index: 40;
@@ -1773,6 +1776,9 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .detail code { font-size: 0.92em; }
 #ws-sidebar .detail .summary { font-style: italic; color: var(--muted); margin: 0.35rem 0 0; }
 #ws-sidebar .detail .children { margin: 0.35rem 0 0; }
+/* An open row's memory lines sit under its other lines (sidebar/memory.ts). */
+#ws-sidebar .detail .memory { margin: 0.35rem 0 0; }
+#ws-sidebar .detail .memory:empty { display: none; }
 #ws-sidebar .detail .children-head { color: var(--muted); }
 #ws-sidebar .detail .children ul { margin: 0.15rem 0 0; padding-left: 1rem; }
 #ws-sidebar .detail .children li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
