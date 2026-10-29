@@ -3628,6 +3628,22 @@ func (d *fakeDB) SetSubsectionFolded(_ context.Context, id ids.SubsectionID, fol
 	return &wsm.UnknownSubsectionError{ID: id}
 }
 
+// ExpandSubsectionHolding expands the subsection the fake's workspace sits in,
+// answering whether it was collapsed, as WSM does.
+func (d *fakeDB) ExpandSubsectionHolding(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	ws := d.workspaces[id]
+	if ws.Subsection == nil {
+		return false, nil
+	}
+	for i := range d.subsections {
+		if d.subsections[i].ID == *ws.Subsection && d.subsections[i].Folded {
+			d.subsections[i].Folded = false
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // fakeNetwork is the network state a failed naming call is classified by. It
 // answers VERDICT to every classification and records the words it was asked
 // about; restore closes the restored latch.

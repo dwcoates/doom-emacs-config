@@ -365,7 +365,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Log:         p.Surfaces,
 	})
 	selfCloses := workspace.NewSelfCloses(verbsRef.carryOutSelfClose, log)
-	edges := wsedges.New(derivedNotices, followNotices, selfCloses)
+	subsectionUnfolds := workspace.NewSubsectionUnfolds(verbsRef.unfoldSubsectionForWork, log)
+	edges := wsedges.New(derivedNotices, followNotices, selfCloses, subsectionUnfolds)
 	p.DB = wsedges.ReportingCloses(p.DB, edges, log)
 
 	judge, err := buildJudge(p.Contracts, guard, headlessClient, paths.PromptsDir)
@@ -1777,7 +1778,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 				func(ctx context.Context) { queueNotices.Run(ctx, handler) },
 				func(ctx context.Context) { derivedNotices.Run(ctx, handler) },
 				func(ctx context.Context) { followNotices.Run(ctx, handler) },
-				selfCloses.Run)
+				selfCloses.Run,
+				subsectionUnfolds.Run)
 		}),
 		StopShims:    stopEveryShim(fleet, supervisor, rootLossShimStopBound),
 		AwaitCreates: awaitCreatesAtExit(creates, holdoutWarnEvery, time.After, log),

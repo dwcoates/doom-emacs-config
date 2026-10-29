@@ -280,6 +280,17 @@ func (f *verbsForwarder) carryOutSelfClose(ctx context.Context, ws ids.Workspace
 	return verbs.CarryOutSelfClose(ctx, ws)
 }
 
+// unfoldSubsectionForWork is the turn-start edge's unfold
+// (workspace.SubsectionUnfolds), read out of the verbs, which are built after
+// the edges.
+func (f *verbsForwarder) unfoldSubsectionForWork(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := f.bound("a turn's start unfolded a subsection")
+	if err != nil {
+		return err
+	}
+	return verbs.UnfoldSubsectionForWork(ctx, ws)
+}
+
 // healthForwarder carries the session watcher's diagnostics verdict to the
 // health reporter, which is built after the fleet the watchers live in.
 type healthForwarder struct {

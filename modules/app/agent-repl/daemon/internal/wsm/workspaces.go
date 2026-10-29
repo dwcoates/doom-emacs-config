@@ -996,14 +996,42 @@ func expandFoldsHolding(ctx context.Context, tx *sql.Tx, id WorkspaceID) (expand
 	if out.repository, err = touchedRow(res); err != nil {
 		return out, fmt.Errorf("wsm: expand the repository of %s: %w", id, err)
 	}
-	res, err = tx.ExecContext(ctx, `UPDATE subsections SET folded = 0 WHERE folded = 1 AND id = (SELECT `+rootSubsectionColumn+` FROM workspaces WHERE id = ?)`, id)
-	if err != nil {
-		return out, fmt.Errorf("wsm: expand the subsection of %s: %w", id, err)
-	}
-	if out.subsection, err = touchedRow(res); err != nil {
-		return out, fmt.Errorf("wsm: expand the subsection of %s: %w", id, err)
+	if out.subsection, err = expandSubsectionHolding(ctx, tx, id); err != nil {
+		return out, err
 	}
 	return out, nil
+}
+
+// expandSubsectionHolding expands, within TX, the subsection workspace ID's
+// family sits in (rootSubsectionColumn), answering whether it was collapsed.
+// It is the ONE statement of that expansion: a selection (expandFoldsHolding)
+// and a workspace's work (ExpandSubsectionHolding) both go through it.
+func expandSubsectionHolding(ctx context.Context, tx *sql.Tx, id WorkspaceID) (bool, error) {
+	res, err := tx.ExecContext(ctx, `UPDATE subsections SET folded = 0 WHERE folded = 1 AND id = (SELECT `+rootSubsectionColumn+` FROM workspaces WHERE id = ?)`, id)
+	if err != nil {
+		return false, fmt.Errorf("wsm: expand the subsection of %s: %w", id, err)
+	}
+	expanded, err := touchedRow(res)
+	if err != nil {
+		return false, fmt.Errorf("wsm: expand the subsection of %s: %w", id, err)
+	}
+	return expanded, nil
+}
+
+// ExpandSubsectionHolding expands the subsection workspace ID's family sits
+// in, answering whether it was collapsed. A workspace that starts working
+// never stays hidden inside a collapsed subsection (owner request,
+// 2026-10-29), so its turn's start comes here. The repository's own fold is
+// the user's alone and is left as it is.
+func (s *store) ExpandSubsectionHolding(ctx context.Context, id WorkspaceID) (bool, error) {
+	var expanded bool
+	err := s.write(ctx, "daemon.wsm.expand_subsection_holding", dlog.Context{"workspace": string(id)},
+		func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			expanded, err = expandSubsectionHolding(ctx, tx, id)
+			return err
+		})
+	return expanded, err
 }
 
 // Current reports the currently selected workspace, nil when none is.
