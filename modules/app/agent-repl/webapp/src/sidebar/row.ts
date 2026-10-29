@@ -78,6 +78,7 @@ import { viewedMode } from "./viewed.js";
 import { rosterArmMark, rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.js";
 import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
+import { applyNameTint, nameTint } from "./name-tint.js";
 import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
 import { clampBeside } from "../topbar/clamp.js";
 import {
@@ -304,6 +305,17 @@ export function drawRosterRow(
   // mark stands still. Only a row that draws a mark breathes, so the bands'
   // names never do.
   if (place === "grouping" && mark.motion !== "still") label.classList.add(mark.motion);
+  // THE NAME STARTS AT ITS STATUS COLOR AND FADES TO GREYSCALE (owner
+  // request, 2026-10-29): held at the tone while a turn runs, fading from it
+  // once the turn ends (`name-tint.ts`). Only an open row, never a band's.
+  if (place === "grouping" && !hidden) {
+    const shown = requireCase(requireMessage(u.when, `${path}.when`).shown, `${path}.when.shown`);
+    const endedMs =
+      shown.case === "noTurnRunning"
+        ? drawRosterRowWhenNoTurnRunning(shown.value, `${path}.when.no_turn_running`)
+        : undefined;
+    applyNameTint(label, nameTint(shown.case, endedMs, mark.toneClass, sc.ctx.ticker.now()));
+  }
   if (place === "grouping") renameOnDoubleClick(label, sc, workspace, name);
   line.appendChild(label);
 

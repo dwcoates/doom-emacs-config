@@ -4912,14 +4912,14 @@ describe("the rail's marks", () => {
     expect(keyframes).not.toMatch(/transform|scale|width|height|font-size/);
   });
 
-  it("swings a breathing name between the unviewed ink and the full text color, never dimmer (owner request, 2026-10-29)", () => {
+  it("swings a breathing name between its resting ink and its peak, never dimmer (owner request, 2026-10-29)", () => {
     // Arrange
     const keyframes = keyframesOf("ws-pulse");
     const at = (stop: string): string => new RegExp(`${stop}\\s*\\{[^}]*color:\\s*([^;]+);`).exec(keyframes)?.[1] ?? "";
     // Act
     const [rest, peak] = [at("0%, 100%"), at("50%")];
     // Assert
-    expect([rest, peak, keyframes.includes("opacity")]).toEqual(["var(--repo-head-expanded)", "var(--fg)", false]);
+    expect([rest, peak, keyframes.includes("opacity")]).toEqual(["var(--name-rest)", "var(--name-peak)", false]);
   });
 
   it("breathes once every 2s, 30% slower than the 1.4s it once took", () => {
@@ -6363,5 +6363,56 @@ describe("the bubbles' resting copy icon (owner request, 2026-10-29)", () => {
 
     // Assert
     expect(rule?.declarations).toMatch(/opacity:\s*var\(--copy-control-rest, 0\.7\)/);
+  });
+});
+
+describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
+  const ruleFor = (selector: string): string =>
+    rulesOf(stylesheet).find((r) => r.selectors.includes(selector) && /--name-|animation:|color:/.test(r.declarations))
+      ?.declarations ?? "";
+
+  it.each([
+    ["tone-blue", "--init"],
+    ["tone-purple", "--blocked"],
+    ["tone-red", "--err"],
+    ["tone-turquoise", "--turquoise"],
+    ["tone-yellow", "--async"],
+    ["tone-green", "--ok"],
+  ])("names the %s row's tone color %s for its name", (tone, token) => {
+    // Arrange / Act
+    const decls = ruleFor(`#ws-sidebar .ws.${tone}`);
+
+    // Assert
+    expect(decls).toMatch(new RegExp(`--name-tone:\\s*var\\(${token}\\)`));
+  });
+
+  it("holds a tinted name at its tone", () => {
+    // Arrange / Act
+    const decls = ruleFor("#ws-sidebar .row .name.tinted");
+
+    // Assert
+    expect(decls).toMatch(/color:\s*var\(--name-tone\)/);
+  });
+
+  it("fades a fading name from its tone to its resting grey over ten minutes, from minus the time since the turn ended", () => {
+    // Arrange / Act
+    const decls = ruleFor("#ws-sidebar .row .name.fading");
+    const keyframes = keyframesOf("name-fade");
+
+    // Assert
+    expect(decls).toMatch(/animation:\s*name-fade var\(--name-fade\) linear var\(--name-fade-delay, 0s\) 1 both/);
+    expect(stylesheet).toMatch(/#ws-sidebar \{ --name-fade: 600s; \}/);
+    expect(keyframes.replace(/\s+/g, " ")).toMatch(/from \{ color: var\(--name-tone\); \}\s*to \{ color: var\(--name-rest\); \}/);
+  });
+
+  it.each([
+    ["an unviewed name", "#ws-sidebar .row .name", "--repo-head-expanded"],
+    ["a viewed name", "#ws-sidebar .row .name.viewed", "--muted"],
+  ])("rests %s at its grey", (_name, selector, token) => {
+    // Arrange / Act
+    const decls = ruleFor(selector);
+
+    // Assert
+    expect(decls).toMatch(new RegExp(`--name-rest:\\s*var\\(${token}\\)`));
   });
 });

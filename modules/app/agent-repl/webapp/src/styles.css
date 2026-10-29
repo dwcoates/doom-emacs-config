@@ -1542,7 +1542,11 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    headers' ink while unviewed, the muted grey once viewed (below), and a cold
    gate strikes the name in a still dimmer grey whether or not it was viewed
    (owner request, 2026-10-29). */
-#ws-sidebar .row .name { color: var(--repo-head-expanded); }
+#ws-sidebar .row .name {
+  --name-rest: var(--repo-head-expanded);
+  --name-peak: var(--fg);
+  color: var(--repo-head-expanded);
+}
 /* PARTIAL display mode (frontend.v1.RosterRowViewed): the user has already
    seen this workspace, so its NAME recedes to the secondary text colour. The
    status dot keeps its tone (owner ruling, 2026-10-13: a viewed done workspace
@@ -1550,7 +1554,7 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    the workspace is doing. The Emacs tab-bar draws the same distinction on the
    same message. `viewed.ts` decides which rows
    carry the class. */
-#ws-sidebar .row .name.viewed { color: var(--muted); }
+#ws-sidebar .row .name.viewed { --name-rest: var(--muted); color: var(--muted); }
 /* A BAND ROW'S NAME -- Recently Merged and Hidden alike -- is drawn in the
    repository section headers' colour (owner requests, 2026-10-03 and
    2026-10-13); a merged row's timestamp keeps its grey. */
@@ -1775,12 +1779,13 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .detail .children li.receded { opacity: var(--receded-opacity); }
 
 /* THE BREATH ONLY BRIGHTENS (owner request, 2026-10-29): a breathing name
-   swings between the unviewed name's ink (--repo-head-expanded) and the full
-   text color, and never dims below the unviewed ink. It still never changes
+   swings between the name's resting ink (--name-rest) and --name-peak, the
+   full text color or, for a name held at its status tone, a brighter tone,
+   and never dims below the resting ink. It still never changes
    size (owner ruling, 2026-10-14). */
 @keyframes ws-pulse {
-  0%, 100% { color: var(--repo-head-expanded); }
-  50% { color: var(--fg); }
+  0%, 100% { color: var(--name-rest); }
+  50% { color: var(--name-peak); }
 }
 
 #topbar {
@@ -6521,8 +6526,35 @@ bubble-body.bubble-body { display: block; }
    parked on its cold gate's choice. The name alone, in every section, never
    the mark or the when-column. */
 #ws-sidebar .ws[data-arm="coldGate"] > .row > .name {
+  --name-rest: color-mix(in srgb, var(--muted) 55%, transparent);
   text-decoration: line-through;
   color: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+/* THE NAME'S STATUS TONE (owner request, 2026-10-29): the row's tone class
+   names the color a tinted name starts from (src/sidebar/name-tint.ts). */
+#ws-sidebar .ws.tone-blue { --name-tone: var(--init); }
+#ws-sidebar .ws.tone-purple { --name-tone: var(--blocked); }
+#ws-sidebar .ws.tone-red { --name-tone: var(--err); }
+#ws-sidebar .ws.tone-turquoise { --name-tone: var(--turquoise); }
+#ws-sidebar .ws.tone-yellow { --name-tone: var(--async); }
+#ws-sidebar .ws.tone-green { --name-tone: var(--ok); }
+/* A TURN RUNNING HOLDS THE NAME AT ITS TONE, a turn ended FADES it from the
+   tone to the name's resting grey over ten minutes (src/sidebar/name-tint.ts
+   sets the delay to minus the time since the turn ended). The resting grey is
+   whichever `--name-rest` the name's own state declares above. A breathing
+   name's loop is declared after and wins. */
+#ws-sidebar { --name-fade: 600s; }
+#ws-sidebar .row .name.tinted {
+  --name-rest: var(--name-tone);
+  --name-peak: color-mix(in srgb, var(--name-tone) 55%, var(--fg));
+  color: var(--name-tone);
+}
+#ws-sidebar .row .name.fading {
+  animation: name-fade var(--name-fade) linear var(--name-fade-delay, 0s) 1 both;
+}
+@keyframes name-fade {
+  from { color: var(--name-tone); }
+  to { color: var(--name-rest); }
 }
 /* The glyph statuses are not discs: a box that centers a picture, so a
    breathing glyph shrinks about its own center. The box is the DOT'S width,

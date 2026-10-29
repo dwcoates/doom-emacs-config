@@ -2123,6 +2123,23 @@ describe("the row's display mode", () => {
       expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--muted)");
     });
 
+    it("holds a running turn's name at its tone", () => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "thinking", value: {} }, when: { case: "turnRunning", value: { startedAtMs: 1n } } }), sidebarContext(), "R");
+
+      // Assert.
+      expect(drawn.querySelector(":scope > .row > .name")?.classList.contains("tinted")).toBe(true);
+    });
+
+    it("starts an ended turn's name fading from the time the turn ended", () => {
+      // Arrange, Act.
+      const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} }, when: { case: "noTurnRunning", value: { lastTurnEndedAtMs: 1n } } }), sidebarContext(), "R");
+      const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
+
+      // Assert.
+      expect([name.classList.contains("fading"), name.style.getPropertyValue("--name-fade-delay")]).toEqual([true, expect.stringMatching(/^-\d+ms$/)]);
+    });
+
     it("paints an unviewed row's name in the repository headers' ink", () => {
       // Arrange, Act.
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} } }), sidebarContext(), "R");
