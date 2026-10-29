@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -70,16 +69,8 @@ func TestShimCallFailedKeepsTheCallersFields(t *testing.T) {
 // TestShimCallFailureTriageHasOneHome fails when a source file in this
 // package triages a dead shim by hand instead of through shimCallFailed.
 func TestShimCallFailureTriageHasOneHome(t *testing.T) {
-	// Arrange
-	files := sourcescan.Production(t)
-
 	// Act
-	var sites []string
-	for _, file := range files {
-		for range strings.Count(string(file.Source), "shimclient.ErrShimDied") {
-			sites = append(sites, file.Name)
-		}
-	}
+	sites := sourcescan.Sites(t, "shimclient.ErrShimDied")
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "keeper.go" {

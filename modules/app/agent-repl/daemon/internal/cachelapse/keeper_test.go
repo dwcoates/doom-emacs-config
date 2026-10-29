@@ -1047,16 +1047,8 @@ func TestRunStandsDownAHiddenWorkspaceWhoseSessionParkedAtItsGate(t *testing.T) 
 // TestLapseWritesHaveOneHome fails when a source file in this package writes
 // a cache lapse other than through Keeper.store.
 func TestLapseWritesHaveOneHome(t *testing.T) {
-	// Arrange
-	files := sourcescan.Production(t)
-
 	// Act
-	var sites []string
-	for _, file := range files {
-		for range strings.Count(string(file.Source), ".SetCacheLapse(ctx") {
-			sites = append(sites, file.Name)
-		}
-	}
+	sites := sourcescan.Sites(t, ".SetCacheLapse(ctx")
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "keeper.go" {

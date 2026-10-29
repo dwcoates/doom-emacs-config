@@ -3,7 +3,6 @@ package cachelapse
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -218,20 +217,11 @@ func TestTheNextTurnsEndResumesTheBeats(t *testing.T) {
 // TestColdMarkWritesHaveOneHome fails when a source file in this package
 // writes the cold mark other than through Keeper.markCold.
 func TestColdMarkWritesHaveOneHome(t *testing.T) {
-	// Arrange
-	files := sourcescan.Production(t)
-
 	// Act
-	var sites []string
-	for _, file := range files {
-		for range strings.Count(string(file.Source), ".MarkCacheCold(ctx") {
-			sites = append(sites, file.Name)
-		}
-	}
+	sites := sourcescan.Sites(t, ".MarkCacheCold(ctx")
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "coldmark.go" {
 		t.Fatalf("the cold mark is written at %v, want only Keeper.markCold in coldmark.go", sites)
 	}
 }
-
