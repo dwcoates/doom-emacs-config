@@ -6328,3 +6328,16 @@ describe("footer readouts that wear a status color (2026-10-28)", () => {
     expect(got).toBe(want);
   });
 });
+
+describe("the held-prompt and merge fades swing as narrowly as the workspace-name fade (owner request, 2026-10-29)", () => {
+  it.each([["hold-breathe"], ["merge-breathe"]])("fades %s from 1 to 0.67", (name) => {
+    // Arrange
+    const frames = new RegExp(`@keyframes ${name} \\{([^}]*\\}[^}]*)\\}`).exec(stylesheet)?.[1] ?? "";
+
+    // Act
+    const opacities = [...frames.matchAll(/opacity:\s*([\d.]+)/g)].map((m) => m[1]);
+
+    // Assert
+    expect(opacities).toEqual(["1", "0.67"]);
+  });
+});

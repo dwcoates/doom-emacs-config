@@ -6250,7 +6250,7 @@ bubble-body.bubble-body { display: block; }
 .badge.held-badge.run { animation: hold-breathe 2.6s ease-in-out infinite; }
 @keyframes hold-breathe {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+  50% { opacity: 0.67; }
 }
 /* A FOLD IS SEEN (src/held/fold-motion.ts, owner request 2026-10-15). The
    folded card's badge reads "folding above" in the accent while the card
@@ -7682,15 +7682,14 @@ bubble-body.bubble-body { display: block; }
 #gate-dock {
   grid-column: 1 / -1;
   grid-row: 2;
-  /* THE DOCK IS EXACTLY THE INPUT WINDOW'S HEIGHT, ALWAYS (owner request,
-     2026-10-28, superseding 2026-10-17's growing dock): the gate must look as
-     if it simply took the composer's place, so the page's apparent bottom,
-     where the rail and the footer end, never moves a pixel. A gate taller
-     than the slot (the open compact submenu) scrolls inside it, its top
-     first, rather than pushing the footer and the rail up. A column, so the
-     docked card can fill it. */
-  height: var(--gate-dock-height, 18.4vh);
-  overflow-y: auto;
+  /* THE DOCK IS THE INPUT WINDOW'S HEIGHT AT LEAST (owner request,
+     2026-10-29, superseding 2026-10-28's fixed slot): a gate that fits stands
+     in the composer's exact slot, so showing one moves nothing. A gate that
+     needs more (the open compact submenu, or any selection mode) grows the
+     dock to fit its content, never scrolling, and the dock falls back to the
+     told height when the content is gone. A column, so the docked card can
+     fill it. */
+  min-height: var(--gate-dock-height, 18.4vh);
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -7716,7 +7715,7 @@ bubble-body.bubble-body { display: block; }
      row are each centered on the card's middle, and the slot's spare height
      is split evenly above the title and below the buttons; the gaps between
      them stay what they always were. The card grows past the slot rather than
-     shrinking its content, and the dock scrolls it from its top. */
+     shrinking its content, and the dock grows with it. */
   flex: 1 0 auto;
   display: flex;
   flex-direction: column;
@@ -8519,7 +8518,7 @@ bubble-body.bubble-body { display: block; }
    without pulling the eye off whatever the reader is actually reading. */
 @keyframes merge-breathe {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+  50% { opacity: 0.67; }
 }
 
 /* The tab strip: chronological, append-only, one button per tab.

@@ -830,3 +830,8 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
 
 (provide 'test-command-completion)
 ;;; test-command-completion.el ends here
+
+(ert-deftest agent-repl-test-command-completion-known-face-is-the-shared-purple ()
+  "The known-command face wears the shared dark purple of render-colors.json."
+  (should (equal (face-attribute 'agent-repl-command-completion-known :foreground nil 'default)
+                 "#7d4bcf")))
