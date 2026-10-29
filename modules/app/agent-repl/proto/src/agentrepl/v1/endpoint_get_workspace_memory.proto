@@ -1,0 +1,63 @@
+// endpoint_get_workspace_memory.proto — GetWorkspaceMemory: what one
+// workspace holds in memory, for its row's hover in the rail's Open section.
+// SIDEBAR section.
+//
+// A PULL, asked when the row's panel opens and again while it stays open, for
+// the reason GetMemoryOverview is. It reads whether the workspace's shim runs
+// and the collector's latest sample of it, and the page residency Emacs last
+// reported (ReportPageResidency); it changes nothing.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "frontend/v1/sidebar_memory.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message GetWorkspaceMemoryRequest {
+  // The row's workspace.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message GetWorkspaceMemoryResponse {
+  oneof result {
+    GetWorkspaceMemorySuccess success = 1;
+    GetWorkspaceMemoryError error = 2;
+  }
+}
+// The workspace's memory lines.
+message GetWorkspaceMemorySuccess {
+  frontend.v1.SidebarWorkspaceMemory memory = 1;
+}
+// Arms derived from the daemon's refusal sites, exactly ReportPageUnloading's:
+// this verb resolves the same subject through the same guard.
+// Validation failures (unset field, blank string) are Connect InvalidArgument, never an arm.
+message GetWorkspaceMemoryError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    GetWorkspaceMemoryUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    GetWorkspaceMemoryWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    GetWorkspaceMemoryTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    GetWorkspaceMemoryNotYetAdopted not_yet_adopted = 4;
+  }
+}
+// The workspace id is not registered. Empty: the echoed ref is the identity.
+message GetWorkspaceMemoryUnknownWorkspace {}
+// The echoed dir disagrees with the registry.
+message GetWorkspaceMemoryWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// The workspace moved to a successor daemon.
+message GetWorkspaceMemoryTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// The joining daemon has not adopted the workspace yet. Empty: presence is the fact.
+message GetWorkspaceMemoryNotYetAdopted {}

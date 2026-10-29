@@ -11,129 +11,132 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
-import "agentrepl/v1/endpoint_run_redundancy.proto";
-import "agentrepl/v1/endpoint_run_tests.proto";
-import "agentrepl/v1/endpoint_submit_prompt.proto";
-import "agentrepl/v1/endpoint_retry_vendor_error.proto";
-import "agentrepl/v1/endpoint_select_feed_row.proto";
-import "agentrepl/v1/endpoint_select_response_text.proto";
-import "agentrepl/v1/endpoint_report_composer_entries.proto";
-import "agentrepl/v1/endpoint_find_entry_neighbor.proto";
-import "agentrepl/v1/endpoint_fold_merge_bubble.proto";
-import "agentrepl/v1/endpoint_plan_rollback.proto";
-import "agentrepl/v1/endpoint_list_rollback_prompts.proto";
-import "agentrepl/v1/endpoint_roll_back.proto";
 import "agentrepl/v1/endpoint_adjust_feed_text_scale.proto";
-import "agentrepl/v1/endpoint_open_feed_image.proto";
-import "agentrepl/v1/endpoint_close_feed_image.proto";
-import "agentrepl/v1/endpoint_open_feed.proto";
-import "agentrepl/v1/endpoint_watch_feed.proto";
-import "agentrepl/v1/endpoint_get_feed_page.proto";
-import "agentrepl/v1/endpoint_interrupt.proto";
-import "agentrepl/v1/endpoint_inspect_chess_board_square.proto";
+import "agentrepl/v1/endpoint_adopt_host_workspace.proto";
+import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
+import "agentrepl/v1/endpoint_answer_cold_gate.proto";
+import "agentrepl/v1/endpoint_answer_editor_evaluation.proto";
+import "agentrepl/v1/endpoint_answer_merge_queue_offer.proto";
 import "agentrepl/v1/endpoint_answer_permission.proto";
 import "agentrepl/v1/endpoint_answer_question.proto";
-import "agentrepl/v1/endpoint_update_question_draft.proto";
-import "agentrepl/v1/endpoint_answer_cold_gate.proto";
-import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
-import "agentrepl/v1/endpoint_create_workspace.proto";
-import "agentrepl/v1/endpoint_register_repository.proto";
-import "agentrepl/v1/endpoint_bind_workspace_session.proto";
-import "agentrepl/v1/endpoint_list_workspace_transcripts.proto";
-import "agentrepl/v1/endpoint_load_feed_through.proto";
-import "agentrepl/v1/endpoint_open_workspace.proto";
-import "agentrepl/v1/endpoint_close_workspace.proto";
-import "agentrepl/v1/endpoint_kill_workspace.proto";
-import "agentrepl/v1/endpoint_forget_workspace.proto";
-import "agentrepl/v1/endpoint_nuke_workspace.proto";
-import "agentrepl/v1/endpoint_finish_workspace.proto";
-import "agentrepl/v1/endpoint_park_workspace.proto";
-import "agentrepl/v1/endpoint_restart_workspace.proto";
-import "agentrepl/v1/endpoint_watch_topbar.proto";
-import "agentrepl/v1/endpoint_open_external.proto";
-import "agentrepl/v1/endpoint_open_in_editor.proto";
-import "agentrepl/v1/endpoint_select_in_editor.proto";
-import "agentrepl/v1/endpoint_send_login_input.proto";
-import "agentrepl/v1/endpoint_request_command_support.proto";
-import "agentrepl/v1/endpoint_create_task.proto";
-import "agentrepl/v1/endpoint_update_task.proto";
-import "agentrepl/v1/endpoint_assign_workspace_task.proto";
-import "agentrepl/v1/endpoint_open_login.proto";
-import "agentrepl/v1/endpoint_watch_login_terminal.proto";
-import "agentrepl/v1/endpoint_close_login.proto";
-import "agentrepl/v1/endpoint_set_model.proto";
-import "agentrepl/v1/endpoint_set_default_model.proto";
-import "agentrepl/v1/endpoint_set_effort.proto";
-import "agentrepl/v1/endpoint_set_permission_mode.proto";
-import "agentrepl/v1/endpoint_fold_repository.proto";
-import "agentrepl/v1/endpoint_update_sidebar_view.proto";
 import "agentrepl/v1/endpoint_arrange_sidebar.proto";
-import "agentrepl/v1/endpoint_get_sidebar_arrangement.proto";
-import "agentrepl/v1/endpoint_set_workspace_hidden.proto";
-import "agentrepl/v1/endpoint_send_hidden_keepalives.proto";
-import "agentrepl/v1/endpoint_set_workspace_parent.proto";
-import "agentrepl/v1/endpoint_set_workspace_priority.proto";
-import "agentrepl/v1/endpoint_move_workspace.proto";
-import "agentrepl/v1/endpoint_swap_workspaces.proto";
-import "agentrepl/v1/endpoint_watch_footer.proto";
-import "agentrepl/v1/endpoint_update_held_prompt.proto";
-import "agentrepl/v1/endpoint_edit_held_prompt.proto";
-import "agentrepl/v1/endpoint_fold_held_prompt.proto";
-import "agentrepl/v1/endpoint_update_classifier_prompt.proto";
-import "agentrepl/v1/endpoint_answer_merge_queue_offer.proto";
+import "agentrepl/v1/endpoint_assign_workspace_task.proto";
+import "agentrepl/v1/endpoint_bind_workspace_session.proto";
+import "agentrepl/v1/endpoint_change_workspace_links.proto";
+import "agentrepl/v1/endpoint_client_log.proto";
+import "agentrepl/v1/endpoint_close_feed_image.proto";
+import "agentrepl/v1/endpoint_close_login.proto";
+import "agentrepl/v1/endpoint_close_workspace.proto";
+import "agentrepl/v1/endpoint_compact_workspace.proto";
+import "agentrepl/v1/endpoint_create_task.proto";
+import "agentrepl/v1/endpoint_create_thread.proto";
+import "agentrepl/v1/endpoint_create_workspace.proto";
+import "agentrepl/v1/endpoint_daemon_health.proto";
 import "agentrepl/v1/endpoint_deploy.proto";
 import "agentrepl/v1/endpoint_dismiss_news_digest.proto";
-import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
-import "agentrepl/v1/endpoint_update_merge_queue.proto";
-import "agentrepl/v1/endpoint_daemon_health.proto";
-import "agentrepl/v1/endpoint_session_health.proto";
-import "agentrepl/v1/endpoint_client_log.proto";
-import "agentrepl/v1/endpoint_report_latencies.proto";
-import "agentrepl/v1/endpoint_update_persistent_wifi_mode.proto";
-import "agentrepl/v1/endpoint_refresh_news_digest.proto";
-import "agentrepl/v1/endpoint_register_workspace.proto";
-import "agentrepl/v1/endpoint_select_account.proto";
-import "agentrepl/v1/endpoint_select_workspace.proto";
-import "agentrepl/v1/endpoint_mark_workspace_viewed.proto";
-import "agentrepl/v1/endpoint_report_page_unloading.proto";
-import "agentrepl/v1/endpoint_report_editor_focus.proto";
-import "agentrepl/v1/endpoint_watch_host_workspace.proto";
-import "agentrepl/v1/endpoint_watch_daemon.proto";
-import "agentrepl/v1/endpoint_adopt_host_workspace.proto";
-import "agentrepl/v1/endpoint_list_slash_commands.proto";
-import "agentrepl/v1/endpoint_watch_web_workspace.proto";
-import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
-import "agentrepl/v1/endpoint_watch_page.proto";
-import "agentrepl/v1/endpoint_open_tabs.proto";
-import "agentrepl/v1/endpoint_report_page_drawn.proto";
+import "agentrepl/v1/endpoint_edit_held_prompt.proto";
+import "agentrepl/v1/endpoint_evaluate_in_editor.proto";
+import "agentrepl/v1/endpoint_find_entry_neighbor.proto";
 import "agentrepl/v1/endpoint_find_workspaces.proto";
-import "agentrepl/v1/endpoint_get_workspace_status.proto";
+import "agentrepl/v1/endpoint_finish_workspace.proto";
+import "agentrepl/v1/endpoint_fold_held_prompt.proto";
+import "agentrepl/v1/endpoint_fold_merge_bubble.proto";
+import "agentrepl/v1/endpoint_fold_repository.proto";
+import "agentrepl/v1/endpoint_forget_workspace.proto";
+import "agentrepl/v1/endpoint_get_feed_page.proto";
+import "agentrepl/v1/endpoint_get_memory_overview.proto";
 import "agentrepl/v1/endpoint_get_merge_queue_status.proto";
-import "agentrepl/v1/endpoint_subscribe_workspace.proto";
-import "agentrepl/v1/endpoint_unsubscribe_workspace.proto";
-import "agentrepl/v1/endpoint_subscribe_merge_queue.proto";
-import "agentrepl/v1/endpoint_unsubscribe_merge_queue.proto";
-import "agentrepl/v1/endpoint_update_deploy_hold.proto";
+import "agentrepl/v1/endpoint_get_sidebar_arrangement.proto";
+import "agentrepl/v1/endpoint_get_workspace_memory.proto";
+import "agentrepl/v1/endpoint_get_workspace_status.proto";
+import "agentrepl/v1/endpoint_inspect_chess_board_square.proto";
+import "agentrepl/v1/endpoint_interrupt.proto";
+import "agentrepl/v1/endpoint_kill_workspace.proto";
+import "agentrepl/v1/endpoint_list_rollback_prompts.proto";
+import "agentrepl/v1/endpoint_list_slash_commands.proto";
+import "agentrepl/v1/endpoint_list_workspace_transcripts.proto";
+import "agentrepl/v1/endpoint_load_feed_through.proto";
+import "agentrepl/v1/endpoint_mark_workspace_viewed.proto";
+import "agentrepl/v1/endpoint_move_workspace.proto";
+import "agentrepl/v1/endpoint_nuke_workspace.proto";
+import "agentrepl/v1/endpoint_open_external.proto";
+import "agentrepl/v1/endpoint_open_feed.proto";
+import "agentrepl/v1/endpoint_open_feed_image.proto";
+import "agentrepl/v1/endpoint_open_in_editor.proto";
+import "agentrepl/v1/endpoint_open_login.proto";
+import "agentrepl/v1/endpoint_open_tabs.proto";
+import "agentrepl/v1/endpoint_open_workspace.proto";
+import "agentrepl/v1/endpoint_park_workspace.proto";
+import "agentrepl/v1/endpoint_plan_rollback.proto";
 import "agentrepl/v1/endpoint_prune_storage.proto";
 import "agentrepl/v1/endpoint_reap_worktrees.proto";
-import "agentrepl/v1/endpoint_roll_out_landing.proto";
-import "agentrepl/v1/endpoint_evaluate_in_editor.proto";
-import "agentrepl/v1/endpoint_answer_editor_evaluation.proto";
-import "agentrepl/v1/endpoint_compact_workspace.proto";
-import "agentrepl/v1/endpoint_set_workspace_correspondence.proto";
-import "agentrepl/v1/endpoint_change_workspace_links.proto";
-import "agentrepl/v1/endpoint_set_workspace_name.proto";
-import "agentrepl/v1/endpoint_validate_workspace_name.proto";
-import "agentrepl/v1/endpoint_set_workspace_one_shot.proto";
-import "agentrepl/v1/endpoint_create_thread.proto";
-import "agentrepl/v1/endpoint_request_new_thread.proto";
-import "agentrepl/v1/endpoint_watch_chat.proto";
-import "agentrepl/v1/endpoint_show_chat_node.proto";
-import "agentrepl/v1/endpoint_switch_chat_sibling.proto";
+import "agentrepl/v1/endpoint_refresh_news_digest.proto";
+import "agentrepl/v1/endpoint_register_repository.proto";
+import "agentrepl/v1/endpoint_register_workspace.proto";
 import "agentrepl/v1/endpoint_report_chat_sightings.proto";
-import "agentrepl/v1/endpoint_select_chat_text.proto";
+import "agentrepl/v1/endpoint_report_composer_entries.proto";
+import "agentrepl/v1/endpoint_report_editor_focus.proto";
+import "agentrepl/v1/endpoint_report_latencies.proto";
+import "agentrepl/v1/endpoint_report_page_drawn.proto";
+import "agentrepl/v1/endpoint_report_page_residency.proto";
+import "agentrepl/v1/endpoint_report_page_unloading.proto";
+import "agentrepl/v1/endpoint_request_command_support.proto";
+import "agentrepl/v1/endpoint_request_new_thread.proto";
+import "agentrepl/v1/endpoint_restart_workspace.proto";
+import "agentrepl/v1/endpoint_retry_vendor_error.proto";
+import "agentrepl/v1/endpoint_roll_back.proto";
+import "agentrepl/v1/endpoint_roll_out_landing.proto";
+import "agentrepl/v1/endpoint_run_redundancy.proto";
+import "agentrepl/v1/endpoint_run_tests.proto";
 import "agentrepl/v1/endpoint_search_chats.proto";
+import "agentrepl/v1/endpoint_select_account.proto";
+import "agentrepl/v1/endpoint_select_chat_text.proto";
+import "agentrepl/v1/endpoint_select_feed_row.proto";
+import "agentrepl/v1/endpoint_select_in_editor.proto";
+import "agentrepl/v1/endpoint_select_response_text.proto";
+import "agentrepl/v1/endpoint_select_workspace.proto";
+import "agentrepl/v1/endpoint_send_hidden_keepalives.proto";
+import "agentrepl/v1/endpoint_send_login_input.proto";
+import "agentrepl/v1/endpoint_session_health.proto";
+import "agentrepl/v1/endpoint_set_default_model.proto";
+import "agentrepl/v1/endpoint_set_effort.proto";
+import "agentrepl/v1/endpoint_set_model.proto";
+import "agentrepl/v1/endpoint_set_permission_mode.proto";
+import "agentrepl/v1/endpoint_set_workspace_correspondence.proto";
+import "agentrepl/v1/endpoint_set_workspace_hidden.proto";
+import "agentrepl/v1/endpoint_set_workspace_name.proto";
+import "agentrepl/v1/endpoint_set_workspace_one_shot.proto";
+import "agentrepl/v1/endpoint_set_workspace_parent.proto";
+import "agentrepl/v1/endpoint_set_workspace_priority.proto";
+import "agentrepl/v1/endpoint_show_chat_node.proto";
 import "agentrepl/v1/endpoint_show_sidebar_app.proto";
+import "agentrepl/v1/endpoint_submit_prompt.proto";
+import "agentrepl/v1/endpoint_subscribe_merge_queue.proto";
+import "agentrepl/v1/endpoint_subscribe_workspace.proto";
+import "agentrepl/v1/endpoint_swap_workspaces.proto";
+import "agentrepl/v1/endpoint_switch_chat_sibling.proto";
+import "agentrepl/v1/endpoint_unsubscribe_merge_queue.proto";
+import "agentrepl/v1/endpoint_unsubscribe_workspace.proto";
+import "agentrepl/v1/endpoint_update_classifier_prompt.proto";
+import "agentrepl/v1/endpoint_update_deploy_hold.proto";
+import "agentrepl/v1/endpoint_update_held_prompt.proto";
+import "agentrepl/v1/endpoint_update_merge_queue.proto";
+import "agentrepl/v1/endpoint_update_persistent_wifi_mode.proto";
+import "agentrepl/v1/endpoint_update_question_draft.proto";
+import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
+import "agentrepl/v1/endpoint_update_sidebar_view.proto";
+import "agentrepl/v1/endpoint_update_task.proto";
+import "agentrepl/v1/endpoint_validate_workspace_name.proto";
+import "agentrepl/v1/endpoint_watch_chat.proto";
+import "agentrepl/v1/endpoint_watch_daemon.proto";
+import "agentrepl/v1/endpoint_watch_feed.proto";
+import "agentrepl/v1/endpoint_watch_footer.proto";
+import "agentrepl/v1/endpoint_watch_host_workspace.proto";
+import "agentrepl/v1/endpoint_watch_login_terminal.proto";
+import "agentrepl/v1/endpoint_watch_page.proto";
+import "agentrepl/v1/endpoint_watch_topbar.proto";
+import "agentrepl/v1/endpoint_watch_web_workspace.proto";
+import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -250,6 +253,19 @@ service AgentRepl {
   // The one global stream: the roster, whole, for every webview alike. See
   // endpoint_watch_workspace_roster.proto.
   rpc WatchWorkspaceRoster(WatchWorkspaceRosterRequest) returns (stream WatchWorkspaceRosterResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // agent-repl's memory as a whole, for the version's hover. See
+  // endpoint_get_memory_overview.proto.
+  rpc GetMemoryOverview(GetMemoryOverviewRequest) returns (GetMemoryOverviewResponse) {
+    // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // One workspace's memory, for its row's hover. See
+  // endpoint_get_workspace_memory.proto.
+  rpc GetWorkspaceMemory(GetWorkspaceMemoryRequest) returns (GetWorkspaceMemoryResponse) {
     // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -528,6 +544,9 @@ service AgentRepl {
   // awaits its web hop rather than drawing it broken. Idempotent. See
   // endpoint_report_page_unloading.proto.
   rpc ReportPageUnloading(ReportPageUnloadingRequest) returns (ReportPageUnloadingResponse);
+  // What Emacs holds of a workspace's page and when it lets go, for the rail's
+  // workspace hover. Idempotent. See endpoint_report_page_residency.proto.
+  rpc ReportPageResidency(ReportPageResidencyRequest) returns (ReportPageResidencyResponse);
 
   // Emacs gained or lost desktop focus; the daemon decides every desktop
   // banner on it, and a gain answers the newest held banner's workspace,

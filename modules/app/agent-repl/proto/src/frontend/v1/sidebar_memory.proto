@@ -1,0 +1,186 @@
+// sidebar_memory.proto — THE RAIL'S TWO MEMORY POPUPS, resolved by the daemon
+// and drawn verbatim (owner request, 2026-10-29).
+//
+// THE VERSION'S HOVER says what agent-repl holds in memory taken as a whole,
+// naming no workspace. A WORKSPACE ROW'S HOVER (Open section rows only) adds
+// what that one workspace holds. Every figure is MEASURED: the daemon's
+// process collector (procmetrics) samples each process's physical footprint,
+// and Emacs reports each page's residency (agentrepl.v1 ReportPageResidency).
+// Nothing here is estimated: the workspace pages share one WebKit web content
+// process, which reports one footprint for all of them, so no per-page byte
+// figure exists to draw and none is served.
+//
+// FETCHED ON HOVER, NOT PUSHED. The figures move every sample, so they ride no
+// roster push (a whole-roster push per sample would redraw every row and
+// decode in Emacs every two seconds); the page asks for them when the popup
+// opens (agentrepl.v1 GetMemoryOverview, GetWorkspaceMemory) and again while it
+// stays open.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// ---- The version's hover: agent-repl as a whole ----------------------------
+
+// The version hover's popup: one line per element, top to bottom.
+message SidebarMemoryOverview {
+  // The shared workspace-page process and how many pages it holds.
+  SidebarMemoryPages pages = 1;
+  // How hard that process is struggling: its main-thread stalls of late.
+  SidebarMemoryStrain strain = 2;
+  // The workspaces' shims, together.
+  SidebarMemoryAgents agents = 3;
+  // Each other agent-repl process the daemon measures, in the daemon's drawn
+  // order: the daemon, Emacs, the store, the sidecar. A process not running
+  // is still listed, drawn as not running.
+  repeated SidebarMemoryProcess processes = 4;
+  // Every measured agent-repl process together.
+  SidebarMemoryTotal total = 5;
+}
+
+// The workspace pages' one WebKit web content process.
+message SidebarMemoryPages {
+  // Its physical footprint, compressed and swapped memory included. UNSET
+  // when the collector found no such process (no web view is open).
+  optional uint64 footprint_bytes = 1;
+  // How many open workspaces' pages it holds now.
+  uint32 loaded = 2;
+  // How many open workspaces have no page held (page-unload.el unloaded it,
+  // or never loaded it): drawn as "of N" beside `loaded`, so the two together
+  // are every open workspace Emacs has reported.
+  uint32 not_loaded = 3;
+}
+
+// The page process's main-thread stalls in the daemon's stall window: the lag
+// a switch can land in. A stall is the webhost's own report (webhost.stall).
+message SidebarMemoryStrain {
+  // Stalls reported within the window.
+  uint32 stalls = 1;
+  // Their blocked time, summed, in milliseconds.
+  uint64 blocked_ms = 2;
+  // The window they were counted over, in seconds (the stall detector's
+  // window), so the line can say "in the last 10 min".
+  uint32 window_seconds = 3;
+}
+
+// The workspaces' shims, together.
+message SidebarMemoryAgents {
+  // Whether any shim runs: an average over none is no figure at all.
+  oneof state {
+    // No workspace's shim is running.
+    SidebarMemoryAgentsNone none = 1;
+    // At least one is.
+    SidebarMemoryAgentsRunning running = 2;
+  }
+}
+
+// No workspace's shim is running. Empty: presence is the fact.
+message SidebarMemoryAgentsNone {}
+
+// The running shims' figures.
+message SidebarMemoryAgentsRunning {
+  // How many shims run.
+  uint32 count = 1;
+  // Their footprints, summed.
+  uint64 footprint_bytes = 2;
+  // That sum over `count`, rounded down: resolved here so no client divides.
+  uint64 average_bytes = 3;
+}
+
+// One other agent-repl process.
+message SidebarMemoryProcess {
+  // Which process, as the line names it ("daemon", "Emacs", "store",
+  // "sidecar").
+  string label = 1;
+  // Its physical footprint. UNSET when it is not running, or the collector
+  // has not measured it.
+  optional uint64 footprint_bytes = 2;
+}
+
+// Every measured agent-repl process together: the pages, the shims and every
+// listed process.
+message SidebarMemoryTotal {
+  // The sum of every footprint above.
+  uint64 footprint_bytes = 1;
+}
+
+// ---- A workspace row's hover: what that workspace holds --------------------
+
+// The memory lines a workspace row's hover adds.
+message SidebarWorkspaceMemory {
+  // The workspace's shim.
+  SidebarWorkspaceMemoryAgent agent = 1;
+  // The workspace's page. UNSET until Emacs has reported it
+  // (ReportPageResidency), which it does for every open workspace it holds a
+  // slot for.
+  optional SidebarWorkspaceMemoryPage page = 2;
+}
+
+// The workspace's shim.
+message SidebarWorkspaceMemoryAgent {
+  // Whether it runs.
+  oneof state {
+    // It runs.
+    SidebarWorkspaceMemoryAgentRunning running = 1;
+    // It does not (stood down, never started, or at its cold gate).
+    SidebarWorkspaceMemoryAgentNotRunning not_running = 2;
+  }
+}
+
+// The shim runs.
+message SidebarWorkspaceMemoryAgentRunning {
+  // Its physical footprint, its vendor child included. UNSET until the
+  // collector has measured it.
+  optional uint64 footprint_bytes = 1;
+}
+
+// The shim does not run. Empty: presence is the fact.
+message SidebarWorkspaceMemoryAgentNotRunning {}
+
+// The workspace's page.
+message SidebarWorkspaceMemoryPage {
+  // Whether Emacs holds it.
+  oneof state {
+    // It is loaded, and lets go as `release` says.
+    SidebarWorkspaceMemoryPageLoaded loaded = 1;
+    // It is not loaded; the switch to the workspace loads it.
+    SidebarWorkspaceMemoryPageNotLoaded not_loaded = 2;
+  }
+}
+
+// The page is loaded.
+message SidebarWorkspaceMemoryPageLoaded {
+  // When it is unloaded.
+  SidebarWorkspaceMemoryPageRelease release = 1;
+}
+
+// When a loaded page is unloaded (page-unload.el's rule for its status).
+message SidebarWorkspaceMemoryPageRelease {
+  // The one rule that applies now.
+  oneof when {
+    // Held while the workspace works; no unload is due.
+    SidebarWorkspaceMemoryPageReleaseHeld held = 1;
+    // Unloaded the moment the user switches away from it.
+    SidebarWorkspaceMemoryPageReleaseOnLeave on_leave = 2;
+    // Unloaded at an instant: an idle page an hour past its last prompt.
+    SidebarWorkspaceMemoryPageReleaseAt at = 3;
+  }
+}
+
+// Held while the workspace works. Empty: presence is the fact.
+message SidebarWorkspaceMemoryPageReleaseHeld {}
+
+// Unloaded when the user switches away. Empty: presence is the fact.
+message SidebarWorkspaceMemoryPageReleaseOnLeave {}
+
+// Unloaded at an instant.
+message SidebarWorkspaceMemoryPageReleaseAt {
+  // The instant, in Unix milliseconds; the page draws it as the time left
+  // ("unloads in 42 min") against its own clock, and as "soon" once past.
+  int64 unix_ms = 1;
+}
+
+// The page is not loaded. Empty: presence is the fact.
+message SidebarWorkspaceMemoryPageNotLoaded {}

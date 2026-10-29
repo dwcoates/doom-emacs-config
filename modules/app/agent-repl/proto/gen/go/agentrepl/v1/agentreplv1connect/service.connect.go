@@ -108,6 +108,12 @@ const (
 	// AgentReplWatchWorkspaceRosterProcedure is the fully-qualified name of the AgentRepl's
 	// WatchWorkspaceRoster RPC.
 	AgentReplWatchWorkspaceRosterProcedure = "/agentrepl.v1.AgentRepl/WatchWorkspaceRoster"
+	// AgentReplGetMemoryOverviewProcedure is the fully-qualified name of the AgentRepl's
+	// GetMemoryOverview RPC.
+	AgentReplGetMemoryOverviewProcedure = "/agentrepl.v1.AgentRepl/GetMemoryOverview"
+	// AgentReplGetWorkspaceMemoryProcedure is the fully-qualified name of the AgentRepl's
+	// GetWorkspaceMemory RPC.
+	AgentReplGetWorkspaceMemoryProcedure = "/agentrepl.v1.AgentRepl/GetWorkspaceMemory"
 	// AgentReplCreateWorkspaceProcedure is the fully-qualified name of the AgentRepl's CreateWorkspace
 	// RPC.
 	AgentReplCreateWorkspaceProcedure = "/agentrepl.v1.AgentRepl/CreateWorkspace"
@@ -290,6 +296,9 @@ const (
 	// AgentReplReportPageUnloadingProcedure is the fully-qualified name of the AgentRepl's
 	// ReportPageUnloading RPC.
 	AgentReplReportPageUnloadingProcedure = "/agentrepl.v1.AgentRepl/ReportPageUnloading"
+	// AgentReplReportPageResidencyProcedure is the fully-qualified name of the AgentRepl's
+	// ReportPageResidency RPC.
+	AgentReplReportPageResidencyProcedure = "/agentrepl.v1.AgentRepl/ReportPageResidency"
 	// AgentReplReportEditorFocusProcedure is the fully-qualified name of the AgentRepl's
 	// ReportEditorFocus RPC.
 	AgentReplReportEditorFocusProcedure = "/agentrepl.v1.AgentRepl/ReportEditorFocus"
@@ -406,6 +415,8 @@ var (
 	agentReplUpdateQuestionDraftMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("UpdateQuestionDraft")
 	agentReplAnswerColdGateMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("AnswerColdGate")
 	agentReplWatchWorkspaceRosterMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("WatchWorkspaceRoster")
+	agentReplGetMemoryOverviewMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("GetMemoryOverview")
+	agentReplGetWorkspaceMemoryMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("GetWorkspaceMemory")
 	agentReplCreateWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("CreateWorkspace")
 	agentReplValidateWorkspaceNameMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("ValidateWorkspaceName")
 	agentReplRegisterRepositoryMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("RegisterRepository")
@@ -474,6 +485,7 @@ var (
 	agentReplSelectWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
 	agentReplMarkWorkspaceViewedMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("MarkWorkspaceViewed")
 	agentReplReportPageUnloadingMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportPageUnloading")
+	agentReplReportPageResidencyMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportPageResidency")
 	agentReplReportEditorFocusMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ReportEditorFocus")
 	agentReplWatchHostWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("WatchHostWorkspace")
 	agentReplWatchDaemonMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
@@ -596,6 +608,12 @@ type AgentReplClient interface {
 	// The one global stream: the roster, whole, for every webview alike. See
 	// endpoint_watch_workspace_roster.proto.
 	WatchWorkspaceRoster(context.Context, *connect.Request[v1.WatchWorkspaceRosterRequest]) (*connect.ServerStreamForClient[v1.WatchWorkspaceRosterResponse], error)
+	// agent-repl's memory as a whole, for the version's hover. See
+	// endpoint_get_memory_overview.proto.
+	GetMemoryOverview(context.Context, *connect.Request[v1.GetMemoryOverviewRequest]) (*connect.Response[v1.GetMemoryOverviewResponse], error)
+	// One workspace's memory, for its row's hover. See
+	// endpoint_get_workspace_memory.proto.
+	GetWorkspaceMemory(context.Context, *connect.Request[v1.GetWorkspaceMemoryRequest]) (*connect.Response[v1.GetWorkspaceMemoryResponse], error)
 	// A new workspace in a repository; the daemon names and creates everything.
 	// See endpoint_create_workspace.proto.
 	CreateWorkspace(context.Context, *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error)
@@ -799,6 +817,9 @@ type AgentReplClient interface {
 	// awaits its web hop rather than drawing it broken. Idempotent. See
 	// endpoint_report_page_unloading.proto.
 	ReportPageUnloading(context.Context, *connect.Request[v1.ReportPageUnloadingRequest]) (*connect.Response[v1.ReportPageUnloadingResponse], error)
+	// What Emacs holds of a workspace's page and when it lets go, for the rail's
+	// workspace hover. Idempotent. See endpoint_report_page_residency.proto.
+	ReportPageResidency(context.Context, *connect.Request[v1.ReportPageResidencyRequest]) (*connect.Response[v1.ReportPageResidencyResponse], error)
 	// Emacs gained or lost desktop focus; the daemon decides every desktop
 	// banner on it, and a gain answers the newest held banner's workspace,
 	// which Emacs selects. See endpoint_report_editor_focus.proto.
@@ -1064,6 +1085,20 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplWatchWorkspaceRosterProcedure,
 			connect.WithSchema(agentReplWatchWorkspaceRosterMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		getMemoryOverview: connect.NewClient[v1.GetMemoryOverviewRequest, v1.GetMemoryOverviewResponse](
+			httpClient,
+			baseURL+AgentReplGetMemoryOverviewProcedure,
+			connect.WithSchema(agentReplGetMemoryOverviewMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		getWorkspaceMemory: connect.NewClient[v1.GetWorkspaceMemoryRequest, v1.GetWorkspaceMemoryResponse](
+			httpClient,
+			baseURL+AgentReplGetWorkspaceMemoryProcedure,
+			connect.WithSchema(agentReplGetWorkspaceMemoryMethodDescriptor),
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
@@ -1480,6 +1515,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplReportPageUnloadingMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		reportPageResidency: connect.NewClient[v1.ReportPageResidencyRequest, v1.ReportPageResidencyResponse](
+			httpClient,
+			baseURL+AgentReplReportPageResidencyProcedure,
+			connect.WithSchema(agentReplReportPageResidencyMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		reportEditorFocus: connect.NewClient[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse](
 			httpClient,
 			baseURL+AgentReplReportEditorFocusProcedure,
@@ -1706,6 +1747,8 @@ type agentReplClient struct {
 	updateQuestionDraft        *connect.Client[v1.UpdateQuestionDraftRequest, v1.UpdateQuestionDraftResponse]
 	answerColdGate             *connect.Client[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse]
 	watchWorkspaceRoster       *connect.Client[v1.WatchWorkspaceRosterRequest, v1.WatchWorkspaceRosterResponse]
+	getMemoryOverview          *connect.Client[v1.GetMemoryOverviewRequest, v1.GetMemoryOverviewResponse]
+	getWorkspaceMemory         *connect.Client[v1.GetWorkspaceMemoryRequest, v1.GetWorkspaceMemoryResponse]
 	createWorkspace            *connect.Client[v1.CreateWorkspaceRequest, v1.CreateWorkspaceResponse]
 	validateWorkspaceName      *connect.Client[v1.ValidateWorkspaceNameRequest, v1.ValidateWorkspaceNameResponse]
 	registerRepository         *connect.Client[v1.RegisterRepositoryRequest, v1.RegisterRepositoryResponse]
@@ -1774,6 +1817,7 @@ type agentReplClient struct {
 	selectWorkspace            *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
 	markWorkspaceViewed        *connect.Client[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse]
 	reportPageUnloading        *connect.Client[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse]
+	reportPageResidency        *connect.Client[v1.ReportPageResidencyRequest, v1.ReportPageResidencyResponse]
 	reportEditorFocus          *connect.Client[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse]
 	watchHostWorkspace         *connect.Client[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse]
 	watchDaemon                *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
@@ -1931,6 +1975,16 @@ func (c *agentReplClient) AnswerColdGate(ctx context.Context, req *connect.Reque
 // WatchWorkspaceRoster calls agentrepl.v1.AgentRepl.WatchWorkspaceRoster.
 func (c *agentReplClient) WatchWorkspaceRoster(ctx context.Context, req *connect.Request[v1.WatchWorkspaceRosterRequest]) (*connect.ServerStreamForClient[v1.WatchWorkspaceRosterResponse], error) {
 	return c.watchWorkspaceRoster.CallServerStream(ctx, req)
+}
+
+// GetMemoryOverview calls agentrepl.v1.AgentRepl.GetMemoryOverview.
+func (c *agentReplClient) GetMemoryOverview(ctx context.Context, req *connect.Request[v1.GetMemoryOverviewRequest]) (*connect.Response[v1.GetMemoryOverviewResponse], error) {
+	return c.getMemoryOverview.CallUnary(ctx, req)
+}
+
+// GetWorkspaceMemory calls agentrepl.v1.AgentRepl.GetWorkspaceMemory.
+func (c *agentReplClient) GetWorkspaceMemory(ctx context.Context, req *connect.Request[v1.GetWorkspaceMemoryRequest]) (*connect.Response[v1.GetWorkspaceMemoryResponse], error) {
+	return c.getWorkspaceMemory.CallUnary(ctx, req)
 }
 
 // CreateWorkspace calls agentrepl.v1.AgentRepl.CreateWorkspace.
@@ -2273,6 +2327,11 @@ func (c *agentReplClient) ReportPageUnloading(ctx context.Context, req *connect.
 	return c.reportPageUnloading.CallUnary(ctx, req)
 }
 
+// ReportPageResidency calls agentrepl.v1.AgentRepl.ReportPageResidency.
+func (c *agentReplClient) ReportPageResidency(ctx context.Context, req *connect.Request[v1.ReportPageResidencyRequest]) (*connect.Response[v1.ReportPageResidencyResponse], error) {
+	return c.reportPageResidency.CallUnary(ctx, req)
+}
+
 // ReportEditorFocus calls agentrepl.v1.AgentRepl.ReportEditorFocus.
 func (c *agentReplClient) ReportEditorFocus(ctx context.Context, req *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error) {
 	return c.reportEditorFocus.CallUnary(ctx, req)
@@ -2521,6 +2580,12 @@ type AgentReplHandler interface {
 	// The one global stream: the roster, whole, for every webview alike. See
 	// endpoint_watch_workspace_roster.proto.
 	WatchWorkspaceRoster(context.Context, *connect.Request[v1.WatchWorkspaceRosterRequest], *connect.ServerStream[v1.WatchWorkspaceRosterResponse]) error
+	// agent-repl's memory as a whole, for the version's hover. See
+	// endpoint_get_memory_overview.proto.
+	GetMemoryOverview(context.Context, *connect.Request[v1.GetMemoryOverviewRequest]) (*connect.Response[v1.GetMemoryOverviewResponse], error)
+	// One workspace's memory, for its row's hover. See
+	// endpoint_get_workspace_memory.proto.
+	GetWorkspaceMemory(context.Context, *connect.Request[v1.GetWorkspaceMemoryRequest]) (*connect.Response[v1.GetWorkspaceMemoryResponse], error)
 	// A new workspace in a repository; the daemon names and creates everything.
 	// See endpoint_create_workspace.proto.
 	CreateWorkspace(context.Context, *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error)
@@ -2724,6 +2789,9 @@ type AgentReplHandler interface {
 	// awaits its web hop rather than drawing it broken. Idempotent. See
 	// endpoint_report_page_unloading.proto.
 	ReportPageUnloading(context.Context, *connect.Request[v1.ReportPageUnloadingRequest]) (*connect.Response[v1.ReportPageUnloadingResponse], error)
+	// What Emacs holds of a workspace's page and when it lets go, for the rail's
+	// workspace hover. Idempotent. See endpoint_report_page_residency.proto.
+	ReportPageResidency(context.Context, *connect.Request[v1.ReportPageResidencyRequest]) (*connect.Response[v1.ReportPageResidencyResponse], error)
 	// Emacs gained or lost desktop focus; the daemon decides every desktop
 	// banner on it, and a gain answers the newest held banner's workspace,
 	// which Emacs selects. See endpoint_report_editor_focus.proto.
@@ -2985,6 +3053,20 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplWatchWorkspaceRosterProcedure,
 		svc.WatchWorkspaceRoster,
 		connect.WithSchema(agentReplWatchWorkspaceRosterMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplGetMemoryOverviewHandler := connect.NewUnaryHandler(
+		AgentReplGetMemoryOverviewProcedure,
+		svc.GetMemoryOverview,
+		connect.WithSchema(agentReplGetMemoryOverviewMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplGetWorkspaceMemoryHandler := connect.NewUnaryHandler(
+		AgentReplGetWorkspaceMemoryProcedure,
+		svc.GetWorkspaceMemory,
+		connect.WithSchema(agentReplGetWorkspaceMemoryMethodDescriptor),
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
@@ -3401,6 +3483,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplReportPageUnloadingMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplReportPageResidencyHandler := connect.NewUnaryHandler(
+		AgentReplReportPageResidencyProcedure,
+		svc.ReportPageResidency,
+		connect.WithSchema(agentReplReportPageResidencyMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplReportEditorFocusHandler := connect.NewUnaryHandler(
 		AgentReplReportEditorFocusProcedure,
 		svc.ReportEditorFocus,
@@ -3649,6 +3737,10 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplAnswerColdGateHandler.ServeHTTP(w, r)
 		case AgentReplWatchWorkspaceRosterProcedure:
 			agentReplWatchWorkspaceRosterHandler.ServeHTTP(w, r)
+		case AgentReplGetMemoryOverviewProcedure:
+			agentReplGetMemoryOverviewHandler.ServeHTTP(w, r)
+		case AgentReplGetWorkspaceMemoryProcedure:
+			agentReplGetWorkspaceMemoryHandler.ServeHTTP(w, r)
 		case AgentReplCreateWorkspaceProcedure:
 			agentReplCreateWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplValidateWorkspaceNameProcedure:
@@ -3785,6 +3877,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplMarkWorkspaceViewedHandler.ServeHTTP(w, r)
 		case AgentReplReportPageUnloadingProcedure:
 			agentReplReportPageUnloadingHandler.ServeHTTP(w, r)
+		case AgentReplReportPageResidencyProcedure:
+			agentReplReportPageResidencyHandler.ServeHTTP(w, r)
 		case AgentReplReportEditorFocusProcedure:
 			agentReplReportEditorFocusHandler.ServeHTTP(w, r)
 		case AgentReplWatchHostWorkspaceProcedure:
@@ -3956,6 +4050,14 @@ func (UnimplementedAgentReplHandler) AnswerColdGate(context.Context, *connect.Re
 
 func (UnimplementedAgentReplHandler) WatchWorkspaceRoster(context.Context, *connect.Request[v1.WatchWorkspaceRosterRequest], *connect.ServerStream[v1.WatchWorkspaceRosterResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchWorkspaceRoster is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) GetMemoryOverview(context.Context, *connect.Request[v1.GetMemoryOverviewRequest]) (*connect.Response[v1.GetMemoryOverviewResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.GetMemoryOverview is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) GetWorkspaceMemory(context.Context, *connect.Request[v1.GetWorkspaceMemoryRequest]) (*connect.Response[v1.GetWorkspaceMemoryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.GetWorkspaceMemory is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) CreateWorkspace(context.Context, *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error) {
@@ -4228,6 +4330,10 @@ func (UnimplementedAgentReplHandler) MarkWorkspaceViewed(context.Context, *conne
 
 func (UnimplementedAgentReplHandler) ReportPageUnloading(context.Context, *connect.Request[v1.ReportPageUnloadingRequest]) (*connect.Response[v1.ReportPageUnloadingResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportPageUnloading is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportPageResidency(context.Context, *connect.Request[v1.ReportPageResidencyRequest]) (*connect.Response[v1.ReportPageResidencyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportPageResidency is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error) {

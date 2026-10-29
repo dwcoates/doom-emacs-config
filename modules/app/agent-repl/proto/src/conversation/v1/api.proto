@@ -165,6 +165,14 @@ message AgentModel {
   string name = 1;
 }
 
+// A login's switchable model set kept as one record: the catalog the last
+// session on that login served (SessionStarted.model_catalog), stored by the
+// daemon so the topbar's model selector offers it while no session runs.
+message ModelCatalog {
+  // The options, in the vendor's order.
+  repeated ModelOption options = 1;
+}
+
 // One model a session may run under, as offered by the vendor for this account.
 // Served as a list for a selector to draw; a selection echoes back the embedded
 // identity rather than any of the display text, so a client never constructs a

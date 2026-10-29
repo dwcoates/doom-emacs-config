@@ -1,0 +1,53 @@
+// endpoint_get_memory_overview.proto — GetMemoryOverview: agent-repl's memory
+// as a whole, for the rail's version hover. SIDEBAR section.
+//
+// A PULL, asked when the popup opens and again while it stays open: the
+// figures move every sample and ride no push (frontend.v1
+// sidebar_memory.proto says why). It reads the process collector's latest
+// sample and the stall detector's window; it changes nothing.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "frontend/v1/sidebar_memory.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Nothing to name: the overview is agent-repl's, no workspace's.
+message GetMemoryOverviewRequest {}
+
+// THE ARM IS THE OUTCOME.
+message GetMemoryOverviewResponse {
+  oneof result {
+    GetMemoryOverviewSuccess success = 1;
+    GetMemoryOverviewError error = 2;
+  }
+}
+
+// The overview, or that no sample has been taken yet.
+message GetMemoryOverviewSuccess {
+  // Whether the collector has sampled since the daemon started.
+  oneof outcome {
+    // The figures, as of the latest sample.
+    frontend.v1.SidebarMemoryOverview measured = 1;
+    // No sample yet: the collector samples on the metrics store's scrape,
+    // seconds after the daemon starts.
+    GetMemoryOverviewNotYetMeasured not_yet_measured = 2;
+  }
+}
+// No sample yet. Empty: presence is the fact.
+message GetMemoryOverviewNotYetMeasured {}
+
+message GetMemoryOverviewError {
+  oneof cause {
+    // The latest sample could not list the host's processes, so it measured
+    // nothing; the daemon's log carries the cause.
+    GetMemoryOverviewMeasurementFailed measurement_failed = 1;
+  }
+}
+// The latest sample failed.
+message GetMemoryOverviewMeasurementFailed {
+  // What failed, in words fit for the popup.
+  string reason = 1;
+}
