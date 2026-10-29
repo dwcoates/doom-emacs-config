@@ -1558,7 +1558,7 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 /* A BAND ROW'S NAME -- Recently Merged and Hidden alike -- is drawn in the
    repository section headers' colour (owner requests, 2026-10-03 and
    2026-10-13); a merged row's timestamp keeps its grey. */
-#ws-sidebar .row .name.band-name { --name-rest: var(--repo-head-expanded); color: var(--repo-head-expanded); }
+#ws-sidebar .row .name.band-name { color: var(--repo-head-expanded); }
 /* A merge that landed TODAY (local date) keeps the name's grey and marks the
    ROW with an off-white gutter bar (owner request, 2026-10-11). `merged-today` is toggled on the row by the shared ticker in
    src/sidebar/row.ts, so the bar goes at midnight. The selector stays below
