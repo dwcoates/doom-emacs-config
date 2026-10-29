@@ -84,7 +84,10 @@ workspace's own.")
   "The workspace id whose page the host should show, or nil.")
 
 (defvar agent-repl--webhost-gate-docks (make-hash-table :test #'equal)
-  "Workspace id -> PIXELS, the height of the slot its docked gate takes.")
+  "Workspace id -> PIXELS, the height of the slot its gate takes.
+Kept while the workspace\='s page is unloaded: the host draws the gate
+itself (webapp/src/host/gate.ts), and every slot is replayed to a host
+that loads.")
 
 (defvar agent-repl--webhost-follow-conn nil
   "The connection to the daemon the host's calls were last pointed at, or nil.
@@ -480,11 +483,14 @@ show, so the page can measure it."
       (agent-repl--info ws "elisp.webhost.show ws=%s id=%s" ws id)
       (agent-repl--webhost-call "show" id switch-started))))
 
-(defun agent-repl-webhost-remove (ws)
-  "Drop WS's page from the host, and everything held for it."
+(defun agent-repl-webhost-remove (ws &optional unloading)
+  "Drop WS's page from the host, and everything held for it.
+UNLOADING keeps WS's gate slot: the webhost draws the gate itself, so an
+unloaded page's workspace still shows its gate at the composer's height
+\(webapp/src/host/gate.ts)."
   (when-let ((id (agent-repl--webhost-id ws)))
     (remhash id agent-repl--webhost-pages)
-    (remhash id agent-repl--webhost-gate-docks)
+    (unless unloading (remhash id agent-repl--webhost-gate-docks))
     (remhash id agent-repl--webhost-held-ingress)
     (when (equal id agent-repl--webhost-shown)
       (setq agent-repl--webhost-shown nil))
@@ -536,7 +542,8 @@ calls go moves (`setDaemon')."
     (format "%s://%s:%d" (url-type parsed) (url-host parsed) (url-port parsed))))
 
 (defun agent-repl-webhost-set-gate-dock (ws pixels)
-  "Tell WS's page the PIXELS tall slot its docked gate takes; kept for its reloads."
+  "Tell the host the PIXELS tall slot WS's gate takes; kept for its reloads.
+The host draws the gate whether or not WS's page is loaded."
   (when-let ((id (agent-repl--webhost-id ws)))
     (puthash id pixels agent-repl--webhost-gate-docks)
     (agent-repl--webhost-call "setGateDock" id pixels)))
@@ -628,8 +635,6 @@ A replay after a reload hands the reload's start with the page
 \(`agent-repl--webhost-reload-started-ms')."
   (when-let ((url (gethash id agent-repl--webhost-pages)))
     (agent-repl--webhost-call "ensure" id url lane agent-repl--webhost-reload-started-ms)
-    (when-let ((pixels (gethash id agent-repl--webhost-gate-docks)))
-      (agent-repl--webhost-call "setGateDock" id pixels))
     (when-let ((entries (gethash id agent-repl--webhost-held-ingress)))
       (agent-repl--webhost-call "setHeldIngress" id entries))))
 
@@ -652,6 +657,10 @@ successor\='s rendezvous completes only once the page has called, inside
 the host\='s own 10s call bound.  Queued behind a lane\='s other pages, two
 such pages missed it on the 2026-10-22 11:14 deploy, and both adopts timed
 out (`agent-repl-host-adopting-p')."
+  ;; EVERY GATE SLOT FIRST, a loaded page's or not: the host draws the gate
+  ;; of whichever workspace is shown (webapp/src/host/gate.ts).
+  (maphash (lambda (id pixels) (agent-repl--webhost-call "setGateDock" id pixels))
+           agent-repl--webhost-gate-docks)
   (let (ids)
     (maphash (lambda (id _url) (push id ids)) agent-repl--webhost-pages)
     (when agent-repl--webhost-shown

@@ -1022,8 +1022,9 @@ panels — the extra-windows-on-first-switch bug."
       (if (agent-repl-input-hidden-p ws)
           ;; A STANDING GATE HIDES THE INPUT WINDOW: its answer replaces
           ;; the composer, and the webview, filling the input's space,
-          ;; docks the gate's banner at the bottom at the input's height
-          ;; and in its background, which the page is told here.  The view is where the user lands.
+          ;; draws the gate at the bottom at the input's height, which the
+          ;; host is told here (webapp/src/host/gate.ts).  The view is where
+          ;; the user lands.
           (progn
             (agent-repl-window-tell-gate-dock ws)
             (select-window win)

@@ -493,6 +493,18 @@ Binds `reloads' and `records', newest first."
     (should-not (gethash "id-alpha" agent-repl--webhost-pages))
     (should-not (gethash "id-alpha" agent-repl--webhost-gate-docks))))
 
+(ert-deftest agent-repl-test-wh-unloading-a-page-keeps-its-gate-slot ()
+  "An unloaded page's workspace keeps its gate slot: the host draws the gate."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-set-gate-dock "alpha" 90)
+    ;; Act
+    (agent-repl-webhost-remove "alpha" 'unloading)
+    ;; Assert
+    (should-not (gethash "id-alpha" agent-repl--webhost-pages))
+    (should (equal (gethash "id-alpha" agent-repl--webhost-gate-docks) 90))))
+
 (ert-deftest agent-repl-test-wh-removing-the-shown-page-shows-none ()
   "The host shows nothing it no longer holds."
   ;; Arrange
@@ -963,6 +975,19 @@ The current tab's page, not shown here, is the nearest of all."
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "setGateDock"))))
     (should (= 1 (length (agent-repl-test-wh--sent "setHeldIngress"))))))
+
+(ert-deftest agent-repl-test-wh-a-load-replays-the-gate-slot-of-a-workspace-with-no-page ()
+  "A loaded host gets the gate slot of a workspace whose page is unloaded."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (agent-repl-webhost-set-gate-dock "alpha" 90)
+    (agent-repl-webhost-remove "alpha" 'unloading)
+    (setq agent-repl-test-wh--calls nil)
+    ;; Act
+    (agent-repl-test-wh--load "load-committed")
+    ;; Assert
+    (should (= 1 (length (agent-repl-test-wh--sent "setGateDock"))))))
 
 (ert-deftest agent-repl-test-wh-a-load-replays-once-at-commit ()
   "Of a navigation's stages only the commit replays."
