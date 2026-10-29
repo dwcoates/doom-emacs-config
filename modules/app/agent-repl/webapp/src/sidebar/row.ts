@@ -284,13 +284,10 @@ export function drawRosterRow(
     label.classList.add("viewed");
     ws.setAttribute("data-viewed", "true");
   }
-  // THE UNREAD TURN END INKS THE NAME (owner request, 2026-10-20): a row in
-  // the background over a result nobody has read keeps the background's
-  // yellow on its dot, and its name takes the color of the turn end beneath,
-  // until a dwell reads the result and the daemon drops the marker.
+  // THE UNREAD TURN END IS NOT INKED ON THE NAME (owner request, 2026-10-29):
+  // names are greyscale, so the marker only validates and tags the row.
   if (u.idleAsyncUnread !== undefined && !hidden) {
     const end = drawRosterRowIdleAsyncUnread(u.idleAsyncUnread, status.case, `${path}.idleAsyncUnread`);
-    label.classList.add(rosterArmMark(end).toneClass);
     ws.setAttribute("data-unread-turn-end", end);
   }
   // A BAND ROW'S NAME TAKES THE REPOSITORY NAMES' COLOUR, Recently Merged and

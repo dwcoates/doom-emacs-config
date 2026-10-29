@@ -3449,7 +3449,7 @@ describe("the response bubble's fill", () => {
 
   it.each([
     ["light", () => withoutBlockComments(declarationsOf(":root") ?? ""), 0.1],
-    ["dark", () => darkThemeBlock(), 0.4],
+    ["dark", () => darkThemeBlock(), 0.6],
   ] as const)("paints the %s theme's tool card --panel-bg moved a set share of the way to --bg (owner request, 2026-10-27, slightly darker than 2026-10-25's 20%%)", (_theme, block, share) => {
     // Arrange
     const css = block();
@@ -3461,7 +3461,7 @@ describe("the response bubble's fill", () => {
     expect(card).toEqual(panel.map((channel, i) => Math.round(channel + (bg[i] - channel) * share)));
   });
 
-  it("paints the dark theme's --assistant a touch above the composer (owner request, 2026-10-28)", () => {
+  it("paints the dark theme's --assistant a touch dimmer than 2026-10-28's #181818 (owner request, 2026-10-29)", () => {
     // Arrange
     const css = darkThemeBlock();
 
@@ -3469,7 +3469,7 @@ describe("the response bubble's fill", () => {
     const response = themeRgbOf(css, "--assistant");
 
     // Assert
-    expect(response).toEqual([0x18, 0x18, 0x18]);
+    expect(response).toEqual([0x16, 0x16, 0x16]);
   });
 
   it("is what a response bubble paints", () => {
