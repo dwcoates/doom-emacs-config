@@ -1,8 +1,6 @@
 package feed
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +8,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 )
 
 // revisionOf is the response_revision page line rewriting UNIT to MARKDOWN.
@@ -342,24 +341,11 @@ func TestFoldOfRowMissesARowNoFoldDrew(t *testing.T) {
 // TestEveryRowToFoldLookupGoesThroughFoldOfRow fails a resolver file that walks
 // the response folds comparing their rows by hand instead of asking foldOfRow.
 func TestEveryRowToFoldLookupGoesThroughFoldOfRow(t *testing.T) {
-	// Arrange.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Act.
 	var offenders []string
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
-			continue
-		}
-		raw, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n := strings.Count(string(raw), "fold.row.GetValue() == "); n > 0 && (file != "revision.go" || n > 1) {
-			offenders = append(offenders, file)
+	for _, file := range sourcescan.Production(t) {
+		if n := strings.Count(string(file.Source), "fold.row.GetValue() == "); n > 0 && (file.Name != "revision.go" || n > 1) {
+			offenders = append(offenders, file.Name)
 		}
 	}
 

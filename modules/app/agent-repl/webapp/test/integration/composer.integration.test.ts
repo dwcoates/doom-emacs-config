@@ -519,6 +519,7 @@ describe("command panels", () => {
       "commandRefused",
       "commandActed",
       "askAnswered",
+      "responseRevising",
     ]);
   });
 
@@ -762,6 +763,35 @@ describe("an ask-answered answer", () => {
   it("draws no refusal and no feed row of its own", async () => {
     // Arrange / Act: the card's re-push is the visible effect.
     await submitAnswer();
+    // Assert
+    expect([harness.refusalArms(), harness.rowIds()]).toEqual([[], []]);
+  });
+});
+
+describe("a response-revising answer", () => {
+  /** Submit words the daemon took as a question about a highlighted response. */
+  const submitRevising = async (): Promise<void> => {
+    harness = await startHarness({ composer: true });
+    harness.fake.answer(
+      "submitPrompt",
+      create(SubmitPromptResponseSchema, {
+        result: { case: "success", value: { outcome: { case: "responseRevising", value: { row: { value: "row-1" } } } } },
+      }),
+    );
+    await type("what does this mean");
+    await send();
+  };
+
+  it("clears the draft", async () => {
+    // Arrange / Act
+    await submitRevising();
+    // Assert
+    expect((harness.$('[data-component="composer"] textarea') as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("draws no refusal and no feed row of its own", async () => {
+    // Arrange / Act: the revised bubble's redraw is the visible effect.
+    await submitRevising();
     // Assert
     expect([harness.refusalArms(), harness.rowIds()]).toEqual([[], []]);
   });

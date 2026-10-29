@@ -103,7 +103,10 @@ export async function reviseResponse(
       break;
   }
   if (asked.text.trim() === "") {
-    LOGGER.error({ ...context, vendor_session_id: parentSessionId }, "the revising side query answered with no text; no revision was written");
+    LOGGER.error(
+      { ...context, vendor_session_id: parentSessionId, cause: "the side query's result carried no text" },
+      "the revising side query answered with no text; no revision was written",
+    );
     return refused({ case: "emptyAnswer", value: create(shimv1.ReviseResponseEmptyAnswerSchema, {}) });
   }
   deps.writeRevision(

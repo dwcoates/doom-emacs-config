@@ -14,6 +14,7 @@ import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { controlCall } from "../../src/rpc/control-call.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { scriptedAppContext } from "./app-context.js";
+import { recordingFailures } from "../failure-sink.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { codeUnder } from "../files-under.js";
 import path from "node:path";
@@ -23,12 +24,13 @@ const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src")
 
 /** A page whose daemon answers SelectFeedRow through ANSWER. */
 function page(answer: () => unknown): { ctx: ReturnType<typeof scriptedAppContext>; reported: FailureKind[] } {
-  const reported: FailureKind[] = [];
+  const sink = recordingFailures();
+  const reported = sink.reports;
   const ctx = scriptedAppContext(
     { selectFeedRow: () => answer() as never },
     {
       workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
-      failures: { report: (kind) => reported.push(kind), retract: () => {} },
+      failures: sink,
     },
   );
   return { ctx, reported };

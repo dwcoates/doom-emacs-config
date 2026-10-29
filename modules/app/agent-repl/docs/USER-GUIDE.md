@@ -436,7 +436,7 @@ Highlight words in a final response (drag across them, or extend a selection wit
 
 - **The highlight is purple** in a final response, and nowhere else. The purple says a prompt sent now revises that response.
 - **The branch boxes that follow the pointer stand down** over a bubble you are highlighting in, so the highlight is the only thing marked.
-- **While the revision is on its way, the bubble wears a breathing purple ring,** and the highlight clears.
+- **While the revision is on its way, the bubble's border turns purple,** and the highlight clears.
 - **When the revision lands, only what changed types out.** The text before and after the change stays as it was.
   - For "what does this mean" about one word, expect a new branch under the branch that holds the word.
 - **Nothing new appears in the feed.** No prompt bubble is drawn for what you sent, and no turn runs.

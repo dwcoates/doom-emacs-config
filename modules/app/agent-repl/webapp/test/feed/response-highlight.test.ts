@@ -17,6 +17,7 @@ import { installResponseHighlight, responseHighlightIn } from "../../src/feed/re
 import { FEED_ROW_ATTRIBUTE } from "../../src/feed/row-id.js";
 import { FINAL_RESPONSE_CLASS } from "../../src/feed/rows/turn-ended.js";
 import { scriptedAppContext } from "../rpc/app-context.js";
+import { recordingFailures } from "../failure-sink.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 let teardown: (() => void) | undefined;
@@ -75,7 +76,8 @@ function scripted(answer?: () => unknown): {
   install: (host: HTMLElement) => void;
 } {
   const calls: SelectResponseTextRequest[] = [];
-  const reported: FailureKind[] = [];
+  const sink = recordingFailures();
+  const reported = sink.reports;
   const ctx = scriptedAppContext(
     {
       selectResponseText: (req) => {
@@ -86,7 +88,7 @@ function scripted(answer?: () => unknown): {
     },
     {
       workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
-      failures: { report: (kind) => reported.push(kind), retract: () => {} },
+      failures: sink,
     },
   );
   return {

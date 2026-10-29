@@ -2657,14 +2657,14 @@ describe("a final response revised from highlighted words", () => {
     expect(shownProse(el)).toBe("alpha omega\n");
   });
 
-  it("rings the bubble while a revision is pending", () => {
+  it("marks the bubble while a revision is pending", () => {
     // Act
     const el = drawFeedResponse(settled("alpha omega", { revision: { state: { case: "pending", value: {} } } }), rowContext());
     // Assert
     expect(el.classList.contains(RESPONSE_REVISING_CLASS)).toBe(true);
   });
 
-  it("drops the ring once no revision is pending", () => {
+  it("drops the mark once no revision is pending", () => {
     // Arrange
     const before = drawFeedResponse(settled("alpha omega", { revision: { state: { case: "pending", value: {} } } }), rowContext());
     mount(before);

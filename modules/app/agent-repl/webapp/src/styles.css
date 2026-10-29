@@ -9635,19 +9635,11 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   color: white;
 }
 
-/* A REVISION ON ITS WAY rings the bubble in the same purple, breathing, until
-   the revised prose lands (FeedResponse.revision `pending`). */
+/* A REVISION ON ITS WAY turns the bubble's border the same purple until the
+   revised prose lands (FeedResponse.revision `pending`). A bubble state rule
+   sets the border and nothing else, and no bubble animates. */
 .bubble.response-revising {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--blocked) 55%, transparent);
-}
-@media (prefers-reduced-motion: no-preference) {
-  .bubble.response-revising {
-    animation: response-revising 2.6s ease-in-out infinite;
-  }
-}
-@keyframes response-revising {
-  0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--blocked) 35%, transparent); }
-  50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blocked) 80%, transparent); }
+  border-color: var(--blocked);
 }
 
 /* A REVISION THAT FAILED says why under the prose, which stands as it was
