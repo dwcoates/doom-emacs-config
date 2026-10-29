@@ -4912,14 +4912,14 @@ describe("the rail's marks", () => {
     expect(keyframes).not.toMatch(/transform|scale|width|height|font-size/);
   });
 
-  it("swings a breathing name's opacity 40% narrower about the old middle (owner request, 2026-10-28)", () => {
+  it("swings a breathing name between the unviewed ink and the full text color, never dimmer (owner request, 2026-10-29)", () => {
     // Arrange
     const keyframes = keyframesOf("ws-pulse");
-    const at = (stop: string): number => Number(new RegExp(`${stop}\\s*\\{[^}]*opacity:\\s*([0-9.]+)\\s*;`).exec(keyframes)?.[1]);
+    const at = (stop: string): string => new RegExp(`${stop}\\s*\\{[^}]*color:\\s*([^;]+);`).exec(keyframes)?.[1] ?? "";
     // Act
-    const [bright, faded] = [at("0%, 100%"), at("50%")];
-    // Assert — the old swing ran 1 to 0.58: 0.42 wide about 0.79.
-    expect([bright - faded, (bright + faded) / 2].map((n) => Number(n.toFixed(3)))).toEqual([0.252, 0.79]);
+    const [rest, peak] = [at("0%, 100%"), at("50%")];
+    // Assert
+    expect([rest, peak, keyframes.includes("opacity")]).toEqual(["var(--repo-head-expanded)", "var(--fg)", false]);
   });
 
   it("breathes once every 2s, 30% slower than the 1.4s it once took", () => {
