@@ -373,8 +373,9 @@ The instant the workspace's sync merge joined its repository's queue."
   (agent-repl-wire-roster--decode-started-at "RosterRowWhenSyncMerging" value))
 
 (defun agent-repl-wire-decode-roster-row-when-no-turn-running (value)
-  "Decode VALUE as `RosterRowWhenNoTurnRunning', a plist `(:last-turn-ended-at-ms)'.
-The durable instant the workspace's last turn ended, epoch MILLISECONDS,
+  "Decode VALUE as `RosterRowWhenNoTurnRunning'.
+A plist `(:last-turn-ended-at-ms)': the durable instant the workspace's
+last turn ended, epoch MILLISECONDS,
 nil when no turn of the workspace has ended."
   (let ((object (agent-repl-wire--object "RosterRowWhenNoTurnRunning" value)))
     (agent-repl-wire--check-keys "RosterRowWhenNoTurnRunning" object '(lastTurnEndedAtMs))
