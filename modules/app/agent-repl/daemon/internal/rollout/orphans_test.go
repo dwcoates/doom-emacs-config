@@ -98,13 +98,13 @@ func TestTheTakeoverDialsNoShimForAFreeLock(t *testing.T) {
 func TestTheTakeoverOfAFreeLock(t *testing.T) {
 	tests := []struct {
 		name      string
-		hidden    bool
+		parked    bool
 		listening bool
 		wantStood bool
 	}{
-		{name: "stands down the listening inert survivor of a hidden workspace", hidden: true, listening: true, wantStood: true},
-		{name: "holds nothing for a hidden workspace no shim listens for", hidden: true},
-		{name: "leaves a visible workspace's survivor to its bring-up", listening: true},
+		{name: "stands down the listening inert survivor of a shim that was not up", parked: true, listening: true, wantStood: true},
+		{name: "holds nothing for a parked workspace no shim listens for", parked: true},
+		{name: "leaves a survivor whose shim was up to its bring-up", listening: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -115,8 +115,10 @@ func TestTheTakeoverOfAFreeLock(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Workspace: %v", err)
 			}
-			if err := h.db.SetHidden(context.Background(), ws, tt.hidden, time.Now()); err != nil {
-				t.Fatalf("SetHidden: %v", err)
+			if tt.parked {
+				if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle, At: time.Now()}); err != nil {
+					t.Fatalf("SetSessionTerminal: %v", err)
+				}
 			}
 			h.mu.Lock()
 			h.lockStates[record.Dir] = sessionlock.StateFree

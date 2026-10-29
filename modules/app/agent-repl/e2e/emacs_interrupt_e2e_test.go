@@ -140,20 +140,22 @@ func emGHIOpenPanel(t *testing.T, e *Emacs) {
 // :ni "RET"` in `input.el`, so pressing it asserts the binding as well as
 // the command.
 //
-// The workspace's session must be up first: the daemon refuses a submit to a
-// workspace with no session (`no_session`), and opening the panel does not
-// wait for the session. A settled roster arm is published only once the
-// session is serving, so awaiting one orders the submit after it.
+// The workspace's tab must be open first, with no turn running: a settled
+// arm, or `:none` for an open workspace with no shim. Opening starts no shim
+// (owner ruling, 2026-10-28), and a submit to a workspace with none is held
+// and starts it (promptqueue's holdForRevival), so the prompt is what brings
+// the session up.
 //
 // That wait is the workspace's FIRST open being answered, bounded by
-// emacsTabOpenBound rather than DefaultTimeout: the roster draws the open's
-// `inactive` arm over every other until the open's webapp page has drawn
-// (daemon/internal/opentabs), so the wait spans a shim spawn AND a WebKit page
-// boot. Under the merge gate's parallel load a page whose script started late
-// held the arm at `inactive` past DefaultTimeout while the session was long up.
+// emacsTabOpenBound rather than DefaultTimeout: a tab joins the order only
+// once the daemon answers its open, after its webapp page has drawn
+// (daemon/internal/opentabs), so the wait spans a WebKit page boot. Under the
+// merge gate's parallel load a page whose script started late held the open
+// past DefaultTimeout.
 func emGHISubmit(t *testing.T, e *Emacs, ws, text string) {
 	t.Helper()
-	emGHIAwaitStatusFor(t, e, emacsTabOpenBound, ws, "the workspace's session to be up before the submit", emGHISettledArms...)
+	emGHIAwaitArmFor(t, e, emacsTabOpenBound, ws, "the workspace's tab to be open with no turn running before the submit",
+		emGHIOpenStatusForm(ws), emGHISubmittableArms...)
 	buffer := e.EvalString(`(buffer-name (agent-repl--input-buffer ` + elispString(ws) + `))`)
 	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + elispString(ws) + `)
                  (erase-buffer)
@@ -172,6 +174,13 @@ func emGHIStatusForm(ws string) string {
 	return `(format "%s" (agent-repl-roster-status-for-ws ` + elispString(ws) + `))`
 }
 
+// emGHIOpenStatusForm is emGHIStatusForm once WS's tab is in the tab order,
+// which it joins when the daemon answers its open (open-tabs.el), and "" before.
+func emGHIOpenStatusForm(ws string) string {
+	return `(if (seq-some (lambda (n) (equal (format "%s" n) ` + elispString(ws) + `)) agent-repl-roster--tab-order) ` +
+		emGHIStatusForm(ws) + ` "")`
+}
+
 // emGHIAwaitStatus waits until WS's roster arm is one of ARMS, within
 // DefaultTimeout.
 func emGHIAwaitStatus(t *testing.T, e *Emacs, ws, what string, arms ...string) string {
@@ -182,7 +191,13 @@ func emGHIAwaitStatus(t *testing.T, e *Emacs, ws, what string, arms ...string) s
 // emGHIAwaitStatusFor is emGHIAwaitStatus with an explicit, named bound.
 func emGHIAwaitStatusFor(t *testing.T, e *Emacs, bound time.Duration, ws, what string, arms ...string) string {
 	t.Helper()
-	raw := e.AwaitEvalFor(bound, what, emGHIStatusForm(ws), func(raw json.RawMessage) bool {
+	return emGHIAwaitArmFor(t, e, bound, ws, what, emGHIStatusForm(ws), arms...)
+}
+
+// emGHIAwaitArmFor waits, within BOUND, until FORM reads one of ARMS.
+func emGHIAwaitArmFor(t *testing.T, e *Emacs, bound time.Duration, ws, what, form string, arms ...string) string {
+	t.Helper()
+	raw := e.AwaitEvalFor(bound, what, form, func(raw json.RawMessage) bool {
 		var got string
 		if err := json.Unmarshal(raw, &got); err != nil {
 			return false
@@ -208,6 +223,10 @@ func emGHIAwaitStatusFor(t *testing.T, e *Emacs, bound time.Duration, ws, what s
 var (
 	emGHIRunningArms = []string{":submitting", ":thinking", ":clearing", ":compacting", ":permission"}
 	emGHISettledArms = []string{":ready", ":done", ":interrupted", ":idle-async"}
+	// emGHISubmittableArms are the arms a submit waits for: a settled
+	// session, or `:none`, an open workspace with no shim, which the prompt
+	// starts.
+	emGHISubmittableArms = append([]string{":none"}, emGHISettledArms...)
 )
 
 // emGHIIngressWaitingForm counts WS's prompts waiting in the durable

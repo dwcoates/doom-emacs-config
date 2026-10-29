@@ -128,8 +128,15 @@ function toHistoryPlace(line: storev1.StoreLineAt): conversationv1.HistoryEntryA
   }
 }
 
-/** One stored line, its pointer, its turn and its place. */
-function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntryAt {
+/**
+ * One stored line, its pointer, its turn and its place.
+ *
+ * THE STORE'S READ-ONLY FACE RENDERS PAGES WITH THE SAME MAPPING in Go
+ * (shim-store/internal/history, EntryAt): a page and this shim's tail must draw
+ * one stored line identically, and both suites read the shared golden cases in
+ * agent-repl/testdata/history-golden.
+ */
+export function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntryAt {
   if (line.at === undefined || line.line === undefined) {
     throw new PersistenceError(
       "store_unavailable",
@@ -355,11 +362,6 @@ function isNotFound(error: unknown): boolean {
 // The reader
 // ---------------------------------------------------------------------------
 
-/** Where a page read below the newest page begins: the store's two position arms. */
-type PageFrom =
-  | { readonly case: "after"; readonly value: conversationv1.HistoryPointer }
-  | { readonly case: "through"; readonly value: conversationv1.ConversationThrough };
-
 /** The read half, plus the two notes the write half feeds it about shell runs. */
 interface Reader {
   openAgentPage(
@@ -390,10 +392,6 @@ interface Reader {
   readAgentPage(
     agent: conversationv1.AgentId,
     after: conversationv1.HistoryPointer,
-  ): Promise<conversationv1.HistoryPage>;
-  readPageThrough(
-    agent: conversationv1.AgentId,
-    through: conversationv1.ConversationThrough,
   ): Promise<conversationv1.HistoryPage>;
   openBashRun(
     work: conversationv1.DetachedWorkId,
@@ -1231,14 +1229,10 @@ export function createReader(options: ReaderOptions): Reader {
    */
   const readStorePageOnce = async (
     agent: conversationv1.AgentId,
-    from: PageFrom,
+    after: conversationv1.HistoryPointer,
   ): Promise<storev1.ReadAgentPageSuccess> => {
-    // THE ARM IS THE POSITION, forwarded as the store spells it: `after` walks
-    // below a served line, `through` reads the book as it stood at an instant.
-    const position: storev1.ReadAgentPageRequest["position"] =
-      from.case === "after"
-        ? { case: "after", value: toStorePointer(from.value) }
-        : { case: "through", value: from.value };
+    // THE PAGE BELOW A SERVED LINE, forwarded as the store spells it.
+    const position: storev1.ReadAgentPageRequest["position"] = { case: "after", value: toStorePointer(after) };
     let response: storev1.ReadAgentPageResponse;
     try {
       response = await client.readAgentPage(
@@ -1280,9 +1274,9 @@ export function createReader(options: ReaderOptions): Reader {
 
   const readAgentPageOnce = async (
     agent: conversationv1.AgentId,
-    from: PageFrom,
+    after: conversationv1.HistoryPointer,
   ): Promise<conversationv1.HistoryPage> => {
-    const read = await readStorePageOnce(agent, from);
+    const read = await readStorePageOnce(agent, after);
     // EVERY LINE CARRIES ITS OWN POINTER (landing 3): a continuation page is
     // a reconnect mark like any other, so nothing here is minted and nothing
     // has to be refused if a caller echoes one back.
@@ -1324,7 +1318,7 @@ export function createReader(options: ReaderOptions): Reader {
     while (from !== undefined) {
       const position: conversationv1.HistoryPointer = from;
       const older: storev1.ReadAgentPageSuccess = await onReadRetrySchedule("walkAgentBook", agent, () =>
-        readStorePageOnce(agent, { case: "after", value: position }),
+        readStorePageOnce(agent, position),
       );
       pages += 1;
       if (older.lines.length === 0 && older.boundary.case === "more") {
@@ -1394,15 +1388,10 @@ export function createReader(options: ReaderOptions): Reader {
 
     readAgentPage(agent, after) {
       return onReadRetrySchedule("readAgentPage", agent, () =>
-        readAgentPageOnce(agent, { case: "after", value: after }),
+        readAgentPageOnce(agent, after),
       );
     },
 
-    readPageThrough(agent, through) {
-      return onReadRetrySchedule("readPageThrough", agent, () =>
-        readAgentPageOnce(agent, { case: "through", value: through }),
-      );
-    },
     async openBashRun(work, { awaitFirstRow }) {
       // THE HANDLE IS THE RUN (ruling, landing 3): `DetachedWorkId.value ==
       // AgentActivityId.value`, the spawning call's own `tool_use_id`. So there

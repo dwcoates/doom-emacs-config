@@ -11,17 +11,15 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
-	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
-// Open brings a registered workspace's session up. MOUNTING A PARKED
-// WORKSPACE'S FRONTEND IS AN IMPLICIT REVIVAL: there is no shim-less read path,
-// so opening spawns rather than serving history from anywhere else.
+// Open opens a registered workspace: its worktree restored when gone, its
+// closed flag cleared. IT STARTS NO SHIM (owner ruling, 2026-10-28): the
+// conversation is read from the store, and the next prompt brings the shim
+// up; a parked workspace stays parked until then.
 //
-// It is idempotent: opening a workspace whose session is already live clears
-// the closed flag and returns, because the mount it answers has already
-// happened.
+// It is idempotent: opening an open workspace changes nothing.
 // reportOpenStage relays one stage to an Open's progress reporter, if the
 // caller set one. An open with no reporter (every non-client caller) emits
 // nothing.
@@ -75,53 +73,15 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID, progress OpenProgr
 		}
 	}
 
-	// A PARKED WORKSPACE IS REVIVED THROUGH THE SAME PATH, and the park is
-	// LIFTED by it. The start below would have spawned the session either way
-	// — that is the implicit revival this verb has always performed — but
-	// nothing retracted the sweep's park from the session-scoped views, so the
-	// topbar went on drawing the hibernated strip over a live session until
-	// the shim's first link state happened to arrive.
-	asleep, err := v.parked(ctx, ws)
-	if err != nil {
-		log.Error(opOpen, "could not tell whether the workspace was hibernated", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("open %q: %w", ws, err)
-	}
 	if v.deps.Sessions.Live(ws) {
-		log.Debug(opOpen, "the session is already live", nil)
-		// AN OPEN RECONCILES; IT DOES NOT TRUST THE LIVENESS IT READ. A live
-		// session is the reason this verb starts nothing — and it is also the
-		// reason the record is never revisited on this path, which is how the
-		// open came to answer in under two milliseconds and leave the user
-		// with nothing: the workspace's session record still read `killed`
-		// from a KillWorkspace weeks earlier, the roster RECEDES a killed
-		// session's row, and Emacs gives a tab only to a row that is not
-		// receded. The open now leaves the record saying what the fleet says.
+		// AN OPEN RECONCILES; IT DOES NOT TRUST THE LIVENESS IT READ. The
+		// workspace's session record may still read `killed` from a
+		// KillWorkspace weeks earlier, the roster RECEDES a killed session's
+		// row, and Emacs gives a tab only to a row that is not receded. The
+		// open leaves the record saying what the fleet says.
 		if err := retireTerminalRecord(ctx, log, v.deps.DB, opOpen, ws); err != nil {
 			return fmt.Errorf("open %q: %w", ws, err)
 		}
-	} else {
-		// THE SLOW STAGE. Reported only when a bring-up actually runs: a
-		// session already live waited for nothing, and a stage announcing
-		// work that is not happening is worse than no stage at all.
-		reportOpenStage(progress, OpenStageStartingSession)
-		if err := v.deps.Sessions.Start(ctx, ws); err != nil {
-			// A DEPARTING DAEMON IS NOT A SESSION THAT FAILED TO COME UP. The
-			// bring-up refused before it spawned because nothing would be left
-			// to own the shim, and the successor opens the workspace from the
-			// same record; the caller still gets the refusal, which is what it
-			// acts on.
-			if errors.Is(err, shimclient.ErrStandingDown) {
-				log.Info(opOpen, "the session was not brought up: this daemon is standing down", nil)
-			} else {
-				log.Error(opOpen, "the session did not come up", dlog.Context{"cause": err.Error()})
-			}
-			return fmt.Errorf("open %q: start the session: %w", ws, err)
-		}
-	}
-	if asleep {
-		reportOpenStage(progress, OpenStageReviving)
-		v.unpark(ws)
-		log.Info(opOpen, "revived the hibernated workspace", nil)
 	}
 
 	// A MERGED ROW IS REOPENED EVEN WHEN IT IS NOT CLOSED: the merge queue

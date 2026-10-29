@@ -163,30 +163,6 @@ export function killSessionLive(response: shimv1.KillSessionResponse): conversat
   return response.result.value.cause.value;
 }
 
-/** One page of history. */
-export function historyPage(response: shimv1.ReadHistoryResponse): conversationv1.HistoryPage {
-  if (response.result.case !== "success") {
-    throw wrongArm(
-      "ReadHistory",
-      response.result.case === "failure"
-        ? `failure.${response.result.value.kind.case ?? "unset"}`
-        : response.result.case,
-      response.result.case === "failure" ? response.result.value.detail : undefined,
-    );
-  }
-  const page = response.result.value.page;
-  if (page === undefined) throw new Error("ReadHistory success carried no HistoryPage");
-  return page;
-}
-
-/** The ReadHistory refusal's kind. */
-export function readHistoryKind(response: shimv1.ReadHistoryResponse): string {
-  if (response.result.case !== "failure") {
-    throw new Error(`ReadHistory: expected a failure, got ${response.result.case ?? "an unset oneof"}`);
-  }
-  return response.result.value.kind.case ?? "unset";
-}
-
 /** The SetSessionModel refusal's cause. */
 export function setModelCause(response: shimv1.SetSessionModelResponse): string {
   if (response.result.case !== "failure") {

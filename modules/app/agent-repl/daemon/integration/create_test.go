@@ -395,6 +395,8 @@ func TestCreateWorkspaceDeployHooksAreRecordedAndReadBackByALaterDeploy(t *testi
 		t.Fatalf("CreateWorkspace(deploy_hooks) = (%v, %v), want a success", resp, err)
 	}
 	ws := resp.Msg.GetSuccess().GetWorkspace()
+	// A CREATE WITH NO INITIAL PROMPT STARTS NO SHIM (owner ruling, 2026-10-28).
+	harness.StartSession(t, d, ws)
 	shim := d.Shim(ws)
 	shim.ExpectStartSession()
 
@@ -715,12 +717,11 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 	d := newDaemon(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the bring-up death the test scripts.
 	// The failed create is then reported to the repository's main-worktree
-	// workspace (workspace.reportCreateFailure), whose open dies the same
-	// scripted death: daemon.workspace.create_failed_report records that at
-	// ERROR, on its own goroutine, so it is declared but not required.
+	// workspace (workspace.reportCreateFailure): the report is queued, and the
+	// revival it occasions dies the same scripted death, which the queue
+	// records at ERROR on its own goroutine.
 	d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.exit", "daemon.shimclient.spawn",
-		"daemon.workspace.bring_up", "daemon.workspace.open", "daemon.workspace.create",
-		"daemon.workspace.create_failed_report")
+		"daemon.workspace.bring_up", "daemon.workspace.create", "daemon.promptqueue.submit")
 	d.WriteDefaultShimProfile(harness.ShimProfile{
 		ExitOn: harness.ExitOnStartup, ExitCode: 7, Stderr: "boom: fake bring-up death",
 	})
@@ -748,12 +749,12 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 			resp.Msg.GetResult())
 	}
 	// THE FAILED CREATE IS THEN REPORTED, ASYNCHRONOUSLY, to the repository's
-	// main-worktree workspace, whose shim dies by the same default profile, so
-	// the report cannot be delivered and says so at ERROR. Awaited rather than
-	// left to race the test's end: whether that record landed before the sweep
-	// used to decide the test's verdict.
-	d.RequireWarnings("daemon.workspace.create_failed_report")
-	d.AwaitLogRecord(d.RunLogPath(), "the failed create's undeliverable report", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.workspace.create_failed_report" && r.Level == "error"
+	// main-worktree workspace: the report is queued, and its revival dies by
+	// the same default profile, which the queue says at ERROR. Awaited rather
+	// than left to race the test's end: whether that record landed before the
+	// sweep used to decide the test's verdict.
+	d.RequireWarnings("daemon.promptqueue.submit")
+	d.AwaitWorkspaceLogRecord(repo.Dir, "the failed create's report's revival failing", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.promptqueue.submit" && r.Level == "error"
 	})
 }

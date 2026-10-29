@@ -22,6 +22,16 @@ export function statusWords(armCase: string): string {
   return protoArmName(armCase).replace(/_/g, " ");
 }
 
+/**
+ * The status cell's word for a status arm. A BOOTING SESSION READS "loading"
+ * (owner ruling, 2026-10-28): every shim start is drawn as an extension of the
+ * loading the footer already shows, so the `starting` arm takes that word.
+ * Every other arm reads as its name (statusWords).
+ */
+export function statusCellWord(armCase: string): string {
+  return armCase === "starting" ? "loading" : statusWords(armCase);
+}
+
 /** A composed line drawn verbatim, in its own classed span. */
 export function textLine(className: string, text: string): HTMLElement {
   const span = document.createElement("span");

@@ -151,7 +151,7 @@ same data.
 
 ### Cardinality
 
-- Allowed labels: `program`, `workspace`, `method`, `outcome`, `model`.
+- Allowed labels: `program`, `workspace`, `method`, `outcome`, `model`, and a series's own closed vocabulary (`cause`, `reason`, `choice`, `phase`, `restart`).
 - Never labels: prompt text, paths, session ids, versions (see above).
 - Expected size: a few thousand active series, mostly latency histograms.
 
@@ -254,9 +254,12 @@ run, judgement call 12).
 | `agentrepl_log_bytes`, `agentrepl_log_files` | gauge | `runtime` | daemon: the state root's logs directory, by the runtime each file's name carries |
 | `agentrepl_merge_step_seconds` | histogram | `step` | daemon (`merge`): how long a merge spent on each step before it left it |
 | `agentrepl_merge_seconds` | histogram | `span`, `outcome` | daemon (`merge`): each merge's `pick`, `queued`, `running` and `total` spans, `landed`, `already_on`, `failed` (or `ok` for a pick) |
-| `agentrepl_keepalive_lateness_seconds` | histogram | `outcome` | daemon (`cachelapse`): how long after it came due each asked-for keep-alive went out; `outcome` is `sent`, `main_agent_busy`, `detached_work_live`, `cache_lapsed`, `submit_failed`, `shim_unreachable`, `no_session`, `unnamed_judgment`, `session_parked` or `not_served`; the count per outcome is how many ended that way |
-| `agentrepl_cache_lapses_total` | counter | `outcome` | daemon (`cachelapse`): recorded cache lapses coming due, `stood_down`, `shown_first`, `merge_queued` or `moved_later` |
-| `agentrepl_cold_gate_idle_seconds` | histogram | `outcome` | daemon (`cachelapse`): how long a cache sat idle before a cold gate was raised over it; `outcome` is `lapsed_5m`, `lapsed_1h`, `lapsed_other_ttl`, `model_switch` or `unnamed_reason`, and the count is how many gates were raised |
+| `agentrepl_keepalive_lateness_seconds` | histogram | `outcome`, `workspace` | daemon (`cachelapse`): how long after it came due each asked-for keep-alive went out; `outcome` is `sent`, `main_agent_busy`, `detached_work_live`, `cache_lapsed`, `submit_failed`, `shim_unreachable`, `no_session`, `unnamed_judgment`, `session_parked` or `not_served`; the count per outcome is how many ended that way |
+| `agentrepl_cache_lapses_total` | counter | `outcome`, `workspace` | daemon (`cachelapse`): recorded cache lapses coming due, `stood_down`, `shown_first`, `merge_queued` or `moved_later` |
+| `agentrepl_cold_gate_idle_seconds` | histogram | `outcome`, `workspace` | daemon (`cachelapse`): how long a cache sat idle before a cold gate was raised over it; `outcome` is `lapsed_5m`, `lapsed_1h`, `lapsed_other_ttl`, `model_switch` or `unnamed_reason`, and the count is how many gates a shim judged: a gate raised again from its record, after a failed answer or carried over a handover is not counted again |
+| `agentrepl_shim_start_seconds` | histogram | `cause`, `outcome`, `workspace` | daemon (`workspace.Fleet`): how long a shim start took, from the fleet taking it to the session up or the start failing; `cause` is why it started (`internal/shimlife`: `prompt`, `relaunch`, `keepalive`, `cold_gate_answer`, `boot`, `takeover`, `restart`, `create`, `fork`, `thread`, `merge`, `rebind`, or `unstated` for a caller that stated none) and `outcome` `ok` or `failed` |
+| `agentrepl_shim_stand_downs_total` | counter | `reason`, `workspace` | daemon (`workspace.Fleet`): shims stood down on purpose, by `reason` (`keepalive_cycle`, `hibernate`, `cache_lapse`, `cold_gate`, `kill`, `rebind`, `handover`, `shutdown`, `replaced`, or `unstated`) |
+| `agentrepl_cold_gate_answers_total` | counter | `choice`, `outcome`, `workspace` | daemon (workspace verbs): cold gates answered, by `choice` (`pay`, `clear`, `compact`, `compact_and_resume`) and `outcome` (`resumed`, `failed`, `abandoned`, `refused`) |
 | `agentrepl_test_seconds` | gauge, one sample per run | `suite`, `test`, `outcome`, `trigger` | testrun, pushed when a merge queue gate's run ends: every individual test (each go test and subtest, ERT test, vitest test, harness group); `trigger` is `merge_queue` or `merge_queue_speculative` |
 | `agentrepl_test_suite_seconds` | gauge, one sample per run | `suite`, `outcome`, `trigger` | testrun, pushed with the tests: each suite's slot time |
 | `agentrepl_test_unit_wall_seconds`, `..._cpu_seconds`, `..._max_rss_bytes`, `..._block_reads`, `..._block_writes` | gauge, one sample per run | `suite`, `unit`, `outcome`, `trigger` | testrun, pushed with the tests: each unit's process (a chunk of tests, a build, a harness group), from the kernel's wait accounting, the finest grain resources are accounted at |
@@ -275,7 +278,7 @@ for metrics that show where restart time goes and when it regressed):
 | `deploy` | `handover`, `total` of a deploy that moved the daemon | | the successor, from the instants the intent manifest carries (judgement call 10) |
 | `daemon_boot` | `claim`, `reconciled`, `serving`, `sessions_up`, each from the process start | `cold`, `successor` | the booting daemon |
 | `service_restart` | `store` (its sidecar with it), `sidecar` | | `deploy.Restarter`, for a deploy and a boot alike |
-| `workspace_start` | `start`, `wake` | `boot`, `takeover`, `editor_open` | the bring-up, per workspace |
+| `workspace_start` | `start`, `wake` | `boot`, `takeover` | the bring-up, per workspace |
 | `session_start` | `shim`, `slot_wait`, `vendor`, `watch`, `total`, each its own duration (`slot_wait` and `vendor` once per attempt) | `fresh`, `resume`, `wake`, `adopted`, `relaunch`, `cold_answer` | the session fleet, per workspace, whoever asked for the start |
 | `editor_start` | `init`, `daemon_linked`, `first_tab`, `all_tabs`, each from the Emacs process's start | `spawned`, `running` | Emacs, reported through `ReportLatencies` once its startup's open ends |
 | `shim_restart` | `wait`, `prelaunch`, `stand_down`, `resume`, `run` | the relaunch reason (`build_stale`, `restart_verb`, `query_died`, `shim_log_hard_ceiling`) | the rollout's bounce engine, per workspace |

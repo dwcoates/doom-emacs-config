@@ -12,6 +12,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptorigin"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -77,6 +78,16 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		return q.holdBehindCall(ctx, d, sub, call, log)
 	}
 
+	// A PROMPT THAT WAITS OUT A STANDING GATE IS HELD THERE before any shim is
+	// looked for: the gate runs none until it is answered (owner ruling,
+	// 2026-10-27), and the answer, not a revival, is what serves it.
+	if sub.Target == nil {
+		if kind, why, waiting := q.sessionWait(sub.WS); waiting && kind == wsm.HoldColdGate {
+			log.Info(opSubmit, "the workspace's session does not serve yet; the prompt is held until it comes up",
+				dlog.Context{"hold": kind.String(), "why": why})
+			return q.hold(ctx, sub, "", &leaseHold{kind: kind}, log)
+		}
+	}
 	sender, ok := q.deps.Client(sub.WS)
 	if !ok {
 		// A HIBERNATED SESSION IS IDLE, NOT DEAD. The prompt is its revival,
@@ -377,9 +388,20 @@ func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Log
 	// outranks this while the route is coming up, so the walk is now
 	// `none` -> `init` -> `submitting` -> `thinking`.
 	q.setTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt})
-	q.reviveInBackground(context.WithoutCancel(ctx), sub.WS, log)
+	q.reviveInBackground(context.WithoutCancel(ctx), sub.WS, revivalLoad, log)
 	return disposition, nil
 }
+
+// revivalCause is why a revival brings a session up: a load (a prompt, a
+// lease's holds) or the relaunch of a shim that died, which badges the
+// prompts held for it "after reconnect" rather than "after loading"
+// (holds.Sink.SetRelaunching).
+type revivalCause int
+
+const (
+	revivalLoad revivalCause = iota
+	revivalRelaunch
+)
 
 // reviveInBackground brings one workspace's session up off the request path and
 // releases every revival-pending hold once it is up.
@@ -387,7 +409,7 @@ func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Log
 // EXACTLY ONE REVIVAL RUNS PER WORKSPACE: a second submission arriving while
 // the first one's bring-up is still running joins its outcome rather than
 // spawning a second bring-up, and its own hold is released by the same sweep.
-func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
+func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, cause revivalCause, log dlog.Logger) {
 	s := q.state(ws)
 	q.mu.Lock()
 	if s.reviving {
@@ -401,12 +423,18 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 	log.Debug("daemon.promptqueue.state_transition", "the workspace revival state changed", dlog.Context{
 		"state": "reviving", "before": beforeReviving, "after": true,
 	})
-	log.Info(opSubmit, "started the background session revival", nil)
+	log.Info(opSubmit, "started the background session revival", dlog.Context{"relaunch": cause == revivalRelaunch})
+	if cause == revivalRelaunch {
+		q.deps.Holds.SetRelaunching(ws, true)
+	}
 
 	q.reviving.Add(1)
 	go func() {
 		defer q.reviving.Done()
 		defer func() {
+			if cause == revivalRelaunch {
+				q.deps.Holds.SetRelaunching(ws, false)
+			}
 			q.mu.Lock()
 			before := s.reviving
 			s.reviving = false
@@ -415,7 +443,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 				"state": "reviving", "before": before, "after": false,
 			})
 		}()
-		revived, err := q.revive(ctx, ws, log)
+		revived, err := q.revive(ctx, ws, cause, log)
 		if err != nil {
 			// THE BRING-UP FAILED, and feed_held.proto settles what that
 			// means for the entries waiting on it: "A FAILED BRING-UP NEVER
@@ -431,6 +459,17 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 			// held and the tray keeps showing it.
 			log.Debug(opSubmit, "no revival hook is wired; the prompt stays held", nil)
 			return
+		}
+		// A REVIVAL THAT PARKED AT ITS COLD GATE HAS NO SHIM BY DESIGN: the gate
+		// runs none until it is answered (owner ruling, 2026-10-27), so no
+		// client is the gate's state, never a revival that lied. Its prompts
+		// move under the gate's hold (sessionWait) exactly as a session's
+		// would under its own.
+		if q.deps.ColdGate != nil {
+			if _, gated := q.deps.ColdGate(ws); gated {
+				q.releaseReconnectHolds(ctx, ws, log)
+				return
+			}
 		}
 		if _, ok := q.deps.Client(ws); !ok {
 			// A SESSION THAT CAME UP AND HAS SINCE DIED is not a revival that
@@ -709,14 +748,18 @@ func (q *queue) releaseReconnectHoldsLocked(ctx context.Context, d *delivery, lo
 // revive brings a parked session back up for a submission that found none.
 // It reports whether a revival was attempted AND succeeded; a revival that
 // fails is the submission's failure, never a silent refusal.
-func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (bool, error) {
+func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, cause revivalCause, log dlog.Logger) (bool, error) {
 	if q.deps.Revive == nil {
 		return false, nil
 	}
 	log.Debug(opSubmit, "no session is live; reviving the workspace for the submission", nil)
 	q.noteBringUp(ws, 1, log)
 	defer q.noteBringUp(ws, -1, log)
-	if err := q.deps.Revive(ctx, ws); err != nil {
+	life := shimlife.StartPrompt
+	if cause == revivalRelaunch {
+		life = shimlife.StartRelaunch
+	}
+	if err := q.deps.Revive(shimlife.WithStart(ctx, life), ws); err != nil {
 		log.Error(opSubmit, "the revival failed; the submission cannot be delivered",
 			dlog.Context{"cause": err.Error()})
 		return false, fmt.Errorf("submit to %q: revive the session: %w", ws, err)

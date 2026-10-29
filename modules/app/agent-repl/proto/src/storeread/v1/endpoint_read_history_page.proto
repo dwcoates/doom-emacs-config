@@ -1,0 +1,113 @@
+// endpoint_read_history_page.proto — ReadHistoryPage: one page of one agent's
+// durable history, read from the store's read-only pool and served in the
+// conversation vocabulary every feed draws. It answers exactly what a shim's
+// own history read answered, so a reader needs no shim up to show a
+// conversation: a parked workspace, one at its cold gate, one whose shim is
+// starting or gone all read the same way.
+
+syntax = "proto3";
+
+package storeread.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/history.proto";
+
+option go_package = "agentrepl/proto/storeread/v1;storereadv1";
+
+// Which book, and where in it.
+message ReadHistoryPageRequest {
+  // WHOSE history: a workspace's main agent (the book the workspace's shim
+  // stated for it) or any agent a page or a tail named, a subagent or a fork's
+  // parent alike.
+  conversation.v1.AgentId book = 1;
+  // Where this page begins. THE ARM IS THE POSITION.
+  oneof position {
+    // The newest page. The newest entry is the store's fact, never a value the
+    // caller supplies.
+    ReadHistoryPageNewest newest = 2;
+    // Entries placed strictly BEFORE the entry this pointer names — a pointer
+    // served by a page's `more` arm or by a watched entry, echoed verbatim.
+    conversation.v1.HistoryPointer after = 3;
+    // The newest entries placed AT OR BEFORE this bound: the book as it stood
+    // at that instant (a fork reads its parent's conversation up to the fork
+    // point this way). `more` then walks older with `after` as usual.
+    conversation.v1.ConversationThrough through = 4;
+  }
+}
+
+// Anchor at the newest entry, saying how the caller knows of the book.
+//
+// THE ARM DECIDES WHAT AN ABSENT BOOK MEANS. The store registers a book on the
+// first row written under its agent, so a session that has written nothing
+// yet (a fresh one, a keep-alive-only one) has no book in the store although
+// its agent is real. Only a caller that holds the producer's own word for the
+// agent may have that read as an empty past; any other reader is told the
+// agent is unknown, so a stale or mistyped id is never answered as patience.
+message ReadHistoryPageNewest {
+  oneof known_as {
+    // The book a producer stated for the workspace (its shim's StartSession
+    // answer), as the caller recorded it: an absent book is served as the
+    // empty page with `floor` it is.
+    ReadHistoryPageNewestStated stated = 1;
+    // A book only named — by a page, a tail or a fork's lineage: an absent
+    // book is refused `unknown_agent`.
+    ReadHistoryPageNewestNamed named = 2;
+  }
+}
+
+// The caller holds the producer's word that the book's agent is real.
+message ReadHistoryPageNewestStated {}
+
+// The caller holds no producer's word for the book; the store's register
+// decides whether it exists.
+message ReadHistoryPageNewestNamed {}
+
+// THE ARM IS THE OUTCOME.
+message ReadHistoryPageResponse {
+  oneof result {
+    ReadHistoryPageSuccess success = 1;
+    ReadHistoryPageFailure failure = 2;
+  }
+}
+
+// The page. An EMPTY page with `floor` is a legitimate answer for a stated
+// book with no history yet.
+message ReadHistoryPageSuccess {
+  conversation.v1.HistoryPage page = 1;
+}
+
+// Not served. THE ARM IS WHY.
+message ReadHistoryPageFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  // Why the page was not served.
+  oneof kind {
+    // The request was malformed: no book, an empty pointer, a non-positive
+    // `through` instant, or no position.
+    ReadHistoryPageInvalidRequest invalid_request = 2;
+    // The book names no agent the store holds, and the request did not state
+    // it (`newest.named`, `after`, `through`).
+    ReadHistoryPageUnknownAgent unknown_agent = 3;
+    // The echoed pointer names no line of this book; the caller re-reads from
+    // the newest page.
+    ReadHistoryPageStalePointer stale_pointer = 4;
+    // The store could not read its database.
+    ReadHistoryPageStorageFailure storage_failure = 5;
+  }
+}
+
+// A malformed request, naming the field at fault.
+message ReadHistoryPageInvalidRequest {
+  // The request field the store refused, as a dotted path ("book",
+  // "after", "through.at_ms").
+  string field = 1;
+}
+
+// The book's agent is not one the store holds.
+message ReadHistoryPageUnknownAgent {}
+
+// The pointer names no line of the book.
+message ReadHistoryPageStalePointer {}
+
+// The store's own read failed.
+message ReadHistoryPageStorageFailure {}

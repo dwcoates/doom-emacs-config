@@ -125,8 +125,8 @@ type WatchAgentRequest_TailOnly struct {
 	// No history: the opening page carries no entries and the stream carries
 	// only what is written from now on. The daemon opens every watch this way
 	// when it holds nothing of the agent's history, and loads history only
-	// when a reader asks for it (ReadHistory). An entry read that way and also
-	// received on this stream is absorbed by its identity.
+	// when a reader asks for it, from the store (storeread.v1). An entry read
+	// that way and also received on this stream is absorbed by its identity.
 	TailOnly *WatchAgentTailOnly `protobuf:"bytes,4,opt,name=tail_only,json=tailOnly,proto3,oneof"`
 }
 
@@ -220,7 +220,8 @@ type isWatchAgentResponse_Frame interface {
 
 type WatchAgentResponse_Page struct {
 	// The first frame of every watch: the opening page (bounded by
-	// known_through when given; `more` walks older via ReadHistory).
+	// known_through when given; `more` walks older through the store,
+	// storeread.v1).
 	Page *v1.HistoryPage `protobuf:"bytes,1,opt,name=page,proto3,oneof"`
 }
 

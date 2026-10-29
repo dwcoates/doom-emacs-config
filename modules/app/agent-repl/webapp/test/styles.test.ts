@@ -2019,7 +2019,7 @@ describe("the reviving shimmer's stylesheet contract", () => {
   it("pans only between 0% and 100%, so the gradient always covers the text", () => {
     // Arrange / Act
     const keyframes = keyframesOf("ws-revive-shimmer");
-    const positions = [...keyframes.matchAll(/background-position-x:\s*(-?\d+)%/g)].map((m) => Number(m[1]));
+    const positions = [...keyframes.matchAll(/(?<!-webkit-)mask-position:\s*(-?\d+)%/g)].map((m) => Number(m[1]));
 
     // Assert
     expect(positions).toEqual([100, 0]);
@@ -2033,7 +2033,27 @@ describe("the reviving shimmer's stylesheet contract", () => {
     // Assert
     expect(rules.length).toBe(2);
     expect(override).toMatch(/animation:\s*none/);
-    expect(override).toMatch(/background-image:\s*none/);
+    expect(override).toMatch(/(?<!-webkit-)mask-image:\s*none/);
+  });
+
+  it("draws the band as a mask's 40% alpha", () => {
+    // Arrange / Act
+    const [base] = shimmerRules();
+
+    // Assert
+    expect(base).toMatch(/(?<!-webkit-)mask-image:\s*linear-gradient\(90deg,[^;]*rgb\(0 0 0 \/ 40%\) 50%/);
+  });
+
+  // WebKitGTK ended every page of the webhost when a gradient mixed
+  // currentColor (2026-10-28), so no gradient anywhere in the stylesheet does.
+  it("mixes currentColor into no gradient anywhere in the stylesheet", () => {
+    // Arrange / Act
+    const mixed = rulesOf(stylesheet).filter((rule) =>
+      /gradient\([^;]*color-mix\([^;)]*currentColor/i.test(rule.declarations),
+    );
+
+    // Assert
+    expect(mixed.map((rule) => rule.selectors)).toEqual([]);
   });
 });
 

@@ -390,11 +390,6 @@ func (f *fakeShim) DetachForeground(_ context.Context, _ *connect.Request[shimv1
 	return connect.NewResponse(&shimv1.DetachForegroundResponse{}), nil
 }
 
-func (f *fakeShim) ReadHistory(_ context.Context, _ *connect.Request[shimv1.ReadHistoryRequest]) (*connect.Response[shimv1.ReadHistoryResponse], error) {
-	f.record("ReadHistory")
-	return connect.NewResponse(&shimv1.ReadHistoryResponse{}), nil
-}
-
 func (f *fakeShim) ReadTranscripts(_ context.Context, _ *connect.Request[shimv1.ReadTranscriptsRequest]) (*connect.Response[shimv1.ReadTranscriptsResponse], error) {
 	f.record("ReadTranscripts")
 	return connect.NewResponse(&shimv1.ReadTranscriptsResponse{}), nil

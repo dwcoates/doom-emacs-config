@@ -380,16 +380,11 @@ func TestAnAdoptedSurvivorReadInertIsNotStartedAgainByItsAnnouncement(t *testing
 		return r.PID == successor.PID() && r.Message == "took the session facts from the shim's re-announcement"
 	})
 
-	// Act: Emacs announces the workspace, which revives a recorded
-	// conversation that has no session up.
+	// Act: Emacs announces the workspace. An announcement starts no shim
+	// (owner ruling, 2026-10-28).
 	harness.Register(t, successor, f.repo.Dir)
 
-	// Assert: the register read the session live and revived nothing, and the
-	// survivor started its one session, under the first daemon.
-	successor.AwaitWorkspaceLogRecord(f.repo.Dir, "the register reading the session live", func(r harness.LogRecord) bool {
-		return r.PID == successor.PID() && r.Operation == "daemon.workspace.flow_decision" &&
-			r.Context["condition"] == "v.deps.Sessions.Live(record.ID)"
-	})
+	// Assert: the survivor started its one session, under the first daemon.
 	if got := f.shim.Count(harness.RPCStartSession); got != 1 {
 		t.Fatalf("StartSession calls on the survivor = %d, want the first daemon's alone", got)
 	}

@@ -147,12 +147,6 @@ export function detachForegroundRequest(): shimv1.DetachForegroundRequest {
   });
 }
 
-export function readHistoryRequest(): shimv1.ReadHistoryRequest {
-  return create(shimv1.ReadHistoryRequestSchema, {
-    position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
-  });
-}
-
 export function gatherTitleDigestRequest(): shimv1.GatherTitleDigestRequest {
   return create(shimv1.GatherTitleDigestRequestSchema, {});
 }

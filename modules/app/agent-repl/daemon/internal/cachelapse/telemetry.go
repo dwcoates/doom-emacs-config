@@ -4,22 +4,27 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"agent-repld/internal/ids"
 )
 
 // Telemetry is where the Keeper reports what happens to every workspace's
 // prompt cache, so how often caches stay warm, lapse or go cold under a user
-// is a series with a version and a day on it (runtimemetrics.Surface). Every
-// method is a single counter or histogram update and never blocks.
+// is a series with a version and a day on it (runtimemetrics.Surface), per
+// workspace. Every method is a single counter or histogram update and never
+// blocks.
 type Telemetry interface {
-	// ObserveBeat records one keep-alive the Keeper asked for, by how the ask
-	// ended (the Beat* outcomes), and how long after it came due it went out.
-	ObserveBeat(outcome string, late time.Duration)
-	// CountLapse records one recorded cache lapse coming due, by what became
-	// of it (the Lapse* outcomes).
-	CountLapse(outcome string)
-	// ObserveColdGate records one cold gate being raised, by its kind (the
-	// ColdGate* outcomes), and how long the cache sat idle before it.
-	ObserveColdGate(outcome string, idle time.Duration)
+	// ObserveBeat records one keep-alive the Keeper asked for WS, by how the
+	// ask ended (the Beat* outcomes), and how long after it came due it went
+	// out.
+	ObserveBeat(ws ids.WorkspaceID, outcome string, late time.Duration)
+	// CountLapse records one recorded cache lapse of WS coming due, by what
+	// became of it (the Lapse* outcomes).
+	CountLapse(ws ids.WorkspaceID, outcome string)
+	// ObserveColdGate records one cold gate a shim judged for WS, by its kind
+	// (the ColdGate* outcomes), and how long the cache sat idle before it. A
+	// gate raised again from its record is the same gate, never counted twice.
+	ObserveColdGate(ws ids.WorkspaceID, outcome string, idle time.Duration)
 }
 
 // How an asked-for keep-alive ended (Telemetry.ObserveBeat).

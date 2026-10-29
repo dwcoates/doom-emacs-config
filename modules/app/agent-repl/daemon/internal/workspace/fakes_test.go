@@ -38,6 +38,7 @@ import (
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -118,7 +119,17 @@ type fakeDB struct {
 	// read.
 	mergeQueues    map[wsm.RepoKey][]wsm.MergeQueueEntry
 	mergeQueuesErr error
-	tasks          []wsm.Task
+	// books are the workspaces' recorded books (SetWorkspaceBook);
+	// setBookErr fails the record and bookErr the read.
+	books map[ids.WorkspaceID]string
+	// gates are the workspaces' recorded cold gates; gateErr fails their
+	// read and setGateErr their record and retirement.
+	gates      map[ids.WorkspaceID]wsm.ColdGateRecord
+	gateErr    error
+	setGateErr error
+	setBookErr error
+	bookErr    error
+	tasks      []wsm.Task
 	// setTaskFoldedErr fails the task fold write, which the slice cannot.
 	// view is the sidebar's recorded view state, nil when nobody changed it
 	// (read back as wsm.DefaultSidebarView); setMergedFoldedErr,
@@ -422,11 +433,54 @@ func (d *fakeDB) owedTurns(ws ids.WorkspaceID) []ids.TurnID {
 	return append([]ids.TurnID(nil), d.owed[ws]...)
 }
 
+func (d *fakeDB) ColdGate(_ context.Context, id ids.WorkspaceID) (wsm.ColdGateRecord, bool, error) {
+	if d.gateErr != nil {
+		return wsm.ColdGateRecord{}, false, d.gateErr
+	}
+	rec, ok := d.gates[id]
+	return rec, ok, nil
+}
+
+func (d *fakeDB) SetColdGate(_ context.Context, id ids.WorkspaceID, rec wsm.ColdGateRecord) error {
+	if d.setGateErr != nil {
+		return d.setGateErr
+	}
+	d.gates[id] = rec
+	return nil
+}
+
+func (d *fakeDB) ClearColdGate(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.setGateErr != nil {
+		return false, d.setGateErr
+	}
+	_, ok := d.gates[id]
+	delete(d.gates, id)
+	return ok, nil
+}
+
+func (d *fakeDB) SetWorkspaceBook(_ context.Context, id ids.WorkspaceID, book string) error {
+	if d.setBookErr != nil {
+		return d.setBookErr
+	}
+	d.books[id] = book
+	return nil
+}
+
+func (d *fakeDB) WorkspaceBook(_ context.Context, id ids.WorkspaceID) (string, bool, error) {
+	if d.bookErr != nil {
+		return "", false, d.bookErr
+	}
+	book, ok := d.books[id]
+	return book, ok, nil
+}
+
 func newFakeDB() *fakeDB {
 	return &fakeDB{
 		workspaces:  map[ids.WorkspaceID]wsm.Workspace{},
 		byDir:       map[string]wsm.Workspace{},
 		sessions:    map[ids.WorkspaceID]wsm.Session{},
+		books:       map[ids.WorkspaceID]string{},
+		gates:       map[ids.WorkspaceID]wsm.ColdGateRecord{},
 		jobs:        map[ids.WorkspaceID]wsm.CreationJob{},
 		held:        map[ids.WorkspaceID][]wsm.HeldPrompt{},
 		closedFlags: map[ids.WorkspaceID]bool{},
@@ -2254,6 +2308,8 @@ type fakeSessions struct {
 	startHold    chan struct{}
 	startMu      sync.Mutex
 	startCalls   []ids.WorkspaceID
+	// startCauses are the start causes the starts' contexts stated.
+	startCauses []shimlife.StartCause
 
 	// resumeHold, when set, holds a detached cold re-open until it is closed,
 	// for the tests whose subject is that the answer does NOT wait on it;
@@ -2328,6 +2384,9 @@ func (s *fakeSessions) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	defer s.startMu.Unlock()
 	s.startCtxErr = ctx.Err()
 	s.startCalls = append(s.startCalls, ws)
+	if cause, ok := shimlife.StartOf(ctx); ok {
+		s.startCauses = append(s.startCauses, cause)
+	}
 	if s.startErr != nil {
 		return s.startErr
 	}
@@ -2344,31 +2403,6 @@ func (s *fakeSessions) StartRebound(ctx context.Context, ws ids.WorkspaceID) err
 	s.rebound = append(s.rebound, ws)
 	s.startMu.Unlock()
 	return s.Start(ctx, ws)
-}
-
-// StartDetached runs the start INLINE and reports its outcome, which is what
-// keeps a test's assertions deterministic: the fake stands for the fleet's
-// contract (the caller does not wait on the answer), not for its goroutine.
-// The one test whose subject IS the detachment drives the real Fleet.
-func (s *fakeSessions) StartDetached(ws ids.WorkspaceID, done func(error)) {
-	if s.detachHold == nil {
-		err := s.Start(context.Background(), ws)
-		if done != nil {
-			done(err)
-		}
-		return
-	}
-	hold, entered := s.detachHold, s.detachEntered
-	go func() {
-		if entered != nil {
-			close(entered)
-		}
-		<-hold
-		err := s.Start(context.Background(), ws)
-		if done != nil {
-			done(err)
-		}
-	}()
 }
 
 func (s *fakeSessions) Stop(_ context.Context, ws ids.WorkspaceID, force bool) error {
@@ -2864,6 +2898,8 @@ func (h *fakeHealth) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.
 // fixture is one arranged verb surface plus every fake behind it, so a test
 // arranges by mutating fields and asserts by reading them.
 type fixture struct {
+	// gateAnswers records every cold gate answer the verbs counted.
+	gateAnswers fakeGateAnswers
 	// creates is the create gate the verbs hold a ticket from.
 	creates *creategate.Gate
 	// network is the network state a failed naming call is classified by.
@@ -3025,7 +3061,7 @@ func newFixture(t *testing.T) *fixture {
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames}, Browser: f.browser,
-		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads,
+		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers,
 		Headless:   f.headless,
 		Health:     f.health,
 		PromptsDir: "/prompts", CheckoutRoot: fixtureCheckoutRoot, HomeDir: f.home, Log: f.log,
@@ -3701,4 +3737,58 @@ func (d *fakeDB) heldCreates() []wsm.QueuedCreate {
 		out = append(out, q)
 	}
 	return out
+}
+
+// fakeStoreHistory is the store's read-only face: it answers every read with
+// PAGE or ERR and records how it was asked.
+type fakeStoreHistory struct {
+	page  *conversationv1.HistoryPage
+	err   error
+	asked []string
+}
+
+func (s *fakeStoreHistory) Newest(_ context.Context, book string, stated bool) (*conversationv1.HistoryPage, error) {
+	s.asked = append(s.asked, fmt.Sprintf("newest %s stated=%t", book, stated))
+	return s.page, s.err
+}
+
+func (s *fakeStoreHistory) Before(_ context.Context, book string, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
+	s.asked = append(s.asked, fmt.Sprintf("before %s %s", book, after.GetValue()))
+	return s.page, s.err
+}
+
+func (s *fakeStoreHistory) Through(_ context.Context, book string, throughMs int64) (*conversationv1.HistoryPage, error) {
+	s.asked = append(s.asked, fmt.Sprintf("through %s %d", book, throughMs))
+	return s.page, s.err
+}
+
+// fakeShimLife records the shim starts and stand-downs the fleet counts.
+type fakeShimLife struct {
+	mu         sync.Mutex
+	starts     []string
+	standDowns []string
+}
+
+func (f *fakeShimLife) ObserveShimStart(ws ids.WorkspaceID, cause, outcome string, _ time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.starts = append(f.starts, string(ws)+" "+cause+" "+outcome)
+}
+
+func (f *fakeShimLife) CountShimStandDown(ws ids.WorkspaceID, reason string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.standDowns = append(f.standDowns, string(ws)+" "+reason)
+}
+
+// fakeGateAnswers records the cold gate answers the verbs count.
+type fakeGateAnswers struct {
+	mu      sync.Mutex
+	answers []string
+}
+
+func (f *fakeGateAnswers) CountColdGateAnswer(ws ids.WorkspaceID, choice, outcome string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.answers = append(f.answers, string(ws)+" "+choice+" "+outcome)
 }

@@ -11,6 +11,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -33,19 +34,19 @@ type fakeTelemetry struct {
 	gates  []gateObservation
 }
 
-func (f *fakeTelemetry) ObserveBeat(outcome string, late time.Duration) {
+func (f *fakeTelemetry) ObserveBeat(_ ids.WorkspaceID, outcome string, late time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.beats = append(f.beats, beatObservation{outcome, late})
 }
 
-func (f *fakeTelemetry) CountLapse(outcome string) {
+func (f *fakeTelemetry) CountLapse(_ ids.WorkspaceID, outcome string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lapses = append(f.lapses, outcome)
 }
 
-func (f *fakeTelemetry) ObserveColdGate(outcome string, idle time.Duration) {
+func (f *fakeTelemetry) ObserveColdGate(_ ids.WorkspaceID, outcome string, idle time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.gates = append(f.gates, gateObservation{outcome, idle})
@@ -201,7 +202,7 @@ func TestAColdGateIsReportedByItsKindAndIdleTime(t *testing.T) {
 			h.gate = tt.cold
 
 			// Act
-			h.keeper.ColdGateRaised(theWorkspace)
+			h.keeper.ColdGateRaised(theWorkspace, true)
 
 			// Assert
 			want := gateObservation{tt.outcome, 2 * time.Hour}
@@ -217,10 +218,27 @@ func TestAColdGateThatNoLongerStandsIsNotReported(t *testing.T) {
 	h := newHarness(t, visible())
 
 	// Act
-	h.keeper.ColdGateRaised(theWorkspace)
+	h.keeper.ColdGateRaised(theWorkspace, true)
 
 	// Assert
 	if len(h.telemetry.gates) != 0 {
 		t.Fatalf("gates = %+v, want none", h.telemetry.gates)
+	}
+}
+
+// TestAGateRaisedAgainIsNotCountedAgain pins that a gate is counted once, when
+// a shim judged it: a raise from its record, a re-raise after a failed answer
+// and a carried gate are the same gate.
+func TestAGateRaisedAgainIsNotCountedAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t, visible())
+	h.gate = &conversationv1.SessionCold{LastRequestAtMs: now.Add(-time.Hour).UnixMilli()}
+
+	// Act
+	h.keeper.ColdGateRaised(theWorkspace, false)
+
+	// Assert
+	if len(h.telemetry.gates) != 0 {
+		t.Fatalf("gates = %+v, want none for a gate raised again", h.telemetry.gates)
 	}
 }

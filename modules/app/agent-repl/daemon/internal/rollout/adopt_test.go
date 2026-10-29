@@ -593,16 +593,16 @@ func TestAdoptionOfAFreeLockDialsNoShim(t *testing.T) {
 	}
 }
 
-// TestAnAdoptionOfAHiddenWorkspaceStandsDownItsInertSurvivor pins the inert
+// TestAnAdoptionOfAParkedWorkspaceStandsDownItsInertSurvivor pins the inert
 // shim a handover detaches for a workspace that runs nothing: its lock reads
 // free, no bring-up reaches it, so the adoption stands it down rather than
 // leaving it served by no daemon.
-func TestAnAdoptionOfAHiddenWorkspaceStandsDownItsInertSurvivor(t *testing.T) {
+func TestAnAdoptionOfAParkedWorkspaceStandsDownItsInertSurvivor(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, dir := h.workspace(t)
-	if err := h.db.SetHidden(context.Background(), ws, true, time.Now()); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle, At: time.Unix(1_700_000_000, 0)}); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
 	}
 	h.mu.Lock()
 	h.lockStates[dir] = sessionlock.StateFree
@@ -1687,12 +1687,12 @@ func TestAnAdoptionOfAClosedFreeLockStartsNoSession(t *testing.T) {
 	}
 }
 
-func TestAnAdoptionOfAHiddenFreeLockStartsNoSession(t *testing.T) {
+func TestAnAdoptionOfAParkedFreeLockStartsNoSession(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws := freeLockAdoption(t, h)
-	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
-		t.Fatalf("SetHidden: %v", err)
+	if err := h.db.SetSessionTerminal(context.Background(), ws, wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle, At: time.Unix(1_700_000_000, 0)}); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
 	}
 
 	// Act
@@ -1700,10 +1700,10 @@ func TestAnAdoptionOfAHiddenFreeLockStartsNoSession(t *testing.T) {
 
 	// Assert
 	if got := h.Started(); len(got) != 0 {
-		t.Fatalf("started = %v, want none for a hidden workspace", got)
+		t.Fatalf("started = %v, want none for a workspace whose shim was not up", got)
 	}
 	if got := h.Marker(); len(got) != 0 {
-		t.Fatalf("marker edges = %v, want none for a hidden workspace", got)
+		t.Fatalf("marker edges = %v, want none for a workspace whose shim was not up", got)
 	}
 }
 

@@ -268,16 +268,26 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *tes
 	f.d.ExpectWarnings(
 		"daemon.shimclient.standdown", "daemon.shimclient.spawn",
 		"daemon.shimclient.exit", "daemon.shimclient.redial",
-		"daemon.workspace.bring_up", "daemon.workspace.open",
+		"daemon.workspace.bring_up", "daemon.workspace.restart",
 		"daemon.health.session", "daemon.health.open_fault",
 	)
+	// AN OPEN STARTS NO SHIM (owner ruling, 2026-10-28): the start under test
+	// is the restart's.
+	if opened, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil || opened.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace = (%v, %v), want a success", opened, err)
+	}
 
-	opened := make(chan *agentreplv1.OpenWorkspaceResponse, 1)
-	openFailed := make(chan error, 1)
+	started := make(chan *agentreplv1.RestartWorkspaceResponse, 1)
+	startFailed := make(chan error, 1)
 	go func() {
-		msg, err := f.openRaw()
-		opened <- msg
-		openFailed <- err
+		resp, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
+		if err != nil {
+			started <- nil
+			startFailed <- err
+			return
+		}
+		started <- resp.Msg
+		startFailed <- nil
 	}()
 	// The fake binds its control listener at startup, so this returns as soon
 	// as the PROCESS is up — long before any diagnostics it is withholding.
@@ -307,12 +317,12 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *tes
 	// daemon says no. A transport error is what it must NOT be: that would be
 	// the answer being cut off by the exit rather than produced by it, and the
 	// caller would have no idea whether a session came up.
-	answer := <-opened
-	if err := <-openFailed; err != nil {
-		t.Fatalf("OpenWorkspace during the stand-down = transport error %v, want the daemon's own refusal", err)
+	answer := <-started
+	if err := <-startFailed; err != nil {
+		t.Fatalf("the start during the stand-down = transport error %v, want the daemon's own refusal", err)
 	}
-	if answer.GetError().GetSpawnFailed() == nil {
-		t.Fatalf("OpenWorkspace after its shim was stood down mid-bring-up = %v, want OpenWorkspaceError.spawn_failed", answer)
+	if answer.GetError().GetRelaunchFailed() == nil {
+		t.Fatalf("the start after its shim was stood down mid-bring-up = %v, want RestartWorkspaceError.relaunch_failed", answer)
 	}
 }
 

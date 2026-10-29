@@ -155,7 +155,6 @@ const (
 	RPCWatchBash                = "WatchBash"
 	RPCStopBash                 = "StopBash"
 	RPCDetachForeground         = "DetachForeground"
-	RPCReadHistory              = "ReadHistory"
 	RPCReadTranscripts          = "ReadTranscripts"
 	RPCGetForkPoint             = "GetForkPoint"
 	RPCForkSession              = "ForkSession"
@@ -300,6 +299,13 @@ func (d *Daemon) OpenedShim(ws *workspacev1.WorkspaceRef) *ShimControl {
 	d.shims[socket] = s
 	d.mu.Unlock()
 	return s
+}
+
+// ShimSpawned reports whether this daemon has spawned a shim for ws, read off
+// the workspace's own daemon sink.
+func (d *Daemon) ShimSpawned(ws *workspacev1.WorkspaceRef) bool {
+	d.t.Helper()
+	return d.latestShimSpawn(ws.GetDir(), d.SocketPath(ws)) != 0
 }
 
 // latestShimSpawn answers the pid of the latest shim this daemon spawned on

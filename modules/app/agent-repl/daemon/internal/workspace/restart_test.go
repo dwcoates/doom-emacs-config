@@ -3,12 +3,14 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -291,9 +293,9 @@ func TestRestartEndsTheVendorStartRunFirst(t *testing.T) {
 	}
 }
 
-// A WORKSPACE WITH NO SESSION IS RESTARTED BY BRINGING ONE UP: the forced
-// bounce runs (the engine prelaunches and resumes), never a refusal.
-func TestRestartOfAWorkspaceWithNoSessionBouncesItUp(t *testing.T) {
+// A WORKSPACE WITH NO SHIM UP IS RESTARTED BY STARTING ITS SESSION at once
+// (owner ruling, 2026-10-28); there is nothing for a bounce to replace.
+func TestRestartOfAWorkspaceWithNoShimStartsItsSession(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -303,12 +305,28 @@ func TestRestartOfAWorkspaceWithNoSessionBouncesItUp(t *testing.T) {
 	err := f.verbs.Restart(context.Background(), "w1")
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("Restart = %v, want a workspace with no session restarted, never refused", err)
+	if err != nil || len(f.fleet.started) != 1 || f.fleet.started[0] != "w1" {
+		t.Fatalf("Restart = %v after starts %v, want w1's session started", err, f.fleet.started)
 	}
-	f.rollout.awaitRelaunch(t)
-	if got := f.rollout.relaunchCalls(); len(got) != 1 {
-		t.Fatalf("relaunches = %+v, want the bounce that brings the session up", got)
+	if got := f.rollout.relaunchCalls(); len(got) != 0 {
+		t.Fatalf("relaunches = %+v, want no bounce of a shim that is not up", got)
+	}
+}
+
+func TestARestartWhoseStartFailsAnswersRelaunchFailed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+	f.fleet.startErr = errFake
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	asRefusal(t, err, "relaunch_failed")
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRestart}); !ok {
+		t.Fatalf("records = %+v, want the failed start at ERROR", f.log.logger.Records())
 	}
 }
 
@@ -529,5 +547,49 @@ func TestRelaunchFailedCarriesItsDetail(t *testing.T) {
 	// Assert.
 	if refusal.Rpc != "RestartWorkspace" || refusal.Arm != "relaunch_failed" || refusal.Fields["detail"] != "the shim died" {
 		t.Fatalf("refusal = %+v, want RestartWorkspace's relaunch_failed carrying the detail", refusal)
+	}
+}
+
+func TestStartNotAgentReplFaultTellsADepartureOrAVendorFaultFromAFailure(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantNot bool
+	}{
+		{name: "the fleet's lifetime ended", err: fmt.Errorf("start: %w", context.Canceled), wantNot: true},
+		{name: "the daemon is standing down", err: fmt.Errorf("start: %w", shimclient.ErrStandingDown), wantNot: true},
+		{name: "the start's shim was taken from it mid-start", err: fmt.Errorf("start: %w", ErrShimTaken), wantNot: true},
+		{name: "the vendor would not start", err: fmt.Errorf("start: %w", &startLabel{vendor: true, err: errFake}), wantNot: true},
+		{name: "the network could not be reached", err: fmt.Errorf("start: %w", &startLabel{network: true, err: errFake}), wantNot: true},
+		{name: "a labeled failure that is neither the vendor's nor the network's", err: fmt.Errorf("start: %w", &startLabel{err: errFake})},
+		{name: "the bring-up failed", err: errFake},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			why, not := startNotAgentReplFault(tt.err)
+
+			// Assert.
+			if not != tt.wantNot || (not && why == "") {
+				t.Fatalf("startNotAgentReplFault = (%q, %v), want %v with a reason", why, not, tt.wantNot)
+			}
+		})
+	}
+}
+
+func TestARestartWhoseVendorWillNotStartIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hasSession = false
+	f.fleet.startErr = &startLabel{vendor: true, err: errFake}
+
+	// Act.
+	err := f.verbs.Restart(context.Background(), "w1")
+
+	// Assert.
+	asRefusal(t, err, "relaunch_failed")
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRestart}); ok {
+		t.Fatalf("records = %+v, want no ERROR for a vendor that would not start", f.log.logger.Records())
 	}
 }

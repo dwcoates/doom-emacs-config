@@ -715,8 +715,6 @@ func TestOpenWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 	h.Verbs.openStages = []workspace.OpenStage{
 		workspace.OpenStageCheckingWorktree,
 		workspace.OpenStageRestoringWorktree,
-		workspace.OpenStageStartingSession,
-		workspace.OpenStageReviving,
 		workspace.OpenStageClearingClosed,
 		workspace.OpenStageCheckingBuild,
 	}
@@ -733,7 +731,7 @@ func TestOpenWorkspaceRelaysProgressStagesInOrder(t *testing.T) {
 	}
 
 	// Assert.
-	wantStages := []string{"checking_worktree", "restoring_worktree", "starting_session", "reviving", "clearing_closed", "checking_build"}
+	wantStages := []string{"checking_worktree", "restoring_worktree", "clearing_closed", "checking_build"}
 	for i, want := range wantStages {
 		if !stream.Receive() {
 			t.Fatalf("receive stage %d: %v", i, stream.Err())
@@ -757,8 +755,6 @@ func openStageArm(stage *agentreplv1.WorkspaceOpenStage) string {
 		return "checking_worktree"
 	case *agentreplv1.WorkspaceOpenStage_StartingSession:
 		return "starting_session"
-	case *agentreplv1.WorkspaceOpenStage_Reviving:
-		return "reviving"
 	case *agentreplv1.WorkspaceOpenStage_ClearingClosed:
 		return "clearing_closed"
 	case *agentreplv1.WorkspaceOpenStage_CheckingBuild:
@@ -807,7 +803,7 @@ func TestOpenWorkspaceRelaysNoUnmappedStage(t *testing.T) {
 	}
 	// A second, MAPPED open proves the stream is live and carried nothing for
 	// the unmapped stage — the only way to assert an absence on a stream.
-	h.Verbs.openStages = []workspace.OpenStage{workspace.OpenStageStartingSession}
+	h.Verbs.openStages = []workspace.OpenStage{workspace.OpenStageCheckingWorktree}
 	if _, err := h.Client.OpenWorkspace(context.Background(),
 		connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ref(), OpId: "op-good"})); err != nil {
 		t.Fatalf("OpenWorkspace: %v", err)

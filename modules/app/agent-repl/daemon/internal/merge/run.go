@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -1007,7 +1008,7 @@ func (r *run) ensureSession(ctx context.Context) error {
 // when its merge first needs a turn, so the bring-up -- which answers at once
 // for a live session -- is asked every time rather than gated on the record.
 func (o *orchestrator) ensureSession(ctx context.Context, ws ids.WorkspaceID) error {
-	return o.deps.StartSession(ctx, ws)
+	return o.deps.StartSession(shimlife.WithStart(ctx, shimlife.StartMerge), ws)
 }
 
 // submit sends one prompt down the queue's ONE delivery path, to the

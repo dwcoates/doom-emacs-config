@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/shimsocket"
 	"agent-repld/internal/wsm"
 )
@@ -1117,10 +1118,16 @@ func (f *Fleet) AdoptParked(ctx context.Context, ws ids.WorkspaceID, cold *conve
 	if err := f.hold(ctx, log, ws, &live{client: client, hostSessionID: session.HostSessionID}); err != nil {
 		return nil, fmt.Errorf("workspace: adopt the parked shim of %q: %w", ws, err)
 	}
-	f.standCarriedColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session))
+	configDir := spawnRootFor(f.deps.Accounts, record.Dir, session)
+	f.standCarriedColdGate(ws, session.VendorSessionID, cold, configDir)
 	log.Info(opFleetRollout, "adopted the running shim parked at its cold gate; the gate stands on this daemon", dlog.Context{
 		"shim_pid": client.PID(), "vendor_session_id": session.VendorSessionID,
 	})
+	// A GATE RUNS NO SHIM (owner ruling, 2026-10-27): the carried gate is
+	// recorded, so it is raised from the record from now on, and the adopted
+	// shim is stood down.
+	f.recordGate(ctx, log, ws, wsm.ColdGateRecord{VendorSessionID: session.VendorSessionID, Cold: cold, ConfigDir: configDir})
+	f.Detach(func(ctx context.Context) { f.standDownAtGate(ctx, ws) })
 	return client, nil
 }
 
@@ -1216,7 +1223,7 @@ func (f *Fleet) standCarriedColdGate(ws ids.WorkspaceID, vendorSessionID string,
 	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkConnected)
 	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkConnected)
 	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkConnected)
-	f.raiseColdGate(ws, vendorSessionID, cold, configDir)
+	f.raiseColdGate(ws, vendorSessionID, cold, configDir, false)
 	f.publishHost(ws)
 }
 
@@ -1226,7 +1233,7 @@ func (f *Fleet) standCarriedColdGate(ws ids.WorkspaceID, vendorSessionID string,
 // the same path -- watcher told first, terminals written, then the process --
 // as every other stand-down in the daemon.
 func (f *Fleet) StandDown(ctx context.Context, ws ids.WorkspaceID) error {
-	return f.KillSession(ctx, ws, true)
+	return f.KillSession(shimlife.WithStandDown(ctx, shimlife.StandDownHandover), ws, true)
 }
 
 // The fleet IS the rollout's shim fleet, the drain's stand and the verbs'
@@ -1273,7 +1280,7 @@ func (f *Fleet) RaiseColdGate(_ context.Context, ws ids.WorkspaceID, cold *conve
 	}
 	// The relaunched shim was spawned under spawnRootFor (Prelaunch), so the
 	// gate serves that account's menu.
-	f.raiseColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session))
+	f.raiseColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session), true)
 	return nil
 }
 

@@ -6,6 +6,12 @@ browser GUI (`webapp/`), two OS-managed services carrying the file plane
 (`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`), and zettel
 (`zettel/`), the OS-managed knowledge-graph service behind chat threads.
 
+The shim and the sidecar write the record store; the daemon only reads it,
+through the store's read-only face (`storeread.v1`, on a socket of its own),
+and never writes it (owner ruling, 2026-10-27; enforced as described in
+`agent-shim/shim-store/AGENTS.md`). Every workspace's history is read from
+there, so showing a conversation never needs a shim up.
+
 The knowledge graph and chat have a glossary of their own, and every term in
 it is the one word for its concept in code, protos and docs alike: see
 `zettel/AGENTS.md` "Glossary". The planning record is
@@ -14,6 +20,24 @@ it is the one word for its concept in code, protos and docs alike: see
 The repo-wide rules in the top-level `AGENTS.md` apply here in full; this file
 covers deploying and running THIS module, plus the color vocabulary every one
 of its surfaces shares.
+
+## Developer docs: `docs/developer/`
+
+`docs/developer/` holds the developer reference for how agent-repl's subsystems
+behave across their code, one file per subsystem. `shim-lifecycle.md` covers
+when a shim runs, and the keep-alives. These files are living documents.
+
+- Read the file for a subsystem before complex work on it, and work from what it
+  states.
+- Every change that alters what a file states updates it in the same change.
+  A subsystem that has grown a cross-cutting behavior the code alone does not
+  explain gets a file of its own.
+- Surface every issue you find in these docs to the user, such as a statement the
+  code contradicts, a gap, or a stale ruling. Put them in your response as one
+  top-level tree entry headed `📚 Developer docs`, placed just before the
+  memory entry. Each issue is one child naming the file and what is wrong. Fix
+  an issue in the same change when your work covers it, and say so in the
+  child.
 
 ## Tests NEVER run real git or a real vendor
 
@@ -3068,25 +3092,27 @@ live detached work) a whole interval, so the user has about an hour after
 the work ends to prompt with no shim start; never under a turn or live
 detached work, nor for the selected workspace, nor once a real turn ran
 since the beat. A parked
-session is drawn as the live idle session it stands in for (`wsm.Park`); a
-look, a prompt or a history read of the selected workspace brings it back,
-the boot and the editor's opens leave it parked, and past the idle cutoff the
-sweep deepens its park into a hibernation. A history read of a workspace the
-user is not looking at restores nothing: the read waits, and selecting the
-workspace restores it. One a history read brought back is parked again once
-the user is not looking at it, unless a prompt engaged it since it came up
-(owner ruling, 2026-10-27; `cachelapse/viewed.go`). So neither flicking
-through workspaces nor every page reloading after a rollout keeps shims up.
-A DEPLOY STARTS NO SHIM THAT WAS DOWN BEFORE IT: Emacs's re-announcement
-after a relaunch revives no withheld workspace (`workspace/register.go`),
-exactly as the rollout's bring-up withholds it (`bringup.OnlyVisible`).
+session is drawn as the live idle session it stands in for (`wsm.Park`).
+ONLY A PROMPT, A KEEP-ALIVE, A COLD GATE'S ANSWER OR A RESTART BRINGS A SHIM UP
+(owner ruling, 2026-10-28): a look, an open, a history read, a boot and a
+deploy leave a parked session parked, because every conversation is read from
+the store. Past the idle cutoff the sweep deepens the park into a
+hibernation. `docs/developer/shim-lifecycle.md` is the reference for when a
+shim runs.
+A WORKSPACE AT ITS COLD GATE RUNS NO SHIM until the user answers the gate: the
+gate is recorded and raised from the record, and only the answer spawns a shim
+(daemon/AGENTS.md "A workspace at its cold gate runs no shim").
+A BOOT OR A DEPLOY BRINGS BACK ONLY THE SHIMS THAT WERE UP when the last
+daemon stopped (`bringup.OnlyWasUp`), hidden or not: the session record states
+each workspace's shim at every park and unpark, and nothing else decides.
+Emacs's re-announcement starts nothing.
 
 A live session costs a node+CLI process pair of roughly 500MB, and dozens of
 workspaces will exhaust a machine. `-idle-timeout` is the mitigation: after a
 workspace has been left alone for that long, the sweeper SIGTERMs its shim and
 leaves the registry record rehydratable, so the next act pays one bring-up and
 gets everything back. It defaults to the keep-alive policy's own idle cutoff,
-**6 hours**, and `0` disables hibernation entirely.
+**24 hours** (owner ruling, 2026-10-28), and `0` disables hibernation entirely.
 
 IT IS FLOORED AT THAT CUTOFF AND CANNOT GO BELOW IT. `-idle-timeout` and
 `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` answer the same question — how long has

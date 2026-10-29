@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"reflect"
 	"slices"
@@ -10,6 +9,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/opentabs"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
@@ -674,58 +674,6 @@ func TestTheGraphRegistersMergeTestLogsForRetention(t *testing.T) {
 	}
 }
 
-// sessionReader is a session record read answering SESSION, FOUND and ERR.
-type sessionReader struct {
-	session wsm.Session
-	found   bool
-	err     error
-}
-
-func (r sessionReader) Session(context.Context, wsm.WorkspaceID) (wsm.Session, bool, error) {
-	return r.session, r.found, r.err
-}
-
-func TestCycleParked(t *testing.T) {
-	tests := []struct {
-		name   string
-		reader sessionReader
-		want   bool
-	}{
-		{name: "a session the keep-alive cycle parked", reader: sessionReader{session: wsm.Session{Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalKeepaliveCycle}}, found: true}, want: true},
-		{name: "a hibernated session", reader: sessionReader{session: wsm.Session{Terminal: &wsm.SessionTerminal{Kind: wsm.TerminalHibernated}}, found: true}, want: false},
-		{name: "a live session", reader: sessionReader{found: true}, want: false},
-		{name: "no session", reader: sessionReader{}, want: false},
-		{name: "a record that cannot be read", reader: sessionReader{err: errors.New("database is locked")}, want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := cycleParked(tt.reader, dlog.NewTestLogger(), "ws-1")
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("cycleParked = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestCycleParkedRecordsAnUnreadableRecordAtError(t *testing.T) {
-	// Arrange
-	log := dlog.NewTestLogger()
-
-	// Act
-	cycleParked(sessionReader{err: errors.New("database is locked")}, log, "ws-1")
-
-	// Assert
-	for _, r := range log.Records() {
-		if r.Level == dlog.LevelError {
-			return
-		}
-	}
-	t.Fatalf("records = %+v, want the unreadable record at ERROR", log.Records())
-}
-
 // recordingSink records the faults it is told of, in order.
 type recordingSink struct{ events []string }
 
@@ -750,5 +698,45 @@ func TestFaultSinksTellEverySinkOfEachFault(t *testing.T) {
 	want := []string{"open ws-1 f-1", "close ws-1 f-1"}
 	if !slices.Equal(a.events, want) || !slices.Equal(b.events, want) {
 		t.Fatalf("sinks told %v and %v, want both %v", a.events, b.events, want)
+	}
+}
+
+// loadingRecorder records every SetShimLoading and SetReviving.
+type loadingRecorder struct{ marks, reviving []bool }
+
+func (r *loadingRecorder) SetShimLoading(_ ids.WorkspaceID, loading bool) {
+	r.marks = append(r.marks, loading)
+}
+
+func (r *loadingRecorder) SetReviving(_ ids.WorkspaceID, reviving bool) {
+	r.reviving = append(r.reviving, reviving)
+}
+
+func TestShimLoadingFollowsTheBringUpsSteps(t *testing.T) {
+	tests := []struct {
+		name string
+		step opentabs.StepKind
+		want []bool
+	}{
+		{name: "a shim being started is loading", step: opentabs.StepStartingSession, want: []bool{true}},
+		{name: "a parked session waking is loading", step: opentabs.StepWaking, want: []bool{true}},
+		{name: "a session up ends it", step: opentabs.StepUp, want: []bool{false}},
+		{name: "a failed start ends it", step: opentabs.StepFailed, want: []bool{false}},
+		{name: "a cold gate ends it", step: opentabs.StepColdGate, want: []bool{false}},
+		{name: "a step inside the bring-up says nothing", step: opentabs.StepServing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			rec := &loadingRecorder{}
+
+			// Act
+			shimLoading(rec, rec, "ws-1", opentabs.Step{Kind: tt.step})
+
+			// Assert
+			if !slices.Equal(rec.marks, tt.want) || !slices.Equal(rec.reviving, tt.want) {
+				t.Fatalf("loading marks = %v, reviving marks = %v, want %v for both", rec.marks, rec.reviving, tt.want)
+			}
+		})
 	}
 }

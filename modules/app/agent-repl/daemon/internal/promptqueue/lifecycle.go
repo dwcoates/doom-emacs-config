@@ -535,15 +535,17 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	// un-stamps and delivers when the session is actually up.
 	revivalPending := false
 	if want == nil && len(standing) > 0 {
-		if _, live := q.deps.Client(ws); !live {
-			want = &leaseHold{kind: wsm.HoldReconnect}
-			revivalPending = true
-		} else if kind, why, waiting := q.sessionWait(ws); waiting && kind == wsm.HoldColdGate {
+		if kind, why, waiting := q.sessionWait(ws); waiting && kind == wsm.HoldColdGate {
 			// A LEASE ENDING OVER A SESSION PARKED AT ITS COLD GATE delivers
-			// nothing into it: its holds wait for the gate's answer.
+			// nothing into it: its holds wait for the gate's answer. It is read
+			// before any client is looked for, since the gate runs no shim
+			// until it is answered (owner ruling, 2026-10-27).
 			log.Info(opLeaseChange, "the lease ended while the session is parked at its cold gate; its holds wait for the gate's answer",
 				dlog.Context{"why": why, "holds": len(standing)})
 			want = &leaseHold{kind: wsm.HoldColdGate}
+		} else if _, live := q.deps.Client(ws); !live {
+			want = &leaseHold{kind: wsm.HoldReconnect}
+			revivalPending = true
 		} else if block, blocked := q.vendorBlocked(ws); blocked {
 			// A LEASE ENDING UNDER A MID-SESSION VENDOR BLOCK delivers
 			// nothing into it: its holds are held after reconnect, and the
@@ -590,7 +592,7 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 		log.Debug(opLeaseChange, "no standing hold changed under the new lease",
 			dlog.Context{"holds": len(standing)})
 		if revivalPending {
-			q.reviveInBackground(ctx, ws, log)
+			q.reviveInBackground(ctx, ws, revivalLoad, log)
 			return
 		}
 		// AN UNCHANGED TRAY CAN STILL HOLD AN ENTRY NOTHING DRIVES: a free
@@ -609,7 +611,7 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	if revivalPending {
 		log.Debug(opLeaseChange, "the lease ended with no session up; the holds wait on a revival",
 			dlog.Context{"holds": len(standing)})
-		q.reviveInBackground(ctx, ws, log)
+		q.reviveInBackground(ctx, ws, revivalLoad, log)
 		return
 	}
 

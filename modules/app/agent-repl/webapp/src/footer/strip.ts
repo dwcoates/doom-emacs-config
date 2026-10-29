@@ -80,7 +80,7 @@ import { heatColor } from "../heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { drawFooterStatusActivity, type ActivityDeps, type FooterActivity } from "./activity.js";
 import { CHIP_PANELS, type FooterChipPanel, type FooterPanel } from "./expanded.js";
-import { statusWords, textLine } from "./parts.js";
+import { statusCellWord, statusWords, textLine } from "./parts.js";
 import { activityDatumClass, statusArmClass, type ActivityDatum } from "./tones.js";
 import type { StopControls } from "./stop.js";
 import { countNoun } from "../count-noun.js";
@@ -321,7 +321,7 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
  * the same speed it crosses the letters.
  */
 function drawStatusWord(word: HTMLElement, armCase: string): void {
-  const text = statusWords(armCase);
+  const text = statusCellWord(armCase);
   if (!statusWordWaves(armCase)) {
     word.textContent = text;
     return;

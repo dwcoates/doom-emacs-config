@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/grantedclock"
@@ -99,4 +100,31 @@ func shortTimeout(t *testing.T, parent context.Context, d time.Duration) context
 	ctx, cancel := grantedclock.WithBound(parent, d)
 	t.Cleanup(cancel)
 	return ctx
+}
+
+// awaitGateShimStoodDown waits for the daemon's record that the cold gate's
+// shim was stood down: a workspace at its gate runs no shim until the gate is
+// answered, and the answer spawns the one it resumes through (answerShim).
+func (f *fixture) awaitGateShimStoodDown() {
+	f.t.Helper()
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the cold gate's shim stood down", func(r harness.LogRecord) bool {
+		return r.Message == "stood the cold gate's shim down; the gate stands until it is answered"
+	})
+}
+
+// answerShim is the shim a gate's answer spawned to resume through.
+func (f *fixture) answerShim() *harness.ShimControl {
+	f.t.Helper()
+	return f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+}
+
+// gateAttempt is the resume the cold gate was raised on, as the stood-down
+// shim logged it.
+func (f *fixture) gateAttempt() *shimv1.StartSessionRequest {
+	f.t.Helper()
+	req := &shimv1.StartSessionRequest{}
+	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartSession, "the resume the cold gate was raised on", req, func() bool {
+		return req.GetResume() != nil
+	})
+	return req
 }

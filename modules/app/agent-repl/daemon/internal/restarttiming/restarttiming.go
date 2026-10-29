@@ -146,9 +146,6 @@ const (
 	StartBoot StartVia = "boot"
 	// StartTakeover is a successor taking workspaces over.
 	StartTakeover StartVia = "takeover"
-	// StartEditor is an editor opening its tabs: Emacs starting, or
-	// reconnecting to a daemon that serves them with no session.
-	StartEditor StartVia = "editor_open"
 )
 
 // StartPhase is what a workspace's start was, its `phase`.

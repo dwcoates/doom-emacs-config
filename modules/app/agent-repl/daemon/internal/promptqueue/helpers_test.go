@@ -27,6 +27,7 @@ import (
 	"agent-repld/internal/resolve/holds"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -1502,6 +1503,21 @@ type fakeHolds struct {
 	folds []holds.Fold
 	// editing records every SetEditing, in order.
 	editing []ids.TurnID
+	// relaunching records every SetRelaunching, in order.
+	relaunching []bool
+}
+
+func (h *fakeHolds) SetRelaunching(_ ids.WorkspaceID, relaunching bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.relaunching = append(h.relaunching, relaunching)
+}
+
+// relaunchMarks answers every recorded SetRelaunching.
+func (h *fakeHolds) relaunchMarks() []bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]bool(nil), h.relaunching...)
 }
 
 func (h *fakeHolds) SetEditing(_ ids.WorkspaceID, turn ids.TurnID) {
@@ -1667,7 +1683,9 @@ type harness struct {
 	banners *fakeTurnBanners
 	commits *fakeRecounter
 	clocks  *fakeCacheClocks
-	log     *dlog.TestSurfaces
+	// reviveCauses are the start causes the revivals stated.
+	reviveCauses []shimlife.StartCause
+	log          *dlog.TestSurfaces
 
 	// noSession, when set, makes the client resolver report no session.
 	revivals   int
@@ -1747,8 +1765,11 @@ func newHarness(t *testing.T) *harness {
 		Merges:  h.leases,
 		Holds:   h.holds,
 		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession && !h.clientReaped },
-		Revive: func(context.Context, ids.WorkspaceID) error {
+		Revive: func(ctx context.Context, _ ids.WorkspaceID) error {
 			h.revivals++
+			if cause, ok := shimlife.StartOf(ctx); ok {
+				h.reviveCauses = append(h.reviveCauses, cause)
+			}
 			if h.reviveErr != nil {
 				return h.reviveErr
 			}

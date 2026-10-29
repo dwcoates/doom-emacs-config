@@ -1,11 +1,34 @@
 # agent-shim/shim-store/
 
 The record store (Go, singleton, launchd-managed): the sole owner of the record
-database (SQLite/WAL) and the only server of `store.v1.ShimStore`. Its callers
-are exactly the shim and the sidecar.
+database (SQLite/WAL), the only server of `store.v1.ShimStore`, whose callers
+are exactly the shim and the sidecar, and the only server of its read-only
+face, `storeread.v1.StoreRead`, whose caller is the daemon.
 
-**THE DAEMON NEVER IMPORTS OR CALLS `store.v1`.** The daemon's read path is
-`shim.v1`; `check-conversation-isolation.sh` refuses the import at codegen.
+**THE DAEMON'S RELATIONSHIP WITH THE STORE IS READ-ONLY, AND STAYS SO** (owner
+ruling, 2026-10-27). It never imports or calls `store.v1`, and reads history
+through `storeread.v1` alone. That is held by construction, never by care:
+
+- `storeread.v1` declares no write verb and imports only the conversation
+  vocabulary (`check-conversation-isolation.sh`, invariant I8); the same gate
+  refuses any daemon import of `store.v1` or of `proto/helpers/go/storewrite`
+  (I7).
+- The read-only face is served on a socket of its own,
+  `storesocket.ReadPath(--socket)` (`store.sock` → `store-read.sock`), by
+  `server.ReadServer`, whose mux mounts `StoreRead` alone: a producer's verb
+  sent there finds no such procedure
+  (`TestTheReadOnlySocketServesNoProducerVerb`,
+  `integration/readonly_test.go`).
+- `ReadServer` holds `db.ReadOnly`, whose method set is pinned to the three
+  page reads (`TestReadOnlyExposesOnlyPageReads`) and which reads on the
+  `query_only` read pool, so SQLite itself refuses a write.
+- Pages are rendered into `conversation.v1.HistoryPage` by
+  `internal/history`, the same mapping the shim's live tail uses in
+  TypeScript; both suites read `testdata/history-golden`.
+
+A verb that would change the store never belongs on the read-only face.
+Retention is the store's own, and a fact the daemon attaches to a conversation
+is the daemon's state (`wsm`), never a write here.
 
 The protos under `proto/src/store/v1/` are the authoritative documentation —
 read them at the symbol you are implementing. Nothing here ever changes a

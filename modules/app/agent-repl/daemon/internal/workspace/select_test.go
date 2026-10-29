@@ -321,60 +321,6 @@ func TestReselectingStillClearsTheAttentionMarker(t *testing.T) {
 	}
 }
 
-func TestSelectRevivesAndUnparksAHibernatedWorkspace(t *testing.T) {
-	// Arrange: the idle sweep stood this workspace's session down.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.hibernate("w1")
-
-	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
-		t.Fatalf("Select: %v", err)
-	}
-
-	// Assert.
-	if len(f.fleet.started) != 1 || f.fleet.started[0] != "w1" {
-		t.Fatalf("started = %v, want [w1]", f.fleet.started)
-	}
-	if len(f.topbarParked) != 1 || f.topbarParked[0] {
-		t.Fatalf("topbar parked = %v, want the park lifted", f.topbarParked)
-	}
-}
-
-func TestSelectStartsNothingForALiveWorkspace(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.fleet.live["w1"] = true
-
-	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
-		t.Fatalf("Select: %v", err)
-	}
-
-	// Assert.
-	if len(f.fleet.started) != 0 {
-		t.Fatalf("started = %v, want none: a live workspace has nothing to revive", f.fleet.started)
-	}
-}
-
-func TestSelectRecordsAFailedRevivalAtError(t *testing.T) {
-	// Arrange: a selected workspace with no session is the state the revival
-	// exists to abolish, so its failure is loud though no answer carries it.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.hibernate("w1")
-	f.fleet.startErr = errors.New("boom")
-
-	// Act.
-	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
-
-	// Assert.
-	if errs := errorRecords(f); len(errs) != 1 || errs[0].Message != "the hibernated workspace's session did not come back up" {
-		t.Fatalf("errors = %+v, want the failed bring-up at ERROR once", errs)
-	}
-}
-
 // recordLevel returns the level of the first captured record whose message
 // equals want, or "" when none matches.
 func recordLevel(f *fixture, want string) string {
@@ -599,340 +545,6 @@ func TestMarkViewedRefusesAnUnknownWorkspace(t *testing.T) {
 	}
 }
 
-// ---- The selection goes first; the revival follows -------------------------
-//
-// Owner ruling, 2026-09-19: the selection is made current and pushed to the
-// roster BEFORE any revival, the row carries REVIVING while the revival runs,
-// and the stamped current reflects REQUEST order — never the order revivals
-// happen to finish in.
-
-func TestSelectTellsTheRosterInOrder(t *testing.T) {
-	cases := []struct {
-		name     string
-		parked   bool
-		startErr error
-		want     []string
-	}{
-		{name: "a live workspace", want: []string{"registry+selected"}},
-		{name: "a parked workspace that revives", parked: true,
-			want: []string{"registry+selected", "reviving", "revived"}},
-		{name: "a parked workspace whose revival fails", parked: true, startErr: errFake,
-			want: []string{"registry+selected", "reviving", "revived"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			f := newFixture(t)
-			f.workspace("w1", t.TempDir())
-			if tc.parked {
-				f.hibernate("w1")
-			}
-			f.fleet.startErr = tc.startErr
-
-			// Act.
-			_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
-
-			// Assert: the selection lands whole before the revival begins, and
-			// the marker is lowered however the revival ended.
-			calls, _, _ := f.sidebar.snapshot()
-			if !slices.Equal(calls, tc.want) {
-				t.Fatalf("roster calls = %v, want %v", calls, tc.want)
-			}
-		})
-	}
-}
-
-func TestSelectStampsTheSelectionBeforeTheRevivalStarts(t *testing.T) {
-	// Arrange: a parked workspace whose bring-up is held at the gate.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.hibernate("w1")
-	entered, release := f.gateStarts(1)
-	done := f.selectAsync(context.Background(), "w1")
-
-	// Act: the revival has begun.
-	receive(t, entered, "the revival's Start")
-
-	// Assert: the selection is already current AND already on the roster.
-	_, selected, _ := f.sidebar.snapshot()
-	close(release)
-	if err := receive(t, done, "the select's answer"); err != nil {
-		t.Fatalf("Select: %v", err)
-	}
-	if !slices.Equal(selected, []ids.WorkspaceID{"w1"}) {
-		t.Fatalf("roster selections while reviving = %v, want [w1]", selected)
-	}
-}
-
-func TestSelectMarksTheRowRevivingWhileTheRevivalRuns(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.hibernate("w1")
-	entered, release := f.gateStarts(1)
-	done := f.selectAsync(context.Background(), "w1")
-
-	// Act.
-	receive(t, entered, "the revival's Start")
-
-	// Assert: the marker stands for the whole bring-up.
-	_, _, reviving := f.sidebar.snapshot()
-	close(release)
-	if err := receive(t, done, "the select's answer"); err != nil {
-		t.Fatalf("Select: %v", err)
-	}
-	if !slices.Equal(reviving, []revivingEdge{{"w1", true}}) {
-		t.Fatalf("reviving edges during the bring-up = %v, want [{w1 true}]", reviving)
-	}
-}
-
-func TestSelectLowersTheRevivingMarkerWhenTheRevivalFails(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.hibernate("w1")
-	f.fleet.startErr = errFake
-
-	// Act.
-	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
-
-	// Assert: a failed bring-up is not still "coming back".
-	_, _, reviving := f.sidebar.snapshot()
-	if !slices.Equal(reviving, []revivingEdge{{"w1", true}, {"w1", false}}) {
-		t.Fatalf("reviving edges = %v, want raised then lowered", reviving)
-	}
-}
-
-func TestSelectAnswersTheSelectionNotTheRevival(t *testing.T) {
-	// Arrange: SelectWorkspace answers that the workspace is selected; the
-	// revival it occasions reports its own outcome.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.hibernate("w1")
-	f.fleet.startErr = errFake
-
-	// Act.
-	err := f.verbs.Select(context.Background(), "w1", RecordSelection)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Select() = %v, want the selection answered whatever the revival did", err)
-	}
-}
-
-func TestAFailedRevivalLeavesTheSelectionStanding(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.hibernate("w1")
-	f.fleet.startErr = errFake
-
-	// Act.
-	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
-
-	// Assert: the user DID switch; the error says what did not come up.
-	if f.db.current == nil || *f.db.current != "w1" {
-		t.Fatalf("current = %v, want w1", f.db.current)
-	}
-}
-
-func TestSelectRaisesNoRevivingMarkerForALiveWorkspace(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.fleet.live["w1"] = true
-
-	// Act.
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
-		t.Fatalf("Select: %v", err)
-	}
-
-	// Assert.
-	if _, _, reviving := f.sidebar.snapshot(); len(reviving) != 0 {
-		t.Fatalf("reviving edges = %v, want none for a live workspace", reviving)
-	}
-}
-
-// arrangeSwitchDuringRevival selects parked workspace "slow" and, while its
-// bring-up is held at the gate, selects live workspace "fast": the user's
-// LAST switch. It answers the gate's release and the slow select's answer.
-func arrangeSwitchDuringRevival(t *testing.T) (*fixture, chan struct{}, <-chan error) {
-	t.Helper()
-	f := newFixture(t)
-	f.workspace("slow", t.TempDir())
-	f.workspace("fast", t.TempDir())
-	f.hibernate("slow")
-	f.fleet.live["fast"] = true
-	entered, release := f.gateStarts(1)
-	slow := f.selectAsync(context.Background(), "slow")
-	receive(t, entered, "the slow revival's Start")
-	if err := f.verbs.Select(context.Background(), "fast", RecordSelection); err != nil {
-		t.Fatalf("Select(fast): %v", err)
-	}
-	return f, release, slow
-}
-
-func TestSelectLandsOnTheLastRequestedWorkspaceWhileAnEarlierRevivalRuns(t *testing.T) {
-	// Arrange, Act: "fast" was requested after "slow", whose revival is still
-	// in flight.
-	f, release, slow := arrangeSwitchDuringRevival(t)
-	current := *f.db.current
-	_, selected, _ := f.sidebar.snapshot()
-	close(release)
-	if err := receive(t, slow, "the slow select's answer"); err != nil {
-		t.Fatalf("Select(slow): %v", err)
-	}
-
-	// Assert: the last request is current, in WSM and on the roster alike.
-	if current != "fast" {
-		t.Fatalf("current = %v, want fast", current)
-	}
-	if !slices.Equal(selected, []ids.WorkspaceID{"slow", "fast"}) {
-		t.Fatalf("roster selections = %v, want [slow fast]", selected)
-	}
-}
-
-func TestARevivalFinishingNeverRestampsTheSelection(t *testing.T) {
-	// Arrange.
-	f, release, slow := arrangeSwitchDuringRevival(t)
-
-	// Act: the earlier revival completes AFTER the later switch landed.
-	close(release)
-	if err := receive(t, slow, "the slow select's answer"); err != nil {
-		t.Fatalf("Select(slow): %v", err)
-	}
-
-	// Assert: nothing re-stamped "slow".
-	_, selected, _ := f.sidebar.snapshot()
-	if *f.db.current != "fast" {
-		t.Fatalf("current = %v, want fast: the revival's completion re-stamped it", *f.db.current)
-	}
-	if !slices.Equal(selected, []ids.WorkspaceID{"slow", "fast"}) {
-		t.Fatalf("roster selections = %v, want [slow fast]", selected)
-	}
-}
-
-func TestConcurrentSelectsOfAParkedWorkspaceStartOneSession(t *testing.T) {
-	// Arrange: the user switches to a parked workspace, and three more selects
-	// of it arrive while its bring-up is held at the gate.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.hibernate("w1")
-	joined := make(chan ids.WorkspaceID, 3)
-	f.verbs.(*verbs).revivals.observeJoin = func(ws ids.WorkspaceID) { joined <- ws }
-	entered, release := f.gateStarts(4)
-	outcomes := []<-chan error{f.selectAsync(context.Background(), "w1")}
-	receive(t, entered, "the leading select's Start")
-	for range 3 {
-		outcomes = append(outcomes, f.selectAsync(context.Background(), "w1"))
-	}
-	for range 3 {
-		receive(t, joined, "a select joining the in-flight revival")
-	}
-
-	// Act.
-	close(release)
-	for _, outcome := range outcomes {
-		if err := receive(t, outcome, "a select's answer"); err != nil {
-			t.Fatalf("Select: %v", err)
-		}
-	}
-
-	// Assert: one bring-up for four selects.
-	if !slices.Equal(f.fleet.startCalls, []ids.WorkspaceID{"w1"}) {
-		t.Fatalf("starts = %v, want exactly one for w1", f.fleet.startCalls)
-	}
-}
-
-// ---- a select's revival outlives the select ----
-
-// arrangeDetachedSelect selects parked "w1" with its DETACHED revival held,
-// and answers the select's error, received while the revival is still held.
-// The revival is then released, and the call returns once its flight has
-// finished.
-func arrangeDetachedSelect(t *testing.T, f *fixture, startErr error) error {
-	t.Helper()
-	f.workspace("w1", t.TempDir())
-	f.hibernate("w1")
-	f.fleet.startErr = startErr
-	f.fleet.detachEntered, f.fleet.detachHold = make(chan struct{}), make(chan struct{})
-	finished := make(chan ids.WorkspaceID, 1)
-	f.verbs.(*verbs).revivals.observeFinish = func(ws ids.WorkspaceID, _ bool, _ error) { finished <- ws }
-	done := f.selectAsync(context.Background(), "w1")
-	err := receive(t, done, "the select's answer, its revival still held")
-	receive(t, f.fleet.detachEntered, "the detached revival")
-	close(f.fleet.detachHold)
-	receive(t, finished, "the revival's finish")
-	return err
-}
-
-// errorRecords answers every ERROR the fixture recorded.
-func errorRecords(f *fixture) []dlog.Record {
-	var out []dlog.Record
-	for _, r := range f.log.logger.Records() {
-		if r.Level == dlog.LevelError {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-// TestASelectAnswersBeforeItsRevivalFinishes is the 2026-10-25T14:53:08
-// switch: Emacs timed SelectWorkspace out at 10s while the bring-up it
-// occasioned ran on, the selection long recorded.
-func TestASelectAnswersBeforeItsRevivalFinishes(t *testing.T) {
-	// Arrange, Act.
-	f := newFixture(t)
-	err := arrangeDetachedSelect(t, f, nil)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Select() = %v, want the selection answered while its revival was held", err)
-	}
-}
-
-// TestASelectsRevivalLandsWholeAfterTheAnswer pins that the bring-up the
-// answer did not wait for still lands, on the fleet's own live context.
-func TestASelectsRevivalLandsWholeAfterTheAnswer(t *testing.T) {
-	// Arrange, Act.
-	f := newFixture(t)
-	_ = arrangeDetachedSelect(t, f, nil)
-
-	// Assert.
-	if !slices.Equal(f.fleet.started, []ids.WorkspaceID{"w1"}) || f.fleet.startCtxErr != nil {
-		t.Fatalf("started = %v (ctx err %v), want w1 started whole on a live context", f.fleet.started, f.fleet.startCtxErr)
-	}
-	if len(f.topbarParked) != 1 || f.topbarParked[0] {
-		t.Fatalf("topbar parked = %v, want the revival to have unparked it", f.topbarParked)
-	}
-}
-
-// TestADetachedRevivalEndedByTheDaemonsExitRecordsNoError covers the fleet's
-// lifetime ending under the revival: the daemon leaving, not a failure.
-func TestADetachedRevivalEndedByTheDaemonsExitRecordsNoError(t *testing.T) {
-	// Arrange, Act.
-	f := newFixture(t)
-	_ = arrangeDetachedSelect(t, f, context.Canceled)
-
-	// Assert.
-	if errs := errorRecords(f); len(errs) != 0 {
-		t.Fatalf("errors = %+v, want none for a revival the daemon's exit ended", errs)
-	}
-}
-
-// TestADetachedRevivalThatFailsIsStillAnError keeps a real failure loud after
-// its caller left.
-func TestADetachedRevivalThatFailsIsStillAnError(t *testing.T) {
-	// Arrange, Act.
-	f := newFixture(t)
-	_ = arrangeDetachedSelect(t, f, errFake)
-
-	// Assert.
-	if errs := errorRecords(f); len(errs) != 1 || errs[0].Message != "the hibernated workspace's session did not come back up" {
-		t.Fatalf("errors = %+v, want the failed bring-up at ERROR once", errs)
-	}
-}
-
 func TestSelectReturnsTheFeedToItsTailOnASwitch(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -969,68 +581,6 @@ func TestReselectingLeavesTheFeedWhereItIs(t *testing.T) {
 	// Assert.
 	if !slices.Equal(f.host.tailReturns, []ids.WorkspaceID{"w1"}) {
 		t.Fatalf("tail returns = %v, want [w1] (the first select only)", f.host.tailReturns)
-	}
-}
-
-func TestSelectStartsAnOpenWorkspaceWithNoSession(t *testing.T) {
-	// Arrange: neither parked nor live, as a workspace a bring-up left down is.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-
-	// Act
-	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
-		t.Fatalf("Select: %v", err)
-	}
-
-	// Assert
-	if len(f.fleet.started) != 1 || f.fleet.started[0] != "w1" {
-		t.Fatalf("started = %v, want [w1]: a looked-at workspace is never session-less", f.fleet.started)
-	}
-}
-
-func TestSelectOnADaemonStandingDownAnswersTheStandingDownArm(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.hibernate("w1")
-	f.fleet.standingDown = true
-
-	// Act.
-	err := f.verbs.Select(context.Background(), "w1", RecordSelection)
-
-	// Assert: SelectWorkspaceError's own arm, never the open's spawn_failed.
-	asRefusal(t, err, ArmStandingDown)
-}
-
-func TestSelectOnADaemonStandingDownStartsNothing(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.hibernate("w1")
-	f.fleet.standingDown = true
-
-	// Act.
-	_ = f.verbs.Select(context.Background(), "w1", RecordSelection)
-
-	// Assert: the refusal comes before anything is detached.
-	if len(f.fleet.startCalls) != 0 {
-		t.Fatalf("starts = %v, want none on a daemon standing down", f.fleet.startCalls)
-	}
-}
-
-func TestSelectOfALiveWorkspaceOnADaemonStandingDownSucceeds(t *testing.T) {
-	// Arrange: nothing is owed a start, so nothing is refused.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.fleet.live["w1"] = true
-	f.fleet.standingDown = true
-
-	// Act.
-	err := f.verbs.Select(context.Background(), "w1", RecordSelection)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("Select() = %v, want success for a live workspace", err)
 	}
 }
 
@@ -1950,4 +1500,54 @@ func TestSelectionHistoryPanicsOnAnUnknownValue(t *testing.T) {
 
 	// Act.
 	_ = SelectionHistory(99).String()
+}
+
+// TestSelectStartsNoShim pins the owner ruling of 2026-10-28: switching to a
+// workspace starts no shim, whatever its session's state; the next prompt
+// does.
+func TestSelectStartsNoShim(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(f *fixture)
+	}{
+		{name: "a hibernated workspace", arrange: func(f *fixture) { f.hibernate("w1") }},
+		{name: "a workspace with no session", arrange: func(*fixture) {}},
+		{name: "a hibernated workspace on a daemon standing down", arrange: func(f *fixture) {
+			f.hibernate("w1")
+			f.fleet.standingDown = true
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			tc.arrange(f)
+
+			// Act.
+			err := f.verbs.Select(context.Background(), "w1", RecordSelection)
+
+			// Assert.
+			if err != nil || len(f.fleet.startCalls) != 0 || len(f.fleet.started) != 0 {
+				t.Fatalf("Select = %v after starts %v; want the selection and no start", err, f.fleet.startCalls)
+			}
+		})
+	}
+}
+
+func TestSelectLeavesAParkedWorkspacesParkDrawn(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.hibernate("w1")
+
+	// Act.
+	if err := f.verbs.Select(context.Background(), "w1", RecordSelection); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+
+	// Assert.
+	if len(f.topbarParked) != 0 {
+		t.Fatalf("topbar park edges = %v, want the park left as it is", f.topbarParked)
+	}
 }

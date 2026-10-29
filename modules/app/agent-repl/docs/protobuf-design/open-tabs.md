@@ -28,7 +28,9 @@ workspace's web page was checked by Emacs alone, never by the daemon.
    it holds, and spares the session of a one-shot or of a workspace with a
    merge pending (`wsm.Workspace.FoldSpare`); see "Hide and collapse stand
    sessions down".
-   - Consequence: boot's bring-up and every open skip invisible workspaces;
+   - Consequence: every open skips invisible workspaces (a boot's bring-up
+     follows only the record of which shims were up, owner ruling
+     2026-10-28: see shim-lifecycle.md);
      hide and collapse stand sessions down; show and expand start nothing by
      themselves, the editor asks with OpenTabs.
    - Reopens: the 2026-09-13 / 2026-10-02 ruling "an open workspace is never
@@ -152,3 +154,22 @@ workspace's web page was checked by Emacs alone, never by the daemon.
   holds.
 - WHY: the answer and the roster ride separate streams, and a row applied
   out of order would roll a status back.
+
+## Landed change: an open never waits on a shim, and starts none (owner, 2026-10-28)
+
+- WHAT: `ready` is sent once the workspace's conversation's newest page is read
+  whole from the store (`conversation_read`) and its page drew when one was
+  loading. The open starts no session and waits on none: no `served`, no cut
+  turn's resumption. Steps of a bring-up some other cause has under way (a
+  boot's, a prompt's) and a resumption's start are relayed as progress.
+  `failed` now means the conversation could not be read.
+- WHY: "No UX ever waits on a shim"; the daemon reads history from the store
+  (2026-10-27-store-read-history.md), so a shim is not needed to draw a
+  workspace. A prompt brings the shim up and is held "after loading" until
+  it is.
+- REPLACES: the 2026-10-12 change below as far as it waited on the session
+  and the cut turn, and principle 2's "served by agent-repl's services".
+  A cut turn is resumed by the session-up release of whatever next brings
+  the session up.
+- Does not change: the message shapes. Only their comments and the
+  daemon's behavior changed.

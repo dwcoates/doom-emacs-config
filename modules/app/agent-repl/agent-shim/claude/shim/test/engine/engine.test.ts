@@ -22,7 +22,6 @@ const UNARY_VERBS = [
   "killTurn",
   "stopBash",
   "detachForeground",
-  "readHistory",
   "gatherTitleDigest",
 ] as const;
 

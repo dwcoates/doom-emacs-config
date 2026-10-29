@@ -25,6 +25,14 @@ printf 'syntax = "proto3";\n' >"$FIXTURE/src/fixture.proto"
 cp "$THIS_DIR/check-conversation-isolation.sh" "$FIXTURE/scripts/check-conversation-isolation.sh"
 mkdir -p "$FIXTURE/daemon"
 printf 'package daemon\n' >"$FIXTURE/daemon/stub.go"
+# The gate also requires the store's read-only view package (I8) to exist and
+# import only the conversation vocabulary, so the fixture carries a clean one.
+mkdir -p "$FIXTURE/proto/src/storeread/v1"
+cat >"$FIXTURE/proto/src/storeread/v1/stub.proto" <<'EOF'
+syntax = "proto3";
+package storeread.v1;
+import "conversation/v1/history.proto";
+EOF
 cat >"$FIXTURE/component/clean.proto" <<'EOF'
 syntax = "proto3";
 package frontend.v1;

@@ -21,7 +21,6 @@ export * from "../../../../proto/gen/ts/shim/v1/endpoint_network_changed_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_kill_session_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_kill_turn_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_gather_title_digest_pb.js";
-export * from "../../../../proto/gen/ts/shim/v1/endpoint_read_history_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_read_transcripts_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_resolve_peer_delivery_pb.js";
 export * from "../../../../proto/gen/ts/shim/v1/endpoint_resolve_vendor_task_pb.js";

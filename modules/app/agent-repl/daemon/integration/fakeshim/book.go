@@ -7,6 +7,8 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"google.golang.org/protobuf/proto"
+
+	"agent-repld/integration/fakestore"
 )
 
 // THE FAKE STORE'S BOOK. The real shim reads history off the store: every
@@ -19,13 +21,20 @@ import (
 
 // DefaultHistoryPageSize is the fake store's page size when the profile
 // states none: the real store's.
-const DefaultHistoryPageSize = 50
+const DefaultHistoryPageSize = fakestore.DefaultPageSize
 
 // book is every agent's history, OLDEST FIRST, keyed by agent id.
 type book struct {
 	mu      sync.Mutex
 	entries map[string][]*conversationv1.HistoryEntryAt
 	minted  map[string]int
+	// dir is where every change of the book is kept for the fake store
+	// (fakestore), and mainBook the name the main agent's book is kept, and
+	// stated, under: unique per workspace, as the real book is. Empty dir keeps
+	// nothing.
+	dir      string
+	mainBook string
+	size     int
 	// asks is every ask a published frame opened and no later frame closed,
 	// in the order they opened: what the real shim's permission gate holds
 	// pending, and so what a re-announcement states as open_asks.
@@ -34,6 +43,50 @@ type book struct {
 
 func newBook() *book {
 	return &book{entries: map[string][]*conversationv1.HistoryEntryAt{}, minted: map[string]int{}}
+}
+
+// mainBookFor is the book the fake shim of workspace WS states and keeps its
+// main agent's history under: the agent id the frames carry is the one
+// MainAgentID every workspace shares, and the book is the workspace's own.
+func mainBookFor(ws string) string {
+	return fakestore.MainBook(ws)
+}
+
+// keepIn has every change of the book kept under DIR for the fake store, the
+// main agent's book as MAINBOOK, paged at SIZE, and keeps the book as it
+// stands now.
+func (b *book) keepIn(dir, mainBook string, size int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.dir, b.mainBook, b.size = dir, mainBook, size
+	for agent := range b.entries {
+		b.keepLocked(agent)
+	}
+	b.keepLocked(MainAgentID)
+}
+
+// keepLocked keeps AGENT's book for the fake store. A book that cannot be kept
+// panics: a reader of the store would be served a conversation that is not
+// this one, which is a broken fixture, never a test outcome.
+func (b *book) keepLocked(agent string) {
+	if b.dir == "" {
+		return
+	}
+	name := agent
+	if agent == MainAgentID {
+		name = b.mainBook
+	}
+	if err := fakestore.Write(b.dir, name, b.size, b.entries[agent]); err != nil {
+		panic(sprintf("fakeshim: keep book %q for the fake store: %v", name, err))
+	}
+}
+
+// stated is the book the fake shim names for its workspace, empty while it
+// keeps none.
+func (b *book) stated() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.mainBook
 }
 
 // bookAgent is the book an entry of AGENT belongs to: the main agent's for an
@@ -52,25 +105,12 @@ func bookAgent(agent string) string {
 func (b *book) seed(newestFirst [][]byte, turns []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	main := b.entries[MainAgentID][:0]
-	for i := len(newestFirst) - 1; i >= 0; i-- {
-		entry := &conversationv1.HistoryEntry{}
-		if err := proto.Unmarshal(newestFirst[i], entry); err != nil {
-			panic(sprintf("fakeshim: profile resume_history[%d] does not decode: %v", i, err))
-		}
-		at := &conversationv1.HistoryEntryAt{
-			At:    &conversationv1.HistoryPointer{Value: sprintf("resume-%d", i)},
-			Entry: entry,
-			Place: &conversationv1.HistoryEntryAt_RecordedPlace{RecordedPlace: &conversationv1.ConversationPlace{
-				AtMs: int64(len(newestFirst) - i),
-			}},
-		}
-		if i < len(turns) && turns[i] != "" {
-			at.Turn = &conversationv1.TurnId{Value: turns[i]}
-		}
-		main = append(main, at)
+	main, err := fakestore.ResumeEntries(newestFirst, turns)
+	if err != nil {
+		panic(sprintf("fakeshim: profile resume_history: %v", err))
 	}
 	b.entries[MainAgentID] = main
+	b.keepLocked(MainAgentID)
 }
 
 // record files one published frame and answers it with the pointer every
@@ -89,6 +129,7 @@ func (b *book) record(f agentFrame) agentFrame {
 			}
 		}
 		b.entries[agent] = kept
+		b.keepLocked(agent)
 		return f
 	}
 	if f.pointer == "" {
@@ -100,6 +141,7 @@ func (b *book) record(f agentFrame) agentFrame {
 		Entry: f.entry(),
 		Turn:  f.stamp(),
 	}))
+	b.keepLocked(agent)
 	b.noteAskLocked(f.frame)
 	return f
 }
@@ -158,60 +200,14 @@ func (b *book) openAsks() []*conversationv1.SessionOpenAsk {
 	return out
 }
 
-// page answers one ReadHistory page of AGENT's book: the newest page with no
-// AFTER, else the entries placed before AFTER. False is a pointer the book
-// never served.
+// page answers one page of AGENT's book, for a test reading what the fake
+// wrote: the newest page with no AFTER, else the entries placed before AFTER.
+// False is a pointer the book never served. The fake store pages its kept copy
+// the same way, and it is what the daemon reads.
 func (b *book) page(agent string, after *conversationv1.HistoryPointer, size int) (*conversationv1.HistoryPage, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	entries := b.entries[bookAgent(agent)]
-	end := len(entries)
-	if after != nil {
-		end = -1
-		for i, at := range entries {
-			if at.GetAt().GetValue() == after.GetValue() {
-				end = i
-			}
-		}
-		if end < 0 {
-			return nil, false
-		}
-	}
-	start := max(end-size, 0)
-	page := &conversationv1.HistoryPage{}
-	for i := end - 1; i >= start; i-- {
-		page.Entries = append(page.Entries, entries[i])
-	}
-	if start == 0 {
-		page.Boundary = &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}}
-	} else {
-		page.Boundary = &conversationv1.HistoryPage_More{More: &conversationv1.HistoryMore{LastEntry: entries[start].GetAt()}}
-	}
-	return page, true
-}
-
-// pageThrough answers one ReadHistory page of AGENT's book read THROUGH an
-// instant: the newest entries placed at or before THROUGHMS, as the store's
-// bounded read serves a fork's inherited past. An entry the serving side
-// placed nowhere counts as placed at the conversation's start.
-func (b *book) pageThrough(agent string, throughMs int64, size int) *conversationv1.HistoryPage {
-	b.mu.Lock()
-	entries := b.entries[bookAgent(agent)]
-	end := len(entries)
-	for end > 0 && entries[end-1].GetRecordedPlace().GetAtMs() > throughMs {
-		end--
-	}
-	var after *conversationv1.HistoryPointer
-	if end < len(entries) {
-		after = entries[end].GetAt()
-	}
-	b.mu.Unlock()
-	if after == nil {
-		page, _ := b.page(agent, nil, size)
-		return page
-	}
-	page, _ := b.page(agent, after, size)
-	return page
+	return fakestore.Page(b.entries[bookAgent(agent)], after, size)
 }
 
 // since answers AGENT's entries written after the one KNOWN names, newest

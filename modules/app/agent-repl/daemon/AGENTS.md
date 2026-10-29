@@ -958,8 +958,8 @@ The rule is structural:
   announcement.
 - `workspace/opening_test.go`'s `TestFirstPageRequestsHaveNamedSitesOnly`
   fails the moment another production site builds a replay opening, a
-  `WatchAgentRequest`, a `StartTurnRequest` or a `ReadHistory` first-page
-  request.
+  `WatchAgentRequest`, a `StartTurnRequest` or a store newest-page request
+  (`storereader.Newest`).
 
 A successor daemon's adoption (handover, crash boot) is that process's first
 open of the workspace: its feed holds nothing, so it still replays the first
@@ -999,35 +999,30 @@ relaunch engine already used. Whether a SESSION runs on it is a separate fact
 - A start that met a vendor or network fault is no agent-repl failure to
   its callers (`startEndedByDaemon`): the fault itself is the record.
 
-## A feed's history source is the shim, never the vendor session
+## A feed's history source is the store, never a shim or the vendor session
 
-Owner principle, 2026-10-02: the vendor and its state never gate agent-repl's
-own functions, and a restarted workspace shows what it showed before. History
-is read through any shim client the fleet can reach (`workspace.Fleet.ReadHistory`,
-`internal/workspace/history.go`), whatever the vendor session is doing:
+Owner rulings, 2026-10-27: a shim runs only when a session must, and the
+daemon's relationship with the store is read-only. Every workspace's history
+is read from the store's read-only face (`storeread.v1`, through
+`internal/storereader`, the daemon's one way into the store), whether or not
+any shim is up: a parked workspace, one at its cold gate, one whose shim is
+starting or gone, and none is started to show it
+(`workspace.Fleet.ReadHistory`, `internal/workspace/history.go`).
 
-- **Every held shim**: the fleet holds every shim from the moment it is
-  spawned or adopted (see "The fleet holds every shim from its spawn"), so a
-  started session's, a cold gate's, a start being answered or retried, and a
-  failed start's are all sources. The shim serves the workspace's PERSISTED
-  book (`agent-id.json`) before any StartSession. With no watcher up, the
-  fleet names the page's main agent for the feed and the footer itself and
-  hands the footer the page (`noteHistoryWithoutWatcher`).
-- **A FRESH start's shim is no source** until its session starts
-  (`live.freshStart`): the book it persisted names the conversation the fresh
-  one replaces.
-- **No shim at all** (or a shim that holds no book yet before any session:
-  `unknown_agent` with no watcher, INFO `daemon.workspace.history_no_book`)
-  is `feed.ErrNoHistorySource`: the reader is served what the feed holds and
-  waits (`awaitingSource`). A shim held with no session started (and not a
-  fresh start's) calls `feed.SourceUp`, which loads and pushes every
-  waiting feed's newest page; a started session's readers are kicked by its
-  watch opening, because a fresh book is not written until its first turn.
-- **The daemon's own rows never stand in for the newest page**: while a
-  book's newest page is unloaded, a row the daemon makes follows the moment it
-  was made when that is later than the row before it (`order.go`
-  `awaitsNewestPage`), so a cold gate made after a restart is not drawn above
-  turns run since an older merge row.
+- **The workspace's book** is the store agent its conversation is filed
+  under: the shim names it on every StartSession answer, a refusal included
+  (`shimv1.StartSessionResponse.book`), and the fleet records it
+  (`recordBook`, `wsm` `workspace_book`). A read of the workspace's own book
+  is STATED, so a book nothing is written under yet reads as the empty page;
+  a read naming any other book (a subagent's, a fork's parent's) is NAMED,
+  and the store refuses one it never heard of.
+- **A fresh start's newest page is empty** until its session starts: the book
+  on record names the conversation it replaces.
+- **A workspace with no recorded book** takes the book its shim persisted
+  (`shimidentity`, `<state>/shim/<workspace key>/agent-id.json`), records it,
+  and is read like any other. One whose shim persisted none has no
+  conversation yet, and its newest page is empty, at its floor. No history is
+  ever read through a shim: `shim.v1.ReadHistory` is retired (2026-10-28).
 
 ## A page carries the prompts of the turns it touches
 
@@ -1074,7 +1069,7 @@ reader from ever being handed a row it will withhold:
   what the fork said. The fleet states the workspace's lineage at every
   bring-up (`Resolver.NoteLineage`, from `wsm.Lineage`); the root feed's walk
   reads the fork's own book to its start and then each generation's book
-  through `HistorySource.ReadInherited` (ReadHistory's bounded `through`
+  through `HistorySource.ReadInherited` (the store's bounded `through`
   read), leaving out entries, and turn heads, of the turns open when the fork
   was taken. An
   inherited book's agent is a root-feed agent (`wsState.agentFeed`), and its
@@ -1764,6 +1759,36 @@ Design record `docs/protobuf-design/vendor-start-resilience.md`.
   and the `relaunch_failed` refusal, carrying the cause, otherwise
   (`restartAnswer`). A caller that leaves first is answered its context's end
   at ERROR, and the bounce runs on and records its own outcome.
+
+## A workspace at its cold gate runs no shim until the gate is answered
+
+Owner ruling, 2026-10-27 (`internal/workspace/coldgaterecord.go`, `wsm`
+`cold_gate`). The gate is the shim's judgment, made once, at the start whose
+resume it refuses cold:
+
+- **Recorded and stood down.** That start records the gate (the conversation,
+  the shim's `SessionCold`, the account root) and stands its shim down before
+  it returns (`standDownAtGate`), keeping the gate.
+- **Raised from the record ever after.** Every later start, the boot's, a
+  handover successor's and a prompt's revival included, raises the recorded
+  gate with no shim (`raiseRecordedGate`); nothing is spawned for it. The
+  conversation is read from the store (`Fleet.ReadHistory`), so the gated workspace
+  shows it whole.
+- **A gate is a quiet session that exists.** `Live`, `Running` and `Health`
+  read a standing gate with no shim as a session that exists, runs nothing and
+  does not serve, never as an absence to report. The footer draws a gate's dead
+  link as the gate, and only a recorded fault (a failed answer's re-open)
+  claims its fault rung over it; the topbar reads it `no_session`.
+- **The queue reads the gate before it looks for a shim**: a revival that
+  parked at it, a held delivery, a lease ending over it and a prompt that waits
+  it out are held under `wsm.HoldColdGate`, never read as a session that did
+  not come up.
+- **The answer spawns the shim it resumes through** (`ResumeCold`,
+  `heldForAnswer`, under the workspace's start gate). A re-open that fails
+  raises the gate again and stands that shim down again.
+- **The record is retired** when a session comes up (`sessionUp`, which every
+  answer's resume reaches) or a rebind points the workspace at another
+  conversation, and with the workspace's row.
 
 ## A prompt waits at the cold gate, and nothing that waits on a session is left unheld
 

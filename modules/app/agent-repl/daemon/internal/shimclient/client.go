@@ -1750,11 +1750,6 @@ func (c *client) DetachForeground(ctx context.Context, req *shimv1.DetachForegro
 	return unary(ctx, c, "detach_foreground", req, validateDetachForegroundRequest, c.rpc.DetachForeground)
 }
 
-// ReadHistory pages an agent's history without opening a watch.
-func (c *client) ReadHistory(ctx context.Context, req *shimv1.ReadHistoryRequest) (*shimv1.ReadHistoryResponse, error) {
-	return unary(ctx, c, "read_history", req, validateReadHistoryRequest, c.rpc.ReadHistory)
-}
-
 // ResolvePeerDelivery asks which sessions hold the two ends of one delivery.
 func (c *client) ResolvePeerDelivery(ctx context.Context, req *shimv1.ResolvePeerDeliveryRequest) (*shimv1.ResolvePeerDeliveryResponse, error) {
 	return unary(ctx, c, "resolve_peer_delivery", req, validateResolvePeerDeliveryRequest, c.rpc.ResolvePeerDelivery)

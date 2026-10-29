@@ -28,6 +28,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	"agentrepl/proto/shim/v1/shimv1connect"
 
+	"agent-repld/integration/fakestore"
+
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/protobuf/proto"
@@ -114,6 +116,10 @@ func run(args []string) error {
 		log:     log,
 	}
 	proc.srv = newServer(proc.rec, profile, log)
+	// THE BOOK IS KEPT IN THE FAKE STORE beside the store socket every shim is
+	// handed, so the daemon reads it with no shim up, as it reads the real
+	// store's.
+	proc.srv.book.keepIn(fakestore.Dir(argv.StoreSocket), mainBookFor(workspaceID), proc.srv.historyPageSize())
 	proc.srv.exit = proc.die
 	proc.srv.onSessionStarted = proc.takeSessionLock
 	proc.srv.claimWorkspace = proc.takeWorkspaceLock

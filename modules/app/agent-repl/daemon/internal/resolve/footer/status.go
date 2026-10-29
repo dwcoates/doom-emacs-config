@@ -147,6 +147,13 @@ func (r *resolver) agentReplFault(s *wsState, log dlog.Logger) *frontendv1.Foote
 	if s.link != shimclient.LinkDialing && s.link != shimclient.LinkRedialing && r.standingFault(s, health.FaultStatusVendorFault) != nil {
 		return r.agentReplByFault(s, log)
 	}
+	// A STANDING COLD GATE RUNS NO SHIM until it is answered (owner ruling,
+	// 2026-10-27): its route being down is the gate's own state, never a
+	// fault, so only a RECORDED fault (a failed answer's re-open) claims this
+	// rung, and otherwise the gate's `waiting` rung draws the workspace.
+	if s.coldGate.Standing && s.link == shimclient.LinkDead {
+		return r.agentReplByFault(s, log)
+	}
 	arm := &frontendv1.FooterStatusAgentReplFault{}
 	switch {
 	case s.link == shimclient.LinkDialing:

@@ -457,7 +457,21 @@ func scripted[Resp any, PResp interface {
 	return connect.NewResponse((*Resp)(typed)), true, nil
 }
 
+// StartSession answers as startSession does, naming the workspace's book on
+// every answer -- a start, a cold gate, any refusal -- as the real shim does
+// (shim.v1.StartSessionResponse.book).
 func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.StartSessionRequest]) (*connect.Response[shimv1.StartSessionResponse], error) {
+	resp, err := s.startSession(ctx, req)
+	if err != nil || resp == nil {
+		return resp, err
+	}
+	if book := s.book.stated(); book != "" {
+		resp.Msg.Book = &conversationv1.AgentId{Value: book}
+	}
+	return resp, nil
+}
+
+func (s *server) startSession(ctx context.Context, req *connect.Request[shimv1.StartSessionRequest]) (*connect.Response[shimv1.StartSessionResponse], error) {
 	if err := s.enter(ctx, RPCStartSession, req.Msg); err != nil {
 		return nil, err
 	}
@@ -1257,35 +1271,6 @@ func (s *server) DetachForeground(ctx context.Context, req *connect.Request[shim
 	}
 	return connect.NewResponse(&shimv1.DetachForegroundResponse{
 		Result: &shimv1.DetachForegroundResponse_Success{Success: &shimv1.DetachForegroundSuccess{}},
-	}), nil
-}
-
-func (s *server) ReadHistory(ctx context.Context, req *connect.Request[shimv1.ReadHistoryRequest]) (*connect.Response[shimv1.ReadHistoryResponse], error) {
-	if err := s.enter(ctx, RPCReadHistory, req.Msg); err != nil {
-		return nil, err
-	}
-	if resp, done, err := scripted[shimv1.ReadHistoryResponse, *shimv1.ReadHistoryResponse](s, RPCReadHistory); done {
-		return resp, err
-	}
-	if through := req.Msg.GetThrough(); through != nil {
-		return connect.NewResponse(&shimv1.ReadHistoryResponse{
-			Result: &shimv1.ReadHistoryResponse_Success{Success: &shimv1.ReadHistorySuccess{
-				Page: s.book.pageThrough(req.Msg.GetTarget().GetValue(), through.GetAtMs(), s.historyPageSize()),
-			}},
-		}), nil
-	}
-	after := req.Msg.GetAfter()
-	page, served := s.book.page(req.Msg.GetTarget().GetValue(), after, s.historyPageSize())
-	if !served {
-		return connect.NewResponse(&shimv1.ReadHistoryResponse{
-			Result: &shimv1.ReadHistoryResponse_Failure{Failure: &shimv1.ReadHistoryFailure{
-				Detail: sprintf("fakeshim: the pointer %q names no entry of the book", after.GetValue()),
-				Kind:   &shimv1.ReadHistoryFailure_StalePointer{StalePointer: &shimv1.ReadHistoryStalePointer{}},
-			}},
-		}), nil
-	}
-	return connect.NewResponse(&shimv1.ReadHistoryResponse{
-		Result: &shimv1.ReadHistoryResponse_Success{Success: &shimv1.ReadHistorySuccess{Page: page}},
 	}), nil
 }
 

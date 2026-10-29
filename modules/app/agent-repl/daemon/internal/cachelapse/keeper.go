@@ -166,8 +166,6 @@ const (
 	edgeFree
 	// edgeRestored is a parked session's restore ending.
 	edgeRestored
-	// edgeRestoreAsked is a restore asked for out of turn (RestoreParked).
-	edgeRestoreAsked
 )
 
 // edge is one queued event.
@@ -216,15 +214,6 @@ type Keeper struct {
 	// detached work), as this Keeper saw it. A beat stands a session down
 	// only once it has been free StandDownGrace (owner ruling, 2026-10-26).
 	freeSince map[ids.WorkspaceID]time.Time
-	// viewed are the parked sessions restored only because a reader asked for
-	// their history (viewed.go): each is stood down again once the user is not
-	// looking at it, unless a prompt engaged it. The instant is when its
-	// restore came up, zero while it is in line or in flight.
-	viewed map[ids.WorkspaceID]time.Time
-	// deferred are the parked sessions a reader asked for while the user was
-	// not looking at the workspace (viewed.go): restored only once it is
-	// selected.
-	deferred map[ids.WorkspaceID]bool
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -262,8 +251,6 @@ func New(deps Deps) (*Keeper, error) {
 		lapsedAt:  map[ids.WorkspaceID]time.Time{},
 		sent:      map[ids.WorkspaceID]time.Time{},
 		freeSince: map[ids.WorkspaceID]time.Time{},
-		viewed:    map[ids.WorkspaceID]time.Time{},
-		deferred:  map[ids.WorkspaceID]bool{},
 	}, nil
 }
 
@@ -290,14 +277,6 @@ func (k *Keeper) TurnClosed(ws ids.WorkspaceID) {
 	k.enqueue(edge{ws: ws, why: "a turn's close was recorded"})
 }
 
-// RestoreParked asks for a session the keep-alive cycle parked to be brought
-// back now, through the same restore slots the beats use: a reader needs its
-// history, which only a shim serves. A workspace not parked is no change. It
-// never blocks.
-func (k *Keeper) RestoreParked(ws ids.WorkspaceID) {
-	k.enqueue(edge{ws: ws, kind: edgeRestoreAsked, why: "a reader asked for the parked session's history"})
-}
-
 // VisibilityChanged is a hide or a show of WS, or the selection moving onto
 // or off it, already recorded: its cadence is reconciled. It never blocks.
 func (k *Keeper) VisibilityChanged(ws ids.WorkspaceID) {
@@ -311,11 +290,14 @@ func (k *Keeper) ClosureChanged(ws ids.WorkspaceID) {
 }
 
 // ColdGateRaised is WS's session parking at its cold gate: a hidden or closed
-// workspace takes the gate's lapse. It never blocks.
-func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID) {
-	if cold, gated := k.deps.ColdGate(ws); gated {
+// workspace takes the gate's lapse. JUDGED is a gate a shim judged just now,
+// the one raise the telemetry counts; a raise from the record, a re-raise
+// after a failed answer and a carried gate are the same gate. It never
+// blocks.
+func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID, judged bool) {
+	if cold, gated := k.deps.ColdGate(ws); gated && judged {
 		idle := k.deps.Clock.Now().Sub(time.UnixMilli(cold.GetLastRequestAtMs()))
-		k.deps.Telemetry.ObserveColdGate(coldGateOutcome(cold), idle)
+		k.deps.Telemetry.ObserveColdGate(ws, coldGateOutcome(cold), idle)
 	}
 	k.enqueue(edge{ws: ws, why: "the session parked at its cold gate"})
 }
@@ -443,15 +425,10 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 	case edgeFree:
 		if e.workEnded {
 			k.freeSince[e.ws] = k.deps.Clock.Now()
-			// WORK RAN, so the session was used, not only viewed: the cycle
-			// parks it at a beat after the grace, as any other.
-			delete(k.viewed, e.ws)
 		}
 		k.schedule(ctx, e.ws, e.why)
 	case edgeRestored:
 		k.restored(ctx, e.ws, e.err)
-	case edgeRestoreAsked:
-		k.restoreAsked(ctx, e.ws)
 	default:
 		k.reconcile(ctx, e.ws, e.why)
 	}
@@ -521,8 +498,6 @@ func (k *Keeper) reconcile(ctx context.Context, ws ids.WorkspaceID, why string) 
 		log.Error(opCadence, "could not read the workspace's visibility; its keep-alives are left as they are", dlog.Context{"cause": err.Error()})
 		return
 	}
-	k.releaseViewed(log, record)
-	k.restoreDeferred(ctx, log, record)
 	if !record.LetsCacheLapse() {
 		delete(k.deadlines, ws)
 	}
@@ -553,8 +528,6 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.lapsedAt, ws)
 	delete(k.sent, ws)
 	delete(k.freeSince, ws)
-	delete(k.viewed, ws)
-	delete(k.deferred, ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace
@@ -619,7 +592,7 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 		return false
 	}
 	if !record.LetsCacheLapse() || record.CacheLapse == nil {
-		k.deps.Telemetry.CountLapse(LapseShownFirst)
+		k.deps.Telemetry.CountLapse(ws, LapseShownFirst)
 		log.Info(opLapse, "the workspace was shown, selected or reopened before its cache lapsed; it keeps running", nil)
 		return false
 	}
@@ -631,17 +604,17 @@ func (k *Keeper) lapse(ctx context.Context, ws ids.WorkspaceID, now time.Time) b
 		return false
 	}
 	if queued {
-		k.deps.Telemetry.CountLapse(LapseMergeQueued)
+		k.deps.Telemetry.CountLapse(ws, LapseMergeQueued)
 		log.Info(opLapse, "the workspace has a merge queued, so its session and cache are kept until the merge leaves its queue", nil)
 		return false
 	}
 	if !record.CacheLapse.Lapsed(now) {
 		k.deadlines[ws] = record.CacheLapse.LapsesAt
-		k.deps.Telemetry.CountLapse(LapseMovedLater)
+		k.deps.Telemetry.CountLapse(ws, LapseMovedLater)
 		log.Debug(opLapse, "the recorded lapse moved later; it is re-armed", lapseFields(*record.CacheLapse))
 		return false
 	}
-	k.deps.Telemetry.CountLapse(LapseStoodDown)
+	k.deps.Telemetry.CountLapse(ws, LapseStoodDown)
 	log.Info(opLapse, "the workspace's cache lapsed; its session is stood down", dlog.Merge(lapseFields(*record.CacheLapse), dlog.Context{"hidden": record.InHiddenSection(), "closed": record.Closed}))
 	k.deps.StandDowns.StandDownWithheld(ws)
 	return true

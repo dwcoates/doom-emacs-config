@@ -162,10 +162,10 @@ func TestResumeColdWithPayRefusesWhenTheGatesFactsAreGone(t *testing.T) {
 	if _, ok := f.db.coldPayment(ws.ID); ok {
 		t.Fatal("a payment was recorded with no read to name")
 	}
-	record := coldPaymentRecord(t, f, "the paid gate's cold facts are gone, so the read it paid for cannot be named; the re-open is refused")
-	if record.Level != "error" {
-		t.Fatalf("record level = %q, want error", record.Level)
-	}
+	// NO GATE STANDS, so the re-open is refused before any payment is
+	// touched: a gate is raised with its cold facts in one step, so a standing
+	// gate without them is unrepresentable.
+	asRefusal(t, err, ArmNoSession)
 }
 
 func TestABringUpRefusedColdForAPaidReadPaysIt(t *testing.T) {

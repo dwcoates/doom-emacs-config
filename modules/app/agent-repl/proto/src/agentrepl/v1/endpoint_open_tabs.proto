@@ -2,8 +2,10 @@
 //
 // THE EDITOR ASKS, THE DAEMON OPENS, THE EDITOR SHOWS. Emacs never shows a
 // workspace's tab until the daemon says everything the workspace needs is
-// loaded: its session is served by agent-repl's services (daemon, shim,
-// store, sidecar) and its web page has drawn its conversation. Emacs asks for
+// loaded: its conversation is read from the store and its web page has drawn
+// it. AN OPEN NEVER WAITS ON A SHIM, AND STARTS NONE (owner ruling,
+// 2026-10-28): a prompt brings the shim up, held "after loading" until it
+// is, so opening, switching and prompting never wait on one. Emacs asks for
 // the workspaces it wants open with this call, loads each visible
 // workspace's page at the same moment (the page reports itself drawn with
 // ReportPageDrawn), and shows each tab when its `opened` frame arrives, at its
@@ -13,13 +15,15 @@
 // open workspace at once), and any later one (a workspace created, reopened,
 // unhidden, or whose repository section was expanded).
 //
-// ONLY VISIBLE WORKSPACES ARE BROUGHT UP. A workspace the user hid, or whose
+// ONLY VISIBLE WORKSPACES ARE OPENED. A workspace the user hid, or whose
 // repository section is collapsed, is answered `opened` at once with its
-// `hidden` arm and nothing is started for it; its session starts when it is
-// shown again, which the editor asks for with another OpenTabs.
+// `hidden` arm; it is opened when it is shown again, which the editor asks for
+// with another OpenTabs.
 //
 // Every step of every workspace's open is a typed frame on this stream, so the
-// editor reports progress as one minibuffer line per step.
+// editor reports progress as one minibuffer line per step. A bring-up some
+// other cause has under way (a boot's, a prompt's) is relayed as steps too,
+// and never waited for.
 syntax = "proto3";
 
 package agentrepl.v1;
@@ -46,10 +50,10 @@ message OpenTabsWorkspace {
   // InvalidArgument).
   oneof page {
     // The editor is loading the workspace's web page now: it opens once its
-    // session is served AND the page reports itself drawn (ReportPageDrawn).
+    // conversation is read AND the page reports itself drawn (ReportPageDrawn).
     OpenTabsPageLoading loading = 2;
     // The editor draws no web page for it (its frontend is not the web page,
-    // or the editor has no webview): it opens once its session is served.
+    // or the editor has no webview): it opens once its conversation is read.
     OpenTabsPageNone none = 3;
   }
 }
@@ -103,9 +107,9 @@ message OpenTabsStep {
     // The network is unreachable, so the vendor cannot start yet ("offline,
     // waiting for the network…").
     OpenTabsStepOffline offline = 10;
-    // Its session is served by agent-repl's services ("session up, waiting
-    // for its page…"). The vendor's and the network's state never gate this:
-    // a workspace whose vendor is down is served and shows its fault.
+    // A bring-up under way reached agent-repl's services serving the session
+    // ("session up, waiting for its page…"); progress only, which the open
+    // never waits for.
     OpenTabsStepServed served = 11;
     // Its web page has attached to the daemon and is loading its
     // conversation ("page connected, drawing the conversation…").
@@ -116,7 +120,8 @@ message OpenTabsStep {
     // turn prompt its rows belong to ("conversation read.").
     OpenTabsStepConversationRead conversation_read = 14;
     // A turn the daemon's own stand-down cut (a restart, a bounce) is being
-    // resumed ("resuming the turn the restart cut…").
+    // resumed ("resuming the turn the restart cut…"); progress only, which
+    // the open never waits for.
     OpenTabsStepResumingCutTurn resuming_cut_turn = 15;
   }
 }
@@ -171,7 +176,7 @@ message OpenTabsStepResumingCutTurn {}
 // One workspace is open.
 //
 // Sent ONCE per workspace of the request, as soon as that workspace is open,
-// in whatever order they open: one workspace's slow start never holds back
+// in whatever order they open: one workspace's slow read never holds back
 // another's tab. A workspace's tab is placed by the registry's tab order, so
 // the order these arrive in decides only when a tab appears, never where.
 message OpenTabsOpened {
@@ -181,17 +186,16 @@ message OpenTabsOpened {
   int64 at_ms = 2;
   // THE ARM IS HOW IT OPENED; exactly one is set.
   oneof outcome {
-    // EVERYTHING THE WORKSPACE NEEDS IS DONE (owner ruling, 2026-10-12):
-    // its session served, its conversation's newest page read whole
-    // (`conversation_read`), any turn the daemon's own stand-down cut
-    // resumed (started again, not finished), and its page drawn when one was
-    // loading. Show the tab ("<name>: ready.").
+    // EVERYTHING THE WORKSPACE NEEDS IS DONE (owner rulings, 2026-10-12 and
+    // 2026-10-28): its conversation's newest page read whole from the store
+    // (`conversation_read`) and its page drawn when one was loading. Its shim
+    // is not waited for. Show the tab ("<name>: ready.").
     OpenTabsOpenedReady ready = 3;
-    // Its service-level start failed; show the tab, which draws the fault
-    // ("<name>: session failed to start: <reason>.").
+    // It could not be opened (its conversation could not be read); show the
+    // tab, which draws the fault ("<name>: could not be opened: <reason>.").
     OpenTabsOpenedFailed failed = 4;
     // Hidden, or in a collapsed repository section, and not the workspace
-    // the user is looking at: nothing was started, and it stays off the tab
+    // the user is looking at: nothing was read, and it stays off the tab
     // bar until it is shown again.
     OpenTabsOpenedHidden hidden = 5;
     // The daemon refused to open it; the editor shows no tab and records why.
@@ -218,7 +222,7 @@ message OpenTabsOpenedReady {
   uint64 roster_revision = 2;
 }
 
-// The service-level start failed.
+// The workspace could not be opened.
 message OpenTabsOpenedFailed {
   // Why, in the daemon's words. Printed verbatim.
   string reason = 1;
@@ -238,7 +242,7 @@ message OpenTabsOpenedFailed {
 // EMPTY: the arm is the fact.
 message OpenTabsOpenedThread {}
 
-// Not visible, so nothing was started. DELIBERATELY EMPTY.
+// Not visible, so nothing was read. DELIBERATELY EMPTY.
 message OpenTabsOpenedHidden {}
 
 // The daemon refused to open the workspace.

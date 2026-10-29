@@ -8,7 +8,9 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
-import { create } from "@bufbuild/protobuf";
+import { create, equals, fromJson, type JsonValue } from "@bufbuild/protobuf";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
@@ -23,6 +25,7 @@ import {
   createReader,
   readFailure,
   toHistoryEntry,
+  toHistoryEntryAt,
   toStorePointer,
   transportFailure,
 } from "../../src/store/reader.js";
@@ -3023,63 +3026,6 @@ describe("the conversation place", () => {
     expect(session.page.entries.map(unitOf)).toEqual(["unit-late", "unit-early"]);
   });
 
-  it("forwards a through read as the store's own through arm", async () => {
-    // Arrange.
-    const requests: storev1.ReadAgentPageRequest[] = [];
-    const reader = readerOver({
-      readAgentPage: async (request) => {
-        requests.push(request);
-        return create(storev1.ReadAgentPageResponseSchema, {
-          result: {
-            case: "success",
-            value: create(storev1.ReadAgentPageSuccessSchema, {
-              boundary: { case: "floor", value: create(storev1.ReadAgentPageFloorSchema, {}) },
-            }),
-          },
-        });
-      },
-    });
-
-    // Act.
-    await reader.readPageThrough(BOOK, create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }));
-
-    // Assert.
-    const position = requests[0]?.position;
-    expect([position?.case, position?.case === "through" ? position.value.atMs : undefined]).toEqual([
-      "through",
-      2_500n,
-    ]);
-  });
-
-  it("reads a book as it stood at an instant", async () => {
-    // Arrange.
-    const { plane, clock } = await clocked("place-through");
-    for (const [at, unitValue] of [
-      [1_000, "unit-1"],
-      [2_000, "unit-2"],
-      [3_000, "unit-3"],
-    ] as const) {
-      clock.now = at;
-      plane.write([readEntry(BOOK, unitValue, `/tmp/${unitValue}`)]);
-      await plane.flush();
-    }
-
-    // Act.
-    const page = await plane.readPageThrough(BOOK, create(conversationv1.ConversationThroughSchema, { atMs: 2_000n }));
-
-    // Assert.
-    expect(page.entries.map(unitOf)).toEqual(["unit-2", "unit-1"]);
-  });
-
-  it("refuses a through read of a book the store never heard of as unknown", async () => {
-    // Arrange.
-    const { plane } = await clocked("place-through-unknown");
-
-    // Act, Assert.
-    await expect(
-      plane.readPageThrough(agent("nobody"), create(conversationv1.ConversationThroughSchema, { atMs: 2_000n })),
-    ).rejects.toMatchObject({ kind: "unknown_agent" });
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -3431,19 +3377,6 @@ describe("turn heads", () => {
     expect(page.heads.map((head) => head.entry?.turn?.value)).toEqual(["turn-b", "turn-a"]);
   });
 
-  it("carries the heads of a through page", async () => {
-    // Arrange.
-    const reader = readerOver({
-      readAgentPage: async () => readSuccess([storedLine("5", "unit-0")], [storedHead(storedPrompt("1", "turn-a"))]),
-    });
-
-    // Act.
-    const page = await reader.readPageThrough(BOOK, create(conversationv1.ConversationThroughSchema, { atMs: 2_500n }));
-
-    // Assert.
-    expect(page.heads.map((head) => head.entry?.at?.value)).toEqual(["1"]);
-  });
-
   it("refuses a page whose head does not convert, exactly as it refuses such a line", async () => {
     // Arrange: a head with a pointer but no content.
     const head = storedHead(
@@ -3514,4 +3447,30 @@ describe("turn heads", () => {
       kind: "store_unavailable",
     });
   });
+});
+
+// THE SHARED GOLDEN CASES: the store's read-only face renders pages in Go
+// (shim-store/internal/history) and this tail renders lines here, so both
+// suites render every stored line in agent-repl/testdata/history-golden and
+// must agree with the entry it names.
+describe("toHistoryEntryAt renders the shared golden cases", () => {
+  const dir = fileURLToPath(new URL("../../../../../testdata/history-golden/", import.meta.url));
+  const files = readdirSync(dir).filter((name) => name.endsWith(".json"));
+  it("finds the golden cases", () => {
+    expect(files.length).toBeGreaterThan(0);
+  });
+  for (const name of files) {
+    it(name, () => {
+      // Arrange
+      const golden = JSON.parse(readFileSync(dir + name, "utf8")) as { line: JsonValue; entry: JsonValue };
+      const line = fromJson(storev1.StoreLineAtSchema, golden.line);
+      const want = fromJson(conversationv1.HistoryEntryAtSchema, golden.entry);
+
+      // Act
+      const got = toHistoryEntryAt(line);
+
+      // Assert
+      expect(equals(conversationv1.HistoryEntryAtSchema, got, want)).toBe(true);
+    });
+  }
 });

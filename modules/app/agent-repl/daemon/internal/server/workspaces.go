@@ -430,10 +430,6 @@ func (r openProgressReporter) Stage(stage workspace.OpenStage) {
 	switch stage {
 	case workspace.OpenStageCheckingWorktree:
 		wire.Stage = &agentreplv1.WorkspaceOpenStage_CheckingWorktree{CheckingWorktree: &agentreplv1.WorkspaceOpenStageCheckingWorktree{}}
-	case workspace.OpenStageStartingSession:
-		wire.Stage = &agentreplv1.WorkspaceOpenStage_StartingSession{StartingSession: &agentreplv1.WorkspaceOpenStageStartingSession{}}
-	case workspace.OpenStageReviving:
-		wire.Stage = &agentreplv1.WorkspaceOpenStage_Reviving{Reviving: &agentreplv1.WorkspaceOpenStageReviving{}}
 	case workspace.OpenStageClearingClosed:
 		wire.Stage = &agentreplv1.WorkspaceOpenStage_ClearingClosed{ClearingClosed: &agentreplv1.WorkspaceOpenStageClearingClosed{}}
 	case workspace.OpenStageCheckingBuild:

@@ -787,49 +787,6 @@ export function detachForegroundDetached(): shimv1.DetachForegroundResponse {
 }
 
 // ---------------------------------------------------------------------------
-// ReadHistory
-// ---------------------------------------------------------------------------
-
-/** Why a page of history could not be served. */
-type ReadHistoryKind =
-  | { readonly kind: "unknownAgent" }
-  | { readonly kind: "stalePointer" }
-  | { readonly kind: "storeUnavailable" };
-
-/** The base constructor for `shim.v1.ReadHistoryFailure`. */
-export function readHistoryFailure(
-  cause: ReadHistoryKind,
-  detail: string,
-): shimv1.ReadHistoryFailure {
-  return create(shimv1.ReadHistoryFailureSchema, {
-    detail,
-    kind:
-      cause.kind === "unknownAgent"
-        ? { case: "unknownAgent", value: create(shimv1.ReadHistoryUnknownAgentSchema, {}) }
-        : cause.kind === "stalePointer"
-          ? { case: "stalePointer", value: create(shimv1.ReadHistoryStalePointerSchema, {}) }
-          : { case: "storeUnavailable", value: create(shimv1.ReadHistoryStoreUnavailableSchema, {}) },
-  });
-}
-
-/** The refusal as the whole response the handler returns. */
-export function readHistoryRefused(
-  cause: ReadHistoryKind,
-  detail: string,
-): shimv1.ReadHistoryResponse {
-  return create(shimv1.ReadHistoryResponseSchema, {
-    result: { case: "failure", value: readHistoryFailure(cause, detail) },
-  });
-}
-
-/** One page of one agent's durable past. */
-export function readHistoryPage(page: conversationv1.HistoryPage): shimv1.ReadHistoryResponse {
-  return create(shimv1.ReadHistoryResponseSchema, {
-    result: { case: "success", value: create(shimv1.ReadHistorySuccessSchema, { page }) },
-  });
-}
-
-// ---------------------------------------------------------------------------
 // GatherTitleDigest
 // ---------------------------------------------------------------------------
 

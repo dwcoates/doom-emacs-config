@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"slices"
 	"testing"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
-	"agent-repld/internal/ids"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -188,9 +186,6 @@ func TestOpenTabsAnswersAWorkspaceThatIsNotVisibleHidden(t *testing.T) {
 			if opened.GetHidden() == nil {
 				t.Fatalf("opened = %v, want hidden", opened)
 			}
-			if len(h.OpenWorld.bringUps) != 0 {
-				t.Fatal("a workspace that is not visible was brought up")
-			}
 		})
 	}
 }
@@ -209,43 +204,21 @@ func TestOpenTabsEndsWithTheErrorWhenTheFoldsCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestOpenTabsBringsUpAWorkspaceThatIsNotLive(t *testing.T) {
+func TestOpenTabsOpensAWorkspaceWithNoPageOnceRead(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ctx, cancel := context.WithTimeout(context.Background(), openBound)
-	defer cancel()
-
-	// Act
-	openTabs(t, h, ctx, noPage(ref()))
-
-	// Assert
-	select {
-	case pending := <-h.OpenWorld.bringUps:
-		if !slices.Equal(pending, []ids.WorkspaceID{testWorkspaceID}) {
-			t.Fatalf("pending = %v, want the workspace", pending)
-		}
-	case <-ctx.Done():
-		t.Fatal("the open brought nothing up")
-	}
-}
-
-func TestOpenTabsOpensALiveWorkspaceWithNoPageOnceServed(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	h.OpenWorld.setLive(testWorkspaceID)
 	ctx, cancel := context.WithTimeout(context.Background(), openBound)
 	defer cancel()
 	stream := openTabs(t, h, ctx, noPage(ref()))
 
 	// Act
-	served := nextOpenFrame(t, stream).GetStep().GetServed()
 	read := nextOpenFrame(t, stream).GetStep().GetConversationRead()
 	opened := nextOpenFrame(t, stream).GetOpened()
 	finished := nextOpenFrame(t, stream).GetFinished()
 
 	// Assert
-	if served == nil || read == nil || opened.GetReady() == nil || finished.GetReady() != 1 || finished.GetTotal() != 1 {
-		t.Fatalf("frames = served %v, conversation read %v, opened %v, finished %v", served, read, opened, finished)
+	if read == nil || opened.GetReady() == nil || finished.GetReady() != 1 || finished.GetTotal() != 1 {
+		t.Fatalf("frames = conversation read %v, opened %v, finished %v", read, opened, finished)
 	}
 	if stream.Receive() {
 		t.Fatalf("a frame followed the finish: %v", stream.Msg())
@@ -255,16 +228,12 @@ func TestOpenTabsOpensALiveWorkspaceWithNoPageOnceServed(t *testing.T) {
 func TestOpenTabsWaitsForTheWorkspacesPageToConnectAndDraw(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.OpenWorld.setLive(testWorkspaceID)
 	ctx, cancel := context.WithTimeout(context.Background(), openBound)
 	defer cancel()
 	attachPageStream(t, h, ctx, "page-1")
 	stream := openTabs(t, h, ctx, loadingPage(ref()))
-	if nextOpenFrame(t, stream).GetStep().GetServed() == nil {
-		t.Fatal("the first frame was not served")
-	}
 	if nextOpenFrame(t, stream).GetStep().GetConversationRead() == nil {
-		t.Fatal("the second frame was not the conversation read")
+		t.Fatal("the first frame was not the conversation read")
 	}
 
 	// Act: the page's footer subscription names the workspace, then it draws.
@@ -288,12 +257,10 @@ func TestOpenTabsWaitsForTheWorkspacesPageToConnectAndDraw(t *testing.T) {
 func TestATopbarSubscriptionServesItsWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.OpenWorld.setLive(testWorkspaceID)
 	ctx, cancel := context.WithTimeout(context.Background(), openBound)
 	defer cancel()
 	attachPageStream(t, h, ctx, "page-1")
 	stream := openTabs(t, h, ctx, loadingPage(ref()))
-	nextOpenFrame(t, stream) // served
 	nextOpenFrame(t, stream) // conversation read
 
 	// Act

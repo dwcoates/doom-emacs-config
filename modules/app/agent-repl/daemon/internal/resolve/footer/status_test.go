@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/ratelimittest"
 	"agent-repld/internal/resolve/turnfault"
@@ -322,6 +323,52 @@ func TestTheColdGateIsAWaitingStep(t *testing.T) {
 	}
 	if waiting.GetActivity().GetSalient().GetColdGateCost().GetText() == "" {
 		t.Fatalf("the cold gate's composed cost line is missing")
+	}
+}
+
+func TestTheColdGateDrawsOverItsStoodDownShim(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(h *harness)
+	}{
+		{name: "a shim that connected and was stood down", setup: func(h *harness) {
+			connected(h)
+			h.r.OnLink(testWS, shimclient.LinkDead)
+		}},
+		{name: "a gate raised from its record with no shim ever seen", setup: func(*harness) {}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the gate runs no shim until it is answered.
+			h := newHarness(t)
+			tt.setup(h)
+
+			// Act
+			h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "context cold — 182k tokens to re-read"}})
+
+			// Assert
+			status := h.view(t).GetStrip().GetStatus()
+			if status.GetWaiting().GetColdGate() == nil {
+				t.Fatalf("status = %+v, want the cold gate's waiting step, never a fault", status)
+			}
+		})
+	}
+}
+
+func TestAFailedAnswersFaultDrawsOverTheGateStandingAgain(t *testing.T) {
+	// Arrange: the answer's re-open failed, and its gate stands again with no
+	// shim.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, Cost: FiguredLine{Lead: "context cold — 182k tokens to re-read"}})
+
+	// Act
+	h.r.OpenFault(testWS, faultOf(t, "fault-1", health.KindColdGateReopenFailed, false))
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetAgentReplFault() == nil {
+		t.Fatalf("status = %+v, want the recorded fault drawn over the gate", h.view(t).GetStrip().GetStatus())
 	}
 }
 
@@ -1071,6 +1118,25 @@ func TestAKeepaliveCycleParkIsIdleOverADeadLink(t *testing.T) {
 	// Assert
 	if got := h.status(t); got != "idle" {
 		t.Fatalf("status = %q, want idle", got)
+	}
+}
+
+// TestAParkedSessionComingBackIsStarting pins the owner ruling of 2026-10-28:
+// every shim start shows, a keep-alive cycle's or a prompt's restore of a
+// parked session included.
+func TestAParkedSessionComingBackIsStarting(t *testing.T) {
+	// Arrange: parked between keep-alives, its link dead.
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, true)
+	h.r.OnLink(testWS, shimclient.LinkDead)
+	h.r.SetParked(testWS, wsm.ParkKeepaliveCycle)
+
+	// Act: the restore dials the new shim.
+	h.r.OnLink(testWS, shimclient.LinkDialing)
+
+	// Assert
+	if got := h.status(t); got != "starting" {
+		t.Fatalf("status = %q, want starting", got)
 	}
 }
 

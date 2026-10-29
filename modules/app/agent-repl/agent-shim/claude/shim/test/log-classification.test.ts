@@ -23,7 +23,6 @@ interface LogCall {
 
 const RECLASSIFIED_SITES: readonly ExpectedSite[] = [
   { file: "store/reader.ts", message: "the store refused to open an agent's book", level: "debug" },
-  { file: "engine/turn.ts", message: "ReadHistory refused", level: "debug" },
   { file: "engine/session.ts", message: "refused a cold resume because the caller named no remediation for its stated cost", level: "debug" },
   { file: "convert/attachments.ts", message: "no context-injection converter owns this attachment; it lands as residue", level: "debug" },
   { file: "convert/blocks.ts", message: "a tool result block's kind is not modelled; it is kept whole as unsupported", level: "debug" },

@@ -33,33 +33,35 @@ const opBringUp = "daemon.rollout.bring_up"
 // placed 0 rows, revived by a prompt at 17:57:06). Both paths now start the
 // session through the boot's own bring-up.
 
-// ONLY VISIBLE WORKSPACES RUN (owner principle, 2026-10-12): a workspace the
-// user hid, or whose repository section is collapsed, is not started here
-// either; the editor starts it with OpenTabs when it is shown. visibleOnly is
-// the takeover's one door onto the shared filter (bringup.OnlyVisible).
+// ONLY A SHIM THAT WAS UP WHEN THE LAST DAEMON STOPPED COMES BACK (owner
+// ruling, 2026-10-28), hidden or not: the session record states it at every
+// park and unpark (bringup.OnlyWasUp), and nothing else decides. A workspace
+// whose shim was parked, killed or never started is not started here; a
+// prompt brings it up.
 
-// visibleOnly keeps the pending workspaces the daemon runs. A fold that cannot
-// be read starts none of them, at ERROR: starting one the user hid breaks the
-// principle, and each still starts when the editor asks for it.
-func (c *controller) visibleOnly(ctx context.Context, pending []wsm.Workspace, fields dlog.Context) []wsm.Workspace {
-	run, withheld, err := bringup.OnlyVisible(ctx, c.deps.DB, pending)
+// bringUpFilter keeps the pending workspaces a takeover brings up: those whose
+// shim was up when the last daemon stopped. A read that fails starts none of
+// them, at ERROR: each still starts on its next prompt.
+func (c *controller) bringUpFilter(ctx context.Context, pending []wsm.Workspace, fields dlog.Context) []wsm.Workspace {
+	up, left, err := bringup.OnlyWasUp(ctx, c.deps.DB, pending)
 	if err != nil {
-		c.log.Error(opBringUp, "could not tell which session-less workspaces are visible; none of them is started",
+		c.log.Error(opBringUp, "could not tell which session-less workspaces' shims were up; none of them is started",
 			dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspaces": bringup.IDs(pending)}), err))
 		return nil
 	}
-	if len(withheld) > 0 {
-		c.log.Info(opBringUp, "hidden or collapsed workspaces this daemon serves are not started; each starts when shown",
-			dlog.Merge(fields, dlog.Context{"workspaces": bringup.IDs(withheld)}))
+	if len(left) > 0 {
+		c.log.Info(opBringUp, "workspaces whose shim was not up when the last daemon stopped are not started; a prompt brings each up",
+			dlog.Merge(fields, dlog.Context{"workspaces": bringup.IDs(left)}))
 	}
-	return run
+	return up
 }
 
-// bringUpSessionless raises the bring-up marker on each pending VISIBLE
-// workspace AT ONCE -- before the caller publishes its views, so no surface
-// draws it idle and usable -- and starts their sessions (startSessionless).
+// bringUpSessionless raises the bring-up marker on each pending workspace the
+// takeover brings up (bringUpFilter) AT ONCE -- before the caller publishes
+// its views, so no surface draws it idle and usable -- and starts their
+// sessions (startSessionless).
 func (c *controller) bringUpSessionless(pending []wsm.Workspace, fields dlog.Context) {
-	pending = c.visibleOnly(c.lifetime(context.Background()), pending, fields)
+	pending = c.bringUpFilter(c.lifetime(context.Background()), pending, fields)
 	for _, ws := range pending {
 		c.deps.BringingUp(ws.ID, true)
 	}

@@ -1,39 +1,25 @@
 // Package opentabs serves the editor's OpenTabs: the editor names the
-// workspaces it wants open, the daemon brings each visible one up and answers
-// it `opened` once it is open, and every step on the way is a typed frame
+// workspaces it wants open, the daemon answers each visible one `opened` once
+// it is open, and every step on the way is a typed frame
 // (agentrepl.v1.OpenTabsResponse; design record
 // docs/protobuf-design/open-tabs.md).
 //
-// THE BRING-UP IS THE EXISTING ONE. Every workspace an open starts goes
-// through bringup.Run and so through workspace.Fleet.Start, the one bring-up
-// every caller shares; this package adds only the account of it. The fleet
-// reports each step of EVERY bring-up (Coordinator.Step), whoever started it,
-// so an open that begins while the boot's own bring-up of a workspace is in
-// flight still knows how far that one has got.
+// AN OPEN NEVER WAITS ON A SHIM, AND STARTS NONE (owner ruling, 2026-10-28).
+// A workspace's conversation is read from the store, so it is open once its
+// newest page is read whole through the feed resolver's own loading
+// (`conversation_read`; the page's OpenFeed then serves it from memory) and,
+// when the editor loads a web page for it, an attached page of it has
+// reported itself drawn (ReportPageDrawn). Nothing about its shim -- up,
+// parked, at its cold gate, starting, or never started -- holds the answer:
+// a prompt brings a shim up, and is held "after loading" until it is. A read
+// that fails answers `failed`. `ready` and `failed` carry the workspace's
+// roster row, taken with its roster's revision once the open no longer marks
+// it `opening`. A hidden workspace is answered at once.
 //
-// OPEN MEANS SERVED, AND DRAWN WHEN A PAGE IS LOADING. A workspace is served
-// once agent-repl's OWN services serve it — the daemon, its shim answering
-// (which proves the store and the sidecar the shim stood up beside), never the
-// vendor or the network. When the editor loads a web page for it, it is open
-// only once an attached page of it has also reported itself drawn
-// (ReportPageDrawn). A service-level failure opens it too, `failed`.
-//
-// `ready` MEANS EVERYTHING THE WORKSPACE NEEDS IS DONE (owner ruling,
-// 2026-10-12): besides served (and drawn), its conversation's newest page was
-// read whole through the feed resolver's own loading (`conversation_read`;
-// the page's OpenFeed then serves it from memory), and a turn the daemon's own
-// stand-down cut was resumed and has STARTED (`resuming_cut_turn`). The resume
-// is paid by the session-up release of the bring-up the open follows (the
-// prompt queue's restartredrive), which reports every account to the
-// coordinator (Resumption); an open that brings a workspace owed a cut turn up
-// waits for that account. A workspace already serving when the open began had
-// its release already, and a bring-up ending with no session to resume in (a
-// cold gate, a vendor refusal) leaves the debt recorded for the next
-// session-up: vendor state still never gates the open. A hidden workspace is
-// answered at once and its debt is left untouched until it is shown and
-// opened. A failed read or resumption answers `failed`. `ready` and `failed`
-// carry the workspace's roster row, taken with its roster's revision once the
-// open no longer marks it `opening`.
+// A BRING-UP IN FLIGHT IS RELAYED, NEVER WAITED FOR: every step the fleet
+// reports for a workspace an open is answering (Coordinator.Step), and every
+// account of a cut turn's resumption (Coordinator.Resumption), reaches the
+// editor as a progress step.
 //
 // NO WORKSPACE WAITS ON ANOTHER. Each is answered the moment it opens; the
 // editor places tabs by the registry's order, never by the answers'.
@@ -120,8 +106,18 @@ type Step struct {
 	Text string
 }
 
-// begins reports whether the step opens a bring-up.
-func (s Step) begins() bool { return s.Kind == StepStartingSession || s.Kind == StepWaking }
+// Begins reports whether the step begins a bring-up: a shim being started or
+// adopted, or a parked session waking.
+func (s Step) Begins() bool { return s.Kind == StepStartingSession || s.Kind == StepWaking }
+
+// Ends reports whether the step ends a bring-up, however it ended.
+func (s Step) Ends() bool {
+	switch s.Kind {
+	case StepUp, StepFailed, StepColdGate, StepVendorRejected, StepVendorFailed:
+		return true
+	}
+	return false
+}
 
 // serves reports whether the step proves agent-repl's services serve the
 // workspace: everything after the shim answered, whatever the vendor did.
@@ -129,15 +125,6 @@ func (s Step) serves() bool {
 	switch s.Kind {
 	case StepServing, StepResuming, StepVendorRetrying, StepVendorRejected, StepVendorFailed,
 		StepColdGate, StepOffline, StepUp:
-		return true
-	}
-	return false
-}
-
-// ends reports whether the step ends a bring-up.
-func (s Step) ends() bool {
-	switch s.Kind {
-	case StepUp, StepFailed, StepColdGate, StepVendorRejected, StepVendorFailed:
 		return true
 	}
 	return false

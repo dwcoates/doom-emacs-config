@@ -1,8 +1,10 @@
 package workspace
 
 import (
+	"agent-repld/internal/ids"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -41,8 +43,11 @@ func TestOpenToRevertMergeOpensTheMergedWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenToRevertMerge: %v", err)
 	}
-	if len(f.fleet.started) != 1 || len(f.git.restored) != 1 {
-		t.Fatalf("started = %v, restored = %v, want the worktree restored and the session up", f.fleet.started, f.git.restored)
+	if len(f.git.restored) != 1 || !slices.Contains(f.db.reopened, ids.WorkspaceID("w1")) {
+		t.Fatalf("restored = %v, reopened = %v, want the worktree restored and the workspace reopened", f.git.restored, f.db.reopened)
+	}
+	if len(f.fleet.started) != 0 {
+		t.Fatalf("started = %v, want none: the revert's brief brings the shim up", f.fleet.started)
 	}
 }
 
@@ -239,8 +244,8 @@ func TestOpenToRevertMergeFailsLoudlyWhenTheQueueDoesNotTakeTheBrief(t *testing.
 			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRevertMerge}); !ok {
 				t.Fatalf("no ERROR record of the untaken brief; records = %+v", f.log.logger.Records())
 			}
-			if len(f.fleet.started) != 1 {
-				t.Fatalf("started = %v, want the workspace left open", f.fleet.started)
+			if !slices.Contains(f.db.reopened, ids.WorkspaceID("w1")) {
+				t.Fatalf("reopened = %v, want the workspace left open", f.db.reopened)
 			}
 		})
 	}

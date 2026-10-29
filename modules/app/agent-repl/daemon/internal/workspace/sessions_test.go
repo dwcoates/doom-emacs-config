@@ -34,6 +34,7 @@ import (
 	"agent-repld/internal/sessionlock"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/shimsocket"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
@@ -119,13 +120,6 @@ type fakeClient struct {
 	killTurnErr error
 	// startTurns records every StartTurn request; each is accepted.
 	startTurns []*shimv1.StartTurnRequest
-	// historyReads counts ReadHistory calls; history is the answer, a floor
-	// page of nothing when unset.
-	historyReads int
-	history      *shimv1.ReadHistoryResponse
-	// historyErr, when set, fails every history read with it.
-	historyErr      error
-	historyRequests []*shimv1.ReadHistoryRequest
 
 	// forkPoint and forkPointErr answer GetForkPoint (a whole point when
 	// unset), forkSession and forkSessionErr answer ForkSession (a fork named
@@ -400,6 +394,11 @@ func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimcli
 		return nil, s.spawnErr
 	}
 	s.spawns = append(s.spawns, spec)
+	// A SPAWN IS A FRESH PROCESS: the one fake client stands in for every
+	// shim this supervisor starts, so a client killed before (a gate's
+	// stand-down) is alive again in the process spawned now.
+	s.client.reaped = false
+	s.client.reapedAt = time.Time{}
 	if s.spawned == nil {
 		s.spawned = make(map[ids.WorkspaceID]int)
 	}
@@ -597,10 +596,16 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
-	// restoreAsked are the parked sessions a history read asked back.
-	restoreAsked []ids.WorkspaceID
+	// persisted are the books the shims persisted, by workspace directory;
+	// persistedErr fails every such read.
+	persisted    map[string]string
+	persistedErr error
+	// store is the store's read-only face history is read from.
+	store *fakeStoreHistory
 	// restarts records every restart observation the fleet makes.
 	restarts restarttimingtest.Recorder
+	// shimLife records every shim start and stand-down the fleet counts.
+	shimLife fakeShimLife
 	// chatPrompt and chatPromptErr answer the fleet's ChatSystemPrompt.
 	chatPrompt    string
 	chatPromptErr error
@@ -773,6 +778,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		now:          fixedNow,
 		standDown:    order,
 		db:           newFakeDB(),
+		store:        &fakeStoreHistory{},
 		accounts:     &fakeAccounts{configDir: "/config", transcript: account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/config"}},
 		client:       &fakeClient{response: startedResponse("vendor-1"), pid: 4242, standDown: order},
 		feed:         &fakeFeed{},
@@ -789,7 +795,14 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 	f.bundle = &fakeBundle{build: "installed-build"}
 
 	fleet, err := NewFleet(FleetDeps{
-		RestoreParked: func(ws ids.WorkspaceID) { f.restoreAsked = append(f.restoreAsked, ws) },
+		StoreHistory: f.store,
+		PersistedBook: func(dir string) (string, bool, error) {
+			if f.persistedErr != nil {
+				return "", false, f.persistedErr
+			}
+			book, ok := f.persisted[dir]
+			return book, ok, nil
+		},
 		NetworkChanged: func() <-chan struct{} {
 			if f.networkChanged != nil {
 				return f.networkChanged
@@ -859,6 +872,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		},
 		Now:        func() time.Time { return f.now },
 		Restarts:   &f.restarts,
+		ShimLife:   &f.shimLife,
 		AdoptBound: f.adoptBound,
 		Clock:      &fleetStepClock{now: fixedNow},
 		RetryAfter: func(d time.Duration) <-chan time.Time {
@@ -897,31 +911,32 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		deps FleetDeps
 	}{
 		{name: "no state client", deps: FleetDeps{}},
-		{name: "no instance id", deps: FleetDeps{DB: newFakeDB()}},
-		{name: "no account resolver", deps: FleetDeps{DB: newFakeDB(), Instance: fixtureInstance}},
-		{name: "no supervisor", deps: FleetDeps{DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}}},
+		{name: "no store history", deps: FleetDeps{DB: newFakeDB()}},
+		{name: "no instance id", deps: FleetDeps{DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}}},
+		{name: "no account resolver", deps: FleetDeps{DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance}},
+		{name: "no supervisor", deps: FleetDeps{DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}}},
 		{
 			name: "no socket path",
-			deps: FleetDeps{DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{}},
+			deps: FleetDeps{DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{}},
 		},
 		{
 			name: "no shim bundle",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" },
 			},
 		},
 		{
 			name: "no log surfaces",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 			},
 		},
 		{
 			name: "no lock directory",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(),
 			},
@@ -929,7 +944,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no bring-up marker",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run",
 			},
@@ -937,7 +952,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no vendor-start marker",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {},
@@ -946,7 +961,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no bring-up step sink",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
@@ -955,7 +970,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no restart recorder",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
@@ -965,7 +980,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no chat system prompt",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
@@ -986,7 +1001,7 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 		{
 			name: "no session-up hook",
 			deps: FleetDeps{
-				DB: newFakeDB(), Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
 				SocketPath: func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
 				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
 				VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
@@ -1815,11 +1830,11 @@ func TestBringUpRecordsALockHolderFailureStatingNoHowAtError(t *testing.T) {
 	}
 }
 
-// TestAGateParkedBringUpStatesTheLinkItself pins the link restatement: no
-// watcher opens on the gate-parked path, so without this the surfaces keep
-// drawing the DEAD link of the shim that died before this one — which outranks
-// the gate in the footer's status tree and hides what the user must answer.
-func TestAGateParkedBringUpStatesTheLinkItself(t *testing.T) {
+// TestAGateParkedBringUpTellsEverySurfaceItsShimIsGone pins the gate's
+// stand-down on the views: the gate runs no shim, so the footer, topbar and
+// roster are each told the link is gone, which a standing gate draws as the
+// gate rather than a fault (resolve/footer, resolve/topbar).
+func TestAGateParkedBringUpTellsEverySurfaceItsShimIsGone(t *testing.T) {
 	// Arrange
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
@@ -1831,11 +1846,9 @@ func TestAGateParkedBringUpStatesTheLinkItself(t *testing.T) {
 	}
 
 	// Assert
-	want := []sessionwatcher.LinkState{
-		shimclient.LinkConnected, shimclient.LinkConnected, shimclient.LinkConnected,
-	}
+	want := []sessionwatcher.LinkState{shimclient.LinkDead, shimclient.LinkDead, shimclient.LinkDead}
 	if len(f.links.links) != len(want) {
-		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is connected", f.links.links)
+		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the gate's shim is gone", f.links.links)
 	}
 	for i, got := range f.links.links {
 		if got != want[i] {
@@ -2331,21 +2344,31 @@ func TestResumeColdRefusesAWorkspaceWithNoLiveSession(t *testing.T) {
 	asRefusal(t, err, ArmNoSession)
 }
 
-func TestResumeColdRefusesAReapedClient(t *testing.T) {
-	// Arrange: the map entry outlives the process, and re-opening over a dead
-	// connection answers a raw transport error where the contract spells
-	// no_session.
+func TestResumeColdOfAGateWhoseShimIsGoneSpawnsTheOneItResumesThrough(t *testing.T) {
+	// Arrange: the gate runs no shim, so the answer has none to re-open
+	// through until it spawns one.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	parkedGate(t, f, ws)
-	f.client.reaped = true
+	if f.fleet.Held(ws.ID) {
+		t.Fatal("the gate's shim is still held, so this test could not tell the spawn apart")
+	}
+	spawned := len(f.supervisor.spawns)
 
 	// Act.
 	err := f.fleet.ResumeCold(context.Background(), ws.ID,
 		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
 
 	// Assert.
-	asRefusal(t, err, ArmNoSession)
+	if err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+	if len(f.supervisor.spawns) != spawned+1 {
+		t.Fatalf("spawns = %d, want one more for the answer", len(f.supervisor.spawns)-spawned)
+	}
+	if exists, serving := f.fleet.Health(ws.ID); !exists || !serving {
+		t.Fatalf("Health() = (%v, %v), want the re-opened session serving", exists, serving)
+	}
 }
 
 func TestResumeColdRefusesWhenTheShimRefusesTheRemediatedResumeAsColdAgain(t *testing.T) {
@@ -2692,7 +2715,7 @@ func TestDrainStartsEndsAnInFlightStartAndJoinsIt(t *testing.T) {
 	f.client.entered = entered
 	f.client.startHold = make(chan struct{}) // never closed: only the drain ends it.
 	settled := make(chan error, 1)
-	f.fleet.StartDetached(ws.ID, func(err error) { settled <- err })
+	f.fleet.StartDetached(ws.ID, shimlife.StartKeepalive, func(err error) { settled <- err })
 	<-entered
 
 	// Act.
@@ -2720,7 +2743,7 @@ func TestDrainStartsReportsAStartThatOutlivesItsBound(t *testing.T) {
 	f.client.entered = entered
 	// The START finishes; what outlives the drain is the SETTLEMENT, which
 	// blocks on `stuck` and never looks at a context at all.
-	f.fleet.StartDetached(ws.ID, func(error) { <-stuck })
+	f.fleet.StartDetached(ws.ID, shimlife.StartKeepalive, func(error) { <-stuck })
 	<-entered
 
 	// Act.
@@ -3047,19 +3070,19 @@ func TestStandingColdGateFollowsTheGatesLife(t *testing.T) {
 	}{
 		{"no gate raised is not standing", func(*fleetFixture, ids.WorkspaceID) {}, false},
 		{"a raised gate stands with its cold facts", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 		}, true},
 		{"a taken gate is not standing", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 			f.fleet.TakeColdGate(ws, "vendor-1")
 		}, false},
 		{"a gate stood again after a failed re-open stands", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 			f.fleet.TakeColdGate(ws, "vendor-1")
 			f.fleet.ReraiseColdGate(ws, "vendor-1")
 		}, true},
 		{"a stopped workspace's gate is gone", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 			_ = f.fleet.Stop(context.Background(), ws, true)
 		}, false},
 	}
@@ -3109,12 +3132,12 @@ func TestColdGateShownFollowsTheGatesLife(t *testing.T) {
 		want bool
 	}{
 		{"a gate stood again after a failed re-open is shown", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 			f.fleet.TakeColdGate(ws, "vendor-1")
 			f.fleet.ReraiseColdGate(ws, "vendor-1")
 		}, true},
 		{"a stopped workspace's gate is gone", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 			_ = f.fleet.Stop(context.Background(), ws, true)
 		}, false},
 	}
@@ -3142,18 +3165,18 @@ func TestEveryEdgeOfTheShownGateRepublishesTheHostView(t *testing.T) {
 		act     func(f *fleetFixture, ws ids.WorkspaceID)
 	}{
 		{"answering the gate", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 		}, func(f *fleetFixture, ws ids.WorkspaceID) {
 			f.fleet.TakeColdGate(ws, "vendor-1")
 		}},
 		{"standing it again", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 			f.fleet.TakeColdGate(ws, "vendor-1")
 		}, func(f *fleetFixture, ws ids.WorkspaceID) {
 			f.fleet.ReraiseColdGate(ws, "vendor-1")
 		}},
 		{"stopping a gated workspace with no session", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 		}, func(f *fleetFixture, ws ids.WorkspaceID) {
 			_ = f.fleet.Stop(context.Background(), ws, true)
 		}},
@@ -3203,7 +3226,7 @@ func TestDetachedFleetWorkSharesOneDrain(t *testing.T) {
 			f.fleet.remember(ws, &live{client: f.client})
 			// A re-open answers a RAISED gate: its cold facts name the read
 			// the pay records (recordColdAnswer).
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 			f.fleet.ResumeColdDetached(ws, ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()},
 				func(_ context.Context, err error) { settled <- err })
 		}},
@@ -3240,7 +3263,7 @@ func TestATakenColdGateRefusesNoPromptButIsCarried(t *testing.T) {
 	// sent after it was refused by the answered gate's name.
 	f := newFleetFixture(t)
 	ws := f.workspace("ws-answering")
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 	f.fleet.TakeColdGate(ws.ID, "vendor-1")
 
 	// Act.
@@ -3270,7 +3293,7 @@ func TestEndColdGateRetiresOnlyTheTakenGateItNames(t *testing.T) {
 			// Arrange.
 			f := newFleetFixture(t)
 			ws := f.workspace("ws-end")
-			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 			if tt.take {
 				f.fleet.TakeColdGate(ws.ID, "vendor-1")
 			}
@@ -3673,10 +3696,10 @@ func TestARaisedColdGateTellsTheQueueTheSessionWentCold(t *testing.T) {
 	f := newFleetFixture(t)
 	ws := f.workspace("ws-cold-queued")
 	var told []ids.WorkspaceID
-	f.fleet.deps.ColdGateRaised = func(w ids.WorkspaceID) { told = append(told, w) }
+	f.fleet.deps.ColdGateRaised = func(w ids.WorkspaceID, _ bool) { told = append(told, w) }
 
 	// Act.
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 
 	// Assert.
 	if len(told) != 1 || told[0] != ws.ID {
@@ -3706,7 +3729,7 @@ func TestAGateRaisedOverHeldPromptsOffersCompactAndResumeAtOnce(t *testing.T) {
 	f.fleet.SetColdGateHeld(ws.ID, 2)
 
 	// Act.
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 
 	// Assert.
 	if got := lastGateStanding(t, f).GetCompactAndResume().GetHeldPrompts(); got != 2 {
@@ -3719,7 +3742,7 @@ func TestTheLastHeldPromptLeavingRepublishesTheGateWithoutCompactAndResume(t *te
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	f.fleet.SetColdGateHeld(ws.ID, 1)
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 
 	// Act.
 	f.fleet.SetColdGateHeld(ws.ID, 0)
@@ -3825,7 +3848,7 @@ func TestARaisedGateOffersHaikuFirstThenSonnetAsTheSummarizer(t *testing.T) {
 			ws := f.workspace("w1")
 
 			// Act.
-			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config")
+			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
 
 			// Assert.
 			want := []string{headless.ModelHaiku, headless.ModelSonnet}
@@ -3966,5 +3989,67 @@ func TestEveryBringUpTakesTheRecordThroughWithRecord(t *testing.T) {
 	// Assert.
 	if len(found) > 0 {
 		t.Fatalf("these files copy the record onto a source by hand instead of withRecord: %v", found)
+	}
+}
+
+// withBook is ANSWER naming BOOK as the workspace's book.
+func withBook(answer *shimv1.StartSessionResponse, book string) *shimv1.StartSessionResponse {
+	answer.Book = &conversationv1.AgentId{Value: book}
+	return answer
+}
+
+func TestStartRecordsTheBookTheShimNamed(t *testing.T) {
+	tests := []struct {
+		name     string
+		earlier  string
+		response *shimv1.StartSessionResponse
+		want     string
+	}{
+		{name: "a started session's book", response: withBook(startedResponse("vendor-1"), "book-1"), want: "book-1"},
+		{name: "a cold refusal's book", response: withBook(coldResponse(), "book-1"), want: "book-1"},
+		{name: "a later book replaces an earlier one", earlier: "book-0", response: withBook(startedResponse("vendor-1"), "book-1"), want: "book-1"},
+		{name: "an answer naming no book leaves the earlier one", earlier: "book-0", response: startedResponse("vendor-1"), want: "book-0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+			if tt.earlier != "" {
+				f.db.books[ws.ID] = tt.earlier
+			}
+			f.client.response = tt.response
+
+			// Act
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert
+			if got := f.db.books[ws.ID]; got != tt.want {
+				t.Fatalf("recorded book = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStartGoesOnWhenTheBookCannotBeRecorded(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.db.setBookErr = errFake
+	f.client.response = withBook(startedResponse("vendor-1"), "book-1")
+
+	// Act
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Message: "could not record the workspace's book; its history is read through its shim until a start records it"}); !ok {
+		t.Fatalf("records = %+v, want the failed record at ERROR", f.log.logger.Records())
 	}
 }

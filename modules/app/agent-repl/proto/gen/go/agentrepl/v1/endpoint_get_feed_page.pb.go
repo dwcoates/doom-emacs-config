@@ -13,7 +13,7 @@
 // A PAGE IS THE STORE'S PAGE (50 entries, the one size for the whole stack),
 // drawn as however many rows those entries make. The daemon holds only the
 // pages some reader asked for: a `next` past what it holds is fetched on the
-// spot (daemon → shim ReadHistory → store), never preloaded. A row whose
+// spot (daemon → the store's read-only face, storeread.v1), never preloaded. A row whose
 // starting entry lies on a page not yet loaded is not drawn until that page
 // is.
 

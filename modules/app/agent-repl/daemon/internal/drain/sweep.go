@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -265,6 +266,8 @@ type standDownReason struct {
 	// park is the park the stand-down leaves: the terminal it records and
 	// what the session-scoped views draw (wsm.Park). ParkNone is no reason's.
 	park wsm.Park
+	// life is the reason the shim lifecycle series counts it under.
+	life shimlife.StandDownReason
 }
 
 // terminal is the session terminal a stand-down for WHY records: the one
@@ -287,6 +290,7 @@ func (c *controller) idleReason() standDownReason {
 		detail: fmt.Sprintf("idle past the %s cutoff; the transcript was left as it stood", c.deps.IdleCutoff),
 		done:   "hibernated an idle session",
 		park:   wsm.ParkHibernated,
+		life:   shimlife.StandDownHibernate,
 	}
 }
 
@@ -368,7 +372,7 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		return hibernateFailed
 	}
 
-	standDown, cancelStandDown := context.WithTimeout(ctx, c.deps.StandBound)
+	standDown, cancelStandDown := context.WithTimeout(shimlife.WithStandDown(ctx, why.life), c.deps.StandBound)
 	err = c.deps.Stand.KillSession(standDown, ws, false)
 	cancelStandDown()
 	if err != nil {

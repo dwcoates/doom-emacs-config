@@ -588,17 +588,17 @@ func TestBringUpDeathLeavesTheRosterRowStartFailed(t *testing.T) {
 	f := newRegistered(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills, the shim death the test drives.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.exit", "daemon.shimclient.spawn",
-		"daemon.workspace.bring_up", "daemon.workspace.open")
+		"daemon.workspace.bring_up", "daemon.workspace.restart")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ExitOn: harness.ExitOnStartup, ExitCode: 7, Stderr: "boom: fake bring-up death"})
 	roster := f.d.WatchRoster()
 
 	// Act
-	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+	resp, err := f.startRaw()
 	if err != nil {
-		t.Fatalf("OpenWorkspace onto a dying shim = transport error %v, want the spawn_failed arm", err)
+		t.Fatalf("a start onto a dying shim = transport error %v, want the relaunch_failed arm", err)
 	}
-	if resp.Msg.GetError().GetSpawnFailed() == nil {
-		t.Fatalf("OpenWorkspace onto a dying shim = %v, want OpenWorkspaceError.spawn_failed", resp.Msg)
+	if resp.GetError().GetRelaunchFailed() == nil {
+		t.Fatalf("a start onto a dying shim = %v, want RestartWorkspaceError.relaunch_failed", resp)
 	}
 
 	// Assert

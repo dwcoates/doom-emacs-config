@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	"agent-repld/internal/account"
-	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/wsm"
@@ -296,7 +295,6 @@ func (v *verbs) admit(ctx context.Context, log dlog.Logger, record wsm.Workspace
 		}
 	}
 
-	v.reviveRecordedConversation(ctx, log, record, created)
 	return nil
 }
 
@@ -437,110 +435,6 @@ const terminalDeleted = "deleted"
 // reviveRecordedConversation brings a KNOWN workspace's recorded conversation
 // back up when Emacs announces it again.
 //
-// A RELAUNCHED DAEMON MUST NEVER LOSE A CONVERSATION. Emacs re-announces every
-// workspace it holds the moment the link comes up, and after a daemon restart
-// that announcement is the ONLY edge a workspace whose panel is ALREADY
-// mounted ever gets: the mount happened against the daemon that died, so no
-// OpenWorkspace follows it, no session comes up, no watcher opens, and the
-// feed serves zero rows for a conversation the store still holds whole.
-//
-// NOR A WORKSPACE THE DAEMON WITHHOLDS (owner ruling, 2026-10-27): a hidden
-// one, one in a collapsed section, or a merge workspace whose merge left every
-// queue starts when it is shown, exactly as the rollout's bring-up withholds
-// it (bringup.OnlyVisible), so a deploy starts no shim that was down before
-// it.
-//
-// SPAWN ON MOUNT still stands. What is revived here is not "every registered
-// workspace" but a workspace whose DURABLE RECORD NAMES A CONVERSATION: a
-// first registration (`created`), a closed workspace, and a workspace that
-// never had a vendor session mint nothing and spawn nothing. The revival runs
-// through Sessions.Start, which is the one transcript-aware classifier, so the
-// conversation RESUMES rather than starting fresh — and the resumed session's
-// opening history page is what puts the store's own rows back in the feed and
-// reconciles the footer to the terminal the last turn recorded.
-//
-// A failed revival is REPORTED, never absorbed and never fatal to the
-// announcement: the roster row is a durable fact that must land regardless,
-// and the workspace's next mount takes the bring-up again.
-//
-// AND IT IS NOT PART OF THE ANSWER. The start runs on its OWN goroutine
-// through Sessions.StartDetached, because Sessions.Start takes the workspace's
-// start gate and can wait behind a start that is already in flight -- the
-// boot's own bring-up, on a relaunched daemon, for exactly the workspaces
-// Emacs is re-announcing. Held inline, that wait was the register's: realtest
-// run 2026-09-13T16:20:34 timed RegisterWorkspace out at Emacs's 10s bound for
-// all three open workspaces across three daemon generations, each time for a
-// roster row the daemon had already written. Everything this function decides
-// before the start -- the terminals, the liveness read, the session record --
-// stays on the answer's goroutine, so a workspace that is NOT revived is
-// settled before the register returns and only the start itself is detached.
-func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger, record wsm.Workspace, created bool) {
-	if created || record.Closed {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "created || record.Closed"})
-		return
-	}
-	if v.deps.Sessions.Live(record.ID) {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "v.deps.Sessions.Live(record.ID)"})
-		return
-	}
-	run, _, err := bringup.OnlyVisible(ctx, v.deps.DB, []wsm.Workspace{record})
-	if err != nil {
-		log.Error(opRegister, "could not read whether the announced workspace is withheld; its conversation is not revived", dlog.Context{
-			"workspace": string(record.ID), "cause": err.Error(),
-		})
-		return
-	}
-	if len(run) == 0 {
-		log.Debug(opRegister, "the announced workspace is withheld; its conversation is revived when it is shown", dlog.Context{
-			"workspace": string(record.ID),
-		})
-		return
-	}
-	recorded, err := readRecordedSession(ctx, v.deps.DB, record.ID)
-	if err != nil {
-		log.Error(opRegister, "could not read the announced workspace's session record", dlog.Context{
-			"workspace": string(record.ID), "cause": err.Error(),
-		})
-		return
-	}
-	if !recorded.hasConversation() {
-		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "!recorded.hasConversation()"})
-		return
-	}
-	session := recorded.session
-	if session.Terminal != nil && (session.Terminal.Kind == terminalDeleted || session.Parked()) {
-		log.Debug(opRegister, "the announced workspace's session is not revived by an announcement", dlog.Context{
-			"workspace": string(record.ID), "terminal": session.Terminal.Kind,
-		})
-		return
-	}
-	log.Info(opRegister, "the announcement revives the workspace's recorded conversation", dlog.Context{
-		"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID,
-	})
-	v.deps.Sessions.StartDetached(record.ID, func(err error) {
-		if err == nil {
-			log.Debug(opRegister, "the announced workspace's recorded conversation is back up", dlog.Context{
-				"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID,
-			})
-			return
-		}
-		// A CANCELLED BRING-UP IS THE DAEMON LEAVING, not a session that
-		// failed to come up, and a daemon standing down is the same answer
-		// reached from the other side (the bring-up refused before it
-		// spawned). Nothing is left to serve the revived conversation; the
-		// next boot, or the successor, revives it from the same record.
-		if why, ended := startEndedByDaemon(err); ended {
-			log.Info(opRegister, "the announced workspace's revival "+why, dlog.Context{
-				"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID, "cause": err.Error(),
-			})
-			return
-		}
-		log.Error(opRegister, "the announced workspace's recorded conversation did not come back up", dlog.Context{
-			"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID, "cause": err.Error(),
-		})
-	})
-}
-
 // bindResolvers binds one workspace's directory on every resolver that needs
 // telling, and its pull request target on the feed (bindPullTarget), before
 // anything is drawn for it. A failure is the caller's, never absorbed: a

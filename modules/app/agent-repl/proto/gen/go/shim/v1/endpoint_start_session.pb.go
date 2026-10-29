@@ -603,7 +603,19 @@ type StartSessionResponse struct {
 	//
 	//	*StartSessionResponse_Success
 	//	*StartSessionResponse_Failure
-	Result        isStartSessionResponse_Result `protobuf_oneof:"result"`
+	Result isStartSessionResponse_Result `protobuf_oneof:"result"`
+	// THE WORKSPACE'S BOOK: the main agent its conversation is stored under in
+	// the store, stated on EVERY answer, a success or any failure (a cold gate,
+	// a vendor that would not start), because it is a fact of the workspace and
+	// not of the outcome. It is the original vendor session's identity, which a
+	// rotation (a /clear) or a rebind's adoption leaves as the book every turn
+	// is filed under.
+	//
+	// The daemon records it and reads the workspace's history from the store
+	// with it (storeread.v1.ReadHistoryPage, `newest.stated`), so showing a
+	// conversation never needs a shim up. UNSET when the workspace has no book:
+	// a fresh start whose vendor session never came up.
+	Book          *v1.AgentId `protobuf:"bytes,3,opt,name=book,proto3,oneof" json:"book,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -659,6 +671,13 @@ func (x *StartSessionResponse) GetFailure() *StartSessionFailure {
 		if x, ok := x.Result.(*StartSessionResponse_Failure); ok {
 			return x.Failure
 		}
+	}
+	return nil
+}
+
+func (x *StartSessionResponse) GetBook() *v1.AgentId {
+	if x != nil {
+		return x.Book
 	}
 	return nil
 }
@@ -1374,7 +1393,7 @@ var File_shim_v1_endpoint_start_session_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\n" +
-	"$shim/v1/endpoint_start_session.proto\x12\ashim.v1\x1a\x19conversation/v1/api.proto\x1a conversation/v1/permission.proto\x1a\x1dconversation/v1/session.proto\x1a\x1aconversation/v1/turn.proto\"\xfa\x01\n" +
+	"$shim/v1/endpoint_start_session.proto\x12\ashim.v1\x1a$conversation/v1/agent_activity.proto\x1a\x19conversation/v1/api.proto\x1a conversation/v1/permission.proto\x1a\x1dconversation/v1/session.proto\x1a\x1aconversation/v1/turn.proto\"\xfa\x01\n" +
 	"\x13StartSessionRequest\x122\n" +
 	"\x05fresh\x18\x01 \x01(\v2\x1a.shim.v1.StartSessionFreshH\x00R\x05fresh\x125\n" +
 	"\x06resume\x18\x02 \x01(\v2\x1b.shim.v1.StartSessionResumeH\x00R\x06resume\x12%\n" +
@@ -1403,11 +1422,13 @@ const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\x11_cold_remediationB\t\n" +
 	"\a_rebindB\b\n" +
 	"\x06_model\"\x14\n" +
-	"\x12StartSessionRebind\"\x94\x01\n" +
+	"\x12StartSessionRebind\"\xd0\x01\n" +
 	"\x14StartSessionResponse\x128\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1c.shim.v1.StartSessionSuccessH\x00R\asuccess\x128\n" +
-	"\afailure\x18\x02 \x01(\v2\x1c.shim.v1.StartSessionFailureH\x00R\afailureB\b\n" +
-	"\x06result\"P\n" +
+	"\afailure\x18\x02 \x01(\v2\x1c.shim.v1.StartSessionFailureH\x00R\afailure\x121\n" +
+	"\x04book\x18\x03 \x01(\v2\x18.conversation.v1.AgentIdH\x01R\x04book\x88\x01\x01B\b\n" +
+	"\x06resultB\a\n" +
+	"\x05_book\"P\n" +
 	"\x13StartSessionSuccess\x129\n" +
 	"\asession\x18\x01 \x01(\v2\x1f.conversation.v1.SessionStartedR\asession\"\xa3\x04\n" +
 	"\x13StartSessionFailure\x122\n" +
@@ -1474,9 +1495,10 @@ var file_shim_v1_endpoint_start_session_proto_goTypes = []any{
 	(*v1.AgentPermissionMode)(nil),            // 21: conversation.v1.AgentPermissionMode
 	(*v1.SessionColdRemediation)(nil),         // 22: conversation.v1.SessionColdRemediation
 	(*v1.TurnId)(nil),                         // 23: conversation.v1.TurnId
-	(*v1.SessionStarted)(nil),                 // 24: conversation.v1.SessionStarted
-	(*v1.SessionCold)(nil),                    // 25: conversation.v1.SessionCold
-	(*v1.LockHolderFailure)(nil),              // 26: conversation.v1.LockHolderFailure
+	(*v1.AgentId)(nil),                        // 24: conversation.v1.AgentId
+	(*v1.SessionStarted)(nil),                 // 25: conversation.v1.SessionStarted
+	(*v1.SessionCold)(nil),                    // 26: conversation.v1.SessionCold
+	(*v1.LockHolderFailure)(nil),              // 27: conversation.v1.LockHolderFailure
 }
 var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	5,  // 0: shim.v1.StartSessionRequest.fresh:type_name -> shim.v1.StartSessionFresh
@@ -1493,23 +1515,24 @@ var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	20, // 11: shim.v1.StartSessionResume.model:type_name -> conversation.v1.AgentModel
 	9,  // 12: shim.v1.StartSessionResponse.success:type_name -> shim.v1.StartSessionSuccess
 	10, // 13: shim.v1.StartSessionResponse.failure:type_name -> shim.v1.StartSessionFailure
-	24, // 14: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
-	25, // 15: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
-	11, // 16: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
-	16, // 17: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
-	17, // 18: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
-	18, // 19: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
-	19, // 20: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
-	12, // 21: shim.v1.StartSessionVendorStartFailed.retryable:type_name -> shim.v1.StartSessionVendorStartRetryable
-	15, // 22: shim.v1.StartSessionVendorStartFailed.rejected:type_name -> shim.v1.StartSessionVendorStartRejected
-	13, // 23: shim.v1.StartSessionVendorStartRetryable.network:type_name -> shim.v1.StartSessionVendorStartNetwork
-	14, // 24: shim.v1.StartSessionVendorStartRetryable.vendor:type_name -> shim.v1.StartSessionVendorStartVendor
-	26, // 25: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
-	26, // [26:26] is the sub-list for method output_type
-	26, // [26:26] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	24, // 14: shim.v1.StartSessionResponse.book:type_name -> conversation.v1.AgentId
+	25, // 15: shim.v1.StartSessionSuccess.session:type_name -> conversation.v1.SessionStarted
+	26, // 16: shim.v1.StartSessionFailure.cold:type_name -> conversation.v1.SessionCold
+	11, // 17: shim.v1.StartSessionFailure.vendor_start_failed:type_name -> shim.v1.StartSessionVendorStartFailed
+	16, // 18: shim.v1.StartSessionFailure.unknown_session:type_name -> shim.v1.StartSessionUnknownSession
+	17, // 19: shim.v1.StartSessionFailure.already_started:type_name -> shim.v1.StartSessionAlreadyStarted
+	18, // 20: shim.v1.StartSessionFailure.conversation_owned:type_name -> shim.v1.StartSessionConversationOwned
+	19, // 21: shim.v1.StartSessionFailure.lock_holder_unavailable:type_name -> shim.v1.StartSessionLockHolderUnavailable
+	12, // 22: shim.v1.StartSessionVendorStartFailed.retryable:type_name -> shim.v1.StartSessionVendorStartRetryable
+	15, // 23: shim.v1.StartSessionVendorStartFailed.rejected:type_name -> shim.v1.StartSessionVendorStartRejected
+	13, // 24: shim.v1.StartSessionVendorStartRetryable.network:type_name -> shim.v1.StartSessionVendorStartNetwork
+	14, // 25: shim.v1.StartSessionVendorStartRetryable.vendor:type_name -> shim.v1.StartSessionVendorStartVendor
+	27, // 26: shim.v1.StartSessionLockHolderUnavailable.failure:type_name -> conversation.v1.LockHolderFailure
+	27, // [27:27] is the sub-list for method output_type
+	27, // [27:27] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_start_session_proto_init() }

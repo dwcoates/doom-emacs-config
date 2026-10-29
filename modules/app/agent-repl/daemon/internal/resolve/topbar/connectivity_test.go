@@ -10,7 +10,7 @@ import (
 
 func TestAnUnobservedLinkIsNoSession(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(false, shimclient.LinkConnected, true, wsm.ParkNone)
+	got := connectivityKey(false, shimclient.LinkConnected, true, wsm.ParkNone, false)
 
 	// Assert
 	if got != linkNoSession {
@@ -20,7 +20,7 @@ func TestAnUnobservedLinkIsNoSession(t *testing.T) {
 
 func TestADialingLinkIsConnecting(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkDialing, true, wsm.ParkNone)
+	got := connectivityKey(true, shimclient.LinkDialing, true, wsm.ParkNone, false)
 
 	// Assert
 	if got != linkConnecting {
@@ -30,7 +30,7 @@ func TestADialingLinkIsConnecting(t *testing.T) {
 
 func TestAServingLinkIsConnected(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkConnected, true, wsm.ParkNone)
+	got := connectivityKey(true, shimclient.LinkConnected, true, wsm.ParkNone, false)
 
 	// Assert
 	if got != linkConnected {
@@ -40,7 +40,7 @@ func TestAServingLinkIsConnected(t *testing.T) {
 
 func TestARedialingLinkIsSevered(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkRedialing, true, wsm.ParkNone)
+	got := connectivityKey(true, shimclient.LinkRedialing, true, wsm.ParkNone, false)
 
 	// Assert
 	if got != linkSevered {
@@ -50,7 +50,7 @@ func TestARedialingLinkIsSevered(t *testing.T) {
 
 func TestADeadLinkIsDead(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkDead, true, wsm.ParkNone)
+	got := connectivityKey(true, shimclient.LinkDead, true, wsm.ParkNone, false)
 
 	// Assert
 	if got != linkDead {
@@ -60,7 +60,7 @@ func TestADeadLinkIsDead(t *testing.T) {
 
 func TestAServingLinkWithAPeerHopDownIsSevered(t *testing.T) {
 	// Arrange, Act: the shim hop serves but a client hop does not.
-	got := connectivityKey(true, shimclient.LinkConnected, false, wsm.ParkNone)
+	got := connectivityKey(true, shimclient.LinkConnected, false, wsm.ParkNone, false)
 
 	// Assert
 	if got != linkSevered {
@@ -71,7 +71,7 @@ func TestAServingLinkWithAPeerHopDownIsSevered(t *testing.T) {
 func TestADialingLinkWithAPeerHopDownIsStillConnecting(t *testing.T) {
 	// Arrange, Act: the shim hop already says not-connected, and the peer hop
 	// must not overwrite the more specific bring-up state.
-	got := connectivityKey(true, shimclient.LinkDialing, false, wsm.ParkNone)
+	got := connectivityKey(true, shimclient.LinkDialing, false, wsm.ParkNone, false)
 
 	// Assert
 	if got != linkConnecting {
@@ -81,7 +81,7 @@ func TestADialingLinkWithAPeerHopDownIsStillConnecting(t *testing.T) {
 
 func TestADeadLinkWithAPeerHopDownIsStillDead(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkDead, false, wsm.ParkNone)
+	got := connectivityKey(true, shimclient.LinkDead, false, wsm.ParkNone, false)
 
 	// Assert
 	if got != linkDead {
@@ -91,7 +91,7 @@ func TestADeadLinkWithAPeerHopDownIsStillDead(t *testing.T) {
 
 func TestAnUnobservedLinkWithAPeerHopDownIsStillNoSession(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(false, shimclient.LinkConnected, false, wsm.ParkNone)
+	got := connectivityKey(false, shimclient.LinkConnected, false, wsm.ParkNone, false)
 
 	// Assert
 	if got != linkNoSession {
@@ -259,7 +259,7 @@ func TestTheLastPeerHopComingUpDrawsTheServingTone(t *testing.T) {
 
 func TestAParkedDeadLinkIsNoSession(t *testing.T) {
 	// Arrange, Act: the idle sweep's deliberate stand-down.
-	got := connectivityKey(true, shimclient.LinkDead, true, wsm.ParkHibernated)
+	got := connectivityKey(true, shimclient.LinkDead, true, wsm.ParkHibernated, false)
 
 	// Assert: `dead` hollows the indicator with "the session's process is
 	// gone", which reports a fault for a route the daemon put down itself.
@@ -300,12 +300,32 @@ func TestConnectivityKeyOfADeadLinkUnderAPark(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := connectivityKey(true, shimclient.LinkDead, tt.peers, tt.park)
+			got := connectivityKey(true, shimclient.LinkDead, tt.peers, tt.park, false)
 
 			// Assert
 			if got != tt.want {
 				t.Fatalf("key = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestADeadLinkUnderAStandingColdGateIsNoSession(t *testing.T) {
+	// Arrange, Act: the gate runs no shim until it is answered.
+	got := connectivityKey(true, shimclient.LinkDead, true, wsm.ParkNone, true)
+
+	// Assert
+	if got != linkNoSession {
+		t.Fatalf("key = %q, want no_session: a gate's route is down on purpose", got)
+	}
+}
+
+func TestAServingLinkUnderAStandingColdGateIsConnected(t *testing.T) {
+	// Arrange, Act: a gate whose shim is still up draws its live route.
+	got := connectivityKey(true, shimclient.LinkConnected, true, wsm.ParkNone, true)
+
+	// Assert
+	if got != linkConnected {
+		t.Fatalf("key = %q, want connected", got)
 	}
 }

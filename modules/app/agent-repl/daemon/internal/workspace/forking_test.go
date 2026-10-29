@@ -308,30 +308,22 @@ func TestABringUpFailsWhenThePendingForkCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestFleetReadInheritedReadsTheBookThroughTheBoundAndTellsNoView(t *testing.T) {
+func TestFleetReadInheritedReadsTheBookFromTheStoreAndTellsNoView(t *testing.T) {
 	cases := []struct {
 		name    string
 		after   *conversationv1.HistoryPointer
 		through int64
-		check   func(t *testing.T, req *shimv1.ReadHistoryRequest)
+		want    string
 	}{
-		{name: "the first page of a generation reads through its bound", through: 42, check: func(t *testing.T, req *shimv1.ReadHistoryRequest) {
-			if req.GetThrough().GetAtMs() != 42 {
-				t.Fatalf("position = %v, want through 42", req.GetPosition())
-			}
-		}},
-		{name: "a later page reads after the served pointer", after: &conversationv1.HistoryPointer{Value: "p-3"}, check: func(t *testing.T, req *shimv1.ReadHistoryRequest) {
-			if req.GetAfter().GetValue() != "p-3" {
-				t.Fatalf("position = %v, want after p-3", req.GetPosition())
-			}
-		}},
+		{name: "the first page of a generation reads through its bound", through: 42, want: "through book-parent 42"},
+		{name: "a later page reads after the served pointer", after: &conversationv1.HistoryPointer{Value: "p-3"}, want: "before book-parent p-3"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			f := newFleetFixture(t)
 			ws := parkAtColdGate(t, f)
-			f.client.history = promptPageResponse("book-parent")
+			f.store.page = &conversationv1.HistoryPage{Boundary: &conversationv1.HistoryPage_Floor{Floor: &conversationv1.HistoryFloor{}}}
 
 			// Act
 			_, err := f.fleet.ReadInherited(context.Background(), ws, &conversationv1.AgentId{Value: "book-parent"}, tc.after, tc.through)
@@ -340,11 +332,9 @@ func TestFleetReadInheritedReadsTheBookThroughTheBoundAndTellsNoView(t *testing.
 			if err != nil {
 				t.Fatalf("ReadInherited: %v", err)
 			}
-			req := f.client.historyRequests[len(f.client.historyRequests)-1]
-			if req.GetTarget().GetValue() != "book-parent" {
-				t.Fatalf("target = %v, want the parent's book", req.GetTarget())
+			if len(f.store.asked) != 1 || f.store.asked[0] != tc.want {
+				t.Fatalf("store asked %v, want %q", f.store.asked, tc.want)
 			}
-			tc.check(t, req)
 			if len(f.feed.mainAgents) != 0 {
 				t.Fatalf("feed main agents = %v, want an inherited page to name none", f.feed.mainAgents)
 			}

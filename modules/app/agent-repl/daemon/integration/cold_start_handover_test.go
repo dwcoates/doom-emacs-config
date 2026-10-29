@@ -36,6 +36,10 @@ func TestAColdStartedDaemonHandsOverTheSessionsItBroughtUp(t *testing.T) {
 		// coldWarnings are the records the cold daemon's boot states BY
 		// DESIGN on this route.
 		coldWarnings []string
+		// spawns is the route on which the boot's bring-up spawns the session
+		// after the daemon serves, so the test waits for it; an adoption is
+		// finished before the daemon serves.
+		spawns bool
 	}{
 		{
 			name: "the boot bring-up spawns the session",
@@ -50,6 +54,7 @@ func TestAColdStartedDaemonHandsOverTheSessionsItBroughtUp(t *testing.T) {
 				}
 				f.d.AwaitExit()
 			},
+			spawns: true,
 		},
 		{
 			name: "the boot reconciliation adopts the surviving shim",
@@ -77,11 +82,13 @@ func TestAColdStartedDaemonHandsOverTheSessionsItBroughtUp(t *testing.T) {
 			if len(tt.coldWarnings) > 0 {
 				cold.ExpectWarnings(tt.coldWarnings...)
 			}
-			// OpenWorkspace is the barrier: it takes the workspace's start gate
-			// behind the boot's own bring-up and answers once the session is
-			// live. It claims nothing itself -- only a registration did.
-			if resp, err := cold.Client().OpenWorkspace(cold.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil || resp.Msg.GetSuccess() == nil {
-				t.Fatalf("OpenWorkspace on the cold daemon = (%v, %v), want the session live", resp, err)
+			// THE BOOT'S OWN BRING-UP IS THE BARRIER: its session-up record,
+			// by the cold daemon. An open starts and waits on nothing (owner
+			// ruling, 2026-10-28), so it can no longer stand in.
+			if tt.spawns {
+				cold.AwaitWorkspaceLogRecord(f.repo.Dir, "the cold daemon's session up", func(r harness.LogRecord) bool {
+					return r.PID == cold.PID() && r.Operation == "daemon.workspace.bring_up" && r.Message == "the session is up"
+				})
 			}
 			shim := cold.Shim(f.ws)
 			if got := shim.Count(harness.RPCStartSession); got != startSessions {

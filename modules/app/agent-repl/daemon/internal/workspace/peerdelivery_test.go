@@ -172,7 +172,7 @@ func TestFleetResolvePeerDeliveryWithNoShimHasNoSource(t *testing.T) {
 func TestThroughShimAnswersWhatTheReadAnswered(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 
 	// Act.
 	got, err := throughShim(f.fleet, ws, func(shimclient.Client) (string, error) { return "answer", nil })
@@ -186,7 +186,7 @@ func TestThroughShimAnswersWhatTheReadAnswered(t *testing.T) {
 func TestThroughShimCutShortByAnOrderedStandDownIsNoSource(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 
 	// Act.
 	_, err := throughShim(f.fleet, ws, func(shimclient.Client) (string, error) { return "", standDownErr })
@@ -200,7 +200,7 @@ func TestThroughShimCutShortByAnOrderedStandDownIsNoSource(t *testing.T) {
 func TestThroughShimOfAnyOtherFailureStaysAFailure(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	ws := parkAtColdGate(t, f)
+	ws := heldWithoutSession(t, f)
 	cause := errors.New("connection refused")
 
 	// Act.

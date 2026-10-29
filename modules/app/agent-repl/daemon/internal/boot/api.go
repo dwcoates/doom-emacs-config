@@ -107,18 +107,17 @@ type Report struct {
 	HoldsRestored int
 	// MergesRecovered are the in-flight merges resumed.
 	MergesRecovered []ids.WorkspaceID
-	// PendingBringUp are the open, VISIBLE, client-less workspaces whose
-	// sessions the bring-up will start (a hidden or collapsed one is in
-	// WithheldBringUp instead). THE RECONCILIATION ONLY NAMES THEM; it does not
+	// PendingBringUp are the open, client-less workspaces whose shim was up
+	// when the last daemon stopped, whose sessions the bring-up will start
+	// (any other is in WithheldBringUp instead). THE RECONCILIATION ONLY NAMES THEM; it does not
 	// start them, because starting them is what a session start costs and the
 	// daemon does not answer a single unary until the reconciliation has
 	// returned. The caller runs `BringUp` over this set once the listener is
 	// accepting. See BringUp for the invariant.
 	PendingBringUp []wsm.Workspace
 	// WithheldBringUp are the open, client-less workspaces the bring-up does
-	// NOT start because the user hid them or collapsed their repository
-	// section (bringup.OnlyVisible): only visible workspaces run. Each is
-	// started when shown, by the editor's OpenTabs.
+	// NOT start because their shim was not up when the last daemon stopped
+	// (bringup.OnlyWasUp). Each is started by its next prompt.
 	WithheldBringUp []wsm.Workspace
 	// Undetermined are the workspaces whose kernel lock probe could not tell.
 	// They are neither adopted nor orphan-closed: "could not tell" is never

@@ -23,7 +23,6 @@ import {
   validateAgentPermissionMode,
   validateDetachedWorkId,
   validateForkPoint,
-  validateConversationThrough,
   validateHistoryPointer,
   validatePromptOrigin,
   validateSessionColdRemediation,
@@ -324,27 +323,6 @@ export function validateResolveVendorTaskRequest(request: shimv1.ResolveVendorTa
     }
   } catch (err) {
     refuse("ResolveVendorTask", err);
-  }
-}
-
-/** `shim.v1.ReadHistoryRequest` — whose history, and from where. */
-export function validateReadHistoryRequest(request: shimv1.ReadHistoryRequest): void {
-  try {
-    if (request.target !== undefined) validateAgentId(request.target, "read_history.target");
-    switch (request.position.case) {
-      case "first":
-        return;
-      case "after":
-        validateHistoryPointer(request.position.value, "read_history.after");
-        return;
-      case "through":
-        validateConversationThrough(request.position.value, "read_history.through");
-        return;
-      default:
-        throw unsetOneof("read_history.position");
-    }
-  } catch (err) {
-    refuse("ReadHistory", err);
   }
 }
 

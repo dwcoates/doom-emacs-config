@@ -195,6 +195,21 @@ a gate that punished the documentation would be deleted in a week.
 script against fixture trees in both directions — a gate nobody has watched fail
 is not a gate.
 
+The same gate also refuses a daemon or webapp import of
+`proto/helpers/go/storewrite`, the store's write validation, which imports
+`store.v1` and so would reach the write batch without naming it.
+
+**I8 — the daemon's view of the store is read-only.** `storeread.v1` is the
+one package the daemon reads the store through (owner ruling, 2026-10-27: the
+daemon's relationship with the store is, and remains, read-only). Its files
+may import `conversation/v1` and `storeread/v1`, nothing else, so no storage
+type and no write request can reach the daemon through it, and it declares no
+write verb. `check-conversation-isolation.sh` enforces it in the same
+`codegen-gate` pass, with self-test rows for a `store.v1` import, any other
+import, and the package going missing. The store serves the package on a
+socket of its own from a handler that can only read (agent-shim/shim-store
+AGENTS.md).
+
 New structural gates hang off `codegen-gate`, so they inherit that coverage
 without each having to be wired into every emitting target.
 

@@ -10,7 +10,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
-	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -21,58 +20,20 @@ import (
 //     selection instant, which is what "current" means; the ATTENTION MARKER
 //     is cleared, because the user has now looked at what raised it; and the
 //     roster is told, so every webview's selection agrees at once.
-//  2. THEN, IF THE WORKSPACE HAS NO SESSION, THE REVIVAL. Switching to a
-//     workspace is looking at it, and an open workspace the user is looking
-//     at is never session-less (owner rulings, 2026-09-13 and 2026-10-02).
-//     `startRevival` is a no-op for a live or closed workspace, so a
-//     select on a live workspace changes nothing but the selection.
 //
-// THE SELECTION NEVER WAITS ON THE REVIVAL (owner ruling, 2026-09-19). A
-// bring-up takes most of a second, and the revival used to run first: the
-// sidebar lagged every switch by one to four seconds, and concurrent selects
-// stamped `current` in the order their revivals FINISHED, so a user's last
-// switch was overwritten by an earlier one whose bring-up happened to end
-// later. Now the selection is stamped on arrival, in request order, and
-// nothing after it touches `current` again: a revival that completes never
-// re-stamps anything. While the revival runs the row carries the REVIVING
-// marker.
-//
-// THE ANSWER DOES NOT WAIT ON THE REVIVAL EITHER (2026-10-25). It used to,
-// so that a failed bring-up failed the select, and the answer was as slow as
-// the vendor: Emacs timed SelectWorkspace out at 10s with the selection long
-// recorded (`fold-spares-busy`, 14:53:08). SelectWorkspace answers that the
-// workspace is selected; the bring-up it occasions runs detached
-// (`startRevival`) and states its own outcome -- its record, at ERROR for a
-// bring-up that failed, and the REVIVING marker lowered either way -- so
-// nothing that failed is hidden. Only a daemon standing down, which starts no
-// session at all, is still refused up front.
+// A SELECT STARTS NO SHIM (owner ruling, 2026-10-28, reversing the look-driven
+// revival of 2026-09-13 and 2026-10-02): the workspace's conversation is read
+// from the store, so a workspace switched to with no session -- parked,
+// hibernated, at its cold gate, never started -- shows its conversation with
+// no shim behind it, and the next prompt, from the user or another
+// workspace, brings the shim up.
 func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID, history SelectionHistory) error {
 	_, log, err := v.owned(ctx, "SelectWorkspace", ws)
 	if err != nil {
 		return err
 	}
-	if _, err := v.selectCurrent(ctx, log, ws, nil, history); err != nil {
-		return err
-	}
-	return v.reviveSelected(ctx, log, ws)
-}
-
-// reviveSelected brings a just-selected workspace's parked session back up, as
-// every selection does.
-func (v *verbs) reviveSelected(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
-	if err := v.startRevival(ctx, log, opSelect, ws); err != nil {
-		// A DAEMON THAT IS LEAVING ANSWERS `standing_down`. The selection
-		// above already stands; only the revival was not attempted, because
-		// this daemon starts no session for a workspace it is about to stop
-		// serving. The client re-asserts the selection on the daemon that
-		// serves next, which revives it. Recorded at INFO by refuse.
-		if errors.Is(err, shimclient.ErrStandingDown) {
-			return refuse(log, "SelectWorkspace", ArmStandingDown,
-				"this daemon is standing down; the selection is recorded and the next daemon revives the workspace", false)
-		}
-		return fmt.Errorf("select %q: %w", ws, err)
-	}
-	return nil
+	_, err = v.selectCurrent(ctx, log, ws, nil, history)
+	return err
 }
 
 // selectCurrent is Select's selection section: stamp the selection, clear the
@@ -341,7 +302,7 @@ func (v *verbs) landAfterHiding(ctx context.Context, log dlog.Logger, hidden ids
 	}
 	targetLog.Info(opSetHidden, "landed the user on the workspace selected before the hidden one",
 		dlog.Context{"place": target.Place, "by": string(by)})
-	return v.reviveSelected(ctx, targetLog, target.ID)
+	return nil
 }
 
 // asShown answers REG with workspace WS not hidden, for the bar as it stood

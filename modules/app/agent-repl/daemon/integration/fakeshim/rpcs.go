@@ -28,7 +28,6 @@ const (
 	RPCWatchBash                = "WatchBash"
 	RPCStopBash                 = "StopBash"
 	RPCDetachForeground         = "DetachForeground"
-	RPCReadHistory              = "ReadHistory"
 	RPCGatherTitleDigest        = "GatherTitleDigest"
 	RPCReadTranscripts          = "ReadTranscripts"
 	RPCResolvePeerDelivery      = "ResolvePeerDelivery"
@@ -71,8 +70,6 @@ func newResponse(rpc string) proto.Message {
 		return &shimv1.StopBashResponse{}
 	case RPCDetachForeground:
 		return &shimv1.DetachForegroundResponse{}
-	case RPCReadHistory:
-		return &shimv1.ReadHistoryResponse{}
 	case RPCGatherTitleDigest:
 		return &shimv1.GatherTitleDigestResponse{}
 	case RPCReadTranscripts:

@@ -185,13 +185,6 @@ const (
 	// OpenStageRestoringWorktree when its branch survives, and is refused at
 	// this stage when there is nothing to restore it from.
 	OpenStageCheckingWorktree OpenStage = iota
-	// OpenStageStartingSession: the daemon is bringing the session up —
-	// spawning the shim and resuming the vendor conversation. THE SLOW STAGE,
-	// and the reason this vocabulary exists.
-	OpenStageStartingSession
-	// OpenStageReviving: the daemon is lifting a hibernation park. Reported
-	// only for a workspace that was actually parked.
-	OpenStageReviving
 	// OpenStageClearingClosed: the daemon is clearing the closed flag, which
 	// is what puts the row back among the open ones. Reported only for a
 	// workspace that was actually closed.
@@ -709,6 +702,9 @@ type Deps struct {
 	// Threads holds the zettel chat threads' graphs, which a nuke deletes as
 	// it deletes a git workspace's worktree and branch.
 	Threads ThreadGraphs
+	// ColdGateAnswers counts every cold gate answered, by the choice and how
+	// the answer ended (runtimemetrics.Surface). Required.
+	ColdGateAnswers ColdGateAnswerTelemetry
 	// Browser opens a clicked link in the pinned external browser.
 	Browser externalbrowser.Opener
 	// Headless is the daemon's own one-shot vendor run. A create that supplies
@@ -1025,11 +1021,6 @@ type Sessions interface {
 	StartRebound(ctx context.Context, ws ids.WorkspaceID) error
 	// Stop ends a workspace's session, forced or graceful.
 	Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error
-	// StartDetached brings a workspace's session up OFF the caller's
-	// goroutine, reporting the outcome to `done` when it settles. It is what
-	// a caller uses when the start is occasioned by its answer rather than
-	// contained in it; see Fleet.StartDetached for why the register uses it.
-	StartDetached(ws ids.WorkspaceID, done func(error))
 	// StandingDown reports whether this daemon has begun standing down, when
 	// it starts no session (shimclient.ErrStandingDown). A caller that answers
 	// before its start runs reads it to refuse up front.
@@ -1075,6 +1066,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("this daemon's instance id")
 	case deps.DB == nil:
 		return nil, missing("a state client")
+	case deps.ColdGateAnswers == nil:
+		return nil, missing("the cold gate answers' telemetry")
 	case deps.Derived == nil:
 		return nil, missing("a derived-workspace reporter")
 	case deps.Git == nil:

@@ -46,7 +46,7 @@ func TestResolveTakesTheStrongestClaimTheFactsMakeWithNoStoppedMerge(t *testing.
 		{name: "a permission ask outranks a turn in flight", claims: []Claim{Waiting, Thinking}, want: Waiting},
 		{name: "a turn in flight outranks idle", claims: []Claim{Thinking}, want: Thinking},
 		{name: "a parked session skips the link rung", parked: true, claims: []Claim{AgentReplFault}, want: Idle},
-		{name: "a parked session skips the starting rung", parked: true, claims: []Claim{Starting}, want: Idle},
+		{name: "a parked session coming back stands on the starting rung", parked: true, claims: []Claim{Starting}, want: Starting},
 		{name: "an agent-repl fault outranks a booting session", claims: []Claim{AgentReplFault, Starting}, want: AgentReplFault},
 		{name: "a booting session outranks a network fault", claims: []Claim{Starting, NetworkFault}, want: Starting},
 		{name: "a merge in flight outranks a booting session", merge: "queued", claims: []Claim{Merging, Starting}, want: Merging},

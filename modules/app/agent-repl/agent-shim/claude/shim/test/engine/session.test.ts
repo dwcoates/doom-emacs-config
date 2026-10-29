@@ -1598,13 +1598,20 @@ describe("the vendor's own facts", () => {
       uuid: "00000000-0000-4000-8000-000000000009",
       session_id: original,
     } as never);
-
-    const history = await h.engine.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-after-reset" }),
+        said: textSaid("after the reset"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
       }),
     );
-    expect(history.result.case).toBe("success");
+
+    // THE BOOK DID NOT MOVE: the turn after the reset is filed under the
+    // original AgentId.
+    const books = new Set(
+      [...h.persistence.durable, ...h.persistence.buffered].map((entry) => entry.agentId?.value),
+    );
+    expect([...books]).toEqual([mainAgentId(original).value]);
   });
 
   it("CONCLUDES the open turn with a failure terminal when the query dies", async () => {
@@ -7607,104 +7614,6 @@ describe("account usage, pushed on the account-usage interval", () => {
   });
 });
 
-/**
- * THE VENDOR NEVER GATES SHOWING THE CONVERSATION. ReadHistory serves the
- * workspace's persisted book whatever state the vendor start is in.
- */
-describe("ReadHistory serves the workspace's persisted book without a started session", () => {
-  function firstPage(): shimv1.ReadHistoryRequest {
-    return create(shimv1.ReadHistoryRequestSchema, {
-      position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
-    });
-  }
-
-  it("serves it before any StartSession", async () => {
-    // Arrange.
-    const h = harness();
-    persistIdentity(h, "original-1");
-
-    // Act.
-    const response = await h.engine.readHistory(firstPage());
-
-    // Assert.
-    expect(response.result.case).toBe("success");
-    expect(h.persistence.firstPageAgents).toEqual(["original-1"]);
-  });
-
-  it("serves it after a vendor start was refused", async () => {
-    // Arrange.
-    const h = harness({ createQueryFailsFrom: 0 });
-    persistIdentity(h, "original-1");
-    writeTranscript(h.configDir, h.cwd, "resume-1", [smallAssistantLine()]);
-    expect(failureCause(await h.engine.startSession(resumeRequest("resume-1")))).toBe("vendorStartFailed");
-
-    // Act.
-    const response = await h.engine.readHistory(firstPage());
-
-    // Assert.
-    expect(response.result.case).toBe("success");
-    expect(h.persistence.firstPageAgents).toEqual(["original-1"]);
-  });
-
-  it("serves it while the session is parked at its cold gate", async () => {
-    // Arrange.
-    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
-    persistIdentity(h, "original-1");
-    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
-    expect(failureCause(await h.engine.startSession(resumeRequest("resume-1")))).toBe("cold");
-
-    // Act.
-    const response = await h.engine.readHistory(firstPage());
-
-    // Assert.
-    expect(response.result.case).toBe("success");
-    expect(h.persistence.firstPageAgents).toEqual(["original-1"]);
-  });
-
-  it("refuses unknown_agent when the workspace never persisted a book", async () => {
-    // Arrange.
-    const h = harness();
-
-    // Act.
-    const response = await h.engine.readHistory(firstPage());
-
-    // Assert.
-    expect(response.result.case === "failure" ? response.result.value.kind.case : undefined).toBe(
-      "unknownAgent",
-    );
-  });
-});
-
-/**
- * reportStoreUnreachable (ReadHistory's store_unavailable path) and
- * concludeStoppedRuns (StopBash's write of the interrupted terminal).
- */
-describe("ReadHistory reports a store outage", () => {
-  it("calls reportStoreUnreachable when the store answers store_unavailable", async () => {
-    const h = harness();
-    await started(h);
-    h.persistence.readError = new PersistenceError(
-      "store_unavailable",
-      "the store is down",
-    );
-    const before = h.engine.pushes.faultCount;
-
-    const response = await h.engine.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: {
-          case: "after",
-          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
-        },
-      }),
-    );
-
-    expect(
-      response.result.case === "failure" ? response.result.value.kind.case : undefined,
-    ).toBe("storeUnavailable");
-    expect(h.engine.pushes.faultCount).toBe(before + 1);
-  });
-});
-
 describe("StopBash writes the interrupted terminal (concludeStoppedRuns)", () => {
   it("closes a live shell run the shim itself stopped", async () => {
     const h = harness();
@@ -13634,36 +13543,6 @@ describe("a component that recovers", () => {
     });
   });
 
-  it("clears the history reader's fault when the next read is served", async () => {
-    // Arrange.
-    const h = harness();
-    await started(h);
-    h.persistence.readError = new PersistenceError("store_unavailable", "the store is down");
-    await h.engine.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: {
-          case: "after",
-          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
-        },
-      }),
-    );
-    expect(faultyComponents(h)).toContain("shim-store-reader");
-
-    // Act.
-    h.persistence.readError = undefined;
-    await h.engine.readHistory(
-      create(shimv1.ReadHistoryRequestSchema, {
-        position: {
-          case: "after",
-          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
-        },
-      }),
-    );
-
-    // Assert.
-    expect(faultyComponents(h)).not.toContain("shim-store-reader");
-  });
-
   // THE ONE FAULT MEANT TO STAND. Nothing in this process restarts a query it
   // lost, and the per-operation components are what keep a probe that still
   // answers from clearing it.
@@ -17614,5 +17493,45 @@ describe("an agent's prompt delivered as a peer message", () => {
     // Assert
     const deliveries = sends.filter((send) => send.uuid === uuid);
     expect(deliveries.map((send) => send.origin?.kind)).toEqual(["peer", "peer"]);
+  });
+});
+
+// THE WORKSPACE'S BOOK, NAMED ON EVERY StartSession ANSWER: the daemon records it
+// and reads the workspace's history from the store with it, so the cold gate and
+// every other refusal name it as a started session does.
+describe("StartSession names the workspace's book", () => {
+  it("names a started session's main agent", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const response = await started(h);
+
+    // Assert
+    expect(response.book?.value).toBe(freshSessionId((await untilQuery(h, 0)).spec));
+  });
+
+  it("names the persisted book on a refusal", async () => {
+    // Arrange
+    const h = harness({ lockThrows: true });
+    persistIdentity(h, "original-session-1");
+
+    // Act
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert
+    expect(failureCause(response)).toBe("conversationOwned");
+    expect(response.book?.value).toBe("original-session-1");
+  });
+
+  it("names no book for a workspace that never settled one", async () => {
+    // Arrange
+    const h = harness({ lockThrows: true });
+
+    // Act
+    const response = await h.engine.startSession(freshRequest());
+
+    // Assert
+    expect(response.book).toBeUndefined();
   });
 });

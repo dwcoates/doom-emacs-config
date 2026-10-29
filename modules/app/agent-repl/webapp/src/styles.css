@@ -1558,34 +1558,38 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   padding-left: calc(0.9rem - var(--row-gutter-w));
 }
 /* REVIVING (frontend.v1.RosterRowReviving): the daemon is bringing this
-   parked workspace's session back up. A SUBTLE shimmer on the NAME alone
-   (owner ruling, 2026-09-19): the text is painted through a gradient of its
-   own colour with one soft band of reduced ink, and the band ripples across
-   the text and rests off it at either end of the pass. `currentColor` keeps
-   whatever colour the name already has, so a PARTIAL (viewed) name shimmers
-   in its muted tone. The gradient is 250% of the box and pans only between 0%
-   and 100%, which keeps the image covering the text at every frame: a
-   position outside that range would leave glyphs with no fill at all.
+   workspace's shim up. A SUBTLE shimmer on the NAME alone (owner ruling,
+   2026-09-19): one soft band of reduced ink (40%) ripples across the text and
+   rests off it at either end of the pass. The band is a MASK's alpha, so the
+   name keeps whatever colour it already has, a PARTIAL (viewed) name's muted
+   tone included. The mask is 250% of the box and pans only between 0% and
+   100%, which keeps it covering the text at every frame: a position outside
+   that range would mask glyphs out entirely.
+
+   NO GRADIENT MIXES `currentColor`. WebKitGTK ended every page of the webhost
+   the moment a gradient drew `color-mix(in srgb, currentColor 40%,
+   transparent)` (2026-10-28, the e2e sandbox's engine: a created workspace's
+   shimmer took both pages' streams down), so the band is alpha on a mask
+   rather than ink in a text-clipped background.
 
    The rail's wall-clock seek (src/sidebar/wall-phase.ts) reads the 2.4s
    period from here, so a roster push that rebuilds the row continues the pass
    rather than restarting it. Reduced motion drops the shimmer entirely (see the
    `prefers-reduced-motion` block). */
 #ws-sidebar .row .name.reviving {
-  background-image: linear-gradient(90deg,
-    currentColor 0%, currentColor 42%,
-    color-mix(in srgb, currentColor 40%, transparent) 50%,
-    currentColor 58%, currentColor 100%);
-  background-size: 250% 100%;
-  background-repeat: no-repeat;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  -webkit-mask-image: linear-gradient(90deg,
+    #000 0%, #000 42%, rgb(0 0 0 / 40%) 50%, #000 58%, #000 100%);
+  mask-image: linear-gradient(90deg,
+    #000 0%, #000 42%, rgb(0 0 0 / 40%) 50%, #000 58%, #000 100%);
+  -webkit-mask-size: 250% 100%;
+  mask-size: 250% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
   animation: ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite;
 }
 @keyframes ws-revive-shimmer {
-  from { background-position-x: 100%; }
-  to { background-position-x: 0%; }
+  from { -webkit-mask-position: 100% 0; mask-position: 100% 0; }
+  to { -webkit-mask-position: 0% 0; mask-position: 0% 0; }
 }
 #ws-sidebar .row .when,
 #ws-sidebar .sb-mq-clock {
@@ -4624,14 +4628,14 @@ html[data-page-unshown] {
     width: 100%;
     opacity: 0.5;
   }
-  /* The reviving shimmer STOPS, and its gradient fill goes with it so the
-     name is drawn in plain ink rather than through a parked band. The fact
-     it restates is transient and the row's status resolves the moment the
-     session is back. */
+  /* The reviving shimmer STOPS, and its mask goes with it so the name is
+     drawn in plain ink rather than through a parked band. The fact it
+     restates is transient and the row's status resolves the moment the
+     session is up. */
   #ws-sidebar .row .name.reviving {
     animation: none;
-    background-image: none;
-    -webkit-text-fill-color: currentColor;
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 }
 

@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/wsm"
 )
 
@@ -38,8 +39,9 @@ const (
 const IdleCutoffEnv = "AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS"
 
 // DefaultIdleCutoff is the cutoff when neither the flag nor the environment
-// names one.
-const DefaultIdleCutoff = 12 * time.Hour
+// names one: 24 hours (owner ruling, 2026-10-28), for which a parked session's
+// keep-alives also go on.
+const DefaultIdleCutoff = 24 * time.Hour
 
 // DefaultSweepEvery is the idle sweep's cadence under Run.
 const DefaultSweepEvery = 5 * time.Minute
@@ -385,7 +387,7 @@ func (c *controller) standEverySessionDown(ctx context.Context) {
 	}
 	for _, ws := range workspaces {
 		fields := dlog.Context{"workspace": string(ws.ID)}
-		standDown, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.deps.StandBound)
+		standDown, cancel := context.WithTimeout(shimlife.WithStandDown(context.WithoutCancel(ctx), shimlife.StandDownShutdown), c.deps.StandBound)
 		err := c.deps.Stand.KillSession(standDown, ws.ID, true)
 		cancel()
 		if err != nil {

@@ -1803,10 +1803,6 @@ shape is refused as an unknown field rather than misread."
   "Decode VALUE as the empty `WorkspaceOpenStageStartingSession'."
   (agent-repl-wire--decode-empty "WorkspaceOpenStageStartingSession" value))
 
-(defun agent-repl-wire-decode-workspace-open-stage-reviving (value)
-  "Decode VALUE as the empty `WorkspaceOpenStageReviving'."
-  (agent-repl-wire--decode-empty "WorkspaceOpenStageReviving" value))
-
 (defun agent-repl-wire-decode-workspace-open-stage-clearing-closed (value)
   "Decode VALUE as the empty `WorkspaceOpenStageClearingClosed'."
   (agent-repl-wire--decode-empty "WorkspaceOpenStageClearingClosed" value))
@@ -1823,14 +1819,14 @@ shape is refused as an unknown field rather than misread."
   "Decode `WorkspaceOpenStage' from VALUE into the stage keyword.
 THE SET ARM IS THE STAGE, and every arm is an empty message, so the
 keyword is the whole fact: `:checking-worktree', `:restoring-worktree',
-`:starting-session', `:reviving', `:clearing-closed' or
+`:starting-session', `:clearing-closed' or
 `:checking-build'.  An arm this codec does not hold is refused as an
 unknown field by the key check -- logged at ERROR and signalled, never a
 stage guessed at or dropped -- and an unset oneof is refused likewise."
   (let ((object (agent-repl-wire--object "WorkspaceOpenStage" value)))
     (agent-repl-wire--check-keys "WorkspaceOpenStage" object
                                  '(checkingWorktree restoringWorktree startingSession
-                                   reviving clearingClosed checkingBuild))
+                                   clearingClosed checkingBuild))
     (agent-repl-wire--decoded
      "WorkspaceOpenStage"
      (plist-get
@@ -1840,8 +1836,6 @@ stage guessed at or dropped -- and an unset oneof is refused likewise."
                            agent-repl-wire-decode-workspace-open-stage-checking-worktree)
          (startingSession :starting-session
                           agent-repl-wire-decode-workspace-open-stage-starting-session)
-         (reviving :reviving
-                   agent-repl-wire-decode-workspace-open-stage-reviving)
          (clearingClosed :clearing-closed
                          agent-repl-wire-decode-workspace-open-stage-clearing-closed)
          (checkingBuild :checking-build

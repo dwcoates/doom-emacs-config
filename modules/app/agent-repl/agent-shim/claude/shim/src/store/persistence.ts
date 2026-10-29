@@ -467,16 +467,6 @@ export interface Persistence {
     after: conversationv1.HistoryPointer,
   ): Promise<conversationv1.HistoryPage>;
   /**
-   * The newest page of one book placed AT OR BEFORE an instant: the book as it
-   * stood then (a fork's parent at the fork point). The store refuses a book it
-   * has never heard of as `unknown_agent`; `more` walks older with
-   * {@link Persistence.readAgentPage} as usual.
-   */
-  readPageThrough(
-    agent: conversationv1.AgentId,
-    through: conversationv1.ConversationThrough,
-  ): Promise<conversationv1.HistoryPage>;
-  /**
    * Everything the record holds a start for and no terminal, WITHIN ONE
    * SESSION: the lineage of `session`, this conversation's main agent.
    *
@@ -683,7 +673,6 @@ export function unavailablePersistence(): Persistence {
     readFirstPage: () => Promise.reject(refuse("readFirstPage")),
     readBookHead: () => Promise.reject(refuse("readBookHead")),
     readAgentPage: () => Promise.reject(refuse("readAgentPage")),
-    readPageThrough: () => Promise.reject(refuse("readPageThrough")),
     liveWork: () => Promise.reject(refuse("liveWork")),
     agentByVendorTask: () =>
       Promise.resolve({ kind: "failed", detail: "shim persistence: agentByVendorTask has no store to reach in this build" }),

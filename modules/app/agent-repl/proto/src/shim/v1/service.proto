@@ -18,7 +18,6 @@ import "shim/v1/endpoint_hibernate.proto";
 import "shim/v1/endpoint_kill_session.proto";
 import "shim/v1/endpoint_kill_turn.proto";
 import "shim/v1/endpoint_roll_back_session.proto";
-import "shim/v1/endpoint_read_history.proto";
 import "shim/v1/endpoint_read_transcripts.proto";
 import "shim/v1/endpoint_resolve_peer_delivery.proto";
 import "shim/v1/endpoint_resolve_vendor_task.proto";
@@ -138,12 +137,11 @@ service Shim {
   // announces it as detached, and the consumer opens the matching Watch.
   rpc DetachForeground(DetachForegroundRequest) returns (DetachForegroundResponse);
 
-  // ---- History: bounded reads of one agent's durable past ----
+  // ---- History ----
 
-  // One page of one agent's history, newest first, from the newest or from
-  // a page already received. Serves cold open, scroll-back, and the daemon's
-  // own catch-up after a restart alike.
-  rpc ReadHistory(ReadHistoryRequest) returns (ReadHistoryResponse);
+  // RETIRED 2026-10-28: `ReadHistory`. The daemon reads every agent's history
+  // from the store's read-only face (storeread.v1.StoreRead.ReadHistoryPage),
+  // never through a shim, so a conversation shows with no shim up.
 
   // Every conversation filed under this shim's working directory, read off
   // the transcripts themselves. Spends nothing; see

@@ -695,8 +695,8 @@ way a refusal does.
    unary and its service has no close — so a page opened and then closed here
    leaves a token nothing will ever spend, for the store's whole process
    lifetime. Every one-shot site uses the read verb: StartTurn's opening page,
-   the teardown's book head, the StartSession reconciliation read, the
-   live-work re-announcement, and `ReadHistory`. `e2e`'s
+   the teardown's book head, the StartSession reconciliation read and the
+   live-work re-announcement. `e2e`'s
    `TestACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding` is what holds
    this: it drives a real turn and stop, then reads the store's own shutdown
    record for `outstanding_tokens=0`.
@@ -725,14 +725,13 @@ way a refusal does.
 
 Owner ruling (`docs/protobuf-design/feed-paging-on-demand.md`, changes 1–2):
 ONE page size for the whole stack, owned by the STORE (`db.PageSize`, 50) and
-stated nowhere else. `page_size` is retired on `WatchAgent`, `ReadHistory`,
-`StartTurn` and on both store verbs; the shim holds no page budget of its own.
+stated nowhere else. `page_size` is retired on `WatchAgent`, `StartTurn` and
+on both store verbs; the shim holds no page budget of its own.
 
 - Every open takes an `AgentOpening` (`store/persistence.ts`): `repaint`
   (unset), `knownThrough`, or `tailOnly`, read off a shim.v1 request by
   `openingOf` and relayed to the store's own `opening` arm as it stands.
-  `ReadHistory{first}`, the reconciliation walk and the teardown's book head
-  read as `REPAINT`.
+  The reconciliation walk and the teardown's book head read as `REPAINT`.
 - **A TAIL-ONLY WATCH STANDS ON THE STORE'S `newest`** (feed-paging change
   5: every `OpenAgentSession` names the book's newest item, unset = empty
   book). The tail-only page is empty by request, so `newest` is what the
@@ -755,13 +754,9 @@ stated nowhere else. `page_size` is retired on `WatchAgent`, `ReadHistory`,
 - Tests shape page boundaries through the FAKE store's own page size
   (`startFakeStore(socket, { pageSize })`, `spawnShim({ storePageSize })`),
   never through a request.
-- **`ReadHistory` serves the WORKSPACE'S book, never only a started
-  session's** (owner principle, 2026-10-02: the vendor never gates showing the
-  conversation). With no settled identity (no StartSession yet, a start being
-  retried or refused, a session parked at its cold gate) the main agent is the
-  workspace's persisted `agent-id.json` (`SessionContext.persistedAgent`), and
-  its pages are read exactly as a started session's are. A workspace that never
-  persisted one answers `unknown_agent`; an unreadable record rejects loudly.
+- **No history is read through a shim.** `ReadHistory` is retired
+  (2026-10-28): the daemon reads every book from the store's read-only face
+  (storeread.v1), so a conversation shows with no shim up.
 
 ## A retired line is relayed, never dropped
 
@@ -1581,7 +1576,7 @@ serves one on every entry it hands out.
   upserts (every streamed delta) move nothing.
 - **SERVED BY ONE MAPPING.** `toHistoryEntryAt` (`store/reader.ts`) is the one
   conversion every serving path uses — a WatchAgent page and its live and
-  retired frames, ReadHistory, StartTurn's page — and it passes the store's
+  retired frames, StartTurn's page — and it passes the store's
   `recorded_place` / `received_place` arm through unchanged. A line a store
   served with no place (one that predates places) is served unplaced and
   traced at debug; the proto defines that as "the serving side states no
@@ -1596,11 +1591,6 @@ serves one on every entry it hands out.
   unchanged; a head with no line or no arm refuses the page. The catch-up walks
   (`walkToMark`, `walkEntriesToMark`) flatten store pages into TAIL entries,
   not a page, and carry no heads.
-- **`ReadHistory.through`** is validated (a positive `at_ms`,
-  `read_history.through`) and forwarded to the store's `ReadAgentPage.through`
-  through `Persistence.readPageThrough`. It never vouches for the book: any book
-  the store holds may be named, and one it never heard of is the typed
-  `unknown_agent` refusal.
 - The fake store (`test/fakes/store-server.ts`) reproduces the same contract:
   first stated place kept, an unplaced row served at its receipt instant,
   pages in descending place, `after` below the named line's current place,
@@ -1737,8 +1727,7 @@ serves one on every entry it hands out.
       a timer. An id this shim MINTED is answered without the store (an empty
       page now, the vouched open once this shim's first write lands,
       `Reader.noteAgentRows`), so a cold bring-up does not depend on the
-      store. `ReadHistory` answers the same empty page rather than refusing,
-      which is what a keep-alive-only session's book is.
+      store.
     - not vouched for → the store's refusal stands, as `Code.NotFound`.
     - any other refusal (`storage_failure`) is untouched.
   - The empty-book refusal in `watchAgent` also stays, for a store that serves

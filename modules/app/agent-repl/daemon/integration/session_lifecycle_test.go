@@ -27,9 +27,16 @@ import (
 // openRaw sends OpenWorkspace exactly as given, without attaching to the
 // fake's control socket — for the bring-up-death test, whose shim never
 // opens one.
-func (f *fixture) openRaw() (*agentreplv1.OpenWorkspaceResponse, error) {
+// startRaw opens the fixture's workspace and starts its session through the
+// restart verb (an open starts no shim, owner ruling 2026-10-28), answering
+// the restart's own outcome.
+func (f *fixture) startRaw() (*agentreplv1.RestartWorkspaceResponse, error) {
 	f.t.Helper()
-	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+	opened, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+	if err != nil || opened.Msg.GetSuccess() == nil {
+		f.t.Fatalf("OpenWorkspace = (%v, %v), want a success", opened, err)
+	}
+	resp, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +108,7 @@ func TestReadinessGatesOnTheFirstHealthyDiagnostics(t *testing.T) {
 	// while the test drives the delayed diagnostics from the other side.
 	done := make(chan error, 1)
 	go func() {
-		_, err := f.openRaw()
+		_, err := f.startRaw()
 		done <- err
 	}()
 
@@ -126,7 +133,7 @@ func TestReadinessGatesOnTheFirstHealthyDiagnostics(t *testing.T) {
 		})
 	select {
 	case err := <-done:
-		t.Fatalf("OpenWorkspace returned %v before any healthy diagnostics, want it gated on readiness", err)
+		t.Fatalf("the start returned %v before any healthy diagnostics, want it gated on readiness", err)
 	default:
 	}
 
@@ -135,7 +142,7 @@ func TestReadinessGatesOnTheFirstHealthyDiagnostics(t *testing.T) {
 
 	// Assert: readiness lands, the rpc answers, and the shim reads attached.
 	if err := <-done; err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a success once the shim came up healthy", err)
+		t.Fatalf("the start = error %v, want a success once the shim came up healthy", err)
 	}
 	harness.AwaitView(t, f.d.Ctx(), host, "shim_attached true after the delayed diagnostics push",
 		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
@@ -149,21 +156,20 @@ func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
 	f := newRegistered(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.health.session", "daemon.shimclient.exit", "daemon.shimclient.spawn",
-		"daemon.workspace.bring_up", "daemon.workspace.open")
+		"daemon.workspace.bring_up", "daemon.workspace.restart")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ExitOn: harness.ExitOnStartup, ExitCode: 7, Stderr: "boom: fake bring-up death"})
 	footer := f.d.WatchFooter(f.ws)
 
 	// Act
-	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+	resp, err := f.startRaw()
 
 	// Assert: bring-up ended on the DEATH — the exit is the evidence, so no
-	// timeout was needed to explain it — and answered the landed spawn_failed
-	// arm.
+	// timeout was needed to explain it — and the start answered relaunch_failed.
 	if err != nil {
-		t.Fatalf("OpenWorkspace onto a dying shim = transport error %v, want the spawn_failed arm", err)
+		t.Fatalf("the start onto a dying shim = transport error %v, want the relaunch_failed arm", err)
 	}
-	if resp.Msg.GetError().GetSpawnFailed() == nil {
-		t.Fatalf("OpenWorkspace onto a dying shim = %v, want OpenWorkspaceError.spawn_failed", resp.Msg)
+	if resp.GetError().GetRelaunchFailed() == nil {
+		t.Fatalf("the start onto a dying shim = %v, want RestartWorkspaceError.relaunch_failed", resp)
 	}
 
 	// Assert: the footer shows disconnected.start_failed.
@@ -254,9 +260,7 @@ func TestReopeningAWorkspaceWithAPriorSessionResumesItsVendorSession(t *testing.
 	f.shim.AwaitGone()
 
 	// Act: reopen.
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace (reopen) = error %v, want a success", err)
-	}
+	harness.OpenAndStart(t, f.d, f.ws)
 	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
 
 	// Assert
@@ -296,9 +300,7 @@ func TestAMissingTranscriptRecordsTheAbandonedConversation(t *testing.T) {
 	f.d.RemoveTranscripts(f.repo.Dir)
 
 	// Act
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a fresh session", err)
-	}
+	harness.OpenAndStart(t, f.d, f.ws)
 
 	// Assert.
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the abandoned conversation stated loudly", func(r harness.LogRecord) bool {
@@ -329,9 +331,7 @@ func TestAMissingTranscriptForAConversationThatNeverSpokeIsOrdinary(t *testing.T
 	f.d.RemoveTranscripts(f.repo.Dir)
 
 	// Act
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a fresh session", err)
-	}
+	harness.OpenAndStart(t, f.d, f.ws)
 
 	// Assert: the ordinary notice lands at INFO, and the cleanup sweep — which
 	// this test did NOT let off daemon.workspace.bring_up — proves no warning
@@ -367,11 +367,8 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 	host := f.d.WatchHost(f.ws)
 
 	// Act
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success carrying the gate on the feed", err)
-	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	req := shim.ExpectStartSession()
+	harness.OpenAndStart(t, f.d, f.ws)
+	req := f.gateAttempt()
 	if req.GetResume().GetColdRemediation() != nil {
 		t.Fatalf("the first resume attempt named a remediation %v, want the daemon's first attempt to learn the cost before paying it", req.GetResume().GetColdRemediation())
 	}
@@ -396,11 +393,9 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 		return r.GetHost().GetGate().GetColdGate() != nil
 	})
 
-	// Assert: no re-open until AnswerColdGate — the shim receives no second
-	// StartSession within the probe window.
-	if shim.Count(harness.RPCStartSession) != 1 {
-		t.Fatalf("StartSession count = %d before any AnswerColdGate, want exactly 1 (no re-open)", shim.Count(harness.RPCStartSession))
-	}
+	// Assert: no re-open until AnswerColdGate — the gate's shim is stood
+	// down, so no shim runs to re-open through until the answer spawns one.
+	f.awaitGateShimStoodDown()
 
 	// Act: AnswerColdGate{pay}.
 	if _, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
@@ -411,8 +406,9 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 		t.Fatalf("AnswerColdGate{pay} = error %v, want a success", err)
 	}
 
-	// Assert: the shim sees the retry with cold_remediation{pay}.
-	retry := shim.ExpectStartSession()
+	// Assert: the shim the answer spawned sees the retry with
+	// cold_remediation{pay}.
+	retry := f.answerShim().ExpectStartSession()
 	if retry.GetResume().GetColdRemediation().GetPay() == nil {
 		t.Fatalf("the retry's cold_remediation = %v, want {pay}", retry.GetResume().GetColdRemediation())
 	}
@@ -429,7 +425,6 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 // cold gate", no StartTurn). A prompt never answers the gate.
 type heldAtTheGate struct {
 	f       *fixture
-	shim    *harness.ShimControl
 	gateRow *frontendv1.FeedRow
 	turn    *conversationv1.TurnId
 	holds   *harness.Stream[*frontendv1.FeedHeld]
@@ -466,21 +461,18 @@ func promptHeldAtTheGate(t *testing.T) heldAtTheGate {
 	if turn.GetValue() == "" {
 		t.Fatalf("SubmitPrompt on a workspace with no session = %v, want a minted TurnId", resp)
 	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	shim.ExpectStartSession()
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
 
-	// The prompt waits at the gate, badged as such, and nothing was sent.
+	// The prompt waits at the gate, badged as such, and nothing can be sent:
+	// the gate's shim is stood down until the gate is answered.
 	harness.AwaitView(t, f.d.Ctx(), holds, "the prompt held at the cold gate", func(tray *frontendv1.FeedHeld) bool {
 		p := promptHeldEntry(tray, turn)
 		return p.GetColdGate() != nil && p.GetBadge().GetColdGate() != nil
 	})
-	if n := shim.Count(harness.RPCStartTurn); n != 0 {
-		t.Fatalf("StartTurn count = %d while the gate stands, want 0: a prompt never answers the gate", n)
-	}
-	return heldAtTheGate{f: f, shim: shim, gateRow: gateRow, turn: turn, holds: holds, feed: feed}
+	f.awaitGateShimStoodDown()
+	return heldAtTheGate{f: f, gateRow: gateRow, turn: turn, holds: holds, feed: feed}
 }
 
 // answer answers the gate with CHOICE, failing the test on anything but a
@@ -520,11 +512,13 @@ func TestAPromptHeldAtTheColdGateIsSentByCompactAndResume(t *testing.T) {
 		},
 	}})
 
-	// Assert: the compacted session is handed the held prompt.
-	if compact := g.shim.ExpectStartSession().GetResume().GetColdRemediation().GetCompact(); compact == nil {
+	// Assert: the compacted session, on the shim the answer spawned, is
+	// handed the held prompt.
+	shim := g.f.answerShim()
+	if compact := shim.ExpectStartSession().GetResume().GetColdRemediation().GetCompact(); compact == nil {
 		t.Fatal("the re-open carried no compact remediation")
 	}
-	if got := g.shim.ExpectStartTurn(); got.GetTurn().GetValue() != g.turn.GetValue() {
+	if got := shim.ExpectStartTurn(); got.GetTurn().GetValue() != g.turn.GetValue() {
 		t.Fatalf("StartTurn turn = %q, want the held prompt %q sent", got.GetTurn().GetValue(), g.turn.GetValue())
 	}
 }
@@ -547,14 +541,11 @@ func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 		ContextTokens: 999, LastRequestAtMS: 1, RequestedModel: "sonnet", CacheTTLMS: 1,
 	}})
 	feed := f.watchRootFeed()
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
-	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	shim.ExpectStartSession()
+	harness.OpenAndStart(t, f.d, f.ws)
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
+	f.awaitGateShimStoodDown()
 
 	// The answer names a model the gate ITSELF served: the compact menu is the
 	// closed set the daemon echoes against, so a model outside it is refused
@@ -582,7 +573,7 @@ func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 	}
 
 	// Assert: the retry echoes the compact choice exactly.
-	retry := shim.ExpectStartSession()
+	retry := f.answerShim().ExpectStartSession()
 	compact := retry.GetResume().GetColdRemediation().GetCompact()
 	if compact == nil {
 		t.Fatalf("the retry's cold_remediation = %v, want {compact}", retry.GetResume().GetColdRemediation())
@@ -652,14 +643,11 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 		ContextTokens: 1, LastRequestAtMS: 1, RequestedModel: "sonnet", CacheTTLMS: 1,
 	}})
 	feed := f.watchRootFeed()
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
-	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	shim.ExpectStartSession()
+	harness.OpenAndStart(t, f.d, f.ws)
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
+	f.awaitGateShimStoodDown()
 
 	// Act: SESSION_COMPACT_SCOPE_UNSPECIFIED is never a served menu value.
 	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
@@ -696,9 +684,7 @@ func TestATopbarInsideTheMultiRepoRootShowsTheMultiRepoAccountEmail(t *testing.T
 	topbar := d.WatchTopbar(ws)
 
 	// Act
-	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a success", err)
-	}
+	harness.OpenAndStart(t, d, ws)
 	d.Shim(ws).PushHealthy()
 
 	// Assert
@@ -723,9 +709,7 @@ func TestATopbarOutsideTheMultiRepoRootShowsTheDefaultAccountEmail(t *testing.T)
 	topbar := d.WatchTopbar(ws)
 
 	// Act
-	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a success", err)
-	}
+	harness.OpenAndStart(t, d, ws)
 	d.Shim(ws).PushHealthy()
 
 	// Assert
@@ -746,9 +730,7 @@ func TestHostVendorClaudeConfigDirIsTheRoutedRootForAMultiRepoWorkspace(t *testi
 	host := d.WatchHost(ws)
 
 	// Act
-	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a success", err)
-	}
+	harness.OpenAndStart(t, d, ws)
 	d.Shim(ws).PushHealthy()
 
 	// Assert: the vendor arm's config_dir names the ROUTED root, not merely
@@ -831,9 +813,7 @@ func TestAccountSwitchPortsTheTranscriptAcrossADaemonBoot(t *testing.T) {
 			"MULTI_REPO_ROOT=" + filepath.Dir(f.repo.Dir),
 		},
 	})
-	if _, err := successor.Client().OpenWorkspace(successor.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace after the routing switch = error %v, want a success", err)
-	}
+	harness.OpenAndStart(t, successor, f.ws)
 
 	// Assert: the transcript was MOVED into the newly routed root before the
 	// resume, and gone from the old one.
@@ -1084,8 +1064,8 @@ func TestABounceOfANeverTurnedSessionComesUpFresh(t *testing.T) {
 		"daemon.rollout.staleness")
 
 	// Act
-	if _, err := f.openRaw(); err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a success", err)
+	if resp, err := f.startRaw(); err != nil || resp.GetSuccess() == nil {
+		t.Fatalf("the start = (%v, %v), want a success", resp, err)
 	}
 	f.d.AwaitLogRecord(f.d.RunLogPath(), "the completed build-staleness bounce", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.rollout.relaunch" && r.Message == "relaunched the workspace's shim"
@@ -1109,8 +1089,8 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 	// Arrange: the fake reports a build that is not the installed bundle's, so
 	// the mount finds the session on an older build.
 	f := newRegistered(t, harness.Opts{ExtraEnv: []string{"FAKESHIM_BUILD_SHA=older-build"}})
-	if _, err := f.openRaw(); err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a success", err)
+	if resp, err := f.startRaw(); err != nil || resp.GetSuccess() == nil {
+		t.Fatalf("the start = (%v, %v), want a success", resp, err)
 	}
 
 	// Assert: the stale shim was bounced onto the deployed build. The daemon's
@@ -1125,8 +1105,8 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 	}
 
 	// Act: mount again. The relaunched shim reports the SAME older build.
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("the second OpenWorkspace = error %v, want a success", err)
+	if opened, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil || opened.Msg.GetSuccess() == nil {
+		t.Fatalf("the second OpenWorkspace = (%v, %v), want a success", opened, err)
 	}
 
 	// Assert: THE BOUNCE FIRES ONCE PER STAMP. A check that did not remember
@@ -1501,14 +1481,11 @@ func TestAnswerColdGateClearEchoesExactly(t *testing.T) {
 		ContextTokens: 1, LastRequestAtMS: 1, RequestedModel: "sonnet", CacheTTLMS: 1,
 	}})
 	feed := f.watchRootFeed()
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
-	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	shim.ExpectStartSession()
+	harness.OpenAndStart(t, f.d, f.ws)
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
+	f.awaitGateShimStoodDown()
 
 	// Act
 	answered, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
@@ -1524,7 +1501,7 @@ func TestAnswerColdGateClearEchoesExactly(t *testing.T) {
 	}
 
 	// Assert: the retry echoes the clear choice exactly.
-	retry := shim.ExpectStartSession()
+	retry := f.answerShim().ExpectStartSession()
 	if retry.GetResume().GetColdRemediation().GetClear() == nil {
 		t.Fatalf("the retry's cold_remediation = %v, want {clear}", retry.GetResume().GetColdRemediation())
 	}
@@ -1543,9 +1520,7 @@ func TestKillWorkspaceLeavesTheWorktreeAndBranchIntact(t *testing.T) {
 	repo := harness.NewRepo(t)
 	dir := worktreeOf(t, repo, "kill-keep-data")
 	ws := harness.Register(t, d, dir)
-	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a success", err)
-	}
+	harness.OpenAndStart(t, d, ws)
 	shim := d.Shim(ws)
 	shim.ExpectStartSession()
 
@@ -1712,9 +1687,7 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	})
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills.
 	successor.ExpectWarnings("daemon.workspace.bring_up")
-	if _, err := successor.Client().OpenWorkspace(successor.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace on a hibernated workspace = error %v, want a success", err)
-	}
+	harness.OpenAndStart(t, successor, f.ws)
 	// The request is read from the fake's DURABLE log, which spans both shims
 	// and both daemons; the wait names the RESUME because the Arrange's own
 	// fresh StartSession is already in that log.
@@ -1758,17 +1731,20 @@ func TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted(t *testin
 	// Act: restart on the same state root and reopen.
 	successor := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills.
-	successor.ExpectWarnings("daemon.workspace.open")
-	resp, err := successor.Client().OpenWorkspace(successor.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
-
-	// Assert: the landed session_deleted arm, and nothing spawned to be
-	// refused BY (the guard reads the durable record before any process
-	// spawns, mirroring TestResumingAMissingVendorTranscriptIsRefusedBeforeSpawn).
-	if err != nil {
-		t.Fatalf("OpenWorkspace on a terminally deleted session = transport error %v, want the session_deleted arm", err)
+	successor.ExpectWarnings("daemon.workspace.restart")
+	if opened, err := successor.Client().OpenWorkspace(successor.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil || opened.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace = (%v, %v), want a success: an open starts nothing to refuse", opened, err)
 	}
-	if resp.Msg.GetError().GetSessionDeleted() == nil {
-		t.Fatalf("OpenWorkspace on a terminally deleted session = %v, want OpenWorkspaceError.session_deleted", resp.Msg)
+	resp, err := successor.Client().RestartWorkspace(successor.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
+
+	// Assert: the start is refused, and nothing spawned to be refused BY (the
+	// guard reads the durable record before any process spawns, mirroring
+	// TestResumingAMissingVendorTranscriptIsRefusedBeforeSpawn).
+	if err != nil {
+		t.Fatalf("a start of a terminally deleted session = transport error %v, want relaunch_failed", err)
+	}
+	if !strings.Contains(resp.Msg.GetError().GetRelaunchFailed().GetDetail(), "deleted") {
+		t.Fatalf("a start of a terminally deleted session = %v, want relaunch_failed naming the deletion", resp.Msg)
 	}
 	if got := successor.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != 0 {
 		t.Fatalf("shim spawn records = %d after the refusal, want 0: the guard refuses BEFORE the spawn", got)
@@ -1791,10 +1767,10 @@ func TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted(t *testin
 // together with the session. So the shim's PROCESS is killed out from under a
 // standing gate, and Fleet.ResumeCold reads the client's REAPED state before
 // touching the link.
-func TestAnswerColdGateWithNoLiveShimStandsTheGateAgain(t *testing.T) {
+func TestAnAnsweredGateWhoseReopenFailsStandsAgain(t *testing.T) {
 	t.Parallel()
-	// Arrange: stand a cold gate, then kill the shim PROCESS directly (never
-	// through KillWorkspace, which would also clear the coldGates record).
+	// Arrange: stand a cold gate, whose shim is stood down, and script the
+	// shim its answer spawns to refuse the remediated resume.
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
@@ -1810,23 +1786,14 @@ func TestAnswerColdGateWithNoLiveShimStandsTheGateAgain(t *testing.T) {
 		ContextTokens: 1, LastRequestAtMS: 1, RequestedModel: "sonnet", CacheTTLMS: 1,
 	}})
 	feed := f.watchRootFeed()
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
-		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
-	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
-	shim.ExpectStartSession()
+	harness.OpenAndStart(t, f.d, f.ws)
 	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
 		return r.GetColdGate().GetStanding() != nil
 	})
+	f.awaitGateShimStoodDown()
 	footer := f.d.WatchFooter(f.ws)
-	killShim(t, f, shim)
-	// THE DAEMON HAS REAPED THE DEATH before the answer, as the scenario
-	// needs: the process being gone is not the daemon having seen it go, and
-	// an answer racing the reap dials the dead socket instead of reading the
-	// reaped client.
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the daemon's record of the shim's death", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.shimclient.exit" && r.Level == "error"
-	})
+	// WRITTEN AFTER THE STAND-DOWN, so only the shim the answer spawns reads it.
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{VendorStartFailed: "the vendor would not start"})
 
 	// Act
 	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
@@ -1837,7 +1804,7 @@ func TestAnswerColdGateWithNoLiveShimStandsTheGateAgain(t *testing.T) {
 
 	// Assert: the answer is taken.
 	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("AnswerColdGate against a dead shim under a standing gate = (%v, %v), want success: the re-open runs after the answer", resp, err)
+		t.Fatalf("AnswerColdGate under a standing gate = (%v, %v), want success: the re-open runs after the answer", resp, err)
 	}
 	// Assert: the re-open's failure is the footer's fault line.
 	awaitFooter(t, f, footer, "the cold_gate_reopen_failed fault", func(v *frontendv1.FooterView) bool {
@@ -1942,18 +1909,18 @@ func TestAVendorStartFailureIsRelayedByNameAndNeverEscapesAsInternal(t *testing.
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{VendorStartFailed: shimDetail})
 
 	// Act
-	resp, err := f.openRaw()
+	resp, err := f.startRaw()
 
 	// Assert
 	if err != nil {
-		t.Fatalf("OpenWorkspace onto a refused vendor start = transport error %v, want the typed vendor_start_failed arm", err)
+		t.Fatalf("a start onto a refused vendor start = transport error %v, want the relaunch_failed arm", err)
 	}
-	failed := resp.GetError().GetVendorStartFailed()
+	failed := resp.GetError().GetRelaunchFailed()
 	if failed == nil {
-		t.Fatalf("OpenWorkspace = %v, want error.vendor_start_failed", resp)
+		t.Fatalf("the start = %v, want error.relaunch_failed", resp)
 	}
-	if failed.GetDetail() != shimDetail {
-		t.Fatalf("vendor_start_failed.detail = %q, want the shim's own account %q", failed.GetDetail(), shimDetail)
+	if !strings.Contains(failed.GetDetail(), shimDetail) {
+		t.Fatalf("relaunch_failed.detail = %q, want it to carry the shim's own account %q", failed.GetDetail(), shimDetail)
 	}
 }
 
@@ -1997,19 +1964,20 @@ func TestTheStartAfterARejectedVendorStartReusesItsShim(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
-	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.workspace.open")
+	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.workspace.restart")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{VendorStartRejectTimes: 1, VendorStartFailDetail: "invalid api key"})
-	if resp, err := f.openRaw(); err != nil || resp.GetError().GetVendorStartFailed() == nil {
-		t.Fatalf("OpenWorkspace = (%v, %v), want the vendor's rejection", resp, err)
+	if resp, err := f.startRaw(); err != nil || resp.GetError().GetRelaunchFailed() == nil {
+		t.Fatalf("the start = (%v, %v), want the vendor's rejection", resp, err)
 	}
 
-	// Act
-	resp, err := f.openRaw()
+	// Act: a prompt is what starts it next.
+	resp := f.submit("after the rejection", "k-after-reject", origin)
 
 	// Assert
-	if err != nil || resp.GetSuccess() == nil {
-		t.Fatalf("the second OpenWorkspace = (%v, %v), want the session up", resp, err)
+	if resp.GetError() != nil {
+		t.Fatalf("SubmitPrompt = %v, want the prompt taken", resp)
 	}
+	f.d.Shim(f.ws).ExpectStartTurn()
 	if got := f.d.Shim(f.ws).Count(harness.RPCStartSession); got != 2 {
 		t.Fatalf("StartSession calls on the one shim = %d, want the rejected one and the one that started", got)
 	}
@@ -2023,11 +1991,11 @@ func TestARestartBringsUpAWorkspaceWhoseVendorWasRejected(t *testing.T) {
 	t.Parallel()
 	// Arrange: the vendor refuses the start, so the workspace has no session.
 	f := newRegistered(t, harness.Opts{})
-	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.workspace.open",
+	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.workspace.restart",
 		"daemon.health.session", "daemon.shimclient.exit", "daemon.shimclient.redial", "daemon.shimclient.spawn")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{VendorStartFailed: "invalid api key"})
-	if resp, err := f.openRaw(); err != nil || resp.GetError().GetVendorStartFailed() == nil {
-		t.Fatalf("OpenWorkspace = (%v, %v), want the vendor's rejection", resp, err)
+	if resp, err := f.startRaw(); err != nil || resp.GetError().GetRelaunchFailed() == nil {
+		t.Fatalf("the start = (%v, %v), want the vendor's rejection", resp, err)
 	}
 	// The user fixes what the vendor refused.
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{})

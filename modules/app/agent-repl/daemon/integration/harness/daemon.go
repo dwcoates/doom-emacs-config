@@ -426,6 +426,12 @@ type Opts struct {
 	// REAL running shim-store, so shims spawned by this daemon persist and
 	// read real events.
 	StoreSocket string
+	// RealStore says the store at StoreSocket is a running shim-store, which
+	// serves its own read-only face beside the socket
+	// (storesocket.ReadPath), so the harness serves no fake one there. The
+	// e2e suite sets it; a successor daemon on its predecessor's fake store
+	// leaves it unset and shares that fake face.
+	RealStore bool
 }
 
 // Daemon is one running agent-repld process and the client dialed to it.
@@ -698,6 +704,9 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	}
 	if d.StoreSocket == "" {
 		d.StoreSocket = filepath.Join(sockRoot, "store.sock")
+	}
+	if !opts.RealStore {
+		serveFakeStore(t, d.StoreSocket)
 	}
 	// THE COVERAGE TEARDOWN IS REGISTERED FIRST, SO IT RUNS LAST. A coverage
 	// run has to let the daemon leave through SIGTERM — a SIGKILLed process
@@ -1911,6 +1920,29 @@ func Register(t testing.TB, d *Daemon, dir string) *workspacev1.WorkspaceRef {
 		}
 	}
 	return ref
+}
+
+// OpenAndStart opens ws and starts its session. AN OPEN STARTS NO SHIM (owner
+// ruling, 2026-10-28), and a restart with no shim up starts one at once, so a
+// test that needs ws's shim up asks for both, as the user would by opening
+// the workspace and restarting it.
+func OpenAndStart(t testing.TB, d *Daemon, ws *workspacev1.WorkspaceRef) {
+	t.Helper()
+	opened, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
+	if err != nil || opened.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace = (%v, %v), want a success", opened, err)
+	}
+	StartSession(t, d, ws)
+}
+
+// StartSession starts ws's session through the restart verb, which starts one
+// at once when no shim is up, and requires its success.
+func StartSession(t testing.TB, d *Daemon, ws *workspacev1.WorkspaceRef) {
+	t.Helper()
+	resp, err := d.Client().RestartWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: ws}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("RestartWorkspace = (%v, %v), want a success", resp, err)
+	}
 }
 
 // SocketPath is the per-workspace shim UDS the daemon spawns against.

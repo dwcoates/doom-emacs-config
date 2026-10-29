@@ -35,7 +35,9 @@
 //     (AwaitingBringUp). An expected step, never a fault (owner ruling,
 //     2026-10-13): GREY, and the composer stays open. It keeps the place the
 //     bring-up held inside agent_repl_fault, so only a real fault outranks
-//     it. Skipped while PARKED, as the link is.
+//     it. It STANDS WHILE PARKED (owner ruling, 2026-10-28: every shim start
+//     shows): a parked session coming back, for a keep-alive or a prompt,
+//     is booting, and its dialing link is what claims the rung.
 //  4. network_fault     this machine cannot reach the network, as the shim
 //     tells it apart from an answer the vendor gave. Skipped while PARKED: a
 //     parked session asks nothing of the network.
@@ -201,7 +203,7 @@ func Resolve[T any](merge string, parked bool, probe func(Claim) (T, bool), idle
 			if claim != standing {
 				continue
 			}
-		case AgentReplFault, Starting, NetworkFault, Degraded:
+		case AgentReplFault, NetworkFault, Degraded:
 			if parked {
 				continue
 			}

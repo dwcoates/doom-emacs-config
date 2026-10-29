@@ -1861,9 +1861,12 @@ func TestCreateReopensAClosedOwnerThatIsToLandTheChild(t *testing.T) {
 			}
 
 			// Assert.
-			opened := slices.Contains(f.fleet.started, owner.ID)
+			opened := slices.Contains(f.db.reopened, owner.ID)
 			if opened != tc.wantOpen {
-				t.Fatalf("owner started = %v (sessions started %v), want %v", opened, f.fleet.started, tc.wantOpen)
+				t.Fatalf("owner reopened = %v (reopened %v), want %v", opened, f.db.reopened, tc.wantOpen)
+			}
+			if slices.Contains(f.fleet.started, owner.ID) {
+				t.Fatalf("sessions started %v, want the owner's shim left for a prompt", f.fleet.started)
 			}
 		})
 	}
@@ -1874,7 +1877,7 @@ func TestCreateFailsWhenTheOwnerItMustReopenWillNotOpen(t *testing.T) {
 	f, spec, owner, _ := derivationFixture(t)
 	owner.Closed = true
 	f.db.with(owner)
-	f.fleet.startErr = errors.New("shim would not spawn")
+	f.db.setClosedErr = errors.New("sql: database is locked")
 	id := owner.ID
 	spec.Parent, spec.OwnerNotice = &id, "the owner lands this child"
 
@@ -2405,6 +2408,39 @@ func TestCreateAsksToGatherOnlyWithEnoughUnsectionedWorkspaces(t *testing.T) {
 			// Assert.
 			if got := strings.Contains(sentText(f), "PLACE"); got != tt.want {
 				t.Fatalf("placement note sent = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCreateStartsAShimOnlyForAPrompt pins the owner ruling of 2026-10-28: a
+// workspace created with no initial prompt starts no shim; one created with a
+// prompt starts its session to take it.
+func TestCreateStartsAShimOnlyForAPrompt(t *testing.T) {
+	cases := []struct {
+		name        string
+		spec        func(t *testing.T, f *fixture) CreateSpec
+		wantStarted bool
+	}{
+		{name: "no initial prompt starts nothing", spec: func(t *testing.T, f *fixture) CreateSpec {
+			return CreateSpec{RepoDir: mainWorktree(t, f), Name: "promptless"}
+		}},
+		{name: "an initial prompt starts the session", spec: standardSpec, wantStarted: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+
+			// Act.
+			created, err := f.verbs.Create(context.Background(), tc.spec(t, f))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			if started := slices.Contains(f.fleet.started, created.ID); started != tc.wantStarted {
+				t.Fatalf("started = %v, want the created workspace started: %v", f.fleet.started, tc.wantStarted)
 			}
 		})
 	}

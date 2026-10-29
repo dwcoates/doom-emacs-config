@@ -34,7 +34,6 @@ import {
   validateSendKeepaliveRequest,
   validateKillSessionRequest,
   validateKillTurnRequest,
-  validateReadHistoryRequest,
   validateReadTranscriptsRequest,
   validateResolvePeerDeliveryRequest,
   validateResolveVendorTaskRequest,
@@ -320,18 +319,11 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         throw unimplemented("StopWorkflow");
       },
 
-      // ---- History ----
-
-      async readHistory(request) {
-        entered("ReadHistory");
-        validateReadHistoryRequest(request);
-        return answering("ReadHistory", () => engine.readHistory(request));
-      },
+      // ---- Reads ----
 
       /**
-       * Every conversation filed under this shim's working directory. It sits
-       * beside ReadHistory because it is the same kind of verb: a READ of
-       * what is already on disk, costing no query and no model call.
+       * Every conversation filed under this shim's working directory: a READ
+       * of what is already on disk, costing no query and no model call.
        */
       async readTranscripts(request) {
         entered("ReadTranscripts");
@@ -341,7 +333,7 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
 
       /**
        * Which session received one cross-session message. A READ of the host's
-       * one store, like ReadHistory, and answerable by any running shim.
+       * one store, answerable by any running shim.
        */
       async resolvePeerDelivery(request) {
         entered("ResolvePeerDelivery");

@@ -144,9 +144,9 @@ Each entry says what was decided, why, and what it departs from.
   workspace.
 - Every restart the daemon runs or sees end is timed: deploys and their
   phases, the daemon's boot, store and sidecar restarts, each workspace's
-  session start, shim replacements and handover transfers. A workspace an
-  editor's opening starts is timed as `workspace_start{cause="editor_open"}`,
-  which covers the workspaces an Emacs relaunch brings back.
+  session start, shim replacements and handover transfers. An editor's
+  opening starts no session (owner ruling, 2026-10-28), so an Emacs relaunch
+  times nothing here.
 - Emacs's own launch and a deploy's `reload_elisp` end inside Emacs, which
   reports nothing yet (call 8). Timing them needs Emacs's encoder for
   `ReportLatencies` and new kinds, a contract change left for when a restart

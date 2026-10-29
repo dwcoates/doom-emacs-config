@@ -311,6 +311,20 @@ func (q *queue) dropLocked(ctx context.Context, d *delivery, held wsm.HeldPrompt
 // caller's defect from sending an edited prompt anyway. Every call it makes
 // -- the revival, the delivery itself -- is made with the lock released and
 // claims the hold while it stands (call.go).
+// holdAtStandingGate puts TURN back on the cold-gate hold when a cold gate
+// stands on WS, answering whether one did.
+func (q *queue) holdAtStandingGate(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, log dlog.Logger) (bool, error) {
+	kind, why, waiting := q.sessionWait(ws)
+	if !waiting || kind != wsm.HoldColdGate {
+		return false, nil
+	}
+	log.Info(opDeliver, "the session is parked at its cold gate; the entry is held until the gate is answered", dlog.Context{"why": why})
+	if err := q.reholdForSession(ctx, ws, turn, kind, log); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
 func (q *queue) deliverHeld(ctx context.Context, d *delivery, held wsm.HeldPrompt, log dlog.Logger) (bool, error) {
 	ws := d.ws
 	if q.withheldByEdit(ws, held) {
@@ -319,6 +333,14 @@ func (q *queue) deliverHeld(ctx context.Context, d *delivery, held wsm.HeldPromp
 			"remediation":         "filter withheldByEdit under the delivery lock before delivering",
 		})
 		return false, errDeliveryBehindEdit
+	}
+	// A SESSION PARKED AT ITS COLD GATE IS HANDED NOTHING, and the entry is
+	// not an error: the gate's answer is the session-up edge that delivers it,
+	// and the gate runs no shim until then (owner ruling, 2026-10-27), so it is
+	// read before any client is looked for. The entry goes back on the
+	// cold-gate hold, never left standing with no hold (2026-10-10).
+	if parked, err := q.holdAtStandingGate(ctx, ws, held.Turn, log); parked || err != nil {
+		return false, err
 	}
 	sender, ok := q.deps.Client(ws)
 	if !ok {
@@ -331,7 +353,7 @@ func (q *queue) deliverHeld(ctx context.Context, d *delivery, held wsm.HeldPromp
 		var revived bool
 		var err error
 		d.outside(shimCall{what: "revival", turn: held.Turn, holds: []ids.TurnID{held.Turn}}, log, func() {
-			revived, err = q.revive(ctx, ws, log)
+			revived, err = q.revive(ctx, ws, revivalLoad, log)
 		})
 		if err != nil {
 			return false, err
@@ -340,22 +362,14 @@ func (q *queue) deliverHeld(ctx context.Context, d *delivery, held wsm.HeldPromp
 			log.Warn(opDeliver, "the workspace has no session to deliver the hold to", nil)
 			return false, q.undelivered(ctx, ws, held.Turn, wsm.HoldReconnect, ErrNoSession, log)
 		}
+		// THE REVIVAL MAY HAVE PARKED AT THE GATE, which leaves no shim.
+		if parked, err := q.holdAtStandingGate(ctx, ws, held.Turn, log); parked || err != nil {
+			return false, err
+		}
 		if sender, ok = q.deps.Client(ws); !ok {
 			log.Error(opDeliver, "the revived workspace still has no session to deliver the hold to", nil)
 			return false, q.undelivered(ctx, ws, held.Turn, wsm.HoldReconnect, ErrNoSession, log)
 		}
-	}
-	// A SESSION PARKED AT ITS COLD GATE IS HANDED NOTHING, and the entry is
-	// not an error: a revival above (or before this delivery) parked it, and
-	// the gate's answer is the session-up edge that delivers it. The entry goes
-	// back on the cold-gate hold, never left standing with no hold
-	// (2026-10-10).
-	if kind, why, waiting := q.sessionWait(ws); waiting && kind == wsm.HoldColdGate {
-		log.Info(opDeliver, "the session is parked at its cold gate; the entry is held until the gate is answered", dlog.Context{"why": why})
-		if err := q.reholdForSession(ctx, ws, held.Turn, kind, log); err != nil {
-			return false, err
-		}
-		return false, nil
 	}
 	watcher, ok := q.deps.Watcher(ws)
 	if !ok {

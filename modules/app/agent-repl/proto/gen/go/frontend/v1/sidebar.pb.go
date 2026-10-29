@@ -2793,19 +2793,14 @@ func (*RosterRowIdleAsyncUnread_Interrupted) isRosterRowIdleAsyncUnread_TurnEnd(
 
 func (*RosterRowIdleAsyncUnread_TurnFailed) isRosterRowIdleAsyncUnread_TurnEnd() {}
 
-// The REVIVING marker: this workspace's parked (hibernated) session is being
-// brought back up right now. Empty: presence is the fact.
+// The REVIVING marker: this workspace's shim is LOADING right now (owner
+// ruling, 2026-10-28): a prompt, a keep-alive, a cold gate's answer, a boot,
+// a restart or a relaunch is bringing it up. Empty: presence is the fact.
 //
-// PRESENT from the instant the daemon decides to revive a parked workspace —
-// a SelectWorkspace naming it, which has ALREADY made the selection current
-// and pushed it — until that revival ends, whether it succeeded or failed.
-// Every push after the revival ends omits it. A failed revival is reported to
-// the caller that asked for it as that rpc's error; the marker only ever says
-// "underway", never how it went.
-//
-// ONE REVIVAL PER WORKSPACE AT A TIME: a second select arriving while one is
-// in flight joins it rather than starting another, so the marker has exactly
-// one start and one end per bring-up.
+// PRESENT from the bring-up's first step until its last (the fleet's steps,
+// opentabs.Step Begins and Ends), whether it succeeded or failed; it says
+// "underway", never how it went. One bring-up runs per workspace at a time,
+// so the marker has exactly one start and one end per bring-up.
 //
 // It is NOT a status arm and says nothing the `status` oneof says: the dot
 // keeps whatever the lifecycle resolves to, the viewed marker is not cleared

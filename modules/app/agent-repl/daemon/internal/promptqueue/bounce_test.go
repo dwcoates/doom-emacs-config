@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/shimlife"
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/wsm"
 )
@@ -1063,6 +1064,64 @@ func TestADeathWithNoBounceIsRecordedAtInfo(t *testing.T) {
 	// Assert
 	if !logged(h.log.Records(), "info", opRevive, "the shim died on its own; its session is brought back now") {
 		t.Fatalf("records = %+v, want the INFO revival record", h.log.Records())
+	}
+}
+
+// TestADeathsRevivalIsARelaunchForTheHeldSection pins the owner ruling of
+// 2026-10-28: the prompts held while a shim that died is relaunched read
+// "after reconnect", for exactly as long as the relaunch runs.
+func TestADeathsRevivalIsARelaunchForTheHeldSection(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	dieAndRevive(h, departedUnasked)
+
+	// Assert
+	if got := h.holds.relaunchMarks(); len(got) != 2 || !got[0] || got[1] {
+		t.Fatalf("relaunch marks = %v, want raised for the revival and lowered after it", got)
+	}
+}
+
+func TestARevivalStatesItsStartsCause(t *testing.T) {
+	tests := []struct {
+		name  string
+		cause revivalCause
+		want  shimlife.StartCause
+	}{
+		{name: "a prompt's revival", cause: revivalLoad, want: shimlife.StartPrompt},
+		{name: "a dead shim's relaunch", cause: revivalRelaunch, want: shimlife.StartRelaunch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.noSession = true
+
+			// Act
+			h.q.reviveInBackground(context.Background(), "ws-1", tt.cause, h.log.Global())
+			h.waitRevivals()
+
+			// Assert
+			if len(h.reviveCauses) != 1 || h.reviveCauses[0] != tt.want {
+				t.Fatalf("revival causes = %v, want [%s]", h.reviveCauses, tt.want)
+			}
+		})
+	}
+}
+
+func TestAPromptsRevivalIsNoRelaunch(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+
+	// Act
+	h.q.reviveInBackground(context.Background(), "ws-1", revivalLoad, h.log.Global())
+	h.waitRevivals()
+
+	// Assert
+	if got := h.holds.relaunchMarks(); len(got) != 0 {
+		t.Fatalf("relaunch marks = %v, want none for a load", got)
 	}
 }
 

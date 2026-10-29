@@ -467,36 +467,6 @@ export function watchAgentRequest(
   });
 }
 
-/** A ReadHistory request positioned at the newest page. */
-export function readHistoryFirst(init: { readonly target?: conversationv1.AgentId } = {}): shimv1.ReadHistoryRequest {
-  return create(shimv1.ReadHistoryRequestSchema, {
-    ...(init.target === undefined ? {} : { target: init.target }),
-    position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
-  });
-}
-
-/** A ReadHistory request walking older than `after`. */
-export function readHistoryAfter(
-  after: conversationv1.HistoryPointer,
-  init: { readonly target?: conversationv1.AgentId } = {},
-): shimv1.ReadHistoryRequest {
-  return create(shimv1.ReadHistoryRequestSchema, {
-    ...(init.target === undefined ? {} : { target: init.target }),
-    position: { case: "after", value: after },
-  });
-}
-
-/** `ReadHistory{through}`: the book as it stood at an instant. */
-export function readHistoryThrough(
-  atMs: bigint,
-  init: { readonly target?: conversationv1.AgentId } = {},
-): shimv1.ReadHistoryRequest {
-  return create(shimv1.ReadHistoryRequestSchema, {
-    ...(init.target === undefined ? {} : { target: init.target }),
-    position: { case: "through", value: create(conversationv1.ConversationThroughSchema, { atMs }) },
-  });
-}
-
 /** `UpdateAgent{stop}`. */
 export function stopAgent(target?: conversationv1.AgentId): shimv1.UpdateAgentRequest {
   return create(shimv1.UpdateAgentRequestSchema, {

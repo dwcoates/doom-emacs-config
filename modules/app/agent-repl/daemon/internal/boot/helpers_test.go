@@ -519,6 +519,22 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 // register puts one workspace in the registry and scripts its lock state.
 func (h *harness) register(t *testing.T, dir string, state sessionlock.State) wsm.Workspace {
 	t.Helper()
+	ws := h.registerNeverStarted(t, dir, state)
+	// ITS SHIM WAS UP WHEN THE LAST DAEMON STOPPED: a session on record with
+	// no terminal, which is what a boot brings back (bringup.OnlyWasUp). A test
+	// of a parked, killed or never-started workspace says so itself.
+	if err := h.db.PutSession(context.Background(), wsm.Session{
+		Workspace: ws.ID, HostSessionID: "host-" + string(ws.ID), VendorSessionID: "vendor-" + string(ws.ID), StartedAt: instant,
+	}); err != nil {
+		t.Fatalf("PutSession(%s): %v", ws.ID, err)
+	}
+	return ws
+}
+
+// registerNeverStarted registers a workspace at DIR whose session never
+// started: no session is on record.
+func (h *harness) registerNeverStarted(t *testing.T, dir string, state sessionlock.State) wsm.Workspace {
+	t.Helper()
 	h.registerMain(t, h.repoDir)
 	ws, _, err := h.db.RegisterWorkspace(context.Background(), dir, wsm.RegisterFacts{Branch: "feature", ParentBranch: "master", RepoDir: h.repoDir, DefaultBranch: "master"})
 	if err != nil {

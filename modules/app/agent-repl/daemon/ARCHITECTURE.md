@@ -267,7 +267,7 @@ type Client interface {
   // verbs (all lease-checked by callers; the client only guards occupancy)
   StartSession(ctx, *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error)
   WatchSession(ctx) (Stream[*shimv1.WatchSessionResponse], error)  // frame oneof: update | session_started (re-announced once per watch)
-  SetSessionModel / SetSessionPermissionMode / SetSessionEffort / Hibernate / KillSession / StartTurn / UpdateAgent / KillTurn / StopBash / DetachForeground / ReadHistory
+  SetSessionModel / SetSessionPermissionMode / SetSessionEffort / Hibernate / KillSession / StartTurn / UpdateAgent / KillTurn / StopBash / DetachForeground
   WatchAgent(ctx, *shimv1.WatchAgentRequest) (Stream[*shimv1.WatchAgentResponse], error)
   WatchBash(ctx, work *conversationv1.DetachedWorkId) (Stream[*conversationv1.AgentBash], error)
   // occupancy: the in-memory guard behind the WSM lease row

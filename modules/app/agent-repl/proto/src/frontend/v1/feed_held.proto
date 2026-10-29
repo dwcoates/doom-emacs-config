@@ -170,10 +170,15 @@ message HeldPrompt {
     // The daemon is draining toward a scheduled shutdown and is not admitting
     // new work.
     HeldPromptShutdownHold shutdown = 9;
-    // The session is not up — coming up, being retried, or down until a
-    // restart — or the vendor refuses it mid-session, and the prompt waits
-    // for it to reconnect or for the vendor to serve again.
+    // The workspace's shim DIED and is being relaunched, or the vendor
+    // refuses the session mid-session, and the prompt waits for it to
+    // reconnect or for the vendor to serve again ("after reconnect").
     HeldPromptReconnectHold reconnect = 11;
+    // The workspace's shim is LOADING (owner ruling, 2026-10-28): a prompt, a
+    // keep-alive, a cold gate's answer, a boot or a restart is bringing it
+    // up, and the prompt is sent once it is ("after loading"). A shim that
+    // died is `reconnect` instead.
+    HeldPromptLoadingHold loading = 27;
     // The session's build is being refreshed onto a newer one before it takes
     // more work.
     HeldPromptBuildRefreshHold build_refresh = 12;
@@ -323,6 +328,8 @@ message HeldPromptBadge {
     HeldPromptBadgeBuildRefresh build_refresh = 11;
     // Held until the session reconnects or the vendor serves again.
     HeldPromptBadgeReconnect reconnect = 12;
+    // Held until the session finishes loading.
+    HeldPromptBadgeLoading loading = 17;
     // Held while a merge of the workspace drives its session.
     HeldPromptBadgeMerge merge = 13;
     // Held until the user answers the session's cold gate.
@@ -353,6 +360,8 @@ message HeldPromptBadgeShutdown {}
 message HeldPromptBadgeBuildRefresh {}
 // The badge shows the reconnect hold.
 message HeldPromptBadgeReconnect {}
+// The badge shows the loading hold.
+message HeldPromptBadgeLoading {}
 // The badge shows the merge hold.
 message HeldPromptBadgeMerge {}
 // The badge shows the cold-gate hold.
@@ -479,6 +488,10 @@ message HeldPromptShutdownHold {
 // workspace's held section, so naming a session here would join the entry to nothing
 // the client could not already reach.
 message HeldPromptReconnectHold {}
+
+// Held because the workspace's shim is loading: no session is up yet, and the
+// prompt is sent once one is. DELIBERATELY EMPTY, as the reconnect hold is.
+message HeldPromptLoadingHold {}
 
 // Held because a merge of this workspace is in flight: the merge drives the
 // session, so nothing the user submits reaches it until the merge ends. The

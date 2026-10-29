@@ -592,47 +592,6 @@ describe("detachForegroundDetached", () => {
   });
 });
 
-describe("readHistoryFailure", () => {
-  it.each([["unknownAgent"], ["stalePointer"], ["storeUnavailable"]] as const)(
-    "states the %s arm",
-    (kind) => {
-      // Arrange, Act.
-      const failure = failures.readHistoryFailure({ kind }, "why");
-
-      // Assert.
-      expect(failure.kind.case).toBe(kind);
-    },
-  );
-});
-
-describe("readHistoryRefused", () => {
-  it("wraps the failure as the response's failure arm", () => {
-    // Arrange, Act.
-    const response = failures.readHistoryRefused({ kind: "storeUnavailable" }, "store down");
-
-    // Assert.
-    expect(response.result.case).toBe("failure");
-  });
-});
-
-describe("readHistoryPage", () => {
-  it("returns the page as the response's success arm", () => {
-    // Arrange.
-    const page = create(conversationv1.HistoryPageSchema, {
-      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
-    });
-
-    // Act.
-    const response = failures.readHistoryPage(page);
-
-    // Assert.
-    expect(response.result).toEqual({
-      case: "success",
-      value: containing({ page }),
-    });
-  });
-});
-
 describe("sessionFault", () => {
   it.each([
     ["storeUnreachable"],

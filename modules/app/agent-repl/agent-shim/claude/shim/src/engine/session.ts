@@ -620,8 +620,6 @@ const MODEL_CATALOG_COMPONENT = "vendor-model-catalog";
 const COMMAND_CATALOG_COMPONENT = "vendor-command-catalog";
 /** Reading the record's open obligations: transient, recovered by any later read. */
 const LIVE_WORK_COMPONENT = "store-live-work";
-/** Serving history out of the store: transient, recovered by the next served read. */
-const HISTORY_READ_COMPONENT = "shim-store-reader";
 /** The shim's own keep-alive prompt: transient, recovered by the next beat. */
 const KEEPALIVE_COMPONENT = "shim-engine-keepalive";
 
@@ -6804,10 +6802,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     noteUserDetach: (toolUseId) => deps.fold.noteUserDetach(toolUseId),
     retireUserDetach: (toolUseId, why) => deps.fold.retireUserDetach(toolUseId, why),
     identity: () => identity,
-    persistedAgent: async () => {
-      const persisted = await identityStore.read();
-      return persisted === undefined ? undefined : mainAgentId(persisted);
-    },
     query: () => query,
     nowMs: deps.nowMs,
     openTurn: () => open,
@@ -6832,16 +6826,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         { turn_id: turn.value, command: command?.command.case ?? "unstated" },
         "holding the stop's command for the stopped turn's terminal",
       );
-    },
-    reportStoreUnreachable: (detail) => {
-      pushes.fault(sessionFault({ kind: "storeUnreachable" }, HISTORY_READ_COMPONENT, detail));
-    },
-    // THE SERVED READ IS THE RECOVERY. Without a counterpart to the refusal
-    // above, one history read that met a busy database made the session
-    // unhealthy for as long as the shim lived, however many reads it served
-    // afterwards.
-    reportStoreReadable: () => {
-      pushes.resolveComponent(HISTORY_READ_COMPONENT, 0);
     },
     watcherOpened: (agent, page) => {
       let settle: () => void = () => undefined;
@@ -7917,10 +7901,26 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
   }
 
+  /**
+   * THE WORKSPACE'S BOOK, NAMED ON EVERY StartSession ANSWER
+   * (shim.v1.StartSessionResponse.book): the started session's main agent, or
+   * the identity this workspace persisted when no session settled one (a cold
+   * gate, a vendor that would not start). The daemon records it and reads the
+   * workspace's history from the store with it, so it never needs this shim up
+   * to show the conversation. A workspace that never settled an identity names
+   * none.
+   */
+  async function statingBook(response: shimv1.StartSessionResponse): Promise<shimv1.StartSessionResponse> {
+    const persisted = identity === undefined ? await identityStore.read() : undefined;
+    const book = identity?.agentId ?? (persisted === undefined ? undefined : mainAgentId(persisted));
+    if (book !== undefined) response.book = book;
+    return response;
+  }
+
   const engine: SessionEngine = {
     pushes,
     onSdkMessage,
-    startSession,
+    startSession: async (request) => statingBook(await startSession(request)),
     // `subscribe()` runs EAGERLY here, at the open, not at the consumer's first
     // pull: the diagnostics frame is seeded into the subscriber's queue by that
     // call, and a generator that only subscribed on first `next()` would leave
@@ -7949,7 +7949,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     watchBash: (request) => turns.watchBash(request),
     stopBash: afterRestart((request: shimv1.StopBashRequest) => turns.stopBash(request)),
     detachForeground: afterRestart((request: shimv1.DetachForegroundRequest) => turns.detachForeground(request)),
-    readHistory: (request) => turns.readHistory(request),
     readTranscripts: () => Promise.resolve(readTranscriptsHere()),
     resolvePeerDelivery: (request) => resolvePeerDeliveryHere(request),
     resolveVendorTask: (request) => resolveVendorTaskHere(request),

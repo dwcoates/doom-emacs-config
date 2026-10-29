@@ -21,22 +21,38 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-func TestOpenStartsTheSession(t *testing.T) {
-	// Arrange: mounting a parked workspace IS an implicit revival.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-
-	// Act.
-	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
-		t.Fatalf("Open: %v", err)
+// TestOpenStartsNoShim pins the owner ruling of 2026-10-28: opening a
+// workspace starts no shim, whatever its session's state; the next prompt
+// does.
+func TestOpenStartsNoShim(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, f *fixture)
+	}{
+		{name: "an open workspace with no session", arrange: func(t *testing.T, f *fixture) { f.workspace("w1", t.TempDir()) }},
+		{name: "a hibernated workspace", arrange: func(t *testing.T, f *fixture) {
+			f.workspace("w1", t.TempDir())
+			f.hibernate("w1")
+		}},
+		{name: "a restored worktree", arrange: func(t *testing.T, f *fixture) { withBranch(f, goneWorkspace(t, f)) }},
+		{name: "a reopened merged workspace", arrange: func(t *testing.T, f *fixture) { mergedWorkspace(t, f) }},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			tc.arrange(t, f)
 
-	// Assert.
-	if len(f.fleet.started) != 1 {
-		t.Fatalf("sessions started = %d, want exactly one", len(f.fleet.started))
+			// Act.
+			err := f.verbs.Open(context.Background(), "w1", nil)
+
+			// Assert.
+			if err != nil || len(f.fleet.started) != 0 || len(f.fleet.startCalls) != 0 {
+				t.Fatalf("Open = %v after starts %v; want the open and no start", err, f.fleet.startCalls)
+			}
+		})
 	}
 }
-
 func TestOpenIsIdempotentWhenTheSessionIsAlreadyLive(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -203,21 +219,6 @@ func TestOpenSurvivesAFailedBuildStalenessCheck(t *testing.T) {
 	}
 }
 
-func TestOpenSurfacesABringUpFailure(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.fleet.startErr = errors.New("the shim exited during bring-up")
-
-	// Act.
-	err := f.verbs.Open(context.Background(), "w1", nil)
-
-	// Assert.
-	if err == nil {
-		t.Fatal("Open() = nil error, want the bring-up failure surfaced")
-	}
-}
-
 func TestOpenRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -258,23 +259,6 @@ func TestOpenRestoresAGoneWorktreeFromItsBranch(t *testing.T) {
 	want := restoredWorktree{RepoDir: filepath.Dir(ws.Dir), WorktreeDir: ws.Dir, Branch: ws.Branch}
 	if len(f.git.restored) != 1 || f.git.restored[0] != want {
 		t.Fatalf("restored = %+v, want exactly %+v", f.git.restored, want)
-	}
-}
-
-func TestOpenStartsTheSessionInARestoredWorktree(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	ws := goneWorkspace(t, f)
-	withBranch(f, ws)
-
-	// Act.
-	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-
-	// Assert.
-	if len(f.fleet.started) != 1 {
-		t.Fatalf("sessions started = %d, want the restored workspace's session", len(f.fleet.started))
 	}
 }
 
@@ -400,7 +384,7 @@ func TestOpenRecordsTheRestoreAtInfoWithItsDirectoryAndBranch(t *testing.T) {
 	t.Fatalf("no INFO record of the restore; records = %+v", f.log.logger.Records())
 }
 
-func TestOpenReportsTheRestoreStageBetweenTheCheckAndTheBringUp(t *testing.T) {
+func TestOpenReportsTheRestoreStageAfterTheCheck(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	ws := goneWorkspace(t, f)
@@ -413,7 +397,7 @@ func TestOpenReportsTheRestoreStageBetweenTheCheckAndTheBringUp(t *testing.T) {
 	}
 
 	// Assert.
-	want := []OpenStage{OpenStageCheckingWorktree, OpenStageRestoringWorktree, OpenStageStartingSession, OpenStageCheckingBuild}
+	want := []OpenStage{OpenStageCheckingWorktree, OpenStageRestoringWorktree, OpenStageCheckingBuild}
 	if len(progress.stages) != len(want) {
 		t.Fatalf("stages = %v, want %v", progress.stages, want)
 	}
@@ -758,7 +742,7 @@ func TestCloseBlockerReportsAQueuedMergeBehindALeadingBlocker(t *testing.T) {
 	}
 }
 
-func TestOpenRevivesAndUnparksAHibernatedWorkspace(t *testing.T) {
+func TestOpenLeavesAHibernatedWorkspacesParkDrawn(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
@@ -770,14 +754,10 @@ func TestOpenRevivesAndUnparksAHibernatedWorkspace(t *testing.T) {
 	}
 
 	// Assert.
-	if len(f.fleet.started) != 1 || f.fleet.started[0] != "w1" {
-		t.Fatalf("started = %v, want [w1]", f.fleet.started)
-	}
-	if len(f.topbarParked) != 1 || f.topbarParked[0] {
-		t.Fatalf("topbar parked = %v, want the park lifted", f.topbarParked)
+	if len(f.topbarParked) != 0 {
+		t.Fatalf("topbar park edges = %v, want the park left as it is", f.topbarParked)
 	}
 }
-
 func TestOpenLiftsNoParkFromAWorkspaceThatWasNotAsleep(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
@@ -814,17 +794,6 @@ func TestOpenReportsItsStagesInOrder(t *testing.T) {
 			setup: func(*testing.T, *fixture) {},
 			want: []OpenStage{
 				OpenStageCheckingWorktree,
-				OpenStageStartingSession,
-				OpenStageCheckingBuild,
-			},
-		},
-		{
-			name:  "a hibernated workspace also reports the revival",
-			setup: func(_ *testing.T, f *fixture) { f.hibernate("w1") },
-			want: []OpenStage{
-				OpenStageCheckingWorktree,
-				OpenStageStartingSession,
-				OpenStageReviving,
 				OpenStageCheckingBuild,
 			},
 		},
@@ -837,16 +806,7 @@ func TestOpenReportsItsStagesInOrder(t *testing.T) {
 			},
 			want: []OpenStage{
 				OpenStageCheckingWorktree,
-				OpenStageStartingSession,
 				OpenStageClearingClosed,
-				OpenStageCheckingBuild,
-			},
-		},
-		{
-			name:  "an already-live session skips the bring-up stage",
-			setup: func(_ *testing.T, f *fixture) { f.fleet.live["w1"] = true },
-			want: []OpenStage{
-				OpenStageCheckingWorktree,
 				OpenStageCheckingBuild,
 			},
 		},
@@ -895,26 +855,6 @@ func TestOpenReportsTheWorktreeCheckBeforeRefusingAMissingDirectory(t *testing.T
 	}
 	if len(progress.stages) != 1 || progress.stages[0] != OpenStageCheckingWorktree {
 		t.Fatalf("stages = %v, want only the worktree check", progress.stages)
-	}
-}
-
-func TestOpenReportsNoStageAfterAFailedBringUp(t *testing.T) {
-	// Arrange: a ladder must not advance past the stage that failed.
-	f := newFixture(t)
-	f.workspace("w1", t.TempDir())
-	f.fleet.startErr = errors.New("the shim would not spawn")
-	progress := &recordingOpenProgress{}
-
-	// Act.
-	err := f.verbs.Open(context.Background(), "w1", progress)
-
-	// Assert.
-	if err == nil {
-		t.Fatalf("Open: want the bring-up failure")
-	}
-	last := progress.stages[len(progress.stages)-1]
-	if last != OpenStageStartingSession {
-		t.Fatalf("stages = %v, want the last to be the bring-up", progress.stages)
 	}
 }
 
@@ -1100,22 +1040,6 @@ func TestOpenRestoresAMergedWorkspaceFromItsBranch(t *testing.T) {
 	want := restoredWorktree{RepoDir: filepath.Dir(ws.Dir), WorktreeDir: ws.Dir, Branch: ws.Branch}
 	if len(f.git.restored) != 1 || f.git.restored[0] != want {
 		t.Fatalf("restored = %+v, want exactly %+v", f.git.restored, want)
-	}
-}
-
-func TestOpenStartsTheSessionOfAReopenedMergedWorkspace(t *testing.T) {
-	// Arrange.
-	f := newFixture(t)
-	mergedWorkspace(t, f)
-
-	// Act.
-	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-
-	// Assert.
-	if len(f.fleet.started) != 1 {
-		t.Fatalf("sessions started = %d, want the reopened merged workspace's session", len(f.fleet.started))
 	}
 }
 

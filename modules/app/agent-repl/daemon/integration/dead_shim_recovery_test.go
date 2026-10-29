@@ -396,8 +396,9 @@ func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 	}
 	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
 	// The store's book as the resumed shim serves it: the cut turn's prompt,
-	// and no terminal, because none was ever written.
-	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
+	// and no terminal, because none was ever written. The store holds it
+	// before the successor boots, as the real store does.
+	resumed := harness.ShimProfile{
 		ResumeHistory: harness.EncodeHistory(t, &conversationv1.HistoryEntry{
 			Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: &conversationv1.AgentPrompt{
 				Id:     &conversationv1.TurnId{Value: cut},
@@ -406,7 +407,9 @@ func TestATurnCutBeforeABootReplaysAsEnded(t *testing.T) {
 				Said:   said(cutText),
 			}},
 		}),
-	})
+	}
+	f.d.WriteShimProfile(f.repo.Dir, resumed)
+	f.d.KeepResumedBook(f.ws.GetId(), resumed)
 
 	// Act: a successor boots on the same machine.
 	successor := harness.StartDaemon(t, f.d.SuccessorOpts())

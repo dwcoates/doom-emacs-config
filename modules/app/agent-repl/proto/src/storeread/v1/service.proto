@@ -1,0 +1,37 @@
+// service.proto — storeread.v1's Connect service: the store as the daemon sees
+// it. Every rpc signature, in commented sections, one endpoint_<rpc>.proto per
+// rpc.
+//
+// ================================ READ-ONLY ================================
+//
+// THE DAEMON'S RELATIONSHIP WITH THE STORE IS READ-ONLY, AND THIS PACKAGE IS
+// WHERE THAT IS ENFORCED. It declares no write verb and imports nothing from
+// store.v1, so neither a write request nor a storage type can reach the
+// daemon through it; the proto build's isolation gate
+// (scripts/check-conversation-isolation.sh) refuses a file here that imports
+// anything but conversation.v1. The store serves this service on a socket of
+// its own, from a handler holding only its read-only pool, so a client on that
+// socket cannot write whatever it sends.
+//
+// A verb that would change the store does NOT belong here, ever: a producer
+// writes through store.v1.WriteBatch, and the store's retention is its own.
+//
+// ==========================================================================
+
+syntax = "proto3";
+
+package storeread.v1;
+
+import "storeread/v1/endpoint_read_history_page.proto";
+
+option go_package = "agentrepl/proto/storeread/v1;storereadv1";
+
+// The store's read-only face: what a reader other than the store's producers
+// may ask of it.
+service StoreRead {
+  // ---- Conversation history: the pages a feed draws ----
+
+  // One page of one agent's book: its newest page, the page below a served
+  // pointer, or the book as it stood at an instant.
+  rpc ReadHistoryPage(ReadHistoryPageRequest) returns (ReadHistoryPageResponse);
+}

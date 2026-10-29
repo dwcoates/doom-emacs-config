@@ -573,6 +573,20 @@ type DB interface {
 	// SetAwaiting marks a workspace awaiting correspondence from another, or
 	// clears the mark with nil (standings.go).
 	SetAwaiting(ctx context.Context, id WorkspaceID, awaited *WorkspaceID) error
+	// ColdGate answers the cold gate recorded on a workspace, false when none
+	// is (coldgate.go).
+	ColdGate(ctx context.Context, id WorkspaceID) (ColdGateRecord, bool, error)
+	// SetColdGate records a workspace's cold gate, replacing any earlier one.
+	SetColdGate(ctx context.Context, id WorkspaceID, rec ColdGateRecord) error
+	// ClearColdGate retires a workspace's recorded cold gate, answering
+	// whether one stood.
+	ClearColdGate(ctx context.Context, id WorkspaceID) (bool, error)
+	// WorkspaceBook answers the book a workspace's shim last stated
+	// (shim.v1.StartSessionResponse.book), false when none has been
+	// (workspacebook.go).
+	WorkspaceBook(ctx context.Context, id WorkspaceID) (string, bool, error)
+	// SetWorkspaceBook records a workspace's book, replacing any earlier one.
+	SetWorkspaceBook(ctx context.Context, id WorkspaceID, book string) error
 	// WorkspaceLinks answers every link a workspace holds, most recently set
 	// first (workspacelinks.go).
 	WorkspaceLinks(ctx context.Context, id WorkspaceID) ([]WorkspaceLink, error)

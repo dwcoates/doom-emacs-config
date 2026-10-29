@@ -7,9 +7,12 @@ import (
 	"time"
 
 	"agent-repld/internal/bounce"
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/shimclient"
+	"agent-repld/internal/shimlife"
 )
 
 // DefaultRestartStopBound bounds the ONE stop a restart asks of the shim before
@@ -42,8 +45,10 @@ const DefaultRestartStopBound = 2 * time.Second
 //  3. once the bounce is done, the webview is told to reload, so the user is
 //     not left on a page built against a different shim.
 //
-// A workspace with no shim or no session is restarted by the same bounce: the
-// engine prelaunches a shim and resumes the session on it.
+// A WORKSPACE WITH NO SHIM UP HAS ITS SESSION STARTED AT ONCE (owner ruling,
+// 2026-10-28: the restart is an explicit start, like a prompt). The bounce
+// would find nothing to replace, so the session is started through the one
+// start path (Sessions.Start) and the restart answers its outcome.
 func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "RestartWorkspace", ws)
 	if err != nil {
@@ -51,6 +56,9 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 	}
 	if v.deps.Sessions.CancelVendorStart(ctx, ws) {
 		log.Info(opRestart, "ended the vendor-start retry run in flight; the restart begins a fresh one", nil)
+	}
+	if _, up := v.deps.Shim(ws); !up {
+		return v.startForRestart(ctx, log, ws)
 	}
 	// THE WORKSPACE'S MERGE LETS GO FIRST (owner ruling, 2026-10-08). A merge
 	// drives this workspace's session, so it is brought to a stopping point
@@ -88,6 +96,22 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID) error {
 		})
 		return fmt.Errorf("restart %q: the caller left before the restart finished: %w", ws, ctx.Err())
 	}
+}
+
+// startForRestart starts the session of a workspace a restart found with no
+// shim up, answering the outcome as the restart's.
+func (v *verbs) startForRestart(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
+	log.Info(opRestart, "no shim is up; the restart starts the session", nil)
+	if err := v.deps.Sessions.Start(shimlife.WithStart(ctx, shimlife.StartRestart), ws); err != nil {
+		if why, notOurs := startNotAgentReplFault(err); notOurs {
+			log.Info(opRestart, "the restart's start "+why, dlog.Context{"cause": err.Error()})
+		} else {
+			log.Error(opRestart, "the restart could not start the session", dlog.Context{"cause": err.Error()})
+		}
+		return relaunchFailed(ws, "the session did not start: "+err.Error())
+	}
+	log.Info(opRestart, "the restart started the session", nil)
+	return nil
 }
 
 // resumeMerges takes the workspace's merges back after a restart, on a context
@@ -231,4 +255,29 @@ func (v *verbs) forceEndTurn(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	log.Debug(opRestart, "force-ended the running turn before the relaunch", dlog.Context{
 		"turn": string(*running.Turn),
 	})
+}
+
+// startNotAgentReplFault reports whether a start ended for a reason that is no
+// agent-repl failure of the session coming up, and says which: this daemon
+// leaving (its context ending, or a standing-down refusal), its shim taken by
+// a handover or a kill, or a VENDOR FAULT -- the vendor would not start, or
+// this machine could not reach the network -- which the start itself recorded
+// as that fault, on the footer and the roster (owner rule: vendor faults never
+// gate agent-repl's own functions, and are not agent-repl's errors).
+func startNotAgentReplFault(err error) (string, bool) {
+	var label *startLabel
+	switch {
+	case errors.As(err, &label) && label.network:
+		return "met a network this machine cannot reach; its network fault stands", true
+	case errors.As(err, &label) && label.vendor:
+		return "met a vendor that would not start; its vendor fault stands", true
+	case ctxend.Is(err):
+		return "ended when its context was cancelled", true
+	case errors.Is(err, shimclient.ErrStandingDown):
+		return "stopped because this daemon is standing down", true
+	case errors.Is(err, ErrShimTaken):
+		return "ended when its shim was taken from it (handed to a successor, or stopped)", true
+	default:
+		return "", false
+	}
 }
