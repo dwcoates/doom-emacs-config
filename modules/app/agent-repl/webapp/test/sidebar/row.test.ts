@@ -2131,12 +2131,12 @@ describe("the row's display mode", () => {
       expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--repo-head-expanded)");
     });
 
-    it.each([true, false])("paints a cold-gate name muted and struck when viewed is %s", (viewed) => {
+    it.each([true, false])("paints a cold-gate name dimmer than muted when viewed is %s", (viewed) => {
       // Arrange, Act.
       const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "coldGate", value: {} }, viewed }), sidebarContext(), "R");
 
       // Assert.
-      expect(paintOf(drawn, ":scope > .row > .name")).toBe("var(--muted)");
+      expect(paintOf(drawn, ":scope > .row > .name")).toBe("color-mix(in srgb, var(--muted) 55%, transparent)");
     });
 
     it("leaves an unviewed child's dot green under a viewed parent", () => {
