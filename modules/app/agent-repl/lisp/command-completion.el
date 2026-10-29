@@ -74,7 +74,7 @@
   :group 'agent-repl)
 
 (defface agent-repl-command-completion-known
-  '((t :foreground "#c678dd"))
+  '((t :foreground "#7d4bcf"))
   "Face of a slash word in the composer that names a known command."
   :group 'agent-repl)
 
