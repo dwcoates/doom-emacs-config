@@ -152,7 +152,9 @@ func TestADueBeatIsSent(t *testing.T) {
 	}
 }
 
-func TestASentBeatAsksForTheCycleStandDown(t *testing.T) {
+// A SENT BEAT AWAITS ITS ANSWER before the cycle stand-down (owner request,
+// 2026-10-29, superseding the stand-down at the send): answer_test.go.
+func TestASentBeatAwaitsItsAnswerBeforeTheCycleStandDown(t *testing.T) {
 	// Arrange
 	h := dueHarness(t, sent())
 	h.keeper.beats[theWorkspace] = now
@@ -161,8 +163,8 @@ func TestASentBeatAsksForTheCycleStandDown(t *testing.T) {
 	h.keeper.beatsDue(context.Background())
 
 	// Assert
-	if len(h.cycled) != 1 || h.cycled[0].ws != theWorkspace || !h.cycled[0].beat.Equal(now) {
-		t.Fatalf("cycle stand-downs = %+v, want one at the beat", h.cycled)
+	if sentAt, waiting := h.keeper.answering[theWorkspace]; len(h.cycled) != 0 || !waiting || !sentAt.Equal(now) {
+		t.Fatalf("cycle stand-downs = %+v, awaiting %v (%t), want none yet and the answer to the beat awaited", h.cycled, sentAt, waiting)
 	}
 }
 
@@ -262,7 +264,7 @@ func TestASentBeatSoonAfterTheSessionFellFreeLeavesTheShimUp(t *testing.T) {
 	}
 }
 
-func TestASentBeatTheGraceAfterTheSessionFellFreeStandsItDown(t *testing.T) {
+func TestASentBeatTheGraceAfterTheSessionFellFreeAwaitsItsAnswerToStandItDown(t *testing.T) {
 	// Arrange
 	h := dueHarness(t, sent())
 	h.keeper.freeSince[theWorkspace] = now.Add(-StandDownGrace)
@@ -272,8 +274,8 @@ func TestASentBeatTheGraceAfterTheSessionFellFreeStandsItDown(t *testing.T) {
 	h.keeper.beatsDue(context.Background())
 
 	// Assert
-	if len(h.cycled) != 1 {
-		t.Fatalf("cycle stand-downs = %+v, want one the grace after falling free", h.cycled)
+	if _, waiting := h.keeper.answering[theWorkspace]; !waiting {
+		t.Fatalf("answers awaited = %v, want the beat's, the grace after falling free", h.keeper.answering)
 	}
 }
 
