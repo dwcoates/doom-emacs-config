@@ -6341,3 +6341,27 @@ describe("the held-prompt and merge fades swing as narrowly as the workspace-nam
     expect(opacities).toEqual(["1", "0.67"]);
   });
 });
+
+describe("the bubbles' resting copy icon (owner request, 2026-10-29)", () => {
+  it.each([
+    ["prompt", "0.3"],
+    ["response", "0.6"],
+  ])("rests a %s bubble's copy icon at %s", (role, rest) => {
+    // Arrange
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(`.bubble[data-role="${role}"] .bubble-copy`) && /--copy-control-rest/.test(r.declarations));
+
+    // Act
+    const got = /--copy-control-rest:\s*([0-9.]+)/.exec(rule?.declarations ?? "")?.[1];
+
+    // Assert
+    expect(got).toBe(rest);
+  });
+
+  it("falls back to 0.7 for every other copy control", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(".copy-control") && /opacity:/.test(r.declarations));
+
+    // Assert
+    expect(rule?.declarations).toMatch(/opacity:\s*var\(--copy-control-rest, 0\.7\)/);
+  });
+});
