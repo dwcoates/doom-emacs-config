@@ -65,6 +65,11 @@ type Collector struct {
 	primed bool
 	seen   map[int]pidState
 	totals map[Group]*totals
+	// latest is the last scrape's per-group footprints, for the rail's memory
+	// popups (memorypopup), which read it between scrapes.
+	latest Snapshot
+	// sampled is whether any scrape has run.
+	sampled bool
 	// hostBase is each CPU mode's host total at the first host read, so the
 	// host's CPU counts from the daemon's start like every other counter
 	// here: a counter since the host's boot read as all of the host's
@@ -148,9 +153,30 @@ func (c *Collector) goneSince(pid int, was Identity) bool {
 	return err == nil && now.StartUnixMicros != was.StartUnixMicros
 }
 
+// Snapshot is one scrape's physical footprint per group: what the rail's
+// memory popups draw.
+type Snapshot struct {
+	// Footprints holds every group a live process was in, summed.
+	Footprints map[Group]uint64
+	// Failed is set when the scrape could not list the host's processes, so
+	// it measured nothing; Footprints is then empty.
+	Failed error
+}
+
+// Latest answers the last scrape's snapshot, false before the first scrape.
+// The figures are as fresh as the metrics store's scrape cadence.
+func (c *Collector) Latest() (Snapshot, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.latest, c.sampled
+}
+
 func (c *Collector) collectProcesses(ch chan<- prometheus.Metric) {
 	pids, err := c.deps.Reader.PIDs()
 	if !c.note("list", err) {
+		c.mu.Lock()
+		c.latest, c.sampled = Snapshot{Failed: err}, true
+		c.mu.Unlock()
 		return
 	}
 	ids := make(map[int]Identity, len(pids))
@@ -185,6 +211,11 @@ func (c *Collector) collectProcesses(ch chan<- prometheus.Metric) {
 
 	c.mu.Lock()
 	sums := c.account(live)
+	footprints := make(map[Group]uint64, len(sums))
+	for g, s := range sums {
+		footprints[g] = s.footprint
+	}
+	c.latest, c.sampled = Snapshot{Footprints: footprints}, true
 	snapshot := make(map[Group]totals, len(c.totals))
 	for g, t := range c.totals {
 		snapshot[g] = *t

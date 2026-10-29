@@ -138,6 +138,8 @@ type harness struct {
 	// ends that stream.
 	emacs   *EmacsProcess
 	release func()
+	// collector is the collector under test, for its Latest snapshot.
+	collector *Collector
 }
 
 func newHarness(t *testing.T, reader *fakeReader) *harness {
@@ -154,6 +156,7 @@ func newHarness(t *testing.T, reader *fakeReader) *harness {
 		t.Fatalf("New: %v", err)
 	}
 	h.reg.MustRegister(c)
+	h.collector = c
 	return h
 }
 
@@ -497,5 +500,53 @@ func TestAProcessGoneDuringItsUsageReadIsNoFailure(t *testing.T) {
 				t.Fatalf("error records = %+v, want none for a process gone during its read", errs)
 			}
 		})
+	}
+}
+
+func TestNoSnapshotStandsBeforeTheFirstScrape(t *testing.T) {
+	// Arrange
+	h := newHarness(t, newWorld())
+
+	// Act
+	_, sampled := h.collector.Latest()
+
+	// Assert
+	if sampled {
+		t.Fatalf("Latest answered a snapshot before any scrape")
+	}
+}
+
+func TestTheSnapshotSumsEachGroupsFootprint(t *testing.T) {
+	// Arrange
+	reader := newWorld()
+	reader.setUsage(30, Usage{FootprintBytes: 300})
+	reader.setUsage(testSelf, Usage{FootprintBytes: 900})
+	h := newHarness(t, reader)
+
+	// Act
+	h.scrape(t)
+	snap, sampled := h.collector.Latest()
+
+	// Assert
+	shim := Group{Process: ProcessShim, Workspace: "ws1"}
+	daemon := Group{Process: ProcessDaemon}
+	if !sampled || snap.Failed != nil || snap.Footprints[shim] != 300 || snap.Footprints[daemon] != 900 {
+		t.Fatalf("snapshot = %+v (sampled %v), want the shim at 300 and the daemon at 900", snap, sampled)
+	}
+}
+
+func TestAFailedListingLeavesAFailedSnapshot(t *testing.T) {
+	// Arrange
+	reader := newWorld()
+	reader.pidsErr = errors.New("proc_listallpids: operation not permitted")
+	h := newHarness(t, reader)
+
+	// Act
+	h.scrape(t)
+	snap, sampled := h.collector.Latest()
+
+	// Assert
+	if !sampled || snap.Failed == nil || len(snap.Footprints) != 0 {
+		t.Fatalf("snapshot = %+v (sampled %v), want a failed one measuring nothing", snap, sampled)
 	}
 }
