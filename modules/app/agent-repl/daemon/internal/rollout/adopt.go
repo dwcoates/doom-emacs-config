@@ -647,9 +647,19 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// process to dial", and undialed it would be served by no daemon at all:
 	// a hidden workspace's bring-up is withheld, so nothing else here would
 	// ever reach it (shims 76760, 76813 and 76849, 2026-10-23 17:59).
+	//
+	// UNLESS THE GATE'S SHIM WAS STOOD DOWN: a gate runs no shim (owner
+	// ruling, 2026-10-27), and dialing one that is gone failed the adoption of
+	// every gated workspace on every deploy (37 on 2026-10-29 19:32), each
+	// then adopted on Emacs's retry. With no shim the workspace is adopted
+	// sessionless, and its start raises the gate from its record.
 	if parked != nil && !dial {
-		c.log.Debug(opAdopt, "the lock reads free because the shim is parked at its cold gate; dialing it", fields)
-		dial = true
+		if carry.ColdGateShim != nil && !*carry.ColdGateShim {
+			c.log.Info(opAdopt, "the gate's shim was stood down by the incumbent; nothing is dialed, and the gate is raised from its record", fields)
+		} else {
+			c.log.Debug(opAdopt, "the lock reads free because the shim is parked at its cold gate; dialing it", fields)
+			dial = true
+		}
 	}
 
 	// THE ROW IS CLAIMED BEFORE THE SHIM IS DIALED, through the one

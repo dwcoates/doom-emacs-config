@@ -348,6 +348,49 @@ func TestAnAdoptionOfAParkedShimWhoseLockReadsFreeDialsIt(t *testing.T) {
 	}
 }
 
+// THE GATE'S SHIM WAS STOOD DOWN (owner ruling, 2026-10-27): the lock reads
+// free because nothing runs, and dialing failed the adoption of every gated
+// workspace on every deploy.
+func TestAnAdoptionOfAGateWhoseShimWasStoodDownDialsNothing(t *testing.T) {
+	tests := []struct {
+		name     string
+		shim     *bool
+		wantDial bool
+	}{
+		{name: "the incumbent held no shim at the gate", shim: ptrBool(false), wantDial: false},
+		{name: "the incumbent held a shim at the gate", shim: ptrBool(true), wantDial: true},
+		{name: "an incumbent that predates the fact", shim: nil, wantDial: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, dir := h.workspace(t)
+			h.mu.Lock()
+			h.lockStates[dir] = sessionlock.StateFree
+			h.mu.Unlock()
+			raw, err := protojson.Marshal(&conversationv1.SessionCold{ContextTokens: 1234})
+			if err != nil {
+				t.Fatalf("encode the cold facts: %v", err)
+			}
+			carryFor(t, h, ws, Carry{ColdGate: raw, ColdGateShim: tt.shim})
+
+			// Act
+			arm(t, h, ws, Participants{})
+
+			// Assert
+			h.fleet.mu.Lock()
+			_, dialed := h.fleet.parkedAdoptions[ws]
+			h.fleet.mu.Unlock()
+			if dialed != tt.wantDial {
+				t.Fatalf("parked shim dialed = %t, want %t", dialed, tt.wantDial)
+			}
+		})
+	}
+}
+
+func ptrBool(v bool) *bool { return &v }
+
 func TestACarriedForcedRestartRunsOnTheAdoptingDaemon(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -563,6 +606,38 @@ func TestASealCarriesTheStandingColdGate(t *testing.T) {
 	cold, err := decodeCold(sealedCarry(t, h, ws).ColdGate)
 	if err != nil || cold.GetContextTokens() != 77 {
 		t.Fatalf("carried cold gate = (%v, %v), want the standing gate's facts", cold, err)
+	}
+}
+
+func TestASealCarriesWhetherAShimStandsAtTheGate(t *testing.T) {
+	tests := []struct {
+		name string
+		held bool
+	}{
+		{name: "a gate whose shim was stood down", held: false},
+		{name: "a gate with a shim still held", held: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.fleet.coldGates[ws] = &conversationv1.SessionCold{ContextTokens: 77}
+			if !tt.held {
+				h.fleet.mu.Lock()
+				delete(h.fleet.live, ws)
+				h.fleet.mu.Unlock()
+			}
+
+			// Act
+			handOverUntilWindow(t, h)
+
+			// Assert
+			got := sealedCarry(t, h, ws).ColdGateShim
+			if got == nil || *got != tt.held {
+				t.Fatalf("carried gate shim = %v, want %t", got, tt.held)
+			}
+		})
 	}
 }
 
