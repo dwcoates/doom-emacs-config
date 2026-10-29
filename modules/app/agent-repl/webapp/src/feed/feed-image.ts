@@ -13,7 +13,6 @@
  * topbar's warning chip (`control_plane_failed`) and logged, as every verb is.
  */
 import { create } from "@bufbuild/protobuf";
-import { ConnectError } from "@connectrpc/connect";
 import {
   OpenFeedImageRequestSchema,
   OpenFeedImageResponseSchema,
@@ -22,13 +21,10 @@ import {
   CloseFeedImageRequestSchema,
   CloseFeedImageResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_feed_image_pb";
-import { controlPlaneFailed } from "../failure/sink.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
-import { callFailure, refusalOf } from "../rpc/refuse.js";
-import { requireCase } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
+import { controlCall } from "../rpc/control-call.js";
 import { FEED_IMAGE_CLASS } from "./rows/blocks.js";
 
 
@@ -48,39 +44,27 @@ const OPEN_FEED_IMAGE_REFUSALS = {
  * filed; nothing is thrown for a refusal or a transport failure.
  */
 export async function openDrawnImage(ctx: AppContext, src: string, alt: string): Promise<void> {
-  let response;
-  try {
-    response = await callUnary(
-      ctx,
-      "OpenFeedImage",
-      (client) =>
-        client.openFeedImage(
-          create(OpenFeedImageRequestSchema, {
-            workspace: ctx.workspace,
-            image: { case: "drawn", value: { image: { src, alt } } },
-          }),
-        ),
-      OpenFeedImageResponseSchema,
-    );
-  } catch (err) {
-    if (!(err instanceof ConnectError)) throw err;
-    ctx.failures.report(controlPlaneFailed(OPEN_IMAGE_REQUEST, callFailure(err).text));
-    return;
-  }
-  const result = requireCase(response.result, "OpenFeedImageResponse.result");
-  if (result.case === "success") {
-    log.debug("the daemon opened the image; its push draws the overlay", {
-      operation: "feed.open-image-answered",
-      context: { src },
-    });
-    return;
-  }
-  const said = refusalOf(result.value.cause, OPEN_FEED_IMAGE_REFUSALS, "OpenFeedImageError.cause");
-  log.error(`the daemon refused to ${OPEN_IMAGE_REQUEST}: ${said.text}`, {
-    operation: "feed.open-image-refused",
-    context: { src, arm: said.arm },
+  const success = await controlCall(ctx, {
+    rpc: "OpenFeedImage",
+    what: OPEN_IMAGE_REQUEST,
+    send: (client) =>
+      client.openFeedImage(
+        create(OpenFeedImageRequestSchema, {
+          workspace: ctx.workspace,
+          image: { case: "drawn", value: { image: { src, alt } } },
+        }),
+      ),
+    schema: OpenFeedImageResponseSchema,
+    result: (response) => response.result,
+    refusals: OPEN_FEED_IMAGE_REFUSALS,
+    refusedOperation: "feed.open-image-refused",
+    context: { src },
   });
-  ctx.failures.report(controlPlaneFailed(OPEN_IMAGE_REQUEST, said.text));
+  if (success === undefined) return;
+  log.debug("the daemon opened the image; its push draws the overlay", {
+    operation: "feed.open-image-answered",
+    context: { src },
+  });
 }
 
 /**
@@ -88,32 +72,20 @@ export async function openDrawnImage(ctx: AppContext, src: string, alt: string):
  * the daemon has answered and any failure has been filed.
  */
 export async function closeFeedImage(ctx: AppContext): Promise<void> {
-  let response;
-  try {
-    response = await callUnary(
-      ctx,
-      "CloseFeedImage",
-      (client) => client.closeFeedImage(create(CloseFeedImageRequestSchema, { workspace: ctx.workspace })),
-      CloseFeedImageResponseSchema,
-    );
-  } catch (err) {
-    if (!(err instanceof ConnectError)) throw err;
-    ctx.failures.report(controlPlaneFailed(CLOSE_IMAGE_REQUEST, callFailure(err).text));
-    return;
-  }
-  const result = requireCase(response.result, "CloseFeedImageResponse.result");
-  if (result.case === "success") {
-    log.debug("the daemon closed the image; its push takes the overlay down", {
-      operation: "feed.close-image-answered",
-    });
-    return;
-  }
-  const said = refusalOf(result.value.cause, {}, "CloseFeedImageError.cause");
-  log.error(`the daemon refused to ${CLOSE_IMAGE_REQUEST}: ${said.text}`, {
-    operation: "feed.close-image-refused",
-    context: { arm: said.arm },
+  const success = await controlCall(ctx, {
+    rpc: "CloseFeedImage",
+    what: CLOSE_IMAGE_REQUEST,
+    send: (client) => client.closeFeedImage(create(CloseFeedImageRequestSchema, { workspace: ctx.workspace })),
+    schema: CloseFeedImageResponseSchema,
+    result: (response) => response.result,
+    refusals: {},
+    refusedOperation: "feed.close-image-refused",
+    context: {},
   });
-  ctx.failures.report(controlPlaneFailed(CLOSE_IMAGE_REQUEST, said.text));
+  if (success === undefined) return;
+  log.debug("the daemon closed the image; its push takes the overlay down", {
+    operation: "feed.close-image-answered",
+  });
 }
 
 /**

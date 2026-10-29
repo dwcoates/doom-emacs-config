@@ -1047,6 +1047,32 @@ message FeedResponse {
   // first drawn and when one is removed (a rollback). Empty while nothing
   // answers it, and always empty on a response with no tree.
   repeated FeedResponseAnswer answers = 10;
+  // WHERE A REVISION OF THIS FINAL RESPONSE STANDS: the user highlighted words
+  // in it and sent a prompt while they were highlighted, so the daemon asked
+  // for the response rewritten to answer it (agentrepl.v1.SelectResponseText).
+  // UNSET while no revision is pending and the last one did not fail. The
+  // revised prose itself arrives in the ordinary `success` arm, with a reveal
+  // pace, so the client types out what the revision changed.
+  optional FeedResponseRevision revision = 11;
+}
+
+// A final response's revision. THE ARM IS THE STATE.
+message FeedResponseRevision {
+  oneof state {
+    // A revision was asked for and has not landed yet.
+    FeedResponseRevisionPending pending = 1;
+    // The last revision asked for did not land.
+    FeedResponseRevisionFailed failed = 2;
+  }
+}
+
+// A revision is on its way. DELIBERATELY EMPTY: the arm is the state.
+message FeedResponseRevisionPending {}
+
+// The revision failed; the response stands as it was.
+message FeedResponseRevisionFailed {
+  // The daemon's composed reason, drawn verbatim.
+  string text = 1;
 }
 
 // One entry of a later prompt that answers one of a response's labels.

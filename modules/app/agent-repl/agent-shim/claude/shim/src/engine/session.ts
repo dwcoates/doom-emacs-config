@@ -43,6 +43,10 @@ import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identi
 import { isAgentTaskType, taskKindOf } from "../convert/detached.js";
 import { appliedEffortOf, effortLevelOf, vendorEffortLevel } from "../convert/effort.js";
 import { boundaryChange } from "./boundary-change.js";
+import { PromptQueue } from "./prompt-queue.js";
+import { askSideQuery } from "./side-query.js";
+import { reviseResponse, type RevisionCut } from "./revise-response.js";
+import type { VendorBinding } from "../sdk/real-query.js";
 import { mainAgentId, promptVendorUuid, subagentId, toolCallActivityId } from "../convert/ids.js";
 import { hookBlockingText } from "../convert/hooks.js";
 import { redactVendorMessage } from "../convert/terminals.js";
@@ -54,6 +58,7 @@ import {
   type VendorStartBound,
 } from "./start-failure.js";
 import { terminalUpsertKey } from "../store/keys.js";
+import { updateEntry } from "../store/update-entry.js";
 import { PersistenceError, REPAINT } from "../store/persistence.js";
 import { describeDetachedWorkAnswer } from "../store/detached-work.js";
 import { describeVendorTaskAnswer } from "../store/locator.js";
@@ -137,7 +142,6 @@ import {
   summarizerSpentTokens,
   type CompactionFigures,
 } from "./compaction.js";
-import { normalizeApiUsage } from "../api-usage.js";
 import {
   cacheRequestOf,
   judgeCold,
@@ -160,7 +164,12 @@ import {
   type AgentIdentityStore,
 } from "./identity.js";
 import { ForkPointTracker, type OpenForkTurn } from "./fork-point.js";
-import { forkSession as forkVendorConversation, type ForkVendorSession } from "./fork-session.js";
+import {
+  forkableRecords,
+  forkSession as forkVendorConversation,
+  resolveUpTo,
+  type ForkVendorSession,
+} from "./fork-session.js";
 import {
   conversationRecordUuid,
   detachedWorkContext,
@@ -224,9 +233,7 @@ const LOGGER = bindLog({ component: "shim-engine-session", operation: "shim.engi
 export interface QuerySpec {
   /** The kind of session: what the vendor is given (settings, tools, prompt). */
   readonly profile: SessionProfile;
-  readonly binding:
-    | { readonly kind: "fresh"; readonly sessionId: string }
-    | { readonly kind: "resume"; readonly resumeSessionId: string };
+  readonly binding: VendorBinding;
   /**
    * The workspace's name, as StartSession stated it
    * (`shim.v1.StartSessionRequest.workspace_name`). Every query of the session
@@ -660,53 +667,6 @@ const ACCOUNT_USAGE_INTERVAL_MS = 5 * 60 * 1000;
 
 /** What a message loop's read answers when the shim let its query go first. */
 const LOOP_STOPPED: unique symbol = Symbol("the shim let the query go");
-
-/**
- * A push-style bridge onto the SDK's pull-style streaming input.
- *
- * The SDK wants an `AsyncIterable` it pulls from; the engine has prompts that
- * arrive when a consumer sends them. This is the ONE submitter — everything
- * that delivers a prompt goes through it, which is what makes "one turn in
- * flight" enforceable rather than merely intended.
- */
-class PromptQueue implements AsyncIterable<SdkUserMessage> {
-  private readonly queued: SdkUserMessage[] = [];
-  private waiting: ((value: IteratorResult<SdkUserMessage>) => void) | undefined;
-  private done = false;
-
-  push(message: SdkUserMessage): void {
-    if (this.done) throw new Error("shim session: a prompt was submitted after the query was closed");
-    if (this.waiting !== undefined) {
-      const resolve = this.waiting;
-      this.waiting = undefined;
-      resolve({ value: message, done: false });
-      return;
-    }
-    this.queued.push(message);
-  }
-
-  close(): void {
-    this.done = true;
-    if (this.waiting !== undefined) {
-      const resolve = this.waiting;
-      this.waiting = undefined;
-      resolve({ value: undefined, done: true });
-    }
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<SdkUserMessage> {
-    return {
-      next: (): Promise<IteratorResult<SdkUserMessage>> => {
-        const next = this.queued.shift();
-        if (next !== undefined) return Promise.resolve({ value: next, done: false });
-        if (this.done) return Promise.resolve({ value: undefined, done: true });
-        return new Promise((resolve) => {
-          this.waiting = resolve;
-        });
-      },
-    };
-  }
-}
 
 /** The engine, plus the hooks tests and main.ts drive it with. */
 export interface SessionEngine extends Engine {
@@ -1916,6 +1876,57 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
     return forkPointAnswered(answer);
+  }
+
+  /**
+   * Revise one settled response on an ephemeral fork of the conversation
+   * (shim.v1.ReviseResponse). The fork ends where GetForkPoint says a fork
+   * taken now would, so a turn in flight is never part of it, and it takes no
+   * tools: the answer is prose about the conversation, never work in it.
+   */
+  function reviseSettledResponse(
+    request: shimv1.ReviseResponseRequest,
+    signal?: AbortSignal,
+  ): Promise<shimv1.ReviseResponseResponse> {
+    return reviseResponse(
+      {
+        vendorSessionId: () => (started && identity !== undefined ? identity.vendorSessionId : undefined),
+        cut: revisionCut,
+        build: ({ parentSessionId, upTo }, prompt, abortController) =>
+          deps.createQuery({
+            profile: sessionProfile(),
+            binding: { kind: "ephemeral_fork", parentSessionId },
+            workspaceName: requireWorkspaceName(),
+            ...(upTo === undefined ? {} : { resumeSessionAt: upTo }),
+            permissionMode: "plan",
+            canUseTool: () => Promise.resolve({ behavior: "deny", message: "a response revision takes no tools" }),
+            abortController,
+            prompt,
+            ...(effectiveModel === "" ? {} : { model: effectiveModel }),
+          }),
+        writeRevision: writeResponseRevision,
+        nowMs: deps.nowMs,
+      },
+      request,
+      signal,
+    );
+  }
+
+  /**
+   * Where a revision's fork ends: the record a fork taken now would end on,
+   * resolved in the session's transcript, or the live end of a conversation
+   * with no concluded turn to name (rolled-back turns excluded).
+   */
+  function revisionCut(vendorSessionId: string): RevisionCut {
+    const answered = getForkPoint();
+    if (answered.result.case !== "success") {
+      return { kind: "unresolved", detail: answered.result.value?.detail ?? "GetForkPoint answered no arm" };
+    }
+    const point = answered.result.value.point;
+    if (point === undefined) throw new Error("shim session: GetForkPoint answered success without a point");
+    if (point.extent.case === "whole") return { kind: "cut", upTo: resumeAtLiveEnd(vendorSessionId).resumeSessionAt };
+    const resolved = resolveUpTo(forkableRecords(transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId)), point);
+    return resolved.kind === "ok" ? { kind: "cut", upTo: resolved.upTo } : { kind: "unresolved", detail: resolved.detail };
   }
 
   /**
@@ -5904,9 +5915,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   ): Promise<{ ok: true; summary: string } | { ok: false; error: string; retry: VendorStartRetry }> {
     const transcript = transcriptPath(deps.env.configDir, deps.env.cwd, vendorSessionId);
     const startedAtMs = deps.nowMs();
-    const queue = new PromptQueue();
-    const controller = new AbortController();
-    let throwaway: QueryLike | undefined;
     /** Narrate one phase, to the fan-out and to the log. */
     const phase = (
       which: conversationv1.SessionCompactionPhase,
@@ -5926,15 +5934,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       LOGGER.debug({ vendor_session_id: vendorSessionId, retry }, "labeled the failed compaction");
       return { ok: false, error, retry };
     };
-    /**
-     * Whether the throwaway query's stream is being read: a throw from INSIDE
-     * it is a child or stream that ended (retryable); a throw outside it is the
-     * query that could not be built or the transcript that could not be
-     * written, which the next attempt meets again (rejected).
-     */
-    let streaming = false;
-    /** Whether the stream answered with a result at all. */
-    let sawResult = false;
     coldCompactionFigures = undefined;
     // BEFORE THE QUERY, NOT AFTER IT. Creating the throwaway query is itself
     // part of the minute the user is waiting through, so a frame that waited
@@ -5944,86 +5943,69 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       { tokensBefore: facts.contextTokens },
       "the cold gate is summarizing the conversation on a throwaway query",
     );
-    try {
-      throwaway = await deps.createQuery({
-        profile: sessionProfile(),
-        binding: { kind: "resume", resumeSessionId: vendorSessionId },
-        workspaceName: requireWorkspaceName(),
-        // THE SUMMARY IS OF THE LIVE CONVERSATION: a rolled-back turn still at
-        // the transcript's tail is neither summarized nor chained under it.
-        ...resumeAtLiveEnd(vendorSessionId),
-        permissionMode: "plan",
-        canUseTool: (() => Promise.resolve({ behavior: "deny", message: "compaction takes no tools" })),
-        abortController: controller,
-        prompt: queue,
-        ...(model === "" ? {} : { model }),
-      });
-      queue.push({
-        type: "user",
-        message: { role: "user", content: compactionPrompt(scope) },
-        parent_tool_use_id: null,
-      });
-      let summary = "";
-      let outputTokens = 0;
-      let spentTokens = 0;
-      /** The model the summarizing query runs on, as its own opening states it. */
-      let summarizer: string | undefined;
-      streaming = true;
-      for await (const message of throwaway) {
-        if (message.type === "system" && message.subtype === "init") {
-          summarizer = message.model;
-          continue;
-        }
-        if (message.type !== "result") continue;
-        sawResult = true;
-        // AN ERROR RESULT IS A FAILURE WHATEVER ITS SUBTYPE. The vendor ends a
-        // turn whose API call failed with `subtype: "success"` and `is_error`,
-        // its `result` the error's own sentence ("API Error: ..."); reading
-        // that as a summary would write the error into the transcript as the
-        // conversation's compacted context.
-        if (message.subtype !== "success" || message.is_error) {
-          // READ EXACTLY AS THE OPENING'S IS: its status and its words decide
-          // whether it can pass. READ DEFENSIVELY: this result is the vendor's,
-          // and one that states no `errors` must still be labeled, not throw.
-          const { api_error_status: status, errors } = message as unknown as {
-            api_error_status?: number | null;
-            errors?: unknown;
-          };
-          const words =
-            message.subtype === "success"
-              ? message.result
-              : Array.isArray(errors)
-                ? errors.map(String).join("; ")
-                : "";
-          const verdict = openingErrorVerdict(typeof status === "number" ? status : undefined, words);
-          return failed(
-            message.subtype === "success"
-              ? `the summarizing session ended with an error result: ${words}`
-              : `the summarizing session ended as ${message.subtype}`,
-            verdict.retry,
-          );
-        }
-        summary = message.result;
-        const usage = normalizeApiUsage(message.usage);
-        outputTokens = usage.outputTokens;
-        spentTokens = summarizerSpentTokens(usage);
+    const asked = await askSideQuery(
+      (prompt, abortController) =>
+        deps.createQuery({
+          profile: sessionProfile(),
+          binding: { kind: "resume", resumeSessionId: vendorSessionId },
+          workspaceName: requireWorkspaceName(),
+          // THE SUMMARY IS OF THE LIVE CONVERSATION: a rolled-back turn still at
+          // the transcript's tail is neither summarized nor chained under it.
+          ...resumeAtLiveEnd(vendorSessionId),
+          permissionMode: "plan",
+          canUseTool: (() => Promise.resolve({ behavior: "deny", message: "compaction takes no tools" })),
+          abortController,
+          prompt,
+          ...(model === "" ? {} : { model }),
+        }),
+      compactionPrompt(scope),
+    );
+    switch (asked.kind) {
+      case "unbuilt":
+        // THE QUERY THAT COULD NOT BE BUILT meets the same refusal on the next
+        // attempt (rejected).
+        writeContextCut(contextCutFailed(asked.error));
+        return failed(asked.error, "rejected");
+      case "broken":
+        // A THROW FROM INSIDE THE STREAM is a child or stream that ended
+        // (retryable).
+        writeContextCut(contextCutFailed(asked.error));
+        return failed(asked.error, "retryable");
+      case "noResult":
+        // A STREAM THAT ENDED WITHOUT A RESULT is a child that went away.
+        return failed("the summarizing session produced no summary", "retryable");
+      case "errorResult": {
+        // AN ERROR RESULT IS A FAILURE WHATEVER ITS SUBTYPE: reading the
+        // vendor's error sentence as a summary would write the error into the
+        // transcript as the conversation's compacted context. READ EXACTLY AS
+        // THE OPENING'S IS: its status and its words decide whether it can pass.
+        const verdict = openingErrorVerdict(asked.status, asked.words);
+        return failed(
+          asked.subtype === "success"
+            ? `the summarizing session ended with an error result: ${asked.words}`
+            : `the summarizing session ended as ${asked.subtype}`,
+          verdict.retry,
+        );
+      }
+      case "answered":
         break;
-      }
-      streaming = false;
-      if (summary === "") {
-        // A STREAM THAT ENDED WITHOUT A RESULT is a child that went away
-        // (retryable); a result that summarized nothing is the vendor's answer
-        // to this transcript, and it will give the same one again (rejected).
-        return failed("the summarizing session produced no summary", sawResult ? "rejected" : "retryable");
-      }
-      if (summarizer === undefined) {
-        // THE VENDOR OPENS EVERY QUERY WITH ITS INIT, before any result, so a
-        // summary with no opening before it is a stream that broke the
-        // vendor's own order. The compaction cannot say on which model its
-        // summary was written, and it fails rather than guess one.
-        return failed("the summarizing session answered without stating its model", "rejected");
-      }
-      const spend = { model: summarizer, tokens: spentTokens };
+    }
+    const summary = asked.text;
+    if (summary === "") {
+      // A result that summarized nothing is the vendor's answer to this
+      // transcript, and it will give the same one again (rejected).
+      return failed("the summarizing session produced no summary", "rejected");
+    }
+    if (asked.model === undefined) {
+      // THE VENDOR OPENS EVERY QUERY WITH ITS INIT, before any result, so a
+      // summary with no opening before it is a stream that broke the
+      // vendor's own order. The compaction cannot say on which model its
+      // summary was written, and it fails rather than guess one.
+      return failed("the summarizing session answered without stating its model", "rejected");
+    }
+    const outputTokens = asked.usage.outputTokens;
+    const spend = { model: asked.model, tokens: summarizerSpentTokens(asked.usage) };
+    try {
       const durationMs = deps.nowMs() - startedAtMs;
       appendCompactionLines(
         transcript,
@@ -6071,13 +6053,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       return { ok: true, summary };
     } catch (err) {
+      // THE TRANSCRIPT THAT COULD NOT BE WRITTEN meets the same failure on the
+      // next attempt (rejected).
       const error = err instanceof Error ? err.message : String(err);
       writeContextCut(contextCutFailed(error));
-      return failed(error, streaming ? "retryable" : "rejected");
-    } finally {
-      queue.close();
-      controller.abort();
-      throwaway?.close();
+      return failed(error, "rejected");
     }
   }
 
@@ -6231,29 +6211,44 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return;
     }
     const agentId = identity.agentId;
-    const entry: PersistEntry = {
-      agentId,
-      upsertKey: terminalUpsertKey(agentId, `context-cut-${deps.nowMs()}`),
-      source: {
-        vendorUuid: `context-cut-${identity.vendorSessionId}-${deps.nowMs()}`,
-        discriminator: `agent_frame.update.context_cut.${cut.cut.case ?? ""}`,
-      },
-      keepalive: false,
-      turn: turnFor(false),
-      item: {
-        kind: "frame",
-        frame: create(conversationv1.AgentFrameSchema, {
-          agentId,
-          result: {
-            case: "update",
-            value: create(conversationv1.AgentUpdateSchema, {
-              update: { case: "contextCut", value: cut },
-            }),
-          },
-        }),
-      },
-    };
-    deps.persistence.write([entry]);
+    deps.persistence.write([
+      updateEntry({
+        agentId,
+        upsertKey: terminalUpsertKey(agentId, `context-cut-${deps.nowMs()}`),
+        source: {
+          vendorUuid: `context-cut-${identity.vendorSessionId}-${deps.nowMs()}`,
+          discriminator: `agent_frame.update.context_cut.${cut.cut.case ?? ""}`,
+        },
+        keepalive: false,
+        turn: turnFor(false),
+        update: { case: "contextCut", value: cut },
+      }),
+    ]);
+  }
+
+  /**
+   * Write a response revision as a page line of the main agent's book. It is
+   * no turn's work, so it is stamped with no turn.
+   */
+  function writeResponseRevision(revision: conversationv1.AgentResponseRevision): void {
+    if (identity === undefined) {
+      throw new Error("shim session: a response revision was written before the session had an identity");
+    }
+    const agentId = identity.agentId;
+    const atMs = deps.nowMs();
+    deps.persistence.write([
+      updateEntry({
+        agentId,
+        upsertKey: terminalUpsertKey(agentId, `response-revision-${atMs}`),
+        source: {
+          vendorUuid: `response-revision-${identity.vendorSessionId}-${atMs}`,
+          discriminator: "agent_frame.update.response_revision",
+        },
+        keepalive: false,
+        turn: undefined,
+        update: { case: "responseRevision", value: revision },
+      }),
+    ]);
   }
 
   /**
@@ -7954,6 +7949,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     resolveVendorTask: (request) => resolveVendorTaskHere(request),
     gatherTitleDigest: () => Promise.resolve(gatherTitleDigest()),
     getForkPoint: () => Promise.resolve(getForkPoint()),
+    reviseResponse: afterRestart(reviseSettledResponse),
     forkSession: afterRestart(forkSession),
     resetKeepalives: afterRestart(resetKeepalives),
     standDown: async (reason: string) => {

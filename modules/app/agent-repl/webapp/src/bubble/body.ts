@@ -33,7 +33,7 @@ import { computedPx, pageResizeObserver, placeChildren, queryAll, scrollbarWidth
 import { onDiscard, stopTicking } from "../feed/ticking.js";
 import { entryTreeHtml } from "../feed/entries.js";
 import { RESPONSE_RUN_CLASS } from "../feed/response-run.js";
-import { applyTextReveal, clearTextReveal, fullTextOf } from "./text-reveal.js";
+import { applyTextReveal, clearTextReveal, fullTextOf, type RevealWindow } from "./text-reveal.js";
 import { FEED_TEXT_SCALE_PROPERTY, feedTextScaleToMeasure, onFeedTextScaleApplied } from "../feed/feed-text-scale.js";
 
 /** The webapp surfaces a wrap issue through the client logger. */
@@ -528,8 +528,8 @@ export function isBubbleBody(el: Element | null | undefined): el is BubbleBody {
   return el !== null && el !== undefined && painters.has(el);
 }
 
-/** Each revealing slot's shown length in rendered characters; absent = whole. */
-const slotReveals = new WeakMap<HTMLElement, number>();
+/** Each revealing slot's reveal window in rendered characters; absent = whole. */
+const slotReveals = new WeakMap<HTMLElement, RevealWindow>();
 
 /** The slots the painter has drawn at least once. */
 const paintedSlots = new WeakSet<HTMLElement>();
@@ -538,14 +538,15 @@ const paintedSlots = new WeakSet<HTMLElement>();
 const paintWaiters = new WeakMap<HTMLElement, (() => void)[]>();
 
 /**
- * Show only the first SHOWN rendered characters of SLOT, already in BODY, or
- * the whole of it for undefined: the arriving response's type-out reveals
+ * Show only the first SHOWN rendered characters of SLOT, already in BODY (or
+ * a window that also keeps an already-shown tail, text-reveal.ts
+ * `RevealWindow`), or the whole of it for undefined: the arriving response's type-out reveals
  * through here every frame (src/bubble/text-reveal.ts). The slot is rendered
  * once per push and only its text is cut, so no frame re-parses markdown and
  * no half-typed syntax is ever drawn. The painter re-applies the reveal after
  * every paint (a push, a re-wrap), so a repaint never flashes the whole text.
  */
-export function revealSlot(body: BubbleBody, slot: HTMLElement, shown: number | undefined): void {
+export function revealSlot(body: BubbleBody, slot: HTMLElement, shown: number | RevealWindow | undefined): void {
   if (!slotSources.has(slot) || !body.contains(slot)) {
     invariant("a reveal named an element that is not a markdown slot of this body", {
       slot: slot.className,
@@ -556,8 +557,9 @@ export function revealSlot(body: BubbleBody, slot: HTMLElement, shown: number | 
     clearTextReveal(slot);
     return;
   }
-  slotReveals.set(slot, shown);
-  if (paintedSlots.has(slot)) applyTextReveal(slot, shown);
+  const window = typeof shown === "number" ? { shown, tailFrom: Number.POSITIVE_INFINITY } : shown;
+  slotReveals.set(slot, window);
+  if (paintedSlots.has(slot)) applyTextReveal(slot, window.shown, window.tailFrom);
 }
 
 /**
@@ -657,8 +659,8 @@ function armPainter(body: BubbleBody): Painter {
       clearTextReveal(slot);
       reconcileChildren(slot, target, null);
       paintedSlots.add(slot);
-      const shown = slotReveals.get(slot);
-      if (shown !== undefined) applyTextReveal(slot, shown);
+      const window = slotReveals.get(slot);
+      if (window !== undefined) applyTextReveal(slot, window.shown, window.tailFrom);
       const waiters = paintWaiters.get(slot);
       paintWaiters.delete(slot);
       for (const fn of waiters ?? []) fn();

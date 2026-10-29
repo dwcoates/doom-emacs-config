@@ -953,6 +953,13 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetContextCut() != nil"})
 		w.routeContextCutLocked(agent, update.GetContextCut(), at, turn, place, cutLive)
 
+	case update.GetResponseRevision() != nil:
+		revision := update.GetResponseRevision()
+		w.log.Debug("daemon.sessionwatcher.response_revision", "a settled response was revised", dlog.Context{
+			"agent_id": agent.GetValue(), "response": revision.GetResponse().GetValue(),
+		})
+		w.sinks.Feed.OnResponseRevision(w.ws, agent, revision)
+
 	case update.GetApiError() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetApiError() != nil"})
 		w.log.Warn("daemon.sessionwatcher.api_error", "a vendor request failed mid-turn", dlog.Context{

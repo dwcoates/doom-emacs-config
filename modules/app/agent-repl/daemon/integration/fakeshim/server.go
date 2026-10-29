@@ -1292,6 +1292,21 @@ func (s *server) GatherTitleDigest(ctx context.Context, req *connect.Request[shi
 	}), nil
 }
 
+// ReviseResponse records the revision asked for and answers success with no
+// page line of its own unless a script says otherwise: a test that wants the
+// revised prose to land pushes the response_revision frame itself.
+func (s *server) ReviseResponse(ctx context.Context, req *connect.Request[shimv1.ReviseResponseRequest]) (*connect.Response[shimv1.ReviseResponseResponse], error) {
+	if err := s.enter(ctx, RPCReviseResponse, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.ReviseResponseResponse, *shimv1.ReviseResponseResponse](s, RPCReviseResponse); done {
+		return resp, err
+	}
+	return connect.NewResponse(&shimv1.ReviseResponseResponse{
+		Result: &shimv1.ReviseResponseResponse_Success{Success: &shimv1.ReviseResponseSuccess{}},
+	}), nil
+}
+
 // GetForkPoint answers the WHOLE transcript by default, bounded at the
 // fake's clock and with no turn in flight: the answer a parent shim gives when
 // it is idle and has concluded nothing it can name. A test that needs a cut

@@ -91,6 +91,13 @@ export function startTurnRequest(): shimv1.StartTurnRequest {
   });
 }
 
+export function reviseResponseRequest(): shimv1.ReviseResponseRequest {
+  return create(shimv1.ReviseResponseRequestSchema, {
+    response: create(conversationv1.AgentActivityIdSchema, { value: "msg_1:0" }),
+    instruction: said(),
+  });
+}
+
 export function watchAgentRequest(): shimv1.WatchAgentRequest {
   return create(shimv1.WatchAgentRequestSchema, {});
 }

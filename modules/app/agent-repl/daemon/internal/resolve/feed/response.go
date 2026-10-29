@@ -148,6 +148,12 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		// the webapp's alone (webapp/src/metaprompt-tree.ts, a port of the
 		// former daemon treefmt engine).
 		fold.markdown = state.Success.GetProse().GetMarkdown()
+		// A REVISION OUTRANKS EVERY RESTATEMENT OF THE ORIGINAL (revision.go):
+		// the file plane re-delivers the block's settle with the words the
+		// transcript still holds, and the revised prose stands over them.
+		if revised, ok := s.revisions[unit]; ok {
+			fold.markdown = revised
+		}
 		fold.settled = true
 		r.stampSettled(fold, state.Success.GetSettledAt().GetAtMs())
 		s.landStamp(fold)
@@ -249,6 +255,8 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	if s.finalAnswerSeen[id.GetValue()] {
 		bubble.FinalAnswer = true
 	}
+	// WHERE A REVISION OF THIS RESPONSE STANDS rides every draw too.
+	bubble.Revision = s.revisionStates[unit]
 	// KEPT SO A DIVERGENT SIBLING CAN RETIRE THIS FRAGMENT'S ROW. When the same
 	// block's settled whole later lands under another id, or a late delta of this
 	// fold matches a whole already settled under another id, the reconciler needs

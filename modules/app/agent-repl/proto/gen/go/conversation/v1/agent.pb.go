@@ -435,6 +435,7 @@ type AgentUpdate struct {
 	//	*AgentUpdate_Permission
 	//	*AgentUpdate_ContextCut
 	//	*AgentUpdate_ApiError
+	//	*AgentUpdate_ResponseRevision
 	Update        isAgentUpdate_Update `protobuf_oneof:"update"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -522,6 +523,15 @@ func (x *AgentUpdate) GetApiError() *ApiRequestFailed {
 	return nil
 }
 
+func (x *AgentUpdate) GetResponseRevision() *AgentResponseRevision {
+	if x != nil {
+		if x, ok := x.Update.(*AgentUpdate_ResponseRevision); ok {
+			return x.ResponseRevision
+		}
+	}
+	return nil
+}
+
 type isAgentUpdate_Update interface {
 	isAgentUpdate_Update()
 }
@@ -558,6 +568,15 @@ type AgentUpdate_ApiError struct {
 	ApiError *ApiRequestFailed `protobuf:"bytes,6,opt,name=api_error,json=apiError,proto3,oneof"`
 }
 
+type AgentUpdate_ResponseRevision struct {
+	// A SETTLED RESPONSE WAS REVISED: the user highlighted words in it and
+	// asked about them, and a side query on a throwaway fork of the
+	// conversation rewrote the response whole. A page line of the main
+	// agent's book; the feed draws no row of its own for it, and redraws the
+	// revised response's bubble with the revised prose instead.
+	ResponseRevision *AgentResponseRevision `protobuf:"bytes,8,opt,name=response_revision,json=responseRevision,proto3,oneof"`
+}
+
 func (*AgentUpdate_Activity) isAgentUpdate_Update() {}
 
 func (*AgentUpdate_Question) isAgentUpdate_Update() {}
@@ -567,6 +586,8 @@ func (*AgentUpdate_Permission) isAgentUpdate_Update() {}
 func (*AgentUpdate_ContextCut) isAgentUpdate_Update() {}
 
 func (*AgentUpdate_ApiError) isAgentUpdate_Update() {}
+
+func (*AgentUpdate_ResponseRevision) isAgentUpdate_Update() {}
 
 // The agent's stream ended on terms the consumer asked for. THE ARM IS HOW —
 // both are answers, never failures. For the main agent this is the instant
@@ -2796,7 +2817,7 @@ const file_conversation_v1_agent_proto_rawDesc = "" +
 	"\vAgentAnswer\x12O\n" +
 	"\x0fquestion_answer\x18\x01 \x01(\v2$.conversation.v1.AgentQuestionAnswerH\x00R\x0equestionAnswer\x12[\n" +
 	"\x13permission_decision\x18\x02 \x01(\v2(.conversation.v1.AgentPermissionDecisionH\x00R\x12permissionDecisionB\b\n" +
-	"\x06answer\"\xf7\x02\n" +
+	"\x06answer\"\xce\x03\n" +
 	"\vAgentUpdate\x12<\n" +
 	"\bactivity\x18\x01 \x01(\v2\x1e.conversation.v1.AgentActivityH\x00R\bactivity\x12<\n" +
 	"\bquestion\x18\x03 \x01(\v2\x1e.conversation.v1.AgentQuestionH\x00R\bquestion\x12B\n" +
@@ -2805,7 +2826,8 @@ const file_conversation_v1_agent_proto_rawDesc = "" +
 	"permission\x12>\n" +
 	"\vcontext_cut\x18\x05 \x01(\v2\x1b.conversation.v1.ContextCutH\x00R\n" +
 	"contextCut\x12@\n" +
-	"\tapi_error\x18\x06 \x01(\v2!.conversation.v1.ApiRequestFailedH\x00R\bapiErrorB\b\n" +
+	"\tapi_error\x18\x06 \x01(\v2!.conversation.v1.ApiRequestFailedH\x00R\bapiError\x12U\n" +
+	"\x11response_revision\x18\b \x01(\v2&.conversation.v1.AgentResponseRevisionH\x00R\x10responseRevisionB\b\n" +
 	"\x06updateJ\x04\b\a\x10\bR\x16context_budget_warning\"\xeb\x01\n" +
 	"\fAgentSuccess\x12?\n" +
 	"\tcompleted\x18\x01 \x01(\v2\x1f.conversation.v1.AgentCompletedH\x00R\tcompleted\x12E\n" +
@@ -2968,12 +2990,13 @@ var file_conversation_v1_agent_proto_goTypes = []any{
 	(*AgentPermission)(nil),                       // 48: conversation.v1.AgentPermission
 	(*ContextCut)(nil),                            // 49: conversation.v1.ContextCut
 	(*ApiRequestFailed)(nil),                      // 50: conversation.v1.ApiRequestFailed
-	(*AgentActivityId)(nil),                       // 51: conversation.v1.AgentActivityId
-	(*DetachedLost)(nil),                          // 52: conversation.v1.DetachedLost
-	(*SessionQueryDied)(nil),                      // 53: conversation.v1.SessionQueryDied
-	(*AgentWorkflowStart)(nil),                    // 54: conversation.v1.AgentWorkflowStart
-	(*AgentSubagentStart)(nil),                    // 55: conversation.v1.AgentSubagentStart
-	(*AgentWorkflowSummary)(nil),                  // 56: conversation.v1.AgentWorkflowSummary
+	(*AgentResponseRevision)(nil),                 // 51: conversation.v1.AgentResponseRevision
+	(*AgentActivityId)(nil),                       // 52: conversation.v1.AgentActivityId
+	(*DetachedLost)(nil),                          // 53: conversation.v1.DetachedLost
+	(*SessionQueryDied)(nil),                      // 54: conversation.v1.SessionQueryDied
+	(*AgentWorkflowStart)(nil),                    // 55: conversation.v1.AgentWorkflowStart
+	(*AgentSubagentStart)(nil),                    // 56: conversation.v1.AgentSubagentStart
+	(*AgentWorkflowSummary)(nil),                  // 57: conversation.v1.AgentWorkflowSummary
 }
 var file_conversation_v1_agent_proto_depIdxs = []int32{
 	41, // 0: conversation.v1.AgentFrame.agent_id:type_name -> conversation.v1.AgentId
@@ -2991,51 +3014,52 @@ var file_conversation_v1_agent_proto_depIdxs = []int32{
 	48, // 12: conversation.v1.AgentUpdate.permission:type_name -> conversation.v1.AgentPermission
 	49, // 13: conversation.v1.AgentUpdate.context_cut:type_name -> conversation.v1.ContextCut
 	50, // 14: conversation.v1.AgentUpdate.api_error:type_name -> conversation.v1.ApiRequestFailed
-	7,  // 15: conversation.v1.AgentSuccess.completed:type_name -> conversation.v1.AgentCompleted
-	8,  // 16: conversation.v1.AgentSuccess.interrupted:type_name -> conversation.v1.AgentInterrupted
-	6,  // 17: conversation.v1.AgentSuccess.backgrounded:type_name -> conversation.v1.AgentBackgrounded
-	51, // 18: conversation.v1.AgentCompleted.answer:type_name -> conversation.v1.AgentActivityId
-	9,  // 19: conversation.v1.AgentInterrupted.by_user:type_name -> conversation.v1.AgentInterruptedByUser
-	12, // 20: conversation.v1.AgentInterrupted.host_shutdown:type_name -> conversation.v1.AgentInterruptedByHostShutdown
-	10, // 21: conversation.v1.AgentInterruptedByUser.direct:type_name -> conversation.v1.AgentInterruptedByUserDirect
-	11, // 22: conversation.v1.AgentInterruptedByUser.interjection:type_name -> conversation.v1.AgentInterruptedByUserInterjection
-	50, // 23: conversation.v1.AgentFailure.api_request_failed:type_name -> conversation.v1.ApiRequestFailed
-	14, // 24: conversation.v1.AgentFailure.blocking_limit:type_name -> conversation.v1.AgentStoppedAtBlockingLimit
-	15, // 25: conversation.v1.AgentFailure.rapid_refill_breaker:type_name -> conversation.v1.AgentStoppedByRapidRefillBreaker
-	16, // 26: conversation.v1.AgentFailure.prompt_too_long:type_name -> conversation.v1.AgentPromptTooLong
-	17, // 27: conversation.v1.AgentFailure.image_error:type_name -> conversation.v1.AgentImageRejected
-	18, // 28: conversation.v1.AgentFailure.model_error:type_name -> conversation.v1.AgentModelError
-	19, // 29: conversation.v1.AgentFailure.malformed_tool_use_exhausted:type_name -> conversation.v1.AgentMalformedToolUseExhausted
-	20, // 30: conversation.v1.AgentFailure.stop_hook_prevented:type_name -> conversation.v1.AgentStoppedByStopHook
-	21, // 31: conversation.v1.AgentFailure.hook_stopped:type_name -> conversation.v1.AgentStoppedByHook
-	22, // 32: conversation.v1.AgentFailure.tool_deferred:type_name -> conversation.v1.AgentToolDeferred
-	23, // 33: conversation.v1.AgentFailure.tool_deferred_unavailable:type_name -> conversation.v1.AgentToolDeferredUnavailable
-	24, // 34: conversation.v1.AgentFailure.max_turns:type_name -> conversation.v1.AgentMaxTurnsReached
-	25, // 35: conversation.v1.AgentFailure.budget_exhausted:type_name -> conversation.v1.AgentBudgetExhausted
-	26, // 36: conversation.v1.AgentFailure.structured_output_retry_exhausted:type_name -> conversation.v1.AgentStructuredOutputRetriesExhausted
-	27, // 37: conversation.v1.AgentFailure.turn_setup_failed:type_name -> conversation.v1.AgentTurnSetupFailed
-	28, // 38: conversation.v1.AgentFailure.execution_error:type_name -> conversation.v1.AgentExecutionError
-	29, // 39: conversation.v1.AgentFailure.continuation_prevented:type_name -> conversation.v1.AgentContinuationPrevented
-	52, // 40: conversation.v1.AgentFailure.lost:type_name -> conversation.v1.DetachedLost
-	53, // 41: conversation.v1.AgentFailure.query_died:type_name -> conversation.v1.SessionQueryDied
-	54, // 42: conversation.v1.AgentWorkflow.start:type_name -> conversation.v1.AgentWorkflowStart
-	31, // 43: conversation.v1.AgentWorkflow.update:type_name -> conversation.v1.AgentWorkflowUpdate
-	35, // 44: conversation.v1.AgentWorkflow.success:type_name -> conversation.v1.AgentWorkflowSuccess
-	38, // 45: conversation.v1.AgentWorkflow.failure:type_name -> conversation.v1.AgentWorkflowFailure
-	32, // 46: conversation.v1.AgentWorkflowUpdate.all_subagents:type_name -> conversation.v1.AgentWorkflowSubagent
-	55, // 47: conversation.v1.AgentWorkflowSubagent.agent_start:type_name -> conversation.v1.AgentSubagentStart
-	33, // 48: conversation.v1.AgentWorkflowSubagent.live:type_name -> conversation.v1.AgentWorkflowSubagentLive
-	34, // 49: conversation.v1.AgentWorkflowSubagent.ended:type_name -> conversation.v1.AgentWorkflowSubagentEnded
-	36, // 50: conversation.v1.AgentWorkflowSuccess.completed:type_name -> conversation.v1.AgentWorkflowCompleted
-	37, // 51: conversation.v1.AgentWorkflowSuccess.interrupted:type_name -> conversation.v1.AgentWorkflowInterrupted
-	56, // 52: conversation.v1.AgentWorkflowCompleted.summary:type_name -> conversation.v1.AgentWorkflowSummary
-	39, // 53: conversation.v1.AgentWorkflowFailure.script_rejected:type_name -> conversation.v1.AgentWorkflowScriptRejected
-	40, // 54: conversation.v1.AgentWorkflowFailure.run_ended:type_name -> conversation.v1.AgentWorkflowRunEnded
-	55, // [55:55] is the sub-list for method output_type
-	55, // [55:55] is the sub-list for method input_type
-	55, // [55:55] is the sub-list for extension type_name
-	55, // [55:55] is the sub-list for extension extendee
-	0,  // [0:55] is the sub-list for field type_name
+	51, // 15: conversation.v1.AgentUpdate.response_revision:type_name -> conversation.v1.AgentResponseRevision
+	7,  // 16: conversation.v1.AgentSuccess.completed:type_name -> conversation.v1.AgentCompleted
+	8,  // 17: conversation.v1.AgentSuccess.interrupted:type_name -> conversation.v1.AgentInterrupted
+	6,  // 18: conversation.v1.AgentSuccess.backgrounded:type_name -> conversation.v1.AgentBackgrounded
+	52, // 19: conversation.v1.AgentCompleted.answer:type_name -> conversation.v1.AgentActivityId
+	9,  // 20: conversation.v1.AgentInterrupted.by_user:type_name -> conversation.v1.AgentInterruptedByUser
+	12, // 21: conversation.v1.AgentInterrupted.host_shutdown:type_name -> conversation.v1.AgentInterruptedByHostShutdown
+	10, // 22: conversation.v1.AgentInterruptedByUser.direct:type_name -> conversation.v1.AgentInterruptedByUserDirect
+	11, // 23: conversation.v1.AgentInterruptedByUser.interjection:type_name -> conversation.v1.AgentInterruptedByUserInterjection
+	50, // 24: conversation.v1.AgentFailure.api_request_failed:type_name -> conversation.v1.ApiRequestFailed
+	14, // 25: conversation.v1.AgentFailure.blocking_limit:type_name -> conversation.v1.AgentStoppedAtBlockingLimit
+	15, // 26: conversation.v1.AgentFailure.rapid_refill_breaker:type_name -> conversation.v1.AgentStoppedByRapidRefillBreaker
+	16, // 27: conversation.v1.AgentFailure.prompt_too_long:type_name -> conversation.v1.AgentPromptTooLong
+	17, // 28: conversation.v1.AgentFailure.image_error:type_name -> conversation.v1.AgentImageRejected
+	18, // 29: conversation.v1.AgentFailure.model_error:type_name -> conversation.v1.AgentModelError
+	19, // 30: conversation.v1.AgentFailure.malformed_tool_use_exhausted:type_name -> conversation.v1.AgentMalformedToolUseExhausted
+	20, // 31: conversation.v1.AgentFailure.stop_hook_prevented:type_name -> conversation.v1.AgentStoppedByStopHook
+	21, // 32: conversation.v1.AgentFailure.hook_stopped:type_name -> conversation.v1.AgentStoppedByHook
+	22, // 33: conversation.v1.AgentFailure.tool_deferred:type_name -> conversation.v1.AgentToolDeferred
+	23, // 34: conversation.v1.AgentFailure.tool_deferred_unavailable:type_name -> conversation.v1.AgentToolDeferredUnavailable
+	24, // 35: conversation.v1.AgentFailure.max_turns:type_name -> conversation.v1.AgentMaxTurnsReached
+	25, // 36: conversation.v1.AgentFailure.budget_exhausted:type_name -> conversation.v1.AgentBudgetExhausted
+	26, // 37: conversation.v1.AgentFailure.structured_output_retry_exhausted:type_name -> conversation.v1.AgentStructuredOutputRetriesExhausted
+	27, // 38: conversation.v1.AgentFailure.turn_setup_failed:type_name -> conversation.v1.AgentTurnSetupFailed
+	28, // 39: conversation.v1.AgentFailure.execution_error:type_name -> conversation.v1.AgentExecutionError
+	29, // 40: conversation.v1.AgentFailure.continuation_prevented:type_name -> conversation.v1.AgentContinuationPrevented
+	53, // 41: conversation.v1.AgentFailure.lost:type_name -> conversation.v1.DetachedLost
+	54, // 42: conversation.v1.AgentFailure.query_died:type_name -> conversation.v1.SessionQueryDied
+	55, // 43: conversation.v1.AgentWorkflow.start:type_name -> conversation.v1.AgentWorkflowStart
+	31, // 44: conversation.v1.AgentWorkflow.update:type_name -> conversation.v1.AgentWorkflowUpdate
+	35, // 45: conversation.v1.AgentWorkflow.success:type_name -> conversation.v1.AgentWorkflowSuccess
+	38, // 46: conversation.v1.AgentWorkflow.failure:type_name -> conversation.v1.AgentWorkflowFailure
+	32, // 47: conversation.v1.AgentWorkflowUpdate.all_subagents:type_name -> conversation.v1.AgentWorkflowSubagent
+	56, // 48: conversation.v1.AgentWorkflowSubagent.agent_start:type_name -> conversation.v1.AgentSubagentStart
+	33, // 49: conversation.v1.AgentWorkflowSubagent.live:type_name -> conversation.v1.AgentWorkflowSubagentLive
+	34, // 50: conversation.v1.AgentWorkflowSubagent.ended:type_name -> conversation.v1.AgentWorkflowSubagentEnded
+	36, // 51: conversation.v1.AgentWorkflowSuccess.completed:type_name -> conversation.v1.AgentWorkflowCompleted
+	37, // 52: conversation.v1.AgentWorkflowSuccess.interrupted:type_name -> conversation.v1.AgentWorkflowInterrupted
+	57, // 53: conversation.v1.AgentWorkflowCompleted.summary:type_name -> conversation.v1.AgentWorkflowSummary
+	39, // 54: conversation.v1.AgentWorkflowFailure.script_rejected:type_name -> conversation.v1.AgentWorkflowScriptRejected
+	40, // 55: conversation.v1.AgentWorkflowFailure.run_ended:type_name -> conversation.v1.AgentWorkflowRunEnded
+	56, // [56:56] is the sub-list for method output_type
+	56, // [56:56] is the sub-list for method input_type
+	56, // [56:56] is the sub-list for extension type_name
+	56, // [56:56] is the sub-list for extension extendee
+	0,  // [0:56] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_agent_proto_init() }
@@ -3073,6 +3097,7 @@ func file_conversation_v1_agent_proto_init() {
 		(*AgentUpdate_Permission)(nil),
 		(*AgentUpdate_ContextCut)(nil),
 		(*AgentUpdate_ApiError)(nil),
+		(*AgentUpdate_ResponseRevision)(nil),
 	}
 	file_conversation_v1_agent_proto_msgTypes[5].OneofWrappers = []any{
 		(*AgentSuccess_Completed)(nil),

@@ -46,6 +46,9 @@ const (
 	AgentReplSubmitPromptProcedure = "/agentrepl.v1.AgentRepl/SubmitPrompt"
 	// AgentReplSelectFeedRowProcedure is the fully-qualified name of the AgentRepl's SelectFeedRow RPC.
 	AgentReplSelectFeedRowProcedure = "/agentrepl.v1.AgentRepl/SelectFeedRow"
+	// AgentReplSelectResponseTextProcedure is the fully-qualified name of the AgentRepl's
+	// SelectResponseText RPC.
+	AgentReplSelectResponseTextProcedure = "/agentrepl.v1.AgentRepl/SelectResponseText"
 	// AgentReplReportComposerEntriesProcedure is the fully-qualified name of the AgentRepl's
 	// ReportComposerEntries RPC.
 	AgentReplReportComposerEntriesProcedure = "/agentrepl.v1.AgentRepl/ReportComposerEntries"
@@ -380,6 +383,7 @@ var (
 	agentReplServiceDescriptor                          = v1.File_agentrepl_v1_service_proto.Services().ByName("AgentRepl")
 	agentReplSubmitPromptMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SubmitPrompt")
 	agentReplSelectFeedRowMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SelectFeedRow")
+	agentReplSelectResponseTextMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SelectResponseText")
 	agentReplReportComposerEntriesMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("ReportComposerEntries")
 	agentReplFindEntryNeighborMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("FindEntryNeighbor")
 	agentReplFoldMergeBubbleMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("FoldMergeBubble")
@@ -514,6 +518,10 @@ type AgentReplClient interface {
 	// its ordered rows, pushes it to the webapp and Emacs, and acks it here.
 	// See endpoint_select_feed_row.proto.
 	SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error)
+	// Hold or clear the words highlighted in a final response: while they are
+	// held, the next prompt revises that response instead of starting a turn.
+	// See endpoint_select_response_text.proto.
+	SelectResponseText(context.Context, *connect.Request[v1.SelectResponseTextRequest]) (*connect.Response[v1.SelectResponseTextResponse], error)
 	// The entries the composer holds while the person types, and the one point
 	// is on: the daemon pushes the node it answers to the webapp, and the labels
 	// that answer nothing to Emacs. See endpoint_report_composer_entries.proto.
@@ -917,6 +925,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplSelectFeedRowProcedure,
 			connect.WithSchema(agentReplSelectFeedRowMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		selectResponseText: connect.NewClient[v1.SelectResponseTextRequest, v1.SelectResponseTextResponse](
+			httpClient,
+			baseURL+AgentReplSelectResponseTextProcedure,
+			connect.WithSchema(agentReplSelectResponseTextMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		reportComposerEntries: connect.NewClient[v1.ReportComposerEntriesRequest, v1.ReportComposerEntriesResponse](
@@ -1669,6 +1683,7 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 type agentReplClient struct {
 	submitPrompt               *connect.Client[v1.SubmitPromptRequest, v1.SubmitPromptResponse]
 	selectFeedRow              *connect.Client[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse]
+	selectResponseText         *connect.Client[v1.SelectResponseTextRequest, v1.SelectResponseTextResponse]
 	reportComposerEntries      *connect.Client[v1.ReportComposerEntriesRequest, v1.ReportComposerEntriesResponse]
 	findEntryNeighbor          *connect.Client[v1.FindEntryNeighborRequest, v1.FindEntryNeighborResponse]
 	foldMergeBubble            *connect.Client[v1.FoldMergeBubbleRequest, v1.FoldMergeBubbleResponse]
@@ -1801,6 +1816,11 @@ func (c *agentReplClient) SubmitPrompt(ctx context.Context, req *connect.Request
 // SelectFeedRow calls agentrepl.v1.AgentRepl.SelectFeedRow.
 func (c *agentReplClient) SelectFeedRow(ctx context.Context, req *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error) {
 	return c.selectFeedRow.CallUnary(ctx, req)
+}
+
+// SelectResponseText calls agentrepl.v1.AgentRepl.SelectResponseText.
+func (c *agentReplClient) SelectResponseText(ctx context.Context, req *connect.Request[v1.SelectResponseTextRequest]) (*connect.Response[v1.SelectResponseTextResponse], error) {
+	return c.selectResponseText.CallUnary(ctx, req)
 }
 
 // ReportComposerEntries calls agentrepl.v1.AgentRepl.ReportComposerEntries.
@@ -2423,6 +2443,10 @@ type AgentReplHandler interface {
 	// its ordered rows, pushes it to the webapp and Emacs, and acks it here.
 	// See endpoint_select_feed_row.proto.
 	SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error)
+	// Hold or clear the words highlighted in a final response: while they are
+	// held, the next prompt revises that response instead of starting a turn.
+	// See endpoint_select_response_text.proto.
+	SelectResponseText(context.Context, *connect.Request[v1.SelectResponseTextRequest]) (*connect.Response[v1.SelectResponseTextResponse], error)
 	// The entries the composer holds while the person types, and the one point
 	// is on: the daemon pushes the node it answers to the webapp, and the labels
 	// that answer nothing to Emacs. See endpoint_report_composer_entries.proto.
@@ -2822,6 +2846,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplSelectFeedRowProcedure,
 		svc.SelectFeedRow,
 		connect.WithSchema(agentReplSelectFeedRowMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSelectResponseTextHandler := connect.NewUnaryHandler(
+		AgentReplSelectResponseTextProcedure,
+		svc.SelectResponseText,
+		connect.WithSchema(agentReplSelectResponseTextMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplReportComposerEntriesHandler := connect.NewUnaryHandler(
@@ -3573,6 +3603,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSubmitPromptHandler.ServeHTTP(w, r)
 		case AgentReplSelectFeedRowProcedure:
 			agentReplSelectFeedRowHandler.ServeHTTP(w, r)
+		case AgentReplSelectResponseTextProcedure:
+			agentReplSelectResponseTextHandler.ServeHTTP(w, r)
 		case AgentReplReportComposerEntriesProcedure:
 			agentReplReportComposerEntriesHandler.ServeHTTP(w, r)
 		case AgentReplFindEntryNeighborProcedure:
@@ -3832,6 +3864,10 @@ func (UnimplementedAgentReplHandler) SubmitPrompt(context.Context, *connect.Requ
 
 func (UnimplementedAgentReplHandler) SelectFeedRow(context.Context, *connect.Request[v1.SelectFeedRowRequest]) (*connect.Response[v1.SelectFeedRowResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectFeedRow is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SelectResponseText(context.Context, *connect.Request[v1.SelectResponseTextRequest]) (*connect.Response[v1.SelectResponseTextResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectResponseText is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) ReportComposerEntries(context.Context, *connect.Request[v1.ReportComposerEntriesRequest]) (*connect.Response[v1.ReportComposerEntriesResponse], error) {

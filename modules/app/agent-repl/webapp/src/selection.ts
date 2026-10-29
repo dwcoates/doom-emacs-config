@@ -24,6 +24,39 @@ export function selectedText(source: SelectionSource = window): string {
   return source.getSelection()?.toString() ?? "";
 }
 
+/** The reader's selection as one span: its text and the nodes it starts and ends in. */
+export interface SelectedSpan {
+  readonly text: string;
+  readonly anchor: Node;
+  readonly focus: Node;
+}
+
+/** The span SOURCE's selection holds, or null when it holds no text. */
+export function selectedSpan(source: SelectionSource = window): SelectedSpan | null {
+  const selection = source.getSelection();
+  if (selection === null) return null;
+  const text = selection.toString();
+  const { anchorNode, focusNode } = selection;
+  if (text === "" || anchorNode === null || focusNode === null) return null;
+  return { text, anchor: anchorNode, focus: focusNode };
+}
+
+/** Whether SOURCE's selection holds text that starts or ends inside ROOT. */
+export function selectionTouches(root: Node, source: SelectionSource = window): boolean {
+  const span = selectedSpan(source);
+  return span !== null && (root.contains(span.anchor) || root.contains(span.focus));
+}
+
+/**
+ * Drop SOURCE's selection when it touches ROOT, answering whether it did. A
+ * selection elsewhere on the page is the reader's and stays.
+ */
+export function clearSelectionIn(root: Node, source: SelectionSource = window): boolean {
+  if (!selectionTouches(root, source)) return false;
+  source.getSelection()?.removeAllRanges();
+  return true;
+}
+
 /** Where a selection starts and ends, compared by boundary, never by text. */
 interface Extent {
   anchorNode: Node | null;

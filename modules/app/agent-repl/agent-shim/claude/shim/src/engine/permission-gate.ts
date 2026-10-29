@@ -33,6 +33,7 @@ import { settledAt } from "../convert/entries.js";
 import { permissionId, questionId, toolCallActivityId } from "../convert/ids.js";
 import { permissionUpsertKey, questionUpsertKey } from "../store/keys.js";
 import type { PersistEntry } from "../store/persistence.js";
+import { updateEntry } from "../store/update-entry.js";
 import type { PermissionModeLike, PermissionResultLike, PermissionUpdateLike } from "../sdk/types.js";
 
 const LOGGER = bindLog({ component: "shim-engine-permission", operation: "shim.engine.permission" });
@@ -1108,7 +1109,7 @@ export class PermissionGate {
     discriminator: string,
     update: conversationv1.AgentUpdate["update"],
   ): PersistEntry {
-    return {
+    return updateEntry({
       agentId,
       upsertKey,
       // The gate has no vendor RECORD uuid: it fires before the vendor writes
@@ -1117,17 +1118,8 @@ export class PermissionGate {
       source: { vendorUuid: toolUseId, discriminator },
       keepalive: this.deps.keepalive(agentId),
       turn: this.deps.turn(agentId),
-      item: {
-        kind: "frame",
-        frame: create(conversationv1.AgentFrameSchema, {
-          agentId,
-          result: {
-            case: "update",
-            value: create(conversationv1.AgentUpdateSchema, { update }),
-          },
-        }),
-      },
-    };
+      update,
+    });
   }
 }
 

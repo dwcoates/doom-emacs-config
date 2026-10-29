@@ -309,6 +309,17 @@ export function mountComposer(
             operation: "composer.ask-answered",
           });
           return;
+        case "responseRevising":
+          // THE WORDS ASKED ABOUT A HIGHLIGHT IN A FINAL RESPONSE: the daemon
+          // revises that response in place and mints no turn; the bubble's
+          // redraw is the visible effect, so the box clears and this
+          // component draws nothing.
+          accepted();
+          log.info("SubmitPrompt revises a highlighted final response without minting a turn", {
+            operation: "composer.response-revising",
+            context: { row: outcome.value.row?.value ?? "unset" },
+          });
+          return;
         default: {
           const other: { case: string } = outcome;
           unreachableArm("SubmitPromptSuccess.outcome", other.case);

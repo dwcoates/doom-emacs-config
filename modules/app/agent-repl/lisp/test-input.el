@@ -2001,6 +2001,44 @@ clears."
       (should-not (agent-repl-test-input--rung-has-p
                    agent-repl-test-input--error "elisp.input.unknown-success-arm")))))
 
+(defconst agent-repl-test-input--response-revising-answer
+  '(:response (:arm :success
+               :value (:arm :response-revising :value (:row (:value "row-1")))))
+  "A scripted `response_revising' success: the send revises a final
+response whose words were highlighted.")
+
+(ert-deftest agent-repl-input-response-revising-arm-clears-the-composer ()
+  "A prompt that revises a highlighted response landed: nothing awaited,
+so the input clears."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--response-revising-answer)
+    (agent-repl-test-input--type "what does this mean")
+    (agent-repl--send :user-sent)
+    (should (equal (agent-repl-test-input--composer-text) ""))))
+
+(ert-deftest agent-repl-input-response-revising-arm-runs-no-posthooks ()
+  "No turn was minted, so there is nothing for a posthook to post-process."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--response-revising-answer)
+    (let* ((ran nil)
+           (agent-repl-send-posthooks
+            (list (cons "" (lambda (_ws _raw) (setq ran t))))))
+      (agent-repl-test-input--type "what does this mean")
+      (agent-repl--send :user-sent)
+      (should-not ran))))
+
+(ert-deftest agent-repl-input-response-revising-arm-is-recorded ()
+  "The revision is recorded at INFO, never as an unknown success arm."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer agent-repl-test-input--response-revising-answer)
+    (agent-repl-test-input--type "what does this mean")
+    (agent-repl-test-input--capturing-rungs
+      (agent-repl--send :user-sent)
+      (should (agent-repl-test-input--rung-has-p
+               agent-repl-test-input--info "elisp.input.response-revising"))
+      (should-not (agent-repl-test-input--rung-has-p
+                   agent-repl-test-input--error "elisp.input.unknown-success-arm")))))
+
 (defconst agent-repl-test-input--ask-not-standing-answer
   '(:response (:arm :error :value (:reason (:arm :ask-not-standing :value nil))))
   "A scripted `ask_not_standing' refusal: the ask settled first.")

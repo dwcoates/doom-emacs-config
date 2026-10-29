@@ -28,6 +28,7 @@
  * once while the pointer stays on it.
  */
 import { log } from "../log.js";
+import { selectionTouches } from "../selection.js";
 import { branchLineAt, governedRowAt, isResponseRow } from "./bubble-selection.js";
 import { TREE_CLASS, TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
 import { answeredNodeAt } from "./entries.js";
@@ -152,6 +153,13 @@ export function installBranchHover(host: HTMLElement, resolve: LengthResolver = 
   };
   const onOver = (event: MouseEvent): void => {
     const row = governedRowAt(event.target, host);
+    // A BUBBLE THE READER IS HIGHLIGHTING IN IS NOT BOXED (owner request,
+    // 2026-10-28): the highlight is what a prompt sent now acts on, and a box
+    // over the branch beneath it would say otherwise.
+    if (row !== null && selectionTouches(row, host.ownerDocument)) {
+      clear();
+      return;
+    }
     const under = row !== null && event.target instanceof Element ? boxUnder(host, row, event.target, event.clientX, boxesOf) : null;
     if (under === null) {
       clear();
@@ -174,13 +182,20 @@ export function installBranchHover(host: HTMLElement, resolve: LengthResolver = 
       context: { row: feedRowId(under.row) ?? "unset", label: under.label },
     });
   };
+  // A SELECTION MADE UNDER A STANDING BOX takes the box down at once, before
+  // the pointer moves again.
+  const onSelectionChange = (): void => {
+    if (hovered !== undefined && selectionTouches(hovered.row, host.ownerDocument)) clear();
+  };
   host.addEventListener("mouseover", onOver);
   host.addEventListener("mousemove", onOver);
   host.addEventListener("mouseleave", clear);
+  host.ownerDocument.addEventListener("selectionchange", onSelectionChange);
   return () => {
     host.removeEventListener("mouseover", onOver);
     host.removeEventListener("mousemove", onOver);
     host.removeEventListener("mouseleave", clear);
+    host.ownerDocument.removeEventListener("selectionchange", onSelectionChange);
     clear();
   };
 }

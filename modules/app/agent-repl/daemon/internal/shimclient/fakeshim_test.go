@@ -290,6 +290,11 @@ func (f *fakeShim) NetworkChanged(_ context.Context, _ *connect.Request[shimv1.N
 	return connect.NewResponse(&shimv1.NetworkChangedResponse{}), nil
 }
 
+func (f *fakeShim) ReviseResponse(_ context.Context, _ *connect.Request[shimv1.ReviseResponseRequest]) (*connect.Response[shimv1.ReviseResponseResponse], error) {
+	f.record("ReviseResponse")
+	return connect.NewResponse(&shimv1.ReviseResponseResponse{}), nil
+}
+
 func (f *fakeShim) SendKeepalive(_ context.Context, _ *connect.Request[shimv1.SendKeepaliveRequest]) (*connect.Response[shimv1.SendKeepaliveResponse], error) {
 	f.record("SendKeepalive")
 	return connect.NewResponse(&shimv1.SendKeepaliveResponse{}), nil

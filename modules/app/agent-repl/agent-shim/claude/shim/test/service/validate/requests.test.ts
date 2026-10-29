@@ -531,6 +531,29 @@ describe("validateDetachForegroundRequest", () => {
   });
 });
 
+describe("validateReviseResponseRequest", () => {
+  it("accepts a response and an instruction", () => {
+    // Arrange, Act, Assert.
+    expect(codeOf(() => validate.validateReviseResponseRequest(requests.reviseResponseRequest()))).toBeUndefined();
+  });
+
+  it("refuses a revision naming no response", () => {
+    // Arrange.
+    const request = create(shimv1.ReviseResponseRequestSchema, { instruction: requests.reviseResponseRequest().instruction });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateReviseResponseRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses a revision with no instruction", () => {
+    // Arrange.
+    const request = create(shimv1.ReviseResponseRequestSchema, { response: requests.reviseResponseRequest().response });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateReviseResponseRequest(request))).toBe(Code.InvalidArgument);
+  });
+});
+
 describe("validateStartSessionRequest cold remediation", () => {
   /** The refusal's message, so a field path can be asserted. */
   function messageOf(act: () => void): string | undefined {

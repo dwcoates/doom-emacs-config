@@ -16,17 +16,14 @@
  * surface, and logged.
  */
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
-import { ConnectError } from "@connectrpc/connect";
 import {
   SelectFeedRowRequestSchema,
   SelectFeedRowResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_feed_row_pb";
-import { controlPlaneFailed } from "../failure/sink.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
-import { callFailure, refusalOf } from "../rpc/refuse.js";
-import { requireCase, unreachableArm } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
+import { controlCall } from "../rpc/control-call.js";
+import { requireCase } from "../rpc/strict.js";
 
 /** SelectFeedRow's own refusal arm, in the reader's words. */
 const SELECT_FEED_ROW_REFUSALS = {
@@ -44,43 +41,20 @@ type FeedRowMove = NonNullable<MessageInitShape<typeof SelectFeedRowRequestSchem
  * a transport failure. A malformed answer throws, for `guardMalformed`.
  */
 export async function selectFeedRow(ctx: AppContext, move: FeedRowMove, what: string): Promise<void> {
-  let response;
-  try {
-    response = await callUnary(
-      ctx,
-      "SelectFeedRow",
-      (client) =>
-        client.selectFeedRow(create(SelectFeedRowRequestSchema, { workspace: ctx.workspace, move })),
-      SelectFeedRowResponseSchema,
-    );
-  } catch (err) {
-    // `callUnary` already logged the transport failure; the chip is told here.
-    if (!(err instanceof ConnectError)) throw err;
-    ctx.failures.report(controlPlaneFailed(what, callFailure(err).text));
-    return;
-  }
-  const result = requireCase(response.result, "SelectFeedRowResponse.result");
-  switch (result.case) {
-    case "success": {
-      const outcome = requireCase(result.value.outcome, "SelectFeedRowSuccess.outcome");
-      log.debug(`the daemon applied the selection move (${what}); its push changes the feed`, {
-        operation: "feed.select-feed-row-answered",
-        context: { move: move.case ?? "unset", outcome: outcome.case },
-      });
-      return;
-    }
-    case "error": {
-      const said = refusalOf(result.value.cause, SELECT_FEED_ROW_REFUSALS, "SelectFeedRowError.cause");
-      log.error(`the daemon refused to ${what}: ${said.text}`, {
-        operation: "feed.select-feed-row-refused",
-        context: { move: move.case ?? "unset", arm: said.arm },
-      });
-      ctx.failures.report(controlPlaneFailed(what, said.text));
-      return;
-    }
-    default: {
-      const other: { case: string } = result;
-      return unreachableArm("SelectFeedRowResponse.result", other.case);
-    }
-  }
+  const success = await controlCall(ctx, {
+    rpc: "SelectFeedRow",
+    what,
+    send: (client) => client.selectFeedRow(create(SelectFeedRowRequestSchema, { workspace: ctx.workspace, move })),
+    schema: SelectFeedRowResponseSchema,
+    result: (response) => response.result,
+    refusals: SELECT_FEED_ROW_REFUSALS,
+    refusedOperation: "feed.select-feed-row-refused",
+    context: { move: move.case ?? "unset" },
+  });
+  if (success === undefined) return;
+  const outcome = requireCase(success.outcome, "SelectFeedRowSuccess.outcome");
+  log.debug(`the daemon applied the selection move (${what}); its push changes the feed`, {
+    operation: "feed.select-feed-row-answered",
+    context: { move: move.case ?? "unset", outcome: outcome.case },
+  });
 }

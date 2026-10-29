@@ -33,8 +33,9 @@
  * this is the single documented place where that is admitted.
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, watch, writeFileSync, type FSWatcher } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, watch, writeFileSync, type FSWatcher } from "node:fs";
+import os from "node:os";
+import path, { dirname } from "node:path";
 
 import { bindLog } from "../log.js";
 import type { SessionProfile } from "../engine/profile.js";
@@ -484,6 +485,14 @@ export interface FakeQueryOpts {
    * `resumeDropsTurn`; `fake/rollback.ts`).
    */
   readonly resumeDropsTurn?: string;
+  /**
+   * The query is an EPHEMERAL FORK of `resume`: it reads that conversation and
+   * writes nothing anyone reads, as the real vendor's unpersisted fork
+   * (`forkSession` with `persistSession: false`). The mock answers under a
+   * freshly minted session id and files its records in a throwaway directory,
+   * so the parent's transcript is never appended to.
+   */
+  readonly ephemeralFork?: boolean;
   /** Mint a uuid. Injectable so goldens are stable. */
   readonly newUuid: () => string;
   /** Milliseconds since the epoch. Injectable so goldens are stable. */
@@ -630,7 +639,7 @@ export function createFakeQuery(
   // and mints a new one, and every message after that point carries the new
   // uuid. On resume it starts at the RESUMED uuid, which the real CLI reports
   // on every message of a continued session — not only on its init.
-  let sessionUuid = opts.resume ?? opts.sessionId;
+  let sessionUuid = opts.ephemeralFork === true ? opts.newUuid() : (opts.resume ?? opts.sessionId);
   let model = opts.model ?? FAKE_DEFAULT_MODEL;
   let permissionMode: PermissionModeLike = opts.permissionMode ?? "default";
   /** The effort the flag layer holds; undefined until `applyFlagSettings` sets one. */
@@ -699,7 +708,7 @@ export function createFakeQuery(
   opts.abortSignal?.addEventListener("abort", () => out.end(), { once: true });
 
   const files = new VendorFiles({
-    configDir,
+    configDir: opts.ephemeralFork === true ? mkdtempSync(path.join(os.tmpdir(), "fake-unpersisted-fork-")) : configDir,
     cwd,
     spoolRoot,
     sessionId: sessionUuid,

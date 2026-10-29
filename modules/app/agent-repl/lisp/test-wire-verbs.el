@@ -2048,12 +2048,12 @@ the form is its prompt and nothing else."
                    "unknownWorkspace" "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-outcome-arms-pinned ()
-  "SubmitPromptSuccess's outcome oneof has exactly the five arms decoded here."
+  "SubmitPromptSuccess's outcome oneof has exactly the six arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptSuccess")
                        #'string<)
-                 '("askAnswered" "commandActed" "commandPanel" "commandRefused" "turn"))))
+                 '("askAnswered" "commandActed" "commandPanel" "commandRefused" "responseRevising" "turn"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-panel-arms-pinned ()
   "SubmitPromptCommandPanel's panel oneof has exactly the six arms decoded
@@ -3136,6 +3136,21 @@ empty, with no turn to await."
     (should (equal (agent-repl-wire-decode-submit-prompt-success
                     (agent-repl-test-wire-verbs--parse "{\"askAnswered\":{}}"))
                    '(:arm :ask-answered :value nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-success-response-revising-arm ()
+  "SubmitPromptSuccess's `response_revising' arm decodes the revised
+response's row."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-success
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"responseRevising\":{\"row\":{\"value\":\"row-1\"}}}"))
+                   '(:arm :response-revising :value (:row (:value "row-1")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-success-response-revising-needs-row ()
+  "A `response_revising' arm that names no row is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-success
+                   (agent-repl-test-wire-verbs--parse "{\"responseRevising\":{}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-error-ask-not-standing-arm ()
   "SubmitPromptError's `ask_not_standing' arm decodes empty."

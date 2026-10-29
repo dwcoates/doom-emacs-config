@@ -21,6 +21,7 @@ import "shim/v1/endpoint_roll_back_session.proto";
 import "shim/v1/endpoint_read_transcripts.proto";
 import "shim/v1/endpoint_resolve_peer_delivery.proto";
 import "shim/v1/endpoint_resolve_vendor_task.proto";
+import "shim/v1/endpoint_revise_response.proto";
 import "shim/v1/endpoint_set_session_model.proto";
 import "shim/v1/endpoint_set_session_effort.proto";
 import "shim/v1/endpoint_set_session_permission_mode.proto";
@@ -114,6 +115,12 @@ service Shim {
   // detached work and restore the files, then resume the vendor session at
   // the last entry before the prompt. See endpoint_roll_back_session.proto.
   rpc RollBackSession(RollBackSessionRequest) returns (RollBackSessionResponse);
+
+  // REWRITE one settled response of the main agent whole, on a side query
+  // over a throwaway fork that persists nothing, and write the answer as the
+  // response_revision page line. Runs beside a turn in flight. See
+  // endpoint_revise_response.proto.
+  rpc ReviseResponse(ReviseResponseRequest) returns (ReviseResponseResponse);
 
   // ---- Detached work: one stream per live item, and the writes each kind accepts ----
 

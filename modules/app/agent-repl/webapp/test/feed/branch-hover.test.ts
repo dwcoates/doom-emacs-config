@@ -455,3 +455,51 @@ describe("the box over the response node a hovered prompt entry answers", () => 
     expect([record.level.case, record.context]).toEqual(["debug", expect.objectContaining({ row: "r1", label: "3.1" })]);
   });
 });
+
+describe("a bubble the reader is highlighting in (owner request, 2026-10-28)", () => {
+  /** Select ROW's prose words. */
+  function highlightIn(row: HTMLElement): void {
+    const range = document.createRange();
+    range.selectNodeContents(row.querySelector("#prose") as Node);
+    document.getSelection()?.removeAllRanges();
+    document.getSelection()?.addRange(range);
+  }
+
+  it("boxes no branch while text in the bubble is highlighted", () => {
+    // Arrange
+    const row = response();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    highlightIn(row);
+    // Act
+    over(lineOf(row, "1.1.1"), 9 * COLUMN_PX);
+    // Assert
+    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("takes a standing box down the moment a highlight lands in its bubble", () => {
+    // Arrange
+    const row = response();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    over(lineOf(row, "1.1.1"), 9 * COLUMN_PX);
+    // Act
+    highlightIn(row);
+    document.dispatchEvent(new Event("selectionchange"));
+    // Assert
+    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("boxes the branch again once the highlight is gone", () => {
+    // Arrange
+    const row = response();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    highlightIn(row);
+    over(lineOf(row, "1.1.1"), 9 * COLUMN_PX);
+    document.getSelection()?.removeAllRanges();
+    // Act
+    move(lineOf(row, "1.1.1"), 9 * COLUMN_PX);
+    // Assert
+    expect(boxedBy(row, HOVER_BOX).map(([node]) => node)).toContain("1.1.1");
+  });
+});

@@ -49,12 +49,8 @@ func (r *resolver) recordFinalAnswer(s *wsState, id *frontendv1.FeedId, unit str
 // the row's own owner is looked up first, and the named unit's fold is the
 // fallback for every ordinary answer, where the two are the same fold.
 func (s *wsState) foldOfAnswer(id *frontendv1.FeedId, unit string) (*proseState, bool) {
-	if value := id.GetValue(); value != "" {
-		for _, fold := range s.responses {
-			if fold.row.GetValue() == value {
-				return fold, true
-			}
-		}
+	if _, fold, ok := s.foldOfRow(id); ok {
+		return fold, true
 	}
 	fold, ok := s.responses[unit]
 	return fold, ok

@@ -82,7 +82,29 @@ export const PER_TASK_STOP_AFFORDANCE = true;
  */
 export type VendorBinding =
   | { readonly kind: "fresh"; readonly sessionId: string }
-  | { readonly kind: "resume"; readonly resumeSessionId: string };
+  | { readonly kind: "resume"; readonly resumeSessionId: string }
+  /**
+   * `ephemeral_fork` reads an existing conversation and writes NOTHING: the
+   * vendor forks it to a new session id (`Options.forkSession`) that it never
+   * persists (`Options.persistSession: false`). The two options travel as ONE
+   * arm because each alone writes somewhere: a fork alone files a new
+   * transcript, and an unpersisted resume alone is not a fork of anything. A
+   * side query about the conversation (a response revision) binds this way, so
+   * the session's own transcript is never touched.
+   */
+  | { readonly kind: "ephemeral_fork"; readonly parentSessionId: string };
+
+/** The vendor session id a binding names: the one minted, resumed, or forked from. */
+export function boundSessionId(binding: VendorBinding): string {
+  switch (binding.kind) {
+    case "fresh":
+      return binding.sessionId;
+    case "resume":
+      return binding.resumeSessionId;
+    case "ephemeral_fork":
+      return binding.parentSessionId;
+  }
+}
 
 /** Everything a real query needs that is not fixed policy. */
 export interface RealQuerySpec {
@@ -283,15 +305,27 @@ export function realQueryOptions(spec: RealQuerySpec, mcpServers: Record<string,
     ...(spec.onChildExit === undefined
       ? { ...(spec.onStderr === undefined ? {} : { stderr: spec.onStderr }) }
       : { spawnClaudeCodeProcess: vendorSpawner(spec.onChildExit, spec.onStderr) }),
-    ...(spec.binding.kind === "fresh"
-      ? { sessionId: spec.binding.sessionId }
-      : {
-          resume: spec.binding.resumeSessionId,
-          ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
-          ...(spec.resumeDropsTurn === undefined ? {} : { resumeDropsTurn: spec.resumeDropsTurn }),
-        }),
+    ...bindingOptions(spec),
   };
   return options;
+}
+
+/** The SDK options a spec's binding (and its resume cut) becomes. */
+export function bindingOptions(
+  spec: Pick<RealQuerySpec, "binding" | "resumeSessionAt" | "resumeDropsTurn">,
+): Pick<Options, "sessionId" | "resume" | "resumeSessionAt" | "resumeDropsTurn" | "forkSession" | "persistSession"> {
+  const cut = {
+    ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
+    ...(spec.resumeDropsTurn === undefined ? {} : { resumeDropsTurn: spec.resumeDropsTurn }),
+  };
+  switch (spec.binding.kind) {
+    case "fresh":
+      return { sessionId: spec.binding.sessionId };
+    case "resume":
+      return { resume: spec.binding.resumeSessionId, ...cut };
+    case "ephemeral_fork":
+      return { resume: spec.binding.parentSessionId, forkSession: true, persistSession: false, ...cut };
+  }
 }
 
 /**
@@ -309,8 +343,7 @@ export async function createRealQuery(
     {
       workspace_dir: spec.cwd,
       binding: spec.binding.kind,
-      vendor_session_id:
-        spec.binding.kind === "fresh" ? spec.binding.sessionId : spec.binding.resumeSessionId,
+      vendor_session_id: boundSessionId(spec.binding),
       model: spec.model ?? "",
       permission_mode: spec.permissionMode,
     },

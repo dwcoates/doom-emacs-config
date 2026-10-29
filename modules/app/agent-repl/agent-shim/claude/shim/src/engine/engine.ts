@@ -107,6 +107,13 @@ export interface Engine {
   killTurn(request: shimv1.KillTurnRequest): Promise<shimv1.KillTurnResponse>;
 
   /**
+   * Rewrite one settled response on an ephemeral fork of the conversation and
+   * write it as the response_revision page line. `signal` is the caller's: its
+   * abort ends the side query with nothing written.
+   */
+  reviseResponse(request: shimv1.ReviseResponseRequest, signal?: AbortSignal): Promise<shimv1.ReviseResponseResponse>;
+
+  /**
    * Rewind the main agent's vendor conversation to just before one of its
    * prompts, optionally restoring the files; the arm is the outcome.
    */
@@ -250,6 +257,10 @@ export class NotImplementedEngine implements Engine {
 
   startTurn(): Promise<shimv1.StartTurnResponse> {
     return Promise.reject(unimplemented("StartTurn"));
+  }
+
+  reviseResponse(): Promise<shimv1.ReviseResponseResponse> {
+    return Promise.reject(unimplemented("ReviseResponse"));
   }
 
   watchAgent(): AsyncIterable<shimv1.WatchAgentResponse> {

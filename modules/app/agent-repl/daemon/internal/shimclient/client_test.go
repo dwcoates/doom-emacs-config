@@ -356,6 +356,26 @@ func TestGatherTitleDigestReachesTheShim(t *testing.T) {
 	}
 }
 
+// TestReviseResponseReachesTheShim asserts the revision verb dials the shim
+// like every other unary verb.
+func TestReviseResponseReachesTheShim(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	client := adoptReady(t, f, dir, uds)
+
+	// Act.
+	_, err := client.ReviseResponse(context.Background(), validReviseResponseRequest())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReviseResponse() error = %v", err)
+	}
+	if got := f.count("ReviseResponse"); got != 1 {
+		t.Fatalf("ReviseResponse calls = %d, want 1", got)
+	}
+}
+
 // TestResolvePeerDeliveryReachesTheShim asserts the delivery lookup dials the
 // shim like every other unary verb.
 func TestResolvePeerDeliveryReachesTheShim(t *testing.T) {

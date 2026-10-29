@@ -206,6 +206,10 @@ type FeedSink interface {
 	// failed MID-TURN and the turn went on. EVIDENCE, never a terminal — the
 	// turn's end is the frame-level failure arm and nothing else.
 	OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, turn *conversationv1.TurnId, place *conversationv1.ConversationPlace)
+	// OnResponseRevision is the AgentUpdate.response_revision page line: a
+	// settled response rewritten whole after it settled. The feed draws no
+	// row for it and redraws the revised response's bubble instead.
+	OnResponseRevision(ws ids.WorkspaceID, agent *conversationv1.AgentId, revision *conversationv1.AgentResponseRevision)
 	// OnAgentTerminal is how one agent's stream ended: exactly one of success
 	// and failure is set, and turn is set when the terminal ENDS a turn — the
 	// main agent's, the turn its own stamp names (or, unstamped, the turn in

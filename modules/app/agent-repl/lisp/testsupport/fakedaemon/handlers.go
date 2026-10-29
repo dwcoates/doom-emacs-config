@@ -637,6 +637,10 @@ func (s *fakeServer) SelectChatText(ctx context.Context, req *connect.Request[v1
 	return handleUnary[v1.SelectChatTextRequest, v1.SelectChatTextResponse](ctx, s, "SelectChatText", req.Msg)
 }
 
+func (s *fakeServer) SelectResponseText(ctx context.Context, req *connect.Request[v1.SelectResponseTextRequest]) (*connect.Response[v1.SelectResponseTextResponse], error) {
+	return handleUnary[v1.SelectResponseTextRequest, v1.SelectResponseTextResponse](ctx, s, "SelectResponseText", req.Msg)
+}
+
 func (s *fakeServer) ShowSidebarApp(ctx context.Context, req *connect.Request[v1.ShowSidebarAppRequest]) (*connect.Response[v1.ShowSidebarAppResponse], error) {
 	return handleUnary[v1.ShowSidebarAppRequest, v1.ShowSidebarAppResponse](ctx, s, "ShowSidebarApp", req.Msg)
 }

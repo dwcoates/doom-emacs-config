@@ -456,6 +456,54 @@ func TestValidateSetSessionPermissionModeRequest(t *testing.T) {
 	assertInvalidField(t, err, "SetSessionPermissionModeRequest.permission_mode")
 }
 
+// validReviseResponseRequest is a revision the shim accepts.
+func validReviseResponseRequest() *shimv1.ReviseResponseRequest {
+	return &shimv1.ReviseResponseRequest{
+		Response: &conversationv1.AgentActivityId{Value: "msg_1:0"},
+		Instruction: &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+			{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "Revise it."}}},
+		}}},
+	}
+}
+
+// TestValidateReviseResponseRequest asserts a revision names its response
+// and carries an instruction.
+func TestValidateReviseResponseRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     func() *shimv1.ReviseResponseRequest
+		invalid string
+	}{
+		{"nil", func() *shimv1.ReviseResponseRequest { return nil }, "ReviseResponseRequest"},
+		{"valid", validReviseResponseRequest, ""},
+		{"no response", func() *shimv1.ReviseResponseRequest {
+			req := validReviseResponseRequest()
+			req.Response = nil
+			return req
+		}, "ReviseResponseRequest.response.value"},
+		{"no instruction", func() *shimv1.ReviseResponseRequest {
+			req := validReviseResponseRequest()
+			req.Instruction = nil
+			return req
+		}, "ReviseResponseRequest.instruction"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			err := validateReviseResponseRequest(tt.req())
+
+			// Assert.
+			if tt.invalid == "" {
+				if err != nil {
+					t.Fatalf("validateReviseResponseRequest = %v, want nil", err)
+				}
+				return
+			}
+			assertInvalidField(t, err, tt.invalid)
+		})
+	}
+}
+
 // TestValidateSendKeepaliveRequest asserts the empty keep-alive request is
 // sent, and only its absence refused.
 func TestValidateSendKeepaliveRequest(t *testing.T) {

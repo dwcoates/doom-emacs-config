@@ -2710,6 +2710,20 @@ while an ask stood was delivered as that ask's typed answer and minted no
 turn; the visible effect is the card's re-push."
   (agent-repl-wire-verbs--decode-empty "SubmitPromptAskAnswered" json))
 
+(defun agent-repl-wire-decode-submit-prompt-response-revising (json)
+  "Decode SubmitPromptResponseRevising from JSON into a plist (`:row').
+Words of a final response were highlighted as the prompt was sent, so it
+revises that response instead of minting a turn.  ROW is the response's
+decoded FeedId; the revision itself arrives on the feed."
+  (let ((message "SubmitPromptResponseRevising"))
+    (agent-repl-wire-verbs--check-keys message json '(row))
+    (list :row (agent-repl-wire-verbs--decode-required-message
+                message 'row json #'agent-repl-wire-decode-feed-id))))
+
+(defun agent-repl-wire-decode-submit-prompt-success-response-revising (json)
+  "Decode SubmitPromptSuccess's `response_revising' outcome arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-response-revising json))
+
 (defun agent-repl-wire-decode-submit-prompt-success-ask-answered (json)
   "Decode SubmitPromptSuccess's `ask_answered' outcome arm from JSON."
   (agent-repl-wire-decode-submit-prompt-ask-answered json))
@@ -2732,12 +2746,13 @@ turn; the visible effect is the card's re-push."
 
 (defun agent-repl-wire-decode-submit-prompt-success (json)
   "Decode SubmitPromptSuccess from JSON into (:arm ARM :value V).
-All five arms are ANSWERS: a minted turn, a resolved panel, a
+All six arms are ANSWERS: a minted turn, a resolved panel, a
 recognized-but-unsupported command, a session-acting command the daemon
-acted on, or a typed answer to a standing ask.  Only the turn arm means
-there is anything to await."
+acted on, a typed answer to a standing ask, or a revision of the final
+response whose words were highlighted.  Only the turn arm means there is
+anything to await."
   (let ((message "SubmitPromptSuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(turn commandPanel commandRefused commandActed askAnswered))
+    (agent-repl-wire-verbs--check-keys message json '(turn commandPanel commandRefused commandActed askAnswered responseRevising))
     (agent-repl-wire-verbs--decode-oneof
      message "outcome" json
      (list (list 'turn :turn #'agent-repl-wire-decode-submit-prompt-success-turn)
@@ -2748,7 +2763,9 @@ there is anything to await."
            (list 'commandActed :command-acted
                  #'agent-repl-wire-decode-submit-prompt-success-command-acted)
            (list 'askAnswered :ask-answered
-                 #'agent-repl-wire-decode-submit-prompt-success-ask-answered)))))
+                 #'agent-repl-wire-decode-submit-prompt-success-ask-answered)
+           (list 'responseRevising :response-revising
+                 #'agent-repl-wire-decode-submit-prompt-success-response-revising)))))
 
 (defun agent-repl-wire-decode-submit-prompt-refused-merging (json)
   "Decode SubmitPromptRefusedMerging from JSON.  Empty: a merge is in flight

@@ -377,6 +377,30 @@ func TestRouteApiError(t *testing.T) {
 	}
 }
 
+// TestRouteResponseRevision covers the response_revision page line: it is the
+// feed's alone, which redraws the revised response's bubble, and it ends no
+// turn.
+func TestRouteResponseRevision(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.quiet()
+	revision := &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_ResponseRevision{
+		ResponseRevision: &conversationv1.AgentResponseRevision{
+			Response: &conversationv1.AgentActivityId{Value: "msg_1:0"},
+			Prose:    &conversationv1.AgentResponseProse{Markdown: "revised"},
+		},
+	}}
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", revision)))
+
+	// Assert.
+	assertNames(t, got, []string{"feed.OnResponseRevision"})
+	if h.w.TurnInFlight() == nil {
+		t.Fatal("a response revision ended the turn; it is a page line, never a terminal")
+	}
+}
+
 // TestRouteApiErrorIsWarnedOnceByTheWatcher covers the failure's ONE owner: the
 // watcher states it at WARN, with the agent and the vendor's message, as it
 // routes it; the sinks it routes to record their own outcomes below WARN.

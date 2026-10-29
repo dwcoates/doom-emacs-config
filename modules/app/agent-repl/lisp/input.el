@@ -45,6 +45,10 @@
 ;;                             permission denied with it as the reason);
 ;;                             no turn, so it is handled like a command
 ;;                             answer: logged, input cleared
+;;   success `response_revising' words of a final response were
+;;                             highlighted in the feed as it was sent, so
+;;                             it revises that response instead of minting
+;;                             a turn: logged, input cleared
 ;;   error `ask_not_standing'  the ask settled before the typed answer
 ;;                             reached it: refused, the text is KEPT
 ;;   error `merging'           refused: the text is KEPT so the user can
@@ -1854,6 +1858,16 @@ it."
      (agent-repl--info ws "elisp.input.ask-answered ws=%s origin=%S raw-len=%d"
                        ws origin (length raw))
      (agent-repl--input-accepted ws raw :ask-answered from-buffer))
+    (:response-revising
+     ;; The send asked about words highlighted in a final response: the
+     ;; daemon revises that response in place and mints no turn, so
+     ;; nothing is awaited and no send posthook runs.  The bubble's
+     ;; redraw in the webapp is the visible effect.
+     (agent-repl--info ws "elisp.input.response-revising ws=%s origin=%S row=%S raw-len=%d"
+                       ws origin
+                       (plist-get (plist-get (plist-get success :value) :row) :value)
+                       (length raw))
+     (agent-repl--input-accepted ws raw :response-revising from-buffer))
     (arm
      (agent-repl--error ws "elisp.input.unknown-success-arm ws=%s arm=%S" ws arm))))
 

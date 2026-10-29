@@ -125,6 +125,12 @@ message AgentUpdate {
     // never a terminal: the turn's end is the frame-level failure arm
     // (AgentFailure.api_request_failed) and nothing else. A page line.
     ApiRequestFailed api_error = 6;
+    // A SETTLED RESPONSE WAS REVISED: the user highlighted words in it and
+    // asked about them, and a side query on a throwaway fork of the
+    // conversation rewrote the response whole. A page line of the main
+    // agent's book; the feed draws no row of its own for it, and redraws the
+    // revised response's bubble with the revised prose instead.
+    AgentResponseRevision response_revision = 8;
   }
   // Tag 7 (`context_budget_warning`) is RETIRED: no footer line warns that
   // the context is nearly full (owner ruling, 2026-10-06), and the real

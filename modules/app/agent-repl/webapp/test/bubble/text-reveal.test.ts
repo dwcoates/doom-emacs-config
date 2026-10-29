@@ -8,6 +8,8 @@ import {
   applyTextReveal,
   clearTextReveal,
   fullTextOf,
+  revisedWindow,
+  visibleIn,
   wholeTextOf,
 } from "../../src/bubble/text-reveal.js";
 
@@ -153,5 +155,102 @@ describe("wholeTextOf", () => {
 
     // Act / Assert
     expect(wholeTextOf(node)).toBe("plain");
+  });
+});
+
+describe("applyTextReveal with a kept tail", () => {
+  it.each([
+    { name: "shows the head and the tail, hiding the middle", shown: 3, tailFrom: 8, want: "helrld" },
+    { name: "shows the whole once the head reaches the tail", shown: 8, tailFrom: 8, want: "hello world" },
+    { name: "shows only the tail at zero", shown: 0, tailFrom: 6, want: "world" },
+  ])("$name", ({ shown, tailFrom, want }) => {
+    // Arrange
+    const root = rooted("<p>hello <strong>world</strong></p>");
+    // Act
+    applyTextReveal(root, shown, tailFrom);
+    // Assert
+    expect(root.textContent).toBe(want);
+  });
+
+  it("keeps an element standing in the tail revealed", () => {
+    // Arrange
+    const root = rooted("<ul><li>one</li><li>two</li><li>six</li></ul>");
+    // Act
+    applyTextReveal(root, 2, 6);
+    // Assert
+    const items = Array.from(root.querySelectorAll("li"));
+    expect(items.map((li) => li.hasAttribute(UNREVEALED_ATTRIBUTE))).toEqual([false, true, false]);
+  });
+
+  it("restores the hidden middle whole when cleared", () => {
+    // Arrange
+    const root = rooted("<p>hello world</p>");
+    applyTextReveal(root, 2, 9);
+    // Act
+    clearTextReveal(root);
+    // Assert
+    expect(root.textContent).toBe("hello world");
+  });
+});
+
+describe("visibleIn", () => {
+  it("never splits a surrogate pair at the tail's cut", () => {
+    // Arrange: "a😀b" — the emoji is two code units at 1 and 2.
+    const full = "a\u{1F600}b";
+    // Act: a tail cut between the pair's halves.
+    const visible = visibleIn(full, 0, { shown: 0, tailFrom: 2 });
+    // Assert: the pair is shown whole.
+    expect(visible).toBe("\u{1F600}b");
+  });
+
+  it("shows the head alone when there is no tail", () => {
+    // Arrange, Act, Assert
+    expect(visibleIn("hello", 0, { shown: 2, tailFrom: Number.POSITIVE_INFINITY })).toBe("he");
+  });
+});
+
+describe("revisedWindow", () => {
+  it("types out only a branch inserted in the middle", () => {
+    // Arrange
+    const before = "1 root\n2 last";
+    const after = "1 root\n1.1 added\n2 last";
+    // Act
+    const window = revisedWindow(before, after, before.length);
+    // Assert: the shared head and the shared tail stay shown; the branch types out.
+    expect(after.slice(window.shown, window.tailFrom)).toBe("1.1 added\n");
+  });
+
+  it("types out an appended ending after the whole shown text, keeping no tail", () => {
+    // Arrange
+    const before = "hello";
+    const after = "hello world";
+    // Act
+    const window = revisedWindow(before, after, before.length);
+    // Assert
+    expect(window).toEqual({ shown: 5, tailFrom: 11 });
+  });
+
+  it("has nothing to type for the same text restated", () => {
+    // Arrange, Act
+    const window = revisedWindow("same", "same", 4);
+    // Assert
+    expect(window.shown >= window.tailFrom).toBe(true);
+  });
+
+  it("resumes where an unfinished type-out stood, keeping no tail", () => {
+    // Arrange: the earlier draw had shown 3 of 11 characters.
+    const window = revisedWindow("hello world", "hello world", 3);
+    // Assert
+    expect(window).toEqual({ shown: 3, tailFrom: Number.POSITIVE_INFINITY });
+  });
+
+  it("never ends the shared head inside a surrogate pair", () => {
+    // Arrange: two emoji sharing a high surrogate, differing in the low one.
+    const before = "x\u{1F600}";
+    const after = "x\u{1F601}";
+    // Act
+    const window = revisedWindow(before, after, before.length);
+    // Assert
+    expect(window.shown).toBe(1);
   });
 });

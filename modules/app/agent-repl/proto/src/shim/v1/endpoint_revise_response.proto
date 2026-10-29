@@ -1,0 +1,88 @@
+// endpoint_revise_response.proto — ReviseResponse: rewrite one settled response
+// whole, out of the conversation's sight. AGENT section.
+//
+// THE USER ASKED ABOUT WORDS THEY HIGHLIGHTED in a final response, and the
+// answer is a revised version of that response rather than a new turn. The
+// daemon composes the whole instruction (the response, the highlighted words
+// and what the user said, images included); the shim runs it on a SIDE QUERY
+// and writes the answer as the page line
+// conversation.v1.AgentUpdate.response_revision.
+//
+// THE SIDE QUERY IS A THROWAWAY FORK THAT PERSISTS NOTHING. It resumes the
+// session's own conversation through the newest finished turn (the same point
+// GetForkPoint names), so it reads the response in the context it was written
+// in, from the prompt cache, and a turn in flight is never part of it. It forks
+// to a vendor session that is never written, so the session's transcript is
+// untouched and the live query, its turn and its locks are never involved: a
+// revision runs beside a turn in flight.
+//
+// UNARY, AND IT RETURNS ONCE THE REVISION IS WRITTEN. `success` means the page
+// line was handed to the store; the revised prose reaches the daemon on the
+// main agent's stream like every other page line. The call's lifetime is the
+// revision's: a caller that goes away cancels it, and nothing is written.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/user.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Revise one response of the main agent's conversation.
+message ReviseResponseRequest {
+  // The response block revised, echoed verbatim into the page line the
+  // revision writes. The shim never resolves it: the instruction carries the
+  // response's words.
+  conversation.v1.AgentActivityId response = 1;
+  // The whole prompt the side query is given, composed by the daemon: the
+  // revision brief ahead of every block the user sent. Never empty.
+  conversation.v1.UserSaid instruction = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReviseResponseResponse {
+  oneof result {
+    ReviseResponseSuccess success = 1;
+    ReviseResponseError error = 2;
+  }
+}
+
+// The revision was written as the response_revision page line.
+message ReviseResponseSuccess {
+  // The model the side query answered with, as its own opening stated it.
+  string model = 1;
+}
+
+// No revision was written. THE ARM IS WHY.
+message ReviseResponseError {
+  oneof cause {
+    // No session is started, so there is no conversation to fork.
+    ReviseResponseNoSession no_session = 1;
+    // The shim could not name the point the fork ends at.
+    ReviseResponseNoForkPoint no_fork_point = 2;
+    // The side query ended without an answer: the vendor's own words.
+    ReviseResponseVendorFailed vendor_failed = 3;
+    // The side query answered with no text.
+    ReviseResponseEmptyAnswer empty_answer = 4;
+  }
+}
+
+// No session is started. DELIBERATELY EMPTY: the arm is the cause.
+message ReviseResponseNoSession {}
+
+// The fork point could not be named.
+message ReviseResponseNoForkPoint {
+  // Why, composed by the shim.
+  string detail = 1;
+}
+
+// The side query failed.
+message ReviseResponseVendorFailed {
+  // The vendor's words, or the shim's description of the stream that broke.
+  string detail = 1;
+}
+
+// The side query answered with nothing. DELIBERATELY EMPTY: the arm is the cause.
+message ReviseResponseEmptyAnswer {}

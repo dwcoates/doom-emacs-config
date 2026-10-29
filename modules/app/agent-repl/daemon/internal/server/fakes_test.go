@@ -49,6 +49,7 @@ import (
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
+	"agent-repld/internal/revision"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/runtimemetrics"
 	"agent-repld/internal/storagesweep"
@@ -1411,7 +1412,9 @@ type fakeFeed struct {
 	// targets is the response row each label targets (ComposerTargets),
 	// keyed by label; a missing label targets nothing. targetReplies records
 	// the reply each ComposerTargets call was asked for, in order.
-	targets       map[string]string
+	targets map[string]string
+	// revisable is each final response a highlight may name, keyed by row id.
+	revisable     map[string]feed.RevisableResponse
 	targetReplies []string
 	// neighbors is each label's neighbor (EntryNeighbor), keyed by the
 	// label, a NUL, and the way's name ("next", "previous", "following", "parent").
@@ -1902,7 +1905,9 @@ type harness struct {
 	HiddenKeepalives *fakeHiddenKeepalives
 	// NewsDigest is the news digest the two rpcs delegate to.
 	NewsDigest *fakeNewsDigest
-	Storage    *fakeStorageSweep
+	// Revisions records every revision a highlighted prompt asked for.
+	Revisions *fakeRevisions
+	Storage   *fakeStorageSweep
 	// Worktrees is the landed-worktree reaper ReapWorktrees delegates to.
 	Worktrees *fakeWorktreeReaper
 	// ClassifierPrompt is the routing brief's updater the rpc delegates to.
@@ -2015,6 +2020,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		RPCs:             &fakeRPCs{},
 		ReconnectRecords: &restarttimingtest.Recorder{},
 		NewsDigest:       &fakeNewsDigest{},
+		Revisions:        &fakeRevisions{},
 		Storage:          &fakeStorageSweep{},
 		Worktrees:        &fakeWorktreeReaper{},
 		ClassifierPrompt: &fakeClassifierPrompt{},
@@ -2066,6 +2072,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		PersistentWifi:    h.PersistentWifi,
 		HiddenKeepalives:  h.HiddenKeepalives,
 		NewsDigest:        h.NewsDigest,
+		Revisions:         h.Revisions,
 		Storage:           h.Storage,
 		Worktrees:         h.Worktrees,
 		ClassifierPrompt:  h.ClassifierPrompt,
@@ -2713,4 +2720,24 @@ func (f *fakeFeed) ReadNewest(_ context.Context, ws ids.WorkspaceID) error {
 		f.readNewest <- ws
 	}
 	return f.readNewestErr
+}
+
+// fakeRevisions records every revision asked for, and answers err.
+type fakeRevisions struct {
+	asks []revision.Ask
+	err  error
+}
+
+func (f *fakeRevisions) Revise(_ ids.WorkspaceID, ask revision.Ask) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.asks = append(f.asks, ask)
+	return nil
+}
+
+// RevisableFinalResponse answers the seeded revisable responses.
+func (f *fakeFeed) RevisableFinalResponse(_ ids.WorkspaceID, row *frontendv1.FeedId) (feed.RevisableResponse, bool) {
+	response, ok := f.revisable[row.GetValue()]
+	return response, ok
 }

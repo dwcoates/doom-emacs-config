@@ -1108,6 +1108,29 @@ The contract is `endpoint_start_turn.proto` (`StartTurnRequest.turn`) and
   ids and their origins, never the prompt. It is process memory, so a shim that
   died forgets; an id pushed out of the window is started as a first start.
 
+## Harness work about the conversation runs on a side query
+
+The live query owns the session's identity, its locks and its in-flight turn,
+and a prompt pushed into it lands in the user's conversation. So work the shim
+does ABOUT the conversation runs on a query of its own, built for one question
+and closed after its first result: the cold gate's compaction summary, and a
+response revision (`shim.v1.ReviseResponse`).
+
+- **One loop reads every side query** (`engine/side-query.ts`, `askSideQuery`).
+  It tells an answer from an error result, a stream that ended silently, a
+  query that could not be built and a stream that broke, and closes the query
+  however it ended. A source scan (`test/engine/side-query.test.ts`) fails a
+  `deps.createQuery(` in `engine/session.ts` that is neither the live query nor
+  a side query's.
+- **A revision forks and persists nothing** (`engine/revise-response.ts`). Its
+  query binds `ephemeral_fork` (`sdk/real-query.ts`): `forkSession` with
+  `persistSession: false`, which travel as one arm because each alone writes
+  somewhere. It is cut where `GetForkPoint` says a fork taken now would end, so
+  a turn in flight is never part of it, and it takes no tools. Its answer is
+  written as the `conversation.v1.AgentUpdate.response_revision` page line,
+  stamped with no turn. The mocked vendor models the fork by answering under
+  its own id and leaving the parent's transcript alone.
+
 ## The hibernate contract: a stand-down never compacts
 
 `Hibernate` is the daemon's pre-hibernation directive. Hibernation is a MEMORY

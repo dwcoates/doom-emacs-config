@@ -19,18 +19,14 @@
  * surface, and logged. The bubble keeps the reader's toggle.
  */
 import { create } from "@bufbuild/protobuf";
-import { ConnectError } from "@connectrpc/connect";
 import {
   FoldMergeBubbleRequestSchema,
   FoldMergeBubbleResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { controlPlaneFailed } from "../failure/sink.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
-import { callFailure, refusalOf } from "../rpc/refuse.js";
-import { requireCase, unreachableArm } from "../rpc/strict.js";
-import { callUnary } from "../rpc/unary.js";
+import { controlCall } from "../rpc/control-call.js";
 
 /** The chip's `request` evidence for a fold the reader made, by its arm. */
 export const OPEN_MERGE_BUBBLE_REQUEST = "record that you opened a merge bubble";
@@ -57,41 +53,19 @@ export async function foldMergeBubble(ctx: AppContext, row: FeedId, folded: bool
     operation: "feed.merge-fold-sent",
     context: { row: row.value, folded },
   });
-  let response;
-  try {
-    response = await callUnary(
-      ctx,
-      "FoldMergeBubble",
-      (client) =>
-        client.foldMergeBubble(create(FoldMergeBubbleRequestSchema, { workspace: ctx.workspace, row, fold })),
-      FoldMergeBubbleResponseSchema,
-    );
-  } catch (err) {
-    // `callUnary` already logged the transport failure; the chip is told here.
-    if (!(err instanceof ConnectError)) throw err;
-    ctx.failures.report(controlPlaneFailed(what, callFailure(err).text));
-    return;
-  }
-  const result = requireCase(response.result, "FoldMergeBubbleResponse.result");
-  switch (result.case) {
-    case "success":
-      log.debug("the daemon recorded the reader's merge bubble fold", {
-        operation: "feed.merge-fold-recorded",
-        context: { row: row.value, folded },
-      });
-      return;
-    case "error": {
-      const said = refusalOf(result.value.cause, FOLD_MERGE_BUBBLE_REFUSALS, "FoldMergeBubbleError.cause");
-      log.error(`the daemon refused to ${what}: ${said.text}`, {
-        operation: "feed.merge-fold-refused",
-        context: { row: row.value, folded, arm: said.arm },
-      });
-      ctx.failures.report(controlPlaneFailed(what, said.text));
-      return;
-    }
-    default: {
-      const other: { case: string } = result;
-      return unreachableArm("FoldMergeBubbleResponse.result", other.case);
-    }
-  }
+  const success = await controlCall(ctx, {
+    rpc: "FoldMergeBubble",
+    what,
+    send: (client) => client.foldMergeBubble(create(FoldMergeBubbleRequestSchema, { workspace: ctx.workspace, row, fold })),
+    schema: FoldMergeBubbleResponseSchema,
+    result: (response) => response.result,
+    refusals: FOLD_MERGE_BUBBLE_REFUSALS,
+    refusedOperation: "feed.merge-fold-refused",
+    context: { row: row.value, folded },
+  });
+  if (success === undefined) return;
+  log.debug("the daemon recorded the reader's merge bubble fold", {
+    operation: "feed.merge-fold-recorded",
+    context: { row: row.value, folded },
+  });
 }
