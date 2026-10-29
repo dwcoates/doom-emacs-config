@@ -99,3 +99,20 @@ and report after; every decision below was taken that way.
   guarded path with the new reason `settings_visit`: never on the workspace in
   view, never under a turn, and never once a real turn has run since the
   settings start.
+
+### The webhost draws the shown workspace's cold gate (`WorkspaceRoster.cold_gates`)
+
+- WHAT: the roster carries one `RosterColdGate` per gated workspace: its ref,
+  the gate's feed row id, and the standing `FeedColdGate` card. The webhost
+  draws the shown workspace's gate in the composer's slot; the page reserves
+  the slot and docks no gate of its own.
+- WHY (owner, 2026-10-29): a cold-gated workspace's page is unloaded off
+  screen, and the gate must be on screen the instant the workspace is; only
+  the feed may load behind it. The roster is the one stream the webhost holds,
+  and a gate changes rarely, so carrying it there adds little to each push.
+- HEIGHTS UNCHANGED (owner, 2026-10-29): the slot is the composer window's
+  height Emacs tells (the webhost's gate-dock pixels), grows only to fit a
+  selection (the compact submenu) and shrinks back, and never scrolls; a switch
+  between a gated and an ungated workspace moves the sidebar by nothing.
+- `FeedColdGate` and `FeedId` are imported from the feed component whole: the
+  dock draws the card the feed's row draws, through the same renderer.

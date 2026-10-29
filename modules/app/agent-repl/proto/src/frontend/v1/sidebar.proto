@@ -137,6 +137,12 @@ message WorkspaceRoster {
   // one. Always set, whichever app is shown, because Emacs reads it to pick
   // threads by name.
   RosterThreadSection threads = 17;
+  // THE STANDING COLD GATES, one per workspace whose session stands at its
+  // gate (owner request, 2026-10-29). The webhost draws the SHOWN workspace's
+  // gate in the composer's slot itself, so the gate is on screen the instant
+  // the workspace is, whether or not its page is loaded; the page reserves the
+  // slot and draws no gate of its own. Empty while no gate stands anywhere.
+  repeated RosterColdGate cold_gates = 18;
 }
 
 // ---- The app switcher ----
@@ -368,6 +374,20 @@ message RosterThreadSummary {
 
 // The thread is the selected one. Empty: presence is the fact.
 message RosterThreadCurrent {}
+
+// One workspace's standing cold gate, as the webhost's gate dock draws it.
+message RosterColdGate {
+  // The gated workspace: the join key the dock is chosen by (the shown
+  // workspace's) and the answer is sent for.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The gate's row identity, exactly as the workspace's feed serves it: the
+  // gate an AnswerColdGate names (AnswerColdGateRequest.gate).
+  FeedId row = 2;
+  // The gate's card, exactly as the feed's row carries it: its context size,
+  // last request, model and the answers it offers. Always the standing arm;
+  // a gate answered or retracted leaves the roster.
+  FeedColdGate gate = 3;
+}
 
 // The agent-repl release the daemon's checkout is at: the highest version tag
 // reachable from its HEAD, so a commit between landings states the last
