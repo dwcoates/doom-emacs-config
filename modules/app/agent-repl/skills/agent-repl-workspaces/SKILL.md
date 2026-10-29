@@ -282,6 +282,15 @@ creating workspaces there with `-repository DIR`.
 - `workspace close WS` closes a workspace whose work is done or abandoned; its
   worktree stays. `close here` closes this workspace once the current turn
   ends.
+- **A workspace closes, without asking, a workspace it created once that
+  workspace has fulfilled its goal.** When this workspace has judged (from the
+  child's reply, its status, or its landing) that the created workspace did
+  what it was asked, it runs `workspace close WS` at once, never `workspace
+  kill`, and needs no permission from the user. It then tells the user in the
+  same response which workspace it closed and why. A workspace whose goal is
+  not yet met, or whose work this workspace has not reviewed, stays open.
+  A child that landed or finished through `workspace finished` closes itself,
+  so this covers the children that do not.
 - `workspace compact WS [-instructions TEXT]` compacts WS's conversation.
   Compact only when the user asked for it.
 
