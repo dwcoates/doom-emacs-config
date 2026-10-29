@@ -88,6 +88,9 @@ type verbs struct {
 	// threadOpens counts the boot's thread opens still running
 	// (OpenThreads).
 	threadOpens sync.WaitGroup
+	// stopped holds the workspaces whose turn the user stopped and whom no
+	// user prompt has followed yet (standings.go TakeBackOneShot).
+	stopped sync.Map
 }
 
 // load resolves one workspace's durable record and its own logger. A REGISTERED

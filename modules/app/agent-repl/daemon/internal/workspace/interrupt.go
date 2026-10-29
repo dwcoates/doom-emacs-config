@@ -81,6 +81,7 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 			return InterruptOutcome{}, fmt.Errorf("interrupt %q: %w", ws, err)
 		}
 		if withdrawn {
+			v.stopped.Store(ws, struct{}{})
 			log.Debug(opInterrupt, "withdrew the accepted turn before its session came up", nil)
 			return InterruptOutcome{Turn: true}, nil
 		}
@@ -275,6 +276,7 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 		return InterruptOutcome{}, refuse(log, "Interrupt", ArmShimRefused, detail, false)
 	}
 
+	v.stopped.Store(ws, struct{}{})
 	log.Info(opInterrupt, "interrupted the running turn", dlog.Context{
 		"turn": string(*running.Turn), "force": confirm, "live_agent_count": liveAgents,
 	})
