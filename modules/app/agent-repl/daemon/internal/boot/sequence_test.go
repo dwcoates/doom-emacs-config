@@ -2856,4 +2856,3 @@ func TestAJoiningDaemonOpensNoThread(t *testing.T) {
 		t.Fatalf("OpenThreads calls = %d on a joining daemon, want 0", got)
 	}
 }
-
