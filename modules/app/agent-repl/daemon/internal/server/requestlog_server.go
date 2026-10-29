@@ -585,6 +585,27 @@ func (s *requestLoggingServer) ReportPageUnloading(
 	return serveUnary(s, ctx, "ReportPageUnloading", req, s.server.ReportPageUnloading)
 }
 
+func (s *requestLoggingServer) ReportPageResidency(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportPageResidencyRequest],
+) (*connect.Response[agentreplv1.ReportPageResidencyResponse], error) {
+	return serveUnary(s, ctx, "ReportPageResidency", req, s.server.ReportPageResidency)
+}
+
+func (s *requestLoggingServer) GetMemoryOverview(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.GetMemoryOverviewRequest],
+) (*connect.Response[agentreplv1.GetMemoryOverviewResponse], error) {
+	return serveUnary(s, ctx, "GetMemoryOverview", req, s.server.GetMemoryOverview)
+}
+
+func (s *requestLoggingServer) GetWorkspaceMemory(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.GetWorkspaceMemoryRequest],
+) (*connect.Response[agentreplv1.GetWorkspaceMemoryResponse], error) {
+	return serveUnary(s, ctx, "GetWorkspaceMemory", req, s.server.GetWorkspaceMemory)
+}
+
 func (s *requestLoggingServer) MarkWorkspaceViewed(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.MarkWorkspaceViewedRequest],

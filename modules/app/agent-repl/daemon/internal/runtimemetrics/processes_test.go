@@ -79,3 +79,54 @@ func TestTheOffSurfaceRegistersNoProcesses(t *testing.T) {
 		t.Fatalf("the off surface refused: %v", err)
 	}
 }
+
+func TestLatestAnswersTheRegisteredCollectorsScrape(t *testing.T) {
+	// Arrange
+	s, err := Open(dlog.NewTestLogger(), t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(s.Close)
+	if err := s.RegisterProcesses(selfOnly{}, "/state/sock", t.TempDir(), onAC); err != nil {
+		t.Fatalf("RegisterProcesses: %v", err)
+	}
+	scrape(t, s)
+
+	// Act
+	snap, sampled := s.Latest()
+
+	// Assert
+	if _, daemon := snap.Footprints[procmetrics.Group{Process: procmetrics.ProcessDaemon}]; !sampled || !daemon {
+		t.Fatalf("Latest = %+v (sampled %v), want the scrape's daemon group", snap, sampled)
+	}
+}
+
+func TestLatestIsUnsampledWithNoCollector(t *testing.T) {
+	// Arrange
+	s, err := Open(dlog.NewTestLogger(), t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(s.Close)
+
+	// Act
+	_, sampled := s.Latest()
+
+	// Assert
+	if sampled {
+		t.Fatalf("Latest answered a sample with no collector registered")
+	}
+}
+
+func TestTheOffSurfaceHasNoSample(t *testing.T) {
+	// Arrange
+	var s *Surface
+
+	// Act
+	_, sampled := s.Latest()
+
+	// Assert
+	if sampled {
+		t.Fatalf("the off surface answered a sample")
+	}
+}

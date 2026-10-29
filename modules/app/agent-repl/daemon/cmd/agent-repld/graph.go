@@ -44,6 +44,7 @@ import (
 	"agent-repld/internal/imageorigin"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/login"
+	"agent-repld/internal/memorypopup"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/mergenotice"
 	"agent-repld/internal/mergeworkspace"
@@ -1584,6 +1585,23 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the editor instance tracker: %w", err)
 	}
 
+	// THE RAIL'S MEMORY POPUPS (owner request, 2026-10-29): the collector's
+	// latest sample, the page process's stalls and the residency Emacs
+	// reports, resolved per hover (internal/memorypopup).
+	memoryPopups, err := memorypopup.New(memorypopup.Deps{
+		Processes:   p.Metrics,
+		Stalls:      stallBeat,
+		StallWindow: stallbeat.Window,
+		Running: func(ws ids.WorkspaceID) bool {
+			_, ok := fleet.Client(ws)
+			return ok
+		},
+		Now: time.Now,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the memory popups: %w", err)
+	}
+
 	background := []backgroundLoop{
 		{Name: "drain", Run: drainController.Run},
 		{Name: "deployed_version", Run: deployedVersion.Run},
@@ -1663,6 +1681,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Footer:           footerResolver,
 			Topbar:           topbarResolver,
 			Sidebar:          sidebarResolver,
+			Memory:           memoryPopups,
 			Chat:             chatService,
 			Revisions: revision.New(revision.Deps{
 				Shims: fleet, Feed: feedResolver, PromptsDir: paths.PromptsDir, Life: ctx, Log: log,

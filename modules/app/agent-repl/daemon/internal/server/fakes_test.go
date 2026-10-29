@@ -1891,6 +1891,7 @@ type harness struct {
 	Footer    *fakeFooter
 	Topbar    *fakeTopbar
 	Sidebar   *fakeSidebar
+	Memory    *fakeMemory
 	// LoudFaults is the standing loud faults every Emacs stream is told.
 	LoudFaults publish.Topic[*agentreplv1.DaemonFaultsStanding]
 	// Focus is Emacs's desktop focus, attached by an Emacs WatchDaemon stream.
@@ -2007,6 +2008,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Footer:     &fakeFooter{},
 		Topbar:     &fakeTopbar{},
 		Sidebar:    &fakeSidebar{},
+		Memory:     &fakeMemory{},
 		Chat:       &fakeChat{},
 		Surfaces:   &fakeSurfaces{},
 		Focus:      desktopnotify.NewFocus(dlog.NewTestLogger()),
@@ -2064,6 +2066,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Footer:            h.Footer,
 		Topbar:            h.Topbar,
 		Sidebar:           h.Sidebar,
+		Memory:            h.Memory,
 		Chat:              h.Chat,
 		LoudFaults:        &h.LoudFaults,
 		Focus:             h.Focus,
@@ -2740,4 +2743,43 @@ func (f *fakeRevisions) Revise(_ ids.WorkspaceID, ask revision.Ask) error {
 func (f *fakeFeed) RevisableFinalResponse(_ ids.WorkspaceID, row *frontendv1.FeedId) (feed.RevisableResponse, bool) {
 	response, ok := f.revisable[row.GetValue()]
 	return response, ok
+}
+
+// fakeMemory is the memory popups: it records reports and answers what the
+// test sets.
+type fakeMemory struct {
+	mu        sync.Mutex
+	reports   map[ids.WorkspaceID]*agentreplv1.PageResidency
+	reportErr error
+	overview  *frontendv1.SidebarMemoryOverview
+	overErr   error
+	// open is the open set the last Overview call was handed, read back.
+	open      func(ids.WorkspaceID) bool
+	workspace *frontendv1.SidebarWorkspaceMemory
+}
+
+func (f *fakeMemory) Report(ws ids.WorkspaceID, r *agentreplv1.PageResidency) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.reportErr != nil {
+		return f.reportErr
+	}
+	if f.reports == nil {
+		f.reports = map[ids.WorkspaceID]*agentreplv1.PageResidency{}
+	}
+	f.reports[ws] = r
+	return nil
+}
+
+func (f *fakeMemory) Overview(open func(ids.WorkspaceID) bool) (*frontendv1.SidebarMemoryOverview, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.open = open
+	return f.overview, f.overErr
+}
+
+func (f *fakeMemory) Workspace(ids.WorkspaceID) *frontendv1.SidebarWorkspaceMemory {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.workspace
 }

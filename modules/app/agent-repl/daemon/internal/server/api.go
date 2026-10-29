@@ -128,6 +128,10 @@ type Deps struct {
 	Topbar topbar.Resolver
 	// Sidebar backs WatchWorkspaceRoster, the one editor-global stream.
 	Sidebar sidebar.Resolver
+	// Memory backs the rail's two memory popups (GetMemoryOverview,
+	// GetWorkspaceMemory) and keeps the page residency Emacs reports
+	// (ReportPageResidency).
+	Memory MemoryPopups
 	// Chat backs the chat verbs and WatchChat (internal/chat).
 	Chat Chat
 	// Revisions revises a final response a highlighted prompt asks about
@@ -520,6 +524,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a topbar resolver")
 	case deps.Sidebar == nil:
 		return nil, missing("a sidebar resolver")
+	case deps.Memory == nil:
+		return nil, missing("the memory popups")
 	case deps.Chat == nil:
 		return nil, missing("a chat service")
 	case deps.Revisions == nil:
