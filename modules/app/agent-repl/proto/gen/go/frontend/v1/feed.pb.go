@@ -26670,7 +26670,11 @@ type FeedComposerEntry struct {
 	//
 	//	*FeedComposerEntry_None
 	//	*FeedComposerEntry_Node
-	At            isFeedComposerEntry_At `protobuf_oneof:"at"`
+	At isFeedComposerEntry_At `protobuf_oneof:"at"`
+	// How many text edits the composer has had (agentrepl.v1.ReportComposerEntriesRequest.edits),
+	// as the last report stated it. The webapp takes down a hover box when it rises:
+	// the person is typing, not pointing.
+	Edits         uint64 `protobuf:"varint,3,opt,name=edits,proto3" json:"edits,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -26728,6 +26732,13 @@ func (x *FeedComposerEntry) GetNode() *FeedComposerEntryNode {
 		}
 	}
 	return nil
+}
+
+func (x *FeedComposerEntry) GetEdits() uint64 {
+	if x != nil {
+		return x.Edits
+	}
+	return 0
 }
 
 type isFeedComposerEntry_At interface {
@@ -28246,10 +28257,11 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"active_tab\x18\x01 \x01(\v2\x1e.frontend.v1.FeedMergeTabLabelR\tactiveTab\x12-\n" +
 	"\x13stage_entered_at_ms\x18\x02 \x01(\x03R\x10stageEnteredAtMs\"F\n" +
 	"\x15FeedMergeQueueWaiting\x12-\n" +
-	"\x13stage_entered_at_ms\x18\x01 \x01(\x03R\x10stageEnteredAtMs\"\x8d\x01\n" +
+	"\x13stage_entered_at_ms\x18\x01 \x01(\x03R\x10stageEnteredAtMs\"\xa3\x01\n" +
 	"\x11FeedComposerEntry\x128\n" +
 	"\x04none\x18\x01 \x01(\v2\".frontend.v1.FeedComposerEntryNoneH\x00R\x04none\x128\n" +
-	"\x04node\x18\x02 \x01(\v2\".frontend.v1.FeedComposerEntryNodeH\x00R\x04nodeB\x04\n" +
+	"\x04node\x18\x02 \x01(\v2\".frontend.v1.FeedComposerEntryNodeH\x00R\x04node\x12\x14\n" +
+	"\x05edits\x18\x03 \x01(\x04R\x05editsB\x04\n" +
 	"\x02at\"\x17\n" +
 	"\x15FeedComposerEntryNone\"T\n" +
 	"\x15FeedComposerEntryNode\x12%\n" +

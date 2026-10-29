@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { FeedComposerEntrySchema, type FeedComposerEntry } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
+  COMPOSER_EDITED_EVENT,
   COMPOSER_ENTRY_CLASS,
   COMPOSER_LEFT_PROPERTY,
   COMPOSER_RIGHT_PROPERTY,
@@ -300,5 +301,47 @@ describe("composerBoxGeometry", () => {
     const got = composerBoxGeometry(document, document.createElement("div"));
     // Assert
     expect(got).toBeNull();
+  });
+});
+
+describe("the edit count of a push", () => {
+  const withEdits = (edits: bigint): FeedComposerEntry => create(FeedComposerEntrySchema, { at: { case: "none", value: {} }, edits });
+  let announced = 0;
+  const count = (): void => {
+    announced++;
+  };
+  beforeEach(() => {
+    announced = 0;
+    document.addEventListener(COMPOSER_EDITED_EVENT, count);
+  });
+  afterEach(() => document.removeEventListener(COMPOSER_EDITED_EVENT, count));
+
+  it("announces nothing for the first push, which only restates the count", () => {
+    // Arrange
+    const fresh = createComposerEntryHighlight(document);
+    // Act
+    fresh.apply(withEdits(5n));
+    // Assert
+    expect(announced).toBe(0);
+  });
+
+  it("announces typing when the count changes", () => {
+    // Arrange
+    const fresh = createComposerEntryHighlight(document);
+    fresh.apply(withEdits(5n));
+    // Act
+    fresh.apply(withEdits(6n));
+    // Assert
+    expect(announced).toBe(1);
+  });
+
+  it("announces nothing when the count stands", () => {
+    // Arrange
+    const fresh = createComposerEntryHighlight(document);
+    fresh.apply(withEdits(5n));
+    // Act
+    fresh.apply(withEdits(5n));
+    // Assert
+    expect(announced).toBe(0);
   });
 });

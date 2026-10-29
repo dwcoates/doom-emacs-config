@@ -4803,14 +4803,16 @@ Beside the four handover arms, `:unservable' (V (:detail STRING)) and
 
 (defun agent-repl-wire-encode-report-composer-entries-request (request)
   "Encode ReportComposerEntriesRequest from plist REQUEST.
-\(:workspace REF :labels LABELS :at-point AT): LABELS the composer's entry
-labels in order, AT which entry point is on, (:arm :entry :value (:label
-L)) or (:arm :none).  REF and AT are required."
+\(:workspace REF :labels LABELS :at-point AT :edits N): LABELS the composer's
+entry labels in order, AT which entry point is on, (:arm :entry :value (:label
+L)) or (:arm :none), N how many text edits the composer has had.  REF and AT
+are required; N defaults to 0."
   (let ((message "ReportComposerEntriesRequest"))
     (list (cons 'workspace
                 (agent-repl-wire-encode-workspace-ref
                  (agent-repl-wire-verbs--require message "workspace" (plist-get request :workspace))))
           (cons 'labels (vconcat (plist-get request :labels)))
+          (cons 'edits (or (plist-get request :edits) 0))
           (cons 'atPoint
                 (list (agent-repl-wire-verbs--encode-oneof
                        "ComposerEntryAtPoint" "at"

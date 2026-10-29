@@ -5659,7 +5659,19 @@ instead diverges from it unseen."
                     (agent-repl-wire-encode-report-composer-entries-request
                      (list :workspace agent-repl-test-wire-verbs--ref :labels '("3.1" "3.2")
                            :at-point '(:arm :entry :value (:label "3.2")))))
-                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"labels\":[\"3.1\",\"3.2\"],\"atPoint\":{\"entry\":{\"label\":\"3.2\"}}}"))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"labels\":[\"3.1\",\"3.2\"],\"edits\":0,\"atPoint\":{\"entry\":{\"label\":\"3.2\"}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-report-composer-entries-carries-the-edit-count ()
+  "A report carries the composer's edit count, 0 when none is given."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (alist-get 'edits
+                              (agent-repl-wire-encode-report-composer-entries-request
+                               (list :workspace agent-repl-test-wire-verbs--ref :labels nil :at-point '(:arm :none) :edits 5)))
+                   5))
+    (should (equal (alist-get 'edits
+                              (agent-repl-wire-encode-report-composer-entries-request
+                               (list :workspace agent-repl-test-wire-verbs--ref :labels nil :at-point '(:arm :none))))
+                   0))))
 
 (ert-deftest agent-repl-test-wire-verbs-report-composer-entries-with-point-on-no-entry ()
   "Point on no entry is the empty `none' arm, and no labels an empty array."
@@ -5667,7 +5679,7 @@ instead diverges from it unseen."
     (should (equal (json-serialize
                     (agent-repl-wire-encode-report-composer-entries-request
                      (list :workspace agent-repl-test-wire-verbs--ref :labels nil :at-point '(:arm :none))))
-                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"labels\":[],\"atPoint\":{\"none\":{}}}"))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"labels\":[],\"edits\":0,\"atPoint\":{\"none\":{}}}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-report-composer-entries-refuses-a-missing-point ()
   "Which entry point is on is REQUIRED, so a report without it never reaches the wire."

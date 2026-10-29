@@ -10,6 +10,7 @@ import {
   citationAt,
   installBranchHover,
 } from "../../src/feed/branch-hover.js";
+import { COMPOSER_EDITED_EVENT } from "../../src/feed/composer-entry.js";
 import { SELECTABLE_ATTRIBUTE, SELECTION_GOVERNED_ATTRIBUTE } from "../../src/feed/bubble-selection.js";
 import { TREE_CLASS, TREE_REFERENCE_CLASS } from "../../src/metaprompt-tree.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -544,5 +545,81 @@ describe("a bubble the reader is highlighting in (owner request, 2026-10-28)", (
     move(lineOf(row, "1.1.1"), 9 * COLUMN_PX);
     // Assert
     expect(boxedBy(row, HOVER_BOX).map(([node]) => node)).toContain("1.1.1");
+  });
+});
+
+describe("typing in the composer takes the hover box down (owner request, 2026-10-29)", () => {
+  /** The composer's highlight announces that the person typed. */
+  const typed = (): void => {
+    document.dispatchEvent(new Event(COMPOSER_EDITED_EVENT));
+  };
+
+  it("takes the hover box down when the person types", () => {
+    // Arrange
+    const row = response();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    over(lineOf(row, "1.1.1"));
+    // Act
+    typed();
+    // Assert
+    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+  });
+
+  it("keeps it down while the pointer rests, though the page repaints under it", () => {
+    // Arrange
+    const row = response();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    over(lineOf(row, "1.1.1"), 9 * COLUMN_PX);
+    typed();
+    // Act
+    over(lineOf(row, "1.1.1"), 9 * COLUMN_PX);
+    // Assert
+    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+  });
+
+  it("boxes again once the pointer moves", () => {
+    // Arrange
+    const row = response();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    over(lineOf(row, "1.1.1"), 9 * COLUMN_PX);
+    typed();
+    // Act
+    move(lineOf(row, "1.1.1"), 5 * COLUMN_PX);
+    // Assert
+    expect(boxedBy(row, HOVER_BOX).map(([node]) => node)).toEqual(["1.1", "1.1.1"]);
+  });
+
+  it("takes down a hovered citation's box too", () => {
+    // Arrange
+    const row = response({}, citingTree);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    over(citation(row));
+    // Act
+    typed();
+    // Assert
+    expect(boxedBy(row, REFERENCE_BOX)).toEqual([]);
+  });
+
+  it("leaves the composer's own box standing", () => {
+    // Arrange
+    const row = response();
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    lineOf(row, "1.1").classList.add("mp-line-composing");
+    over(lineOf(row, "1.1.1"));
+    // Act
+    typed();
+    // Assert
+    expect(lineOf(row, "1.1").classList.contains("mp-line-composing")).toBe(true);
+  });
+
+  it("stops listening once uninstalled", () => {
+    // Arrange
+    const row = response();
+    installBranchHover(document.body, TEN_PX_COLUMNS)();
+    lineOf(row, "1.1.1").classList.add("mp-line-hovered");
+    // Act
+    typed();
+    // Assert
+    expect(lineOf(row, "1.1.1").classList.contains("mp-line-hovered")).toBe(true);
   });
 });

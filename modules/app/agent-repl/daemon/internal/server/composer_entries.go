@@ -40,6 +40,7 @@ const opComposerEntries = "daemon.server.composer_entries"
 type composerReport struct {
 	labels  []string
 	atPoint string // "" when point is on no entry
+	edits   uint64 // text edits the composer has had, relayed so the webapp can tell the person typed
 }
 
 // composerReply answers the reply row a composer's entries are read
@@ -78,7 +79,7 @@ func (s *server) ReportComposerEntries(
 		return answer(resp, cerr)
 	}
 	ws := subject.Record.ID
-	report := composerReport{labels: slices.Clone(req.Msg.GetLabels()), atPoint: req.Msg.GetAtPoint().GetEntry().GetLabel()}
+	report := composerReport{labels: slices.Clone(req.Msg.GetLabels()), atPoint: req.Msg.GetAtPoint().GetEntry().GetLabel(), edits: req.Msg.GetEdits()}
 	s.composerMu.Lock()
 	s.composerReports[ws] = report
 	s.composerMu.Unlock()
@@ -237,7 +238,7 @@ func (s *server) restateComposerEntries(ctx context.Context, ws ids.WorkspaceID)
 // composer ANSWERS no response, point is on no entry, or its label targets
 // nothing.
 func composerEntryOf(report composerReport, answers bool, targets []*frontendv1.FeedId) *frontendv1.FeedComposerEntry {
-	none := &frontendv1.FeedComposerEntry{At: &frontendv1.FeedComposerEntry_None{None: &frontendv1.FeedComposerEntryNone{}}}
+	none := &frontendv1.FeedComposerEntry{At: &frontendv1.FeedComposerEntry_None{None: &frontendv1.FeedComposerEntryNone{}}, Edits: report.edits}
 	if !answers || report.atPoint == "" {
 		return none
 	}
@@ -247,7 +248,7 @@ func composerEntryOf(report composerReport, answers bool, targets []*frontendv1.
 	}
 	return &frontendv1.FeedComposerEntry{At: &frontendv1.FeedComposerEntry_Node{Node: &frontendv1.FeedComposerEntryNode{
 		Row: targets[i], Label: report.atPoint,
-	}}}
+	}}, Edits: report.edits}
 }
 
 // unansweredLabels is every label of REPORT whose target (TARGETS) is

@@ -4340,6 +4340,10 @@ message FeedComposerEntry {
     // Point's entry answers this node.
     FeedComposerEntryNode node = 2;
   }
+  // How many text edits the composer has had (agentrepl.v1.ReportComposerEntriesRequest.edits),
+  // as the last report stated it. The webapp takes down a hover box when it rises:
+  // the person is typing, not pointing.
+  uint64 edits = 3;
 }
 
 message FeedComposerEntryNone {}

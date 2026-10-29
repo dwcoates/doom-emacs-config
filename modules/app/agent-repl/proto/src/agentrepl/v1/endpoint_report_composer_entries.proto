@@ -40,6 +40,11 @@ message ReportComposerEntriesRequest {
   repeated string labels = 2;
   // Which entry point is on. REQUIRED — unset is Connect InvalidArgument.
   ComposerEntryAtPoint at_point = 3;
+  // How many text edits this composer has had since it was created, counted
+  // by Emacs and only ever rising. The daemon relays it unchanged
+  // (frontend.v1.FeedComposerEntry.edits), so the webapp can tell that the
+  // person typed. REQUIRED to be sent: 0 means the composer was never edited.
+  uint64 edits = 4;
 }
 
 // Which entry point is on. THE ARM IS THE ANSWER.

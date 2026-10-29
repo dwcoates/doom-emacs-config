@@ -94,6 +94,43 @@ func TestAReportWithPointOnNoEntryHighlightsNothing(t *testing.T) {
 	}
 }
 
+func TestAReportRelaysItsEditCountWithTheNodeItHighlights(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Feed.targets = map[string]string{"3.1": "r1"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+	req := composerReportRequest("3.1", "3.1")
+	req.Edits = 7
+
+	// Act
+	report(t, h, req)
+
+	// Assert
+	if entry := receiveComposerEntry(t, stream); entry.GetEdits() != 7 || entry.GetNode() == nil {
+		t.Fatalf("composer entry = %v, want node 3.1 with edits 7", entry)
+	}
+}
+
+func TestAReportRelaysItsEditCountWhenNothingIsHighlighted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := openRootWatch(t, h, ctx)
+	req := composerReportRequest("", "3.1")
+	req.Edits = 3
+
+	// Act
+	report(t, h, req)
+
+	// Assert
+	if entry := receiveComposerEntry(t, stream); entry.GetEdits() != 3 || entry.GetNone() == nil {
+		t.Fatalf("composer entry = %v, want none with edits 3", entry)
+	}
+}
+
 func TestAPointEntryAnsweringNothingHighlightsNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
