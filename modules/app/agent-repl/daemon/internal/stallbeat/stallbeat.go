@@ -103,6 +103,23 @@ func (d *Detector) Observe(at time.Time, blockedMS int64) {
 	})
 }
 
+// Recent answers how many stalls fell within Window before NOW and how long
+// they blocked in all, in milliseconds: the strain line of the rail's memory
+// popup (memorypopup). A stall older than Window is not counted, whether or
+// not a later Observe has pruned it yet.
+func (d *Detector) Recent(now time.Time) (int, int64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	count, blocked := 0, int64(0)
+	for _, s := range d.stalls {
+		if now.Sub(s.at) < Window {
+			count++
+			blocked += s.blocked
+		}
+	}
+	return count, blocked
+}
+
 // bestBeat answers the phase of Period that the most STALLS fall within
 // Tolerance of, how many do, and how long they blocked in all.
 func bestBeat(stalls []stall) (time.Duration, int, int64) {
