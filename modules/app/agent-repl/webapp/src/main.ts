@@ -62,6 +62,7 @@ import { liveUnshownAnimationsEnv, pauseAnimationsWhileUnshown } from "./host/un
 import { mountSidebar } from "./sidebar/sidebar.js";
 import { mountTopbar } from "./topbar/topbar.js";
 import { installNavigationGuard, installProseLinkRouting } from "./link.js";
+import { installLinkHoverPopup } from "./link-hover.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
 import { LEVEL_WINDOW_OPERATION, bindLogContext, log } from "./log.js";
@@ -391,6 +392,7 @@ export async function boot(): Promise<void> {
     // exactly as the structured links do. Hung here, at the feed/markdown seam,
     // once — every markdown-bearing surface lives inside `feedScroll`.
     installProseLinkRouting(ctx, shell.feedScroll);
+    installLinkHoverPopup(shell.feedScroll);
     // A DOUBLE CLICK ON A BUBBLE EXPANDS IT over the whole webapp (bubble/overlay.ts).
     mountBubbleOverlay(document, shell.feedScroll);
     // AND NO OUTWARD LINK ANYWHERE ON THE PAGE NAVIGATES THE WEBVIEW: what no
