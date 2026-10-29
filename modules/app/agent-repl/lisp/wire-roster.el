@@ -1957,17 +1957,36 @@ interacted with first."
   "Decode `WorkspaceRoster''s optional `version' field VALUE."
   (agent-repl-wire-decode-roster-version value))
 
+(defun agent-repl-wire-decode-roster-cold-gate (value)
+  "Decode VALUE as `RosterColdGate'.
+Returns `(:workspace REF :row ID)'.  THE CARD IS THE WEBHOST\='S TO DRAW
+\(webapp/src/host/gate.ts): Emacs hides the input from the host view\='s
+gate, never from this one, so the card is checked to be a message and not
+read further."
+  (let ((object (agent-repl-wire--object "RosterColdGate" value)))
+    (agent-repl-wire--check-keys "RosterColdGate" object '(workspace row gate))
+    (agent-repl-wire--decode-message "RosterColdGate" 'gate object
+                                     (lambda (gate) (agent-repl-wire--object "RosterColdGate.gate" gate)))
+    (agent-repl-wire--decoded
+     "RosterColdGate"
+     (list :workspace (agent-repl-wire--decode-message
+                       "RosterColdGate" 'workspace object
+                       #'agent-repl-wire-decode-workspace-ref)
+           :row (agent-repl-wire--decode-message
+                 "RosterColdGate" 'row object
+                 #'agent-repl-wire-decode-feed-id)))))
+
 (defun agent-repl-wire-decode-workspace-roster (value)
   "Decode VALUE as `WorkspaceRoster'.
 Returns `(:repository V :open O :hidden H :recently-merged S :closed C
 :current C-or-nil :revision N :version V-or-nil :app-switcher A
-:threads T)'.  THERE IS NO TAB BAR
+:threads T :cold-gates G)'.  THERE IS NO TAB BAR
 MESSAGE: the Open section's rows are the tab bar, each stating its own
 tab."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
-     '(repository open hidden recentlyMerged closed current revision version appSwitcher threads))
+     '(repository open hidden recentlyMerged closed current revision version appSwitcher threads coldGates))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
      (list :repository (agent-repl-wire--decode-message
@@ -1997,7 +2016,10 @@ tab."
                           #'agent-repl-wire-decode-roster-app-switcher)
            :threads (agent-repl-wire--decode-message
                      "WorkspaceRoster" 'threads object
-                     #'agent-repl-wire-decode-roster-thread-section)))))
+                     #'agent-repl-wire-decode-roster-thread-section)
+           :cold-gates (agent-repl-wire--decode-repeated
+                        "WorkspaceRoster" 'coldGates object
+                        #'agent-repl-wire-decode-roster-cold-gate)))))
 
 ;;;; ---- The rpc ----
 

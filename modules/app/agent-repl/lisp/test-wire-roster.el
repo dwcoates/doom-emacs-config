@@ -1367,7 +1367,46 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                    :revision 0
                    :version nil
                    :app-switcher (:title "Workspaces" :shown :workspaces :options nil)
-                   :threads (:new-thread "New thread" :rows nil)))))
+                   :threads (:new-thread "New thread" :rows nil)
+                   :cold-gates nil))))
+
+(defun agent-repl-test-wire-roster--with-cold-gates (gates)
+  "The whole roster JSON carrying GATES, a JSON array's text, as its cold gates."
+  (concat (substring agent-repl-test-wire-roster--roster-json 0 -1)
+          ",\"coldGates\":" gates "}"))
+
+(ert-deftest agent-repl-test-wire-roster-decodes-the-cold-gates ()
+  "Each cold gate decodes to its workspace and row; the card is the webhost's."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-workspace-roster
+                             (agent-repl-test-wire-roster--with-cold-gates
+                              "[{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"},\"row\":{\"value\":\"cold-gate:ws-1\"},\"gate\":{\"standing\":{}}}]"))
+                            :cold-gates)
+                 '((:workspace (:id "ws-1" :dir "/w/1") :row (:value "cold-gate:ws-1"))))))
+
+(ert-deftest agent-repl-test-wire-roster-a-cold-gate-without-its-card-is-a-breach ()
+  "A cold gate carries its card; one without is a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-roster
+                  (agent-repl-test-wire-roster--with-cold-gates
+                   "[{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"},\"row\":{\"value\":\"cold-gate:ws-1\"}}]"))
+                 '("RosterColdGate" gate "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-cold-gate-whose-card-is-no-message-is-a-breach ()
+  "A cold gate's card is a message; anything else is a breach."
+  (should (equal (car (agent-repl-test-wire-roster--breach
+                       #'agent-repl-wire-decode-workspace-roster
+                       (agent-repl-test-wire-roster--with-cold-gates
+                        "[{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"},\"row\":{\"value\":\"cold-gate:ws-1\"},\"gate\":7}]")))
+                 "RosterColdGate.gate")))
+
+(ert-deftest agent-repl-test-wire-roster-a-cold-gate-refuses-an-unknown-field ()
+  "A cold gate carries its workspace, row and card, and nothing else."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-roster
+                  (agent-repl-test-wire-roster--with-cold-gates
+                   "[{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/1\"},\"row\":{\"value\":\"cold-gate:ws-1\"},\"gate\":{},\"tint\":1}]"))
+                 '("RosterColdGate" tint "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-decodes-the-revision ()
   "The roster's revision decodes from protojson's decimal string."
