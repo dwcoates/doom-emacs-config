@@ -1441,6 +1441,37 @@ and seven rows drew severed on every webapp deploy."
       ;; Assert
       (should (null navigated)))))
 
+(ert-deftest agent-repl-test-wh-the-blank-document-is-not-taken-back ()
+  "WebKit's about:blank commit ahead of the first load navigates nothing."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-committed-uri "about:blank"
+      ;; Act
+      (agent-repl-test-wh--load "load-committed")
+      ;; Assert
+      (should (null navigated)))))
+
+(ert-deftest agent-repl-test-wh-the-blank-document-is-not-recorded-at-error ()
+  "The about:blank commit is no outward link, so nothing is recorded at ERROR."
+  (agent-repl-test-wh--with-host
+    (agent-repl-test-wh--with-committed-uri "about:blank"
+      (let (errors)
+        (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+          ;; Act
+          (agent-repl-test-wh--load "load-committed"))
+        ;; Assert
+        (should (null errors))))))
+
+(ert-deftest agent-repl-test-wh-the-blank-document-replays-no-page ()
+  "The blank document is not the host's page: nothing is replayed into it."
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-ensure-page "alpha")
+    (setq agent-repl-test-wh--calls nil)
+    (agent-repl-test-wh--with-committed-uri "about:blank"
+      ;; Act
+      (agent-repl-test-wh--load "load-committed")
+      ;; Assert
+      (should (null (agent-repl-test-wh--sent "ensure"))))))
+
 (ert-deftest agent-repl-test-wh-another-port-on-the-host-name-is-taken-back ()
   "Only the host's exact origin is its own: another port strayed."
   (agent-repl-test-wh--with-host

@@ -201,13 +201,24 @@ reads it, so it is read here off `last-input-event' rather than passed."
     (let ((status (nth 3 last-input-event)))
       (agent-repl--info agent-repl--webhost-central "elisp.webhost.load-changed status=%s pages=%d shown=%s"
                         status (hash-table-count agent-repl--webhost-pages) agent-repl--webhost-shown)
-      (when (equal status "load-committed")
+      (when (and (equal status "load-committed")
+                 (not (agent-repl--webhost-blank-uri-p (agent-repl--webhost-current-uri))))
         (if-let ((strayed (and agent-repl--webhost-url
                                (agent-repl--webhost-strayed-uri (agent-repl--webhost-current-uri)))))
             (agent-repl--webhost-take-back strayed)
           ;; From here on every answer is the new document's.
           (setq agent-repl--webhost-predates-reload-pending nil)
           (agent-repl--webhost-replay))))))
+
+(defun agent-repl--webhost-blank-uri-p (uri)
+  "Return non-nil when URI is the blank document a web view holds before a load.
+WebKit commits `about:blank' ahead of the host's first navigation (and the
+host's page is not that document), so the commit is neither an outward link
+to take the host back from -- the take-back's own navigation replaced the
+page load still in flight, and the host's page never attached (2026-10-29,
+`TestEmacsTabsRehydrateFromTheRosterOnConnect') -- nor a document to replay
+into.  The host's own page commits after it."
+  (equal uri "about:blank"))
 
 (defun agent-repl--webhost-current-uri ()
   "Return the URI the host's main frame shows, or nil when there is no host."
