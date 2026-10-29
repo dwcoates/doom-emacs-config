@@ -49,7 +49,7 @@ func (s *store) MarkCacheCold(ctx context.Context, id WorkspaceID) (*time.Time, 
 			return err
 		}
 		var at sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT cache_cold_turn_at FROM workspaces WHERE id = ?`, id).Scan(&at); err != nil {
+		if err := scanWorkspaceRow(ctx, tx, id, `cache_cold_turn_at`, &at); err != nil {
 			return err
 		}
 		marked = optTime(at)
