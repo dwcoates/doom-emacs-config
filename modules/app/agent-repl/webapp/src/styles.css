@@ -9710,3 +9710,18 @@ ar-button.merge-queue-move[aria-disabled="true"] {
 /* A REVISION THAT FAILED says why under the prose, which stands as it was
    (FeedResponse.revision `failed`): it is a footer note, drawn by the
    cut-short marker's rule. */
+
+.link-hover-popup {
+  position: fixed;
+  z-index: 1000;
+  max-width: min(640px, 90vw);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(30, 30, 30, 0.92);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.link-hover-popup[hidden] { display: none; }
