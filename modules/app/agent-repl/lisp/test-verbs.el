@@ -2027,6 +2027,20 @@ so a `read-string' here would be a question the ruling removed."
                                  :value)))
         (should-not (plist-get standard :name))))))
 
+(ert-deftest agent-repl-verbs-create-command-prompt-names-the-repository ()
+  "A DYNAMIC create asks `Initial prompt (REPOSITORY): ', REPOSITORY being the section's basename."
+  (let (asked)
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+      (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
+                 (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
+                ((symbol-function 'agent-repl-verbs--read-prompt)
+                 (lambda (p &optional _history-file _unseeded) (setq asked p) "do a thing")))
+        (agent-repl-create-workspace)
+        (should (equal asked
+                       (format "Initial prompt (%s): "
+                               (agent-repl-verbs--repository-name
+                                (agent-repl-verbs--section-ref (agent-repl-test-verbs--repo-section))))))))))
+
 (ert-deftest agent-repl-verbs-fork-into-primary-forks-the-context-of-a-primary ()
   "`SPC TAB f\=' forks the conversation into a PRIMARY workspace: the
 current workspace is the forked context, and the topology is primary."
@@ -2318,10 +2332,11 @@ called with the request that answers or signals."
                          blank-refusal agent-repl-verbs--name-blank-refusal))
                  "fix-login")))
       ;; Act.
-      (let ((name (agent-repl-verbs--read-name "a named fork IS its name")))
+      (let ((name (agent-repl-verbs--read-name (agent-repl-test-verbs--repo-ref) "a named fork IS its name")))
         ;; Assert.
         (should (equal name "fix-login"))
-        (should (equal asked "Workspace name (slug, no prompt): "))
+        (should (equal asked (format "Workspace name (%s) (slug, no prompt): "
+                                (agent-repl-verbs--repository-name (agent-repl-test-verbs--repo-ref)))))
         (should (eq exit-command #'agent-repl-verbs-name-minibuffer-exit))
         (should (equal blank-refusal "a named fork IS its name"))))))
 
