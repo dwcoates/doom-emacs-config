@@ -187,6 +187,12 @@ func (v *verbs) submitPlacement(ctx context.Context, log dlog.Logger, ws ids.Wor
 // it republishes the roster, and the sidebar's one-shot subsection lets the
 // family go, with no code of its own.
 //
+// THE PROMPT THAT FOLLOWS THE USER'S OWN STOP OF A TURN TAKES NOTHING BACK: the
+// user interrupting and prompting again is steering the unattended work, not
+// stepping in to finish it. That prompt consumes the stop, so the next user
+// prompt takes the one-shot back as usual. A reopen is not a prompt and
+// neither consumes nor honors a stop.
+//
 // IT ANSWERS THE PLACEMENT BRIEF THE TAKE-BACK OWES rather than queuing it:
 // the caller queues it (SubmitPlacement) once the prompt that took the
 // workspace back is queued, so the user's words run before it.
@@ -197,6 +203,12 @@ func (v *verbs) TakeBackOneShot(ctx context.Context, ws ids.WorkspaceID, by OneS
 	}
 	if !record.OneShot || record.Closed {
 		return PendingPlacement{}, nil
+	}
+	if by == TakenBackByUserPrompt {
+		if _, stopped := v.stopped.LoadAndDelete(ws); stopped {
+			log.Info(opTakeBackOneShot, "the prompt followed the user's own stop of a turn; the one-shot is kept", nil)
+			return PendingPlacement{}, nil
+		}
 	}
 	_, placement, err := v.setOneShot(ctx, ws, nil, false)
 	if err != nil {

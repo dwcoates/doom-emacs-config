@@ -517,3 +517,57 @@ func TestLeavingTheOneShotStateFailsLoudlyWhenThePlacementCannotBeAsked(t *testi
 		})
 	}
 }
+
+func TestTakeBackOneShotKeepsTheMarkForThePromptAfterAStop(t *testing.T) {
+	// Arrange
+	f := markedOneShot(t)
+	runningTurn(f, 0)
+	if _, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Act
+	_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+
+	// Assert
+	if err != nil || !f.db.jobs["w1"].OneShot {
+		t.Fatalf("TakeBackOneShot = %v, one-shot %v; want the mark kept", err, f.db.jobs["w1"].OneShot)
+	}
+}
+
+func TestTakeBackOneShotTakesBackOnTheSecondPromptAfterAStop(t *testing.T) {
+	// Arrange
+	f := markedOneShot(t)
+	runningTurn(f, 0)
+	if _, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if _, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt); err != nil {
+		t.Fatalf("first TakeBackOneShot: %v", err)
+	}
+
+	// Act
+	_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByUserPrompt)
+
+	// Assert
+	if err != nil || f.db.jobs["w1"].OneShot {
+		t.Fatalf("TakeBackOneShot = %v, one-shot %v; want the mark cleared", err, f.db.jobs["w1"].OneShot)
+	}
+}
+
+func TestTakeBackOneShotByReopenIgnoresAStop(t *testing.T) {
+	// Arrange
+	f := markedOneShot(t)
+	runningTurn(f, 0)
+	if _, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Act
+	_, err := f.verbs.TakeBackOneShot(context.Background(), "w1", TakenBackByReopen)
+
+	// Assert
+	if err != nil || f.db.jobs["w1"].OneShot {
+		t.Fatalf("TakeBackOneShot = %v, one-shot %v; want the mark cleared", err, f.db.jobs["w1"].OneShot)
+	}
+}
