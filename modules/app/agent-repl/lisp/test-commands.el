@@ -1877,6 +1877,20 @@ and `--switched' to the workspace whose switch was requested of the daemon."
       ;; Assert
       (should (equal agent-repl-test-commands--offered '("fresh"))))))
 
+(ert-deftest agent-repl-test-commands-switcher-leaves-out-a-chat-thread-workspace ()
+  "A live `chat/ID' thread workspace is no project, so `SPC p p' never offers it."
+  ;; Arrange
+  (agent-repl-test-commands--switcher nil '("local" "chat/abc123")
+    (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+              ((symbol-function 'agent-repl--ws-get)
+               (lambda (ws key) (and (eq key :thread) (equal ws "chat/abc123"))))
+              ((symbol-function 'completing-read)
+               (agent-repl-test-commands--pick "local")))
+      ;; Act
+      (agent-repl-switch-to-project)
+      ;; Assert
+      (should (equal agent-repl-test-commands--offered '("local"))))))
+
 (ert-deftest agent-repl-test-commands-switcher-offers-a-local-workspace-off-the-roster ()
   "A live local workspace no roster push carries yet is never dropped."
   ;; Arrange

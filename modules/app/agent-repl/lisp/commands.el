@@ -89,6 +89,7 @@
 (declare-function agent-repl-verb-move "agent-repl-verbs" (ws target))
 (declare-function agent-repl-workspace-progress-report "mutation-progress" (kind phase &rest details))
 (declare-function agent-repl-verbs--all-rows "agent-repl-verbs" (&optional roster))
+(declare-function agent-repl-roster-thread-p "agent-repl-roster" (ws))
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-numbered-tab "agent-repl-roster" (number))
@@ -826,7 +827,9 @@ excludes them at its source."
                         :section (plist-get walked :section))
                   entries)))))
     (dolist (ws (agent-repl--live-ws-names))
-      (unless (member ws claimed)
+      ;; A zettel chat thread's workspace (`chat/ID') is live here but is no
+      ;; project: the thread commands reach it, never this switcher.
+      (unless (or (member ws claimed) (agent-repl-roster-thread-p ws))
         (push (list :name ws
                     :dir (agent-repl--ws-get ws :project-dir)
                     :ref (agent-repl--ws-get ws :ref)
