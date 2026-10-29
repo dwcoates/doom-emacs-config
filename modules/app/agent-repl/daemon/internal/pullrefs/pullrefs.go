@@ -1,6 +1,7 @@
-// Package pullrefs turns a pull request reference written as `#<number>` into
-// a link to that pull request on GitHub, in the repository of the workspace
-// whose text it is.
+// Package pullrefs turns a pull request reference written as `#<number>` or
+// `<repo>#<number>` into a link to that pull request on GitHub. A bare
+// reference links into the repository of the workspace whose text it is, and a
+// `<repo>#<number>` one into that repository under the same owner.
 //
 // WHICH GITHUB OWNER a repository belongs to is decided by the account its
 // work is routed to (account.Resolver.ConfigDirFor): the work account's
@@ -86,12 +87,14 @@ func (t Target) PullURL(number string) string {
 	return "https://github.com/" + t.Owner + "/" + t.Repo + "/pull/" + number
 }
 
-// Linkify answers MARKDOWN with every bare `#<number>` written as a link to
-// that pull request in T.
+// Linkify answers MARKDOWN with every `#<number>` written as a link to that
+// pull request in T, and every `<repo>#<number>` as a link to that pull
+// request in T's owner's repository REPO.
 //
 // A reference is linked only where it stands as a word of prose: never in a
-// fenced code block or a code span, and never glued to what precedes it (a
-// url's fragment, an entity, a link that is already written). A text still
+// fenced code block or a code span, never inside an existing link (its text or
+// its destination), and never glued to what precedes it (a url's fragment, an
+// entity). A text still
 // ARRIVING leaves a reference at its very end alone, because the next push
 // may add digits to it.
 func Linkify(markdown string, t Target, arriving bool) string {
@@ -149,10 +152,16 @@ func closesFence(line, marker string) bool {
 
 // linkifyLine writes LINE to OUT with its references linked. ATEND says the
 // line ends a text still arriving.
+//
+// The scan walks LINE once and copies three kinds of span verbatim before a
+// reference can be found in them: a code span, a link (its text and its
+// destination, see linkEnd), and any word that is not a reference. A reference
+// is linked only where the scan meets it at the start of a word.
 func linkifyLine(out *strings.Builder, line string, t Target, atEnd bool) {
 	i := 0
 	for i < len(line) {
-		switch c := line[i]; {
+		c := line[i]
+		switch {
 		case c == '`':
 			run := backtickRun(line, i)
 			if end := closingRun(line, i+run, run); end >= 0 {
@@ -162,19 +171,35 @@ func linkifyLine(out *strings.Builder, line string, t Target, atEnd bool) {
 			}
 			out.WriteString(line[i : i+run])
 			i += run
-		case c == '#' && standsAlone(line, i):
-			j := i + 1
-			for j < len(line) && line[j] >= '0' && line[j] <= '9' {
-				j++
-			}
-			if j == i+1 || line[i+1] == '0' || (j < len(line) && isWordByte(line[j])) || (atEnd && j == len(line)) {
+		case c == '[':
+			end := linkEnd(line, i)
+			if end < 0 {
 				out.WriteByte(c)
 				i++
 				continue
 			}
-			number := line[i+1 : j]
-			out.WriteString("[#" + number + "](" + t.PullURL(number) + ")")
-			i = j
+			out.WriteString(line[i:end])
+			i = end
+		case c == '#' && startsWord(line, i):
+			number, end, ok := pullNumber(line, i, atEnd)
+			if !ok {
+				out.WriteByte(c)
+				i++
+				continue
+			}
+			writePullLink(out, "#"+number, t.PullURL(number))
+			i = end
+		case isRepoByte(c) && startsWord(line, i):
+			name := repoName(line, i)
+			if hash := i + len(name); hash < len(line) && line[hash] == '#' && validRepoName(name) {
+				if number, end, ok := pullNumber(line, hash, atEnd); ok {
+					writePullLink(out, name+"#"+number, Target{Owner: t.Owner, Repo: name}.PullURL(number))
+					i = end
+					continue
+				}
+			}
+			out.WriteString(name)
+			i += len(name)
 		default:
 			out.WriteByte(c)
 			i++
@@ -182,20 +207,110 @@ func linkifyLine(out *strings.Builder, line string, t Target, atEnd bool) {
 	}
 }
 
-// standsAlone reports whether the `#` at I begins a word of prose: at the
-// line's start, after whitespace, or after an opening parenthesis that is not
-// a link's destination.
-func standsAlone(line string, i int) bool {
+// writePullLink writes the markdown link TEXT to URL.
+func writePullLink(out *strings.Builder, text, url string) {
+	out.WriteString("[" + text + "](" + url + ")")
+}
+
+// pullNumber reads the pull request number after the `#` at HASH. END is where
+// the reference stops. It is not a number when no digits follow, when they
+// lead with a zero, when a word byte follows them, or when ATEND says the text
+// is still arriving and the digits run to the line's end (more may follow).
+func pullNumber(line string, hash int, atEnd bool) (number string, end int, ok bool) {
+	end = hash + 1
+	for end < len(line) && line[end] >= '0' && line[end] <= '9' {
+		end++
+	}
+	if end == hash+1 || line[hash+1] == '0' || (end < len(line) && isWordByte(line[end])) || (atEnd && end == len(line)) {
+		return "", 0, false
+	}
+	return line[hash+1 : end], end, true
+}
+
+// startsWord reports whether position I begins a word of prose: the line's
+// start, after whitespace, or after an opening parenthesis. A parenthesis that
+// opens a link's destination never reaches here, because linkEnd consumes the
+// whole link.
+func startsWord(line string, i int) bool {
 	if i == 0 {
 		return true
 	}
 	switch line[i-1] {
-	case ' ', '\t':
+	case ' ', '\t', '(':
 		return true
-	case '(':
-		return i < 2 || line[i-2] != ']'
 	}
 	return false
+}
+
+// linkEnd answers where the inline link opening with the `[` at I ends, or -1
+// when the `[` opens no link. A link is its text up to the matching `]`
+// (brackets nest, code spans hide theirs) followed at once by `(`, then its
+// destination up to the matching `)`. A destination still unclosed at the
+// line's end runs to it, so a link arriving mid-destination stays whole.
+func linkEnd(line string, i int) int {
+	depth := 0
+	j := i
+	for j < len(line) {
+		switch line[j] {
+		case '`':
+			run := backtickRun(line, j)
+			if end := closingRun(line, j+run, run); end >= 0 {
+				j = end + run
+			} else {
+				j += run
+			}
+			continue
+		case '\\':
+			j += 2
+			continue
+		case '[':
+			depth++
+		case ']':
+			depth--
+		}
+		j++
+		if depth == 0 {
+			break
+		}
+	}
+	if depth != 0 || j >= len(line) || line[j] != '(' {
+		return -1
+	}
+	parens := 0
+	for ; j < len(line); j++ {
+		switch line[j] {
+		case '\\':
+			j++
+		case '(':
+			parens++
+		case ')':
+			parens--
+			if parens == 0 {
+				return j + 1
+			}
+		}
+	}
+	return len(line)
+}
+
+// isRepoByte reports whether C may appear in a GitHub repository name.
+func isRepoByte(c byte) bool {
+	return isWordByte(c) || c == '-' || c == '.'
+}
+
+// repoName is the run of repository-name bytes starting at I.
+func repoName(line string, i int) string {
+	j := i
+	for j < len(line) && isRepoByte(line[j]) {
+		j++
+	}
+	return line[i:j]
+}
+
+// validRepoName reports whether NAME can be a GitHub repository name: `.` and
+// `..` are reserved.
+func validRepoName(name string) bool {
+	return name != "." && name != ".."
 }
 
 // isWordByte reports whether C continues a word, so a reference followed by it
