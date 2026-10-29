@@ -317,6 +317,18 @@ func (s *fakeServer) ReportPageUnloading(ctx context.Context, req *connect.Reque
 	return handleUnary[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse](ctx, s, "ReportPageUnloading", req.Msg)
 }
 
+func (s *fakeServer) ReportPageResidency(ctx context.Context, req *connect.Request[v1.ReportPageResidencyRequest]) (*connect.Response[v1.ReportPageResidencyResponse], error) {
+	return handleUnary[v1.ReportPageResidencyRequest, v1.ReportPageResidencyResponse](ctx, s, "ReportPageResidency", req.Msg)
+}
+
+func (s *fakeServer) GetMemoryOverview(ctx context.Context, req *connect.Request[v1.GetMemoryOverviewRequest]) (*connect.Response[v1.GetMemoryOverviewResponse], error) {
+	return handleUnary[v1.GetMemoryOverviewRequest, v1.GetMemoryOverviewResponse](ctx, s, "GetMemoryOverview", req.Msg)
+}
+
+func (s *fakeServer) GetWorkspaceMemory(ctx context.Context, req *connect.Request[v1.GetWorkspaceMemoryRequest]) (*connect.Response[v1.GetWorkspaceMemoryResponse], error) {
+	return handleUnary[v1.GetWorkspaceMemoryRequest, v1.GetWorkspaceMemoryResponse](ctx, s, "GetWorkspaceMemory", req.Msg)
+}
+
 func (s *fakeServer) MarkWorkspaceViewed(ctx context.Context, req *connect.Request[v1.MarkWorkspaceViewedRequest]) (*connect.Response[v1.MarkWorkspaceViewedResponse], error) {
 	return handleUnary[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse](ctx, s, "MarkWorkspaceViewed", req.Msg)
 }
