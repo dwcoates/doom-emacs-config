@@ -6438,7 +6438,7 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
     // Assert
     expect(decls).toMatch(/animation:\s*name-fade var\(--name-fade\) linear var\(--name-fade-delay, 0s\) 1 both/);
     expect(stylesheet).toMatch(/#ws-sidebar \{ --name-fade: 600s; \}/);
-    expect(keyframes.replace(/\s+/g, " ")).toMatch(/from \{ color: var\(--name-tone\); \}\s*to \{ color: var\(--name-rest\); \}/);
+    expect(keyframes.replace(/\s+/g, " ")).toMatch(/0%, 50% \{ color: var\(--name-tone\); \}.*100% \{ color: var\(--name-rest\); \}/);
   });
 
   it.each([
@@ -6450,5 +6450,31 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
 
     // Assert
     expect(decls).toMatch(new RegExp(`--name-rest:\\s*var\\(${token}\\)`));
+  });
+
+  it("holds the tone for the first half of the window, then accelerates (owner request, 2026-10-29)", () => {
+    // Arrange
+    const keyframes = keyframesOf("name-fade");
+    const remaining = [...keyframes.matchAll(/(\d+(?:\.\d+)?)% \{ color: color-mix\(in srgb, var\(--name-tone\) ([\d.]+)%/g)].map((m) => [Number(m[1]), Number(m[2])]);
+
+    // Act
+    const steps = remaining.slice(1).map(([, tone], i) => remaining[i][1] - tone);
+
+    // Assert — the tone only falls after the hold, and each step is larger than the last.
+    expect([remaining[0][0] > 50, steps.every((step, i) => i === 0 || step > steps[i - 1])]).toEqual([true, true]);
+  });
+
+  it("breathes a colored name both darker and brighter about its tone", () => {
+    // Arrange
+    const tinted = ruleFor("#ws-sidebar .row .name.tinted");
+    const keyframes = keyframesOf("ws-pulse-tone").replace(/\s+/g, " ");
+
+    // Act / Assert
+    expect([
+      ruleFor("#ws-sidebar .row .name.tinted.breathes"),
+      tinted.includes("--name-dark: color-mix(in srgb, var(--name-tone) 74%, var(--bg));"),
+      tinted.includes("--name-bright: color-mix(in srgb, var(--name-tone) 86%, var(--fg));"),
+      /0%, 100% \{ color: var\(--name-dark\); \}\s*50% \{ color: var\(--name-bright\); \}/.test(keyframes),
+    ]).toEqual([expect.stringContaining("ws-pulse-tone"), true, true, true]);
   });
 });
