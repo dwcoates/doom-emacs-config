@@ -1540,7 +1540,8 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* WORKSPACE NAMES ARE GREYSCALE (owner request, 2026-10-29): the repository
    headers' ink while unviewed, the muted grey once viewed (below), and a cold
-   gate strikes the name in that muted grey whether or not it was viewed. */
+   gate strikes the name in a still dimmer grey whether or not it was viewed
+   (owner request, 2026-10-29). */
 #ws-sidebar .row .name { color: var(--repo-head-expanded); }
 /* PARTIAL display mode (frontend.v1.RosterRowViewed): the user has already
    seen this workspace, so its NAME recedes to the secondary text colour. The
@@ -6516,7 +6517,10 @@ bubble-body.bubble-body { display: block; }
 /* A COLD GATE STRIKES THE NAME (owner ruling, 2026-10-13): the workspace is
    parked on its cold gate's choice. The name alone, in every section, never
    the mark or the when-column. */
-#ws-sidebar .ws[data-arm="coldGate"] > .row > .name { text-decoration: line-through; color: var(--muted); }
+#ws-sidebar .ws[data-arm="coldGate"] > .row > .name {
+  text-decoration: line-through;
+  color: color-mix(in srgb, var(--muted) 55%, transparent);
+}
 /* The glyph statuses are not discs: a box that centers a picture, so a
    breathing glyph shrinks about its own center. The box is the DOT'S width,
    not the picture's (owner request, 2026-10-08), and the picture is drawn at
