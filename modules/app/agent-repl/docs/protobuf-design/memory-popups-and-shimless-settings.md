@@ -116,3 +116,10 @@ and report after; every decision below was taken that way.
   between a gated and an ungated workspace moves the sidebar by nothing.
 - `FeedColdGate` and `FeedId` are imported from the feed component whole: the
   dock draws the card the feed's row draws, through the same renderer.
+- Consequences outside the contract: the page/webhost messages `gateDock`
+  (webhost to page) and `gateBand` (page to webhost) are retired; the webhost
+  keeps each workspace's slot itself (`Host.setGateDock` answers `kept`), and
+  Emacs keeps a workspace's slot while its page is unloaded and replays every
+  slot to a webhost that loads. The pages and the sidebar end above the gate's
+  exact measured height (`--webhost-gate-band`), never a rounded one, which
+  left a seam under a gate grown to a fractional height.

@@ -11,10 +11,6 @@
  * parent, and nothing else may steer it.
  */
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../feed/conversation-drawn.js";
-import { DOCK_HEIGHT_PROPERTY } from "../feed/gate-dock.js";
-
-/** The id of the page's docked gate band (index.html). */
-const GATE_DOCK_ID = "gate-dock";
 import { LEVEL_WINDOW_OPERATION, log } from "../log.js";
 import type { AppliedLevel, LevelWindow, WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { BUBBLE_OVERLAY_ATTRIBUTE, closeStandingBubbleOverlay } from "../bubble/overlay.js";
@@ -101,7 +97,6 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
   restyleTurns.connect((kind) => send({ channel: HOST_CHANNEL, kind }));
 
   const apply = (message: HostToPage): void => {
-    const root = doc.documentElement.style;
     switch (message.kind) {
       case "presence":
         if (message.shown !== presence.shown()) {
@@ -113,9 +108,6 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         // THE RELOAD FIRST, so a show it rides with already knows it.
         if (message.reloadStartedAtMs !== undefined) presence.setReloadStartedAt(message.reloadStartedAtMs);
         presence.setShown(message.shown, message.switchStartedAtMs ?? null);
-        return;
-      case "gateDock":
-        root.setProperty(DOCK_HEIGHT_PROPERTY, `${message.pixels}px`);
         return;
       case "sidebarDock":
         if (doc.documentElement.classList.contains(WEBHOST_SIDEBAR_CLASS) !== message.docked) {
@@ -248,24 +240,6 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
     const what = doc.documentElement.getAttribute(CONVERSATION_DRAWN_ATTRIBUTE);
     if (what === "page" || what === "refused") send({ channel: HOST_CHANNEL, kind: "drawn", what });
   };
-  // THE GATE BAND'S HEIGHT, as laid out: the webhost ends its sidebar above it.
-  // A dock that is hidden measures 0, which is the band being gone.
-  let gateBand = -1;
-  const reportGateBand = (pixels: number): void => {
-    const rounded = Math.round(pixels);
-    if (rounded === gateBand) return;
-    gateBand = rounded;
-    send({ channel: HOST_CHANNEL, kind: "gateBand", pixels: rounded });
-  };
-  const gateDock = doc.getElementById(GATE_DOCK_ID);
-  const gateWatch =
-    gateDock === null
-      ? null
-      : new ResizeObserver(() => {
-          reportGateBand(gateDock.getBoundingClientRect().height);
-        });
-  gateWatch?.observe(gateDock as Element);
-
   const drawnWatch = pageMutationObserver(doc, reportDrawn);
   drawnWatch.observe(doc.documentElement, { attributes: true, attributeFilter: [CONVERSATION_DRAWN_ATTRIBUTE] });
   // A BUBBLE EXPANDED OVER THE WEBAPP: the webhost lifts this page's iframe
@@ -290,12 +264,10 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
   send({ channel: HOST_CHANNEL, kind: "hello" });
   reportDrawn();
   reportOverlay();
-  if (gateDock !== null) reportGateBand(gateDock.getBoundingClientRect().height);
   log.info("the page joined its host", { operation: "page.host-joined", context: {} });
 
   return {
     dispose() {
-      gateWatch?.disconnect();
       drawnWatch.disconnect();
       overlayWatch.disconnect();
       win.removeEventListener("message", onMessage);

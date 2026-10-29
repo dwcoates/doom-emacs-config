@@ -39,6 +39,7 @@ import { readWebappBuild } from "../webapp-build.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
 import type { Host } from "./host.js";
 import { installLoadCensus, type LoadCensus } from "./load-census.js";
+import { createWebhostGate, type WebhostGate } from "./gate.js";
 
 /** The id the webhost's sidebar element wears: the page's own, so one stylesheet draws both. */
 export const WEBHOST_SIDEBAR_ID = "ws-sidebar";
@@ -59,6 +60,13 @@ export interface WebhostSidebarStartDeps {
   daemon?: DaemonOrigin;
   /** The webapp build the webhost was loaded from; read off its own entry script when absent. */
   webappBuild?: () => string;
+  /**
+   * The element the shown workspace's cold gate is drawn in (host/gate.ts);
+   * no gate is drawn when absent.
+   */
+  gate?: HTMLElement;
+  /** Create the webhost's gate; the real one draws through the feed's card. */
+  createGate?: typeof createWebhostGate;
 }
 
 /**
@@ -118,7 +126,23 @@ export function startWebhostSidebar(
     // An unloaded webhost stops at once: its requests, and its census.
     const unwatch = endPageAtPagehide(win);
     stopAtPageTeardown(() => census.stop());
+    // THE SHOWN WORKSPACE'S COLD GATE follows the roster, the page shown and
+    // the slot Emacs told, whether or not the page is loaded.
+    const gateEl = deps.gate;
+    const gate: WebhostGate | null =
+      gateEl === undefined
+        ? null
+        : (deps.createGate ?? createWebhostGate)({
+            doc,
+            el: gateEl,
+            ctx,
+            dismissDigest: (id) => {
+              host.dismissDigest(id);
+            },
+          });
+    const stopSlots = gate === null ? () => undefined : host.onGateSlot((id, pixels) => gate.setSlot(id, pixels));
     const sidebar = (deps.mount ?? mountWebhostSidebar)(nav, ctx, {
+      coldGates: (gates) => gate?.setGates(gates),
       // THE PAGES RESERVE THE COLUMN ONLY ONCE THERE IS A SIDEBAR TO FILL IT,
       // so a webhost whose sidebar never draws leaves the pages' layout as a
       // page on its own would have it.
@@ -134,10 +158,13 @@ export function startWebhostSidebar(
     // `markShown`), not a daemon round trip later.
     const stopShown = host.onShown((id) => {
       sidebar.markShown(id);
+      gate?.setShown(id);
     });
     stop = () => {
       unwatch();
       stopShown();
+      stopSlots();
+      gate?.dispose();
       sidebar.dispose();
       ctx.quiesce();
     };

@@ -14,7 +14,6 @@ import {
   FRAME_OVERLAY_ATTRIBUTE,
   FRAME_SHOWN_ATTRIBUTE,
   FRAME_WORKSPACE_ATTRIBUTE,
-  SIDEBAR_BOTTOM_PROPERTY,
   createHost,
   hostHasFocus,
   type Host,
@@ -358,7 +357,7 @@ describe("ensure", () => {
   it("keeps the desired state Emacs gave across a re-point", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");
-    host.setGateDock("a", 40);
+    host.setHeldIngress("a", []);
 
     // Act
     host.ensure("a", "http://ws-a.localhost:2/");
@@ -369,8 +368,8 @@ describe("ensure", () => {
     expect(posted).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          kind: "gateDock",
-          pixels: 40,
+          kind: "heldIngress",
+          entries: [],
         }),
       ]),
     );
@@ -627,7 +626,19 @@ describe("reload", () => {
 });
 
 describe("commands", () => {
-  it("sends the docked gate's slot to the page", () => {
+  it("keeps a gate slot for a workspace it holds no page for", () => {
+    // Arrange
+    const told: [string, number][] = [];
+    host.onGateSlot((id, pixels) => told.push([id, pixels]));
+
+    // Act
+    const answer = parsed(host.setGateDock("nobody", 140));
+
+    // Assert
+    expect([answer.outcome, told]).toEqual(["kept", [["nobody", 140]]]);
+  });
+
+  it("sends a page no gate slot: the webhost draws the gate", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");
     const posted = postsTo("a");
@@ -636,11 +647,23 @@ describe("commands", () => {
     host.setGateDock("a", 140);
 
     // Assert
-    expect(posted).toContainEqual({
-      channel: HOST_CHANNEL,
-      kind: "gateDock",
-      pixels: 140,
-    });
+    expect(posted).toEqual([]);
+  });
+
+  it("hands a slot listener every slot kept before it listened", () => {
+    // Arrange
+    host.setGateDock("a", 90);
+    host.setGateDock("b", 120);
+    const told: [string, number][] = [];
+
+    // Act
+    host.onGateSlot((id, pixels) => told.push([id, pixels]));
+
+    // Assert
+    expect(told).toEqual([
+      ["a", 90],
+      ["b", 120],
+    ]);
   });
 
   it("asks the page to close its news digest", () => {
@@ -693,7 +716,7 @@ describe("commands", () => {
   });
 
   it("answers absent for a command to a workspace it holds no page for", () => {
-    expect(parsed(host.setGateDock("nobody", 10)).outcome).toBe(
+    expect(parsed(host.dismissDigest("nobody")).outcome).toBe(
       "absent",
     );
   });
@@ -703,7 +726,6 @@ describe("hello", () => {
   it("replays the state Emacs gave to a page that says hello", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");
-    host.setGateDock("a", 90);
     host.show("a");
     const posted = postsTo("a");
 
@@ -715,11 +737,6 @@ describe("hello", () => {
       { channel: HOST_CHANNEL, kind: "presence", shown: true },
       { channel: HOST_CHANNEL, kind: "sidebarDock", docked: false },
       { channel: HOST_CHANNEL, kind: "webhostFailures", failures: [] },
-      {
-        channel: HOST_CHANNEL,
-        kind: "gateDock",
-        pixels: 90,
-      },
     ]);
   });
 
@@ -1006,22 +1023,6 @@ describe("the webhost's sidebar", () => {
     evidence: [["close", "1006"]],
   } as const;
 
-  /** ID's page reports its gate band PIXELS tall. */
-  function band(id: string, pixels: number): void {
-    fromPage(id, { channel: HOST_CHANNEL, kind: "gateBand", pixels });
-  }
-
-  /** Where the sidebar ends, as the webhost set it. */
-  function sidebarBottom(): string {
-    return document.documentElement.style.getPropertyValue(
-      SIDEBAR_BOTTOM_PROPERTY,
-    );
-  }
-
-  afterEach(() => {
-    document.documentElement.style.removeProperty(SIDEBAR_BOTTOM_PROPERTY);
-  });
-
   it("tells every page Emacs moved its focus", () => {
     // Arrange
     pages(host, "a", "b");
@@ -1109,57 +1110,6 @@ describe("the webhost's sidebar", () => {
       kind: "webhostFailures",
       failures: [FAILURE],
     });
-  });
-
-  it("ends the sidebar above the gate band of the page on screen", () => {
-    // Arrange
-    pages(host, "a");
-    host.show("a");
-
-    // Act
-    band("a", 120);
-
-    // Assert
-    expect(sidebarBottom()).toBe("120px");
-  });
-
-  it("ignores the gate band of a page that is not on screen", () => {
-    // Arrange
-    pages(host, "a", "b");
-    host.show("a");
-    band("a", 0);
-
-    // Act
-    band("b", 120);
-
-    // Assert
-    expect(sidebarBottom()).toBe("0px");
-  });
-
-  it("moves the sidebar's end to the band of the page shown next", () => {
-    // Arrange
-    pages(host, "a", "b");
-    host.show("a");
-    band("b", 90);
-
-    // Act
-    host.show("b");
-
-    // Assert
-    expect(sidebarBottom()).toBe("90px");
-  });
-
-  it("runs the sidebar to the bottom once the page on screen is removed", () => {
-    // Arrange
-    pages(host, "a");
-    host.show("a");
-    band("a", 120);
-
-    // Act
-    host.remove("a");
-
-    // Assert
-    expect(sidebarBottom()).toBe("0px");
   });
 
   it("answers text selected in the webhost itself as the selection", () => {
@@ -1696,7 +1646,7 @@ describe("a shown page re-pointed at another daemon", () => {
     host.show("a");
     host.ensure("a", "http://ws-a.localhost:2/");
     const [, fresh] = framesOf("a");
-    host.setGateDock("a", 120);
+    host.setHeldIngress("a", []);
     const posted = (() => {
       const got: HostToPage[] = [];
       const target = fresh.contentWindow;
@@ -1713,8 +1663,8 @@ describe("a shown page re-pointed at another daemon", () => {
     // Assert
     expect(posted).toContainEqual({
       channel: HOST_CHANNEL,
-      kind: "gateDock",
-      pixels: 120,
+      kind: "heldIngress",
+      entries: [],
     });
   });
 
@@ -1849,7 +1799,7 @@ describe("a page re-pointed into a fresh frame", () => {
     // Arrange
     pages(host, "a", "b");
     host.show(shown ? "a" : "b");
-    host.setGateDock("a", 120);
+    host.setHeldIngress("a", []);
     host.ensure("a", "http://ws-a.localhost:2/");
     const fresh = lastFrame("a");
     const posted = postsInto(fresh);
@@ -1862,8 +1812,8 @@ describe("a page re-pointed into a fresh frame", () => {
     // Assert
     expect(posted).toContainEqual({
       channel: HOST_CHANNEL,
-      kind: "gateDock",
-      pixels: 120,
+      kind: "heldIngress",
+      entries: [],
     });
   });
 });

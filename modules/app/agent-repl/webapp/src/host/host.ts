@@ -73,32 +73,17 @@ export interface HostEnv {
   readonly focusLeft?: FocusLeftSource;
 }
 
-/**
- * The root custom property the webhost's sidebar ends above: the gate band of
- * the page on screen, in pixels (host/protocol.ts `gateBand`).
- */
-export const SIDEBAR_BOTTOM_PROPERTY = "--webhost-sidebar-bottom";
-
-/** The slot the docked gate takes, as Emacs last told it. */
-interface GateDockState {
-  readonly pixels: number;
-}
-
 /** One workspace's page, and everything the host knows and holds for it. */
 interface Frame {
   readonly id: string;
   url: string;
   readonly iframe: HTMLIFrameElement;
-  /** Desired state Emacs gave, replayed to the page on every hello. */
-  gateDock: GateDockState | null;
   /** The editor's held-prompt ingress entries for the workspace; null until stated. */
   heldIngress: readonly HeldIngressWireEntry[] | null;
   /** Facts the page pushed, which Emacs reads back. Reset when it reloads. */
   drawn: DrawnWhat | null;
   selection: { text: string | null; focused: boolean };
   editing: boolean;
-  /** How tall the page's docked gate band is, as it last reported. */
-  gateBand: number;
   /**
    * Whether the page now in the frame has said hello, so a message posted to
    * it is heard. False from a load or navigation until its hello.
@@ -154,8 +139,14 @@ export interface Host {
    * the reload began, handed to the page it loads.
    */
   reload(id: string, reloadStartedAtMs?: number | null): string;
-  /** Tell ID's page the slot its docked gate takes: the input window's height. */
+  /**
+   * Record the slot workspace ID's gate takes: the input window's height. The
+   * webhost draws the gate (host/gate.ts), so the slot is kept whether or not
+   * ID's page is loaded, until ID's page is removed, and answers `kept`.
+   */
   setGateDock(id: string, pixels: number): string;
+  /** Tell LISTENER every slot recorded from now on; answers the stop. */
+  onGateSlot(listener: (id: string, pixels: number) => void): () => void;
   /**
    * Tell ID's page the editor's held-prompt ingress entries for its
    * workspace, the whole list. An entry that is not one (host/protocol.ts
@@ -274,6 +265,10 @@ export function createHost(env: HostEnv): Host {
   const incoming = new Map<string, { fresh: Frame; bound: number }>();
   /** Who is told every page shown (`onShown`): the webhost's sidebar. */
   const shownListeners = createListeners<[string]>();
+  /** Who is told every gate slot Emacs records (`onGateSlot`): the webhost's gate. */
+  const gateSlots = createListeners<[string, number]>();
+  /** Every gate slot Emacs recorded, by workspace id. */
+  const slots = new Map<string, number>();
   const note = (level: HostNote["level"], text: string): void => {
     notes.push({ level, text });
     if (notes.length > NOTE_LIMIT) notes = notes.slice(notes.length - NOTE_LIMIT);
@@ -314,12 +309,6 @@ export function createHost(env: HostEnv): Host {
     for (const frame of frames.values()) post(frame, message);
   };
 
-  /** End the sidebar above the gate band of the page on screen. */
-  const placeSidebar = (): void => {
-    const shown = shownId === null ? undefined : frames.get(shownId);
-    doc.documentElement.style.setProperty(SIDEBAR_BOTTOM_PROPERTY, `${shown?.gateBand ?? 0}px`);
-  };
-
   const sendState = (frame: Frame): void => {
     // A SWITCH THE PAGE MISSED WHILE IT LOADED is handed over once, here.
     const switchStartedAtMs = frame.id === shownId ? frame.pendingSwitchStartedAtMs : null;
@@ -331,13 +320,6 @@ export function createHost(env: HostEnv): Host {
     post(frame, presenceOf(frame, switchStartedAtMs, reloadStartedAtMs));
     post(frame, dockMessage());
     post(frame, failuresMessage());
-    if (frame.gateDock !== null) {
-      post(frame, {
-        channel: HOST_CHANNEL,
-        kind: "gateDock",
-        pixels: frame.gateDock.pixels,
-      });
-    }
     if (logLevel !== null && logLevel.untilMs > now()) {
       post(frame, { channel: HOST_CHANNEL, kind: "logLevel", level: logLevel.level, untilMs: logLevel.untilMs });
     }
@@ -518,7 +500,6 @@ export function createHost(env: HostEnv): Host {
     if (old !== undefined) retire(old);
     applyShown(waiting.fresh, id === shownId);
     post(waiting.fresh, presenceOf(waiting.fresh));
-    if (id === shownId) placeSidebar();
   };
 
   const take = (frame: Frame, message: PageToHost): void => {
@@ -553,10 +534,6 @@ export function createHost(env: HostEnv): Host {
         return;
       case "editing":
         frame.editing = message.editing;
-        return;
-      case "gateBand":
-        frame.gateBand = message.pixels;
-        if (frame.id === shownId) placeSidebar();
         return;
       case "bubbleOverlay":
         // The iframe rises above the sidebar while its page has a bubble open.
@@ -631,9 +608,7 @@ export function createHost(env: HostEnv): Host {
    * keeps what the page it replaces held.
    */
   const carryDesiredState = (from: Frame, to: Frame): void => {
-    to.gateDock = from.gateDock;
     to.heldIngress = from.heldIngress;
-    to.gateBand = from.gateBand;
   };
 
   /** A frame for ID at URL, in the page and laid out SHOWN or hidden, not yet loading. */
@@ -649,12 +624,10 @@ export function createHost(env: HostEnv): Host {
       id,
       url,
       iframe,
-      gateDock: null,
       heldIngress: null,
       drawn: null,
       selection: { text: "", focused: false },
       editing: false,
-      gateBand: 0,
       attached: false,
       pendingSwitchStartedAtMs: null,
       pendingReloadStartedAtMs: null,
@@ -760,7 +733,6 @@ export function createHost(env: HostEnv): Host {
         next.pendingSwitchStartedAtMs = switchStartedAtMs;
         post(next, presenceOf(next));
       }
-      placeSidebar();
       // THE SIDEBAR'S HIGHLIGHT MOVES WITH THE PAGE, in the same turn.
       shownListeners.notify(id);
       // The keyboard follows the page on screen: Emacs focused this web view,
@@ -776,10 +748,7 @@ export function createHost(env: HostEnv): Host {
         dropIncoming(id);
         frames.delete(id);
         retire(frame);
-        if (shownId === id) {
-          shownId = null;
-          placeSidebar();
-        }
+        if (shownId === id) shownId = null;
         return "removed";
       });
     },
@@ -802,11 +771,15 @@ export function createHost(env: HostEnv): Host {
       });
     },
     setGateDock(id, pixels) {
-      return withFrame("setGateDock", id, (frame) => {
-        frame.gateDock = { pixels };
-        post(frame, { channel: HOST_CHANNEL, kind: "gateDock", pixels });
-        return "sent";
-      });
+      slots.set(id, pixels);
+      gateSlots.notify(id, pixels);
+      return answer("setGateDock", id, "kept");
+    },
+    onGateSlot(listener) {
+      // Emacs's calls run before the webhost's gate starts (main.ts runs the
+      // queued calls first), so a new listener is handed every slot kept.
+      for (const [id, pixels] of slots) listener(id, pixels);
+      return gateSlots.add(listener);
     },
     setHeldIngress(id, entries) {
       return withFrame("setHeldIngress", id, (frame) => {

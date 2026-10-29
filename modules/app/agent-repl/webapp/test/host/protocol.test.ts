@@ -13,7 +13,6 @@ describe("parseHostToPage", () => {
       "presence a reload loaded and a switch showed",
       { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: 1_700_000_000_123, reloadStartedAtMs: 1_700_000_000_100 },
     ],
-    ["gateDock", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120 }],
     ["dismissDigest", { channel: HOST_CHANNEL, kind: "dismissDigest" }],
     ["focusMoved", { channel: HOST_CHANNEL, kind: "focusMoved" }],
     ["restyleGranted", { channel: HOST_CHANNEL, kind: "restyleGranted" }],
@@ -57,7 +56,7 @@ describe("parseHostToPage", () => {
     ["presence with a reload start that is not a number", { channel: HOST_CHANNEL, kind: "presence", shown: true, reloadStartedAtMs: "then" }],
     ["presence with a non-finite reload start", { channel: HOST_CHANNEL, kind: "presence", shown: true, reloadStartedAtMs: Infinity }],
     ["an inputBackground, which no host tells any more", { channel: HOST_CHANNEL, kind: "inputBackground", background: "#123456" }],
-    ["a gateDock with a non-finite height", { channel: HOST_CHANNEL, kind: "gateDock", pixels: Infinity }],
+    ["a gateDock, which no host tells any more", { channel: HOST_CHANNEL, kind: "gateDock", pixels: 120 }],
     ["a sidebarDock without a boolean", { channel: HOST_CHANNEL, kind: "sidebarDock", docked: 1 }],
     ["a logLevel naming no level", { channel: HOST_CHANNEL, kind: "logLevel", level: "trace", untilMs: 1 }],
     ["a logLevel window with no end", { channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: null }],
@@ -93,12 +92,10 @@ describe("parsePageToHost", () => {
     ["selection", { channel: HOST_CHANNEL, kind: "selection", text: "abc", focused: true }],
     ["selection with no selection object", { channel: HOST_CHANNEL, kind: "selection", text: null, focused: false }],
     ["editing", { channel: HOST_CHANNEL, kind: "editing", editing: true }],
-    ["gateBand", { channel: HOST_CHANNEL, kind: "gateBand", pixels: 120 }],
     ["restyleTurn", { channel: HOST_CHANNEL, kind: "restyleTurn" }],
     ["restyled", { channel: HOST_CHANNEL, kind: "restyled" }],
     ["bubbleOverlay open", { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: true }],
     ["bubbleOverlay closed", { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: false }],
-    ["gateBand with no band", { channel: HOST_CHANNEL, kind: "gateBand", pixels: 0 }],
   ])("reads a %s message", (_name, data) => {
     // Arrange / Act
     const message = parsePageToHost(data);
@@ -114,8 +111,7 @@ describe("parsePageToHost", () => {
     ["a selection without focus", { channel: HOST_CHANNEL, kind: "selection", text: "abc" }],
     ["an editing without a boolean", { channel: HOST_CHANNEL, kind: "editing", editing: 1 }],
     ["a bubbleOverlay with no flag", { channel: HOST_CHANNEL, kind: "bubbleOverlay", open: "yes" }],
-    ["a gateBand below zero", { channel: HOST_CHANNEL, kind: "gateBand", pixels: -1 }],
-    ["a gateBand that is not finite", { channel: HOST_CHANNEL, kind: "gateBand", pixels: NaN }],
+    ["a gateBand, which no page reports any more", { channel: HOST_CHANNEL, kind: "gateBand", pixels: 120 }],
   ])("refuses %s", (_name, data) => {
     // Arrange / Act
     const message = parsePageToHost(data);

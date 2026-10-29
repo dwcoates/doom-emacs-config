@@ -177,6 +177,8 @@ export function mountWebhostSidebar(
 export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallPhase" | "frame"> & {
   /** Told once, when the first push reveals the sidebar. */
   revealed?: () => void;
+  /** Told the roster's shown cold gates on every roster drawn (host/gate.ts). */
+  coldGates?: (gates: WorkspaceRoster["coldGates"]) => void;
 };
 
 /** Where a sidebar is drawn, and what that placement needs. */
@@ -404,6 +406,7 @@ function mountSidebarIn(
       guardMalformedNow(ctx, "sidebar.roster-draw", () =>
         timeRosterDraw(body, placement.case, (mark) => drawRosterNow(newest, mark), drawTiming),
       );
+      guardMalformedNow(ctx, "sidebar.cold-gates", () => deps.coldGates?.(newest.coldGates));
     });
   }
 

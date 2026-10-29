@@ -20,6 +20,12 @@
 import { log } from "../log.js";
 import { installCardDock, type CardDock } from "./card-dock.js";
 
+/**
+ * The class a page's root wears while the webhost draws its gate
+ * (host/gate.ts): the page draws no standing gate, in its feed or its dock.
+ */
+export const WEBHOST_GATE_CLASS = "webhost-gate";
+
 /** The class the docked card wears. */
 export const DOCKED_CARD_CLASS = "cold-gate-docked";
 /** The class the docked card's (hidden) home row wears. */
@@ -73,4 +79,21 @@ export function installGateDock(feed: HTMLElement, dock: HTMLElement): GateDock 
     rowClass: DOCKED_ROW_CLASS,
     docked: recordDocked,
   });
+}
+
+/**
+ * The page's part in drawing its gate. A page IN THE WEBHOST (EMBEDDED) draws
+ * no standing gate: the webhost draws it (host/gate.ts), and the page's root
+ * wears `WEBHOST_GATE_CLASS`, which hides the standing row. A page on its own
+ * docks its gate in DOCK. Answers the dock installed, or null in the webhost.
+ */
+export function installPageGate(doc: Document, embedded: boolean, feed: HTMLElement, dock: HTMLElement): GateDock | null {
+  if (embedded) {
+    doc.documentElement.classList.add(WEBHOST_GATE_CLASS);
+    log.info("the page is in the webhost, which draws its gate; the page draws no standing gate", {
+      operation: "feed.gate-dock.webhost",
+    });
+    return null;
+  }
+  return installGateDock(feed, dock);
 }

@@ -106,6 +106,9 @@ import { buildAnswerColdGateRequest, type ColdGateChoice } from "./requests.js";
 
 const PATH = "FeedColdGate";
 
+/** The event a card raises, bubbling, the moment the user answers its gate. */
+export const GATE_ANSWERING_EVENT = "agent-repl:cold-gate-answering";
+
 /**
  * EVERY STRING THIS CARD SAYS, in one place.
  *
@@ -647,6 +650,9 @@ async function answer(
   // ANSWERING THE GATE CLOSES A STANDING NEWS DIGEST, as sending a prompt does
   // (owner, 2026-10-06): the user has moved on to the conversation.
   closeStandingNewsDigest(actions.ownerDocument);
+  // A GATE THE WEBHOST DRAWS is in another document than its page's digest:
+  // the webhost hears this and closes the shown page's (host/gate.ts).
+  actions.dispatchEvent(new CustomEvent(GATE_ANSWERING_EVENT, { bubbles: true }));
   log.info(`answering a cold gate with ${choice.kind}`, {
     operation: "feed.asks.cold-gate.answer",
     context: {

@@ -30,6 +30,8 @@ function recordingHost() {
     docked: [] as boolean[],
     failures: [] as Array<readonly WebhostFailure[]>,
     shown: null as ((id: string) => void) | null,
+    slots: null as ((id: string, pixels: number) => void) | null,
+    dismissed: [] as string[],
   };
   const host = {
     setSidebarDocked: (docked: boolean) => told.docked.push(docked),
@@ -39,6 +41,16 @@ function recordingHost() {
       return () => {
         told.shown = null;
       };
+    },
+    onGateSlot: (listener: (id: string, pixels: number) => void) => {
+      told.slots = listener;
+      return () => {
+        told.slots = null;
+      };
+    },
+    dismissDigest: (id: string) => {
+      told.dismissed.push(id);
+      return "";
     },
   } as unknown as Host;
   return { host, told };
@@ -56,6 +68,123 @@ function start(host: Host, deps: WebhostSidebarStartDeps) {
   });
   return logged;
 }
+
+/** A webhost gate that records what it is told. */
+function recordingGate() {
+  const told = {
+    gates: [] as string[][],
+    shown: [] as Array<string | null>,
+    slots: [] as Array<[string, number]>,
+    disposed: false,
+    dismiss: null as ((id: string) => void) | null,
+  };
+  const createGate: WebhostSidebarStartDeps["createGate"] = (env) => {
+    told.dismiss = env.dismissDigest;
+    return {
+      setGates: (gates) => void told.gates.push(gates.map((g) => g.workspace?.id ?? "")),
+      setShown: (id) => void told.shown.push(id),
+      setSlot: (id, pixels) => void told.slots.push([id, pixels]),
+      dispose: () => {
+        told.disposed = true;
+      },
+    };
+  };
+  return { createGate, told };
+}
+
+describe("the webhost's gate", () => {
+  it("is told the roster's cold gates on every roster drawn", () => {
+    // Arrange
+    const { host } = recordingHost();
+    const { createGate, told } = recordingGate();
+    let coldGates: ((gates: []) => void) | undefined;
+
+    // Act
+    start(host, {
+      gate: document.createElement("div"),
+      createGate,
+      mount: (_nav, _ctx, deps) => {
+        coldGates = deps?.coldGates;
+        return { dispose: () => undefined, markShown: () => undefined };
+      },
+    });
+    coldGates?.([]);
+
+    // Assert
+    expect(told.gates).toEqual([[]]);
+  });
+
+  it("is told every page the webhost shows", () => {
+    // Arrange
+    const { host, told: hostTold } = recordingHost();
+    const { createGate, told } = recordingGate();
+    start(host, { gate: document.createElement("div"), createGate, mount: () => ({ dispose: () => undefined, markShown: () => undefined }) });
+
+    // Act
+    hostTold.shown?.("ws-b");
+
+    // Assert
+    expect(told.shown).toEqual(["ws-b"]);
+  });
+
+  it("is told every slot Emacs records", () => {
+    // Arrange
+    const { host, told: hostTold } = recordingHost();
+    const { createGate, told } = recordingGate();
+    start(host, { gate: document.createElement("div"), createGate, mount: () => ({ dispose: () => undefined, markShown: () => undefined }) });
+
+    // Act
+    hostTold.slots?.("ws-b", 132);
+
+    // Assert
+    expect(told.slots).toEqual([["ws-b", 132]]);
+  });
+
+  it("closes the shown page's news digest through the webhost", () => {
+    // Arrange
+    const { host, told: hostTold } = recordingHost();
+    const { createGate, told } = recordingGate();
+    start(host, { gate: document.createElement("div"), createGate, mount: () => ({ dispose: () => undefined, markShown: () => undefined }) });
+
+    // Act
+    told.dismiss?.("ws-b");
+
+    // Assert
+    expect(hostTold.dismissed).toEqual(["ws-b"]);
+  });
+
+  it("is disposed, and stops hearing slots, when the sidebar stops", () => {
+    // Arrange
+    const { host, told: hostTold } = recordingHost();
+    const { createGate, told } = recordingGate();
+    start(host, { gate: document.createElement("div"), createGate, mount: () => ({ dispose: () => undefined, markShown: () => undefined }) });
+
+    // Act
+    stop?.dispose();
+    stop = null;
+
+    // Assert
+    expect([told.disposed, hostTold.slots]).toEqual([true, null]);
+  });
+
+  it("is not created without an element to draw in", () => {
+    // Arrange
+    const { host } = recordingHost();
+    let created = false;
+
+    // Act
+    start(host, {
+      createGate: () => {
+        created = true;
+        throw new Error("no gate was wanted");
+      },
+      mount: () => ({ dispose: () => undefined, markShown: () => undefined }),
+    });
+
+    // Assert
+    expect(created).toBe(false);
+  });
+});
 
 describe("startWebhostSidebar", () => {
   it("files its records as the webhost's", async () => {
