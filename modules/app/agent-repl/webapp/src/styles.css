@@ -2943,7 +2943,7 @@ html[data-page-unshown] {
   border-radius: 4px;
   background: none;
   color: var(--muted);
-  opacity: 0.7;
+  opacity: var(--copy-control-rest, 0.7);
   cursor: pointer;
 }
 .copy-control:hover { opacity: 1; background: color-mix(in srgb, var(--fg) 8%, transparent); }
@@ -3018,6 +3018,12 @@ html[data-page-unshown] {
 }
 /* A prompt's control is in the prompt's own text color. */
 .bubble[data-role="prompt"] .bubble-copy { color: inherit; }
+/* THE RESTING COPY ICON IS DIMMER (owner request, 2026-10-29): a prompt's, in
+   the prompt's own ink, read almost as prompt text at 0.7, so it rests far
+   dimmer; a response's rests only slightly dimmer. Hover and the copied mark
+   still go to full opacity. */
+.bubble[data-role="prompt"] .bubble-copy { --copy-control-rest: 0.3; }
+.bubble[data-role="response"] .bubble-copy { --copy-control-rest: 0.6; }
 /* The reservation is half a line tall: any height inside the first line
    narrows that line alone, so the second line can never be narrowed too. */
 .bubble > :has(> .bubble-copy)::before {
