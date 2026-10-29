@@ -95,6 +95,10 @@ type DB interface {
 	// SetLastKeepalive records when a workspace's keep-alive was sent: the
 	// beat's half of the cache clock (wsm.Workspace.CacheClock).
 	SetLastKeepalive(ctx context.Context, id wsm.WorkspaceID, at time.Time) error
+	// MarkCacheCold records a workspace's cache as cold at its turn clock
+	// (wsm.Workspace.CacheKnownCold): no beat is owed until a turn closes
+	// after it.
+	MarkCacheCold(ctx context.Context, id wsm.WorkspaceID) (*time.Time, error)
 	// Session reads a workspace's session record: its engagement clock and
 	// its park.
 	Session(ctx context.Context, id wsm.WorkspaceID) (wsm.Session, bool, error)
@@ -203,9 +207,6 @@ type Keeper struct {
 	// restoring the ones in flight; both owned by Run alone.
 	queued    []queuedRestore
 	restoring map[ids.WorkspaceID]bool
-	// lapsedAt is the cache clock at which the shim answered that the cache
-	// had lapsed: no beat goes out again until a turn moves the clock past it.
-	lapsedAt map[ids.WorkspaceID]time.Time
 	// sent is when this Keeper last sent each workspace's keep-alive: the
 	// record's own copy (wsm.Workspace.LastKeepaliveAt) held in memory too,
 	// so a write that failed cannot time the next beat from before it.
@@ -248,7 +249,6 @@ func New(deps Deps) (*Keeper, error) {
 		beats:     map[ids.WorkspaceID]time.Time{},
 		restores:  map[ids.WorkspaceID]time.Time{},
 		restoring: map[ids.WorkspaceID]bool{},
-		lapsedAt:  map[ids.WorkspaceID]time.Time{},
 		sent:      map[ids.WorkspaceID]time.Time{},
 		freeSince: map[ids.WorkspaceID]time.Time{},
 	}, nil
@@ -289,16 +289,22 @@ func (k *Keeper) ClosureChanged(ws ids.WorkspaceID) {
 	k.enqueue(edge{ws: ws, why: "the workspace was closed or reopened"})
 }
 
-// ColdGateRaised is WS's session parking at its cold gate: a hidden or closed
-// workspace takes the gate's lapse. JUDGED is a gate a shim judged just now,
-// the one raise the telemetry counts; a raise from the record, a re-raise
-// after a failed answer and a carried gate are the same gate. It never
-// blocks.
+// ColdGateRaised is WS's session parking at its cold gate: its cache is
+// marked cold (markCold), and a hidden or closed workspace takes the gate's
+// lapse. JUDGED is a gate a shim judged just now, the one raise the telemetry
+// counts; a raise from the record, a re-raise after a failed answer and a
+// carried gate are the same gate.
+//
+// THE MARK IS WRITTEN BEFORE IT RETURNS, not on the loop: no session runs at a
+// gate, so no turn can close between the raise and the mark, and none is
+// marked cold with it. A mark that cannot be written is recorded at ERROR by
+// markCold; the answer marks the cache again, and refuses if it cannot.
 func (k *Keeper) ColdGateRaised(ws ids.WorkspaceID, judged bool) {
 	if cold, gated := k.deps.ColdGate(ws); gated && judged {
 		idle := k.deps.Clock.Now().Sub(time.UnixMilli(cold.GetLastRequestAtMs()))
 		k.deps.Telemetry.ObserveColdGate(ws, coldGateOutcome(cold), idle)
 	}
+	_ = k.markCold(context.Background(), ws, "the session parked at its cold gate")
 	k.enqueue(edge{ws: ws, why: "the session parked at its cold gate"})
 }
 
@@ -525,7 +531,6 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.deadlines, ws)
 	delete(k.beats, ws)
 	delete(k.restores, ws)
-	delete(k.lapsedAt, ws)
 	delete(k.sent, ws)
 	delete(k.freeSince, ws)
 }

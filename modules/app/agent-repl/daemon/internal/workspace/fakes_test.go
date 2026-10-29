@@ -2953,6 +2953,10 @@ type fixture struct {
 	// visibilityEdges is every workspace whose hide or show the cache keeper
 	// was told of.
 	visibilityEdges []ids.WorkspaceID
+	// coldMarks is every workspace whose answered cold gate the cache keeper
+	// was told of (CacheLapses.ColdGateAnswered); coldMarkErr fails it.
+	coldMarks   []ids.WorkspaceID
+	coldMarkErr error
 	// summaries is the summary restorer registration asks.
 	summaries *fakeSummaries
 	// topbarParked is every park state the topbar seam was handed, in order.
@@ -3093,9 +3097,13 @@ func newFixture(t *testing.T) *fixture {
 		StandDowns: standDownsFunc(func(ws ids.WorkspaceID) {
 			f.standDowns = append(f.standDowns, ws)
 		}),
-		CacheLapses: visibilityFunc(func(ws ids.WorkspaceID) {
-			f.visibilityEdges = append(f.visibilityEdges, ws)
-		}),
+		CacheLapses: &fakeCacheLapses{
+			visibility: func(ws ids.WorkspaceID) { f.visibilityEdges = append(f.visibilityEdges, ws) },
+			answered: func(ws ids.WorkspaceID) error {
+				f.coldMarks = append(f.coldMarks, ws)
+				return f.coldMarkErr
+			},
+		},
 		Cards:     f.cards,
 		Summaries: f.summaries,
 		ReadEffortSettings: func(configDir string) (claudesettings.Effort, error) {
@@ -3580,7 +3588,6 @@ type standDownsFunc func(ws ids.WorkspaceID)
 
 func (f standDownsFunc) StandDownWithheld(ws ids.WorkspaceID) { f(ws) }
 
-// visibilityFunc adapts a function to CacheLapses.
 // fakeSummaries records every workspace whose summary was restored, and
 // answers err.
 type fakeSummaries struct {
@@ -3593,9 +3600,17 @@ func (s *fakeSummaries) Restore(_ context.Context, ws ids.WorkspaceID) error {
 	return s.err
 }
 
-type visibilityFunc func(ws ids.WorkspaceID)
+// fakeCacheLapses adapts two functions to CacheLapses.
+type fakeCacheLapses struct {
+	visibility func(ws ids.WorkspaceID)
+	answered   func(ws ids.WorkspaceID) error
+}
 
-func (f visibilityFunc) VisibilityChanged(ws ids.WorkspaceID) { f(ws) }
+func (f *fakeCacheLapses) VisibilityChanged(ws ids.WorkspaceID) { f.visibility(ws) }
+
+func (f *fakeCacheLapses) ColdGateAnswered(_ context.Context, ws ids.WorkspaceID) error {
+	return f.answered(ws)
+}
 
 // RequireOpenParent answers openParentErr, recording the parent asked about.
 func (f *fakeDB) RequireOpenParent(_ context.Context, parent ids.WorkspaceID) error {

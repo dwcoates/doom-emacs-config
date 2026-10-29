@@ -42,6 +42,27 @@ type fakeDB struct {
 	// sessions are the session records by workspace; sessionErr fails the read.
 	sessions   map[ids.WorkspaceID]wsm.Session
 	sessionErr error
+	// coldErr fails MarkCacheCold; coldMarks counts every mark written.
+	coldErr   error
+	coldMarks int
+}
+
+// MarkCacheCold marks the record cold at its last turn end, as the store's
+// one statement does.
+func (f *fakeDB) MarkCacheCold(_ context.Context, id wsm.WorkspaceID) (*time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.coldErr != nil {
+		return nil, f.coldErr
+	}
+	rec, ok := f.records[id]
+	if !ok {
+		return nil, wsm.ErrNotFound
+	}
+	f.coldMarks++
+	rec.CacheColdTurnAt = rec.LastTurnEndedAt
+	f.records[id] = rec
+	return rec.CacheColdTurnAt, nil
 }
 
 func (f *fakeDB) Session(_ context.Context, id wsm.WorkspaceID) (wsm.Session, bool, error) {

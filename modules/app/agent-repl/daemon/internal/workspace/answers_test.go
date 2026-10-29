@@ -1367,3 +1367,66 @@ func TestAnswerColdGateWhoseShowFailsIsRefusedAndStandsTheGateAgain(t *testing.T
 		t.Fatalf("records = %+v, want the refused answer recorded with its cause", f.log.logger.Records())
 	}
 }
+
+// Passing the cold gate by any answer makes no LLM request of its own (owner
+// ruling, 2026-10-29): the cache is marked cold before the held prompts are
+// settled, so the session the answer brings up owes no keep-alive at once.
+func TestAnswerColdGateMarksTheCacheColdBeforeSettlingThePrompts(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer *agentreplv1.AnswerColdGateRequest
+	}{
+		{name: "pay", answer: payAnswer()},
+		{name: "clear", answer: clearAnswer()},
+		{name: "compact", answer: compactAnswer()},
+		{name: "compact and resume", answer: compactAndResumeAnswer()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			standingGate(f)
+			marksAtFate := -1
+			f.queue.onGateFate = func() { marksAtFate = len(f.coldMarks) }
+
+			// Act.
+			err := f.verbs.AnswerColdGate(context.Background(), "w1", tt.answer)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("AnswerColdGate: %v", err)
+			}
+			if !slices.Equal(f.coldMarks, []ids.WorkspaceID{"w1"}) || marksAtFate != 1 {
+				t.Fatalf("cold marks = %v (%d when the fate was settled), want w1 marked first", f.coldMarks, marksAtFate)
+			}
+		})
+	}
+}
+
+func TestAnswerColdGateWhoseColdMarkFailsIsRefusedAndStandsTheGateAgain(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.coldMarkErr = errors.New("store unreachable")
+
+	// Act.
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", clearAnswer())
+
+	// Assert.
+	if !errors.Is(err, f.coldMarkErr) {
+		t.Fatalf("AnswerColdGate = %v, want the mark's failure", err)
+	}
+	if len(f.fleet.resumes) != 0 || len(f.queue.gateFates) != 0 || len(f.feed.retired) != 0 {
+		t.Fatalf("resumes %d, fates %v, retired %v; want nothing settled or re-opened", len(f.fleet.resumes), f.queue.gateFates, f.feed.retired)
+	}
+	if len(f.cards.reraised) != 1 || f.cards.reraised[0] != "vendor-1" {
+		t.Fatalf("reraised = %v, want vendor-1's gate stood again", f.cards.reraised)
+	}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{
+		Level: "info", Operation: opColdGate, Message: "the cache could not be marked cold; the answer is refused"})
+	if !ok || r.Context["cause"] != "store unreachable" || r.Context["choice"] != footer.ChoiceClear || r.Context["gate_stands_again"] != true {
+		t.Fatalf("records = %+v, want the refused answer recorded with its cause", f.log.logger.Records())
+	}
+}

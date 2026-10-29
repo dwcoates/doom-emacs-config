@@ -81,6 +81,11 @@ type Workspace struct {
 	// (lastkeepalive.go); nil when it never has. CacheClock combines it with
 	// LastTurnEndedAt.
 	LastKeepaliveAt *time.Time
+	// CacheColdTurnAt is the turn clock (LastTurnEndedAt) at which the
+	// workspace's prompt cache was last known cold (cachecold.go): its cold
+	// gate was raised or answered, or its shim judged the cache lapsed. Nil
+	// when it never was. CacheKnownCold combines it with LastTurnEndedAt.
+	CacheColdTurnAt *time.Time
 	// Awaiting is the workspace this one awaits correspondence from
 	// (standings.go), nil while it awaits none.
 	Awaiting *WorkspaceID

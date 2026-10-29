@@ -805,9 +805,12 @@ type Network interface {
 }
 
 // CacheLapses is the hidden workspaces' cache keeper (cachelapse.Keeper),
-// told of every hide and show once it is recorded.
+// told of every hide and show once it is recorded, and of every cold gate
+// answered before its re-open starts, so the session the answer brings up
+// owes no keep-alive until its next turn ends.
 type CacheLapses interface {
 	VisibilityChanged(ws ids.WorkspaceID)
+	ColdGateAnswered(ctx context.Context, ws ids.WorkspaceID) error
 }
 
 // Summaries restores a workspace's persisted summary (titlesynth.Synthesizer):

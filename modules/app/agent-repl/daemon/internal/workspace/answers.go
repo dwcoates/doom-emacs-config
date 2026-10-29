@@ -199,6 +199,9 @@ func validateQuestionEcho(log dlog.Logger, batch *conversationv1.AgentQuestionBa
 // prompt the answer kept or discarded. A queue that cannot settle them
 // refuses the answer, and the gate stands again.
 //
+// AN ANSWERED GATE MARKS ITS CACHE COLD first (cachelapse.Keeper.ColdGateAnswered),
+// so the re-opened session owes no keep-alive until its next turn ends.
+//
 // AN ANSWERED GATE SHOWS ITS WORKSPACE (owner ruling, 2026-10-17). A hidden
 // workspace's answer moves it out of the hidden section before the re-open
 // starts, so the session the answer brings up is one the daemon runs and
@@ -227,6 +230,16 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	if !v.deps.Cards.TakeColdGate(ws, served.VendorSessionID) {
 		return refuse(log, "AnswerColdGate", ArmNoColdGate,
 			fmt.Sprintf("the cold gate on workspace %q was already answered", ws), false)
+	}
+	// THE CACHE IS MARKED COLD BEFORE ANYTHING THE ANSWER CANNOT UNDO (owner
+	// ruling, 2026-10-29: passing the gate by any answer makes no LLM request
+	// of its own). Unmarked, the re-open's session would owe a keep-alive at
+	// once, timed from the turn before the gate, so a mark that cannot be
+	// written refuses the answer while its held prompts are still unsettled.
+	if err := v.deps.CacheLapses.ColdGateAnswered(ctx, ws); err != nil {
+		// The keeper recorded the failure at ERROR as its owner.
+		v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, "the cache could not be marked cold", err)
+		return fmt.Errorf("mark the cache of the workspace whose cold gate was answered, %q, cold: %w", ws, err)
 	}
 	if record.InHiddenSection() {
 		if err := v.recordHidden(ctx, log, ws, false); err != nil {
