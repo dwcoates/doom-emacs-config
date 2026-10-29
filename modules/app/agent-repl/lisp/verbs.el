@@ -2461,11 +2461,11 @@ says where the create stopped, and the caller still sees it stop."
                        command read (car err) (error-message-string err))
      (signal (car err) (cdr err)))))
 
-(defconst agent-repl-verbs--name-question "Workspace name (slug, no prompt): "
-  "The question a static create or a named fork reads its REQUIRED name with.
-It says what it wants because a prompt typed here is no name: the daemon
-refuses it, and the question is the one place to say so before the user
-types.")
+(defconst agent-repl-verbs--name-question "Workspace name (%s) (slug, no prompt): "
+  "The format of the question a static create or a named fork reads its REQUIRED name with.
+Its argument is the repository the workspace lands in.  It says what it
+wants because a prompt typed here is no name: the daemon refuses it, and
+the question is the one place to say so before the user types.")
 
 (defvar-local agent-repl-verbs--name-blank-refusal nil
   "The sentence the name minibuffer refuses a blank name with.")
@@ -2528,8 +2528,8 @@ the minibuffer closed lost whatever was typed."
         (minibuffer-message "agent-repl: %s" refusal)
       (exit-minibuffer))))
 
-(defun agent-repl-verbs--read-name (refusal)
-  "Read a REQUIRED workspace name, refusing a blank one with REFUSAL.
+(defun agent-repl-verbs--read-name (repository refusal)
+  "Read a REQUIRED name for a workspace in REPOSITORY, refusing a blank one with REFUSAL.
 The daemon judges the name before the minibuffer closes
 \(`agent-repl-verbs-name-minibuffer-exit\=')."
   (let ((name (string-trim
@@ -2538,7 +2538,8 @@ The daemon judges the name before the minibuffer closes
                      (setq-local agent-repl-verbs--name-blank-refusal refusal)
                      (use-local-map (make-composed-keymap agent-repl-verbs--name-exit-map
                                                           (current-local-map))))
-                 (read-string agent-repl-verbs--name-question)))))
+                 (read-string (format agent-repl-verbs--name-question
+                                      (agent-repl-verbs--repository-name repository)))))))
     (when (string-empty-p name)
       (user-error "agent-repl: %s" refusal))
     name))
@@ -2570,11 +2571,13 @@ recorded before the abandonment propagates."
          (name (when static
                  (agent-repl-verbs--read-for
                   command 'name
-                  (lambda () (agent-repl-verbs--read-name "a static workspace IS its name")))))
+                  (lambda () (agent-repl-verbs--read-name repository "a static workspace IS its name")))))
          (prompt (unless static
                    (agent-repl-verbs--read-for
                     command 'prompt
-                    (lambda () (agent-repl-verbs--read-prompt "Initial prompt: "))))))
+                    (lambda () (agent-repl-verbs--read-prompt
+                                    (format "Initial prompt (%s): "
+                                            (agent-repl-verbs--repository-name repository))))))))
     (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-standard mode=%s" mode)
     (apply #'agent-repl-verb-create
            repository :standard
@@ -2672,11 +2675,13 @@ recorded before the abandonment propagates."
          (name (when static
                  (agent-repl-verbs--read-for
                   command 'name
-                  (lambda () (agent-repl-verbs--read-name "a named fork IS its name")))))
+                  (lambda () (agent-repl-verbs--read-name repository "a named fork IS its name")))))
          (prompt (unless static
                    (agent-repl-verbs--read-for
                     command 'prompt
-                    (lambda () (agent-repl-verbs--read-prompt "Initial prompt: ")))))
+                    (lambda () (agent-repl-verbs--read-prompt
+                                    (format "Initial prompt (%s): "
+                                            (agent-repl-verbs--repository-name repository)))))))
          (source (agent-repl-verbs--ref (agent-repl--ws-current-name))))
     (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-fork mode=%s into-primary=%s"
                       mode (and into-primary t))
