@@ -215,6 +215,11 @@ type Keeper struct {
 	// detached work), as this Keeper saw it. A beat stands a session down
 	// only once it has been free StandDownGrace (owner ruling, 2026-10-26).
 	freeSince map[ids.WorkspaceID]time.Time
+	// answering is each workspace whose stand-down awaits its keep-alive's
+	// answer, with when that keep-alive was sent, and answerBy when the
+	// stand-down is taken without one (answer.go); both owned by Run alone.
+	answering map[ids.WorkspaceID]time.Time
+	answerBy  map[ids.WorkspaceID]time.Time
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -251,6 +256,8 @@ func New(deps Deps) (*Keeper, error) {
 		restoring: map[ids.WorkspaceID]bool{},
 		sent:      map[ids.WorkspaceID]time.Time{},
 		freeSince: map[ids.WorkspaceID]time.Time{},
+		answering: map[ids.WorkspaceID]time.Time{},
+		answerBy:  map[ids.WorkspaceID]time.Time{},
 	}, nil
 }
 
@@ -357,6 +364,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.lapseDue(ctx)
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
+			k.answersDue()
 			continue
 		}
 		var due <-chan time.Time
@@ -374,6 +382,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.lapseDue(ctx)
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
+			k.answersDue()
 		}
 	}
 }
@@ -410,11 +419,12 @@ func (k *Keeper) take() []edge {
 	return queued
 }
 
-// earliest answers the first armed deadline: a lapse, a beat or a restore.
+// earliest answers the first armed deadline: a lapse, a beat, a restore or an
+// awaited keep-alive answer's bound.
 func (k *Keeper) earliest() (time.Time, bool) {
 	var next time.Time
 	armed := false
-	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.beats, k.restores} {
+	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.beats, k.restores, k.answerBy} {
 		for _, at := range set {
 			if !armed || at.Before(next) {
 				next, armed = at, true
@@ -427,6 +437,7 @@ func (k *Keeper) earliest() (time.Time, bool) {
 func (k *Keeper) apply(ctx context.Context, e edge) {
 	switch e.kind {
 	case edgeLapse:
+		k.answered(e.ws, e.lapse)
 		k.record(ctx, e.ws, e.lapse)
 	case edgeFree:
 		if e.workEnded {

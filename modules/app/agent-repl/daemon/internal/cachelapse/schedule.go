@@ -240,7 +240,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 	switch {
 	case answer.GetSent() != nil:
 		observe(BeatOutcomeSent)
-		log.Info(opDrive, "sent the workspace's keep-alive; its session is stood down until the next one once it is free", fields)
+		log.Info(opDrive, "sent the workspace's keep-alive", fields)
 		// THE BEAT MOVES THE CACHE CLOCK, and it is recorded before the
 		// stand-down, whose edges re-time the next beat from that clock.
 		k.sent[ws] = now
@@ -257,7 +257,9 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 			log.Info(opDrive, "the session fell free less than an interval ago; the shim stays up until the next keep-alive",
 				dlog.Merge(fields, dlog.Context{"free_since": free}))
 		} else {
-			k.deps.CycleDown(ws, now)
+			// NEVER UNDER ITS OWN KEEP-ALIVE (answer.go): the stand-down waits
+			// for the vendor's answer.
+			k.awaitAnswer(log, ws, now, fields)
 		}
 		k.beats[ws] = now.Add(k.deps.Interval)
 	case answer.GetSkipped().GetMainAgentBusy() != nil:
