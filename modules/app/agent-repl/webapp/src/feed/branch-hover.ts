@@ -31,7 +31,7 @@ import { log } from "../log.js";
 import { selectionTouches } from "../selection.js";
 import { branchLineAt, governedRowAt, isResponseRow } from "./bubble-selection.js";
 import { TREE_CLASS, TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
-import { answeredNodeAt } from "./entries.js";
+import { LABEL_LINK_CLASS, answeredNodeAt } from "./entries.js";
 import { feedRowId } from "./row-id.js";
 import {
   boxSubtree,
@@ -90,6 +90,9 @@ export function citationAt(row: HTMLElement, target: Element): string | null {
   return label;
 }
 
+/** What a click follows instead of answering a branch: a web link, or a label linked to the prompt that answered it. */
+const LINK_SELECTOR = `a, .${LABEL_LINK_CLASS}`;
+
 /** One box the pointer stands: the row it is drawn in, the node it boxes, and how. */
 interface Hovered {
   readonly row: HTMLElement;
@@ -131,6 +134,10 @@ function boxUnder(
       record: "boxed the response branch the prompt entry under the pointer answers",
     };
   }
+  // A LINK IS NOT A BRANCH (owner request, 2026-10-29): a click on a web link
+  // or a linked label follows it rather than answering the node, so no box
+  // is drawn over the branch the link sits in.
+  if (target.closest(LINK_SELECTOR) !== null) return null;
   const line = branchLineAt(row, target);
   if (line === null) return null;
   const label = nodeBoxedAt(boxesOf(line), xInLine(line, clientX));

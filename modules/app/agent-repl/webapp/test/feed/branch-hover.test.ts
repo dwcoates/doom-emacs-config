@@ -158,6 +158,49 @@ describe("the area that boxes a branch is the box it draws (owner request, 2026-
   });
 });
 
+describe("a link takes no branch box (owner request, 2026-10-29)", () => {
+  it("boxes nothing while the pointer is on a web link in a branch's words", () => {
+    // Arrange
+    const row = response();
+    const anchor = document.createElement("a");
+    anchor.href = "https://example.com";
+    anchor.textContent = "docs";
+    words(row, "1.1").append(anchor);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    // Act
+    over(anchor, insideBoxX(words(row, "1.1")));
+    // Assert
+    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+  });
+
+  it("takes down the box the pointer had on the branch when it moves onto a link in it", () => {
+    // Arrange
+    const row = response();
+    const anchor = document.createElement("a");
+    anchor.textContent = "docs";
+    words(row, "1.1").append(anchor);
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    over(words(row, "1.1"));
+    // Act
+    over(anchor, insideBoxX(words(row, "1.1")));
+    // Assert
+    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+  });
+
+  it("boxes nothing while the pointer is on a label linked to the prompt that answered it", () => {
+    // Arrange
+    const row = response();
+    linkAnswers(row, [create(FeedResponseAnswerSchema, { label: "1.1", prompt: { value: "p1" } })]);
+    const label = row.querySelector(".mp-label-linked");
+    if (label === null) throw new Error("no linked label drawn");
+    uninstall = installBranchHover(document.body, TEN_PX_COLUMNS);
+    // Act
+    over(label, insideBoxX(label));
+    // Assert
+    expect(boxedBy(row, HOVER_BOX)).toEqual([]);
+  });
+});
+
 /** The column NODE's label starts at in exampleTree. */
 const labelColumnOf = (node: string): number => ({ "1": 0, "1.1": 4, "1.1.1": 8 })[node] ?? Number.NaN;
 
