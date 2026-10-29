@@ -116,6 +116,10 @@ type ShimBundle interface {
 
 // FleetDeps are what the session fleet needs to bring a session up.
 type FleetDeps struct {
+	// GateDock states a workspace's shown cold gate to the webhost's dock
+	// (sidebar.Resolver.SetColdGate): its row id and card, or nil for both
+	// when none is shown. Nil states nothing.
+	GateDock func(ws ids.WorkspaceID, row *frontendv1.FeedId, gate *frontendv1.FeedColdGate)
 	// StoreHistory is the store's read-only face, which every workspace's
 	// history is read from (ReadHistory). REQUIRED.
 	StoreHistory StoreHistory
@@ -619,6 +623,9 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 // Before the server exists there is nothing to publish onto, and that is not a
 // failure: the boot sequence deliberately runs first.
 func (f *Fleet) publishHost(ws ids.WorkspaceID) {
+	// THE DOCK FOLLOWS THE HOST VIEW: every gate edge republishes the host
+	// view, so the same edge states the gate's dock.
+	f.syncGateDock(ws)
 	if f.deps.PublishHost == nil {
 		return
 	}
@@ -2781,23 +2788,47 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 // the gate offers compaction. A gate an answer has taken publishes nothing:
 // its row is already retired.
 func (f *Fleet) publishColdGateRow(ws ids.WorkspaceID) {
+	id, card, ok := f.coldGateCard(ws)
+	if !ok {
+		return
+	}
+	f.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, &frontendv1.FeedRow{
+		Id:  id,
+		Row: &frontendv1.FeedRow_ColdGate{ColdGate: card},
+	})
+	f.syncGateDock(ws)
+}
+
+// coldGateCard answers WS's shown gate (ColdGateShown) as its card and row id:
+// its facts as raised, plus the compact-and-resume button while prompts are
+// held at the gate and the gate offers compaction. The feed's row and the
+// webhost's dock are drawn from this one card.
+func (f *Fleet) coldGateCard(ws ids.WorkspaceID) (*frontendv1.FeedId, *frontendv1.FeedColdGate, bool) {
 	f.mu.RLock()
 	gate, ok := f.coldGates[ws]
 	held := f.heldAtGate[ws]
 	f.mu.RUnlock()
 	if !ok || gate.answering {
-		return
+		return nil, nil, false
 	}
 	standing := proto.Clone(gate.standing).(*frontendv1.FeedColdGateStanding)
 	if held > 0 && standing.GetCompact() != nil {
 		standing.CompactAndResume = &frontendv1.FeedColdGateCompactAndResume{HeldPrompts: uint32(held)}
 	}
-	f.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, &frontendv1.FeedRow{
-		Id: coldGateRowID(ws, gate.served.VendorSessionID),
-		Row: &frontendv1.FeedRow_ColdGate{ColdGate: &frontendv1.FeedColdGate{
-			State: &frontendv1.FeedColdGate_Standing{Standing: standing},
-		}},
-	})
+	return coldGateRowID(ws, gate.served.VendorSessionID),
+		&frontendv1.FeedColdGate{State: &frontendv1.FeedColdGate_Standing{Standing: standing}}, true
+}
+
+// syncGateDock states WS's shown gate to the webhost's dock (the roster's
+// cold_gates), or its absence: the dock is on screen exactly while Emacs hides
+// the composer for the gate, both following ColdGateShown (owner request,
+// 2026-10-29: the gate is on screen the instant its workspace is).
+func (f *Fleet) syncGateDock(ws ids.WorkspaceID) {
+	if f.deps.GateDock == nil {
+		return
+	}
+	id, card, _ := f.coldGateCard(ws)
+	f.deps.GateDock(ws, id, card)
 }
 
 // SetColdGateHeld records how many prompts are held at a cold gate on WS (the

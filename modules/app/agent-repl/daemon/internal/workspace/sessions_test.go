@@ -623,6 +623,9 @@ type fleetFixture struct {
 	// hostPublished is every workspace whose host view the fleet republished,
 	// in order.
 	hostPublished []ids.WorkspaceID
+	// docked is the last gate the fleet stated to the webhost's dock, by
+	// workspace: its card, or nil once none is shown.
+	docked map[ids.WorkspaceID]*frontendv1.FeedColdGate
 	// now is the fleet's clock. It moves only when the vendor-start run waits
 	// (retryAfter), so the retry window is crossed without any real wait.
 	now time.Time
@@ -889,6 +892,15 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		Deliveries: &f.deliveries,
 		PublishHost: func(ws ids.WorkspaceID) {
 			f.hostPublished = append(f.hostPublished, ws)
+		},
+		GateDock: func(ws ids.WorkspaceID, row *frontendv1.FeedId, gate *frontendv1.FeedColdGate) {
+			if (row == nil) != (gate == nil) {
+				t.Errorf("GateDock(%s) stated a row id %v with the card %v", ws, row, gate)
+			}
+			if f.docked == nil {
+				f.docked = map[ids.WorkspaceID]*frontendv1.FeedColdGate{}
+			}
+			f.docked[ws] = gate
 		},
 	})
 	if err != nil {
@@ -3153,6 +3165,59 @@ func TestColdGateShownFollowsTheGatesLife(t *testing.T) {
 			// Assert.
 			if got := f.fleet.ColdGateShown(ws.ID); got != tt.want {
 				t.Fatalf("ColdGateShown = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheGateDockFollowsTheShownGate(t *testing.T) {
+	raise := func(f *fleetFixture, ws ids.WorkspaceID) {
+		f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+	}
+	tests := []struct {
+		name       string
+		act        func(f *fleetFixture, ws ids.WorkspaceID)
+		wantDocked bool
+		wantHeld   uint32
+	}{
+		{"a raised gate is docked", raise, true, 0},
+		{"an answered gate leaves the dock", func(f *fleetFixture, ws ids.WorkspaceID) {
+			raise(f, ws)
+			f.fleet.TakeColdGate(ws, "vendor-1")
+		}, false, 0},
+		{"a gate stood again after a failed re-open is docked again", func(f *fleetFixture, ws ids.WorkspaceID) {
+			raise(f, ws)
+			f.fleet.TakeColdGate(ws, "vendor-1")
+			f.fleet.ReraiseColdGate(ws, "vendor-1")
+		}, true, 0},
+		{"a stopped workspace's gate leaves the dock", func(f *fleetFixture, ws ids.WorkspaceID) {
+			raise(f, ws)
+			_ = f.fleet.Stop(context.Background(), ws, true)
+		}, false, 0},
+		{"prompts held at the gate are docked with it", func(f *fleetFixture, ws ids.WorkspaceID) {
+			raise(f, ws)
+			f.fleet.SetColdGateHeld(ws, 2)
+		}, true, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-dock")
+
+			// Act.
+			tt.act(f, ws.ID)
+
+			// Assert.
+			gate, stated := f.docked[ws.ID]
+			if !stated {
+				t.Fatal("the dock was never told of the gate")
+			}
+			if (gate != nil) != tt.wantDocked {
+				t.Fatalf("docked gate = %v, want docked %t", gate, tt.wantDocked)
+			}
+			if got := gate.GetStanding().GetCompactAndResume().GetHeldPrompts(); got != tt.wantHeld {
+				t.Fatalf("docked held prompts = %d, want %d", got, tt.wantHeld)
 			}
 		})
 	}
