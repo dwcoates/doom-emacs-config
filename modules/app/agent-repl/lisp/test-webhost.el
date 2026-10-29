@@ -317,7 +317,7 @@ Binds `reloads' and `records', newest first."
   (should-error (agent-repl-webhost-parse-answer "not json") :type 'json-parse-error))
 
 (ert-deftest agent-repl-test-wh-every-host-answer-reader-parses-through-the-one-helper ()
-  "The webhost's own record and the page-unload cancel both parse with the helper."
+  "The webhost's own record parses with the helper."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (let ((raw "{\"op\":\"drawn\",\"id\":\"none\",\"outcome\":\"absent\",\"notes\":[]}")
@@ -329,10 +329,9 @@ Binds `reloads' and `records', newest first."
                 ((symbol-function 'agent-repl--info) #'ignore)
                 ((symbol-function 'agent-repl--log) #'ignore))
         ;; Act
-        (agent-repl--webhost-answered raw)
-        (agent-repl-page-unload--on-drawn-answer raw))
-      ;; Assert: the cancel's own parse, and the webhost record it hands on.
-      (should (equal parsed (list raw raw raw))))))
+        (agent-repl--webhost-answered raw))
+      ;; Assert
+      (should (equal parsed (list raw))))))
 
 ;;;; ---- Calls without a host ----
 

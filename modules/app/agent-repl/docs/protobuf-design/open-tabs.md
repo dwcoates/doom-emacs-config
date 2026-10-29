@@ -123,11 +123,27 @@ workspace's web page was checked by Emacs alone, never by the daemon.
 ### A fold drops no page (owner ruling, 2026-10-26)
 - WHAT: folding a repository section or a subsection takes its workspaces'
   tabs off the Emacs bar and drops no web page; only the user's hide does
-  (`agent-repl-open-tabs-withheld-p`). A folded workspace's page is loaded
-  like a drawn one's, and is unloaded only by page-unload.el's clock, which
-  the fold and the unfold never touch.
+  (`agent-repl-open-tabs-withheld-p`). A folded workspace's page is held
+  like a drawn one's, by its status (page-unload.el), which the fold and the
+  unfold never touch.
 - Does not claim: anything about the daemon's sessions. A repository fold
   still stands sessions down as above.
+
+### A page is held by its workspace's status (owner ruling, 2026-10-29)
+- WHAT: a tab opens with a page only when it is on screen or its workspace
+  is working (`agent-repl-page-unload-wanted-p`); every other tab opens with
+  `page: none`, so its open answers once its conversation is read. Its page
+  loads the instant the user switches to it, and is unloaded the instant the
+  user switches away unless its status holds it: working always; idle for an
+  hour past its last prompt, unless it was loaded only for that visit;
+  merging, faulted, cold-gated, transitional and merged never off screen.
+  A workspace that starts working while unloaded loads its page in the
+  background.
+- WHY: every page lives in one WebKit web content process, whose memory-
+  pressure collections every 30s stalled switches by up to 1.4s with 42
+  pages held (2026-10-28).
+- Does not claim: anything about the shim, which runs by its own rules
+  (`docs/developer/shim-lifecycle.md`).
 
 ## Decisions taken for the owner (delegated 2026-10-12, to confirm)
 - Collapsed repository sections count as not visible, like hidden ones.

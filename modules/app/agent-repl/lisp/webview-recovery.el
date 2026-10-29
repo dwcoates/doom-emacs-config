@@ -1,13 +1,14 @@
-;;; webview-recovery.el --- every workspace's page, made ahead of the look -*- lexical-binding: t; -*-
+;;; webview-recovery.el --- every workspace's slot, made ahead of the look -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; PAGES ARE MADE AHEAD OF THE LOOK.  Every eligible workspace gets its
-;; webview slot and its page in the host web view (webhost.el) the moment it
-;; is buildable -- on the link-up, on every roster push, when its tab is
-;; created -- so a switch to it shows a page that is already live and drawn.
-;; A slot is a buffer and a page is one call to the host, so every owed page
-;; is made in one immediate pass; nothing is staggered or queued.
+;; SLOTS ARE MADE AHEAD OF THE LOOK.  Every eligible workspace gets its
+;; webview slot the moment it is buildable -- on the link-up, on every roster
+;; push, when its tab is created -- and its page in the host web view
+;; (webhost.el) only when the page is wanted: on screen, or working
+;; (page-unload.el, owner ruling 2026-10-29).  Any other slot's page loads at
+;; its show.  A slot is a buffer and a page is one call to the host, so every
+;; owed slot is made in one immediate pass; nothing is staggered or queued.
 ;;
 ;; THE HOST IS MADE REGARDLESS OF FOCUS (owner ruling, 2026-10-12): a page
 ;; is loaded when its workspace is asked open, whether or not Emacs is the

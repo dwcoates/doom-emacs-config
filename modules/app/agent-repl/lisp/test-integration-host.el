@@ -751,6 +751,10 @@ standing page streams starved every later request."
                   ((symbol-function 'agent-repl--frontend-webview-live-widget)
                    (lambda (&rest _) 'fake-widget))
                   ((symbol-function 'agent-repl--webhost-watch-load) #'ignore)
+                  ;; A slot is made with its page only where the page is
+                  ;; wanted (page-unload.el); this one is, as a working
+                  ;; workspace's is.
+                  ((symbol-function 'agent-repl-page-unload-wanted-p) (lambda (_ws) t))
                   ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
                    (lambda (_widget script _callback)
                      (when-let ((url (agent-repl-itest-host--ensured-url script)))

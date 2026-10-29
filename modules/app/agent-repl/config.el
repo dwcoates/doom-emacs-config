@@ -398,9 +398,9 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; the look through frontend.el's mount and webhost.el's host, so it loads
 ;; after both.
 (agent-repl--load-module "webview-recovery")
-;; WHY: page-unload.el unloads the pages nobody looks at, through frontend.el's
-;; detach, and keeps webview-recovery.el's pass from remaking them; it loads
-;; after both.
+;; WHY: page-unload.el holds each page by its workspace's status, through
+;; frontend.el's detach and webhost.el's host, and decides which pages
+;; webview-recovery.el's slots are made with; it loads after both.
 (agent-repl--load-module "page-unload")
 ;; WHY: notes.el owns the per-workspace org notes file, all that survives
 ;; of tasks.el.  It reads core.el's state-dir resolver, workspace.el's

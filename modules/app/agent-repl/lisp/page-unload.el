@@ -6,34 +6,33 @@
 ;; 30 seconds, and every full collection marks every live page: the main-thread
 ;; stalls that put a switch's slow tail at 140-230ms (switch bench,
 ;; 2026-10-17) grow with the pages held.  So a page is held only while its
-;; workspace is in use (owner ruling, 2026-10-17):
+;; workspace needs it, by its STATUS (owner ruling, 2026-10-29, which
+;; supersedes the looked-at clock of 2026-10-17, 2026-10-18 and 2026-10-26):
 ;;
+;;   - WORKING (a turn running in front or behind, a permission or question
+;;     ask, a vendor retry): always held, and loaded in the background the
+;;     moment the workspace starts working;
+;;   - IDLE (ready, done, interrupted, no session): held until an hour has
+;;     passed since its last prompt, read as its last turn's end or its
+;;     page's load, whichever is later.  A page loaded only because the user
+;;     switched to it is unloaded the moment they switch away, unless the
+;;     workspace started working while they were there: a prompt they sent;
+;;   - MERGING, FAULTED (every blue and turquoise status), COLD-GATED,
+;;     TRANSITIONAL (opening, closing, waiting) and MERGED: held only while
+;;     shown, so unloaded the moment the workspace enters the status, or the
+;;     moment the user switches away;
 ;;   - a HIDDEN workspace (one the user hid) holds no page while the user is
-;;     not looking at it: one made before it was hidden, or while the user
-;;     stood on it, is unloaded;
-;;   - a workspace nobody has LOOKED AT for `agent-repl-page-unload-after'
-;;     seconds of USE is unloaded too.
+;;     not looking at it.
 ;;
-;; A FOLD UNLOADS NOTHING (owner ruling, 2026-10-26).  Folding a repository
-;; section or a subsection only takes its workspaces off the bar: their
-;; pages are held, and age out on the same clock as every other page,
-;; which neither the fold nor the unfold touches.
+;; The page on screen and the current workspace's are never unloaded.  A
+;; workspace with no roster row yet decides nothing until its first push.
 ;;
-;; THE CLOCK RUNS ONLY WHILE THE SYSTEM IS IN USE (owner rulings, 2026-10-17
-;; and 2026-10-18).  In use means the user switched workspaces within the last
-;; `agent-repl-page-unload-idle-after' seconds; a switch is the one sign that the
-;; user is there, since an agent's turn runs as well with nobody there.  Once that
-;; long passes with no switch, nobody is using the system, and the clock stops
-;; and resets: the user coming back will certainly reach for a page the idle
-;; time would otherwise have unloaded.  The next switch starts every page's
-;; hold afresh from it, so a page is unloaded only for going unlooked while the
-;; user was working elsewhere.
-;;
-;; LOOKED AT MEANS SHOWN FOR A WHILE.  A page shown for less than
-;; `agent-repl-page-unload-dwell' seconds was passed through, as a held switch
-;; key passes through every workspace on the way to another, and it does not
-;; count.  A page's mount counts as a look, so a page made ahead of the look at
-;; startup ages out like any other when it is never visited.
+;; A PAGE IS NOT LOADED AHEAD OF NEED (owner ruling, 2026-10-29).  A tab's
+;; slot is made at its open with no page unless the workspace is shown or
+;; working (`agent-repl-page-unload-wanted-p'); the switch to it loads the
+;; page at once, with no wait, and the switch away from a page that is not
+;; wanted unloads it at once, whether or not it had drawn: a user cycling
+;; through tabs never waits on a page loading only to be dropped.
 ;;
 ;; AN UNLOAD IS INVISIBLE (owner ruling, 2026-10-20).  It is a performance
 ;; measure behind the scenes, never a state the user sees: the workspace's
@@ -59,15 +58,6 @@
 ;; showing an unloaded one puts its page back first
 ;; (`agent-repl-page-unload--return'), so the panels stand throughout.
 ;;
-;; A REMOUNT THE USER LEFT BEFORE IT DREW IS ABANDONED (owner ruling,
-;; 2026-10-24).  A remounted page boots in the one web content process every
-;; page shares, so while it loads it holds up the page the user flipped on
-;; to.  A user who leaves a page before its conversation has drawn is
-;; flipping through workspaces and does not want that one, so its load is
-;; cancelled: the host is asked whether the page has drawn (its `drawn'
-;; call), and a page that has not is unloaded as any other is, the daemon
-;; told first (`agent-repl-page-unload--abandon').  It comes back on the
-;; next switch to it.
 ;;; Code:
 (require 'cl-lib)
 
@@ -81,13 +71,12 @@
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
+(declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
+(declare-function agent-repl--webhost-id "webhost" (ws))
 (declare-function agent-repl-host-report-page-unloading "host" (ws on-reported on-not-reported))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
-(declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
-(declare-function agent-repl--webhost-id "webhost" (ws))
-(declare-function agent-repl--webhost-answered "webhost" (raw))
-(declare-function agent-repl-webhost-parse-answer "webhost" (raw))
-(declare-function agent-repl-webhost-read "webhost" (method args callback))
+(declare-function agent-repl-roster-status-for-ws "roster" (ws))
+(declare-function agent-repl-roster-last-turn-ended-ms "roster" (ws))
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-roster-update-functions)
 
@@ -95,25 +84,14 @@
   "Unloading the workspace pages nobody looks at."
   :group 'agent-repl)
 
-(defcustom agent-repl-page-unload-after 1800
-  "Seconds of use a workspace's page is held after it was last looked at.
-Thirty minutes (owner ruling, 2026-10-26)."
+(defcustom agent-repl-page-unload-after 3600
+  "Seconds an IDLE workspace's page is held after its last prompt.
+An hour (owner ruling, 2026-10-29)."
   :type 'integer
-  :group 'agent-repl-page-unload)
-
-(defcustom agent-repl-page-unload-idle-after 300
-  "Seconds with no workspace switch after which the system is not in use.
-The hold's clock stops then, and starts afresh at the next switch."
-  :type 'integer
-  :group 'agent-repl-page-unload)
-
-(defcustom agent-repl-page-unload-dwell 1
-  "Seconds a page must be shown for the showing to count as a look."
-  :type 'number
   :group 'agent-repl-page-unload)
 
 (defcustom agent-repl-page-unload-interval 60
-  "Seconds between the passes that unload pages nobody has looked at."
+  "Seconds between the passes that unload the pages no status holds."
   :type 'integer
   :group 'agent-repl-page-unload)
 
@@ -121,111 +99,140 @@ The hold's clock stops then, and starts afresh at the next switch."
   '(:agent-repl-central "a page-unload pass spans workspaces")
   "The log scope of a pass's own records.")
 
+(defconst agent-repl-page-unload-buckets
+  '((working :submitting :thinking :clearing :compacting :permission :question
+             :idle-async :api-retrying)
+    (idle :ready :done :interrupted :none)
+    (merging :merging :merge-queued)
+    (faulted :vendor-blocked :vendor-fault :network-fault :severed :start-failed
+             :degraded :dead :turn-died :merge-failed :turn-failed :daemon-impaired)
+    (cold-gated :cold-gate)
+    (transitional :init :inactive :closing :waiting)
+    (merged :merged))
+  "Every roster status arm, by how its workspace's page is held.
+`working' is always held; `idle' is held for `agent-repl-page-unload-after'
+past its last prompt; every other bucket is held only while shown (owner
+ruling, 2026-10-29).")
+
 (defvar agent-repl-page-unload--clock #'float-time
   "Answers the current time in seconds.  Tests bind it.")
 
 (defvar agent-repl-page-unload--shown nil
   "The workspace whose page the host shows, or nil.")
 
-(defvar agent-repl-page-unload--shown-since nil
-  "When `agent-repl-page-unload--shown' was shown.")
-
 (defvar agent-repl-page-unload--timer nil
   "The repeating timer that runs the pass, while one is running.")
-
-(defvar agent-repl-page-unload--last-switch-at nil
-  "When the user last switched workspaces, or nil before the first switch.")
-
-(defvar agent-repl-page-unload--in-use-since nil
-  "When the system's present spell of use began: the first switch after idle.")
 
 (defun agent-repl-page-unload--now ()
   "The current time, in seconds."
   (funcall agent-repl-page-unload--clock))
 
+(defun agent-repl-page-unload-bucket (arm)
+  "The bucket of status ARM in `agent-repl-page-unload-buckets', or nil for no ARM.
+An ARM no bucket names is a status this table was not taught: it is
+recorded at ERROR and signalled, never guessed at."
+  (when arm
+    (or (car (seq-find (lambda (bucket) (memq arm (cdr bucket)))
+                       agent-repl-page-unload-buckets))
+        (progn
+          (agent-repl--error agent-repl--page-unload-central
+                             "elisp.page-unload.unknown-status arm=%S" arm)
+          (error "page-unload: status %S is in no bucket" arm)))))
+
+(defun agent-repl-page-unload--ws-bucket (ws)
+  "WS's bucket from its roster status, or nil before its first row."
+  (agent-repl-page-unload-bucket (agent-repl-roster-status-for-ws ws)))
+
+(defun agent-repl-page-unload--on-screen-p (ws)
+  "Non-nil when WS's page is the one shown or WS is the current workspace."
+  (or (equal ws agent-repl-page-unload--shown)
+      (equal ws (agent-repl--ws-current-name))))
+
+(defun agent-repl-page-unload--withheld-p (ws)
+  "Non-nil when the user hid WS, so it holds no page off screen."
+  (and (fboundp 'agent-repl-open-tabs-withheld-p) (agent-repl-open-tabs-withheld-p ws)))
+
+(defun agent-repl-page-unload-wanted-p (ws)
+  "Non-nil when WS's page should be loaded now, before anyone shows it.
+That is when it is on screen, or working and not hidden.  A slot made for
+a workspace that is not wanted is made with no page
+\(`agent-repl--frontend-ensure-webview-buffer'); its show loads it."
+  (or (agent-repl-page-unload--on-screen-p ws)
+      (and (not (agent-repl-page-unload--withheld-p ws))
+           (eq (agent-repl-page-unload--ws-bucket ws) 'working))))
+
 (defun agent-repl-page-unload-note-shown (ws)
   "Record that the host now shows WS's page.
-The page shown until now was looked at when it was shown for at least
-`agent-repl-page-unload-dwell' seconds."
-  (let ((now (agent-repl-page-unload--now))
-        (previous agent-repl-page-unload--shown))
+An unloaded page is put back first (`agent-repl-page-unload--return').  The
+page shown until now is judged at once: a page no status holds off screen
+is unloaded the moment the user switches away from it."
+  (let ((previous agent-repl-page-unload--shown))
     (when (agent-repl-page-unloaded-p ws)
       (agent-repl-page-unload--return ws))
-    (when (and previous (not (equal previous ws))
-               (>= (- now agent-repl-page-unload--shown-since) agent-repl-page-unload-dwell))
-      (agent-repl--ws-put previous :page-looked-at now))
     (unless (equal previous ws)
-      (agent-repl-page-unload--note-use now)
-      (setq agent-repl-page-unload--shown ws
-            agent-repl-page-unload--shown-since now)
-      (when (and previous (agent-repl--ws-get previous :page-remounting))
-        (agent-repl-page-unload--abandon previous)))))
+      (setq agent-repl-page-unload--shown ws)
+      (when previous
+        (agent-repl-page-unload--judge previous (agent-repl-page-unload--now))))))
 
 (defun agent-repl-page-unload-note-mounted (ws)
-  "Record that WS's page was just mounted: a look."
-  (agent-repl--ws-put ws :page-looked-at (agent-repl-page-unload--now)))
-
-(defun agent-repl-page-unload--in-use-p (now)
-  "Non-nil when the user switched workspaces within the idle span before NOW."
-  (and agent-repl-page-unload--last-switch-at
-       (<= (- now agent-repl-page-unload--last-switch-at) agent-repl-page-unload-idle-after)))
-
-(defun agent-repl-page-unload--note-use (now)
-  "Record that the user switched workspaces at NOW: the system is in use.
-A switch after an idle spell starts the hold's clock afresh."
-  (unless (agent-repl-page-unload--in-use-p now)
-    (setq agent-repl-page-unload--in-use-since now)
-    (agent-repl--log agent-repl--page-unload-central
-                     "elisp.page-unload.in-use since-idle-s=%s"
-                     (if agent-repl-page-unload--last-switch-at
-                         (round (- now agent-repl-page-unload--last-switch-at))
-                       "never")))
-  (setq agent-repl-page-unload--last-switch-at now))
+  "Record that WS's page was just loaded: the start of its idle hold."
+  (agent-repl--ws-put ws :page-loaded-at (agent-repl-page-unload--now)))
 
 (defun agent-repl-page-unloaded-p (ws)
   "Non-nil when WS holds a live slot whose page the host does not hold.
-That is what an unload leaves (`agent-repl-page-unload--unload'), read off
-the slot and the host rather than kept as a flag beside them."
+That is what an unload leaves (`agent-repl-page-unload--unload'), and what a
+slot made with no page is, read off the slot and the host rather than kept
+as a flag beside them."
   (and (buffer-live-p (agent-repl--ws-get ws :frontend-buffer))
        (not (agent-repl-webhost-has-page-p ws))))
 
 (defun agent-repl-page-unload--return (ws)
   "Put WS's unloaded page back in the host, its slot being shown.
 The slot and its windows stood throughout; only the page comes back.  A
-page the user leaves before it draws is unloaded again
-\(`agent-repl-page-unload--abandon')."
-  (agent-repl--ws-put ws :page-remounting t)
+page put back for a workspace that is not working is a VISIT: it is
+unloaded when the user switches away unless the workspace started working
+meanwhile (`agent-repl-page-unload--reason')."
+  (agent-repl--ws-put ws :page-visit
+                      (not (eq (agent-repl-page-unload--ws-bucket ws) 'working)))
   (agent-repl-page-unload-note-mounted ws)
-  (agent-repl--info ws "elisp.page-unload.returned ws=%s" ws)
+  (agent-repl--info ws "elisp.page-unload.returned ws=%s visit=%s"
+                    ws (agent-repl--ws-get ws :page-visit))
   (agent-repl-webhost-ensure-page ws))
 
+(defun agent-repl-page-unload--idle-since (ws)
+  "When WS's idle hold began: its last turn's end or its page's load, later."
+  (max (/ (or (agent-repl-roster-last-turn-ended-ms ws) 0) 1000.0)
+       (or (agent-repl--ws-get ws :page-loaded-at) 0)))
+
 (defun agent-repl-page-unload--reason (ws now)
-  "Why WS's page should be unloaded at NOW, or nil when it should be held.
-A page with no recorded look (one mounted before this module ran) is
-stamped as looked at now, so a reload of this module unloads nothing.  A
-page goes unlooked only while the system is in use, and only for the time
-since the later of its look and the start of the present spell of use."
-  (cond
-   ((and (fboundp 'agent-repl-open-tabs-withheld-p) (agent-repl-open-tabs-withheld-p ws)) 'hidden)
-   ((null (agent-repl--ws-get ws :page-looked-at))
-    (agent-repl--ws-put ws :page-looked-at now)
-    nil)
-   ((not (agent-repl-page-unload--in-use-p now)) nil)
-   ((> (- now (max (agent-repl--ws-get ws :page-looked-at) agent-repl-page-unload--in-use-since))
-       agent-repl-page-unload-after)
-    'unlooked)))
+  "Why WS's held page should be unloaded at NOW, or nil when it is held.
+WS is off screen (`agent-repl-page-unload--holdable-p').  A working
+workspace clears a standing visit: the user prompted it, or it started
+working on its own, and either way it is held as working."
+  (let ((bucket (agent-repl-page-unload--ws-bucket ws)))
+    (when (eq bucket 'working)
+      (agent-repl--ws-put ws :page-visit nil))
+    (cond
+     ((agent-repl-page-unload--withheld-p ws) 'hidden)
+     ((memq bucket '(nil working)) nil)
+     ((not (eq bucket 'idle)) bucket)
+     ((agent-repl--ws-get ws :page-visit) 'visited)
+     ((> (- now (agent-repl-page-unload--idle-since ws)) agent-repl-page-unload-after)
+      'idle))))
 
 (defun agent-repl-page-unload--holdable-p (ws)
   "The page of WS, when it is one a pass may unload, else nil.
 Neither the page the host shows nor the current workspace\='s is ever
 unloaded, nor one already unloaded, nor one whose unload is already being
-reported."
+reported, nor one whose tab's open is in flight: the daemon answers that
+open once the page has drawn, so a page dropped under it left the tab
+unanswered for good (2026-10-29)."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
     (and (buffer-live-p buf)
          (agent-repl-webhost-has-page-p ws)
-         (not (equal ws agent-repl-page-unload--shown))
-         (not (equal ws (agent-repl--ws-current-name)))
+         (not (agent-repl-page-unload--on-screen-p ws))
          (not (agent-repl--ws-get ws :page-unloading))
+         (not (agent-repl-open-tabs-holds-p (agent-repl--webhost-id ws)))
          buf)))
 
 (defun agent-repl-page-drop-announced (ws still-p drop on-kept)
@@ -269,10 +276,10 @@ the report was in flight."
    (lambda ()
      ;; THE PAGE GOES, THE SLOT STAYS: its windows are the panels.
      (agent-repl-webhost-remove ws)
-     (agent-repl--ws-put ws :page-remounting nil)
-     (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s unlooked-s=%d"
+     (agent-repl--ws-put ws :page-visit nil)
+     (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s held-s=%d"
                        ws reason
-                       (round (- now (or (agent-repl--ws-get ws :page-looked-at) now)))))
+                       (round (- now (or (agent-repl--ws-get ws :page-loaded-at) now)))))
    (lambda (why)
      (agent-repl--info ws "elisp.page-unload.kept ws=%s reason=%s why=%s"
                        ws reason (pcase why
@@ -280,71 +287,41 @@ the report was in flight."
                                    ('not-reported "not-reported")
                                    (_ (error "Unknown kept reason %S" why)))))))
 
-(defun agent-repl-page-unload--abandon (ws)
-  "Ask the host whether WS\='s remounted page has drawn, the user having left it.
-The answer goes to `agent-repl-page-unload--on-drawn-answer', which unloads
-a page that has not.  With no host there is no page loading to cancel."
-  (if-let ((id (agent-repl--webhost-id ws)))
-      (if (agent-repl-webhost-read "drawn" (list id) 'agent-repl-page-unload--on-drawn-answer)
-          (agent-repl--log ws "elisp.page-unload.abandon-asked ws=%s id=%s" ws id)
-        (agent-repl--ws-put ws :page-remounting nil)
-        (agent-repl--info ws "elisp.page-unload.abandon-skipped ws=%s reason=no-host" ws))
-    ;; A remounted page was mounted at its workspace's ref: one gone since is a bug.
-    (agent-repl--error ws "elisp.page-unload.abandon-failed ws=%s reason=no-ref" ws)
-    (error "Remounted workspace %s has no ref" ws)))
+(defun agent-repl-page-unload--judge (ws now)
+  "Unload WS\='s page when no status holds it at NOW; answer non-nil if so."
+  (when (agent-repl-page-unload--holdable-p ws)
+    (when-let ((reason (agent-repl-page-unload--reason ws now)))
+      (agent-repl-page-unload--unload ws reason now)
+      t)))
 
-(defun agent-repl-page-unload--on-drawn-answer (raw)
-  "Cancel the remounted page\='s load that RAW, the host\='s `drawn' answer, names.
-A page still loading is unloaded (`agent-repl-page-unload--unload'), the
-daemon told first, unless the user is back on it.  A page that has drawn,
-or that the host no longer holds, is left as it is.  Called BY SYMBOL from
-the read channel (`agent-repl-webhost-read')."
-  (agent-repl--webhost-answered raw)
-  (condition-case err
-      (let* ((answer (agent-repl-webhost-parse-answer raw))
-             (id (plist-get answer :id))
-             (outcome (plist-get answer :outcome))
-             (ws (and (stringp id) (agent-repl--ws-by-ref-id id))))
-        (cond
-         ((null ws)
-          (agent-repl--info agent-repl--page-unload-central
-                            "elisp.page-unload.abandon-dropped id=%s reason=no-workspace" id))
-         ((not (agent-repl--ws-get ws :page-remounting))
-          (agent-repl--log ws "elisp.page-unload.abandon-dropped ws=%s reason=settled" ws))
-         ((equal outcome "queued")
-          ;; The host is loading, and replays every page once it starts: the
-          ;; next switch away asks again.
-          (agent-repl--info ws "elisp.page-unload.abandon-deferred ws=%s reason=host-loading" ws))
-         ((not (equal outcome "present"))
-          (agent-repl--ws-put ws :page-remounting nil)
-          (agent-repl--info ws "elisp.page-unload.abandon-dropped ws=%s reason=%s" ws outcome))
-         ((plist-get answer :drawn)
-          (agent-repl--ws-put ws :page-remounting nil)
-          (agent-repl--info ws "elisp.page-unload.abandon-dropped ws=%s reason=drawn drawn=%s"
-                            ws (plist-get answer :drawn)))
-         ((not (agent-repl-page-unload--holdable-p ws))
-          (agent-repl--info ws "elisp.page-unload.abandon-deferred ws=%s reason=not-holdable" ws))
-         (t
-          (agent-repl--info ws "elisp.page-unload.abandon ws=%s reason=left-before-drawn" ws)
-          (agent-repl-page-unload--unload ws 'abandoned (agent-repl-page-unload--now)))))
-    (error
-     (agent-repl--error agent-repl--page-unload-central
-                        "elisp.page-unload.abandon-answer-unreadable raw=%S error=%S" raw err))))
+(defun agent-repl-page-unload--load-working (ws)
+  "Load WS\='s unloaded page in the background when WS is working; non-nil if so.
+A workspace that starts working while its page is unloaded gets it back
+before anyone switches to it (owner ruling, 2026-10-29)."
+  (when (and (agent-repl-page-unloaded-p ws)
+             (not (agent-repl-page-unload--withheld-p ws))
+             (eq (agent-repl-page-unload--ws-bucket ws) 'working))
+    (agent-repl--ws-put ws :page-visit nil)
+    (agent-repl-page-unload-note-mounted ws)
+    (agent-repl--info ws "elisp.page-unload.loaded ws=%s reason=working" ws)
+    (agent-repl-webhost-ensure-page ws)
+    t))
 
 (defun agent-repl-page-unload-pass ()
-  "Unload every held page whose workspace is hidden or not looked at lately.
+  "Load every working workspace\='s page, and unload every page no status holds.
 Each unload waits on the daemon being told (`agent-repl-page-unload--unload').
 Answers how many unloads were started."
   (let ((now (agent-repl-page-unload--now))
-        (started 0))
+        (started 0)
+        (loaded 0))
     (dolist (ws (agent-repl--live-ws-names))
-      (when (agent-repl-page-unload--holdable-p ws)
-        (when-let ((reason (agent-repl-page-unload--reason ws now)))
-          (setq started (1+ started))
-          (agent-repl-page-unload--unload ws reason now))))
-    (when (> started 0)
+      (when (agent-repl-page-unload--load-working ws)
+        (setq loaded (1+ loaded)))
+      (when (agent-repl-page-unload--judge ws now)
+        (setq started (1+ started))))
+    (when (> (+ started loaded) 0)
       (agent-repl--info agent-repl--page-unload-central
-                        "elisp.page-unload.pass started=%d" started))
+                        "elisp.page-unload.pass started=%d loaded=%d" started loaded))
     started))
 
 (defun agent-repl-page-unload-start (&optional _conn)
@@ -355,12 +332,11 @@ Registered on `agent-repl-link-up-functions'; a timer already running is kept."
           (run-with-timer agent-repl-page-unload-interval agent-repl-page-unload-interval
                           #'agent-repl-page-unload-pass))
     (agent-repl--log agent-repl--page-unload-central
-                     "elisp.page-unload.started interval-s=%d after-s=%d idle-after-s=%d"
-                     agent-repl-page-unload-interval agent-repl-page-unload-after
-                     agent-repl-page-unload-idle-after)))
+                     "elisp.page-unload.started interval-s=%d after-s=%d"
+                     agent-repl-page-unload-interval agent-repl-page-unload-after)))
 
 (defun agent-repl-page-unload-on-roster-update (&optional _roster)
-  "Unload the pages a roster push hid, without waiting for the next pass."
+  "Apply the statuses a roster push changed, without waiting for the next pass."
   (agent-repl-page-unload-pass))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl-page-unload-start)
