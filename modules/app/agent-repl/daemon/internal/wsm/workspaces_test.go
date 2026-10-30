@@ -361,7 +361,7 @@ func TestAnAnnouncementOfAnOpenWorkspaceIgnoresABornClosedFact(t *testing.T) {
 	}
 }
 
-func TestRegisterWorkspaceDerivesTheNameFromTheDir(t *testing.T) {
+func TestRegisterWorkspaceNamesTheMainWorktreeAfterItsRepository(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	dir := filepath.Join(t.TempDir(), "derived")
@@ -376,8 +376,35 @@ func TestRegisterWorkspaceDerivesTheNameFromTheDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterWorkspace: %v", err)
 	}
-	if ws.Name != "derived" {
-		t.Fatalf("name = %q, want %q", ws.Name, "derived")
+	if ws.Name != "main (derived)" {
+		t.Fatalf("name = %q, want %q", ws.Name, "main (derived)")
+	}
+}
+
+func TestRegisterWorkspaceDerivesALinkedWorktreesNameFromItsDir(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	root := t.TempDir()
+	main := filepath.Join(root, "repo")
+	linked := filepath.Join(root, "linked")
+	for _, dir := range []string{main, linked} {
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	if _, _, err := s.RegisterWorkspace(context.Background(), main, RegisterFacts{RepoDir: main}); err != nil {
+		t.Fatalf("RegisterWorkspace main: %v", err)
+	}
+
+	// Act
+	ws, _, err := s.RegisterWorkspace(context.Background(), linked, RegisterFacts{RepoDir: main})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	if ws.Name != "linked" {
+		t.Fatalf("name = %q, want %q", ws.Name, "linked")
 	}
 }
 

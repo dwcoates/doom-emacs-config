@@ -278,6 +278,9 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			priority = int(*facts.Priority)
 		}
 		name := facts.Name
+		if name == "" && IsMainWorktree(normalized, repoDir) {
+			name = MainWorkspaceName(filepath.Base(repoDir))
+		}
 		if name == "" {
 			name = filepath.Base(normalized)
 		}
