@@ -2992,7 +2992,7 @@ tiers, and the tier is defined by WHAT ENDS the line:
 | --- | --- | --- |
 | **salient** | the condition it describes stops being true — never a timer | escalating faults (a severed link, a failed bring-up, an impaired daemon); anything waiting on the user (a gated call, a question batch, the cold gate, the agent's `PushNotification` message, which ends at the next prompt); an act in progress with its own end signal (a compaction running, an interrupt, a refused close, a deploy, a pending wakeup, a retry until the response lands); the dead-query line (ends at the next prompt) |
 | **transient** | its 10 s display window lapses, or a newer transient replaces it | task-tracker moves; hook starts; injected context; a concluded compaction; every non-blocking error or warning (non-escalating faults, daemon Warn/Error records); session changes; a finished deploy; network-resume edges; a detached run finishing while the session is `background` |
-| **enduring** | never — it is always true, so the cell is never empty | the ACCOUNT's usage BY BILLING MODE: a subscription's 5-hour and weekly windows, or a per-seat account's month-to-date spend (`seat_spend`, "$223.88 of $12,000 this month"); `unobserved` until anything is read, drawn in words, fed by account-usage samples and by the vendor's rate-limit events, which stand no salient line of their own (owner rulings, 2026-10-01 and 2026-10-06) |
+| **enduring** | never — it is always true, so the cell is never empty | the ACCOUNT's usage BY BILLING MODE: a subscription's weekly windows, or a per-seat account's month-to-date spend (`seat_spend`, "$223.88 of $12,000 this month"); `unobserved` until anything is read, drawn in words, fed by the vendor's rate-limit events, which stand no salient line of their own (owner rulings, 2026-10-01 and 2026-10-06) |
 
 **PRECEDENCE IS BY TIER, ALWAYS:** salient, then transient, then enduring. A
 transient never covers a salient line; it covers only the enduring line, and
@@ -3052,10 +3052,13 @@ config dir), and every workspace bound to the root (`footer.SetAccount`, from
 `publishAccount`) draws it, so the figures one workspace's shim samples are
 drawn by every workspace on the account at once. Each change is kept in the
 state store's `account_usage` table (layout 24, the seat's spend layout 25) and read back at boot, so a
-restarted daemon draws the last figures before any session speaks. The shim
-samples the account's usage (`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`,
-the data behind the CLI's `/usage`) at every session start and every five
-minutes; no billed turn is needed.
+restarted daemon draws the last figures before any session speaks. THE
+ACCOUNT'S USAGE IS NEVER SAMPLED (2026-10-30): a per-session sample of the
+vendor's experimental usage verb cost each idle session's CLI about 18
+CPU-seconds every five minutes. The figures are the vendor's rate-limit
+events, which state a window's utilization only near that window's limit, so
+a weekly figure is drawn once the account nears it. The five-hour window is
+not drawn (owner ruling, 2026-10-30: the plan has none).
 
 **A TIMER MAY END ONLY A TRANSIENT.** A salient line with no clearing
 event is a missing end signal, and the fix is the end signal, not an expiry.
