@@ -97,8 +97,10 @@ func (k MigrationKind) String() string {
 // EACH STEP REUSES THE FRESH-FILE DDL rather than restating it, so a migrated
 // file and a created one cannot drift into two different shapes. The one
 // exception is a table a later step reshapes (agent_repl_session: layout 21
-// created it, layout 26 dropped two of its columns), whose earlier step keeps
-// its text as shipped; a test pins that the migrated table matches a fresh one.
+// created it, layout 26 dropped two of its columns; account_usage: layout 24
+// created it, layout 91 dropped the columns nothing produces), whose earlier
+// steps keep their text as shipped; a test pins that each migrated table
+// matches a fresh one.
 var migrations = []migration{
 	{To: 4, Name: "ported_prompts", Kind: MigrationAdditive, DDL: portedPromptsDDL},
 	{To: 5, Name: "host_session_identity_backfill", Kind: MigrationAdditive, DDL: hostSessionIdentityBackfillDDL},
@@ -120,7 +122,7 @@ var migrations = []migration{
 	{To: 21, Name: "agent_repl_session", Kind: MigrationAdditive, DDL: agentReplSessionLayout21DDL},
 	{To: 22, Name: "news_digest_history", Kind: MigrationAdditive, DDL: newsDigestHistoryDDL},
 	{To: 23, Name: "sidebar_view", Kind: MigrationAdditive, DDL: sidebarViewDDL},
-	{To: 24, Name: "account_usage", Kind: MigrationAdditive, DDL: accountUsageDDL},
+	{To: 24, Name: "account_usage", Kind: MigrationAdditive, DDL: accountUsageLayout24DDL},
 	{To: 25, Name: "account_usage_seat_spend", Kind: MigrationAdditive, DDL: accountUsageSeatDDL},
 	{To: 26, Name: "agent_repl_session_drop_traffic", Kind: MigrationBreaking, DDL: agentReplSessionDropTrafficDDL},
 	{To: 27, Name: "reveal_gaps", Kind: MigrationAdditive, DDL: revealGapsDDL},
@@ -189,6 +191,7 @@ var migrations = []migration{
 	{To: 88, Name: "cold_gate", Kind: MigrationAdditive, DDL: coldGateDDL},
 	{To: 89, Name: "selections", Kind: MigrationAdditive, DDL: selectionsDDL},
 	{To: 90, Name: "cache_cold", Kind: MigrationAdditive, DDL: cacheColdDDL},
+	{To: 91, Name: "account_usage_drop_unproduced", Kind: MigrationBreaking, DDL: accountUsageDropUnproducedDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

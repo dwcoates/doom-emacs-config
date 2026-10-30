@@ -3,6 +3,7 @@ package wsm
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -15,23 +16,12 @@ func fullUsage(root string) AccountUsage {
 	return AccountUsage{
 		ConfigDir:  root,
 		ObservedAt: time.Unix(1_791_294_066, 0).UTC(),
-		Session: &AllowanceFigures{Utilization: 0.44, ResetsAtS: 1_791_299_399, SampledAtMs: 1_791_294_066_973,
-			Verdict: VerdictAllowed, VerdictResetsAtS: 1_791_299_399},
-		Weekly: &AllowanceFigures{Utilization: 0.53, ResetsAtS: 1_791_532_799, SampledAtMs: 1_791_294_066_973, Verdict: VerdictNone},
-		WeeklyOpus: &AllowanceFigures{Utilization: 0.12, ResetsAtS: 1_791_532_799, SampledAtMs: 1_791_294_066_973,
+		Weekly:     &AllowanceFigures{Utilization: 0.53, ResetsAtS: 1_791_532_799, Verdict: VerdictNone},
+		WeeklyOpus: &AllowanceFigures{Utilization: 0.12, ResetsAtS: 1_791_532_799,
 			Verdict: VerdictRejected, VerdictResetsAtS: 1_791_532_799},
-		WeeklySonnet: &AllowanceFigures{Utilization: 0.3, ResetsAtS: 1_791_532_799, SampledAtMs: 1_791_294_066_973,
+		WeeklySonnet: &AllowanceFigures{Utilization: 0.3, ResetsAtS: 1_791_532_799,
 			Verdict: VerdictAllowedWarning},
 		Overage: &AllowanceFigures{Utilization: 0.1, ResetsAtS: 1_793_000_000, Verdict: VerdictRejected, VerdictResetsAtS: 1_793_000_000},
-	}
-}
-
-// seatUsage is a per-seat account with the given month-to-date spend.
-func seatUsage(root string, spent *int64) AccountUsage {
-	return AccountUsage{
-		ConfigDir:  root,
-		ObservedAt: time.Unix(1_791_294_066, 0).UTC(),
-		Seat:       &SeatSpend{AllotmentMinor: 1_200_000, SpentMinor: spent, Currency: "USD", SampledAtMs: 1_791_294_066_973},
 	}
 }
 
@@ -44,8 +34,6 @@ func TestAccountUsageIsReadBack(t *testing.T) {
 	}{
 		{name: "every window figured", usage: fullUsage("/home/a/.claude")},
 		{name: "no window figured", usage: AccountUsage{ConfigDir: "/home/a/.claude-work", ObservedAt: time.Unix(5, 0).UTC()}},
-		{name: "a seat's spend", usage: seatUsage("/home/a/.claude-work", ptr(int64(22_388)))},
-		{name: "a seat with no spend reported", usage: seatUsage("/home/a/.claude-work", nil)},
 		{name: "the weekly window alone unfigured", usage: func() AccountUsage {
 			u := fullUsage("/home/a/.claude")
 			u.Weekly = nil
@@ -87,7 +75,7 @@ func TestAccountUsageReplacesTheRootsPreviousRow(t *testing.T) {
 		t.Fatalf("seed SetAccountUsage: %v", err)
 	}
 	newer := fullUsage("/home/a/.claude")
-	newer.Session.Utilization = 0.9
+	newer.Weekly.Utilization = 0.9
 
 	// Act
 	err := s.SetAccountUsage(context.Background(), newer)
@@ -97,7 +85,7 @@ func TestAccountUsageReplacesTheRootsPreviousRow(t *testing.T) {
 		t.Fatalf("SetAccountUsage: %v", err)
 	}
 	got, _ := s.AccountUsages(context.Background())
-	if len(got) != 1 || got[0].Session.Utilization != 0.9 {
+	if len(got) != 1 || got[0].Weekly.Utilization != 0.9 {
 		t.Fatalf("AccountUsages = %+v, want the one root's newer figures", got)
 	}
 }
@@ -142,7 +130,7 @@ func TestSetAccountUsageRefusesAnUnknownVerdict(t *testing.T) {
 	// Arrange
 	s, log := testStore(t)
 	usage := fullUsage("/home/a/.claude")
-	usage.Session.Verdict = "maybe"
+	usage.Weekly.Verdict = "maybe"
 
 	// Act
 	err := s.SetAccountUsage(context.Background(), usage)
@@ -186,7 +174,7 @@ func TestAStoredVerdictWithNoResetReloadsAsAnUnknownReset(t *testing.T) {
 	if err := s.SetAccountUsage(context.Background(), fullUsage("/home/a/.claude")); err != nil {
 		t.Fatalf("seed SetAccountUsage: %v", err)
 	}
-	if _, err := s.db().Exec(`UPDATE account_usage SET session_verdict_resets_at_s = NULL`); err != nil {
+	if _, err := s.db().Exec(`UPDATE account_usage SET weekly_opus_verdict_resets_at_s = NULL`); err != nil {
 		t.Fatalf("clear the verdict reset: %v", err)
 	}
 
@@ -194,8 +182,8 @@ func TestAStoredVerdictWithNoResetReloadsAsAnUnknownReset(t *testing.T) {
 	got, err := s.AccountUsages(context.Background())
 
 	// Assert
-	if err != nil || len(got) != 1 || got[0].Session.VerdictResetsAtS != 0 || got[0].Session.Verdict != VerdictAllowed {
-		t.Fatalf("AccountUsages = %+v, %v, want the session verdict with an unknown (0) reset", got, err)
+	if err != nil || len(got) != 1 || got[0].WeeklyOpus.VerdictResetsAtS != 0 || got[0].WeeklyOpus.Verdict != VerdictRejected {
+		t.Fatalf("AccountUsages = %+v, %v, want the opus verdict with an unknown (0) reset", got, err)
 	}
 }
 
@@ -245,23 +233,8 @@ func TestSetAccountUsageRefusesAnUnknownModelWindowVerdict(t *testing.T) {
 	}
 }
 
-func TestAccountUsageWithAModelWindowAndASeatIsRefused(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	usage := seatUsage("/home/a/.claude", nil)
-	usage.WeeklySonnet = &AllowanceFigures{Utilization: 0.3}
-
-	// Act
-	err := s.SetAccountUsage(context.Background(), usage)
-
-	// Assert
-	if err == nil {
-		t.Fatal("SetAccountUsage accepted a model window beside a seat's spend")
-	}
-}
-
 // THE WINDOW LIST IS THE ONE SHAPE every statement walks: each named window
-// has its five columns in the table, and the usage hands one figure slot per
+// has its four columns in the table, and the usage hands one figure slot per
 // name, so a window added to one but not the other fails here.
 func TestEveryStoredWindowHasItsColumnsAndItsSlot(t *testing.T) {
 	// Arrange
@@ -290,7 +263,7 @@ func TestAccountUsagesRefusesAStoredUnknownVerdict(t *testing.T) {
 	if err := s.SetAccountUsage(context.Background(), fullUsage("/home/a/.claude")); err != nil {
 		t.Fatalf("seed SetAccountUsage: %v", err)
 	}
-	if _, err := s.db().Exec(`UPDATE account_usage SET session_verdict = 'maybe'`); err != nil {
+	if _, err := s.db().Exec(`UPDATE account_usage SET weekly_opus_verdict = 'maybe'`); err != nil {
 		t.Fatalf("corrupt the row: %v", err)
 	}
 
@@ -299,8 +272,8 @@ func TestAccountUsagesRefusesAStoredUnknownVerdict(t *testing.T) {
 
 	// Assert
 	var decode *DecodeError
-	if !errors.As(err, &decode) || decode.Field != "session" {
-		t.Fatalf("AccountUsages = %v, want a DecodeError naming the session window", err)
+	if !errors.As(err, &decode) || decode.Field != "weekly_opus" {
+		t.Fatalf("AccountUsages = %v, want a DecodeError naming the weekly_opus window", err)
 	}
 }
 
@@ -314,112 +287,6 @@ func TestAccountUsagesIsEmptyOnAFreshStore(t *testing.T) {
 	// Assert
 	if err != nil || len(got) != 0 {
 		t.Fatalf("AccountUsages = %+v, %v, want none", got, err)
-	}
-}
-
-func TestAccountUsageWithBothWindowsAndASeatIsRefused(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-	usage := fullUsage("/home/a/.claude")
-	usage.Seat = seatUsage("/home/a/.claude", nil).Seat
-
-	// Act
-	err := s.SetAccountUsage(context.Background(), usage)
-
-	// Assert
-	if err == nil || !loggedOperation(log, "daemon.wsm.set_account_usage", "error") {
-		t.Fatalf("SetAccountUsage = %v, want a logged refusal of both billing modes at once", err)
-	}
-}
-
-func TestASeatWithNoCurrencyIsRefused(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-	usage := seatUsage("/home/a/.claude-work", nil)
-	usage.Seat.Currency = ""
-
-	// Act
-	err := s.SetAccountUsage(context.Background(), usage)
-
-	// Assert
-	if err == nil || !loggedOperation(log, "daemon.wsm.set_account_usage", "error") {
-		t.Fatalf("SetAccountUsage = %v, want a logged refusal of a currencyless seat", err)
-	}
-}
-
-func TestASeatHalfStoredIsADecodeError(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	if err := s.SetAccountUsage(context.Background(), seatUsage("/home/a/.claude-work", nil)); err != nil {
-		t.Fatalf("seed SetAccountUsage: %v", err)
-	}
-	if _, err := s.db().Exec(`UPDATE account_usage SET seat_currency = NULL`); err != nil {
-		t.Fatalf("corrupt the row: %v", err)
-	}
-
-	// Act
-	_, err := s.AccountUsages(context.Background())
-
-	// Assert
-	var decode *DecodeError
-	if !errors.As(err, &decode) || decode.Field != "seat" {
-		t.Fatalf("AccountUsages err = %v, want a DecodeError on the seat", err)
-	}
-}
-
-func TestAStoredSpendWithNoAllotmentIsADecodeError(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	if err := s.SetAccountUsage(context.Background(), AccountUsage{ConfigDir: "/home/a/.claude-work", ObservedAt: time.Unix(5, 0).UTC()}); err != nil {
-		t.Fatalf("seed SetAccountUsage: %v", err)
-	}
-	if _, err := s.db().Exec(`UPDATE account_usage SET seat_spent_minor = 7`); err != nil {
-		t.Fatalf("corrupt the row: %v", err)
-	}
-
-	// Act
-	_, err := s.AccountUsages(context.Background())
-
-	// Assert
-	var decode *DecodeError
-	if !errors.As(err, &decode) || decode.Field != "seat" {
-		t.Fatalf("AccountUsages err = %v, want a DecodeError on the seat", err)
-	}
-}
-
-func TestARowStoredWithNoAllowanceReloadsAsNothingKnown(t *testing.T) {
-	// Arrange: a row as the layout-24 build stored the enterprise seat.
-	s, _ := testStore(t)
-	if _, err := s.db().Exec(`INSERT INTO account_usage (config_dir, observed_at, no_allowance) VALUES ('/home/a/.claude-work', 5, 1)`); err != nil {
-		t.Fatalf("seed the layout-24 row: %v", err)
-	}
-
-	// Act
-	got, err := s.AccountUsages(context.Background())
-
-	// Assert
-	want := AccountUsage{ConfigDir: "/home/a/.claude-work", ObservedAt: fromNanos(5)}
-	if err != nil || len(got) != 1 || !reflect.DeepEqual(got[0], want) {
-		t.Fatalf("AccountUsages = %+v, %v, want [%+v]", got, err, want)
-	}
-}
-
-// TestTheMigrationAddsTheSeatColumns pins the layout-25 step.
-func TestTheMigrationAddsTheSeatColumns(t *testing.T) {
-	// Arrange
-	path := fixtureAt(t, 24)
-
-	// Act
-	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
-	if err != nil {
-		t.Fatalf("Open on a layout-24 database: %v", err)
-	}
-	defer handle.Close()
-
-	// Assert
-	s := handle.(*store)
-	if got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('account_usage') WHERE name LIKE 'seat_%'`); got != 4 {
-		t.Fatalf("seat columns after the migration = %d, want 4", got)
 	}
 }
 
@@ -438,10 +305,11 @@ func TestTheMigrationAddsTheModelWindowAndVerdictResetColumns(t *testing.T) {
 	s := handle.(*store)
 	got := scalar[int](t, s, `SELECT count(*) FROM pragma_table_info('account_usage')
 WHERE name LIKE 'weekly_opus_%' OR name LIKE 'weekly_sonnet_%' OR name LIKE '%_verdict_resets_at_s'`)
-	// Five columns per model window (its verdict reset among them), plus a
-	// verdict reset for each of the three windows before them.
-	if got != 13 {
-		t.Fatalf("columns the migration added = %d, want 13", got)
+	// Four columns per model window (its verdict reset among them), plus a
+	// verdict reset for each of the two windows before them that layout 91
+	// keeps (weekly, overage).
+	if got != 10 {
+		t.Fatalf("columns the migrations left = %d, want 10", got)
 	}
 }
 
@@ -461,6 +329,89 @@ func TestTheMigrationAddsTheAccountUsage(t *testing.T) {
 	s := handle.(*store)
 	if got := scalar[int](t, s, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'account_usage'`); got != 1 {
 		t.Fatalf("account_usage tables after the migration = %d, want 1", got)
+	}
+}
+
+// accountUsageFreshColumns is account_usage's columns once layout 91 has run,
+// in the order the migrations leave them.
+const accountUsageFreshColumns = "config_dir,observed_at,weekly_utilization,weekly_resets_at_s,weekly_verdict," +
+	"overage_utilization,overage_resets_at_s,overage_verdict," +
+	"weekly_opus_utilization,weekly_opus_resets_at_s,weekly_opus_verdict," +
+	"weekly_sonnet_utilization,weekly_sonnet_resets_at_s,weekly_sonnet_verdict," +
+	"weekly_verdict_resets_at_s,weekly_opus_verdict_resets_at_s,weekly_sonnet_verdict_resets_at_s,overage_verdict_resets_at_s"
+
+// TestTheMigrationDropsTheUnproducedAccountUsageColumns pins the layout-91
+// step: the five-hour window, the seat's spend, every sample stamp and
+// no_allowance leave the table.
+func TestTheMigrationDropsTheUnproducedAccountUsageColumns(t *testing.T) {
+	// Arrange
+	path := fixtureAt(t, 90)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-90 database: %v", err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Assert
+	if got := tableColumns(t, path, "account_usage"); got != accountUsageFreshColumns {
+		t.Fatalf("account_usage columns after the migration = %q, want %q", got, accountUsageFreshColumns)
+	}
+}
+
+func TestTheMigrationKeepsTheStandingWeeklyFigures(t *testing.T) {
+	// Arrange: a layout-90 row holding a sampled five-hour and weekly figure.
+	path := fixtureAt(t, 90)
+	execRaw(t, path, `INSERT INTO account_usage (config_dir, observed_at, no_allowance,
+  session_utilization, session_resets_at_s, session_sampled_at_ms, session_verdict,
+  weekly_utilization, weekly_resets_at_s, weekly_sampled_at_ms, weekly_verdict, weekly_verdict_resets_at_s)
+VALUES ('/home/a/.claude', 5, 0, 0.44, 1791299399, 1791294066973, 'allowed', 0.53, 1791532799, 1791294066973, 'rejected', 1791532799)`)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-90 database: %v", err)
+	}
+	defer handle.Close()
+	got, err := handle.(*store).AccountUsages(context.Background())
+
+	// Assert
+	want := AccountUsage{ConfigDir: "/home/a/.claude", ObservedAt: fromNanos(5),
+		Weekly: &AllowanceFigures{Utilization: 0.53, ResetsAtS: 1_791_532_799, Verdict: VerdictRejected, VerdictResetsAtS: 1_791_532_799}}
+	if err != nil || len(got) != 1 || !reflect.DeepEqual(got[0], want) {
+		t.Fatalf("AccountUsages = %+v, %v, want [%+v]", got, err, want)
+	}
+}
+
+func TestAMigratedAccountUsageTableMatchesAFreshOne(t *testing.T) {
+	// Arrange: one file migrated from before the table existed, one created
+	// at this build's layout.
+	migrated := fixtureAt(t, 23)
+	handle, err := Open(context.Background(), migrated, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-23 database: %v", err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	fresh := filepath.Join(t.TempDir(), "fresh.db")
+	handle, err = Open(context.Background(), fresh, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open a fresh database: %v", err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act
+	got, want := tableColumns(t, migrated, "account_usage"), tableColumns(t, fresh, "account_usage")
+
+	// Assert
+	if got != want {
+		t.Fatalf("migrated account_usage columns = %q, a fresh file's = %q; the two routes drifted", got, want)
 	}
 }
 
@@ -524,7 +475,7 @@ func TestAccountUsageHeldTwiceForOneRootWritesTheLatest(t *testing.T) {
 	older := fullUsage("/home/a/.claude")
 	newer := fullUsage("/home/a/.claude")
 	newer.ObservedAt = older.ObservedAt.Add(time.Minute)
-	newer.Session.Utilization = 0.61
+	newer.Weekly.Utilization = 0.61
 	for _, u := range []AccountUsage{older, newer} {
 		if err := ro.SetAccountUsage(context.Background(), u); err != nil {
 			t.Fatalf("SetAccountUsage: %v", err)
