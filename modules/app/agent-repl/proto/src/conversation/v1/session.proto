@@ -224,8 +224,6 @@ message SessionUpdate {
     SessionFastMode fast_mode = 4;
     // One MCP server's health changed.
     SessionMcpServer mcp_server = 5;
-    // The account's usage allowance was observed.
-    SessionAccountUsage account_usage = 6;
     // The session's permission mode changed — by SetSessionPermissionMode, or by a
     // standing permission grant that set it. Stated here even when the
     // consumer asked for it, so one place is authoritative.
@@ -340,6 +338,12 @@ message SessionUpdate {
     // SessionVendorActivity, which carries the level's whole contract.
     SessionVendorActivity vendor_activity = 41;
   }
+  // Tag 6 (`account_usage`, the account's sampled usage allowance) is
+  // RETIRED: the account's usage is never sampled, so the arm had no
+  // producer. A window's figure and verdict both come from
+  // `rate_limit_status`.
+  reserved 6;
+  reserved "account_usage";
 }
 
 // A JOINING PROMPT AN ASK OVERTOOK, TAKEN BACK (owner ruling, 2026-10-23).
@@ -946,148 +950,6 @@ message SessionMcpServerConnected {}
 message SessionMcpServerFailed {
   // The error, verbatim.
   string error = 1;
-}
-
-// What the account's usage looked like when sampled. LIVE, whenever the
-// shim observes it — not pinned to a turn boundary.
-//
-// THE OUTCOME IS BY BILLING MODE (owner ruling, 2026-10-06): an account billed
-// by allowance windows (a Pro or Max subscription) reads `available`; an
-// account billed by a monthly per-seat spend allotment reads `seat_spend`;
-// never both. The shim picks `seat_spend` exactly when the subscription type
-// is enterprise AND the vendor reports a monthly limit with no five-hour
-// window; anything else that reports windows is `available`.
-message SessionAccountUsage {
-  // When it was sampled, in unix millis.
-  int64 observed_at_ms = 1;
-  // Tag 2 (`subscription_type`, the vendor's word as a free string) is
-  // RETIRED: the plan is typed (tag 6).
-  reserved 2;
-  // THE ARM IS THE BILLING MODE, or why no figure could be read.
-  oneof outcome {
-    // The account's allowance windows were read (subscription billing).
-    SessionAccountUsageAvailable available = 3;
-    // No figure could be read.
-    SessionAccountUsageUnavailable unavailable = 4;
-    // The account is billed by a monthly per-seat spend allotment.
-    SessionAccountUsageSeatSpend seat_spend = 5;
-  }
-  // The account's plan as the vendor names it. UNSET when the vendor named
-  // none (an API key or third-party provider session, or a failed sample).
-  // SET WITH ITS ONEOF UNASSIGNED when the vendor named a plan this schema
-  // revision does not.
-  optional SessionSubscriptionType subscription_type = 6;
-}
-
-// The account's plan (the SDK's `subscription_type`). THE ARM IS THE PLAN.
-message SessionSubscriptionType {
-  oneof plan {
-    SessionSubscriptionTypePro pro = 1;
-    SessionSubscriptionTypeMax max = 2;
-    SessionSubscriptionTypeTeam team = 3;
-    SessionSubscriptionTypeEnterprise enterprise = 4;
-  }
-}
-// A Claude Pro subscription.
-message SessionSubscriptionTypePro {}
-// A Claude Max subscription.
-message SessionSubscriptionTypeMax {}
-// A Claude Team subscription.
-message SessionSubscriptionTypeTeam {}
-// A Claude Enterprise seat.
-message SessionSubscriptionTypeEnterprise {}
-
-// The account's seat spend for the current month: what has been spent
-// against the seat's monthly allotment. The vendor states no billing-period
-// reset, so none is carried.
-message SessionAccountUsageSeatSpend {
-  // The seat's monthly allotment (the vendor's extra_usage.monthly_limit).
-  SessionMoney allotment = 1;
-  // Month-to-date spend (the vendor's extra_usage.used_credits), in the
-  // allotment's currency. UNSET while the vendor has reported no spend
-  // figure.
-  optional SessionMoney spent = 2;
-}
-
-// An amount of money as the vendor states it.
-message SessionMoney {
-  // The amount in minor units of the currency (cents for USD).
-  int64 amount_minor = 1;
-  // The ISO 4217 currency code, verbatim (e.g. "USD").
-  string currency = 2;
-}
-
-// The allowance windows were read.
-message SessionAccountUsageAvailable {
-  // The rolling five-hour window.
-  SessionUsageWindow five_hour = 1;
-
-  // THE LONGER WINDOWS, each UNSET when the account has no such allowance or
-  // the vendor reported none for it.
-  //
-  // SEPARATE FIELDS RATHER THAN A LIST, because a consumer draws a NAMED
-  // window ("weekly", "weekly on Opus") and a list keyed by a vendor string
-  // would put the naming back in the consumer's hands. A window the vendor
-  // adds later is a compiler-surfaced gap rather than an entry silently
-  // dropped.
-  //
-  // The rolling seven-day allowance across everything.
-  optional SessionUsageWindow seven_day = 2;
-  // The rolling seven-day allowance for OAuth-app traffic, which is metered
-  // apart from the account's own.
-  optional SessionUsageWindow seven_day_oauth_apps = 3;
-  // The rolling seven-day allowance for the Opus model family. EXHAUSTIBLE ON
-  // ITS OWN: this can run out while the overall weekly window has room, which
-  // is otherwise a refusal with no visible cause.
-  optional SessionUsageWindow seven_day_opus = 4;
-  // The rolling seven-day allowance for the Sonnet model family.
-  optional SessionUsageWindow seven_day_sonnet = 5;
-
-  // Allowances scoped to one model each, for models the vendor meters
-  // individually. Empty when it meters none that way.
-  repeated SessionModelUsageWindow model_scoped = 6;
-}
-
-// One allowance window that applies to a single model.
-message SessionModelUsageWindow {
-  // Which model the window meters.
-  AgentModel model = 1;
-  // The window's figures.
-  SessionUsageWindow window = 2;
-}
-
-// One allowance window's figures.
-message SessionUsageWindow {
-  // How much of the window is used, 0–100.
-  double utilization_percent = 1;
-  // When the window resets, in unix millis.
-  int64 resets_at_ms = 2;
-}
-
-// Why no figure could be read. THE ARM IS THE REASON.
-message SessionAccountUsageUnavailable {
-  oneof reason {
-    // The usage service did not answer.
-    SessionUsageServiceUnavailable service_unavailable = 1;
-    // The service answered without a five-hour window.
-    SessionUsageWindowUnavailable window_unavailable = 2;
-    // The window carried no utilization figure.
-    SessionUsageUtilizationUnavailable utilization_unavailable = 3;
-    // The shim's own sampling failed.
-    SessionUsageSamplingFailure sampling_failure = 4;
-  }
-}
-
-// The usage service did not answer.
-message SessionUsageServiceUnavailable {}
-// The service answered without a five-hour window.
-message SessionUsageWindowUnavailable {}
-// The window carried no utilization figure.
-message SessionUsageUtilizationUnavailable {}
-// The shim's own sampling failed.
-message SessionUsageSamplingFailure {
-  // The cause, verbatim.
-  string cause = 1;
 }
 
 // ---- The shim's own health: PULLED by the daemon, never pushed ----
