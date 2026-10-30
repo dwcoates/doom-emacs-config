@@ -254,6 +254,14 @@
   - The verb and its flags are `/agent-repl-workspaces`'.
 - The daemon clears the mark itself when I take the workspace back, so no workspace unmarks itself.
 
+### A repository's main workspace is never a one-shot
+
+- A repository's main workspace never marks itself one-shot.
+  - The main workspace is the one on the repository's main checkout, such as `main (doom)`, and its system prompt ends by saying so.
+  - It sits on the main branch and lands nothing itself, so the daemon refuses the mark (`main_workspace`).
+- Told to one-shot itself, the main workspace instead splits the work off into a created one-shot workspace, which lands it.
+  - It writes that workspace's prompt and creates it with `-one-shot`, per `/agent-repl-workspaces`.
+
 ## Handed failures
 
 ### A failure agent-repl hands over is diagnosed, then fixed by a one-shot child, never proposed and waited on
