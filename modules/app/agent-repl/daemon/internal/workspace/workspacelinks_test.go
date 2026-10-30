@@ -32,9 +32,14 @@ func TestLinkVerbsRecordAndRepublish(t *testing.T) {
 	}{
 		{name: "a set stores the link and hands the title it",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", docLink.URL, docLink.Label)
+				return v.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, false)
 			},
 			want: []wsm.WorkspaceLink{docLink}, wantTopbar: []topbar.Link{{Label: docLink.Label, URL: docLink.URL}}, wantLine: "set a link"},
+		{name: "an owned set stores the link owned",
+			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
+				return v.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, true)
+			},
+			want: []wsm.WorkspaceLink{{URL: docLink.URL, Label: docLink.Label, Shown: true, Owned: true}}, wantTopbar: []topbar.Link{{Label: docLink.Label, URL: docLink.URL}}, wantLine: "set a link"},
 		{name: "a removal hands the title the rest", standing: []wsm.WorkspaceLink{ticketLink, docLink},
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
 				return v.RemoveLink(context.Background(), "w1", ticketLink.URL)
@@ -89,31 +94,31 @@ func TestLinkVerbsRefuse(t *testing.T) {
 	}{
 		{name: "a url that is not http or https",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "ftp://example.com/x", "An ftp link")
+				return v.SetLink(context.Background(), "w1", "ftp://example.com/x", "An ftp link", false)
 			}, arm: ArmInvalidLink, wantFields: map[string]any{"url": "ftp://example.com/x"}},
 		{name: "a url carrying whitespace",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/a b", "A spaced link")
+				return v.SetLink(context.Background(), "w1", "https://example.com/a b", "A spaced link", false)
 			}, arm: ArmInvalidLink, wantFields: map[string]any{"url": "https://example.com/a b"}},
 		{name: "a one-word label",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/x", "Doc")
+				return v.SetLink(context.Background(), "w1", "https://example.com/x", "Doc", false)
 			}, arm: ArmInvalidLabel, wantFields: map[string]any{"label": "Doc"}},
 		{name: "a nine-word label",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/x", "one two three four five six seven eight nine")
+				return v.SetLink(context.Background(), "w1", "https://example.com/x", "one two three four five six seven eight nine", false)
 			}, arm: ArmInvalidLabel, wantFields: map[string]any{"label": "one two three four five six seven eight nine"}},
 		{name: "a label of two sentences",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The doc. Read it")
+				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The doc. Read it", false)
 			}, arm: ArmInvalidLabel, wantFields: map[string]any{"label": "The doc. Read it"}},
 		{name: "a label on two lines",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The design\ndoc")
+				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The design\ndoc", false)
 			}, arm: ArmInvalidLabel, wantFields: map[string]any{"label": "The design\ndoc"}},
 		{name: "a label with whitespace at its end",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The design doc ")
+				return v.SetLink(context.Background(), "w1", "https://example.com/x", "The design doc ", false)
 			}, arm: ArmInvalidLabel, wantFields: map[string]any{"label": "The design doc "}},
 		{name: "removing a link the workspace does not hold",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
@@ -129,7 +134,7 @@ func TestLinkVerbsRefuse(t *testing.T) {
 			}, arm: ArmTooManyShown, wantFields: map[string]any{"named": uint32(6), "limit": uint32(5)}},
 		{name: "a workspace that is not registered",
 			act: func(v Verbs) ([]wsm.WorkspaceLink, error) {
-				return v.SetLink(context.Background(), "absent", docLink.URL, docLink.Label)
+				return v.SetLink(context.Background(), "absent", docLink.URL, docLink.Label, false)
 			}, arm: ArmUnknownWorkspace, wantFields: map[string]any{}},
 	}
 	for _, tt := range tests {
@@ -174,7 +179,7 @@ func TestLinkVerbsFailLoudlyWhenTheStoreWillNotWrite(t *testing.T) {
 	f.db.linksErr = errors.New("disk full")
 
 	// Act.
-	_, err := f.verbs.SetLink(context.Background(), "w1", docLink.URL, docLink.Label)
+	_, err := f.verbs.SetLink(context.Background(), "w1", docLink.URL, docLink.Label, false)
 
 	// Assert: the error surfaces, is recorded with its context, and the title
 	// is not handed links the store does not hold.
@@ -238,6 +243,9 @@ func TestLinksView(t *testing.T) {
 	unshown := wsm.WorkspaceLink{URL: "https://example.com/old", Label: "An older draft"}
 	shownArm := &agentreplv1.WorkspaceLinkPlacement{Placement: &agentreplv1.WorkspaceLinkPlacement_Shown{Shown: &agentreplv1.WorkspaceLinkPlacementShown{}}}
 	unshownArm := &agentreplv1.WorkspaceLinkPlacement{Placement: &agentreplv1.WorkspaceLinkPlacement_Unshown{Unshown: &agentreplv1.WorkspaceLinkPlacementUnshown{}}}
+	referenceArm := &agentreplv1.WorkspaceLinkOwnership{Ownership: &agentreplv1.WorkspaceLinkOwnership_Reference{Reference: &agentreplv1.WorkspaceLinkReference{}}}
+	ownedArm := &agentreplv1.WorkspaceLinkOwnership{Ownership: &agentreplv1.WorkspaceLinkOwnership_Owned{Owned: &agentreplv1.WorkspaceLinkOwned{}}}
+	pull := wsm.WorkspaceLink{URL: "https://github.com/a/b/pull/7", Label: "The fix itself", Shown: true, Owned: true}
 	five := []wsm.WorkspaceLink{docLink, docLink, docLink, docLink, docLink}
 	tests := []struct {
 		name  string
@@ -249,16 +257,20 @@ func TestLinksView(t *testing.T) {
 				Menu: &agentreplv1.WorkspaceLinksMenu{Standing: &agentreplv1.WorkspaceLinksMenu_Room{Room: &agentreplv1.WorkspaceLinksMenuRoom{Free: 5}}}}},
 		{name: "each link carries its placement, and room counts only the shown", links: []wsm.WorkspaceLink{docLink, unshown},
 			want: &agentreplv1.WorkspaceLinks{Links: []*agentreplv1.WorkspaceLink{
-				{Url: docLink.URL, Label: docLink.Label, Placement: shownArm},
-				{Url: unshown.URL, Label: unshown.Label, Placement: unshownArm}},
+				{Url: docLink.URL, Label: docLink.Label, Placement: shownArm, Ownership: referenceArm},
+				{Url: unshown.URL, Label: unshown.Label, Placement: unshownArm, Ownership: referenceArm}},
 				Menu: &agentreplv1.WorkspaceLinksMenu{Standing: &agentreplv1.WorkspaceLinksMenu_Room{Room: &agentreplv1.WorkspaceLinksMenuRoom{Free: 4}}}}},
 		{name: "five shown links fill the menu", links: five,
 			want: func() *agentreplv1.WorkspaceLinks {
 				out := LinksView(five[:4])
-				out.Links = append(out.Links, &agentreplv1.WorkspaceLink{Url: docLink.URL, Label: docLink.Label, Placement: shownArm})
+				out.Links = append(out.Links, &agentreplv1.WorkspaceLink{Url: docLink.URL, Label: docLink.Label, Placement: shownArm, Ownership: referenceArm})
 				out.Menu = &agentreplv1.WorkspaceLinksMenu{Standing: &agentreplv1.WorkspaceLinksMenu_Full{Full: &agentreplv1.WorkspaceLinksMenuFull{Limit: 5}}}
 				return out
 			}()},
+		{name: "an owned link carries the owned arm", links: []wsm.WorkspaceLink{pull},
+			want: &agentreplv1.WorkspaceLinks{Links: []*agentreplv1.WorkspaceLink{
+				{Url: pull.URL, Label: pull.Label, Placement: shownArm, Ownership: ownedArm}},
+				Menu: &agentreplv1.WorkspaceLinksMenu{Standing: &agentreplv1.WorkspaceLinksMenu_Room{Room: &agentreplv1.WorkspaceLinksMenuRoom{Free: 4}}}}},
 		{name: "a full menu counts the unshown", links: append([]wsm.WorkspaceLink{unshown}, five...),
 			want: func() *agentreplv1.WorkspaceLinks {
 				out := LinksView(append([]wsm.WorkspaceLink{unshown}, five...))

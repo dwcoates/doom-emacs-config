@@ -22,6 +22,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/sourcescan"
+	"agent-repld/internal/workspace"
 )
 
 // cliClient is a daemon client that records every request and answers the
@@ -351,6 +352,35 @@ func TestCreateSendsNoPriorityItWasNotGiven(t *testing.T) {
 	}
 }
 
+func TestCreateSendsTheSlackOriginItNames(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want *agentreplv1.CreateWorkspaceSlackOrigin
+	}{
+		{name: "a slack thread is the origin", args: []string{"-slack-thread", "https://w.slack.com/archives/C1/p1730000000123456"},
+			want: &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: "https://w.slack.com/archives/C1/p1730000000123456"}},
+		{name: "no slack thread names no origin", args: nil, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"create", "-repository", "here", "-relationship", "peer", "-context", "fresh"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			if req := only[*agentreplv1.CreateWorkspaceRequest](t, f); !proto.Equal(req.GetSlackOrigin(), tt.want) {
+				t.Fatalf("slack origin = %v, want %v", req.GetSlackOrigin(), tt.want)
+			}
+		})
+	}
+}
+
 func TestCreateRefusesAnUnnamedChoice(t *testing.T) {
 	tests := []struct {
 		name string
@@ -587,9 +617,12 @@ func TestLinkSendsTheChange(t *testing.T) {
 		args []string
 		want *agentreplv1.ChangeWorkspaceLinksRequest
 	}{
-		{name: "-url with -label sets the link", args: []string{"-url", "https://example.com/pr/3", "-label", "The pull request"},
+		{name: "-url with -label and -owned sets an owned link", args: []string{"-url", "https://example.com/pr/3", "-label", "The pull request", "-owned"},
 			want: &agentreplv1.ChangeWorkspaceLinksRequest{Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{
-				Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://example.com/pr/3", Label: "The pull request"}}}},
+				Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://example.com/pr/3", Label: "The pull request", Ownership: workspace.LinkOwnershipView(true)}}}},
+		{name: "-url with -label and -reference sets a reference", args: []string{"-url", "https://example.com/t/3", "-label", "The tracking ticket", "-reference"},
+			want: &agentreplv1.ChangeWorkspaceLinksRequest{Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{
+				Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://example.com/t/3", Label: "The tracking ticket", Ownership: workspace.LinkOwnershipView(false)}}}},
 		{name: "-remove removes one", args: []string{"-remove", "https://example.com/pr/3"},
 			want: &agentreplv1.ChangeWorkspaceLinksRequest{Change: &agentreplv1.ChangeWorkspaceLinksRequest_Remove{
 				Remove: &agentreplv1.ChangeWorkspaceLinksRemove{Url: "https://example.com/pr/3"}}}},
@@ -630,7 +663,10 @@ func TestLinkRefusesAMalformedChange(t *testing.T) {
 		args []string
 	}{
 		{name: "no change", args: nil},
-		{name: "a url with no label", args: []string{"-url", "https://example.com"}},
+		{name: "a url with no label", args: []string{"-url", "https://example.com", "-owned"}},
+		{name: "a set naming no ownership", args: []string{"-url", "https://example.com", "-label", "The design doc"}},
+		{name: "a set naming both ownerships", args: []string{"-url", "https://example.com", "-label", "The design doc", "-owned", "-reference"}},
+		{name: "an ownership beside a removal", args: []string{"-remove", "https://a", "-owned"}},
 		{name: "a label with no url", args: []string{"-label", "The design doc"}},
 		{name: "two changes at once", args: []string{"-remove", "https://a", "-clear"}},
 		{name: "a positional argument", args: []string{"-clear", "extra"}},

@@ -373,6 +373,14 @@ type DetachedMerges interface {
 	Reveal(ctx context.Context, mergeWS ids.WorkspaceID) (bool, error)
 }
 
+// EndObserver is told how every merge left the queue for good.
+type EndObserver interface {
+	// MergeEnded is told that the merge run in WS resolved as OUT: landed,
+	// failed, or abandoned. It records its own failures; nothing it does
+	// changes the merge's terminal.
+	MergeEnded(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome)
+}
+
 // Names is the slice of workspace naming an async request needs: its merge
 // workspace's name is checked and reserved when the request is recorded, so
 // the fork can never collide.
@@ -563,6 +571,10 @@ type Deps struct {
 	// Detached forks a detached request's merge workspace and hands its
 	// outcome back to the requester.
 	Detached DetachedMerges
+	// Ends is told every merge's resolution, once, after the workspaces it
+	// is handed back to were told (ended): the workspace verbs, which post a
+	// finished workspace's end into the Slack thread it was created for.
+	Ends EndObserver
 	// QueueEvents is told every change of every queue this daemon makes, with
 	// the queue as it stands after it: the merge queue subscriptions' notices
 	// (internal/mergenotice).

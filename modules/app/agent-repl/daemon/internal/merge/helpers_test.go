@@ -2317,6 +2317,7 @@ type harness struct {
 	db *fakeDB
 	// events records every queue change the orchestrator reports.
 	events  *fakeQueueEvents
+	ends    *fakeEnds
 	git     *fakeGit
 	queue   *fakeQueue
 	feed    *fakeFeed
@@ -2686,6 +2687,7 @@ func newHarness(t *testing.T) *harness {
 	h.detached = &fakeDetached{h: h}
 	h.hooks = &fakeHookRunner{h: h, exits: map[string]int{}, timeouts: map[string]bool{}, lines: map[string][]string{}}
 	h.events = &fakeQueueEvents{}
+	h.ends = &fakeEnds{}
 	h.names = &fakeNames{}
 	h.banners = &fakeBanners{told: func() int { return len(h.detached.sent()) }}
 	h.queue = &fakeQueue{db: h.db}
@@ -2844,6 +2846,7 @@ func (h *harness) deps() Deps {
 		},
 		Home:     "/home/tester",
 		Detached: h.detached,
+		Ends:     h.ends,
 		Names:    h.names,
 		InterruptTurn: func(_ context.Context, ws ids.WorkspaceID) (bool, error) {
 			h.mu.Lock()
@@ -3352,6 +3355,30 @@ func attemptsUpTo(n int) []int {
 		out[i] = i + 1
 	}
 	return out
+}
+
+// fakeEnds records every merge resolution the orchestrator reported, in order.
+type fakeEnds struct {
+	mu   sync.Mutex
+	seen []endSeen
+}
+
+// endSeen is one resolution fakeEnds was told.
+type endSeen struct {
+	ws  ids.WorkspaceID
+	out DetachedOutcome
+}
+
+func (f *fakeEnds) MergeEnded(_ context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seen = append(f.seen, endSeen{ws: ws, out: out})
+}
+
+func (f *fakeEnds) told() []endSeen {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]endSeen(nil), f.seen...)
 }
 
 // fakeQueueEvents records every reported queue change, in order.

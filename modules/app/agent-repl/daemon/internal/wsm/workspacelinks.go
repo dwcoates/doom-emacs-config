@@ -27,6 +27,15 @@ CREATE TABLE workspace_links (
 );
 `
 
+// linkOwnershipDDL is the layout-92 addition: whether the workspace's work
+// made what each link points at (agentrepl.v1.WorkspaceLinkOwnership). IT IS
+// ADDITIVE: the previous build's INSERT names no such column, so a link it
+// stores takes 0, a reference, which is what every link set before links
+// carried ownership reads as.
+const linkOwnershipDDL = `
+ALTER TABLE workspace_links ADD COLUMN owned INTEGER NOT NULL DEFAULT 0;
+`
+
 // ShownLinkLimit is how many of a workspace's links the topbar summary's menu
 // shows at most.
 const ShownLinkLimit = 5
@@ -40,6 +49,9 @@ type WorkspaceLink struct {
 	Label string
 	// Shown is true while the menu shows the link.
 	Shown bool
+	// Owned is true when the workspace's work made what the link points at,
+	// false when it only references it.
+	Owned bool
 }
 
 // UnknownLinkError is a removal or a show naming a url the workspace does not
@@ -69,13 +81,14 @@ func (s *store) WorkspaceLinks(ctx context.Context, id WorkspaceID) ([]Workspace
 	return out, err
 }
 
-// SetWorkspaceLink stores URL under LABEL, or relabels it when ID already
-// holds it, making it the most recently set either way. A new link is shown
-// while fewer than ShownLinkLimit are; a relabeled one keeps its placement.
-// It answers every link ID now holds, read in the same transaction.
-func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, url, label string) ([]WorkspaceLink, error) {
+// SetWorkspaceLink stores URL under LABEL with its ownership, or relabels it
+// and sets its ownership anew when ID already holds it, making it the most
+// recently set either way. A new link is shown while fewer than
+// ShownLinkLimit are; a relabeled one keeps its placement. It answers every
+// link ID now holds, read in the same transaction.
+func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, url, label string, owned bool) ([]WorkspaceLink, error) {
 	const op = "daemon.wsm.set_workspace_link"
-	fields := dlog.Context{"workspace": string(id), "url": url, "label": label}
+	fields := dlog.Context{"workspace": string(id), "url": url, "label": label, "owned": owned}
 	if url == "" || label == "" {
 		err := fmt.Errorf("wsm: link of %s: a link names its url and its label", id)
 		s.log.Error(op, "refused a link its caller should never have made", withError(fields, err))
@@ -93,9 +106,9 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, url, label
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown) VALUES (?, ?, ?, ?, ?)
-			 ON CONFLICT(workspace_id, url) DO UPDATE SET label = excluded.label, set_seq = excluded.set_seq`,
-			id, url, label, next, shown < ShownLinkLimit); err != nil {
+			`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown, owned) VALUES (?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(workspace_id, url) DO UPDATE SET label = excluded.label, set_seq = excluded.set_seq, owned = excluded.owned`,
+			id, url, label, next, shown < ShownLinkLimit, owned); err != nil {
 			return err
 		}
 		var err error
@@ -193,10 +206,10 @@ func requireWorkspaceRow(ctx context.Context, tx *sql.Tx, id WorkspaceID) error 
 
 // linksOf reads ID's links, most recently set first.
 func linksOf(ctx context.Context, q querier, id WorkspaceID) ([]WorkspaceLink, error) {
-	return listRows(ctx, q, `SELECT url, label, shown FROM workspace_links WHERE workspace_id = ? ORDER BY set_seq DESC`,
+	return listRows(ctx, q, `SELECT url, label, shown, owned FROM workspace_links WHERE workspace_id = ? ORDER BY set_seq DESC`,
 		func(row interface{ Scan(...any) error }) (WorkspaceLink, error) {
 			var link WorkspaceLink
-			err := row.Scan(&link.URL, &link.Label, &link.Shown)
+			err := row.Scan(&link.URL, &link.Label, &link.Shown, &link.Owned)
 			return link, err
 		}, id)
 }

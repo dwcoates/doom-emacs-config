@@ -39,6 +39,7 @@ import (
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/slackpost"
 	"agent-repld/internal/wsm"
 )
 
@@ -103,6 +104,10 @@ type CreateSpec struct {
 	// Name is the user-supplied workspace name. Empty derives the slug from
 	// the initial prompt by the naming rule.
 	Name string
+	// SlackThread is the link of the Slack message the workspace was created
+	// to act on (agentrepl.v1.CreateWorkspaceSlackOrigin), empty for a create
+	// no Slack message started. The request's validation parsed it.
+	SlackThread string
 	// Model is the model the session starts under, empty for the vendor's
 	// default.
 	Model string
@@ -446,10 +451,14 @@ type Verbs interface {
 	MarkViewed(ctx context.Context, ws ids.WorkspaceID) error
 	// SetPriority sets or clears the roster priority badge.
 	SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error
-	// SetLink stores a link under its label, or relabels a stored one
-	// (agentrepl.v1.ChangeWorkspaceLinksSet), answering every link the
-	// workspace then holds and republishing the summary's menu.
-	SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string) ([]wsm.WorkspaceLink, error)
+	// SetLink stores a link under its label and ownership, or relabels a
+	// stored one (agentrepl.v1.ChangeWorkspaceLinksSet), answering every link
+	// the workspace then holds and republishing the summary's menu.
+	SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool) ([]wsm.WorkspaceLink, error)
+	// MergeEnded is told how a merge run in WS left the queue for good
+	// (merge.EndObserver). A workspace created for a Slack message posts the
+	// end of a finish's deploy into that thread, with every link it owns.
+	MergeEnded(ctx context.Context, ws ids.WorkspaceID, out merge.DetachedOutcome)
 	// RemoveLink removes one stored link, answering the rest.
 	RemoveLink(ctx context.Context, ws ids.WorkspaceID, url string) ([]wsm.WorkspaceLink, error)
 	// ShowLinks names exactly the links the summary's menu shows, answering
@@ -724,6 +733,10 @@ type Deps struct {
 	ColdGateAnswers ColdGateAnswerTelemetry
 	// Browser opens a clicked link in the pinned external browser.
 	Browser externalbrowser.Opener
+	// Slack posts into the Slack thread a workspace was created for: when its
+	// work begins, and when a finish's deploy ends (slackorigin.go).
+	// Required.
+	Slack slackpost.Poster
 	// Headless is the daemon's own one-shot vendor run. A create that supplies
 	// no name asks it for one; nothing else in this package uses it. nil is a
 	// build with no naming call at all, which REFUSES an unnamed create rather
@@ -1147,6 +1160,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("the hidden workspaces' cache keeper")
 	case deps.Summaries == nil:
 		return nil, missing("a summary restorer")
+	case deps.Slack == nil:
+		return nil, missing("a slack poster")
 	case deps.Cards == nil:
 		return nil, missing("a served-card store")
 	case deps.PromptsDir == "":

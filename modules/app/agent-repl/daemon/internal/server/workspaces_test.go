@@ -917,8 +917,10 @@ func TestChangeWorkspaceLinksHandsTheChangeToTheVerb(t *testing.T) {
 		req  *agentreplv1.ChangeWorkspaceLinksRequest
 		want string
 	}{
-		{"set", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://example.com/pr/1", Label: "The pull request"}}},
-			"set https://example.com/pr/1 The pull request"},
+		{"set", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://example.com/pr/1", Label: "The pull request", Ownership: workspace.LinkOwnershipView(true)}}},
+			"set https://example.com/pr/1 The pull request owned"},
+		{"set of a reference", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "https://example.com/t/1", Label: "The tracking ticket", Ownership: workspace.LinkOwnershipView(false)}}},
+			"set https://example.com/t/1 The tracking ticket reference"},
 		{"remove", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Remove{Remove: &agentreplv1.ChangeWorkspaceLinksRemove{Url: "https://example.com/pr/1"}}},
 			"remove https://example.com/pr/1"},
 		{"show", &agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(), Change: &agentreplv1.ChangeWorkspaceLinksRequest_Show{Show: &agentreplv1.ChangeWorkspaceLinksShow{Urls: []string{"https://a", "https://b"}}}},
@@ -1008,7 +1010,7 @@ func TestChangeWorkspaceLinksMapsTheVerbsRefusals(t *testing.T) {
 			// Act
 			resp, err := h.Client.ChangeWorkspaceLinks(context.Background(),
 				connect.NewRequest(&agentreplv1.ChangeWorkspaceLinksRequest{Workspace: ref(),
-					Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "ftp://x", Label: "Doc"}}}))
+					Change: &agentreplv1.ChangeWorkspaceLinksRequest_Set{Set: &agentreplv1.ChangeWorkspaceLinksSet{Url: "ftp://x", Label: "Doc", Ownership: workspace.LinkOwnershipView(false)}}}))
 
 			// Assert
 			if err != nil {
@@ -2069,6 +2071,38 @@ func TestCreateWorkspaceMapsAOneShotContextToTheSpec(t *testing.T) {
 			}
 			if (spec.ContextWorkspace == nil) != (tt.want == nil) || (tt.want != nil && *spec.ContextWorkspace != *tt.want) {
 				t.Fatalf("context workspace = %v, want %v", spec.ContextWorkspace, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateWorkspaceMapsASlackOriginToTheSpec(t *testing.T) {
+	const thread = "https://w.slack.com/archives/C1/p1730000000123456"
+	tests := []struct {
+		name   string
+		origin *agentreplv1.CreateWorkspaceSlackOrigin
+		want   string
+	}{
+		{name: "an origin names its thread", origin: &agentreplv1.CreateWorkspaceSlackOrigin{ThreadUrl: thread}, want: thread},
+		{name: "no origin names none", origin: nil, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+			req := oneShotCreate(registeredRepoRef(h), nil)
+			req.SlackOrigin = tt.origin
+
+			// Act.
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("CreateWorkspace = (%v, %v), want success", resp, err)
+			}
+			if got := h.Verbs.createSpecs[0].SlackThread; got != tt.want {
+				t.Fatalf("spec slack thread = %q, want %q", got, tt.want)
 			}
 		})
 	}

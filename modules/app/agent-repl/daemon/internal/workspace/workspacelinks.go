@@ -26,14 +26,15 @@ const (
 	maxLinkLabelWords = 8
 )
 
-// SetLink stores URL under LABEL on the workspace, or relabels it when the
-// workspace already holds it (agentrepl.v1.ChangeWorkspaceLinksSet), and
+// SetLink stores URL under LABEL on the workspace, owned or a reference, or
+// relabels it and sets its ownership anew when the workspace already holds it
+// (agentrepl.v1.ChangeWorkspaceLinksSet), and
 // republishes the topbar title that opens the shown links. A url the external
 // browser would refuse to open is refused invalid_link, and a label that is
 // not two to eight words in one sentence invalid_label, before anything is
 // written. It answers every link the workspace then holds.
-func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string) ([]wsm.WorkspaceLink, error) {
-	fields := dlog.Context{"url": url, "label": label}
+func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label string, owned bool) ([]wsm.WorkspaceLink, error) {
+	fields := dlog.Context{"url": url, "label": label, "owned": owned}
 	return v.changeLinks(ctx, ws, fields, "set a link", func(log dlog.Logger) ([]wsm.WorkspaceLink, error) {
 		if err := externalbrowser.Validate(url); err != nil {
 			return nil, refuseWith(log, rpcChangeWorkspaceLinks, ArmInvalidLink,
@@ -45,7 +46,7 @@ func (v *verbs) SetLink(ctx context.Context, ws ids.WorkspaceID, url, label stri
 				fmt.Sprintf("%q is not a label the menu draws: %v", label, err), false,
 				map[string]any{"label": label, "reason": err.Error()})
 		}
-		return v.deps.DB.SetWorkspaceLink(ctx, ws, url, label)
+		return v.deps.DB.SetWorkspaceLink(ctx, ws, url, label, owned)
 	})
 }
 
@@ -135,6 +136,15 @@ func isSentenceEnd(r rune) bool {
 	return r == '.' || r == '!' || r == '?' || unicode.Is(unicode.Sentence_Terminal, r)
 }
 
+// LinkOwnershipView renders whether a link is owned
+// (agentrepl.v1.WorkspaceLinkOwnership).
+func LinkOwnershipView(owned bool) *agentreplv1.WorkspaceLinkOwnership {
+	if owned {
+		return &agentreplv1.WorkspaceLinkOwnership{Ownership: &agentreplv1.WorkspaceLinkOwnership_Owned{Owned: &agentreplv1.WorkspaceLinkOwned{}}}
+	}
+	return &agentreplv1.WorkspaceLinkOwnership{Ownership: &agentreplv1.WorkspaceLinkOwnership_Reference{Reference: &agentreplv1.WorkspaceLinkReference{}}}
+}
+
 // ShownLinks is the links the summary's menu shows, in the order given (most
 // recently set first, as the store reads them).
 func ShownLinks(links []wsm.WorkspaceLink) []topbar.Link {
@@ -161,7 +171,7 @@ func LinksView(links []wsm.WorkspaceLink) *agentreplv1.WorkspaceLinks {
 		} else {
 			placement.Placement = &agentreplv1.WorkspaceLinkPlacement_Unshown{Unshown: &agentreplv1.WorkspaceLinkPlacementUnshown{}}
 		}
-		out.Links[i] = &agentreplv1.WorkspaceLink{Url: link.URL, Label: link.Label, Placement: placement}
+		out.Links[i] = &agentreplv1.WorkspaceLink{Url: link.URL, Label: link.Label, Placement: placement, Ownership: LinkOwnershipView(link.Owned)}
 	}
 	if shown < wsm.ShownLinkLimit {
 		out.Menu = &agentreplv1.WorkspaceLinksMenu{Standing: &agentreplv1.WorkspaceLinksMenu_Room{

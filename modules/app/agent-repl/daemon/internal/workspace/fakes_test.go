@@ -41,6 +41,7 @@ import (
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/shimlife"
+	"agent-repld/internal/slackpost"
 	"agent-repld/internal/wsm"
 )
 
@@ -226,9 +227,14 @@ type fakeDB struct {
 	setAwaitingErr  error
 	// links are each workspace's stored links, most recently set first;
 	// linksErr fails every change to them and linksReadErr every read.
-	links        map[ids.WorkspaceID][]wsm.WorkspaceLink
-	linksErr     error
-	linksReadErr error
+	links map[ids.WorkspaceID][]wsm.WorkspaceLink
+	// slackOrigins are the recorded originating threads; slackOriginErr
+	// fails a record and slackOriginReadErr a read.
+	slackOrigins       map[ids.WorkspaceID]string
+	slackOriginErr     error
+	slackOriginReadErr error
+	linksErr           error
+	linksReadErr       error
 	// setNameErr fails SetName; listWorkspacesErrAfterRename becomes
 	// listWorkspacesErr once SetName writes, for a test that fails only the
 	// reads after a rename is recorded.
@@ -748,7 +754,7 @@ func (d *fakeDB) WorkspaceLinks(_ context.Context, id ids.WorkspaceID) ([]wsm.Wo
 
 // SetWorkspaceLink stores or relabels a link at the front, shown while fewer
 // than wsm.ShownLinkLimit are, as the store does; linksErr fails it.
-func (d *fakeDB) SetWorkspaceLink(_ context.Context, id ids.WorkspaceID, url, label string) ([]wsm.WorkspaceLink, error) {
+func (d *fakeDB) SetWorkspaceLink(_ context.Context, id ids.WorkspaceID, url, label string, owned bool) ([]wsm.WorkspaceLink, error) {
 	if d.linksErr != nil {
 		return nil, d.linksErr
 	}
@@ -756,7 +762,7 @@ func (d *fakeDB) SetWorkspaceLink(_ context.Context, id ids.WorkspaceID, url, la
 		d.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{}
 	}
 	links := d.links[id]
-	link := wsm.WorkspaceLink{URL: url, Label: label}
+	link := wsm.WorkspaceLink{URL: url, Label: label, Owned: owned}
 	if i := slices.IndexFunc(links, func(l wsm.WorkspaceLink) bool { return l.URL == url }); i >= 0 {
 		link.Shown = links[i].Shown
 		links = slices.Delete(links, i, i+1)
@@ -804,6 +810,29 @@ func (d *fakeDB) ShowWorkspaceLinks(_ context.Context, id ids.WorkspaceID, urls 
 	}
 	d.links[id] = links
 	return slices.Clone(links), nil
+}
+
+// SetWorkspaceSlackOrigin records the workspace's originating thread;
+// slackOriginErr fails it and records nothing.
+func (d *fakeDB) SetWorkspaceSlackOrigin(_ context.Context, id ids.WorkspaceID, url string) error {
+	if d.slackOriginErr != nil {
+		return d.slackOriginErr
+	}
+	if d.slackOrigins == nil {
+		d.slackOrigins = map[ids.WorkspaceID]string{}
+	}
+	d.slackOrigins[id] = url
+	return nil
+}
+
+// WorkspaceSlackOrigin answers the recorded originating thread;
+// slackOriginReadErr fails it.
+func (d *fakeDB) WorkspaceSlackOrigin(_ context.Context, id ids.WorkspaceID) (string, bool, error) {
+	if d.slackOriginReadErr != nil {
+		return "", false, d.slackOriginReadErr
+	}
+	url, found := d.slackOrigins[id]
+	return url, found, nil
 }
 
 // ClearWorkspaceLinks removes every stored link; linksErr fails it.
@@ -2619,6 +2648,25 @@ func (s *fakeShim) KillSession(_ context.Context, force bool) error {
 	return nil
 }
 
+// fakeSlack is a slackpost.Poster: it records every reply and answers
+// permalink, or err when set.
+type fakeSlack struct {
+	replies   []slackReply
+	permalink string
+	err       error
+}
+
+// slackReply is one reply fakeSlack was asked to post.
+type slackReply struct {
+	thread slackpost.Thread
+	body   string
+}
+
+func (s *fakeSlack) Reply(_ context.Context, thread slackpost.Thread, markdown string) (string, error) {
+	s.replies = append(s.replies, slackReply{thread: thread, body: markdown})
+	return s.permalink, s.err
+}
+
 // fakeBrowser is an externalbrowser.Opener.
 type fakeBrowser struct {
 	opened []string
@@ -2948,6 +2996,7 @@ type fixture struct {
 	host       *fakeHost
 	banners    *fakeBanners
 	browser    *fakeBrowser
+	slack      *fakeSlack
 	fleet      *fakeSessions
 	// threads is the threads' graphs a nuke deletes.
 	threads  *fakeThreadGraphs
@@ -3041,6 +3090,7 @@ func newFixture(t *testing.T) *fixture {
 		host:       &fakeHost{},
 		banners:    &fakeBanners{},
 		browser:    &fakeBrowser{},
+		slack:      &fakeSlack{},
 		fleet:      newFakeSessions(),
 		threads:    &fakeThreadGraphs{},
 		shim:       &fakeShim{},
@@ -3083,7 +3133,7 @@ func newFixture(t *testing.T) *fixture {
 			return rec
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames}, Browser: f.browser,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames}, Browser: f.browser, Slack: f.slack,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers, SettingsVisits: f.ensureVisits(), Drain: &f.visitDrain,
 		Headless:   f.headless,
 		Health:     f.health,

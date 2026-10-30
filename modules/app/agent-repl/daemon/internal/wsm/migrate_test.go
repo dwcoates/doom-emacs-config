@@ -728,6 +728,28 @@ func TestTheMigrationAddsTheMergeQueueFrontColumn(t *testing.T) {
 	}
 }
 
+func TestTheMigrationAddsTheLinkOwnershipColumnAndTheSlackOriginsTable(t *testing.T) {
+	// Arrange -- a file written before links carried ownership or a workspace
+	// recorded the Slack thread it was created for.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	owned := scalar[int](t, handle.(*store),
+		`SELECT count(*) FROM pragma_table_info('workspace_links') WHERE name = 'owned' AND dflt_value = '0' AND "notnull" = 1`)
+	origins := scalar[int](t, handle.(*store),
+		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'workspace_slack_origins'`)
+	if owned != 1 || origins != 1 {
+		t.Fatalf("workspace_links.owned (not null, default 0) exists %d times and workspace_slack_origins %d times, want 1 and 1", owned, origins)
+	}
+}
+
 func TestTheMigrationAddsTheDetachedLandingColumns(t *testing.T) {
 	// Arrange -- a file written before a detached merge's landing was recorded.
 	path := layout3Fixture(t)

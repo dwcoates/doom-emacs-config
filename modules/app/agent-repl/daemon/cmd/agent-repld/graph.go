@@ -77,6 +77,7 @@ import (
 	"agent-repld/internal/shimidentity"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/signin"
+	"agent-repld/internal/slackpost"
 	"agent-repld/internal/stallbeat"
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/storereader"
@@ -1319,6 +1320,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Timings:       p.Metrics,
 		QueueEvents:   merge.QueueObservers{queueNotices, edges},
 		Detached:      detachedRef,
+		Ends:          verbsRef,
 		Names:         verbsRef,
 		InterruptTurn: verbsRef.interruptTurn,
 		PublishHost:   relay.PublishHostWorkspace,
@@ -1439,6 +1441,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Sessions:          fleet,
 		Headless:          headlessClient,
 		Browser:           browser,
+		Slack:             slackpost.New(slackpost.Config{}),
 		PromptsDir:        paths.PromptsDir,
 		CheckoutRoot:      paths.Checkout,
 		HomeDir:           paths.Home,
