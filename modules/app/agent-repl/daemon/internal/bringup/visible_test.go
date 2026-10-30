@@ -6,21 +6,29 @@ import (
 	"slices"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
-// fakeRegistry answers repositories, merge queues and workspace records.
+// fakeRegistry answers the arrangement, merge queues and workspace records.
+// Its arrangement holds arranged and every record in workspaces.
 type fakeRegistry struct {
-	repos      []wsm.Repository
-	reposErr   error
-	queues     map[wsm.RepoKey][]wsm.MergeQueueEntry
-	queuesErr  error
-	workspaces map[ids.WorkspaceID]wsm.Workspace
+	repos       []wsm.Repository
+	subsections []wsm.Subsection
+	arranged    []wsm.Workspace
+	reposErr    error
+	queues      map[wsm.RepoKey][]wsm.MergeQueueEntry
+	queuesErr   error
+	workspaces  map[ids.WorkspaceID]wsm.Workspace
 }
 
-func (f *fakeRegistry) ListRepositories(context.Context) ([]wsm.Repository, error) {
-	return f.repos, f.reposErr
+func (f *fakeRegistry) ReadArrangement(context.Context) (wsm.Arrangement, error) {
+	all := slices.Clone(f.arranged)
+	for _, ws := range f.workspaces {
+		all = append(all, ws)
+	}
+	return wsm.Arrangement{Workspaces: all, Repositories: f.repos, Subsections: f.subsections}, f.reposErr
 }
 
 func (f *fakeRegistry) AllMergeQueues(context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {
@@ -51,11 +59,12 @@ func TestOnlyVisibleSplitsPending(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			reg := &fakeRegistry{repos: []wsm.Repository{{ID: "open"}, {ID: "folded", Folded: true}},
-				queues: map[wsm.RepoKey][]wsm.MergeQueueEntry{"/repo/.git": {{Workspace: "queued"}}}}
+			reg := &fakeRegistry{repos: []wsm.Repository{{ID: "open", Place: 1}, {ID: "folded", Folded: true, Place: 2}},
+				arranged: []wsm.Workspace{tc.ws},
+				queues:   map[wsm.RepoKey][]wsm.MergeQueueEntry{"/repo/.git": {{Workspace: "queued"}}}}
 
 			// Act
-			run, withheld, err := OnlyVisible(context.Background(), reg, []wsm.Workspace{tc.ws})
+			run, withheld, err := OnlyVisible(context.Background(), reg, dlog.NewTestLogger(), []wsm.Workspace{tc.ws})
 
 			// Assert
 			if err != nil {
@@ -68,12 +77,46 @@ func TestOnlyVisibleSplitsPending(t *testing.T) {
 	}
 }
 
+func TestOnlyVisibleReadsTheSubsectionFolds(t *testing.T) {
+	folded, open := ids.SubsectionID("folded-sub"), ids.SubsectionID("open-sub")
+	cases := []struct {
+		name    string
+		ws      wsm.Workspace
+		wantRun bool
+	}{
+		{name: "a workspace in a collapsed subsection is withheld", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Subsection: &folded}},
+		{name: "a workspace in an expanded subsection runs", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Subsection: &open}, wantRun: true},
+		{name: "a one-shot filed in a collapsed subsection runs, its tab drawn in the one-shot subsection", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Subsection: &folded, OneShot: true}, wantRun: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			reg := &fakeRegistry{
+				repos:       []wsm.Repository{{ID: "r", Place: 1}},
+				subsections: []wsm.Subsection{{ID: folded, Repo: "r", Name: "folded", Place: 1, Folded: true}, {ID: open, Repo: "r", Name: "open", Place: 2}},
+				arranged:    []wsm.Workspace{tc.ws},
+			}
+
+			// Act
+			run, withheld, err := OnlyVisible(context.Background(), reg, dlog.NewTestLogger(), []wsm.Workspace{tc.ws})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("OnlyVisible: %v", err)
+			}
+			if (len(run) == 1) != tc.wantRun || (len(withheld) == 1) == tc.wantRun {
+				t.Fatalf("run = %v, withheld = %v, want run %v", run, withheld, tc.wantRun)
+			}
+		})
+	}
+}
+
 func TestOnlyVisibleRefusesWhenTheFoldsCannotBeRead(t *testing.T) {
 	// Arrange
 	reg := &fakeRegistry{reposErr: errors.New("arranged: the store is gone")}
 
 	// Act
-	run, withheld, err := OnlyVisible(context.Background(), reg, []wsm.Workspace{{ID: "a"}})
+	run, withheld, err := OnlyVisible(context.Background(), reg, dlog.NewTestLogger(), []wsm.Workspace{{ID: "a"}})
 
 	// Assert
 	if err == nil || run != nil || withheld != nil {
@@ -86,7 +129,7 @@ func TestOnlyVisibleRefusesWhenTheQueuesCannotBeRead(t *testing.T) {
 	reg := &fakeRegistry{queuesErr: errors.New("arranged: the store is gone")}
 
 	// Act
-	run, withheld, err := OnlyVisible(context.Background(), reg, []wsm.Workspace{{ID: "a"}})
+	run, withheld, err := OnlyVisible(context.Background(), reg, dlog.NewTestLogger(), []wsm.Workspace{{ID: "a"}})
 
 	// Assert: every workspace's verdict reads the queues, merge workspace or not.
 	if err == nil || run != nil || withheld != nil {
@@ -99,7 +142,7 @@ func TestOnlyVisibleRunsAHiddenWorkspaceWithAMergeQueued(t *testing.T) {
 	reg := &fakeRegistry{queues: map[wsm.RepoKey][]wsm.MergeQueueEntry{"/repo/.git": {{Workspace: "a"}}}}
 
 	// Act
-	run, withheld, err := OnlyVisible(context.Background(), reg, []wsm.Workspace{{ID: "a", Hidden: true}})
+	run, withheld, err := OnlyVisible(context.Background(), reg, dlog.NewTestLogger(), []wsm.Workspace{{ID: "a", Hidden: true}})
 
 	// Assert
 	if err != nil || len(run) != 1 || len(withheld) != 0 {
@@ -112,7 +155,7 @@ func TestOnlyVisibleReadsNothingForNothingPending(t *testing.T) {
 	reg := &fakeRegistry{reposErr: errors.New("arranged: must not be read")}
 
 	// Act
-	_, _, err := OnlyVisible(context.Background(), reg, nil)
+	_, _, err := OnlyVisible(context.Background(), reg, dlog.NewTestLogger(), nil)
 
 	// Assert
 	if err != nil {
@@ -135,7 +178,7 @@ func TestVisibleReadsTheRecordAfresh(t *testing.T) {
 			reg := &fakeRegistry{repos: []wsm.Repository{{ID: "r"}}, workspaces: map[ids.WorkspaceID]wsm.Workspace{"a": tc.ws}}
 
 			// Act
-			got, err := Visible(context.Background(), reg, "a")
+			got, err := Visible(context.Background(), reg, dlog.NewTestLogger(), "a")
 
 			// Assert
 			if err != nil || got != tc.want {
@@ -150,7 +193,7 @@ func TestVisibleRefusesAnUnreadableRecord(t *testing.T) {
 	reg := &fakeRegistry{workspaces: map[ids.WorkspaceID]wsm.Workspace{}}
 
 	// Act
-	_, err := Visible(context.Background(), reg, "missing")
+	_, err := Visible(context.Background(), reg, dlog.NewTestLogger(), "missing")
 
 	// Assert
 	if !errors.Is(err, wsm.ErrNotFound) {

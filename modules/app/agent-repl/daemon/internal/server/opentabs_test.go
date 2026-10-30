@@ -11,6 +11,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/ids"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
 )
@@ -168,7 +169,15 @@ func TestOpenTabsAnswersAWorkspaceThatIsNotVisibleHidden(t *testing.T) {
 			record := h.DB.workspaces[testWorkspaceID]
 			record.Repo = "r"
 			h.DB.workspaces[testWorkspaceID] = record
-			h.DB.repositories = []wsm.Repository{{ID: "r", Folded: true}}
+			h.DB.repositories = []wsm.Repository{{ID: "r", Folded: true, Place: 1}}
+		}},
+		{name: "a workspace in a collapsed subsection", arrange: func(h *harness) {
+			record := h.DB.workspaces[testWorkspaceID]
+			sub := ids.SubsectionID("s")
+			record.Repo, record.Subsection = "r", &sub
+			h.DB.workspaces[testWorkspaceID] = record
+			h.DB.repositories = []wsm.Repository{{ID: "r", Place: 1}}
+			h.DB.subsections = []wsm.Subsection{{ID: sub, Repo: "r", Name: "s", Place: 1, Folded: true}}
 		}},
 	}
 	for _, tc := range cases {

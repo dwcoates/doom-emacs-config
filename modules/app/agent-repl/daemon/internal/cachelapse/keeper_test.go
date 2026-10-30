@@ -75,7 +75,7 @@ func (f *fakeDB) Session(_ context.Context, id wsm.WorkspaceID) (wsm.Session, bo
 	return s, ok, nil
 }
 
-func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) { return nil, nil }
+func (f *fakeDB) ReadArrangement(context.Context) (wsm.Arrangement, error) { return wsm.Arrangement{}, nil }
 
 func (f *fakeDB) AllMergeQueues(context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {
 	f.mu.Lock()

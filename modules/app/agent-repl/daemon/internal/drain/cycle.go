@@ -176,7 +176,7 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		log.Debug(op, "the workspace is closed; its cache's lapse stands it down", fields)
 		return withheldSettled
 	}
-	visible, err := bringup.Visible(ctx, c.deps.DB, ws)
+	visible, err := bringup.Visible(ctx, c.deps.DB, log, ws)
 	if err != nil {
 		log.Error(op, "could not read whether the workspace is visible; its stand-down is dropped", dlog.WithCause(fields, err))
 		return withheldSettled

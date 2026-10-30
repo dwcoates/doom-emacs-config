@@ -16,9 +16,9 @@
 // unhidden, or whose repository section was expanded).
 //
 // ONLY VISIBLE WORKSPACES ARE OPENED. A workspace the user hid, or whose
-// repository section is collapsed, is answered `opened` at once with its
-// `hidden` arm; it is opened when it is shown again, which the editor asks for
-// with another OpenTabs.
+// repository section or subsection is collapsed, is answered `opened` at
+// once with its `hidden` arm; it is opened when it is shown again, which the
+// editor asks for with another OpenTabs.
 //
 // Every step of every workspace's open is a typed frame on this stream, so the
 // editor reports progress as one minibuffer line per step. A bring-up some
@@ -194,7 +194,7 @@ message OpenTabsOpened {
     // It could not be opened (its conversation could not be read); show the
     // tab, which draws the fault ("<name>: could not be opened: <reason>.").
     OpenTabsOpenedFailed failed = 4;
-    // Hidden, or in a collapsed repository section, and not the workspace
+    // Hidden, or in a collapsed repository section or subsection, and not the workspace
     // the user is looking at: nothing was read, and it stays off the tab
     // bar until it is shown again.
     OpenTabsOpenedHidden hidden = 5;

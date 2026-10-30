@@ -146,6 +146,8 @@ type fakeDB struct {
 	repositories   []wsm.Repository
 	// listRepositoriesErr fails the repository read, which the slice cannot.
 	listRepositoriesErr error
+	// subsections are the subsections ReadArrangement answers.
+	subsections []wsm.Subsection
 	// summaries are the stored workspace summaries ListWorkspaceSummaries
 	// answers; summariesErr fails that read.
 	summaries    map[ids.WorkspaceID]wsm.WorkspaceSummary
@@ -224,6 +226,20 @@ func (f *fakeDB) ListRepositories(context.Context) ([]wsm.Repository, error) {
 		return nil, f.listRepositoriesErr
 	}
 	return f.repositories, nil
+}
+
+// ReadArrangement answers the seeded workspaces, repositories and
+// subsections as one snapshot, failing with listRepositoriesErr: the folds
+// OpenTabs reads come from it (bringup.OnlyVisible).
+func (f *fakeDB) ReadArrangement(context.Context) (wsm.Arrangement, error) {
+	if f.listRepositoriesErr != nil {
+		return wsm.Arrangement{}, f.listRepositoriesErr
+	}
+	workspaces := make([]wsm.Workspace, 0, len(f.workspaces))
+	for _, ws := range f.workspaces {
+		workspaces = append(workspaces, ws)
+	}
+	return wsm.Arrangement{Workspaces: workspaces, Repositories: f.repositories, Subsections: f.subsections}, nil
 }
 
 // AllMergeQueues answers the seeded merge queues: whether a workspace has a

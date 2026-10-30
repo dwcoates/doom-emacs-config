@@ -4,26 +4,28 @@ import (
 	"context"
 	"fmt"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
 
 // ONLY OPEN AND VISIBLE WORKSPACES ARE OPENED AND KEPT WARM (owner principle
 // 1, docs/protobuf-design/open-tabs.md). A workspace the user hid, or whose
-// repository section is collapsed, is answered hidden by an open and beats no
-// keep-alive. Whether a boot or a takeover brings a shim back is NOT this
-// file's: only the record of which shims were up decides that (wasup.go,
-// owner ruling 2026-10-28). A hidden workspace's session already running is
-// kept until its cache lapses (cachelapse.Keeper).
+// repository section or subsection is collapsed, is answered hidden by an
+// open and beats no keep-alive. Whether a boot or a takeover brings a shim
+// back is NOT this file's: only the record of which shims were up decides
+// that (wasup.go, owner ruling 2026-10-28). A hidden workspace's session
+// already running is kept until its cache lapses (cachelapse.Keeper).
 // Every site that decides what to start reads this file, and this file reads
 // the one statement of visibility (wsm.Workspace.Runs).
 
-// RepositoryLister lists the registered repositories, whose folds decide
-// which of their workspaces are collapsed, and the merge queues, which decide
-// whether a hidden merge workspace still carries a merge. wsm.DB is the
-// production one.
+// RepositoryLister reads the arrangement, whose folds decide which
+// workspaces are collapsed, and the merge queues, which decide whether a
+// hidden merge workspace still carries a merge. wsm.DB is the production
+// one.
 type RepositoryLister interface {
-	ListRepositories(ctx context.Context) ([]wsm.Repository, error)
+	ReadArrangement(ctx context.Context) (wsm.Arrangement, error)
 	AllMergeQueues(ctx context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error)
 }
 
@@ -38,15 +40,22 @@ type VisibilityReader interface {
 	WorkspaceReader
 }
 
-// folds reads every repository's fold.
-func folds(ctx context.Context, repos RepositoryLister) (map[ids.RepoID]bool, error) {
-	list, err := repos.ListRepositories(ctx)
+// folds answers which workspaces a fold keeps off the tab bar: the TAB BAR'S
+// OWN STATEMENT of a folded tab (sidebar.Tabs), so a collapsed repository
+// section and a collapsed subsection withhold exactly the workspaces whose
+// tabs they fold, and what the daemon runs never disagrees with what the bar
+// draws. A workspace with no tab (closed, a thread) is folded by nothing.
+func folds(ctx context.Context, repos RepositoryLister, log dlog.Logger) (map[ids.WorkspaceID]bool, error) {
+	arrangement, err := repos.ReadArrangement(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("bringup: list the repositories to read their folds: %w", err)
+		return nil, fmt.Errorf("bringup: read the arrangement to read its folds: %w", err)
 	}
-	out := make(map[ids.RepoID]bool, len(list))
-	for _, r := range list {
-		out[r.ID] = r.Folded
+	reg := sidebar.Registry{Workspaces: arrangement.Workspaces, Repositories: arrangement.Repositories, Subsections: arrangement.Subsections}
+	out := map[ids.WorkspaceID]bool{}
+	for _, tab := range sidebar.Tabs(reg, log) {
+		if tab.Withheld == wsm.WithheldCollapsed {
+			out[tab.Workspace.ID] = true
+		}
 	}
 	return out, nil
 }
@@ -78,17 +87,17 @@ func MergeQueued(ctx context.Context, repos RepositoryLister, ws wsm.Workspace) 
 }
 
 // OnlyVisible splits pending into the workspaces the daemon runs and the ones
-// it withholds (hidden, in a collapsed repository section, or a hidden merge
-// workspace whose merge left every queue), each in
+// it withholds (hidden, in a collapsed repository section or subsection, or a
+// hidden merge workspace whose merge left every queue), each in
 // pending's order. A fold or a queue that cannot be read is an error and splits nothing:
 // starting a workspace that may be hidden would break the principle, and
 // starting none silently would leave visible ones session-less, so the
 // caller states the failure.
-func OnlyVisible(ctx context.Context, repos RepositoryLister, pending []wsm.Workspace) (run, withheld []wsm.Workspace, err error) {
+func OnlyVisible(ctx context.Context, repos RepositoryLister, log dlog.Logger, pending []wsm.Workspace) (run, withheld []wsm.Workspace, err error) {
 	if len(pending) == 0 {
 		return nil, nil, nil
 	}
-	folded, err := folds(ctx, repos)
+	folded, err := folds(ctx, repos, log)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -97,7 +106,7 @@ func OnlyVisible(ctx context.Context, repos RepositoryLister, pending []wsm.Work
 		return nil, nil, err
 	}
 	for _, ws := range pending {
-		if ws.Runs(folded[ws.Repo], queued[ws.ID]) {
+		if ws.Runs(folded[ws.ID], queued[ws.ID]) {
 			run = append(run, ws)
 			continue
 		}
@@ -107,13 +116,13 @@ func OnlyVisible(ctx context.Context, repos RepositoryLister, pending []wsm.Work
 }
 
 // Visible reports whether the daemon runs one workspace, read afresh from its
-// record and its repository's fold.
-func Visible(ctx context.Context, db VisibilityReader, ws ids.WorkspaceID) (bool, error) {
+// record and the folds of its section.
+func Visible(ctx context.Context, db VisibilityReader, log dlog.Logger, ws ids.WorkspaceID) (bool, error) {
 	record, err := db.Workspace(ctx, ws)
 	if err != nil {
 		return false, fmt.Errorf("bringup: read the workspace record of %q: %w", ws, err)
 	}
-	run, _, err := OnlyVisible(ctx, db, []wsm.Workspace{record})
+	run, _, err := OnlyVisible(ctx, db, log, []wsm.Workspace{record})
 	if err != nil {
 		return false, err
 	}
