@@ -58,3 +58,19 @@ export function isDaemonOrigin(value: unknown): value is string {
     return false;
   }
 }
+
+/**
+ * The web view host's origin on the daemon at ADDRESS (`127.0.0.1:<port>`):
+ * `http://host.localhost:<port>`, the host name every daemon serves the host
+ * under (lisp/webhost.el `agent-repl-webhost-origin`), so a call from the host
+ * to a daemon it was not loaded from stays on that daemon's host origin and
+ * shares no connection budget with any workspace's page.
+ *
+ * An address with no port is a malformed view of the daemon's refusal, and is
+ * thrown rather than turned into an origin no daemon answers.
+ */
+export function webhostOriginAt(address: string): string {
+  const port = /:([0-9]+)$/.exec(address)?.[1];
+  if (port === undefined) throw new Error(`a daemon address with no port: ${JSON.stringify(address)}`);
+  return `http://host.localhost:${port}`;
+}

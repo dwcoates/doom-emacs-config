@@ -103,6 +103,15 @@ export interface DaemonContext {
   /** Run FN every time the link comes back. Returns its unsubscriber. */
   onLinkRestored(fn: () => void): () => void;
   /**
+   * A client for the daemon at ADDRESS (`127.0.0.1:<port>`), the one a
+   * `not_yet_adopted` refusal names as still serving a workspace during a
+   * handover. Only the web view host's context has it: the host's sidebar
+   * shows every workspace, so it acts on each where it is served, while a
+   * workspace page dials the daemon that served it for its whole life and is
+   * never handed another.
+   */
+  readonly clientAt?: (address: string) => AgentReplClient;
+  /**
    * Record one frame's main-thread cost. See StreamContext.noteStreamCost.
    */
   noteStreamCost(stream: string, ms: number): void;
@@ -163,6 +172,8 @@ export interface DaemonContextInit {
    * whose daemon is its own origin for its whole life.
    */
   daemon?: DaemonOrigin;
+  /** See DaemonContext.clientAt; set by the web view host's context alone. */
+  clientAt?: (address: string) => AgentReplClient;
 }
 
 /** What a workspace page's context is built from. */
@@ -204,6 +215,7 @@ export function createDaemonContext(init: DaemonContextInit): DaemonContext {
     client: init.client,
     ticker: init.ticker,
     failures: init.failures,
+    ...(init.clientAt === undefined ? {} : { clientAt: init.clientAt }),
     quiesce(): void {
       if (quiesced) return;
       quiesced = true;

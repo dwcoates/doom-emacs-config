@@ -443,8 +443,11 @@ function verbNamed(rpc: string): VerbUnderTest {
 describe.each(VERBS.map((verb) => [verb.rpc, verb] as const))(
   "%s's typed refusal",
   (_rpc, verb) => {
-    // An expected answer draws no refusal; it is pinned separately below.
-    const arms = oneofArms(verb.errorSchema, "cause").filter((arm) => verb.expected?.[arm] === undefined);
+    // An expected answer draws no refusal, and neither does a handover, which
+    // is a lifecycle state; both are pinned separately below.
+    const arms = oneofArms(verb.errorSchema, "cause").filter(
+      (arm) => verb.expected?.[arm] === undefined && arm !== "notYetAdopted",
+    );
 
     it.each(arms)("labels the %s arm with its own case name", async (arm) => {
       expect((await refuseWith(verb, arm))?.getAttribute("data-arm")).toBe(arm);
@@ -480,6 +483,113 @@ describe("an expected answer", () => {
     const control = createControl();
     await select!.call(t, control);
     expect(control.disabled).toBe(false);
+  });
+});
+
+describe("a workspace a handover has not moved yet", () => {
+  const selectAnswer = (cause: { case: "notYetAdopted"; value: { address?: string } } | null) =>
+    create(SelectInEditorResponseSchema, {
+      result:
+        cause === null
+          ? { case: "success", value: { route: { case: "relayed", value: {} } } }
+          : { case: "error", value: { cause } },
+    });
+
+  /** A row target whose daemon refuses with not_yet_adopted naming ADDRESS, and whose host can dial INCUMBENT. */
+  function handoverTarget(address: string | undefined, incumbent: () => ReturnType<typeof selectAnswer>) {
+    const dialed: string[] = [];
+    const refused = appContext({
+      selectInEditor: () => selectAnswer({ case: "notYetAdopted", value: address === undefined ? {} : { address } }),
+    });
+    const served = appContext({ selectInEditor: incumbent });
+    const ctx = {
+      ...refused,
+      clientAt: (at: string) => {
+        dialed.push(at);
+        return served.client;
+      },
+    };
+    return { t: { sc: sidebarContext(ctx), workspace: TARGET_WS, name: "seven", kind: "workspace" as const }, dialed };
+  }
+
+  /** Click the row through TARGET and answer the drawn refusal, if any, and the control. */
+  async function clickRow(t: ReturnType<typeof handoverTarget>["t"]) {
+    const host = document.createElement("div");
+    const control = createControl();
+    host.appendChild(control);
+    const done = await runVerb(control, {
+      sc: t.sc,
+      rpc: "SelectInEditor",
+      call: (client) => client.selectInEditor(buildSelectInEditorRequest(TARGET_WS)),
+      schema: SelectInEditorResponseSchema,
+      expectedArms: SELECT_WORKSPACE_EXPECTED_ARMS,
+    });
+    return { done, control, refusal: host.querySelector(".refusal") };
+  }
+
+  it("asks the daemon the refusal names", async () => {
+    const { t, dialed } = handoverTarget("127.0.0.1:6666", () => selectAnswer(null));
+    await clickRow(t);
+    expect(dialed).toEqual(["127.0.0.1:6666"]);
+  });
+
+  it("answers the named daemon's success as the verb's", async () => {
+    const { t } = handoverTarget("127.0.0.1:6666", () => selectAnswer(null));
+    expect((await clickRow(t)).done).toBe(true);
+  });
+
+  it("records where the verb went at INFO", async () => {
+    const capture = captureLogRecords();
+    const { t } = handoverTarget("127.0.0.1:6666", () => selectAnswer(null));
+    await clickRow(t);
+    const record = await forwardedRecord(capture, "sidebar.verbs.served-elsewhere");
+    expect(record.level.case).toBe("info");
+  });
+
+  it("draws nothing under the row when no daemon is named", async () => {
+    const { t } = handoverTarget(undefined, () => selectAnswer(null));
+    expect((await clickRow(t)).refusal).toBeNull();
+  });
+
+  it("dials nothing when no daemon is named", async () => {
+    const { t, dialed } = handoverTarget(undefined, () => selectAnswer(null));
+    await clickRow(t);
+    expect(dialed).toEqual([]);
+  });
+
+  it("re-enables the row when no daemon is named", async () => {
+    const { t } = handoverTarget(undefined, () => selectAnswer(null));
+    expect((await clickRow(t)).control.disabled).toBe(false);
+  });
+
+  it("records the handover wait at INFO", async () => {
+    const capture = captureLogRecords();
+    const { t } = handoverTarget(undefined, () => selectAnswer(null));
+    await clickRow(t);
+    const record = await forwardedRecord(capture, "sidebar.verbs.handover");
+    expect(record.level.case).toBe("info");
+  });
+
+  it("asks the named daemon once even when it refuses the same way", async () => {
+    const { t, dialed } = handoverTarget("127.0.0.1:6666", () =>
+      selectAnswer({ case: "notYetAdopted", value: { address: "127.0.0.1:5555" } }),
+    );
+    await clickRow(t);
+    expect(dialed).toEqual(["127.0.0.1:6666"]);
+  });
+
+  it("draws nothing when the named daemon refuses the same way", async () => {
+    const { t } = handoverTarget("127.0.0.1:6666", () =>
+      selectAnswer({ case: "notYetAdopted", value: { address: "127.0.0.1:5555" } }),
+    );
+    expect((await clickRow(t)).refusal).toBeNull();
+  });
+
+  it("draws nothing on a page that cannot dial another daemon", async () => {
+    const t = target({
+      selectInEditor: () => selectAnswer({ case: "notYetAdopted", value: { address: "127.0.0.1:6666" } }),
+    });
+    expect((await clickRow(t)).refusal).toBeNull();
   });
 });
 
@@ -850,13 +960,13 @@ describe("the menu's own controls, clicked", () => {
     const t = target({
       restartWorkspace: () =>
         create(RestartWorkspaceResponseSchema, {
-          result: { case: "error", value: { cause: { case: "notYetAdopted", value: {} } } },
+          result: { case: "error", value: { cause: { case: "relaunchFailed", value: { detail: "the prelaunched shim died" } } } },
         }),
     });
     const menu = drawRowMenu(t);
     const button = menu.querySelector("[data-verb='restart']") as HTMLElement;
     await click(button);
-    expect(button.nextElementSibling?.getAttribute("data-arm")).toBe("notYetAdopted");
+    expect(button.nextElementSibling?.getAttribute("data-arm")).toBe("relaunchFailed");
   });
 
   it("keeps the nuke confirmation folded until its entry is opened", () => {
