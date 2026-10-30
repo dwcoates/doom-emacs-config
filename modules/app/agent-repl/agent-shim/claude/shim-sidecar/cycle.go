@@ -285,7 +285,7 @@ type sidecar struct {
 	// told us it cannot accept.
 	parked map[string]bool
 	// residueWithheld tallies the RESIDUE records the write path classified and
-	// did not store, keyed by the tailed file's `dev:inode` identity and then by
+	// did not store, keyed by the tailed file's `volume:inode` identity and then by
 	// residue label. Inferred batches name no file and tally under the empty
 	// key. It is process-scoped, like the withholding itself: the reader states
 	// it as one summary per file at the end of the startup catch-up window.
@@ -296,12 +296,12 @@ type sidecar struct {
 	// for the same reason the tally is: a cycle that dropped its tailers did not
 	// make the vendor stop emitting the shape.
 	shapeCatalogued map[string]bool
-	// newShapes counts, per tailed file's `dev:inode` identity, the shapes this
+	// newShapes counts, per tailed file's `volume:inode` identity, the shapes this
 	// process saw for the FIRST time. Inferred batches name no file and count
 	// under the empty key, exactly as the withheld tally does.
 	newShapes map[string]int
 	// defects counts how many times each file's OWN defect has now been
-	// observed, keyed by the file's `dev:inode` identity so a rename does not
+	// observed, keyed by the file's `volume:inode` identity so a rename does not
 	// buy the same defect a fresh count.
 	//
 	// A PARK ALREADY STATES THE DEFECT ONCE, and for a file that stays parked
@@ -691,6 +691,7 @@ func (s *sidecar) beginCycle() error {
 		return fmt.Errorf("recovering cursors: %w", err)
 	}
 	s.cursors = indexCursorsByFileID(cursors)
+	s.rekeyCursors()
 	// The outage is over, so the next one gets its own opening WARNING.
 	s.suspensionStated = false
 	// THE CATCH-UP BOUNDARY IS THE FIRST PRODUCTION CYCLE. Everything already on
@@ -1186,7 +1187,7 @@ func (s *sidecar) cursorFor(target discover.Target, identity string) (*storev1.C
 
 // watch builds one tailer for a resolved target and starts reading it.
 //
-// `identity` is the file's own dev:inode and `cursor` the position THIS CYCLE'S
+// `identity` is the file's own volume:inode and `cursor` the position THIS CYCLE'S
 // store holds under it — nil only when the store was reached and genuinely holds
 // none. Neither is derived from the path, which the vendor may rename under us
 // at any moment.
@@ -2358,6 +2359,56 @@ func indexCursorsByFileID(cursors []*storev1.CursorState) map[string]*storev1.Cu
 		}
 	}
 	return out
+}
+
+// rekeyCursors files every recovered cursor written under an EARLIER SPELLING
+// of its file's identity under the spelling the file holds now, so the file
+// resumes where the store says it stopped.
+//
+// WITHOUT IT A RE-SPELLED IDENTITY IS A COLD START. darwin's st_dev moved at
+// every reboot, and a cursor keyed by it matched nothing afterwards: the next
+// activation of a conversation re-read every transcript in its book from byte
+// 0 and replayed a month of history as live rows (2026-10-30). The same holds
+// for the cursors written before the volume was named by its mount point.
+//
+// The evidence is the file itself: the cursor's path still names a file with
+// the inode the cursor names. A cursor already keyed by the current spelling
+// is never displaced, and of several older spellings of one file the furthest
+// position wins. The re-keyed position is persisted by the file's next advance.
+func (s *sidecar) rekeyCursors() {
+	rekeyed := map[string]*storev1.CursorState{}
+	for fileID, cursor := range s.cursors {
+		current, ok, err := tail.Rekey(fileID, cursor.GetPath())
+		if err != nil {
+			s.log.With(logging.Context{
+				Operation: "recover-cursors", Path: cursor.GetPath(), FileID: fileID, Level: "warn",
+			}).Log("whether this stored cursor's file is still at its path could not be read, so its position is not carried to the file's current identity: %v", err)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if _, held := s.cursors[current]; held {
+			continue
+		}
+		if prior := rekeyed[current]; prior != nil && prior.GetOffset() >= cursor.GetOffset() {
+			continue
+		}
+		moved := proto.Clone(cursor).(*storev1.CursorState)
+		moved.FileId = current
+		rekeyed[current] = moved
+	}
+	for current, cursor := range rekeyed {
+		s.cursors[current] = cursor
+		s.log.With(logging.Context{
+			Operation: "recover-cursors", Path: cursor.GetPath(), FileID: current,
+			Offset: logging.Off(cursor.GetOffset()),
+		}).LogVerbose("this file's stored cursor was written under an earlier spelling of its identity; it resumes from that position")
+	}
+	if len(rekeyed) > 0 {
+		s.log.With(logging.Context{Operation: "recover-cursors", Repeat: logging.Repeat(len(rekeyed))}).
+			Log("carried %d stored cursor(s) written under an earlier spelling of their file's identity to the identity the file holds now", len(rekeyed))
+	}
 }
 
 // jitterBackoff spreads d over ±recoverJitterFraction of itself. A zero delay

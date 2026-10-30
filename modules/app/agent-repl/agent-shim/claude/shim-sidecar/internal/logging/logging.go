@@ -126,7 +126,7 @@ type Context struct {
 	WatchTokenHash string
 	// RPC is the Connect procedure name.
 	RPC string
-	// FileID is a tailed file's stable "dev:inode" identity.
+	// FileID is a tailed file's stable "volume:inode" identity.
 	FileID string
 	// Path is an absolute file path.
 	Path string

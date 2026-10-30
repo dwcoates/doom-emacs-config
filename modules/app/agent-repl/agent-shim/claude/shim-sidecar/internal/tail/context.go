@@ -62,7 +62,7 @@ type Context struct {
 	Path      string // absolute file path (residue evidence + logging)
 	Kind      Kind
 
-	// FileID is the file's stable "dev:inode" identity, the cursor's key. It is
+	// FileID is the file's stable "volume:inode" identity, the cursor's key. It is
 	// set from the last poll's stat, so a handler naming a file in a log record
 	// names the same identity the store's cursor row does.
 	FileID string
