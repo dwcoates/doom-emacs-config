@@ -333,7 +333,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   ("{\"error\":{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}}"
                    (:arm :transferring-away :value (:address "127.0.0.1:9")))
                   ("{\"error\":{\"notYetAdopted\":{}}}"
-                   (:arm :not-yet-adopted :value nil))))
+                   (:arm :not-yet-adopted :value (:address nil)))))
     (should (equal (agent-repl-test-wire-host--decode
                     #'agent-repl-wire-decode-report-page-unloading-response (car case))
                    (list :arm :error :value (list :cause (cadr case)))))))
@@ -1546,7 +1546,7 @@ opens are OpenTabs streams."
               :refused (:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/r"))))
              ("refused" "{\"transferringAway\":{\"address\":\"127.0.0.1:9\"}}"
               :refused (:cause (:arm :transferring-away :value (:address "127.0.0.1:9"))))
-             ("refused" "{\"notYetAdopted\":{}}" :refused (:cause (:arm :not-yet-adopted :value nil)))))
+             ("refused" "{\"notYetAdopted\":{}}" :refused (:cause (:arm :not-yet-adopted :value (:address nil))))))
     (should (equal (agent-repl-test-wire-host--opened (nth 0 case) (nth 1 case))
                    (list :arm (nth 2 case) :value (nth 3 case))))))
 
@@ -1919,7 +1919,7 @@ carries."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-select-workspace-error
                   "{\"notYetAdopted\":{}}")
-                 '(:cause (:arm :not-yet-adopted :value nil)))))
+                 '(:cause (:arm :not-yet-adopted :value (:address nil))))))
 
 (ert-deftest agent-repl-test-wire-host-select-error-standing-down-arm ()
   "SelectWorkspaceError's `standing_down' arm decodes with everything it
@@ -1980,7 +1980,7 @@ carries."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-adopt-host-workspace-error
                   "{\"notYetAdopted\":{}}")
-                 '(:cause (:arm :not-yet-adopted :value nil)))))
+                 '(:cause (:arm :not-yet-adopted :value (:address nil))))))
 
 (ert-deftest agent-repl-test-wire-host-adopt-error-no-transfer-announced-arm ()
   "AdoptHostWorkspaceError's `no_transfer_announced' arm decodes with

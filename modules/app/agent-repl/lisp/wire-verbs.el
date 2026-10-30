@@ -57,6 +57,7 @@
 ;; wire-common.el (concurrent sibling module) owns the shared leaf codecs and
 ;; the `agent-repl-wire-error' definition.
 (declare-function agent-repl-wire--fail "agent-repl-wire-common" (message field reason))
+(declare-function agent-repl-wire-decode-not-yet-adopted "agent-repl-wire-common" (message-name value))
 (declare-function agent-repl-wire--decoded "agent-repl-wire-common" (message-name value))
 (declare-function agent-repl-wire-decode-inside-temporary-directory "agent-repl-wire-common" (message-name value))
 (declare-function agent-repl-wire--object "agent-repl-wire-common" (message-name value))
@@ -168,6 +169,12 @@ Any field at all is unknown, so this is the whole validation."
 (defun agent-repl-wire-verbs--empty-arm (message)
   "Return a decoder for the empty refusal arm MESSAGE."
   (lambda (json) (agent-repl-wire-verbs--decode-empty message json)))
+
+(defun agent-repl-wire-verbs--not-yet-adopted-arm (message)
+  "Return a decoder for the `not_yet_adopted' refusal arm MESSAGE.
+The arm names the daemon serving the workspace meanwhile
+\(`agent-repl-wire-decode-not-yet-adopted')."
+  (lambda (json) (agent-repl-wire-decode-not-yet-adopted message json)))
 
 (defun agent-repl-wire-verbs--decode-oneof (message field json arms)
   "Decode the oneof FIELD of MESSAGE from JSON into (:arm KEYWORD :value V).
@@ -953,9 +960,10 @@ This daemon released the workspace to a successor; dial `address'."
                        message 'address json))))
 
 (defun agent-repl-wire-decode-open-workspace-not-yet-adopted (json)
-  "Decode OpenWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
-not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "OpenWorkspaceNotYetAdopted" json))
+  "Decode OpenWorkspaceNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "OpenWorkspaceNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-open-workspace-session-deleted (json)
   "Decode OpenWorkspaceSessionDeleted from JSON.  Empty: The workspace's
@@ -1517,9 +1525,10 @@ This daemon released the workspace to a successor; dial `address'."
                        message 'address json))))
 
 (defun agent-repl-wire-decode-close-workspace-not-yet-adopted (json)
-  "Decode CloseWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
-not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "CloseWorkspaceNotYetAdopted" json))
+  "Decode CloseWorkspaceNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "CloseWorkspaceNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-close-workspace-error-blocked (json)
   "Decode CloseWorkspaceError's `blocked' cause arm from JSON."
@@ -1619,9 +1628,10 @@ This daemon released the workspace to a successor; dial `address'."
                        message 'address json))))
 
 (defun agent-repl-wire-decode-kill-workspace-not-yet-adopted (json)
-  "Decode KillWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
-not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "KillWorkspaceNotYetAdopted" json))
+  "Decode KillWorkspaceNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "KillWorkspaceNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-kill-workspace-error-unknown-workspace (json)
   "Decode KillWorkspaceError's `unknown_workspace' cause arm from JSON."
@@ -1728,9 +1738,10 @@ This daemon released the workspace to a successor; dial `address'."
                        message 'address json))))
 
 (defun agent-repl-wire-decode-nuke-workspace-not-yet-adopted (json)
-  "Decode NukeWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
-not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "NukeWorkspaceNotYetAdopted" json))
+  "Decode NukeWorkspaceNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "NukeWorkspaceNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-nuke-workspace-git-failed (json)
   "Decode NukeWorkspaceGitFailed from JSON into a plist (`:detail').
@@ -1864,9 +1875,10 @@ This daemon released the workspace to a successor; dial `address'."
                        message 'address json))))
 
 (defun agent-repl-wire-decode-finish-workspace-not-yet-adopted (json)
-  "Decode FinishWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon
-has not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "FinishWorkspaceNotYetAdopted" json))
+  "Decode FinishWorkspaceNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "FinishWorkspaceNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-finish-workspace-no-layout-facts (json)
   "Decode FinishWorkspaceNoLayoutFacts from JSON.  Empty: The daemon holds no
@@ -2043,9 +2055,10 @@ This daemon released the workspace to a successor; dial `address'."
                        message 'address json))))
 
 (defun agent-repl-wire-decode-restart-workspace-not-yet-adopted (json)
-  "Decode RestartWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
-not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "RestartWorkspaceNotYetAdopted" json))
+  "Decode RestartWorkspaceNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "RestartWorkspaceNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-restart-workspace-relaunch-failed (json)
   "Decode RestartWorkspaceRelaunchFailed from JSON into a plist (`:detail').
@@ -2160,9 +2173,10 @@ This daemon released the workspace to a successor; dial `address'."
                        message 'address json))))
 
 (defun agent-repl-wire-decode-set-workspace-priority-not-yet-adopted (json)
-  "Decode SetWorkspacePriorityNotYetAdopted from JSON.  Empty: A joining daemon
-has not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "SetWorkspacePriorityNotYetAdopted" json))
+  "Decode SetWorkspacePriorityNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "SetWorkspacePriorityNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-set-workspace-priority-error-unknown-workspace (json)
   "Decode SetWorkspacePriorityError's `unknown_workspace' cause arm from JSON."
@@ -2280,9 +2294,10 @@ This daemon released a workspace to a successor; dial `address'."
                     message 'address json))))
 
 (defun agent-repl-wire-decode-swap-workspaces-not-yet-adopted (json)
-  "Decode SwapWorkspacesNotYetAdopted from JSON.  Empty: adoption of a
-named workspace is still in progress."
-  (agent-repl-wire-verbs--decode-empty "SwapWorkspacesNotYetAdopted" json))
+  "Decode SwapWorkspacesNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "SwapWorkspacesNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-swap-workspaces-error-unknown-workspace (json)
   "Decode SwapWorkspacesError's `unknown_workspace' cause arm from JSON."
@@ -2418,9 +2433,10 @@ This daemon released a workspace to a successor; dial `address'."
                     message 'address json))))
 
 (defun agent-repl-wire-decode-move-workspace-not-yet-adopted (json)
-  "Decode MoveWorkspaceNotYetAdopted from JSON.  Empty: adoption of a
-named workspace is still in progress."
-  (agent-repl-wire-verbs--decode-empty "MoveWorkspaceNotYetAdopted" json))
+  "Decode MoveWorkspaceNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "MoveWorkspaceNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-move-workspace-other-repository (json)
   "Decode MoveWorkspaceOtherRepository from JSON.  Empty: the two
@@ -2814,9 +2830,10 @@ This daemon released the workspace to a successor; dial `address'."
                        message 'address json))))
 
 (defun agent-repl-wire-decode-submit-prompt-not-yet-adopted (json)
-  "Decode SubmitPromptNotYetAdopted from JSON.  Empty: A joining daemon has not
-finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "SubmitPromptNotYetAdopted" json))
+  "Decode SubmitPromptNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "SubmitPromptNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-submit-prompt-feed-not-in-workspace (json)
   "Decode SubmitPromptFeedNotInWorkspace from JSON.  Empty: The FeedId decodes
@@ -3738,9 +3755,10 @@ This daemon released the workspace to a successor; dial `address'."
                        message 'address json))))
 
 (defun agent-repl-wire-decode-update-merge-queue-not-yet-adopted (json)
-  "Decode UpdateMergeQueueNotYetAdopted from JSON.  Empty: A joining daemon has
-not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNotYetAdopted" json))
+  "Decode UpdateMergeQueueNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "UpdateMergeQueueNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-update-merge-queue-already-paused (json)
   "Decode UpdateMergeQueueAlreadyPaused from JSON.  Empty: The queue is already
@@ -4274,9 +4292,10 @@ This daemon released the workspace to a successor; dial `address'."
                        message 'address json))))
 
 (defun agent-repl-wire-decode-session-health-not-yet-adopted (json)
-  "Decode SessionHealthNotYetAdopted from JSON.  Empty: A joining daemon has
-not finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "SessionHealthNotYetAdopted" json))
+  "Decode SessionHealthNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "SessionHealthNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-session-health-error-unknown-workspace (json)
   "Decode SessionHealthError's `unknown_workspace' cause arm from JSON."
@@ -4494,9 +4513,10 @@ This daemon released the workspace to a successor; dial `address'."
           (agent-repl-wire-verbs--decode-string message 'address json))))
 
 (defun agent-repl-wire-decode-interrupt-not-yet-adopted (json)
-  "Decode InterruptNotYetAdopted from JSON.  Empty: a joining daemon has not
-finished adopting this workspace yet."
-  (agent-repl-wire-verbs--decode-empty "InterruptNotYetAdopted" json))
+  "Decode InterruptNotYetAdopted from JSON into (:address A).
+A joining daemon has not adopted this workspace yet; A is the daemon
+serving it meanwhile, nil when none does."
+  (agent-repl-wire-decode-not-yet-adopted "InterruptNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-interrupt-not-detached-work (json)
   "Decode InterruptNotDetachedWork from JSON.  Empty: the FeedId names no
@@ -5081,7 +5101,7 @@ Returns (:detail DETAIL)."
               (lambda (json) (agent-repl-wire-verbs--decode-address
                               (concat prefix "TransferringAway") json)))
         (list 'notYetAdopted :not-yet-adopted
-              (agent-repl-wire-verbs--empty-arm (concat prefix "NotYetAdopted")))))
+              (agent-repl-wire-verbs--not-yet-adopted-arm (concat prefix "NotYetAdopted")))))
 
 (defun agent-repl-wire-decode-plan-rollback-prompt-not-reachable (json)
   "Decode PlanRollbackPromptNotReachable from JSON into (:prompt FEEDID).
@@ -5372,7 +5392,7 @@ THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
                  (list 'transferringAway :transferring-away
                        #'agent-repl-wire-decode-edit-held-prompt-transferring-away)
                  (list 'notYetAdopted :not-yet-adopted
-                       (agent-repl-wire-verbs--empty-arm "EditHeldPromptNotYetAdopted"))
+                       (agent-repl-wire-verbs--not-yet-adopted-arm "EditHeldPromptNotYetAdopted"))
                  (list 'noSuchHold :no-such-hold
                        (agent-repl-wire-verbs--empty-arm "EditHeldPromptNoSuchHold"))
                  (list 'notHeld :not-held
@@ -5462,7 +5482,7 @@ THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
                  (list 'transferringAway :transferring-away
                        #'agent-repl-wire-decode-update-held-prompt-transferring-away)
                  (list 'notYetAdopted :not-yet-adopted
-                       (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptNotYetAdopted"))
+                       (agent-repl-wire-verbs--not-yet-adopted-arm "UpdateHeldPromptNotYetAdopted"))
                  (list 'noSuchHold :no-such-hold
                        (agent-repl-wire-verbs--empty-arm "UpdateHeldPromptNoSuchHold"))
                  (list 'alreadyDelivered :already-delivered

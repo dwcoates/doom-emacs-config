@@ -1164,9 +1164,9 @@ This daemon released the workspace to a successor; dial `address'."
                     "SelectWorkspaceTransferringAway" 'address object)))))
 
 (defun agent-repl-wire-decode-select-workspace-not-yet-adopted (value)
-  "Decode VALUE as the empty message `SelectWorkspaceNotYetAdopted'.
+  "Decode VALUE as `SelectWorkspaceNotYetAdopted', `(:address A)'.
 A joining daemon has not finished adopting this workspace yet."
-  (agent-repl-wire--decode-empty "SelectWorkspaceNotYetAdopted" value))
+  (agent-repl-wire-decode-not-yet-adopted "SelectWorkspaceNotYetAdopted" value))
 
 (defun agent-repl-wire-decode-select-workspace-standing-down (value)
   "Decode VALUE as the empty message `SelectWorkspaceStandingDown'.
@@ -1280,7 +1280,7 @@ arm this codec does not know is refused as an unknown field."
                              (concat name "TransferringAway") 'address :address v)))
               (notYetAdopted
                :not-yet-adopted
-               ,(lambda (v) (agent-repl-wire--decode-empty (concat name "NotYetAdopted") v)))))))))
+               ,(lambda (v) (agent-repl-wire-decode-not-yet-adopted (concat name "NotYetAdopted") v)))))))))
 
 (defun agent-repl-wire--decode-subject-response (name value)
   "Decode VALUE as the NAME rpc's Response.  THE ARM IS THE OUTCOME.
@@ -1421,9 +1421,9 @@ This daemon released the workspace to a successor; dial `address'."
                     "AdoptHostWorkspaceTransferringAway" 'address object)))))
 
 (defun agent-repl-wire-decode-adopt-host-workspace-not-yet-adopted (value)
-  "Decode VALUE as the empty message `AdoptHostWorkspaceNotYetAdopted'.
+  "Decode VALUE as `AdoptHostWorkspaceNotYetAdopted', `(:address A)'.
 A joining daemon has not finished adopting this workspace yet."
-  (agent-repl-wire--decode-empty "AdoptHostWorkspaceNotYetAdopted" value))
+  (agent-repl-wire-decode-not-yet-adopted "AdoptHostWorkspaceNotYetAdopted" value))
 
 (defun agent-repl-wire-decode-adopt-host-workspace-no-transfer-announced (value)
   "Decode VALUE as the empty message `AdoptHostWorkspaceNoTransferAnnounced'.
@@ -2251,8 +2251,9 @@ Returns `(:reason S :listing ONEOF :roster-revision N)', LISTING as in
 
 (agent-repl-wire--define-empty-decoder
  agent-repl-wire-decode-open-tabs-refused-unknown-workspace "OpenTabsRefusedUnknownWorkspace")
-(agent-repl-wire--define-empty-decoder
- agent-repl-wire-decode-open-tabs-refused-not-yet-adopted "OpenTabsRefusedNotYetAdopted")
+(defun agent-repl-wire-decode-open-tabs-refused-not-yet-adopted (value)
+  "Decode VALUE as `OpenTabsRefusedNotYetAdopted', `(:address A)'."
+  (agent-repl-wire-decode-not-yet-adopted "OpenTabsRefusedNotYetAdopted" value))
 
 (defun agent-repl-wire-decode-open-tabs-refused-workspace-ref-mismatch (value)
   "Decode VALUE as `OpenTabsRefusedWorkspaceRefMismatch', `(:registry-dir S)'."
@@ -2509,7 +2510,7 @@ The workspace id is not in the daemon's registry."
 (defun agent-repl-wire-decode-list-slash-commands-error-not-yet-adopted (value)
   "Decode ListSlashCommandsError's `not_yet_adopted' cause arm from VALUE.
 A joining daemon has not finished adopting this workspace yet."
-  (agent-repl-wire--decode-empty "ListSlashCommandsNotYetAdopted" value))
+  (agent-repl-wire-decode-not-yet-adopted "ListSlashCommandsNotYetAdopted" value))
 
 (defun agent-repl-wire-decode-list-slash-commands-error (value)
   "Decode VALUE as `ListSlashCommandsError', a plist (:cause ONEOF).

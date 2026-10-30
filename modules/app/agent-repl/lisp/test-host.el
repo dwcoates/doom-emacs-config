@@ -3816,6 +3816,127 @@ retry is scheduled: retrying flipped the webview between the daemons."
       ;; Assert
       (should (null agent-repl-test-host--calls)))))
 
+(defconst agent-repl-test-host--served-elsewhere
+  '(:arm :not-yet-adopted :value (:address "127.0.0.1:6666"))
+  "A `not_yet_adopted' naming the daemon that serves the workspace meanwhile.")
+
+(defmacro agent-repl-test-host--with-serving-conns (&rest body)
+  "Run BODY with no connection kept for a serving daemon yet."
+  (declare (indent 0))
+  `(let ((agent-repl-link--serving-conns (make-hash-table :test #'equal)))
+     ,@body))
+
+(ert-deftest agent-repl-test-host-not-yet-adopted-naming-a-daemon-registers-the-workspace-there ()
+  "A refusal naming the serving daemon re-attaches the workspace to it."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      (let ((walked nil))
+        (cl-letf (((symbol-function 'agent-repl-host--reattach)
+                   (lambda (ws conn claim trigger &rest _)
+                     (push (list ws (agent-repl-connect-connection-address conn) claim trigger) walked))))
+          ;; Act
+          (agent-repl-host-handle-refusal "ws-1" agent-repl-test-host--served-elsewhere)
+          ;; Assert
+          (should (equal walked '(("ws-1" "127.0.0.1:6666" :register "not-yet-adopted")))))))))
+
+(ert-deftest agent-repl-test-host-not-yet-adopted-naming-a-daemon-adopts-nothing ()
+  "A workspace viewed where it is served is not adopted onto the successor."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      ;; Arrange
+      (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-host-handle-refusal "ws-1" agent-repl-test-host--served-elsewhere)
+      ;; Assert
+      (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls))))))
+
+(ert-deftest agent-repl-test-host-not-yet-adopted-naming-a-daemon-is-recorded-at-info ()
+  "Viewing a workspace where it is served is recorded with the daemon."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-host-handle-refusal "ws-1" agent-repl-test-host--served-elsewhere)
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :info "elisp.host.view-where-served")))))
+
+(ert-deftest agent-repl-test-host-not-yet-adopted-naming-the-daemon-already-serving-walks-nothing ()
+  "A workspace already standing on the named daemon is not walked again."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      ;; Arrange
+      (agent-repl-test-host--subscribe "ws-1" (agent-repl-connect-open "127.0.0.1:6666"))
+      (setq agent-repl-test-host--calls nil)
+      ;; Act
+      (agent-repl-host-handle-refusal "ws-1" agent-repl-test-host--served-elsewhere)
+      ;; Assert
+      (should (null (assoc "RegisterWorkspace" agent-repl-test-host--calls))))))
+
+(ert-deftest agent-repl-test-host-a-refusal-naming-a-daemon-is-routed-at-once ()
+  "A `not_yet_adopted' naming the serving daemon is not put off to a timer."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      (let ((scheduled nil) (handled nil))
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (&rest args) (push args scheduled)))
+                  ((symbol-function 'agent-repl-host-handle-refusal)
+                   (lambda (ws arm) (push (list ws arm) handled))))
+          ;; Act
+          (agent-repl-host--on-refused "ws-1" "open"
+                                       (list :cause agent-repl-test-host--served-elsewhere))
+          ;; Assert
+          (should (equal (list scheduled handled)
+                         (list nil (list (list "ws-1" agent-repl-test-host--served-elsewhere))))))))))
+
+(ert-deftest agent-repl-test-host-a-select-refused-naming-a-daemon-is-marked-to-send-again ()
+  "A selection a handover refused is marked to be sent again where it is served."
+  (agent-repl-test-host--with-harness
+    (let ((agent-repl-host--reselect-on-reattach nil))
+      (cl-letf (((symbol-function 'agent-repl-host-handle-refusal) #'ignore))
+        ;; Act
+        (agent-repl-host--on-refused "ws-1" "select"
+                                     (list :cause agent-repl-test-host--served-elsewhere))
+        ;; Assert
+        (should (equal agent-repl-host--reselect-on-reattach "ws-1"))))))
+
+(ert-deftest agent-repl-test-host-a-reattach-sends-the-refused-selection-again ()
+  "The reattach of the workspace whose selection was refused selects it again."
+  (agent-repl-test-host--with-harness
+    (let ((agent-repl-host--reselect-on-reattach "ws-1") (selected nil))
+      (cl-letf (((symbol-function 'agent-repl-host-select)
+                 (lambda (ws &rest _) (push ws selected))))
+        ;; Act
+        (agent-repl-host--reselect-after-reattach "ws-1")
+        ;; Assert
+        (should (equal (list selected agent-repl-host--reselect-on-reattach) '(("ws-1") nil)))))))
+
+(ert-deftest agent-repl-test-host-another-workspaces-reattach-sends-no-selection ()
+  "Only the workspace whose selection was refused is selected again."
+  (agent-repl-test-host--with-harness
+    (let ((agent-repl-host--reselect-on-reattach "ws-1") (selected nil))
+      (cl-letf (((symbol-function 'agent-repl-host-select)
+                 (lambda (ws &rest _) (push ws selected))))
+        ;; Act
+        (agent-repl-host--reselect-after-reattach "ws-2")
+        ;; Assert
+        (should (equal (list selected agent-repl-host--reselect-on-reattach) '(nil "ws-1")))))))
+
+(ert-deftest agent-repl-test-host-a-select-refused-by-the-daemon-already-serving-is-not-sent-again ()
+  "A selection refused by the very daemon named is not sent again, or it loops."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-serving-conns
+      (let ((agent-repl-host--reselect-on-reattach "ws-1"))
+        ;; Arrange
+        (agent-repl-test-host--subscribe "ws-1" (agent-repl-connect-open "127.0.0.1:6666"))
+        ;; Act
+        (agent-repl-host-handle-refusal "ws-1" agent-repl-test-host--served-elsewhere)
+        ;; Assert
+        (should (null agent-repl-host--reselect-on-reattach))))))
+
 (ert-deftest agent-repl-test-host-unknown-refusal-arm-is-an-error ()
   "An arm that is not a handover refusal is a contract breach."
   (agent-repl-test-host--with-harness

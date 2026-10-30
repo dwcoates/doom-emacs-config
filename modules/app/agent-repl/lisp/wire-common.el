@@ -167,6 +167,17 @@ the consumer does not hold, and drawing from it would be a guess."
    message-name (agent-repl-wire--object message-name value) nil)
   nil)
 
+(defun agent-repl-wire-decode-not-yet-adopted (message-name value)
+  "Decode VALUE as a `<Rpc>NotYetAdopted' arm MESSAGE-NAME, `(:address A)'.
+A is the daemon that serves the workspace until the joining daemon adopts
+it (the handover's incumbent), where the workspace is viewed and acted on
+meanwhile; nil when no live daemon serves it, and the caller waits for the
+adoption.  Every endpoint's arm has this one shape, so one decoder reads
+them all."
+  (let ((object (agent-repl-wire--object message-name value)))
+    (agent-repl-wire--check-keys message-name object '(address))
+    (list :address (agent-repl-wire--decode-optional-string message-name 'address object))))
+
 (defun agent-repl-wire--decode-string (message-name field object)
   "Decode OBJECT's non-optional string FIELD of MESSAGE-NAME.
 An absent field is the proto3 default, which protojson omits."

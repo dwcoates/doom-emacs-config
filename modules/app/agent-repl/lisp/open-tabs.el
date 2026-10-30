@@ -63,6 +63,11 @@
 (declare-function agent-repl-open-progress-note-loaded "open-progress" (ws))
 (declare-function agent-repl-rpc-open-tabs "rpc" (conn workspaces on-push on-close))
 (declare-function agent-repl-link-primary "daemon-link" ())
+(declare-function agent-repl-host-view-where-served "host" (ws address trigger))
+(declare-function agent-repl-host-conn "host" (ws))
+(declare-function agent-repl-host-serving-address "host" (arm-plist))
+(declare-function agent-repl-connect-connection-address "connect" (conn))
+(declare-function agent-repl-connect-connection-alive-p "connect" (conn))
 (declare-function agent-repl-connect-stream-conn "connect" (stream))
 (declare-function agent-repl-startup-first-hooks-arm "startup" ())
 (declare-function agent-repl-startup-reach "startup" (milestone))
@@ -231,10 +236,13 @@ The daemon that served the rows is the one asked to open them."
            (agent-repl-connect-stream-conn agent-repl-roster--stream))
       (agent-repl-link-primary)))
 
-(defun agent-repl-open-tabs--send-to-daemon (workspaces on-frame on-close)
+(defun agent-repl-open-tabs--send-to-daemon (workspaces on-frame on-close &optional conn)
   "Send `OpenTabs' for WORKSPACES; ON-FRAME and ON-CLOSE take its answers.
-Returns nil, sending nothing, when there is no daemon connection."
-  (let ((conn (agent-repl-open-tabs--conn)))
+CONN is the daemon asked when the workspaces are served by one other than
+the roster's (`agent-repl-open-tabs--serving-conn'); the roster's
+otherwise.  Returns nil, sending nothing, when there is no daemon
+connection."
+  (let ((conn (or conn (agent-repl-open-tabs--conn))))
     (when conn
       (agent-repl-rpc-open-tabs conn workspaces on-frame on-close)
       t)))
@@ -262,8 +270,9 @@ lost."
                  :loading
                :none)))
 
-(defun agent-repl-open-tabs--ask (rows)
+(defun agent-repl-open-tabs--ask (rows &optional conn)
   "Ask the daemon to open ROWS, loading each visible one's page first.
+CONN, when given, is the daemon serving ROWS other than the roster's.
 Every row is marked in flight; when the request cannot be sent they are
 left unasked, and the next link-up or roster walk asks again."
   (let* ((startup (eq agent-repl-open-tabs--startup 'expected))
@@ -286,9 +295,10 @@ left unasked, and the next link-up or roster walk asks again."
       (setq agent-repl-open-tabs--startup 'running)
       (agent-repl-open-tabs--say "opening %d workspaces…" (length rows))
       (agent-repl-open-tabs--show-host-while-starting))
-    (unless (funcall agent-repl-open-tabs-sender workspaces
-                     (lambda (frame) (agent-repl-open-tabs--on-frame frame startup))
-                     (lambda (outcome) (agent-repl-open-tabs--on-close ids outcome startup)))
+    (unless (apply agent-repl-open-tabs-sender workspaces
+                   (lambda (frame) (agent-repl-open-tabs--on-frame frame startup))
+                   (lambda (outcome) (agent-repl-open-tabs--on-close ids outcome startup))
+                   (and conn (list conn)))
       (dolist (id ids) (remhash id agent-repl-open-tabs--state))
       (when startup (setq agent-repl-open-tabs--startup 'expected))
       (agent-repl--info agent-repl-open-tabs--central
@@ -517,22 +527,49 @@ once a daemon is serving."
 (defun agent-repl-open-tabs--handed-over (row id ws refused reattached)
   "Take workspace WS's (ref ID, walk ROW) handover refusal REFUSED.
 REATTACHED is non-nil when WS was re-attached while the open was in flight:
-there is no reattach left to wait for, so it is asked for again at once."
-  (agent-repl--info ws "elisp.open-tabs.refused-handover ws=%s id=%s cause=%s reattached=%s"
-                    ws id (agent-repl-open-tabs--cause-word refused) (and reattached t))
-  (when row
-    (puthash id 'handover agent-repl-open-tabs--state)
-    (if reattached
-        (agent-repl-open-tabs--ask-again row "reattached-while-asked")
-      (agent-repl-open-tabs--say "%s: moving to the new daemon; its tab opens once it has." ws)))
-  (agent-repl-open-tabs--maybe-land-startup))
+there is no reattach left to wait for, so it is asked for again at once.
+
+A `not_yet_adopted' NAMING THE DAEMON THAT SERVES WS opens WS there: WS is
+re-attached to that daemon (`agent-repl-host-view-where-served'), whose
+reattach asks for it again on that daemon, or it is asked for there at
+once when WS already stands on it.  Its tab opens without waiting for the
+handover, and the incumbent's `transferred' push moves it on later."
+  (let ((address (agent-repl-open-tabs--serving-address refused)))
+    (agent-repl--info ws "elisp.open-tabs.refused-handover ws=%s id=%s cause=%s reattached=%s serving=%S"
+                      ws id (agent-repl-open-tabs--cause-word refused) (and reattached t) address)
+    (when row
+      (puthash id 'handover agent-repl-open-tabs--state)
+      (cond
+       (reattached (agent-repl-open-tabs--ask-again row "reattached-while-asked"))
+       (address
+        (unless (agent-repl-host-view-where-served ws address "open-tabs-not-yet-adopted")
+          (agent-repl-open-tabs--ask-again row "served-elsewhere")))
+       (t (agent-repl-open-tabs--say "%s: moving to the new daemon; its tab opens once it has." ws))))
+    (agent-repl-open-tabs--maybe-land-startup)))
+
+(defun agent-repl-open-tabs--serving-address (refused)
+  "Return the daemon address REFUSED\='s `not_yet_adopted' names, or nil."
+  (agent-repl-host-serving-address (plist-get (plist-get refused :value) :cause)))
+
+(defun agent-repl-open-tabs--serving-conn (ws)
+  "Return the connection of the daemon serving WS when it is not the roster's.
+A handover\='s incumbent serves WS until the joining daemon adopts it, and
+WS\='s open goes there; nil when WS stands on the roster\='s daemon, or on
+none."
+  (let ((conn (agent-repl-host-conn ws))
+        (roster (agent-repl-open-tabs--conn)))
+    (and conn roster
+         (agent-repl-connect-connection-alive-p conn)
+         (not (equal (agent-repl-connect-connection-address conn)
+                     (agent-repl-connect-connection-address roster)))
+         conn)))
 
 (defun agent-repl-open-tabs--ask-again (row why)
   "Ask again for ROW, held by a handover refusal; WHY is recorded."
   (agent-repl--info (plist-get row :name) "elisp.open-tabs.handover-ask-again ws=%s id=%s why=%s"
                     (plist-get row :name) (plist-get row :id) why)
   (remhash (plist-get row :id) agent-repl-open-tabs--state)
-  (agent-repl-open-tabs--ask (list row)))
+  (agent-repl-open-tabs--ask (list row) (agent-repl-open-tabs--serving-conn (plist-get row :name))))
 
 (defun agent-repl-open-tabs--on-reattached (ws)
   "Workspace WS was re-attached to the daemon that serves it.

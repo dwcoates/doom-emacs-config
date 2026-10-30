@@ -58,11 +58,11 @@ A ref id names the workspace of the same name."
      (let ((agent-repl-open-tabs--startup 'expected)
            (agent-repl-roster-view nil)
            (agent-repl-open-tabs-sender
-            (lambda (workspaces on-frame on-close)
+            (lambda (workspaces on-frame on-close &optional conn)
               (when agent-repl-test-open-tabs--connected
                 (setq agent-repl-test-open-tabs--requests
                       (append agent-repl-test-open-tabs--requests
-                              (list (list workspaces on-frame on-close))))
+                              (list (list workspaces on-frame on-close conn))))
                 t)))
            (agent-repl-test-open-tabs--requests nil)
            (agent-repl-test-open-tabs--connected t)
@@ -908,7 +908,7 @@ Owner request 2026-10-30: a fold unloads its pages at once (page-unload.el)."
         (agent-repl-test-open-tabs--frame
          (agent-repl-test-open-tabs--handover "a" :transferring-away)))
       ;; Assert
-      (should (member "elisp.open-tabs.refused-handover ws=a id=a cause=transferring-away reattached=nil"
+      (should (member "elisp.open-tabs.refused-handover ws=a id=a cause=transferring-away reattached=nil serving=nil"
                       infos)))))
 
 (ert-deftest agent-repl-test-open-tabs-a-handover-refusal-says-the-tab-waits-for-the-move ()
@@ -944,6 +944,90 @@ Owner request 2026-10-30: a fold unloads its pages at once (page-unload.el)."
     (run-hook-with-args 'agent-repl-host-reattached-functions "a")
     ;; Assert
     (should (equal (agent-repl-test-open-tabs--asked) '("a")))))
+
+(defun agent-repl-test-open-tabs--served-elsewhere (id address)
+  "A `refused' frame for workspace ID whose `not_yet_adopted' names ADDRESS."
+  (agent-repl-test-open-tabs--opened
+   id :refused (list :cause (list :arm :not-yet-adopted :value (list :address address)))))
+
+(defmacro agent-repl-test-open-tabs--with-serving (already-there &rest body)
+  "Run BODY with the host's view-where-served recorded into `viewed'.
+ALREADY-THERE non-nil answers that the workspace already stands on the
+named daemon, so no walk is started."
+  (declare (indent 1))
+  `(let ((viewed nil))
+     (cl-letf (((symbol-function 'agent-repl-host-view-where-served)
+                (lambda (ws address trigger)
+                  (push (list ws address trigger) viewed)
+                  (not ,already-there))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-open-tabs-a-not-yet-adopted-naming-a-daemon-views-the-workspace-there ()
+  "A `not_yet_adopted' naming the serving daemon re-attaches the workspace there."
+  (agent-repl-test-open-tabs--with
+    (agent-repl-test-open-tabs--with-serving nil
+      ;; Arrange
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+      ;; Act
+      (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--served-elsewhere "a" "127.0.0.1:6666"))
+      ;; Assert
+      (should (equal viewed '(("a" "127.0.0.1:6666" "open-tabs-not-yet-adopted")))))))
+
+(ert-deftest agent-repl-test-open-tabs-a-not-yet-adopted-naming-a-daemon-says-nothing-of-waiting ()
+  "A workspace viewed where it is served is not announced as waiting for the move."
+  (agent-repl-test-open-tabs--with
+    (agent-repl-test-open-tabs--with-serving nil
+      ;; Arrange
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+      ;; Act
+      (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--served-elsewhere "a" "127.0.0.1:6666"))
+      ;; Assert
+      (should-not (member "a: moving to the new daemon; its tab opens once it has."
+                          agent-repl-test-open-tabs--lines)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-workspace-already-on-its-serving-daemon-is-asked-there-at-once ()
+  "A workspace already standing on the named daemon is asked for there at once."
+  (agent-repl-test-open-tabs--with
+    (agent-repl-test-open-tabs--with-serving t
+      (let ((roster (agent-repl-connect-open "127.0.0.1:7777"))
+            (serving (agent-repl-connect-open "127.0.0.1:6666")))
+        (cl-letf (((symbol-function 'agent-repl-open-tabs--conn) (lambda () roster))
+                  ((symbol-function 'agent-repl-host-conn) (lambda (_ws) serving)))
+          ;; Arrange
+          (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+          ;; Act
+          (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--served-elsewhere "a" "127.0.0.1:6666"))
+          ;; Assert
+          (should (eq (nth 3 (car (last agent-repl-test-open-tabs--requests))) serving)))))))
+
+(ert-deftest agent-repl-test-open-tabs-a-reattach-asks-again-on-the-serving-daemon ()
+  "The reattach of a workspace now served by another daemon asks for it there."
+  (agent-repl-test-open-tabs--with
+    (let ((roster (agent-repl-connect-open "127.0.0.1:7777"))
+          (serving (agent-repl-connect-open "127.0.0.1:6666")))
+      (cl-letf (((symbol-function 'agent-repl-open-tabs--conn) (lambda () roster))
+                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) serving)))
+        ;; Arrange
+        (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+        (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a"))
+        ;; Act
+        (agent-repl-open-tabs--on-reattached "a")
+        ;; Assert
+        (should (eq (nth 3 (car (last agent-repl-test-open-tabs--requests))) serving))))))
+
+(ert-deftest agent-repl-test-open-tabs-a-reattach-onto-the-rosters-daemon-names-no-other ()
+  "A workspace on the roster's own daemon is asked for on the roster's connection."
+  (agent-repl-test-open-tabs--with
+    (let ((roster (agent-repl-connect-open "127.0.0.1:7777")))
+      (cl-letf (((symbol-function 'agent-repl-open-tabs--conn) (lambda () roster))
+                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) roster)))
+        ;; Arrange
+        (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+        (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--handover "a"))
+        ;; Act
+        (agent-repl-open-tabs--on-reattached "a")
+        ;; Assert
+        (should (null (nth 3 (car (last agent-repl-test-open-tabs--requests)))))))))
 
 (ert-deftest agent-repl-test-open-tabs-a-reattach-asks-again-for-a-transferring-away-tab ()
   "The reattach of a workspace refused `transferring_away' asks for it again."

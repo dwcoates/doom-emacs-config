@@ -90,6 +90,7 @@
          (agent-repl-link--pending-reconnect-p nil)
          (agent-repl-link--pending-successor nil)
          (agent-repl-link--pending-successor-stream nil)
+         (agent-repl-link--serving-conns (make-hash-table :test #'equal))
          (agent-repl-link--reconnect-timer nil)
          (agent-repl-link--reconnect-interval nil)
          (agent-repl-link--quiet-until-ms nil)
@@ -225,6 +226,53 @@ gate is the point, so it is exercised here rather than bypassed."
     (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
       ;; Assert
       (should (equal (cdr (assq :up agent-repl-test-link--hooks)) (list conn))))))
+
+(ert-deftest agent-repl-test-link-serving-conn-answers-the-primary-at-its-address ()
+  "A serving daemon that is the primary is reached on the primary."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((primary (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act / Assert
+      (should (eq (agent-repl-link-serving-conn "127.0.0.1:9001") primary)))))
+
+(ert-deftest agent-repl-test-link-serving-conn-opens-one-for-another-daemon ()
+  "A serving daemon the link does not stand on gets a connection of its own."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Act
+    (let ((conn (agent-repl-link-serving-conn "127.0.0.1:6666")))
+      ;; Assert
+      (should (equal (agent-repl-connect-connection-address conn) "127.0.0.1:6666")))))
+
+(ert-deftest agent-repl-test-link-serving-conn-keeps-the-connection-it-opened ()
+  "Asking twice for one serving daemon answers the same connection."
+  (agent-repl-test-link--with-harness
+    ;; Act
+    (let ((first (agent-repl-link-serving-conn "127.0.0.1:6666")))
+      ;; Assert
+      (should (eq (agent-repl-link-serving-conn "127.0.0.1:6666") first)))))
+
+(ert-deftest agent-repl-test-link-serving-conn-drops-a-connection-left-with-no-stream ()
+  "A kept connection no stream stands on is dropped at the next lookup."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-link-serving-conn "127.0.0.1:6666")
+    ;; Act
+    (agent-repl-link-serving-conn "127.0.0.1:5555")
+    ;; Assert
+    (should-not (gethash "127.0.0.1:6666" agent-repl-link--serving-conns))))
+
+(ert-deftest agent-repl-test-link-serving-conn-keeps-a-connection-a-stream-stands-on ()
+  "A kept connection a workspace's stream stands on is kept."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-link-serving-conn "127.0.0.1:6666")))
+      (setf (agent-repl-connect-connection-streams conn) (list 'stream))
+      ;; Act
+      (agent-repl-link-serving-conn "127.0.0.1:5555")
+      ;; Assert
+      (should (eq (gethash "127.0.0.1:6666" agent-repl-link--serving-conns) conn)))))
 
 (ert-deftest agent-repl-test-link-connect-records-the-primary ()
   "The connection the link stands on is the primary."
