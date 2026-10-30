@@ -74,6 +74,26 @@ func testWorkspaceNamed(t *testing.T, s *store, name string) Workspace {
 	return ws
 }
 
+// testLinkedWorkspace registers a workspace on a LINKED worktree of a
+// repository whose main worktree it registers first: the shape of every
+// created workspace, which is never its repository's main workspace
+// (IsMainWorktree). testWorkspace's workspace IS a main workspace, so a test
+// that marks a one-shot uses this one.
+func testLinkedWorkspace(t *testing.T, s *store) Workspace {
+	t.Helper()
+	main := testWorkspaceNamed(t, s, "main")
+	ws, created, err := s.RegisterWorkspace(context.Background(), t.TempDir(), RegisterFacts{
+		Name: "sample", Branch: "feature", ParentBranch: "master", RepoDir: main.Dir,
+	})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	if !created {
+		t.Fatalf("RegisterWorkspace reported an existing record for a fresh linked worktree")
+	}
+	return ws
+}
+
 // corrupt runs one raw statement against the store, so a test can write the
 // exact malformed row a decoder must refuse.
 func corrupt(t *testing.T, s *store, query string, args ...any) {

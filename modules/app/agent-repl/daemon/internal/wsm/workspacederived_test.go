@@ -48,7 +48,7 @@ func TestWorkspaceReadsOneShotOffTheCreationJob(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			s, _ := testStore(t)
-			ws := testWorkspace(t, s)
+			ws := testLinkedWorkspace(t, s)
 			if tc.job != nil {
 				job := *tc.job
 				job.Workspace = ws.ID

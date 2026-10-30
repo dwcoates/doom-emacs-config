@@ -55,6 +55,14 @@ var ErrMainWorktreeUnregistered = errors.New("wsm: a repository is minted only b
 // repository's last workspace can do.
 var ErrMainWorktreeInUse = errors.New("wsm: the main worktree's workspace stands while other workspaces are registered under its repository")
 
+// ErrMainWorkspaceOneShot refuses a one-shot mark on a repository's main
+// workspace (the workspace on its main checkout, IsMainWorktree). A main
+// workspace sits on the main branch, lands nothing itself and splits its work
+// off into created workspaces, so it is NEVER a one-shot. The store refuses
+// the mark wherever it is written (SetOneShot, PutCreationJob), so no path --
+// the agent API's verb, a create, an internal setter -- can record one.
+var ErrMainWorkspaceOneShot = errors.New("wsm: a repository's main workspace is never a one-shot")
+
 // ErrMergeLeaseGone refuses a merge hold recorded after the merge it waits on
 // released its lease: the merge has already decided whether its requester
 // closes, so the prompt must take the path a workspace with no merge takes.

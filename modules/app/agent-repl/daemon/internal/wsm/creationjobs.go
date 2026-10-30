@@ -25,6 +25,9 @@ func (s *store) PutCreationJob(ctx context.Context, job CreationJob) error {
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := refuseMainWorkspaceOneShot(ctx, tx, job.Workspace, job.OneShot); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, pre_deploy_hooks, post_deploy_hooks,
 			   base_ref, materialized, one_shot, initial_prompt, consented_ungated_mode, created_at)
