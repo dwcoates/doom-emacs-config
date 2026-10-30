@@ -1394,24 +1394,36 @@ neighbours (`agent-repl--step-workspace')."
 (defconst agent-repl--working-states '(:thinking :submitting :clearing :compacting)
   "Roster status arms that paint a tab red: a turn is running in the workspace.")
 
+(defconst agent-repl--recently-prompted-seconds 900
+  "How long after the user sends from the composer a workspace stays in the working ring.")
+
+(defun agent-repl--recently-prompted-p (name)
+  "Non-nil when the user sent NAME a prompt from the composer within the window.
+`:composer-prompted-at' is stamped by `agent-repl--send' on a from-buffer send."
+  (let ((at (agent-repl--ws-get name :composer-prompted-at)))
+    (and at (< (- (float-time) at) agent-repl--recently-prompted-seconds))))
+
 (defun agent-repl--working-ring (current)
-  "Return the tab order narrowed to the WORKING tabs, and CURRENT.
-Working is a roster status arm in `agent-repl--working-states', the arms the
-bar paints red.  CURRENT stays in the ring even when it is not working, so
-the step still has a place to start from."
+  "Return the tab order narrowed to the active tabs, and CURRENT.
+Active is either WORKING (a roster status arm in `agent-repl--working-states',
+the arms the bar paints red) or RECENTLY PROMPTED (the user sent it a prompt
+from the composer within `agent-repl--recently-prompted-seconds').  CURRENT
+stays in the ring even when neither holds, so the step still has a place to
+start from."
   (cl-remove-if-not
    (lambda (name)
      (or (equal name current)
-         (memq (agent-repl-status-tab-state name) agent-repl--working-states)))
+         (memq (agent-repl-status-tab-state name) agent-repl--working-states)
+         (agent-repl--recently-prompted-p name)))
    (and (fboundp 'agent-repl-roster-tab-order) (agent-repl-roster-tab-order))))
 
 (defun agent-repl-switch-working-left ()
-  "Switch to the working tab LEFT of the current one, wrapping."
+  "Switch to the working or recently prompted tab LEFT of the current one, wrapping."
   (interactive)
   (agent-repl--step-workspace -1 #'agent-repl--working-ring "working-cycle" 'cycle))
 
 (defun agent-repl-switch-working-right ()
-  "Switch to the working tab RIGHT of the current one, wrapping."
+  "Switch to the working or recently prompted tab RIGHT of the current one, wrapping."
   (interactive)
   (agent-repl--step-workspace 1 #'agent-repl--working-ring "working-cycle" 'cycle))
 

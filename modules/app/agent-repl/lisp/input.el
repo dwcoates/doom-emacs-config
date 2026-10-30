@@ -2302,6 +2302,8 @@ Returns the submission's idempotency key, or nil when nothing was sent."
                 (agent-repl-held-edit-commit
                  ws said (agent-repl--input-optimistic-clear ws raw))
                 nil)
+            (when from-buffer
+              (agent-repl--ws-put ws :composer-prompted-at (float-time)))
             (agent-repl--kickoff-prompt-summary ws raw)
             ;; `(null prompt)' is the one fact that says the words came out
             ;; of the composer.  A from-buffer submission clears the composer
