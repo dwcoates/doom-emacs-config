@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -3101,5 +3102,101 @@ func TestAPassWhoseRosterOutnumbersTheWatchersEnrollsWithoutPanicking(t *testing
 	// Assert.
 	if got := len(h.sc.pass.pending); got != 0 {
 		t.Fatalf("pending = %d, want none", got)
+	}
+}
+
+// earlierSpelling answers the identity a file's cursor carried before the
+// volume was named the way it is now: the same inode under another volume
+// name, as darwin's st_dev spelled it before each reboot moved it.
+func earlierSpelling(t *testing.T, path string, inodeDelta uint64) string {
+	t.Helper()
+	current := identityOf(t, path)
+	inode, err := strconv.ParseUint(current[strings.LastIndexByte(current, ':')+1:], 10, 64)
+	if err != nil {
+		t.Fatalf("parsing the inode of %q: %v", current, err)
+	}
+	return fmt.Sprintf("4294967295:%d", inode+inodeDelta)
+}
+
+// TestACursorUnderAnEarlierSpellingOfItsFileIdentity pins the re-keying that
+// keeps a reboot from being a cold start: a stored cursor written under an
+// earlier spelling of the file's identity is the file's position when its path
+// still names the same inode, and only then.
+func TestACursorUnderAnEarlierSpellingOfItsFileIdentity(t *testing.T) {
+	turn := promptLine + "\n" + assistantLine + "\n"
+	cases := []struct {
+		name    string
+		cursors func(t *testing.T, path string) []*storev1.CursorState
+		want    int64
+		// restored says a stored position was handed to the tailer, which
+		// then holds the file's current identity before its first poll.
+		restored bool
+	}{
+		{
+			name: "resumes from the position it holds",
+			cursors: func(t *testing.T, path string) []*storev1.CursorState {
+				return []*storev1.CursorState{
+					{FileId: earlierSpelling(t, path, 0), Path: path, Offset: int64(2 * len(turn)), Conversion: currentConversion()},
+				}
+			},
+			want:     int64(len(turn)),
+			restored: true,
+		},
+		{
+			name: "never displaces a cursor under the current spelling",
+			cursors: func(t *testing.T, path string) []*storev1.CursorState {
+				return []*storev1.CursorState{
+					{FileId: identityOf(t, path), Path: path, Offset: 0, Conversion: currentConversion()},
+					{FileId: earlierSpelling(t, path, 0), Path: path, Offset: int64(2 * len(turn)), Conversion: currentConversion()},
+				}
+			},
+			want:     0,
+			restored: true,
+		},
+		{
+			name: "takes the furthest of several earlier spellings",
+			cursors: func(t *testing.T, path string) []*storev1.CursorState {
+				return []*storev1.CursorState{
+					{FileId: earlierSpelling(t, path, 0), Path: path, Offset: int64(2 * len(turn)), Conversion: currentConversion()},
+					{FileId: "4294967294" + earlierSpelling(t, path, 0)[len("4294967295"):], Path: path, Offset: 0, Conversion: currentConversion()},
+				}
+			},
+			want:     int64(len(turn)),
+			restored: true,
+		},
+		{
+			name: "is not carried when its path now names another inode",
+			cursors: func(t *testing.T, path string) []*storev1.CursorState {
+				return []*storev1.CursorState{
+					{FileId: earlierSpelling(t, path, 1), Path: path, Offset: int64(2 * len(turn)), Conversion: currentConversion()},
+				}
+			},
+			want: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, &fakeStore{})
+			path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
+			h.store.cursors = tc.cursors(t, path)
+
+			// Act.
+			if err := h.sc.beginCycle(); err != nil {
+				t.Fatalf("beginCycle: %v", err)
+			}
+
+			// Assert.
+			tailer := h.sc.watchers[path].tailer
+			if got := tailer.Offset(); got != tc.want {
+				t.Fatalf("resumed offset = %d, want %d", got, tc.want)
+			}
+			if !tc.restored {
+				return
+			}
+			if got := tailer.FileID(); got != identityOf(t, path) {
+				t.Fatalf("the tailer holds identity %q, want the file's current %q", got, identityOf(t, path))
+			}
+		})
 	}
 }

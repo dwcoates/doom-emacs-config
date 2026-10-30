@@ -293,8 +293,11 @@ func TestTailerRestoreResumesFromCursor(t *testing.T) {
 	writeFile(t, p, first+`{"b":2}`+"\n")
 	tr, _ := newTailer(t, p)
 	// Prime file_id via a stat, then restore an offset past the first line.
-	fi, _ := os.Stat(p)
-	tr.Restore(&storev1.CursorState{FileId: statID(fi), Path: p, Offset: int64(len(first))})
+	id, err := Identity(p)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	tr.Restore(&storev1.CursorState{FileId: id, Path: p, Offset: int64(len(first))})
 	// Act
 	r, _ := tr.Poll()
 	tr.Commit(r)
@@ -724,4 +727,97 @@ func TestAPollThatFindsNothingRecordsNothing(t *testing.T) {
 	if r2.Changed || sink.Len() != 0 {
 		t.Fatalf("an unchanged poll answered changed=%t and recorded:\n%s", r2.Changed, sink.String())
 	}
+}
+
+// TestRekey pins when a stored identity is an earlier spelling of the file a
+// path names now — the evidence a cursor is carried across a re-spelled volume.
+func TestRekey(t *testing.T) {
+	cases := []struct {
+		name   string
+		stored func(t *testing.T, path string) (fileID, at string)
+		wantOK bool
+	}{
+		{
+			name: "the same inode under another volume name is re-keyed",
+			stored: func(t *testing.T, path string) (string, string) {
+				return "4294967295:" + inodeOfPath(t, path), path
+			},
+			wantOK: true,
+		},
+		{
+			name: "an identity already current is not re-keyed",
+			stored: func(t *testing.T, path string) (string, string) {
+				id, err := Identity(path)
+				if err != nil {
+					t.Fatalf("identity: %v", err)
+				}
+				return id, path
+			},
+			wantOK: false,
+		},
+		{
+			name: "another inode at the path is not re-keyed",
+			stored: func(t *testing.T, path string) (string, string) {
+				return "4294967295:" + inodeOfPath(t, path) + "0", path
+			},
+			wantOK: false,
+		},
+		{
+			name: "a path that no longer exists is not re-keyed",
+			stored: func(t *testing.T, path string) (string, string) {
+				return "4294967295:" + inodeOfPath(t, path), path + ".gone"
+			},
+			wantOK: false,
+		},
+		{
+			name: "an identity naming no inode is not re-keyed",
+			stored: func(t *testing.T, path string) (string, string) {
+				return "nameless", path
+			},
+			wantOK: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			path := filepath.Join(t.TempDir(), "t.jsonl")
+			writeFile(t, path, `{"a":1}`+"\n")
+			fileID, at := tc.stored(t, path)
+
+			// Act.
+			current, ok, err := Rekey(fileID, at)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Rekey: %v", err)
+			}
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if !ok {
+				return
+			}
+			want, err := Identity(path)
+			if err != nil {
+				t.Fatalf("identity: %v", err)
+			}
+			if current != want {
+				t.Fatalf("re-keyed to %q, want the file's current %q", current, want)
+			}
+		})
+	}
+}
+
+// inodeOfPath answers the inode a path's current identity names.
+func inodeOfPath(t *testing.T, path string) string {
+	t.Helper()
+	id, err := Identity(path)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	inode, ok := inodeOf(id)
+	if !ok {
+		t.Fatalf("identity %q names no inode", id)
+	}
+	return inode
 }

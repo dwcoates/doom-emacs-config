@@ -442,7 +442,7 @@ func (o *ownerIndex) repoint(taskID, path string) {
 // output under a new runtime-session segment; the owner index still names the
 // old path, so resolution refuses the new one as a mismatch — and a refused
 // spool is never read, which would strand the rest of a rendered run's output.
-// The file's own dev:inode identity is the evidence, exactly as it is for the
+// The file's own volume:inode identity is the evidence, exactly as it is for the
 // cursor: the same identity as the watched old path is the same file, never a
 // guess from its name.
 func (s *sidecar) followRename(target discover.Target) {

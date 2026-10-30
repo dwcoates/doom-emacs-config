@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"strings"
 	"syscall"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -116,7 +118,7 @@ type PollResult struct {
 // any poll ever saw one.
 func (t *Tailer) LastSize() (int64, bool) { return t.lastSize, t.sized }
 
-// FileID returns the tailer's last-known "dev:inode" identity (empty until first Poll).
+// FileID returns the tailer's last-known "volume:inode" identity (empty until first Poll).
 func (t *Tailer) FileID() string { return t.fileID }
 
 // Poll reads any appended bytes and returns the resulting batch WITHOUT mutating
@@ -132,7 +134,10 @@ func (t *Tailer) Poll() (PollResult, error) {
 	if err != nil {
 		return PollResult{}, err
 	}
-	fileID := statID(fi)
+	fileID, err := statID(t.path, fi)
+	if err != nil {
+		return PollResult{}, err
+	}
 	size := fi.Size()
 	t.lastSize, t.sized = size, true
 
@@ -354,14 +359,58 @@ func readAt(path string, buf []byte, off int64) (err error) {
 	return nil
 }
 
-// statID returns the "dev:inode" identity used to detect rotation.
-func statID(fi os.FileInfo) string {
-	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-		return fmt.Sprintf("%d:%d", uint64(st.Dev), uint64(st.Ino))
+// statID returns the "volume:inode" identity used to detect rotation. The
+// volume is named by volumeKey, which keeps it the same across reboots.
+func statID(path string, fi os.FileInfo) (string, error) {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		// Fallback (non-unix): size+mtime is a coarse identity. The sidecar only
+		// targets unix, so this path is effectively unreachable.
+		return fmt.Sprintf("nosys:%d:%d", fi.Size(), fi.ModTime().UnixNano()), nil
 	}
-	// Fallback (non-unix): size+mtime is a coarse identity. The sidecar only
-	// targets unix, so this path is effectively unreachable.
-	return fmt.Sprintf("nosys:%d:%d", fi.Size(), fi.ModTime().UnixNano())
+	volume, err := volumeKey(path, st)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s:%d", volume, uint64(st.Ino)), nil
+}
+
+// inodeOf answers the inode an identity names: what follows its last colon,
+// in this spelling and in every earlier "<volume>:<inode>" one.
+func inodeOf(fileID string) (string, bool) {
+	i := strings.LastIndexByte(fileID, ':')
+	if i < 0 || i == len(fileID)-1 {
+		return "", false
+	}
+	return fileID[i+1:], true
+}
+
+// Rekey answers the identity a stored cursor's file holds NOW, when that is a
+// different spelling of the same file: `path` still names a file whose inode is
+// the one `fileID` names, but its volume is spelled differently. That is a
+// cursor written under an earlier spelling of the volume — darwin's st_dev,
+// which moved at every reboot — and the position it holds is still this
+// file's. Anything else (the file gone, a different inode, the identity
+// unchanged) is not a re-keying, and ok is false.
+func Rekey(fileID, path string) (current string, ok bool, err error) {
+	inode, parsed := inodeOf(fileID)
+	if !parsed {
+		return "", false, nil
+	}
+	current, err = Identity(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if current == fileID {
+		return "", false, nil
+	}
+	if now, _ := inodeOf(current); now != inode {
+		return "", false, nil
+	}
+	return current, true, nil
 }
 
 // Handler returns the handler this tailer drives, so the reader can ask it for
@@ -376,7 +425,7 @@ func (t *Tailer) Offset() int64 { return t.offset }
 // seam's callers can assert what was resolved rather than re-deriving it.
 func (t *Tailer) Context() *Context { return t.ctx }
 
-// Identity answers a path's stable file identity — the same "dev:inode"
+// Identity answers a path's stable file identity — the same "volume:inode"
 // spelling a tailer stamps onto CursorState.file_id.
 //
 // IT IS EXPORTED SO THERE IS ONE SPELLING. The cursor's identity is what
@@ -388,5 +437,5 @@ func Identity(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("tail: reading the identity of %s: %w", path, err)
 	}
-	return statID(fi), nil
+	return statID(path, fi)
 }

@@ -51,6 +51,7 @@ import (
 	"agentrepl/protohelpers/storewrite"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/recorded"
+	"agentrepl/shim-claude-sidecar/internal/tail"
 	"agentrepl/shim-claude-sidecar/internal/testclose"
 	"agentrepl/testrun/testenv"
 )
@@ -486,18 +487,16 @@ func (g *growingFile) Remove() {
 	}
 }
 
-// fileID spells a file's identity the way CursorState.file_id does: "dev:inode".
+// fileID spells a file's identity the way CursorState.file_id does, through
+// the one spelling the sidecar itself uses: "volume:inode", the volume named so
+// it survives a reboot.
 func fileID(t *testing.T, path string) string {
 	t.Helper()
-	info, err := os.Stat(path)
+	id, err := tail.Identity(path)
 	if err != nil {
-		t.Fatalf("stat %s: %v", path, err)
+		t.Fatalf("identity of %s: %v", path, err)
 	}
-	st, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		t.Fatalf("stat %s: no syscall.Stat_t", path)
-	}
-	return fmt.Sprintf("%d:%d", st.Dev, st.Ino)
+	return id
 }
 
 // ---------------------------------------------------------------------------

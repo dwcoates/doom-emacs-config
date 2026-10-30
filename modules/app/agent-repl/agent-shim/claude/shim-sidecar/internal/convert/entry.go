@@ -77,7 +77,7 @@ type Attribution struct {
 	Path   string
 	Offset int64
 
-	// FileID is the tailed file's stable "dev:inode" identity, so a log record
+	// FileID is the tailed file's stable "volume:inode" identity, so a log record
 	// names the file the same way the cursor does even across a rename.
 	FileID string
 
@@ -162,7 +162,7 @@ func (at Attribution) ctxError(operation string) logging.Context {
 // the store rests entirely on the same bytes minting the same id.
 //
 // IT DIGESTS THE FILE ID, NEVER THE PATH, and the two are not
-// interchangeable. The cursor is keyed by "dev:inode", so a RENAMED file keeps
+// interchangeable. The cursor is keyed by "volume:inode", so a RENAMED file keeps
 // its cursor and is resumed from it — but a path-derived write identity would
 // mint a brand new id for every record replayed after that rename, and the
 // store's absorption (a replayed batch whose write_ids all landed before is the
@@ -185,7 +185,7 @@ func writeID(at Attribution, discriminator string) string {
 		sum := sha256.Sum256([]byte(Producer + "|" + versionTag + "|" + at.WriteScope + "|" + discriminator))
 		return hex.EncodeToString(sum[:])
 	}
-	panic("convert: write_id requires either the file's dev:inode identity or a run-scoped WriteScope; the reader supplied neither")
+	panic("convert: write_id requires either the file's volume:inode identity or a run-scoped WriteScope; the reader supplied neither")
 }
 
 // RunScope spells the WriteScope of a record inferred ABOUT a run rather than
