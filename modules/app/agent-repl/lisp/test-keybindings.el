@@ -56,7 +56,8 @@
                  agent-repl-finish-workspace
                  agent-repl-restart-workspace
                  agent-repl-create-workspace
-                 agent-repl-create-workspace-static
+                 agent-repl-create-workspace-explanation-engine
+                 agent-repl-create-workspace-in-repository
                  agent-repl-fork-workspace-into-primary
                  agent-repl-fork-workspace-into-primary-static
                  agent-repl-fork-workspace
@@ -365,10 +366,31 @@ walked for KEY followed by its #\\='COMMAND."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "h")
               'agent-repl-hide-workspace)))
 
-(ert-deftest agent-repl-test-keybindings-spc-tab-p-is-the-swap ()
-  "`SPC TAB p\=' swaps the current workspace with a drawn tab's workspace."
+;; `SPC TAB p' is add-project; the swap has no key.
+(ert-deftest agent-repl-test-keybindings-spc-tab-p-is-add-project ()
+  "`SPC TAB p\=' onboards a directory as a workspace."
   (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "p")
-              'agent-repl-workspace-swap)))
+              'agent-repl-add-project-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-n-creates-in-doom ()
+  "`SPC TAB n\=' creates a workspace in doom from a prompt."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "n")
+              'agent-repl-create-workspace)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-shift-n-creates-in-explanation-engine ()
+  "`SPC TAB N\=' creates a workspace in explanation-engine from a prompt."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "N")
+              'agent-repl-create-workspace-explanation-engine)))
+
+(ert-deftest agent-repl-test-keybindings-spc-tab-ctrl-n-creates-in-a-picked-repository ()
+  "`SPC TAB C-n\=' creates a workspace in a picked repository with a model."
+  (should (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "C-n")
+              'agent-repl-create-workspace-in-repository)))
+
+(ert-deftest agent-repl-test-keybindings-the-swap-has-no-key ()
+  "`agent-repl-workspace-swap\=' is no longer bound under `SPC TAB p\='."
+  (should-not (eq (agent-repl-test-keybindings--leader-prefix-binding "TAB" "p")
+                  'agent-repl-workspace-swap)))
 
 (ert-deftest agent-repl-test-keybindings-spc-tab-shift-p-is-the-move ()
   "`SPC TAB P\=' moves the current workspace onto a drawn tab, the tabs between shifting over."

@@ -645,7 +645,7 @@ sources lag filesystem deletions."
 ;;;; ---- Onboarding a directory -------------------------------------------
 
 (defun agent-repl-add-project-workspace (&optional dir)
-  "Onboard DIR as a workspace (`SPC TAB C-n').
+  "Onboard DIR as a workspace (`SPC TAB p').
 REGISTER is one of Emacs's only two workspace verbs: it hands the daemon
 a directory and the daemon MINTS the identity, normalizing whatever
 spelling of the path Emacs happened to have.  Idempotent by dir, so

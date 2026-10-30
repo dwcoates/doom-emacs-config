@@ -221,14 +221,13 @@ Workspaces — COMPLETE
 4. Switch between workspaces with `s-{`, `s-}` and `M-<n>`. Selection, tab
    highlight, panel and composer all follow.
 5. Create a workspace (`SPC TAB n` — it asks "Initial prompt: " and nothing
-   else; the repository is the one the current workspace sits in and the daemon
-   mints the name), work in it, delete it. The tab appears, is selected,
+   else; the repository is always doom and the daemon mints the name), work in it, delete it. The tab appears, is selected,
    disappears; the user lands somewhere sensible.
-6. Register a directory (`SPC TAB C-n` — "Add project directory: "); re-open a
+6. Register a directory (`SPC TAB p` — "Add project directory: "); re-open a
    closed workspace (`SPC TAB C-r` — "Open workspace: ").
    Register a REPOSITORY on its own (`SPC j .` — "Register repository from
    file: ", which takes any file inside it): the rail draws the repository as a
-   section with no rows, and `SPC TAB N` can then pick it.
+   section with no rows, and `SPC TAB C-n` can then pick it.
 7. Fork a workspace with its conversation (`SPC TAB f` — "Initial prompt: "
    alone, like every dynamic mode). The fork carries the history.
 8. Reorder by priority; close, reopen (`SPC TAB C-r`), kill a workspace.

@@ -113,8 +113,9 @@ Findings are collected at the end, in "Audit findings".
 
 | Command | Does | Evil key | Context | Emacs mode |
 | --- | --- | --- | --- | --- |
-| `agent-repl-create-workspace` | Create a dynamic workspace from a prompt. | `SPC TAB n` | leader | leader |
-| `agent-repl-create-workspace-static` | Create a static workspace from a repository and a name. | `SPC TAB N` | leader | leader |
+| `agent-repl-create-workspace-explanation-engine` | Create a workspace in explanation-engine from a prompt. | `SPC TAB N` | leader | leader |
+| `agent-repl-create-workspace` | Create a workspace in doom from a prompt. | `SPC TAB n` | leader | leader |
+| `agent-repl-create-workspace-in-repository` | Create a workspace in a picked repository from a prompt and a model. | `SPC TAB C-n` | leader | leader |
 | `agent-repl-create-child-workspace` | Create a dynamic child workspace. | `SPC TAB c` | leader | leader |
 | `agent-repl-create-child-workspace-static` | Create a static child workspace. | `SPC TAB C` | leader | leader |
 | `agent-repl-fork-workspace` | Create a child workspace forking the current conversation. | `SPC TAB f` | leader | leader |
@@ -122,7 +123,7 @@ Findings are collected at the end, in "Audit findings".
 | `agent-repl-create-oneshot` | Create a one-shot workspace for a commission. | `SPC TAB o` | leader | leader |
 | `agent-repl-create-oneshot-for-current-workspace` | Create a one-shot whose commission is about the current workspace. | `SPC TAB C-o` | leader | leader |
 | `agent-repl-create-explanation-engine-oneshot` | Create a one-shot in the explanation-engine repository, from any workspace. | `SPC TAB O` | leader | leader |
-| `agent-repl-add-project-workspace` | Onboard a directory as a workspace. | `SPC TAB C-n` | leader | leader |
+| `agent-repl-add-project-workspace` | Onboard a directory as a workspace. | `SPC TAB p` | leader | leader |
 | `agent-repl-register-repository` | Register the repository a picked file is inside. | `SPC j .` | leader | leader |
 
 ## 9. Workspace lifecycle

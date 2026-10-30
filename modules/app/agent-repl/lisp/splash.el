@@ -95,7 +95,7 @@ one block, as Doom's own banner does."
      :action agent-repl-add-project-workspace)
     ("New project workspace"
      :icon (nerd-icons-octicon "nf-oct-plus" :face 'doom-dashboard-menu-title)
-     :action agent-repl-create-workspace-static)
+     :action agent-repl-create-workspace-in-repository)
     ("Open workspace"
      :icon (nerd-icons-octicon "nf-oct-briefcase" :face 'doom-dashboard-menu-title)
      :action agent-repl-switch-to-project)

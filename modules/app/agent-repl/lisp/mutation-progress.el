@@ -29,7 +29,7 @@
 ;;;; ---- The one progress report ------------------------------------------
 ;;
 ;; EVERY WAY OF MAKING OR RESTORING A WORKSPACE REPORTS THROUGH THIS ONE
-;; FUNCTION.  `SPC TAB n', `N', `c', `C', `f', `o', `O', `C-n' and `SPC j .'
+;; FUNCTION.  `SPC TAB n', `N', `C-n', `c', `C', `f', `o', `O', `p' and `SPC j .'
 ;; are nine gestures over four rpcs, and each of them used to word its own
 ;; feedback -- where it worded any at all.  A user cannot learn nine
 ;; vocabularies for one operation, so the vocabulary is a TABLE here and the

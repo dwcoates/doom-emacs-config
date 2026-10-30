@@ -160,8 +160,8 @@ carries: a failed deploy, and a failed deploy's rollback.
 
 ## Workspace create/open/register progress
 
-Every gesture that makes or restores a workspace -- `SPC TAB n`, `N`, `c`,
-`C`, `f`, `o`, `O`, `C-n` and `SPC j .` -- reports each step it reaches
+Every gesture that makes or restores a workspace -- `SPC TAB n`, `N`, `C-n`, `c`,
+`C`, `f`, `o`, `O`, `p` and `SPC j .` -- reports each step it reaches
 through exactly one function, `agent-repl-workspace-progress-report` in
 `mutation-progress.el`. Its sentences live in one table,
 `agent-repl-workspace-progress-phases`, keyed by KIND (`:create`, `:open`,

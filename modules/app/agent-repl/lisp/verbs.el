@@ -1158,7 +1158,7 @@ CONN is the connection the create is sent on, the primary link when nil;
 RESENT marks the one resend, which is never resent again.
 
 CREATING A WORKSPACE NEVER MOVES THE USER (owner ruling, 2026-10-16).
-No creation -- dynamic, static, fork or one-shot -- selects what it
+No creation -- standard, named fork or one-shot -- selects what it
 made: the user may be typing in a minibuffer, or simply working where they
 stand, and the new tab appearing on the bar is the whole of the news.
 
@@ -2133,20 +2133,20 @@ workspace, and a fork -- ask for a prompt and nothing else: the repository
 is the repository the CURRENT workspace sits in, taken off that repo's
 MAIN (default) branch, and the daemon mints the name.  So the repository
 is READ from the roster section the current workspace's row sits in, and
-never picked.  Only the static mode asks for a repository.  The
-exceptions are the one-shots bound to FIXED repositories (owner ruling,
-2026-10-19): `SPC TAB o\=' always lands in agent-repl\='s own repository
-and `SPC TAB O\=' in explanation-engine\='s; `SPC TAB C-o\=' derives.
+never picked.  The exceptions are the creations bound to FIXED
+repositories: `SPC TAB n\=' and `SPC TAB o\=' always land in doom\='s own
+repository, `SPC TAB N\=' and `SPC TAB O\=' in explanation-engine\='s, and
+`SPC TAB C-n\=' picks one by hand; `SPC TAB C-o\=' derives.
 
 COMMAND names the mode in the refusal, which is raised when the current
 buffer has no workspace to derive from -- a dynamic create has nothing to
-derive from then, and the static command is where a repository is named
+derive from then, and `SPC TAB C-n\=' is where a repository is named
 by hand."
   (let* ((section (agent-repl-verbs--section-of-ws (agent-repl--ws-current-name)))
          (repository (and section (agent-repl-verbs--section-ref section))))
     (unless repository
       (user-error
-       "agent-repl: %s needs a current workspace to take its repository from; use `agent-repl-create-workspace-static' to name one"
+       "agent-repl: %s needs a current workspace to take its repository from; use `agent-repl-create-workspace-in-repository' to pick one"
        command))
     repository))
 
@@ -2226,8 +2226,8 @@ there."
   "Register the repository the picked FILE is inside (`SPC j .\=').
 A repository used to enter the roster only as a SIDE EFFECT of registering
 a workspace in it, so a checkout nobody had worked in yet could not be
-named at all -- and the static create, which is the one mode that picks a
-repository by hand, could offer only repositories some workspace had
+named at all -- and the create that picks a repository by hand
+\(`agent-repl-create-workspace-in-repository\='), could offer only repositories some workspace had
 already minted.
 
 THE GESTURE IS PICKING A FILE, not naming a repository root: the daemon
@@ -2241,7 +2241,7 @@ and a repository with no workspace is not selectable: `SPC p p\='
 (`agent-repl-switch-to-project\=') completes over LIVE WORKSPACES, so
 registering the repository you were standing in still left you unable to
 switch to it.  The daemon registers the main worktree through the same
-registration `SPC TAB C-n\=' runs, so the row is an ordinary workspace row
+registration `SPC TAB p\=' runs, so the row is an ordinary workspace row
 in every respect.
 
 AND THIS COMMAND SWITCHES TO IT (owner ruling, 2026-09-18).  \"Register
@@ -2287,7 +2287,7 @@ opened."
          ;; The roster is where the workspace is actually born in this
          ;; editor, and it only opens panels for an arrival some verb
          ;; claimed -- so this one claims it before standing on it, exactly
-         ;; as `SPC TAB C-n\=' does.  `already known\=' is an answer about
+         ;; as `SPC TAB p\=' does.  `already known\=' is an answer about
          ;; MINTING and never a reason to leave the user where they were.
          (agent-repl--panels-note-arrival-reason
           (plist-get workspace :id) "registered")
@@ -2462,7 +2462,7 @@ says where the create stopped, and the caller still sees it stop."
      (signal (car err) (cdr err)))))
 
 (defconst agent-repl-verbs--name-question "Workspace name (%s) (slug, no prompt): "
-  "The format of the question a static create or a named fork reads its REQUIRED name with.
+  "The format of the question a named fork reads its REQUIRED name with.
 Its argument is the repository the workspace lands in.  It says what it
 wants because a prompt typed here is no name: the daemon refuses it, and
 the question is the one place to say so before the user types.")
@@ -2544,15 +2544,15 @@ The daemon judges the name before the minibuffer closes
       (user-error "agent-repl: %s" refusal))
     name))
 
-(defun agent-repl-verbs--create-standard (command mode)
-  "Create a standard TOP-LEVEL workspace in MODE.
-MODE is `dynamic\=' -- a prompt and nothing else, the repository read off
-the current workspace\='s roster section -- or `static\=', which asks for a
-repository and a REQUIRED name and sends no prompt at all.
+(defun agent-repl-verbs--create-standard (command repository-fn pick-model)
+  "Create a standard TOP-LEVEL workspace for COMMAND from a prompt.
+The repository is what REPOSITORY-FN answers, the initial prompt is read
+\(seeded from the composer\=', the repository named in its question), and
+the model is asked for only when PICK-MODEL.  A blank prompt sends none.
 
 It is cut from the repository\='s primary branch and merges into it; a
 workspace that merges into another one is a CHILD FORK
-\(`agent-repl-verbs--create-fork\').
+\(`agent-repl-verbs--create-fork\=').
 
 THE NEW WORKSPACE IS NOT SELECTED: no creation moves the user
 \(`agent-repl-verb-create\=').
@@ -2561,61 +2561,60 @@ COMMAND is the interactive command running this body; its invocation is
 recorded before any question is asked, and a question it abandons is
 recorded before the abandonment propagates."
   (agent-repl-verbs--create-invoked command)
-  (let* ((static (eq mode 'static))
-         (repository (agent-repl-verbs--read-for
-                      command 'repository
-                      (lambda ()
-                        (if static
-                            (agent-repl-verbs--read-repository)
-                          (agent-repl-verbs--dynamic-repository "a dynamic create")))))
-         (name (when static
-                 (agent-repl-verbs--read-for
-                  command 'name
-                  (lambda () (agent-repl-verbs--read-name repository "a static workspace IS its name")))))
-         (prompt (unless static
-                   (agent-repl-verbs--read-for
-                    command 'prompt
-                    (lambda () (agent-repl-verbs--read-prompt
-                                    (format "Initial prompt (%s): "
-                                            (agent-repl-verbs--repository-name repository))))))))
-    (agent-repl--info agent-repl-verbs--create-log-scope "elisp.verbs.create-standard mode=%s" mode)
-    (apply #'agent-repl-verb-create
-           repository :standard
-           (if (eq mode 'static)
-               (list :name name)
-             (list :initial-prompt
-                   (unless (string-empty-p (string-trim prompt)) prompt))))))
+  (let* ((repository (agent-repl-verbs--read-for command 'repository repository-fn))
+         (prompt (agent-repl-verbs--read-for
+                  command 'prompt
+                  (lambda () (agent-repl-verbs--read-prompt
+                                  (format "Initial prompt (%s): "
+                                          (agent-repl-verbs--repository-name repository))))))
+         (model (and pick-model
+                     (agent-repl-verbs--read-for
+                      command 'model #'agent-repl-verbs--read-model))))
+    (agent-repl--info agent-repl-verbs--create-log-scope
+                      "elisp.verbs.create-standard command=%s model=%S" command model)
+    (agent-repl-verb-create
+     repository :standard
+     :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
+     :model model)))
 
 (defun agent-repl-create-workspace ()
-  "Create a DYNAMIC workspace (`SPC TAB n\='): a prompt, and nothing else.
-Owner ruling, 2026-09-12.  This is the dynamic normal mode, so the only
-question it asks is the prompt, which defaults to the composer\='s text.
-The repository is the one the current workspace sits in, off that repo\='s
-MAIN (default) branch -- an absent base ref IS that resolution -- and the
-daemon mints the name.
+  "Create a workspace in the doom repository from a prompt (`SPC TAB n\=').
+The repository is ALWAYS doom\='s own (`agent-repl-verbs--agent-repl-repository\='),
+whichever workspace (or none) this runs from, off its main branch; the
+daemon mints the name.  The only question is the prompt, which defaults to
+the composer\='s text.  `SPC TAB N\=' is the explanation-engine counterpart
+and `SPC TAB C-n\=' picks the repository and the model.
 
 It never makes a child: the child fork (`agent-repl-fork-workspace\=') is
-the one way to make a workspace that merges into another, and naming a
-repository or a name by hand is the STATIC mode\='s
-business (`agent-repl-create-workspace-static\=').
+the one way to make a workspace that merges into another.
 
 THE NEW WORKSPACE IS NOT SELECTED: its tab arrives and the user stays put."
   (interactive)
-  (agent-repl-verbs--create-standard 'agent-repl-create-workspace 'dynamic))
+  (agent-repl-verbs--create-standard
+   'agent-repl-create-workspace #'agent-repl-verbs--agent-repl-repository nil))
 
-(defun agent-repl-create-workspace-static ()
-  "Create a STATIC workspace (`SPC TAB N\='): a repository and a name, no prompt.
-Owner ruling, 2026-09-12.  This is the one creation mode that asks for a
-repository, and the one that REQUIRES a name; it sends no initial prompt
-at all, so the workspace comes up idle and waits for the user.
-
-It never makes a child: `agent-repl-fork-workspace-static\=' is the named
-child fork.
-
-THE NEW WORKSPACE IS NOT SELECTED, exactly as the dynamic create\='s is
-not."
+(defun agent-repl-create-workspace-explanation-engine ()
+  "Create a workspace in the explanation-engine repository from a prompt (`SPC TAB N\=').
+Exactly `agent-repl-create-workspace\=', except the repository is always
+the explanation-engine checkout
+\(`agent-repl-verbs--explanation-engine-repository\=')."
   (interactive)
-  (agent-repl-verbs--create-standard 'agent-repl-create-workspace-static 'static))
+  (agent-repl-verbs--create-standard
+   'agent-repl-create-workspace-explanation-engine
+   #'agent-repl-verbs--explanation-engine-repository nil))
+
+(defun agent-repl-create-workspace-in-repository ()
+  "Create a workspace in a repository you pick, with a prompt and a model (`SPC TAB C-n\=').
+The one creation that asks for the repository
+\(`agent-repl-verbs--read-repository\=', defaulting to the current
+workspace\='s), then the initial prompt, then the model
+\(`agent-repl-verbs--read-model\=', blank for the daemon\='s default).
+
+THE NEW WORKSPACE IS NOT SELECTED, exactly as `agent-repl-create-workspace\='s
+is not."
+  (interactive)
+  (agent-repl-verbs--create-standard
+   'agent-repl-create-workspace-in-repository #'agent-repl-verbs--read-repository t))
 
 (defun agent-repl-fork-workspace ()
   "Create a CHILD workspace forking the current one's conversation (`SPC TAB c').
@@ -2640,8 +2639,7 @@ Exactly `agent-repl-fork-workspace\=' -- the repository is the current
 workspace\='s, the parent is the current workspace, the conversation is
 forked, the fork is NOT selected -- except it asks for a REQUIRED name instead
 of a prompt and sends NO initial prompt, so the fork comes up idle on the
-forked conversation.  It relates to the fork as `SPC TAB N\=' relates to
-`SPC TAB n\=', but it never asks for a repository: a fork\='s repository is
+forked conversation.  It never asks for a repository: a fork\='s repository is
 its parent\='s by construction."
   (interactive)
   (agent-repl-verbs--create-fork 'agent-repl-fork-workspace-static 'static))
@@ -2831,7 +2829,7 @@ The checkout is `agent-repl-verbs--explanation-engine-basename\=' under
 the roster\='s repository sections by canonical directory.
 
 Refuses when `MULTI_REPO_ROOT\=' is unset, and when the checkout is not on
-the roster -- registering it (`SPC TAB C-n\=') is the user\='s act."
+the roster -- registering it (`SPC TAB p\=') is the user\='s act."
   (let ((root agent-repl-daemon-multi-repo-root))
     (unless root
       (agent-repl--error agent-repl-verbs--create-log-scope
@@ -2844,7 +2842,7 @@ the roster -- registering it (`SPC TAB C-n\=') is the user\='s act."
             (agent-repl--warn agent-repl-verbs--create-log-scope
                               "elisp.verbs.explanation-engine-repository-unregistered root=%s main=%s"
                               root main)
-            (user-error "agent-repl: the explanation-engine repository %s is not on the roster; register it with SPC TAB C-n"
+            (user-error "agent-repl: the explanation-engine repository %s is not on the roster; register it with SPC TAB p"
                         main))))))
 
 (defun agent-repl-create-explanation-engine-oneshot (&optional pick-model)
@@ -2943,7 +2941,7 @@ agent-repl\='s own repository finds it here.
 
 Refuses when the module root is not in a git repository, or when that
 repository is not on the roster -- a creation fixed to it has nowhere
-else to go, and registering the repository (`SPC TAB C-n') is the
+else to go, and registering the repository (`SPC TAB p') is the
 user\='s act."
   (let* ((module-root (file-name-directory agent-repl-metaprompt-file))
          (main (agent-repl--main-worktree-for-dir module-root)))
@@ -2957,7 +2955,7 @@ user\='s act."
           (agent-repl--warn agent-repl-verbs--create-log-scope
                             "elisp.verbs.agent-repl-repository-unregistered module-root=%s main=%s"
                             module-root main)
-          (user-error "agent-repl: agent-repl's repository %s is not on the roster; register it with SPC TAB C-n"
+          (user-error "agent-repl: agent-repl's repository %s is not on the roster; register it with SPC TAB p"
                       main)))))
 
 ;;;; ---- Shutdown and merge-queue commands --------------------------------
