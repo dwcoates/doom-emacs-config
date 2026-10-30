@@ -246,8 +246,8 @@ hand any more:
 ## Standing rules
 
 - **THE CANONICAL ORANGE IS `--canonical-orange`** (src/styles.css; owner
-  ruling, 2026-10-30). It is the pastel orange of a response tree's answered
-  labels and a prompt's entry labels (`#e08a4c` light, `#d99866` dark). A new
+  ruling, 2026-10-30). It is the orange of a response tree's answered labels
+  and a prompt's entry labels (`#cc4d00` light, `#c26404` dark). A new
   use of orange reads `var(--canonical-orange)`, or a token that reads it,
   and never declares a hue of its own. The status palette's orange
   (`render-colors.json`, `--compact-rule`) and the thinking orange

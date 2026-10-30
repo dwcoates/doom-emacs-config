@@ -1344,7 +1344,7 @@ describe("recently merged rows", () => {
   });
 
   it("styles a merged name with the repository headers' colour variable", () => {
-    expect(css).toContain("#ws-sidebar .row .name.band-name { color: var(--repo-head-expanded); }");
+    expect(css).toContain("#ws-sidebar .row .name.band-name { --name-rest: var(--repo-head-expanded); color: var(--repo-head-expanded); }");
   });
 
   it("draws a row merged today with the off-white gutter bar", () => {

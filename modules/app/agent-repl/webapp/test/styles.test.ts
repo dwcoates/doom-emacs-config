@@ -6273,8 +6273,8 @@ describe("the answered label's pastel orange", () => {
   });
 
   it.each([
-    ["light", () => rootToken("--canonical-orange"), "#e08a4c"],
-    ["dark", () => /--canonical-orange:\s*([^;]+);/.exec(darkThemeBlock())?.[1]?.trim(), "#d99866"],
+    ["light", () => rootToken("--canonical-orange"), "#cc4d00"],
+    ["dark", () => /--canonical-orange:\s*([^;]+);/.exec(darkThemeBlock())?.[1]?.trim(), "#c26404"],
   ])("defines the %s theme's pastel orange as the canonical orange", (_theme, read, want) => {
     // Act
     const got = read();
