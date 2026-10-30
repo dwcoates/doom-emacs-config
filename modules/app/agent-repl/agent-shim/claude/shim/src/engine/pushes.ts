@@ -180,6 +180,10 @@ export class SessionPushes {
   // daemon answers by replacing this shim at its next idle point: a daemon that
   // attaches after it was stated (a handover's successor) must still learn it,
   // or the replacement it owes is lost with the daemon that heard it.
+  //
+  // `vendorActivity` is whether the vendor is doing or owes anything, a LEVEL
+  // the daemon counts toward freeness: a daemon that attaches while the vendor
+  // is busy must not read the session as free until it hears idle.
   private static readonly REPLAYED = [
     "contextUsage",
     "modelChanged",
@@ -193,6 +197,7 @@ export class SessionPushes {
     "cacheLapse",
     "vendorErrorRetry",
     "skillsChanged",
+    "vendorActivity",
   ];
 
   /**

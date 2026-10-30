@@ -296,7 +296,19 @@ export function realQueryOptions(spec: RealQuerySpec, mcpServers: Record<string,
     // agent-repl owns the cadence (engine/vendor-error-retry.ts), so a failed
     // call ends the turn at once and the shim retries it where the footer can
     // count down to it and the user can ask for it now.
-    env: { ...process.env, CLAUDE_CONFIG_DIR: spec.claudeConfigDir, CLAUDE_CODE_MAX_RETRIES: "0" },
+    //
+    // THE VENDOR STATES ITS SESSION STATE ON THE STREAM. Without
+    // CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS the SDK asks for the state for its
+    // own use only (`sdk_host_only`) and swallows it; the shim needs it,
+    // because the vendor's idle is the one fact that covers work the vendor
+    // owes before any turn or task says so (engine/session.ts
+    // `servedVendorBusy`, the stand-down guard).
+    env: {
+      ...process.env,
+      CLAUDE_CONFIG_DIR: spec.claudeConfigDir,
+      CLAUDE_CODE_MAX_RETRIES: "0",
+      CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1",
+    },
     ...(spec.model === undefined ? {} : { model: spec.model }),
     // THE STDERR CALLBACK OR THE SPAWNER, NEVER BOTH. A custom spawner is
     // where `Options.stderr` stops being fed (`SpawnedProcess` declares no

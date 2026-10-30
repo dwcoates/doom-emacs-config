@@ -2313,87 +2313,96 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   // -- the message loop -----------------------------------------------------
 
   async function onSdkMessage(vendorMessage: SdkMessage): Promise<void> {
-    // THE TASK'S KIND, TAKEN ONCE, before anything reads it: the live table
-    // below and the fold read the same restated `task_type`, so a monitor the
-    // vendor typed as a shell is a monitor to both (convert/detached.ts
-    // `restateTaskMessage`).
-    const message = deps.fold.restateTaskMessage(vendorMessage);
-    // BEFORE THE FOLD. A rewind the vendor refused reaches us as this message,
-    // and recovering here is what keeps the refusal out of the feed and the
-    // prompt alive. A recovered message is consumed: the query it arrived on is
-    // already closed and the prompt already re-delivered on its replacement.
-    if (await noteRewindOutcome(message)) return;
-    // WHAT IT SAYS OF A PEER SEND AWAITING ADMISSION: queued, or held.
-    peerAdmissions.observe(message);
-    // THE SEND IT ANSWERS, BY ITS ECHO, TAKEN ONCE (engine/sends.ts). Every
-    // turn attribution below reads this one verdict, never what is "open".
-    const verdict = sends.attribute(message);
-    // THE TAG, TAKEN ONCE. Everything below reads this one answer: the fold
-    // writes it into every row (the writer stores nothing tagged), and the push
-    // plane drops every tagged session fact.
-    const attribution = keepaliveScope.attribute(message, verdict);
-    // A TURN THE VENDOR ABSORBED ENDS BEFORE THE SEND THAT ABSORBED IT GOES ON,
-    // so its terminal is its last row and the send's rows follow it.
-    // Awaited ONLY when there is something to conclude or adopt, so an
-    // ordinary message reaches the fold in the same step it always did.
-    if (verdict.absorbed.length > 0) await concludeAbsorbedTurns(verdict);
-    // A turn the keep-alive's own rewind set off is the keep-alive's: tagged,
-    // never adopted (engine/keepalive.ts `attribute`).
-    if (verdict.openedVendorTurn && !attribution.keepalive) await adoptVendorTurn(message, verdict);
-    // AFTER the adoption: the adopting message's own instant is the new
-    // turn's, so it must not lift the bound its prompt is placed at.
-    noteMainRecordInstant(message);
-    noteRewindBoundary(message);
-    notePreInitMessage(message);
-    noteIdentityFacts(message, attribution);
-    noteMainApiResponse(message, attribution, verdict.turn);
-    noteRateLimitEvent(message);
-    noteCacheRequest(message);
-    settleStartOnBlockingHook(message);
-    settleStartOnErrorResult(message);
-    noteDetachedWork(message, attribution, verdict.turn);
-    networkResume.observe(message);
-    const reach = networkReach(message);
-    if (reach !== undefined) noteNetworkReach(reach);
-    // A RESUMED SUBAGENT THIS PROCESS NEVER SAW SPAWN IS NAMED BY THE STORE,
-    // before the fold, which cannot await: the pairing of its vendor task
-    // locator with its agent is the sidecar's, on record since the agent first
-    // ran. Awaited HERE, inside the one serial message loop, so no later
-    // message can be folded ahead of this one.
-    // A TASK MESSAGE THE FOLD CANNOT TYPE IS TYPED BY THE STORE first, the same
-    // way and for the same reason: only a start states a kind, and a
-    // notification after a restart or a keep-alive rewind follows no start
-    // this process saw. Asked BEFORE the agent, whose ask needs the kind.
-    const awaitingKind = deps.fold.taskAwaitingKind(message, foldContext(attribution, verdict.turn));
-    if (awaitingKind !== undefined) await kindFromStore(awaitingKind.taskId, awaitingKind.unit);
-    const awaitingAgent = deps.fold.taskAwaitingAgent(message, foldContext(attribution, verdict.turn));
-    if (awaitingAgent !== undefined) await agentFromStore(awaitingAgent, "announcement");
-    converterDefectThisMessage = false;
-    const output = deps.fold.onSdkMessage(message, foldContext(attribution, verdict.turn));
-    if (message.type === "result" && !attribution.keepalive) retireStopCommand("the stopped turn's result was folded");
-    if (converterDefectThisMessage) {
-      LOGGER.logVerbose({}, "this message was refused; the converter's window stays open");
+    // AFTER THE WHOLE MESSAGE, on every return: it may have changed the
+    // vendor's state, or closed the keep-alive slot that hid it, and either
+    // changes the served level. A `finally` around the body rather than a
+    // wrapper, so the loop reaches its next read in the same steps as before.
+    try {
+      // THE TASK'S KIND, TAKEN ONCE, before anything reads it: the live table
+      // below and the fold read the same restated `task_type`, so a monitor the
+      // vendor typed as a shell is a monitor to both (convert/detached.ts
+      // `restateTaskMessage`).
+      const message = deps.fold.restateTaskMessage(vendorMessage);
+      // BEFORE THE FOLD. A rewind the vendor refused reaches us as this message,
+      // and recovering here is what keeps the refusal out of the feed and the
+      // prompt alive. A recovered message is consumed: the query it arrived on is
+      // already closed and the prompt already re-delivered on its replacement.
+      if (await noteRewindOutcome(message)) return;
+      // WHAT IT SAYS OF A PEER SEND AWAITING ADMISSION: queued, or held.
+      peerAdmissions.observe(message);
+      // THE SEND IT ANSWERS, BY ITS ECHO, TAKEN ONCE (engine/sends.ts). Every
+      // turn attribution below reads this one verdict, never what is "open".
+      const verdict = sends.attribute(message);
+      // THE TAG, TAKEN ONCE. Everything below reads this one answer: the fold
+      // writes it into every row (the writer stores nothing tagged), and the push
+      // plane drops every tagged session fact.
+      const attribution = keepaliveScope.attribute(message, verdict);
+      // A TURN THE VENDOR ABSORBED ENDS BEFORE THE SEND THAT ABSORBED IT GOES ON,
+      // so its terminal is its last row and the send's rows follow it.
+      // Awaited ONLY when there is something to conclude or adopt, so an
+      // ordinary message reaches the fold in the same step it always did.
+      if (verdict.absorbed.length > 0) await concludeAbsorbedTurns(verdict);
+      // A turn the keep-alive's own rewind set off is the keep-alive's: tagged,
+      // never adopted (engine/keepalive.ts `attribute`).
+      if (verdict.openedVendorTurn && !attribution.keepalive) await adoptVendorTurn(message, verdict);
+      // AFTER the adoption: the adopting message's own instant is the new
+      // turn's, so it must not lift the bound its prompt is placed at.
+      noteMainRecordInstant(message);
+      noteRewindBoundary(message);
+      notePreInitMessage(message);
+      noteIdentityFacts(message, attribution);
+      noteVendorState(message);
+      noteMainApiResponse(message, attribution, verdict.turn);
+      noteRateLimitEvent(message);
+      noteCacheRequest(message);
+      settleStartOnBlockingHook(message);
+      settleStartOnErrorResult(message);
+      noteDetachedWork(message, attribution, verdict.turn);
+      networkResume.observe(message);
+      const reach = networkReach(message);
+      if (reach !== undefined) noteNetworkReach(reach);
+      // A RESUMED SUBAGENT THIS PROCESS NEVER SAW SPAWN IS NAMED BY THE STORE,
+      // before the fold, which cannot await: the pairing of its vendor task
+      // locator with its agent is the sidecar's, on record since the agent first
+      // ran. Awaited HERE, inside the one serial message loop, so no later
+      // message can be folded ahead of this one.
+      // A TASK MESSAGE THE FOLD CANNOT TYPE IS TYPED BY THE STORE first, the same
+      // way and for the same reason: only a start states a kind, and a
+      // notification after a restart or a keep-alive rewind follows no start
+      // this process saw. Asked BEFORE the agent, whose ask needs the kind.
+      const awaitingKind = deps.fold.taskAwaitingKind(message, foldContext(attribution, verdict.turn));
+      if (awaitingKind !== undefined) await kindFromStore(awaitingKind.taskId, awaitingKind.unit);
+      const awaitingAgent = deps.fold.taskAwaitingAgent(message, foldContext(attribution, verdict.turn));
+      if (awaitingAgent !== undefined) await agentFromStore(awaitingAgent, "announcement");
+      converterDefectThisMessage = false;
+      const output = deps.fold.onSdkMessage(message, foldContext(attribution, verdict.turn));
+      if (message.type === "result" && !attribution.keepalive) retireStopCommand("the stopped turn's result was folded");
+      if (converterDefectThisMessage) {
+        LOGGER.logVerbose({}, "this message was refused; the converter's window stays open");
+      }
+      const entries = [...output.entries];
+      noteForegroundUnits(entries);
+      shellRunStarts.note(entries);
+      if (entries.length > 0) deps.persistence.write(entries);
+      serveSessionUpdates(entries);
+      // THE ANCHOR, AND ONLY FROM WHAT MAY BE ONE. The whole message goes in; the
+      // rewind itself refuses everything that is not an assistant record of the
+      // open real turn (see engine/keepalive.ts).
+      noteConversationRecord(message, recordTurn(attribution, verdict.turn));
+      if (output.turnEnded === undefined) return;
+      // THE TURN IS THE UNIT OF RECOVERY. A defective turn is degraded for its
+      // WHOLE length: the messages that follow the refused one are the same
+      // turn's own remainder, and recovering on the next of them closed the
+      // window a millisecond after opening it — before any consumer could
+      // observe it, and while the turn that lost a record was still running. So
+      // the window closes only at the end of a turn that refused nothing.
+      if (!converterDefectThisTurn) noteConverterHealthy();
+      converterDefectThisTurn = false;
+      if (!attribution.keepalive) vendorErrorRetry.turnEnded(shimTurnOf(verdict.turn), output.turnEnded.frame);
+      await endVendorTurn(verdict.turn);
+    } finally {
+      refreshVendorActivity("vendor_message");
     }
-    const entries = [...output.entries];
-    noteForegroundUnits(entries);
-    shellRunStarts.note(entries);
-    if (entries.length > 0) deps.persistence.write(entries);
-    serveSessionUpdates(entries);
-    // THE ANCHOR, AND ONLY FROM WHAT MAY BE ONE. The whole message goes in; the
-    // rewind itself refuses everything that is not an assistant record of the
-    // open real turn (see engine/keepalive.ts).
-    noteConversationRecord(message, recordTurn(attribution, verdict.turn));
-    if (output.turnEnded === undefined) return;
-    // THE TURN IS THE UNIT OF RECOVERY. A defective turn is degraded for its
-    // WHOLE length: the messages that follow the refused one are the same
-    // turn's own remainder, and recovering on the next of them closed the
-    // window a millisecond after opening it — before any consumer could
-    // observe it, and while the turn that lost a record was still running. So
-    // the window closes only at the end of a turn that refused nothing.
-    if (!converterDefectThisTurn) noteConverterHealthy();
-    converterDefectThisTurn = false;
-    if (!attribution.keepalive) vendorErrorRetry.turnEnded(shimTurnOf(verdict.turn), output.turnEnded.frame);
-    await endVendorTurn(verdict.turn);
   }
 
   /** The shim turn a vendor turn answers, or absence when it answers none of ours. */
@@ -3633,6 +3642,67 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   function endVendorProcessWork(why: string): void {
     live.clear(why);
     pushLiveWorkLevel(why);
+    vendorBusy = false;
+    refreshVendorActivity(why);
+  }
+
+  // -- the vendor's activity level (conversation.v1 SessionVendorActivity) ----
+
+  /**
+   * THE VENDOR'S OWN STATE, from its `session_state_changed` (emitted because
+   * the vendor runs with CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS, sdk/real-query.ts).
+   * The vendor reports idle only when no turn runs or is queued, no background
+   * task runs, no notification waits to be delivered and no wakeup or cron job
+   * is pending, so it is busy across the span between a background task's end
+   * and the first reply of the turn that hands its result back, which no turn
+   * or live-work fact covers. A vendor process that has just started, and been
+   * sent nothing, is idle.
+   */
+  let vendorBusy = false;
+  /** The activity last pushed, so an unchanged reading is not logged as a change. */
+  let servedVendorBusyLast: boolean | undefined;
+
+  /**
+   * The vendor's activity AS ANY CONSUMER MAY SEE IT: busy, unless the only
+   * thing it runs is the shim's own keep-alive. A keep-alive is never a turn in
+   * flight to anyone outside this process (servedOpenTurn), and the vendor
+   * running it is housekeeping no consumer waits on. Whatever the vendor still
+   * owes once the keep-alive's slot closes reads busy again.
+   */
+  function servedVendorBusy(): boolean {
+    return vendorBusy && open?.keepalive !== true;
+  }
+
+  function vendorActivity(): conversationv1.SessionVendorActivity {
+    return create(conversationv1.SessionVendorActivitySchema, {
+      state: servedVendorBusy()
+        ? { case: "busy", value: create(conversationv1.SessionVendorActivityBusySchema, {}) }
+        : { case: "idle", value: create(conversationv1.SessionVendorActivityIdleSchema, {}) },
+    });
+  }
+
+  /**
+   * PUSH THE ACTIVITY LEVEL when the served reading changed: on the vendor's
+   * own state change, when the keep-alive slot opens or closes around it, and
+   * when the vendor process ends. The push table replays it to every watch
+   * that opens later and drops an unchanged one.
+   */
+  function refreshVendorActivity(why: string): void {
+    const busy = servedVendorBusy();
+    if (busy === servedVendorBusyLast) return;
+    servedVendorBusyLast = busy;
+    LOGGER.info({ busy, vendor_busy: vendorBusy, why }, "the vendor's activity level changed and was pushed");
+    pushes.push(create(conversationv1.SessionUpdateSchema, { update: { case: "vendorActivity", value: vendorActivity() } }));
+  }
+
+  /** Take the vendor's own state from its `session_state_changed`. */
+  function noteVendorState(message: SdkMessage): void {
+    if (message.type !== "system" || message.subtype !== "session_state_changed") return;
+    const state = (message as { state?: unknown }).state;
+    // ANY STATE BUT IDLE IS BUSY, an unrecognized one included: an unknown
+    // state is never read as permission to stand the session down.
+    vendorBusy = state !== "idle";
+    LOGGER.debug({ state: String(state), vendor_busy: vendorBusy }, "the vendor stated its session state");
   }
 
   /** State the level in effect on WatchSession; the fan-out drops an unchanged one. */
@@ -5481,7 +5551,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       permissionMode,
       modelCatalog,
       liveWork,
-      contract: conversationv1.SessionContract.LIVE_WORK_LEVEL,
+      vendorActivity: vendorActivity(),
+      contract: conversationv1.SessionContract.VENDOR_ACTIVITY_LEVEL,
     });
     // KEPT SO A LATER WATCH CAN BE TOLD. A daemon that adopts an already-started
     // shim (crash boot, handover) was not there for this announcement, and the
@@ -6850,7 +6921,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // being asked stands the gate it never saw open, rather than drawing the
       // turn in flight as working while a card waits on the user.
       openAsks: gate.openAsks(),
-      contract: conversationv1.SessionContract.LIVE_WORK_LEVEL,
+      vendorActivity: vendorActivity(),
+      contract: conversationv1.SessionContract.VENDOR_ACTIVITY_LEVEL,
     });
   }
 
@@ -7115,6 +7187,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     return create(conversationv1.SessionLiveSchema, {
       ...servedTurnInFlight(),
       liveWork: live.workIds(announceable),
+      vendorActivity: vendorActivity(),
     });
   }
 
@@ -7128,7 +7201,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // A KEEP-ALIVE HOLDS NOTHING A KILL MUST WAIT FOR: it is housekeeping no
     // consumer asked for, and ending it mid-flight costs nothing but its call.
     const served = servedOpenTurn();
-    const busy = served !== undefined || announceable.length > 0;
+    // THE SHIM IS THE SOLE AUTHORITY ON STAND-DOWN (owner ruling, 2026-10-30),
+    // and it decides here, in one step with nothing awaited between the
+    // judgement and the teardown. The vendor's own state is part of it: a
+    // background task that just ended has its hand-back turn queued before any
+    // turn or live-work fact says so, and a pending wakeup or cron job runs a
+    // turn on its own clock.
+    const vendorOwes = servedVendorBusy();
+    const busy = served !== undefined || announceable.length > 0 || vendorOwes;
     if (busy && !request.force) {
       // THE REFUSAL NAMES WHAT IS LIVE, each item's kind included: a refusal
       // the daemon's ledger reads as free is the two disagreeing, and this
@@ -7137,6 +7217,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         {
           turn_in_flight: served?.id.value ?? "",
           live_work: announceable.length,
+          vendor_busy: vendorOwes,
           live_items: announceable.map((entry) => ({
             task_id: entry.taskId,
             tool_use_id: entry.toolUseId ?? "",
@@ -7147,7 +7228,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       return killSessionRefused(
         { kind: "live", live: sessionLive() },
-        `the session has ${served === undefined ? "no turn" : `turn ${served.id.value}`} in flight and ${announceable.length} live item(s)`,
+        `the session has ${served === undefined ? "no turn" : `turn ${served.id.value}`} in flight and ${announceable.length} live item(s)${vendorOwes ? ", and the vendor is busy" : ""}`,
       );
     }
     const interruptedTurn = served?.id;

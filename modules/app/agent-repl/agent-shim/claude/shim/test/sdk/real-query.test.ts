@@ -176,6 +176,14 @@ describe("realQueryOptions", () => {
     expect(options.env?.CLAUDE_CODE_MAX_RETRIES).toBe("0");
   });
 
+  it("asks the vendor to state its session state on the stream, which the stand-down guard reads", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec(), NO_SERVERS);
+
+    // Assert.
+    expect(options.env?.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS).toBe("1");
+  });
+
   it("passes the rest of the environment through to the child", () => {
     // Arrange.
     process.env.AGENT_REPL_REAL_QUERY_PROBE = "kept";
