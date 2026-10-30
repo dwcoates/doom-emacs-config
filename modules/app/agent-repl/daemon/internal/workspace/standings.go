@@ -47,6 +47,9 @@ const (
 	// ArmRequesterMayNotSet is a standing asked by a workspace the rule does
 	// not let set it.
 	ArmRequesterMayNotSet = "requester_may_not_set"
+	// ArmMainWorkspace is a one-shot mark on a repository's main workspace,
+	// which is never a one-shot.
+	ArmMainWorkspace = "main_workspace"
 	// ArmUnknownAwaited is a correspondence mark naming no registered
 	// workspace, or the marked workspace itself.
 	ArmUnknownAwaited = "unknown_awaited"
@@ -102,6 +105,20 @@ func (v *verbs) setOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.W
 	fields := dlog.Context{"one_shot": oneShot, "asker": optionalAsker(asker)}
 	if err := v.standingOpen(log, rpc, record); err != nil {
 		return "", PendingPlacement{}, err
+	}
+	// A MAIN WORKSPACE IS NEVER A ONE-SHOT: it sits on the main branch,
+	// lands nothing itself and splits its work off into created workspaces.
+	// Decided before anything else about the mark; an unmark passes.
+	if oneShot {
+		main, err := isMainWorkspace(ctx, v.deps.DB, record)
+		if err != nil {
+			log.Error(opSetOneShot, "could not resolve whether the workspace is its repository's main workspace", dlog.WithCause(fields, err))
+			return "", PendingPlacement{}, fmt.Errorf("set one-shot on %q: %w", ws, err)
+		}
+		if main {
+			return "", PendingPlacement{}, refuse(log, rpc, ArmMainWorkspace,
+				fmt.Sprintf("workspace %q (%s) is its repository's main workspace, which lands nothing itself and is never a one-shot; asked by %s", ws, record.Dir, optionalAsker(asker)), false)
+		}
 	}
 	if !record.MayAct(optionalAsker(asker)) {
 		return "", PendingPlacement{}, refuse(log, rpc, ArmRequesterMayNotSet, fmt.Sprintf("workspace %s is neither the workspace nor its owner", optionalAsker(asker)), false)

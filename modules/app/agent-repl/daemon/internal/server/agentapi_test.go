@@ -921,6 +921,21 @@ func TestSetWorkspaceOneShotAnswersTheVerbsRefusal(t *testing.T) {
 	}
 }
 
+func TestSetWorkspaceOneShotAnswersTheMainWorkspaceRefusal(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Verbs.api.oneShotErr = &workspace.Refusal{Arm: workspace.ArmMainWorkspace, Reason: "main workspace"}
+
+	// Act
+	resp, err := h.Client.SetWorkspaceOneShot(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceOneShotRequest{
+		Workspace: ref(), Requester: userRequester(), OneShot: true}))
+
+	// Assert
+	if err != nil || resp.Msg.GetError().GetMainWorkspace() == nil {
+		t.Fatalf("SetWorkspaceOneShot = %v, %v; want the main_workspace arm", resp, err)
+	}
+}
+
 func TestSetWorkspaceCorrespondenceHandsTheVerbItsMark(t *testing.T) {
 	awaited := ids.WorkspaceID("ws-planner")
 	tests := []struct {
