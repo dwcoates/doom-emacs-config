@@ -733,7 +733,7 @@ is recorded on `flashed'."
     ;; Assert
     (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) asked)
                    '("1.2 - " 2 nil)))
-    (should (cl-some (lambda (m) (string-match-p "sibling ws=ws-1 label=1.1 next=t sibling=1.2" m)) logs))))
+    (should (cl-some (lambda (m) (string-match-p "sibling ws=ws-1 label=1.1 way=:next sibling=1.2" m)) logs))))
 
 (ert-deftest agent-repl-test-prompt-entries-M-j-opens-the-previous-sibling-above ()
   "`M-j' on `2.2 - no' opens `2.1 - ' above it, asking the daemon nothing."
@@ -745,7 +745,7 @@ is recorded on `flashed'."
     ;; Assert
     (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) asked)
                    '("2.1 - " 3 nil)))
-    (should (cl-some (lambda (m) (string-match-p "sibling ws=ws-1 label=2.2 next=nil sibling=2.1" m)) logs))))
+    (should (cl-some (lambda (m) (string-match-p "sibling ws=ws-1 label=2.2 way=:previous sibling=2.1" m)) logs))))
 
 (ert-deftest agent-repl-test-prompt-entries-M-k-onto-a-sibling-below-goes-to-it ()
   "`M-k' whose next sibling already has an entry below goes to that line's end in insert mode."
@@ -770,12 +770,12 @@ is recorded on `flashed'."
       ;; Assert
       (should (equal (list (buffer-string) (point) flashed)
                      (list before 3 '(("ws-1" "1.1 is the first sibling")))))
-      (should (cl-some (lambda (m) (string-match-p "sibling-none ws=ws-1 label=1.1" m)) logs)))))
+      (should (cl-some (lambda (m) (string-match-p "sibling-none ws=ws-1 label=1.1 way=:previous" m)) logs)))))
 
 (ert-deftest agent-repl-test-prompt-entries-a-sibling-off-an-entry-refuses ()
   "Run off an entry line, either sibling command is refused and recorded, the composer untouched."
-  (dolist (case '((agent-repl-prompt-entries-open-sibling-above "nil")
-                  (agent-repl-prompt-entries-open-sibling-below "t")))
+  (dolist (case '((agent-repl-prompt-entries-open-sibling-above ":previous")
+                  (agent-repl-prompt-entries-open-sibling-below ":next")))
     (agent-repl-test-prompt-entries--siblings "2.1"
       ;; Arrange
       (goto-char 15)
@@ -783,7 +783,7 @@ is recorded on `flashed'."
         ;; Act / Assert
         (should-error (funcall (car case)) :type 'user-error)
         (should (equal (buffer-string) before))
-        (should (cl-some (lambda (m) (string-match-p (format "sibling-off-entry ws=ws-1 next=%s" (cadr case)) m)) logs))))))
+        (should (cl-some (lambda (m) (string-match-p (format "sibling-off-entry ws=ws-1 way=%s" (cadr case)) m)) logs))))))
 
 ;;;; ---- Stepping an entry along its tree ----
 
@@ -883,6 +883,53 @@ is recorded on `flashed'."
       (should-error (funcall (car case)) :type 'user-error)
       (should (equal asked nil))
       (should (cl-some (lambda (m) (string-match-p (format "step-off-entry ws=ws-1 way=%s" (cadr case)) m)) logs)))))
+
+(ert-deftest agent-repl-test-prompt-entries-on-entry-acts-on-the-label-and-its-target ()
+  "On an entry line with a target, the shared helper runs its action on both labels and flashes nothing."
+  (agent-repl-test-prompt-entries--siblings "2.1"
+    ;; Arrange
+    (let (acted)
+      (goto-char 3)
+      ;; Act
+      (agent-repl-prompt-entries--on-entry "kind" :way (lambda (label) (concat label ".9")) "%s none"
+                                           (lambda (label to) (push (list label to) acted)))
+      ;; Assert
+      (should (equal (list acted flashed) '((("1.1" "1.1.9")) nil))))))
+
+(ert-deftest agent-repl-test-prompt-entries-on-entry-with-no-target-flashes-and-acts-not ()
+  "With no target the shared helper flashes NONE, records KIND's none at info, and never acts."
+  (agent-repl-test-prompt-entries--siblings "2.1"
+    ;; Arrange
+    (let (acted)
+      (goto-char 3)
+      ;; Act
+      (agent-repl-prompt-entries--on-entry "kind" :way #'ignore "%s none" (lambda (&rest args) (push args acted)))
+      ;; Assert
+      (should (equal (list acted flashed) '(nil (("ws-1" "1.1 none")))))
+      (should (cl-some (lambda (m) (string-match-p "kind-none ws=ws-1 label=1.1 way=:way" m)) logs)))))
+
+(ert-deftest agent-repl-test-prompt-entries-on-entry-off-an-entry-refuses-and-asks-no-target ()
+  "Off an entry line the shared helper refuses, records KIND's off-entry, and never asks for a target."
+  (agent-repl-test-prompt-entries--siblings "2.1"
+    ;; Arrange
+    (let (asked-target)
+      (goto-char 15)
+      ;; Act / Assert
+      (should-error (agent-repl-prompt-entries--on-entry "kind" :way (lambda (l) (push l asked-target)) "%s" #'ignore)
+                    :type 'user-error)
+      (should (null asked-target))
+      (should (cl-some (lambda (m) (string-match-p "kind-off-entry ws=ws-1 way=:way point=15" m)) logs)))))
+
+(ert-deftest agent-repl-test-prompt-entries-every-entry-command-acts-through-on-entry ()
+  "Stepping and opening a sibling both act through `agent-repl-prompt-entries--on-entry', never a hand-rolled refusal."
+  (dolist (name '("agent-repl-prompt-entries--step" "agent-repl-prompt-entries--open-sibling"))
+    ;; Arrange
+    (let ((source (agent-repl-test-prompt-entries--defun-source name)))
+      ;; Act / Assert
+      (should (equal (list name
+                           (and (string-match-p "(agent-repl-prompt-entries--on-entry\\_>" source) t)
+                           (string-match-p "user-error\\|agent-repl--input-flash" source))
+                     (list name t nil))))))
 
 (ert-deftest agent-repl-test-prompt-entries-on-entry-binding-is-a-filtered-menu-item ()
   "The entry-only binding of a command is a menu item the on-entry filter guards."

@@ -482,22 +482,38 @@ dotted run of numerals is an error."
         (index (+ (string-to-number (match-string 2 label)) offset)))
     (and (> index 0) (concat parent (number-to-string index)))))
 
+(defun agent-repl-prompt-entries--on-entry (kind way target none act)
+  "Run ACT on point's entry label and the label TARGET names WAY from it.
+THE ONE SHAPE of a command acting on point's entry and another label:
+TARGET maps the entry's label to that label, or nil when none stands, and
+ACT runs with both.  Off an entry line the command is refused; with no
+label that way the composer flashes NONE, a format of the entry's label.
+KIND names the command in its records (`step', `sibling'), which carry
+WAY, a direction keyword."
+  (let* ((ws agent-repl-prompt-entries--ws)
+         (label (agent-repl-prompt-entries--label-at-point))
+         (to (and label (funcall target label))))
+    (cond
+     ((null label)
+      (agent-repl--info ws "elisp.prompt-entries.%s-off-entry ws=%s way=%s point=%d" kind ws way (point))
+      (user-error "Point is on no entry line"))
+     ((null to)
+      (agent-repl--info ws "elisp.prompt-entries.%s-none ws=%s label=%s way=%s" kind ws label way)
+      (agent-repl--input-flash ws (format none label)))
+     (t (funcall act label to)))))
+
 (defun agent-repl-prompt-entries--open-sibling (next)
   "Open a line below (NEXT) or above point's entry, answering its sibling that way.
 A first sibling has none above: nothing opens, and the composer says so."
-  (let* ((ws agent-repl-prompt-entries--ws)
-         (label (agent-repl-prompt-entries--label-at-point))
-         (sibling (and label (agent-repl-prompt-entries--sibling label (if next 1 -1)))))
-    (cond
-     ((null label)
-      (agent-repl--info ws "elisp.prompt-entries.sibling-off-entry ws=%s next=%s point=%d" ws next (point))
-      (user-error "Point is on no entry line"))
-     ((null sibling)
-      (agent-repl--info ws "elisp.prompt-entries.sibling-none ws=%s label=%s" ws label)
-      (agent-repl--input-flash ws (format "%s is the first sibling" label)))
-     (t
-      (agent-repl--info ws "elisp.prompt-entries.sibling ws=%s label=%s next=%s sibling=%s" ws label next sibling)
-      (agent-repl-prompt-entries--open-on label sibling next)))))
+  (let ((way (if next :next :previous)))
+    (agent-repl-prompt-entries--on-entry
+     "sibling" way
+     (lambda (label) (agent-repl-prompt-entries--sibling label (if next 1 -1)))
+     "%s is the first sibling"
+     (lambda (label sibling)
+       (agent-repl--info agent-repl-prompt-entries--ws "elisp.prompt-entries.sibling ws=%s label=%s way=%s sibling=%s"
+                         agent-repl-prompt-entries--ws label way sibling)
+       (agent-repl-prompt-entries--open-on label sibling next)))))
 
 (defun agent-repl-prompt-entries-open-sibling-above ()
   "Open a line above point's entry, answering its previous sibling.
@@ -547,19 +563,14 @@ or before the label moves to the new label's end."
 WAY is `:following' or `:previous' (EntryNeighborDirection).  A node with
 no neighbor that way keeps its label, and the composer flashes NONE, a
 format of the label."
-  (let* ((ws agent-repl-prompt-entries--ws)
-         (label (agent-repl-prompt-entries--label-at-point))
-         (to (and label (agent-repl-prompt-entries--neighbor label way))))
-    (cond
-     ((null label)
-      (agent-repl--info ws "elisp.prompt-entries.step-off-entry ws=%s way=%s point=%d" ws way (point))
-      (user-error "Point is on no entry line"))
-     ((null to)
-      (agent-repl--info ws "elisp.prompt-entries.step-none ws=%s label=%s way=%s" ws label way)
-      (agent-repl--input-flash ws (format none label)))
-     (t
-      (agent-repl-prompt-entries--relabel label to)
-      (agent-repl--info ws "elisp.prompt-entries.stepped ws=%s label=%s way=%s to=%s" ws label way to)))))
+  (agent-repl-prompt-entries--on-entry
+   "step" way
+   (lambda (label) (agent-repl-prompt-entries--neighbor label way))
+   none
+   (lambda (label to)
+     (agent-repl-prompt-entries--relabel label to)
+     (agent-repl--info agent-repl-prompt-entries--ws "elisp.prompt-entries.stepped ws=%s label=%s way=%s to=%s"
+                       agent-repl-prompt-entries--ws label way to))))
 
 (defun agent-repl-prompt-entries-step-on ()
   "Relabel point's entry to answer the node read after its own.
