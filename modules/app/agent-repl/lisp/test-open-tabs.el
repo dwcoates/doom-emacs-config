@@ -629,6 +629,38 @@ section, landed on a perspective that no page was ever made for."
       ;; Assert
       (should-not (agent-repl-open-tabs-withheld-p "a")))))
 
+;;;; ---- A workspace's row ----
+
+(ert-deftest agent-repl-test-open-tabs-ws-row-answers-the-walked-row ()
+  "A walked workspace's row is found through its ref id."
+  (agent-repl-test-open-tabs--with
+    ;; Act
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Assert
+    (should (equal (plist-get (agent-repl-open-tabs--ws-row "a") :id) "a"))))
+
+(ert-deftest agent-repl-test-open-tabs-ws-row-is-nil-for-a-workspace-never-walked ()
+  "A workspace the last walk did not meet has no row."
+  (agent-repl-test-open-tabs--with
+    ;; Act / Assert
+    (should-not (agent-repl-open-tabs--ws-row "a"))))
+
+(ert-deftest agent-repl-test-open-tabs-every-name-to-row-read-shares-ws-row ()
+  "No function of open-tabs.el reads a workspace's row by its ref by hand."
+  ;; Arrange
+  (let ((source (with-temp-buffer
+                  (insert-file-contents (replace-regexp-in-string "\\.elc\\'" ".el" (symbol-file 'agent-repl-open-tabs--ws-row)))
+                  (buffer-string))))
+    ;; Act / Assert: the one read is `agent-repl-open-tabs--ws-row' itself.
+    (should (= (agent-repl-test-open-tabs--occurrences "(agent-repl--ws-get ws :ref) :id)" source) 1))))
+
+(defun agent-repl-test-open-tabs--occurrences (needle haystack)
+  "How many times NEEDLE occurs in HAYSTACK."
+  (let ((count 0) (start 0))
+    (while (setq start (string-search needle haystack start))
+      (setq count (1+ count) start (1+ start)))
+    count))
+
 ;;;; ---- Folding ----
 
 (ert-deftest agent-repl-test-open-tabs-hidden-p-is-nil-for-a-folded-row ()

@@ -538,8 +538,8 @@ there is no reattach left to wait for, so it is asked for again at once."
   "Workspace WS was re-attached to the daemon that serves it.
 Held by a handover refusal, it is asked for again now; with its open in
 flight, the refusal that may still come is asked for again on arrival."
-  (let* ((id (plist-get (agent-repl--ws-get ws :ref) :id))
-         (row (and id (agent-repl-open-tabs--row id))))
+  (let* ((row (agent-repl-open-tabs--ws-row ws))
+         (id (plist-get row :id)))
     (pcase (and row (gethash id agent-repl-open-tabs--state))
       ('handover (agent-repl-open-tabs--ask-again row "reattached"))
       ('in-flight (puthash id t agent-repl-open-tabs--reattached-while-asked)))))
