@@ -109,6 +109,47 @@ func TestNotYetAdoptedIsRefusedOnAJoiningDaemon(t *testing.T) {
 	}
 }
 
+// TestNotYetAdoptedNamesTheServingDaemon pins where the caller views the
+// workspace meanwhile: the arm names the incumbent that still serves it, or
+// names none when no other daemon serves it.
+func TestNotYetAdoptedNamesTheServingDaemon(t *testing.T) {
+	cases := []struct {
+		name      string
+		incumbent string
+		wantSet   bool
+	}{
+		{name: "a live incumbent is named", incumbent: "127.0.0.1:8888", wantSet: true},
+		{name: "no live incumbent leaves the address unset", incumbent: "", wantSet: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Ownership.standing = workspace.StandingNotYetAdopted
+			h.IncumbentAddress = tc.incumbent
+
+			// Act.
+			resp, err := h.Client.SelectWorkspace(context.Background(),
+				connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ref()}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("SelectWorkspace: %v", err)
+			}
+			arm := resp.Msg.GetError().GetNotYetAdopted()
+			if arm == nil {
+				t.Fatalf("result = %v, want not_yet_adopted", resp.Msg.GetResult())
+			}
+			if arm.Address != nil != tc.wantSet {
+				t.Fatalf("address set = %v, want %v", arm.Address != nil, tc.wantSet)
+			}
+			if tc.wantSet && arm.GetAddress() != tc.incumbent {
+				t.Fatalf("address = %q, want the incumbent's %q", arm.GetAddress(), tc.incumbent)
+			}
+		})
+	}
+}
+
 // TestOwnedWorkspaceIsServed pins that a served workspace reaches the verb.
 func TestOwnedWorkspaceIsServed(t *testing.T) {
 	// Arrange.

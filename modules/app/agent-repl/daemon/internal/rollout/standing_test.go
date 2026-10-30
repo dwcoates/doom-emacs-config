@@ -75,6 +75,39 @@ func TestSuccessorAddressIsEmptyWithNoHandoverInFlight(t *testing.T) {
 	}
 }
 
+// TestIncumbentAddressNamesTheDaemonServingWhatIsNotAdopted covers the one
+// field the not_yet_adopted arm carries: the incumbent's address while this
+// daemon joins, and none once it has taken over or never joined.
+func TestIncumbentAddressNamesTheDaemonServingWhatIsNotAdopted(t *testing.T) {
+	tests := []struct {
+		name        string
+		incumbent   string
+		joiningMode bool
+		want        string
+	}{
+		{name: "a joining daemon names its incumbent", incumbent: "127.0.0.1:6666", joiningMode: true, want: "127.0.0.1:6666"},
+		{name: "a daemon whose incumbent exited names none", incumbent: "127.0.0.1:6666", joiningMode: false, want: ""},
+		{name: "a daemon that never joined names none", incumbent: "", joiningMode: false, want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, func(d *Deps) { d.IncumbentAddress = tc.incumbent })
+			h.c.mu.Lock()
+			h.c.joiningMode = tc.joiningMode
+			h.c.mu.Unlock()
+
+			// Act
+			got := h.c.IncumbentAddress()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("IncumbentAddress = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestStandingIsNotYetAdoptedForAJoiningDaemonsManifestedWorkspace covers the
 // incoming half: a successor knows the workspace from the intent manifest but
 // must refuse for it until it has actually adopted it.
