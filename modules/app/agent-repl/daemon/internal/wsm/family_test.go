@@ -8,6 +8,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"agent-repld/internal/sourcescan"
 )
 
 // family is a parent with one open child, both in one repository.
@@ -695,3 +697,34 @@ func TestOpenChildrenAnswersTheOpenDirectChildrenInPlaceOrder(t *testing.T) {
 		t.Fatalf("OpenChildren = %+v, want first and second only, in place order %+v", got, want)
 	}
 }
+
+func TestScanFamilyRefReadsTheIDThenTheDir(t *testing.T) {
+	// Arrange
+	row := scanFunc(func(dest ...any) error {
+		*dest[0].(*WorkspaceID), *dest[1].(*string) = "ws-1", "/w/one"
+		return nil
+	})
+
+	// Act
+	got, err := scanFamilyRef(row)
+
+	// Assert
+	if err != nil || got != (FamilyRef{ID: "ws-1", Dir: "/w/one"}) {
+		t.Fatalf("scanFamilyRef = (%+v, %v), want ws-1 at /w/one", got, err)
+	}
+}
+
+func TestEveryFamilyListScansThroughScanFamilyRef(t *testing.T) {
+	// Act
+	handRolled := sourcescan.Count(t, "row.Scan(&ref.ID, &ref.Dir)")
+
+	// Assert: the helper's own scan is the only one.
+	if handRolled != 1 {
+		t.Fatalf("family member scans = %d, want only scanFamilyRef's", handRolled)
+	}
+}
+
+// scanFunc is a row whose Scan is the function itself.
+type scanFunc func(dest ...any) error
+
+func (f scanFunc) Scan(dest ...any) error { return f(dest...) }

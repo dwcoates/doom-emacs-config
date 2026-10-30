@@ -129,6 +129,13 @@ const mergeHiddenSQL = `(w.merge_of IS NOT NULL AND w.merge_revealed = 0 AND w.m
 // aliased `w`: not closed, and not a hidden merge workspace.
 const openChildSQL = `w.closed = 0 AND NOT ` + mergeHiddenSQL
 
+// scanFamilyRef reads one family member's id and dir, the two columns every
+// family list selects in that order.
+func scanFamilyRef(row interface{ Scan(...any) error }) (FamilyRef, error) {
+	var ref FamilyRef
+	return ref, row.Scan(&ref.ID, &ref.Dir)
+}
+
 // openDescendants answers every open descendant of ID (openChildSQL), at
 // every depth, in place order. A closed child's own open children count: the
 // rule is about the parent's whole family, legacy rows included.
@@ -140,10 +147,7 @@ func openDescendants(ctx context.Context, q querier, id WorkspaceID) ([]FamilyRe
 		)
 		SELECT w.id, w.dir FROM workspaces w JOIN family f ON w.id = f.id
 		WHERE `+openChildSQL+` ORDER BY w.place`,
-		func(row interface{ Scan(...any) error }) (FamilyRef, error) {
-			var ref FamilyRef
-			return ref, row.Scan(&ref.ID, &ref.Dir)
-		}, id)
+		scanFamilyRef, id)
 }
 
 // openLanders answers every open workspace (openChildSQL) whose merge lands
@@ -158,10 +162,7 @@ func openLanders(ctx context.Context, q querier, id WorkspaceID, descendants []F
 		JOIN workspaces target ON target.dir = c.target_dir
 		JOIN repositories r ON r.id = target.repo_id
 		WHERE target.id = ? AND w.id != target.id AND target.dir != r.dir AND `+openChildSQL+` ORDER BY w.place`,
-		func(row interface{ Scan(...any) error }) (FamilyRef, error) {
-			var ref FamilyRef
-			return ref, row.Scan(&ref.ID, &ref.Dir)
-		}, id)
+		scanFamilyRef, id)
 	if err != nil {
 		return nil, err
 	}
@@ -177,10 +178,7 @@ func (s *store) OpenChildren(ctx context.Context, parent WorkspaceID) ([]FamilyR
 	err := s.read(ctx, "daemon.wsm.open_children", dlog.Context{"parent": string(parent)}, func(ctx context.Context) error {
 		var err error
 		out, err = listRows(ctx, s.q(ctx), `SELECT w.id, w.dir FROM workspaces w WHERE w.parent_id = ? AND w.id != w.parent_id AND `+openChildSQL+` ORDER BY w.place`,
-			func(row interface{ Scan(...any) error }) (FamilyRef, error) {
-				var ref FamilyRef
-				return ref, row.Scan(&ref.ID, &ref.Dir)
-			}, parent)
+			scanFamilyRef, parent)
 		return err
 	})
 	return out, err
