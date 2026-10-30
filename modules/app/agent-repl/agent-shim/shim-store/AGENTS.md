@@ -1311,7 +1311,7 @@ cd modules/app/agent-repl/agent-shim/shim-store
 go build ./... && go vet ./...
 ```
 
-Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. The packages: `internal/server` (the Connect service, with a fake
+Tests run through the daemon, naming only the tests the change added or changed (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. The packages: `internal/server` (the Connect service, with a fake
 Store), `internal/db` (the schema, routing and reads), and `integration` (the
 whole module end to end over a socket).
 

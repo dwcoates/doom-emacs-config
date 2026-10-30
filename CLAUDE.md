@@ -103,7 +103,7 @@ Set these environment variables for full functionality:
 
 ## Testing
 
-- Tests for `modules/app/agent-repl/` run through the daemon, naming only the tests the change needs (`agent-repld test run`); the `agent-repl-tests` skill says how. The full suite is the merge queue's gate.
+- Tests for `modules/app/agent-repl/` run through the daemon, naming only the tests the change added or changed (`agent-repld test run`); the `agent-repl-tests` skill says how. The full suite is the merge queue's gate.
   Every elisp source and suite lives in `lisp/`; only `config.el`, `packages.el`, and `doctor.el` stay at the module root, because Doom's module loader resolves those three by exact path.
   For the `webapp/`, type-checks run with `npm run typecheck` from `modules/app/agent-repl/webapp/`; its `pretypecheck` hook runs `npm ci` automatically when `node_modules` is absent.
 - **Every new addition or change must have corresponding test cases.** New functions get new tests. Changed behavior requires updated or new tests that cover the change. One test case per edge case. A case is the smallest unit the runner names on failure: a `t.Run` subtest, a vitest `it`, an `ert-deftest`. A scenario test whose steps or observations are separate named cases, each asserting one edge case, satisfies this rule. Sharing an expensive fixture follows `modules/app/agent-repl/AGENTS.md` "A case may share an expensive fixture, never a slice another case reads".

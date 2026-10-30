@@ -237,7 +237,7 @@ a workspace after its merge lands), ONE rule decides what Emacs selects:
 
 ## Verification
 
-Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. A bare `emacs -batch`
+Tests run through the daemon, naming only the tests the change added or changed (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. A bare `emacs -batch`
 load of `test-helpers.el` refuses to start. Byte-compile from
 `modules/app/agent-repl/`:
 

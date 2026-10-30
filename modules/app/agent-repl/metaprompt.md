@@ -6,7 +6,7 @@
 
 - Create new commits freely and often for atomic, well-scoped units of work.
   - Do not ask first.
-  - Before each commit, run and pass the tests covering the code it changes (the test file, package or test name), not whole suites.
+  - Before each commit, run and pass the tests it adds or changes, named one by one, and no others.
   - Every git operation is authorized by default and needs no per-use permission.
     - This includes rebase, pull, merge, reset, checkout, cherry-pick, force-push, and branch deletion.
     - Push with discretion per the rule below, but never wait for permission to run any git command.
@@ -14,11 +14,13 @@
 ### When to run which tests
 
 - Tests are used actively throughout: written alongside the code and run often to drive the work.
-- Run only the tests you need, at every stage: the tests, subtests and files covering what you change.
-  - Never a whole suite, never a suite of a system the change does not touch, and never a repeat run for confidence.
-  - Chasing a flaky test reruns that test, not its suite.
-  - A finished change and a git merge you made yourself are verified the same way: the tests covering everything the change or merge touched, named one by one.
-- Never run the full suite yourself: the merge queue runs it as the gate of every landing.
+- Outside the merge queue, run only the tests your own work added or changed, named one by one.
+  - Never an existing test the work did not touch, even one covering the code it changes.
+  - Never a whole suite, never a suite of another system, and never a repeat run for confidence.
+  - A finished change and a git merge you made yourself are verified the same way, by the tests that work added or changed.
+- Every test beyond those runs only in the merge queue, which runs the full suite as the gate of every landing.
+  - The gate runs them anyway, so running them yourself duplicates its work and adds load the host's other workspaces contend with.
+  - A failure the gate finds is remediated in the merge's own test-failure turn, as a targeted loop over the cases it hands over.
   - The rare exception is a change with systemic knock-on effects, and the run states that reason.
 - Where the repository's daemon runs tests (`agent-repld test run`), every test run goes through it, never a hand-run test command.
   - The repository's tests skill says how to name the tests.
@@ -55,7 +57,7 @@
   - Report what was extracted afterwards, so the extraction is visible without having been gated on a reply.
 - Land the extraction as its own commit, separate from the functional change that revealed it.
   - The functional commit stays reviewable on its own terms.
-  - The extraction commit is behavior-preserving and says so, with the existing suite passing unchanged as the evidence.
+  - The extraction commit is behavior-preserving and says so, with the merge queue's gate passing the existing suite unchanged as the evidence.
 - Every extracted helper gets unit tests of its own, exactly as any other new function does.
   - Cover the invariant parts the helper now guarantees for all its callers.
   - Add a test asserting the call sites actually share the extracted shape, so a hand-rolled divergent site fails rather than passing silently.
@@ -89,7 +91,7 @@
 - Every failure in a unit or integration test tracked by the repository is assumed confidently to have been introduced by my work.
   - This applies wherever the tracked test runs: locally, in a commit hook, or in CICD.
   - I NEVER consider such a failure "pre-existing", investigate its provenance, compare it against an earlier revision, or use history to decide whether I own it.
-  - I fix the failing test or the production defect directly and drive the entire tracked suite to green.
+  - I fix the failing test or the production defect directly, and the merge queue's gate drives the entire tracked suite to green.
 - The ONLY permitted alternative to fixing a tracked test failure is surfacing it to the user when the correct fix genuinely depends on a decision that is the user's to make.
   - I state the failure and the decision explicitly; I do not perform provenance analysis or silently tolerate the failure.
 - This automatic attribution rule is specific to repository-tracked unit and integration tests.

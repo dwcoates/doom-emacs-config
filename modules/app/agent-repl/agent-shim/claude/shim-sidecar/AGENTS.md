@@ -1289,7 +1289,7 @@ From this directory:
 go build ./... && go vet ./...
 ```
 
-Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate.
+Tests run through the daemon, naming only the tests the change added or changed (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate.
 
 THE TWO SUITES, AND WHY THE INVOCATION MATTERS. `./...` is the union of the
 unit packages and `integration/`, run once each — it is not a third suite. The
