@@ -1551,9 +1551,9 @@ func branchMove(row, label string) *agentreplv1.SelectFeedRowRequest {
 }
 
 // TestSelectFeedRowBranchAsksTheHostToOpenAnEntryAndLeavesTheSelection pins
-// a click on a response's node: the host is asked to open an entry answering
-// the node, and the selection stands exactly as it was, the clicked response
-// never selected by the click.
+// a click on a node of the NEWEST final response, or of a response already
+// selected: the host is asked to open an entry answering the node, and the
+// selection stands exactly as it was.
 func TestSelectFeedRowBranchAsksTheHostToOpenAnEntryAndLeavesTheSelection(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1561,9 +1561,9 @@ func TestSelectFeedRowBranchAsksTheHostToOpenAnEntryAndLeavesTheSelection(t *tes
 		selected string
 	}{
 		{name: "a final response, nothing selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") }},
-		{name: "an interim response, nothing selected", set: func(h *harness) { h.Feed.markdown = map[string]string{"resp-1": "interim"} }},
 		{name: "another response selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-0", "resp-1") }, selected: "resp-0"},
 		{name: "the clicked response selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1") }, selected: "resp-1"},
+		{name: "the clicked older response selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1", "resp-2") }, selected: "resp-1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1595,6 +1595,133 @@ func TestSelectFeedRowBranchAsksTheHostToOpenAnEntryAndLeavesTheSelection(t *tes
 			}
 			if tc.selected != "" && resp.Msg.GetSuccess().GetSelected().GetSelection().GetResponse().GetRow().GetValue() != tc.selected {
 				t.Fatalf("result = %v, want %q still selected", resp.Msg.GetResult(), tc.selected)
+			}
+		})
+	}
+}
+
+// TestSelectFeedRowBranchInAnOlderResponseSelectsIt pins a click on a node of
+// any response but the newest final one (owner request, 2026-10-30): the
+// clicked response is selected as the arm a bubble click gives it, held under
+// the click, and the host is asked to open an entry answering the node, so
+// the next prompt replies to that response.
+func TestSelectFeedRowBranchInAnOlderResponseSelectsIt(t *testing.T) {
+	tests := []struct {
+		name     string
+		set      func(*harness)
+		selected string
+		want     func(*frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport
+	}{
+		{name: "an older final response, nothing selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1", "resp-2") },
+			want: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
+				return rowViewport(s.GetResponse())
+			}},
+		{name: "an older final response, the newest selected", set: func(h *harness) { h.Feed.finals = feedIDs("resp-1", "resp-2") }, selected: "resp-2",
+			want: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
+				return rowViewport(s.GetResponse())
+			}},
+		{name: "a response that is not final", set: func(h *harness) {
+			h.Feed.finals = feedIDs("resp-2")
+			h.Feed.markdown = map[string]string{"resp-1": "interim"}
+		}, want: func(s *frontendv1.FeedSelection) *frontendv1.FeedSelectionRowViewport {
+			return rowViewport(s.GetBubble())
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			tc.set(h)
+			h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
+			if tc.selected != "" {
+				sendMove(t, h, bubbleMove(&frontendv1.FeedId{Value: tc.selected}))
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := dialHostStream(t, h, ctx)
+
+			// Act.
+			resp := sendMove(t, h, branchMove("resp-1", "3.1"))
+			event := receiveHostEventPastSelection(t, stream)
+
+			// Assert.
+			if got := event.GetComposeEntry().GetLabel(); got != "3.1" {
+				t.Fatalf("event = %v, want compose_entry naming 3.1", event)
+			}
+			row, _, held := h.Server.(*server).currentSelection(testWorkspaceID)
+			if !held || row.GetValue() != "resp-1" {
+				t.Fatalf("selection after the click = (%q, %v), want resp-1 selected", row.GetValue(), held)
+			}
+			if tc.want(resp.Msg.GetSuccess().GetSelected().GetSelection()).GetHold() == nil {
+				t.Fatalf("result = %v, want resp-1 selected in its arm and held under the click", resp.Msg.GetResult())
+			}
+		})
+	}
+}
+
+// rowViewport answers the viewport of a selection arm (response, prompt or
+// bubble), nil for an absent arm.
+func rowViewport(arm interface {
+	GetViewport() *frontendv1.FeedSelectionRowViewport
+}) *frontendv1.FeedSelectionRowViewport {
+	if arm == nil {
+		return nil
+	}
+	return arm.GetViewport()
+}
+
+// TestSelectFeedRowBranchSelectionIsRecordedAtInfo pins that a branch click
+// that selects its older response enters the workspace log, naming the kind,
+// the row and the label.
+func TestSelectFeedRowBranchSelectionIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h, log := newLoggedHarness(t)
+	h.Feed.finals = feedIDs("resp-1", "resp-2")
+	h.Feed.nodes = map[string]bool{"resp-1\x003.1": true}
+
+	// Act.
+	sendMove(t, h, branchMove("resp-1", "3.1"))
+
+	// Assert.
+	for _, rec := range log.at("INFO") {
+		if rec.Operation == opSelectFeedRow && rec.Context["kind"] == "response" && rec.Context["row"] == "resp-1" && rec.Context["label"] == "3.1" {
+			return
+		}
+	}
+	t.Fatalf("INFO records = %v, want one naming the response resp-1 and its node 3.1", log.at("INFO"))
+}
+
+// TestBranchClickSelects pins which responses a branch click selects: any but
+// the newest final response, and never the one already selected.
+func TestBranchClickSelects(t *testing.T) {
+	tests := []struct {
+		name     string
+		finals   []*frontendv1.FeedId
+		selected string
+		row      string
+		want     bool
+	}{
+		{name: "the newest final response", finals: feedIDs("resp-1", "resp-2"), row: "resp-2", want: false},
+		{name: "an older final response", finals: feedIDs("resp-1", "resp-2"), row: "resp-1", want: true},
+		{name: "an older final response already selected", finals: feedIDs("resp-1", "resp-2"), selected: "resp-1", row: "resp-1", want: false},
+		{name: "an older final response, another selected", finals: feedIDs("resp-1", "resp-2"), selected: "resp-2", row: "resp-1", want: true},
+		{name: "a response with no final response yet", row: "resp-1", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Feed.finals = tc.finals
+			if tc.selected != "" {
+				sendMove(t, h, bubbleMove(&frontendv1.FeedId{Value: tc.selected}))
+			}
+
+			// Act.
+			got := h.Server.(*server).branchClickSelects(testWorkspaceID, &frontendv1.FeedId{Value: tc.row})
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("branchClickSelects(%q) = %v, want %v", tc.row, got, tc.want)
 			}
 		})
 	}
@@ -1745,8 +1872,8 @@ func TestSelectClickedFailsWithoutRunningThen(t *testing.T) {
 }
 
 // TestEveryClickSelectsThroughSelectClicked pins that each click handler that
-// selects (bubble, answer, entry) selects through selectClicked, so none
-// hand-rolls the lock and the store. A branch click selects nothing.
+// selects (bubble, answer, entry, and a branch of an older response) selects
+// through selectClicked, so none hand-rolls the lock and the store.
 func TestEveryClickSelectsThroughSelectClicked(t *testing.T) {
 	// Arrange.
 	src, err := os.ReadFile("select_feed_row.go")
@@ -1758,8 +1885,8 @@ func TestEveryClickSelectsThroughSelectClicked(t *testing.T) {
 	calls := strings.Count(string(src), "s.selectClicked(")
 	builds := strings.Count(string(src), "selectionOf(kind, row,")
 
-	// Assert: three handlers call it, and only it builds a clicked selection.
-	if calls != 3 || builds != 1 {
-		t.Fatalf("select_feed_row.go calls selectClicked %d times and builds a clicked selection %d times, want 3 and 1", calls, builds)
+	// Assert: four handlers call it, and only it builds a clicked selection.
+	if calls != 4 || builds != 1 {
+		t.Fatalf("select_feed_row.go calls selectClicked %d times and builds a clicked selection %d times, want 4 and 1", calls, builds)
 	}
 }

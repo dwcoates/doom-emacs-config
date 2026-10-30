@@ -92,9 +92,14 @@ message SelectFeedRowRequest {
     // The reader clicked a node of a response's tree (owner request,
     // 2026-10-24): tell Emacs to open an entry answering the node
     // (HostWorkspaceComposeEntry), so the reader answers a point straight from
-    // the feed. The click selects the ENTRY, never the bubble (owner ruling,
-    // 2026-10-25): the selection stands as it was, and the success names it
-    // (`selected`, or `none` with nothing selected). A row that is no
+    // the feed. A click in the NEWEST final response selects the ENTRY, never
+    // the bubble (owner ruling, 2026-10-25): the selection stands as it was,
+    // and the success names it (`selected`, or `none` with nothing selected).
+    // A click in any OLDER response also selects that response, unless it is
+    // already selected (owner request, 2026-10-30), so the next prompt replies
+    // to it without a separate click on the bubble: the selection holds the
+    // feed still under the click (frontend.v1.FeedSelectionRowViewportHold),
+    // takes the arm a bubble click would, and never toggles. A row that is no
     // selectable response, or whose tree holds no such node, is refused as not
     // selectable.
     SelectFeedRowBranch branch = 10;

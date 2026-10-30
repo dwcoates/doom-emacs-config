@@ -209,8 +209,9 @@ export function bubbleClick(opts: {
     return { case: "entry", row, label: entry?.getAttribute(ENTRY_ATTRIBUTE) ?? "" };
   }
   // A RESPONSE'S BRANCH IS ANSWERED: Emacs opens a blank entry answering the
-  // node in the composer, and the bubble is never selected by the click
-  // (branch-hover.ts).
+  // node in the composer (branch-hover.ts). The daemon also selects the
+  // response when it is not the newest final one, so the next prompt replies
+  // to it.
   const branch = branchAt(opts.row, opts.target, opts.clientX, opts.resolve);
   if (branch !== null) return { case: "branch", row, label: branch.label };
   return { case: "select", row };

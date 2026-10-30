@@ -272,11 +272,15 @@ wrong labels). That needs one parse, in one place, that every program reads.
     composer's end, and puts the keyboard there in insert state with point right
     after it.
 - **Decisions inside the shape:**
-  - **The click selects the entry, never the bubble** (owner ruling, 2026-10-25).
-    The feed selection stands as it was, so the bubble's fill and expansion never
-    change under the click, and the success names the selection in force. The
-    composer's box over the node, drawn from the entry it opened, is the click's
-    only mark in the feed.
+  - **A click in the newest final response selects the entry, never the bubble**
+    (owner ruling, 2026-10-25). The feed selection stands as it was, so the
+    bubble's fill and expansion never change under the click, and the success
+    names the selection in force. The composer's box over the node, drawn from
+    the entry it opened, is the click's only mark in the feed.
+  - **A click in any older response also selects that response** (owner request,
+    2026-10-30), unless it is already selected, so the next prompt replies to it
+    without a separate click on the bubble. The selection takes the arm a bubble
+    click would, holds the feed still under the click, and never toggles.
   - **The click names the node, not its text.** Emacs opens the entry itself
     (`agent-repl-prompt-entries-opening`, the words `o` and `O` open with), so the
     event carries only the label.
