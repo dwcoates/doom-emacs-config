@@ -430,7 +430,7 @@ moves to the end of that entry's line, in insert mode."
 
 (defun agent-repl-prompt-entries--open-on (label neighbor next)
   "From LABEL's line, open a line below (NEXT) or above, answering NEIGHBOR.
-THE ONE OPENING of a line beside an entry, for `o' and `O':
+THE ONE OPENING of a line beside an entry, for `o', `O', `M-j' and `M-k':
 the new line opens on `NEIGHBOR - ', or empty when NEIGHBOR is nil.  An
 entry already answering NEIGHBOR that way is not opened again: point moves
 to the end of that entry's line, in insert mode."
@@ -458,6 +458,60 @@ The composer's `O' in command mode: the previous node's label, in the tree
 the entry targets."
   (interactive)
   (agent-repl-prompt-entries--open nil))
+
+;;;; ---- Opening an entry's sibling ----
+;;
+;; `M-j' and `M-k' on an entry line in insert mode open the entry's sibling:
+;; `M-j' opens a line above answering the previous one (`3.3 - ' opens
+;; `3.2 - '), `M-k' a line below answering the next one (`3.4 - ').  The
+;; sibling is the label's last numeral stepped by one, whether or not the
+;; tree the entry targets holds it, so nothing is asked of the daemon.  A
+;; first sibling has none above: the line stays as it was and the composer
+;; says so.  An entry already answering the sibling that way is gone to
+;; rather than opened twice, as `o' and `O' do.  Off an entry line either key
+;; is what it always was.
+
+(defun agent-repl-prompt-entries--sibling (label offset)
+  "The label of LABEL's sibling OFFSET places along, or nil before the first.
+Only LABEL's last numeral moves: `3.3' with -1 is `3.2', with 1 `3.4', and
+`3.1' with -1 is nil.  LABEL is one the grammar read, so a label that is no
+dotted run of numerals is an error."
+  (unless (string-match "\\`\\(\\(?:[0-9]+\\.\\)*\\)\\([0-9]+\\)\\'" label)
+    (error "prompt-entries: %S is no dotted label" label))
+  (let ((parent (match-string 1 label))
+        (index (+ (string-to-number (match-string 2 label)) offset)))
+    (and (> index 0) (concat parent (number-to-string index)))))
+
+(defun agent-repl-prompt-entries--open-sibling (next)
+  "Open a line below (NEXT) or above point's entry, answering its sibling that way.
+A first sibling has none above: nothing opens, and the composer says so."
+  (let* ((ws agent-repl-prompt-entries--ws)
+         (label (agent-repl-prompt-entries--label-at-point))
+         (sibling (and label (agent-repl-prompt-entries--sibling label (if next 1 -1)))))
+    (cond
+     ((null label)
+      (agent-repl--info ws "elisp.prompt-entries.sibling-off-entry ws=%s next=%s point=%d" ws next (point))
+      (user-error "Point is on no entry line"))
+     ((null sibling)
+      (agent-repl--info ws "elisp.prompt-entries.sibling-none ws=%s label=%s" ws label)
+      (agent-repl--input-flash ws (format "%s is the first sibling" label)))
+     (t
+      (agent-repl--info ws "elisp.prompt-entries.sibling ws=%s label=%s next=%s sibling=%s" ws label next sibling)
+      (agent-repl-prompt-entries--open-on label sibling next)))))
+
+(defun agent-repl-prompt-entries-open-sibling-above ()
+  "Open a line above point's entry, answering its previous sibling.
+The composer's `M-j' in insert mode on an entry line: `3.3 - ' opens
+`3.2 - ' above it."
+  (interactive)
+  (agent-repl-prompt-entries--open-sibling nil))
+
+(defun agent-repl-prompt-entries-open-sibling-below ()
+  "Open a line below point's entry, answering its next sibling.
+The composer's `M-k' in insert mode on an entry line: `3.3 - ' opens
+`3.4 - ' below it."
+  (interactive)
+  (agent-repl-prompt-entries--open-sibling t))
 
 ;;;; ---- Stepping an entry along its tree ----
 ;;
@@ -545,16 +599,26 @@ line, so the key lookup goes on to the next map."
 elsewhere.  `[C-i]' is the event Doom decodes a GUI `C-i' into when a
 binding for it stands, so `TAB' keeps its own meaning.")
 
+(defconst agent-repl-prompt-entries--insert-entry-keys
+  `((,(kbd "M-j") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-above))
+    (,(kbd "M-k") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-below)))
+  "The composer's entry-only keys in insert mode, as (KEY . BINDING).
+`M-j' opens the previous sibling above and `M-k' the next one below on an
+entry line, and both fall through elsewhere.")
+
 (defun agent-repl-prompt-entries-bind-keys ()
   "Bind the composer's entry-aware keys.
 `o' and `O' in command mode open a line on a neighbor's label; `C-o' and
 `C-i' in command and insert mode step an entry line's entry
-\(`agent-repl-prompt-entries--entry-keys')."
+\(`agent-repl-prompt-entries--entry-keys'), and `M-j' and `M-k' in insert
+mode open its sibling (`agent-repl-prompt-entries--insert-entry-keys')."
   (evil-define-key* 'normal agent-repl-input-mode-map
     "o" #'agent-repl-prompt-entries-open-below
     "O" #'agent-repl-prompt-entries-open-above)
   (pcase-dolist (`(,key . ,binding) agent-repl-prompt-entries--entry-keys)
-    (evil-define-key* '(normal insert) agent-repl-input-mode-map key binding)))
+    (evil-define-key* '(normal insert) agent-repl-input-mode-map key binding))
+  (pcase-dolist (`(,key . ,binding) agent-repl-prompt-entries--insert-entry-keys)
+    (evil-define-key* 'insert agent-repl-input-mode-map key binding)))
 
 (with-eval-after-load 'evil
   (agent-repl-prompt-entries-bind-keys))
