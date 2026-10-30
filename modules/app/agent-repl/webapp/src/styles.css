@@ -3134,7 +3134,8 @@ html[data-page-unshown] {
 .mp-line.mp-line-composing,
 .mp-line.mp-line-revealed,
 .mp-line.mp-line-hovered,
-.mp-line.mp-line-referenced {
+.mp-line.mp-line-referenced,
+.mp-line.mp-line-composing-cited {
   background: linear-gradient(to right,
     transparent var(--box-left),
     var(--box-bg) var(--box-left),
@@ -3148,6 +3149,9 @@ html[data-page-unshown] {
    citation's orange, and every citation wears that orange, so it reads as
    hoverable. */
 .mp-line.mp-line-referenced { --box-left: var(--reference-left); --box-right: var(--reference-right); --box-bg: var(--reference-bg); }
+/* The nodes the composer's subtree cites (feed/composer-entry.ts) stand boxed
+   the same way, as though every citation in it were hovered at once. */
+.mp-line.mp-line-composing-cited { --box-left: var(--composer-cited-left); --box-right: var(--composer-cited-right); --box-bg: var(--reference-bg); }
 .mp-ref { color: var(--reference); }
 /* The entry a linked label revealed flashes once, as a coalesced held card does. */
 .mp-entry-flash { animation: mp-entry-flash 1.2s ease-out; }

@@ -4,6 +4,9 @@ import { create } from "@bufbuild/protobuf";
 import { FeedComposerEntrySchema, type FeedComposerEntry } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   COMPOSER_EDITED_EVENT,
+  COMPOSER_CITED_CLASS,
+  COMPOSER_CITED_LEFT_PROPERTY,
+  COMPOSER_CITED_RIGHT_PROPERTY,
   COMPOSER_ENTRY_CLASS,
   COMPOSER_LEFT_PROPERTY,
   COMPOSER_RIGHT_PROPERTY,
@@ -39,6 +42,61 @@ const highlight = createComposerEntryHighlight(document);
 
 beforeEach(() => {
   highlight.apply(noEntry());
+});
+
+const cited = (el: HTMLElement): (string | null)[] =>
+  boxedBy(el, {
+    className: COMPOSER_CITED_CLASS,
+    leftProperty: COMPOSER_CITED_LEFT_PROPERTY,
+    rightProperty: COMPOSER_CITED_RIGHT_PROPERTY,
+  }).map(([node]) => node);
+
+const citingTree = tree([
+  ["1", "Root"],
+  ["1.1", "Cites a sibling (1.2) and a child (1.1.1)", 0],
+  ["1.1.1", "Child", 1],
+  ["1.2", "Sibling", 0],
+  ["1.3", "Cites nothing here (1.2)", 0],
+]);
+
+describe("the nodes the composed subtree cites", () => {
+  it("are boxed along with the composed node", () => {
+    // Arrange
+    const row = drawnRow("r1", citingTree);
+    // Act
+    highlight.apply(nodeEntry("r1", "1.1"));
+    // Assert
+    expect(cited(row)).toEqual(["1.1.1", "1.2"]);
+  });
+
+  it("are not boxed for a composed node citing nothing", () => {
+    // Arrange
+    const row = drawnRow("r1", citingTree);
+    // Act
+    highlight.apply(nodeEntry("r1", "1.2"));
+    // Assert
+    expect(cited(row)).toEqual([]);
+  });
+
+  it("are taken down when the composer answers no node", () => {
+    // Arrange
+    const row = drawnRow("r1", citingTree);
+    highlight.apply(nodeEntry("r1", "1.1"));
+    // Act
+    highlight.apply(noEntry());
+    // Assert
+    expect(cited(row)).toEqual([]);
+  });
+
+  it("are drawn again on a repaint of the row's prose", () => {
+    // Arrange
+    highlight.apply(nodeEntry("r1", "1.1"));
+    // Act
+    const row = drawnRow("r1", citingTree);
+    markComposerEntry(row, "r1");
+    // Assert
+    expect(cited(row)).toEqual(["1.1.1", "1.2"]);
+  });
 });
 
 describe("the composer's box", () => {
