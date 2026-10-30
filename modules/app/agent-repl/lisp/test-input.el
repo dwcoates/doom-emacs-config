@@ -2950,6 +2950,13 @@ The second escape is treated as a FIRST again -- it warns, never clears."
                                                (agent-repl-test-input--text-block "two")))
                  '(:parts ("one\ntwo") :dropped 0))))
 
+(ert-deftest agent-repl-test-input-said-parts-drops-a-reply-quote ()
+  "The daemon's quote of a replied-to bubble is not put back; it is counted dropped."
+  (should (equal (agent-repl--input-said-parts
+                  '(:content (:blocks ((:arm :quote :value (:text "> hi" :quoted-row "r1"))
+                                       (:arm :text :value (:text "and this"))))))
+                 '(:parts ("and this") :dropped 1))))
+
 (ert-deftest agent-repl-test-input-said-parts-keeps-images-between-the-words ()
   "A path image is a part in its place, splitting the words around it."
   (should (equal (agent-repl--input-said-parts
