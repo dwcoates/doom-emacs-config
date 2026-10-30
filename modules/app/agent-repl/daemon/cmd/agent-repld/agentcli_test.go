@@ -34,8 +34,11 @@ type cliClient struct {
 	create   *agentreplv1.CreateWorkspaceResponse
 	// creates, when set, answers each CreateWorkspace in turn, before create.
 	creates []*agentreplv1.CreateWorkspaceResponse
-	finish  *agentreplv1.FinishWorkspaceResponse
-	queues  *agentreplv1.GetMergeQueueStatusResponse
+	// createErr, when set, fails CreateWorkspace alone, so the reads a
+	// create makes first still answer.
+	createErr error
+	finish    *agentreplv1.FinishWorkspaceResponse
+	queues    *agentreplv1.GetMergeQueueStatusResponse
 	// found answers FindWorkspaces, an empty complete find when nil.
 	found *agentreplv1.FindWorkspacesResponse
 	// arrangement answers GetSidebarArrangement; arrange answers
@@ -86,6 +89,9 @@ func (c *cliClient) record(req proto.Message) error {
 func (c *cliClient) CreateWorkspace(_ context.Context, req *connect.Request[agentreplv1.CreateWorkspaceRequest]) (*connect.Response[agentreplv1.CreateWorkspaceResponse], error) {
 	if err := c.record(req.Msg); err != nil {
 		return nil, err
+	}
+	if c.createErr != nil {
+		return nil, c.createErr
 	}
 	if len(c.creates) > 0 {
 		next := c.creates[0]
@@ -1291,7 +1297,9 @@ func TestCreateSendsTheLandingTargetItNames(t *testing.T) {
 				return l.GetPrimary() != nil && l.GetPrimary().GetFromOrigin() == nil
 			}},
 		{name: "a peer landing into a workspace", args: []string{"-relationship", "peer", "-lands-into", "peer"},
-			want: func(l *agentreplv1.WorkspaceLandingTarget) bool { return l.GetWorkspace().GetWorkspace().GetId() == "ws-peer" }},
+			want: func(l *agentreplv1.WorkspaceLandingTarget) bool {
+				return l.GetWorkspace().GetWorkspace().GetId() == "ws-peer"
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1564,6 +1572,42 @@ func TestCreateRefusedTwiceByHandingOverDaemonsIsRefused(t *testing.T) {
 	// Assert: sent once more, never chased further.
 	if code != exitRefused || len(f.dialed) != 2 {
 		t.Fatalf("exit %d after dialing %v, want refused after the one resend", code, f.dialed)
+	}
+}
+
+// TestCreateWhoseCallFailsAnswersTheErrorWithNoAnswerRead pins the create's
+// error path: a call that failed carries no answer, so the handover check
+// must not read one (a nil response panicked here on 2026-10-30).
+func TestCreateWhoseCallFailsAnswersTheErrorWithNoAnswerRead(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantCode   int
+		wantStderr string
+	}{
+		{name: "a failed call is surfaced", err: errors.New("connection refused"), wantCode: exitFailure, wantStderr: "the daemon failed the call: connection refused"},
+		{name: "a dry run is answered as success", err: errDryRun, wantCode: exitSuccess},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.client.createErr = tt.err
+
+			// Act
+			code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "peer", "-context", "fresh", "-name", "named")
+
+			// Assert: the error answered, never resent to a successor.
+			if code != tt.wantCode {
+				t.Fatalf("exit %d, stderr %q, want %d", code, f.errOut.String(), tt.wantCode)
+			}
+			if !strings.Contains(f.errOut.String(), tt.wantStderr) {
+				t.Fatalf("stderr %q, want %q", f.errOut.String(), tt.wantStderr)
+			}
+			if len(f.dialed) != 1 {
+				t.Fatalf("dialed %v, want only the daemon", f.dialed)
+			}
+		})
 	}
 }
 
