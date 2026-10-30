@@ -95,7 +95,7 @@ func TestCreateArgsNameEveryChoiceAndTheUserAsAsker(t *testing.T) {
 	got := strings.Join(createArgs("/repo", "look into it"), " ")
 
 	// Assert
-	want := "workspace create -repository /repo -topology primary -context fresh -name " + InvestigationName + " -prompt look into it -as-user"
+	want := "workspace create -repository /repo -relationship peer -context fresh -name " + InvestigationName + " -prompt look into it -as-user"
 	if got != want {
 		t.Fatalf("createArgs = %q, want %q", got, want)
 	}

@@ -111,12 +111,12 @@ func investigationWorktrees(inv Investigation) (root, open string, err error) {
 }
 
 // createArgs is the agent CLI command that creates the investigation in the
-// repository whose main worktree is ROOT: a primary workspace with a fresh
-// context, its commission PROMPT, asked by the user, since a test run is no
-// workspace's agent.
+// repository whose main worktree is ROOT: a peer landing on the main branch,
+// with a fresh context, its commission PROMPT, asked by the user, since a test
+// run is no workspace's agent.
 func createArgs(root, prompt string) []string {
 	return []string{"workspace", "create",
-		"-repository", root, "-topology", "primary", "-context", "fresh",
+		"-repository", root, "-relationship", "peer", "-context", "fresh",
 		"-name", InvestigationName, "-prompt", prompt, "-as-user"}
 }
 
