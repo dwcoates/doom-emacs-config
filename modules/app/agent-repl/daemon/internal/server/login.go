@@ -248,6 +248,10 @@ func (s *server) OpenInEditor(
 		if err := s.deps.Verbs.OpenCommitLogInEditor(ctx, subject.Record.ID, target.CommitLog); err != nil {
 			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 		}
+	case *agentreplv1.OpenInEditorRequest_TerminalCommand:
+		if err := s.deps.Verbs.RunInTerminal(ctx, subject.Record.ID, target.TerminalCommand); err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		}
 	case *agentreplv1.OpenInEditorRequest_FeedLink:
 		report := target.FeedLink.GetReport() != nil
 		unresolved, err := s.deps.Verbs.OpenFeedLink(ctx, subject.Record.ID, target.FeedLink.GetHref(), report)

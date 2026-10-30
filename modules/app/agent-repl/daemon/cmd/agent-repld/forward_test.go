@@ -30,11 +30,15 @@ import (
 type recordingRelay struct {
 	tailReturns    []ids.WorkspaceID
 	commitLogOpens []*agentreplv1.OpenInEditorCommitLog
+	terminalRuns   []*agentreplv1.OpenInEditorTerminalCommand
 }
 
 func (r *recordingRelay) OpenInEditor(ids.WorkspaceID, string, *uint32) {}
 func (r *recordingRelay) OpenCommitLog(_ ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog) {
 	r.commitLogOpens = append(r.commitLogOpens, target)
+}
+func (r *recordingRelay) RunInTerminal(_ ids.WorkspaceID, target *agentreplv1.OpenInEditorTerminalCommand) {
+	r.terminalRuns = append(r.terminalRuns, target)
 }
 func (r *recordingRelay) ReloadWebapp(ids.WorkspaceID)         {}
 func (r *recordingRelay) PublishHostWorkspace(ids.WorkspaceID) {}
@@ -70,6 +74,22 @@ func TestRelayForwarderCarriesOpenCommitLogToTheBoundRelay(t *testing.T) {
 	// Assert.
 	if len(target.commitLogOpens) != 1 || target.commitLogOpens[0] != log {
 		t.Fatalf("commit log opens = %v, want the one forwarded", target.commitLogOpens)
+	}
+}
+
+func TestRelayForwarderCarriesRunInTerminalToTheBoundRelay(t *testing.T) {
+	// Arrange.
+	target := &recordingRelay{}
+	var f relayForwarder
+	f.bind(target)
+	command := &agentreplv1.OpenInEditorTerminalCommand{Command: "ls -la"}
+
+	// Act.
+	f.RunInTerminal("w1", command)
+
+	// Assert.
+	if len(target.terminalRuns) != 1 || target.terminalRuns[0] != command {
+		t.Fatalf("terminal runs = %v, want the one forwarded", target.terminalRuns)
 	}
 }
 

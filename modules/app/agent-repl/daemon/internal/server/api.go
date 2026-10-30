@@ -758,6 +758,21 @@ func (s *server) pushOpenCommitLog(ws ids.WorkspaceID, target *agentreplv1.OpenI
 	})
 }
 
+// RunInTerminal pushes the run_in_terminal arm onto the workspace's host
+// stream.
+func (r hostRelay) RunInTerminal(ws ids.WorkspaceID, target *agentreplv1.OpenInEditorTerminalCommand) {
+	r.s.pushRunInTerminal(ws, target)
+}
+
+// pushRunInTerminal publishes the run_in_terminal arm, the command verbatim.
+func (s *server) pushRunInTerminal(ws ids.WorkspaceID, target *agentreplv1.OpenInEditorTerminalCommand) {
+	s.log.Debug("daemon.server.run_in_terminal", "relayed a shell code block's run click to the host stream",
+		dlog.Context{"workspace": string(ws), "characters": len(target.GetCommand())})
+	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_RunInTerminal{RunInTerminal: target},
+	})
+}
+
 // pushOpenInEditor publishes the open_in_editor arm.
 func (s *server) pushOpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 	s.log.Debug("daemon.server.open_in_editor", "relayed a link click to the host stream",

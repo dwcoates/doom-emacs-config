@@ -609,6 +609,10 @@ type Verbs interface {
 	// with point on the commit. The workspace is checked as every verb checks
 	// it, and the repository dir must be absolute.
 	OpenCommitLogInEditor(ctx context.Context, ws ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog) error
+	// RunInTerminal relays a click on a shell code block's run control onto
+	// the host stream verbatim: Emacs runs the command in its terminal popup.
+	// The workspace is checked as every verb checks it.
+	RunInTerminal(ctx context.Context, ws ids.WorkspaceID, target *agentreplv1.OpenInEditorTerminalCommand) error
 	// OpenFeedLink resolves a non-web link clicked in a prompt or response
 	// bubble (OpenInEditorFeedLink's order) and relays the file it names
 	// exactly as OpenInEditor relays a workspace file. A link that names no
@@ -655,6 +659,9 @@ type HostRelay interface {
 	// OpenCommitLog pushes the open_commit_log arm to the workspace's host
 	// stream.
 	OpenCommitLog(ws ids.WorkspaceID, target *agentreplv1.OpenInEditorCommitLog)
+	// RunInTerminal pushes the run_in_terminal arm to the workspace's host
+	// stream.
+	RunInTerminal(ws ids.WorkspaceID, target *agentreplv1.OpenInEditorTerminalCommand)
 	// ReloadWebapp pushes the reload_webapp arm.
 	ReloadWebapp(ws ids.WorkspaceID)
 	// PublishHostWorkspace recomposes and republishes the workspace's host

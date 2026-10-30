@@ -154,6 +154,21 @@ func (v *verbs) OpenCommitLogInEditor(ctx context.Context, ws ids.WorkspaceID, t
 	return nil
 }
 
+// RunInTerminal relays a click on a shell code block's run control onto the
+// workspace's host stream, verbatim: Emacs runs the command in its terminal
+// popup. The command is the code block the reader clicked, which the daemon
+// neither reads nor runs.
+func (v *verbs) RunInTerminal(ctx context.Context, ws ids.WorkspaceID, target *agentreplv1.OpenInEditorTerminalCommand) error {
+	_, log, err := v.owned(ctx, "OpenInEditor", ws)
+	if err != nil {
+		return err
+	}
+	v.deps.Host.RunInTerminal(ws, target)
+	log.Info(opOpenInEditor, "relayed a shell code block's command to the editor's terminal",
+		dlog.Context{"characters": len(target.GetCommand())})
+	return nil
+}
+
 // within reports whether path is the directory itself or lives beneath it.
 func within(dir, path string) bool {
 	dir = filepath.Clean(dir)

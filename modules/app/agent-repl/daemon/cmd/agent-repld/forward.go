@@ -172,6 +172,12 @@ func (f *relayForwarder) OpenCommitLog(ws ids.WorkspaceID, log *agentreplv1.Open
 	}
 }
 
+func (f *relayForwarder) RunInTerminal(ws ids.WorkspaceID, command *agentreplv1.OpenInEditorTerminalCommand) {
+	if target, ok := f.relay(); ok {
+		target.RunInTerminal(ws, command)
+	}
+}
+
 func (f *relayForwarder) ReloadWebapp(ws ids.WorkspaceID) {
 	if target, ok := f.relay(); ok {
 		target.ReloadWebapp(ws)
