@@ -254,6 +254,23 @@
   - The verb and its flags are `/agent-repl-workspaces`'.
 - The daemon clears the mark itself when I take the workspace back, so no workspace unmarks itself.
 
+## Handed failures
+
+### A failure agent-repl hands over is diagnosed, then fixed by a one-shot child, never proposed and waited on
+
+- When agent-repl hands a workspace a failure to diagnose, the workspace diagnoses it itself and dispatches the fix at once.
+  - Such failures include a failed workspace create and a feed link that could not be opened, along with every other daemon brief that asks for a root cause or a fix.
+  - The brief is the request to change code, so the workspace does not stop to ask whether to fix it.
+- The diagnosis names the root cause, along with the log records that show it.
+  - Diagnosis follows the evidence rules of the `/agent-repl-debug` skill.
+- The fix is implemented by a one-shot child forked from this workspace, which lands into master through the merge queue.
+  - The command is `agent-repld workspace create -repository <repository> -relationship child -parent here -lands-into main -context fork -fork here -one-shot -prompt <the fix>`.
+  - `<repository>` is the repository the fix belongs in, which for an agent-repl failure is agent-repl's own, even from an unrelated repository.
+  - The rest of the verb's flags are `/agent-repl-workspaces`'.
+- The workspace then reports the root cause, the records, and the child it dispatched, by name.
+- A fix that genuinely turns on a decision that is mine to make is the one exception.
+  - The workspace states that decision as a question and dispatches nothing until I answer it.
+
 ## Workspace links
 
 ### Every link the workspace's task is about, or that its work creates, is stored as one of its links

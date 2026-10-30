@@ -72,3 +72,24 @@ func TestEveryShippedBriefLoadGoesThroughLoadShippedBrief(t *testing.T) {
 		})
 	}
 }
+
+// handedFailuresSection is the metaprompt section a brief handing over a
+// failure points at for how the fix is dispatched.
+const handedFailuresSection = "Handed failures"
+
+// assertBriefHandsTheFixToAChild fails unless body points at the metaprompt's
+// handed-failures rule and never asks the workspace to propose a fix and wait.
+func assertBriefHandsTheFixToAChild(t *testing.T, body string) {
+	t.Helper()
+	if !strings.Contains(body, `"`+handedFailuresSection+`"`) {
+		t.Fatalf("brief = %q, want it to point at the metaprompt's %q section", body, handedFailuresSection)
+	}
+	if !strings.Contains(body, "one-shot child workspace") {
+		t.Fatalf("brief = %q, want it to dispatch the fix as a one-shot child workspace", body)
+	}
+	for _, waiting := range []string{"until I answer", "wait for my answer", "propose a fix", "propose a change", "Offer to make"} {
+		if strings.Contains(body, waiting) {
+			t.Fatalf("brief = %q, want no ask-and-wait wording, found %q", body, waiting)
+		}
+	}
+}

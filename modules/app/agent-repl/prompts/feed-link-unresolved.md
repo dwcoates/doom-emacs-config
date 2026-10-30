@@ -5,9 +5,9 @@ I clicked the link `{{href}}` in the message quoted above, and agent-repl could 
 
 Please tell me which file you meant, with its full path.
 
-Then propose a change to agent-repl so a link like this one opens next time. Either:
+Then change agent-repl so a link like this one opens next time. The change is either:
 
 1. a way for you to write links that are never ambiguous, or
 2. a further resolution fallback in agent-repl's link resolver, which is `{{resolver}}`.
 
-agent-repl lives at `{{agent_repl_dir}}`. Offer to make the change there yourself, even if the repository you are working in is an unrelated one, and wait for my answer before changing anything.
+agent-repl lives at `{{agent_repl_dir}}`. Make the change there as the metaprompt's "Handed failures" section says, even if the repository you are working in is an unrelated one: dispatch it as a one-shot child workspace that lands into master, and report why the link missed and the child you dispatched.

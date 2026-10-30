@@ -747,3 +747,14 @@ func TestOpenFeedLinkRelaysAHomeRelativePathOutsideTheWorktree(t *testing.T) {
 		t.Fatalf("relayed %+v, want %s at line 7", f.host.editorOpens, want)
 	}
 }
+
+func TestTheShippedLinkUnresolvedBriefHandsTheFixToAChild(t *testing.T) {
+	// Arrange.
+	brief := loadShippedBrief(t, BriefLinkUnresolved)
+
+	// Act.
+	body := brief.Body
+
+	// Assert.
+	assertBriefHandsTheFixToAChild(t, body)
+}

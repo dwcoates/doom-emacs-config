@@ -477,3 +477,14 @@ func TestTheShippedCreateFailedBriefSplices(t *testing.T) {
 		}
 	}
 }
+
+func TestTheShippedCreateFailedBriefHandsTheFixToAChild(t *testing.T) {
+	// Arrange.
+	brief := loadShippedBrief(t, BriefCreateFailed)
+
+	// Act.
+	body := brief.Body
+
+	// Assert.
+	assertBriefHandsTheFixToAChild(t, body)
+}
