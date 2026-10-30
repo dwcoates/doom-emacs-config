@@ -2418,6 +2418,8 @@ A fork that left no trace was indistinguishable from one never run."
                        (lambda () (agent-repl-test-verbs--repo-ref)))
                       ((symbol-function 'agent-repl-verbs--explanation-engine-repository)
                        (lambda () (agent-repl-test-verbs--repo-ref)))
+                      ;; The model is answered, so `SPC TAB C-n' reaches its prompt.
+                      ((symbol-function 'agent-repl-verbs--read-model) (lambda () nil))
                       ((symbol-function 'agent-repl-verbs--read-prompt)
                        (lambda (_p &optional _history-file _unseeded) (signal 'quit nil)))
                       ((symbol-function 'read-string)
