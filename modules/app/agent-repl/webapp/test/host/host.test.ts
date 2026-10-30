@@ -539,6 +539,139 @@ describe("show", () => {
   });
 });
 
+describe("a held-back page", () => {
+  /** Record every held-back page told on H, the first told at once. */
+  function heldBackTold(h: Host): (string | null)[] {
+    const told: (string | null)[] = [];
+    h.onHeldBackShown((shown) => told.push(shown === null ? null : `${shown.id}@${shown.dir}`));
+    return told;
+  }
+
+  it("answers held-back to holdBack", () => {
+    expect(parsed(host.holdBack("a", "/ws/a")).outcome).toBe("held-back");
+  });
+
+  it("is shown as held back, with no frame", () => {
+    // Arrange
+    host.holdBack("a", "/ws/a");
+
+    // Act
+    const answer = parsed(host.show("a"));
+
+    // Assert
+    expect(answer.outcome).toBe("held-back");
+    expect(document.querySelectorAll("iframe")).toHaveLength(0);
+  });
+
+  it("tells the load button the held-back page shown", () => {
+    // Arrange
+    const told = heldBackTold(host);
+    host.holdBack("a", "/ws/a");
+
+    // Act
+    host.show("a");
+
+    // Assert
+    expect(told).toEqual([null, "a@/ws/a"]);
+  });
+
+  it("tells nothing for a page held back while another is shown", () => {
+    // Arrange
+    pages(host, "b");
+    host.show("b");
+    const told = heldBackTold(host);
+
+    // Act
+    host.holdBack("a", "/ws/a");
+
+    // Assert
+    expect(told).toEqual([null]);
+  });
+
+  it("hides the page shown before it", () => {
+    // Arrange
+    pages(host, "b");
+    host.show("b");
+    host.holdBack("a", "/ws/a");
+
+    // Act
+    host.show("a");
+
+    // Assert
+    expect(frame("b").hasAttribute(FRAME_SHOWN_ATTRIBUTE)).toBe(false);
+  });
+
+  it("moves the sidebar's highlight to it", () => {
+    // Arrange
+    const told: string[] = [];
+    host.onShown((id) => told.push(id));
+    host.holdBack("a", "/ws/a");
+
+    // Act
+    host.show("a");
+
+    // Assert
+    expect(told).toEqual(["a"]);
+  });
+
+  it("is shown as its page once that page is ensured", () => {
+    // Arrange
+    host.holdBack("a", "/ws/a");
+    host.show("a");
+    const told = heldBackTold(host);
+
+    // Act
+    pages(host, "a");
+
+    // Assert
+    expect(told).toEqual(["a@/ws/a", null]);
+    expect(frame("a").hasAttribute(FRAME_SHOWN_ATTRIBUTE)).toBe(true);
+    expect(loading("a")).toBe(true);
+  });
+
+  it("ends its load button when another page is shown", () => {
+    // Arrange
+    pages(host, "b");
+    host.holdBack("a", "/ws/a");
+    host.show("a");
+    const told = heldBackTold(host);
+
+    // Act
+    host.show("b");
+
+    // Assert
+    expect(told).toEqual(["a@/ws/a", null]);
+  });
+
+  it("is removed whole, and shown no longer", () => {
+    // Arrange
+    host.holdBack("a", "/ws/a");
+    host.show("a");
+    const told = heldBackTold(host);
+
+    // Act
+    const answer = parsed(host.remove("a"));
+
+    // Assert
+    expect(answer.outcome).toBe("removed");
+    expect(told).toEqual(["a@/ws/a", null]);
+    expect(parsed(host.show("a")).outcome).toBe("absent");
+  });
+
+  it("is held back no longer once its page is ensured", () => {
+    // Arrange
+    host.holdBack("a", "/ws/a");
+    pages(host, "a");
+    host.remove("a");
+
+    // Act
+    const answer = parsed(host.show("a"));
+
+    // Assert
+    expect(answer.outcome).toBe("absent");
+  });
+});
+
 describe("remove", () => {
   it("drops the workspace's iframe", () => {
     // Arrange
