@@ -196,6 +196,10 @@ func (v *verbs) settleRegistered(ctx context.Context, global dlog.Logger, normal
 		return wsm.Workspace{}, fmt.Errorf("register %q: resolve log sink: %w", normalized, err)
 	}
 	if created {
+		// A WORKSPACE IS OWNED BY THE DAEMON THAT CREATED IT, from this
+		// moment: it is in no predecessor's manifest, so no rollout standing
+		// may answer it not_yet_adopted here.
+		v.deps.Ownership.Created(record.ID)
 		log.Info(opRegister, "registered a new workspace", dlog.Context{
 			"workspace": string(record.ID), "branch": record.Branch, "repo": string(record.Repo),
 		})

@@ -280,6 +280,8 @@ func (f *fakeOwnership) Standing(context.Context, ids.WorkspaceID) (workspace.St
 	return f.standing, f.err
 }
 
+func (f *fakeOwnership) Created(ids.WorkspaceID) {}
+
 // retargetCall is one Retarget the operation received.
 type retargetCall struct {
 	ws     ids.WorkspaceID

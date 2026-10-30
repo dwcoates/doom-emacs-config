@@ -12,9 +12,12 @@ import (
 type fakeRolloutStanding struct {
 	rollout.Controller
 	standing rollout.Standing
+	created  []ids.WorkspaceID
 }
 
 func (f *fakeRolloutStanding) Standing(ids.WorkspaceID) rollout.Standing { return f.standing }
+
+func (f *fakeRolloutStanding) Created(ws ids.WorkspaceID) { f.created = append(f.created, ws) }
 
 // TestOwnershipTranslatesEveryStanding covers the whole translation: the two
 // packages keep separate vocabularies, so every arm must be carried across.
@@ -60,5 +63,21 @@ func TestOwnershipRefusesAnUnrecognizedStanding(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("Standing accepted an unrecognized rollout standing, want a refusal")
+	}
+}
+
+// TestOwnershipHandsACreationToTheRollout covers the one writer of the
+// created-here standing: the adapter passes the workspace on unchanged.
+func TestOwnershipHandsACreationToTheRollout(t *testing.T) {
+	// Arrange
+	controller := &fakeRolloutStanding{}
+	o := NewOwnership(controller)
+
+	// Act
+	o.Created("ws-1")
+
+	// Assert
+	if len(controller.created) != 1 || controller.created[0] != "ws-1" {
+		t.Fatalf("rollout told created %v, want [ws-1]", controller.created)
 	}
 }
