@@ -43,20 +43,62 @@ func (s Standing) String() string {
 	}
 }
 
-// Standing answers a workspace's serving standing on this daemon. An unknown
-// workspace is OWNED: a daemon that never transferred it and is not joining is
-// the one serving it, and refusing on ignorance would refuse every ordinary
-// rpc.
+// Standing answers a workspace's serving standing on this daemon.
+//
+// EACH NON-OWNED STANDING DERIVES FROM A FACT THAT NAMES THE WORKSPACE, never
+// from how this daemon booted (2026-10-30 17:41-17:54: a successor answered
+// not_yet_adopted for workspaces it had CREATED itself, because "joining" was
+// read as "owns nothing", and they could not be opened until the handover
+// ended).
+//   - transferring_away: this daemon handed the workspace over, OR it is
+//     handing over and the workspace is outside the served set it fixed
+//     (the successor minted it after the create gate closed here).
+//   - not_yet_adopted: the predecessor's manifest names the workspace and it
+//     is not adopted yet, or the manifest is still unread and this daemon did
+//     not create the workspace itself.
+//
+// Anything else is OWNED: a daemon refusing on ignorance would refuse every
+// ordinary rpc.
 func (c *controller) Standing(ws ids.WorkspaceID) Standing {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.transferred[ws] != "" {
 		return StandingTransferringAway
 	}
-	if (c.joiningMode || c.joining[ws]) && !c.owned[ws] {
+	if c.successorsLocked(ws) {
+		return StandingTransferringAway
+	}
+	if c.owned[ws] || c.created[ws] {
+		return StandingOwned
+	}
+	if c.joining[ws] || (c.joiningMode && !c.manifestSeen) {
 		return StandingNotYetAdopted
 	}
 	return StandingOwned
+}
+
+// successorsLocked reports that a handover in flight fixed a served set this
+// workspace is outside of. The caller holds c.mu.
+func (c *controller) successorsLocked(ws ids.WorkspaceID) bool {
+	slot := c.handover
+	return slot != nil && slot.served != nil && !slot.served[ws]
+}
+
+// Created implements Controller.
+func (c *controller) Created(ws ids.WorkspaceID) {
+	c.mu.Lock()
+	if c.created == nil {
+		c.created = map[ids.WorkspaceID]bool{}
+	}
+	was := c.created[ws]
+	c.created[ws] = true
+	joining := c.joiningMode
+	c.mu.Unlock()
+	if !was {
+		c.logTransition(opJoin, ws, "serving_standing", "unknown", "owned", dlog.Context{
+			"created_here": true, "joining": joining,
+		})
+	}
 }
 
 // SuccessorAddress answers the address this daemon's workspaces moved to,
@@ -65,6 +107,9 @@ func (c *controller) Standing(ws ids.WorkspaceID) Standing {
 func (c *controller) SuccessorAddress() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.successor == "" && c.handover != nil {
+		return c.handover.servedSuccessor
+	}
 	return c.successor
 }
 

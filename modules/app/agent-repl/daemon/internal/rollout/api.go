@@ -176,6 +176,10 @@ type Controller interface {
 	// SuccessorAddress answers the address a transferred workspace moved to,
 	// empty when no handover is in flight.
 	SuccessorAddress() string
+	// Created records that THIS daemon minted the workspace (a create's
+	// registration): it is owned here from that moment, so no standing a
+	// rollout derives ever answers it not_yet_adopted on its own daemon.
+	Created(ws ids.WorkspaceID)
 	// Reconcile reads the intent manifest against the kernel locks actually
 	// held and answers one disposition PER SESSION. PRESERVED, ROLLED, DIED
 	// and UNKNOWN are never collapsed and never counted.

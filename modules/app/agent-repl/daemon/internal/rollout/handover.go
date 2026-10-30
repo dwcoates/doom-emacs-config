@@ -130,6 +130,14 @@ type handoverSlot struct {
 	// armed is the rendezvous entries this handover's announcement armed, so
 	// an abandoned handover disarms exactly what it armed.
 	armed []ids.WorkspaceID
+	// served is the WHOLE of what this daemon serves for the handover, fixed
+	// when the create gate is closed and the list is taken (beginHandover).
+	// Nil until then. From then on a workspace absent from it is the
+	// successor's (it was created there), so this daemon answers it
+	// transferring_away to successor rather than serving it.
+	served map[ids.WorkspaceID]bool
+	// servedSuccessor is the address served's absentees are pointed to.
+	servedSuccessor string
 }
 
 // claimHandover claims the successor slot, or refuses naming what the
@@ -178,6 +186,26 @@ func (c *controller) abandonHandover(ctx context.Context, slot *handoverSlot, fi
 		c.logTransition(opHandover, ws, "rendezvous", "armed", "unarmed", dlog.Context{"abandoned": true})
 	}
 	c.log.Info(opHandover, "the abandoned handover released its slot; the next handover may begin", fields)
+}
+
+// fixServed records the handover's served set on its slot. The create gate
+// is already closed, so nothing joins this daemon's set after it: every
+// workspace outside it was minted by the successor, and is answered
+// transferring_away to it (Standing) and never brought up here.
+func (c *controller) fixServed(slot *handoverSlot, successor string, workspaces, untransferable []wsm.Workspace, fields dlog.Context) {
+	served := make(map[ids.WorkspaceID]bool, len(workspaces)+len(untransferable))
+	for _, ws := range workspaces {
+		served[ws.ID] = true
+	}
+	for _, ws := range untransferable {
+		served[ws.ID] = true
+	}
+	c.mu.Lock()
+	slot.served, slot.servedSuccessor = served, successor
+	c.mu.Unlock()
+	c.log.Info(opHandover, "fixed the handover's served set; any other workspace is the successor's", dlog.Merge(fields, dlog.Context{
+		"served": len(served),
+	}))
 }
 
 // beginHandover is everything up to and including the announcement and the
@@ -248,6 +276,7 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 		c.abandonHandover(ctx, slot, fields, err)
 		return nil, err
 	}
+	c.fixServed(slot, address, workspaces, untransferable, fields)
 
 	c.deps.Announcer.ShutdownAnnounced(&agentreplv1.DaemonShutdownAnnounced{
 		Address: &address,
