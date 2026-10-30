@@ -68,6 +68,12 @@ type Carry struct {
 	// ColdGate is the standing cold gate's facts (a protojson SessionCold),
 	// empty when no gate stands.
 	ColdGate json.RawMessage `json:"cold_gate,omitempty"`
+	// ColdGateShim says whether the incumbent still held a shim at the
+	// standing gate. A gate stands its shim down (owner ruling, 2026-10-27),
+	// so mostly none runs, and the successor raises the gate from its record
+	// rather than dialing a socket nobody listens on. Nil from an incumbent
+	// that predates the field, which leaves the successor dialing as before.
+	ColdGateShim *bool `json:"cold_gate_shim,omitempty"`
 	// Replacements are the shim replacements the move overtook or was asked
 	// while it ran: the successor runs them after its adoption.
 	Replacements []CarriedReplacement `json:"replacements,omitempty"`
@@ -282,6 +288,8 @@ func (c *controller) seal(ctx context.Context, ws ids.WorkspaceID, fields dlog.C
 			return nil, errors.Join(fmt.Errorf("rollout: carry the cold gate of %q: %w", ws, err), c.unseal(ctx, ws, move, fields))
 		}
 		carry.ColdGate = raw
+		_, held := c.deps.Shims.Client(ws)
+		carry.ColdGateShim = &held
 		move.parked = true
 	}
 	if err := c.writeCarry(carry); err != nil {
