@@ -1417,6 +1417,77 @@ func TestCreateDerivations(t *testing.T) {
 	}
 }
 
+func TestCreateAChildOfAnOwnerOfAnotherRepository(t *testing.T) {
+	tests := []struct {
+		name      string
+		fork      bool
+		notice    string
+		wantLands bool
+	}{
+		{name: "forked from its owner, it lands itself", fork: true},
+		{name: "fresh, it is its owner's to land", notice: "build the proto side", wantLands: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f, spec, _, _ := derivationFixture(t)
+			elsewhere := f.workspaceInRepo(t, "elsewhere", mainWorktree(t, f))
+			f.db.sessions[elsewhere.ID] = wsm.Session{Workspace: elsewhere.ID, VendorSessionID: "vendor-elsewhere"}
+			spec.Parent = &elsewhere.ID
+			if tc.fork {
+				spec.ForkFrom = &elsewhere.ID
+			}
+			spec.OwnerNotice = tc.notice
+
+			// Act.
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert: nested under and owned by the owner, but cut from and
+			// landing on its own repository's primary branch.
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			facts := f.db.registered[len(f.db.registered)-1]
+			if facts.Parent == nil || *facts.Parent != elsewhere.ID || facts.OwnerLands != tc.wantLands {
+				t.Errorf("parent = %v, owner lands = %v, want %s and %v", facts.Parent, facts.OwnerLands, elsewhere.ID, tc.wantLands)
+			}
+			if got := f.git.created[0].BaseRef; got != "master" {
+				t.Errorf("base = %q, want the own repository's primary branch", got)
+			}
+			if got := f.db.putJobs[0].Layout.TargetDir; got != spec.RepoDir {
+				t.Errorf("target dir = %q, want the own repository's main checkout %q", got, spec.RepoDir)
+			}
+		})
+	}
+}
+
+func TestCreateFailsWhenTheOwnersRepositoryCannotBeResolved(t *testing.T) {
+	// Arrange: the owner names a repository the registry does not carry.
+	f, spec, owner, _ := derivationFixture(t)
+	owner.Repo = "repo-gone"
+	f.db.with(owner)
+	id := owner.ID
+	spec.Parent, spec.ForkFrom = &id, &id
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Create succeeded, want the registry failure")
+	}
+	if len(f.git.created) != 0 {
+		t.Fatalf("worktrees %v, want nothing built", f.git.created)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Message: "could not resolve the repository of the child's owner"})
+	if !ok {
+		t.Fatalf("records = %+v, want the owner's repository failure at ERROR", f.log.logger.Records())
+	}
+	if record.Context["owner"] != string(owner.ID) || record.Context["repo_dir"] != spec.RepoDir {
+		t.Errorf("context = %v, want the owner and the repo_dir", record.Context)
+	}
+}
+
 func TestCreateRecordsTheRequester(t *testing.T) {
 	// Arrange.
 	f, spec, _, other := derivationFixture(t)
@@ -1459,11 +1530,6 @@ func TestCreateRefusesADerivationItCannotBuild(t *testing.T) {
 			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
 				id := ids.WorkspaceID("nope")
 				spec.Parent = &id
-			}},
-		{name: "an owner of another repository", wantArm: ArmUnknownOwner,
-			arrange: func(f *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
-				elsewhere := f.workspaceInRepo(t, "elsewhere", mainWorktree(t, f))
-				spec.Parent, spec.ForkFrom = &elsewhere.ID, &elsewhere.ID
 			}},
 		{name: "a fork source the registry does not hold", wantArm: ArmUnknownForkSource,
 			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) {

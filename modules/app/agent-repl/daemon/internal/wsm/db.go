@@ -110,10 +110,11 @@ type DB interface {
 	// workspace is refused, an unknown one is ErrNotFound.
 	RevealMergeWorkspace(ctx context.Context, id WorkspaceID) (bool, error)
 	// SetParent retargets a workspace: its recorded parent (nil: top-level)
-	// and its merge target directory, in one transaction. A parent the
-	// registry does not hold, of another repository, or beneath the
-	// workspace, and a workspace with no creation job, are refused with a
-	// ParentRefusedError; an unknown workspace is ErrNotFound.
+	// and its merge target directory, in one transaction. A parent of another
+	// repository nests and owns the workspace, whose merge target is its own
+	// repository's main checkout. A parent the registry does not hold or
+	// beneath the workspace, and a workspace with no creation job, are
+	// refused with a ParentRefusedError; an unknown workspace is ErrNotFound.
 	SetParent(ctx context.Context, id WorkspaceID, parent *WorkspaceID) (ParentChange, error)
 	// RestoreParent puts a retarget's prior target back while the workspace
 	// still stands as the retarget left it; stale reports a retarget that
