@@ -91,8 +91,8 @@ message OpenInEditorError {
     // A `workspace_file` path resolves outside the workspace's worktree.
     // Never answered for a `feed_link`, which may open any file.
     OpenInEditorPathEscapesWorkspace path_escapes_workspace = 5;
-    // The merge test log token names no log this daemon holds for the
-    // workspace: it was never served, or the log has since been removed.
+    // The merge test log token names no log this daemon opens for the
+    // workspace; its `reason` says which check refused it.
     OpenInEditorUnknownMergeTestLog unknown_merge_test_log = 6;
     // A feed link resolved to no existing file. The daemon has already
     // published the transient "unknown file" footer line and sent the
@@ -111,7 +111,26 @@ message OpenInEditorTransferringAway {
 }
 message OpenInEditorNotYetAdopted {}
 message OpenInEditorPathEscapesWorkspace {}
-message OpenInEditorUnknownMergeTestLog {}
+// Why a merge test log token was refused. Exactly one is set.
+message OpenInEditorUnknownMergeTestLog {
+  oneof reason {
+    // The token is not one the daemon mints (no lease, or no round number).
+    OpenInEditorUnknownMergeTestLogMalformed malformed = 1;
+    // The token names a merge whose bubble is not drawn in the asking
+    // workspace's feed: its own merges, and the async merges it requested,
+    // are the bubbles it draws.
+    OpenInEditorUnknownMergeTestLogNotDrawnHere not_drawn_here = 2;
+    // The merge is one this feed draws, but its log is gone: the log
+    // retention pass removed it.
+    OpenInEditorUnknownMergeTestLogAgedOut aged_out = 3;
+  }
+}
+// The token is not one the daemon mints.
+message OpenInEditorUnknownMergeTestLogMalformed {}
+// The token names a merge this workspace's feed draws no bubble for.
+message OpenInEditorUnknownMergeTestLogNotDrawnHere {}
+// The log retention pass removed the log.
+message OpenInEditorUnknownMergeTestLogAgedOut {}
 
 // A non-web link clicked in a prompt or response bubble.
 //
