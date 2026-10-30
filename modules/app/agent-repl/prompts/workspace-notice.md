@@ -1,8 +1,8 @@
-<!-- used by: daemon/internal/workspacesubs (a workspace subscription's notice of the followed workspace's change); placeholders: {{label}}, {{event}}, {{status}} -->
+<!-- used by: daemon/internal/workspacesubs (a workspace subscription's notice of the followed workspace's change, or a parent's notice of its child's); placeholders: {{label}}, {{why}}, {{event}}, {{status}}, {{stop}} -->
 {{label}}
 
-A workspace you subscribed to changed. {{event}}
+{{why}} {{event}}
 
 {{status}}
 
-This is a notice, not a request from the user. Act on it only as far as the work you subscribed for calls for, and otherwise carry on with whatever you were doing. To stop these notices, unsubscribe through `agent-repld workspace unsubscribe`.
+This is a notice, not a request from the user. {{stop}}

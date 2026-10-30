@@ -140,13 +140,13 @@ names its requester and placement as well, so the request tests read
   "Encode the CreateWorkspaceRequest REQUEST with its required facts filled.
 A test about one fact names only that fact: an absent requester is the
 user, an absent context origin is fresh, and a form value without a
-topology is primary."
+relationship is a peer."
   (let* ((form (plist-get request :form))
          (value (plist-get form :value)))
-    (when (and form (not (plist-member value :topology)))
+    (when (and form (not (plist-member value :relationship)))
       (setq request (plist-put (copy-sequence request) :form
                                (list :arm (plist-get form :arm)
-                                     :value (append value (list :topology '(:arm :primary)))))))
+                                     :value (append value (list :relationship '(:arm :peer)))))))
     (agent-repl-wire-encode-create-workspace-request
      (append request
              (unless (plist-member request :requester) (list :requester '(:arm :user)))
@@ -154,14 +154,14 @@ topology is primary."
 
 (ert-deftest agent-repl-test-wire-verbs-create-standard-minimal ()
   "A standard create with no optional facts carries its repository, its
-topology, its requester and its context origin, and nothing else."
+relationship, its requester and its context origin, and nothing else."
   (agent-repl-test-wire-verbs--with-common
     (let* ((request (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value nil)))
            (encoded (agent-repl-test-wire-verbs--encode-create request)))
       (should (equal (json-serialize encoded)
                      (concat "{\"repository\":{\"id\":\"repo-1\",\"dir\":\"/r/one\"},"
-                             "\"standard\":{\"topology\":{\"primary\":{}}},"
+                             "\"standard\":{\"relationship\":{\"peer\":{}}},"
                              "\"requester\":{\"user\":{}},"
                              "\"contextOrigin\":{\"fresh\":{}}}"))))))
 
@@ -185,13 +185,13 @@ topology, its requester and its context origin, and nothing else."
 
 (ert-deftest agent-repl-test-wire-verbs-create-standard-absent-optionals ()
   "Absent standard-form optionals are OMITTED, never spelled as sentinels:
-the required topology is all the form carries."
+the required relationship is all the form carries."
   (agent-repl-test-wire-verbs--with-common
     (let* ((request (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value nil)))
            (standard (cdr (assq 'standard
                                 (agent-repl-test-wire-verbs--encode-create request)))))
-      (should (equal standard '((topology . ((primary)))))))))
+      (should (equal standard '((relationship . ((peer)))))))))
 
 ;;;; ---- CreateWorkspaceRequest: the one-shot form ----------------------
 
@@ -204,7 +204,7 @@ the required topology is all the form carries."
            (one-shot (cdr (assq 'oneShot
                                 (agent-repl-test-wire-verbs--encode-create request)))))
       (should (equal (json-serialize one-shot)
-                     "{\"prompt\":{\"said\":\"ship it\"},\"topology\":{\"primary\":{}}}")))))
+                     "{\"prompt\":{\"said\":\"ship it\"},\"relationship\":{\"peer\":{}}}")))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-one-shot-carries-its-context-workspace ()
   "A one-shot's context workspace encodes inside the one-shot arm, beside the prompt."
@@ -216,7 +216,7 @@ the required topology is all the form carries."
            (one-shot (cdr (assq 'oneShot
                                 (agent-repl-test-wire-verbs--encode-create request)))))
       (should (equal (json-serialize one-shot)
-                     (concat "{\"prompt\":{\"said\":\"fix its feed\"},\"topology\":{\"primary\":{}},"
+                     (concat "{\"prompt\":{\"said\":\"fix its feed\"},\"relationship\":{\"peer\":{}},"
                              "\"context\":{\"workspace\":{\"id\":\"ws-2\",\"dir\":\"/w/two\"}}}"))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-one-shot-without-prompt-refused ()
@@ -255,8 +255,8 @@ the required topology is all the form carries."
             :form '(:arm :rehydrate :value nil)))
      :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-create-standard-without-topology-refused ()
-  "Nothing is implied: a standard form without a topology never reaches the wire."
+(ert-deftest agent-repl-test-wire-verbs-create-standard-without-relationship-refused ()
+  "Nothing is implied: a standard form without a relationship never reaches the wire."
   (agent-repl-test-wire-verbs--with-common
     (should-error
      (agent-repl-wire-encode-create-workspace-request
@@ -265,8 +265,8 @@ the required topology is all the form carries."
             :requester '(:arm :user) :context-origin '(:arm :fresh)))
      :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-create-one-shot-without-topology-refused ()
-  "Nothing is implied: a one-shot form without a topology never reaches the wire."
+(ert-deftest agent-repl-test-wire-verbs-create-one-shot-without-relationship-refused ()
+  "Nothing is implied: a one-shot form without a relationship never reaches the wire."
   (agent-repl-test-wire-verbs--with-common
     (should-error
      (agent-repl-wire-encode-create-workspace-request
@@ -281,7 +281,7 @@ the required topology is all the form carries."
     (should-error
      (agent-repl-wire-encode-create-workspace-request
       (list :repository agent-repl-test-wire-verbs--repo
-            :form '(:arm :standard :value (:topology (:arm :primary)))
+            :form '(:arm :standard :value (:relationship (:arm :peer)))
             :context-origin '(:arm :fresh)))
      :type 'agent-repl-wire-error)))
 
@@ -291,41 +291,41 @@ the required topology is all the form carries."
     (should-error
      (agent-repl-wire-encode-create-workspace-request
       (list :repository agent-repl-test-wire-verbs--repo
-            :form '(:arm :standard :value (:topology (:arm :primary)))
+            :form '(:arm :standard :value (:relationship (:arm :peer)))
             :requester '(:arm :user)))
      :type 'agent-repl-wire-error)))
 
-(ert-deftest agent-repl-test-wire-verbs-create-child-topology ()
-  "A child topology names its owner inside the form."
+(ert-deftest agent-repl-test-wire-verbs-create-child-relationship ()
+  "A child relationship names its parent inside the form."
   (agent-repl-test-wire-verbs--with-common
     (let* ((request (list :repository agent-repl-test-wire-verbs--repo
                           :form (list :arm :standard
-                                      :value (list :topology
+                                      :value (list :relationship
                                                    (list :arm :child
-                                                         :value (list :owner agent-repl-test-wire-verbs--ref))))))
+                                                         :value (list :parent agent-repl-test-wire-verbs--ref))))))
            (standard (cdr (assq 'standard (agent-repl-test-wire-verbs--encode-create request)))))
       (should (equal (json-serialize standard)
-                     "{\"topology\":{\"child\":{\"owner\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}}")))))
+                     "{\"relationship\":{\"child\":{\"parent\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}}")))))
 
-(ert-deftest agent-repl-test-wire-verbs-create-child-topology-owner-notice ()
-  "A child's owner notice rides beside its owner as `ownerNotice'."
+(ert-deftest agent-repl-test-wire-verbs-create-standard-owner-notice ()
+  "A standard create's owner notice rides the form as `ownerNotice'."
   (agent-repl-test-wire-verbs--with-common
     (let* ((request (list :repository agent-repl-test-wire-verbs--repo
                           :form (list :arm :standard
-                                      :value (list :topology
+                                      :value (list :relationship
                                                    (list :arm :child
-                                                         :value (list :owner agent-repl-test-wire-verbs--ref
-                                                                      :owner-notice "coming your way"))))))
-           (child (cdr (assq 'child (cdr (assq 'topology (cdr (assq 'standard (agent-repl-test-wire-verbs--encode-create request)))))))))
-      (should (equal (cdr (assq 'ownerNotice child)) '((text . "coming your way")))))))
+                                                         :value (list :parent agent-repl-test-wire-verbs--ref))
+                                                   :owner-notice "coming your way"))))
+           (standard (cdr (assq 'standard (agent-repl-test-wire-verbs--encode-create request)))))
+      (should (equal (cdr (assq 'ownerNotice standard)) '((text . "coming your way")))))))
 
-(ert-deftest agent-repl-test-wire-verbs-create-child-without-owner-refused ()
-  "A child topology IS its owner, so one without an owner never reaches the wire."
+(ert-deftest agent-repl-test-wire-verbs-create-child-without-parent-refused ()
+  "A child relationship IS its parent's, so one without a parent never reaches the wire."
   (agent-repl-test-wire-verbs--with-common
     (should-error
      (agent-repl-test-wire-verbs--encode-create
       (list :repository agent-repl-test-wire-verbs--repo
-            :form '(:arm :standard :value (:topology (:arm :child :value nil)))))
+            :form '(:arm :standard :value (:relationship (:arm :child :value nil)))))
      :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-create-context-origin-fork ()
@@ -2237,7 +2237,7 @@ and the temporary root it carries."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
                        #'string<)
-                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine")
+                 (sort (list "ungatedWithoutConsent" "noSlug" "briefMissing" "unknownRepository" "worktreeCreationFailed" "spawnFailed" "oneShotPolicyMissing" "namingFailed" "insideTemporaryDirectory" "unknownForkSource" "forkSourceHasNoConversation" "nameReserved" "invalidName" "unknownContextWorkspace" "unknownOwner" "ownerNoticeRequired" "ownerNoticeUnexpected" "oneShotOwnerLands" "unknownRequester" "asyncMergeUnknownBranch" "asyncMergeBranchOwned" "asyncMergeUnknownSubagent" "asyncMergeUnknownMaker" "asyncMergeContextNotMaker" "asyncMergeNameTaken" "asyncMergeUnknownCloseAfter" "opIdWithAsyncMerge" "versionIncrementRequired" "versionIncrementUnexpected" "asyncMergeRequesterQueued" "asyncMergeRequesterMerging" "asyncMergeRequesterSessionDeleted" "parentNotOpen" "originFetchFailed" "asyncMergeNoDeployConfig" "asyncMergeDeployConfigInvalid" "transferringAway" "standingDown" "placementBehindNotInLine" "unknownLandingTarget")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-error-unknown-fork-source-arm ()
@@ -6130,7 +6130,7 @@ instead diverges from it unseen."
 
 (defconst agent-repl-test-wire-verbs--open-children-decoded
   '(:cause (:arm :has-open-children
-            :value (:parent (:id "p" :dir "/w/parent") :children ((:id "c" :dir "/w/child")))))
+            :value (:parent (:id "p" :dir "/w/parent") :children ((:id "c" :dir "/w/child")) :landing-into nil)))
   "What `agent-repl-test-wire-verbs--open-children-json' decodes to.")
 
 (ert-deftest agent-repl-test-wire-verbs-every-has-open-children-arm-decodes-alike ()
@@ -6144,13 +6144,23 @@ instead diverges from it unseen."
       (should (equal (funcall decoder (agent-repl-test-wire-verbs--parse agent-repl-test-wire-verbs--open-children-json))
                      agent-repl-test-wire-verbs--open-children-decoded)))))
 
-(ert-deftest agent-repl-test-wire-verbs-has-open-children-naming-no-child-is-a-breach ()
-  "The contract says the children are never empty."
+(ert-deftest agent-repl-test-wire-verbs-has-open-children-naming-nobody-is-a-breach ()
+  "The contract says the children and the workspaces landing into it are never both empty."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-decode-close-workspace-error
                    (agent-repl-test-wire-verbs--parse
-                    "{\"hasOpenChildren\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"},\"children\":[]}}"))
+                    "{\"hasOpenChildren\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"},\"children\":[],\"landingInto\":[]}}"))
                   :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-has-open-children-naming-only-workspaces-landing-into-it ()
+  "A workspace held open only by workspaces landing into it decodes them as `:landing-into'."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-close-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"hasOpenChildren\":{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"},\"landingInto\":[{\"id\":\"l\",\"dir\":\"/w/lander\"}]}}"))
+                   '(:cause (:arm :has-open-children
+                             :value (:parent (:id "p" :dir "/w/p") :children nil
+                                     :landing-into ((:id "l" :dir "/w/lander")))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-every-parent-not-open-arm-decodes-each-state ()
   "Open, create and show decode `parent_not_open' with its parent and state."

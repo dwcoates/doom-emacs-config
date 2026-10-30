@@ -28,6 +28,7 @@ package workspacenotice
 
 import (
 	"context"
+	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -171,34 +172,50 @@ func (s *Service) Run(ctx context.Context, prompts prompthandler.Submitter) {
 // Recipient is one source an event is told to.
 type Recipient struct {
 	Source ids.WorkspaceID
-	// Owner is set when the source owns the derived workspace's branch.
+	// Owner is set when the source is the derived workspace's parent, which
+	// owns and coordinates it.
 	Owner bool
+	// Branch is set when the source's branch is the one the derived workspace
+	// was cut from and lands into.
+	Branch bool
 	// Context is set when the source's conversation was forked into it.
 	Context bool
 }
 
-// Recipients answers who is told about WS: its owner and its context source,
-// once each, never its requester and never itself.
-func Recipients(ws wsm.Workspace) []Recipient {
+// Recipients answers who is told KIND about WS, once each, never its requester
+// and never itself:
+//
+//   - its PARENT (Owner), of its creation only: a parent follows its child's
+//     landing and close without subscribing (wsm.ParentFollowedEvents), so it
+//     is told them there and in no other role here. A MERGE WORKSPACE's parent
+//     is its requester, which follows nothing, so it is told every kind;
+//   - the workspace whose branch it lands into (Branch);
+//   - its context source (Context).
+func Recipients(ws wsm.Workspace, kind Kind) []Recipient {
 	var out []Recipient
-	add := func(id *wsm.WorkspaceID, owner bool) {
-		if id == nil || *id == ws.ID || (ws.RequestedBy != nil && *id == *ws.RequestedBy) {
+	parentFollows := ws.MergeOf == nil && ws.Parent != nil && kind != Created
+	add := func(id *wsm.WorkspaceID, mark func(*Recipient)) {
+		if id == nil || *id == ws.ID || (ws.RequestedBy != nil && *id == *ws.RequestedBy) || (parentFollows && *id == *ws.Parent) {
 			return
 		}
 		for i := range out {
 			if out[i].Source == *id {
-				if owner {
-					out[i].Owner = true
-				} else {
-					out[i].Context = true
-				}
+				mark(&out[i])
 				return
 			}
 		}
-		out = append(out, Recipient{Source: *id, Owner: owner, Context: !owner})
+		out = append(out, Recipient{Source: *id})
+		mark(&out[len(out)-1])
 	}
-	add(ws.Parent, true)
-	add(ws.ContextFrom, false)
+	if ws.MergeOf != nil {
+		add(ws.Parent, func(r *Recipient) { r.Owner, r.Branch = true, true })
+	} else {
+		if kind == Created {
+			add(ws.Parent, func(r *Recipient) { r.Owner = true })
+		}
+		add(ws.LandsInto, func(r *Recipient) { r.Branch = true })
+	}
+	add(ws.ContextFrom, func(r *Recipient) { r.Context = true })
 	return out
 }
 
@@ -212,7 +229,7 @@ func (s *Service) deliver(ctx context.Context, prompts prompthandler.Submitter, 
 		}
 		event.Workspace, event.unread = record, false
 	}
-	for _, told := range Recipients(event.Workspace) {
+	for _, told := range Recipients(event.Workspace, event.Kind) {
 		s.notify(ctx, prompts, told, event)
 	}
 }
@@ -302,14 +319,23 @@ func kindWords(k Kind) string {
 }
 
 func relationWords(told Recipient) string {
-	switch {
-	case told.Owner && told.Context:
-		return "was cut from this workspace's branch, with this conversation forked, and lands into this workspace"
-	case told.Owner:
-		return "was cut from this workspace's branch and lands into this workspace"
-	default:
-		return "was created with this conversation forked"
+	var parts []string
+	if told.Owner {
+		parts = append(parts, "is a child of this workspace")
 	}
+	if told.Branch {
+		parts = append(parts, "was cut from this workspace's branch and lands into it")
+	}
+	if told.Context {
+		parts = append(parts, "was created with this conversation forked")
+	}
+	switch len(parts) {
+	case 0:
+		panic("workspacenotice: a recipient told with no relation")
+	case 1:
+		return parts[0]
+	}
+	return strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
 }
 
 func eventSentence(event Event) string {

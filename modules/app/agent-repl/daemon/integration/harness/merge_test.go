@@ -62,11 +62,11 @@ func TestFinishRequestIsTheUsersAtTheBackUnlessEdited(t *testing.T) {
 func TestCreateIsTheUsersFreshPrimaryStandardUnlessEdited(t *testing.T) {
 	// Act
 	req := Create(&workspacev1.RepositoryRef{Id: "repo"}, Standard(func(s *agentreplv1.CreateWorkspaceStandard) {
-		s.Topology = ChildOf(&workspacev1.WorkspaceRef{Id: "owner"}, "")
+		s.Relationship = Child(&workspacev1.WorkspaceRef{Id: "owner"})
 	}))
 
 	// Assert
-	if req.GetRequester().GetUser() == nil || req.GetContextOrigin().GetFresh() == nil || req.GetStandard().GetTopology().GetChild().GetOwner().GetId() != "owner" {
+	if req.GetRequester().GetUser() == nil || req.GetContextOrigin().GetFresh() == nil || req.GetStandard().GetRelationship().GetChild().GetParent().GetId() != "owner" {
 		t.Fatalf("Create = %v, want the user's fresh create edited into a child", req)
 	}
 }

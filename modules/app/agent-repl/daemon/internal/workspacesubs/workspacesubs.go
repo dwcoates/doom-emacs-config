@@ -146,10 +146,10 @@ func (s *Service) deliver(ctx context.Context, prompts prompthandler.Submitter, 
 		log.Error(op, "could not read the workspace's subscribers; nobody is told of the edge", dlog.WithCause(fields, err))
 		return
 	}
-	var told []ids.WorkspaceID
+	var told []wsm.WorkspaceSubscription
 	for _, sub := range subs {
 		if sub.Events.Has(e.event) {
-			told = append(told, sub.Subscriber)
+			told = append(told, sub)
 		}
 	}
 	if len(told) == 0 {
@@ -160,20 +160,21 @@ func (s *Service) deliver(ctx context.Context, prompts prompthandler.Submitter, 
 		log.Error(op, "could not read the followed workspace's status; its subscribers are not told of the edge", dlog.WithCause(fields, err))
 		return
 	}
-	for _, subscriber := range told {
-		s.notify(ctx, prompts, subscriber, e, status, fields)
+	for _, sub := range told {
+		s.notify(ctx, prompts, sub, e, status, fields)
 	}
 }
 
 // notify composes and submits one notice of edge E to SUBSCRIBER, saying first
 // every change of the subscriber's untold notice it supersedes, and records it
 // as the subscriber's untold notice about the workspace.
-func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, subscriber ids.WorkspaceID, e edge, status *agentreplv1.WorkspaceStatus, edgeFields dlog.Context) {
+func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, sub wsm.WorkspaceSubscription, e edge, status *agentreplv1.WorkspaceStatus, edgeFields dlog.Context) {
 	log := s.deps.Log.Global()
-	fields := dlog.Merge(edgeFields, dlog.Context{"subscriber": string(subscriber)})
+	subscriber := sub.Subscriber
+	fields := dlog.Merge(edgeFields, dlog.Context{"subscriber": string(subscriber), "parent_follows": sub.ParentFollows})
 	sentences := append(s.carried(ctx, subscriber, e.ws), EventSentence(status.GetName(), e.event))
 	fields["changes"] = len(sentences)
-	turn, failure, err := s.submit(ctx, prompts, subscriber, e.event, sentences, status)
+	turn, failure, err := s.submit(ctx, prompts, sub, e.event, sentences, status)
 	if err != nil {
 		log.Error(op, failure, dlog.WithCause(fields, err))
 	} else {
@@ -188,8 +189,9 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 // submit composes the notice of SENTENCES, the latest being EVENT's, about the
 // workspace standing STATUS, and submits it to SUBSCRIBER, answering the turn
 // it was submitted as, or the record a failure is written with and why.
-func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, subscriber ids.WorkspaceID, event wsm.WorkspaceEvent, sentences []string, status *agentreplv1.WorkspaceStatus) (ids.TurnID, string, error) {
-	text, err := s.deps.Briefs(BriefNotice, NoticeValues(event, sentences, status))
+func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, sub wsm.WorkspaceSubscription, event wsm.WorkspaceEvent, sentences []string, status *agentreplv1.WorkspaceStatus) (ids.TurnID, string, error) {
+	subscriber := sub.Subscriber
+	text, err := s.deps.Briefs(BriefNotice, NoticeValues(event, sentences, status, sub.ParentFollows))
 	if err != nil {
 		return "", "could not compose a workspace notice; the subscriber is not told of the edge", err
 	}
@@ -220,12 +222,24 @@ func (s *Service) carried(ctx context.Context, subscriber, followed ids.Workspac
 
 // NoticeValues are the brief's placeholders for a notice of SENTENCES, oldest
 // first, the last being EVENT's, about the workspace standing STATUS.
-func NoticeValues(event wsm.WorkspaceEvent, sentences []string, status *agentreplv1.WorkspaceStatus) map[string]string {
+//
+// A PARENT IS TOLD AS THE PARENT (PARENTFOLLOWS): it follows its child without
+// subscribing, coordinates the child's work, and cannot unsubscribe from it --
+// the notices end when the child closes or stops being its child.
+func NoticeValues(event wsm.WorkspaceEvent, sentences []string, status *agentreplv1.WorkspaceStatus, parentFollows bool) map[string]string {
 	name := status.GetName()
+	why := "A workspace you subscribed to changed."
+	stop := "Act on it only as far as the work you subscribed for calls for, and otherwise carry on with whatever you were doing. To stop these notices, unsubscribe through `agent-repld workspace unsubscribe`."
+	if parentFollows {
+		why = "Your child workspace `" + name + "` changed; as its parent you follow it without subscribing."
+		stop = "Coordinate the child as its work calls for (answer it with `agent-repld workspace prompt`, review and land or close it when it is done), and otherwise carry on with whatever you were doing. These notices end when the child closes or stops being this workspace's child."
+	}
 	return map[string]string{
 		"label":  "workspace `" + name + "`: " + strings.ReplaceAll(event.String(), "_", " "),
+		"why":    why,
 		"event":  untoldnotice.Sentences(sentences),
 		"status": StatusWords(status),
+		"stop":   stop,
 	}
 }
 
@@ -253,15 +267,15 @@ func EventSentence(name string, event wsm.WorkspaceEvent) string {
 func StatusWords(status *agentreplv1.WorkspaceStatus) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Its status now: `%s`, on branch `%s`, ", status.GetName(), status.GetBranch()))
-	if owner := status.GetMergeTarget().GetOwner(); owner != nil {
-		lands := "lands itself"
-		if owner.GetOwnerLands() {
-			lands = "is landed by its owner"
-		}
-		b.WriteString(fmt.Sprintf("lands into the workspace at `%s` and %s; ", owner.GetOwner().GetDir(), lands))
+	if into := status.GetMergeTarget().GetWorkspace(); into != nil {
+		b.WriteString(fmt.Sprintf("lands into the workspace at `%s`", into.GetWorkspace().GetDir()))
 	} else {
-		b.WriteString("lands on the primary branch; ")
+		b.WriteString("lands on the primary branch")
 	}
+	if status.GetOwner().GetOwnerLands() {
+		b.WriteString(" and is landed by its owner")
+	}
+	b.WriteString("; ")
 	if status.GetStanding().GetClosed() != nil {
 		b.WriteString("closed")
 	} else {

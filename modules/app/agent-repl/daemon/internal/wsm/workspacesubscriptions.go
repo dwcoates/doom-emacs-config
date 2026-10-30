@@ -113,9 +113,21 @@ type WorkspaceSubscription struct {
 	Followed WorkspaceID
 	// Events are the edges told.
 	Events WorkspaceEvents
-	// SubscribedAt is when the subscription took its current events.
+	// SubscribedAt is when the subscription took its current events, zero
+	// for a parent's implicit following that no explicit subscription widens.
 	SubscribedAt time.Time
+	// ParentFollows marks the subscriber as the followed workspace's open
+	// parent, which follows ParentFollowedEvents without subscribing; Events
+	// then include them, together with any its explicit subscription asked
+	// for.
+	ParentFollows bool
 }
+
+// ParentFollowedEvents are the edges a child's open parent is told without
+// subscribing (agentrepl.v1.WorkspaceRelationship.child): the child's turns
+// ending, its questions, its landing and its close. A turn's start is left
+// out: the end that follows it says everything the parent acts on.
+var ParentFollowedEvents = NewWorkspaceEvents(WorkspaceEventTurnEnded, WorkspaceEventNeedsInput, WorkspaceEventLanded, WorkspaceEventClosed)
 
 // ErrUnknownFollowed is a subscription refused because the workspace it
 // follows is not registered.
@@ -189,6 +201,12 @@ func (s *store) UnsubscribeWorkspace(ctx context.Context, subscriber, followed W
 // WorkspaceSubscribers loads every subscription that follows FOLLOWED, by
 // subscriber, all-or-nothing. A row whose events are undeclared refuses the
 // whole read: it would otherwise be told events nobody asked for.
+//
+// A CHILD'S OPEN PARENT FOLLOWS IT WITHOUT A ROW (ParentFollowedEvents). The
+// following is read off the child's recorded parent in the same read, never
+// stored, so a reparent or a close can never leave a stale follow behind. A
+// merge workspace's requester is its parent too, but follows nothing: the
+// merge reports to it on its own path.
 func (s *store) WorkspaceSubscribers(ctx context.Context, followed WorkspaceID) ([]WorkspaceSubscription, error) {
 	var out []WorkspaceSubscription
 	err := s.read(ctx, "daemon.wsm.workspace_subscribers", dlog.Context{"followed": string(followed)}, func(ctx context.Context) error {
@@ -218,10 +236,39 @@ func (s *store) WorkspaceSubscribers(ctx context.Context, followed WorkspaceID) 
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		var parent sql.NullString
+		err = s.q(ctx).QueryRowContext(ctx, `SELECT parent.id FROM workspaces child JOIN workspaces parent ON parent.id = child.parent_id
+			WHERE child.id = ? AND child.merge_of IS NULL AND parent.closed = 0 AND parent.id != child.id`, followed).Scan(&parent)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return err
+		default:
+			loaded = withParentFollowing(loaded, followed, WorkspaceID(parent.String))
+		}
 		out = loaded
 		return nil
 	})
 	return out, err
+}
+
+// withParentFollowing adds PARENT's implicit following of FOLLOWED to SUBS:
+// widening its explicit subscription when it holds one, or as a subscription
+// of its own, kept in subscriber order.
+func withParentFollowing(subs []WorkspaceSubscription, followed, parent WorkspaceID) []WorkspaceSubscription {
+	for i := range subs {
+		if subs[i].Subscriber == parent {
+			subs[i].Events |= ParentFollowedEvents
+			subs[i].ParentFollows = true
+			return subs
+		}
+	}
+	at := 0
+	for at < len(subs) && subs[at].Subscriber < parent {
+		at++
+	}
+	implicit := WorkspaceSubscription{Subscriber: parent, Followed: followed, Events: ParentFollowedEvents, ParentFollows: true}
+	return append(subs[:at], append([]WorkspaceSubscription{implicit}, subs[at:]...)...)
 }
 
 // endWorkspaceSubscriptionsInTx deletes every workspace subscription WS holds

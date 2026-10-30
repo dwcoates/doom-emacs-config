@@ -23,7 +23,7 @@ import (
 type fakeVerbs struct {
 	change     wsm.ParentChange
 	setErr     error
-	set        []*ids.WorkspaceID
+	set        []wsm.Retarget
 	restoreErr error
 	restored   []wsm.ParentChange
 	// calls is the order the two verbs were called in, shared with the
@@ -31,9 +31,9 @@ type fakeVerbs struct {
 	calls *[]string
 }
 
-func (v *fakeVerbs) SetParent(_ context.Context, _ ids.WorkspaceID, parent *ids.WorkspaceID) (wsm.ParentChange, error) {
+func (v *fakeVerbs) SetParent(_ context.Context, _ ids.WorkspaceID, retarget wsm.Retarget) (wsm.ParentChange, error) {
 	*v.calls = append(*v.calls, "set")
-	v.set = append(v.set, parent)
+	v.set = append(v.set, retarget)
 	return v.change, v.setErr
 }
 
@@ -83,7 +83,7 @@ func toParent() wsm.ParentChange {
 	return wsm.ParentChange{
 		Workspace: "w1",
 		Before:    wsm.MergeTarget{Dir: "/repo", DefaultBranch: "master"},
-		After:     wsm.MergeTarget{Parent: &parent, ParentName: "parent-ws", Dir: "/wt/parent-ws", DefaultBranch: "master"},
+		After:     wsm.MergeTarget{Parent: &parent, ParentName: "parent-ws", Dir: "/wt/parent-ws", LandsInto: &parent, LandsIntoName: "parent-ws", DefaultBranch: "master"},
 	}
 }
 
@@ -116,7 +116,7 @@ func TestRetargetRecordsTheRetargetThenQueuesTheNotice(t *testing.T) {
 	parent := ids.WorkspaceID("p1")
 
 	// Act
-	err := f.svc.Retarget(context.Background(), "w1", &parent)
+	err := f.svc.Retarget(context.Background(), "w1", wsm.ToParent(&parent))
 
 	// Assert
 	if err != nil {
@@ -125,8 +125,8 @@ func TestRetargetRecordsTheRetargetThenQueuesTheNotice(t *testing.T) {
 	if strings.Join(f.calls, ",") != "set,submit" {
 		t.Fatalf("calls = %v, want the retarget recorded before its notice", f.calls)
 	}
-	if len(f.verbs.set) != 1 || f.verbs.set[0] == nil || *f.verbs.set[0] != parent {
-		t.Fatalf("retargets = %v, want one naming p1", f.verbs.set)
+	if len(f.verbs.set) != 1 || f.verbs.set[0].Parent == nil || *f.verbs.set[0].Parent != parent || f.verbs.set[0].Landing != nil {
+		t.Fatalf("retargets = %v, want one naming p1 with the default landing", f.verbs.set)
 	}
 	got := f.prompts.got[0]
 	if got.ws != "w1" || got.origin != Origin || got.delivery != wsm.DeliveryDeferred || got.target != nil || got.key != "key-1" {
@@ -144,8 +144,8 @@ func TestRetargetNoticeNamesTheNewAndPreviousTargets(t *testing.T) {
 		want   []string
 	}{
 		{name: "to a parent workspace", change: toParent, want: []string{
-			"lands in the workspace `parent-ws`, whose checkout is `/wt/parent-ws`",
-			"used to land in the repository's main checkout at `/repo`, on its default branch `master`",
+			"lands in the workspace `parent-ws`, whose checkout is `/wt/parent-ws`, as a child of the workspace `parent-ws`, which owns and coordinates it",
+			"used to land in the repository's main checkout at `/repo`, on its default branch `master`, as a top-level peer nobody coordinates",
 			"`agent-repld workspace finished here -placement back`",
 		}},
 		{name: "to top-level", change: func() wsm.ParentChange {
@@ -158,10 +158,25 @@ func TestRetargetNoticeNamesTheNewAndPreviousTargets(t *testing.T) {
 		}},
 		{name: "to a parent of another repository", change: func() wsm.ParentChange {
 			c := toParent()
-			c.After.Dir, c.After.CrossRepository = "/repo", true
+			c.After.Dir, c.After.CrossRepository, c.After.LandsInto, c.After.LandsIntoName = "/repo", true, nil, ""
 			return c
 		}, want: []string{
-			"lands in the repository's main checkout at `/repo`, on its default branch `master`, under the workspace `parent-ws` of another repository, which owns it",
+			"lands in the repository's main checkout at `/repo`, on its default branch `master`, as a child of the workspace `parent-ws` of another repository, which owns and coordinates it",
+		}},
+		{name: "into a workspace other than its parent", change: func() wsm.ParentChange {
+			c := toParent()
+			other := ids.WorkspaceID("o1")
+			c.After.Dir, c.After.LandsInto, c.After.LandsIntoName = "/wt/other-ws", &other, "other-ws"
+			return c
+		}, want: []string{
+			"lands in the workspace `other-ws`, whose checkout is `/wt/other-ws`, as a child of the workspace `parent-ws`, which owns and coordinates it",
+		}},
+		{name: "a peer landing into a workspace", change: func() wsm.ParentChange {
+			c := toParent()
+			c.After.Parent, c.After.ParentName = nil, ""
+			return c
+		}, want: []string{
+			"lands in the workspace `parent-ws`, whose checkout is `/wt/parent-ws`, as a top-level peer nobody coordinates",
 		}},
 	}
 	for _, tt := range tests {
@@ -171,7 +186,7 @@ func TestRetargetNoticeNamesTheNewAndPreviousTargets(t *testing.T) {
 			f.verbs.change = tt.change()
 
 			// Act
-			if err := f.svc.Retarget(context.Background(), "w1", nil); err != nil {
+			if err := f.svc.Retarget(context.Background(), "w1", wsm.ToParent(nil)); err != nil {
 				t.Fatalf("Retarget: %v", err)
 			}
 
@@ -193,7 +208,7 @@ func TestRetargetPassesARefusalThroughAndSendsNoNotice(t *testing.T) {
 	f.verbs.setErr = refusal
 
 	// Act
-	err := f.svc.Retarget(context.Background(), "w1", nil)
+	err := f.svc.Retarget(context.Background(), "w1", wsm.ToParent(nil))
 
 	// Assert
 	if !errors.Is(err, refusal) {
@@ -222,7 +237,7 @@ func TestRetargetUndoesTheRetargetWhenTheNoticeCannotBeQueued(t *testing.T) {
 			tt.arrange(f)
 
 			// Act
-			err := f.svc.Retarget(context.Background(), "w1", nil)
+			err := f.svc.Retarget(context.Background(), "w1", wsm.ToParent(nil))
 
 			// Assert
 			if err == nil {
@@ -244,7 +259,7 @@ func TestRetargetAtAColdGateIsTheGatesRefusalRecordedAtInfo(t *testing.T) {
 	f.prompts.err = &promptqueue.ColdGateRefusal{Detail: "resumed cold"}
 
 	// Act
-	err := f.svc.Retarget(context.Background(), "w1", nil)
+	err := f.svc.Retarget(context.Background(), "w1", wsm.ToParent(nil))
 
 	// Assert
 	var coldGate *promptqueue.ColdGateRefusal
@@ -268,7 +283,7 @@ func TestRetargetReportsAFailedUndoBesideTheFailedNotice(t *testing.T) {
 	f.verbs.restoreErr = undo
 
 	// Act
-	err := f.svc.Retarget(context.Background(), "w1", nil)
+	err := f.svc.Retarget(context.Background(), "w1", wsm.ToParent(nil))
 
 	// Assert
 	if !errors.Is(err, notice) || !errors.Is(err, undo) {

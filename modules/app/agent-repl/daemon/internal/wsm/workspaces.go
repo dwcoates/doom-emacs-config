@@ -57,7 +57,8 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
 	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
 	`(SELECT MAX(turns.closed_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
-	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL)`
+	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL), ` +
+	landsIntoColumn
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range
 // priority is a decode failure, never a silently substituted default.
@@ -100,8 +101,9 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		kind          string
 		lastKeepalive sql.NullInt64
 		cacheCold     sql.NullInt64
+		landsInto     sql.NullString
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OwnerLands, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &ws.OneShot, &ws.MergePending, &ended, &asked); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OwnerLands, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &ws.OneShot, &ws.MergePending, &ended, &asked, &landsInto); err != nil {
 		return Workspace{}, err
 	}
 	switch WorkspaceKind(kind) {
@@ -158,6 +160,10 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	if contextFrom.Valid {
 		id := WorkspaceID(contextFrom.String)
 		ws.ContextFrom = &id
+	}
+	if landsInto.Valid {
+		id := WorkspaceID(landsInto.String)
+		ws.LandsInto = &id
 	}
 	if requestedBy.Valid {
 		id := WorkspaceID(requestedBy.String)
@@ -299,6 +305,7 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			OwnerLands:   facts.OwnerLands,
 			ContextFrom:  facts.ContextFrom,
 			RequestedBy:  facts.RequestedBy,
+			LandsInto:    facts.LandsInto,
 		}
 		if out.OwnerLands && out.Parent == nil {
 			return fmt.Errorf("wsm: register %s: a workspace its owner lands names its owner", normalized)

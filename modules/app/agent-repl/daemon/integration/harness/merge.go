@@ -35,19 +35,35 @@ func Fork(ws *workspacev1.WorkspaceRef) *agentreplv1.WorkspaceContextOrigin {
 	return &agentreplv1.WorkspaceContextOrigin{Origin: &agentreplv1.WorkspaceContextOrigin_Fork{Fork: &agentreplv1.WorkspaceContextOriginFork{Workspace: ws}}}
 }
 
-// Primary is cut from and landing on the primary branch.
-func Primary() *agentreplv1.WorkspaceTopology {
-	return &agentreplv1.WorkspaceTopology{Shape: &agentreplv1.WorkspaceTopology_Primary{Primary: &agentreplv1.WorkspaceTopologyPrimary{}}}
+// Peer is a workspace standing on its own, landing by default on the primary
+// branch.
+func Peer() *agentreplv1.WorkspaceRelationship {
+	return &agentreplv1.WorkspaceRelationship{Kind: &agentreplv1.WorkspaceRelationship_Peer{Peer: &agentreplv1.WorkspaceRelationshipPeer{}}}
 }
 
-// ChildOf is cut from OWNER's branch and landing into it, carrying NOTICE to
-// an owner that lands it (empty for a child that forks its owner).
-func ChildOf(owner *workspacev1.WorkspaceRef, notice string) *agentreplv1.WorkspaceTopology {
-	child := &agentreplv1.WorkspaceTopologyChild{Owner: owner}
-	if notice != "" {
-		child.OwnerNotice = &agentreplv1.WorkspaceTopologyChildOwnerNotice{Text: notice}
+// Child is a child of PARENT, landing by default into PARENT's branch when the
+// two share a repository.
+func Child(parent *workspacev1.WorkspaceRef) *agentreplv1.WorkspaceRelationship {
+	return &agentreplv1.WorkspaceRelationship{Kind: &agentreplv1.WorkspaceRelationship_Child{Child: &agentreplv1.WorkspaceRelationshipChild{Parent: parent}}}
+}
+
+// Notice is the owner notice TEXT, nil for none (a child that forks its
+// owner, or a peer).
+func Notice(text string) *agentreplv1.WorkspaceOwnerNotice {
+	if text == "" {
+		return nil
 	}
-	return &agentreplv1.WorkspaceTopology{Shape: &agentreplv1.WorkspaceTopology_Child{Child: child}}
+	return &agentreplv1.WorkspaceOwnerNotice{Text: text}
+}
+
+// LandsInto is the landing target into WS's branch.
+func LandsInto(ws *workspacev1.WorkspaceRef) *agentreplv1.WorkspaceLandingTarget {
+	return &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Workspace{Workspace: &agentreplv1.WorkspaceLandingTargetWorkspace{Workspace: ws}}}
+}
+
+// LandsOnPrimary is the landing target on the primary branch.
+func LandsOnPrimary() *agentreplv1.WorkspaceLandingTarget {
+	return &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Primary{Primary: &agentreplv1.WorkspaceLandingTargetPrimary{}}}
 }
 
 // Back and Front are a merge's placements.
@@ -63,12 +79,12 @@ func Front() *agentreplv1.MergeQueuePlacement {
 // CreateEdit shapes a create request.
 type CreateEdit func(*agentreplv1.CreateWorkspaceRequest)
 
-// Create is a standard create in REPOSITORY asked by the user, with a fresh
-// conversation, cut from the primary branch, shaped by EDITS.
+// Create is a standard create of a peer in REPOSITORY asked by the user, with
+// a fresh conversation, landing on the primary branch, shaped by EDITS.
 func Create(repository *workspacev1.RepositoryRef, edits ...CreateEdit) *agentreplv1.CreateWorkspaceRequest {
 	req := &agentreplv1.CreateWorkspaceRequest{
 		Repository:    repository,
-		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: Primary()}},
+		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: Peer()}},
 		Requester:     User(),
 		ContextOrigin: Fresh(),
 	}

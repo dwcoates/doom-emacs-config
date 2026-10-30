@@ -131,14 +131,15 @@ func (s *server) CreateWorkspace(
 		spec.InitialPrompt = s.saidText(s.log, "standard.initial_prompt", standard.GetInitialPrompt())
 		spec.Name = standard.GetName()
 		spec.DeployHooks = deployHooksOf(standard.GetDeployHooks())
-		spec.Parent, spec.OwnerNotice = topologyOwner(standard.GetTopology())
-		spec.FromOrigin = standard.GetTopology().GetPrimary().GetFromOrigin() != nil
+		spec.Parent = relationshipParent(standard.GetRelationship())
+		spec.Landing, spec.FromOrigin = landingChoice(standard.LandingTarget)
+		spec.OwnerNotice = standard.GetOwnerNotice().GetText()
 	}
 	if oneShot := req.Msg.GetOneShot(); oneShot != nil {
 		spec.OneShot = true
 		spec.InitialPrompt = s.saidText(s.log, "one_shot.prompt", oneShot.GetPrompt())
-		spec.Parent, spec.OwnerNotice = topologyOwner(oneShot.GetTopology())
-		spec.FromOrigin = oneShot.GetTopology().GetPrimary().GetFromOrigin() != nil
+		spec.Parent = relationshipParent(oneShot.GetRelationship())
+		spec.Landing, spec.FromOrigin = landingChoice(oneShot.LandingTarget)
 		if about := oneShot.GetContext(); about != nil {
 			// The context must be a registered workspace this daemon serves; a
 			// refusal names it on the create's own arm.
@@ -279,17 +280,31 @@ func forkSourceID(c *agentreplv1.WorkspaceContextOrigin) *ids.WorkspaceID {
 	return &id
 }
 
-// topologyOwner is a child's owner and its notice to the owner, nil and empty
-// for a workspace cut from the primary branch. Whether the owner is a
-// workspace of the repository, and whether the notice is required, is the
-// create's to judge.
-func topologyOwner(t *agentreplv1.WorkspaceTopology) (*ids.WorkspaceID, string) {
-	child := t.GetChild()
+// relationshipParent is a child's parent, nil for a peer. Whether the parent
+// is registered, and whether a notice is owed it, is the create's to judge.
+func relationshipParent(r *agentreplv1.WorkspaceRelationship) *ids.WorkspaceID {
+	child := r.GetChild()
 	if child == nil {
-		return nil, ""
+		return nil
 	}
-	id := ids.WorkspaceID(child.GetOwner().GetId())
-	return &id, child.GetOwnerNotice().GetText()
+	id := ids.WorkspaceID(child.GetParent().GetId())
+	return &id
+}
+
+// landingChoice is a request's explicit landing target -- nil when it names
+// none, so the relationship's default applies -- and whether a primary
+// landing is cut from origin. Every rpc that names a landing target reads it
+// here, so a create and a retarget cannot read the same message two ways.
+// Whether a named workspace may be landed into is the verb's to judge.
+func landingChoice(t *agentreplv1.WorkspaceLandingTarget) (*wsm.LandingChoice, bool) {
+	if t == nil {
+		return nil, false
+	}
+	if into := t.GetWorkspace(); into != nil {
+		id := ids.WorkspaceID(into.GetWorkspace().GetId())
+		return &wsm.LandingChoice{Into: &id}, false
+	}
+	return &wsm.LandingChoice{}, t.GetPrimary().GetFromOrigin() != nil
 }
 
 // runBackgroundCreate performs an option-B create to completion and publishes
@@ -1193,10 +1208,10 @@ func (s *server) SetWorkspaceHidden(
 	return connect.NewResponse(resp), nil
 }
 
-// SetWorkspaceParent retargets a workspace's merge, to another workspace of
-// its repository or to the main checkout, and queues the notice in its
-// session in the same operation (internal/retarget). The new nesting arrives
-// on the roster stream.
+// SetWorkspaceParent retargets a workspace -- its parent, where its merge
+// lands, or both -- and queues the notice in its session in the same
+// operation (internal/retarget). The new nesting arrives on the roster
+// stream.
 func (s *server) SetWorkspaceParent(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SetWorkspaceParentRequest],
@@ -1210,7 +1225,8 @@ func (s *server) SetWorkspaceParent(
 	if done {
 		return answer(resp, cerr)
 	}
-	var parent *ids.WorkspaceID
+	retarget := wsm.Retarget{KeepParent: req.Msg.GetUnchanged() != nil}
+	retarget.Landing, _ = landingChoice(req.Msg.LandingTarget)
 	if child := req.Msg.GetChildOf(); child != nil {
 		// THE PARENT IS RESOLVED AGAINST THE REGISTRY ALONE: it is not the
 		// subject of the request, so which daemon serves it does not matter,
@@ -1228,9 +1244,9 @@ func (s *server) SetWorkspaceParent(
 			return answer(resp, s.refuse(subject.Log, rpc, resp, *r))
 		}
 		id := resolvedParent.Record.ID
-		parent = &id
+		retarget.Parent = &id
 	}
-	if err := s.deps.Retarget.Retarget(ctx, subject.Record.ID, parent); err != nil {
+	if err := s.deps.Retarget.Retarget(ctx, subject.Record.ID, retarget); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
 	resp.Result = &agentreplv1.SetWorkspaceParentResponse_Success{

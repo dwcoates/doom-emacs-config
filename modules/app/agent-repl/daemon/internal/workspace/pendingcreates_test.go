@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -374,7 +375,9 @@ func TestDistinctRequestsAreDistinctCreates(t *testing.T) {
 		{name: "a fork source does not", change: func(s *CreateSpec) { s.ForkFrom = ptr(ids.WorkspaceID("source")) }},
 		{name: "a context workspace does not", change: func(s *CreateSpec) { s.ContextWorkspace = ptr(ids.WorkspaceID("ctx")) }},
 		{name: "one-shot does not", change: func(s *CreateSpec) { s.OneShot = true }},
-		{name: "cut from origin does not", change: func(s *CreateSpec) { s.FromOrigin = true }},
+		{name: "cut from origin does not", change: func(s *CreateSpec) { s.FromOrigin, s.Landing = true, &wsm.LandingChoice{} }},
+		{name: "an explicit landing on the primary branch does not", change: func(s *CreateSpec) { s.Landing = &wsm.LandingChoice{} }},
+		{name: "a landing into a workspace does not", change: func(s *CreateSpec) { s.Landing = &wsm.LandingChoice{Into: ptr(ids.WorkspaceID("into"))} }},
 		{name: "a name does not", change: func(s *CreateSpec) { s.Name = "chosen" }},
 		{name: "a model does not", change: func(s *CreateSpec) { s.Model = "opus" }},
 		{name: "a priority does not", change: func(s *CreateSpec) { s.Priority = &p1 }},
@@ -405,7 +408,7 @@ func TestAHeldRequestSurvivesItsEncoding(t *testing.T) {
 	// Arrange
 	p2 := wsm.PriorityP2
 	spec := CreateSpec{
-		RepoDir: "/r", InitialPrompt: "fix it", OneShot: true, FromOrigin: true,
+		RepoDir: "/r", InitialPrompt: "fix it", OneShot: true, FromOrigin: true, Landing: &wsm.LandingChoice{},
 		ContextWorkspace: ptr(ids.WorkspaceID("ctx")), Parent: ptr(ids.WorkspaceID("owner")),
 		ForkFrom: ptr(ids.WorkspaceID("source")), Requester: ptr(ids.WorkspaceID("asker")),
 		OwnerNotice: "land it", ConsentedUngatedMode: "bypassPermissions", Name: "n", Model: "opus",
@@ -424,8 +427,41 @@ func TestAHeldRequestSurvivesItsEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if createKey(decoded) != createKey(spec) || *decoded.Requester != *spec.Requester || *decoded.Priority != p2 {
+	if createKey(decoded) != createKey(spec) || *decoded.Requester != *spec.Requester || *decoded.Priority != p2 || decoded.Landing == nil || decoded.Landing.Into != nil {
 		t.Fatalf("decoded %+v, want the request encoded", decoded)
+	}
+}
+
+func TestAHeldRequestKeepsItsLandingTarget(t *testing.T) {
+	into := ids.WorkspaceID("into")
+	tests := []struct {
+		name    string
+		landing *wsm.LandingChoice
+	}{
+		{name: "the relationship's default", landing: nil},
+		{name: "the primary branch", landing: &wsm.LandingChoice{}},
+		{name: "a workspace", landing: &wsm.LandingChoice{Into: &into}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			spec := CreateSpec{RepoDir: "/r", InitialPrompt: "fix it", Landing: tt.landing}
+
+			// Act
+			encoded, err := encodeHeldSpec(spec)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			decoded, err := decodeHeldSpec(encoded)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if !reflect.DeepEqual(decoded.Landing, tt.landing) {
+				t.Fatalf("landing = %+v, want %+v", decoded.Landing, tt.landing)
+			}
+		})
 	}
 }
 

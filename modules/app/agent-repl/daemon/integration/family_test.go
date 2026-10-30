@@ -114,7 +114,9 @@ func TestAChildOfAHiddenParentIsNotCreated(t *testing.T) {
 
 	// Act
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(harness.Create(repository,
-		harness.Standard(func(s *agentreplv1.CreateWorkspaceStandard) { s.Topology = harness.ChildOf(parent, "the child's work") }))))
+		harness.Standard(func(s *agentreplv1.CreateWorkspaceStandard) {
+			s.Relationship, s.OwnerNotice = harness.Child(parent), harness.Notice("the child's work")
+		}))))
 
 	// Assert
 	if err != nil {

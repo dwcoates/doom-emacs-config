@@ -337,20 +337,24 @@ sentence the shim and the daemon word it with."
 
 (defun agent-repl-verbs-family-sentence (op keyword fields)
   "Word the family refusal KEYWORD of verb OP from its FIELDS, or nil.
-KEYWORD `:has-open-children' names the parent's open children, and for a
-merge (OP \"merge\") asks for them to be resolved and closed before a
-one-shot merge; `:parent-not-open' names the parent and what to do about
+KEYWORD `:has-open-children' names the parent's open children and the
+open workspaces landing into it, and for a merge (OP \"merge\") asks for
+them to be resolved and closed before a one-shot merge; `:parent-not-open' names the parent and what to do about
 it.  Nil for any other arm, which is not a family refusal."
   (pcase keyword
     (:has-open-children
-     (let* ((children (plist-get fields :children))
-            (names (mapconcat #'agent-repl-verbs--ref-label children ", "))
-            (one (null (cdr children))))
+     (let* ((open (append (plist-get fields :children) (plist-get fields :landing-into)))
+            (names (mapconcat #'agent-repl-verbs--ref-label open ", "))
+            (one (null (cdr open)))
+            (landers (plist-get fields :landing-into))
+            (where (if landers "under or landing into this workspace" "under this workspace")))
        (if (equal op "merge")
-           (format "%s still has open child workspaces (%s); resolve and close all of them before a one-shot merge"
-                   (agent-repl-verbs--ref-label (plist-get fields :parent)) names)
-         (format "%s refused: %s %s still open under this workspace; close %s first"
-                 op names (if one "is" "are") (if one "it" "them")))))
+           (format "%s still has open %s (%s); resolve and close all of them before a one-shot merge"
+                   (agent-repl-verbs--ref-label (plist-get fields :parent))
+                   (if landers "workspaces under or landing into it" "child workspaces")
+                   names)
+         (format "%s refused: %s %s still open %s; close %s first"
+                 op names (if one "is" "are") where (if one "it" "them")))))
     (:parent-not-open
      (let ((parent (agent-repl-verbs--ref-label (plist-get fields :parent))))
        (pcase (plist-get (plist-get fields :state) :arm)
@@ -1140,11 +1144,12 @@ it, because a caller at a keybinding writes facts, not nested oneofs.
     workspace (the daemon\='s completion directive, appended to the
     commission), and what that does is the repository\='s deploy config.
 
-NOTHING IS IMPLIED: the request names its requester, its topology and
-its context origin, and this function spells each from what the user did.
-The requester is always the user, because every editor create is one.
-OWNER is the `WorkspaceRef\' a CHILD is cut from and lands into; without
-it the workspace is PRIMARY, cut from and landing on the primary branch.
+NOTHING IS IMPLIED: the request names its requester, its relationship
+and its context origin, and this function spells each from what the user
+did.  The requester is always the user, because every editor create is
+one.  OWNER is the `WorkspaceRef\' of the parent a CHILD is made under,
+which by default it is cut from and lands into; without it the workspace
+is a PEER, cut from and landing on the primary branch.
 FORK-OF is the `WorkspaceRef\' whose conversation the new workspace
 copies; without it the context is fresh.  The editor makes a child only
 as a fork of its owner, which lands itself and so carries no owner
@@ -1213,7 +1218,7 @@ and the new workspace\'s tab arrives through the roster push."
            :form (agent-repl-verbs--create-form
                   form :initial-prompt initial-prompt :name name
                   :prompt prompt :context context
-                  :topology (agent-repl-verbs--topology owner))
+                  :relationship (agent-repl-verbs--relationship owner))
            :requester (list :arm :user)
            :context-origin (if fork-of
                                (list :arm :fork :value fork-of)
@@ -1652,30 +1657,30 @@ pending ref is cleared before the landing runs or is withdrawn."
 (defvar agent-repl-roster-update-functions)
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-verbs--pending-landing-fire)
 
-(defun agent-repl-verbs--topology (owner)
-  "Return the `WorkspaceTopology\' oneof for OWNER, a `WorkspaceRef\' or nil.
-An owner makes a CHILD of it, and no owner a PRIMARY workspace."
+(defun agent-repl-verbs--relationship (owner)
+  "Return the `WorkspaceRelationship\' oneof for OWNER, a `WorkspaceRef\' or nil.
+An owner makes a CHILD of it, and no owner a PEER."
   (if owner
-      (list :arm :child :value (list :owner owner))
-    (list :arm :primary)))
+      (list :arm :child :value (list :parent owner))
+    (list :arm :peer)))
 
 (cl-defun agent-repl-verbs--create-form (form &key initial-prompt name
-                                              prompt context topology)
+                                              prompt context relationship)
   "Return the creation-form oneof for the bare arm keyword FORM.
 The two forms take disjoint facts, so each arm reads only its own, and
-both carry TOPOLOGY."
+both carry RELATIONSHIP."
   (pcase form
     (:standard
      (list :arm :standard
            :value (list :initial-prompt (and initial-prompt
                                              (agent-repl-verbs--said initial-prompt))
                         :name name
-                        :topology topology)))
+                        :relationship relationship)))
     (:one-shot
      (list :arm :one-shot
            :value (list :prompt (and prompt (agent-repl-verbs--said prompt))
                         :context context
-                        :topology topology)))
+                        :relationship relationship)))
     (_ (user-error "agent-repl: unknown creation form %S" form))))
 
 ;;;; ---- The daemon-admin verbs -------------------------------------------

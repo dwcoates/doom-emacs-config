@@ -28,17 +28,22 @@ func forkContext(ws *workspacev1.WorkspaceRef) *agentreplv1.WorkspaceContextOrig
 	return &agentreplv1.WorkspaceContextOrigin{Origin: &agentreplv1.WorkspaceContextOrigin_Fork{Fork: &agentreplv1.WorkspaceContextOriginFork{Workspace: ws}}}
 }
 
-func primaryTopology() *agentreplv1.WorkspaceTopology {
-	return &agentreplv1.WorkspaceTopology{Shape: &agentreplv1.WorkspaceTopology_Primary{Primary: &agentreplv1.WorkspaceTopologyPrimary{}}}
+// peerRelationship is a peer, landing by default on the primary branch.
+func peerRelationship() *agentreplv1.WorkspaceRelationship {
+	return &agentreplv1.WorkspaceRelationship{Kind: &agentreplv1.WorkspaceRelationship_Peer{Peer: &agentreplv1.WorkspaceRelationshipPeer{}}}
 }
 
-// childTopology is a child of OWNER, carrying NOTICE to it when non-empty.
-func childTopology(owner *workspacev1.WorkspaceRef, notice string) *agentreplv1.WorkspaceTopology {
-	child := &agentreplv1.WorkspaceTopologyChild{Owner: owner}
-	if notice != "" {
-		child.OwnerNotice = &agentreplv1.WorkspaceTopologyChildOwnerNotice{Text: notice}
+// childRelationship is a child of PARENT.
+func childRelationship(parent *workspacev1.WorkspaceRef) *agentreplv1.WorkspaceRelationship {
+	return &agentreplv1.WorkspaceRelationship{Kind: &agentreplv1.WorkspaceRelationship_Child{Child: &agentreplv1.WorkspaceRelationshipChild{Parent: parent}}}
+}
+
+// ownerNotice is the notice TEXT to an owner, nil when TEXT is empty.
+func ownerNotice(text string) *agentreplv1.WorkspaceOwnerNotice {
+	if text == "" {
+		return nil
 	}
-	return &agentreplv1.WorkspaceTopology{Shape: &agentreplv1.WorkspaceTopology_Child{Child: child}}
+	return &agentreplv1.WorkspaceOwnerNotice{Text: text}
 }
 
 func backPlacement() *agentreplv1.MergeQueuePlacement {
@@ -53,7 +58,7 @@ func frontPlacement() *agentreplv1.MergeQueuePlacement {
 func validCreate(edit func(*agentreplv1.CreateWorkspaceRequest)) *agentreplv1.CreateWorkspaceRequest {
 	req := &agentreplv1.CreateWorkspaceRequest{
 		Repository:    &workspacev1.RepositoryRef{Id: "repo-1"},
-		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: primaryTopology()}},
+		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: peerRelationship()}},
 		Requester:     userRequester(),
 		ContextOrigin: freshContext(),
 	}

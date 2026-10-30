@@ -1,6 +1,6 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (the topbar summary''s menu), rename a workspace, hide or show a workspace, set its priority, retarget its parent, adopt an existing workspace as this one''s child, reorganize this workspace''s work across repositories (move to the repository the work principally belongs to and govern one workspace in each other repository it touches, proactively and without asking), read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); whenever this workspace''s work principally belongs to another repository or touches several (reorganize it); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a peer, with its landing target (its parent''s branch or the main branch), a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (the topbar summary''s menu), rename a workspace, hide or show a workspace, set its priority, retarget its parent, adopt an existing workspace as this one''s child, reorganize this workspace''s work across repositories (move to the repository the work principally belongs to and govern one workspace in each other repository it touches, proactively and without asking), read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); whenever this workspace''s work principally belongs to another repository or touches several (reorganize it); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
 argument-hint: "create | async-merge | prompt | status | list | find | set | link | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe | subsections | place | repository register"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
@@ -25,16 +25,33 @@ refusal's printed arm rather than guessing. This skill says WHEN and WHY.
 ## Creating a workspace (`workspace create`)
 
 NOTHING IS IMPLIED. Every create names its repository (`-repository here` or
-a main-checkout directory), its topology and its context:
+a main-checkout directory), its relationship, its context, and, when it is
+not the relationship's default, its landing target:
 
-- `-topology primary` is cut from the main branch and lands on it. Add
-  `-origin-master` to cut it from origin's main branch, fetched as the create
-  runs, when the work must start from what is pushed rather than the local
-  main branch.
-  `-topology child -owner WS` is cut from WS's branch and lands into WS.
-  WS may be of another repository: then the child nests under and is owned
-  by WS, but is cut from and lands on its own repository's main branch,
-  since no branch crosses repositories.
+- `-relationship` is how the new workspace stands to its creator's work:
+  - `child -parent WS` works on part of WS's work and keeps coordinating
+    with it. WS is its parent and OWNER: the sidebar nests it under WS (under
+    a divider naming its repository when that is not WS's), WS FOLLOWS it
+    automatically without `workspace subscribe` (WS is told its turn ends,
+    its questions, its landing and its close), and WS reviews it and closes
+    it. WS cannot be closed, hidden, finished or merged away while the child
+    is open.
+  - `peer` is tangential, self-sufficient, fire-and-forget: top level,
+    followed by nobody, with no owner, and it always lands itself. The
+    natural one-shot. Who created it is still recorded (`createdBy` in its
+    status).
+- `-lands-into` is the landing target, SEPARATE from the relationship and
+  optional. A workspace is always cut from what it lands into.
+  - Unset is the relationship's default: a child lands into its parent when
+    the parent is of the same repository, and on its own repository's main
+    branch otherwise (no branch crosses repositories); a peer lands on main.
+  - `-lands-into main` opts out of the default, e.g. a parallel piece the
+    parent waits on and picks up from main.
+  - `-lands-into WS` lands into any open workspace of the SAME repository,
+    e.g. a fix sent into another workspace's unlanded branch.
+  - `-origin-master` cuts the workspace from origin's main branch, fetched as
+    the create runs, when the work must start from what is pushed rather than
+    the local main branch; it goes only with `-lands-into main`.
 - `-context fresh` starts an empty conversation. `-context fork -fork WS`
   copies WS's conversation (cut at its last concluded turn).
 - **A workspace created in another repository forks only to MOVE this
@@ -54,44 +71,47 @@ a main-checkout directory), its topology and its context:
   repository baz:
   - A does the foo work itself in its own workspace, and does the baz work
     by creating a workspace B as its child:
-    `workspace create -repository <baz> -topology child -owner here`.
+    `workspace create -repository <baz> -relationship child -parent here`.
     B nests under A in the sidebar, under a divider naming baz, and A owns
     and lands it. A NEVER edits baz's checkout or cuts branches in it by
-    hand.
+    hand. Work in baz that is truly separate from A's is a `peer` instead.
   - If baz is not yet registered with agent-repl, A first registers it with
     `repository register` (see "Registering a repository" below), then
     creates B.
   - B is created `-context fresh` (per the cross-repository rule above),
     with everything B needs carried in its `-prompt` and an `-owner-notice`
     telling A what is coming.
-  - A coordinates with B through `workspace prompt`, `workspace subscribe`
-    and the awaiting mark (`workspace set -await`), e.g. integrating B's
-    result. Example: baz owns the protobufs and foo holds the C++
-    implementation: A asks B for the protobuf change, subscribes and marks
-    itself awaiting, then builds A's C++ integration against B's protobufs.
+  - A coordinates with B through `workspace prompt` and the awaiting mark
+    (`workspace set -await`), e.g. integrating B's result; A follows B
+    without subscribing. Example: baz owns the protobufs and foo holds the
+    C++ implementation: A asks B for the protobuf change, marks itself
+    awaiting, then builds A's C++ integration against B's protobufs.
   - A lands B's change through baz's deploy (`workspace finished B`) once
     it has reviewed it, and lands foo's own.
 
 Choose the combination from what the work needs (every `fork` row is within
 one repository, except the move below):
 
-| want | topology | context | how common |
-|---|---|---|---|
-| a tangential fix landed while this work goes on, a parallel subtask, a second approach | `primary` | `fork -fork here` | common |
-| a piece of this workspace's unlanded feature that lands back into it | `child -owner here` | `fork -fork here` | common |
-| a piece of another workspace W's work, landing into W, with W's whole context | `child -owner W` | `fork -fork W` | common |
-| a fix on main that needs another workspace Y's context | `primary` | `fork -fork Y` | uncommon |
-| a truly tangential bug, or a review that must not be biased by this context | `primary` | `fresh` | situational |
-| a fix sent into another workspace X's unlanded branch | `child -owner X` | `fork -fork here` | rare |
-| fresh work on W's unlanded branch | `child -owner W` | `fresh` | situational |
-| work in a different repository from this workspace's (`-repository DIR`) | `primary` | `fresh` | situational |
+| want | relationship | lands into | context | how common |
+|---|---|---|---|---|
+| a tangential fix landed while this work goes on, a parallel subtask, a second approach | `peer` | main | `fork -fork here` | common |
+| a piece of this workspace's unlanded feature that lands back into it | `child -parent here` | here (default) | `fork -fork here` | common |
+| a piece of another workspace W's work, landing into W, with W's whole context | `child -parent W` | W (default) | `fork -fork W` | common |
+| a fix on main that needs another workspace Y's context | `peer` | main | `fork -fork Y` | uncommon |
+| a truly tangential bug, or a review that must not be biased by this context | `peer` | main | `fresh` | situational |
+| a fix sent into another workspace X's unlanded branch | `child -parent here` | `-lands-into X` | `fork -fork here` | rare |
+| fresh work on W's unlanded branch | `child -parent W` | W (default) | `fresh` | situational |
+| a piece this workspace waits on and picks up from main | `child -parent here` | `-lands-into main` | `fork -fork here` or `fresh` | situational |
+| coordinated work in a different repository (`-repository DIR`) | `child -parent here` | its main (default) | `fresh` | situational |
+| separate work in a different repository | `peer` | its main | `fresh` | situational |
 
-- A CHILD THAT DOES NOT FORK ITS OWNER is its owner's to arbitrate and land:
-  give `-owner-notice` a plain-English note telling the owner what is coming
-  and why. The owner is told with the daemon's addendum, and only the owner
-  lands it (`workspace finished`). Such a child is never a one-shot.
-- A child that forks its owner has the owner's whole context and lands itself;
-  it takes no notice.
+- A CHILD WHOSE CONTEXT IS NOT FORKED FROM ITS PARENT is its parent's to
+  arbitrate and land: give `-owner-notice` a plain-English note telling the
+  parent what is coming and why. The parent is told with the daemon's
+  addendum, and only the parent (or the user) finishes it
+  (`workspace finished`). Such a child is never a one-shot.
+- A child forked from its parent has the parent's whole context and lands
+  itself; it takes no notice. A peer never takes a notice.
 - `-one-shot -prompt TEXT` makes a workspace that finishes its commission
   unattended and then runs `workspace finished here`, as the daemon's
   completion directive tells it.
@@ -125,7 +145,7 @@ one repository, except the move below):
   never `pop`. Store or tag the SHA if the gap will be long, since `git gc`
   may prune it.
 - Afterwards, tell the user each workspace's name and what it was asked to do.
-- The workspaces a new one derives from (its owner, and the one it forks) are
+- The workspaces a new one derives from (its parent, and the one it forks) are
   told when it is created, when it lands and when it closes without landing.
   Nothing needs to be relayed by hand.
 - A branch no workspace owns (a subagent's) is landed through an async merge,
@@ -151,7 +171,7 @@ user in the same response what it reorganized and why.
    - a. Read this workspace's priority, one-shot mark and links with
      `workspace status here`.
    - b. Create the governor: `workspace create -repository <principal>
-     -topology primary -origin-master -context fork -fork here -prompt TEXT`,
+     -relationship peer -lands-into main -origin-master -context fork -fork here -prompt TEXT`,
      adding `-priority P` and `-one-shot` when this workspace has them.
    - c. TEXT tells the governor that it is this workspace moved, what is done
      and what remains, and to do these first:
@@ -201,9 +221,11 @@ user in the same response what it reorganized and why.
   this lands", "send me the results once the tests pass"), send the update
   with `workspace prompt` as soon as that condition is met, without asking the
   user for confirmation: the other workspace's request is the authorization.
-- `workspace status WS` reads one workspace: its activity, its merge target,
-  its repository, whether it is a one-shot, whether it awaits another
-  workspace, and a cold gate it is parked at. `workspace list` reads every
+- `workspace status WS` reads one workspace: its activity, its merge target
+  (`primary` or `workspace{workspace}`), its repository, its `relationship`
+  (child{parent} or peer), its `owner` (the workspace and `ownerLands`; absent
+  for a peer), `createdBy`, its open `children`, whether it is a one-shot,
+  whether it awaits another workspace, and a cold gate it is parked at. `workspace list` reads every
   workspace the daemon serves.
 - `workspace find [-repository here|DIR] [-since WHEN] [-until WHEN]
   [-standing open|closed|landed] [-text TEXT] [-limit N|-all]` lists the
@@ -223,8 +245,9 @@ user in the same response what it reorganized and why.
   closed workspaces; `workspace list` reads only what the daemon serves now.
 - `workspace subscribe WS -events ...` has this workspace's agent told, as a
   prompt drawn nowhere, when WS's turn starts or ends, it needs input, it lands
-  or it closes. Subscribe instead of polling; `workspace unsubscribe WS` ends
-  it. A subscription ends with this workspace's close (re-opening does not
+  or it closes. Subscribe instead of polling, to follow a peer or an unrelated
+  workspace (a parent already follows its children); `workspace unsubscribe WS`
+  ends it. A subscription ends with this workspace's close (re-opening does not
   restore it) and when WS is forgotten; WS closing is an event it tells, and
   it goes on following WS if WS is opened again. A notice that waited
   behind your turns lists every change since the last one you were told,
@@ -272,7 +295,7 @@ creating workspaces there with `-repository DIR`.
 - **ONE-SHOT.** When to mark this workspace a one-shot is the metaprompt's
   rule ("One-shot workspaces"). The verb is `workspace set here -one-shot`,
   and its answer carries the daemon's completion directive: follow it when the
-  work is done. A child its owner lands cannot be marked.
+  work is done. A child its parent lands cannot be marked.
 - **BACK FROM A ONE-SHOT.** A workspace that keeps the mark would finish
   itself again, unattended, when the user meant to keep working in it.
   - The daemon clears the mark itself when the user takes the workspace back:
@@ -320,11 +343,14 @@ creating workspaces there with `-repository DIR`.
     its name.
 - **ADOPT.** `workspace set WS -parent here` makes an existing workspace
   this workspace's child. Its conversation is untouched. It nests under this
-  workspace in the sidebar, and this workspace owns it and is told of it as
-  an owner is. A child of this repository lands into this workspace's
-  branch. A child of another repository is drawn under a divider naming its
-  repository and lands on its own repository's main branch, since no branch
-  crosses repositories. `-top-level` releases it.
+  workspace in the sidebar, and this workspace owns it, follows it and is
+  told of it as an owner is. Without `-lands-into` it lands by the child
+  default: into this workspace's branch for a child of this repository, and
+  on its own repository's main branch for a child of another (drawn under a
+  divider naming its repository). `-lands-into WS|main` alone moves only
+  where it lands and keeps the relationship; given with `-parent` it sets
+  both. `-top-level` makes it a top-level peer and, without `-lands-into`,
+  lands it on main.
 - `-hidden` / `-shown` and `-priority` set the rest.
 
 ## Finishing, opening, closing

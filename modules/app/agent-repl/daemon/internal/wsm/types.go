@@ -71,6 +71,14 @@ type Workspace struct {
 	// ContextFrom is the workspace whose conversation was forked into this
 	// one at its creation, nil for a fresh context or a registered workspace.
 	ContextFrom *WorkspaceID
+	// LandsInto is the workspace whose branch this one's merge lands into, nil
+	// when it lands on its repository's primary branch or has no merge
+	// geometry. READ BACK, NEVER STORED: it is the workspace whose worktree is
+	// the creation job's target directory (landsIntoColumn), so it can never
+	// disagree with where the merge actually lands. Independent of Parent: a
+	// child usually lands into its parent, but may land on the primary branch
+	// or into another workspace, and a peer may land into a workspace too.
+	LandsInto *WorkspaceID
 	// RequestedBy is the workspace whose agent asked for this one's creation,
 	// nil when the user asked or the workspace was registered.
 	RequestedBy *WorkspaceID
@@ -339,6 +347,10 @@ type RegisterFacts struct {
 	OwnerLands  bool
 	ContextFrom *WorkspaceID
 	RequestedBy *WorkspaceID
+	// LandsInto is the workspace the creation job's target directory names,
+	// echoed onto the record Register answers; the row stores no such column
+	// (Workspace.LandsInto).
+	LandsInto *WorkspaceID
 	// Priority is the priority a minted workspace is created with, nil for
 	// none. It is recorded in the insert itself because it decides the place
 	// the workspace lands on. An announcement of an already-registered

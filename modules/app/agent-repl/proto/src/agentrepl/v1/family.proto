@@ -1,7 +1,9 @@
 // family.proto — the refusals that keep a workspace family in one list of the
-// roster (frontend.v1.WorkspaceRoster). A child workspace merges into its
-// parent and is drawn and tabbed right after it, so a parent may not leave the
-// Open section while a child is still open: a workspace with open children
+// roster (frontend.v1.WorkspaceRoster). A child workspace is coordinated by its
+// parent and is drawn and tabbed right after it, and a workspace landing into
+// another's branch needs that branch to stay, so a parent, or a workspace
+// another lands into, may not leave the Open section while such a workspace is
+// still open: a workspace with open children
 // cannot be hidden, closed, killed, nuked, or merged by a merge that closes
 // it, and a workspace cannot be made, moved or brought back as the open child
 // of a parent that is hidden, closed, or closing (a merge waiting in its
@@ -28,8 +30,12 @@ message WorkspaceHasOpenChildren {
   // merge's one-shot names.
   workspace.v1.WorkspaceRef parent = 1;
   // Every open child of `parent`, hidden ones included, in the roster's order.
-  // Never empty.
+  // Empty only when `landing_into` is not.
   repeated workspace.v1.WorkspaceRef children = 2;
+  // Every open workspace that is NOT a child of `parent` but whose branch
+  // lands into `parent`'s branch (WorkspaceLandingTarget.workspace), hidden
+  // ones included, in the roster's order. Empty only when `children` is not.
+  repeated workspace.v1.WorkspaceRef landing_into = 3;
 }
 
 // The workspace's parent is not open, so the request would make an open child

@@ -493,8 +493,16 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 				return err
 			}
 		}
-		if err := validateWorkspaceTopology("standard.topology", standard.GetTopology()); err != nil {
+		if err := validateWorkspaceRelationship("standard.relationship", standard.GetRelationship()); err != nil {
 			return err
+		}
+		if standard.LandingTarget != nil {
+			if err := validateWorkspaceLandingTarget("standard.landing_target", standard.GetLandingTarget()); err != nil {
+				return err
+			}
+		}
+		if notice := standard.OwnerNotice; notice != nil && strings.TrimSpace(notice.GetText()) == "" {
+			return invalid("standard.owner_notice.text", "a notice to the owner says what is coming")
 		}
 		if err := validateDeployHooks("standard.deploy_hooks", standard.GetDeployHooks()); err != nil {
 			return err
@@ -504,8 +512,13 @@ func validateCreateWorkspaceRequest(req *agentreplv1.CreateWorkspaceRequest) *co
 		if err := validateUserSaid("one_shot.prompt", oneShot.GetPrompt()); err != nil {
 			return err
 		}
-		if err := validateWorkspaceTopology("one_shot.topology", oneShot.GetTopology()); err != nil {
+		if err := validateWorkspaceRelationship("one_shot.relationship", oneShot.GetRelationship()); err != nil {
 			return err
+		}
+		if oneShot.LandingTarget != nil {
+			if err := validateWorkspaceLandingTarget("one_shot.landing_target", oneShot.GetLandingTarget()); err != nil {
+				return err
+			}
 		}
 		if about := oneShot.GetContext(); about != nil {
 			if err := validateWorkspaceRef("one_shot.context.workspace", about.GetWorkspace()); err != nil {
@@ -568,18 +581,27 @@ func validateWorkspaceContextOrigin(field string, c *agentreplv1.WorkspaceContex
 	return invalid(field, "a context origin arm (fresh or fork) is required")
 }
 
-// validateWorkspaceTopology is WorkspaceTopology's base function.
-func validateWorkspaceTopology(field string, t *agentreplv1.WorkspaceTopology) *connect.Error {
-	switch shape := t.GetShape().(type) {
-	case *agentreplv1.WorkspaceTopology_Primary:
+// validateWorkspaceRelationship is WorkspaceRelationship's base function.
+func validateWorkspaceRelationship(field string, r *agentreplv1.WorkspaceRelationship) *connect.Error {
+	switch kind := r.GetKind().(type) {
+	case *agentreplv1.WorkspaceRelationship_Peer:
 		return nil
-	case *agentreplv1.WorkspaceTopology_Child:
-		if notice := shape.Child.OwnerNotice; notice != nil && strings.TrimSpace(notice.GetText()) == "" {
-			return invalid(field+".child.owner_notice.text", "a notice to the owner says what is coming")
-		}
-		return validateWorkspaceRef(field+".child.owner", shape.Child.GetOwner())
+	case *agentreplv1.WorkspaceRelationship_Child:
+		return validateWorkspaceRef(field+".child.parent", kind.Child.GetParent())
 	}
-	return invalid(field, "a topology arm (primary or child) is required")
+	return invalid(field, "a relationship arm (child or peer) is required")
+}
+
+// validateWorkspaceLandingTarget is WorkspaceLandingTarget's base function,
+// for a target that is set.
+func validateWorkspaceLandingTarget(field string, t *agentreplv1.WorkspaceLandingTarget) *connect.Error {
+	switch target := t.GetTarget().(type) {
+	case *agentreplv1.WorkspaceLandingTarget_Primary:
+		return nil
+	case *agentreplv1.WorkspaceLandingTarget_Workspace:
+		return validateWorkspaceRef(field+".workspace.workspace", target.Workspace.GetWorkspace())
+	}
+	return invalid(field, "a landing target arm (primary or workspace) is required")
 }
 
 // validateMergeQueuePlacement is MergeQueuePlacement's base function.
@@ -827,10 +849,23 @@ func validateSetWorkspaceParentRequest(req *agentreplv1.SetWorkspaceParentReques
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
 	}
+	if req.LandingTarget != nil {
+		if err := validateWorkspaceLandingTarget("landing_target", req.GetLandingTarget()); err != nil {
+			return err
+		}
+		if req.GetLandingTarget().GetPrimary().GetFromOrigin() != nil {
+			return invalid("landing_target.primary.from_origin", "a retarget cuts no branch, so nothing is cut from origin")
+		}
+	}
 	switch target := req.GetParent().(type) {
 	case *agentreplv1.SetWorkspaceParentRequest_ChildOf:
 		return validateWorkspaceRef("child_of.parent", target.ChildOf.GetParent())
 	case *agentreplv1.SetWorkspaceParentRequest_TopLevel:
+		return nil
+	case *agentreplv1.SetWorkspaceParentRequest_Unchanged:
+		if req.LandingTarget == nil {
+			return invalid("landing_target", "a retarget that keeps the relationship names where the merge lands")
+		}
 		return nil
 	default:
 		return invalid("parent", "a parent arm is required")

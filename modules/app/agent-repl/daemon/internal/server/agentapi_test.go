@@ -36,6 +36,8 @@ func TestCreateWorkspaceMapsItsChoicesOntoTheSpec(t *testing.T) {
 		wantFork      *ids.WorkspaceID
 		wantRequester *ids.WorkspaceID
 		wantNotice    string
+		wantLanding   *wsm.LandingChoice
+		wantOrigin    bool
 	}{
 		{name: "a fresh workspace on the primary branch, asked by the user"},
 		{name: "a fork of another workspace onto the primary branch", edit: func(r *agentreplv1.CreateWorkspaceRequest) {
@@ -43,9 +45,21 @@ func TestCreateWorkspaceMapsItsChoicesOntoTheSpec(t *testing.T) {
 		}, wantFork: &other},
 		{name: "a child of an owner that lands it, asked by a workspace", edit: func(r *agentreplv1.CreateWorkspaceRequest) {
 			r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-				Topology: childTopology(&workspacev1.WorkspaceRef{Id: string(owner)}, "the parser fix")}}
+				Relationship: childRelationship(&workspacev1.WorkspaceRef{Id: string(owner)}), OwnerNotice: ownerNotice("the parser fix")}}
 			r.Requester = workspaceRequester(ref())
 		}, wantParent: &owner, wantNotice: "the parser fix", wantRequester: func() *ids.WorkspaceID { id := testWorkspaceID; return &id }()},
+		{name: "a child landing on the primary branch cut from origin", edit: func(r *agentreplv1.CreateWorkspaceRequest) {
+			r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+				Relationship:  childRelationship(&workspacev1.WorkspaceRef{Id: string(owner)}),
+				OwnerNotice:   ownerNotice("the parser fix"),
+				LandingTarget: &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Primary{Primary: &agentreplv1.WorkspaceLandingTargetPrimary{FromOrigin: &agentreplv1.WorkspaceLandingTargetPrimaryFromOrigin{}}}}}}
+		}, wantParent: &owner, wantNotice: "the parser fix", wantLanding: &wsm.LandingChoice{}, wantOrigin: true},
+		{name: "a one-shot peer landing into another workspace", edit: func(r *agentreplv1.CreateWorkspaceRequest) {
+			r.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+				Prompt: workspace.SaidText("fix the feed"), Relationship: peerRelationship(),
+				LandingTarget: &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Workspace{Workspace: &agentreplv1.WorkspaceLandingTargetWorkspace{
+					Workspace: &workspacev1.WorkspaceRef{Id: string(other)}}}}}}
+		}, wantLanding: &wsm.LandingChoice{Into: &other}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -65,9 +79,11 @@ func TestCreateWorkspaceMapsItsChoicesOntoTheSpec(t *testing.T) {
 			}
 			spec := h.Verbs.createSpecs[0]
 			if !reflect.DeepEqual(spec.Parent, tt.wantParent) || !reflect.DeepEqual(spec.ForkFrom, tt.wantFork) ||
-				!reflect.DeepEqual(spec.Requester, tt.wantRequester) || spec.OwnerNotice != tt.wantNotice {
-				t.Fatalf("spec = parent %v fork %v requester %v notice %q; want %v %v %v %q",
-					spec.Parent, spec.ForkFrom, spec.Requester, spec.OwnerNotice, tt.wantParent, tt.wantFork, tt.wantRequester, tt.wantNotice)
+				!reflect.DeepEqual(spec.Requester, tt.wantRequester) || spec.OwnerNotice != tt.wantNotice ||
+				!reflect.DeepEqual(spec.Landing, tt.wantLanding) || spec.FromOrigin != tt.wantOrigin {
+				t.Fatalf("spec = parent %v fork %v requester %v notice %q landing %+v origin %v; want %v %v %v %q %+v %v",
+					spec.Parent, spec.ForkFrom, spec.Requester, spec.OwnerNotice, spec.Landing, spec.FromOrigin,
+					tt.wantParent, tt.wantFork, tt.wantRequester, tt.wantNotice, tt.wantLanding, tt.wantOrigin)
 			}
 		})
 	}

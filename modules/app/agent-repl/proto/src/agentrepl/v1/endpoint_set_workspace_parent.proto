@@ -1,15 +1,17 @@
 // endpoint_set_workspace_parent.proto — SetWorkspaceParent: RETARGET a
-// workspace's merge. SIDEBAR section.
+// workspace: change its relationship (child of a parent, or peer), where its
+// merge lands, or both. SIDEBAR section.
 //
-// A workspace's PARENT is its merge target and its roster nesting at once: a
-// child's merge lands in its parent's checkout, and a top-level workspace's
-// lands in its repository's main checkout on the default branch
-// (CreateWorkspaceRequest.parent). A parent of ANOTHER repository is the
-// child's owner and nesting only: no branch crosses repositories, so such a
-// child's merge lands in its own repository's main checkout, on the default
-// branch, while the roster nests it under that parent. Creation records that choice; this rpc is
-// the one way to change it afterwards. The roster nests the workspace under
-// its new parent, or at the top level, on its next push.
+// THE RELATIONSHIP AND THE LANDING TARGET ARE TWO FACTS, set together here
+// because the landing target's default follows the relationship
+// (WorkspaceLandingTarget): a child lands into its parent when the parent is of
+// the same repository, and on its own repository's primary branch otherwise; a
+// peer lands on the primary branch. A request that names no landing target
+// re-applies that default for the relationship it leaves; one that names one
+// lands there, whatever the relationship. Creation records both choices
+// (CreateWorkspaceStandard.relationship, .landing_target); this rpc is the one
+// way to change either afterwards. The roster nests the workspace under its
+// parent, or at the top level, on its next push.
 //
 // THE RETARGET AND ITS NOTICE ARE ONE OPERATION. On success the daemon has
 // also queued a prompt into the retargeted workspace's session, through the
@@ -28,6 +30,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "agentrepl/v1/family.proto";
+import "agentrepl/v1/workspace_topology.proto";
 import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
@@ -35,21 +38,30 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 message SetWorkspaceParentRequest {
   // The workspace being retargeted, echoed from its roster row.
   workspace.v1.WorkspaceRef workspace = 1;
-  // THE ARM IS THE NEW MERGE TARGET: another workspace (of another
-  // repository, its owner only), or the repository's main checkout. Unset is a malformed
-  // request (Connect InvalidArgument), never "top-level": clearing a parent
-  // changes where work lands, so it is asked for by name. Asking for the
-  // parent a workspace already has is NOT refused; it re-sends the notice.
+  // THE ARM IS THE NEW RELATIONSHIP: a child of another workspace (of any
+  // repository), a top-level peer, or the relationship it already has. Unset is
+  // a malformed request (Connect InvalidArgument), never "top-level": clearing
+  // a parent changes who coordinates the workspace, so it is asked for by name.
+  // Asking for the parent a workspace already has is NOT refused; it re-sends
+  // the notice.
   oneof parent {
     SetWorkspaceParentChild child_of = 2;
     SetWorkspaceParentTopLevel top_level = 3;
+    SetWorkspaceParentUnchanged unchanged = 4;
   }
+  // Where the workspace's merge lands from now on. UNSET = the default for
+  // the relationship the request leaves the workspace in. A workspace landing
+  // target must be an open workspace of the retargeted workspace's own
+  // repository (`unknown_landing_target`), neither the workspace itself nor one
+  // landing into it.
+  optional WorkspaceLandingTarget landing_target = 5;
 }
 
-// Make the workspace a CHILD of another workspace: the roster nests it there,
-// and its merge lands in that workspace's checkout, on that workspace's
-// branch, when the two are of one repository, or in its own repository's main
-// checkout when they are not.
+// Make the workspace a CHILD of another workspace: the roster nests it there
+// and the parent coordinates it (WorkspaceRelationship.child). Its merge lands
+// as `landing_target` says, by default in the parent's checkout when the two
+// are of one repository, or in its own repository's main checkout when they
+// are not.
 message SetWorkspaceParentChild {
   // The new parent, echoed from its roster row. It must be a registered
   // workspace of any repository, and neither the retargeted workspace itself
@@ -57,10 +69,16 @@ message SetWorkspaceParentChild {
   workspace.v1.WorkspaceRef parent = 1;
 }
 
-// Make the workspace TOP-LEVEL: its merge lands in its repository's main
-// checkout, on the default branch, and the roster draws it at the top of its
-// section. DELIBERATELY EMPTY: the arm is the request.
+// Make the workspace a TOP-LEVEL PEER: the roster draws it at the top of its
+// section and nobody coordinates it. Its merge lands as `landing_target` says,
+// by default in its repository's main checkout, on the default branch.
+// DELIBERATELY EMPTY: the arm is the request.
 message SetWorkspaceParentTopLevel {}
+
+// Keep the workspace's relationship as it stands: the request changes only
+// where its merge lands, so `landing_target` is REQUIRED beside it (Connect
+// InvalidArgument otherwise). DELIBERATELY EMPTY: the arm is the request.
+message SetWorkspaceParentUnchanged {}
 
 // THE ARM IS THE OUTCOME.
 message SetWorkspaceParentResponse {
@@ -109,9 +127,14 @@ message SetWorkspaceParentError {
     // prompt until the gate is answered, so the notice cannot be queued and
     // the retarget is not made. Answer the gate, then retarget.
     SetWorkspaceParentColdGate cold_gate = 10;
-    // The named parent is hidden or closed, and moving the workspace under
-    // it would make an open child of a parent outside the Open section.
+    // The named parent, or the workspace to land into, is hidden or closed,
+    // and moving the workspace would make an open child of, or an open branch
+    // landing into, a workspace outside the Open section.
     WorkspaceParentNotOpen parent_not_open = 11;
+    // The workspace to land into is not in the daemon's registry, is of
+    // another repository, or is the retargeted workspace or one landing into
+    // it.
+    SetWorkspaceParentUnknownLandingTarget unknown_landing_target = 12;
   }
 }
 
@@ -143,6 +166,12 @@ message SetWorkspaceParentParentRefMismatch {
   string registry_dir = 1;
 }
 
+
+// The workspace to land into cannot take the retargeted workspace's merge.
+message SetWorkspaceParentUnknownLandingTarget {
+  // The workspace as the request named it.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
 
 // The new parent is the retargeted workspace or one of its descendants.
 // DELIBERATELY EMPTY: the request named both ends of the would-be cycle.

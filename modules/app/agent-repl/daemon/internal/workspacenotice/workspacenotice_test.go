@@ -115,30 +115,60 @@ func (f *fixture) deliverNow(event Event) {
 	f.s.deliver(context.Background(), f.prompts, event)
 }
 
+// derived is a workspace derived from PARENT, which it lands into, and
+// CONTEXTFROM, whose conversation it forked.
 func derived(parent, contextFrom, requestedBy *ids.WorkspaceID, ownerLands bool) wsm.Workspace {
-	return wsm.Workspace{ID: child, Name: "child", Branch: "b-child", Parent: parent, ContextFrom: contextFrom, RequestedBy: requestedBy, OwnerLands: ownerLands}
+	return wsm.Workspace{ID: child, Name: "child", Branch: "b-child", Parent: parent, LandsInto: parent, ContextFrom: contextFrom, RequestedBy: requestedBy, OwnerLands: ownerLands}
 }
 
 func TestRecipients(t *testing.T) {
+	into := ids.WorkspaceID("ws-into")
+	peerInto := func() wsm.Workspace {
+		ws := derived(nil, idp(source), nil, false)
+		ws.LandsInto = &into
+		return ws
+	}
+	childInto := func() wsm.Workspace {
+		ws := derived(idp(owner), nil, nil, true)
+		ws.LandsInto = &into
+		return ws
+	}
+	merge := func() wsm.Workspace {
+		ws := derived(idp(owner), nil, nil, false)
+		ws.MergeOf = &wsm.MergeOrigin{Requester: owner}
+		return ws
+	}
 	tests := []struct {
 		name string
 		ws   wsm.Workspace
+		kind Kind
 		want []Recipient
 	}{
-		{name: "owner and a distinct context source are each told", ws: derived(idp(owner), idp(source), nil, true),
-			want: []Recipient{{Source: owner, Owner: true}, {Source: source, Context: true}}},
-		{name: "a workspace that is both sources is told once", ws: derived(idp(owner), idp(owner), nil, false),
-			want: []Recipient{{Source: owner, Owner: true, Context: true}}},
-		{name: "the requester is never told about its own act", ws: derived(idp(owner), idp(requester), idp(requester), true),
-			want: []Recipient{{Source: owner, Owner: true}}},
-		{name: "a fresh top-level workspace has nobody to tell", ws: derived(nil, nil, idp(requester), false)},
-		{name: "a top-level fork tells its context source", ws: derived(nil, idp(source), nil, false),
+		{name: "a created child tells its parent and a distinct context source", ws: derived(idp(owner), idp(source), nil, true), kind: Created,
+			want: []Recipient{{Source: owner, Owner: true, Branch: true}, {Source: source, Context: true}}},
+		{name: "a landed child leaves its following parent out", ws: derived(idp(owner), idp(source), nil, true), kind: Landed,
 			want: []Recipient{{Source: source, Context: true}}},
+		{name: "a child closed without landing leaves its following parent out", ws: derived(idp(owner), idp(owner), nil, false), kind: ClosedWithoutLanding},
+		{name: "a workspace that is every source is told once", ws: derived(idp(owner), idp(owner), nil, false), kind: Created,
+			want: []Recipient{{Source: owner, Owner: true, Branch: true, Context: true}}},
+		{name: "the requester is never told about its own act", ws: derived(idp(owner), idp(requester), idp(requester), true), kind: Created,
+			want: []Recipient{{Source: owner, Owner: true, Branch: true}}},
+		{name: "a fresh peer on the primary branch has nobody to tell", ws: derived(nil, nil, idp(requester), false), kind: Created},
+		{name: "a peer fork tells its context source", ws: derived(nil, idp(source), nil, false), kind: Created,
+			want: []Recipient{{Source: source, Context: true}}},
+		{name: "a peer landing into a workspace tells it every kind", ws: peerInto(), kind: Landed,
+			want: []Recipient{{Source: into, Branch: true}, {Source: source, Context: true}}},
+		{name: "a child landing into another workspace tells both at its creation", ws: childInto(), kind: Created,
+			want: []Recipient{{Source: owner, Owner: true}, {Source: into, Branch: true}}},
+		{name: "a child landing into another workspace tells only it of its landing", ws: childInto(), kind: Landed,
+			want: []Recipient{{Source: into, Branch: true}}},
+		{name: "a merge workspace's requester follows nothing, so it is told the landing", ws: merge(), kind: Landed,
+			want: []Recipient{{Source: owner, Owner: true, Branch: true}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := Recipients(tc.ws)
+			got := Recipients(tc.ws, tc.kind)
 
 			// Assert
 			if !reflect.DeepEqual(got, tc.want) {
@@ -180,12 +210,15 @@ func TestDeliverTellsEachEventKindBriefly(t *testing.T) {
 			// Arrange
 			f := newFixture()
 
-			// Act: a self-landing child, so even its creation is the brief notice.
-			f.deliverNow(Event{Kind: tc.kind, Workspace: derived(idp(owner), idp(owner), nil, false)})
+			// Act: a self-landing peer forking the workspace it lands into, so
+			// even its creation is the brief notice and no parent follows it.
+			ws := derived(nil, idp(owner), nil, false)
+			ws.LandsInto = idp(owner)
+			f.deliverNow(Event{Kind: tc.kind, Workspace: ws})
 
 			// Assert
 			want := []submission{{ws: owner, origin: OriginDerived, defer_: true,
-				text: "derived|workspace `child`: " + tc.label + "|was cut from this workspace's branch, with this conversation forked, and lands into this workspace|" + tc.event}}
+				text: "derived|workspace `child`: " + tc.label + "|was cut from this workspace's branch and lands into it and was created with this conversation forked|" + tc.event}}
 			if !reflect.DeepEqual(f.prompts.got, want) {
 				t.Errorf("submissions = %+v, want %+v", f.prompts.got, want)
 			}
@@ -193,16 +226,16 @@ func TestDeliverTellsEachEventKindBriefly(t *testing.T) {
 	}
 }
 
-func TestDeliverLandingOfAnOwnerLandedChildIsTheBriefNotice(t *testing.T) {
+func TestDeliverLandingOfAnOwnerLandedChildTellsTheParentNothingHere(t *testing.T) {
 	// Arrange
 	f := newFixture()
 
 	// Act
 	f.deliverNow(Event{Kind: Landed, Workspace: derived(idp(owner), nil, nil, true)})
 
-	// Assert
-	if len(f.prompts.got) != 1 || f.prompts.got[0].origin != OriginDerived {
-		t.Errorf("submissions = %+v, want one brief notice", f.prompts.got)
+	// Assert: the parent hears the landing by following its child.
+	if len(f.prompts.got) != 0 {
+		t.Errorf("submissions = %+v, want none", f.prompts.got)
 	}
 }
 
@@ -377,14 +410,16 @@ func TestTheEdgesReportOnlyTheDerivedEvents(t *testing.T) {
 func TestALandingToldByIDReadsTheWorkspaceAtDelivery(t *testing.T) {
 	// Arrange
 	f := newFixture()
-	f.reg.byID[child] = derived(idp(owner), nil, nil, false)
+	landed := derived(nil, nil, nil, false)
+	landed.LandsInto = idp(owner)
+	f.reg.byID[child] = landed
 
 	// Act
 	f.deliverNow(Event{Kind: Landed, Workspace: wsm.Workspace{ID: child}, unread: true})
 
 	// Assert
 	if len(f.prompts.got) != 1 || f.prompts.got[0].ws != owner {
-		t.Fatalf("submitted = %+v, want the owner told", f.prompts.got)
+		t.Fatalf("submitted = %+v, want the workspace landed into told", f.prompts.got)
 	}
 }
 

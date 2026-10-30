@@ -349,8 +349,8 @@ func TestAOneShotIsDrawnInTheOneShotSubsectionUntilItIsPlaced(t *testing.T) {
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Topology: harness.Primary(),
-			Prompt:   said("ship the fix"),
+			Relationship: harness.Peer(),
+			Prompt:       said("ship the fix"),
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {

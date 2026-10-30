@@ -52,11 +52,17 @@ type CreateSpec struct {
 	InitialPrompt string
 	// OneShot marks the one-shot form: created, prompted, merged, closed.
 	OneShot bool
-	// FromOrigin cuts a primary workspace from origin's primary branch,
-	// fetched as the create runs, rather than from the local primary branch
-	// (agentrepl.v1.WorkspaceTopologyPrimary.from_origin). Never set with a
-	// Parent: only a primary workspace is cut from the primary branch.
+	// FromOrigin cuts a workspace landing on the primary branch from origin's
+	// primary branch, fetched as the create runs, rather than from the local
+	// primary branch (agentrepl.v1.WorkspaceLandingTargetPrimary.from_origin).
+	// Set only beside an explicit Landing on the primary branch.
 	FromOrigin bool
+	// Landing is where the workspace is cut from and lands
+	// (agentrepl.v1.WorkspaceLandingTarget), nil for its relationship's
+	// default: into Parent when Parent is of the create's repository, the
+	// primary branch otherwise. Never set on a merge workspace, whose target
+	// is the queue's (MergeOf).
+	Landing *wsm.LandingChoice
 	// ContextWorkspace, set only on a one-shot, is the registered workspace
 	// the commission is about: the one-shot's first message opens with the
 	// one-shot context note naming it as the workspace the cited issue
@@ -66,12 +72,12 @@ type CreateSpec struct {
 	// BaseRef is the base a MERGE WORKSPACE is cut from (its branch), set only
 	// with MergeOf. Every other workspace is cut from its source's tip: the
 	// parent's branch for a child, the repository's default branch otherwise
-	// (agentrepl.v1.WorkspaceTopology), so no request names a base.
+	// (agentrepl.v1.WorkspaceLandingTarget), so no request names a base.
 	BaseRef string
-	// Parent, when set, is the workspace this create's branch is cut from and
-	// lands into: its OWNER (agentrepl.v1.WorkspaceTopologyChild). The
-	// child's merge target is the parent's worktree, and the roster nests the
-	// child under it. Nil cuts from and lands on the primary branch.
+	// Parent, when set, makes the workspace a CHILD of it
+	// (agentrepl.v1.WorkspaceRelationshipChild): the parent is its OWNER,
+	// coordinates it, follows its edges, and the roster nests it there. Nil
+	// makes it a PEER. Where it lands is Landing, which defaults by it.
 	Parent *ids.WorkspaceID
 	// ForkFrom, when set, is the workspace whose conversation is forked into
 	// this one (agentrepl.v1.WorkspaceContextOrigin.fork). It is INDEPENDENT
@@ -458,7 +464,7 @@ type Verbs interface {
 	// the repository's main checkout), records parent as its roster parent,
 	// and republishes the roster. It tells the workspace's session NOTHING:
 	// internal/retarget, its only caller, pairs it with the notice.
-	SetParent(ctx context.Context, ws ids.WorkspaceID, parent *ids.WorkspaceID) (wsm.ParentChange, error)
+	SetParent(ctx context.Context, ws ids.WorkspaceID, retarget wsm.Retarget) (wsm.ParentChange, error)
 	// RestoreParent undoes change unless a later retarget superseded it.
 	RestoreParent(ctx context.Context, change wsm.ParentChange) error
 	// Swap exchanges the places of workspaces ws and target in the registry

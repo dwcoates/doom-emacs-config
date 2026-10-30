@@ -130,7 +130,7 @@ func newFixture() *fixture {
 			if name != BriefNotice {
 				return "", fmt.Errorf("unknown brief %q", name)
 			}
-			return briefText + values["label"] + "|" + values["event"] + "|" + values["status"], nil
+			return briefText + values["label"] + "|" + values["why"] + "|" + values["event"] + "|" + values["status"] + "|" + values["stop"], nil
 		},
 		MintKey: func(prefix string) (string, error) {
 			keys++
@@ -193,6 +193,49 @@ func TestEachEdgeIsToldToTheSubscribersThatAskedForIt(t *testing.T) {
 			got := f.prompts.got[0]
 			if got.origin != Origin || !got.defer_ || !strings.Contains(got.text, tt.words) || !strings.Contains(got.text, "Its status now: `followed`") {
 				t.Errorf("notice = %+v, want a deferred workspace notice naming the edge and the status", got)
+			}
+		})
+	}
+}
+
+func TestAParentIsToldAsTheParentAndASubscriberAsASubscriber(t *testing.T) {
+	tests := []struct {
+		name          string
+		parentFollows bool
+		want          []string
+		wantNot       string
+	}{
+		{name: "a parent following its child", parentFollows: true,
+			want:    []string{"Your child workspace `followed` changed; as its parent you follow it without subscribing.", "These notices end when the child closes"},
+			wantNot: "unsubscribe"},
+		{name: "a subscriber", parentFollows: false,
+			want:    []string{"A workspace you subscribed to changed.", "unsubscribe through `agent-repld workspace unsubscribe`"},
+			wantNot: "Your child workspace"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture()
+			sub := subscribed(watcherA, wsm.WorkspaceEventTurnEnded)
+			sub.ParentFollows = tt.parentFollows
+			f.subs.subs = []wsm.WorkspaceSubscription{sub}
+
+			// Act
+			f.s.TurnEnded(followed)
+			f.deliverAll()
+
+			// Assert
+			if len(f.prompts.got) != 1 {
+				t.Fatalf("submitted = %+v, want one notice", f.prompts.got)
+			}
+			text := f.prompts.got[0].text
+			for _, want := range tt.want {
+				if !strings.Contains(text, want) {
+					t.Errorf("notice %q lacks %q", text, want)
+				}
+			}
+			if strings.Contains(text, tt.wantNot) {
+				t.Errorf("notice %q says %q", text, tt.wantNot)
 			}
 		})
 	}
@@ -279,8 +322,9 @@ func TestAnEdgeThatCannotBeToldIsRecorded(t *testing.T) {
 }
 
 func TestStatusWordsStatesTheStatus(t *testing.T) {
-	owner := &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Owner{Owner: &agentreplv1.WorkspaceStatusMergeTargetOwner{
-		Owner: &workspacev1.WorkspaceRef{Id: "ws-owner", Dir: "/wt/owner"}, OwnerLands: true}}}
+	ownerRef := &workspacev1.WorkspaceRef{Id: "ws-owner", Dir: "/wt/owner"}
+	into := &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Workspace{Workspace: &agentreplv1.WorkspaceStatusMergeTargetWorkspace{
+		Workspace: ownerRef}}}
 	closed := &agentreplv1.WorkspaceStatusStanding{Standing: &agentreplv1.WorkspaceStatusStanding_Closed{Closed: &agentreplv1.WorkspaceStatusClosed{}}}
 	tests := []struct {
 		name   string
@@ -291,9 +335,15 @@ func TestStatusWordsStatesTheStatus(t *testing.T) {
 			want: "Its status now: `followed`, on branch `agent/followed`, lands on the primary branch; open, idle."},
 		{name: "a closed hidden child its owner lands", status: func() *agentreplv1.WorkspaceStatus {
 			s := idleStatus()
-			s.MergeTarget, s.Standing, s.Hidden = owner, closed, true
+			s.MergeTarget, s.Standing, s.Hidden = into, closed, true
+			s.Owner = &agentreplv1.WorkspaceStatusOwner{Workspace: ownerRef, OwnerLands: true}
 			return s
 		}, want: "Its status now: `followed`, on branch `agent/followed`, lands into the workspace at `/wt/owner` and is landed by its owner; closed, hidden."},
+		{name: "an open peer landing into another workspace, which lands itself", status: func() *agentreplv1.WorkspaceStatus {
+			s := idleStatus()
+			s.MergeTarget = into
+			return s
+		}, want: "Its status now: `followed`, on branch `agent/followed`, lands into the workspace at `/wt/owner`; open, idle."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -29,8 +29,21 @@ ALTER TABLE workspaces ADD COLUMN requested_by TEXT REFERENCES workspaces(id) ON
 
 // MayAct reports whether ASKER may act on the workspace's own work -- land
 // it, or mark it a one-shot: the user (an empty ASKER), the workspace itself,
-// or its owner. Whether the workspace itself may land is narrowed further by
-// OwnerLands, which the act decides.
+// its owner (its parent), or the workspace its merge lands into. Whether the
+// workspace itself may land is narrowed further by OwnerLands, which the act
+// decides.
 func (ws Workspace) MayAct(asker WorkspaceID) bool {
-	return asker == "" || asker == ws.ID || (ws.Parent != nil && asker == *ws.Parent)
+	return asker == "" || asker == ws.ID || (ws.Parent != nil && asker == *ws.Parent) ||
+		(ws.LandsInto != nil && asker == *ws.LandsInto)
 }
+
+// landsIntoColumn reads, beside a workspace row, the workspace its merge
+// lands into: the one whose worktree is its creation job's target directory
+// (Workspace.LandsInto). A target directory that is no workspace's (the
+// repository's main checkout, whose main workspace a merge onto the primary
+// branch never names as a target workspace) reads NULL, and so does a
+// workspace with no creation job. Worktree directories are unique, so at most
+// one row matches.
+const landsIntoColumn = `(SELECT target_ws.id FROM creation_jobs JOIN workspaces AS target_ws ON target_ws.dir = creation_jobs.target_dir ` +
+	`JOIN repositories ON repositories.id = workspaces.repo_id ` +
+	`WHERE creation_jobs.workspace_id = workspaces.id AND target_ws.id != workspaces.id AND target_ws.dir != repositories.dir)`

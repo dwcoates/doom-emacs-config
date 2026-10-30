@@ -372,12 +372,8 @@ func setListField(armMessage protoreflect.Message, field protoreflect.FieldDescr
 func familyRefusal(err error) (refusal, bool) {
 	var children *wsm.HasOpenChildrenError
 	if errors.As(err, &children) {
-		refs := make([]proto.Message, len(children.Children))
-		for i, child := range children.Children {
-			refs[i] = child.Ref()
-		}
 		return refusal{Arm: "has_open_children", Reason: err.Error(), Fields: map[string]any{
-			"parent": children.Parent.Ref(), "children": refs,
+			"parent": children.Parent.Ref(), "children": familyRefs(children.Children), "landing_into": familyRefs(children.LandingInto),
 		}}, true
 	}
 	var parent *wsm.ParentNotOpenError
@@ -387,6 +383,16 @@ func familyRefusal(err error) (refusal, bool) {
 		}}, true
 	}
 	return refusal{}, false
+}
+
+// familyRefs is a family refusal's members as the repeated arm field carries
+// them (setListField).
+func familyRefs(members []wsm.FamilyRef) []proto.Message {
+	refs := make([]proto.Message, len(members))
+	for i, member := range members {
+		refs[i] = member.Ref()
+	}
+	return refs
 }
 
 // setNestedArms selects the arm of every NESTED oneof the refusal named,

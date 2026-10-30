@@ -528,27 +528,44 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 				r.ContextOrigin = forkContext(&workspacev1.WorkspaceRef{})
 			}))
 		}, field: "context_origin.fork.workspace.id"},
-		{name: "create with no topology", check: func() *connect.Error {
+		{name: "create with no relationship", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
 				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{}}
 			}))
-		}, field: "standard.topology"},
-		{name: "create of a child naming no owner", check: func() *connect.Error {
+		}, field: "standard.relationship"},
+		{name: "create of a child naming no parent", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
-				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: childTopology(&workspacev1.WorkspaceRef{}, "")}}
+				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: childRelationship(&workspacev1.WorkspaceRef{})}}
 			}))
-		}, field: "standard.topology.child.owner.id"},
-		{name: "create of a child with a blank owner notice", check: func() *connect.Error {
+		}, field: "standard.relationship.child.parent.id"},
+		{name: "create with a blank owner notice", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
-				topology := childTopology(ref(), "")
-				topology.GetChild().OwnerNotice = &agentreplv1.WorkspaceTopologyChildOwnerNotice{Text: " "}
-				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: topology}}
+				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+					Relationship: childRelationship(ref()), OwnerNotice: &agentreplv1.WorkspaceOwnerNotice{Text: " "}}}
 			}))
-		}, field: "standard.topology.child.owner_notice.text"},
+		}, field: "standard.owner_notice.text"},
+		{name: "create with a landing target naming no arm", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+					Relationship: peerRelationship(), LandingTarget: &agentreplv1.WorkspaceLandingTarget{}}}
+			}))
+		}, field: "standard.landing_target"},
+		{name: "create landing into no workspace", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+					Relationship: peerRelationship(), LandingTarget: &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Workspace{
+						Workspace: &agentreplv1.WorkspaceLandingTargetWorkspace{Workspace: &workspacev1.WorkspaceRef{}}}}}}
+			}))
+		}, field: "standard.landing_target.workspace.workspace.id"},
+		{name: "create of a one-shot with no relationship", check: func() *connect.Error {
+			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
+				r.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{Prompt: workspace.SaidText("fix the feed")}}
+			}))
+		}, field: "one_shot.relationship"},
 		{name: "create of a one-shot whose context names no workspace", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
 				r.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-					Prompt: workspace.SaidText("fix the feed"), Topology: primaryTopology(), Context: &agentreplv1.CreateWorkspaceOneShotContext{}}}
+					Prompt: workspace.SaidText("fix the feed"), Relationship: peerRelationship(), Context: &agentreplv1.CreateWorkspaceOneShotContext{}}}
 			}))
 		}, field: "one_shot.context.workspace"},
 		{name: "an async merge the user asks for", check: func() *connect.Error {
@@ -803,7 +820,7 @@ func TestEachRequestValidatorAcceptsAWellFormedRequestWithTargetsAndSources(t *t
 		{name: "create a standard workspace", check: func() *connect.Error { return validateCreateWorkspaceRequest(validCreate(nil)) }},
 		{name: "create a child that forks another workspace", check: func() *connect.Error {
 			return validateCreateWorkspaceRequest(validCreate(func(r *agentreplv1.CreateWorkspaceRequest) {
-				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: childTopology(ref(), "the parser fix")}}
+				r.Form = &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: childRelationship(ref()), OwnerNotice: ownerNotice("the parser fix")}}
 				r.ContextOrigin = forkContext(&workspacev1.WorkspaceRef{Id: "ws-other"})
 			}))
 		}},

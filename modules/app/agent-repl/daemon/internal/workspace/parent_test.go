@@ -29,7 +29,7 @@ func TestSetParentRecordsTheRetargetAndRepublishesTheRoster(t *testing.T) {
 	parent := ids.WorkspaceID("p1")
 
 	// Act
-	change, err := f.verbs.SetParent(context.Background(), "w1", &parent)
+	change, err := f.verbs.SetParent(context.Background(), "w1", wsm.ToParent(&parent))
 
 	// Assert
 	if err != nil {
@@ -38,7 +38,7 @@ func TestSetParentRecordsTheRetargetAndRepublishesTheRoster(t *testing.T) {
 	if change.After.Dir != "/repo-p1" {
 		t.Fatalf("change = %+v, want the store's change", change)
 	}
-	if len(f.db.parentWrites) != 1 || f.db.parentWrites[0] == nil || *f.db.parentWrites[0] != parent {
+	if len(f.db.parentWrites) != 1 || f.db.parentWrites[0].Parent == nil || *f.db.parentWrites[0].Parent != parent {
 		t.Fatalf("parent writes = %v, want one naming p1", f.db.parentWrites)
 	}
 	if len(f.sidebar.registries) != 1 {
@@ -88,7 +88,7 @@ func TestSetParentRefuses(t *testing.T) {
 			tt.arrange(f)
 
 			// Act
-			_, err := f.verbs.SetParent(context.Background(), "w1", nil)
+			_, err := f.verbs.SetParent(context.Background(), "w1", wsm.ToParent(nil))
 
 			// Assert
 			refusal := asRefusal(t, err, tt.want)
@@ -112,7 +112,7 @@ func TestSetParentSurfacesAFailedWriteAtError(t *testing.T) {
 	f.db.setParentErr = errors.New("disk I/O error")
 
 	// Act
-	_, err := f.verbs.SetParent(context.Background(), "w1", nil)
+	_, err := f.verbs.SetParent(context.Background(), "w1", wsm.ToParent(nil))
 
 	// Assert
 	if err == nil {
@@ -212,7 +212,7 @@ func TestSetParentAnswersAParentThatIsNotOpen(t *testing.T) {
 	parent := ids.WorkspaceID("parent")
 
 	// Act
-	_, err := f.verbs.SetParent(context.Background(), "w1", &parent)
+	_, err := f.verbs.SetParent(context.Background(), "w1", wsm.ToParent(&parent))
 
 	// Assert
 	requireFamilyAnswer(t, f, err, errParentNotOpen, opSetParent)
