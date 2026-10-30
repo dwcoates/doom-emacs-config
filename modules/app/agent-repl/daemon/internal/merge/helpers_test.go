@@ -520,6 +520,22 @@ func (f *fakeDB) RecordTabInterval(ctx context.Context, lease wsm.LeaseID, inter
 	return fmt.Errorf("no ledger for lease %s", lease)
 }
 
+func (f *fakeDB) MergeLedgerWorkspace(_ context.Context, lease wsm.LeaseID) (ids.WorkspaceID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ledgerReadErr != nil {
+		return "", f.ledgerReadErr
+	}
+	for id, entries := range f.ledger {
+		for _, entry := range entries {
+			if entry.Lease == lease {
+				return id, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("wsm: merge ledger for lease %s: %w", lease, wsm.ErrNotFound)
+}
+
 func (f *fakeDB) MergeLedger(_ context.Context, id ids.WorkspaceID) ([]wsm.MergeLedgerEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
