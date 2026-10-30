@@ -928,6 +928,96 @@ The current tab's page, not shown here, is the nearest of all."
     ;; Assert
     (should (= 1 (length (agent-repl-test-wh--sent "show"))))))
 
+;;;; ---- A held-back page ----
+
+(ert-deftest agent-repl-test-wh-hold-back-tells-the-host-the-page-and-its-dir ()
+  "Holding a page back hands the host its id and the dir its load button names."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    ;; Act
+    (agent-repl-webhost-hold-back "alpha")
+    ;; Assert
+    (should (equal (agent-repl-test-wh--sent "holdBack")
+                   (list (agent-repl--webhost-script "holdBack" "id-alpha" "/tmp/alpha"))))
+    (should (agent-repl-webhost-held-back-p "alpha"))))
+
+(ert-deftest agent-repl-test-wh-hold-back-is-recorded-once ()
+  "Holding the same page back again records nothing new."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (agent-repl-test--record-into logged)))
+        ;; Act
+        (agent-repl-webhost-hold-back "alpha")
+        (agent-repl-webhost-hold-back "alpha"))
+      ;; Assert
+      (should (= 1 (seq-count (lambda (text) (string-search "elisp.webhost.page-held-back ws=alpha" text))
+                              logged))))))
+
+(ert-deftest agent-repl-test-wh-hold-back-of-an-unregistered-workspace-signals ()
+  "A workspace with no ref has no page to hold back: an error, recorded at ERROR."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--error)
+                 (agent-repl-test--record-into logged)))
+        ;; Act / Assert
+        (should-error (agent-repl-webhost-hold-back "alpha"))
+        (should (seq-some (lambda (text) (string-search "elisp.webhost.hold-back-unregistered ws=alpha" text))
+                          logged))
+        (should-not (agent-repl-test-wh--sent "holdBack"))))))
+
+(ert-deftest agent-repl-test-wh-ensuring-a-held-back-page-ends-the-hold ()
+  "A page the host is asked to hold is held back no longer."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-hold-back "alpha")
+    ;; Act
+    (agent-repl-webhost-ensure-page "alpha")
+    ;; Assert
+    (should-not (agent-repl-webhost-held-back-p "alpha"))))
+
+(ert-deftest agent-repl-test-wh-removing-a-held-back-page-ends-the-hold ()
+  "A removed workspace's page is held back no longer."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-hold-back "alpha")
+    ;; Act
+    (agent-repl-webhost-remove "alpha")
+    ;; Assert
+    (should-not (agent-repl-webhost-held-back-p "alpha"))))
+
+(ert-deftest agent-repl-test-wh-a-load-replays-a-shown-held-back-page-before-its-show ()
+  "A loaded host is told the shown page is held back, then shown it."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (cl-letf (((symbol-function 'agent-repl-page-unload-note-shown) #'ignore))
+      (agent-repl-webhost-hold-back "alpha")
+      (agent-repl-webhost-show "alpha"))
+    (setq agent-repl-test-wh--calls nil)
+    ;; Act
+    (agent-repl-test-wh--load "load-committed")
+    ;; Assert
+    (let ((scripts (reverse (mapcar #'car agent-repl-test-wh--calls))))
+      (should (equal (seq-filter (lambda (script) (or (string-search "h.holdBack(" script)
+                                                      (string-search "h.show(" script)))
+                                 scripts)
+                     (list (agent-repl--webhost-script "holdBack" "id-alpha" "/tmp/alpha")
+                           (agent-repl--webhost-script "show" "id-alpha")))))))
+
+(ert-deftest agent-repl-test-wh-a-load-replays-no-hold-for-a-page-not-shown ()
+  "A page held back and left is not handed to a host that loads."
+  ;; Arrange
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-hold-back "alpha")
+    (setq agent-repl-test-wh--calls nil)
+    ;; Act
+    (agent-repl-test-wh--load "load-committed")
+    ;; Assert
+    (should-not (agent-repl-test-wh--sent "holdBack"))))
+
 ;;;; ---- The log level window ----
 
 (ert-deftest agent-repl-test-wh-set-log-level-tells-the-host-the-window ()

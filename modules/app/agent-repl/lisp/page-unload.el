@@ -34,6 +34,17 @@
 ;; wanted unloads it at once, whether or not it had drawn: a user cycling
 ;; through tabs never waits on a page loading only to be dropped.
 ;;
+;; A COLD-GATED PAGE IS HELD BACK UNTIL THE USER ASKS FOR IT (owner request,
+;; 2026-10-30).  The gate is the webhost's own (webapp/src/host/gate.ts), so
+;; it stands without the page, and a user switching rapidly past cold-gated
+;; workspaces would otherwise load a whole page for each, only to drop it.
+;; So the switch to a cold-gated workspace whose page is unloaded loads
+;; nothing: the host draws a load button where the page would be
+;; \(`agent-repl-webhost-hold-back'), and its click loads the page
+;; \(`agent-repl-page-unload-load-requested').  A gate answered while its
+;; page is held back on screen loads the page with no click: the gate no
+;; longer stands, so nothing holds it back.
+;;
 ;; AN UNLOAD IS INVISIBLE (owner ruling, 2026-10-20).  It is a performance
 ;; measure behind the scenes, never a state the user sees: the workspace's
 ;; status reads exactly as it would with its page held.  The page's web
@@ -70,6 +81,8 @@
 (declare-function agent-repl-webhost-remove "webhost" (ws &optional unloading))
 (declare-function agent-repl-webhost-ensure-page "webhost" (ws))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
+(declare-function agent-repl-webhost-hold-back "webhost" (ws))
+(declare-function agent-repl-webhost-held-back-p "webhost" (ws))
 (declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
 (declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
 (declare-function agent-repl--webhost-id "webhost" (ws))
@@ -170,24 +183,34 @@ recorded at ERROR and signalled, never guessed at."
   "Non-nil when the user hid WS, so it holds no page off screen."
   (and (fboundp 'agent-repl-open-tabs-withheld-p) (agent-repl-open-tabs-withheld-p ws)))
 
+(defun agent-repl-page-unload--gated-p (ws)
+  "Non-nil when WS stands at its cold gate, so its page is held back on show."
+  (eq (agent-repl-page-unload--ws-bucket ws) 'cold-gated))
+
 (defun agent-repl-page-unload-wanted-p (ws)
   "Non-nil when WS's page should be loaded now, before anyone shows it.
-That is when it is on screen, or working and not hidden.  A slot made for
-a workspace that is not wanted is made with no page
-\(`agent-repl--frontend-ensure-webview-buffer'); its show loads it."
-  (or (agent-repl-page-unload--on-screen-p ws)
+That is when it is on screen and not cold-gated, or working and not
+hidden.  A slot made for a workspace that is not wanted is made with no
+page \(`agent-repl--frontend-ensure-webview-buffer'); its show loads it,
+or holds it back when WS is cold-gated (`agent-repl-page-unload-note-shown')."
+  (or (and (agent-repl-page-unload--on-screen-p ws)
+           (not (agent-repl-page-unload--gated-p ws)))
       (and (not (agent-repl-page-unload--withheld-p ws))
            (eq (agent-repl-page-unload--ws-bucket ws) 'working))))
 
 (defun agent-repl-page-unload-note-shown (ws)
   "Record that the host now shows WS's page.
-An unloaded page is put back first (`agent-repl-page-unload--return').  The
-page shown until now is LEFT: a page no status holds off screen is judged
+An unloaded page is put back first (`agent-repl-page-unload--return'),
+unless WS is cold-gated: its page is then held back, and the host draws a
+load button in its place (`agent-repl-webhost-hold-back').  The page
+shown until now is LEFT: a page no status holds off screen is judged
 `agent-repl-page-unload-leave-grace' seconds after the switch away
 \(`agent-repl-page-unload--leave')."
   (let ((previous agent-repl-page-unload--shown))
     (when (agent-repl-page-unloaded-p ws)
-      (agent-repl-page-unload--return ws))
+      (if (agent-repl-page-unload--gated-p ws)
+          (agent-repl-page-unload--hold-back ws)
+        (agent-repl-page-unload--return ws)))
     (unless (equal previous ws)
       (setq agent-repl-page-unload--shown ws)
       (when previous
@@ -243,6 +266,33 @@ its unload: it is held like any idle page, the hour after the last prompt
   (agent-repl--info ws "elisp.page-unload.returned ws=%s visit=%s"
                     ws (agent-repl--ws-get ws :page-visit))
   (agent-repl-webhost-ensure-page ws))
+
+(defun agent-repl-page-unload--hold-back (ws)
+  "Hold back WS's unloaded page, WS being shown at its cold gate."
+  (agent-repl--info ws "elisp.page-unload.held-back ws=%s" ws)
+  (agent-repl-webhost-hold-back ws))
+
+(defun agent-repl-page-unload-load-requested (ws)
+  "Load WS's held-back page: the user clicked the host's load button.
+A page already loaded is left as it is: a second click, or one that
+crossed a load the gate's answer made, has nothing left to load."
+  (if (agent-repl-page-unloaded-p ws)
+      (progn
+        (agent-repl--info ws "elisp.page-unload.load-requested ws=%s outcome=loaded" ws)
+        (agent-repl-page-unload--return ws))
+    (agent-repl--info ws "elisp.page-unload.load-requested ws=%s outcome=already-loaded" ws)))
+
+(defun agent-repl-page-unload--load-ungated (ws)
+  "Load WS's page when it is held back on screen but no gate holds it now.
+The user answered the gate, or it was retracted, while the load button
+stood; nothing holds the page back any more.  Non-nil if loaded."
+  (when (and (agent-repl-page-unloaded-p ws)
+             (equal ws agent-repl-page-unload--shown)
+             (agent-repl-webhost-held-back-p ws)
+             (not (agent-repl-page-unload--gated-p ws)))
+    (agent-repl--info ws "elisp.page-unload.loaded ws=%s reason=ungated" ws)
+    (agent-repl-page-unload--return ws)
+    t))
 
 (defun agent-repl-page-unload--idle-since (ws)
   "When WS's idle hold began: the end of its last prompt's turn, 0 for none.
@@ -414,14 +464,15 @@ on the next change or pass."
     (agent-repl-page-unload--report ws)))
 
 (defun agent-repl-page-unload-pass ()
-  "Load every working workspace\='s page, and unload every page no status holds.
+  "Load every working or ungated held-back page; unload every page no status holds.
 Each unload waits on the daemon being told (`agent-repl-page-unload--unload').
 Answers how many unloads were started."
   (let ((now (agent-repl-page-unload--now))
         (started 0)
         (loaded 0))
     (dolist (ws (agent-repl--live-ws-names))
-      (when (agent-repl-page-unload--load-working ws)
+      (when (or (agent-repl-page-unload--load-working ws)
+                (agent-repl-page-unload--load-ungated ws))
         (setq loaded (1+ loaded)))
       (when (agent-repl-page-unload--judge ws now)
         (setq started (1+ started))))

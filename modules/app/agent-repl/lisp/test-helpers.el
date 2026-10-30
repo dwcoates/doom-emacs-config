@@ -821,6 +821,7 @@ re-routes their frontend resolution instead."
          (agent-repl--webhost-shown nil)
          (agent-repl--webhost-gate-docks (make-hash-table :test 'equal))
          (agent-repl--webhost-held-ingress (make-hash-table :test 'equal))
+         (agent-repl--webhost-held-back (make-hash-table :test 'equal))
          (agent-repl--held-ingress-pushed (make-hash-table :test 'equal))
          (agent-repl--webhost-reload-timer nil)
          (agent-repl--webhost-build nil)
