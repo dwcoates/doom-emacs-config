@@ -615,7 +615,7 @@ func TestALocalMergeIntoAParentWorktreeRunsNoDeployHook(t *testing.T) {
 		// its StartTurn and terminates it, and a promptless create opens no
 		// turn to wait for at all.
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology:      harness.ChildOf(parent.ws, "the child's work"),
+			Relationship: harness.Child(parent.ws), OwnerNotice: harness.Notice("the child's work"),
 			InitialPrompt: said("the child work"),
 			Name:          strPtr("sibling7a-child"),
 		}},
@@ -672,8 +672,8 @@ func TestAHooksOnlyDeployNeverTriggersTheRollout(t *testing.T) {
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Topology: harness.Primary(),
-			Prompt:   said("ship the fix"),
+			Relationship: harness.Peer(),
+			Prompt:       said("ship the fix"),
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
@@ -1182,7 +1182,7 @@ func mergeCreateChild(t *testing.T, d *harness.Daemon, repoRef *workspacev1.Repo
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology:      harness.Primary(),
+			Relationship:  harness.Peer(),
 			InitialPrompt: said(prompt),
 			Name:          strPtr(name),
 			DeployHooks:   hooks,

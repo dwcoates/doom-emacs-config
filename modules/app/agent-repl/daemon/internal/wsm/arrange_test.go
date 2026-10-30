@@ -729,7 +729,7 @@ func TestSetParentPutsTheWorkspaceWhereItsNewParentSits(t *testing.T) {
 	mustPlace(t, s, ws.ID, &aside.ID, AtEnd{})
 
 	// Act
-	if _, err := s.SetParent(context.Background(), ws.ID, &parent.ID); err != nil {
+	if _, err := s.SetParent(context.Background(), ws.ID, ToParent(&parent.ID)); err != nil {
 		t.Fatalf("SetParent: %v", err)
 	}
 
@@ -747,12 +747,12 @@ func TestSetParentToNoneLeavesTheWorkspaceWhereItSat(t *testing.T) {
 	ws := registerInRepo(t, s, repoDir, "ws", true)
 	later := mustSubsection(t, s, parent.Repo, "later")
 	mustPlace(t, s, parent.ID, &later.ID, AtEnd{})
-	if _, err := s.SetParent(context.Background(), ws.ID, &parent.ID); err != nil {
+	if _, err := s.SetParent(context.Background(), ws.ID, ToParent(&parent.ID)); err != nil {
 		t.Fatalf("SetParent: %v", err)
 	}
 
 	// Act
-	if _, err := s.SetParent(context.Background(), ws.ID, nil); err != nil {
+	if _, err := s.SetParent(context.Background(), ws.ID, ToParent(nil)); err != nil {
 		t.Fatalf("SetParent(nil): %v", err)
 	}
 

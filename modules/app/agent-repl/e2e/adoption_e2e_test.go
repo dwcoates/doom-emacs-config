@@ -286,7 +286,7 @@ func adCreateAndFinishChild(t *testing.T, w *World, repoRef *workspacev1.Reposit
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology:      harness.Primary(),
+			Relationship:  harness.Peer(),
 			InitialPrompt: adSaidText("!prose-streamed"),
 			Name:          adStrPtr(name),
 		}},

@@ -284,6 +284,11 @@ func (f *fakeOwnership) Standing(context.Context, ids.WorkspaceID) (workspace.St
 type retargetCall struct {
 	ws     ids.WorkspaceID
 	parent string
+	// keep is a retarget that leaves the parent as it stands.
+	keep bool
+	// landing is the explicit landing asked for: empty for the default,
+	// "primary", or the workspace landed into.
+	landing string
 }
 
 // fakeRetarget answers err and records each retarget.
@@ -292,10 +297,16 @@ type fakeRetarget struct {
 	calls []retargetCall
 }
 
-func (f *fakeRetarget) Retarget(_ context.Context, ws ids.WorkspaceID, parent *ids.WorkspaceID) error {
-	call := retargetCall{ws: ws}
-	if parent != nil {
-		call.parent = string(*parent)
+func (f *fakeRetarget) Retarget(_ context.Context, ws ids.WorkspaceID, retarget wsm.Retarget) error {
+	call := retargetCall{ws: ws, keep: retarget.KeepParent}
+	if retarget.Parent != nil {
+		call.parent = string(*retarget.Parent)
+	}
+	if retarget.Landing != nil {
+		call.landing = "primary"
+		if retarget.Landing.Into != nil {
+			call.landing = string(*retarget.Landing.Into)
+		}
 	}
 	f.calls = append(f.calls, call)
 	return f.err

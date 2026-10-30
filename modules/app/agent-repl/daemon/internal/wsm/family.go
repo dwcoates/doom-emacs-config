@@ -21,7 +21,9 @@ import (
 //
 //   - A WORKSPACE WITH OPEN CHILDREN STAYS OPEN (refuseOpenChildren): it is
 //     not hidden (SetHidden), closed by the user or an agent (MarkClosed), or
-//     queued for a merge whose landing closes it (requestMerge).
+//     queued for a merge whose landing closes it (requestMerge). An open
+//     workspace whose merge LANDS INTO it (Workspace.LandsInto) holds it open
+//     the same way, child or not: its branch is where that work goes.
 //   - A CHILD IS ONLY EVER OPEN UNDER AN OPEN PARENT (requireOpenParent): it
 //     is not registered (RegisterWorkspace), re-parented (SetParent),
 //     re-opened (Reopen) or shown (SetHidden) under a parent that is hidden,
@@ -51,17 +53,21 @@ type HasOpenChildrenError struct {
 	// Parent is the workspace the write would have taken out of Open.
 	Parent FamilyRef
 	// Children is every open descendant of Parent, hidden ones included, in
-	// place order. Never empty.
+	// place order. Empty only when LandingInto is not.
 	Children []FamilyRef
+	// LandingInto is every open workspace, not among Children, whose merge
+	// lands into Parent's branch, in place order. Empty only when Children is
+	// not.
+	LandingInto []FamilyRef
 }
 
 // Error implements error.
 func (e *HasOpenChildrenError) Error() string {
-	ids := make([]string, len(e.Children))
-	for i, child := range e.Children {
-		ids[i] = string(child.ID)
+	ids := make([]string, 0, len(e.Children)+len(e.LandingInto))
+	for _, ref := range append(slices.Clone(e.Children), e.LandingInto...) {
+		ids = append(ids, string(ref.ID))
 	}
-	return fmt.Sprintf("wsm: workspace %s still has open children: %s", e.Parent.ID, strings.Join(ids, ", "))
+	return fmt.Sprintf("wsm: workspace %s still has open children or workspaces landing into it: %s", e.Parent.ID, strings.Join(ids, ", "))
 }
 
 // ParentState is why a parent is not open.
@@ -140,6 +146,46 @@ func openDescendants(ctx context.Context, q querier, id WorkspaceID) ([]FamilyRe
 		}, id)
 }
 
+// openLanders answers every open workspace (openChildSQL) whose merge lands
+// into ID's branch -- whose creation job's target directory is ID's worktree --
+// and that is not among ID's open descendants, in place order. A repository's
+// main workspace has none: a merge onto the primary branch lands in the main
+// checkout without landing into the workspace registered there
+// (landsIntoColumn reads the same way).
+func openLanders(ctx context.Context, q querier, id WorkspaceID, descendants []FamilyRef) ([]FamilyRef, error) {
+	landers, err := listRows(ctx, q, `SELECT w.id, w.dir FROM workspaces w
+		JOIN creation_jobs c ON c.workspace_id = w.id
+		JOIN workspaces target ON target.dir = c.target_dir
+		JOIN repositories r ON r.id = target.repo_id
+		WHERE target.id = ? AND w.id != target.id AND target.dir != r.dir AND `+openChildSQL+` ORDER BY w.place`,
+		func(row interface{ Scan(...any) error }) (FamilyRef, error) {
+			var ref FamilyRef
+			return ref, row.Scan(&ref.ID, &ref.Dir)
+		}, id)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(landers, func(ref FamilyRef) bool {
+		return slices.ContainsFunc(descendants, func(d FamilyRef) bool { return d.ID == ref.ID })
+	}), nil
+}
+
+// OpenChildren answers PARENT's open direct children (openChildSQL), in place
+// order: the workspaces it coordinates (agentrepl.v1.WorkspaceStatus.children).
+func (s *store) OpenChildren(ctx context.Context, parent WorkspaceID) ([]FamilyRef, error) {
+	var out []FamilyRef
+	err := s.read(ctx, "daemon.wsm.open_children", dlog.Context{"parent": string(parent)}, func(ctx context.Context) error {
+		var err error
+		out, err = listRows(ctx, s.q(ctx), `SELECT w.id, w.dir FROM workspaces w WHERE w.parent_id = ? AND w.id != w.parent_id AND `+openChildSQL+` ORDER BY w.place`,
+			func(row interface{ Scan(...any) error }) (FamilyRef, error) {
+				var ref FamilyRef
+				return ref, row.Scan(&ref.ID, &ref.Dir)
+			}, parent)
+		return err
+	})
+	return out, err
+}
+
 // familyQuerier is what a family rule reads through: the write's own
 // transaction, or the handle for a verb's read ahead of it.
 type familyQuerier interface {
@@ -148,20 +194,24 @@ type familyQuerier interface {
 }
 
 // refuseOpenChildren answers HasOpenChildrenError when ID has an open
-// descendant, nil when it has none.
+// descendant or an open workspace landing into it, nil when it has neither.
 func refuseOpenChildren(ctx context.Context, q familyQuerier, id WorkspaceID) error {
 	children, err := openDescendants(ctx, q, id)
 	if err != nil {
 		return err
 	}
-	if len(children) == 0 {
+	landers, err := openLanders(ctx, q, id, children)
+	if err != nil {
+		return err
+	}
+	if len(children) == 0 && len(landers) == 0 {
 		return nil
 	}
 	var dir string
 	if err := scanWorkspaceRow(ctx, q, id, "dir", &dir); err != nil {
 		return err
 	}
-	return &HasOpenChildrenError{Parent: FamilyRef{ID: id, Dir: dir}, Children: children}
+	return &HasOpenChildrenError{Parent: FamilyRef{ID: id, Dir: dir}, Children: children, LandingInto: landers}
 }
 
 // closingSQL is the SQL spelling of MergeSource.Closes over every merge in

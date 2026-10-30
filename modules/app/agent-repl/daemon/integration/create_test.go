@@ -34,7 +34,7 @@ func TestCreateWorkspaceStandardDerivesTheSlugCreatesTheBranchAndSubmitsTheIniti
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology:      harness.Primary(),
+			Relationship:  harness.Peer(),
 			InitialPrompt: said("fix the flaky reconnect test"),
 		}},
 	}))
@@ -92,7 +92,7 @@ func TestCreateWorkspaceWithASuppliedNameWinsOverTheDerivedSlug(t *testing.T) {
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology:      harness.Primary(),
+			Relationship:  harness.Peer(),
 			InitialPrompt: said("something entirely different"),
 			Name:          &name,
 		}},
@@ -132,7 +132,7 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 		Repository:    repository,
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
-		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: harness.Primary()}},
+		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: harness.Peer()}},
 	}))
 	if err != nil || parentResp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(parent) = (%v, %v), want a success", parentResp, err)
@@ -145,7 +145,7 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 		Repository:    repository,
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
-		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Topology: harness.ChildOf(parent, "the child's work")}},
+		Form:          &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: harness.Child(parent), OwnerNotice: harness.Notice("the child's work")}},
 	}))
 	if err != nil || childResp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(parent=%s) = (%v, %v), want a success", parent.GetId(), childResp, err)
@@ -242,8 +242,8 @@ func TestCreateWorkspaceOneShotCarriesTheDaemonsDirectiveNotTheRepositorys(t *te
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Topology: harness.Primary(),
-			Prompt:   said("ship the fix"),
+			Relationship: harness.Peer(),
+			Prompt:       said("ship the fix"),
 		}},
 	}))
 
@@ -278,8 +278,8 @@ func TestCreateWorkspaceOneShotRefusesARepositoryThatStatesNoPolicy(t *testing.T
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Topology: harness.Primary(),
-			Prompt:   said("ship the fix"),
+			Relationship: harness.Peer(),
+			Prompt:       said("ship the fix"),
 		}},
 	}))
 
@@ -316,8 +316,8 @@ func TestCreateWorkspaceOneShotNeedsNoDirectiveOfTheRepositorys(t *testing.T) {
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Topology: harness.Primary(),
-			Prompt:   said("ship the fix"),
+			Relationship: harness.Peer(),
+			Prompt:       said("ship the fix"),
 		}},
 	}))
 
@@ -344,8 +344,8 @@ func TestCreateWorkspaceOneShotTakesNoFinishActionOnCompletion(t *testing.T) {
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
-			Topology: harness.Primary(),
-			Prompt:   said("ship the fix"),
+			Relationship: harness.Peer(),
+			Prompt:       said("ship the fix"),
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
@@ -387,8 +387,8 @@ func TestCreateWorkspaceDeployHooksAreRecordedAndReadBackByALaterDeploy(t *testi
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology:    harness.Primary(),
-			DeployHooks: harness.PreDeployPrompts("run the pre-merge checklist"),
+			Relationship: harness.Peer(),
+			DeployHooks:  harness.PreDeployPrompts("run the pre-merge checklist"),
 		}},
 	}))
 	if err != nil || resp.Msg.GetSuccess() == nil {
@@ -637,7 +637,7 @@ func TestCreateWorkspaceUnderTheVendorGuardAloneSpawnsAFakeShim(t *testing.T) {
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology:      harness.Primary(),
+			Relationship:  harness.Peer(),
 			InitialPrompt: said("fix the flaky reconnect test"),
 			// A NAME IS SUPPLIED SO THE SUBJECT STAYS THE SHIM. This daemon is
 			// started without AGENT_REPL_CLAUDE_BIN on purpose, so the
@@ -678,7 +678,7 @@ func TestCreateWorkspaceUnderTheVendorGuardAloneStartsTheSession(t *testing.T) {
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology:      harness.Primary(),
+			Relationship:  harness.Peer(),
 			InitialPrompt: said("fix the flaky reconnect test"),
 			// See the sibling test: the name is supplied so the guarded
 			// naming call is never made and the subject stays the session.
@@ -734,7 +734,7 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology:      harness.Primary(),
+			Relationship:  harness.Peer(),
 			InitialPrompt: said("fix the flaky reconnect test"),
 		}},
 	}))
@@ -757,4 +757,54 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 	d.AwaitWorkspaceLogRecord(repo.Dir, "the failed create's report's revival failing", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.promptqueue.submit" && r.Level == "error"
 	})
+}
+
+// TestCreateWorkspaceChildStandsInBothStatuses covers a child's relationship
+// end to end: the child's status names its parent as its owner and lands into
+// it, and the parent's status lists the child among its open children.
+func TestCreateWorkspaceChildStandsInBothStatuses(t *testing.T) {
+	t.Parallel()
+	// Arrange: a peer to be the parent.
+	repo := harness.NewRepo(t)
+	d := newDaemon(t, harness.Opts{})
+	repository := createRepositoryRef(t, d, repo)
+	parentResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(harness.Create(repository)))
+	if err != nil || parentResp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(parent) = (%v, %v), want a success", parentResp, err)
+	}
+	parent := parentResp.Msg.GetSuccess().GetWorkspace()
+
+	// Act: a child of it, which its parent lands.
+	childResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(harness.Create(repository, harness.Standard(func(s *agentreplv1.CreateWorkspaceStandard) {
+		s.Relationship, s.OwnerNotice = harness.Child(parent), harness.Notice("the child's work")
+	}))))
+	if err != nil || childResp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(child) = (%v, %v), want a success", childResp, err)
+	}
+	child := childResp.Msg.GetSuccess().GetWorkspace()
+
+	// Assert: the child is the parent's, and lands into it.
+	childStatus := workspaceStatus(t, d, child)
+	if childStatus.GetRelationship().GetChild().GetParent().GetId() != parent.GetId() ||
+		childStatus.GetOwner().GetWorkspace().GetId() != parent.GetId() || !childStatus.GetOwner().GetOwnerLands() ||
+		childStatus.GetMergeTarget().GetWorkspace().GetWorkspace().GetId() != parent.GetId() {
+		t.Fatalf("child status = %v, want a child of %s, landed by it and landing into it", childStatus, parent.GetId())
+	}
+	// Assert: the parent is a peer and accounts for its open child.
+	parentStatus := workspaceStatus(t, d, parent)
+	if parentStatus.GetRelationship().GetPeer() == nil || parentStatus.GetOwner() != nil ||
+		len(parentStatus.GetChildren()) != 1 || parentStatus.GetChildren()[0].GetId() != child.GetId() {
+		t.Fatalf("parent status = %v, want a peer listing its one child %s", parentStatus, child.GetId())
+	}
+}
+
+// workspaceStatus reads WS's status through the agent API, failing the test
+// on anything but a success.
+func workspaceStatus(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) *agentreplv1.WorkspaceStatus {
+	t.Helper()
+	resp, err := d.Client().GetWorkspaceStatus(d.Ctx(), connect.NewRequest(&agentreplv1.GetWorkspaceStatusRequest{Workspace: ws}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("GetWorkspaceStatus(%s) = (%v, %v), want a success", ws.GetId(), resp, err)
+	}
+	return resp.Msg.GetSuccess().GetStatus()
 }

@@ -362,7 +362,7 @@ func standardCreate(repoRef *workspacev1.RepositoryRef, opID string) *agentreplv
 	req := &agentreplv1.CreateWorkspaceRequest{
 		Repository: repoRef,
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{
-			Standard: &agentreplv1.CreateWorkspaceStandard{Topology: primaryTopology()},
+			Standard: &agentreplv1.CreateWorkspaceStandard{Relationship: peerRelationship()},
 		},
 		Requester:     userRequester(),
 		ContextOrigin: freshContext(),
@@ -1151,6 +1151,15 @@ func TestSetWorkspaceParentHandsTheTargetToTheRetarget(t *testing.T) {
 		}, retargetCall{ws: testWorkspaceID, parent: string(parentWorkspaceID)}},
 		{"top-level", &agentreplv1.SetWorkspaceParentRequest{Workspace: ref(), Parent: topLevel()},
 			retargetCall{ws: testWorkspaceID}},
+		{"a child landing on the primary branch", &agentreplv1.SetWorkspaceParentRequest{
+			Workspace: ref(), Parent: childOf(&workspacev1.WorkspaceRef{Id: string(parentWorkspaceID), Dir: "/tmp/agent-repl-parent"}),
+			LandingTarget: &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Primary{Primary: &agentreplv1.WorkspaceLandingTargetPrimary{}}},
+		}, retargetCall{ws: testWorkspaceID, parent: string(parentWorkspaceID), landing: "primary"}},
+		{"the relationship kept and the landing moved into a workspace", &agentreplv1.SetWorkspaceParentRequest{
+			Workspace: ref(), Parent: &agentreplv1.SetWorkspaceParentRequest_Unchanged{Unchanged: &agentreplv1.SetWorkspaceParentUnchanged{}},
+			LandingTarget: &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Workspace{Workspace: &agentreplv1.WorkspaceLandingTargetWorkspace{
+				Workspace: &workspacev1.WorkspaceRef{Id: "ws-into"}}}},
+		}, retargetCall{ws: testWorkspaceID, keep: true, landing: "ws-into"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1322,6 +1331,11 @@ func TestSetWorkspaceParentRefusesAMalformedRequest(t *testing.T) {
 	}{
 		{"no target arm", &agentreplv1.SetWorkspaceParentRequest{Workspace: ref()}},
 		{"a child_of naming no parent", &agentreplv1.SetWorkspaceParentRequest{Workspace: ref(), Parent: childOf(nil)}},
+		{"the relationship kept with no landing target", &agentreplv1.SetWorkspaceParentRequest{Workspace: ref(),
+			Parent: &agentreplv1.SetWorkspaceParentRequest_Unchanged{Unchanged: &agentreplv1.SetWorkspaceParentUnchanged{}}}},
+		{"a landing target cut from origin", &agentreplv1.SetWorkspaceParentRequest{Workspace: ref(), Parent: topLevel(),
+			LandingTarget: &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Primary{Primary: &agentreplv1.WorkspaceLandingTargetPrimary{
+				FromOrigin: &agentreplv1.WorkspaceLandingTargetPrimaryFromOrigin{}}}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2014,7 +2028,7 @@ func TestMoveWorkspaceFailsAVerbError(t *testing.T) {
 // oneShotCreate builds a one-shot create request for repoRef naming the
 // context workspace about, when it is non-nil.
 func oneShotCreate(repoRef *workspacev1.RepositoryRef, about *workspacev1.WorkspaceRef) *agentreplv1.CreateWorkspaceRequest {
-	oneShot := &agentreplv1.CreateWorkspaceOneShot{Prompt: workspace.SaidText("fix the feed"), Topology: primaryTopology()}
+	oneShot := &agentreplv1.CreateWorkspaceOneShot{Prompt: workspace.SaidText("fix the feed"), Relationship: peerRelationship()}
 	if about != nil {
 		oneShot.Context = &agentreplv1.CreateWorkspaceOneShotContext{Workspace: about}
 	}

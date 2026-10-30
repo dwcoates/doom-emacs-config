@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	workspacev1 "agentrepl/proto/workspace/v1"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
@@ -16,21 +18,21 @@ const opSetParent = "daemon.workspace.set_parent"
 // rpcSetParent is the rpc a retarget's refusals are spelled under.
 const rpcSetParent = "SetWorkspaceParent"
 
-// SetParent retargets a workspace's merge: parent (nil: top-level) becomes its
-// recorded parent and its merge lands in that parent's checkout, or in the
-// repository's main checkout. The change is durable before this returns and
-// the roster is republished with the new nesting.
+// SetParent retargets a workspace (wsm.Retarget): its recorded parent, and
+// where its merge lands -- explicitly, or by the default for the relationship
+// it is left in. The change is durable before this returns and the roster is
+// republished with the new nesting.
 //
 // IT TELLS NOBODY. A retarget and its notice to the workspace's session are
 // one operation, and internal/retarget is what makes them one; it is the only
 // caller, and every surface (the rpc, the command file) goes through it.
-func (v *verbs) SetParent(ctx context.Context, ws ids.WorkspaceID, parent *ids.WorkspaceID) (wsm.ParentChange, error) {
+func (v *verbs) SetParent(ctx context.Context, ws ids.WorkspaceID, retarget wsm.Retarget) (wsm.ParentChange, error) {
 	_, log, err := v.owned(ctx, rpcSetParent, ws)
 	if err != nil {
 		return wsm.ParentChange{}, err
 	}
-	fields := dlog.Context{"parent": ids.Optional(parent)}
-	change, err := v.deps.DB.SetParent(ctx, ws, parent)
+	fields := dlog.Context{"retarget": retarget.String()}
+	change, err := v.deps.DB.SetParent(ctx, ws, retarget)
 	if refused, ok := wsm.AsParentRefused(err); ok {
 		return wsm.ParentChange{}, parentRefusal(log, refused)
 	}
@@ -47,7 +49,7 @@ func (v *verbs) SetParent(ctx context.Context, ws ids.WorkspaceID, parent *ids.W
 		return wsm.ParentChange{}, fmt.Errorf("set parent of %q: %w", ws, err)
 	}
 	log.Info(opSetParent, "recorded the workspace's new parent and merge target", dlog.Context{
-		"parent": ids.Optional(parent), "target_dir": change.After.Dir,
+		"retarget": retarget.String(), "parent": ids.Optional(change.After.Parent), "target_dir": change.After.Dir,
 		"previous_parent": ids.Optional(change.Before.Parent), "previous_target_dir": change.Before.Dir,
 	})
 	v.republishRegistry(ctx, log, opSetParent)
@@ -88,6 +90,12 @@ func parentRefusal(log dlog.Logger, refused *wsm.ParentRefusedError) *Refusal {
 		return refuse(log, rpcSetParent, ArmCycle, reason, false)
 	case wsm.ParentNoMergeLayout:
 		return refuse(log, rpcSetParent, ArmNoMergeLayout, reason, false)
+	case wsm.ParentUnknownLandingTarget:
+		landing := map[string]any{}
+		if into := refused.Asked.Landing; into != nil && into.Into != nil {
+			landing["workspace"] = &workspacev1.WorkspaceRef{Id: string(*into.Into)}
+		}
+		return refuseWith(log, rpcSetParent, ArmUnknownLandingTarget, reason, true, landing)
 	}
 	panic(fmt.Sprintf("workspace: undeclared retarget refusal %s", refused.Refusal))
 }

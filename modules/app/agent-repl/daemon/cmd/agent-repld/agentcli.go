@@ -144,10 +144,10 @@ type cliCommand struct {
 // cliNouns are every noun's subcommands.
 var cliNouns = map[string]map[string]cliCommand{
 	workspaceNoun: {
-		"create":      {usage: "create -repository here|DIR -topology primary|child [-origin-master] [-owner WS] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-as-user]", run: workspaceCreate},
+		"create":      {usage: "create -repository here|DIR -relationship child|peer [-parent WS] [-lands-into WS|main] [-origin-master] [-owner-notice TEXT] -context fresh|fork [-fork WS] [-one-shot] [-prompt TEXT] [-name NAME] [-model M] [-priority p05|p1|p2|p3] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-as-user]", run: workspaceCreate},
 		"async-merge": {usage: "async-merge -name NAME -branch BRANCH (-maker WS | -maker-subagent ID) -context-fork WS -target primary|maker -placement back|front|behind=MERGE [-instruction TEXT] [-close-after WS] [-cleanup-worktree] [-compact-after] [-pre-deploy-prompt TEXT] [-pre-deploy-script PATH:SECONDS] [-post-deploy-prompt TEXT] [-post-deploy-script PATH:SECONDS] [-version-part minor|patch -changelog-line TEXT]", run: workspaceAsyncMerge},
 		"prompt":      {usage: "prompt WS TEXT", run: workspacePrompt},
-		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-as-user]", run: workspaceSet},
+		"set":         {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-as-user]", run: workspaceSet},
 		"link":        {usage: "link WS (-url URL -label TEXT | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
 		"finished":    {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":        {usage: "open WS", run: workspaceOpen},
@@ -566,10 +566,11 @@ func versionIncrement(part, line string) (*agentreplv1.MergeWorkspaceVersionIncr
 func workspaceCreate(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	repository := fs.String("repository", "", "here, or the repository's main checkout")
-	topology := fs.String("topology", "", "primary, or child of -owner")
-	originMaster := fs.Bool("origin-master", false, "cut a primary workspace from origin's primary branch, fetched now")
-	owner := fs.String("owner", "", "the owner a child is cut from and lands into")
-	ownerNotice := fs.String("owner-notice", "", "the notice to an owner that lands the child")
+	relationship := fs.String("relationship", "", "child of -parent, or peer")
+	parent := fs.String("parent", "", "the parent that owns and coordinates a child")
+	landsInto := fs.String("lands-into", "", "main, or the workspace whose branch the work is cut from and lands into; unset is the relationship's default")
+	originMaster := fs.Bool("origin-master", false, "cut a workspace landing on main from origin's primary branch, fetched now")
+	ownerNotice := fs.String("owner-notice", "", "the notice to a parent that lands the child")
 	contextOrigin := fs.String("context", "", "fresh, or fork of -fork")
 	fork := fs.String("fork", "", "the workspace whose conversation is forked")
 	oneShot := fs.Bool("one-shot", false, "a one-shot, which lands itself when done")
@@ -583,11 +584,11 @@ func workspaceCreate(c *cliCall, args []string) int {
 	if !ok {
 		return exitFailure
 	}
-	if len(positionals) != 0 || *repository == "" || *topology == "" || *contextOrigin == "" {
-		return c.usageFailed("-repository, -topology and -context are required, and nothing is positional")
+	if len(positionals) != 0 || *repository == "" || *relationship == "" || *contextOrigin == "" {
+		return c.usageFailed("-repository, -relationship and -context are required, and nothing is positional")
 	}
-	if *originMaster && *topology != "primary" {
-		return c.usageFailed("-origin-master cuts a primary workspace; a child is cut from its owner")
+	if *originMaster && *landsInto != landsIntoMain {
+		return c.usageFailed("-origin-master cuts a workspace landing on main, so it goes with -lands-into main")
 	}
 	if !c.dial(*stateDir) {
 		return exitFailure
@@ -600,26 +601,25 @@ func workspaceCreate(c *cliCall, args []string) int {
 	if req.Requester, good = c.requester(*asUser); !good {
 		return exitFailure
 	}
-	shape := &agentreplv1.WorkspaceTopology{}
-	switch *topology {
-	case "primary":
-		primary := &agentreplv1.WorkspaceTopologyPrimary{}
-		if *originMaster {
-			primary.FromOrigin = &agentreplv1.WorkspaceTopologyPrimaryFromOrigin{}
+	kind := &agentreplv1.WorkspaceRelationship{}
+	switch *relationship {
+	case "peer":
+		if *parent != "" {
+			return c.usageFailed("a peer has no -parent")
 		}
-		shape.Shape = &agentreplv1.WorkspaceTopology_Primary{Primary: primary}
+		kind.Kind = &agentreplv1.WorkspaceRelationship_Peer{Peer: &agentreplv1.WorkspaceRelationshipPeer{}}
 	case "child":
-		ownerRef, ok := c.named(*owner)
-		if *owner == "" || !ok {
-			return c.usageFailed("a child names its -owner")
+		parentRef, ok := c.named(*parent)
+		if *parent == "" || !ok {
+			return c.usageFailed("a child names its -parent")
 		}
-		child := &agentreplv1.WorkspaceTopologyChild{Owner: ownerRef}
-		if *ownerNotice != "" {
-			child.OwnerNotice = &agentreplv1.WorkspaceTopologyChildOwnerNotice{Text: *ownerNotice}
-		}
-		shape.Shape = &agentreplv1.WorkspaceTopology_Child{Child: child}
+		kind.Kind = &agentreplv1.WorkspaceRelationship_Child{Child: &agentreplv1.WorkspaceRelationshipChild{Parent: parentRef}}
 	default:
-		return c.usageFailed("-topology is primary or child, not %q", *topology)
+		return c.usageFailed("-relationship is child or peer, not %q", *relationship)
+	}
+	landing, ok := c.landingTarget(*landsInto, *originMaster)
+	if !ok {
+		return exitFailure
 	}
 	switch *contextOrigin {
 	case "fresh":
@@ -637,9 +637,15 @@ func workspaceCreate(c *cliCall, args []string) int {
 		if *prompt == "" {
 			return c.usageFailed("a one-shot names its -prompt")
 		}
-		req.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{Prompt: feed.SaidText(*prompt), Topology: shape}}
+		if *ownerNotice != "" {
+			return c.usageFailed("a one-shot lands itself, so it carries no -owner-notice")
+		}
+		req.Form = &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{Prompt: feed.SaidText(*prompt), Relationship: kind, LandingTarget: landing}}
 	} else {
-		standard := &agentreplv1.CreateWorkspaceStandard{InitialPrompt: optionalSaid(*prompt), Topology: shape, DeployHooks: deployHooks(pre, post)}
+		standard := &agentreplv1.CreateWorkspaceStandard{InitialPrompt: optionalSaid(*prompt), Relationship: kind, LandingTarget: landing, DeployHooks: deployHooks(pre, post)}
+		if *ownerNotice != "" {
+			standard.OwnerNotice = &agentreplv1.WorkspaceOwnerNotice{Text: *ownerNotice}
+		}
 		if *name != "" {
 			standard.Name = name
 		}
@@ -665,6 +671,31 @@ func workspaceCreate(c *cliCall, args []string) int {
 		resp, err = c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
 	}
 	return answer(c, resp, err)
+}
+
+// landsIntoMain is -lands-into's spelling of the primary branch.
+const landsIntoMain = "main"
+
+// landingTarget reads -lands-into: nil when unset (the relationship's
+// default), the primary branch for `main` (cut from origin when FROMORIGIN),
+// and otherwise the named workspace. A name that resolves to nothing has
+// already been reported.
+func (c *cliCall) landingTarget(text string, fromOrigin bool) (*agentreplv1.WorkspaceLandingTarget, bool) {
+	switch text {
+	case "":
+		return nil, true
+	case landsIntoMain:
+		primary := &agentreplv1.WorkspaceLandingTargetPrimary{}
+		if fromOrigin {
+			primary.FromOrigin = &agentreplv1.WorkspaceLandingTargetPrimaryFromOrigin{}
+		}
+		return &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Primary{Primary: primary}}, true
+	}
+	into, ok := c.named(text)
+	if !ok {
+		return nil, false
+	}
+	return &agentreplv1.WorkspaceLandingTarget{Target: &agentreplv1.WorkspaceLandingTarget_Workspace{Workspace: &agentreplv1.WorkspaceLandingTargetWorkspace{Workspace: into}}}, true
 }
 
 func workspaceAsyncMerge(c *cliCall, args []string) int {
@@ -809,8 +840,9 @@ func workspaceSet(c *cliCall, args []string) int {
 	hidden := fs.Bool("hidden", false, "hide the workspace")
 	shown := fs.Bool("shown", false, "show the workspace")
 	priority := fs.String("priority", "", "p05, p1, p2, p3, or none")
-	parent := fs.String("parent", "", "retarget the workspace into this owner")
-	topLevel := fs.Bool("top-level", false, "retarget the workspace onto the primary branch")
+	parent := fs.String("parent", "", "make the workspace a child of this parent")
+	topLevel := fs.Bool("top-level", false, "make the workspace a top-level peer")
+	landsInto := fs.String("lands-into", "", "main, or the workspace its merge lands into; unset with -parent or -top-level re-applies the default")
 	oneShot := fs.Bool("one-shot", false, "mark the workspace a one-shot")
 	notOneShot := fs.Bool("not-one-shot", false, "unmark the workspace a one-shot")
 	await := fs.String("await", "", "mark the workspace awaiting this workspace")
@@ -849,21 +881,24 @@ func workspaceSet(c *cliCall, args []string) int {
 			return answer(c, resp, err)
 		})
 	}
-	switch {
-	case *parent != "":
-		owner, ok := c.named(*parent)
-		if !ok {
+	if *parent != "" || *topLevel || *landsInto != "" {
+		retarget := &agentreplv1.SetWorkspaceParentRequest{Workspace: ref,
+			Parent: &agentreplv1.SetWorkspaceParentRequest_Unchanged{Unchanged: &agentreplv1.SetWorkspaceParentUnchanged{}}}
+		switch {
+		case *parent != "":
+			owner, ok := c.named(*parent)
+			if !ok {
+				return exitFailure
+			}
+			retarget.Parent = &agentreplv1.SetWorkspaceParentRequest_ChildOf{ChildOf: &agentreplv1.SetWorkspaceParentChild{Parent: owner}}
+		case *topLevel:
+			retarget.Parent = &agentreplv1.SetWorkspaceParentRequest_TopLevel{TopLevel: &agentreplv1.SetWorkspaceParentTopLevel{}}
+		}
+		if retarget.LandingTarget, ok = c.landingTarget(*landsInto, false); !ok {
 			return exitFailure
 		}
 		calls = append(calls, func() int {
-			resp, err := c.client.SetWorkspaceParent(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceParentRequest{Workspace: ref,
-				Parent: &agentreplv1.SetWorkspaceParentRequest_ChildOf{ChildOf: &agentreplv1.SetWorkspaceParentChild{Parent: owner}}}))
-			return answer(c, resp, err)
-		})
-	case *topLevel:
-		calls = append(calls, func() int {
-			resp, err := c.client.SetWorkspaceParent(c.ctx, connect.NewRequest(&agentreplv1.SetWorkspaceParentRequest{Workspace: ref,
-				Parent: &agentreplv1.SetWorkspaceParentRequest_TopLevel{TopLevel: &agentreplv1.SetWorkspaceParentTopLevel{}}}))
+			resp, err := c.client.SetWorkspaceParent(c.ctx, connect.NewRequest(retarget))
 			return answer(c, resp, err)
 		})
 	}

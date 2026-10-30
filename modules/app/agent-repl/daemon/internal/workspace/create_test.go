@@ -14,6 +14,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
@@ -2057,7 +2058,7 @@ func TestCreateFromOriginCutsFromOriginsPrimaryBranch(t *testing.T) {
 	f := newFixture(t)
 	f.git.defaultBranch = "main"
 	spec := standardSpec(t, f)
-	spec.FromOrigin = true
+	spec.FromOrigin, spec.Landing = true, &wsm.LandingChoice{}
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -2093,7 +2094,7 @@ func TestCreateFromOriginWhoseFetchFailsIsRefusedAndBuildsNothing(t *testing.T) 
 	f := newFixture(t)
 	f.git.fetchErr = errors.New("could not resolve host")
 	spec := standardSpec(t, f)
-	spec.FromOrigin = true
+	spec.FromOrigin, spec.Landing = true, &wsm.LandingChoice{}
 
 	// Act.
 	_, err := f.verbs.Create(context.Background(), spec)
@@ -2600,5 +2601,119 @@ func TestCreateStartsAShimOnlyForAPrompt(t *testing.T) {
 				t.Fatalf("started = %v, want the created workspace started: %v", f.fleet.started, tc.wantStarted)
 			}
 		})
+	}
+}
+
+func TestCreateLandsWhereItsLandingSays(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange shapes SPEC with the fixture's parent and other workspace.
+		arrange func(spec *CreateSpec, parent, other wsm.Workspace)
+		// wantInto names the workspace landed into: "parent", "other", or ""
+		// for the primary branch.
+		wantInto string
+	}{
+		{name: "a child lands into its parent by default", arrange: func(spec *CreateSpec, parent, _ wsm.Workspace) {
+			spec.Parent, spec.OwnerNotice = &parent.ID, "the parent lands this child"
+		}, wantInto: "parent"},
+		{name: "a child lands on the primary branch when asked", arrange: func(spec *CreateSpec, parent, _ wsm.Workspace) {
+			spec.Parent, spec.OwnerNotice, spec.Landing = &parent.ID, "the parent lands this child", &wsm.LandingChoice{}
+		}},
+		{name: "a child lands into another workspace when asked", arrange: func(spec *CreateSpec, parent, other wsm.Workspace) {
+			spec.Parent, spec.OwnerNotice, spec.Landing = &parent.ID, "the parent lands this child", &wsm.LandingChoice{Into: &other.ID}
+		}, wantInto: "other"},
+		{name: "a peer lands into a workspace when asked", arrange: func(spec *CreateSpec, _, other wsm.Workspace) {
+			spec.Landing = &wsm.LandingChoice{Into: &other.ID}
+		}, wantInto: "other"},
+		{name: "a peer lands on the primary branch by default", arrange: func(*CreateSpec, wsm.Workspace, wsm.Workspace) {}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			placementBrief(f)
+			f.git.defaultBranch = "main"
+			spec := standardSpec(t, f)
+			parent := f.workspaceInRepo(t, "parent", spec.RepoDir)
+			other := f.workspaceInRepo(t, "other", spec.RepoDir)
+			tt.arrange(&spec, parent, other)
+
+			// Act.
+			if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Assert: cut from what it lands into, and the record says so.
+			wantBase, wantTarget, wantInto := "main", spec.RepoDir, (*wsm.WorkspaceID)(nil)
+			switch tt.wantInto {
+			case "parent":
+				wantBase, wantTarget, wantInto = parent.Branch, parent.Dir, &parent.ID
+			case "other":
+				wantBase, wantTarget, wantInto = other.Branch, other.Dir, &other.ID
+			}
+			if got := f.git.created[0].BaseRef; got != wantBase {
+				t.Errorf("base ref = %q, want %q", got, wantBase)
+			}
+			if got := f.db.putJobs[0].Layout.TargetDir; got != wantTarget {
+				t.Errorf("target dir = %q, want %q", got, wantTarget)
+			}
+			facts := f.db.registered[len(f.db.registered)-1]
+			if ids.Optional(facts.LandsInto) != ids.Optional(wantInto) || ids.Optional(facts.Parent) != ids.Optional(spec.Parent) {
+				t.Errorf("registered parent %q lands into %q, want %q and %q", ids.Optional(facts.Parent), ids.Optional(facts.LandsInto), ids.Optional(spec.Parent), ids.Optional(wantInto))
+			}
+		})
+	}
+}
+
+func TestCreateRefusesALandingTargetItCannotLandIn(t *testing.T) {
+	tests := []struct {
+		name string
+		into func(t *testing.T, f *fixture) ids.WorkspaceID
+	}{
+		{name: "an unregistered workspace", into: func(*testing.T, *fixture) ids.WorkspaceID { return "ws-missing" }},
+		{name: "a workspace of another repository", into: func(t *testing.T, f *fixture) ids.WorkspaceID {
+			return f.workspaceInRepo(t, "elsewhere", mainWorktree(t, f)).ID
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			spec := standardSpec(t, f)
+			into := tt.into(t, f)
+			spec.Landing = &wsm.LandingChoice{Into: &into}
+
+			// Act.
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert: refused before anything was minted or built.
+			refusal := asRefusal(t, err, ArmUnknownLandingTarget)
+			if ref, ok := refusal.Fields["workspace"].(*workspacev1.WorkspaceRef); !ok || ref.GetId() != string(into) {
+				t.Errorf("refusal fields = %+v, want the workspace named", refusal.Fields)
+			}
+			if len(f.git.created) != 0 || len(f.db.putJobs) != 0 || len(f.headless.calls) != 0 {
+				t.Errorf("worktrees %v jobs %v naming calls %v, want nothing built", f.git.created, f.db.putJobs, f.headless.calls)
+			}
+		})
+	}
+}
+
+func TestCreateRefusesALandingTargetThatIsNotOpen(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	other := f.workspaceInRepo(t, "other", spec.RepoDir)
+	spec.Landing = &wsm.LandingChoice{Into: &other.ID}
+	f.db.openParentErr = errParentNotOpen
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if !errors.Is(err, errParentNotOpen) {
+		t.Fatalf("Create = %v, want the family refusal", err)
+	}
+	if !slices.Contains(f.db.openParentAsked, other.ID) || len(f.git.created) != 0 {
+		t.Fatalf("asked %v, worktrees %v; want the landing target asked and nothing built", f.db.openParentAsked, f.git.created)
 	}
 }

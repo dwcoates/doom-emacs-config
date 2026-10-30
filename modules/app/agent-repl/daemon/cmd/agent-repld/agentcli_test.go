@@ -123,6 +123,10 @@ func (c *cliClient) SetWorkspaceHidden(_ context.Context, req *connect.Request[a
 	return connect.NewResponse(&agentreplv1.SetWorkspaceHiddenResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) SetWorkspaceParent(_ context.Context, req *connect.Request[agentreplv1.SetWorkspaceParentRequest]) (*connect.Response[agentreplv1.SetWorkspaceParentResponse], error) {
+	return connect.NewResponse(&agentreplv1.SetWorkspaceParentResponse{}), c.record(req.Msg)
+}
+
 func (c *cliClient) SetWorkspaceOneShot(_ context.Context, req *connect.Request[agentreplv1.SetWorkspaceOneShotRequest]) (*connect.Response[agentreplv1.SetWorkspaceOneShotResponse], error) {
 	return connect.NewResponse(&agentreplv1.SetWorkspaceOneShotResponse{}), c.record(req.Msg)
 }
@@ -289,7 +293,7 @@ func TestCreateSendsEveryChoiceItNames(t *testing.T) {
 	f := newCLIFixture()
 
 	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "child", "-owner", "peer", "-owner-notice", "the fix",
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "child", "-parent", "peer", "-owner-notice", "the fix",
 		"-context", "fork", "-fork", "here", "-prompt", "fix the parser")
 
 	// Assert
@@ -300,9 +304,12 @@ func TestCreateSendsEveryChoiceItNames(t *testing.T) {
 	if req.GetRepository().GetId() != "repo-1" || req.GetRequester().GetWorkspace().GetWorkspace().GetId() != "ws-caller" {
 		t.Errorf("repository %v requester %v, want the caller's", req.GetRepository(), req.GetRequester())
 	}
-	child := req.GetStandard().GetTopology().GetChild()
-	if child.GetOwner().GetId() != "ws-peer" || child.GetOwnerNotice().GetText() != "the fix" || req.GetContextOrigin().GetFork().GetWorkspace().GetId() != "ws-caller" {
+	child := req.GetStandard().GetRelationship().GetChild()
+	if child.GetParent().GetId() != "ws-peer" || req.GetStandard().GetOwnerNotice().GetText() != "the fix" || req.GetContextOrigin().GetFork().GetWorkspace().GetId() != "ws-caller" {
 		t.Errorf("create = %v, want a child of peer forking the caller", req)
+	}
+	if req.GetStandard().LandingTarget != nil {
+		t.Errorf("landing target = %v, want unset for the relationship's default", req.GetStandard().GetLandingTarget())
 	}
 }
 
@@ -311,7 +318,7 @@ func TestCreateSendsAPriorityItNames(t *testing.T) {
 	f := newCLIFixture()
 
 	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh", "-priority", "p1")
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "peer", "-context", "fresh", "-priority", "p1")
 
 	// Assert
 	if code != exitSuccess {
@@ -327,7 +334,7 @@ func TestCreateSendsNoPriorityItWasNotGiven(t *testing.T) {
 	f := newCLIFixture()
 
 	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh")
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "peer", "-context", "fresh")
 
 	// Assert
 	if code != exitSuccess {
@@ -343,12 +350,15 @@ func TestCreateRefusesAnUnnamedChoice(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "no topology", args: []string{"-repository", "here", "-context", "fresh"}},
-		{name: "no context", args: []string{"-repository", "here", "-topology", "primary"}},
-		{name: "a child with no owner", args: []string{"-repository", "here", "-topology", "child", "-context", "fresh"}},
-		{name: "a one-shot with no prompt", args: []string{"-repository", "here", "-topology", "primary", "-context", "fresh", "-one-shot"}},
-		{name: "an unknown priority", args: []string{"-repository", "here", "-topology", "primary", "-context", "fresh", "-priority", "urgent"}},
-		{name: "a cleared priority, which a create has none to clear", args: []string{"-repository", "here", "-topology", "primary", "-context", "fresh", "-priority", "none"}},
+		{name: "no relationship", args: []string{"-repository", "here", "-context", "fresh"}},
+		{name: "an unknown relationship", args: []string{"-repository", "here", "-relationship", "sibling", "-context", "fresh"}},
+		{name: "a peer with a parent", args: []string{"-repository", "here", "-relationship", "peer", "-parent", "peer", "-context", "fresh"}},
+		{name: "a one-shot with an owner notice", args: []string{"-repository", "here", "-relationship", "peer", "-context", "fresh", "-one-shot", "-prompt", "fix it", "-owner-notice", "the fix"}},
+		{name: "no context", args: []string{"-repository", "here", "-relationship", "peer"}},
+		{name: "a child with no parent", args: []string{"-repository", "here", "-relationship", "child", "-context", "fresh"}},
+		{name: "a one-shot with no prompt", args: []string{"-repository", "here", "-relationship", "peer", "-context", "fresh", "-one-shot"}},
+		{name: "an unknown priority", args: []string{"-repository", "here", "-relationship", "peer", "-context", "fresh", "-priority", "urgent"}},
+		{name: "a cleared priority, which a create has none to clear", args: []string{"-repository", "here", "-relationship", "peer", "-context", "fresh", "-priority", "none"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -962,7 +972,7 @@ func TestCreateSendsItsDeployHooksInOrder(t *testing.T) {
 	f := newCLIFixture()
 
 	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh",
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "peer", "-context", "fresh",
 		"-pre-deploy-prompt", "lint it", "-pre-deploy-script", "bin/check.sh:30", "-post-deploy-prompt", "announce it")
 
 	// Assert
@@ -993,7 +1003,7 @@ func TestAMalformedHookFlagIsAUsageFailure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newCLIFixture()
-			args := append([]string{"create", "-repository", "here", "-topology", "primary", "-context", "fresh"}, tt.flag...)
+			args := append([]string{"create", "-repository", "here", "-relationship", "peer", "-context", "fresh"}, tt.flag...)
 
 			// Act
 			code := f.run(workspaceNoun, args...)
@@ -1236,25 +1246,107 @@ func TestCreateOriginMasterCutsFromOrigin(t *testing.T) {
 	f := newCLIFixture()
 
 	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "/repo", "-topology", "primary", "-origin-master", "-context", "fresh", "-prompt", "fix it")
+	code := f.run(workspaceNoun, "create", "-repository", "/repo", "-relationship", "peer", "-lands-into", "main", "-origin-master", "-context", "fresh", "-prompt", "fix it")
 
 	// Assert
 	req := only[*agentreplv1.CreateWorkspaceRequest](t, f)
-	if code != exitSuccess || req.GetStandard().GetTopology().GetPrimary().GetFromOrigin() == nil {
-		t.Fatalf("exit %d, request %v; want a primary cut from origin", code, req)
+	if code != exitSuccess || req.GetStandard().GetLandingTarget().GetPrimary().GetFromOrigin() == nil {
+		t.Fatalf("exit %d, request %v; want a landing on main cut from origin", code, req)
 	}
 }
 
-func TestCreateOriginMasterRefusesAChild(t *testing.T) {
-	// Arrange
-	f := newCLIFixture()
+func TestCreateOriginMasterRefusesALandingNotOnMain(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "the relationship's default landing", args: []string{"-relationship", "child", "-parent", "peer"}},
+		{name: "a landing into a workspace", args: []string{"-relationship", "peer", "-lands-into", "peer"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
 
-	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "/repo", "-topology", "child", "-owner", "peer", "-origin-master", "-context", "fresh")
+			// Act
+			args := append([]string{"create", "-repository", "/repo", "-origin-master", "-context", "fresh"}, tt.args...)
+			code := f.run(workspaceNoun, args...)
 
-	// Assert
-	if code != exitFailure || len(f.client.requests) != 0 || !strings.Contains(f.errOut.String(), "-origin-master") {
-		t.Fatalf("exit %d, requests %v, stderr %q; want the flag refused for a child", code, f.client.requests, f.errOut.String())
+			// Assert
+			if code != exitFailure || len(f.client.requests) != 0 || !strings.Contains(f.errOut.String(), "-origin-master") {
+				t.Fatalf("exit %d, requests %v, stderr %q; want the flag refused", code, f.client.requests, f.errOut.String())
+			}
+		})
+	}
+}
+
+func TestCreateSendsTheLandingTargetItNames(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want func(*agentreplv1.WorkspaceLandingTarget) bool
+	}{
+		{name: "a child landing on main", args: []string{"-relationship", "child", "-parent", "peer", "-lands-into", "main"},
+			want: func(l *agentreplv1.WorkspaceLandingTarget) bool {
+				return l.GetPrimary() != nil && l.GetPrimary().GetFromOrigin() == nil
+			}},
+		{name: "a peer landing into a workspace", args: []string{"-relationship", "peer", "-lands-into", "peer"},
+			want: func(l *agentreplv1.WorkspaceLandingTarget) bool { return l.GetWorkspace().GetWorkspace().GetId() == "ws-peer" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"create", "-repository", "here", "-context", "fresh"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			if req := only[*agentreplv1.CreateWorkspaceRequest](t, f); !tt.want(req.GetStandard().GetLandingTarget()) {
+				t.Fatalf("landing target = %v, want %s", req.GetStandard().GetLandingTarget(), tt.name)
+			}
+		})
+	}
+}
+
+func TestSetSendsTheRetargetItNames(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want func(*agentreplv1.SetWorkspaceParentRequest) bool
+	}{
+		{name: "a new parent with the default landing", args: []string{"-parent", "peer"},
+			want: func(r *agentreplv1.SetWorkspaceParentRequest) bool {
+				return r.GetChildOf().GetParent().GetId() == "ws-peer" && r.LandingTarget == nil
+			}},
+		{name: "a top-level peer landing into a workspace", args: []string{"-top-level", "-lands-into", "peer"},
+			want: func(r *agentreplv1.SetWorkspaceParentRequest) bool {
+				return r.GetTopLevel() != nil && r.GetLandingTarget().GetWorkspace().GetWorkspace().GetId() == "ws-peer"
+			}},
+		{name: "the landing alone moved onto main", args: []string{"-lands-into", "main"},
+			want: func(r *agentreplv1.SetWorkspaceParentRequest) bool {
+				return r.GetUnchanged() != nil && r.GetLandingTarget().GetPrimary() != nil
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, append([]string{"set", "here"}, tt.args...)...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			if req := only[*agentreplv1.SetWorkspaceParentRequest](t, f); !tt.want(req) {
+				t.Fatalf("retarget = %v, want %s", req, tt.name)
+			}
+		})
 	}
 }
 
@@ -1438,7 +1530,7 @@ func TestCreateRefusedByAHandingOverDaemonIsSentToItsSuccessor(t *testing.T) {
 	f.client.creates = []*agentreplv1.CreateWorkspaceResponse{transferringAway("127.0.0.1:2")}
 
 	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh")
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "peer", "-context", "fresh")
 
 	// Assert: the same create, sent again to the successor, which created it.
 	if code != exitSuccess {
@@ -1467,7 +1559,7 @@ func TestCreateRefusedTwiceByHandingOverDaemonsIsRefused(t *testing.T) {
 	f.client.creates = []*agentreplv1.CreateWorkspaceResponse{transferringAway("127.0.0.1:2"), transferringAway("127.0.0.1:3")}
 
 	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh")
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "peer", "-context", "fresh")
 
 	// Assert: sent once more, never chased further.
 	if code != exitRefused || len(f.dialed) != 2 {
@@ -1483,7 +1575,7 @@ func TestCreateRefusedStandingDownIsNotResent(t *testing.T) {
 	}}}
 
 	// Act
-	code := f.run(workspaceNoun, "create", "-repository", "here", "-topology", "primary", "-context", "fresh")
+	code := f.run(workspaceNoun, "create", "-repository", "here", "-relationship", "peer", "-context", "fresh")
 
 	// Assert
 	if code != exitRefused || len(f.dialed) != 1 {

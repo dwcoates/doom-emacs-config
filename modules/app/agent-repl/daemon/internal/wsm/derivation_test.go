@@ -129,9 +129,10 @@ func TestForgettingADerivationSourceLeavesTheDerivedWorkspace(t *testing.T) {
 	}
 }
 
-func TestMayActIsTheUserTheWorkspaceOrItsOwner(t *testing.T) {
+func TestMayActIsTheUserTheWorkspaceItsOwnerOrWhereItLands(t *testing.T) {
 	owner := WorkspaceID("ws-owner")
-	child := Workspace{ID: "ws-child", Parent: &owner}
+	into := WorkspaceID("ws-into")
+	child := Workspace{ID: "ws-child", Parent: &owner, LandsInto: &into}
 	tests := []struct {
 		name  string
 		ws    Workspace
@@ -141,6 +142,8 @@ func TestMayActIsTheUserTheWorkspaceOrItsOwner(t *testing.T) {
 		{name: "the user", ws: child, asker: "", want: true},
 		{name: "the workspace itself", ws: child, asker: "ws-child", want: true},
 		{name: "its owner", ws: child, asker: owner, want: true},
+		{name: "the workspace it lands into", ws: child, asker: into, want: true},
+		{name: "the workspace a peer lands into", ws: Workspace{ID: "ws-peer", LandsInto: &into}, asker: into, want: true},
 		{name: "a stranger", ws: child, asker: "ws-stranger"},
 		{name: "a stranger to a workspace with no owner", ws: Workspace{ID: "ws-top"}, asker: "ws-stranger"},
 	}

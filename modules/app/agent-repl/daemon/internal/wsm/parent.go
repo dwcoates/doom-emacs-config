@@ -10,12 +10,16 @@ import (
 	"agent-repld/internal/ids"
 )
 
-// THE PARENT AND THE MERGE TARGET ARE ONE FACT, STORED TWICE. A workspace's
-// recorded parent (workspaces.parent_id) is its roster nesting, and its
-// creation job's target directory (creation_jobs.target_dir) is where its
-// merge lands; creation records both from the same choice. A retarget changes
-// both in ONE transaction, so no reader ever sees the nesting say one target
-// and the merge another.
+// THE PARENT AND THE MERGE TARGET ARE TWO FACTS, CHANGED TOGETHER. A
+// workspace's recorded parent (workspaces.parent_id) is its relationship: a
+// child's parent coordinates it and the roster nests it there; no parent makes
+// it a peer. Its creation job's target directory (creation_jobs.target_dir) is
+// where its merge lands (agentrepl.v1.WorkspaceLandingTarget). The landing
+// target's DEFAULT follows the relationship -- a child lands into its parent
+// when the two share a repository, everything else on the primary branch -- so
+// a retarget writes both in ONE transaction, and the workspace the merge lands
+// into is read back from the target directory (Workspace.LandsInto), never
+// stored a second time.
 
 // ParentRefusal is why SetParent refused a retarget. Each is the answer to
 // what was asked, never a store failure, and changes nothing.
@@ -31,6 +35,10 @@ const (
 	// ParentNoMergeLayout is a workspace with no creation job: the editor
 	// registered it, so it has no merge geometry to retarget.
 	ParentNoMergeLayout
+	// ParentUnknownLandingTarget is a workspace to land into that the
+	// registry does not hold, that is of another repository, or that is the
+	// workspace itself or lands into it, directly or through others.
+	ParentUnknownLandingTarget
 )
 
 // String names the refusal for records.
@@ -42,6 +50,8 @@ func (r ParentRefusal) String() string {
 		return "cycle"
 	case ParentNoMergeLayout:
 		return "no_merge_layout"
+	case ParentUnknownLandingTarget:
+		return "unknown_landing_target"
 	}
 	return fmt.Sprintf("ParentRefusal(%d)", int(r))
 }
@@ -52,18 +62,57 @@ type ParentRefusedError struct {
 	Refusal ParentRefusal
 	// Workspace is the workspace whose parent was asked to change.
 	Workspace WorkspaceID
-	// Parent is the new parent asked for, nil for top-level.
-	Parent *WorkspaceID
+	// Asked is the retarget asked for.
+	Asked Retarget
 }
 
 // Error implements error.
 func (e *ParentRefusedError) Error() string {
-	parent := "top-level"
-	if e.Parent != nil {
-		parent = string(*e.Parent)
-	}
-	return fmt.Sprintf("wsm: workspace %s cannot take parent %s: %s", e.Workspace, parent, e.Refusal)
+	return fmt.Sprintf("wsm: workspace %s cannot be retargeted (%s): %s", e.Workspace, e.Asked, e.Refusal)
 }
+
+// Retarget is what a retarget asks for: the relationship to leave the
+// workspace in, and where its merge lands from now on.
+type Retarget struct {
+	// KeepParent leaves the recorded parent as it stands; Parent is then
+	// ignored.
+	KeepParent bool
+	// Parent is the new parent, nil to make the workspace a top-level peer.
+	Parent *WorkspaceID
+	// Landing is where the merge lands from now on, nil to re-apply the
+	// default for the relationship the retarget leaves (a child of the same
+	// repository lands into its parent; anything else on the primary branch).
+	Landing *LandingChoice
+}
+
+// LandingChoice is an explicit landing target.
+type LandingChoice struct {
+	// Into is the workspace landed into, nil for the primary branch.
+	Into *WorkspaceID
+}
+
+// String spells the retarget for records.
+func (r Retarget) String() string {
+	parent := "top-level"
+	switch {
+	case r.KeepParent:
+		parent = "parent unchanged"
+	case r.Parent != nil:
+		parent = "parent " + string(*r.Parent)
+	}
+	landing := "default landing"
+	if r.Landing != nil {
+		landing = "landing on the primary branch"
+		if r.Landing.Into != nil {
+			landing = "landing into " + string(*r.Landing.Into)
+		}
+	}
+	return parent + ", " + landing
+}
+
+// ToParent is the retarget that makes PARENT (nil: none) the workspace's
+// parent and re-applies the default landing target for it.
+func ToParent(parent *WorkspaceID) Retarget { return Retarget{Parent: parent} }
 
 // AsParentRefused answers err's ParentRefusedError, if it carries one.
 func AsParentRefused(err error) (*ParentRefusedError, bool) {
@@ -81,14 +130,18 @@ type MergeTarget struct {
 	Parent *WorkspaceID
 	// ParentName is the parent's display name, empty for top-level.
 	ParentName string
-	// Dir is the checkout the merge lands in: the parent's worktree, or the
-	// repository's main checkout (for a top-level workspace, and for a child
-	// whose parent is of another repository).
+	// Dir is the checkout the merge lands in: a workspace's worktree, or the
+	// repository's main checkout.
 	Dir string
+	// LandsInto is the workspace whose worktree Dir is, nil when Dir is the
+	// repository's main checkout.
+	LandsInto *WorkspaceID
+	// LandsIntoName is LandsInto's display name, empty when it is nil.
+	LandsIntoName string
 	// CrossRepository is a Parent of another repository than the workspace's:
 	// the workspace nests under it and it owns the workspace, but no branch
-	// crosses repositories, so the merge lands in Dir, the workspace's own
-	// repository's main checkout, on DefaultBranch.
+	// crosses repositories, so the merge can only land in the workspace's own
+	// repository.
 	CrossRepository bool
 	// DefaultBranch is the repository's default branch, which a top-level
 	// workspace's merge lands on.
@@ -105,25 +158,25 @@ type ParentChange struct {
 	After MergeTarget
 }
 
-// SetParent makes parent (nil: none) the workspace's recorded parent, and its
-// merge target the parent's checkout (or, for nil, the repository's main
-// checkout), in one transaction. The new parent must be a registered
-// workspace, and neither the workspace nor one of its descendants; a
-// workspace with no creation job has no merge to retarget. A parent of
-// ANOTHER repository nests and owns the workspace, but its merge target is
-// the workspace's own repository's main checkout, since no branch crosses
-// repositories. A
-// new parent that is hidden, closed or closing is refused with
-// ParentNotOpenError (family.go).
-// Every check runs inside the transaction, so a retarget racing another cannot
-// close a cycle the check did not see. An unknown workspace is ErrNotFound.
-func (s *store) SetParent(ctx context.Context, id WorkspaceID, parent *WorkspaceID) (ParentChange, error) {
+// SetParent applies RETARGET to the workspace in one transaction: its recorded
+// parent and the checkout its merge lands in. A new parent must be a registered
+// workspace of any repository, and neither the workspace nor one of its
+// descendants; a workspace with no creation job has no merge to retarget. A
+// parent of ANOTHER repository nests and owns the workspace, but its merge can
+// only land in the workspace's own repository. A workspace to land into must be
+// registered in the workspace's own repository, and neither the workspace nor
+// one landing into it (ParentUnknownLandingTarget). A new parent, or a workspace
+// to land into, that is hidden, closed or closing is refused with
+// ParentNotOpenError (family.go). Every check runs inside the transaction, so a
+// retarget racing another cannot close a cycle the check did not see. An
+// unknown workspace is ErrNotFound.
+func (s *store) SetParent(ctx context.Context, id WorkspaceID, retarget Retarget) (ParentChange, error) {
 	const op = "daemon.wsm.set_parent"
-	fields := dlog.Context{"workspace": string(id), "parent": ids.Optional(parent)}
+	fields := dlog.Context{"workspace": string(id), "retarget": retarget.String()}
 	var change ParentChange
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		change, err = setParent(ctx, tx, id, parent)
+		change, err = setParent(ctx, tx, id, retarget)
 		return err
 	})
 	if err != nil {
@@ -163,13 +216,13 @@ type storedTarget struct {
 }
 
 // setParent is SetParent's body, inside its transaction.
-func setParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *WorkspaceID) (ParentChange, error) {
+func setParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, retarget Retarget) (ParentChange, error) {
 	current, err := readTarget(ctx, tx, id)
 	if err != nil {
 		return ParentChange{}, err
 	}
 	refused := func(r ParentRefusal) error {
-		return &ParentRefusedError{Refusal: r, Workspace: id, Parent: parent}
+		return &ParentRefusedError{Refusal: r, Workspace: id, Asked: retarget}
 	}
 	if current.targetDir == "" {
 		return ParentChange{}, refused(ParentNoMergeLayout)
@@ -178,11 +231,16 @@ func setParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *Workspac
 	if err != nil {
 		return ParentChange{}, err
 	}
-	before, err := describeTarget(ctx, tx, current.repo, current.parent, current.targetDir, defaultBranch)
+	before, err := describeTarget(ctx, tx, current.repo, current.parent, current.targetDir, repoDir, defaultBranch)
 	if err != nil {
 		return ParentChange{}, err
 	}
+	parent := retarget.Parent
+	if retarget.KeepParent {
+		parent = current.parent
+	}
 	after := MergeTarget{Dir: repoDir, DefaultBranch: defaultBranch}
+	sameRepoParent := false
 	if parent != nil {
 		var (
 			name, dir string
@@ -196,27 +254,85 @@ func setParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *Workspac
 			return ParentChange{}, err
 		}
 		// A WORKSPACE IS NEVER MOVED UNDER A PARENT THAT IS NOT OPEN
-		// (family.go).
-		if err := requireOpenParent(ctx, tx, *parent); err != nil {
-			return ParentChange{}, err
+		// (family.go). A kept parent is not asked again: the workspace is not
+		// moved.
+		if !retarget.KeepParent {
+			if err := requireOpenParent(ctx, tx, *parent); err != nil {
+				return ParentChange{}, err
+			}
+			cycle, err := descendsFrom(ctx, tx, *parent, id)
+			if err != nil {
+				return ParentChange{}, err
+			}
+			if cycle {
+				return ParentChange{}, refused(ParentCycle)
+			}
 		}
-		cycle, err := descendsFrom(ctx, tx, *parent, id)
+		chosen := *parent
+		after.Parent, after.ParentName = &chosen, name
+		after.CrossRepository = repo != current.repo
+		sameRepoParent = !after.CrossRepository
+		if retarget.Landing == nil && sameRepoParent {
+			after.Dir, after.LandsInto, after.LandsIntoName = dir, &chosen, name
+		}
+	}
+	if retarget.Landing != nil && retarget.Landing.Into != nil {
+		into := *retarget.Landing.Into
+		var (
+			name, dir string
+			repo      RepoID
+		)
+		err := scanWorkspaceRow(ctx, tx, into, "name, dir, repo_id", &name, &dir, &repo)
+		if errors.Is(err, ErrNotFound) || (err == nil && (repo != current.repo || IsMainWorktree(dir, repoDir))) {
+			return ParentChange{}, refused(ParentUnknownLandingTarget)
+		}
 		if err != nil {
 			return ParentChange{}, err
 		}
-		if cycle {
-			return ParentChange{}, refused(ParentCycle)
+		landsBack, err := landsInto(ctx, tx, into, id)
+		if err != nil {
+			return ParentChange{}, err
 		}
-		chosen := *parent
-		after = MergeTarget{Parent: &chosen, ParentName: name, Dir: dir, DefaultBranch: defaultBranch}
-		if repo != current.repo {
-			after.Dir, after.CrossRepository = repoDir, true
+		if landsBack {
+			return ParentChange{}, refused(ParentUnknownLandingTarget)
 		}
+		// A MERGE NEVER LANDS INTO A WORKSPACE THAT IS NOT OPEN (family.go):
+		// its branch is where the work goes.
+		if err := requireOpenParent(ctx, tx, into); err != nil {
+			return ParentChange{}, err
+		}
+		after.Dir, after.LandsInto, after.LandsIntoName = dir, &into, name
 	}
 	if err := writeTarget(ctx, tx, id, after.Parent, after.Dir); err != nil {
 		return ParentChange{}, err
 	}
 	return ParentChange{Workspace: id, Before: before, After: after}, nil
+}
+
+// landsInto reports whether START is TARGET or its merge lands into TARGET,
+// directly or through the workspaces it lands into. The chain is bounded by the
+// number of workspaces: a longer walk means the stored targets already cycle,
+// which no write admits, so it is corruption and is returned as an error.
+func landsInto(ctx context.Context, tx *sql.Tx, start, target WorkspaceID) (bool, error) {
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces`).Scan(&total); err != nil {
+		return false, err
+	}
+	at := start
+	for step := 0; step <= total; step++ {
+		if at == target {
+			return true, nil
+		}
+		var next sql.NullString
+		if err := scanWorkspaceRow(ctx, tx, at, landsIntoColumn, &next); err != nil {
+			return false, fmt.Errorf("wsm: walk the landing targets of %s at %s: %w", start, at, err)
+		}
+		if !next.Valid {
+			return false, nil
+		}
+		at = WorkspaceID(next.String)
+	}
+	return false, fmt.Errorf("wsm: the recorded landing targets beyond %s cycle", start)
 }
 
 // readTarget reads a workspace's repository, recorded parent and merge target
@@ -293,10 +409,21 @@ func repositoryTarget(ctx context.Context, tx *sql.Tx, repo RepoID) (dir, defaul
 }
 
 // describeTarget names a stored target of a workspace of REPO for the change
-// record: the parent's display name when there is a parent, and whether it
-// is of another repository.
-func describeTarget(ctx context.Context, tx *sql.Tx, repo RepoID, parent *WorkspaceID, dir, defaultBranch string) (MergeTarget, error) {
+// record: the parent's display name when there is a parent, whether it is of
+// another repository, and the workspace DIR is the worktree of unless it is the
+// repository's main checkout, REPODIR.
+func describeTarget(ctx context.Context, tx *sql.Tx, repo RepoID, parent *WorkspaceID, dir, repoDir, defaultBranch string) (MergeTarget, error) {
 	out := MergeTarget{Parent: parent, Dir: dir, DefaultBranch: defaultBranch}
+	if !IsMainWorktree(dir, repoDir) {
+		var into WorkspaceID
+		err := tx.QueryRowContext(ctx, `SELECT id, name FROM workspaces WHERE dir = ?`, dir).Scan(&into, &out.LandsIntoName)
+		switch {
+		case err == nil:
+			out.LandsInto = &into
+		case !errors.Is(err, sql.ErrNoRows):
+			return MergeTarget{}, fmt.Errorf("wsm: the workspace at the target %s: %w", dir, err)
+		}
+	}
 	if parent == nil {
 		return out, nil
 	}

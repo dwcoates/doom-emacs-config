@@ -121,8 +121,8 @@ func mqCreateTopLevelChild(t *testing.T, w *World, repoRef *workspacev1.Reposito
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology: harness.Primary(),
-			Name:     mqStrPtr(name),
+			Relationship: harness.Peer(),
+			Name:         mqStrPtr(name),
 		}},
 	}))
 	if err != nil {
@@ -722,9 +722,9 @@ func mqCreateChildWithHooks(t *testing.T, w *World, repoRef *workspacev1.Reposit
 		Requester:     harness.User(),
 		ContextOrigin: harness.Fresh(),
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
-			Topology:    harness.Primary(),
-			Name:        mqStrPtr(name),
-			DeployHooks: hooks,
+			Relationship: harness.Peer(),
+			Name:         mqStrPtr(name),
+			DeployHooks:  hooks,
 		}},
 	}))
 	if err != nil {

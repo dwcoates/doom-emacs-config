@@ -223,3 +223,54 @@ func TestForgettingEitherWorkspaceEndsTheSubscription(t *testing.T) {
 		})
 	}
 }
+
+func TestAChildsOpenParentFollowsItWithoutSubscribing(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange makes "child" a child of "parent" or not, and subscribes.
+		arrange func(t *testing.T, s *store, f parentFamily)
+		want    func(f parentFamily) []WorkspaceSubscription
+	}{
+		{name: "an open parent follows its child",
+			arrange: func(t *testing.T, s *store, f parentFamily) { f.retarget(t, s, "child", "parent") },
+			want: func(f parentFamily) []WorkspaceSubscription {
+				return []WorkspaceSubscription{{Subscriber: *f.id("parent"), Followed: *f.id("child"), Events: ParentFollowedEvents, ParentFollows: true}}
+			}},
+		{name: "a parent's own subscription is widened",
+			arrange: func(t *testing.T, s *store, f parentFamily) {
+				f.retarget(t, s, "child", "parent")
+				if _, err := s.SubscribeWorkspace(context.Background(), following(*f.id("parent"), *f.id("child"), WorkspaceEventTurnStarted)); err != nil {
+					t.Fatalf("SubscribeWorkspace: %v", err)
+				}
+			},
+			want: func(f parentFamily) []WorkspaceSubscription {
+				return []WorkspaceSubscription{{Subscriber: *f.id("parent"), Followed: *f.id("child"), SubscribedAt: instant, ParentFollows: true,
+					Events: ParentFollowedEvents | NewWorkspaceEvents(WorkspaceEventTurnStarted)}}
+			}},
+		{name: "a closed parent follows nothing",
+			arrange: func(t *testing.T, s *store, f parentFamily) {
+				f.retarget(t, s, "child", "parent")
+				mustClose(t, s, *f.id("child"), CloseByUser)
+				mustClose(t, s, *f.id("parent"), CloseByUser)
+			},
+			want: func(parentFamily) []WorkspaceSubscription { return nil }},
+		{name: "a peer is followed by nobody", arrange: func(*testing.T, *store, parentFamily) {},
+			want: func(parentFamily) []WorkspaceSubscription { return nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			f := newParentFamily(t, s, "child", "parent")
+			tt.arrange(t, s, f)
+
+			// Act
+			got := subscribersOf(t, s, *f.id("child"))
+
+			// Assert
+			if want := tt.want(f); !reflect.DeepEqual(got, want) {
+				t.Fatalf("subscribers = %+v, want %+v", got, want)
+			}
+		})
+	}
+}

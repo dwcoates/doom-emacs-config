@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -400,7 +401,7 @@ func TestSetParentRefusesAParentThatIsNotOpen(t *testing.T) {
 	mustHide(t, s, parent.ID)
 
 	// Act
-	_, err := s.SetParent(context.Background(), ws.ID, &parent.ID)
+	_, err := s.SetParent(context.Background(), ws.ID, ToParent(&parent.ID))
 
 	// Assert
 	requireParentNotOpen(t, err, parent, ParentHidden)
@@ -611,5 +612,86 @@ func TestMergeHiddenSQLAgreesWithMergeHidden(t *testing.T) {
 		if want := workspaceNow(t, s, ws.ID).MergeHidden(); got != want {
 			t.Fatalf("mergeHiddenSQL(%s) = %v, want %v", ws.ID, got, want)
 		}
+	}
+}
+
+func TestAWorkspaceSomethingLandsIntoStaysOpen(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	f := newParentFamily(t, s, "target", "lander", "child")
+	if _, err := s.SetParent(context.Background(), *f.id("lander"), Retarget{Landing: &LandingChoice{Into: f.id("target")}}); err != nil {
+		t.Fatalf("SetParent(lander): %v", err)
+	}
+	f.retarget(t, s, "child", "target")
+
+	// Act
+	err := s.MarkClosed(context.Background(), *f.id("target"), Closure{At: time.Unix(10, 0), By: CloseByUser})
+
+	// Assert
+	var refused *HasOpenChildrenError
+	if !errors.As(err, &refused) {
+		t.Fatalf("MarkClosed = %v, want a HasOpenChildrenError", err)
+	}
+	child, lander := f.byName["child"], f.byName["lander"]
+	if !reflect.DeepEqual(refused.Children, []FamilyRef{{ID: child.ID, Dir: child.Dir}}) ||
+		!reflect.DeepEqual(refused.LandingInto, []FamilyRef{{ID: lander.ID, Dir: lander.Dir}}) {
+		t.Fatalf("refusal = children %+v landing into %+v, want the child once and the lander", refused.Children, refused.LandingInto)
+	}
+}
+
+func TestTheMainWorkspaceIsNotHeldOpenByTheWorkspacesLandingOnThePrimaryBranch(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	f := newParentFamily(t, s, "one", "two")
+	main, err := s.WorkspaceByDir(context.Background(), f.repoDir)
+	if err != nil {
+		t.Fatalf("WorkspaceByDir: %v", err)
+	}
+
+	// Act
+	err = s.RequireNoOpenChildren(context.Background(), main.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("RequireNoOpenChildren(main) = %v, want nil", err)
+	}
+}
+
+func TestOpenChildrenAnswersTheOpenDirectChildrenInPlaceOrder(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	f := newParentFamily(t, s, "parent", "first", "second", "closed", "grandchild")
+	f.retarget(t, s, "first", "parent")
+	f.retarget(t, s, "second", "parent")
+	f.retarget(t, s, "closed", "parent")
+	f.retarget(t, s, "grandchild", "first")
+	mustClose(t, s, *f.id("closed"), CloseByUser)
+
+	// Act
+	got, err := s.OpenChildren(context.Background(), *f.id("parent"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenChildren: %v", err)
+	}
+	var want []FamilyRef
+	for _, name := range []string{"first", "second"} {
+		ws, err := s.Workspace(context.Background(), *f.id(name))
+		if err != nil {
+			t.Fatalf("Workspace(%s): %v", name, err)
+		}
+		want = append(want, FamilyRef{ID: ws.ID, Dir: ws.Dir})
+		if len(want) == 2 {
+			other, err := s.Workspace(context.Background(), want[0].ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if ws.Place < other.Place {
+				want[0], want[1] = want[1], want[0]
+			}
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("OpenChildren = %+v, want first and second only, in place order %+v", got, want)
 	}
 }

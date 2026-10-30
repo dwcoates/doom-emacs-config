@@ -56,6 +56,9 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 		}
 		out.Awaiting = awaited
 	}
+	if err := v.relationshipOf(ctx, record, out); err != nil {
+		return nil, err
+	}
 	if record.Closed {
 		out.Standing = &agentreplv1.WorkspaceStatusStanding{Standing: &agentreplv1.WorkspaceStatusStanding_Closed{Closed: &agentreplv1.WorkspaceStatusClosed{}}}
 		return out, nil
@@ -68,47 +71,66 @@ func (v *verbs) Status(ctx context.Context, ws ids.WorkspaceID) (*agentreplv1.Wo
 	return out, nil
 }
 
-// mergeTargetOf answers where RECORD's branch lands: its owner when it has
-// one, and for a merge workspace the workspace whose worktree its creation
-// recorded as the landing, the primary branch otherwise.
+// mergeTargetOf answers where RECORD's branch lands: the workspace whose
+// worktree its creation job targets (wsm.Workspace.LandsInto), the primary
+// branch otherwise. A merge workspace reads the same way: its target is the
+// one the queue decided at hand-off.
 func (v *verbs) mergeTargetOf(ctx context.Context, record wsm.Workspace) (*agentreplv1.WorkspaceStatusMergeTarget, error) {
-	owner := func(ref *workspacev1.WorkspaceRef, lands bool) *agentreplv1.WorkspaceStatusMergeTarget {
-		return &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Owner{Owner: &agentreplv1.WorkspaceStatusMergeTargetOwner{
-			Owner: ref, OwnerLands: lands}}}
-	}
-	primary := &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Primary{Primary: &agentreplv1.WorkspaceStatusMergeTargetPrimary{}}}
-	fields := dlog.Context{"workspace": string(record.ID)}
-	if record.MergeOf == nil {
-		if record.Parent != nil {
-			parent, err := v.refOf(ctx, *record.Parent, "its owner")
-			if err != nil {
-				return nil, err
-			}
-			return owner(parent, record.OwnerLands), nil
+	// A MERGE WORKSPACE ALWAYS HAS A CREATION JOB: the queue's hand-off
+	// recorded its target there. One without it cannot say where it lands, and
+	// reading it as landing on the primary branch would hide that.
+	if record.MergeOf != nil {
+		fields := dlog.Context{"workspace": string(record.ID)}
+		_, found, err := v.deps.DB.CreationJob(ctx, record.ID)
+		if err != nil {
+			v.deps.Log.Global().Error(opStatus, "could not read a merge workspace's creation job to say where it lands", dlog.WithCause(fields, err))
+			return nil, fmt.Errorf("status: creation job of %q: %w", record.ID, err)
 		}
-		return primary, nil
+		if !found {
+			err := fmt.Errorf("status: merge workspace %q has no creation job", record.ID)
+			v.deps.Log.Global().Error(opStatus, "a merge workspace has no creation job to say where it lands", dlog.WithCause(fields, err))
+			return nil, err
+		}
 	}
-	// A MERGE WORKSPACE'S PARENT IS ITS REQUESTER, which the roster nests it
-	// under, not where it lands: the landing is its creation's layout.
-	job, found, err := v.deps.DB.CreationJob(ctx, record.ID)
+	if record.LandsInto == nil {
+		return &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Primary{Primary: &agentreplv1.WorkspaceStatusMergeTargetPrimary{}}}, nil
+	}
+	into, err := v.refOf(ctx, *record.LandsInto, "the workspace it lands into")
 	if err != nil {
-		v.deps.Log.Global().Error(opStatus, "could not read a merge workspace's creation job to say where it lands", dlog.WithCause(fields, err))
-		return nil, fmt.Errorf("status: creation job of %q: %w", record.ID, err)
-	}
-	if !found {
-		err := fmt.Errorf("status: merge workspace %q has no creation job", record.ID)
-		v.deps.Log.Global().Error(opStatus, "a merge workspace has no creation job to say where it lands", dlog.WithCause(fields, err))
 		return nil, err
 	}
-	into, err := v.deps.DB.WorkspaceByDir(ctx, job.Layout.TargetDir)
-	if errors.Is(err, wsm.ErrNotFound) {
-		return primary, nil
+	return &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Workspace{Workspace: &agentreplv1.WorkspaceStatusMergeTargetWorkspace{
+		Workspace: into}}}, nil
+}
+
+// relationshipOf fills OUT's relationship facts from RECORD: child or peer,
+// its owner, who asked for it, and its open children.
+func (v *verbs) relationshipOf(ctx context.Context, record wsm.Workspace, out *agentreplv1.WorkspaceStatus) error {
+	out.Relationship = &agentreplv1.WorkspaceStatusRelationship{Kind: &agentreplv1.WorkspaceStatusRelationship_Peer{Peer: &agentreplv1.WorkspaceStatusRelationshipPeer{}}}
+	if record.Parent != nil {
+		parent, err := v.refOf(ctx, *record.Parent, "its owner")
+		if err != nil {
+			return err
+		}
+		out.Relationship = &agentreplv1.WorkspaceStatusRelationship{Kind: &agentreplv1.WorkspaceStatusRelationship_Child{Child: &agentreplv1.WorkspaceStatusRelationshipChild{Parent: parent}}}
+		out.Owner = &agentreplv1.WorkspaceStatusOwner{Workspace: parent, OwnerLands: record.OwnerLands}
 	}
+	if record.RequestedBy != nil {
+		creator, err := v.refOf(ctx, *record.RequestedBy, "the workspace that asked for it")
+		if err != nil {
+			return err
+		}
+		out.CreatedBy = creator
+	}
+	children, err := v.deps.DB.OpenChildren(ctx, record.ID)
 	if err != nil {
-		v.deps.Log.Global().Error(opStatus, "could not read the workspace a merge workspace lands in", dlog.WithCause(dlog.Merge(fields, dlog.Context{"target_dir": job.Layout.TargetDir}), err))
-		return nil, fmt.Errorf("status: workspace at %q: %w", job.Layout.TargetDir, err)
+		v.deps.Log.Global().Error(opStatus, "could not read the open children of the workspace whose status was asked", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
+		return fmt.Errorf("status: open children of %q: %w", record.ID, err)
 	}
-	return owner(into.Ref(), false), nil
+	for _, child := range children {
+		out.Children = append(out.Children, child.Ref())
+	}
+	return nil
 }
 
 // refOf answers workspace ID as every wire names it, its directory and all

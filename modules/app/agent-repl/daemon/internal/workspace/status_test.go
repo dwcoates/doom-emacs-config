@@ -23,30 +23,32 @@ func footerIdle() *frontendv1.FooterStatus {
 
 func TestStatusAnswersTheWorkspaceAndWhereItLands(t *testing.T) {
 	owner := ids.WorkspaceID("ws-owner")
+	maker := ids.WorkspaceID("ws-maker")
+	primary := &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Primary{Primary: &agentreplv1.WorkspaceStatusMergeTargetPrimary{}}}
+	into := func(id ids.WorkspaceID, dir string) *agentreplv1.WorkspaceStatusMergeTarget {
+		return &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Workspace{Workspace: &agentreplv1.WorkspaceStatusMergeTargetWorkspace{
+			Workspace: &workspacev1.WorkspaceRef{Id: string(id), Dir: dir}}}}
+	}
 	tests := []struct {
 		name   string
 		record wsm.Workspace
-		job    *wsm.CreationJob
-		landIn *wsm.Workspace
 		want   *agentreplv1.WorkspaceStatusMergeTarget
 	}{
-		{name: "a workspace cut from the primary branch",
+		{name: "a workspace landing on the primary branch",
 			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one"},
-			want:   &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Primary{Primary: &agentreplv1.WorkspaceStatusMergeTargetPrimary{}}}},
-		{name: "a child its owner lands",
-			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner, OwnerLands: true},
-			want: &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Owner{Owner: &agentreplv1.WorkspaceStatusMergeTargetOwner{
-				Owner: &workspacev1.WorkspaceRef{Id: string(owner), Dir: "/wt/owner"}, OwnerLands: true}}}},
+			want:   primary},
+		{name: "a child landing into its parent",
+			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner, LandsInto: &owner, OwnerLands: true},
+			want:   into(owner, "/wt/owner")},
+		{name: "a child landing on the primary branch",
+			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner},
+			want:   primary},
 		{name: "a merge workspace landing in its maker",
-			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner, MergeOf: &wsm.MergeOrigin{Requester: owner}},
-			job:    &wsm.CreationJob{Workspace: "ws-1", Layout: wsm.MergeLayout{TargetDir: "/wt/maker"}},
-			landIn: &wsm.Workspace{ID: "ws-maker", Dir: "/wt/maker"},
-			want: &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Owner{Owner: &agentreplv1.WorkspaceStatusMergeTargetOwner{
-				Owner: &workspacev1.WorkspaceRef{Id: "ws-maker", Dir: "/wt/maker"}}}}},
+			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner, LandsInto: &maker, MergeOf: &wsm.MergeOrigin{Requester: owner}},
+			want:   into(maker, "/wt/maker")},
 		{name: "a merge workspace landing on the primary branch",
 			record: wsm.Workspace{ID: "ws-1", Name: "one", Branch: "agent/one", Dir: "/wt/one", Parent: &owner, MergeOf: &wsm.MergeOrigin{Requester: owner}},
-			job:    &wsm.CreationJob{Workspace: "ws-1", Layout: wsm.MergeLayout{TargetDir: "/repo"}},
-			want:   &agentreplv1.WorkspaceStatusMergeTarget{Target: &agentreplv1.WorkspaceStatusMergeTarget_Primary{Primary: &agentreplv1.WorkspaceStatusMergeTargetPrimary{}}}},
+			want:   primary},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -54,12 +56,8 @@ func TestStatusAnswersTheWorkspaceAndWhereItLands(t *testing.T) {
 			f := newFixture(t)
 			f.db.workspaces[tt.record.ID] = tt.record
 			f.db.workspaces[owner] = wsm.Workspace{ID: owner, Dir: "/wt/owner"}
-			if tt.job != nil {
-				f.db.jobs[tt.record.ID] = *tt.job
-			}
-			if tt.landIn != nil {
-				f.db.byDir[tt.landIn.Dir] = *tt.landIn
-			}
+			f.db.workspaces[maker] = wsm.Workspace{ID: maker, Dir: "/wt/maker"}
+			f.db.jobs[tt.record.ID] = wsm.CreationJob{Workspace: tt.record.ID}
 			f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{tt.record.ID: footerIdle()}
 
 			// Act
@@ -76,6 +74,112 @@ func TestStatusAnswersTheWorkspaceAndWhereItLands(t *testing.T) {
 				t.Errorf("merge target = %v, want %v", got.GetMergeTarget(), tt.want)
 			}
 		})
+	}
+}
+
+func TestStatusAnswersTheRelationship(t *testing.T) {
+	parent := ids.WorkspaceID("ws-parent")
+	creator := ids.WorkspaceID("ws-creator")
+	parentRef := &workspacev1.WorkspaceRef{Id: string(parent), Dir: "/wt/parent"}
+	creatorRef := &workspacev1.WorkspaceRef{Id: string(creator), Dir: "/wt/creator"}
+	tests := []struct {
+		name        string
+		record      wsm.Workspace
+		wantKind    *agentreplv1.WorkspaceStatusRelationship
+		wantOwner   *agentreplv1.WorkspaceStatusOwner
+		wantCreator *workspacev1.WorkspaceRef
+	}{
+		{name: "a peer the user asked for",
+			record:   wsm.Workspace{ID: "ws-1"},
+			wantKind: &agentreplv1.WorkspaceStatusRelationship{Kind: &agentreplv1.WorkspaceStatusRelationship_Peer{Peer: &agentreplv1.WorkspaceStatusRelationshipPeer{}}}},
+		{name: "a peer another workspace asked for",
+			record:      wsm.Workspace{ID: "ws-1", RequestedBy: &creator},
+			wantKind:    &agentreplv1.WorkspaceStatusRelationship{Kind: &agentreplv1.WorkspaceStatusRelationship_Peer{Peer: &agentreplv1.WorkspaceStatusRelationshipPeer{}}},
+			wantCreator: creatorRef},
+		{name: "a child its parent lands",
+			record:      wsm.Workspace{ID: "ws-1", Parent: &parent, OwnerLands: true, RequestedBy: &creator},
+			wantKind:    &agentreplv1.WorkspaceStatusRelationship{Kind: &agentreplv1.WorkspaceStatusRelationship_Child{Child: &agentreplv1.WorkspaceStatusRelationshipChild{Parent: parentRef}}},
+			wantOwner:   &agentreplv1.WorkspaceStatusOwner{Workspace: parentRef, OwnerLands: true},
+			wantCreator: creatorRef},
+		{name: "a child that lands itself",
+			record:    wsm.Workspace{ID: "ws-1", Parent: &parent},
+			wantKind:  &agentreplv1.WorkspaceStatusRelationship{Kind: &agentreplv1.WorkspaceStatusRelationship_Child{Child: &agentreplv1.WorkspaceStatusRelationshipChild{Parent: parentRef}}},
+			wantOwner: &agentreplv1.WorkspaceStatusOwner{Workspace: parentRef}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.db.workspaces[tt.record.ID] = tt.record
+			f.db.workspaces[parent] = wsm.Workspace{ID: parent, Dir: "/wt/parent"}
+			f.db.workspaces[creator] = wsm.Workspace{ID: creator, Dir: "/wt/creator"}
+			f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{tt.record.ID: footerIdle()}
+
+			// Act
+			got, err := f.verbs.Status(context.Background(), tt.record.ID)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Status: %v", err)
+			}
+			if !proto.Equal(got.GetRelationship(), tt.wantKind) {
+				t.Errorf("relationship = %v, want %v", got.GetRelationship(), tt.wantKind)
+			}
+			if !proto.Equal(got.GetOwner(), tt.wantOwner) {
+				t.Errorf("owner = %v, want %v", got.GetOwner(), tt.wantOwner)
+			}
+			if !proto.Equal(got.GetCreatedBy(), tt.wantCreator) {
+				t.Errorf("created by = %v, want %v", got.GetCreatedBy(), tt.wantCreator)
+			}
+		})
+	}
+}
+
+func TestStatusListsTheOpenChildrenInPlaceOrder(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	parent := ids.WorkspaceID("ws-parent")
+	f.db.workspaces[parent] = wsm.Workspace{ID: parent, Dir: "/wt/parent"}
+	f.db.workspaces["ws-b"] = wsm.Workspace{ID: "ws-b", Dir: "/wt/b", Parent: &parent, Place: 2}
+	f.db.workspaces["ws-a"] = wsm.Workspace{ID: "ws-a", Dir: "/wt/a", Parent: &parent, Place: 1, Hidden: true}
+	f.db.workspaces["ws-closed"] = wsm.Workspace{ID: "ws-closed", Dir: "/wt/closed", Parent: &parent, Closed: true}
+	f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{parent: footerIdle()}
+
+	// Act
+	got, err := f.verbs.Status(context.Background(), parent)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	want := []*workspacev1.WorkspaceRef{{Id: "ws-a", Dir: "/wt/a"}, {Id: "ws-b", Dir: "/wt/b"}}
+	if len(got.GetChildren()) != len(want) {
+		t.Fatalf("children = %v, want %v", got.GetChildren(), want)
+	}
+	for i := range want {
+		if !proto.Equal(got.GetChildren()[i], want[i]) {
+			t.Errorf("children[%d] = %v, want %v", i, got.GetChildren()[i], want[i])
+		}
+	}
+}
+
+func TestStatusFailsWhenItsChildrenCannotBeRead(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.workspaces["ws-1"] = wsm.Workspace{ID: "ws-1"}
+	f.db.openChildrenErr = errors.New("database is locked")
+	f.footer.statuses = map[ids.WorkspaceID]*frontendv1.FooterStatus{"ws-1": footerIdle()}
+
+	// Act
+	_, err := f.verbs.Status(context.Background(), "ws-1")
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("Status err = %v, want the failed children read", err)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opStatus, Message: "could not read the open children of the workspace whose status was asked"})
+	if !ok || record.Context["workspace"] != "ws-1" {
+		t.Errorf("records = %+v, want the failed read recorded at error with the workspace", f.log.logger.Records())
 	}
 }
 

@@ -78,7 +78,7 @@ func mkdir(t *testing.T, dir string) string {
 // test.
 func (f parentFamily) retarget(t *testing.T, s *store, name, parentName string) ParentChange {
 	t.Helper()
-	change, err := s.SetParent(context.Background(), f.byName[name].ID, f.id(parentName))
+	change, err := s.SetParent(context.Background(), f.byName[name].ID, ToParent(f.id(parentName)))
 	if err != nil {
 		t.Fatalf("SetParent(%s -> %q): %v", name, parentName, err)
 	}
@@ -234,7 +234,7 @@ func TestSetParentRefuses(t *testing.T) {
 			}
 
 			// Act
-			_, err = s.SetParent(context.Background(), subject, parent)
+			_, err = s.SetParent(context.Background(), subject, ToParent(parent))
 
 			// Assert
 			refused, ok := AsParentRefused(err)
@@ -267,7 +267,7 @@ func TestSetParentOfAnotherRepositoryNestsAndOwnsButLandsInTheOwnRepository(t *t
 	g := newParentFamily(t, s, "foreign")
 
 	// Act
-	change, err := s.SetParent(context.Background(), f.byName["child"].ID, g.id("foreign"))
+	change, err := s.SetParent(context.Background(), f.byName["child"].ID, ToParent(g.id("foreign")))
 
 	// Assert
 	if err != nil {
@@ -294,12 +294,12 @@ func TestSetParentReportsAForeignParentBefore(t *testing.T) {
 	s, _ := testStore(t)
 	f := newParentFamily(t, s, "child")
 	g := newParentFamily(t, s, "foreign")
-	if _, err := s.SetParent(context.Background(), f.byName["child"].ID, g.id("foreign")); err != nil {
+	if _, err := s.SetParent(context.Background(), f.byName["child"].ID, ToParent(g.id("foreign"))); err != nil {
 		t.Fatalf("SetParent: %v", err)
 	}
 
 	// Act
-	change, err := s.SetParent(context.Background(), f.byName["child"].ID, nil)
+	change, err := s.SetParent(context.Background(), f.byName["child"].ID, ToParent(nil))
 
 	// Assert
 	if err != nil {
@@ -315,7 +315,7 @@ func TestSetParentOfAnUnknownWorkspaceIsNotFound(t *testing.T) {
 	s, _ := testStore(t)
 
 	// Act
-	_, err := s.SetParent(context.Background(), "ws-missing", nil)
+	_, err := s.SetParent(context.Background(), "ws-missing", ToParent(nil))
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
@@ -398,6 +398,132 @@ func TestARetargetReDecidesWhoLandsTheWorkspace(t *testing.T) {
 			}
 			if got.OwnerLands != tt.want {
 				t.Fatalf("owner lands = %v, want %v", got.OwnerLands, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetParentLandsWhereTheRetargetSays(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange runs before the retarget under test.
+		arrange func(t *testing.T, s *store, f parentFamily)
+		// retarget is the retarget under test, of "child".
+		retarget      func(f parentFamily) Retarget
+		wantParent    string
+		wantLandsInto string
+	}{
+		{name: "a child lands into its parent by default",
+			retarget:   func(f parentFamily) Retarget { return ToParent(f.id("parent")) },
+			wantParent: "parent", wantLandsInto: "parent"},
+		{name: "a child lands on the primary branch when asked",
+			retarget:   func(f parentFamily) Retarget { return Retarget{Parent: f.id("parent"), Landing: &LandingChoice{}} },
+			wantParent: "parent"},
+		{name: "a kept parent with the landing moved into another workspace",
+			arrange: func(t *testing.T, s *store, f parentFamily) { f.retarget(t, s, "child", "parent") },
+			retarget: func(f parentFamily) Retarget {
+				return Retarget{KeepParent: true, Landing: &LandingChoice{Into: f.id("other")}}
+			},
+			wantParent: "parent", wantLandsInto: "other"},
+		{name: "a peer landing into a workspace",
+			retarget:      func(f parentFamily) Retarget { return Retarget{Landing: &LandingChoice{Into: f.id("other")}} },
+			wantLandsInto: "other"},
+		{name: "a peer lands on the primary branch by default",
+			arrange:  func(t *testing.T, s *store, f parentFamily) { f.retarget(t, s, "child", "parent") },
+			retarget: func(f parentFamily) Retarget { return ToParent(nil) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			f := newParentFamily(t, s, "child", "parent", "other")
+			if tt.arrange != nil {
+				tt.arrange(t, s, f)
+			}
+
+			// Act
+			change, err := s.SetParent(context.Background(), f.byName["child"].ID, tt.retarget(f))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetParent: %v", err)
+			}
+			wantDir := f.repoDir
+			if tt.wantLandsInto != "" {
+				wantDir = f.byName[tt.wantLandsInto].Dir
+			}
+			if ids.Optional(change.After.Parent) != ids.Optional(f.id(tt.wantParent)) || ids.Optional(change.After.LandsInto) != ids.Optional(f.id(tt.wantLandsInto)) || change.After.Dir != wantDir {
+				t.Fatalf("after = %+v, want parent %q landing into %q at %q", change.After, tt.wantParent, tt.wantLandsInto, wantDir)
+			}
+			child, err := s.Workspace(context.Background(), f.byName["child"].ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if ids.Optional(child.Parent) != ids.Optional(f.id(tt.wantParent)) || ids.Optional(child.LandsInto) != ids.Optional(f.id(tt.wantLandsInto)) {
+				t.Fatalf("read back parent %q lands into %q, want %q and %q", ids.Optional(child.Parent), ids.Optional(child.LandsInto), tt.wantParent, tt.wantLandsInto)
+			}
+			if _, got := targetOf(t, s, child.ID); got != wantDir {
+				t.Fatalf("target_dir = %q, want %q", got, wantDir)
+			}
+		})
+	}
+}
+
+func TestSetParentRefusesALandingTargetItCannotLandIn(t *testing.T) {
+	tests := []struct {
+		name string
+		// into names the workspace to land into, arranging what it needs.
+		into        func(t *testing.T, s *store, f parentFamily) WorkspaceID
+		wantRefusal ParentRefusal
+		wantFamily  bool
+	}{
+		{name: "an unregistered workspace", into: func(*testing.T, *store, parentFamily) WorkspaceID { return "ws-missing" },
+			wantRefusal: ParentUnknownLandingTarget},
+		{name: "a workspace of another repository", into: func(t *testing.T, s *store, _ parentFamily) WorkspaceID {
+			return *newParentFamily(t, s, "foreign").id("foreign")
+		}, wantRefusal: ParentUnknownLandingTarget},
+		{name: "the workspace itself", into: func(_ *testing.T, _ *store, f parentFamily) WorkspaceID { return *f.id("child") },
+			wantRefusal: ParentUnknownLandingTarget},
+		{name: "a workspace landing into it", into: func(t *testing.T, s *store, f parentFamily) WorkspaceID {
+			if _, err := s.SetParent(context.Background(), *f.id("other"), Retarget{Landing: &LandingChoice{Into: f.id("child")}}); err != nil {
+				t.Fatalf("SetParent: %v", err)
+			}
+			return *f.id("other")
+		}, wantRefusal: ParentUnknownLandingTarget},
+		{name: "the repository's main workspace", into: func(t *testing.T, s *store, f parentFamily) WorkspaceID {
+			main, err := s.WorkspaceByDir(context.Background(), f.repoDir)
+			if err != nil {
+				t.Fatalf("WorkspaceByDir: %v", err)
+			}
+			return main.ID
+		}, wantRefusal: ParentUnknownLandingTarget},
+		{name: "a closed workspace", into: func(t *testing.T, s *store, f parentFamily) WorkspaceID {
+			mustClose(t, s, *f.id("other"), CloseByUser)
+			return *f.id("other")
+		}, wantFamily: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			f := newParentFamily(t, s, "child", "other")
+			into := tt.into(t, s, f)
+			_, before := targetOf(t, s, *f.id("child"))
+
+			// Act
+			_, err := s.SetParent(context.Background(), *f.id("child"), Retarget{Landing: &LandingChoice{Into: &into}})
+
+			// Assert
+			if tt.wantFamily {
+				var notOpen *ParentNotOpenError
+				if !errors.As(err, &notOpen) {
+					t.Fatalf("err = %v, want a ParentNotOpenError", err)
+				}
+			} else if refused, ok := AsParentRefused(err); !ok || refused.Refusal != tt.wantRefusal {
+				t.Fatalf("err = %v, want refusal %s", err, tt.wantRefusal)
+			}
+			if _, after := targetOf(t, s, *f.id("child")); after != before {
+				t.Fatalf("target_dir = %q, want %q kept by the refusal", after, before)
 			}
 		})
 	}

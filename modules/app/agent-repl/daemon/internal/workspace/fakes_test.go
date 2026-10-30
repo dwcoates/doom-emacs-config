@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -149,7 +150,7 @@ type fakeDB struct {
 	// fails it. parentWrites records each retarget asked for.
 	setParentChange wsm.ParentChange
 	setParentErr    error
-	parentWrites    []*ids.WorkspaceID
+	parentWrites    []wsm.Retarget
 	// restoreStale and restoreErr are RestoreParent's answer; restores
 	// records each change it was asked to undo.
 	restoreStale bool
@@ -174,6 +175,9 @@ type fakeDB struct {
 	setLandedErr error
 	// setMergedErr fails SetMergedAt.
 	setMergedErr error
+
+	// openChildrenErr fails every OpenChildren read.
+	openChildrenErr error
 
 	// openParentErr is what every RequireOpenParent answers; openParentAsked
 	// records each parent it was asked about.
@@ -909,8 +913,8 @@ func (d *fakeDB) SetAttention(_ context.Context, id ids.WorkspaceID, on bool) er
 }
 
 // SetParent records the retarget asked for and answers the arranged change.
-func (d *fakeDB) SetParent(_ context.Context, id ids.WorkspaceID, parent *ids.WorkspaceID) (wsm.ParentChange, error) {
-	d.parentWrites = append(d.parentWrites, parent)
+func (d *fakeDB) SetParent(_ context.Context, id ids.WorkspaceID, retarget wsm.Retarget) (wsm.ParentChange, error) {
+	d.parentWrites = append(d.parentWrites, retarget)
 	if d.setParentErr != nil {
 		return wsm.ParentChange{}, d.setParentErr
 	}
@@ -3610,6 +3614,26 @@ func (f *fakeCacheLapses) VisibilityChanged(ws ids.WorkspaceID) { f.visibility(w
 
 func (f *fakeCacheLapses) ColdGateAnswered(_ context.Context, ws ids.WorkspaceID) error {
 	return f.answered(ws)
+}
+
+// OpenChildren answers PARENT's open children among the arranged records, in
+// place order, as WSM does.
+func (f *fakeDB) OpenChildren(_ context.Context, parent ids.WorkspaceID) ([]wsm.FamilyRef, error) {
+	if f.openChildrenErr != nil {
+		return nil, f.openChildrenErr
+	}
+	var children []wsm.Workspace
+	for _, ws := range f.workspaces {
+		if ws.Parent != nil && *ws.Parent == parent && ws.ID != parent && !ws.Closed && !ws.MergeHidden() {
+			children = append(children, ws)
+		}
+	}
+	slices.SortFunc(children, func(a, b wsm.Workspace) int { return cmp.Compare(a.Place, b.Place) })
+	refs := make([]wsm.FamilyRef, len(children))
+	for i, child := range children {
+		refs[i] = wsm.FamilyRef{ID: child.ID, Dir: child.Dir}
+	}
+	return refs, nil
 }
 
 // RequireOpenParent answers openParentErr, recording the parent asked about.

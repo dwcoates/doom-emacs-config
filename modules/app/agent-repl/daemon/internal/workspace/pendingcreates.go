@@ -537,12 +537,13 @@ func createKey(spec CreateSpec) string {
 		priority = fmt.Sprint(int(*spec.Priority))
 	}
 	key := struct {
-		RepoDir, Parent, OwnerNotice, ContextWorkspace, ForkFrom string
-		FromOrigin, OneShot                                      bool
+		RepoDir, Parent, OwnerNotice, ContextWorkspace, ForkFrom, Landing string
+		FromOrigin, OneShot                                               bool
 		Name, Model, Priority, PermissionMode, Consent, Prompt   string
 		PreDeploy, PostDeploy                                    []string
 	}{
 		RepoDir: filepath.Clean(spec.RepoDir), Parent: ids.Optional(spec.Parent), OwnerNotice: strings.TrimSpace(spec.OwnerNotice),
+		Landing:          landingKey(spec.Landing),
 		ContextWorkspace: ids.Optional(spec.ContextWorkspace), ForkFrom: ids.Optional(spec.ForkFrom),
 		FromOrigin: spec.FromOrigin, OneShot: spec.OneShot,
 		Name: strings.TrimSpace(spec.Name), Model: spec.Model, Priority: priority,
@@ -592,6 +593,26 @@ type heldSpec struct {
 	Model                string   `json:"model,omitempty"`
 	PermissionMode       string   `json:"permission_mode,omitempty"`
 	Priority             *int     `json:"priority,omitempty"`
+	// Landing is the explicit landing target, absent for the relationship's
+	// default; a held row written before landing targets existed has none,
+	// which is what its create meant.
+	Landing *heldLanding `json:"landing,omitempty"`
+}
+
+// heldLanding is a held create's explicit landing target.
+type heldLanding struct {
+	// Into is the workspace landed into, empty for the primary branch.
+	Into string `json:"into,omitempty"`
+}
+
+// landingKey spells an explicit landing target for a create's key: empty for
+// the relationship's default, so a default and an explicit landing that
+// happen to agree stay distinct requests.
+func landingKey(landing *wsm.LandingChoice) string {
+	if landing == nil {
+		return ""
+	}
+	return "lands:" + ids.Optional(landing.Into)
 }
 
 // encodeHeldSpec encodes SPEC for its durable row.
@@ -609,6 +630,9 @@ func encodeHeldSpec(spec CreateSpec) (string, error) {
 	if spec.Priority != nil {
 		p := int(*spec.Priority)
 		held.Priority = &p
+	}
+	if spec.Landing != nil {
+		held.Landing = &heldLanding{Into: ids.Optional(spec.Landing.Into)}
 	}
 	out, err := json.Marshal(held)
 	if err != nil {
@@ -641,6 +665,9 @@ func decodeHeldSpec(encoded string) (CreateSpec, error) {
 	if held.Priority != nil {
 		p := wsm.Priority(*held.Priority)
 		spec.Priority = &p
+	}
+	if held.Landing != nil {
+		spec.Landing = &wsm.LandingChoice{Into: optionalID(held.Landing.Into)}
 	}
 	return spec, nil
 }

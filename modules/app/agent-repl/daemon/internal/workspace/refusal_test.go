@@ -305,7 +305,7 @@ func TestEveryParentPreCheckGoesThroughRequireOpenParent(t *testing.T) {
 	shared := sourcescan.Count(t, "v.requireOpenParent(ctx, ")
 
 	// Assert.
-	if direct != 1 || shared != 2 {
-		t.Fatalf("direct reads = %d, shared calls = %d; want Open and Create both through the one helper", direct, shared)
+	if direct != 1 || shared != 3 {
+		t.Fatalf("direct reads = %d, shared calls = %d; want Open, and Create's parent and landing target, all through the one helper", direct, shared)
 	}
 }

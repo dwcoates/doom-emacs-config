@@ -542,15 +542,15 @@ func TestDefaultListRollbackPromptsIsAnEmptySuccess(t *testing.T) {
 	}
 }
 
-// userPrimaryCreate is the user's fresh, primary standard create in the
+// userPrimaryCreate is the user's fresh standard create of a peer in the
 // repository at DIR: every fact the request requires, and nothing else.
 func userPrimaryCreate(dir string) *agentreplv1.CreateWorkspaceRequest {
 	return &agentreplv1.CreateWorkspaceRequest{
 		Repository: &workspacev1.RepositoryRef{Dir: dir},
 		Form: &agentreplv1.CreateWorkspaceRequest_Standard{
 			Standard: &agentreplv1.CreateWorkspaceStandard{
-				Topology: &agentreplv1.WorkspaceTopology{
-					Shape: &agentreplv1.WorkspaceTopology_Primary{Primary: &agentreplv1.WorkspaceTopologyPrimary{}},
+				Relationship: &agentreplv1.WorkspaceRelationship{
+					Kind: &agentreplv1.WorkspaceRelationship_Peer{Peer: &agentreplv1.WorkspaceRelationshipPeer{}},
 				},
 			},
 		},

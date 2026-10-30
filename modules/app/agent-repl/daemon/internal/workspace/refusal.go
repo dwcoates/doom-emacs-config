@@ -87,9 +87,12 @@ const (
 	// ArmUngatedWithoutConsent is a model/mode combination that disables the
 	// permission gate with no consent recorded.
 	ArmUngatedWithoutConsent = "ungated_without_consent"
-	// ArmUnknownOwner is a create whose child topology names an owner the
-	// registry does not hold in the create's repository.
+	// ArmUnknownOwner is a create of a child whose parent the registry does
+	// not hold, in any repository.
 	ArmUnknownOwner = "unknown_owner"
+	// ArmUnknownLandingTarget is a create that lands into a workspace the
+	// registry does not hold in the create's repository.
+	ArmUnknownLandingTarget = "unknown_landing_target"
 	// ArmOriginFetchFailed is a primary create cut from origin whose fetch of
 	// origin's primary branch failed.
 	ArmOriginFetchFailed = "origin_fetch_failed"

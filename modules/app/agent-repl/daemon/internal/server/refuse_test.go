@@ -847,12 +847,14 @@ func TestSetResponseErrorFillsTheOpenWorktreeUnrestorableEvidence(t *testing.T) 
 
 // familyChildren is a family rule's refusal of a parent with two open children.
 var familyChildren = &wsm.HasOpenChildrenError{
-	Parent:   wsm.FamilyRef{ID: "ws-parent", Dir: "/w/parent"},
-	Children: []wsm.FamilyRef{{ID: "ws-a", Dir: "/w/a"}, {ID: "ws-b", Dir: "/w/b"}},
+	Parent:      wsm.FamilyRef{ID: "ws-parent", Dir: "/w/parent"},
+	Children:    []wsm.FamilyRef{{ID: "ws-a", Dir: "/w/a"}, {ID: "ws-b", Dir: "/w/b"}},
+	LandingInto: []wsm.FamilyRef{{ID: "ws-c", Dir: "/w/c"}},
 }
 
 // TestFamilyRefusalMapsOpenChildrenOntoItsArm pins has_open_children's
-// evidence: the parent and every child, as the wire names workspaces.
+// evidence: the parent, every child, and every workspace landing into it, as
+// the wire names workspaces.
 func TestFamilyRefusalMapsOpenChildrenOntoItsArm(t *testing.T) {
 	// Arrange.
 	resp := &agentreplv1.CloseWorkspaceResponse{}
@@ -875,6 +877,9 @@ func TestFamilyRefusalMapsOpenChildrenOntoItsArm(t *testing.T) {
 	}
 	if strings.Join(children, ",") != "ws-a@/w/a,ws-b@/w/b" {
 		t.Fatalf("children = %v, want ws-a and ws-b with their dirs", children)
+	}
+	if landers := got.GetLandingInto(); len(landers) != 1 || landers[0].GetId() != "ws-c" || landers[0].GetDir() != "/w/c" {
+		t.Fatalf("landing into = %v, want ws-c with its dir", landers)
 	}
 }
 
