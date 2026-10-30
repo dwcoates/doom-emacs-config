@@ -2653,10 +2653,15 @@ with no multi-select standing, or with text in the composer, it is
 (declare-function company-complete-selection "company" ())
 
 (defun agent-repl-input-company-return ()
-  "Close company's popup, then run the composer's own `RET' binding."
+  "Close company's popup, then run the composer's own `RET' binding.
+The binding is looked up under `RET' itself, never under the keys that
+invoked this command: in a graphical frame the Return key is the
+`<return>' event, which company's map binds directly, and only key
+reading translates it to `RET' -- so the composer, which binds `RET',
+has nothing under `<return>'."
   (interactive)
   (company-abort)
-  (let ((cmd (key-binding (this-command-keys-vector))))
+  (let ((cmd (key-binding (kbd "RET"))))
     (cl-assert (commandp cmd) nil
                "composer RET resolves to no command after company-abort: %S" cmd)
     (setq this-command cmd)

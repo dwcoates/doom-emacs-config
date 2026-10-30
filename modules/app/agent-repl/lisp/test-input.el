@@ -1816,6 +1816,21 @@ Company itself is never loaded: PARENT stands in for its global
         (should (equal (nreverse calls) '(abort send)))
         (should (eq this-command #'agent-repl-send))))))
 
+(ert-deftest agent-repl-input-company-return-sends-from-the-return-event ()
+  "A graphical frame's `<return>' event sends, though only `RET' is bound."
+  ;; Arrange.
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'company-abort) #'ignore)
+              ((symbol-function 'agent-repl-send)
+               (lambda () (interactive) (setq sent t)))
+              ((symbol-function 'this-command-keys-vector) (lambda () [return])))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        ;; Act.
+        (agent-repl-input-company-return)
+        ;; Assert.
+        (should sent)))))
+
 (ert-deftest agent-repl-input-company-return-fails-hard-without-a-command ()
   "A composer `RET' bound to no command is an invariant failure, not a no-op."
   ;; Arrange.
