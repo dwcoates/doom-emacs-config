@@ -987,6 +987,35 @@ func (s *server) SelectInEditor(
 	return connect.NewResponse(resp), nil
 }
 
+// LoadPageInEditor relays the webhost's load button to the editor, which
+// loads the held-back page (endpoint_load_page_in_editor.proto): the editor
+// owns which pages the host holds, so the daemon only carries the click.
+// A workspace no host stream holds has no editor to load its page, and is
+// refused `no_editor`.
+func (s *server) LoadPageInEditor(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.LoadPageInEditorRequest],
+) (*connect.Response[agentreplv1.LoadPageInEditorResponse], error) {
+	const rpc = "LoadPageInEditor"
+	resp := &agentreplv1.LoadPageInEditorResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	heard := s.pushLoadPageRequested(subject.Record.ID)
+	if heard == 0 {
+		subject.Log.Warn(rpc, "no host stream holds the workspace, so no editor loads its page", nil)
+		resp.Result = &agentreplv1.LoadPageInEditorResponse_Error{Error: &agentreplv1.LoadPageInEditorError{
+			Cause: &agentreplv1.LoadPageInEditorError_NoEditor{NoEditor: &agentreplv1.LoadPageInEditorNoEditor{}},
+		}}
+		return connect.NewResponse(resp), nil
+	}
+	subject.Log.Info(rpc, "relayed a load button's click to the editor, which loads the page",
+		dlog.Context{"host_streams": heard})
+	resp.Result = &agentreplv1.LoadPageInEditorResponse_Success{Success: &agentreplv1.LoadPageInEditorSuccess{}}
+	return connect.NewResponse(resp), nil
+}
+
 // selectSubject is THE ONE SELECT a client's request makes of the daemon:
 // SelectWorkspace's, and SelectInEditor's for a workspace no editor holds. It
 // selects SUBJECT under HISTORY and reveals REVEAL's row when it is set, and

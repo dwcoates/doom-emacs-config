@@ -578,6 +578,13 @@ func (s *requestLoggingServer) SelectInEditor(
 	return serveUnary(s, ctx, "SelectInEditor", req, s.server.SelectInEditor)
 }
 
+func (s *requestLoggingServer) LoadPageInEditor(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.LoadPageInEditorRequest],
+) (*connect.Response[agentreplv1.LoadPageInEditorResponse], error) {
+	return serveUnary(s, ctx, "LoadPageInEditor", req, s.server.LoadPageInEditor)
+}
+
 func (s *requestLoggingServer) ReportPageUnloading(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ReportPageUnloadingRequest],

@@ -111,6 +111,7 @@ describe("every rpc answers", () => {
       ["registerWorkspace", client.registerWorkspace({ dir: "/tmp/x" })],
       ["selectWorkspace", client.selectWorkspace({ workspace })],
       ["selectInEditor", client.selectInEditor({ workspace })],
+      ["loadPageInEditor", client.loadPageInEditor({ workspace })],
       ["adoptHostWorkspace", client.adoptHostWorkspace({ workspace })],
       ["adoptWebWorkspace", client.adoptWebWorkspace({ workspace })],
       ["openLogin", client.openLogin({ workspace })],
