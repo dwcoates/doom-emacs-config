@@ -104,6 +104,23 @@ func (s *store) MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerE
 	return out, nil
 }
 
+// MergeLedgerWorkspace answers the workspace whose ledger holds LEASE: the
+// workspace that ran the merge. A lease no ledger holds is ErrNotFound.
+func (s *store) MergeLedgerWorkspace(ctx context.Context, lease LeaseID) (WorkspaceID, error) {
+	var ws WorkspaceID
+	err := s.read(ctx, "daemon.wsm.merge_ledger_workspace", dlog.Context{"lease": string(lease)}, func(ctx context.Context) error {
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT workspace_id FROM merge_ledger WHERE lease_id = ?`, lease).Scan(&ws)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("wsm: merge ledger for lease %s: %w", lease, ErrNotFound)
+		}
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return ws, nil
+}
+
 // tabIntervals loads one lease's rounds in order, all-or-nothing.
 func (s *store) tabIntervals(ctx context.Context, lease LeaseID) ([]TabInterval, error) {
 	rows, err := s.q(ctx).QueryContext(ctx,

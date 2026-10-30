@@ -423,6 +423,9 @@ type DB interface {
 	RecordTabInterval(ctx context.Context, lease LeaseID, interval TabInterval) error
 	// MergeLedger loads a workspace's ledger entries, all-or-nothing.
 	MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerEntry, error)
+	// MergeLedgerWorkspace answers the workspace whose ledger holds a lease;
+	// ErrNotFound when none does.
+	MergeLedgerWorkspace(ctx context.Context, lease LeaseID) (WorkspaceID, error)
 	// PutMergeProgress records an admitted merge's progress, replacing the
 	// workspace's record.
 	PutMergeProgress(ctx context.Context, p MergeProgress) error
