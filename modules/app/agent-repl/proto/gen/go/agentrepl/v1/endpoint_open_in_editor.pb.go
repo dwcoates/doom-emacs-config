@@ -2,7 +2,7 @@
 // section. The webview's shared link component calls this for the
 // affordances that open something in the editor — the plan bubble's edit
 // button, a findings row's location, a worktree divider's path, a merge's
-// test log, a landed merge's commit — and the
+// test log, a landed merge's commit, a shell code block's run control — and the
 // daemon RELAYS the click as the workspace's WatchHostWorkspace push arm
 // `open_in_editor`, which Emacs answers with its ONE shared editor-popup
 // subroutine (a file at a line, or dired for a directory). No daemon→Emacs
@@ -49,6 +49,7 @@ type OpenInEditorRequest struct {
 	//	*OpenInEditorRequest_MergeTestLog
 	//	*OpenInEditorRequest_FeedLink
 	//	*OpenInEditorRequest_CommitLog
+	//	*OpenInEditorRequest_TerminalCommand
 	Target        isOpenInEditorRequest_Target `protobuf_oneof:"target"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -134,6 +135,15 @@ func (x *OpenInEditorRequest) GetCommitLog() *OpenInEditorCommitLog {
 	return nil
 }
 
+func (x *OpenInEditorRequest) GetTerminalCommand() *OpenInEditorTerminalCommand {
+	if x != nil {
+		if x, ok := x.Target.(*OpenInEditorRequest_TerminalCommand); ok {
+			return x.TerminalCommand
+		}
+	}
+	return nil
+}
+
 type isOpenInEditorRequest_Target interface {
 	isOpenInEditorRequest_Target()
 }
@@ -163,6 +173,14 @@ type OpenInEditorRequest_CommitLog struct {
 	CommitLog *OpenInEditorCommitLog `protobuf:"bytes,7,opt,name=commit_log,json=commitLog,proto3,oneof"`
 }
 
+type OpenInEditorRequest_TerminalCommand struct {
+	// A shell code block's run control, clicked: Emacs opens its terminal
+	// popup (the one `SPC o t` toggles), runs the command in it, and closes
+	// the popup once the command exits. Relayed verbatim as the host push
+	// arm `run_in_terminal`.
+	TerminalCommand *OpenInEditorTerminalCommand `protobuf:"bytes,8,opt,name=terminal_command,json=terminalCommand,proto3,oneof"`
+}
+
 func (*OpenInEditorRequest_WorkspaceFile) isOpenInEditorRequest_Target() {}
 
 func (*OpenInEditorRequest_MergeTestLog) isOpenInEditorRequest_Target() {}
@@ -170,6 +188,55 @@ func (*OpenInEditorRequest_MergeTestLog) isOpenInEditorRequest_Target() {}
 func (*OpenInEditorRequest_FeedLink) isOpenInEditorRequest_Target() {}
 
 func (*OpenInEditorRequest_CommitLog) isOpenInEditorRequest_Target() {}
+
+func (*OpenInEditorRequest_TerminalCommand) isOpenInEditorRequest_Target() {}
+
+// A shell command to run in the editor's terminal popup.
+type OpenInEditorTerminalCommand struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The code block's text, verbatim: one command a terminal runs whole. A
+	// blank one is Connect InvalidArgument.
+	Command       string `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenInEditorTerminalCommand) Reset() {
+	*x = OpenInEditorTerminalCommand{}
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenInEditorTerminalCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenInEditorTerminalCommand) ProtoMessage() {}
+
+func (x *OpenInEditorTerminalCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenInEditorTerminalCommand.ProtoReflect.Descriptor instead.
+func (*OpenInEditorTerminalCommand) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *OpenInEditorTerminalCommand) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
 
 // A branch's log, opened with one commit selected. Every field is echoed
 // from the merge head that drew it (frontend.v1.FeedMergeSuccess) and
@@ -188,7 +255,7 @@ type OpenInEditorCommitLog struct {
 
 func (x *OpenInEditorCommitLog) Reset() {
 	*x = OpenInEditorCommitLog{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -200,7 +267,7 @@ func (x *OpenInEditorCommitLog) String() string {
 func (*OpenInEditorCommitLog) ProtoMessage() {}
 
 func (x *OpenInEditorCommitLog) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -213,7 +280,7 @@ func (x *OpenInEditorCommitLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorCommitLog.ProtoReflect.Descriptor instead.
 func (*OpenInEditorCommitLog) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *OpenInEditorCommitLog) GetRepositoryDir() string {
@@ -251,7 +318,7 @@ type OpenInEditorWorkspaceFile struct {
 
 func (x *OpenInEditorWorkspaceFile) Reset() {
 	*x = OpenInEditorWorkspaceFile{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -263,7 +330,7 @@ func (x *OpenInEditorWorkspaceFile) String() string {
 func (*OpenInEditorWorkspaceFile) ProtoMessage() {}
 
 func (x *OpenInEditorWorkspaceFile) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -276,7 +343,7 @@ func (x *OpenInEditorWorkspaceFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorWorkspaceFile.ProtoReflect.Descriptor instead.
 func (*OpenInEditorWorkspaceFile) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *OpenInEditorWorkspaceFile) GetPath() string {
@@ -307,7 +374,7 @@ type OpenInEditorResponse struct {
 
 func (x *OpenInEditorResponse) Reset() {
 	*x = OpenInEditorResponse{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -319,7 +386,7 @@ func (x *OpenInEditorResponse) String() string {
 func (*OpenInEditorResponse) ProtoMessage() {}
 
 func (x *OpenInEditorResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[3]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -332,7 +399,7 @@ func (x *OpenInEditorResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorResponse.ProtoReflect.Descriptor instead.
 func (*OpenInEditorResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{3}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *OpenInEditorResponse) GetResult() isOpenInEditorResponse_Result {
@@ -385,7 +452,7 @@ type OpenInEditorSuccess struct {
 
 func (x *OpenInEditorSuccess) Reset() {
 	*x = OpenInEditorSuccess{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -397,7 +464,7 @@ func (x *OpenInEditorSuccess) String() string {
 func (*OpenInEditorSuccess) ProtoMessage() {}
 
 func (x *OpenInEditorSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -410,7 +477,7 @@ func (x *OpenInEditorSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorSuccess.ProtoReflect.Descriptor instead.
 func (*OpenInEditorSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{5}
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
@@ -433,7 +500,7 @@ type OpenInEditorError struct {
 
 func (x *OpenInEditorError) Reset() {
 	*x = OpenInEditorError{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -445,7 +512,7 @@ func (x *OpenInEditorError) String() string {
 func (*OpenInEditorError) ProtoMessage() {}
 
 func (x *OpenInEditorError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -458,7 +525,7 @@ func (x *OpenInEditorError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorError.ProtoReflect.Descriptor instead.
 func (*OpenInEditorError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *OpenInEditorError) GetCause() isOpenInEditorError_Cause {
@@ -596,7 +663,7 @@ type OpenInEditorUnknownWorkspace struct {
 
 func (x *OpenInEditorUnknownWorkspace) Reset() {
 	*x = OpenInEditorUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -608,7 +675,7 @@ func (x *OpenInEditorUnknownWorkspace) String() string {
 func (*OpenInEditorUnknownWorkspace) ProtoMessage() {}
 
 func (x *OpenInEditorUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -621,7 +688,7 @@ func (x *OpenInEditorUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*OpenInEditorUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{7}
 }
 
 type OpenInEditorWorkspaceRefMismatch struct {
@@ -634,7 +701,7 @@ type OpenInEditorWorkspaceRefMismatch struct {
 
 func (x *OpenInEditorWorkspaceRefMismatch) Reset() {
 	*x = OpenInEditorWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -646,7 +713,7 @@ func (x *OpenInEditorWorkspaceRefMismatch) String() string {
 func (*OpenInEditorWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *OpenInEditorWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -659,7 +726,7 @@ func (x *OpenInEditorWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*OpenInEditorWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *OpenInEditorWorkspaceRefMismatch) GetRegistryDir() string {
@@ -679,7 +746,7 @@ type OpenInEditorTransferringAway struct {
 
 func (x *OpenInEditorTransferringAway) Reset() {
 	*x = OpenInEditorTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -691,7 +758,7 @@ func (x *OpenInEditorTransferringAway) String() string {
 func (*OpenInEditorTransferringAway) ProtoMessage() {}
 
 func (x *OpenInEditorTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -704,7 +771,7 @@ func (x *OpenInEditorTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorTransferringAway.ProtoReflect.Descriptor instead.
 func (*OpenInEditorTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *OpenInEditorTransferringAway) GetAddress() string {
@@ -722,7 +789,7 @@ type OpenInEditorNotYetAdopted struct {
 
 func (x *OpenInEditorNotYetAdopted) Reset() {
 	*x = OpenInEditorNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -734,7 +801,7 @@ func (x *OpenInEditorNotYetAdopted) String() string {
 func (*OpenInEditorNotYetAdopted) ProtoMessage() {}
 
 func (x *OpenInEditorNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -747,7 +814,7 @@ func (x *OpenInEditorNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*OpenInEditorNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{10}
 }
 
 type OpenInEditorPathEscapesWorkspace struct {
@@ -758,7 +825,7 @@ type OpenInEditorPathEscapesWorkspace struct {
 
 func (x *OpenInEditorPathEscapesWorkspace) Reset() {
 	*x = OpenInEditorPathEscapesWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -770,7 +837,7 @@ func (x *OpenInEditorPathEscapesWorkspace) String() string {
 func (*OpenInEditorPathEscapesWorkspace) ProtoMessage() {}
 
 func (x *OpenInEditorPathEscapesWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -783,7 +850,7 @@ func (x *OpenInEditorPathEscapesWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorPathEscapesWorkspace.ProtoReflect.Descriptor instead.
 func (*OpenInEditorPathEscapesWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{11}
 }
 
 // Why a merge test log token was refused. Exactly one is set.
@@ -801,7 +868,7 @@ type OpenInEditorUnknownMergeTestLog struct {
 
 func (x *OpenInEditorUnknownMergeTestLog) Reset() {
 	*x = OpenInEditorUnknownMergeTestLog{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -813,7 +880,7 @@ func (x *OpenInEditorUnknownMergeTestLog) String() string {
 func (*OpenInEditorUnknownMergeTestLog) ProtoMessage() {}
 
 func (x *OpenInEditorUnknownMergeTestLog) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -826,7 +893,7 @@ func (x *OpenInEditorUnknownMergeTestLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorUnknownMergeTestLog.ProtoReflect.Descriptor instead.
 func (*OpenInEditorUnknownMergeTestLog) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *OpenInEditorUnknownMergeTestLog) GetReason() isOpenInEditorUnknownMergeTestLog_Reason {
@@ -900,7 +967,7 @@ type OpenInEditorUnknownMergeTestLogMalformed struct {
 
 func (x *OpenInEditorUnknownMergeTestLogMalformed) Reset() {
 	*x = OpenInEditorUnknownMergeTestLogMalformed{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -912,7 +979,7 @@ func (x *OpenInEditorUnknownMergeTestLogMalformed) String() string {
 func (*OpenInEditorUnknownMergeTestLogMalformed) ProtoMessage() {}
 
 func (x *OpenInEditorUnknownMergeTestLogMalformed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -925,7 +992,7 @@ func (x *OpenInEditorUnknownMergeTestLogMalformed) ProtoReflect() protoreflect.M
 
 // Deprecated: Use OpenInEditorUnknownMergeTestLogMalformed.ProtoReflect.Descriptor instead.
 func (*OpenInEditorUnknownMergeTestLogMalformed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{13}
 }
 
 // The token names a merge this workspace's feed draws no bubble for.
@@ -937,7 +1004,7 @@ type OpenInEditorUnknownMergeTestLogNotDrawnHere struct {
 
 func (x *OpenInEditorUnknownMergeTestLogNotDrawnHere) Reset() {
 	*x = OpenInEditorUnknownMergeTestLogNotDrawnHere{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -949,7 +1016,7 @@ func (x *OpenInEditorUnknownMergeTestLogNotDrawnHere) String() string {
 func (*OpenInEditorUnknownMergeTestLogNotDrawnHere) ProtoMessage() {}
 
 func (x *OpenInEditorUnknownMergeTestLogNotDrawnHere) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -962,7 +1029,7 @@ func (x *OpenInEditorUnknownMergeTestLogNotDrawnHere) ProtoReflect() protoreflec
 
 // Deprecated: Use OpenInEditorUnknownMergeTestLogNotDrawnHere.ProtoReflect.Descriptor instead.
 func (*OpenInEditorUnknownMergeTestLogNotDrawnHere) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{14}
 }
 
 // The log retention pass removed the log.
@@ -974,7 +1041,7 @@ type OpenInEditorUnknownMergeTestLogAgedOut struct {
 
 func (x *OpenInEditorUnknownMergeTestLogAgedOut) Reset() {
 	*x = OpenInEditorUnknownMergeTestLogAgedOut{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -986,7 +1053,7 @@ func (x *OpenInEditorUnknownMergeTestLogAgedOut) String() string {
 func (*OpenInEditorUnknownMergeTestLogAgedOut) ProtoMessage() {}
 
 func (x *OpenInEditorUnknownMergeTestLogAgedOut) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -999,7 +1066,7 @@ func (x *OpenInEditorUnknownMergeTestLogAgedOut) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use OpenInEditorUnknownMergeTestLogAgedOut.ProtoReflect.Descriptor instead.
 func (*OpenInEditorUnknownMergeTestLogAgedOut) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{15}
 }
 
 // A non-web link clicked in a prompt or response bubble.
@@ -1040,7 +1107,7 @@ type OpenInEditorFeedLink struct {
 
 func (x *OpenInEditorFeedLink) Reset() {
 	*x = OpenInEditorFeedLink{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1052,7 +1119,7 @@ func (x *OpenInEditorFeedLink) String() string {
 func (*OpenInEditorFeedLink) ProtoMessage() {}
 
 func (x *OpenInEditorFeedLink) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1065,7 +1132,7 @@ func (x *OpenInEditorFeedLink) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorFeedLink.ProtoReflect.Descriptor instead.
 func (*OpenInEditorFeedLink) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *OpenInEditorFeedLink) GetHref() string {
@@ -1141,7 +1208,7 @@ type OpenInEditorFeedLinkReport struct {
 
 func (x *OpenInEditorFeedLinkReport) Reset() {
 	*x = OpenInEditorFeedLinkReport{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1153,7 +1220,7 @@ func (x *OpenInEditorFeedLinkReport) String() string {
 func (*OpenInEditorFeedLinkReport) ProtoMessage() {}
 
 func (x *OpenInEditorFeedLinkReport) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1166,7 +1233,7 @@ func (x *OpenInEditorFeedLinkReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorFeedLinkReport.ProtoReflect.Descriptor instead.
 func (*OpenInEditorFeedLinkReport) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{17}
 }
 
 // Resolve silently; the client falls back to the web.
@@ -1178,7 +1245,7 @@ type OpenInEditorFeedLinkWebFallback struct {
 
 func (x *OpenInEditorFeedLinkWebFallback) Reset() {
 	*x = OpenInEditorFeedLinkWebFallback{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1190,7 +1257,7 @@ func (x *OpenInEditorFeedLinkWebFallback) String() string {
 func (*OpenInEditorFeedLinkWebFallback) ProtoMessage() {}
 
 func (x *OpenInEditorFeedLinkWebFallback) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[17]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1203,7 +1270,7 @@ func (x *OpenInEditorFeedLinkWebFallback) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorFeedLinkWebFallback.ProtoReflect.Descriptor instead.
 func (*OpenInEditorFeedLinkWebFallback) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{17}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{18}
 }
 
 // The feed link resolved to no file.
@@ -1217,7 +1284,7 @@ type OpenInEditorLinkUnresolved struct {
 
 func (x *OpenInEditorLinkUnresolved) Reset() {
 	*x = OpenInEditorLinkUnresolved{}
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1229,7 +1296,7 @@ func (x *OpenInEditorLinkUnresolved) String() string {
 func (*OpenInEditorLinkUnresolved) ProtoMessage() {}
 
 func (x *OpenInEditorLinkUnresolved) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[18]
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1242,7 +1309,7 @@ func (x *OpenInEditorLinkUnresolved) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenInEditorLinkUnresolved.ProtoReflect.Descriptor instead.
 func (*OpenInEditorLinkUnresolved) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{18}
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *OpenInEditorLinkUnresolved) GetHref() string {
@@ -1256,15 +1323,18 @@ var File_agentrepl_v1_endpoint_open_in_editor_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc = "" +
 	"\n" +
-	"*agentrepl/v1/endpoint_open_in_editor.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x98\x03\n" +
+	"*agentrepl/v1/endpoint_open_in_editor.proto\x12\fagentrepl.v1\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xf0\x03\n" +
 	"\x13OpenInEditorRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12P\n" +
 	"\x0eworkspace_file\x18\x04 \x01(\v2'.agentrepl.v1.OpenInEditorWorkspaceFileH\x00R\rworkspaceFile\x12J\n" +
 	"\x0emerge_test_log\x18\x05 \x01(\v2\".frontend.v1.FeedMergeTestLogTokenH\x00R\fmergeTestLog\x12A\n" +
 	"\tfeed_link\x18\x06 \x01(\v2\".agentrepl.v1.OpenInEditorFeedLinkH\x00R\bfeedLink\x12D\n" +
 	"\n" +
-	"commit_log\x18\a \x01(\v2#.agentrepl.v1.OpenInEditorCommitLogH\x00R\tcommitLogB\b\n" +
-	"\x06targetJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\x04pathR\x04line\"n\n" +
+	"commit_log\x18\a \x01(\v2#.agentrepl.v1.OpenInEditorCommitLogH\x00R\tcommitLog\x12V\n" +
+	"\x10terminal_command\x18\b \x01(\v2).agentrepl.v1.OpenInEditorTerminalCommandH\x00R\x0fterminalCommandB\b\n" +
+	"\x06targetJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\x04pathR\x04line\"7\n" +
+	"\x1bOpenInEditorTerminalCommand\x12\x18\n" +
+	"\acommand\x18\x01 \x01(\tR\acommand\"n\n" +
 	"\x15OpenInEditorCommitLog\x12%\n" +
 	"\x0erepository_dir\x18\x01 \x01(\tR\rrepositoryDir\x12\x16\n" +
 	"\x06branch\x18\x02 \x01(\tR\x06branch\x12\x16\n" +
@@ -1326,57 +1396,59 @@ func file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_agentrepl_v1_endpoint_open_in_editor_proto_goTypes = []any{
 	(*OpenInEditorRequest)(nil),                         // 0: agentrepl.v1.OpenInEditorRequest
-	(*OpenInEditorCommitLog)(nil),                       // 1: agentrepl.v1.OpenInEditorCommitLog
-	(*OpenInEditorWorkspaceFile)(nil),                   // 2: agentrepl.v1.OpenInEditorWorkspaceFile
-	(*OpenInEditorResponse)(nil),                        // 3: agentrepl.v1.OpenInEditorResponse
-	(*OpenInEditorSuccess)(nil),                         // 4: agentrepl.v1.OpenInEditorSuccess
-	(*OpenInEditorError)(nil),                           // 5: agentrepl.v1.OpenInEditorError
-	(*OpenInEditorUnknownWorkspace)(nil),                // 6: agentrepl.v1.OpenInEditorUnknownWorkspace
-	(*OpenInEditorWorkspaceRefMismatch)(nil),            // 7: agentrepl.v1.OpenInEditorWorkspaceRefMismatch
-	(*OpenInEditorTransferringAway)(nil),                // 8: agentrepl.v1.OpenInEditorTransferringAway
-	(*OpenInEditorNotYetAdopted)(nil),                   // 9: agentrepl.v1.OpenInEditorNotYetAdopted
-	(*OpenInEditorPathEscapesWorkspace)(nil),            // 10: agentrepl.v1.OpenInEditorPathEscapesWorkspace
-	(*OpenInEditorUnknownMergeTestLog)(nil),             // 11: agentrepl.v1.OpenInEditorUnknownMergeTestLog
-	(*OpenInEditorUnknownMergeTestLogMalformed)(nil),    // 12: agentrepl.v1.OpenInEditorUnknownMergeTestLogMalformed
-	(*OpenInEditorUnknownMergeTestLogNotDrawnHere)(nil), // 13: agentrepl.v1.OpenInEditorUnknownMergeTestLogNotDrawnHere
-	(*OpenInEditorUnknownMergeTestLogAgedOut)(nil),      // 14: agentrepl.v1.OpenInEditorUnknownMergeTestLogAgedOut
-	(*OpenInEditorFeedLink)(nil),                        // 15: agentrepl.v1.OpenInEditorFeedLink
-	(*OpenInEditorFeedLinkReport)(nil),                  // 16: agentrepl.v1.OpenInEditorFeedLinkReport
-	(*OpenInEditorFeedLinkWebFallback)(nil),             // 17: agentrepl.v1.OpenInEditorFeedLinkWebFallback
-	(*OpenInEditorLinkUnresolved)(nil),                  // 18: agentrepl.v1.OpenInEditorLinkUnresolved
-	(*v1.WorkspaceRef)(nil),                             // 19: workspace.v1.WorkspaceRef
-	(*v11.FeedMergeTestLogToken)(nil),                   // 20: frontend.v1.FeedMergeTestLogToken
-	(*v11.FeedId)(nil),                                  // 21: frontend.v1.FeedId
+	(*OpenInEditorTerminalCommand)(nil),                 // 1: agentrepl.v1.OpenInEditorTerminalCommand
+	(*OpenInEditorCommitLog)(nil),                       // 2: agentrepl.v1.OpenInEditorCommitLog
+	(*OpenInEditorWorkspaceFile)(nil),                   // 3: agentrepl.v1.OpenInEditorWorkspaceFile
+	(*OpenInEditorResponse)(nil),                        // 4: agentrepl.v1.OpenInEditorResponse
+	(*OpenInEditorSuccess)(nil),                         // 5: agentrepl.v1.OpenInEditorSuccess
+	(*OpenInEditorError)(nil),                           // 6: agentrepl.v1.OpenInEditorError
+	(*OpenInEditorUnknownWorkspace)(nil),                // 7: agentrepl.v1.OpenInEditorUnknownWorkspace
+	(*OpenInEditorWorkspaceRefMismatch)(nil),            // 8: agentrepl.v1.OpenInEditorWorkspaceRefMismatch
+	(*OpenInEditorTransferringAway)(nil),                // 9: agentrepl.v1.OpenInEditorTransferringAway
+	(*OpenInEditorNotYetAdopted)(nil),                   // 10: agentrepl.v1.OpenInEditorNotYetAdopted
+	(*OpenInEditorPathEscapesWorkspace)(nil),            // 11: agentrepl.v1.OpenInEditorPathEscapesWorkspace
+	(*OpenInEditorUnknownMergeTestLog)(nil),             // 12: agentrepl.v1.OpenInEditorUnknownMergeTestLog
+	(*OpenInEditorUnknownMergeTestLogMalformed)(nil),    // 13: agentrepl.v1.OpenInEditorUnknownMergeTestLogMalformed
+	(*OpenInEditorUnknownMergeTestLogNotDrawnHere)(nil), // 14: agentrepl.v1.OpenInEditorUnknownMergeTestLogNotDrawnHere
+	(*OpenInEditorUnknownMergeTestLogAgedOut)(nil),      // 15: agentrepl.v1.OpenInEditorUnknownMergeTestLogAgedOut
+	(*OpenInEditorFeedLink)(nil),                        // 16: agentrepl.v1.OpenInEditorFeedLink
+	(*OpenInEditorFeedLinkReport)(nil),                  // 17: agentrepl.v1.OpenInEditorFeedLinkReport
+	(*OpenInEditorFeedLinkWebFallback)(nil),             // 18: agentrepl.v1.OpenInEditorFeedLinkWebFallback
+	(*OpenInEditorLinkUnresolved)(nil),                  // 19: agentrepl.v1.OpenInEditorLinkUnresolved
+	(*v1.WorkspaceRef)(nil),                             // 20: workspace.v1.WorkspaceRef
+	(*v11.FeedMergeTestLogToken)(nil),                   // 21: frontend.v1.FeedMergeTestLogToken
+	(*v11.FeedId)(nil),                                  // 22: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_open_in_editor_proto_depIdxs = []int32{
-	19, // 0: agentrepl.v1.OpenInEditorRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2,  // 1: agentrepl.v1.OpenInEditorRequest.workspace_file:type_name -> agentrepl.v1.OpenInEditorWorkspaceFile
-	20, // 2: agentrepl.v1.OpenInEditorRequest.merge_test_log:type_name -> frontend.v1.FeedMergeTestLogToken
-	15, // 3: agentrepl.v1.OpenInEditorRequest.feed_link:type_name -> agentrepl.v1.OpenInEditorFeedLink
-	1,  // 4: agentrepl.v1.OpenInEditorRequest.commit_log:type_name -> agentrepl.v1.OpenInEditorCommitLog
-	4,  // 5: agentrepl.v1.OpenInEditorResponse.success:type_name -> agentrepl.v1.OpenInEditorSuccess
-	5,  // 6: agentrepl.v1.OpenInEditorResponse.error:type_name -> agentrepl.v1.OpenInEditorError
-	6,  // 7: agentrepl.v1.OpenInEditorError.unknown_workspace:type_name -> agentrepl.v1.OpenInEditorUnknownWorkspace
-	7,  // 8: agentrepl.v1.OpenInEditorError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenInEditorWorkspaceRefMismatch
-	8,  // 9: agentrepl.v1.OpenInEditorError.transferring_away:type_name -> agentrepl.v1.OpenInEditorTransferringAway
-	9,  // 10: agentrepl.v1.OpenInEditorError.not_yet_adopted:type_name -> agentrepl.v1.OpenInEditorNotYetAdopted
-	10, // 11: agentrepl.v1.OpenInEditorError.path_escapes_workspace:type_name -> agentrepl.v1.OpenInEditorPathEscapesWorkspace
-	11, // 12: agentrepl.v1.OpenInEditorError.unknown_merge_test_log:type_name -> agentrepl.v1.OpenInEditorUnknownMergeTestLog
-	18, // 13: agentrepl.v1.OpenInEditorError.link_unresolved:type_name -> agentrepl.v1.OpenInEditorLinkUnresolved
-	12, // 14: agentrepl.v1.OpenInEditorUnknownMergeTestLog.malformed:type_name -> agentrepl.v1.OpenInEditorUnknownMergeTestLogMalformed
-	13, // 15: agentrepl.v1.OpenInEditorUnknownMergeTestLog.not_drawn_here:type_name -> agentrepl.v1.OpenInEditorUnknownMergeTestLogNotDrawnHere
-	14, // 16: agentrepl.v1.OpenInEditorUnknownMergeTestLog.aged_out:type_name -> agentrepl.v1.OpenInEditorUnknownMergeTestLogAgedOut
-	21, // 17: agentrepl.v1.OpenInEditorFeedLink.source_row:type_name -> frontend.v1.FeedId
-	16, // 18: agentrepl.v1.OpenInEditorFeedLink.report:type_name -> agentrepl.v1.OpenInEditorFeedLinkReport
-	17, // 19: agentrepl.v1.OpenInEditorFeedLink.web_fallback:type_name -> agentrepl.v1.OpenInEditorFeedLinkWebFallback
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	20, // 0: agentrepl.v1.OpenInEditorRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	3,  // 1: agentrepl.v1.OpenInEditorRequest.workspace_file:type_name -> agentrepl.v1.OpenInEditorWorkspaceFile
+	21, // 2: agentrepl.v1.OpenInEditorRequest.merge_test_log:type_name -> frontend.v1.FeedMergeTestLogToken
+	16, // 3: agentrepl.v1.OpenInEditorRequest.feed_link:type_name -> agentrepl.v1.OpenInEditorFeedLink
+	2,  // 4: agentrepl.v1.OpenInEditorRequest.commit_log:type_name -> agentrepl.v1.OpenInEditorCommitLog
+	1,  // 5: agentrepl.v1.OpenInEditorRequest.terminal_command:type_name -> agentrepl.v1.OpenInEditorTerminalCommand
+	5,  // 6: agentrepl.v1.OpenInEditorResponse.success:type_name -> agentrepl.v1.OpenInEditorSuccess
+	6,  // 7: agentrepl.v1.OpenInEditorResponse.error:type_name -> agentrepl.v1.OpenInEditorError
+	7,  // 8: agentrepl.v1.OpenInEditorError.unknown_workspace:type_name -> agentrepl.v1.OpenInEditorUnknownWorkspace
+	8,  // 9: agentrepl.v1.OpenInEditorError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenInEditorWorkspaceRefMismatch
+	9,  // 10: agentrepl.v1.OpenInEditorError.transferring_away:type_name -> agentrepl.v1.OpenInEditorTransferringAway
+	10, // 11: agentrepl.v1.OpenInEditorError.not_yet_adopted:type_name -> agentrepl.v1.OpenInEditorNotYetAdopted
+	11, // 12: agentrepl.v1.OpenInEditorError.path_escapes_workspace:type_name -> agentrepl.v1.OpenInEditorPathEscapesWorkspace
+	12, // 13: agentrepl.v1.OpenInEditorError.unknown_merge_test_log:type_name -> agentrepl.v1.OpenInEditorUnknownMergeTestLog
+	19, // 14: agentrepl.v1.OpenInEditorError.link_unresolved:type_name -> agentrepl.v1.OpenInEditorLinkUnresolved
+	13, // 15: agentrepl.v1.OpenInEditorUnknownMergeTestLog.malformed:type_name -> agentrepl.v1.OpenInEditorUnknownMergeTestLogMalformed
+	14, // 16: agentrepl.v1.OpenInEditorUnknownMergeTestLog.not_drawn_here:type_name -> agentrepl.v1.OpenInEditorUnknownMergeTestLogNotDrawnHere
+	15, // 17: agentrepl.v1.OpenInEditorUnknownMergeTestLog.aged_out:type_name -> agentrepl.v1.OpenInEditorUnknownMergeTestLogAgedOut
+	22, // 18: agentrepl.v1.OpenInEditorFeedLink.source_row:type_name -> frontend.v1.FeedId
+	17, // 19: agentrepl.v1.OpenInEditorFeedLink.report:type_name -> agentrepl.v1.OpenInEditorFeedLinkReport
+	18, // 20: agentrepl.v1.OpenInEditorFeedLink.web_fallback:type_name -> agentrepl.v1.OpenInEditorFeedLinkWebFallback
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_in_editor_proto_init() }
@@ -1389,13 +1461,14 @@ func file_agentrepl_v1_endpoint_open_in_editor_proto_init() {
 		(*OpenInEditorRequest_MergeTestLog)(nil),
 		(*OpenInEditorRequest_FeedLink)(nil),
 		(*OpenInEditorRequest_CommitLog)(nil),
+		(*OpenInEditorRequest_TerminalCommand)(nil),
 	}
-	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[2].OneofWrappers = []any{}
-	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[3].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[3].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[4].OneofWrappers = []any{
 		(*OpenInEditorResponse_Success)(nil),
 		(*OpenInEditorResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[5].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[6].OneofWrappers = []any{
 		(*OpenInEditorError_UnknownWorkspace)(nil),
 		(*OpenInEditorError_WorkspaceRefMismatch)(nil),
 		(*OpenInEditorError_TransferringAway)(nil),
@@ -1404,12 +1477,12 @@ func file_agentrepl_v1_endpoint_open_in_editor_proto_init() {
 		(*OpenInEditorError_UnknownMergeTestLog)(nil),
 		(*OpenInEditorError_LinkUnresolved)(nil),
 	}
-	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[11].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[12].OneofWrappers = []any{
 		(*OpenInEditorUnknownMergeTestLog_Malformed)(nil),
 		(*OpenInEditorUnknownMergeTestLog_NotDrawnHere)(nil),
 		(*OpenInEditorUnknownMergeTestLog_AgedOut)(nil),
 	}
-	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[15].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[16].OneofWrappers = []any{
 		(*OpenInEditorFeedLink_Report)(nil),
 		(*OpenInEditorFeedLink_WebFallback)(nil),
 	}
@@ -1419,7 +1492,7 @@ func file_agentrepl_v1_endpoint_open_in_editor_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc), len(file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
