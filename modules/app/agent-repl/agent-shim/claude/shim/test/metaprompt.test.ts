@@ -102,13 +102,19 @@ describe("readMetaprompt", () => {
 const REPO_ROOT = fileURLToPath(new URL("../../../../../../..", import.meta.url));
 
 describe("this repository's committed metaprompt", () => {
-  it("defaults subagent dispatch to opus at medium effort and allows the sonnet tier", () => {
-    // Arrange — a throwaway home whose canonical checkout path points at this
-    // repository, so the real committed file is read exactly as a session
-    // reads it without touching the developer's actual home.
+  // A throwaway home whose canonical checkout path points at this repository,
+  // so the real committed file is read exactly as a session reads it without
+  // touching the developer's actual home.
+  function homeOnThisRepository(): string {
     const home = makeHome();
     fs.mkdirSync(path.join(home, path.dirname(DOOM_CHECKOUT_REL_PATH)), { recursive: true });
     fs.symlinkSync(REPO_ROOT, path.join(home, DOOM_CHECKOUT_REL_PATH));
+    return home;
+  }
+
+  it("defaults subagent dispatch to opus at medium effort and allows the sonnet tier", () => {
+    // Arrange
+    const home = homeOnThisRepository();
     // Act
     const text = readMetaprompt(home);
     // Assert — the directive only governs a session if it survives into the
@@ -117,6 +123,17 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("subagent_type: opus-medium");
     expect(text).toContain("dispatched through the `sonnet-medium` subagent type");
     expect(text).not.toContain("weaker tier than opus is a defect");
+  });
+
+  it("requires a workspace to store its task's link and every pull request it creates, unasked", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("A link the workspace was created to investigate or act on");
+    expect(text).toContain("Every pull request the workspace creates is stored the moment its URL is known");
+    expect(text).toContain("without asking me any questions or for permission");
   });
 });
 
