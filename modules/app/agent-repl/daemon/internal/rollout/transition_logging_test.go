@@ -48,21 +48,21 @@ func TestRolloutStateTransitionsRecordTheirBeforeAndAfter(t *testing.T) {
 			},
 		},
 		{
-			name: "a headless workspace is claimed", operation: opJoin, state: "headless_claimed",
+			name: "a headless workspace is claimed", operation: opJoin, state: "adoption_claimed",
 			before: false, after: true,
 			arrange: func(c *controller) {
 				c.armSessions(ids.InstanceID("daemon-outgoing-previous"), instant, []ManifestSession{{Workspace: ws}})
 			},
-			act: func(c *controller) { c.claimHeadless() },
+			act: func(c *controller) { c.claimArmed() },
 		},
 		{
-			name: "a failed headless adoption releases its claim", operation: opJoin, state: "headless_claimed",
+			name: "a failed headless adoption releases its claim", operation: opJoin, state: "adoption_claimed",
 			before: true, after: false,
 			arrange: func(c *controller) {
 				c.armSessions(ids.InstanceID("daemon-outgoing-previous"), instant, []ManifestSession{{Workspace: ws}})
-				c.claimHeadless()
+				c.claimArmed()
 			},
-			act: func(c *controller) { c.releaseHeadless(ws) },
+			act: func(c *controller) { c.releaseAdoption(ws) },
 		},
 	}
 

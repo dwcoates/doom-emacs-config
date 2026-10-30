@@ -831,9 +831,9 @@ func TestHeadlessAdoptFailureIsRetriedUntilItAdopts(t *testing.T) {
 	if got := h.fleet.Adoptions(); len(got) != 0 {
 		t.Fatalf("adoptions = %v, want none while the adopt is failing", got)
 	}
-	h.clock.awaitArmed(t, headlessRetryInitial)
+	h.clock.awaitArmed(t, adoptRetryInitial)
 	setAdoptErr(h.fleet, ws, nil)
-	h.clock.Fire(headlessRetryInitial)
+	h.clock.Fire(adoptRetryInitial)
 
 	// Assert
 	select {
@@ -862,17 +862,17 @@ func TestHeadlessAdoptRetryBacksOffWhileItKeepsFailing(t *testing.T) {
 	if err := h.c.Join(ctx); err != nil {
 		t.Fatalf("Join: %v", err)
 	}
-	h.clock.awaitArmed(t, headlessRetryInitial)
-	h.clock.Fire(headlessRetryInitial)
+	h.clock.awaitArmed(t, adoptRetryInitial)
+	h.clock.Fire(adoptRetryInitial)
 
 	// Assert: the second window is twice the first.
-	h.clock.awaitArmed(t, 2*headlessRetryInitial)
+	h.clock.awaitArmed(t, 2*adoptRetryInitial)
 }
 
-// TestReclaimHeadlessRefusesAWorkspaceAnotherAdopterHolds is why the retry can
+// TestReclaimArmedRefusesAWorkspaceAnotherAdopterHolds is why the retry can
 // never adopt behind somebody else: it re-claims before every attempt, and the
 // claim is one-at-a-time.
-func TestReclaimHeadlessRefusesAWorkspaceAnotherAdopterHolds(t *testing.T) {
+func TestReclaimArmedRefusesAWorkspaceAnotherAdopterHolds(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
@@ -880,23 +880,23 @@ func TestReclaimHeadlessRefusesAWorkspaceAnotherAdopterHolds(t *testing.T) {
 	if err := h.c.armFromManifest(); err != nil {
 		t.Fatalf("armFromManifest: %v", err)
 	}
-	if claimed := h.c.claimHeadless(); len(claimed) != 1 || claimed[0] != ws {
-		t.Fatalf("claimHeadless = %v, want the armed headless workspace", claimed)
+	if claimed := h.c.claimArmed(); len(claimed) != 1 || claimed[0] != ws {
+		t.Fatalf("claimArmed = %v, want the armed headless workspace", claimed)
 	}
 
 	// Act
-	got := h.c.reclaimHeadless(ws)
+	got := h.c.reclaimArmed(ws)
 
 	// Assert
 	if got {
-		t.Fatalf("reclaimHeadless took a claim another adopter already holds")
+		t.Fatalf("reclaimArmed took a claim another adopter already holds")
 	}
 }
 
-// TestReclaimHeadlessRefusesAnAlreadyAdoptedWorkspace pins the other stand-down
+// TestReclaimArmedRefusesAnAlreadyAdoptedWorkspace pins the other stand-down
 // edge: a released claim on a workspace that has since adopted must not be
 // taken again.
-func TestReclaimHeadlessRefusesAnAlreadyAdoptedWorkspace(t *testing.T) {
+func TestReclaimArmedRefusesAnAlreadyAdoptedWorkspace(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
@@ -907,14 +907,14 @@ func TestReclaimHeadlessRefusesAnAlreadyAdoptedWorkspace(t *testing.T) {
 	if got := h.fleet.Adoptions(); len(got) != 1 {
 		t.Fatalf("adoptions = %v, want the headless workspace adopted at boot", got)
 	}
-	h.c.releaseHeadless(ws)
+	h.c.releaseAdoption(ws)
 
 	// Act
-	got := h.c.reclaimHeadless(ws)
+	got := h.c.reclaimArmed(ws)
 
 	// Assert
 	if got {
-		t.Fatalf("reclaimHeadless took a claim on a workspace that has already adopted")
+		t.Fatalf("reclaimArmed took a claim on a workspace that has already adopted")
 	}
 }
 

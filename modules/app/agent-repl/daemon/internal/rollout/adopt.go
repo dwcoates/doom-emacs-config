@@ -133,10 +133,10 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 	// adopt call re-reads the manifest before this poll gets to it — adds
 	// nothing here. It still has to be adopted: a headless workspace has no
 	// participant to adopt it and the incumbent would otherwise wait out the
-	// whole adoption window for it. claimHeadless hands back every armed
+	// whole adoption window for it. claimArmed hands back every armed
 	// headless workspace this daemon has not already claimed, so exactly one
 	// read adopts each of them.
-	headless := c.claimHeadless()
+	headless := c.claimArmed()
 
 	c.log.Info(opJoin, "armed the adopt rendezvous from the intent manifest", dlog.Context{
 		"outgoing_daemon": string(m.Daemon),
@@ -145,13 +145,13 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 		"headless":        len(headless),
 	})
 
-	c.adoptHeadless(ctx, headless)
+	c.adoptClaimed(ctx, headless)
 	return true, nil
 }
 
-// adoptHeadless adopts each claimed headless workspace, releasing the claim of
+// adoptClaimed adopts each claimed headless workspace, releasing the claim of
 // one that fails and retrying it.
-func (c *controller) adoptHeadless(ctx context.Context, headless []ids.WorkspaceID) {
+func (c *controller) adoptClaimed(ctx context.Context, headless []ids.WorkspaceID) {
 	for _, ws := range headless {
 		if err := c.adopt(ctx, ws, "headless"); err != nil {
 			// A headless workspace that will not adopt is that workspace's own
@@ -161,7 +161,7 @@ func (c *controller) adoptHeadless(ctx context.Context, headless []ids.Workspace
 			// THE CLAIM IS RELEASED ON FAILURE so this workspace can be tried
 			// again; an adoption that never happened must not look like one
 			// that did.
-			c.releaseHeadless(ws)
+			c.releaseAdoption(ws)
 			// AND SOMETHING MUST ACTUALLY TRY AGAIN. Releasing the claim only
 			// makes a retry POSSIBLE; for a headless workspace nothing was
 			// making one. `awaitManifest` stops the moment a manifest is read
@@ -182,7 +182,7 @@ func (c *controller) adoptHeadless(ctx context.Context, headless []ids.Workspace
 			// failing run's dlog was not preserved, so which call inside
 			// `adopt` returned the error is not on record; what IS on record
 			// is that no second attempt could ever have been made.
-			go c.retryHeadless(ctx, ws)
+			go c.retryAdoption(ctx, ws)
 		}
 	}
 }
@@ -192,29 +192,29 @@ func (c *controller) adoptHeadless(ctx context.Context, headless []ids.Workspace
 // fraction of the adoption window, and the cap keeps a workspace that will
 // never adopt from turning a 30s window into 1200 log lines.
 const (
-	headlessRetryInitial = 100 * time.Millisecond
-	headlessRetryMax     = 2 * time.Second
+	adoptRetryInitial = 100 * time.Millisecond
+	adoptRetryMax     = 2 * time.Second
 )
 
-// retryHeadless keeps trying to adopt one headless workspace until it adopts,
+// retryAdoption keeps trying to adopt one headless workspace until it adopts,
 // somebody else adopts it, or the daemon stops.
 //
 // IT RE-CLAIMS BEFORE EVERY ATTEMPT, so it can never race a manifest read that
-// picked the workspace up in the meantime: `claimHeadless` and this both go
+// picked the workspace up in the meantime: `claimArmed` and this both go
 // through the same one-at-a-time claim, and whichever takes it is the sole
 // adopter of that attempt.
 //
 // It is driven by the injected Clock, so a test drives the backoff rather than
 // waiting it out.
-func (c *controller) retryHeadless(ctx context.Context, ws ids.WorkspaceID) {
-	delay := headlessRetryInitial
+func (c *controller) retryAdoption(ctx context.Context, ws ids.WorkspaceID) {
+	delay := adoptRetryInitial
 	for attempt := 1; ; attempt++ {
 		select {
 		case <-ctx.Done():
 			return
 		case <-c.deps.Clock.After(delay):
 		}
-		if !c.reclaimHeadless(ws) {
+		if !c.reclaimArmed(ws) {
 			// Adopted in the meantime, by a manifest read or a participant.
 			return
 		}
@@ -222,9 +222,9 @@ func (c *controller) retryHeadless(ctx context.Context, ws ids.WorkspaceID) {
 		if err := c.adopt(ctx, ws, "headless-retry"); err != nil {
 			c.log.Warn(opJoin, "a headless workspace could not be adopted; retrying",
 				dlog.WithCause(fields, err))
-			c.releaseHeadless(ws)
-			if delay *= 2; delay > headlessRetryMax {
-				delay = headlessRetryMax
+			c.releaseAdoption(ws)
+			if delay *= 2; delay > adoptRetryMax {
+				delay = adoptRetryMax
 			}
 			continue
 		}
@@ -233,19 +233,19 @@ func (c *controller) retryHeadless(ctx context.Context, ws ids.WorkspaceID) {
 	}
 }
 
-// reclaimHeadless takes the headless claim for ONE workspace, and reports
+// reclaimArmed takes the headless claim for ONE workspace, and reports
 // whether this caller now holds it. It answers false for a workspace that has
 // since been adopted, is claimed by somebody else, or is no longer armed.
-func (c *controller) reclaimHeadless(ws ids.WorkspaceID) bool {
+func (c *controller) reclaimArmed(ws ids.WorkspaceID) bool {
 	c.mu.Lock()
 	e, ok := c.rendezvous[ws]
-	if !ok || e.adopted || e.headlessClaimed {
+	if !ok || e.adopted || e.adoptionClaimed {
 		c.mu.Unlock()
 		return false
 	}
-	e.headlessClaimed = true
+	e.adoptionClaimed = true
 	c.mu.Unlock()
-	c.logTransition(opJoin, ws, "headless_claimed", false, true, nil)
+	c.logTransition(opJoin, ws, "adoption_claimed", false, true, nil)
 	return true
 }
 
@@ -302,24 +302,24 @@ func (c *controller) armSessions(outgoing ids.InstanceID, writtenAt time.Time, s
 	return added
 }
 
-// claimHeadless takes ownership of every armed headless workspace — zero
+// claimArmed takes ownership of every armed headless workspace — zero
 // expected participants — that has not been claimed or adopted already, and
 // reports them. A workspace comes back from it AT MOST ONCE, so two manifest
 // reads adopt it once between them, and the caller is the sole adopter of what
 // it is handed.
-func (c *controller) claimHeadless() []ids.WorkspaceID {
+func (c *controller) claimArmed() []ids.WorkspaceID {
 	c.mu.Lock()
 	claimed := make([]ids.WorkspaceID, 0, len(c.rendezvous))
 	for ws, e := range c.rendezvous {
-		if e.expected.Count() != 0 || e.adopted || e.headlessClaimed {
+		if e.expected.Count() != 0 || e.adopted || e.adoptionClaimed {
 			continue
 		}
-		e.headlessClaimed = true
+		e.adoptionClaimed = true
 		claimed = append(claimed, ws)
 	}
 	c.mu.Unlock()
 	for _, ws := range claimed {
-		c.logTransition(opJoin, ws, "headless_claimed", false, true, nil)
+		c.logTransition(opJoin, ws, "adoption_claimed", false, true, nil)
 	}
 	return claimed
 }
@@ -481,7 +481,7 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 	// host's call can therefore expire mid-`adopt' -- and cancelling the
 	// adoption there left serving ownership unclaimed, settled the rendezvous
 	// FAILED (`e.settle'), and left nothing to try again with: Emacs does not
-	// re-adopt after a transport failure, and `retryHeadless' covers only
+	// re-adopt after a transport failure, and `retryAdoption' covers only
 	// workspaces with no participants. The incumbent then waited out its whole
 	// `DefaultAdoptionWindow' (30s) for an adoption that had all but finished,
 	// which delays `windows.Wait()', which delays its exit, which delays the
@@ -1454,16 +1454,16 @@ func (c *controller) awaitClaimedOwned(ctx context.Context, fields dlog.Context)
 	}
 }
 
-// releaseHeadless undoes a headless claim whose adoption failed.
-func (c *controller) releaseHeadless(ws ids.WorkspaceID) {
+// releaseAdoption undoes a headless claim whose adoption failed.
+func (c *controller) releaseAdoption(ws ids.WorkspaceID) {
 	c.mu.Lock()
 	changed := false
 	if e, ok := c.rendezvous[ws]; ok {
-		changed = e.headlessClaimed
-		e.headlessClaimed = false
+		changed = e.adoptionClaimed
+		e.adoptionClaimed = false
 	}
 	c.mu.Unlock()
 	if changed {
-		c.logTransition(opJoin, ws, "headless_claimed", true, false, nil)
+		c.logTransition(opJoin, ws, "adoption_claimed", true, false, nil)
 	}
 }

@@ -83,7 +83,7 @@ func (c *controller) followCarries(ctx context.Context) {
 		if headless := c.followCarriesOnce(); len(headless) > 0 {
 			c.log.Info(opJoin, "a transfer left workspaces with no participant to call; adopting them headless",
 				dlog.Context{"workspaces": len(headless)})
-			c.adoptHeadless(ctx, headless)
+			c.adoptClaimed(ctx, headless)
 		}
 	}
 }
@@ -95,7 +95,7 @@ func (c *controller) followCarriesOnce() []ids.WorkspaceID {
 	c.mu.Lock()
 	var candidates []ids.WorkspaceID
 	for ws, e := range c.rendezvous {
-		if !e.adopted && !e.adopting && !e.headlessClaimed {
+		if !e.adopted && !e.adopting && !e.adoptionClaimed {
 			candidates = append(candidates, ws)
 		}
 	}
@@ -114,12 +114,12 @@ func (c *controller) followCarriesOnce() []ids.WorkspaceID {
 			continue
 		}
 		c.mu.Lock()
-		if e, armed := c.rendezvous[ws]; armed && !e.headlessClaimed {
+		if e, armed := c.rendezvous[ws]; armed && !e.adoptionClaimed {
 			c.followCarriedLocked(ws, e, carried, sealedBy)
 		}
 		c.mu.Unlock()
 	}
-	return c.claimHeadless()
+	return c.claimArmed()
 }
 
 // servingReleased reports whether no daemon holds the workspace's serving row:
