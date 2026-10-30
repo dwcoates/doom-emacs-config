@@ -69,6 +69,7 @@
 (require 'seq)
 (require 'subr-x)
 
+(declare-function agent-repl--ws-put "workspace" (ws key val))
 (declare-function agent-repl-webhost-dismiss-digest "webhost" (ws))
 (declare-function agent-repl-prompt-entries-opening "prompt-entries" (label))
 (declare-function agent-repl--frontend-webview-buffer-name "frontend" (ws))

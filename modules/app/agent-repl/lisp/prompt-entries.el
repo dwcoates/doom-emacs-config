@@ -311,7 +311,7 @@ new one is owed, and sent once that one is answered."
            (lambda (done) (agent-repl-prompt-entries--send state done))))))))
 
 (defun agent-repl-prompt-entries--send (state done)
-  "Send STATE, (LABELS AT EDITS), as this composer's report; call DONE once it ends.
+  "Send STATE, (LABELS AT EDITS), as this composer's report; then call DONE.
 With no daemon-minted ref or no connection nothing is sent and nothing is
 marked reported, so the next command tries again."
   (let* ((ws agent-repl-prompt-entries--ws)
@@ -410,7 +410,8 @@ an entry, and a click on a response's branch in the webview
        (agent-repl-prompt-entries--entry-at-point (agent-repl-prompt-entries--entries))))
 
 (defun agent-repl-prompt-entries--existing (label next)
-  "The start of the nearest entry answering LABEL below (NEXT) or above point's line, or nil."
+  "The start of the nearest entry answering LABEL below (NEXT) or above point.
+Nil when there is none."
   (let* ((bol (line-beginning-position))
          (entries (agent-repl-prompt-entries--entries)))
     (nth 1 (seq-find (lambda (entry)
