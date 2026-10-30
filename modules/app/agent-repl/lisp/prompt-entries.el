@@ -424,9 +424,17 @@ On an entry line whose label has a neighbor that way, the new line opens
 on `LABEL - '; otherwise it opens empty, as `evil-open-below' does.  A
 neighbor already holding an entry that way is not opened again: point
 moves to the end of that entry's line, in insert mode."
-  (let* ((label (agent-repl-prompt-entries--label-at-point))
-         (neighbor (and label (agent-repl-prompt-entries--neighbor label (if next :next :previous))))
-         (existing (and neighbor (agent-repl-prompt-entries--existing neighbor next))))
+  (let ((label (agent-repl-prompt-entries--label-at-point)))
+    (agent-repl-prompt-entries--open-on
+     label (and label (agent-repl-prompt-entries--neighbor label (if next :next :previous))) next)))
+
+(defun agent-repl-prompt-entries--open-on (label neighbor next)
+  "From LABEL's line, open a line below (NEXT) or above, answering NEIGHBOR.
+THE ONE OPENING of a line beside an entry, for `o' and `O':
+the new line opens on `NEIGHBOR - ', or empty when NEIGHBOR is nil.  An
+entry already answering NEIGHBOR that way is not opened again: point moves
+to the end of that entry's line, in insert mode."
+  (let ((existing (and neighbor (agent-repl-prompt-entries--existing neighbor next))))
     (if existing
         (progn
           (goto-char existing)

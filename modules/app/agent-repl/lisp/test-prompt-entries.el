@@ -531,7 +531,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
 
 (ert-deftest agent-repl-test-prompt-entries-every-opened-entry-is-opened-by-the-one-helper ()
   "`o'/`O' and a branch click open entries through `agent-repl-prompt-entries-opening'."
-  (dolist (case '(("prompt-entries.el" "agent-repl-prompt-entries--open")
+  (dolist (case '(("prompt-entries.el" "agent-repl-prompt-entries--open-on")
                   ("input.el" "agent-repl-input-compose-entry")))
     ;; Arrange
     (let ((source (with-temp-buffer
@@ -545,6 +545,26 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                            (and (string-match-p "(agent-repl-prompt-entries-opening " source) t)
                            (string-match-p "\" - \"" source))
                      (list (cadr case) t nil))))))
+
+(defun agent-repl-test-prompt-entries--defun-source (name)
+  "The source of NAME's `defun' in prompt-entries.el."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "prompt-entries.el" agent-repl-test--module-dir))
+    (goto-char (point-min))
+    (re-search-forward (concat "^(defun " (regexp-quote name) " "))
+    (beginning-of-line)
+    (buffer-substring (point) (progn (forward-sexp) (point)))))
+
+(ert-deftest agent-repl-test-prompt-entries-every-line-beside-an-entry-opens-through-open-on ()
+  "`o'/`O' open their line through `agent-repl-prompt-entries--open-on', never by hand."
+  (dolist (name '("agent-repl-prompt-entries--open"))
+    ;; Arrange
+    (let ((source (agent-repl-test-prompt-entries--defun-source name)))
+      ;; Act / Assert
+      (should (equal (list name
+                           (and (string-match-p "(agent-repl-prompt-entries--open-on\\_>" source) t)
+                           (string-match-p "(evil-open-\\(below\\|above\\) " source))
+                     (list name t nil))))))
 
 (ert-deftest agent-repl-test-prompt-entries-o-on-an-entry-opens-the-next-nodes-entry ()
   "`o' on an entry line opens a line below filled with the next node's label."
