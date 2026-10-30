@@ -1325,3 +1325,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-30 governor-first-seat (landed off the merge queue): Test runs no longer wait indefinitely for CPU: while no test holds a seat, one may start whenever the host is under the 35% cap.
 - 2026-10-30 elisp-warning-free (landed off the merge queue): The editor's lisp byte-compiles without warnings again, so a hard bounce of agent-repl is no longer refused.
 - 2026-10-30 elisp-warning-free-2 (landed off the merge queue): The editor's remaining over-wide docstrings are rewrapped, so the byte-compile gate passes.
+- 2026-10-30 elisp-warning-free-3 (landed off the merge queue): The last over-wide editor docstring is rewrapped.
