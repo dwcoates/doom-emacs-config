@@ -228,16 +228,19 @@ user in the same response what it reorganized and why.
   whether it awaits another workspace, and a cold gate it is parked at. `workspace list` reads every
   workspace the daemon serves.
 - `workspace find [-repository here|DIR] [-since WHEN] [-until WHEN]
-  [-standing open|closed|landed] [-text TEXT] [-limit N|-all]` lists the
+  [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-limit N|-all]` lists the
   workspaces the daemon's registry holds, OPEN OR CLOSED (including ones
   closed long ago that the roster no longer shows), each with its name,
   branch, repository, its summary (the one-sentence task summary the
   webapp's topbar draws as the workspace's title), when it was created and
-  last active, and whether it is open, closed or landed, most recently
-  active first. WHEN is an age (`90m`, `36h`, `7d`), a date (`2026-10-20`) or
+  last active, whether it is open, closed or landed, its `createdBy` and,
+  for a child, its `parent`, most recently active first. WHEN is an age (`90m`, `36h`, `7d`), a date (`2026-10-20`) or
   an RFC 3339 instant: `-since` keeps workspaces active at or after WHEN,
   `-until` keeps workspaces created at or before WHEN. `-text` matches name,
-  branch or summary case-insensitively. It answers 50 by default; `-limit N`
+  branch or summary case-insensitively. `-created-by WS` (`-created-by here`)
+  keeps only the workspaces WS's agent asked for: the way a workspace
+  accounts for every workspace it made, open or closed, when its conversation
+  was compacted and no longer remembers them. It answers 50 by default; `-limit N`
   or `-all` change that, and a cut answer is a `partial` extent naming how
   many were omitted. Zettel chat threads and async-merge workspaces are not
   answered. Use it whenever the agent needs to find the workspace that did
@@ -347,13 +350,15 @@ creating workspaces there with `-repository DIR`.
 - **ADOPT.** `workspace set WS -parent here` makes an existing workspace
   this workspace's child. Its conversation is untouched. It nests under this
   workspace in the sidebar, and this workspace owns it, follows it and is
-  told of it as an owner is. Without `-lands-into` it lands by the child
-  default: into this workspace's branch for a child of this repository, and
-  on its own repository's main branch for a child of another (drawn under a
-  divider naming its repository). `-lands-into WS|main` alone moves only
-  where it lands and keeps the relationship; given with `-parent` it sets
-  both. `-top-level` makes it a top-level peer and, without `-lands-into`,
-  lands it on main.
+  told of it as an owner is. A retarget (`-parent` or `-top-level`) that
+  names no `-lands-into` KEEPS where WS lands now: its branch was cut from
+  there, and moving it would merge it into a branch it was never cut from.
+  The relationship's landing default applies only at `workspace create`.
+  `-lands-into WS|main` changes the landing, alone (the relationship is
+  kept) or with `-parent`/`-top-level`. To also land an adopted workspace
+  into this one, add `-lands-into here`, ONLY when its branch was cut from
+  this workspace's; otherwise keep its landing. `-top-level` makes it a
+  top-level peer.
 - `-hidden` / `-shown` and `-priority` set the rest.
 
 ## Finishing, opening, closing
