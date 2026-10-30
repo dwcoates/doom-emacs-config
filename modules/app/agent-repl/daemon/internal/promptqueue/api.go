@@ -710,7 +710,7 @@ type Watcher interface {
 	// workspace waits on besides the turn.
 	LiveWork() sessionwatcher.LiveWorkSet
 	// Free is the watcher's own freeness judgement: its facts are in, and
-	// they leave no turn in flight and no live work. A pure attach whose
+	// they leave no turn in flight, no live work and no vendor activity. A pure attach whose
 	// facts have not arrived is NOT free, whatever TurnInFlight answers.
 	Free() bool
 	// SessionFactsIn reports, without waiting, whether the session facts are

@@ -57,8 +57,8 @@ func (f *Fleet) Client(ws ids.WorkspaceID) (shimclient.Client, bool) {
 	return session.client, true
 }
 
-// Free answers freeness right now: no turn in flight and no live detached
-// work. A workspace with NO live session is free — there is nothing in flight
+// Free answers freeness right now: no turn in flight, no live detached work,
+// and a vendor that states itself idle (sessionwatcher/vendoractivity.go). A workspace with NO live session is free — there is nothing in flight
 // to wait on — which is what lets a lease holder proceed on a hibernated or
 // never-started workspace instead of blocking forever.
 func (f *Fleet) Free(ws ids.WorkspaceID) bool {
