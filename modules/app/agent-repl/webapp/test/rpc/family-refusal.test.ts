@@ -17,7 +17,9 @@ function openChildren(children: Array<{ id: string; dir: string }>) {
   return create(WorkspaceHasOpenChildrenSchema, { parent: PARENT, children });
 }
 
-function parentNotOpen(state: MessageInitShape<typeof WorkspaceParentNotOpenSchema>["state"]) {
+function parentNotOpen(
+  state: MessageInitShape<typeof WorkspaceParentNotOpenSchema>["state"],
+) {
   return create(WorkspaceParentNotOpenSchema, { parent: PARENT, state });
 }
 
@@ -45,7 +47,11 @@ describe("hasOpenChildrenSentence", () => {
     // Arrange
     const u = openChildren(children);
     // Act
-    const said = hasOpenChildrenSentence(u, "CloseWorkspaceError.has_open_children", "close");
+    const said = hasOpenChildrenSentence(
+      u,
+      "CloseWorkspaceError.has_open_children",
+      "close",
+    );
     // Assert
     expect(said).toBe(want);
   });
@@ -54,16 +60,61 @@ describe("hasOpenChildrenSentence", () => {
     // Arrange
     const u = openChildren([]);
     // Act / Assert
-    expect(() => hasOpenChildrenSentence(u, "CloseWorkspaceError.has_open_children", "close")).toThrow(MalformedView);
+    expect(() =>
+      hasOpenChildrenSentence(
+        u,
+        "CloseWorkspaceError.has_open_children",
+        "close",
+      ),
+    ).toThrow(MalformedView);
+  });
+
+  it("names the workspaces landing into it after its children", () => {
+    // Arrange
+    const u = create(WorkspaceHasOpenChildrenSchema, {
+      parent: PARENT,
+      children: [{ id: "c1", dir: "/w/doom/child-a" }],
+      landingInto: [{ id: "l1", dir: "/w/doom/lander" }],
+    });
+    // Act
+    const said = hasOpenChildrenSentence(
+      u,
+      "CloseWorkspaceError.has_open_children",
+      "close",
+    );
+    // Assert
+    expect(said).toBe(
+      "close refused: child-a, lander are still open under or landing into this workspace; close them first",
+    );
   });
 });
 
 describe("mergeHasOpenChildrenSentence", () => {
+  it("names the workspaces landing into the parent when only they hold it open", () => {
+    // Arrange
+    const u = create(WorkspaceHasOpenChildrenSchema, {
+      parent: PARENT,
+      landingInto: [{ id: "l1", dir: "/w/doom/lander" }],
+    });
+    // Act
+    const said = mergeHasOpenChildrenSentence(
+      u,
+      "MergeWorkspaceError.has_open_children",
+    );
+    // Assert
+    expect(said).toBe(
+      "parent-ws still has open workspaces under or landing into it (lander); resolve and close all of them before a one-shot merge",
+    );
+  });
+
   it("names the parent and its children and asks for them to be resolved and closed before a one-shot merge", () => {
     // Arrange
     const u = openChildren([{ id: "c1", dir: "/w/doom/child-a" }]);
     // Act
-    const said = mergeHasOpenChildrenSentence(u, "MergeWorkspaceError.has_open_children");
+    const said = mergeHasOpenChildrenSentence(
+      u,
+      "MergeWorkspaceError.has_open_children",
+    );
     // Assert
     expect(said).toBe(
       "parent-ws still has open child workspaces (child-a); resolve and close all of them before a one-shot merge",
@@ -72,16 +123,22 @@ describe("mergeHasOpenChildrenSentence", () => {
 
   it("refuses a refusal with no parent", () => {
     // Arrange
-    const u = create(WorkspaceHasOpenChildrenSchema, { children: [{ id: "c1", dir: "/w/c" }] });
+    const u = create(WorkspaceHasOpenChildrenSchema, {
+      children: [{ id: "c1", dir: "/w/c" }],
+    });
     // Act / Assert
-    expect(() => mergeHasOpenChildrenSentence(u, "MergeWorkspaceError.has_open_children")).toThrow(MalformedView);
+    expect(() =>
+      mergeHasOpenChildrenSentence(u, "MergeWorkspaceError.has_open_children"),
+    ).toThrow(MalformedView);
   });
 
   it("refuses a refusal that names no child", () => {
     // Arrange
     const u = openChildren([]);
     // Act / Assert
-    expect(() => mergeHasOpenChildrenSentence(u, "MergeWorkspaceError.has_open_children")).toThrow(MalformedView);
+    expect(() =>
+      mergeHasOpenChildrenSentence(u, "MergeWorkspaceError.has_open_children"),
+    ).toThrow(MalformedView);
   });
 });
 
@@ -106,7 +163,11 @@ describe("parentNotOpenSentence", () => {
     // Arrange
     const u = parentNotOpen(state);
     // Act
-    const said = parentNotOpenSentence(u, "OpenWorkspaceError.parent_not_open", "reopen");
+    const said = parentNotOpenSentence(
+      u,
+      "OpenWorkspaceError.parent_not_open",
+      "reopen",
+    );
     // Assert
     expect(said).toBe(want);
   });
@@ -115,13 +176,19 @@ describe("parentNotOpenSentence", () => {
     // Arrange
     const u = parentNotOpen(undefined);
     // Act / Assert
-    expect(() => parentNotOpenSentence(u, "OpenWorkspaceError.parent_not_open", "reopen")).toThrow(MalformedView);
+    expect(() =>
+      parentNotOpenSentence(u, "OpenWorkspaceError.parent_not_open", "reopen"),
+    ).toThrow(MalformedView);
   });
 
   it("refuses a refusal with no parent", () => {
     // Arrange
-    const u = create(WorkspaceParentNotOpenSchema, { state: { case: "hidden", value: {} } });
+    const u = create(WorkspaceParentNotOpenSchema, {
+      state: { case: "hidden", value: {} },
+    });
     // Act / Assert
-    expect(() => parentNotOpenSentence(u, "OpenWorkspaceError.parent_not_open", "reopen")).toThrow(MalformedView);
+    expect(() =>
+      parentNotOpenSentence(u, "OpenWorkspaceError.parent_not_open", "reopen"),
+    ).toThrow(MalformedView);
   });
 });
