@@ -58,6 +58,10 @@ message ChangeWorkspaceLinksSet {
   // the menu draws fits it. A blank label is a malformed request (Connect
   // InvalidArgument).
   string label = 2;
+  // Whether the workspace's work made what the link points at. REQUIRED: an
+  // unset ownership is a malformed request (Connect InvalidArgument), so
+  // every stored link says which it is. A relabel sets it anew.
+  WorkspaceLinkOwnership ownership = 3;
 }
 
 // Remove one stored link. A url the workspace does not hold is refused

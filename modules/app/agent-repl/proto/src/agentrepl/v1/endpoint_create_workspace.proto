@@ -109,6 +109,31 @@ message CreateWorkspaceRequest {
   // success — ride progress. Refused beside `async_merge`, whose workspace is
   // created later by the queue (`op_id_with_async_merge`).
   optional string op_id = 8;
+
+  // The Slack message the workspace was created to act on, when a Slack
+  // message started it (a bound emoji the user typed or reacted with). UNSET
+  // for every other create. Refused as invalid beside `async_merge`, whose
+  // workspace the queue creates.
+  optional CreateWorkspaceSlackOrigin slack_origin = 13;
+}
+
+// THE DAEMON SPEAKS FOR THE WORKSPACE IN ITS ORIGINATING THREAD. A workspace
+// created for a Slack message records the message's thread and stores it
+// among its links as a reference (WorkspaceLinkReference), labelled
+// "Originating Slack thread". The daemon then posts into that thread itself,
+// never the agent:
+//   - once the workspace is created, a one-line reply that work on it began;
+//   - once a finish's deploy ends (FinishWorkspace), a reply saying whether it
+//     landed or failed, with every link the workspace OWNS
+//     (WorkspaceLinkOwned) as a bullet.
+// A post that fails is recorded and drawn as a transient footer line on the
+// workspace; it never fails the create or the finish.
+message CreateWorkspaceSlackOrigin {
+  // The message's Slack link, as Slack's "Copy link" gives it: an https
+  // `<workspace>.slack.com/archives/<channel>/p<timestamp>` link, with
+  // `thread_ts` when the message is a reply. A link that is not one is a
+  // malformed request (Connect InvalidArgument).
+  string thread_url = 1;
 }
 
 // The ordinary workspace create.
