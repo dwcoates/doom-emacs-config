@@ -287,6 +287,10 @@
   - The links are what the topbar's summary opens: one shown link opens on a click, and several drop a menu of their labels.
   - Examples are a pull request, a ticket, a design doc, or a dashboard.
   - A link already stored is relabeled rather than stored twice.
+- Every stored link says whether the workspace's work made what it points at.
+  - It is owned when the work made it, such as a pull request the workspace opened or a doc it wrote.
+  - It is a reference when it exists apart from the work, such as the thread or ticket the task came from.
+  - The daemon posts every owned link into the Slack thread a workspace was created for when its finish's deploy ends, so a wrong ownership shows the thread the wrong things.
 - Two kinds of link MUST always be stored, whatever else the menu holds.
   - A link the workspace was created to investigate or act on, such as a Slack thread, a Jira ticket, an issue, or a pull request to review, is stored before any other work on it begins.
   - Every pull request the workspace creates is stored the moment its URL is known, including one created by a skill or a subagent working for the workspace.

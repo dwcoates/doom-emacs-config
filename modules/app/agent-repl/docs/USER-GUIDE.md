@@ -200,11 +200,17 @@ A workspace keeps every link that bears on its task, such as its pull request, t
   - Once the menu is full, the agent chooses which five it shows, ranked by how much each matters to you and to the people you report the work to.
 - Agents store links on their own, without asking, whenever one comes up in the conversation.
 - You can change them yourself from a shell:
-  - `agent-repld workspace link WS -url URL -label TEXT` stores a link, or relabels one. A label is two to eight words in one sentence.
+  - `agent-repld workspace link WS -url URL -label TEXT -owned|-reference` stores a link, or relabels one. A label is two to eight words in one sentence.
+    - `-owned` says the workspace's work made what the link points at, such as a pull request it opened.
+    - `-reference` says the link only points at something apart from the work, such as the thread the task came from.
   - `agent-repld workspace link WS -show URL -show URL` names the links the menu shows, at most five.
   - `agent-repld workspace link WS -remove URL` removes one, and `-clear` removes them all.
   - Only `http` and `https` links are accepted.
-- `agent-repld workspace status WS` shows every link as `links`, with whether the menu shows it.
+- `agent-repld workspace status WS` shows every link as `links`, with whether the menu shows it and whether it is owned.
+- A workspace created for a Slack message (`agent-repld workspace create ... -slack-thread URL`) is spoken for in that thread by agent-repl itself.
+  - Once the workspace is created, the thread gets a one-line reply that work began.
+  - Once a finish's deploy ends, the thread gets a reply saying whether it landed or failed, listing every owned link.
+  - The thread itself is stored among the links as a reference.
 - The links are kept across restarts.
 
 ## Renaming a workspace

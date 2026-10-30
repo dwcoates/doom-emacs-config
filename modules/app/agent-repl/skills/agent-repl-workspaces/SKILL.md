@@ -333,9 +333,19 @@ creating workspaces there with `-repository DIR`.
   it opens the one shown link, or drops a menu of the shown links' labels,
   most recently set first, when there are several.
   - The metaprompt says when to store one ("Workspace links").
-  - `workspace link here -url URL -label TEXT` stores a link, or relabels
-    one already stored. The label is two to eight words in one sentence;
-    any other is refused `invalid_label` with the reason.
+  - `workspace link here -url URL -label TEXT -owned|-reference` stores a
+    link, or relabels one already stored. The label is two to eight words
+    in one sentence; any other is refused `invalid_label` with the reason.
+  - Exactly one of `-owned` and `-reference` is named on every set, and a
+    relabel names it anew.
+    - `-owned`: this workspace's work made what the link points at (a pull
+      request it opened, a doc or a ticket it wrote).
+    - `-reference`: it exists apart from the work, which only points at it
+      (the thread or ticket the task came from, a doc it read).
+    - The daemon reads it: a workspace created for a Slack message
+      (`create -slack-thread URL`) has every owned link posted into that
+      thread when its finish's deploy ends. The daemon makes that post, and
+      the one saying work began, itself; the agent posts neither.
   - The menu shows at most five links. While it has room a new link is
     shown; once it is full a new link is stored unshown, and the answer's
     `links.menu` is `full` with `unshown` above zero. Then name the five the
