@@ -176,11 +176,11 @@ func TestARateLimitVerdictIsSharedAcrossTheAccount(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, usageSample(30, 20, instant.UnixMilli()))
 
 	// Act
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 30, 5*time.Hour))
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.SevenDay(), 30, 5*time.Hour))
 
 	// Assert
-	if got := enduringOfWS(t, h, otherWS).GetUsage().GetSession(); got.GetAllowed() == nil {
-		t.Fatalf("second workspace's session allowance = %+v, want the account's allowed verdict", got)
+	if got := enduringOfWS(t, h, otherWS).GetUsage().GetWeekly().GetOverall(); got.GetAllowed() == nil {
+		t.Fatalf("second workspace's weekly allowance = %+v, want the account's allowed verdict", got)
 	}
 }
 
@@ -518,8 +518,8 @@ func TestARestartedResolverDrawsTheKeptFigures(t *testing.T) {
 
 	// Assert
 	usage := enduringOf(t, after).GetUsage()
-	if usage.GetSession().GetUtilization() != 0.44 || usage.GetWeekly().GetOverall().GetUtilization() != 0.53 {
-		t.Fatalf("restarted usage = %+v, want the kept 44%% and 53%%", usage)
+	if usage.GetWeekly().GetOverall().GetUtilization() != 0.53 {
+		t.Fatalf("restarted usage = %+v, want the kept 53%%", usage)
 	}
 }
 
@@ -544,8 +544,8 @@ func TestARestartedResolverDrawsTheKeptModelWindowsAndVerdictScope(t *testing.T)
 		t.Fatalf("kept opus window = %+v, want its verdict scoped to the hour's reset", record.WeeklyOpus)
 	}
 	models := enduringOf(t, after).GetUsage().GetWeekly().GetModels()
-	if models.GetOpus().GetUtilization() != 0.12 || models.GetSonnet().GetUtilization() != 0.3 || models.GetOpus().GetStatus() != nil {
-		t.Fatalf("restarted models = %+v, want the kept 12%% and 30%% with the lapsed verdict undrawn", models)
+	if models.GetOpus().GetUtilization() != 1 || models.GetSonnet().GetUtilization() != 0.3 || models.GetOpus().GetStatus() != nil {
+		t.Fatalf("restarted models = %+v, want the kept 100%% (the event's) and 30%% with the lapsed verdict undrawn", models)
 	}
 }
 
@@ -626,7 +626,7 @@ func TestAKeptFigureIsShippedWithItsResetInstantSoALapseCanBeDrawn(t *testing.T)
 	lapsed := instant.Add(-time.Hour).Unix()
 	h := newHarness(t, WithAccountUsages([]wsm.AccountUsage{{
 		ConfigDir: personalRoot, ObservedAt: instant.Add(-6 * time.Hour),
-		Session: &wsm.AllowanceFigures{Utilization: 0.97, ResetsAtS: lapsed},
+		Weekly: &wsm.AllowanceFigures{Utilization: 0.97, ResetsAtS: lapsed},
 	}}))
 
 	// Act
@@ -634,8 +634,25 @@ func TestAKeptFigureIsShippedWithItsResetInstantSoALapseCanBeDrawn(t *testing.T)
 	h.r.SetAccount(testWS, personalRoot)
 
 	// Assert
-	if got := enduringOf(t, h).GetUsage().GetSession().GetResetsAtS(); got != lapsed {
+	if got := enduringOf(t, h).GetUsage().GetWeekly().GetOverall().GetResetsAtS(); got != lapsed {
 		t.Fatalf("resets_at_s = %d, want the kept instant %d the client lapses the figure by", got, lapsed)
+	}
+}
+
+func TestAKeptFiveHourFigureIsNotDrawn(t *testing.T) {
+	// Arrange: a five-hour figure kept from before the plan lost the window.
+	h := newHarness(t, WithAccountUsages([]wsm.AccountUsage{{
+		ConfigDir: personalRoot, ObservedAt: instant.Add(-time.Hour),
+		Session: &wsm.AllowanceFigures{Utilization: 0.41, ResetsAtS: instant.Add(time.Hour).Unix()},
+	}}))
+
+	// Act
+	connected(h)
+	h.r.SetAccount(testWS, personalRoot)
+
+	// Assert
+	if got := enduringOf(t, h).GetUsage().GetSession(); got != nil {
+		t.Fatalf("session allowance = %+v, want none: the five-hour window is not drawn", got)
 	}
 }
 

@@ -379,51 +379,45 @@ func TestFooterAgentsChipRetiresADetachedRunSettledOnTheCallersStream(t *testing
 }
 
 // ---------------------------------------------------------------------------
-// Footer: the allowance cell — composed from TWO facts.
+// Footer: the allowance cell — drawn from the vendor's rate-limit event.
 // ---------------------------------------------------------------------------
 
-func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T) {
+func TestFooterAllowanceDrawnFromARateLimitEvent(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
-	awaitFooter(t, f, footer, "idle before any usage sample", func(v *frontendv1.FooterView) bool {
+	awaitFooter(t, f, footer, "idle before any rate-limit event", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil
 	})
 
 	// The window resets in the FUTURE: a verdict about a window whose reset
 	// has passed is about a window that no longer exists, and is not drawn.
 	resetsAtMs := time.Now().Add(5 * time.Hour).UnixMilli()
+	status := ratelimittest.Allowed(ratelimittest.SevenDay())
+	utilization := 95.0
+	status.UtilizationPercent = &utilization
+	status.ResetsAtMs = &resetsAtMs
 
-	// Act: the FIGURES come from account_usage...
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_AccountUsage{AccountUsage: &conversationv1.SessionAccountUsage{
-			ObservedAtMs: 1_700_000_000_000,
-			Outcome: &conversationv1.SessionAccountUsage_Available{Available: &conversationv1.SessionAccountUsageAvailable{
-				FiveHour: &conversationv1.SessionUsageWindow{UtilizationPercent: 95, ResetsAtMs: resetsAtMs},
-			}},
-		}},
-	})
-	// ...and the VERDICT comes from rate_limit_status, for the same window. An
-	// ALLOWED verdict, because a refusal blocks the session and moves the
-	// enduring line out of the idle cell.
-	f.shim.PushSessionUpdate(ratelimittest.Update(ratelimittest.Allowed(ratelimittest.FiveHour())))
+	// Act: an ALLOWED verdict, because a refusal blocks the session and moves
+	// the enduring line out of the idle cell.
+	f.shim.PushSessionUpdate(ratelimittest.Update(status))
 
-	// Assert: the session allowance carries BOTH the figure (utilization,
-	// reset) from account_usage and the verdict (allowed) from
-	// rate_limit_status -- one cell composed from two different facts.
-	got := awaitFooter(t, f, footer, "the session allowance composed from both facts", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession().GetAllowed() != nil
+	// Assert: the weekly allowance carries the event's figure, reset and
+	// verdict: the account's usage is never sampled, so the event is the one
+	// source of all three.
+	got := awaitFooter(t, f, footer, "the weekly allowance drawn from the event", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall().GetAllowed() != nil
 	})
-	allowance := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession()
+	allowance := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly().GetOverall()
 	if allowance.GetUtilization() != 0.95 {
-		t.Fatalf("the session allowance's utilization = %v, want 0.95 (the account_usage figure, converted)", allowance.GetUtilization())
+		t.Fatalf("the weekly allowance's utilization = %v, want 0.95 (the event's figure, converted)", allowance.GetUtilization())
 	}
 	if allowance.GetResetsAtS() != resetsAtMs/1000 {
-		t.Fatalf("the session allowance's resets_at_s = %d, want the account_usage figure converted to seconds", allowance.GetResetsAtS())
+		t.Fatalf("the weekly allowance's resets_at_s = %d, want the event's reset converted to seconds", allowance.GetResetsAtS())
 	}
 	if !allowance.GetNewsworthy() {
-		t.Fatal("the session allowance is not drawn newsworthy at 95% utilization")
+		t.Fatal("the weekly allowance is not drawn newsworthy at 95% utilization")
 	}
 }
 

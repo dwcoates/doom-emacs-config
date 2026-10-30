@@ -109,7 +109,8 @@ func (u *accountUsage) record(root string) wsm.AccountUsage {
 func usageFromRecord(rec wsm.AccountUsage) *accountUsage {
 	u := &accountUsage{}
 	u.rate.at = rec.ObservedAt
-	u.rate.session.restore(rec.Session)
+	// The five-hour window is never drawn (owner ruling, 2026-10-30), so a
+	// figure kept from before is not restored.
 	u.rate.weekly.restore(rec.Weekly)
 	u.rate.weeklyOpus.restore(rec.WeeklyOpus)
 	u.rate.weeklySonnet.restore(rec.WeeklySonnet)
