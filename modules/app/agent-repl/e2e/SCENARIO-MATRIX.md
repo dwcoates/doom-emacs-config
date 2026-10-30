@@ -90,8 +90,8 @@ Two further limits, stated rather than hidden:
 | `!api-max-output` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!api-oauth-org` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!api-unmodeled` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
-| `!artifact-list` | declared-only | — | — | — | ✓ | ✓ | stream-tool-card | Go: TestArtifactPublishAndList asserts only listTurn.GetValue()!= (turn minted); contract says list produces no row (weak). | covered |
-| `!artifact-publish` | declared-only | — | — | — | ✓ | ✓ | stream-tool-card | Both halves pinned, seam stream-tool-card wired. | covered |
+| `!artifact-list` | declared-only | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
+| `!artifact-publish` | declared-only | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!ask-free` | grounded | — | cards.layer.test.ts | — | ✓ | ✓ | answer-path | Go: TestQuestionFreeText asserts exact free-text echo in OtherText, single_select arm. Web: cards.layer answers with a typed send (SubmitPromptAskAnswered), asserts the open batch removed and the typed text drawn. | covered |
 | `!ask-multi` | grounded | — | cards.layer.test.ts | — | ✓ | ✓ | answer-path | Go: TestQuestionMultiSelect/TestQuestionMultipleInOneBatch assert multi_select arm, exact 2-item Chosen slice, header/answer keyed by text. Web: cards.layer asserts [data-question-mode]. | covered |
 | `!ask-single` | grounded | questions_e2e_test.go | cards.layer.test.ts, perf.layer.test.ts | — | ✓ | ✓ | answer-path | Go: TestQuestionSingleSelect asserts exact chosen-label round-trip, OtherText unset. Web: cards.layer asserts [data-question-option]/[data-ask-hint], and that one option click delivers the one-question batch (answered [data-state]). | covered |
@@ -119,12 +119,12 @@ Two further limits, stated rather than hidden:
 | `!context-window` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!cron` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!cron-create` | grounded | remainder_e2e_test.go | — | — | — | — | — | Go: TestCronCreateSetsTheFootersCronsChip asserts turn Concluded and footer LiveWork.Crons chip Count exactly 1 once the turn has ended. | covered |
-| `!edit` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Go: TestEdit asserts a diff output form. | covered |
+| `!edit` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!fail-aborted-tools` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!fail-blocking-limit` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!fail-budget` | grounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!fail-continuation-prevented` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
-| `!fail-execution` | declared-only | — | — | — | ✓ | ✓ | turn-failure | Go: TestTurnStopErrorDuringExecution asserts errored.GetExecutionError()!=nil. | covered |
+| `!fail-execution` | declared-only | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!fail-hook-stopped` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!fail-image` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!fail-malformed-tool-use` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
@@ -138,12 +138,12 @@ Two further limits, stated rather than hidden:
 | `!fail-tool-deferred` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!fail-tool-deferred-unavailable` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
 | `!fail-turn-setup` | ungrounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
-| `!fast-cooldown` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestAccountUsage. | covered |
-| `!fast-off` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestAccountUsage. | covered |
-| `!fast-on` | grounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestAccountUsage. | covered |
+| `!fast-cooldown` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance. | covered |
+| `!fast-off` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance. | covered |
+| `!fast-on` | grounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance. | covered |
 | `!fault-converter` | ungrounded | producerfaults_e2e_test.go | — | — | ✓ | ✓ | shim-diagnostics | Go: TestConverterDefectOpensADegradedWindow asserts three things — the turn still CONCLUDES, the malformed hook_started drew NO hook card (it reached no arm), and the diagnostics opened a TopbarDegradedWindowWarningDetail with a stated component, a stated reason and a positive began_at_ms. | covered |
 | `!fault-recover` | ungrounded | producerfaults_e2e_test.go | — | — | ✓ | ✓ | shim-diagnostics | Go: TestConverterRecoveryClosesTheDegradedWindow asserts THAT window closed — matched by component plus began_at_ms, not merely "some closed window exists" — with ended_at_ms >= began_at_ms and a dropped_count >= 1 for the one message the converter refused. | covered |
-| `!findings` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves pinned, seam stream-tool-card wired. | covered |
+| `!findings` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!glob` | declared-only | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!grep-content` | declared-only | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!grep-count` | declared-only | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
@@ -152,18 +152,18 @@ Two further limits, stated rather than hidden:
 | `!hook-blocked` | grounded | hooks_e2e_test.go | — | — | ✓ | ✓ | stream-tool-card | Go: TestHookBlocked asserts exact FeedHookBlocked.Reason string. | covered |
 | `!hook-cancelled` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!hook-failed` | grounded | hooks_e2e_test.go | — | — | ✓ | ✓ | stream-tool-card | Go: TestHookFailed asserts exact ExitCode==1 and exact Output.Text. | covered |
-| `!hook-success` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves pinned, seam stream-tool-card wired. | covered |
+| `!hook-success` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!ide-diagnostics` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!ide-diagnostics-write` | grounded | filetools_e2e_test.go | — | — | — | — | — | Go: TestIdeDiagnosticsAfterWrite asserts the diagnostics hang off the tool card NAMED "Write", with composed lines — the write arm of the adjacency join, which a defect once folded onto the edit arm. | covered |
 | `!interrupt` | grounded | interrupt_e2e_test.go | — | emacs_interrupt_e2e_test.go | ✓ | ✓ | interrupt-live-tool | Go: TestInterruptAfterTextDelta asserts InterruptedTurn!=nil, terminal specifically Interrupted. Emacs: TestEmacsForcedRestartInterruptsTheTurn asserts roster arm settles to :interrupted specifically. | covered |
 | `!keepalive` | ungrounded | — | — | — | ✓ | ✓ | keepalive-marker | Both halves are pinned by its goldens (frames.json, feed.json); the `keepalive-marker` seam is wired by TestKeepAliveStoresNothingOnEitherPlane. | covered |
 | `!max-tokens` | grounded | — | — | — | ✓ | ✓ | turn-failure | Both halves are pinned by its goldens (frames.json, feed.json); the `turn-failure` seam is wired by TestApiRateLimitedCarriesTheVendorWait. | covered |
-| `!mcp-all` | grounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestAccountUsage. | covered |
-| `!mcp-healthy` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestAccountUsage. | covered |
+| `!mcp-all` | grounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance. | covered |
+| `!mcp-healthy` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance. | covered |
 | `!mcp-tool` | grounded | mcpmonitors_e2e_test.go | — | — | — | — | — | Go: TestMcpToolCall asserts the turn's settled FeedSimpleToolCall headed mcp__echo__echo carries the tool's text, and no TopbarWarning.UnmodeledTool names it. | covered |
-| `!md` | ungrounded | — | — | — | ✓ | ✓ | prompt-round-trip | Both halves pinned, seam prompt-round-trip wired. | covered |
+| `!md` | ungrounded | — | — | — | ✓ | ✓ | prompt-round-trip | Both halves are pinned by its goldens (frames.json, feed.json); the `prompt-round-trip` seam is wired by TestTurnStartToCompletion. | covered |
 | `!memory` | declared-only | — | — | — | ✓ | ✓ | two-plane-episode | Both halves are pinned by its goldens (frames.json, feed.json); the `two-plane-episode` seam is wired by TestPlanModeCoalescesOntoOneBubble, TestResidueAttachmentsDrawNoRow. | covered |
-| `!model-fallback` | grounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestAccountUsage. | covered |
+| `!model-fallback` | grounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance. | covered |
 | `!monitor-deadline` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!monitor-persistent` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `<!--agent-repl:network-resume-->` (marker) | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario; the shim's own network-resume prompt selects it, and the shim integration suite drives it end to end (test/integration/detached.test.ts). | uncovered |
@@ -182,9 +182,9 @@ Two further limits, stated rather than hidden:
 | `!push-user-present` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!query-eof` | ungrounded | producerfaults_e2e_test.go | — | — | ✓ | ✓ | query-death | Go: TestQueryEofEndsTheTurnAsQueryDied asserts the terminal is specifically FeedTurnEndedErrored.query_died with cause unexpected_eof (never concluded, never a generic vendor failure) plus a composed headline; TestQueryDiedRaisesTheFootersTurnDiedFault asserts the footer's agent_repl_fault · turn_died (a dead query is agent-repl's fault, never a block) and its FooterStatusActivityTurnEnded line. | covered |
 | `!query-eof-mid-ask` | ungrounded | producerfaults_e2e_test.go | — | — | — | — | — | Go: TestQueryEofMidAskDeniesTheOpenAsk asserts the ask genuinely OPENED, then that the death settles it — FeedPermissionAnswered.denied_by_user, the gate's stand-down — and that the turn still ends on query_died. The fate of the in-flight ask, not only the notice. | covered |
-| `!query-fail` | ungrounded | — | — | — | ✓ | ✓ | query-death | Go: TestQueryFailEndsTheTurnAsQueryDied asserts FeedTurnEndedErrored.query_died with cause iterator_failure specifically, separating the rejecting iterable from the EOF half. | covered |
+| `!query-fail` | ungrounded | — | — | — | ✓ | ✓ | query-death | Both halves are pinned by its goldens (frames.json, feed.json); the `query-death` seam is wired by TestQueryEofEndsTheTurnAsQueryDied. | covered |
 | `!queue-vendor-turn` | ungrounded | hibernation_e2e_test.go | — | — | — | — | — | Go: TestCompletedTaskBesideKeepAliveAnchorsTheRewind asserts the next rewind anchors on the completed task's adopted turn and discards exactly [keepalive], no rewind is refused, and the vendor's own answer is drawn; TestKeepAliveAnswerAfterVendorTurnNeverServed asserts no keep-alive row is served beside it. | covered |
-| `!rate-limit` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestAccountUsage. | covered |
+| `!rate-limit` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance. | covered |
 | `!rate-limit-five-hour` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario. | uncovered |
 | `!rate-limit-seven-day` | ungrounded | sessionfacts_e2e_test.go | — | — | — | — | — | Go: TestRateLimitSevenDayWindowFeedsTheWeeklyAllowance asserts the weekly `FooterAllowance` of the enduring usage line carries the event's `allowed_warning` verdict, its 0.91 utilization and a non-zero `resets_at_s`, the specific negative that no salient line stands, and the event's session-arm record. | covered |
 | `!read` | grounded | footeractivity_e2e_test.go | — | — | ✓ | ✓ | stream-tool-card | Go: TestReadWholeHeadRange asserts code output form, paint spans, omitted-line composed for the cut. | covered |
@@ -198,9 +198,9 @@ Two further limits, stated rather than hidden:
 | `!rotate` | grounded | identityrotation_e2e_test.go | — | — | ✓ | ✓ | clear-rotation | Go: TestClearRotatesIdentity/TestSecondRotateUnderRotatedIdentity assert exact new session-line value, distinct Cleared rows. | covered |
 | `!send-message` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!send-message-refused` | ungrounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
-| `!send-message-resumed` | ungrounded | — | — | — | ✓ | ✓ | stream-tool-card | Go: TestSendMessageQueuedAndResumed waits on FeedAgentPrompt.resumed_recipient (the arm that says a DORMANT agent was restarted), asserts the address is the composed `→ <recipient>` form naming the minted recipient — never the `an agent the send did not name` stand-in — and the body is the summary `resume the sweep`. | covered |
+| `!send-message-resumed` | ungrounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!skill` | grounded | skills_e2e_test.go | — | — | ✓ | ✓ | skill | Go: TestSkillInvocation/TestSkillNamedAndArgsParameterized assert exact byte-for-byte Document.Markdown match. | covered |
-| `!skill-fail` | ungrounded | — | — | — | ✓ | ✓ | skill | Both halves pinned, seam skill wired. | covered |
+| `!skill-fail` | ungrounded | — | — | — | ✓ | ✓ | skill | Both halves are pinned by its goldens (frames.json, feed.json); the `skill` seam is wired by TestSkillInvocation. | covered |
 | `!skills-injected` | declared-only | — | — | — | ✓ | ✓ | two-plane-episode | Both halves are pinned by its goldens (frames.json, feed.json); the `two-plane-episode` seam is wired by TestPlanModeCoalescesOntoOneBubble, TestResidueAttachmentsDrawNoRow. | covered |
 | `!slash` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!slash-shape-a` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario. | uncovered |
@@ -219,24 +219,15 @@ Two further limits, stated rather than hidden:
 | `!task-create` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!task-reject` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!tokens-reminder` | ungrounded | producerfaults_e2e_test.go | — | — | — | — | — | Go: TestTokensReminderDrawsNoRow asserts the only-prose-rows negative AND the negative that no footer salient line was minted from a TOKEN-COUNT reminder. | covered |
-| `!unmodeled` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Go: TestUnmodeledTool asserts exactly 1 TopbarWarning.UnmodeledTool for StructuredOutput, feed rows never mention it. | covered |
-| `!usage-available` | grounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestAccountUsage. | covered |
-| `!usage-full` | grounded | accounting_e2e_test.go | — | — | ✓ | ✓ | session-footer | Go: TestAccountUsage (same log-record assertion as usage-available). | covered |
+| `!unmodeled` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!usage-historical` | ungrounded | subagents_e2e_test.go | — | — | — | — | — | Go: TestNestedSubagentHistoricalUsage asserts specifically that NO subagent bubble row is fabricated on the root feed (a shape-absence check) alongside Concluded. | covered |
-| `!usage-opus-absent` | ungrounded | sessionfacts_e2e_test.go | — | — | ✓ | ✓ | session-footer | Go: TestAccountUsageOpusAbsentIsReadAndRetiresTheLine stands a rate line on the weekly EVENT over an unread probe, drives this scenario, and asserts the drawn consequence of an available outcome that is NOT an unavailability: its reprobe READS and re-files the sub-threshold weekly figure, so `FooterStatusActivityRateLimited` goes away entirely (a specific negative an unread arm would not produce). Exact conclusion prose pinned too. | covered |
-| `!usage-sampling-failure` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestAccountUsage. | covered |
-| `!usage-seat-spend` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario. | uncovered |
-| `!usage-seat-spend-unreported` | ungrounded | — | — | — | — | — | — | No counted e2e layer drives this scenario. | uncovered |
-| `!usage-service-unavailable` | ungrounded | sessionfacts_e2e_test.go | — | — | ✓ | ✓ | session-footer | Go: TestAccountUsageUnreadArmsLeaveTheReadFiguresStanding/service_unavailable asserts the daemon's `usage_sample_unreadable` breadcrumb names this reason, and that the line the weekly event then opens still draws the session 0.41 a prior READABLE sample filed, with that reading's `figures_read_at_ms` and no unread caveat (owner ruling fc4917be4). Exact conclusion prose pinned. TestSampledPerModelWeeklyWindowsAreDrawnBesideTheOverallOne drives this scenario too and asserts the start-time sample's per-model weekly windows land on `FooterWeeklyModelAllowances` (opus 0.77, sonnet 0.21) beside the overall 0.63. | covered |
-| `!usage-utilization-unavailable` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestAccountUsage. | covered |
-| `!usage-window-unavailable` | ungrounded | — | — | — | ✓ | ✓ | session-footer | Both halves are pinned by its goldens (frames.json, feed.json); the `session-footer` seam is wired by TestAccountUsage. | covered |
 | `!vendor-backgrounded` | grounded | — | — | — | ✓ | ✓ | shell-spool | Both halves are pinned by its goldens (frames.json, feed.json); the `shell-spool` seam is wired by TestBashDetachedStartAndComplete. | covered |
 | `!wakeup-schedule` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!wakeup-stop` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!web-fetch` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!web-fetch-redirect` | ungrounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
-| `!web-search` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves pinned, seam stream-tool-card wired. Both halves pinned, seam stream-tool-card wired. | covered |
-| `!worktree-keep` | declared-only | — | — | — | ✓ | ✓ | stream-tool-card | Both halves pinned, seam stream-tool-card wired. | covered |
+| `!web-search` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
+| `!worktree-keep` | declared-only | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!worktree-remove` | declared-only | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!write-create` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
 | `!write-update` | grounded | — | — | — | ✓ | ✓ | stream-tool-card | Both halves are pinned by its goldens (frames.json, feed.json); the `stream-tool-card` seam is wired by TestBashForegroundCompleted. | covered |
@@ -249,16 +240,16 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Shim half pinned: 132 scenarios
-- Daemon half pinned: 132 scenarios
+- Shim half pinned: 125 scenarios
+- Daemon half pinned: 125 scenarios
 - Seam families: 18, each wired by its e2e test
-- Covered (at least one STRONG, specific-shape assertion in a counted layer, or both halves pinned with a wired seam): **153**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer, or both halves pinned with a wired seam): **146**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **0**
-- Uncovered (no counted layer drives the scenario, and its halves are not both pinned with a wired seam): **9**
-- Total canonical scenarios: 162
+- Uncovered (no counted layer drives the scenario, and its halves are not both pinned with a wired seam): **7**
+- Total canonical scenarios: 153
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 47 scenarios referenced across 27 files
+- Go e2e (non-emacs): 44 scenarios referenced across 27 files
 - Webapp layer: 9 scenarios referenced across 2 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 
@@ -281,8 +272,6 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 - `!slash-shape-a`
 - `!subagent-network-failed`
 - `!subagent-resumed`
-- `!usage-seat-spend-unreported`
-- `!usage-seat-spend`
 - `<!--agent-repl:network-resume-->` (marker)
 
 <!-- END DERIVED: uncovered -->

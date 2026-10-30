@@ -1,43 +1,12 @@
-// accounting_e2e_test.go — SPEC.md §C "Usage / accounting" (#58-59). See
+// accounting_e2e_test.go — SPEC.md §C "Usage / accounting" (#59). See
 // SPEC.md (read-only) for the harness this file builds on: NewWorld,
 // SubmitPrompt/AwaitTurnEnded, driveScenarioToCompletion, harness.Register.
 //
-// Contract citations:
+// #58 (AccountUsage, `!usage-full`) is retired: the account's usage is never
+// sampled (2026-10-30), and the allowances it fed are drawn from rate-limit
+// events, which sessionfacts_e2e_test.go's rate-limit tests drive.
 //
-//   - #58 AccountUsage drives `!usage-full`
-//     (agent-shim/claude/shim/src/fake/scenarios/session.ts). USAGE_FULL's
-//     own doc comment names it as "the SAME available shape under the name
-//     the e2e roster reaches for" — i.e. this scenario is the one this
-//     suite is meant to drive for this golden, distinct from
-//     `!usage-available` (same shape, older name) and from
-//     `!usage-subagent`, which the SPEC's own §C entry says is "a
-//     DIFFERENT, narrower fixture [that] does not cover this golden."
-//     `usage-full` sets every window (`five_hour`, `seven_day`,
-//     `seven_day_oauth_apps`, `seven_day_opus`, `seven_day_sonnet`,
-//     `model_scoped`, `extra_usage`) via the same `accountInfo`/
-//     `usage_EXPERIMENTAL` controls docs/overhaul/shim.md §"Session facts
-//     with no message behind them" describes ("account usage →
-//     query.usage_EXPERIMENTAL…()"), landing as
-//     conversation.v1 SessionUpdate.account_usage
-//     (SessionAccountUsage/SessionAccountUsageAvailable). The captured
-//     golden `account-usage`
-//     (agent-shim/claude/shim/testdata/captures/MANIFEST.md) grounds the
-//     same shape from a real vendor recording of the identical controls;
-//     this suite drives the scripted `--fake` shim, never a replayed
-//     capture, so what is asserted here is the scripted push landing and
-//     being filed by the daemon (daemon/internal/resolve/footer/
-//     resolver.go's `observeAccountUsage`), not the capture itself.
-//     The account-usage figures this scenario sets (five_hour 41%, weekly
-//     windows single digits to 13%) sit below the footer's
-//     DefaultRateLimitNewsworthyThreshold (0.8,
-//     daemon/internal/resolve/footer/api.go), so the allowance never
-//     surfaces as a drawn "rate limited" status line — that line is gated
-//     on a SEPARATE newsworthiness fact this golden does not exercise. The
-//     assertable contract fact at this scenario's own figures is that the
-//     push arrived and was filed, observed via the daemon's own structured
-//     log record for the arm (an explicitly sanctioned wait signal per
-//     SPEC.md §B "Waits": "a LogRecord in the daemon's, store's, or
-//     sidecar's own structured log").
+// Contract citations:
 //
 //   - #59 ContextUsage drives `!context-usage-drift` (session.ts), one of
 //     "the e2e mock additions" docs/overhaul/shim.md documents for exactly
@@ -59,7 +28,7 @@
 //     it moved is the push contract in action — the TEST never calls any
 //     pull verb itself.
 //
-// Neither `usage-full` nor `context-usage-drift` carries an
+// `context-usage-drift` carries no
 // UNGROUNDED/INVENTED/DECLARED-ONLY mark in
 // agent-shim/claude/shim/testdata/captures/MANIFEST.md.
 //
@@ -70,7 +39,7 @@
 // manifest marks UNGROUNDED/INVENTED, and that this file should drive it.
 // SPEC.md §C instead assigns `!usage-historical` to test #30
 // (NestedSubagentHistoricalUsage, subagents_e2e_test.go's own row) and this
-// file's assigned entries are #58-59 (AccountUsage, ContextUsage) only —
+// file's assigned entry is #59 (ContextUsage) only —
 // neither citing usage-historical, and SPEC.md's §D scenario-mapping table
 // lists `!usage-historical` only under §D's "extra options" list feeding
 // test #30, never under account-usage or context-usage. This file therefore
@@ -89,7 +58,6 @@ import (
 
 	"connectrpc.com/connect"
 
-	"agent-repld/integration/harness"
 )
 
 // submitCommand submits a daemon-recognized slash command (never a plain
@@ -116,75 +84,6 @@ func submitCommand(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, command
 		t.Fatalf("SubmitPrompt(%q) = %v, want a success", command, resp.Msg)
 	}
 	return success
-}
-
-// TestAccountUsage drives #58: `!usage-full` pushes
-// conversation.v1 SessionUpdate.account_usage, and the daemon's footer
-// resolver files it (daemon/internal/resolve/footer/resolver.go's
-// observeAccountUsage), observed via the resolver's own structured log
-// record for the arm — see this file's header comment for why the figures
-// this scenario carries never cross the footer's separate newsworthiness
-// threshold and so are not asserted as a drawn status line.
-//
-// Seam: session-footer
-func TestAccountUsage(t *testing.T) {
-	t.Parallel()
-	// Arrange: one world, one (fake-git) repository registered as a
-	// workspace.
-	w := NewWorld(t, WorldOpts{})
-	repo, ws := w.NewRepoWorkspace(t)
-
-	// Act: drive the scenario that switches the account-usage probe to the
-	// full/available shape, to its own turn-ended, store-durable
-	// completion.
-	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-full")
-
-	// Assert: the turn concluded (this scenario's own golden terminal is
-	// success.completed).
-	row := AwaitTurnEnded(t, w, ws, turn)
-	if row.GetTurnEnded().GetConcluded() == nil {
-		t.Fatalf("usage-full turn ended = %v, want a concluded (success.completed) outcome", row.GetTurnEnded())
-	}
-
-	// Assert: the daemon's own footer resolver logged that it took the
-	// account_usage arm off the session stream for this workspace — the
-	// structured-log wait signal SPEC.md §B names for exactly this
-	// situation (a fact with no user-visible surface at this scenario's own
-	// figures), read from the WORKSPACE's own daemon sink.
-	// The resolver files through the WORKSPACE-BOUND logger (its mutate
-	// helper is keyed by workspace), so the record lands on the workspace's
-	// own daemon sink, never on the restart-scoped daemon.run.log.
-	w.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "daemon"), "the footer resolver to file an account_usage session update", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.footer.on_session_update" && r.Context["arm"] == "account_usage"
-	})
-
-	// Assert the FRONTEND consequence. A SAMPLE is the account's figures, so
-	// they are the enduring usage line's, drawn whatever they are.
-	// `usage-full`'s five_hour window is 41% (agent-shim/claude/shim/src/fake/
-	// catalogs.ts fakeAccountUsage), drawn on the enduring usage line.
-	assertTheSampleDrawsOnlyTheEnduringUsage(t, w, ws)
-}
-
-// assertTheSampleDrawsOnlyTheEnduringUsage fails if the footer stands a
-// salient line, or draws the sample's figures anywhere but the enduring usage
-// line. It opens a FRESH footer stream and reads its FIRST view: a newly
-// opened stream is served the CURRENT resolved state, so — called after the
-// resolver's own account_usage log record has been observed — the view it
-// answers necessarily already carries the filed sample. No sleep, and no
-// waiting for the absence of something.
-func assertTheSampleDrawsOnlyTheEnduringUsage(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
-	t.Helper()
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
-	view := harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer's current view after the usage sample was filed", func(*frontendv1.FooterView) bool {
-		return true
-	})
-	if salient := footerTier(view, "salient"); salient != nil {
-		t.Errorf("footer stands salient line %v after a sample, want none: a sample feeds the enduring usage line only", salient)
-	}
-	if footerEnduringUsage(view).GetSession() == nil {
-		t.Errorf("footer view %v, want the sample's session figure on the enduring usage line", view.GetStrip().GetStatus())
-	}
 }
 
 // TestContextUsage drives #59: `!context-usage-drift` pushes a GROWING
