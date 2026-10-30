@@ -50,6 +50,7 @@ import { landChatAtEnd } from "./scroll.js";
 import { mountFooter } from "./footer/footer.js";
 import { installResponseUsageHover } from "./feed/response-usage.js";
 import { pageFocusLeft } from "./focus-left.js";
+import { pageWebhostPresses } from "./webhost-pressed.js";
 import { adoptAtBoot, startLifecycle } from "./lifecycle/lifecycle.js";
 import { createRevealRelay } from "./lifecycle/reveal-relay.js";
 import { mountLoginOverlay } from "./login/login.js";
@@ -181,6 +182,7 @@ export async function boot(): Promise<void> {
       levelWindow,
       editorIngress,
       focusLeft: pageFocusLeft(),
+      webhostPresses: pageWebhostPresses(document),
       restyleTurns: pageRestyleTurns(document),
     });
 

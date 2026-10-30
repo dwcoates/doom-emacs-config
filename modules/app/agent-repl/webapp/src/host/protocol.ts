@@ -80,6 +80,17 @@ interface FocusMovedMessage {
 }
 
 /**
+ * host -> page: the reader pressed the webhost's own document (its sidebar):
+ * a click inside the webapp outside every page, which ends what a click on
+ * the page's own background would (webhost-pressed.ts). Sent to every page,
+ * since a press never lands in a page's document.
+ */
+interface WebhostPressedMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "webhostPressed";
+}
+
+/**
  * host -> page: whether the webhost draws the sidebar over the page's sidebar
  * column. While it does, the page keeps that column empty and reserved, so its
  * main column and docked gate sit exactly where they would beside its own
@@ -164,6 +175,7 @@ export type HostToPage =
   | PresenceMessage
   | DismissDigestMessage
   | FocusMovedMessage
+  | WebhostPressedMessage
   | SidebarDockMessage
   | WebhostFailuresMessage;
 
@@ -265,6 +277,8 @@ export function parseHostToPage(data: unknown): HostToPage | null {
       return { channel: HOST_CHANNEL, kind: "restyleGranted" };
     case "focusMoved":
       return { channel: HOST_CHANNEL, kind: "focusMoved" };
+    case "webhostPressed":
+      return { channel: HOST_CHANNEL, kind: "webhostPressed" };
     case "logLevel": {
       if (!isWindowLevel(data.level)) return null;
       if (data.level === "info") {

@@ -15,6 +15,7 @@ describe("parseHostToPage", () => {
     ],
     ["dismissDigest", { channel: HOST_CHANNEL, kind: "dismissDigest" }],
     ["focusMoved", { channel: HOST_CHANNEL, kind: "focusMoved" }],
+    ["webhostPressed", { channel: HOST_CHANNEL, kind: "webhostPressed" }],
     ["restyleGranted", { channel: HOST_CHANNEL, kind: "restyleGranted" }],
     ["sidebarDock", { channel: HOST_CHANNEL, kind: "sidebarDock", docked: true }],
     ["logLevel opening a window", { channel: HOST_CHANNEL, kind: "logLevel", level: "debug", untilMs: 1_060_000 }],

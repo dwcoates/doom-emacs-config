@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { onResponseHighlightTaken } from "../../../src/feed/response-highlight.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
@@ -2684,6 +2685,28 @@ describe("a final response revised from highlighted words", () => {
     drawFeedResponse(settled("alpha omega", { revision: { state: { case: "pending", value: {} } } }), rowContext(before));
     // Assert
     expect(document.getSelection()?.toString()).toBe("");
+  });
+
+  it("tells the page's response highlight that the sent prompt took its row", () => {
+    // Arrange
+    const taken: string[] = [];
+    const stop = onResponseHighlightTaken(document, (row) => taken.push(row));
+    // Act
+    drawFeedResponse(settled("alpha omega", { revision: { state: { case: "pending", value: {} } } }), rowContext(original()));
+    // Assert
+    stop();
+    expect(taken).toEqual(["row-1"]);
+  });
+
+  it("tells the page's response highlight nothing while no revision is pending", () => {
+    // Arrange
+    const taken: string[] = [];
+    const stop = onResponseHighlightTaken(document, (row) => taken.push(row));
+    // Act
+    drawFeedResponse(settled("alpha omega"), rowContext(original()));
+    // Assert
+    stop();
+    expect(taken).toEqual([]);
   });
 
   it("leaves a highlight elsewhere on the page standing", () => {

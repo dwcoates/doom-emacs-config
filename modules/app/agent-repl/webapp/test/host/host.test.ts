@@ -1202,6 +1202,33 @@ describe("the webhost's sidebar", () => {
     expect([outcome, toA, toB]).toEqual(["sent", [moved], [moved]]);
   });
 
+  it("tells every page the reader pressed the webhost's own document", () => {
+    // Arrange
+    pages(host, "a", "b");
+    const toA = postsTo("a");
+    const toB = postsTo("b");
+
+    // Act
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+
+    // Assert
+    const pressed = { channel: HOST_CHANNEL, kind: "webhostPressed" };
+    expect([toA, toB]).toEqual([[pressed], [pressed]]);
+  });
+
+  it("tells no page of a press once disposed", () => {
+    // Arrange
+    pages(host, "a");
+    const toA = postsTo("a");
+    host.dispose();
+
+    // Act
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+
+    // Assert
+    expect(toA).toEqual([]);
+  });
+
   it("tells the webhost's own document Emacs moved its focus, so its sidebar lets go", () => {
     // Arrange
     const left: string[] = [];

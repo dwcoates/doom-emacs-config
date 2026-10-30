@@ -609,6 +609,14 @@ export function createHost(env: HostEnv): Host {
     take(frame, message);
   };
   win.addEventListener("message", onMessage);
+  // A PRESS ON THE WEBHOST'S OWN DOCUMENT (its sidebar) is a click inside the
+  // webapp outside every page, which no page's document sees: every page is
+  // told, so it ends what a click on its own background would
+  // (webhost-pressed.ts). A press inside a page's iframe never reaches here.
+  const onPointerDown = (): void => {
+    broadcast({ channel: HOST_CHANNEL, kind: "webhostPressed" });
+  };
+  doc.addEventListener("pointerdown", onPointerDown, { capture: true });
 
   const measure = env.measure ?? ((element: Element) => element.getBoundingClientRect());
 
@@ -982,6 +990,7 @@ export function createHost(env: HostEnv): Host {
       win.removeEventListener("message", onMessage);
       for (const id of [...incoming.keys()]) dropIncoming(id);
       for (const frame of frames.values()) frame.iframe.remove();
+      doc.removeEventListener("pointerdown", onPointerDown, { capture: true });
       frames.clear();
       heldBack.clear();
       shownId = null;

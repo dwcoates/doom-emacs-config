@@ -13,6 +13,7 @@ import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
 import { createWebhostFailureView, type WebhostFailureView } from "../../src/failure/webhost.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
 import { createRestyleTurns, type RestyleTurnsSource } from "../../src/host/restyle-turn.js";
+import { createWebhostPresses, type WebhostPressSource } from "../../src/webhost-pressed.js";
 
 let pageWin: Window;
 let pageDoc: Document;
@@ -24,6 +25,8 @@ let webhostFailures: WebhostFailureView;
 let editorIngress: EditorIngressView;
 let focusLeft: FocusLeftSource;
 let restyleTurns: RestyleTurnsSource;
+let webhostPresses: WebhostPressSource;
+let presses: number;
 let leftFor: string[];
 let link: HostLink | null;
 let received: PageToHost[];
@@ -81,11 +84,16 @@ beforeEach(() => {
   editorIngress = createEditorIngressView();
   focusLeft = createFocusLeft(pageWin, presence);
   restyleTurns = createRestyleTurns();
+  webhostPresses = createWebhostPresses();
+  presses = 0;
+  webhostPresses.onPressed(() => {
+    presses += 1;
+  });
   leftFor = [];
   focusLeft.onLeft((why) => leftFor.push(why));
   clock = 1_000_000;
   levelWindow = new LevelWindow({ level: "info", untilMs: null }, () => clock);
-  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns });
+  link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, webhostPresses, restyleTurns });
 });
 
 afterEach(() => {
@@ -104,7 +112,7 @@ describe("joining", () => {
     const alone = createPresence(document, false);
 
     // Act
-    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns });
+    const none = connectToHost({ doc: document, win: window, presence: alone, webhostFailures, levelWindow, editorIngress, focusLeft, webhostPresses, restyleTurns });
 
 
     // Assert
@@ -256,7 +264,7 @@ describe("a bubble expanded over the webapp", () => {
     if (!open) pageDoc.documentElement.setAttribute("data-bubble-overlay", "response");
     link?.dispose();
     received = [];
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, webhostPresses, restyleTurns });
     await delivered();
     received = [];
 
@@ -278,6 +286,16 @@ describe("Emacs moving its focus", () => {
 
     // Assert
     expect(leftFor).toEqual([FOCUS_LEFT_EMACS]);
+  });
+});
+
+describe("the reader pressing the webhost", () => {
+  it("tells the page's webhost-press signal", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "webhostPressed" });
+
+    // Assert
+    expect(presses).toBe(1);
   });
 });
 
@@ -326,7 +344,7 @@ describe("reported facts", () => {
     received = [];
 
     // Act
-    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns });
+    link = connectToHost({ doc: pageDoc, win: pageWin, presence, webhostFailures, levelWindow, editorIngress, focusLeft, webhostPresses, restyleTurns });
 
     // Assert
     await delivered();
