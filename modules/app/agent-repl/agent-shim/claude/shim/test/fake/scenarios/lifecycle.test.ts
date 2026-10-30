@@ -23,8 +23,11 @@ describe("query death by EOF", () => {
     // it would have done had the iterable rejected.
     const driven = await driveScenario(["!query-eof"]);
 
-    // Assert. Only the init got through.
-    expect(driven.messages.map((m) => (m as { type: string }).type)).toEqual(["system"]);
+    // Assert. Only the init and the session state the CLI states as the turn
+    // starts got through: no reply and no result.
+    expect(
+      driven.messages.map((m) => `${(m as { type: string }).type}:${(m as { subtype?: string }).subtype ?? ""}`),
+    ).toEqual(["system:init", "system:session_state_changed"]);
   });
 
   it("still recorded the prompt before dying", async () => {
