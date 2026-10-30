@@ -1,6 +1,6 @@
 ---
 name: agent-repl-tests
-description: 'Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage, and so every new or changed test obeys the host CPU governor. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or runs tests for a change: every run goes through `agent-repld test run`, naming only the tests needed. Holds the measured test-performance pitfalls and their fixes as a living list.'
+description: 'Write or change agent-repl tests (Go unit/integration/e2e, vitest, ERT, shell harnesses) so they are fast and cheap WITHOUT losing any coverage, and so every new or changed test obeys the host CPU governor. Use whenever an agent adds, changes, speeds up, or stabilizes a test anywhere under modules/app/agent-repl, writes a test fixture or harness helper, or runs tests for a change: every run goes through `agent-repld test run`, naming only the tests the change added or changed. Holds the measured test-performance pitfalls and their fixes as a living list.'
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
@@ -24,9 +24,9 @@ workspace's own `bin/test-all.sh` with the selection, so the run takes
 background priority, the host's one test-CPU budget, and the runner's own
 log.
 
-Name only the tests you need: the tests covering what you changed. Never
-the full suite: the merge queue runs it as the gate of every landing (the
-metaprompt's "When to run which tests" rules how broad a run is).
+Name only the tests your own work added or changed. Every other test, and
+the full suite, runs only in the merge queue's gate (the metaprompt's "When
+to run which tests" rules how broad a run is).
 
 Selections (each a repeatable flag; paths relative to the working directory
 or absolute, inside the workspace's worktree):
@@ -187,9 +187,9 @@ coverage impact (always none).
    - Evidence: units run at `taskpolicy -d utility`; on the run's RAM disk a 4KB fsync is p50 0.1ms but p90 166ms, p99 330ms during a run, and 86ms per fsync whenever default-tier I/O touches the same volume (the SSD shows no such effect) (test-speed investigation, fourth round).
    - Consequence for test design: every fsync and every small write in a hot test loop can cost tens of milliseconds under load. Write less (pitfalls 2-4), batch, and never fsync in a test unless the fsync is the subject.
 
-7. **Running a whole suite when a targeted run would do.**
+7. **Running tests beyond the ones the change added or changed.**
    - Evidence: the host has ONE suite slot shared by every session's full runs and every merge gate; gates waited 64-338s for it before any suite started, and a load average of 25-95 turned timing-sensitive tests red across unrelated merges (docs/investigations/2026-10-12-merge-queue-latency.md).
-   - Fix: run only the tests you need, through `agent-repld test run` (see "Running tests"); never the full suite, which is the merge queue's gate.
+   - Fix: run only the tests your own work added or changed, through `agent-repld test run` (see "Running tests"); every other test is the merge queue's gate.
 
 8. **Sequential waits that could overlap.**
    - Fix: `t.Parallel()` with per-test isolation (own temp dirs, own state roots, own sockets); wait-bound packages overlap 8 tests per chunk (df9f409ed; 16 per chunk was slower and failed).
