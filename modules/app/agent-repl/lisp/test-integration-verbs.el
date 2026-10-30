@@ -1864,9 +1864,15 @@ are stubbed."
                         :name agent-repl-itest-verbs--ws))
         (cl-letf (((symbol-function 'agent-repl--ws-current-name)
                    (lambda () agent-repl-itest-verbs--ws))
+                  ;; `SPC TAB n' is fixed to doom's repository, found through git;
+                  ;; git is never reached in a test, so the roster's one section stands in.
+                  ((symbol-function 'agent-repl-verbs--agent-repl-repository)
+                   (lambda ()
+                     (agent-repl-verbs--section-ref
+                      (agent-repl-verbs--section-of-ws agent-repl-itest-verbs--ws))))
                   ((symbol-function 'completing-read)
                    (lambda (&rest _)
-                     (error "a dynamic create must not ask for a repository")))
+                     (error "`SPC TAB n' must not ask for a repository")))
                   ((symbol-function 'read-string)
                    (lambda (prompt &optional initial &rest _) (ignore prompt initial) "")))
           ;; Act.
