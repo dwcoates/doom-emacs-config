@@ -1222,6 +1222,24 @@ CURRENT is shown.  Binds `requests' to the (WS TRIGGER) pairs requested."
     (agent-repl-switch-working-right)
     (should (equal agent-repl-test-commands--switched "a"))))
 
+(ert-deftest agent-repl-test-commands-switch-working-includes-recently-prompted ()
+  "An idle tab the user prompted within 15 minutes is in the working ring."
+  (agent-repl-test-commands--with-working '(("a" . :thinking) ("b" . :done) ("c" . :done)) "a"
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (ws key) (and (equal ws "c") (eq key :composer-prompted-at)
+                                     (- (float-time) 60)))))
+      (agent-repl-switch-working-right)
+      (should (equal agent-repl-test-commands--switched "c")))))
+
+(ert-deftest agent-repl-test-commands-switch-working-skips-stale-prompted ()
+  "An idle tab last prompted over 15 minutes ago is passed over."
+  (agent-repl-test-commands--with-working '(("a" . :thinking) ("b" . :done) ("c" . :thinking)) "a"
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (ws key) (and (equal ws "b") (eq key :composer-prompted-at)
+                                     (- (float-time) 1000)))))
+      (agent-repl-switch-working-right)
+      (should (equal agent-repl-test-commands--switched "c")))))
+
 (ert-deftest agent-repl-test-commands-switch-older-lands-on-the-previously-viewed ()
   "`s-[' from the most recent goes to the workspace viewed before it."
   (agent-repl-test-commands--with-history '("a" "b" "c") nil '("c" "a" "b") "c"

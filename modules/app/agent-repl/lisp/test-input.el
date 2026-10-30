@@ -188,6 +188,28 @@ fake would not exercise them."
     ;; Assert
     (should (equal (agent-repl-test-input--composer-text) ""))))
 
+(ert-deftest agent-repl-input-a-composer-send-stamps-the-prompted-time ()
+  "A from-composer send records when the user prompted the workspace."
+  (agent-repl-test-input--with
+    (let ((puts nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-put)
+                 (lambda (ws key val) (push (list ws key val) puts))))
+        (agent-repl-test-input--type "my draft")
+        (agent-repl--send :user-sent))
+      (let ((stamp (seq-find (lambda (p) (eq (nth 1 p) :composer-prompted-at)) puts)))
+        (should stamp)
+        (should (equal (car stamp) "ws-one"))
+        (should (floatp (nth 2 stamp)))))))
+
+(ert-deftest agent-repl-input-an-explicit-text-send-does-not-stamp-the-prompted-time ()
+  "A canned command is not the user prompting from the composer."
+  (agent-repl-test-input--with
+    (let ((puts nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-put)
+                 (lambda (ws key val) (push (list ws key val) puts))))
+        (agent-repl--send :command-update-pr "update the pr"))
+      (should-not (seq-find (lambda (p) (eq (nth 1 p) :composer-prompted-at)) puts)))))
+
 (ert-deftest agent-repl-input-an-explicit-text-send-keeps-the-draft ()
   "A canned command composed its own words and must not eat an unrelated draft."
   (agent-repl-test-input--with
