@@ -53,6 +53,7 @@ func TestParsePromptReadsEntries(t *testing.T) {
 		{name: "a label and an em dash", text: "2 — my answer", want: lines("entries", `  2 ^- = "my answer"`, "")},
 		{name: "a dotted label alone, then words", text: "3.1 my answer", want: lines("entries", "  3 ^- ·", `  3.1 ^0 = "my answer"`, "")},
 		{name: "a label with nothing after it", text: "3.1 -", want: lines("entries", "  3 ^- ·", `  3.1 ^0 = ""`, "")},
+		{name: "an entry whose words hold a NUL byte", text: "3.1 - a\x00b", want: lines("entries", "  3 ^- ·", `  3.1 ^0 = "a\x00b"`, "")},
 		{
 			name: "an entry is its one line, and the line after it is prose",
 			text: "3.1 - first\nmore of it\n",
@@ -124,6 +125,7 @@ func TestParsePromptLeavesTextWithNoEntryAsParseReadsIt(t *testing.T) {
 		{name: "a bare number opening a line", text: "10 items are left"},
 		{name: "a markdown ordered list", text: "1. First\n2. Second"},
 		{name: "a pasted tree, whose roots open on a marker", text: "1 🔧 Fixed it\n└── 1.1 a detail"},
+		{name: "a pasted binary holding NUL bytes", text: "Show\x00 \x02:\x01\nHide\x00\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -144,6 +146,7 @@ func TestParsePromptKeepsTheTextAsWrittenForItsSource(t *testing.T) {
 		text string
 	}{
 		{name: "entries", text: "3.2 - second\n3.1 - first"},
+		{name: "NUL bytes, which the grammar reads through a stand-in", text: "3.1 - a\x00b\nc\x00d"},
 		{name: "a pasted tree whose labels Parse would renumber", text: "1 🔧 Fixed it\n└── 1.4 a detail"},
 	}
 	for _, tc := range tests {

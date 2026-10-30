@@ -27,6 +27,27 @@ var promptParsers = sync.Pool{New: func() any {
 	return p
 }}
 
+// nulStandIn is the byte the prompt grammar reads in place of a NUL: ASCII
+// SUB, a control character the grammar reads as text like any other.
+const nulStandIn = 0x1a
+
+// promptGrammarInput is TEXT as the prompt grammar reads it: every NUL byte
+// replaced by nulStandIn. The grammar's text is a lexer token (`[^\n]+`), and
+// tree-sitter's generated lexers never match a NUL, so a prompt holding one (a
+// pasted binary, 2026-10-30) failed to parse, and the panic that failure is
+// took the daemon down at every boot while the prompt stayed held. The stand-in
+// is one byte for one, so every offset of the parse is an offset into TEXT, and
+// readEntries reads what the entries say from TEXT itself.
+func promptGrammarInput(text string) []byte {
+	src := []byte(text)
+	for i, b := range src {
+		if b == 0 {
+			src[i] = nulStandIn
+		}
+	}
+	return src
+}
+
 // entrySpan is one entry of a prompt's text: the byte span of its one line
 // (its newline included), its label, and where what it says begins (after the
 // label and any separator).
@@ -201,7 +222,7 @@ func entryTree(text string, run []entrySpan) *frontendv1.ProseEntryTree {
 func readEntries(text string) ([]entrySpan, error) {
 	p := promptParsers.Get().(*ts.Parser)
 	defer promptParsers.Put(p)
-	src := []byte(text)
+	src := promptGrammarInput(text)
 	tree := p.Parse(src, nil)
 	if tree == nil {
 		return nil, fmt.Errorf("the prompt grammar returned no tree for a %d-byte text", len(text))
