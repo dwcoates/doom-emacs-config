@@ -16,10 +16,12 @@
 //     an agent cut by hand -- through a hidden merge workspace the queue
 //     creates when the merge starts.
 //
-// NOTHING IS IMPLIED. Every form names where its work is cut from and lands
-// (WorkspaceTopology, or the async merge's own source and target), every
-// request names its context origin and its requester, and no field stands in
-// for an unstated choice.
+// NOTHING IS IMPLIED BUT THE RELATIONSHIP'S LANDING DEFAULT. Every standard and
+// one-shot form names its relationship to its creator's work (child or peer,
+// WorkspaceRelationship); every request names its context origin and its
+// requester. Where a workspace lands defaults by its relationship (a child into
+// its parent, a peer on the primary branch) and is otherwise named
+// (WorkspaceLandingTarget); an async merge names its own source and target.
 //
 // THE WORKSPACES A CREATE DERIVES FROM ARE TOLD. When a workspace is created
 // from another's branch, or with another's conversation forked, each such
@@ -115,9 +117,19 @@ message CreateWorkspaceStandard {
   // empty workspace; presence, never an empty UserSaid. Also the naming
   // input: the daemon derives the slug from it when no name is supplied.
   optional conversation.v1.UserSaid initial_prompt = 1;
-  // Where the workspace is cut from and where it lands. REQUIRED. It is cut
-  // from the TIP of its source branch, read when the create runs.
-  WorkspaceTopology topology = 5;
+  // How the workspace stands to its creator's work. REQUIRED.
+  WorkspaceRelationship relationship = 7;
+  // Where the workspace is cut from and where it lands. UNSET = the
+  // relationship's default (WorkspaceLandingTarget). It is cut from the TIP of
+  // its source branch, read when the create runs.
+  optional WorkspaceLandingTarget landing_target = 8;
+  // The notice to the workspace's owner when the owner lands it
+  // (WorkspaceOwnerNotice): set exactly when one is owed.
+  optional WorkspaceOwnerNotice owner_notice = 9;
+  // Tag 5 (`topology`) is RETIRED: the one choice it made is now two, the
+  // relationship and the landing target.
+  reserved 5;
+  reserved "topology";
   // Tag 2 (`base_ref`) is RETIRED: a workspace is always cut from its source
   // branch's tip, which the topology names.
   reserved 2;
@@ -155,11 +167,18 @@ message CreateWorkspaceOneShot {
   // The one-shot's commission. A one-shot IS its prompt — always set.
   conversation.v1.UserSaid prompt = 1;
 
-  // Where the one-shot is cut from and where it lands. REQUIRED. A one-shot
-  // lands itself, so a child whose context is not forked from its owner --
-  // which only its owner may land -- is refused as a one-shot
-  // (`one_shot_owner_lands`).
-  WorkspaceTopology topology = 5;
+  // How the one-shot stands to its creator's work. REQUIRED. A peer is the
+  // natural one-shot; a child one-shot lands itself only when its context is
+  // forked from its owner (`one_shot_owner_lands` otherwise).
+  WorkspaceRelationship relationship = 6;
+  // Where the one-shot is cut from and where it lands. UNSET = the
+  // relationship's default (WorkspaceLandingTarget).
+  optional WorkspaceLandingTarget landing_target = 7;
+  // Tag 5 (`topology`) is RETIRED: the one choice it made is now two, the
+  // relationship and the landing target. A one-shot lands itself, so it never
+  // owes its owner a notice.
+  reserved 5;
+  reserved "topology";
 
   // The workspace the commission is ABOUT, when the one-shot was asked for
   // from inside another workspace to fix something wrong with it (a defect in
@@ -465,21 +484,25 @@ message CreateWorkspaceError {
     CreateWorkspaceInvalidName invalid_name = 42;
     // The one-shot's context workspace is not in the daemon's registry.
     CreateWorkspaceUnknownContextWorkspace unknown_context_workspace = 19;
-    // The named parent is hidden or closed, and creating a child of it
-    // would make an open child of a parent outside the Open section.
+    // The named parent, or the workspace landed into, is hidden or closed,
+    // and creating the workspace would make an open child of, or an open
+    // branch landing into, a workspace outside the Open section.
     WorkspaceParentNotOpen parent_not_open = 20;
-    // The child's owner is not in the daemon's registry, or is in another
-    // repository.
+    // The child's parent is not in the daemon's registry, in any repository.
     CreateWorkspaceUnknownOwner unknown_owner = 21;
-    // A child whose context is not forked from its owner carries no owner
-    // notice; its owner must be told what is coming before it arbitrates it.
+    // A workspace its owner lands carries no owner notice; its owner must be
+    // told what is coming before it arbitrates it.
     CreateWorkspaceOwnerNoticeRequired owner_notice_required = 22;
-    // A child forked from its own owner carries an owner notice; it lands
-    // itself, so there is nothing for its owner to arbitrate.
+    // A workspace that lands itself (forked from its owner, or with no owner)
+    // carries an owner notice, so there is nothing for an owner to arbitrate.
     CreateWorkspaceOwnerNoticeUnexpected owner_notice_unexpected = 23;
-    // A one-shot child whose context is not forked from its owner: only the
-    // owner lands such a child, and a one-shot lands itself.
+    // A one-shot whose context is not forked from its owner: only the owner
+    // lands such a workspace, and a one-shot lands itself.
     CreateWorkspaceOneShotOwnerLands one_shot_owner_lands = 24;
+    // The workspace to land into (WorkspaceLandingTarget.workspace) is not in
+    // the daemon's registry, or is of another repository than the create's:
+    // no branch crosses repositories. Nothing was created.
+    CreateWorkspaceUnknownLandingTarget unknown_landing_target = 46;
     // The requesting workspace is not in the daemon's registry.
     CreateWorkspaceUnknownRequester unknown_requester = 25;
     // The async merge's branch does not exist in the repository.
@@ -523,7 +546,7 @@ message CreateWorkspaceError {
     // The requester's session was deleted, so the merge's report could never
     // reach it. Nothing was recorded.
     CreateWorkspaceAsyncMergeRequesterSessionDeleted async_merge_requester_session_deleted = 38;
-    // A primary create cut from origin (WorkspaceTopologyPrimary.from_origin)
+    // A primary create cut from origin (WorkspaceLandingTargetPrimary.from_origin)
     // could not fetch origin's primary branch. Nothing was created.
     CreateWorkspaceOriginFetchFailed origin_fetch_failed = 39;
     // The async merge's repository has no `.agent-repl/deploy.yaml`, so
@@ -627,18 +650,26 @@ message CreateWorkspaceInvalidNameSlug {}
 // A prefix component of the name is empty, or is not ASCII letters and digits
 // joined by single `.`, `_` or `-`.
 message CreateWorkspaceInvalidNamePrefix {}
-// Names the owner the registry does not hold for this repository.
+// Names the parent the registry does not hold.
 message CreateWorkspaceUnknownOwner {
-  // The owner as the request named it.
+  // The parent as the request named it.
   workspace.v1.WorkspaceRef owner = 1;
 }
-// The owner notice a child not forked from its owner must carry is missing.
+// Names the workspace to land into that the registry does not hold in the
+// create's repository.
+message CreateWorkspaceUnknownLandingTarget {
+  // The workspace as the request named it.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+// The owner notice a workspace its owner lands must carry is missing.
+// DELIBERATELY EMPTY: the arm is the refusal.
 message CreateWorkspaceOwnerNoticeRequired {}
-// A child forked from its owner carries a notice it may not carry.
+// A workspace that lands itself carries a notice it may not carry.
+// DELIBERATELY EMPTY: the arm is the refusal.
 message CreateWorkspaceOwnerNoticeUnexpected {}
-// Names the owner that must land the refused one-shot child.
+// Names the owner that must land the refused one-shot.
 message CreateWorkspaceOneShotOwnerLands {
-  // The child's owner, which alone lands it.
+  // The one-shot's owner, which alone lands it.
   workspace.v1.WorkspaceRef owner = 1;
 }
 // Names the requester the registry does not hold.

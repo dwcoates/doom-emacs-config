@@ -56,4 +56,61 @@ Where a workspace lands becomes a second, independent setting.
 
 ## Core design principles
 
+- **The orchestrator owns the design end to end (user, 2026-10-30).** "You take
+  the whole implementation e2e, don't ask me for any feedback on design."
+  Consequence: no increment of this change is put to the user for agreement;
+  the orchestrator decides each shape on the settled rulings above and records
+  it here. It does not claim the user waived the rulings already made above:
+  those bind every shape.
+- **A child is coordinated by its parent; a peer stands alone.** Consequence:
+  the parent link drives nesting, the parent's implicit following, ownership
+  and the family refusals; landing is a separate fact. It does not claim a
+  child must land into its parent: landing defaults there and is overridable.
+
 ## Landed changes
+
+### 1. Relationship and landing target replace the topology (agentrepl.v1)
+
+WHAT. `WorkspaceTopology` (one oneof naming source branch and merge target, with
+the child arm also naming the owner) is removed from `workspace_topology.proto`
+and replaced by three messages: `WorkspaceRelationship` (child{parent} | peer),
+`WorkspaceLandingTarget` (primary{from_origin} | workspace{workspace}), and
+`WorkspaceOwnerNotice`. `CreateWorkspaceStandard` and `CreateWorkspaceOneShot`
+retire tag 5 `topology` and carry `relationship` (required), `landing_target`
+(optional; unset = the relationship's default), and, on the standard form,
+`owner_notice`. `CreateWorkspaceError` gains `unknown_landing_target` (46).
+`SetWorkspaceParentRequest` gains the `unchanged` arm and an optional
+`landing_target`; its error gains `unknown_landing_target`.
+`WorkspaceHasOpenChildren` gains `landing_into`. `WorkspaceStatus` gains
+`relationship`, `owner`, `created_by` and `children`; its merge target's `owner`
+arm becomes `workspace` (`WorkspaceStatusMergeTargetWorkspace`, retiring
+`owner_lands`, which moved to `WorkspaceStatus.owner`).
+
+WHY. The user's ruling that relationship (coordination) and landing are
+independent. Landing keeps ONE arm for source and target together, so the old
+ownership rule (cut from what you land into) stays structural.
+
+DECISIONS AND WHY ALTERNATIVES LOST.
+- OWNER is a derived fact: a child's parent; else the workspace a peer lands
+  into; else none. Owner-lands (only the owner may land) = an owner exists and
+  the context was not forked from it. Alternative "owner = landing workspace"
+  lost because a cross-repository child (landing on its own main branch) is
+  still owned and landed by its parent, which `agent-repl-ack-emoji` shipped and
+  the skill relies on.
+- The landing default lives in the daemon, not the CLI, so every client (Emacs,
+  webapp drag-to-reparent, CLI) gets the same rule.
+- `SetWorkspaceParent` keeps its name and gains `unchanged` rather than a new
+  `SetWorkspaceLandingTarget` rpc: a retarget of either fact must queue ONE
+  notice to the workspace (the retarget package's one-operation guarantee), and
+  the default landing follows the relationship, so the two facts are set
+  together. Elisp and the webapp call it with the parent arms and no landing
+  target, which keeps their behavior (default landing re-applied).
+- The child's implicit following by its parent is NOT a stored subscription
+  row: it is derived at delivery time from `parent_id`, so a reparent can never
+  leave a stale follow behind (structurally impossible, versus kept in sync).
+
+CONSEQUENCES (accepted).
+- Every client building a create request changes (CLI, integration harness,
+  e2e tests, the elisp fake daemon). Elisp itself builds no create topology.
+- A workspace landing into a non-parent workspace blocks that workspace's close
+  and finish exactly as a child does (`landing_into`).

@@ -12,14 +12,20 @@
 // call this when its work is done, whatever its repository.
 //
 // THE REQUEST NAMES NO TARGET. Where a workspace lands was fixed when it was
-// created (agentrepl.v1.WorkspaceTopology): the primary branch, or the
-// workspace that owns the branch it was cut from. The daemon reads it from the
+// created (agentrepl.v1.WorkspaceLandingTarget) or last retargeted
+// (agentrepl.v1.SetWorkspaceParent): the primary branch, or the workspace whose
+// branch it was cut from. The daemon reads it from the
 // workspace's own record, so no request can deploy work anywhere else.
 //
-// WHO MAY ASK. The workspace itself, the user, or -- for a child -- the
-// workspace that owns its branch. A child whose context was not forked from its
-// owner never finishes itself: its owner arbitrates its work and finishes it
-// (`owner_lands`).
+// WHO MAY ASK. The workspace itself, the user, its owner (a child's parent, or
+// the workspace a peer lands into), or the workspace it lands into. A workspace
+// whose context was not forked from its owner never finishes itself: its owner
+// arbitrates its work and finishes it (`owner_lands`).
+//
+// A WORKSPACE OTHERS STILL WORK FOR IS NOT FINISHED. While a child of it, or a
+// workspace landing into its branch, is open, the deploy is refused
+// (`has_open_children`): every child is accounted for, landed or closed,
+// before its parent's work moves on.
 //
 // A DEPLOY THAT FAILS NEVER CLOSES THE WORKSPACE: its feed is released and the
 // failure is handed back to its conversation

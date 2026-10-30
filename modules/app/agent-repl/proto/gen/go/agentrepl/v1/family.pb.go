@@ -1,7 +1,9 @@
 // family.proto — the refusals that keep a workspace family in one list of the
-// roster (frontend.v1.WorkspaceRoster). A child workspace merges into its
-// parent and is drawn and tabbed right after it, so a parent may not leave the
-// Open section while a child is still open: a workspace with open children
+// roster (frontend.v1.WorkspaceRoster). A child workspace is coordinated by its
+// parent and is drawn and tabbed right after it, and a workspace landing into
+// another's branch needs that branch to stay, so a parent, or a workspace
+// another lands into, may not leave the Open section while such a workspace is
+// still open: a workspace with open children
 // cannot be hidden, closed, killed, nuked, or merged by a merge that closes
 // it, and a workspace cannot be made, moved or brought back as the open child
 // of a parent that is hidden, closed, or closing (a merge waiting in its
@@ -45,8 +47,12 @@ type WorkspaceHasOpenChildren struct {
 	// merge's one-shot names.
 	Parent *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=parent,proto3" json:"parent,omitempty"`
 	// Every open child of `parent`, hidden ones included, in the roster's order.
-	// Never empty.
-	Children      []*v1.WorkspaceRef `protobuf:"bytes,2,rep,name=children,proto3" json:"children,omitempty"`
+	// Empty only when `landing_into` is not.
+	Children []*v1.WorkspaceRef `protobuf:"bytes,2,rep,name=children,proto3" json:"children,omitempty"`
+	// Every open workspace that is NOT a child of `parent` but whose branch
+	// lands into `parent`'s branch (WorkspaceLandingTarget.workspace), hidden
+	// ones included, in the roster's order. Empty only when `children` is not.
+	LandingInto   []*v1.WorkspaceRef `protobuf:"bytes,3,rep,name=landing_into,json=landingInto,proto3" json:"landing_into,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -91,6 +97,13 @@ func (x *WorkspaceHasOpenChildren) GetParent() *v1.WorkspaceRef {
 func (x *WorkspaceHasOpenChildren) GetChildren() []*v1.WorkspaceRef {
 	if x != nil {
 		return x.Children
+	}
+	return nil
+}
+
+func (x *WorkspaceHasOpenChildren) GetLandingInto() []*v1.WorkspaceRef {
+	if x != nil {
+		return x.LandingInto
 	}
 	return nil
 }
@@ -329,10 +342,11 @@ var File_agentrepl_v1_family_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_family_proto_rawDesc = "" +
 	"\n" +
-	"\x19agentrepl/v1/family.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\x86\x01\n" +
+	"\x19agentrepl/v1/family.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xc5\x01\n" +
 	"\x18WorkspaceHasOpenChildren\x122\n" +
 	"\x06parent\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x06parent\x126\n" +
-	"\bchildren\x18\x02 \x03(\v2\x1a.workspace.v1.WorkspaceRefR\bchildren\"\xaa\x02\n" +
+	"\bchildren\x18\x02 \x03(\v2\x1a.workspace.v1.WorkspaceRefR\bchildren\x12=\n" +
+	"\flanding_into\x18\x03 \x03(\v2\x1a.workspace.v1.WorkspaceRefR\vlandingInto\"\xaa\x02\n" +
 	"\x16WorkspaceParentNotOpen\x122\n" +
 	"\x06parent\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x06parent\x12D\n" +
 	"\x06hidden\x18\x02 \x01(\v2*.agentrepl.v1.WorkspaceParentNotOpenHiddenH\x00R\x06hidden\x12D\n" +
@@ -367,15 +381,16 @@ var file_agentrepl_v1_family_proto_goTypes = []any{
 var file_agentrepl_v1_family_proto_depIdxs = []int32{
 	5, // 0: agentrepl.v1.WorkspaceHasOpenChildren.parent:type_name -> workspace.v1.WorkspaceRef
 	5, // 1: agentrepl.v1.WorkspaceHasOpenChildren.children:type_name -> workspace.v1.WorkspaceRef
-	5, // 2: agentrepl.v1.WorkspaceParentNotOpen.parent:type_name -> workspace.v1.WorkspaceRef
-	2, // 3: agentrepl.v1.WorkspaceParentNotOpen.hidden:type_name -> agentrepl.v1.WorkspaceParentNotOpenHidden
-	3, // 4: agentrepl.v1.WorkspaceParentNotOpen.closed:type_name -> agentrepl.v1.WorkspaceParentNotOpenClosed
-	4, // 5: agentrepl.v1.WorkspaceParentNotOpen.closing:type_name -> agentrepl.v1.WorkspaceParentNotOpenClosing
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	5, // 2: agentrepl.v1.WorkspaceHasOpenChildren.landing_into:type_name -> workspace.v1.WorkspaceRef
+	5, // 3: agentrepl.v1.WorkspaceParentNotOpen.parent:type_name -> workspace.v1.WorkspaceRef
+	2, // 4: agentrepl.v1.WorkspaceParentNotOpen.hidden:type_name -> agentrepl.v1.WorkspaceParentNotOpenHidden
+	3, // 5: agentrepl.v1.WorkspaceParentNotOpen.closed:type_name -> agentrepl.v1.WorkspaceParentNotOpenClosed
+	4, // 6: agentrepl.v1.WorkspaceParentNotOpen.closing:type_name -> agentrepl.v1.WorkspaceParentNotOpenClosing
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_family_proto_init() }

@@ -1,7 +1,9 @@
 // family.proto — the refusals that keep a workspace family in one list of the
-// roster (frontend.v1.WorkspaceRoster). A child workspace merges into its
-// parent and is drawn and tabbed right after it, so a parent may not leave the
-// Open section while a child is still open: a workspace with open children
+// roster (frontend.v1.WorkspaceRoster). A child workspace is coordinated by its
+// parent and is drawn and tabbed right after it, and a workspace landing into
+// another's branch needs that branch to stay, so a parent, or a workspace
+// another lands into, may not leave the Open section while such a workspace is
+// still open: a workspace with open children
 // cannot be hidden, closed, killed, nuked, or merged by a merge that closes
 // it, and a workspace cannot be made, moved or brought back as the open child
 // of a parent that is hidden, closed, or closing (a merge waiting in its
@@ -24,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/family.proto.
  */
 export const file_agentrepl_v1_family: GenFile = /*@__PURE__*/
-  fileDesc("ChlhZ2VudHJlcGwvdjEvZmFtaWx5LnByb3RvEgxhZ2VudHJlcGwudjEidAoYV29ya3NwYWNlSGFzT3BlbkNoaWxkcmVuEioKBnBhcmVudBgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSLAoIY2hpbGRyZW4YAiADKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIokCChZXb3Jrc3BhY2VQYXJlbnROb3RPcGVuEioKBnBhcmVudBgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSPAoGaGlkZGVuGAIgASgLMiouYWdlbnRyZXBsLnYxLldvcmtzcGFjZVBhcmVudE5vdE9wZW5IaWRkZW5IABI8CgZjbG9zZWQYAyABKAsyKi5hZ2VudHJlcGwudjEuV29ya3NwYWNlUGFyZW50Tm90T3BlbkNsb3NlZEgAEj4KB2Nsb3NpbmcYBCABKAsyKy5hZ2VudHJlcGwudjEuV29ya3NwYWNlUGFyZW50Tm90T3BlbkNsb3NpbmdIAEIHCgVzdGF0ZSIeChxXb3Jrc3BhY2VQYXJlbnROb3RPcGVuSGlkZGVuIh4KHFdvcmtzcGFjZVBhcmVudE5vdE9wZW5DbG9zZWQiHwodV29ya3NwYWNlUGFyZW50Tm90T3BlbkNsb3NpbmdCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("ChlhZ2VudHJlcGwvdjEvZmFtaWx5LnByb3RvEgxhZ2VudHJlcGwudjEipgEKGFdvcmtzcGFjZUhhc09wZW5DaGlsZHJlbhIqCgZwYXJlbnQYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEiwKCGNoaWxkcmVuGAIgAygLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIwCgxsYW5kaW5nX2ludG8YAyADKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIokCChZXb3Jrc3BhY2VQYXJlbnROb3RPcGVuEioKBnBhcmVudBgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSPAoGaGlkZGVuGAIgASgLMiouYWdlbnRyZXBsLnYxLldvcmtzcGFjZVBhcmVudE5vdE9wZW5IaWRkZW5IABI8CgZjbG9zZWQYAyABKAsyKi5hZ2VudHJlcGwudjEuV29ya3NwYWNlUGFyZW50Tm90T3BlbkNsb3NlZEgAEj4KB2Nsb3NpbmcYBCABKAsyKy5hZ2VudHJlcGwudjEuV29ya3NwYWNlUGFyZW50Tm90T3BlbkNsb3NpbmdIAEIHCgVzdGF0ZSIeChxXb3Jrc3BhY2VQYXJlbnROb3RPcGVuSGlkZGVuIh4KHFdvcmtzcGFjZVBhcmVudE5vdE9wZW5DbG9zZWQiHwodV29ya3NwYWNlUGFyZW50Tm90T3BlbkNsb3NpbmdCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * The workspace still has open children, so the request would leave them
@@ -46,11 +48,20 @@ export type WorkspaceHasOpenChildren = Message<"agentrepl.v1.WorkspaceHasOpenChi
 
   /**
    * Every open child of `parent`, hidden ones included, in the roster's order.
-   * Never empty.
+   * Empty only when `landing_into` is not.
    *
    * @generated from field: repeated workspace.v1.WorkspaceRef children = 2;
    */
   children: WorkspaceRef[];
+
+  /**
+   * Every open workspace that is NOT a child of `parent` but whose branch
+   * lands into `parent`'s branch (WorkspaceLandingTarget.workspace), hidden
+   * ones included, in the roster's order. Empty only when `children` is not.
+   *
+   * @generated from field: repeated workspace.v1.WorkspaceRef landing_into = 3;
+   */
+  landingInto: WorkspaceRef[];
 };
 
 /**

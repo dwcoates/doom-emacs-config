@@ -1,18 +1,19 @@
-// workspace_topology.proto — WHERE A NEW WORKSPACE'S WORK COMES FROM AND
-// GOES: the branch it is cut from, the branch it lands in, and the
-// conversation it starts with. Shared by every rpc that makes a workspace
-// (CreateWorkspace, in each of its forms).
+// workspace_topology.proto — HOW A NEW WORKSPACE STANDS TO OTHER WORK: its
+// relationship to its creator's work, the branch it is cut from and lands in,
+// and the conversation it starts with. Shared by every rpc that makes a
+// workspace (CreateWorkspace, in each of its forms) or moves one
+// (SetWorkspaceParent).
 //
-// THREE CHOICES, EACH ALWAYS MADE. A create names its branch source and merge
-// target (one topology arm names both) and its context origin; none of them has
-// a default, so every create is a specific, intentional one.
+// THREE INDEPENDENT CHOICES. A create names its relationship (child or peer),
+// its context origin, and, where the relationship's default is not wanted, its
+// landing target. They answer different questions: whom the workspace
+// coordinates with, where its work goes, and what it already knows.
 //
-// THE OWNERSHIP RULE, which the topology arms make structural: a branch cut
-// from the primary branch lands only on the primary branch, and a branch a
-// workspace owns lands only into that workspace. A workspace is therefore never
-// cut from one owner's branch and landed in another's; no arm can express it.
-// The one way work on a branch no workspace owns reaches anything is the async
-// merge (CreateWorkspaceAsyncMerge), whose source and target are its own.
+// THE OWNERSHIP RULE, which the landing-target arms make structural: a branch
+// cut from the primary branch lands only on the primary branch, and a branch
+// cut from a workspace's branch lands only into that workspace. The one way
+// work on a branch no workspace owns reaches anything is the async merge
+// (CreateWorkspaceAsyncMerge), whose source and target are its own.
 
 syntax = "proto3";
 
@@ -75,63 +76,117 @@ message WorkspaceContextOriginFork {
   workspace.v1.WorkspaceRef workspace = 1;
 }
 
-// ---- Topology: the branch a workspace is cut from and the one it lands in ----
+// ---- Relationship: how a new workspace stands to the work it was made for ----
 
-// Where a standard or one-shot workspace is cut from, and where it lands. The
-// ARM names both, because the ownership rule ties each source to exactly one
-// target. REQUIRED: a request that sets no arm is refused as invalid.
-message WorkspaceTopology {
-  // THE ARM IS THE SHAPE.
-  oneof shape {
-    // Cut from the primary branch's tip, landing on the primary branch in the
-    // repository's main worktree. The common shape.
-    WorkspaceTopologyPrimary primary = 1;
-    // Cut from a workspace's branch tip, landing into that workspace's branch
-    // in its worktree, and nested under it in the roster.
-    WorkspaceTopologyChild child = 2;
+// How a new workspace stands to its creator's work. REQUIRED: a request that
+// sets no arm is refused as invalid. INDEPENDENT of where the workspace lands
+// (WorkspaceLandingTarget) and of the conversation it starts with
+// (WorkspaceContextOrigin): the three are chosen separately.
+message WorkspaceRelationship {
+  // THE ARM IS THE RELATIONSHIP. A child and a peer are mutually exclusive:
+  // a workspace either works on part of a parent's work, coordinated by that
+  // parent, or stands on its own.
+  oneof kind {
+    // A CHILD works on part of its parent's work and keeps coordinating with
+    // it. The roster nests it under its parent (under a repository divider
+    // when the parent is of another repository); the parent follows its
+    // turns, its questions, its landing and its close without subscribing
+    // (SubscribeWorkspace's events arrive as though the parent had asked for
+    // them); the parent reviews it and closes it; and the parent cannot be
+    // closed, hidden, finished or merged away while the child is open
+    // (WorkspaceHasOpenChildren). Its landing target defaults to its parent's
+    // branch.
+    WorkspaceRelationshipChild child = 1;
+    // A PEER is tangential to its creator's work and self-sufficient: made,
+    // then left to finish on its own. It sits at the top level of its
+    // repository's section, nobody follows it unless someone subscribes, and
+    // it is the natural one-shot. Who asked for it is still recorded
+    // (WorkspaceStatus.relationship), for diagnosis. Its landing target
+    // defaults to its repository's primary branch.
+    WorkspaceRelationshipPeer peer = 2;
+  }
+}
+// A child of a parent workspace.
+message WorkspaceRelationshipChild {
+  // The parent, as the roster served it. A registered workspace of ANY
+  // repository; a CLOSED parent is reopened before anything else is done, so
+  // the child has a session to coordinate with, and a hidden or closing one
+  // refuses the create (WorkspaceParentNotOpen).
+  workspace.v1.WorkspaceRef parent = 1;
+}
+// A peer: no parent. DELIBERATELY EMPTY: the arm is the relationship.
+message WorkspaceRelationshipPeer {}
+
+// ---- Landing target: the branch a workspace is cut from and lands in ----
+
+// Where a workspace's work is cut from and where it lands. ONE arm names both,
+// because the ownership rule ties each source to exactly one target: a branch
+// cut from the primary branch lands only on the primary branch, and a branch
+// cut from a workspace's branch lands only into that workspace. A workspace is
+// therefore never cut from one branch and landed in another; no arm can
+// express it.
+//
+// WHERE IT IS OPTIONAL, UNSET IS THE RELATIONSHIP'S DEFAULT: a child lands into
+// its parent when the parent is of the same repository, and on its own
+// repository's primary branch when the parent is of another (no branch
+// crosses repositories); a peer lands on the primary branch.
+message WorkspaceLandingTarget {
+  // THE ARM IS THE TARGET.
+  oneof target {
+    // The repository's primary branch, in its main worktree. A child chooses
+    // it explicitly for a piece of work its parent waits on rather than
+    // absorbs; the parent then picks the work up from the primary branch.
+    WorkspaceLandingTargetPrimary primary = 1;
+    // A workspace's unlanded branch, in that workspace's worktree. Usually the
+    // parent; it may be any OTHER open workspace of the same repository (a fix
+    // sent into another workspace's branch), and a workspace of another
+    // repository is refused (`landing_target_other_repository`).
+    WorkspaceLandingTargetWorkspace workspace = 2;
   }
 }
 // From the primary branch, onto the primary branch. The repository names its
 // primary branch.
-message WorkspaceTopologyPrimary {
+message WorkspaceLandingTargetPrimary {
   // SET: cut from the primary branch's tip on the remote `origin`, fetched as
   // the create runs, rather than from the local primary branch's tip. The
   // workspace still lands onto the local primary branch. A fetch that fails
   // refuses the create (CreateWorkspaceError.origin_fetch_failed). UNSET: the
   // local primary branch's tip.
-  optional WorkspaceTopologyPrimaryFromOrigin from_origin = 1;
+  optional WorkspaceLandingTargetPrimaryFromOrigin from_origin = 1;
 }
 // The create is cut from origin's primary branch. DELIBERATELY EMPTY: presence
 // is the fact.
-message WorkspaceTopologyPrimaryFromOrigin {}
-// A child of another workspace: from its branch, into its branch.
-//
-// WHO LANDS A CHILD depends on whose context it starts with. A child whose
-// context is forked FROM ITS OWNER carries the owner's whole context and lands
-// itself like any workspace. A child that starts fresh, or forked from any
-// other workspace, does not know why its owner's work is shaped as it is, so
-// its OWNER arbitrates and lands it: such a request must carry `owner_notice`,
-// is refused as a one-shot, and is refused merging itself
-// (MergeWorkspaceError.owner_lands); the owner lands it with MergeWorkspace.
-// A child whose context is forked from its owner must not carry a notice.
-message WorkspaceTopologyChild {
-  // The owning workspace. Must be registered in the create's repository; a
-  // CLOSED owner is reopened before anything else is done, so the work it is
-  // to arbitrate has a session to arbitrate it.
-  workspace.v1.WorkspaceRef owner = 1;
-  // What the owner is told, in the requester's own words, when its context
-  // is not the one forked: what the child will do on the owner's branch and
-  // why. The daemon delivers it to the owner's session with its own addendum
-  // stating that landing the child's work into the owner is the owner's
-  // responsibility, and how to do it. Set exactly when the context origin is
-  // not a fork of `owner`; otherwise refused (`owner_notice_unexpected`, or
-  // `owner_notice_required` when absent).
-  optional WorkspaceTopologyChildOwnerNotice owner_notice = 2;
+message WorkspaceLandingTargetPrimaryFromOrigin {}
+// From a workspace's branch, into that workspace's branch.
+message WorkspaceLandingTargetWorkspace {
+  // The workspace landed into, as the roster served it. Must be registered in
+  // the create's repository and open.
+  workspace.v1.WorkspaceRef workspace = 1;
 }
-// The requester's notice to a child's owner.
-message WorkspaceTopologyChildOwnerNotice {
-  // Plain text, as the requesting agent or user wrote it. REQUIRED: blank is
-  // refused as invalid.
+
+// ---- Owner notice: what a workspace that lands another's work is told ----
+
+// The requester's notice to a new workspace's OWNER when the owner, not the
+// workspace itself, lands its work.
+//
+// WHO OWNS A WORKSPACE: a child's parent; a peer landing into a workspace,
+// that workspace; a peer landing on the primary branch has no owner. WHO
+// LANDS IT depends on whose context it starts with: a workspace whose context
+// is forked FROM ITS OWNER carries the owner's whole context and lands
+// itself; one that starts fresh, or forked from any other workspace, does not
+// know why its owner's work is shaped as it is, so its OWNER arbitrates and
+// lands it. Such a create must carry the notice, is refused as a one-shot, and
+// the workspace is refused merging itself (MergeWorkspaceError.owner_lands);
+// the owner lands it with FinishWorkspace. A create whose context is forked
+// from its owner, or that has no owner, must not carry one
+// (`owner_notice_unexpected`; `owner_notice_required` when one is owed and
+// absent).
+message WorkspaceOwnerNotice {
+  // Plain text, as the requesting agent or user wrote it: what the new
+  // workspace will do for the owner and why. The daemon delivers it to the
+  // owner's session with its own addendum stating that landing the new
+  // workspace's work is the owner's responsibility, and how to do it.
+  // REQUIRED: blank is refused as invalid.
   string text = 1;
 }
 

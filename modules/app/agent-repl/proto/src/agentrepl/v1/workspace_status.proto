@@ -26,7 +26,8 @@ message WorkspaceStatus {
   string name = 2;
   // The workspace's branch, as git spells it.
   string branch = 3;
-  // Where the workspace's branch lands, fixed at its creation.
+  // Where the workspace's branch lands, fixed at its creation and changed only
+  // by a retarget (SetWorkspaceParent).
   WorkspaceStatusMergeTarget merge_target = 4;
   // TRUE while the workspace is in the hidden section (off the Emacs tab bar);
   // SetWorkspaceHidden moves it in and out.
@@ -51,6 +52,49 @@ message WorkspaceStatus {
   // link it was just given is already stored, and which links to show once
   // the menu is full.
   WorkspaceLinks links = 11;
+  // How the workspace stands to other work: a child of a parent, or a peer
+  // (WorkspaceRelationship).
+  WorkspaceStatusRelationship relationship = 12;
+  // The workspace's owner and whether the owner lands its work
+  // (WorkspaceOwnerNotice). UNSET for a peer that lands on the primary
+  // branch, which nobody owns.
+  optional WorkspaceStatusOwner owner = 13;
+  // The workspace whose agent asked for this one's creation. UNSET when the
+  // user asked, or the workspace was registered rather than created. Recorded
+  // for every relationship, so the origin of a peer stays traceable.
+  optional workspace.v1.WorkspaceRef created_by = 14;
+  // Every OPEN child of this workspace, hidden ones included, in the roster's
+  // order: the workspaces this one coordinates and must account for before it
+  // can be finished or closed. Empty for a workspace with no open child.
+  repeated workspace.v1.WorkspaceRef children = 15;
+}
+
+// How a workspace stands to other work.
+message WorkspaceStatusRelationship {
+  // THE ARM IS THE RELATIONSHIP.
+  oneof kind {
+    // A child, coordinated by its parent.
+    WorkspaceStatusRelationshipChild child = 1;
+    // A peer, standing on its own.
+    WorkspaceStatusRelationshipPeer peer = 2;
+  }
+}
+// A child's parent.
+message WorkspaceStatusRelationshipChild {
+  // The parent, of any repository.
+  workspace.v1.WorkspaceRef parent = 1;
+}
+// A peer. DELIBERATELY EMPTY: the arm is the relationship.
+message WorkspaceStatusRelationshipPeer {}
+
+// A workspace's owner.
+message WorkspaceStatusOwner {
+  // The owning workspace: the parent of a child, or the workspace a peer
+  // lands into.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // TRUE when the owner arbitrates and lands this workspace's work, because
+  // its context was not forked from the owner; FALSE when it lands itself.
+  bool owner_lands = 2;
 }
 
 // Where a workspace's branch lands.
@@ -59,19 +103,21 @@ message WorkspaceStatusMergeTarget {
   oneof target {
     // The primary branch, in the repository's main worktree.
     WorkspaceStatusMergeTargetPrimary primary = 1;
-    // The owner's branch, in the owner's worktree.
-    WorkspaceStatusMergeTargetOwner owner = 2;
+    // A workspace's branch, in that workspace's worktree.
+    WorkspaceStatusMergeTargetWorkspace workspace = 2;
   }
 }
 // Onto the primary branch. No fields.
 message WorkspaceStatusMergeTargetPrimary {}
-// Into an owning workspace.
-message WorkspaceStatusMergeTargetOwner {
-  // The owning workspace.
-  workspace.v1.WorkspaceRef owner = 1;
-  // TRUE when the owner arbitrates and lands this workspace's work, because
-  // its context was not forked from the owner; FALSE when it lands itself.
-  bool owner_lands = 2;
+// Into a workspace's branch.
+message WorkspaceStatusMergeTargetWorkspace {
+  // The workspace landed into: the parent of most children, or whichever
+  // workspace of the same repository the create or a retarget named.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Tag 2 (`owner_lands`) is RETIRED: who lands the work is the owner's fact
+  // (WorkspaceStatus.owner), which need not be the workspace landed into.
+  reserved 2;
+  reserved "owner_lands";
 }
 
 // Whether a workspace is open.

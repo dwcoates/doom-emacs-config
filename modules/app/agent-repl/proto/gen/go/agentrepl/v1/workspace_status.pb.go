@@ -42,7 +42,8 @@ type WorkspaceStatus struct {
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// The workspace's branch, as git spells it.
 	Branch string `protobuf:"bytes,3,opt,name=branch,proto3" json:"branch,omitempty"`
-	// Where the workspace's branch lands, fixed at its creation.
+	// Where the workspace's branch lands, fixed at its creation and changed only
+	// by a retarget (SetWorkspaceParent).
 	MergeTarget *WorkspaceStatusMergeTarget `protobuf:"bytes,4,opt,name=merge_target,json=mergeTarget,proto3" json:"merge_target,omitempty"`
 	// TRUE while the workspace is in the hidden section (off the Emacs tab bar);
 	// SetWorkspaceHidden moves it in and out.
@@ -64,7 +65,22 @@ type WorkspaceStatus struct {
 	// the topbar's summary menu shows. An agent reads it to judge whether a
 	// link it was just given is already stored, and which links to show once
 	// the menu is full.
-	Links         *WorkspaceLinks `protobuf:"bytes,11,opt,name=links,proto3" json:"links,omitempty"`
+	Links *WorkspaceLinks `protobuf:"bytes,11,opt,name=links,proto3" json:"links,omitempty"`
+	// How the workspace stands to other work: a child of a parent, or a peer
+	// (WorkspaceRelationship).
+	Relationship *WorkspaceStatusRelationship `protobuf:"bytes,12,opt,name=relationship,proto3" json:"relationship,omitempty"`
+	// The workspace's owner and whether the owner lands its work
+	// (WorkspaceOwnerNotice). UNSET for a peer that lands on the primary
+	// branch, which nobody owns.
+	Owner *WorkspaceStatusOwner `protobuf:"bytes,13,opt,name=owner,proto3,oneof" json:"owner,omitempty"`
+	// The workspace whose agent asked for this one's creation. UNSET when the
+	// user asked, or the workspace was registered rather than created. Recorded
+	// for every relationship, so the origin of a peer stays traceable.
+	CreatedBy *v1.WorkspaceRef `protobuf:"bytes,14,opt,name=created_by,json=createdBy,proto3,oneof" json:"created_by,omitempty"`
+	// Every OPEN child of this workspace, hidden ones included, in the roster's
+	// order: the workspaces this one coordinates and must account for before it
+	// can be finished or closed. Empty for a workspace with no open child.
+	Children      []*v1.WorkspaceRef `protobuf:"bytes,15,rep,name=children,proto3" json:"children,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -169,6 +185,261 @@ func (x *WorkspaceStatus) GetLinks() *WorkspaceLinks {
 	return nil
 }
 
+func (x *WorkspaceStatus) GetRelationship() *WorkspaceStatusRelationship {
+	if x != nil {
+		return x.Relationship
+	}
+	return nil
+}
+
+func (x *WorkspaceStatus) GetOwner() *WorkspaceStatusOwner {
+	if x != nil {
+		return x.Owner
+	}
+	return nil
+}
+
+func (x *WorkspaceStatus) GetCreatedBy() *v1.WorkspaceRef {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return nil
+}
+
+func (x *WorkspaceStatus) GetChildren() []*v1.WorkspaceRef {
+	if x != nil {
+		return x.Children
+	}
+	return nil
+}
+
+// How a workspace stands to other work.
+type WorkspaceStatusRelationship struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// THE ARM IS THE RELATIONSHIP.
+	//
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*WorkspaceStatusRelationship_Child
+	//	*WorkspaceStatusRelationship_Peer
+	Kind          isWorkspaceStatusRelationship_Kind `protobuf_oneof:"kind"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceStatusRelationship) Reset() {
+	*x = WorkspaceStatusRelationship{}
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceStatusRelationship) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceStatusRelationship) ProtoMessage() {}
+
+func (x *WorkspaceStatusRelationship) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceStatusRelationship.ProtoReflect.Descriptor instead.
+func (*WorkspaceStatusRelationship) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *WorkspaceStatusRelationship) GetKind() isWorkspaceStatusRelationship_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *WorkspaceStatusRelationship) GetChild() *WorkspaceStatusRelationshipChild {
+	if x != nil {
+		if x, ok := x.Kind.(*WorkspaceStatusRelationship_Child); ok {
+			return x.Child
+		}
+	}
+	return nil
+}
+
+func (x *WorkspaceStatusRelationship) GetPeer() *WorkspaceStatusRelationshipPeer {
+	if x != nil {
+		if x, ok := x.Kind.(*WorkspaceStatusRelationship_Peer); ok {
+			return x.Peer
+		}
+	}
+	return nil
+}
+
+type isWorkspaceStatusRelationship_Kind interface {
+	isWorkspaceStatusRelationship_Kind()
+}
+
+type WorkspaceStatusRelationship_Child struct {
+	// A child, coordinated by its parent.
+	Child *WorkspaceStatusRelationshipChild `protobuf:"bytes,1,opt,name=child,proto3,oneof"`
+}
+
+type WorkspaceStatusRelationship_Peer struct {
+	// A peer, standing on its own.
+	Peer *WorkspaceStatusRelationshipPeer `protobuf:"bytes,2,opt,name=peer,proto3,oneof"`
+}
+
+func (*WorkspaceStatusRelationship_Child) isWorkspaceStatusRelationship_Kind() {}
+
+func (*WorkspaceStatusRelationship_Peer) isWorkspaceStatusRelationship_Kind() {}
+
+// A child's parent.
+type WorkspaceStatusRelationshipChild struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The parent, of any repository.
+	Parent        *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=parent,proto3" json:"parent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceStatusRelationshipChild) Reset() {
+	*x = WorkspaceStatusRelationshipChild{}
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceStatusRelationshipChild) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceStatusRelationshipChild) ProtoMessage() {}
+
+func (x *WorkspaceStatusRelationshipChild) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceStatusRelationshipChild.ProtoReflect.Descriptor instead.
+func (*WorkspaceStatusRelationshipChild) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *WorkspaceStatusRelationshipChild) GetParent() *v1.WorkspaceRef {
+	if x != nil {
+		return x.Parent
+	}
+	return nil
+}
+
+// A peer. DELIBERATELY EMPTY: the arm is the relationship.
+type WorkspaceStatusRelationshipPeer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceStatusRelationshipPeer) Reset() {
+	*x = WorkspaceStatusRelationshipPeer{}
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceStatusRelationshipPeer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceStatusRelationshipPeer) ProtoMessage() {}
+
+func (x *WorkspaceStatusRelationshipPeer) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceStatusRelationshipPeer.ProtoReflect.Descriptor instead.
+func (*WorkspaceStatusRelationshipPeer) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{3}
+}
+
+// A workspace's owner.
+type WorkspaceStatusOwner struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The owning workspace: the parent of a child, or the workspace a peer
+	// lands into.
+	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// TRUE when the owner arbitrates and lands this workspace's work, because
+	// its context was not forked from the owner; FALSE when it lands itself.
+	OwnerLands    bool `protobuf:"varint,2,opt,name=owner_lands,json=ownerLands,proto3" json:"owner_lands,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceStatusOwner) Reset() {
+	*x = WorkspaceStatusOwner{}
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceStatusOwner) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceStatusOwner) ProtoMessage() {}
+
+func (x *WorkspaceStatusOwner) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceStatusOwner.ProtoReflect.Descriptor instead.
+func (*WorkspaceStatusOwner) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *WorkspaceStatusOwner) GetWorkspace() *v1.WorkspaceRef {
+	if x != nil {
+		return x.Workspace
+	}
+	return nil
+}
+
+func (x *WorkspaceStatusOwner) GetOwnerLands() bool {
+	if x != nil {
+		return x.OwnerLands
+	}
+	return false
+}
+
 // Where a workspace's branch lands.
 type WorkspaceStatusMergeTarget struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -177,7 +448,7 @@ type WorkspaceStatusMergeTarget struct {
 	// Types that are valid to be assigned to Target:
 	//
 	//	*WorkspaceStatusMergeTarget_Primary
-	//	*WorkspaceStatusMergeTarget_Owner
+	//	*WorkspaceStatusMergeTarget_Workspace
 	Target        isWorkspaceStatusMergeTarget_Target `protobuf_oneof:"target"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -185,7 +456,7 @@ type WorkspaceStatusMergeTarget struct {
 
 func (x *WorkspaceStatusMergeTarget) Reset() {
 	*x = WorkspaceStatusMergeTarget{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -197,7 +468,7 @@ func (x *WorkspaceStatusMergeTarget) String() string {
 func (*WorkspaceStatusMergeTarget) ProtoMessage() {}
 
 func (x *WorkspaceStatusMergeTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[1]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -210,7 +481,7 @@ func (x *WorkspaceStatusMergeTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceStatusMergeTarget.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusMergeTarget) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{1}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *WorkspaceStatusMergeTarget) GetTarget() isWorkspaceStatusMergeTarget_Target {
@@ -229,10 +500,10 @@ func (x *WorkspaceStatusMergeTarget) GetPrimary() *WorkspaceStatusMergeTargetPri
 	return nil
 }
 
-func (x *WorkspaceStatusMergeTarget) GetOwner() *WorkspaceStatusMergeTargetOwner {
+func (x *WorkspaceStatusMergeTarget) GetWorkspace() *WorkspaceStatusMergeTargetWorkspace {
 	if x != nil {
-		if x, ok := x.Target.(*WorkspaceStatusMergeTarget_Owner); ok {
-			return x.Owner
+		if x, ok := x.Target.(*WorkspaceStatusMergeTarget_Workspace); ok {
+			return x.Workspace
 		}
 	}
 	return nil
@@ -247,14 +518,14 @@ type WorkspaceStatusMergeTarget_Primary struct {
 	Primary *WorkspaceStatusMergeTargetPrimary `protobuf:"bytes,1,opt,name=primary,proto3,oneof"`
 }
 
-type WorkspaceStatusMergeTarget_Owner struct {
-	// The owner's branch, in the owner's worktree.
-	Owner *WorkspaceStatusMergeTargetOwner `protobuf:"bytes,2,opt,name=owner,proto3,oneof"`
+type WorkspaceStatusMergeTarget_Workspace struct {
+	// A workspace's branch, in that workspace's worktree.
+	Workspace *WorkspaceStatusMergeTargetWorkspace `protobuf:"bytes,2,opt,name=workspace,proto3,oneof"`
 }
 
 func (*WorkspaceStatusMergeTarget_Primary) isWorkspaceStatusMergeTarget_Target() {}
 
-func (*WorkspaceStatusMergeTarget_Owner) isWorkspaceStatusMergeTarget_Target() {}
+func (*WorkspaceStatusMergeTarget_Workspace) isWorkspaceStatusMergeTarget_Target() {}
 
 // Onto the primary branch. No fields.
 type WorkspaceStatusMergeTargetPrimary struct {
@@ -265,7 +536,7 @@ type WorkspaceStatusMergeTargetPrimary struct {
 
 func (x *WorkspaceStatusMergeTargetPrimary) Reset() {
 	*x = WorkspaceStatusMergeTargetPrimary{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -277,7 +548,7 @@ func (x *WorkspaceStatusMergeTargetPrimary) String() string {
 func (*WorkspaceStatusMergeTargetPrimary) ProtoMessage() {}
 
 func (x *WorkspaceStatusMergeTargetPrimary) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[2]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -290,36 +561,34 @@ func (x *WorkspaceStatusMergeTargetPrimary) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use WorkspaceStatusMergeTargetPrimary.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusMergeTargetPrimary) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{2}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{6}
 }
 
-// Into an owning workspace.
-type WorkspaceStatusMergeTargetOwner struct {
+// Into a workspace's branch.
+type WorkspaceStatusMergeTargetWorkspace struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The owning workspace.
-	Owner *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"`
-	// TRUE when the owner arbitrates and lands this workspace's work, because
-	// its context was not forked from the owner; FALSE when it lands itself.
-	OwnerLands    bool `protobuf:"varint,2,opt,name=owner_lands,json=ownerLands,proto3" json:"owner_lands,omitempty"`
+	// The workspace landed into: the parent of most children, or whichever
+	// workspace of the same repository the create or a retarget named.
+	Workspace     *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *WorkspaceStatusMergeTargetOwner) Reset() {
-	*x = WorkspaceStatusMergeTargetOwner{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[3]
+func (x *WorkspaceStatusMergeTargetWorkspace) Reset() {
+	*x = WorkspaceStatusMergeTargetWorkspace{}
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *WorkspaceStatusMergeTargetOwner) String() string {
+func (x *WorkspaceStatusMergeTargetWorkspace) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*WorkspaceStatusMergeTargetOwner) ProtoMessage() {}
+func (*WorkspaceStatusMergeTargetWorkspace) ProtoMessage() {}
 
-func (x *WorkspaceStatusMergeTargetOwner) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[3]
+func (x *WorkspaceStatusMergeTargetWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -330,23 +599,16 @@ func (x *WorkspaceStatusMergeTargetOwner) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use WorkspaceStatusMergeTargetOwner.ProtoReflect.Descriptor instead.
-func (*WorkspaceStatusMergeTargetOwner) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{3}
+// Deprecated: Use WorkspaceStatusMergeTargetWorkspace.ProtoReflect.Descriptor instead.
+func (*WorkspaceStatusMergeTargetWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *WorkspaceStatusMergeTargetOwner) GetOwner() *v1.WorkspaceRef {
+func (x *WorkspaceStatusMergeTargetWorkspace) GetWorkspace() *v1.WorkspaceRef {
 	if x != nil {
-		return x.Owner
+		return x.Workspace
 	}
 	return nil
-}
-
-func (x *WorkspaceStatusMergeTargetOwner) GetOwnerLands() bool {
-	if x != nil {
-		return x.OwnerLands
-	}
-	return false
 }
 
 // Whether a workspace is open.
@@ -365,7 +627,7 @@ type WorkspaceStatusStanding struct {
 
 func (x *WorkspaceStatusStanding) Reset() {
 	*x = WorkspaceStatusStanding{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -377,7 +639,7 @@ func (x *WorkspaceStatusStanding) String() string {
 func (*WorkspaceStatusStanding) ProtoMessage() {}
 
 func (x *WorkspaceStatusStanding) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -390,7 +652,7 @@ func (x *WorkspaceStatusStanding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceStatusStanding.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusStanding) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *WorkspaceStatusStanding) GetStanding() isWorkspaceStatusStanding_Standing {
@@ -448,7 +710,7 @@ type WorkspaceStatusOpen struct {
 
 func (x *WorkspaceStatusOpen) Reset() {
 	*x = WorkspaceStatusOpen{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -460,7 +722,7 @@ func (x *WorkspaceStatusOpen) String() string {
 func (*WorkspaceStatusOpen) ProtoMessage() {}
 
 func (x *WorkspaceStatusOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -473,7 +735,7 @@ func (x *WorkspaceStatusOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceStatusOpen.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusOpen) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *WorkspaceStatusOpen) GetActivity() *WorkspaceStatusActivity {
@@ -492,7 +754,7 @@ type WorkspaceStatusClosed struct {
 
 func (x *WorkspaceStatusClosed) Reset() {
 	*x = WorkspaceStatusClosed{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -504,7 +766,7 @@ func (x *WorkspaceStatusClosed) String() string {
 func (*WorkspaceStatusClosed) ProtoMessage() {}
 
 func (x *WorkspaceStatusClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -517,7 +779,7 @@ func (x *WorkspaceStatusClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceStatusClosed.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusClosed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{10}
 }
 
 // What an open workspace's session is doing, as the footer would say it.
@@ -541,7 +803,7 @@ type WorkspaceStatusActivity struct {
 
 func (x *WorkspaceStatusActivity) Reset() {
 	*x = WorkspaceStatusActivity{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -553,7 +815,7 @@ func (x *WorkspaceStatusActivity) String() string {
 func (*WorkspaceStatusActivity) ProtoMessage() {}
 
 func (x *WorkspaceStatusActivity) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -566,7 +828,7 @@ func (x *WorkspaceStatusActivity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceStatusActivity.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusActivity) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *WorkspaceStatusActivity) GetActivity() isWorkspaceStatusActivity_Activity {
@@ -707,7 +969,7 @@ type WorkspaceStatusActivityStarting struct {
 
 func (x *WorkspaceStatusActivityStarting) Reset() {
 	*x = WorkspaceStatusActivityStarting{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -719,7 +981,7 @@ func (x *WorkspaceStatusActivityStarting) String() string {
 func (*WorkspaceStatusActivityStarting) ProtoMessage() {}
 
 func (x *WorkspaceStatusActivityStarting) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -732,7 +994,7 @@ func (x *WorkspaceStatusActivityStarting) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceStatusActivityStarting.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusActivityStarting) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{12}
 }
 
 // Idle. No fields.
@@ -744,7 +1006,7 @@ type WorkspaceStatusActivityIdle struct {
 
 func (x *WorkspaceStatusActivityIdle) Reset() {
 	*x = WorkspaceStatusActivityIdle{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -756,7 +1018,7 @@ func (x *WorkspaceStatusActivityIdle) String() string {
 func (*WorkspaceStatusActivityIdle) ProtoMessage() {}
 
 func (x *WorkspaceStatusActivityIdle) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -769,7 +1031,7 @@ func (x *WorkspaceStatusActivityIdle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceStatusActivityIdle.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusActivityIdle) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{13}
 }
 
 // A turn is running. No fields.
@@ -781,7 +1043,7 @@ type WorkspaceStatusActivityTurnRunning struct {
 
 func (x *WorkspaceStatusActivityTurnRunning) Reset() {
 	*x = WorkspaceStatusActivityTurnRunning{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -793,7 +1055,7 @@ func (x *WorkspaceStatusActivityTurnRunning) String() string {
 func (*WorkspaceStatusActivityTurnRunning) ProtoMessage() {}
 
 func (x *WorkspaceStatusActivityTurnRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -806,7 +1068,7 @@ func (x *WorkspaceStatusActivityTurnRunning) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use WorkspaceStatusActivityTurnRunning.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusActivityTurnRunning) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{14}
 }
 
 // Waiting on the user.
@@ -825,7 +1087,7 @@ type WorkspaceStatusActivityNeedsInput struct {
 
 func (x *WorkspaceStatusActivityNeedsInput) Reset() {
 	*x = WorkspaceStatusActivityNeedsInput{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -837,7 +1099,7 @@ func (x *WorkspaceStatusActivityNeedsInput) String() string {
 func (*WorkspaceStatusActivityNeedsInput) ProtoMessage() {}
 
 func (x *WorkspaceStatusActivityNeedsInput) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -850,7 +1112,7 @@ func (x *WorkspaceStatusActivityNeedsInput) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use WorkspaceStatusActivityNeedsInput.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusActivityNeedsInput) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *WorkspaceStatusActivityNeedsInput) GetAsk() isWorkspaceStatusActivityNeedsInput_Ask {
@@ -905,7 +1167,7 @@ type WorkspaceStatusActivityNeedsInputQuestion struct {
 
 func (x *WorkspaceStatusActivityNeedsInputQuestion) Reset() {
 	*x = WorkspaceStatusActivityNeedsInputQuestion{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -917,7 +1179,7 @@ func (x *WorkspaceStatusActivityNeedsInputQuestion) String() string {
 func (*WorkspaceStatusActivityNeedsInputQuestion) ProtoMessage() {}
 
 func (x *WorkspaceStatusActivityNeedsInputQuestion) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -930,7 +1192,7 @@ func (x *WorkspaceStatusActivityNeedsInputQuestion) ProtoReflect() protoreflect.
 
 // Deprecated: Use WorkspaceStatusActivityNeedsInputQuestion.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusActivityNeedsInputQuestion) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{16}
 }
 
 // A permission is open. No fields.
@@ -942,7 +1204,7 @@ type WorkspaceStatusActivityNeedsInputPermission struct {
 
 func (x *WorkspaceStatusActivityNeedsInputPermission) Reset() {
 	*x = WorkspaceStatusActivityNeedsInputPermission{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -954,7 +1216,7 @@ func (x *WorkspaceStatusActivityNeedsInputPermission) String() string {
 func (*WorkspaceStatusActivityNeedsInputPermission) ProtoMessage() {}
 
 func (x *WorkspaceStatusActivityNeedsInputPermission) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -967,7 +1229,7 @@ func (x *WorkspaceStatusActivityNeedsInputPermission) ProtoReflect() protoreflec
 
 // Deprecated: Use WorkspaceStatusActivityNeedsInputPermission.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusActivityNeedsInputPermission) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{17}
 }
 
 // Parked at the cold gate.
@@ -982,7 +1244,7 @@ type WorkspaceStatusActivityColdGate struct {
 
 func (x *WorkspaceStatusActivityColdGate) Reset() {
 	*x = WorkspaceStatusActivityColdGate{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -994,7 +1256,7 @@ func (x *WorkspaceStatusActivityColdGate) String() string {
 func (*WorkspaceStatusActivityColdGate) ProtoMessage() {}
 
 func (x *WorkspaceStatusActivityColdGate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1007,7 +1269,7 @@ func (x *WorkspaceStatusActivityColdGate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceStatusActivityColdGate.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusActivityColdGate) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *WorkspaceStatusActivityColdGate) GetGate() *v11.FeedId {
@@ -1029,7 +1291,7 @@ type WorkspaceStatusActivityFault struct {
 
 func (x *WorkspaceStatusActivityFault) Reset() {
 	*x = WorkspaceStatusActivityFault{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1041,7 +1303,7 @@ func (x *WorkspaceStatusActivityFault) String() string {
 func (*WorkspaceStatusActivityFault) ProtoMessage() {}
 
 func (x *WorkspaceStatusActivityFault) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1054,7 +1316,7 @@ func (x *WorkspaceStatusActivityFault) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceStatusActivityFault.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusActivityFault) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *WorkspaceStatusActivityFault) GetDescription() string {
@@ -1074,7 +1336,7 @@ type WorkspaceStatusActivityMerging struct {
 
 func (x *WorkspaceStatusActivityMerging) Reset() {
 	*x = WorkspaceStatusActivityMerging{}
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1086,7 +1348,7 @@ func (x *WorkspaceStatusActivityMerging) String() string {
 func (*WorkspaceStatusActivityMerging) ProtoMessage() {}
 
 func (x *WorkspaceStatusActivityMerging) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[16]
+	mi := &file_agentrepl_v1_workspace_status_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1099,14 +1361,14 @@ func (x *WorkspaceStatusActivityMerging) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceStatusActivityMerging.ProtoReflect.Descriptor instead.
 func (*WorkspaceStatusActivityMerging) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{16}
+	return file_agentrepl_v1_workspace_status_proto_rawDescGZIP(), []int{20}
 }
 
 var File_agentrepl_v1_workspace_status_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\n" +
-	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\"agentrepl/v1/workspace_links.proto\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x8b\x04\n" +
+	"#agentrepl/v1/workspace_status.proto\x12\fagentrepl.v1\x1a\"agentrepl/v1/workspace_links.proto\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xaa\x06\n" +
 	"\x0fWorkspaceStatus\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -1119,18 +1381,34 @@ const file_agentrepl_v1_workspace_status_proto_rawDesc = "" +
 	"\n" +
 	"repository\x18\t \x01(\v2\x1b.workspace.v1.RepositoryRefR\n" +
 	"repository\x122\n" +
-	"\x05links\x18\v \x01(\v2\x1c.agentrepl.v1.WorkspaceLinksR\x05linksB\v\n" +
-	"\t_awaitingJ\x04\b\n" +
-	"\x10\vR\x0eprincipal_link\"\xba\x01\n" +
-	"\x1aWorkspaceStatusMergeTarget\x12K\n" +
-	"\aprimary\x18\x01 \x01(\v2/.agentrepl.v1.WorkspaceStatusMergeTargetPrimaryH\x00R\aprimary\x12E\n" +
-	"\x05owner\x18\x02 \x01(\v2-.agentrepl.v1.WorkspaceStatusMergeTargetOwnerH\x00R\x05ownerB\b\n" +
-	"\x06target\"#\n" +
-	"!WorkspaceStatusMergeTargetPrimary\"t\n" +
-	"\x1fWorkspaceStatusMergeTargetOwner\x120\n" +
-	"\x05owner\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x05owner\x12\x1f\n" +
+	"\x05links\x18\v \x01(\v2\x1c.agentrepl.v1.WorkspaceLinksR\x05links\x12M\n" +
+	"\frelationship\x18\f \x01(\v2).agentrepl.v1.WorkspaceStatusRelationshipR\frelationship\x12=\n" +
+	"\x05owner\x18\r \x01(\v2\".agentrepl.v1.WorkspaceStatusOwnerH\x01R\x05owner\x88\x01\x01\x12>\n" +
+	"\n" +
+	"created_by\x18\x0e \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x02R\tcreatedBy\x88\x01\x01\x126\n" +
+	"\bchildren\x18\x0f \x03(\v2\x1a.workspace.v1.WorkspaceRefR\bchildrenB\v\n" +
+	"\t_awaitingB\b\n" +
+	"\x06_ownerB\r\n" +
+	"\v_created_byJ\x04\b\n" +
+	"\x10\vR\x0eprincipal_link\"\xb2\x01\n" +
+	"\x1bWorkspaceStatusRelationship\x12F\n" +
+	"\x05child\x18\x01 \x01(\v2..agentrepl.v1.WorkspaceStatusRelationshipChildH\x00R\x05child\x12C\n" +
+	"\x04peer\x18\x02 \x01(\v2-.agentrepl.v1.WorkspaceStatusRelationshipPeerH\x00R\x04peerB\x06\n" +
+	"\x04kind\"V\n" +
+	" WorkspaceStatusRelationshipChild\x122\n" +
+	"\x06parent\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x06parent\"!\n" +
+	"\x1fWorkspaceStatusRelationshipPeer\"q\n" +
+	"\x14WorkspaceStatusOwner\x128\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x1f\n" +
 	"\vowner_lands\x18\x02 \x01(\bR\n" +
-	"ownerLands\"\x9d\x01\n" +
+	"ownerLands\"\xc6\x01\n" +
+	"\x1aWorkspaceStatusMergeTarget\x12K\n" +
+	"\aprimary\x18\x01 \x01(\v2/.agentrepl.v1.WorkspaceStatusMergeTargetPrimaryH\x00R\aprimary\x12Q\n" +
+	"\tworkspace\x18\x02 \x01(\v21.agentrepl.v1.WorkspaceStatusMergeTargetWorkspaceH\x00R\tworkspaceB\b\n" +
+	"\x06target\"#\n" +
+	"!WorkspaceStatusMergeTargetPrimary\"r\n" +
+	"#WorkspaceStatusMergeTargetWorkspace\x128\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspaceJ\x04\b\x02\x10\x03R\vowner_lands\"\x9d\x01\n" +
 	"\x17WorkspaceStatusStanding\x127\n" +
 	"\x04open\x18\x01 \x01(\v2!.agentrepl.v1.WorkspaceStatusOpenH\x00R\x04open\x12=\n" +
 	"\x06closed\x18\x02 \x01(\v2#.agentrepl.v1.WorkspaceStatusClosedH\x00R\x06closedB\n" +
@@ -1179,58 +1457,70 @@ func file_agentrepl_v1_workspace_status_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_workspace_status_proto_rawDescData
 }
 
-var file_agentrepl_v1_workspace_status_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_agentrepl_v1_workspace_status_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_agentrepl_v1_workspace_status_proto_goTypes = []any{
 	(*WorkspaceStatus)(nil),                             // 0: agentrepl.v1.WorkspaceStatus
-	(*WorkspaceStatusMergeTarget)(nil),                  // 1: agentrepl.v1.WorkspaceStatusMergeTarget
-	(*WorkspaceStatusMergeTargetPrimary)(nil),           // 2: agentrepl.v1.WorkspaceStatusMergeTargetPrimary
-	(*WorkspaceStatusMergeTargetOwner)(nil),             // 3: agentrepl.v1.WorkspaceStatusMergeTargetOwner
-	(*WorkspaceStatusStanding)(nil),                     // 4: agentrepl.v1.WorkspaceStatusStanding
-	(*WorkspaceStatusOpen)(nil),                         // 5: agentrepl.v1.WorkspaceStatusOpen
-	(*WorkspaceStatusClosed)(nil),                       // 6: agentrepl.v1.WorkspaceStatusClosed
-	(*WorkspaceStatusActivity)(nil),                     // 7: agentrepl.v1.WorkspaceStatusActivity
-	(*WorkspaceStatusActivityStarting)(nil),             // 8: agentrepl.v1.WorkspaceStatusActivityStarting
-	(*WorkspaceStatusActivityIdle)(nil),                 // 9: agentrepl.v1.WorkspaceStatusActivityIdle
-	(*WorkspaceStatusActivityTurnRunning)(nil),          // 10: agentrepl.v1.WorkspaceStatusActivityTurnRunning
-	(*WorkspaceStatusActivityNeedsInput)(nil),           // 11: agentrepl.v1.WorkspaceStatusActivityNeedsInput
-	(*WorkspaceStatusActivityNeedsInputQuestion)(nil),   // 12: agentrepl.v1.WorkspaceStatusActivityNeedsInputQuestion
-	(*WorkspaceStatusActivityNeedsInputPermission)(nil), // 13: agentrepl.v1.WorkspaceStatusActivityNeedsInputPermission
-	(*WorkspaceStatusActivityColdGate)(nil),             // 14: agentrepl.v1.WorkspaceStatusActivityColdGate
-	(*WorkspaceStatusActivityFault)(nil),                // 15: agentrepl.v1.WorkspaceStatusActivityFault
-	(*WorkspaceStatusActivityMerging)(nil),              // 16: agentrepl.v1.WorkspaceStatusActivityMerging
-	(*v1.WorkspaceRef)(nil),                             // 17: workspace.v1.WorkspaceRef
-	(*v1.RepositoryRef)(nil),                            // 18: workspace.v1.RepositoryRef
-	(*WorkspaceLinks)(nil),                              // 19: agentrepl.v1.WorkspaceLinks
-	(*v11.FeedId)(nil),                                  // 20: frontend.v1.FeedId
+	(*WorkspaceStatusRelationship)(nil),                 // 1: agentrepl.v1.WorkspaceStatusRelationship
+	(*WorkspaceStatusRelationshipChild)(nil),            // 2: agentrepl.v1.WorkspaceStatusRelationshipChild
+	(*WorkspaceStatusRelationshipPeer)(nil),             // 3: agentrepl.v1.WorkspaceStatusRelationshipPeer
+	(*WorkspaceStatusOwner)(nil),                        // 4: agentrepl.v1.WorkspaceStatusOwner
+	(*WorkspaceStatusMergeTarget)(nil),                  // 5: agentrepl.v1.WorkspaceStatusMergeTarget
+	(*WorkspaceStatusMergeTargetPrimary)(nil),           // 6: agentrepl.v1.WorkspaceStatusMergeTargetPrimary
+	(*WorkspaceStatusMergeTargetWorkspace)(nil),         // 7: agentrepl.v1.WorkspaceStatusMergeTargetWorkspace
+	(*WorkspaceStatusStanding)(nil),                     // 8: agentrepl.v1.WorkspaceStatusStanding
+	(*WorkspaceStatusOpen)(nil),                         // 9: agentrepl.v1.WorkspaceStatusOpen
+	(*WorkspaceStatusClosed)(nil),                       // 10: agentrepl.v1.WorkspaceStatusClosed
+	(*WorkspaceStatusActivity)(nil),                     // 11: agentrepl.v1.WorkspaceStatusActivity
+	(*WorkspaceStatusActivityStarting)(nil),             // 12: agentrepl.v1.WorkspaceStatusActivityStarting
+	(*WorkspaceStatusActivityIdle)(nil),                 // 13: agentrepl.v1.WorkspaceStatusActivityIdle
+	(*WorkspaceStatusActivityTurnRunning)(nil),          // 14: agentrepl.v1.WorkspaceStatusActivityTurnRunning
+	(*WorkspaceStatusActivityNeedsInput)(nil),           // 15: agentrepl.v1.WorkspaceStatusActivityNeedsInput
+	(*WorkspaceStatusActivityNeedsInputQuestion)(nil),   // 16: agentrepl.v1.WorkspaceStatusActivityNeedsInputQuestion
+	(*WorkspaceStatusActivityNeedsInputPermission)(nil), // 17: agentrepl.v1.WorkspaceStatusActivityNeedsInputPermission
+	(*WorkspaceStatusActivityColdGate)(nil),             // 18: agentrepl.v1.WorkspaceStatusActivityColdGate
+	(*WorkspaceStatusActivityFault)(nil),                // 19: agentrepl.v1.WorkspaceStatusActivityFault
+	(*WorkspaceStatusActivityMerging)(nil),              // 20: agentrepl.v1.WorkspaceStatusActivityMerging
+	(*v1.WorkspaceRef)(nil),                             // 21: workspace.v1.WorkspaceRef
+	(*v1.RepositoryRef)(nil),                            // 22: workspace.v1.RepositoryRef
+	(*WorkspaceLinks)(nil),                              // 23: agentrepl.v1.WorkspaceLinks
+	(*v11.FeedId)(nil),                                  // 24: frontend.v1.FeedId
 }
 var file_agentrepl_v1_workspace_status_proto_depIdxs = []int32{
-	17, // 0: agentrepl.v1.WorkspaceStatus.workspace:type_name -> workspace.v1.WorkspaceRef
-	1,  // 1: agentrepl.v1.WorkspaceStatus.merge_target:type_name -> agentrepl.v1.WorkspaceStatusMergeTarget
-	4,  // 2: agentrepl.v1.WorkspaceStatus.standing:type_name -> agentrepl.v1.WorkspaceStatusStanding
-	17, // 3: agentrepl.v1.WorkspaceStatus.awaiting:type_name -> workspace.v1.WorkspaceRef
-	18, // 4: agentrepl.v1.WorkspaceStatus.repository:type_name -> workspace.v1.RepositoryRef
-	19, // 5: agentrepl.v1.WorkspaceStatus.links:type_name -> agentrepl.v1.WorkspaceLinks
-	2,  // 6: agentrepl.v1.WorkspaceStatusMergeTarget.primary:type_name -> agentrepl.v1.WorkspaceStatusMergeTargetPrimary
-	3,  // 7: agentrepl.v1.WorkspaceStatusMergeTarget.owner:type_name -> agentrepl.v1.WorkspaceStatusMergeTargetOwner
-	17, // 8: agentrepl.v1.WorkspaceStatusMergeTargetOwner.owner:type_name -> workspace.v1.WorkspaceRef
-	5,  // 9: agentrepl.v1.WorkspaceStatusStanding.open:type_name -> agentrepl.v1.WorkspaceStatusOpen
-	6,  // 10: agentrepl.v1.WorkspaceStatusStanding.closed:type_name -> agentrepl.v1.WorkspaceStatusClosed
-	7,  // 11: agentrepl.v1.WorkspaceStatusOpen.activity:type_name -> agentrepl.v1.WorkspaceStatusActivity
-	8,  // 12: agentrepl.v1.WorkspaceStatusActivity.starting:type_name -> agentrepl.v1.WorkspaceStatusActivityStarting
-	9,  // 13: agentrepl.v1.WorkspaceStatusActivity.idle:type_name -> agentrepl.v1.WorkspaceStatusActivityIdle
-	10, // 14: agentrepl.v1.WorkspaceStatusActivity.turn_running:type_name -> agentrepl.v1.WorkspaceStatusActivityTurnRunning
-	11, // 15: agentrepl.v1.WorkspaceStatusActivity.needs_input:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInput
-	16, // 16: agentrepl.v1.WorkspaceStatusActivity.merging:type_name -> agentrepl.v1.WorkspaceStatusActivityMerging
-	14, // 17: agentrepl.v1.WorkspaceStatusActivity.cold_gate:type_name -> agentrepl.v1.WorkspaceStatusActivityColdGate
-	15, // 18: agentrepl.v1.WorkspaceStatusActivity.fault:type_name -> agentrepl.v1.WorkspaceStatusActivityFault
-	12, // 19: agentrepl.v1.WorkspaceStatusActivityNeedsInput.question:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputQuestion
-	13, // 20: agentrepl.v1.WorkspaceStatusActivityNeedsInput.permission:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputPermission
-	20, // 21: agentrepl.v1.WorkspaceStatusActivityColdGate.gate:type_name -> frontend.v1.FeedId
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	21, // 0: agentrepl.v1.WorkspaceStatus.workspace:type_name -> workspace.v1.WorkspaceRef
+	5,  // 1: agentrepl.v1.WorkspaceStatus.merge_target:type_name -> agentrepl.v1.WorkspaceStatusMergeTarget
+	8,  // 2: agentrepl.v1.WorkspaceStatus.standing:type_name -> agentrepl.v1.WorkspaceStatusStanding
+	21, // 3: agentrepl.v1.WorkspaceStatus.awaiting:type_name -> workspace.v1.WorkspaceRef
+	22, // 4: agentrepl.v1.WorkspaceStatus.repository:type_name -> workspace.v1.RepositoryRef
+	23, // 5: agentrepl.v1.WorkspaceStatus.links:type_name -> agentrepl.v1.WorkspaceLinks
+	1,  // 6: agentrepl.v1.WorkspaceStatus.relationship:type_name -> agentrepl.v1.WorkspaceStatusRelationship
+	4,  // 7: agentrepl.v1.WorkspaceStatus.owner:type_name -> agentrepl.v1.WorkspaceStatusOwner
+	21, // 8: agentrepl.v1.WorkspaceStatus.created_by:type_name -> workspace.v1.WorkspaceRef
+	21, // 9: agentrepl.v1.WorkspaceStatus.children:type_name -> workspace.v1.WorkspaceRef
+	2,  // 10: agentrepl.v1.WorkspaceStatusRelationship.child:type_name -> agentrepl.v1.WorkspaceStatusRelationshipChild
+	3,  // 11: agentrepl.v1.WorkspaceStatusRelationship.peer:type_name -> agentrepl.v1.WorkspaceStatusRelationshipPeer
+	21, // 12: agentrepl.v1.WorkspaceStatusRelationshipChild.parent:type_name -> workspace.v1.WorkspaceRef
+	21, // 13: agentrepl.v1.WorkspaceStatusOwner.workspace:type_name -> workspace.v1.WorkspaceRef
+	6,  // 14: agentrepl.v1.WorkspaceStatusMergeTarget.primary:type_name -> agentrepl.v1.WorkspaceStatusMergeTargetPrimary
+	7,  // 15: agentrepl.v1.WorkspaceStatusMergeTarget.workspace:type_name -> agentrepl.v1.WorkspaceStatusMergeTargetWorkspace
+	21, // 16: agentrepl.v1.WorkspaceStatusMergeTargetWorkspace.workspace:type_name -> workspace.v1.WorkspaceRef
+	9,  // 17: agentrepl.v1.WorkspaceStatusStanding.open:type_name -> agentrepl.v1.WorkspaceStatusOpen
+	10, // 18: agentrepl.v1.WorkspaceStatusStanding.closed:type_name -> agentrepl.v1.WorkspaceStatusClosed
+	11, // 19: agentrepl.v1.WorkspaceStatusOpen.activity:type_name -> agentrepl.v1.WorkspaceStatusActivity
+	12, // 20: agentrepl.v1.WorkspaceStatusActivity.starting:type_name -> agentrepl.v1.WorkspaceStatusActivityStarting
+	13, // 21: agentrepl.v1.WorkspaceStatusActivity.idle:type_name -> agentrepl.v1.WorkspaceStatusActivityIdle
+	14, // 22: agentrepl.v1.WorkspaceStatusActivity.turn_running:type_name -> agentrepl.v1.WorkspaceStatusActivityTurnRunning
+	15, // 23: agentrepl.v1.WorkspaceStatusActivity.needs_input:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInput
+	20, // 24: agentrepl.v1.WorkspaceStatusActivity.merging:type_name -> agentrepl.v1.WorkspaceStatusActivityMerging
+	18, // 25: agentrepl.v1.WorkspaceStatusActivity.cold_gate:type_name -> agentrepl.v1.WorkspaceStatusActivityColdGate
+	19, // 26: agentrepl.v1.WorkspaceStatusActivity.fault:type_name -> agentrepl.v1.WorkspaceStatusActivityFault
+	16, // 27: agentrepl.v1.WorkspaceStatusActivityNeedsInput.question:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputQuestion
+	17, // 28: agentrepl.v1.WorkspaceStatusActivityNeedsInput.permission:type_name -> agentrepl.v1.WorkspaceStatusActivityNeedsInputPermission
+	24, // 29: agentrepl.v1.WorkspaceStatusActivityColdGate.gate:type_name -> frontend.v1.FeedId
+	30, // [30:30] is the sub-list for method output_type
+	30, // [30:30] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_workspace_status_proto_init() }
@@ -1241,14 +1531,18 @@ func file_agentrepl_v1_workspace_status_proto_init() {
 	file_agentrepl_v1_workspace_links_proto_init()
 	file_agentrepl_v1_workspace_status_proto_msgTypes[0].OneofWrappers = []any{}
 	file_agentrepl_v1_workspace_status_proto_msgTypes[1].OneofWrappers = []any{
-		(*WorkspaceStatusMergeTarget_Primary)(nil),
-		(*WorkspaceStatusMergeTarget_Owner)(nil),
+		(*WorkspaceStatusRelationship_Child)(nil),
+		(*WorkspaceStatusRelationship_Peer)(nil),
 	}
-	file_agentrepl_v1_workspace_status_proto_msgTypes[4].OneofWrappers = []any{
+	file_agentrepl_v1_workspace_status_proto_msgTypes[5].OneofWrappers = []any{
+		(*WorkspaceStatusMergeTarget_Primary)(nil),
+		(*WorkspaceStatusMergeTarget_Workspace)(nil),
+	}
+	file_agentrepl_v1_workspace_status_proto_msgTypes[8].OneofWrappers = []any{
 		(*WorkspaceStatusStanding_Open)(nil),
 		(*WorkspaceStatusStanding_Closed)(nil),
 	}
-	file_agentrepl_v1_workspace_status_proto_msgTypes[7].OneofWrappers = []any{
+	file_agentrepl_v1_workspace_status_proto_msgTypes[11].OneofWrappers = []any{
 		(*WorkspaceStatusActivity_Starting)(nil),
 		(*WorkspaceStatusActivity_Idle)(nil),
 		(*WorkspaceStatusActivity_TurnRunning)(nil),
@@ -1257,7 +1551,7 @@ func file_agentrepl_v1_workspace_status_proto_init() {
 		(*WorkspaceStatusActivity_ColdGate)(nil),
 		(*WorkspaceStatusActivity_Fault)(nil),
 	}
-	file_agentrepl_v1_workspace_status_proto_msgTypes[11].OneofWrappers = []any{
+	file_agentrepl_v1_workspace_status_proto_msgTypes[15].OneofWrappers = []any{
 		(*WorkspaceStatusActivityNeedsInput_Question)(nil),
 		(*WorkspaceStatusActivityNeedsInput_Permission)(nil),
 	}
@@ -1267,7 +1561,7 @@ func file_agentrepl_v1_workspace_status_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_workspace_status_proto_rawDesc), len(file_agentrepl_v1_workspace_status_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
