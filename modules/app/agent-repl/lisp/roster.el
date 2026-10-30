@@ -574,8 +574,9 @@ has a tab, a hidden one an undrawn tab), so a merged or closed row gets
 none.
 
 `:collapsed' is a tab off the bar: folded, or hidden.  `:hidden' is only
-the user\='s hide, the one that withholds the workspace\='s page
-\(`agent-repl-open-tabs-withheld-p'); a fold withholds nothing.
+the user\='s hide, the one that withholds the workspace\='s slot
+\(`agent-repl-open-tabs-withheld-p'); a fold withholds only its page
+\(`agent-repl-open-tabs-folded-p').
 
 THE ROWS IT REFUSES A TAB ARE RECORDED.  This predicate is the whole
 answer to \"why is there no tab for that workspace\", and it used to give

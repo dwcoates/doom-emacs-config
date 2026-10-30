@@ -1266,7 +1266,8 @@ Refusals, all preconditions rather than failures:
   - `:hidden'            the user hid it, and the user is not looking at
                          it: it runs nothing
                          (`agent-repl-open-tabs-withheld-p').  A fold
-                         withholds no page;
+                         keeps the slot and withholds only its page
+                         (`agent-repl-page-unload-wanted-p');
   - `:already-mounted'   a live webview buffer already exists (this is
                          what makes pre-creation idempotent);
   - `:no-xwidget'        an Emacs with no xwidget support has no webview

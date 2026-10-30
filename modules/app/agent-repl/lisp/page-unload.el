@@ -22,7 +22,11 @@
 ;;     shown, so unloaded the moment the workspace enters the status, or the
 ;;     moment the user switches away;
 ;;   - a HIDDEN workspace (one the user hid) holds no page while the user is
-;;     not looking at it.
+;;     not looking at it;
+;;   - a FOLDED workspace (in a repository section or subsection the user
+;;     collapsed) holds no page, whatever its status: its page is unloaded
+;;     the moment the section folds, with no grace after a switch away
+;;     (owner request, 2026-10-30), and loaded back at its show.
 ;;
 ;; The page on screen and the current workspace's are never unloaded.  A
 ;; workspace with no roster row yet decides nothing until its first push.
@@ -84,6 +88,7 @@
 (declare-function agent-repl-webhost-hold-back "webhost" (ws))
 (declare-function agent-repl-webhost-held-back-p "webhost" (ws))
 (declare-function agent-repl-open-tabs-withheld-p "open-tabs" (ws))
+(declare-function agent-repl-open-tabs-folded-p "open-tabs" (ws))
 (declare-function agent-repl-open-tabs-holds-p "open-tabs" (id))
 (declare-function agent-repl--webhost-id "webhost" (ws))
 (declare-function agent-repl-link-successor "daemon-link" ())
@@ -179,9 +184,15 @@ recorded at ERROR and signalled, never guessed at."
   (or (equal ws agent-repl-page-unload--shown)
       (equal ws (agent-repl--ws-current-name))))
 
+(defun agent-repl-page-unload--folded-p (ws)
+  "Non-nil when a collapsed section folds WS, so it holds no page."
+  (and (fboundp 'agent-repl-open-tabs-folded-p) (agent-repl-open-tabs-folded-p ws)))
+
 (defun agent-repl-page-unload--withheld-p (ws)
-  "Non-nil when the user hid WS, so it holds no page off screen."
-  (and (fboundp 'agent-repl-open-tabs-withheld-p) (agent-repl-open-tabs-withheld-p ws)))
+  "Non-nil when the user hid WS or folded its section.
+Either way WS holds no page off screen."
+  (or (and (fboundp 'agent-repl-open-tabs-withheld-p) (agent-repl-open-tabs-withheld-p ws))
+      (agent-repl-page-unload--folded-p ws)))
 
 (defun agent-repl-page-unload--gated-p (ws)
   "Non-nil when WS stands at its cold gate, so its page is held back on show."
@@ -189,10 +200,11 @@ recorded at ERROR and signalled, never guessed at."
 
 (defun agent-repl-page-unload-wanted-p (ws)
   "Non-nil when WS's page should be loaded now, before anyone shows it.
-That is when it is on screen and not cold-gated, or working and not
-hidden.  A slot made for a workspace that is not wanted is made with no
-page \(`agent-repl--frontend-ensure-webview-buffer'); its show loads it,
-or holds it back when WS is cold-gated (`agent-repl-page-unload-note-shown')."
+That is when it is on screen and not cold-gated, or working and neither
+hidden nor folded (`agent-repl-page-unload--withheld-p').  A slot made for
+a workspace that is not wanted is made with no page
+\(`agent-repl--frontend-ensure-webview-buffer'); its show loads it, or
+holds it back when WS is cold-gated (`agent-repl-page-unload-note-shown')."
   (or (and (agent-repl-page-unload--on-screen-p ws)
            (not (agent-repl-page-unload--gated-p ws)))
       (and (not (agent-repl-page-unload--withheld-p ws))
@@ -310,6 +322,9 @@ working on its own, and either way it is held as working."
     (when (eq bucket 'working)
       (agent-repl--ws-put ws :page-visit nil))
     (cond
+     ;; A FOLD UNLOADS AT ONCE (owner request, 2026-10-30), the grace after a
+     ;; switch away included.
+     ((agent-repl-page-unload--folded-p ws) 'folded)
      ;; THE GRACE AFTER A SWITCH AWAY holds the page, whatever its status.
      ((agent-repl-page-unload--leave-ends ws now) nil)
      ((agent-repl-page-unload--withheld-p ws) 'hidden)
@@ -398,6 +413,14 @@ the report was in flight."
     (when-let ((reason (agent-repl-page-unload--reason ws now)))
       (agent-repl-page-unload--unload ws reason now)
       t)))
+
+(defun agent-repl-page-unload-judge (ws)
+  "Unload WS\='s page now when no status holds it, and report its residency.
+The open-tabs reconcile calls it the moment a fold takes WS\='s tab off
+the bar, so the folded page goes at once rather than at the next pass.
+Answers non-nil when an unload was started."
+  (prog1 (agent-repl-page-unload--judge ws (agent-repl-page-unload--now))
+    (agent-repl-page-unload--report ws)))
 
 (defun agent-repl-page-unload--load-working (ws)
   "Load WS\='s unloaded page in the background when WS is working; non-nil if so.

@@ -29,6 +29,7 @@
 (defvar agent-repl-test-open-tabs--slot-only nil
   "Workspaces whose slot is made with no page: not wanted (page-unload.el).")
 (defvar agent-repl-test-open-tabs--dropped nil "Workspaces whose page was dropped.")
+(defvar agent-repl-test-open-tabs--judged nil "Workspaces whose page was judged at a fold, oldest first.")
 (defvar agent-repl-test-open-tabs--switches nil "Every switch asked, as (WS . TRIGGER).")
 (defvar agent-repl-test-open-tabs--undrawn nil "Workspaces the bar never draws.")
 (defvar agent-repl-test-open-tabs--armed 0 "How often Doom's one-time setup was armed.")
@@ -70,6 +71,7 @@ A ref id names the workspace of the same name."
            (agent-repl-test-open-tabs--no-page nil)
            (agent-repl-test-open-tabs--slot-only nil)
            (agent-repl-test-open-tabs--dropped nil)
+           (agent-repl-test-open-tabs--judged nil)
            (agent-repl-test-open-tabs--report 'reported)
            (agent-repl-test-open-tabs--pending nil)
            (agent-repl-test-open-tabs--events nil)
@@ -150,6 +152,10 @@ A ref id names the workspace of the same name."
                               (append agent-repl-test-open-tabs--milestones (list :ended)))))
                      ((symbol-function 'agent-repl-open-progress-note-loaded)
                       (lambda (ws) (push ws agent-repl-test-open-tabs--noted)))
+                     ((symbol-function 'agent-repl-page-unload-judge)
+                      (lambda (ws)
+                        (setq agent-repl-test-open-tabs--judged
+                              (append agent-repl-test-open-tabs--judged (list ws)))))
                      ;; No host unless a test stages one.
                      ((symbol-function 'agent-repl-webhost-xwidget) #'ignore))
              ,@body)
@@ -626,15 +632,51 @@ section, landed on a perspective that no page was ever made for."
 ;;;; ---- Folding ----
 
 (ert-deftest agent-repl-test-open-tabs-hidden-p-is-nil-for-a-folded-row ()
-  "A workspace in a collapsed section is not hidden: a fold withholds nothing."
+  "A workspace in a collapsed section is not hidden but folded."
   (agent-repl-test-open-tabs--with
     ;; Act
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'folded))
     ;; Assert
     (should-not (agent-repl-open-tabs-hidden-p "a"))))
 
+(ert-deftest agent-repl-test-open-tabs-folded-p-answers-for-a-folded-row-not-looked-at ()
+  "A workspace in a collapsed section the user stands elsewhere than is folded."
+  (agent-repl-test-open-tabs--with
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "b")))
+      ;; Act
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'folded))
+      ;; Assert
+      (should (agent-repl-open-tabs-folded-p "a")))))
+
+(ert-deftest agent-repl-test-open-tabs-folded-p-is-nil-for-the-folded-workspace-looked-at ()
+  "The workspace the user is looking at is never folded."
+  (agent-repl-test-open-tabs--with
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "a")))
+      ;; Act
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'folded))
+      ;; Assert
+      (should-not (agent-repl-open-tabs-folded-p "a")))))
+
+(ert-deftest agent-repl-test-open-tabs-folded-p-is-nil-for-a-hidden-row ()
+  "A workspace the user hid is hidden, not folded."
+  (agent-repl-test-open-tabs--with
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "b")))
+      ;; Act
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'hidden))
+      ;; Assert
+      (should-not (agent-repl-open-tabs-folded-p "a")))))
+
+(ert-deftest agent-repl-test-open-tabs-folded-p-is-nil-for-a-drawn-row ()
+  "A drawn workspace is not folded."
+  (agent-repl-test-open-tabs--with
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "b")))
+      ;; Act
+      (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+      ;; Assert
+      (should-not (agent-repl-open-tabs-folded-p "a")))))
+
 (ert-deftest agent-repl-test-open-tabs-withheld-p-is-nil-for-a-folded-row-not-looked-at ()
-  "A folded workspace the user stands elsewhere than still holds its page."
+  "A folded workspace keeps its slot: only the user's hide withholds one."
   (agent-repl-test-open-tabs--with
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "b")))
       ;; Act
@@ -643,7 +685,9 @@ section, landed on a perspective that no page was ever made for."
       (should-not (agent-repl-open-tabs-withheld-p "a")))))
 
 (ert-deftest agent-repl-test-open-tabs-asks-a-folded-row-loading-its-page ()
-  "A folded row is asked for with its page loaded, as a drawn one is."
+  "A folded row is asked for with its slot made, as a drawn one is.
+Whether the slot holds a page is the stubbed precreate's, which page-unload.el
+decides in production (`agent-repl-page-unload-wanted-p')."
   (agent-repl-test-open-tabs--with
     ;; Act
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'folded))
@@ -652,9 +696,9 @@ section, landed on a perspective that no page was ever made for."
                          (agent-repl-test-open-tabs--page-arm "a"))
                    '(("a") ("a") :loading)))))
 
-(ert-deftest agent-repl-test-open-tabs-folding-an-open-row-keeps-its-page ()
-  "An open workspace whose section is folded keeps its page, nothing reported.
-Owner ruling 2026-10-26: a fold never unloads."
+(ert-deftest agent-repl-test-open-tabs-folding-an-open-row-judges-its-page-at-once ()
+  "An open workspace whose section is folded has its page judged at the fold.
+Owner request 2026-10-30: a fold unloads its pages at once (page-unload.el)."
   (agent-repl-test-open-tabs--with
     ;; Arrange
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
@@ -662,9 +706,29 @@ Owner ruling 2026-10-26: a fold never unloads."
     ;; Act
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'folded))
     ;; Assert
-    (should (equal (list agent-repl-test-open-tabs--events
-                         (and (member "a" agent-repl-test-open-tabs--paged) t))
-                   '(nil t)))))
+    (should (equal agent-repl-test-open-tabs--judged '("a")))))
+
+(ert-deftest agent-repl-test-open-tabs-folding-an-open-row-keeps-its-slot ()
+  "A fold never drops the slot the way a hide does: the panels stand."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Act
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'folded))
+    ;; Assert
+    (should-not agent-repl-test-open-tabs--dropped)))
+
+(ert-deftest agent-repl-test-open-tabs-a-drawn-row-is-not-judged ()
+  "A walk that folds nothing judges no page."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Act
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    ;; Assert
+    (should-not agent-repl-test-open-tabs--judged)))
 
 (ert-deftest agent-repl-test-open-tabs-a-folded-row-goes-dormant ()
   "An open workspace whose section is folded goes dormant, keeping its place."
@@ -707,8 +771,8 @@ Owner ruling 2026-10-26: a fold never unloads."
                          agent-repl-test-open-tabs--dropped)
                    '(2 :loading nil)))))
 
-(ert-deftest agent-repl-test-open-tabs-a-row-folded-while-opening-keeps-its-page ()
-  "A ready answer for a workspace folded meanwhile leaves its page, dormant."
+(ert-deftest agent-repl-test-open-tabs-a-row-folded-while-opening-keeps-its-slot ()
+  "A ready answer for a workspace folded meanwhile leaves its slot, dormant."
   (agent-repl-test-open-tabs--with
     ;; Arrange
     (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
@@ -719,6 +783,17 @@ Owner ruling 2026-10-26: a fold never unloads."
     (should (equal (list agent-repl-test-open-tabs--dropped
                          (gethash "a" agent-repl-open-tabs--state))
                    '(nil dormant)))))
+
+(ert-deftest agent-repl-test-open-tabs-a-row-folded-while-opening-is-judged-at-its-answer ()
+  "A ready answer for a workspace folded meanwhile has its page judged at once."
+  (agent-repl-test-open-tabs--with
+    ;; Arrange
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a"))
+    (agent-repl-test-open-tabs--walk (agent-repl-test-open-tabs--row "a" 'folded))
+    ;; Act
+    (agent-repl-test-open-tabs--frame (agent-repl-test-open-tabs--opened "a" :ready))
+    ;; Assert
+    (should (equal agent-repl-test-open-tabs--judged '("a")))))
 
 ;;;; ---- Refusals ----
 
