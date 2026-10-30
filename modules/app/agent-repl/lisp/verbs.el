@@ -340,7 +340,8 @@ sentence the shim and the daemon word it with."
 KEYWORD `:has-open-children' names the parent's open children and the
 open workspaces landing into it, and for a merge (OP \"merge\") asks for
 them to be resolved and closed before a one-shot merge;
-`:parent-not-open' names the parent and what to do about it.  Nil for any other arm, which is not a family refusal."
+`:parent-not-open' names the parent and what to do about it.  Nil for
+any other arm, which is not a family refusal."
   (pcase keyword
     (:has-open-children
      (let* ((open (append (plist-get fields :children) (plist-get fields :landing-into)))
@@ -2588,8 +2589,9 @@ recorded before the abandonment propagates."
 (defun agent-repl-create-workspace ()
   "Create a workspace in the doom repository from a prompt (`SPC TAB n\=').
 The repository is ALWAYS doom\='s own
-\(`agent-repl-verbs--agent-repl-repository\='), whichever workspace (or none) this runs from, off its main branch; the
-daemon mints the name.  The only question is the prompt, which defaults to
+\(`agent-repl-verbs--agent-repl-repository\='), whichever workspace
+\(or none) this runs from, off its main branch; the daemon mints the
+name.  The only question is the prompt, which defaults to
 the composer\='s text.  `SPC TAB N\=' is the explanation-engine counterpart
 and `SPC TAB C-n\=' picks the repository and the model.
 
