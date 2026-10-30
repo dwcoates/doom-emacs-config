@@ -184,6 +184,10 @@ and nothing waiting is called."
 (defvar-local agent-repl-prompt-entries--parser nil
   "This composer's parser of the prompt grammar, or nil before it loads.")
 
+(defvar-local agent-repl-prompt-entries--edits 0
+  "How many text edits this composer has had, only ever rising.
+Reported with the entries, so the webapp can tell the person typed.")
+
 (defvar-local agent-repl-prompt-entries--ws nil
   "The workspace this composer is, once marking is enabled.")
 
@@ -216,7 +220,9 @@ and so does reporting them to the daemon after each command
   "Re-mark the composer's entries after an edit.
 The composer's `after-change-functions' entry; unlogged, as it runs per
 keystroke.  A whole-buffer pass: an edit can move where every later entry
-begins, and a composer is short."
+begins, and a composer is short.  Counts the edit, which the next report
+carries."
+  (cl-incf agent-repl-prompt-entries--edits)
   (agent-repl-prompt-entries-mark))
 
 (defun agent-repl-prompt-entries--entries ()
@@ -287,7 +293,7 @@ An `agent-repl-host-update-functions' entry."
 ;; in either order, and the daemon would then hold the older.
 
 (defvar-local agent-repl-prompt-entries--reported nil
-  "The (LABELS . AT) last sent from this composer, or nil.")
+  "The (LABELS AT EDITS) last sent from this composer, or nil.")
 
 (defun agent-repl-prompt-entries--report ()
   "Report the composer's entries to the daemon when they moved since last sent.
@@ -295,7 +301,8 @@ The composer's `post-command-hook' entry.  While a report is in flight the
 new one is owed, and sent once that one is answered."
   (when (and agent-repl-prompt-entries--parser agent-repl-prompt-entries--ws)
     (let* ((entries (agent-repl-prompt-entries--entries))
-           (state (cons (mapcar #'car entries) (agent-repl-prompt-entries--entry-at-point entries))))
+           (state (list (mapcar #'car entries) (agent-repl-prompt-entries--entry-at-point entries)
+                        agent-repl-prompt-entries--edits)))
       (unless (equal state agent-repl-prompt-entries--reported)
         (let ((buf (current-buffer)))
           (agent-repl-serial-send
@@ -304,7 +311,7 @@ new one is owed, and sent once that one is answered."
            (lambda (done) (agent-repl-prompt-entries--send state done))))))))
 
 (defun agent-repl-prompt-entries--send (state done)
-  "Send STATE, (LABELS . AT), as this composer's report; call DONE once it ends.
+  "Send STATE, (LABELS AT EDITS), as this composer's report; call DONE once it ends.
 With no daemon-minted ref or no connection nothing is sent and nothing is
 marked reported, so the next command tries again."
   (let* ((ws agent-repl-prompt-entries--ws)
@@ -316,10 +323,11 @@ marked reported, so the next command tries again."
           (agent-repl--log ws "elisp.prompt-entries.report-skipped ws=%s ref=%s conn=%s" ws (and ref t) (and conn t))
           (funcall done))
       (setq agent-repl-prompt-entries--reported state)
-      (agent-repl--log ws "elisp.prompt-entries.report ws=%s labels=%S at=%S" ws (car state) (cdr state))
+      (agent-repl--log ws "elisp.prompt-entries.report ws=%s labels=%S at=%S" ws (car state) (cadr state))
       (agent-repl-rpc-report-composer-entries
        conn (list :workspace ref :labels (car state)
-                  :at-point (if (cdr state) (list :arm :entry :value (list :label (cdr state))) (list :arm :none)))
+                  :at-point (if (cadr state) (list :arm :entry :value (list :label (cadr state))) (list :arm :none))
+                  :edits (nth 2 state))
        :on-response (lambda (response) (agent-repl-prompt-entries--answered ws state response done))
        :on-failure (lambda (detail) (agent-repl-prompt-entries--failed buf ws state detail done))))))
 

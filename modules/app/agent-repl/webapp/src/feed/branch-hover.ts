@@ -26,12 +26,18 @@
  * covers it (`branchAt`'s rule, the one a click answers by), so it is
  * followed across a line as well as onto one. A line's boxes are measured
  * once while the pointer stays on it.
+ *
+ * TYPING IN THE COMPOSER TAKES THE HOVER BOX DOWN (owner request,
+ * 2026-10-29): the person's attention is on the entry, so the pointer's box
+ * stays down until the pointer moves. Only the hover boxes go: the composer's
+ * own box and every other highlight stand.
  */
 import { log } from "../log.js";
 import { selectionTouches } from "../selection.js";
 import { branchLineAt, governedRowAt, isResponseRow } from "./bubble-selection.js";
 import { TREE_CLASS, TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
 import { LABEL_LINK_CLASS, answeredNodeAt } from "./entries.js";
+import { COMPOSER_EDITED_EVENT } from "./composer-entry.js";
 import { feedRowId } from "./row-id.js";
 import {
   boxSubtree,
@@ -148,6 +154,7 @@ function boxUnder(
 /** Arm the hover box on the root feed HOST, RESOLVE measuring box edges. Answers the uninstall. */
 export function installBranchHover(host: HTMLElement, resolve: LengthResolver = lengthInLine): () => void {
   let hovered: Hovered | undefined;
+  let lastPointer: { x: number; y: number } | undefined;
   let measured: { line: HTMLElement; boxes: readonly LineBox[] } | undefined;
   const boxesOf: LineBoxes = (line) => {
     if (measured?.line !== line) measured = { line, boxes: boxesOverLine(line, resolve) };
@@ -158,7 +165,13 @@ export function installBranchHover(host: HTMLElement, resolve: LengthResolver = 
     unboxAll(hovered.row, hovered.box);
     hovered = undefined;
   };
+  // Where the pointer stood when the person typed, while the hover is down.
+  let typedAt: { x: number; y: number } | undefined;
   const onOver = (event: MouseEvent): void => {
+    if (typedAt !== undefined) {
+      if (event.clientX === typedAt.x && event.clientY === typedAt.y) return;
+      typedAt = undefined;
+    }
     const row = governedRowAt(event.target, host);
     // A BUBBLE THE READER IS HIGHLIGHTING IN IS NOT BOXED (owner request,
     // 2026-10-28): the highlight is what a prompt sent now acts on, and a box
@@ -189,16 +202,29 @@ export function installBranchHover(host: HTMLElement, resolve: LengthResolver = 
       context: { row: feedRowId(under.row) ?? "unset", label: under.label },
     });
   };
+  const onPointer = (event: MouseEvent): void => {
+    lastPointer = { x: event.clientX, y: event.clientY };
+  };
+  const onComposerEdited = (): void => {
+    clear();
+    if (lastPointer !== undefined) typedAt = lastPointer;
+  };
   // A SELECTION MADE UNDER A STANDING BOX takes the box down at once, before
   // the pointer moves again.
   const onSelectionChange = (): void => {
     if (hovered !== undefined && selectionTouches(hovered.row, host.ownerDocument)) clear();
   };
+  host.addEventListener("mouseover", onPointer, true);
+  host.addEventListener("mousemove", onPointer, true);
+  host.ownerDocument.addEventListener(COMPOSER_EDITED_EVENT, onComposerEdited);
   host.addEventListener("mouseover", onOver);
   host.addEventListener("mousemove", onOver);
   host.addEventListener("mouseleave", clear);
   host.ownerDocument.addEventListener("selectionchange", onSelectionChange);
   return () => {
+    host.removeEventListener("mouseover", onPointer, true);
+    host.removeEventListener("mousemove", onPointer, true);
+    host.ownerDocument.removeEventListener(COMPOSER_EDITED_EVENT, onComposerEdited);
     host.removeEventListener("mouseover", onOver);
     host.removeEventListener("mousemove", onOver);
     host.removeEventListener("mouseleave", clear);

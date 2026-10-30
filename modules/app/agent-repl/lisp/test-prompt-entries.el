@@ -401,7 +401,22 @@ of every rung."
     (agent-repl-prompt-entries--report)
     ;; Assert
     (should (equal (car sent) '(:workspace (:id "ws-1" :dir "/w") :labels ("1.1" "2.1")
-                               :at-point (:arm :entry :value (:label "2.1")))))))
+                               :at-point (:arm :entry :value (:label "2.1")) :edits 0)))))
+
+(ert-deftest agent-repl-test-prompt-entries-an-edit-is-reported-though-no-entry-moved ()
+  "Typing that moves neither the labels nor point's entry still sends a report, carrying the edit count."
+  (agent-repl-test-prompt-entries--reporting
+    ;; Arrange
+    (goto-char 2)
+    (agent-repl-prompt-entries--report)
+    (funcall answer '(:arm :success :value nil))
+    ;; Act
+    (cl-letf (((symbol-function 'agent-repl-prompt-entries-mark) #'ignore))
+      (agent-repl-prompt-entries--on-change 2 3 0)
+      (agent-repl-prompt-entries--on-change 3 4 0))
+    (agent-repl-prompt-entries--report)
+    ;; Assert
+    (should (equal (mapcar (lambda (r) (plist-get r :edits)) sent) '(2 0)))))
 
 (ert-deftest agent-repl-test-prompt-entries-report-with-point-on-no-entry-says-none ()
   "Point off every entry line is reported as no entry."

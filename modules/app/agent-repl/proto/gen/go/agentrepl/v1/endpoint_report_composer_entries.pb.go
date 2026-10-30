@@ -56,7 +56,12 @@ type ReportComposerEntriesRequest struct {
 	// ("3.1"). Empty when it holds none.
 	Labels []string `protobuf:"bytes,2,rep,name=labels,proto3" json:"labels,omitempty"`
 	// Which entry point is on. REQUIRED — unset is Connect InvalidArgument.
-	AtPoint       *ComposerEntryAtPoint `protobuf:"bytes,3,opt,name=at_point,json=atPoint,proto3" json:"at_point,omitempty"`
+	AtPoint *ComposerEntryAtPoint `protobuf:"bytes,3,opt,name=at_point,json=atPoint,proto3" json:"at_point,omitempty"`
+	// How many text edits this composer has had since it was created, counted
+	// by Emacs and only ever rising. The daemon relays it unchanged
+	// (frontend.v1.FeedComposerEntry.edits), so the webapp can tell that the
+	// person typed. REQUIRED to be sent: 0 means the composer was never edited.
+	Edits         uint64 `protobuf:"varint,4,opt,name=edits,proto3" json:"edits,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -110,6 +115,13 @@ func (x *ReportComposerEntriesRequest) GetAtPoint() *ComposerEntryAtPoint {
 		return x.AtPoint
 	}
 	return nil
+}
+
+func (x *ReportComposerEntriesRequest) GetEdits() uint64 {
+	if x != nil {
+		return x.Edits
+	}
+	return 0
 }
 
 // Which entry point is on. THE ARM IS THE ANSWER.
@@ -686,11 +698,12 @@ var File_agentrepl_v1_endpoint_report_composer_entries_proto protoreflect.FileDe
 
 const file_agentrepl_v1_endpoint_report_composer_entries_proto_rawDesc = "" +
 	"\n" +
-	"3agentrepl/v1/endpoint_report_composer_entries.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xaf\x01\n" +
+	"3agentrepl/v1/endpoint_report_composer_entries.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"\xc5\x01\n" +
 	"\x1cReportComposerEntriesRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x16\n" +
 	"\x06labels\x18\x02 \x03(\tR\x06labels\x12=\n" +
-	"\bat_point\x18\x03 \x01(\v2\".agentrepl.v1.ComposerEntryAtPointR\aatPoint\"\x9b\x01\n" +
+	"\bat_point\x18\x03 \x01(\v2\".agentrepl.v1.ComposerEntryAtPointR\aatPoint\x12\x14\n" +
+	"\x05edits\x18\x04 \x01(\x04R\x05edits\"\x9b\x01\n" +
 	"\x14ComposerEntryAtPoint\x12<\n" +
 	"\x04none\x18\x01 \x01(\v2&.agentrepl.v1.ComposerEntryAtPointNoneH\x00R\x04none\x12?\n" +
 	"\x05entry\x18\x02 \x01(\v2'.agentrepl.v1.ComposerEntryAtPointEntryH\x00R\x05entryB\x04\n" +

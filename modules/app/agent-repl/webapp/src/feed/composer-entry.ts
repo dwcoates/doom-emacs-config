@@ -8,6 +8,10 @@
  * node's subtree, drawn as every highlight of a response's node is
  * (subtree-box.ts).
  *
+ * A PUSH WHOSE EDIT COUNT ROSE means the person is typing: the highlight
+ * announces it (`COMPOSER_EDITED_EVENT`) so a hover box comes down while the
+ * composer's box, and every other highlight, stands.
+ *
  * The box stands over the node until the next push moves it, restated on
  * every paint of the response's prose (`markComposerEntry`, subtree-box.ts).
  *
@@ -32,6 +36,13 @@ export const COMPOSER_LEFT_PROPERTY = "--composer-left";
 
 /** The property naming the box's right edge, in `ch`, on each line inside it. */
 export const COMPOSER_RIGHT_PROPERTY = "--composer-right";
+
+/**
+ * The event the highlight dispatches on its document when a push says the
+ * person typed in the composer, which a hover box (branch-hover.ts) takes
+ * down on. The box of the composer's own entry is not touched by it.
+ */
+export const COMPOSER_EDITED_EVENT = "agent-repl:composer-edited";
 
 /** The node ENTRY names, or undefined for none. A push with no state, or a node naming no row, is refused. */
 function nodeOf(entry: FeedComposerEntry): BoxedNode | undefined {
@@ -103,6 +114,9 @@ export function composerBoxGeometry(doc: Document, box: HTMLElement): RevealGeom
  */
 export function createComposerEntryHighlight(doc: Document, scroll?: ComposerEntryScroll): ComposerEntryHighlight {
   let standing: BoxedNode | undefined;
+  // The edit count of the last push, or undefined before any: a push that
+  // opens a page mid-edit restates a count, it is not an edit.
+  let edits: bigint | undefined;
   /** Bring the box over NODE into view in SCROLL's feed, as far as it needs. */
   const reveal = (node: BoxedNode, on: ComposerEntryScroll): void => {
     const geometry = composerBoxGeometry(doc, on.box);
@@ -124,6 +138,14 @@ export function createComposerEntryHighlight(doc: Document, scroll?: ComposerEnt
       const node = nodeOf(entry);
       const changed = !sameNode(standing, node);
       standing = node;
+      if (edits !== undefined && edits !== entry.edits) {
+        log.debug("the person typed in the composer; a hovered branch's box comes down", {
+          operation: "feed.composer-entry.edited",
+          context: { edits: String(entry.edits) },
+        });
+        doc.dispatchEvent(new Event(COMPOSER_EDITED_EVENT));
+      }
+      edits = entry.edits;
       composerBox.stand(doc, node);
       log.info(node === undefined ? "the composer answers no node; nothing is highlighted" : "highlighted the subtree the composer answers", {
         operation: "feed.composer-entry.applied",
