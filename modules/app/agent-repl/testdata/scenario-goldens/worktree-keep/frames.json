@@ -193,7 +193,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000003,
+      "atMs": 1800000000002,
       "ordinal": 0
     },
     "source": {
@@ -242,7 +242,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000012,
+      "atMs": 1800000000011,
       "ordinal": 0
     },
     "source": {
@@ -262,7 +262,7 @@
               "start": {
                 "enter": {},
                 "startedAt": {
-                  "atMs": "1800000000012"
+                  "atMs": "1800000000011"
                 }
               }
             },
@@ -281,7 +281,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000012,
+      "atMs": 1800000000011,
       "ordinal": 0
     },
     "source": {
@@ -304,9 +304,9 @@
                   "message": "Entered the worktree."
                 },
                 "settledAt": {
-                  "atMs": "1800000000012",
+                  "atMs": "1800000000011",
                   "startedAt": {
-                    "atMs": "1800000000012"
+                    "atMs": "1800000000011"
                   }
                 }
               }
@@ -357,7 +357,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000006,
+      "atMs": 1800000000005,
       "ordinal": 0
     },
     "source": {
@@ -406,7 +406,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000012,
+      "atMs": 1800000000011,
       "ordinal": 0
     },
     "source": {
@@ -428,7 +428,7 @@
                   "keep": {}
                 },
                 "startedAt": {
-                  "atMs": "1800000000012"
+                  "atMs": "1800000000011"
                 }
               }
             },
@@ -447,7 +447,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000012,
+      "atMs": 1800000000011,
       "ordinal": 0
     },
     "source": {
@@ -472,9 +472,9 @@
                   "message": "Left the worktree in place."
                 },
                 "settledAt": {
-                  "atMs": "1800000000012",
+                  "atMs": "1800000000011",
                   "startedAt": {
-                    "atMs": "1800000000012"
+                    "atMs": "1800000000011"
                   }
                 }
               }
@@ -525,7 +525,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000009,
+      "atMs": 1800000000008,
       "ordinal": 0
     },
     "source": {
@@ -671,7 +671,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000010,
+      "atMs": 1800000000009,
       "ordinal": 0
     },
     "source": {
@@ -694,7 +694,7 @@
                 },
                 "fromModel": {},
                 "settledAt": {
-                  "atMs": "1800000000010"
+                  "atMs": "1800000000009"
                 }
               }
             },

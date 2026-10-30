@@ -134,10 +134,10 @@ func TestAnAllowanceCopiesTheVendorsStatusArm(t *testing.T) {
 	bothAllowances(h, 95, 95)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 95, 5*time.Hour))
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.SevenDay(), 95, 5*time.Hour))
 
 	// Assert
-	got := enduringUsageOf(h).GetSession()
+	got := enduringUsageOf(h).GetWeekly().GetOverall()
 	if got.GetAllowed() == nil {
 		t.Fatalf("status = %+v, want the vendor's allowed arm copied", got.GetStatus())
 	}
@@ -150,14 +150,14 @@ func TestAnAllowanceWarningStatusIsCopied(t *testing.T) {
 	bothAllowances(h, 95, 95)
 
 	// Act
-	update := rateLimitStatus(ratelimittest.FiveHour(), 95, 5*time.Hour)
+	update := rateLimitStatus(ratelimittest.SevenDay(), 95, 5*time.Hour)
 	update.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_AllowedWarning{
 		AllowedWarning: &conversationv1.SessionRateLimitAllowedWarning{},
 	}
 	h.r.OnSessionUpdate(testWS, update)
 
 	// Assert
-	got := enduringUsageOf(h).GetSession()
+	got := enduringUsageOf(h).GetWeekly().GetOverall()
 	if got.GetAllowedWarning() == nil {
 		t.Fatalf("status = %+v, want the vendor's allowed_warning arm copied", got.GetStatus())
 	}
@@ -170,14 +170,14 @@ func TestARejectedAllowanceStatusIsCopied(t *testing.T) {
 	bothAllowances(h, 95, 95)
 
 	// Act
-	update := rateLimitStatus(ratelimittest.FiveHour(), 95, 5*time.Hour)
+	update := rateLimitStatus(ratelimittest.SevenDay(), 95, 5*time.Hour)
 	withVerdict(update, ratelimittest.Rejected)
 	h.r.OnSessionUpdate(testWS, update)
 
 	// Assert
 	// A rejected verdict blocks the session (ladder.RateLimitRejections), so the
 	// allowance line stands under the block.
-	got := enduringUsageOf(h).GetSession()
+	got := enduringUsageOf(h).GetWeekly().GetOverall()
 	if got.GetRejected() == nil {
 		t.Fatalf("status = %+v, want the vendor's rejected arm copied", got.GetStatus())
 	}
@@ -253,14 +253,14 @@ func TestTheVerdictJoinsWhenTheRateLimitEventArrives(t *testing.T) {
 	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
 
 	// Act
-	update := rateLimitStatus(ratelimittest.FiveHour(), 95, 5*time.Hour)
+	update := rateLimitStatus(ratelimittest.SevenDay(), 95, 5*time.Hour)
 	withVerdict(update, ratelimittest.Rejected)
 	h.r.OnSessionUpdate(testWS, update)
 
 	// Assert
 	// A rejected verdict blocks the session (ladder.RateLimitRejections), so the
 	// allowance line stands under the block.
-	got := enduringUsageOf(h).GetSession()
+	got := enduringUsageOf(h).GetWeekly().GetOverall()
 	if got.GetRejected() == nil {
 		t.Fatalf("status = %+v, want the verdict to have joined the drawn allowance", got.GetStatus())
 	}
@@ -275,7 +275,7 @@ func TestEveryRateLimitWindowMatchesItsAllowance(t *testing.T) {
 		// every other allowance must be left without a status arm.
 		want string
 	}{
-		{name: "five hour is the session allowance", window: ratelimittest.FiveHour(), want: "session"},
+		{name: "five hour is no drawn allowance", window: ratelimittest.FiveHour(), want: ""},
 		{name: "seven day is the overall weekly allowance", window: ratelimittest.SevenDay(), want: "weekly"},
 		{name: "seven day opus is the opus weekly allowance", window: ratelimittest.SevenDayOpus(), want: "weekly_opus"},
 		{name: "seven day sonnet is the sonnet weekly allowance", window: ratelimittest.SevenDaySonnet(), want: "weekly_sonnet"},
@@ -475,22 +475,22 @@ func TestAnUnreportedOverageWindowDrawsNoAllowance(t *testing.T) {
 // AN EVENT NEVER OVERWRITES THE SAMPLED FIGURE (owner ruling, 2026-10-13:
 // only the most recent figure is drawn). The event carries no instant, so it
 // cannot be shown to be newer than the sample on hand.
-func TestAnEventDoesNotOverwriteTheSampledFigure(t *testing.T) {
+func TestAnEventOverwritesTheKeptFigure(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
 
 	// Act
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 99, 5*time.Hour))
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.SevenDay(), 99, 5*time.Hour))
 
 	// Assert
-	got := enduringUsageOf(h).GetSession()
-	if got.GetUtilization() != 0.95 {
-		t.Fatalf("utilization = %v, want the sample's figure kept over the event's", got.GetUtilization())
+	got := enduringUsageOf(h).GetWeekly().GetOverall()
+	if got.GetUtilization() != 0.99 {
+		t.Fatalf("utilization = %v, want the event's 0.99: the account's usage is never sampled, so the newest event's figure is drawn", got.GetUtilization())
 	}
 	if got.GetAllowed() == nil {
-		t.Fatalf("status = %+v, want the event's verdict joined to the sampled figure", got.GetStatus())
+		t.Fatalf("status = %+v, want the event's verdict drawn with its figure", got.GetStatus())
 	}
 }
 
@@ -517,13 +517,12 @@ func TestAnotherWorkspacesEventDoesNotLowerTheAccountsSampledFigure(t *testing.T
 	}
 }
 
-func TestAnEventAloneDoesNotFigureASampledWindow(t *testing.T) {
+func TestAnEventAloneFiguresAWeeklyWindow(t *testing.T) {
 	tests := []struct {
 		name   string
 		window *conversationv1.SessionRateLimitType
 		drawn  func(*frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance
 	}{
-		{"five hour", ratelimittest.FiveHour(), (*frontendv1.FooterActivityEnduringUsage).GetSession},
 		{"seven day", ratelimittest.SevenDay(), func(u *frontendv1.FooterActivityEnduringUsage) *frontendv1.FooterAllowance {
 			return u.GetWeekly().GetOverall()
 		}},
@@ -544,10 +543,24 @@ func TestAnEventAloneDoesNotFigureASampledWindow(t *testing.T) {
 			h.r.OnSessionUpdate(testWS, rateLimitStatus(tc.window, 50, 5*time.Hour))
 
 			// Assert
-			if got := tc.drawn(enduringUsageOf(h)); got != nil {
-				t.Fatalf("allowance = %+v, want none until a sample figures the window", got)
+			if got := tc.drawn(enduringUsageOf(h)).GetUtilization(); got != 0.5 {
+				t.Fatalf("utilization = %v, want the event's 0.5", got)
 			}
 		})
+	}
+}
+
+func TestAnEventNeverFiguresTheFiveHourWindow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 50, 5*time.Hour))
+
+	// Assert
+	if got := enduringUsageOf(h).GetSession(); got != nil {
+		t.Fatalf("session allowance = %+v, want none: the five-hour window is not drawn", got)
 	}
 }
 
@@ -591,12 +604,12 @@ func TestEveryFigureTheFooterReceivesIsRecorded(t *testing.T) {
 			percent: 39,
 		},
 		{
-			name:    "an event on a sampled window",
-			arrange: func(h *harness) { h.r.OnSessionUpdate(testWS, usageSample(40, 20, instant.UnixMilli())) },
+			name:    "an event on a weekly window",
+			arrange: func(*harness) {},
 			act: func(h *harness) {
-				h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 38, 5*time.Hour))
+				h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.SevenDay(), 38, 5*time.Hour))
 			},
-			want:    dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.footer.account_usage_figure", Message: "a rate-limit event's utilization is not drawn on a sampled window; the newest sample's figure stands"},
+			want:    dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.footer.account_usage_figure", Message: "a rate-limit event figured the window"},
 			source:  "rate_limit_event",
 			percent: 38,
 		},
@@ -606,7 +619,7 @@ func TestEveryFigureTheFooterReceivesIsRecorded(t *testing.T) {
 			act: func(h *harness) {
 				h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.Overage(), 12, 3*time.Hour))
 			},
-			want:    dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.footer.account_usage_figure", Message: "a rate-limit event figured the overage window"},
+			want:    dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.footer.account_usage_figure", Message: "a rate-limit event figured the window"},
 			source:  "rate_limit_event",
 			percent: 12,
 		},

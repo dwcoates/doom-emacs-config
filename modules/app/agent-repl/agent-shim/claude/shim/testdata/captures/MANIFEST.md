@@ -80,7 +80,7 @@ in the shim's AGENTS.md scenario table carry the same DECLARED-ONLY mark.
 
 | Scenario | Captured | Golden for (unit kinds → terminal) | Scenarios: (registered `!<name>`(s) that reproduce it) | Notes | Size |
 |---|---|---|---|---|---|
-| `account-usage` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | `!usage-full` (same shape as `!usage-available`) | single turn | 44 KB |
+| `account-usage` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | none: the account's usage is never sampled (2026-10-30) | single turn | 44 KB |
 | `artifact-publish-and-list` | 2026-09-01 | `hook`, `thinking`, `read`, `bash`, `response` → `success.completed` | `!artifact-publish` + `!artifact-list` | single turn | 188 KB |
 | `auto-compaction` | 2026-09-04 (Haiku) | `hook`, `thinking`, `read`, `response` → `success.completed` | `!compact-auto` | GROUNDED. 16 turn terminals, one per paced read. The two 2026-09-03 attempts tried to force this with `.claude/settings.local.json`'s `autoCompactWindow` and got nothing (occupancy never left ~45k); this run instead PACES real occupancy — sixteen turns, each reading one 40000-byte file (~10k tokens) in full — so the window climbs ~10k a turn and the vendor compacts BETWEEN turns rather than the run blowing past the window inside one turn. Real `compact_boundary` with `compact_metadata{trigger:"auto", pre_tokens:165716, post_tokens:13675, cumulative_dropped_tokens:152041, duration_ms:18695, preserved_segment{head_uuid, anchor_uuid, tail_uuid}, preserved_messages{anchor_uuid, uuids, all_uuids}}` — the SAME field set as the manual `compaction-directed`, `trigger` being the only discriminator. THREE shapes this capture settles, each AGREEING with `compaction-directed` so neither is a one-run accident: (1) the compaction's END is a `system:status` carrying `status: null` AND `compact_result: "success"`; (2) `preserved_segment.head_uuid`/`tail_uuid` are the FIRST and LAST entries of `preserved_messages.uuids` (a real multi-message span) while `anchor_uuid` is a uuid of its own appearing in NEITHER list; (3) `logical_parent_uuid` equals the preserved TAIL, not the head. The fake collapsed all five uuids onto the transcript head and pointed `logical_parent_uuid` at the head; both are fixed (`src/fake/scenarios/session.ts`'s `preservedUuids`, applied to `!compact` and `!compact-auto` alike), and `!compact-auto`'s previously invented token/duration figures are now this capture's real ones. | 872 KB |
 | `bash-detached` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash-detach` | single turn | 52 KB |
@@ -277,9 +277,6 @@ both directions` case).
 **Grounded, beyond the table above** (same arm, a second name or a residue
 carrier, not a distinct golden of its own):
 
-- `!usage-available` — the SAME `available` shape `account-usage` grounds
-  through `!usage-full` (`session.ts`'s own comment: "two names for one
-  arm").
 - `!tokens-reminder` — GROUNDED (residue): the ONE token-budget carrier any
   real capture holds, observed in `artifact-publish-and-list`'s own run (see
   "Evidence gaps" above: "the nearest carrier observed is a
@@ -297,14 +294,6 @@ here): `!slash-shape-a`, `!slash-shape-a-unnamed`, `!bash-detach-poll`,
 **UNGROUNDED — declared sibling of a grounded family, no capture recorded
 the narrower/alternate state**:
 
-- `!usage-opus-absent`, `!usage-service-unavailable`,
-  `!usage-window-unavailable`, `!usage-utilization-unavailable`,
-  `!usage-sampling-failure` — declared `account-usage` outcomes; every
-  capture that touches account usage recorded the `available` shape only.
-- `!usage-seat-spend`, `!usage-seat-spend-unreported` — the per-seat
-  enterprise answer (every window null, `extra_usage` carrying the monthly
-  limit and spend). Grounded only by the vendor CLI's own cached usage answer
-  for the owner's enterprise account (2026-10-06), not by a capture here.
 - `!fast-off`, `!fast-cooldown` — declared fast-mode states; no capture ran
   with fast mode off or in cooldown.
 - `!mcp-healthy` — a narrower MCP catalog than `!mcp-all` (which

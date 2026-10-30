@@ -29,7 +29,6 @@ import { toStanding } from "../../src/engine/permission-gate.js";
 import { sessionFault } from "../../src/service/failures.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
 import type {
-  AccountUsageLike,
   ContextUsageLike,
   McpServerStatusLike,
   ModelInfoLike,
@@ -184,8 +183,6 @@ function harness(
     backgroundTasksThrows?: boolean;
     /** What the scripted query answers `mcpServerStatus` with. */
     mcp?: McpServerStatusLike[];
-    /** What the scripted query answers the account-usage control verb with. */
-    accountUsage?: AccountUsageLike;
     /** The teardown's per-wait budget, so a hang suite does not sit out five seconds. */
     watcherConclusionBudgetMs?: number;
     /** Leave every scripted query's stream standing after `close()`. */
@@ -304,7 +301,6 @@ function harness(
         query.backgroundTasks = () => Promise.reject(new Error("the vendor cannot answer"));
       }
       if (options.mcp !== undefined) query.mcp = options.mcp;
-      if (options.accountUsage !== undefined) query.accountUsage = options.accountUsage;
       if (options.closeLeavesStreamOpen === true) query.closeLeavesStreamOpen = true;
       if (options.holdLiveSignal === true) query.holdModels();
       const index = queries.length;
@@ -1847,27 +1843,6 @@ describe("the turn loop", () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     const after = h.queries[0]?.query.calls.filter((call) => call === "getContextUsage").length ?? 0;
-    expect(after).toBeGreaterThan(before);
-  });
-
-  it("re-probes account usage at the turn's end", async () => {
-    // Account usage is PULLED from the vendor, so a session that probed once at
-    // StartSession would never notice a limit being approached.
-    const h = harness();
-    await started(h);
-    const usageCall = "usage";
-    const before = h.queries[0]?.query.calls.filter((call) => call === usageCall).length ?? 0;
-    await h.engine.startTurn(
-      create(shimv1.StartTurnRequestSchema, {
-        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
-        said: textSaid("go"),
-        origin: conversationv1.PromptOrigin.USER_SENT,
-      }),
-    );
-    h.queries[0]?.query.emit(answering(h, resultMessage()));
-    await new Promise((resolve) => setImmediate(resolve));
-
-    const after = h.queries[0]?.query.calls.filter((call) => call === usageCall).length ?? 0;
     expect(after).toBeGreaterThan(before);
   });
 
@@ -3415,11 +3390,11 @@ describe("the keep-alive turn serves nothing", () => {
     expect(probes()).toBe(before);
   });
 
-  it("re-probes no account usage at the keep-alive's end", async () => {
+  it("re-probes no session facts at the keep-alive's end", async () => {
     // Arrange
     const h = harness();
     await started(h);
-    const probes = (): number => h.queries[0]?.query.calls.filter((call) => call === "usage").length ?? 0;
+    const probes = (): number => h.queries[0]?.query.calls.filter((call) => call === "mcpServerStatus").length ?? 0;
     await beat(h);
     const before = probes();
 
@@ -7522,15 +7497,7 @@ describe("a standing grant's mode change, delivered through UpdateAgent", () => 
   });
 });
 
-/**
- * The account facts a scheduled beat pushes: mcpUpdate (pushMcpServerStatus,
- * called once during StartSession) and usageWindow/optional
- * (accountUsageUpdate, called on the account-usage interval's own beat).
- * Neither had ever run: no test in this suite configures the scripted
- * query's mcpServerStatus()/usage_EXPERIMENTAL... answers, or fires the
- * account-usage interval, the only interval ManualScheduler registers (the
- * keep-alive cadence is a one-shot timer).
- */
+/** The MCP facts StartSession pushes (pushMcpServerStatus). */
 describe("mcp server status, pushed at StartSession", () => {
   it("pushes one mcpServer update per declared server, each its own health arm", async () => {
     const h = harness({
@@ -7560,57 +7527,6 @@ describe("mcp server status, pushed at StartSession", () => {
       { name: "docs", health: "connected" },
       { name: "search", health: "failed" },
     ]);
-  });
-});
-
-describe("account usage, pushed on the account-usage interval", () => {
-  it("reports the five-hour window and echoes the offered seven-day window", async () => {
-    const h = harness({
-      accountUsage: {
-        session: {
-          total_cost_usd: 0,
-          total_api_duration_ms: 0,
-          total_duration_ms: 0,
-          total_lines_added: 0,
-          total_lines_removed: 0,
-          model_usage: {},
-        },
-        subscription_type: "max",
-        rate_limits_available: true,
-        rate_limits: {
-          five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
-          seven_day: { utilization: 20, resets_at: "2026-01-02T00:00:00.000Z" },
-          seven_day_oauth_apps: null,
-          seven_day_opus: null,
-          seven_day_sonnet: null,
-          model_scoped: [],
-        },
-        behaviors: null,
-      },
-    });
-    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
-    let seen: conversationv1.SessionAccountUsage | undefined;
-    const reading = (async () => {
-      for (;;) {
-        const step = await stream.next();
-        if (step.done === true) return;
-        const update = step.value.update;
-        if (update.case === "accountUsage") {
-          seen = update.value;
-          return;
-        }
-      }
-    })();
-
-    await started(h);
-    h.scheduler.fire(0);
-    await reading;
-
-    expect(seen?.outcome.case).toBe("available");
-    const available = seen?.outcome.value as conversationv1.SessionAccountUsageAvailable | undefined;
-    expect(available?.fiveHour?.utilizationPercent).toBe(10);
-    expect(available?.sevenDay?.utilizationPercent).toBe(20);
-    expect(available?.sevenDayOpus).toBeUndefined();
   });
 });
 
@@ -8435,29 +8351,12 @@ describe("the context usage the vendor states, mapped field by field", () => {
   });
 });
 
-describe("the account's rate-limit windows", () => {
-  /** The vendor's usage answer, with only the rate-limit half varied. */
-  function usage(overrides: Partial<AccountUsageLike>): AccountUsageLike {
-    return {
-      session: {
-        total_cost_usd: 0,
-        total_api_duration_ms: 0,
-        total_duration_ms: 0,
-        total_lines_added: 0,
-        total_lines_removed: 0,
-        model_usage: {},
-      },
-      subscription_type: "max",
-      rate_limits_available: true,
-      rate_limits: null,
-      behaviors: null,
-      ...overrides,
-    };
-  }
+describe("the account's usage", () => {
+  it("is never sampled: no session states an account-usage figure of its own", async () => {
+    // Arrange
+    const h = harness();
 
-  /** The account-usage push a session with this vendor answer produces. */
-  async function accountUsagePushed(answer: AccountUsageLike): Promise<conversationv1.SessionAccountUsage> {
-    const h = harness({ accountUsage: answer });
+    // Act
     const seen = await pushedUpdates(
       h,
       (update) => (update.case === "accountUsage" ? update.value : undefined),
@@ -8465,260 +8364,9 @@ describe("the account's rate-limit windows", () => {
         await started(h);
       },
     );
-    const first = seen[0];
-    if (first === undefined) throw new Error("the engine pushed no account usage");
-    return first;
-  }
 
-  /** The unavailable reason on a push that carries one. */
-  function unavailableReason(pushed: conversationv1.SessionAccountUsage): string | undefined {
-    return pushed.outcome.case === "unavailable" ? (pushed.outcome.value.reason.case ?? "") : undefined;
-  }
-
-  it("reports service_unavailable when limits are claimed and none are given", async () => {
-    // The service said it had limits and produced none: still the service
-    // failing to answer, not a shape with a window missing from it.
-    const pushed = await accountUsagePushed(usage({ rate_limits: null }));
-
-    expect(unavailableReason(pushed)).toBe("serviceUnavailable");
-  });
-
-  it("reports window_unavailable when the answer carries no five-hour window", async () => {
-    const pushed = await accountUsagePushed(
-      usage({ rate_limits: { five_hour: null } }),
-    );
-
-    expect(unavailableReason(pushed)).toBe("windowUnavailable");
-  });
-
-  /** The usage answer of an enterprise seat billed by spend. */
-  function seatAnswer(extra: NonNullable<NonNullable<AccountUsageLike["rate_limits"]>["extra_usage"]>): AccountUsageLike {
-    return usage({ subscription_type: "enterprise", rate_limits: { five_hour: null, extra_usage: extra } });
-  }
-
-  it("reports a seat's spend and allotment for an enterprise answer with a monthly limit and no five-hour window", async () => {
-    const pushed = await accountUsagePushed(
-      seatAnswer({ is_enabled: true, monthly_limit: 1_200_000, used_credits: 22_388, utilization: 1.87, currency: "USD" }),
-    );
-    const seat = pushed.outcome.case === "seatSpend" ? pushed.outcome.value : undefined;
-
-    expect([seat?.allotment?.amountMinor, seat?.spent?.amountMinor, seat?.allotment?.currency]).toEqual([
-      1_200_000n,
-      22_388n,
-      "USD",
-    ]);
-  });
-
-  it("leaves a seat's spend unset while the vendor reports none", async () => {
-    const pushed = await accountUsagePushed(
-      seatAnswer({ is_enabled: true, monthly_limit: 1_200_000, used_credits: null, utilization: null, currency: "USD" }),
-    );
-    const seat = pushed.outcome.case === "seatSpend" ? pushed.outcome.value : undefined;
-
-    expect([seat?.allotment?.amountMinor, seat?.spent]).toEqual([1_200_000n, undefined]);
-  });
-
-  it("reports window_unavailable for an enterprise answer with no monthly limit", async () => {
-    const pushed = await accountUsagePushed(
-      seatAnswer({ is_enabled: false, monthly_limit: null, used_credits: null, utilization: null, currency: null }),
-    );
-
-    expect(unavailableReason(pushed)).toBe("windowUnavailable");
-  });
-
-  it("reads a non-enterprise answer with a monthly limit and no five-hour window as a subscription", async () => {
-    const pushed = await accountUsagePushed(
-      usage({
-        subscription_type: "max",
-        rate_limits: {
-          five_hour: null,
-          extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 10, utilization: 0.2, currency: "USD" },
-        },
-      }),
-    );
-
-    expect(unavailableReason(pushed)).toBe("windowUnavailable");
-  });
-
-  it("reads an enterprise answer that reports a five-hour window as a subscription", async () => {
-    const pushed = await accountUsagePushed(
-      usage({
-        subscription_type: "enterprise",
-        rate_limits: {
-          five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
-          extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 10, utilization: 0.2, currency: "USD" },
-        },
-      }),
-    );
-
-    expect(pushed.outcome.case).toBe("available");
-  });
-
-  it("reports a sampling failure for a seat limit stated with no currency", async () => {
-    const pushed = await accountUsagePushed(
-      seatAnswer({ is_enabled: true, monthly_limit: 1_200_000, used_credits: 1, utilization: 0, currency: null }),
-    );
-
-    expect(unavailableReason(pushed)).toBe("samplingFailure");
-  });
-
-  it("types the vendor's enterprise plan word", async () => {
-    const pushed = await accountUsagePushed(usage({ subscription_type: "enterprise", rate_limits: null }));
-
-    expect(pushed.subscriptionType?.plan.case).toBe("enterprise");
-  });
-
-  it("leaves the plan unset when the vendor names none", async () => {
-    const pushed = await accountUsagePushed(usage({ subscription_type: null, rate_limits: null }));
-
-    expect(pushed.subscriptionType).toBeUndefined();
-  });
-
-  it("carries a plan word this schema does not name as the set plan with no arm", async () => {
-    const pushed = await accountUsagePushed(usage({ subscription_type: "galaxy", rate_limits: null }));
-
-    expect([pushed.subscriptionType !== undefined, pushed.subscriptionType?.plan.case]).toEqual([true, undefined]);
-  });
-
-  it("reports utilization_unavailable when the five-hour window states no utilization", async () => {
-    const pushed = await accountUsagePushed(
-      usage({
-        rate_limits: { five_hour: { utilization: null, resets_at: "2026-01-01T00:00:00.000Z" } },
-      }),
-    );
-
-    expect(unavailableReason(pushed)).toBe("utilizationUnavailable");
-  });
-
-  it("reports utilization_unavailable when the window's reset time cannot be read", async () => {
-    const pushed = await accountUsagePushed(
-      usage({
-        rate_limits: { five_hour: { utilization: 10, resets_at: "not a timestamp" } },
-      }),
-    );
-
-    expect(unavailableReason(pushed)).toBe("utilizationUnavailable");
-  });
-
-  it("echoes each per-model window the vendor offered", async () => {
-    const pushed = await accountUsagePushed(
-      usage({
-        rate_limits: {
-          five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
-          model_scoped: [
-            { display_name: "Fable", utilization: 30, resets_at: "2026-01-03T00:00:00.000Z" },
-          ],
-        },
-      }),
-    );
-    const available =
-      pushed.outcome.case === "available" ? pushed.outcome.value : undefined;
-
-    expect(available?.modelScoped.map((scoped) => [scoped.model?.name, scoped.window?.utilizationPercent])).toEqual(
-      [["Fable", 30]],
-    );
-  });
-
-  it("DROPS a per-model window the vendor could not state", async () => {
-    const pushed = await accountUsagePushed(
-      usage({
-        rate_limits: {
-          five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
-          model_scoped: [{ display_name: "Fable", utilization: null, resets_at: null }],
-        },
-      }),
-    );
-    const available =
-      pushed.outcome.case === "available" ? pushed.outcome.value : undefined;
-
-    expect(available?.modelScoped).toEqual([]);
-  });
-
-  it("reports a sampling failure when the vendor's usage verb throws", async () => {
-    // "We could not ask" is a different fact to a consumer than "the service is
-    // down", so it gets its own reason rather than an absent field.
-    const h = harness({
-      onQueryCreated: (query) => {
-        query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = () =>
-          Promise.reject(new Error("the usage endpoint is down"));
-      },
-    });
-    const seen = await pushedUpdates(
-      h,
-      (update) => (update.case === "accountUsage" ? update.value : undefined),
-      async () => {
-        await started(h);
-      },
-    );
-    const outcome = seen[0]?.outcome;
-
-    expect(
-      outcome?.case === "unavailable" && outcome.value.reason.case === "samplingFailure"
-        ? outcome.value.reason.value.cause
-        : undefined,
-    ).toBe("the usage endpoint is down");
-  });
-
-  it("stamps each sample when it is asked for, not when it answers", async () => {
-    // A stamp taken on the answer lets a slow sample asked earlier outrank a
-    // fast one asked later; the daemon orders every session's samples by it.
-    let now = 1_000_000;
-    const asked: bigint[] = [];
-    const h = harness({
-      clock: () => now,
-      onQueryCreated: (query) => {
-        query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = () => {
-          asked.push(BigInt(now));
-          now += 5_000;
-          return Promise.resolve(query.accountUsage);
-        };
-      },
-    });
-
-    const seen = await pushedUpdates(
-      h,
-      (update) => (update.case === "accountUsage" ? update.value.observedAtMs : undefined),
-      async () => {
-        await started(h);
-      },
-    );
-
-    expect(asked.length).toBeGreaterThan(0);
-    expect(seen).toEqual(asked);
-  });
-
-  it("takes a fresh sample when the vendor states a live rate-limit event", async () => {
-    // The event's own utilization is never drawn (it carries no instant), so
-    // the event asks for a sample that does.
-    let now = 1_000_000;
-    let eventSent = false;
-    let sampledAfterEvent = (): void => undefined;
-    const sampled = new Promise<void>((resolve) => {
-      sampledAfterEvent = resolve;
-    });
-    const h = harness({
-      clock: () => (now += 1),
-      onQueryCreated: (query) => {
-        query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = () => {
-          if (eventSent) sampledAfterEvent();
-          return Promise.resolve(query.accountUsage);
-        };
-      },
-    });
-    await started(h);
-    const query = (await untilQuery(h, 0)).query;
-
-    eventSent = true;
-    query.emit({
-      type: "rate_limit_event",
-      uuid: "rate-limit-1",
-      session_id: "s",
-      rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.97 },
-    } as unknown as SdkMessage);
-    await sampled;
-
-    expect(eventSent).toBe(true);
-    await h.engine.standDown("collected");
+    // Assert
+    expect(seen).toEqual([]);
   });
 });
 
@@ -11914,29 +11562,6 @@ describe("a vendor failure that is not an Error", () => {
     expect(details).toContain("mcpServerStatus failed: the mcp probe went away");
   });
 
-  it("carries a bare-string usage rejection into the sampling failure", async () => {
-    const h = harness({
-      onQueryCreated: (query) => {
-        query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = () =>
-          Promise.reject("the usage endpoint went away");
-      },
-    });
-    const seen = await pushedUpdates(
-      h,
-      (update) => (update.case === "accountUsage" ? update.value : undefined),
-      async () => {
-        await started(h);
-      },
-    );
-    const outcome = seen[0]?.outcome;
-
-    expect(
-      outcome?.case === "unavailable" && outcome.value.reason.case === "samplingFailure"
-        ? outcome.value.reason.value.cause
-        : undefined,
-    ).toBe("the usage endpoint went away");
-  });
-
   it("carries a bare-string supportedModels rejection into the fault", async () => {
     // THE SECOND READ, not the first: the first IS the start's live signal, and
     // a bare-string rejection there is carried by the START's refusal instead
@@ -12479,35 +12104,6 @@ describe("the vendor answers the engine maps around an absent field", () => {
     expect(seen[0]?.mcpTools[0]?.isLoaded).toBeUndefined();
   });
 
-  it("states no per-model windows when the account named none", async () => {
-    const h = harness({
-      accountUsage: {
-        session: {
-          total_cost_usd: 0,
-          total_api_duration_ms: 0,
-          total_duration_ms: 0,
-          total_lines_added: 0,
-          total_lines_removed: 0,
-          model_usage: {},
-        },
-        subscription_type: "max",
-        rate_limits_available: true,
-        rate_limits: { five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" } },
-        behaviors: null,
-      } as unknown as AccountUsageLike,
-    });
-    const seen = await pushedUpdates(
-      h,
-      (update) => (update.case === "accountUsage" ? update.value : undefined),
-      async () => {
-        await started(h);
-      },
-    );
-    const outcome = seen[0]?.outcome;
-
-    expect(outcome?.case === "available" ? outcome.value.modelScoped : undefined).toEqual([]);
-  });
-
   it("states an empty error for a failed server the vendor gave no words for", async () => {
     const h = harness({ mcp: [{ name: "docs", status: "failed" }] as McpServerStatusLike[] });
     const seen = await pushedUpdates(
@@ -12865,16 +12461,6 @@ describe("the session's own beats once the vendor query is gone", () => {
     expect(h.persistence.buffered.filter((entry) => entry.item.kind === "prompt")).toEqual([]);
   });
 
-  it("samples no account usage once there is nothing to sample", async () => {
-    const h = await withDeadQuery();
-    const before = h.queries[0]?.query.calls.filter((call) => call === "usage").length ?? 0;
-
-    h.scheduler.fire(0);
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(h.queries[0]?.query.calls.filter((call) => call === "usage").length).toBe(before);
-  });
-
   it("accepts a model change without asking a vendor that is gone", async () => {
     const h = await withDeadQuery();
     const before = h.queries[0]?.query.calls.filter((call) => call.startsWith("setModel")).length ?? 0;
@@ -13208,13 +12794,13 @@ describe("a turn that ends while the session is standing down", () => {
     for (let attempt = 0; attempt < 20 && !(h.queries[0]?.query.calls.includes("interrupt") ?? false); attempt++) {
       await new Promise((resolve) => setImmediate(resolve));
     }
-    const before = h.queries[0]?.query.calls.filter((call) => call === "usage").length ?? 0;
+    const before = h.queries[0]?.query.calls.filter((call) => call === "mcpServerStatus").length ?? 0;
 
     await h.engine.onSdkMessage(resultMessage("11111111-2222-4333-8444-555555555555"));
     releaseInterrupt();
     await standing;
 
-    expect(h.queries[0]?.query.calls.filter((call) => call === "usage").length).toBe(before);
+    expect(h.queries[0]?.query.calls.filter((call) => call === "mcpServerStatus").length).toBe(before);
   });
 });
 
@@ -17103,24 +16689,25 @@ describe("the vendor-error retry", () => {
     expect(h.retryScheduler.pendingTimeout()).toBeUndefined();
   });
 
-  it("waits for the exhausted session window's reset after a usage limit", async () => {
+  it("waits for the reset its refusing rate-limit event named after a usage limit", async () => {
     // Arrange
     const h = harness({ nowMs: 1_000_100 });
     await started(h);
-    const resetsAtMs = 1_000_100 + 76 * 60_000;
+    const resetsAtS = Math.floor((1_000_100 + 76 * 60_000) / 1_000);
     const query = h.queries.at(-1)?.query;
     if (query === undefined) throw new Error("no query was created");
-    query.accountUsage = {
-      ...query.accountUsage,
-      rate_limits_available: true,
-      rate_limits: { five_hour: { utilization: 100, resets_at: new Date(resetsAtMs).toISOString() } },
-    };
+    query.emit({
+      type: "rate_limit_event",
+      uuid: "rate-limit-1",
+      session_id: "s",
+      rate_limit_info: { status: "rejected", rateLimitType: "seven_day", resetsAt: resetsAtS },
+    } as unknown as SdkMessage);
 
     // Act
     await failedTurn(h, "turn-1", [], BLOCKING_LIMIT);
 
     // Assert
-    expect(h.retryScheduler.pendingTimeout()?.delayMs).toBe(76 * 60_000);
+    expect(h.retryScheduler.pendingTimeout()?.delayMs).toBe(resetsAtS * 1_000 - 1_000_100);
   });
 
   /** The latest vendor-error retry schedule a fresh session watch replays. */

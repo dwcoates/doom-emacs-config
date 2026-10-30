@@ -858,16 +858,16 @@ Rulings already binding; code swaps to the generated arms when it lands:
 
 ## FooterAllowance sourcing (project lead ruling, supersedes the landing-4 adaptation)
 
-- `SessionUpdate.account_usage` is NOT retired. FIGURES (utilization,
-  resets_at) come from account_usage: five_hour → `session`, seven_day →
-  `weekly.overall`, seven_day_opus → `weekly.models.opus`, seven_day_sonnet
-  → `weekly.models.sonnet`; sampled at a cadence and complete from the
-  first sample. A sample is COMPLETE: one that omits an optional window
-  (seven_day, seven_day_opus, seven_day_sonnet) retires the figure an older
-  sample filed for it, since the account has no such allowance.
+- No shim produces `SessionUpdate.account_usage` any more (2026-10-30): the
+  account's usage is never sampled. FIGURES (utilization, resets_at) come
+  from the rate-limit event's own: seven_day → `weekly.overall`,
+  seven_day_opus → `weekly.models.opus`, seven_day_sonnet →
+  `weekly.models.sonnet`, overage → `overage`. The five-hour window is not
+  drawn (owner ruling, 2026-10-30), and a kept five-hour figure is not
+  restored.
 - The VERDICT (`FooterAllowance.status` arm) comes from
   `SessionUpdate.rate_limit_status`, matched by window, EACH VENDOR WINDOW
-  ITS OWN: five_hour → session; seven_day → `weekly.overall`;
+  ITS OWN: seven_day → `weekly.overall`;
   seven_day_opus / seven_day_sonnet → their `weekly.models` figure;
   `overage` → the `overage` allowance, its own cell since 2026-09-13;
   seven_day_overage_included has no drawn allowance. It stays UNSET until a
@@ -879,8 +879,8 @@ Rulings already binding; code swaps to the generated arms when it lands:
 - The usage-limit BLOCK is per window too (`ladder.RateLimitRejections`,
   shared by the footer and the roster): a window's rejection is lifted only
   by a later verdict on the same window, a session start or a new turn.
-- The allowance line draws as soon as a usage sample exists; the verdict
-  arm joins when it arrives.
+- An allowance draws as soon as an event figures it, with that event's
+  verdict.
 - A per-seat sample (`SessionAccountUsage.seat_spend`) draws the seat's
   spend instead (`FooterActivityEnduring.seat_spend`) and clears the windows;
   a subscription sample ends the seat mode. While the account is per seat a

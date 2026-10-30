@@ -193,7 +193,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000003,
+      "atMs": 1800000000002,
       "ordinal": 0
     },
     "source": {
@@ -242,7 +242,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000008,
+      "atMs": 1800000000007,
       "ordinal": 0
     },
     "source": {
@@ -265,7 +265,7 @@
                   "sandboxed": {}
                 },
                 "startedAt": {
-                  "atMs": "1800000000008"
+                  "atMs": "1800000000007"
                 }
               }
             },
@@ -320,7 +320,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000008,
+      "atMs": 1800000000007,
       "ordinal": 0
     },
     "source": {
@@ -339,9 +339,9 @@
               "failure": {
                 "error": {
                   "settledAt": {
-                    "atMs": "1800000000008",
+                    "atMs": "1800000000007",
                     "startedAt": {
-                      "atMs": "1800000000008"
+                      "atMs": "1800000000007"
                     }
                   }
                 },
@@ -463,7 +463,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000006,
+      "atMs": 1800000000005,
       "ordinal": 0
     },
     "source": {
@@ -486,7 +486,7 @@
                 },
                 "fromModel": {},
                 "settledAt": {
-                  "atMs": "1800000000006"
+                  "atMs": "1800000000005"
                 }
               }
             },

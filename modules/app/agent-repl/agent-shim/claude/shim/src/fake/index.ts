@@ -41,7 +41,6 @@ import { bindLog } from "../log.js";
 import type { SessionProfile } from "../engine/profile.js";
 import type {
   AccountInfoLike,
-  AccountUsageLike,
   AppliedSettingsLike,
   AgentInfoLike,
   CanUseToolLike,
@@ -68,15 +67,11 @@ import {
   FAKE_MCP_SERVERS,
   FAKE_MCP_SERVERS_HEALTHY,
   FAKE_MODELS,
-  fakeAccountUsage,
   fakeContextUsage,
-  noteAnnouncedWindow,
-  type AnnouncedWindows,
 } from "./catalogs.js";
 import { AsyncQueue } from "./queue.js";
 import { selectScenario } from "./registry.js";
 import type {
-  AccountUsageArm,
   AssistantEmission,
   AssistantOptions,
   FakeBlock,
@@ -644,11 +639,6 @@ export function createFakeQuery(
   let permissionMode: PermissionModeLike = opts.permissionMode ?? "default";
   /** The effort the flag layer holds; undefined until `applyFlagSettings` sets one. */
   let effortLevel: EffortLevelLike | undefined;
-  let accountUsageArm: AccountUsageArm = "available";
-  // Every sampled window a `rate_limit_event` of this query announced since the
-  // scenario last chose the usage answer, so the probe reports the same account
-  // the events describe.
-  let announcedWindows: AnnouncedWindows = {};
   let mcpArm: "all" | "healthy" = "all";
   // Whether `getContextUsage()` answers a growing occupancy. OFF by default: the
   // ordinary session's answer moves only with the turn counter, and a mock that
@@ -733,7 +723,6 @@ export function createFakeQuery(
 
   const emitWithUuid = (uuid: string, message: Record<string, unknown>): void => {
     if (out.isEnded) return;
-    noteAnnouncedWindow(announcedWindows, message);
     out.push({ session_id: sessionUuid, ...message, uuid } as unknown as SdkMessage);
   };
   const emit = (message: Record<string, unknown>): void => emitWithUuid(opts.newUuid(), message);
@@ -1472,13 +1461,6 @@ export function createFakeQuery(
     endTask: (taskId: string) => {
       liveTasks.delete(taskId);
     },
-    setAccountUsageArm: (arm) => {
-      accountUsageArm = arm;
-      // A CHOSEN ANSWER IS THE WHOLE ANSWER: the scenario is stating what the
-      // endpoint reports from now on, which supersedes what earlier events
-      // announced about it.
-      announcedWindows = {};
-    },
     setMcpArm: (arm) => {
       mcpArm = arm;
     },
@@ -2048,8 +2030,6 @@ export function createFakeQuery(
       contextUsageDrift
         ? fakeContextUsage(model, 30_000 + turn * 20_000, turn)
         : fakeContextUsage(model, 30_000 + turn * 1_000),
-    usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async (): Promise<AccountUsageLike> =>
-      fakeAccountUsage(accountUsageArm, nowMs(), announcedWindows),
     accountInfo: async (): Promise<AccountInfoLike> => FAKE_ACCOUNT_INFO,
     initializationResult: async (): Promise<InitializationResultLike> => FAKE_INITIALIZATION_RESULT,
 

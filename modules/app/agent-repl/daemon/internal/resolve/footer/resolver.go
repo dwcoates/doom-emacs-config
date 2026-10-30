@@ -1463,10 +1463,14 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 		return
 	}
 	var window *allowanceWindow
-	sampled := true
 	switch status.GetRateLimitType().GetWindow().(type) {
 	case *conversationv1.SessionRateLimitType_FiveHour:
-		window = &account.rate.session
+		// THE FIVE-HOUR WINDOW IS NOT DRAWN (owner ruling, 2026-10-30): the
+		// plan no longer has one. Its verdict's block still applies.
+		r.logOf(s.id, s).Debug("daemon.footer.rate_limit_undrawn_window",
+			"a rate-limit event about the five-hour window, which the usage line no longer draws; only its verdict's block applies",
+			dlog.Context{"window": name, "verdict": string(verdictOf(status))})
+		return
 	case *conversationv1.SessionRateLimitType_SevenDay:
 		window = &account.rate.weekly
 	case *conversationv1.SessionRateLimitType_SevenDayOpus:
@@ -1475,7 +1479,6 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 		window = &account.rate.weeklySonnet
 	case *conversationv1.SessionRateLimitType_Overage:
 		window = &account.rate.overage
-		sampled = false
 	default:
 		r.logOf(s.id, s).Debug("daemon.footer.rate_limit_undrawn_window",
 			"a rate-limit event about a window the usage line draws no allowance for; only its verdict's block applies",
@@ -1490,14 +1493,12 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 			"resets_at_ms":         status.GetResetsAtMs(),
 			"previous_utilization": window.utilization,
 		}
-		if sampled {
-			r.logOf(s.id, s).Debug("daemon.footer.account_usage_figure",
-				"a rate-limit event's utilization is not drawn on a sampled window; the newest sample's figure stands", fields)
-		} else {
-			window.observeEventFigures(status.GetUtilizationPercent(), status.GetResetsAtMs())
-			r.logOf(s.id, s).Info("daemon.footer.account_usage_figure",
-				"a rate-limit event figured the overage window", fields)
-		}
+		// THE EVENT IS THE ONLY SOURCE OF A FIGURE: the account's usage is
+		// never sampled (2026-10-30), so the vendor states a window's
+		// utilization only on the events it sends near that window's limit.
+		window.observeEventFigures(status.GetUtilizationPercent(), status.GetResetsAtMs())
+		r.logOf(s.id, s).Info("daemon.footer.account_usage_figure",
+			"a rate-limit event figured the window", fields)
 	}
 	window.observeVerdict(verdictOf(status), status.GetResetsAtMs())
 	account.touch(r.opts.clock.Now())

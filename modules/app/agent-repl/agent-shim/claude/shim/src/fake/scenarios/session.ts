@@ -12,10 +12,10 @@
  *
  * So the scenarios here do two different things. Where a message exists, they
  * emit it. Where only an answer exists, they FLIP THE ANSWER the mock will give
- * (`setAccountUsageArm`, `setMcpArm`) and let the shim's own cadence discover
+ * (`setMcpArm`) and let the shim's own cadence discover
  * it — which is the real production path, not a shortcut around it.
  */
-import type { AccountUsageArm, ScenarioContext } from "../scenario.js";
+import type { ScenarioContext } from "../scenario.js";
 import { conclude, scenario, withheldThinking } from "./support.js";
 
 const ROTATE = scenario({
@@ -269,78 +269,6 @@ const MCP_HEALTHY = scenario({
     conclude(ctx, "Only the healthy MCP server is now reported.");
   },
 });
-
-/** One account-usage scenario per declared outcome. */
-function usageScenario(name: string, arm: AccountUsageArm, armDoc: string) {
-  return scenario({
-    name,
-    prompt: `!${name}`,
-    emits: `prose only; it switches the account-usage answer to the \`${arm}\` shape`,
-    writes: "the assistant line, the prompt line and the turn record",
-    arms: armDoc,
-    run(ctx) {
-      ctx.log.debug({ turn: ctx.turn, branch: name, usage_arm: arm }, "fake account-usage arm switched");
-      ctx.setAccountUsageArm(arm);
-      conclude(ctx, `The account-usage probe now answers with the ${arm} shape.`);
-    },
-  });
-}
-
-const USAGE_AVAILABLE = usageScenario(
-  "usage-available",
-  "available",
-  "SessionAccountUsage.outcome=available with five_hour, seven_day, seven_day_oauth_apps, seven_day_opus, seven_day_sonnet, model_scoped and extra_usage",
-);
-/**
- * The SAME available shape under the name the e2e roster reaches for.
- *
- * Two names for one arm is deliberate: `!usage-available` names the ARM and
- * `!usage-full` names what a reader wants from it — every window populated, each
- * with a utilization and a reset instant, plus `subscription_type` and the
- * session cost rollup. Renaming the older one would have broken every caller
- * that already spells it.
- */
-const USAGE_FULL = usageScenario(
-  "usage-full",
-  "available",
-  "SessionAccountUsage.outcome=available with EVERY window populated — five_hour, seven_day, seven_day_oauth_apps, seven_day_opus, seven_day_sonnet, model_scoped and extra_usage, each with utilization and resets_at — beside subscription_type",
-);
-const USAGE_OPUS_ABSENT = usageScenario(
-  "usage-opus-absent",
-  "opus_absent",
-  "SessionAccountUsage.outcome=available with seven_day_opus UNSET — an absent optional window, which is not an unavailability",
-);
-const USAGE_SERVICE_UNAVAILABLE = usageScenario(
-  "usage-service-unavailable",
-  "service_unavailable",
-  "SessionAccountUsage.outcome=unavailable reason=service_unavailable",
-);
-const USAGE_WINDOW_UNAVAILABLE = usageScenario(
-  "usage-window-unavailable",
-  "window_unavailable",
-  "SessionAccountUsage.outcome=unavailable reason=window_unavailable — the FIVE-HOUR window is null, which is what that reason means",
-);
-const USAGE_UTILIZATION_UNAVAILABLE = usageScenario(
-  "usage-utilization-unavailable",
-  "utilization_unavailable",
-  "SessionAccountUsage.outcome=unavailable reason=utilization_unavailable",
-);
-const USAGE_SAMPLING_FAILURE = usageScenario(
-  "usage-sampling-failure",
-  "sampling_failure",
-  "SessionAccountUsage.outcome=unavailable reason=sampling_failure",
-);
-
-const USAGE_SEAT_SPEND = usageScenario(
-  "usage-seat-spend",
-  "seat_spend",
-  "SessionAccountUsage.outcome=seat_spend with allotment and spent — an enterprise seat billed by spend, every window null",
-);
-const USAGE_SEAT_SPEND_UNREPORTED = usageScenario(
-  "usage-seat-spend-unreported",
-  "seat_spend_unreported",
-  "SessionAccountUsage.outcome=seat_spend with the allotment and spent UNSET — the seat before the vendor reports any spend",
-);
 
 const RATE_LIMIT = scenario({
   name: "rate-limit",
@@ -734,15 +662,6 @@ export const SESSION_SCENARIOS = [
   FAST_COOLDOWN,
   MCP_ALL,
   MCP_HEALTHY,
-  USAGE_AVAILABLE,
-  USAGE_FULL,
-  USAGE_OPUS_ABSENT,
-  USAGE_SERVICE_UNAVAILABLE,
-  USAGE_WINDOW_UNAVAILABLE,
-  USAGE_UTILIZATION_UNAVAILABLE,
-  USAGE_SAMPLING_FAILURE,
-  USAGE_SEAT_SPEND,
-  USAGE_SEAT_SPEND_UNREPORTED,
   RATE_LIMIT,
   RATE_LIMIT_FIVE_HOUR,
   RATE_LIMIT_SEVEN_DAY,

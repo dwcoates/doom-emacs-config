@@ -123,6 +123,8 @@ function comparableSessionArms(run: GoldenRun): string[] {
  * unit kinds, session arms, turn terminals.
  */
 const EXCLUDED: Readonly<Record<string, string>> = {
+  "account-usage":
+    "the account's usage is never sampled (2026-10-30), so no scenario switches a usage answer; the capture's turn is plain thinking and prose",
   "ctrl-b-detach-of-foreground-subagent":
     "PARKING: `!ctrl-b` waits on DetachForeground, a caller verb this harness does not issue; exercised in test/integration/detached.test.ts",
   "ctrl-b-detach-of-foreground-work":
@@ -144,7 +146,6 @@ const EXCLUDED: Readonly<Record<string, string>> = {
 };
 
 const ROWS: readonly ConformanceRow[] = [
-  { capture: "account-usage", prompt: "!usage-available", golden: ["thinking", "response"], mock: ["thinking", "response"] },
   {
     capture: "artifact-publish-and-list",
     prompt: "!artifact-publish",

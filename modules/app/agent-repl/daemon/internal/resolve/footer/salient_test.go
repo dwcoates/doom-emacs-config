@@ -160,14 +160,14 @@ func TestARateLimitEventFeedsTheUsageFiguresAndStandsNoSalientLine(t *testing.T)
 			bothAllowances(h, 85, 40)
 
 			// Act
-			h.r.OnSessionUpdate(testWS, rateEvent(ratelimittest.FiveHour(), tt.verdict))
+			h.r.OnSessionUpdate(testWS, rateEvent(ratelimittest.SevenDay(), tt.verdict))
 
 			// Assert
 			if got := lineNow(t, h); got.tier != "enduring" {
 				t.Fatalf("activity = %+v, want the enduring line: a rate-limit event stands no salient line", got)
 			}
-			if session := enduringUsageOf(h).GetSession(); !tt.want(session) {
-				t.Fatalf("session allowance = %+v, want the event's %s verdict in the usage figures", session, tt.verdict)
+			if weekly := enduringUsageOf(h).GetWeekly().GetOverall(); !tt.want(weekly) {
+				t.Fatalf("weekly allowance = %+v, want the event's %s verdict in the usage figures", weekly, tt.verdict)
 			}
 		})
 	}

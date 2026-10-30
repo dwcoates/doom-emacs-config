@@ -489,15 +489,6 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
 | `!fast-cooldown` | a turn whose `result` reports `fast_mode_state: "cooldown"` with `fast_mode_disabled_reason: "extra_usage_disabled"`. The state STICKS: every later result reports it, and so does the `init` a rotation emits — the two places `sdk.d.ts` carries fast mode at all | the assistant line, the prompt line and the turn record | SessionFastMode.state=cooldown |
 | `!mcp-all` | prose only. It switches `mcpServerStatus()` to the FIVE-server catalog — one per declared health: connected, failed, needs-auth, pending, disabled — and the shim's own cadence discovers the change | the assistant line, the prompt line and the turn record | SessionMcpServer.health=connected/failed/needs_auth/pending/disabled |
 | `!mcp-healthy` | prose only. It narrows `mcpServerStatus()` to the single connected server, so the arms CHANGE rather than merely existing | the assistant line, the prompt line and the turn record | SessionMcpServer.health=connected only — the change is what a push tests |
-| `!usage-available` | prose only; it switches the account-usage answer to the `available` shape | the assistant line, the prompt line and the turn record | SessionAccountUsage.outcome=available with five_hour, seven_day, seven_day_oauth_apps, seven_day_opus, seven_day_sonnet, model_scoped and extra_usage |
-| `!usage-full` | prose only; it switches the account-usage answer to the `available` shape | the assistant line, the prompt line and the turn record | SessionAccountUsage.outcome=available with EVERY window populated — five_hour, seven_day, seven_day_oauth_apps, seven_day_opus, seven_day_sonnet, model_scoped and extra_usage, each with utilization and resets_at — beside subscription_type |
-| `!usage-opus-absent` | prose only; it switches the account-usage answer to the `opus_absent` shape | the assistant line, the prompt line and the turn record | SessionAccountUsage.outcome=available with seven_day_opus UNSET — an absent optional window, which is not an unavailability |
-| `!usage-service-unavailable` | prose only; it switches the account-usage answer to the `service_unavailable` shape | the assistant line, the prompt line and the turn record | SessionAccountUsage.outcome=unavailable reason=service_unavailable |
-| `!usage-window-unavailable` | prose only; it switches the account-usage answer to the `window_unavailable` shape | the assistant line, the prompt line and the turn record | SessionAccountUsage.outcome=unavailable reason=window_unavailable — the FIVE-HOUR window is null, which is what that reason means |
-| `!usage-utilization-unavailable` | prose only; it switches the account-usage answer to the `utilization_unavailable` shape | the assistant line, the prompt line and the turn record | SessionAccountUsage.outcome=unavailable reason=utilization_unavailable |
-| `!usage-sampling-failure` | prose only; it switches the account-usage answer to the `sampling_failure` shape | the assistant line, the prompt line and the turn record | SessionAccountUsage.outcome=unavailable reason=sampling_failure |
-| `!usage-seat-spend` | prose only; it switches the account-usage answer to the `seat_spend` shape | the assistant line, the prompt line and the turn record | SessionAccountUsage.outcome=seat_spend with allotment and spent — an enterprise seat billed by spend, every window null |
-| `!usage-seat-spend-unreported` | prose only; it switches the account-usage answer to the `seat_spend_unreported` shape | the assistant line, the prompt line and the turn record | SessionAccountUsage.outcome=seat_spend with the allotment and spent UNSET — the seat before the vendor reports any spend |
 | `!rate-limit` | a `rate_limit_event` in the corpus's shape — allowed_warning on the overage window with a threshold | the assistant line, the prompt line and the turn record | SessionAccountUsage from the rate-limit event, plus the usage-warning synthesized notice |
 | `!rate-limit-five-hour` | a `rate_limit_event` naming the `five_hour` window — `allowed_warning` with a utilization and a reset instant, the shape the FOOTER's window row joins against | the assistant line, the prompt line and the turn record | SessionRateLimitStatus.rate_limit_type=five_hour |
 | `!rate-limit-seven-day` | a `rate_limit_event` naming the `seven_day` window — `allowed_warning` with a utilization and a reset instant, the shape the FOOTER's window row joins against | the assistant line, the prompt line and the turn record | SessionRateLimitStatus.rate_limit_type=seven_day |
@@ -678,7 +669,7 @@ way a refusal does.
    `next()` resolves without waiting on anything. That push IS the daemon's
    readiness signal, and there is no other. A late joiner is then caught up on
    the current `context_usage`, `model_changed`, `permission_mode_changed`,
-   `fast_mode`, `account_usage`, `title` and `network_resume_waits`;
+   `fast_mode`, `title` and `network_resume_waits`;
    after that, arms are pushed on CHANGE only. A level is replayed only once
    it has been stated: a session that never waited on the network states no
    `network_resume_waits` at open, and one whose last wait ended replays the
@@ -1499,11 +1490,10 @@ network resume uses.
   retried. The two hours run from the chain's first failure.
 - **An exhausted usage allowance waits for its reset instead.** A usage-limit
   terminal (a 429, `blocking_limit`, `rapid_refill_breaker`: the set the
-  footer calls `usage_limit`) reads the account's usage afresh
-  (`readUsageForRetry`, a `SerialProbe.run` of the same sample the footer's
-  session and weekly figures come from). The retry is made when the exhausted
-  window resets: the five-hour session window, or a weekly one (the latest
-  reset when several are exhausted). Should the vendor still refuse after
+  footer calls `usage_limit`) reads the newest `rate_limit_event` of each
+  window the session saw: the account's usage is never sampled. The retry is
+  made when the window whose newest event refused resets (the latest reset
+  when several refused). Should the vendor still refuse after
   that reset, the retry repeats every thirty seconds for thirty minutes. A 429
   with no exhausted window on record is a passing rate limit, retried by the
   rule above; a `blocking_limit` or `rapid_refill_breaker` with none is not

@@ -193,7 +193,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000003,
+      "atMs": 1800000000002,
       "ordinal": 0
     },
     "source": {
@@ -242,7 +242,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000009,
+      "atMs": 1800000000008,
       "ordinal": 0
     },
     "source": {
@@ -264,7 +264,7 @@
                   "path": "/w/s/example.ts"
                 },
                 "startedAt": {
-                  "atMs": "1800000000009"
+                  "atMs": "1800000000008"
                 }
               }
             },
@@ -283,7 +283,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000009,
+      "atMs": 1800000000008,
       "ordinal": 0
     },
     "source": {
@@ -307,9 +307,9 @@
                   "contents": "export const one = 1;\nexport const two = 2;\nexport const three = 3;\nexport const four = 4;"
                 },
                 "settledAt": {
-                  "atMs": "1800000000009",
+                  "atMs": "1800000000008",
                   "startedAt": {
-                    "atMs": "1800000000009"
+                    "atMs": "1800000000008"
                   }
                 }
               }
@@ -360,7 +360,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000006,
+      "atMs": 1800000000005,
       "ordinal": 0
     },
     "source": {
@@ -506,7 +506,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000007,
+      "atMs": 1800000000006,
       "ordinal": 0
     },
     "source": {
@@ -529,7 +529,7 @@
                 },
                 "fromModel": {},
                 "settledAt": {
-                  "atMs": "1800000000007"
+                  "atMs": "1800000000006"
                 }
               }
             },

@@ -54,7 +54,6 @@
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
-import type { AccountUsageLike } from "../sdk/types.js";
 import type { KeepaliveScheduler } from "./keepalive.js";
 import type { ShimPromptDelivery } from "./shim-prompt.js";
 import { vendorErrorRetryPrompt } from "./vendor-error-retry-prompt.js";
@@ -76,10 +75,19 @@ export const USAGE_LIMIT_RETRY_TAIL_MS = 30 * 60 * 1_000;
  */
 export const VENDOR_ERROR_RETRY_BUSY_MS = 5_000;
 
-/** The account's usage, as the retry reads it at a usage-limit failure. */
-export type UsageReading =
-  | { readonly kind: "sampled"; readonly usage: AccountUsageLike }
-  | { readonly kind: "unavailable"; readonly detail: string };
+/**
+ * The vendor's newest rate-limit event for one account window, as the session
+ * last saw it (`rate_limit_event`'s `rate_limit_info`). No usage is sampled:
+ * the event is the vendor's own statement that a window refused or allowed a
+ * request, and when it resets.
+ */
+export interface RateLimitReading {
+  /** The vendor's own name for the window (`seven_day`, `seven_day_opus`, ...). */
+  readonly name: string;
+  readonly status: "allowed" | "allowed_warning" | "rejected";
+  /** When the window resets, epoch ms; absent when the event named none. */
+  readonly resetsAtMs?: number;
+}
 
 /** The retry the chain makes next, as the session stream states it. */
 export interface ScheduledRetry {
@@ -120,8 +128,8 @@ export interface VendorErrorRetryDeps {
   readonly deliver: (prompt: string) => Promise<ShimPromptDelivery>;
   /** States the schedule on the session stream, whole: the next retry, the one being made, or none. */
   readonly state: (stated: StatedRetry | undefined) => void;
-  /** A usage sample taken AFTER it is asked for (engine/serial-probe.ts `run`). */
-  readonly readUsage: () => Promise<UsageReading>;
+  /** The newest rate-limit event the session has seen for each window. */
+  readonly readLimits: () => readonly RateLimitReading[];
   readonly nowMs: () => number;
   readonly scheduler: KeepaliveScheduler;
 }
@@ -137,34 +145,28 @@ export interface ExhaustedWindow {
   readonly resetsAtMs: number;
 }
 
-/** The vendor's name for each account window a usage limit can exhaust. */
-type WindowName = "five_hour" | "seven_day" | "seven_day_opus" | "seven_day_sonnet" | "seven_day_oauth_apps";
-
-/** The account windows a usage limit can exhaust, by allowance. */
-const ALLOWANCE_WINDOWS: readonly { readonly name: WindowName; readonly window: AllowanceWindow }[] = [
-  { name: "five_hour", window: "session" },
-  { name: "seven_day", window: "weekly" },
-  { name: "seven_day_opus", window: "weekly" },
-  { name: "seven_day_sonnet", window: "weekly" },
-  { name: "seven_day_oauth_apps", window: "weekly" },
-];
+/** The allowance a vendor window belongs to, absent for one no usage limit exhausts. */
+function allowanceOf(name: string): AllowanceWindow | undefined {
+  if (name === "five_hour") return "session";
+  if (name.startsWith("seven_day")) return "weekly";
+  return undefined;
+}
 
 /**
- * The exhausted window that resets LAST, or absence when none is exhausted
- * and still to reset at NOW_MS. Every exhausted window must reset before a
- * request can be served, so the latest reset is the first moment worth asking.
+ * The refused window that resets LAST, or absence when no window's newest
+ * event refused and is still to reset at NOW_MS. Every refused window must
+ * reset before a request can be served, so the latest reset is the first
+ * moment worth asking.
  */
-export function exhaustedWindow(usage: AccountUsageLike, nowMs: number): ExhaustedWindow | undefined {
-  const limits = usage.rate_limits;
-  if (limits === null) return undefined;
+export function exhaustedWindow(readings: readonly RateLimitReading[], nowMs: number): ExhaustedWindow | undefined {
   let latest: ExhaustedWindow | undefined;
-  for (const { name, window } of ALLOWANCE_WINDOWS) {
-    const reading = limits[name];
-    if (reading === null || reading === undefined) continue;
-    if (reading.utilization === null || reading.utilization < 100 || reading.resets_at === null) continue;
-    const resetsAtMs = Date.parse(reading.resets_at);
-    if (Number.isNaN(resetsAtMs) || resetsAtMs <= nowMs) continue;
-    if (latest === undefined || resetsAtMs > latest.resetsAtMs) latest = { window, name, resetsAtMs };
+  for (const reading of readings) {
+    const window = allowanceOf(reading.name);
+    if (window === undefined || reading.status !== "rejected" || reading.resetsAtMs === undefined) continue;
+    if (reading.resetsAtMs <= nowMs) continue;
+    if (latest === undefined || reading.resetsAtMs > latest.resetsAtMs) {
+      latest = { window, name: reading.name, resetsAtMs: reading.resetsAtMs };
+    }
   }
   return latest;
 }
@@ -250,7 +252,7 @@ export class VendorErrorRetry {
     retrying.awaiting = undefined;
     retrying.status = failure.status;
     if (failure.usageLimit) {
-      void this.readAllowance(retrying, failure);
+      this.readAllowance(retrying, failure);
       return;
     }
     this.retryVendorError(retrying, failure);
@@ -345,18 +347,12 @@ export class VendorErrorRetry {
   }
 
   /**
-   * The usage-limit schedule, read off a usage sample taken after the
-   * failure. OFF THE MESSAGE LOOP: the sample is a vendor round trip, and the
-   * loop must not wait on it.
+   * The usage-limit schedule, read off the newest rate-limit event of each
+   * window: the vendor's refusal names the window and its reset.
    */
-  private async readAllowance(chain: Chain, failure: Failure): Promise<void> {
-    const reading = await this.deps.readUsage();
-    if (this.chain !== chain) {
-      LOGGER.debug({ chain: chain.id }, "the retry chain ended while the account's usage was read");
-      return;
-    }
+  private readAllowance(chain: Chain, failure: Failure): void {
     const now = this.deps.nowMs();
-    const exhausted = reading.kind === "sampled" ? exhaustedWindow(reading.usage, now) : undefined;
+    const exhausted = exhaustedWindow(this.deps.readLimits(), now);
     if (exhausted !== undefined) {
       chain.mode = { kind: "usage_limit", window: exhausted, untilMs: exhausted.resetsAtMs + USAGE_LIMIT_RETRY_TAIL_MS };
       LOGGER.info(
@@ -391,7 +387,7 @@ export class VendorErrorRetry {
       this.arm(chain, VENDOR_ERROR_RETRY_INTERVAL_MS);
       return;
     }
-    const detail = reading.kind === "sampled" ? "no usage window is exhausted and still to reset" : reading.detail;
+    const detail = "no window's newest rate-limit event refused a request and is still to reset";
     if (failure.retryable) {
       LOGGER.info({ chain: chain.id, detail }, "the usage-limit failure names no exhausted allowance; it is retried as a vendor error");
       this.retryVendorError(chain, failure);
