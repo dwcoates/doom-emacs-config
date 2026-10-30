@@ -69,6 +69,10 @@ type Controller interface {
 	// under a turn: a busy one is stood down once its turn ends (withheld.go).
 	// It returns at once.
 	StandDownWithheld(ws ids.WorkspaceID)
+	// StandDownFolded asks for StandDownWithheld FoldStandDownDelay after the
+	// latest collapse that folded the workspace (folded.go). It returns at
+	// once.
+	StandDownFolded(ws ids.WorkspaceID)
 	// RetryWithheld is the daemon's own edge for a workspace (the free edge
 	// a turn's end raises, a session coming up): a stand-down pending on it --
 	// a withheld one or a keep-alive cycle's -- is asked again.

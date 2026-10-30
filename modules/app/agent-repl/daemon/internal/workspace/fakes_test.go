@@ -3650,7 +3650,7 @@ func (f *fakeFeed) SetAccount(ids.WorkspaceID, string) {}
 // standDownsFunc adapts a function to StandDowns.
 type standDownsFunc func(ws ids.WorkspaceID)
 
-func (f standDownsFunc) StandDownWithheld(ws ids.WorkspaceID) { f(ws) }
+func (f standDownsFunc) StandDownFolded(ws ids.WorkspaceID) { f(ws) }
 
 // fakeSummaries records every workspace whose summary was restored, and
 // answers err.

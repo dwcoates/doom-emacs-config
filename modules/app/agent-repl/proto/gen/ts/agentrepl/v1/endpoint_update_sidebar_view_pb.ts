@@ -87,10 +87,15 @@ export type SidebarViewFoldSection = Message<"agentrepl.v1.SidebarViewFoldSectio
     /**
      * A repository's section, echoed from RosterRepoKey. Its fold has a
      * second reader: the Emacs tab bar hides a collapsed repository's
-     * workspaces. COLLAPSING STANDS THEIR SESSIONS DOWN, as hiding one
-     * workspace does (endpoint_set_workspace_hidden.proto): at once when no
-     * turn runs, once the running turn ends otherwise. EXPANDING starts
-     * nothing by itself: the editor asks for the workspaces with OpenTabs.
+     * workspaces. COLLAPSING UNLOADS THEIR PAGES AT ONCE AND STANDS THEIR
+     * SESSIONS DOWN FIVE MINUTES LATER (owner request, 2026-10-30): the
+     * editor drops each page the moment the fold arrives, keeping its slot,
+     * and the daemon stands each session down five minutes after the latest
+     * collapse that folded it, once the running turn ends if one runs then.
+     * A workspace the collapse spares (a one-shot, a merge pending) keeps
+     * its session. EXPANDING starts nothing by itself: the editor asks for
+     * the workspaces with OpenTabs, and an expand within the five minutes
+     * finds their sessions still up.
      *
      * @generated from field: workspace.v1.RepositoryRef repository = 1;
      */
@@ -130,8 +135,9 @@ export type SidebarViewFoldSection = Message<"agentrepl.v1.SidebarViewFoldSectio
      * One subsection of a repository's section, echoed from
      * frontend.v1.RosterSubsectionKey. Its fold has the repository fold's two
      * readers and the same effect on its workspaces: the Emacs tab bar hides
-     * them, and COLLAPSING STANDS THEIR SESSIONS DOWN as a repository's
-     * collapse does. EXPANDING starts nothing by itself.
+     * them, and COLLAPSING UNLOADS THEIR PAGES AT ONCE AND STANDS THEIR
+     * SESSIONS DOWN FIVE MINUTES LATER as a repository's collapse does.
+     * EXPANDING starts nothing by itself.
      *
      * @generated from field: agentrepl.v1.SubsectionRef subsection = 10;
      */
