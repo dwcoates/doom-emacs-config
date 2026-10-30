@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -461,10 +460,7 @@ func TestDescribeCreateRequest(t *testing.T) {
 
 func TestTheShippedCreateFailedBriefSplices(t *testing.T) {
 	// Arrange.
-	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefCreateFailed)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	brief := loadShippedBrief(t, BriefCreateFailed)
 
 	// Act.
 	text, err := brief.Splice(map[string]string{

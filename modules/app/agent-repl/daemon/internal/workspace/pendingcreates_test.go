@@ -3,7 +3,6 @@ package workspace
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -536,12 +535,9 @@ func TestRecoverQueuedCreates(t *testing.T) {
 
 func TestTheShippedDequeuedBriefSplices(t *testing.T) {
 	// Arrange
-	brief, err := prompts.Load(filepath.Join("..", "..", "..", "prompts"), BriefCreateDequeued)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
+	brief := loadShippedBrief(t, BriefCreateDequeued)
 	// Act
-	_, err = brief.Splice(map[string]string{"request": "r", "outcome": "o"})
+	_, err := brief.Splice(map[string]string{"request": "r", "outcome": "o"})
 	// Assert
 	if err != nil {
 		t.Fatalf("splice: %v", err)

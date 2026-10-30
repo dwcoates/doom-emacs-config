@@ -368,7 +368,7 @@ func TestChatSystemPromptReadsTheCorpusBrief(t *testing.T) {
 		dir     func(t *testing.T) string
 		wantErr bool
 	}{
-		{name: "the shipped corpus", dir: func(*testing.T) string { return filepath.Join("..", "..", "..", "prompts") }},
+		{name: "the shipped corpus", dir: func(*testing.T) string { return shippedPromptsDir }},
 		{name: "a corpus without the brief", dir: func(t *testing.T) string { return t.TempDir() }, wantErr: true},
 	}
 	for _, tc := range cases {
