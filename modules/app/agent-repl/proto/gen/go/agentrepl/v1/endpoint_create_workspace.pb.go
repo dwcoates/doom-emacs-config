@@ -2125,7 +2125,7 @@ type CreateWorkspaceError_InsideTemporaryDirectory struct {
 
 type CreateWorkspaceError_UnknownForkSource struct {
 	// The forked workspace (context_origin.fork) is not in the daemon's
-	// registry, or is in another repository.
+	// registry, in any repository.
 	UnknownForkSource *CreateWorkspaceUnknownForkSource `protobuf:"bytes,16,opt,name=unknown_fork_source,json=unknownForkSource,proto3,oneof"`
 }
 

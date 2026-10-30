@@ -97,7 +97,7 @@ const (
 	// origin's primary branch failed.
 	ArmOriginFetchFailed = "origin_fetch_failed"
 	// ArmUnknownForkSource is a create whose context forks a workspace the
-	// registry does not hold in the create's repository.
+	// registry does not hold, in any repository.
 	ArmUnknownForkSource = "unknown_fork_source"
 	// ArmUnknownRequester is a create whose requesting workspace the registry
 	// does not hold.
