@@ -151,8 +151,9 @@
     (:id creating
      :group "Workspaces"
      :title "Creating workspaces"
-     :bindings ((agent-repl-create-workspace "New workspace, from a prompt.")
-                (agent-repl-create-workspace-static "New named workspace, with no prompt.")
+     :bindings ((agent-repl-create-workspace "New workspace in doom, from a prompt.")
+                (agent-repl-create-workspace-explanation-engine "New workspace in explanation-engine, from a prompt.")
+                (agent-repl-create-workspace-in-repository "New workspace in a picked repository, from a prompt and a model.")
                 (agent-repl-create-oneshot "New one-shot workspace, from a commission.")
                 (agent-repl-create-oneshot-for-current-workspace "New one-shot that fixes something wrong with this workspace.")
                 (agent-repl-create-explanation-engine-oneshot "New one-shot in the explanation-engine repository.")
@@ -169,7 +170,6 @@
      :bindings ((agent-repl-finish-workspace "Finish this workspace: deploy its work, and close it once deployed.")
                 (agent-repl-hide-workspace "Hide this workspace from the tab bar.")
                 (agent-repl-show-hidden-workspace "Show a hidden workspace again and switch to it.")
-                (agent-repl-workspace-swap "Swap this workspace with the tab at a digit (0 is 10).")
                 (agent-repl-workspace-move "Move this workspace onto the tab at a digit (0 is 10).")
                 (agent-repl-set-priority "Set or clear this workspace's priority.")
                 (agent-repl-bind-conversation "Point this workspace at another of its conversations.")

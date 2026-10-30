@@ -1619,16 +1619,16 @@ the filesystem to decide it.
 ## A repository joins the roster from any path inside it, with its main worktree
 
 `SPC j .` (`agent-repl-register-repository`) registers a REPOSITORY **and the
-repository's main worktree as a workspace**. It is not `SPC TAB C-n`, and the
+repository's main worktree as a workspace**. It is not `SPC TAB p`, and the
 two are easy to confuse:
 
 | binding | command | rpc | what enters the roster |
 |---|---|---|---|
-| `SPC TAB C-n` | `agent-repl-add-project-workspace` ("Add project directory") | `RegisterWorkspace` | a WORKSPACE at the DIRECTORY you name, whose repository row is minted as a side effect |
+| `SPC TAB p` | `agent-repl-add-project-workspace` ("Add project directory") | `RegisterWorkspace` | a WORKSPACE at the DIRECTORY you name, whose repository row is minted as a side effect |
 | `SPC j .` | `agent-repl-register-repository` ("Register repository from file") | `RegisterRepository` | a REPOSITORY resolved from any path inside it, PLUS a workspace at its main worktree |
 
 It exists because a repository had exactly one way in — that side effect — so
-`agent-repl-verbs--read-repository` (the static create's picker, `SPC TAB N`)
+`agent-repl-verbs--read-repository` (the picker of `SPC TAB C-n`, `agent-repl-create-workspace-in-repository`)
 could offer only repositories some workspace had already minted, and a checkout
 nobody had worked in yet could not be named at all.
 

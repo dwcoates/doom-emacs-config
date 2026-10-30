@@ -557,7 +557,7 @@ The input window underlines misspelled words as you type.
 `SPC TAB o` makes a one-shot in agent-repl's own repository, whichever workspace you press it in.
 
 - The repository is the one agent-repl's source lives in, by its main checkout.
-  - It must be on the roster. If it is not, the command says so. Add it with `SPC TAB C-n`.
+  - It must be on the roster. If it is not, the command says so. Add it with `SPC TAB p`.
 - It asks for the commission alone, and the daemon names the workspace.
   - `SPC u SPC TAB o` asks for the model too.
 - It is cut from the repository's primary branch and merges back into it.
@@ -584,7 +584,7 @@ The input window underlines misspelled words as you type.
 `SPC TAB O` makes a one-shot in the explanation-engine repository, whichever workspace you press it in.
 
 - The repository is always `$MULTI_REPO_ROOT/explanation-engine` (see Setup).
-  - It must be on the roster. If it is not, the command says so. Add it with `SPC TAB C-n`.
+  - It must be on the roster. If it is not, the command says so. Add it with `SPC TAB p`.
 - Otherwise it is an ordinary `SPC TAB o` one-shot.
   - `SPC u SPC TAB O` asks for the model too.
 - What happens when the work is done is explanation-engine's own deploy, in `.agent-repl/deploy.yaml` at its main checkout.
@@ -626,7 +626,7 @@ No way of creating a workspace switches you to it.
 A project agent-repl knows always has a workspace for its main worktree.
 
 - Adding a project by any means registers its main worktree as a workspace.
-  - This covers `SPC TAB C-n` on any of the project's worktrees, `SPC j .`, and creating a workspace in it.
+  - This covers `SPC TAB p` on any of the project's worktrees, `SPC j .`, and creating a workspace in it.
   - Adding a linked worktree registers the main worktree as well, closed rather than opened.
     - It is in the switcher (`SPC p p`) as a closed workspace, and opening it is an ordinary open.
   - Adding the main worktree itself opens it, as before.
@@ -767,7 +767,7 @@ The top bar's effort selector sits between the model selector and the permission
   - Inside a repository, the tabs follow the sidebar top to bottom: a subsection's workspaces take their tabs where the subsection stands.
   - A child always sits right after its parent.
   - So a workspace dragged into an empty subsection at the bottom of its repository becomes that repository's last tab.
-- **`SPC TAB p` then a digit swaps the current workspace with that tab's workspace.**
+- **`M-x agent-repl-workspace-swap` then a digit swaps the current workspace with that tab's workspace.** It has no key.
   - `0` names the tenth tab, and only drawn tabs count.
   - The two exchange places and every other tab stays put.
   - The tab must belong to a workspace of the same repository.

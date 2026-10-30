@@ -91,7 +91,7 @@ Redraws are recorded in `reloads'; centering pads to the width as Doom's does."
   "Every shortcut runs an interactive command, the one its label names."
   (should (equal (mapcar (lambda (section) (plist-get (cdr section) :action))
                          agent-repl-splash-menu-sections)
-                 '(agent-repl-add-project-workspace agent-repl-create-workspace-static
+                 '(agent-repl-add-project-workspace agent-repl-create-workspace-in-repository
                    agent-repl-switch-to-project agent-repl-open-workspace agent-repl-input-help)))
   (dolist (section agent-repl-splash-menu-sections)
     (should (commandp (plist-get (cdr section) :action)))))

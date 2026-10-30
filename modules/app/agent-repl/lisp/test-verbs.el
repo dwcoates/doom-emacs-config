@@ -2013,34 +2013,6 @@ skipped a section the bar walks fails here rather than passing silently."
       (should-not (plist-get request :priority))
       (should-not (plist-get request :allow-ungated)))))
 
-(ert-deftest agent-repl-verbs-create-command-sends-no-name ()
-  "A DYNAMIC create asks for no name and sends none: the daemon mints it,
-so a `read-string' here would be a question the ruling removed."
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing"))
-              ((symbol-function 'read-string)
-               (lambda (&rest _) (error "a dynamic create asks nothing but its prompt"))))
-      (agent-repl-create-workspace)
-      (let ((standard (plist-get (plist-get (agent-repl-test-verbs--request :create) :form)
-                                 :value)))
-        (should-not (plist-get standard :name))))))
-
-(ert-deftest agent-repl-verbs-create-command-prompt-names-the-repository ()
-  "A DYNAMIC create asks `Initial prompt (REPOSITORY): ', REPOSITORY being the section's basename."
-  (let (asked)
-    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-                 (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-                ((symbol-function 'agent-repl-verbs--read-prompt)
-                 (lambda (p &optional _history-file _unseeded) (setq asked p) "do a thing")))
-        (agent-repl-create-workspace)
-        (should (equal asked
-                       (format "Initial prompt (%s): "
-                               (agent-repl-verbs--repository-name
-                                (agent-repl-verbs--section-ref (agent-repl-test-verbs--repo-section))))))))))
-
 (ert-deftest agent-repl-verbs-fork-into-primary-forks-the-context-of-a-primary ()
   "`SPC TAB f\=' forks the conversation into a PRIMARY workspace: the
 current workspace is the forked context, and the topology is primary."
@@ -2053,17 +2025,6 @@ current workspace is the forked context, and the topology is primary."
         (should (equal (plist-get request :context-origin)
                        (list :arm :fork :value (agent-repl-test-verbs--ref))))
         (should (equal (agent-repl-test-verbs--topology request) '(:arm :primary)))))))
-
-(ert-deftest agent-repl-verbs-create-command-is-primary ()
-  "`SPC TAB n\=' is never a child: its topology is primary."
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-    (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
-               (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
-              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing"))
-              ((symbol-function 'read-string) (lambda (&rest _) "")))
-      (agent-repl-create-workspace)
-      (should (equal (agent-repl-test-verbs--topology (agent-repl-test-verbs--request :create))
-                     '(:arm :primary))))))
 
 (ert-deftest agent-repl-verbs-fork-command-is-a-child-forked-from-its-owner ()
   "`SPC TAB c\=' makes a child of the current workspace, forked from it."
@@ -2079,52 +2040,6 @@ current workspace is the forked context, and the topology is primary."
                        (list :arm :fork :value (agent-repl-test-verbs--ref))))))))
 
 ;;;; ---- Create: the four modes and the questions each one asks ----
-
-(ert-deftest agent-repl-verbs-create-command-asks-no-repository ()
-  "A DYNAMIC create never asks for a repository (owner ruling, 2026-09-12)."
-  ;; Arrange.
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
-    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing"))
-                ((symbol-function 'completing-read)
-                 (lambda (&rest _) (error "a dynamic create must not ask for a repository"))))
-        ;; Act.
-        (agent-repl-create-workspace)
-        ;; Assert.
-        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
-                       (agent-repl-test-verbs--repo-ref)))))))
-
-(ert-deftest agent-repl-verbs-create-command-uses-the-current-workspaces-section ()
-  "The derived repository is the section the CURRENT workspace's row sits in."
-  ;; Arrange: two sections, the current workspace's row in the second.
-  (let* ((other (list :key (list :repository (agent-repl-test-verbs--repo-ref
-                                              "other-id" "/tmp/other"))
-                      :header (list :label (list :text "other-repo"))
-                      :entries (agent-repl-test--row-entries nil)))
-         (mine (list :key (list :repository (agent-repl-test-verbs--repo-ref))
-                     :header (list :label (list :text "repo-one"))
-                     :entries (agent-repl-test--row-entries (list (agent-repl-test-verbs--row)))))
-         (agent-repl-roster-view
-          (agent-repl-test-verbs--roster nil nil (list other mine))))
-    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "do a thing")))
-        ;; Act.
-        (agent-repl-create-workspace)
-        ;; Assert.
-        (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
-                       (agent-repl-test-verbs--repo-ref)))))))
-
-(ert-deftest agent-repl-verbs-create-command-without-a-current-workspace-refuses ()
-  "With no current workspace a dynamic create has nothing to derive from."
-  ;; Arrange.
-  (let ((agent-repl-roster-view
-         (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
-    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-      (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
-        ;; Act / Assert.
-        (should-error (agent-repl-create-workspace) :type 'user-error)
-        (should-not agent-repl-test-verbs--sent)))))
 
 (ert-deftest agent-repl-verbs-fork-command-asks-no-repository ()
   "A fork is a DYNAMIC mode too: prompt only, repository derived."
@@ -2340,49 +2255,6 @@ called with the request that answers or signals."
         (should (eq exit-command #'agent-repl-verbs-name-minibuffer-exit))
         (should (equal blank-refusal "a named fork IS its name"))))))
 
-(ert-deftest agent-repl-verbs-static-create-sends-its-name ()
-  "The STATIC create asks a repository and a REQUIRED name, and sends both."
-  ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
-              ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
-      ;; Act.
-      (agent-repl-create-workspace-static)
-      ;; Assert.
-      (let ((request (agent-repl-test-verbs--request :create)))
-        (should (equal (plist-get request :repository) (agent-repl-test-verbs--repo-ref)))
-        (should (equal (plist-get (plist-get (plist-get request :form) :value) :name)
-                       "named-one"))))))
-
-(ert-deftest agent-repl-verbs-static-create-sends-no-initial-prompt ()
-  "The STATIC create sends NO prompt: the workspace comes up idle."
-  ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
-              ((symbol-function 'agent-repl-verbs--read-prompt)
-               (lambda (_p &optional _history-file _unseeded) (error "a static create asks for no prompt")))
-              ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
-      ;; Act.
-      (agent-repl-create-workspace-static)
-      ;; Assert.
-      (should-not (plist-get (plist-get (plist-get (agent-repl-test-verbs--request :create)
-                                                   :form)
-                                        :value)
-                             :initial-prompt)))))
-
-(ert-deftest agent-repl-verbs-static-create-refuses-a-blank-name ()
-  "The static create's name is REQUIRED: a blank one is refused before send."
-  ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
-              ((symbol-function 'read-string) (lambda (&rest _) "   ")))
-      ;; Act / Assert.
-      (should-error (agent-repl-create-workspace-static) :type 'user-error)
-      (should-not agent-repl-test-verbs--sent))))
-
 (ert-deftest agent-repl-verbs-named-fork-into-primary-sends-the-name-and-no-prompt ()
   "`SPC TAB F\=' names the fork into the primary branch and asks no prompt."
   ;; Arrange.
@@ -2402,19 +2274,6 @@ called with the request that answers or signals."
         (should (equal (plist-get (plist-get (plist-get request :form) :value) :name)
                        "named-one"))
         (should-not (plist-get (plist-get (plist-get request :form) :value) :initial-prompt))))))
-
-(ert-deftest agent-repl-verbs-static-create-is-primary ()
-  "`SPC TAB N\=' is never a child: its topology is primary."
-  ;; Arrange.
-  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
-    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
-               (lambda () (agent-repl-test-verbs--repo-ref)))
-              ((symbol-function 'read-string) (lambda (&rest _) "named-one")))
-      ;; Act.
-      (agent-repl-create-workspace-static)
-      ;; Assert.
-      (should (equal (agent-repl-test-verbs--topology (agent-repl-test-verbs--request :create))
-                     '(:arm :primary))))))
 
 ;;;; ---- Create: the named fork ----
 
@@ -2483,7 +2342,8 @@ called with the request that answers or signals."
 
 (defconst agent-repl-test-verbs--creation-commands
   '(agent-repl-create-workspace
-    agent-repl-create-workspace-static
+    agent-repl-create-workspace-explanation-engine
+    agent-repl-create-workspace-in-repository
     agent-repl-fork-workspace
     agent-repl-fork-workspace-static
     agent-repl-fork-workspace-into-primary
@@ -2518,6 +2378,10 @@ A fork that left no trace was indistinguishable from one never run."
                      (lambda ()
                        (setq logged-at-first-read (copy-sequence logs))
                        (signal 'quit nil)))
+                    ((symbol-function 'agent-repl-verbs--explanation-engine-repository)
+                     (lambda ()
+                       (setq logged-at-first-read (copy-sequence logs))
+                       (signal 'quit nil)))
                     ((symbol-function 'agent-repl-verbs--read-repository)
                      (lambda ()
                        (setq logged-at-first-read (copy-sequence logs))
@@ -2532,7 +2396,8 @@ A fork that left no trace was indistinguishable from one never run."
   "A quit out of a creation question is recorded, then propagates as a quit."
   ;; Arrange: each command, and the question it is quit out of.
   (dolist (case '((agent-repl-create-workspace prompt)
-                  (agent-repl-create-workspace-static name)
+                  (agent-repl-create-workspace-explanation-engine prompt)
+                  (agent-repl-create-workspace-in-repository prompt)
                   (agent-repl-fork-workspace prompt)
                   (agent-repl-fork-workspace-static name)
                   (agent-repl-fork-workspace-into-primary prompt)
@@ -2550,6 +2415,8 @@ A fork that left no trace was indistinguishable from one never run."
                       ((symbol-function 'agent-repl-verbs--read-repository)
                        (lambda () (agent-repl-test-verbs--repo-ref)))
                       ((symbol-function 'agent-repl-verbs--agent-repl-repository)
+                       (lambda () (agent-repl-test-verbs--repo-ref)))
+                      ((symbol-function 'agent-repl-verbs--explanation-engine-repository)
                        (lambda () (agent-repl-test-verbs--repo-ref)))
                       ((symbol-function 'agent-repl-verbs--read-prompt)
                        (lambda (_p &optional _history-file _unseeded) (signal 'quit nil)))
@@ -2920,7 +2787,7 @@ directories need not exist."
           ;; Act.
           (let ((err (should-error (agent-repl-create-explanation-engine-oneshot nil) :type 'user-error)))
             ;; Assert.
-            (should (string-match-p "not on the roster; register it with SPC TAB C-n" (cadr err)))
+            (should (string-match-p "not on the roster; register it with SPC TAB p" (cadr err)))
             (should-not agent-repl-test-verbs--sent)
             (should (member (concat "elisp.verbs.explanation-engine-repository-unregistered"
                                     " root=/tmp/agent-repl-test/elsewhere"
@@ -3415,6 +3282,227 @@ trailing-slash removal alone, so the fixture directories need not exist."
               :header (list :label (list :text "repo-one"))
               :entries (agent-repl-test--row-entries (list (agent-repl-test-verbs--row))))))
 
+;;;; ---- Create: the three standard workspace commands ----
+
+(defmacro agent-repl-test-verbs--with-standard-creates (&rest body)
+  "Run BODY on a roster holding doom\='s and the current workspace\='s repositories.
+The module root resolves to doom\='s checkout, the prompt answers \"do a thing\"
+and the current workspace sits in the other repository."
+  (declare (indent 0))
+  `(let ((agent-repl-roster-view
+          (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)) nil
+                                         (agent-repl-test-verbs--agent-repl-sections))))
+     (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+       (agent-repl-test-verbs--with-agent-repl-repo "/tmp/agent-repl-test/doom/.git"
+         (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt)
+                    (lambda (p &optional _history-file _unseeded)
+                      (push p agent-repl-test-verbs--asked-prompts)
+                      "do a thing")))
+           (let ((agent-repl-test-verbs--asked-prompts nil))
+             ,@body))))))
+
+(defvar agent-repl-test-verbs--asked-prompts nil
+  "The prompt labels `agent-repl-test-verbs--with-standard-creates' saw, newest first.")
+
+(defun agent-repl-test-verbs--create-form-value ()
+  "Return the standard form\='s fields of the recorded create request."
+  (plist-get (plist-get (agent-repl-test-verbs--request :create) :form) :value))
+
+(defconst agent-repl-test-verbs--doom-repo-ref
+  '(:id "agent-repl-repo" :dir "/tmp/agent-repl-test/doom")
+  "The `RepositoryRef\=' of doom\='s checkout in the fixture roster.")
+
+(ert-deftest agent-repl-verbs-create-workspace-lands-in-doom-whatever-the-current-repository ()
+  "`SPC TAB n\=' sends doom\='s repository although the current workspace sits in another."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-standard-creates
+    ;; Act.
+    (agent-repl-create-workspace)
+    ;; Assert.
+    (should (equal (plist-get (agent-repl-test-verbs--request :create) :repository)
+                   (agent-repl-test-verbs--repo-ref "agent-repl-repo" "/tmp/agent-repl-test/doom")))))
+
+(ert-deftest agent-repl-verbs-create-workspace-asks-only-the-prompt ()
+  "`SPC TAB n\=' asks neither a repository, a name nor a model."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-standard-creates
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) (error "`SPC TAB n' asks for no repository or model")))
+              ((symbol-function 'read-string)
+               (lambda (&rest _) (error "`SPC TAB n' asks for no name"))))
+      ;; Act.
+      (agent-repl-create-workspace)
+      ;; Assert.
+      (let ((standard (agent-repl-test-verbs--create-form-value)))
+        (should (equal (plist-get standard :initial-prompt) (agent-repl-verbs--said "do a thing")))
+        (should-not (plist-get standard :name))
+        (should-not (plist-get (agent-repl-test-verbs--request :create) :model))))))
+
+(ert-deftest agent-repl-verbs-create-workspace-prompt-names-doom ()
+  "`SPC TAB n\=' asks `Initial prompt (doom): \='."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-standard-creates
+    ;; Act.
+    (agent-repl-create-workspace)
+    ;; Assert.
+    (should (equal agent-repl-test-verbs--asked-prompts '("Initial prompt (doom): ")))))
+
+(ert-deftest agent-repl-verbs-create-workspace-is-primary ()
+  "`SPC TAB n\=' is never a child: its topology is primary."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-standard-creates
+    ;; Act.
+    (agent-repl-create-workspace)
+    ;; Assert.
+    (should (equal (agent-repl-test-verbs--topology (agent-repl-test-verbs--request :create))
+                   '(:arm :primary)))))
+
+(ert-deftest agent-repl-verbs-create-workspace-works-without-a-current-workspace ()
+  "`SPC TAB n\=' derives nothing from the current workspace, so none is needed."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-standard-creates
+    (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+      ;; Act.
+      (agent-repl-create-workspace)
+      ;; Assert.
+      (should (agent-repl-test-verbs--request :create)))))
+
+(ert-deftest agent-repl-verbs-create-workspace-blank-prompt-sends-no-initial-prompt ()
+  "A blank prompt makes an idle workspace: no initial prompt is sent."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-standard-creates
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt)
+               (lambda (_p &optional _history-file _unseeded) "   ")))
+      ;; Act.
+      (agent-repl-create-workspace)
+      ;; Assert.
+      (should-not (plist-get (agent-repl-test-verbs--create-form-value) :initial-prompt)))))
+
+(ert-deftest agent-repl-verbs-create-workspace-refuses-when-doom-is-not-on-the-roster ()
+  "`SPC TAB n\=' refuses, and sends nothing, when doom\='s repository is unregistered."
+  ;; Arrange.
+  (agent-repl-test-verbs--with-standard-creates
+    (let ((agent-repl-roster-view (agent-repl-test-verbs--roster (list (agent-repl-test-verbs--row)))))
+      ;; Act.
+      (let ((err (should-error (agent-repl-create-workspace) :type 'user-error)))
+        ;; Assert.
+        (should (string-match-p "register it with SPC TAB p" (cadr err)))
+        (should-not agent-repl-test-verbs--sent)
+        (should-not agent-repl-test-verbs--asked-prompts)))))
+
+(ert-deftest agent-repl-verbs-create-workspace-explanation-engine-lands-in-explanation-engine ()
+  "`SPC TAB N\=' sends the explanation-engine checkout and its prompt."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (agent-repl-test-verbs--with-ee "/tmp/agent-repl-test/work"
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-prompt)
+                 (lambda (p &optional _history-file _unseeded)
+                   (should (equal p "Initial prompt (explanation-engine): "))
+                   "do a thing")))
+        ;; Act.
+        (agent-repl-create-workspace-explanation-engine)
+        ;; Assert.
+        (let ((request (agent-repl-test-verbs--request :create)))
+          (should (equal (plist-get request :repository)
+                         (agent-repl-test-verbs--repo-ref
+                          "ee-repo" "/tmp/agent-repl-test/work/explanation-engine")))
+          (should (equal (plist-get (plist-get (plist-get request :form) :value) :initial-prompt)
+                         (agent-repl-verbs--said "do a thing")))
+          (should (equal (agent-repl-test-verbs--topology request) '(:arm :primary)))
+          (should-not (plist-get request :model)))))))
+
+(ert-deftest agent-repl-verbs-create-workspace-explanation-engine-refuses-without-multi-repo-root ()
+  "`SPC TAB N\=' refuses, and sends nothing, when `MULTI_REPO_ROOT\=' is unset."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (let ((agent-repl-daemon-multi-repo-root nil))
+      ;; Act.
+      (let ((err (should-error (agent-repl-create-workspace-explanation-engine) :type 'user-error)))
+        ;; Assert.
+        (should (string-match-p "MULTI_REPO_ROOT is unset" (cadr err)))
+        (should-not agent-repl-test-verbs--sent)))))
+
+(ert-deftest agent-repl-verbs-create-workspace-in-repository-sends-repository-prompt-and-model ()
+  "`SPC TAB C-n\=' sends the picked repository, the prompt and the picked model."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref "picked" "/tmp/agent-repl-test/picked")))
+              ((symbol-function 'agent-repl-verbs--read-prompt)
+               (lambda (p &optional _history-file _unseeded)
+                 (should (equal p "Initial prompt (picked): "))
+                 "do a thing"))
+              ((symbol-function 'agent-repl-verbs--read-model) (lambda () "haiku")))
+      ;; Act.
+      (agent-repl-create-workspace-in-repository)
+      ;; Assert.
+      (let ((request (agent-repl-test-verbs--request :create)))
+        (should (equal (plist-get request :repository)
+                       (agent-repl-test-verbs--repo-ref "picked" "/tmp/agent-repl-test/picked")))
+        (should (equal (plist-get (plist-get (plist-get request :form) :value) :initial-prompt)
+                       (agent-repl-verbs--said "do a thing")))
+        (should (equal (plist-get request :model) "haiku"))
+        (should (equal (agent-repl-test-verbs--topology request) '(:arm :primary)))))))
+
+(ert-deftest agent-repl-verbs-create-workspace-in-repository-asks-repository-then-prompt-then-model ()
+  "`SPC TAB C-n\=' asks its three questions in that order."
+  ;; Arrange.
+  (let (asked)
+    (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+                 (lambda () (push 'repository asked) (agent-repl-test-verbs--repo-ref)))
+                ((symbol-function 'agent-repl-verbs--read-prompt)
+                 (lambda (&rest _) (push 'prompt asked) "do a thing"))
+                ((symbol-function 'agent-repl-verbs--read-model)
+                 (lambda () (push 'model asked) nil)))
+        ;; Act.
+        (agent-repl-create-workspace-in-repository)
+        ;; Assert.
+        (should (equal (reverse asked) '(repository prompt model)))))))
+
+(ert-deftest agent-repl-verbs-create-workspace-in-repository-blank-model-omits-the-model ()
+  "A blank model answer leaves the model to the daemon: none is sent."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
+              ((symbol-function 'agent-repl-verbs--read-prompt)
+               (lambda (&rest _) "do a thing"))
+              ((symbol-function 'completing-read) (lambda (&rest _) "")))
+      ;; Act.
+      (agent-repl-create-workspace-in-repository)
+      ;; Assert.
+      (should-not (plist-get (agent-repl-test-verbs--request :create) :model)))))
+
+(ert-deftest agent-repl-verbs-create-workspace-in-repository-quit-before-the-model-sends-nothing ()
+  "Quitting the model question aborts the create: nothing is sent."
+  ;; Arrange.
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (&rest _) "do a thing"))
+              ((symbol-function 'agent-repl-verbs--read-model) (lambda () (signal 'quit nil))))
+      ;; Act / Assert.
+      (should (agent-repl-test-verbs--quits-p #'agent-repl-create-workspace-in-repository))
+      (should-not agent-repl-test-verbs--sent))))
+
+(ert-deftest agent-repl-verbs-standard-creates-share-one-body ()
+  "Every standard create command runs `agent-repl-verbs--create-standard\=' under its own name."
+  ;; Arrange.
+  (dolist (case '((agent-repl-create-workspace agent-repl-verbs--agent-repl-repository nil)
+                  (agent-repl-create-workspace-explanation-engine
+                   agent-repl-verbs--explanation-engine-repository nil)
+                  (agent-repl-create-workspace-in-repository agent-repl-verbs--read-repository t)))
+    (pcase-let ((`(,command ,repository-fn ,pick-model) case))
+      (ert-info ((symbol-name command))
+        (let (seen)
+          (cl-letf (((symbol-function 'agent-repl-verbs--create-standard)
+                     (lambda (&rest args) (setq seen args))))
+            ;; Act.
+            (funcall command)
+            ;; Assert.
+            (should (equal seen (list command repository-fn pick-model)))))))))
+
 ;;;; ---- Create: no creation moves the user ----
 
 (defmacro agent-repl-test-verbs--with-create-commands (&rest body)
@@ -3430,6 +3518,9 @@ name are fixed."
                   (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
                  ((symbol-function 'agent-repl-verbs--read-repository)
                   (lambda (&rest _) (agent-repl-test-verbs--repo-ref)))
+                 ((symbol-function 'agent-repl-verbs--explanation-engine-repository)
+                  (lambda () (agent-repl-test-verbs--repo-ref)))
+                 ((symbol-function 'agent-repl-verbs--read-model) (lambda () nil))
                  ((symbol-function 'agent-repl-verbs--read-prompt)
                   (lambda (_p &optional _history-file _unseeded) "do a thing"))
                  ((symbol-function 'agent-repl-verbs--read-required-prompt)
@@ -3439,7 +3530,8 @@ name are fixed."
 
 (defconst agent-repl-test-verbs--standard-creation-commands
   '(agent-repl-create-workspace
-    agent-repl-create-workspace-static
+    agent-repl-create-workspace-explanation-engine
+    agent-repl-create-workspace-in-repository
     agent-repl-fork-workspace
     agent-repl-fork-workspace-static
     agent-repl-fork-workspace-into-primary
@@ -3464,13 +3556,6 @@ project landed on."
   "`SPC TAB n' leaves the user where they are once its tab arrives."
   ;; Arrange / Act.
   (let ((moves (agent-repl-test-verbs--create-and-arrive 'agent-repl-create-workspace)))
-    ;; Assert.
-    (should (equal moves '(:landed nil :switched nil :requested nil :pending nil)))))
-
-(ert-deftest agent-repl-verbs-static-create-stands-still ()
-  "`SPC TAB N' leaves the user where they are once its tab arrives."
-  ;; Arrange / Act.
-  (let ((moves (agent-repl-test-verbs--create-and-arrive 'agent-repl-create-workspace-static)))
     ;; Assert.
     (should (equal moves '(:landed nil :switched nil :requested nil :pending nil)))))
 
