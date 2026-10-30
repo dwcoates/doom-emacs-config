@@ -5986,12 +5986,16 @@ describe("the repository's subsections and the drag", () => {
     );
   });
 
-  it("draws a subsection's name in the canonical orange", () => {
-    expect(declarationsOf("#ws-sidebar .sb-subsection-label")).toMatch(/color:\s*var\(--canonical-orange\)/);
+  it("draws a subsection's name in the repository names' ink", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-label")).toMatch(/color:\s*var\(--repo-head-expanded\)/);
   });
 
-  it("keeps a folded subsection's name orange, with no folded override", () => {
-    expect(declarationsOf("#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label")).toBeUndefined();
+  it("greys a folded subsection's name as a folded repository's", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label")).toMatch(/color:\s*var\(--repo-head-collapsed\)/);
+  });
+
+  it("lays a subsection's header row on a band slightly darker than the rail", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-head")).toMatch(/background:\s*color-mix\(in srgb, var\(--sidebar-bg\) 88%, #000000\)/);
   });
 
   it("draws the name popup's input with a hairline border and no focus ring", () => {
