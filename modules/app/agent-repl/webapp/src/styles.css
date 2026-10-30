@@ -1206,12 +1206,18 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   letter-spacing: 0.04em;
   color: var(--muted);
   font-weight: 600;
+  /* A SUBSECTION'S HEADER ROW SITS ON A SLIGHTLY DARKER BAND than the rail
+     (owner request, 2026-10-30): the rail's own ground with a little black
+     mixed in, across the whole row. */
+  background: color-mix(in srgb, var(--sidebar-bg) 88%, #000000);
 }
 #ws-sidebar .sb-subsection-head .sb-count { font-size: 0.85em; }
-/* A SUBSECTION'S NAME IS THE CANONICAL ORANGE (owner request, 2026-10-30,
-   superseding the --blocked purple it wore from 2026-10-24), folded or not.
-   Its triangle and count keep the header's own colour. */
-#ws-sidebar .sb-subsection-label { color: var(--canonical-orange); }
+/* A SUBSECTION'S NAME WEARS THE REPOSITORY NAMES' INK (owner request,
+   2026-10-30, superseding the canonical orange it wore earlier that day):
+   --repo-head-expanded open, --repo-head-collapsed folded, as a repository's
+   name does. Its triangle and count keep the header's own colour. */
+#ws-sidebar .sb-subsection-label { color: var(--repo-head-expanded); }
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label { color: var(--repo-head-collapsed); }
 #ws-sidebar .sb-subsection-delete {
   margin-left: auto;
   border: 0;

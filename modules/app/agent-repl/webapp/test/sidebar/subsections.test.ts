@@ -985,13 +985,16 @@ describe("a subsection's fold", () => {
     });
   });
 
-  it.each([true, false])("draws a subsection's name in the canonical orange, collapsed=%s", (collapsed) => {
+  it.each([
+    [false, "var(--repo-head-expanded)"],
+    [true, "var(--repo-head-collapsed)"],
+  ])("draws a subsection's name in the repository names' ink, collapsed=%s", (collapsed, want) => {
     // Arrange
     const drawn = drawWorkspaceRoster(subsectionOf(collapsed), sidebarContext());
 
     // Act / Assert
     inRail(drawn, (rail) => {
-      expect(cascadedValue(rail.querySelector(".sb-subsection-label") as HTMLElement, "color")).toBe("var(--canonical-orange)");
+      expect(cascadedValue(rail.querySelector(".sb-subsection-label") as HTMLElement, "color")).toBe(want);
     });
   });
 });
