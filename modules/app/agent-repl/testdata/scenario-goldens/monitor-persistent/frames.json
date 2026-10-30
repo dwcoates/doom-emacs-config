@@ -193,7 +193,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000003,
+      "atMs": 1800000000002,
       "ordinal": 0
     },
     "source": {
@@ -242,7 +242,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000004,
+      "atMs": 1800000000003,
       "ordinal": 0
     },
     "source": {
@@ -265,7 +265,7 @@
                 "websocket": {
                   "url": "ws://127.0.0.1:8787/echo"
                 },
-                "startedAtMs": "1800000000009"
+                "startedAtMs": "1800000000008"
               }
             },
             "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
@@ -350,7 +350,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000006,
+      "atMs": 1800000000005,
       "ordinal": 0
     },
     "source": {
@@ -496,7 +496,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000007,
+      "atMs": 1800000000006,
       "ordinal": 0
     },
     "source": {
@@ -519,7 +519,7 @@
                 },
                 "fromModel": {},
                 "settledAt": {
-                  "atMs": "1800000000007"
+                  "atMs": "1800000000006"
                 }
               }
             },

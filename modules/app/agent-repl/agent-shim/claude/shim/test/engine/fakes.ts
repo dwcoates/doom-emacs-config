@@ -10,7 +10,6 @@ import { create } from "@bufbuild/protobuf";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import type {
   AccountInfoLike,
-  AccountUsageLike,
   AppliedSettingsLike,
   ContextUsageLike,
   EffortLevelLike,
@@ -58,7 +57,6 @@ export class ScriptedQuery implements QueryLike {
   /** What `supportedCommands()` answers: the runtime's slash-command catalog. */
   commands: SlashCommandLike[] = [];
   contextUsage: ContextUsageLike = emptyContextUsage();
-  accountUsage: AccountUsageLike = emptyAccountUsage();
   backgroundTaskAnswer = false;
   /** When set, `interrupt` rejects with it, as a vendor that refuses the interrupt does. */
   interruptRejects: Error | undefined;
@@ -224,10 +222,6 @@ export class ScriptedQuery implements QueryLike {
   getContextUsage(): Promise<ContextUsageLike> {
     this.calls.push("getContextUsage");
     return Promise.resolve(this.contextUsage);
-  }
-  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): Promise<AccountUsageLike> {
-    this.calls.push("usage");
-    return Promise.resolve(this.accountUsage);
   }
   accountInfo(): Promise<AccountInfoLike> {
     return Promise.resolve({} as AccountInfoLike);
@@ -893,23 +887,6 @@ function emptyContextUsage(): ContextUsageLike {
     agents: [],
     isAutoCompactEnabled: false,
     apiUsage: null,
-  };
-}
-
-function emptyAccountUsage(): AccountUsageLike {
-  return {
-    session: {
-      total_cost_usd: 0,
-      total_api_duration_ms: 0,
-      total_duration_ms: 0,
-      total_lines_added: 0,
-      total_lines_removed: 0,
-      model_usage: {},
-    },
-    subscription_type: null,
-    rate_limits_available: false,
-    rate_limits: null,
-    behaviors: null,
   };
 }
 

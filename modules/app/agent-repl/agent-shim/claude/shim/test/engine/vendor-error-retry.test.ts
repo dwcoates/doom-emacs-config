@@ -20,12 +20,11 @@ import {
   retryVendorErrorNowResponse,
   vendorErrorRetryUpdate,
   type StatedRetry,
-  type UsageReading,
+  type RateLimitReading,
 } from "../../src/engine/vendor-error-retry.js";
 import { isVendorErrorRetryPrompt, vendorErrorRetryPrompt } from "../../src/engine/vendor-error-retry-prompt.js";
 import type { ShimPromptDelivery } from "../../src/engine/shim-prompt.js";
 import { conversationv1, shimv1 } from "../../src/proto.js";
-import type { AccountUsageLike } from "../../src/sdk/types.js";
 import { ManualScheduler } from "./fakes.js";
 import { logRecordsSince, logSinkMark, type LogRecord } from "../log-records.js";
 
@@ -71,12 +70,13 @@ interface WindowAt {
   readonly resetsAtMs: number;
 }
 
-function usage(windows: Partial<Record<"five_hour" | "seven_day" | "seven_day_opus", WindowAt>>): AccountUsageLike {
-  const rate: Record<string, { utilization: number; resets_at: string }> = {};
-  for (const [name, at] of Object.entries(windows)) {
-    rate[name] = { utilization: at.utilization, resets_at: new Date(at.resetsAtMs).toISOString() };
-  }
-  return { subscription_type: "max", rate_limits_available: true, rate_limits: rate } as unknown as AccountUsageLike;
+/** Each window's newest rate-limit event: a window at its limit refused the request. */
+function usage(windows: Partial<Record<"five_hour" | "seven_day" | "seven_day_opus", WindowAt>>): readonly RateLimitReading[] {
+  return Object.entries(windows).map(([name, at]) => ({
+    name,
+    status: at.utilization >= 100 ? "rejected" : "allowed",
+    resetsAtMs: at.resetsAtMs,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ interface Harness {
   /** The last statement standing when each prompt was delivered. */
   readonly statedAtDelivery: (StatedRetry | undefined)[];
   delivery: ShimPromptDelivery | Error;
-  reading: UsageReading;
+  reading: readonly RateLimitReading[];
   readings: number;
 }
 
@@ -110,7 +110,7 @@ function harness(): Harness {
     states,
     statedAtDelivery,
     delivery: { kind: "delivered", turnId: "retry-1" },
-    reading: { kind: "sampled", usage: usage({}) },
+    reading: usage({}),
     readings: 0,
     retry: new VendorErrorRetry({
       deliver: (prompt) => {
@@ -122,9 +122,9 @@ function harness(): Harness {
       state: (scheduled) => {
         states.push(scheduled);
       },
-      readUsage: () => {
+      readLimits: () => {
         h.readings += 1;
-        return Promise.resolve(h.reading);
+        return h.reading;
       },
       nowMs: () => clock.now,
       scheduler,
@@ -188,7 +188,7 @@ describe("the retry prompt", () => {
 // ---------------------------------------------------------------------------
 
 describe("exhaustedWindow", () => {
-  const cases: { name: string; usage: AccountUsageLike; expected: ReturnType<typeof exhaustedWindow> }[] = [
+  const cases: { name: string; usage: readonly RateLimitReading[]; expected: ReturnType<typeof exhaustedWindow> }[] = [
     {
       name: "an exhausted session window answers its reset",
       usage: usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } }),
@@ -216,7 +216,7 @@ describe("exhaustedWindow", () => {
       expected: { window: "weekly", name: "seven_day", resetsAtMs: START + 600 * MINUTE },
     },
     {
-      name: "a window below its limit is not exhausted",
+      name: "a window whose newest event allowed the request is not exhausted",
       usage: usage({ five_hour: { utilization: 99.9, resetsAtMs: START + 60 * MINUTE } }),
       expected: undefined,
     },
@@ -226,8 +226,8 @@ describe("exhaustedWindow", () => {
       expected: undefined,
     },
     {
-      name: "an account with no plan limits has no exhausted window",
-      usage: { subscription_type: null, rate_limits_available: false, rate_limits: null } as unknown as AccountUsageLike,
+      name: "a session that saw no rate-limit event has no exhausted window",
+      usage: [],
       expected: undefined,
     },
   ];
@@ -553,7 +553,7 @@ describe("delivering a retry", () => {
     const retry = new VendorErrorRetry({
       deliver: () => pending,
       state: () => undefined,
-      readUsage: () => Promise.resolve({ kind: "unavailable", detail: "unused" }),
+      readLimits: () => [],
       nowMs: () => START,
       scheduler,
     });
@@ -578,7 +578,7 @@ describe("a usage-limit failure", () => {
   it("retries when the exhausted session window resets", async () => {
     // Arrange
     const h = harness();
-    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } }) };
+    h.reading = usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } });
 
     // Act
     h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
@@ -592,13 +592,10 @@ describe("a usage-limit failure", () => {
     // Arrange
     const h = harness();
     const weeklyReset = START + 2 * 24 * 60 * MINUTE;
-    h.reading = {
-      kind: "sampled",
-      usage: usage({
+    h.reading = usage({
         five_hour: { utilization: 30, resetsAtMs: START + 60 * MINUTE },
         seven_day: { utilization: 100, resetsAtMs: weeklyReset },
-      }),
-    };
+      });
 
     // Act
     h.retry.turnEnded("turn-1", RATE_LIMITED);
@@ -611,7 +608,7 @@ describe("a usage-limit failure", () => {
   it("waits for the reset of a 429 with an exhausted window", async () => {
     // Arrange
     const h = harness();
-    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } }) };
+    h.reading = usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } });
 
     // Act
     await failedTurnEnds(h, "turn-1", RATE_LIMITED);
@@ -647,7 +644,7 @@ describe("a usage-limit failure", () => {
     // Arrange
     const h = harness();
     const reset = START + 76 * MINUTE;
-    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: reset } }) };
+    h.reading = usage({ five_hour: { utilization: 100, resetsAtMs: reset } });
     h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
     await settle();
     h.clock.now = reset;
@@ -665,7 +662,7 @@ describe("a usage-limit failure", () => {
     // Arrange
     const h = harness();
     const reset = START + 76 * MINUTE;
-    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: reset } }) };
+    h.reading = usage({ five_hour: { utilization: 100, resetsAtMs: reset } });
     h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
     await settle();
     h.clock.now = reset + USAGE_LIMIT_RETRY_TAIL_MS - VENDOR_ERROR_RETRY_INTERVAL_MS / 2;
@@ -690,13 +687,13 @@ describe("a usage-limit failure", () => {
     // Arrange: the session window resets, and the weekly one is now the exhausted one.
     const h = harness();
     const reset = START + 76 * MINUTE;
-    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: reset } }) };
+    h.reading = usage({ five_hour: { utilization: 100, resetsAtMs: reset } });
     h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
     await settle();
     h.clock.now = reset;
     await fire(h);
     const weeklyReset = reset + 24 * 60 * MINUTE;
-    h.reading = { kind: "sampled", usage: usage({ seven_day: { utilization: 100, resetsAtMs: weeklyReset } }) };
+    h.reading = usage({ seven_day: { utilization: 100, resetsAtMs: weeklyReset } });
 
     // Act
     h.retry.turnEnded("retry-1", BLOCKING_LIMIT);
@@ -709,7 +706,7 @@ describe("a usage-limit failure", () => {
   it("retries a 429 with no exhausted window as a vendor error", async () => {
     // Arrange
     const h = harness();
-    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 40, resetsAtMs: START + 60 * MINUTE } }) };
+    h.reading = usage({ five_hour: { utilization: 40, resetsAtMs: START + 60 * MINUTE } });
 
     // Act
     await failedTurnEnds(h, "turn-1", RATE_LIMITED);
@@ -721,7 +718,7 @@ describe("a usage-limit failure", () => {
   it("does not retry a blocking limit with no exhausted window", async () => {
     // Arrange
     const h = harness();
-    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 40, resetsAtMs: START + 60 * MINUTE } }) };
+    h.reading = usage({ five_hour: { utilization: 40, resetsAtMs: START + 60 * MINUTE } });
 
     // Act
     h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
@@ -731,10 +728,10 @@ describe("a usage-limit failure", () => {
     expect({ standing: h.retry.standing(), scheduled: h.retry.scheduled() }).toEqual({ standing: false, scheduled: false });
   });
 
-  it("records why it is not retried when the usage could not be read", async () => {
+  it("records why it is not retried when no rate-limit event refused a request", async () => {
     // Arrange
     const h = harness();
-    h.reading = { kind: "unavailable", detail: "the usage service did not answer" };
+    h.reading = [];
     const before = logSinkMark();
 
     // Act
@@ -746,13 +743,15 @@ describe("a usage-limit failure", () => {
       logRecordsSince(before),
       "the usage-limit failure names no exhausted allowance to wait for; the turn is not retried",
     );
-    expect(records.map((record) => record.context["detail"])).toEqual(["the usage service did not answer"]);
+    expect(records.map((record) => record.context["detail"])).toEqual([
+      "no window's newest rate-limit event refused a request and is still to reset",
+    ]);
   });
 
-  it("is not scheduled when a prompt was submitted while the usage was read", async () => {
+  it("is not scheduled once a prompt is submitted after the usage-limit failure", async () => {
     // Arrange
     const h = harness();
-    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } }) };
+    h.reading = usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } });
     h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
 
     // Act
@@ -988,7 +987,7 @@ describe("the stated schedule", () => {
   it("states the window's reset as the instant of a usage-limit retry", async () => {
     // Arrange
     const h = harness();
-    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } }) };
+    h.reading = usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } });
 
     // Act
     h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
@@ -1031,7 +1030,7 @@ describe("networkRecovered", () => {
   it("leaves a usage-limit retry at its window's reset", async () => {
     // Arrange
     const h = harness();
-    h.reading = { kind: "sampled", usage: usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } }) };
+    h.reading = usage({ five_hour: { utilization: 100, resetsAtMs: START + 76 * MINUTE } });
     h.retry.turnEnded("turn-1", BLOCKING_LIMIT);
     await settle();
 

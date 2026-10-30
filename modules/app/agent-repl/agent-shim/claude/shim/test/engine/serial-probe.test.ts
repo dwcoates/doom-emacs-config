@@ -150,7 +150,6 @@ describe("SerialProbe", () => {
     // A reading that hand-rolls its chain is a second copy free to drift.
     const source = readFileSync(path.join(import.meta.dirname, "../../src/engine/session.ts"), "utf8");
     expect(source).toMatch(/const contextProbe = new SerialProbe\(\(\) => probeContextUsage\(\)\);/);
-    expect(source).toMatch(/const accountUsageProbe = new SerialProbe\(\(\) => sampleAccountUsage\(\)\);/);
     expect(source).not.toMatch(/Chain: Promise<void> = Promise\.resolve\(\)/);
   });
 });

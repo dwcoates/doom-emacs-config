@@ -193,7 +193,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000003,
+      "atMs": 1800000000002,
       "ordinal": 0
     },
     "source": {
@@ -242,7 +242,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000010,
+      "atMs": 1800000000009,
       "ordinal": 0
     },
     "source": {
@@ -264,7 +264,7 @@
                   "path": "/w/s/example.ts"
                 },
                 "startedAt": {
-                  "atMs": "1800000000010"
+                  "atMs": "1800000000009"
                 }
               }
             },
@@ -300,7 +300,7 @@
                 "hookName": "PostToolUse:Edit",
                 "event": "AGENT_HOOK_EVENT_POST_TOOL_USE",
                 "startedAt": {
-                  "atMs": "1800000000010"
+                  "atMs": "1800000000009"
                 }
               }
             },
@@ -386,7 +386,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000010,
+      "atMs": 1800000000009,
       "ordinal": 0
     },
     "source": {
@@ -414,9 +414,9 @@
                     ]
                   },
                   "settledAt": {
-                    "atMs": "1800000000010",
+                    "atMs": "1800000000009",
                     "startedAt": {
-                      "atMs": "1800000000010"
+                      "atMs": "1800000000009"
                     }
                   }
                 },
@@ -471,7 +471,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000007,
+      "atMs": 1800000000006,
       "ordinal": 0
     },
     "source": {
@@ -617,7 +617,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000008,
+      "atMs": 1800000000007,
       "ordinal": 0
     },
     "source": {
@@ -640,7 +640,7 @@
                 },
                 "fromModel": {},
                 "settledAt": {
-                  "atMs": "1800000000008"
+                  "atMs": "1800000000007"
                 }
               }
             },

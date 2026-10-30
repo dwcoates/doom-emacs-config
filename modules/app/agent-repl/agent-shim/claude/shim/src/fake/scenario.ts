@@ -360,8 +360,6 @@ export interface ScenarioContext {
   endTask(taskId: string): void;
 
   // -- the session's answerable state --------------------------------------
-  /** Choose which account-usage answer `usage_EXPERIMENTAL…` gives. */
-  setAccountUsageArm(arm: AccountUsageArm): void;
   /** Choose which mcp-server healths `mcpServerStatus()` reports. */
   setMcpArm(arm: "all" | "healthy"): void;
   /**
@@ -410,17 +408,6 @@ export interface ScenarioContext {
   /** Log through `src/log.ts`. Every branch of every scenario logs. */
   log: ShimLogger;
 }
-
-/** Which shape `usage_EXPERIMENTAL…` answers with. */
-export type AccountUsageArm =
-  | "available"
-  | "opus_absent"
-  | "service_unavailable"
-  | "window_unavailable"
-  | "utilization_unavailable"
-  | "sampling_failure"
-  | "seat_spend"
-  | "seat_spend_unreported";
 
 /** One registered mocked-vendor scenario. */
 export interface Scenario {

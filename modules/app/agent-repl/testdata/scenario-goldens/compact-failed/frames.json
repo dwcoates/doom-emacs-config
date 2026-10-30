@@ -178,13 +178,13 @@
     }
   },
   {
-    "upsertKey": "terminal:601de000-0000-4000-8000-000000000001:context-cut-1800000000006",
+    "upsertKey": "terminal:601de000-0000-4000-8000-000000000001:context-cut-1800000000005",
     "book": "601de000-0000-4000-8000-000000000001",
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": null,
     "source": {
-      "vendorUuid": "context-cut-601de000-0000-4000-8000-000000000001-1800000000006",
+      "vendorUuid": "context-cut-601de000-0000-4000-8000-000000000001-1800000000005",
       "discriminator": "agent_frame.update.context_cut.compactionFailed"
     },
     "item": {
@@ -243,7 +243,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000003,
+      "atMs": 1800000000002,
       "ordinal": 0
     },
     "source": {
@@ -389,7 +389,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000004,
+      "atMs": 1800000000003,
       "ordinal": 0
     },
     "source": {
@@ -412,7 +412,7 @@
                 },
                 "fromModel": {},
                 "settledAt": {
-                  "atMs": "1800000000004"
+                  "atMs": "1800000000003"
                 }
               }
             },

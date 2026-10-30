@@ -1,9 +1,0 @@
-{
-  "scenario": "!usage-sampling-failure",
-  "seam": "session-footer",
-  "nowMs": 1800000000000,
-  "planes": [
-    "stream",
-    "file"
-  ]
-}

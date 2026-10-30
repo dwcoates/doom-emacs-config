@@ -1,9 +1,0 @@
-{
-  "scenario": "!usage-opus-absent",
-  "seam": "session-footer",
-  "nowMs": 1800000000000,
-  "planes": [
-    "stream",
-    "file"
-  ]
-}

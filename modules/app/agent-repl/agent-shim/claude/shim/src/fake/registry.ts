@@ -86,7 +86,6 @@ export const SCENARIOS: readonly Scenario[] = [
  * value resolves and every key round-trips through `selectScenario`.
  */
 export const ALIASES: Readonly<Record<string, string>> = {
-  "account-usage": "usage-full",
   "bash-detached": "bash-detach",
   "bash-foreground-completed": "bash",
   "bash-image-output": "bash-image",

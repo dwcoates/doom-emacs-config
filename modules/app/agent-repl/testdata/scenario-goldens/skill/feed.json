@@ -44,7 +44,7 @@
         "skill": {
           "clock": {
             "running": {},
-            "startedAtMs": "1800000000010"
+            "startedAtMs": "1800000000009"
           },
           "invocation": {
             "text": "/fake-skill --target one"
@@ -83,7 +83,7 @@
             }
           },
           "usage": {
-            "atMs": "1800000000008",
+            "atMs": "1800000000007",
             "heat": {
               "position": 0.07186666666666668
             },

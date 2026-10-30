@@ -87,7 +87,6 @@ import type {
   SdkMessage,
   SdkUserMessage,
   ContextUsageLike,
-  AccountUsageLike,
   McpServerStatusLike,
   ModelInfoLike,
 } from "../sdk/types.js";
@@ -211,7 +210,7 @@ import {
   VendorErrorRetry,
   retryVendorErrorNowResponse,
   vendorErrorRetryUpdate,
-  type UsageReading,
+  type RateLimitReading,
 } from "./vendor-error-retry.js";
 import { REAL_SKILL_WATCH_FS, SkillSetWatch, skillDirsOf, type SkillWatchFs } from "./skill-watch.js";
 import { networkReach, type NetworkReach } from "./network-reach.js";
@@ -662,9 +661,6 @@ const NETWORK_COMPONENT = "network";
  */
 const ROLLBACK_STOP_SETTLE_MS = 10_000;
 
-/** How often the account's rate-limit windows are sampled. */
-const ACCOUNT_USAGE_INTERVAL_MS = 5 * 60 * 1000;
-
 /** What a message loop's read answers when the shim let its query go first. */
 const LOOP_STOPPED: unique symbol = Symbol("the shim let the query go");
 
@@ -696,33 +692,6 @@ function lockHolderUnavailable(err: LockHolderUnavailableError): shimv1.StartSes
     `this shim's lock helper ${err.binary} ${describeLockHolderHow(err.how)}; ` +
       `no other process is known to own this conversation`,
   );
-}
-
-/**
- * The vendor's plan word, typed. UNSET when the vendor named none (an API key
- * or third-party provider session); a word this schema does not name is the
- * set message with its oneof unassigned, never a guessed arm.
- */
-export function subscriptionTypeOf(
-  word: string | null | undefined,
-): conversationv1.SessionSubscriptionType | undefined {
-  if (word === null || word === undefined) return undefined;
-  const plan = ((): conversationv1.SessionSubscriptionType["plan"] => {
-    switch (word) {
-      case "pro":
-        return { case: "pro", value: create(conversationv1.SessionSubscriptionTypeProSchema, {}) };
-      case "max":
-        return { case: "max", value: create(conversationv1.SessionSubscriptionTypeMaxSchema, {}) };
-      case "team":
-        return { case: "team", value: create(conversationv1.SessionSubscriptionTypeTeamSchema, {}) };
-      case "enterprise":
-        return { case: "enterprise", value: create(conversationv1.SessionSubscriptionTypeEnterpriseSchema, {}) };
-      default:
-        LOGGER.info({ subscription_type: word }, "the vendor named a plan this schema does not; it rides unassigned");
-        return { case: undefined };
-    }
-  })();
-  return create(conversationv1.SessionSubscriptionTypeSchema, { plan });
 }
 
 export function createEngine(deps: EngineDeps): SessionEngine {
@@ -826,7 +795,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     state: (stated) => {
       pushes.push(vendorErrorRetryUpdate(stated));
     },
-    readUsage: () => readUsageForRetry(),
+    readLimits: () => [...rateLimitReadings.values()],
     nowMs: deps.nowMs,
     scheduler: deps.vendorErrorRetryScheduler ?? REAL_SCHEDULER,
   });
@@ -1059,7 +1028,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * turn runs at ONE effort throughout, exactly as it runs on one model.
    */
   const pendingEffort = boundaryChange<conversationv1.AgentEffortLevel, shimv1.SetSessionEffortResponse>();
-  let accountUsageHandle: unknown;
   let cadence: KeepaliveCadence | undefined;
   /**
    * How many keep-alive beats this session has sent, so each prompt is unique.
@@ -2161,197 +2129,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }, closedBySession);
   }
 
-  /** One usage window, or absence when the vendor could not state it. */
-  function usageWindow(
-    window: { utilization: number | null; resets_at: string | null } | null | undefined,
-  ): conversationv1.SessionUsageWindow | undefined {
-    if (window === undefined || window === null) return undefined;
-    if (window.utilization === null || window.resets_at === null) return undefined;
-    const resetsAt = Date.parse(window.resets_at);
-    if (Number.isNaN(resetsAt)) return undefined;
-    return create(conversationv1.SessionUsageWindowSchema, {
-      utilizationPercent: window.utilization,
-      resetsAtMs: BigInt(resetsAt),
-    });
-  }
-
-  /**
-   * The account's windows.
-   *
-   * Every "the vendor could not say" case gets its OWN unavailable reason
-   * rather than an absent field, because "we did not ask" and "the service is
-   * down" are different facts to a consumer deciding whether to warn a user.
-   */
-  function accountUsageUpdate(usage: AccountUsageLike, observedAtMs: bigint): conversationv1.SessionUpdate {
-    const subscriptionType = subscriptionTypeOf(usage.subscription_type);
-    const unavailable = (
-      reason: conversationv1.SessionAccountUsageUnavailable["reason"],
-    ): conversationv1.SessionUpdate =>
-      create(conversationv1.SessionUpdateSchema, {
-        update: {
-          case: "accountUsage",
-          value: create(conversationv1.SessionAccountUsageSchema, {
-            observedAtMs,
-            subscriptionType,
-            outcome: {
-              case: "unavailable",
-              value: create(conversationv1.SessionAccountUsageUnavailableSchema, { reason }),
-            },
-          }),
-        },
-      });
-    if (!usage.rate_limits_available) {
-      return unavailable({
-        case: "serviceUnavailable",
-        value: create(conversationv1.SessionUsageServiceUnavailableSchema, {}),
-      });
-    }
-    if (usage.rate_limits === null || usage.rate_limits === undefined) {
-      // The service said it had limits and then produced none: still the
-      // service failing to answer, not a shape with a window missing from it.
-      return unavailable({
-        case: "serviceUnavailable",
-        value: create(conversationv1.SessionUsageServiceUnavailableSchema, {}),
-      });
-    }
-    // THE TWO REASONS ARE DIFFERENT FACTS ABOUT THE FIVE-HOUR WINDOW, and the
-    // consumer acts on them differently. `window_unavailable` means the service
-    // answered WITHOUT a five-hour window at all; `utilization_unavailable`
-    // means the window is there and its utilization is not. Collapsing the
-    // first onto the second left `window_unavailable` unproducible while
-    // looking as though it were covered.
-    const rawFiveHour = usage.rate_limits.five_hour;
-    // THE BILLING MODE (owner ruling, 2026-10-06): a per-seat account is an
-    // enterprise subscription whose usage answer reports a monthly limit and
-    // no five-hour window. Anything else that reports windows is a
-    // subscription, read below.
-    const seatLimit = usage.rate_limits.extra_usage?.monthly_limit ?? null;
-    const perSeat =
-      usage.subscription_type === "enterprise" &&
-      (rawFiveHour === null || rawFiveHour === undefined) &&
-      seatLimit !== null;
-    LOGGER.info(
-      {
-        subscription_type: usage.subscription_type,
-        five_hour_reported: rawFiveHour !== null && rawFiveHour !== undefined,
-        monthly_limit_reported: seatLimit !== null,
-        billing_mode: perSeat ? "seat_spend" : "subscription",
-      },
-      perSeat
-        ? "the account is billed per seat: enterprise, a monthly limit and no five-hour window"
-        : "the account is billed by subscription allowance windows",
-    );
-    if (perSeat) {
-      return seatSpendUpdate(observedAtMs, subscriptionType, usage.rate_limits.extra_usage, seatLimit);
-    }
-    if (rawFiveHour === null || rawFiveHour === undefined) {
-      return unavailable({
-        case: "windowUnavailable",
-        value: create(conversationv1.SessionUsageWindowUnavailableSchema, {}),
-      });
-    }
-    const fiveHour = usageWindow(rawFiveHour);
-    if (fiveHour === undefined) {
-      return unavailable({
-        case: "utilizationUnavailable",
-        value: create(conversationv1.SessionUsageUtilizationUnavailableSchema, {}),
-      });
-    }
-    const optional = (
-      window: { utilization: number | null; resets_at: string | null } | null | undefined,
-      key: "sevenDay" | "sevenDayOauthApps" | "sevenDayOpus" | "sevenDaySonnet",
-    ): Record<string, conversationv1.SessionUsageWindow> => {
-      const built = usageWindow(window);
-      return built === undefined ? {} : { [key]: built };
-    };
-    return create(conversationv1.SessionUpdateSchema, {
-      update: {
-        case: "accountUsage",
-        value: create(conversationv1.SessionAccountUsageSchema, {
-          observedAtMs,
-          subscriptionType,
-          outcome: {
-            case: "available",
-            value: create(conversationv1.SessionAccountUsageAvailableSchema, {
-              fiveHour,
-              ...optional(usage.rate_limits.seven_day, "sevenDay"),
-              ...optional(usage.rate_limits.seven_day_oauth_apps, "sevenDayOauthApps"),
-              ...optional(usage.rate_limits.seven_day_opus, "sevenDayOpus"),
-              ...optional(usage.rate_limits.seven_day_sonnet, "sevenDaySonnet"),
-              modelScoped: (usage.rate_limits.model_scoped ?? []).flatMap((scoped) => {
-                const window = usageWindow(scoped);
-                return window === undefined
-                  ? []
-                  : [
-                      create(conversationv1.SessionModelUsageWindowSchema, {
-                        model: create(conversationv1.AgentModelSchema, { name: scoped.display_name }),
-                        window,
-                      }),
-                    ];
-              }),
-            }),
-          },
-        }),
-      },
-    });
-  }
-
-  /**
-   * A per-seat account's month-to-date spend against its allotment. The
-   * vendor states both in minor units of one currency; a limit with no
-   * currency cannot be drawn, so it is the sampling failing, stated loudly.
-   */
-  function seatSpendUpdate(
-    observedAtMs: bigint,
-    subscriptionType: conversationv1.SessionSubscriptionType | undefined,
-    extra: { used_credits: number | null; currency?: string | null } | null | undefined,
-    monthlyLimit: number,
-  ): conversationv1.SessionUpdate {
-    const currency = extra?.currency ?? null;
-    if (currency === null || currency === "") {
-      const cause = "the vendor reported a monthly seat limit with no currency";
-      // warn: a defect because the vendor's declared money is unreadable without its currency.
-      LOGGER.warn({ monthly_limit: monthlyLimit }, cause);
-      return create(conversationv1.SessionUpdateSchema, {
-        update: {
-          case: "accountUsage",
-          value: create(conversationv1.SessionAccountUsageSchema, {
-            observedAtMs,
-            subscriptionType,
-            outcome: {
-              case: "unavailable",
-              value: create(conversationv1.SessionAccountUsageUnavailableSchema, {
-                reason: {
-                  case: "samplingFailure",
-                  value: create(conversationv1.SessionUsageSamplingFailureSchema, { cause }),
-                },
-              }),
-            },
-          }),
-        },
-      });
-    }
-    const money = (amountMinor: number): conversationv1.SessionMoney =>
-      create(conversationv1.SessionMoneySchema, { amountMinor: BigInt(Math.round(amountMinor)), currency });
-    const used = extra?.used_credits ?? null;
-    return create(conversationv1.SessionUpdateSchema, {
-      update: {
-        case: "accountUsage",
-        value: create(conversationv1.SessionAccountUsageSchema, {
-          observedAtMs,
-          subscriptionType,
-          outcome: {
-            case: "seatSpend",
-            value: create(conversationv1.SessionAccountUsageSeatSpendSchema, {
-              allotment: money(monthlyLimit),
-              ...(used === null ? {} : { spent: money(used) }),
-            }),
-          },
-        }),
-      },
-    });
-  }
-
   /**
    * Re-read the pulled session facts, after something that could have changed
    * them.
@@ -2362,7 +2139,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   async function reprobeSessionFacts(): Promise<void> {
     if (standingDown) return;
-    await pushAccountUsage();
     await pushMcpServerStatus();
     // THE CATALOG IS PULLED LIKE THE REST, so it is re-read like the rest. It
     // was read exactly once, at StartSession, which made a single refusal there
@@ -2426,108 +2202,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
-   * THE ACCOUNT'S USAGE SAMPLES ARE SERIAL (engine/serial-probe.ts). The daemon
-   * draws only the newest sample by its `observed_at_ms`, across every session
-   * on the account; serial samples make one shim's stamps rise in the order its
-   * answers land, so its own samples never race each other there.
+   * THE NEWEST RATE-LIMIT EVENT OF EACH WINDOW, which the usage-limit retry
+   * reads its schedule from. The account's usage is never sampled: the daemon
+   * draws each login's allowances from these events, and a usage sample in
+   * every session cost each idle session's CLI tens of CPU-seconds every five
+   * minutes (2026-10-30).
    */
-  const accountUsageProbe = new SerialProbe(() => sampleAccountUsage());
+  const rateLimitReadings = new Map<string, RateLimitReading>();
 
-  /** Sample the account's usage behind every sample already asked for. */
-  function pushAccountUsage(): Promise<void> {
-    return accountUsageProbe.run();
-  }
-
-  /**
-   * Sample the account's usage again, folded into a sample already queued.
-   * Never rejects: `sampleAccountUsage` states its own failure as a sample.
-   */
-  function refreshAccountUsage(trigger: string): void {
-    if (accountUsageProbe.refreshPending) {
-      LOGGER.logVerbose({ trigger }, "an account usage sample is already queued; this trigger rides it");
-      return;
-    }
-    LOGGER.debug({ trigger }, "refreshing the account's usage sample");
-    void accountUsageProbe.refresh();
-  }
-
-  /** The latest account usage sample's own answer, and how many samples answered. */
-  let lastUsageReading: UsageReading | undefined;
-  let usageReadings = 0;
-
-  function noteUsageReading(reading: UsageReading): void {
-    lastUsageReading = reading;
-    usageReadings += 1;
-  }
-
-  /**
-   * THE ACCOUNT'S USAGE AFTER A USAGE-LIMIT FAILURE, for the vendor-error
-   * retry (engine/vendor-error-retry.ts). A probe queued behind every one
-   * already asked for (`run`, never coalesced), so the reading answers after
-   * the failure, never a sample taken before it.
-   */
-  async function readUsageForRetry(): Promise<UsageReading> {
-    const before = usageReadings;
-    try {
-      await accountUsageProbe.run();
-    } catch (err) {
-      return { kind: "unavailable", detail: err instanceof Error ? err.message : String(err) };
-    }
-    if (usageReadings === before || lastUsageReading === undefined) {
-      return { kind: "unavailable", detail: "no vendor query was up to sample the account's usage" };
-    }
-    return lastUsageReading;
-  }
-
-  /**
-   * A LIVE RATE-LIMIT EVENT MEANS THE ACCOUNT'S USAGE MOVED, so it asks for a
-   * fresh sample. The event's own utilization is never the drawn figure: it
-   * carries no instant, so it cannot be ordered against the samples every
-   * session on the account takes; the daemon takes only its verdict.
-   */
   function noteRateLimitEvent(message: SdkMessage): void {
     if (message.type !== "rate_limit_event") return;
-    refreshAccountUsage("rate_limit_event");
-  }
-
-  /**
-   * One usage sample. STAMPED WHEN IT IS ASKED FOR, not when it answers: the
-   * vendor reads the usage at some instant between the two, and a stamp taken
-   * on the answer would let a slow sample asked earlier outrank a fast one
-   * asked later, on this shim or another on the same account.
-   */
-  async function sampleAccountUsage(): Promise<void> {
-    const active = query;
-    if (active === undefined) return;
-    const observedAtMs = BigInt(deps.nowMs());
-    try {
-      const usage = await active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
-      noteUsageReading({ kind: "sampled", usage });
-      pushes.push(accountUsageUpdate(usage, observedAtMs));
-    } catch (err) {
-      noteUsageReading({ kind: "unavailable", detail: err instanceof Error ? err.message : String(err) });
-      pushes.push(
-        create(conversationv1.SessionUpdateSchema, {
-          update: {
-            case: "accountUsage",
-            value: create(conversationv1.SessionAccountUsageSchema, {
-              observedAtMs,
-              outcome: {
-                case: "unavailable",
-                value: create(conversationv1.SessionAccountUsageUnavailableSchema, {
-                  reason: {
-                    case: "samplingFailure",
-                    value: create(conversationv1.SessionUsageSamplingFailureSchema, {
-                      cause: err instanceof Error ? err.message : String(err),
-                    }),
-                  },
-                }),
-              },
-            }),
-          },
-        }),
-      );
-    }
+    const info = message.rate_limit_info;
+    const name = info.rateLimitType;
+    if (name === undefined) return;
+    rateLimitReadings.set(name, {
+      name,
+      status: info.status,
+      ...(info.resetsAt === undefined ? {} : { resetsAtMs: info.resetsAt * 1000 }),
+    });
   }
 
 
@@ -5752,10 +5444,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // the daemon times its beats and its hidden countdown from.
     cadence.hold();
     cadence.start(cacheAnchor.anchor, cacheAnchor.reason);
-    accountUsageHandle = (deps.scheduler ?? REAL_SCHEDULER).setInterval(
-      () => refreshAccountUsage("interval"),
-      ACCOUNT_USAGE_INTERVAL_MS,
-    );
     pushModel();
     pushPermissionMode();
     await pushAppliedEffort();
@@ -5767,7 +5455,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // watch through the push table whenever the vendor answers it.
     void pushContextUsage();
     pushSessionTitle();
-    void pushAccountUsage();
     // THE COMMAND CATALOG IS NOT AWAITED: the opening owes nobody the list,
     // and the push table replays it to every watch that opens after it lands.
     void pushCommandCatalog();
@@ -7531,10 +7218,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     cadence?.stop();
     networkResume.stop(reason);
     vendorErrorRetry.stop(reason);
-    if (accountUsageHandle !== undefined) {
-      (deps.scheduler ?? REAL_SCHEDULER).clearInterval(accountUsageHandle);
-      accountUsageHandle = undefined;
-    }
     const active = query;
     if (active !== undefined) {
       // SNAPSHOT FIRST. Stopping a task provokes the vendor's own

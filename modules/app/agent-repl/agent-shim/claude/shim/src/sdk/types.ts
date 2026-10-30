@@ -38,7 +38,6 @@ import type {
   SDKBackgroundTasksChangedMessage,
   SDKCompactBoundaryMessage,
   SDKControlGetContextUsageResponse,
-  SDKControlGetUsageResponse,
   SDKControlInitializeResponse,
   SDKControlInterruptResponse,
   SDKConversationResetMessage,
@@ -155,8 +154,6 @@ export type EffortLevelLike = EffortLevel;
 
 /** `query.getContextUsage()` — the source of SessionUpdate.context_usage. */
 export type ContextUsageLike = SDKControlGetContextUsageResponse;
-/** `query.usage_EXPERIMENTAL_...()` — the source of SessionUpdate.account_usage. */
-export type AccountUsageLike = SDKControlGetUsageResponse;
 /** `query.initializationResult()` — commands, models, account, binary version. */
 export type InitializationResultLike = SDKControlInitializeResponse;
 /** `query.accountInfo()`. */
@@ -245,8 +242,6 @@ export interface QueryLike extends AsyncIterable<SdkMessage> {
   mcpServerStatus(): Promise<McpServerStatusLike[]>;
   /** The context window's current occupancy. */
   getContextUsage(): Promise<ContextUsageLike>;
-  /** The account's rate-limit windows. Experimental vendor-side; read-only here. */
-  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(): Promise<AccountUsageLike>;
   /** Who this session is authenticated as. */
   accountInfo(): Promise<AccountInfoLike>;
   /** The cached first-connect initialize response. */

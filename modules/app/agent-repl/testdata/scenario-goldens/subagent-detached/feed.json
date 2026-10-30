@@ -52,10 +52,10 @@
             "name": "fake-sonnet-5"
           },
           "runtime": {
-            "startedAtMs": "1800000000010"
+            "startedAtMs": "1800000000009"
           },
           "settled": {
-            "endedAtMs": "1800000000012",
+            "endedAtMs": "1800000000010",
             "succeeded": {}
           },
           "tokens": {
@@ -97,7 +97,7 @@
             }
           },
           "usage": {
-            "atMs": "1800000000008",
+            "atMs": "1800000000007",
             "heat": {
               "position": 0.07186666666666668
             },

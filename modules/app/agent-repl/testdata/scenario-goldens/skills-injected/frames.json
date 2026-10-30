@@ -306,7 +306,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000006,
+      "atMs": 1800000000005,
       "ordinal": 0
     },
     "source": {
@@ -452,7 +452,7 @@
     "keepalive": false,
     "turn": "turn-1",
     "recordPlace": {
-      "atMs": 1800000000007,
+      "atMs": 1800000000006,
       "ordinal": 0
     },
     "source": {
@@ -475,7 +475,7 @@
                 },
                 "fromModel": {},
                 "settledAt": {
-                  "atMs": "1800000000007"
+                  "atMs": "1800000000006"
                 }
               }
             },
