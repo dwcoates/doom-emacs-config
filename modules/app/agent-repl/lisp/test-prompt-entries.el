@@ -531,7 +531,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
 
 (ert-deftest agent-repl-test-prompt-entries-every-opened-entry-is-opened-by-the-one-helper ()
   "`o'/`O' and a branch click open entries through `agent-repl-prompt-entries-opening'."
-  (dolist (case '(("prompt-entries.el" "agent-repl-prompt-entries--open")
+  (dolist (case '(("prompt-entries.el" "agent-repl-prompt-entries--open-on")
                   ("input.el" "agent-repl-input-compose-entry")))
     ;; Arrange
     (let ((source (with-temp-buffer
@@ -545,6 +545,26 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                            (and (string-match-p "(agent-repl-prompt-entries-opening " source) t)
                            (string-match-p "\" - \"" source))
                      (list (cadr case) t nil))))))
+
+(defun agent-repl-test-prompt-entries--defun-source (name)
+  "The source of NAME's `defun' in prompt-entries.el."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "prompt-entries.el" agent-repl-test--module-dir))
+    (goto-char (point-min))
+    (re-search-forward (concat "^(defun " (regexp-quote name) " "))
+    (beginning-of-line)
+    (buffer-substring (point) (progn (forward-sexp) (point)))))
+
+(ert-deftest agent-repl-test-prompt-entries-every-line-beside-an-entry-opens-through-open-on ()
+  "`o'/`O' and `M-j'/`M-k' open their line through `agent-repl-prompt-entries--open-on', never by hand."
+  (dolist (name '("agent-repl-prompt-entries--open" "agent-repl-prompt-entries--open-sibling"))
+    ;; Arrange
+    (let ((source (agent-repl-test-prompt-entries--defun-source name)))
+      ;; Act / Assert
+      (should (equal (list name
+                           (and (string-match-p "(agent-repl-prompt-entries--open-on\\_>" source) t)
+                           (string-match-p "(evil-open-\\(below\\|above\\) " source))
+                     (list name t nil))))))
 
 (ert-deftest agent-repl-test-prompt-entries-o-on-an-entry-opens-the-next-nodes-entry ()
   "`o' on an entry line opens a line below filled with the next node's label."
@@ -652,7 +672,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
     (should (cl-some (lambda (m) (string-match-p "neighbor-unknown-arm ws=ws-1 arm=:mystery" m)) logs))))
 
 (ert-deftest agent-repl-test-prompt-entries-entry-keys-are-bound ()
-  "`o' and `O' are bound in command mode, and `C-o' and `C-i' in command and insert mode."
+  "`o'/`O' bind in command mode, `C-o'/`C-i' in command and insert mode, `M-j'/`M-k' in insert mode."
   (let (bound)
     (cl-letf (((symbol-function 'evil-define-key*)
                (lambda (state map &rest bindings) (push (list state (eq map agent-repl-input-mode-map) bindings) bound))))
@@ -663,7 +683,107 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                          (list '(normal insert) t (list (kbd "C-o") (agent-repl-prompt-entries--on-entry-binding
                                                                     #'agent-repl-prompt-entries-step-on)))
                          (list '(normal insert) t (list [C-i] (agent-repl-prompt-entries--on-entry-binding
-                                                              #'agent-repl-prompt-entries-step-back))))))))
+                                                              #'agent-repl-prompt-entries-step-back)))
+                         (list 'insert t (list (kbd "M-j") (agent-repl-prompt-entries--on-entry-binding
+                                                          #'agent-repl-prompt-entries-open-sibling-above)))
+                         (list 'insert t (list (kbd "M-k") (agent-repl-prompt-entries--on-entry-binding
+                                                          #'agent-repl-prompt-entries-open-sibling-below))))))))
+
+;;;; ---- Opening an entry's sibling ----
+
+(ert-deftest agent-repl-test-prompt-entries-sibling-steps-the-last-numeral ()
+  "A sibling moves only the label's last numeral, and nothing stands before the first."
+  ;; Each case: the label, the offset, the sibling.
+  (dolist (case '(("3.3" -1 "3.2")
+                  ("3.3" 1 "3.4")
+                  ("3.9" 1 "3.10")
+                  ("3.10" -1 "3.9")
+                  ("3" 1 "4")
+                  ("3" -1 "2")
+                  ("3.1.2" 1 "3.1.3")
+                  ("3.1" -1 nil)
+                  ("1" -1 nil)))
+    ;; Act / Assert
+    (should (equal (list (car case) (cadr case) (agent-repl-prompt-entries--sibling (car case) (cadr case)))
+                   case))))
+
+(ert-deftest agent-repl-test-prompt-entries-sibling-of-no-label-is-an-error ()
+  "A label that is no dotted run of numerals is an error, never a guessed sibling."
+  (dolist (label '("" "3." ".3" "3.a" "a"))
+    (should-error (agent-repl-prompt-entries--sibling label 1))))
+
+(defmacro agent-repl-test-prompt-entries--siblings (third &rest body)
+  "Run BODY as `agent-repl-test-prompt-entries--opening' does, the third line's label written THIRD.
+THIRD is three characters, so the fake tree's spans still hold.  The flash
+is recorded on `flashed'."
+  (declare (indent 1))
+  `(let ((flashed nil))
+     (agent-repl-test-prompt-entries--opening agent-repl-test-prompt-entries--none
+       (cl-letf (((symbol-function 'agent-repl--input-flash) (lambda (ws text) (push (list ws text) flashed))))
+         (save-excursion (goto-char 21) (delete-char 3) (insert ,third))
+         ,@body))))
+
+(ert-deftest agent-repl-test-prompt-entries-M-k-opens-the-next-sibling-below ()
+  "`M-k' on `1.1 - yes' opens `1.2 - ' below it, asking the daemon nothing."
+  (agent-repl-test-prompt-entries--siblings "2.1"
+    ;; Arrange
+    (goto-char 3)
+    ;; Act
+    (agent-repl-prompt-entries-open-sibling-below)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) asked)
+                   '("1.2 - " 2 nil)))
+    (should (cl-some (lambda (m) (string-match-p "sibling ws=ws-1 label=1.1 way=:next sibling=1.2" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-M-j-opens-the-previous-sibling-above ()
+  "`M-j' on `2.2 - no' opens `2.1 - ' above it, asking the daemon nothing."
+  (agent-repl-test-prompt-entries--siblings "2.2"
+    ;; Arrange
+    (goto-char 25)
+    ;; Act
+    (agent-repl-prompt-entries-open-sibling-above)
+    ;; Assert
+    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) asked)
+                   '("2.1 - " 3 nil)))
+    (should (cl-some (lambda (m) (string-match-p "sibling ws=ws-1 label=2.2 way=:previous sibling=2.1" m)) logs))))
+
+(ert-deftest agent-repl-test-prompt-entries-M-k-onto-a-sibling-below-goes-to-it ()
+  "`M-k' whose next sibling already has an entry below goes to that line's end in insert mode."
+  (agent-repl-test-prompt-entries--siblings "1.2"
+    ;; Arrange
+    (goto-char 3)
+    (let ((before (buffer-string)))
+      ;; Act
+      (agent-repl-prompt-entries-open-sibling-below)
+      ;; Assert
+      (should (equal (list (buffer-string) (point) (agent-repl-test-prompt-entries--line) inserting)
+                     (list before 29 "1.2 - no" t))))))
+
+(ert-deftest agent-repl-test-prompt-entries-M-j-at-the-first-sibling-opens-nothing-and-says-so ()
+  "`M-j' on a first sibling leaves the composer as it was; it flashes why, recorded at info."
+  (agent-repl-test-prompt-entries--siblings "2.1"
+    ;; Arrange
+    (goto-char 3)
+    (let ((before (buffer-string)))
+      ;; Act
+      (agent-repl-prompt-entries-open-sibling-above)
+      ;; Assert
+      (should (equal (list (buffer-string) (point) flashed)
+                     (list before 3 '(("ws-1" "1.1 is the first sibling")))))
+      (should (cl-some (lambda (m) (string-match-p "sibling-none ws=ws-1 label=1.1 way=:previous" m)) logs)))))
+
+(ert-deftest agent-repl-test-prompt-entries-a-sibling-off-an-entry-refuses ()
+  "Run off an entry line, either sibling command is refused and recorded, the composer untouched."
+  (dolist (case '((agent-repl-prompt-entries-open-sibling-above ":previous")
+                  (agent-repl-prompt-entries-open-sibling-below ":next")))
+    (agent-repl-test-prompt-entries--siblings "2.1"
+      ;; Arrange
+      (goto-char 15)
+      (let ((before (buffer-string)))
+        ;; Act / Assert
+        (should-error (funcall (car case)) :type 'user-error)
+        (should (equal (buffer-string) before))
+        (should (cl-some (lambda (m) (string-match-p (format "sibling-off-entry ws=ws-1 way=%s" (cadr case)) m)) logs))))))
 
 ;;;; ---- Stepping an entry along its tree ----
 
@@ -764,6 +884,53 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
       (should (equal asked nil))
       (should (cl-some (lambda (m) (string-match-p (format "step-off-entry ws=ws-1 way=%s" (cadr case)) m)) logs)))))
 
+(ert-deftest agent-repl-test-prompt-entries-on-entry-acts-on-the-label-and-its-target ()
+  "On an entry line with a target, the shared helper runs its action on both labels and flashes nothing."
+  (agent-repl-test-prompt-entries--siblings "2.1"
+    ;; Arrange
+    (let (acted)
+      (goto-char 3)
+      ;; Act
+      (agent-repl-prompt-entries--on-entry "kind" :way (lambda (label) (concat label ".9")) "%s none"
+                                           (lambda (label to) (push (list label to) acted)))
+      ;; Assert
+      (should (equal (list acted flashed) '((("1.1" "1.1.9")) nil))))))
+
+(ert-deftest agent-repl-test-prompt-entries-on-entry-with-no-target-flashes-and-acts-not ()
+  "With no target the shared helper flashes NONE, records KIND's none at info, and never acts."
+  (agent-repl-test-prompt-entries--siblings "2.1"
+    ;; Arrange
+    (let (acted)
+      (goto-char 3)
+      ;; Act
+      (agent-repl-prompt-entries--on-entry "kind" :way #'ignore "%s none" (lambda (&rest args) (push args acted)))
+      ;; Assert
+      (should (equal (list acted flashed) '(nil (("ws-1" "1.1 none")))))
+      (should (cl-some (lambda (m) (string-match-p "kind-none ws=ws-1 label=1.1 way=:way" m)) logs)))))
+
+(ert-deftest agent-repl-test-prompt-entries-on-entry-off-an-entry-refuses-and-asks-no-target ()
+  "Off an entry line the shared helper refuses, records KIND's off-entry, and never asks for a target."
+  (agent-repl-test-prompt-entries--siblings "2.1"
+    ;; Arrange
+    (let (asked-target)
+      (goto-char 15)
+      ;; Act / Assert
+      (should-error (agent-repl-prompt-entries--on-entry "kind" :way (lambda (l) (push l asked-target)) "%s" #'ignore)
+                    :type 'user-error)
+      (should (null asked-target))
+      (should (cl-some (lambda (m) (string-match-p "kind-off-entry ws=ws-1 way=:way point=15" m)) logs)))))
+
+(ert-deftest agent-repl-test-prompt-entries-every-entry-command-acts-through-on-entry ()
+  "Stepping and opening a sibling both act through `agent-repl-prompt-entries--on-entry', never a hand-rolled refusal."
+  (dolist (name '("agent-repl-prompt-entries--step" "agent-repl-prompt-entries--open-sibling"))
+    ;; Arrange
+    (let ((source (agent-repl-test-prompt-entries--defun-source name)))
+      ;; Act / Assert
+      (should (equal (list name
+                           (and (string-match-p "(agent-repl-prompt-entries--on-entry\\_>" source) t)
+                           (string-match-p "user-error\\|agent-repl--input-flash" source))
+                     (list name t nil))))))
+
 (ert-deftest agent-repl-test-prompt-entries-on-entry-binding-is-a-filtered-menu-item ()
   "The entry-only binding of a command is a menu item the on-entry filter guards."
   (should (equal (agent-repl-prompt-entries--on-entry-binding 'agent-repl-test-prompt-entries--cmd)
@@ -772,7 +939,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
 
 (ert-deftest agent-repl-test-prompt-entries-every-entry-key-shares-the-on-entry-shape ()
   "Each entry-only key is bound through `agent-repl-prompt-entries--on-entry-binding'."
-  (dolist (key agent-repl-prompt-entries--entry-keys)
+  (dolist (key (append agent-repl-prompt-entries--entry-keys agent-repl-prompt-entries--insert-entry-keys))
     (should (equal (cdr key) (agent-repl-prompt-entries--on-entry-binding (nth 2 (cdr key)))))))
 
 (ert-deftest agent-repl-test-prompt-entries-the-on-entry-filter-names-the-command-only-on-an-entry-line ()
@@ -794,6 +961,24 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
       (let ((ours (make-sparse-keymap))
             (theirs (make-sparse-keymap)))
         (define-key ours key (alist-get key agent-repl-prompt-entries--entry-keys nil nil #'equal))
+        (define-key theirs key 'agent-repl-test-prompt-entries--its-own)
+        (use-local-map theirs)
+        (let ((minor-mode-map-alist (cons (cons t ours) minor-mode-map-alist)))
+          (dolist (case `((3 ,command) (15 agent-repl-test-prompt-entries--its-own)))
+            ;; Act
+            (goto-char (car case))
+            ;; Assert
+            (should (equal (list key (car case) (key-binding key)) (cons key case)))))))))
+
+(ert-deftest agent-repl-test-prompt-entries-sibling-keys-fall-through-off-an-entry-line ()
+  "Looked up through the active keymaps, `M-j' and `M-k' open a sibling on an entry line and keep their own bindings elsewhere."
+  (pcase-dolist (`(,key ,command) `((,(kbd "M-j") agent-repl-prompt-entries-open-sibling-above)
+                                    (,(kbd "M-k") agent-repl-prompt-entries-open-sibling-below)))
+    (agent-repl-test-prompt-entries--opening agent-repl-test-prompt-entries--none
+      ;; Arrange: the composer's map above a map binding the key as it always was.
+      (let ((ours (make-sparse-keymap))
+            (theirs (make-sparse-keymap)))
+        (define-key ours key (alist-get key agent-repl-prompt-entries--insert-entry-keys nil nil #'equal))
         (define-key theirs key 'agent-repl-test-prompt-entries--its-own)
         (use-local-map theirs)
         (let ((minor-mode-map-alist (cons (cons t ours) minor-mode-map-alist)))
