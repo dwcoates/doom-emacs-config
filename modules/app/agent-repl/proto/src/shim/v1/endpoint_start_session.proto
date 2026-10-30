@@ -67,9 +67,40 @@ message SessionProfile {
 
 // An agent session in a workspace: the user's and project's settings, the
 // coding tools, agent-repl's own tools, and the agent metaprompt appended to
-// the vendor's coding preset. DELIBERATELY EMPTY: everything it implies is the
-// shim's standing policy for agent sessions.
-message SessionProfileAgent {}
+// the vendor's coding preset. Everything else it implies is the shim's
+// standing policy for agent sessions; what it carries is the one fact about
+// the workspace that policy cannot know.
+message SessionProfileAgent {
+  // Whether the workspace is its repository's main workspace. REQUIRED: the
+  // shim refuses an agent profile that leaves it unset rather than guess. The
+  // shim states it in a notice that is the LAST section of the session's
+  // system prompt, after the metaprompt and the workspace's name, so the
+  // agent knows how its workspace stands before it acts. A workspace never
+  // changes which repository checkout it is, so it holds for the session's
+  // life.
+  SessionProfileAgentStanding standing = 1;
+}
+
+// How the agent's workspace stands within its repository. The set arm IS the
+// standing.
+message SessionProfileAgentStanding {
+  // The two standings are exclusive: a workspace is either the repository's
+  // main checkout or a linked worktree of it.
+  oneof kind {
+    SessionProfileAgentMainWorkspace main_workspace = 1;
+    SessionProfileAgentLinkedWorkspace linked_workspace = 2;
+  }
+}
+
+// The workspace is its repository's main workspace: the main checkout, on
+// the main branch. It lands nothing itself, is never a one-shot, and splits
+// separate work off into created workspaces. Empty: the arm is the fact.
+message SessionProfileAgentMainWorkspace {}
+
+// The workspace is a linked worktree of its repository: a workspace created
+// for a piece of work (or registered on such a worktree), on its own branch,
+// which it lands. Empty: the arm is the fact.
+message SessionProfileAgentLinkedWorkspace {}
 
 // A chat session, answering questions in a zettel thread: no filesystem
 // settings (so no skills, CLAUDE.md or memory from the user's agent setup), no

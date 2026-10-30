@@ -31,6 +31,13 @@
 // A CHILD ITS OWNER LANDS IS NEVER A ONE-SHOT: landing it is its owner's act,
 // so marking one is refused (`owner_lands`), as creating one is
 // (CreateWorkspaceError.one_shot_owner_lands).
+//
+// A REPOSITORY'S MAIN WORKSPACE IS NEVER A ONE-SHOT: the workspace on the
+// repository's main checkout sits on the main branch, lands nothing itself and
+// splits its work off into created workspaces, so there is nothing for it to
+// finish unattended. Marking one is refused (`main_workspace`) before anything
+// else is decided about the mark. No create can make one: every created
+// workspace is a new linked worktree, never the main checkout.
 
 syntax = "proto3";
 
@@ -88,12 +95,17 @@ message SetWorkspaceOneShotError {
     // The workspace is closed.
     SetWorkspaceOneShotClosed closed = 3;
     // The workspace was registered rather than created, so it records no
-    // creation to mark (the repository's main checkout).
+    // creation to mark. A repository's main workspace is answered
+    // `main_workspace` instead, which says why it can never be marked.
     SetWorkspaceOneShotNoCreationJob no_creation_job = 4;
     // The workspace is a child its owner lands. Nothing was changed.
     SetWorkspaceOneShotOwnerLands owner_lands = 5;
     // The requester is neither the workspace, nor its owner, nor the user.
     SetWorkspaceOneShotRequesterMayNotSet requester_may_not_set = 6;
+    // The workspace is its repository's main workspace, which is never a
+    // one-shot. Answered only to a mark (one_shot = true); an unmark is
+    // answered as for any registered workspace. Nothing was changed.
+    SetWorkspaceOneShotMainWorkspace main_workspace = 8;
   }
   // Tag 7 (`policy_missing`) is RETIRED: the completion directive a marked
   // workspace is told is the daemon's own, the same for every repository.
@@ -112,3 +124,6 @@ message SetWorkspaceOneShotOwnerLands {
   workspace.v1.WorkspaceRef owner = 1;
 }
 message SetWorkspaceOneShotRequesterMayNotSet {}
+// A mark on a repository's main workspace. Empty: the arm is the whole
+// answer, and the workspace it names is the request's own.
+message SetWorkspaceOneShotMainWorkspace {}
