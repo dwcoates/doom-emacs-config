@@ -26,7 +26,9 @@ import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import type { RevealGeometry, TailFollow } from "../scroll.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { standingBox, type BoxedNode } from "./subtree-box.js";
+import { TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
+import { FEED_ROW_SELECTOR } from "./row-id.js";
+import { boxSubtree, unboxAll, standingBox, type BoxedNode, type SubtreeBox } from "./subtree-box.js";
 
 /** The class every line inside the box wears. */
 export const COMPOSER_ENTRY_CLASS = "mp-line-composing";
@@ -66,6 +68,41 @@ const composerBox = standingBox({
   rightProperty: COMPOSER_RIGHT_PROPERTY,
 });
 
+/** The class every line of a node the composed subtree cites wears. */
+export const COMPOSER_CITED_CLASS = "mp-line-composing-cited";
+
+/** The property naming a cited box's left edge, in `ch`, on each line inside it. */
+export const COMPOSER_CITED_LEFT_PROPERTY = "--composer-cited-left";
+
+/** The property naming a cited box's right edge, in `ch`, on each line inside it. */
+export const COMPOSER_CITED_RIGHT_PROPERTY = "--composer-cited-right";
+
+/** The box over each node the composed subtree cites (subtree-box.ts), drawn as a hovered citation's. */
+const COMPOSER_CITED_BOX: SubtreeBox = {
+  className: COMPOSER_CITED_CLASS,
+  leftProperty: COMPOSER_CITED_LEFT_PROPERTY,
+  rightProperty: COMPOSER_CITED_RIGHT_PROPERTY,
+};
+
+/**
+ * THE NODES THE COMPOSED SUBTREE CITES ARE BOXED TOO (owner request,
+ * 2026-10-29), as though the pointer were on every citation in it at once:
+ * each citation (`TREE_REFERENCE_CLASS`) on a line inside the composer's box
+ * boxes the node it names, in the color a hovered citation boxes it.
+ */
+function markCitedByComposer(rendered: HTMLElement): void {
+  unboxAll(rendered, COMPOSER_CITED_BOX);
+  const cited = new Set<string>();
+  for (const line of queryAll<HTMLElement>(rendered, `.${COMPOSER_ENTRY_CLASS}`)) {
+    for (const ref of queryAll<HTMLElement>(line, `.${TREE_REFERENCE_CLASS}`)) {
+      const label = ref.getAttribute(TREE_REFERENCE_ATTRIBUTE);
+      if (label === null) throw new Error("a citation the reference selector matched names no label");
+      cited.add(label);
+    }
+  }
+  for (const label of cited) boxSubtree(rendered, label, COMPOSER_CITED_BOX);
+}
+
 /**
  * Box, in RENDERED (the drawn prose of the response row ROW), the subtree of
  * the node the composer answers, and take any box off every other line. Run
@@ -73,6 +110,7 @@ const composerBox = standingBox({
  */
 export function markComposerEntry(rendered: HTMLElement, row: string): void {
   composerBox.mark(rendered, row);
+  markCitedByComposer(rendered);
 }
 
 /** The highlight of one page: `apply` draws each pushed state. */
@@ -147,6 +185,7 @@ export function createComposerEntryHighlight(doc: Document, scroll?: ComposerEnt
       }
       edits = entry.edits;
       composerBox.stand(doc, node);
+      for (const row of queryAll<HTMLElement>(doc.body, FEED_ROW_SELECTOR)) markCitedByComposer(row);
       log.info(node === undefined ? "the composer answers no node; nothing is highlighted" : "highlighted the subtree the composer answers", {
         operation: "feed.composer-entry.applied",
         context: { row: node?.row ?? "none", label: node?.label ?? "none" },
