@@ -40,8 +40,9 @@ type bucket struct {
 	subsection *wsm.Subsection
 	// oneShot marks the repository's ONE-SHOT bucket
 	// (frontend.v1.RosterSubsectionOneShot): every family of the repository
-	// holding an open one-shot member. It is always the repository's last
-	// bucket, and present only when it has workspaces.
+	// holding an open one-shot member, except the main workspace's family
+	// (oneShotHeld). It is always the repository's last bucket, and present
+	// only when it has workspaces.
 	oneShot    bool
 	workspaces []wsm.Workspace
 }
@@ -54,7 +55,7 @@ type bucket struct {
 func arrange(reg Registry, workspaces []wsm.Workspace) ([]repoArrangement, map[ids.RepoID][]wsm.Workspace) {
 	bySubsection := map[ids.SubsectionID][]wsm.Workspace{}
 	unsectioned := map[ids.RepoID][]wsm.Workspace{}
-	held := oneShotHeld(workspaces)
+	held := oneShotHeld(workspaces, reg.Repositories)
 	oneShot := map[ids.RepoID][]wsm.Workspace{}
 	section := sectionRepos(workspaces)
 	for _, ws := range workspaces {
@@ -110,7 +111,8 @@ func sectionRepos(workspaces []wsm.Workspace) map[ids.WorkspaceID]ids.RepoID {
 
 // oneShotHeld answers which of WORKSPACES the one-shot subsection holds: every
 // member of a family in which some OPEN member is marked one-shot
-// (wsm.Workspace.OneShot).
+// (wsm.Workspace.OneShot), unless the family's root is its repository's MAIN
+// workspace (wsm.IsMainWorktree against REPOSITORIES).
 //
 // THE MARK IS THE ONLY FACT. Nothing about the subsection is stored, so every
 // path that sets or clears a mark moves the family's rows, and a boot draws
@@ -119,11 +121,27 @@ func sectionRepos(workspaces []wsm.Workspace) map[ids.WorkspaceID]ids.RepoID {
 // placing one member moves its family (ArrangePlaceWorkspace). A closed or
 // hidden member's mark does not count, since a finished one-shot keeps its
 // mark once it closes.
-func oneShotHeld(workspaces []wsm.Workspace) map[ids.WorkspaceID]bool {
+//
+// THE MAIN WORKSPACE'S FAMILY IS NEVER HELD. The main workspace is never a
+// one-shot itself, so its family's marks are only ever its children's, and
+// those children stay nested under it as ordinary children where it stands.
+// They are still one-shots in every other respect (the completion directive,
+// the unattended landing): only the sidebar's grouping ignores their marks.
+func oneShotHeld(workspaces []wsm.Workspace, repositories []wsm.Repository) map[ids.WorkspaceID]bool {
 	root := familyRoots(workspaces)
+	repoDir := make(map[ids.RepoID]string, len(repositories))
+	for _, repo := range repositories {
+		repoDir[repo.ID] = repo.Dir
+	}
+	mainRoot := map[ids.WorkspaceID]bool{}
+	for _, ws := range workspaces {
+		if root[ws.ID] == ws.ID && wsm.IsMainWorktree(ws.Dir, repoDir[ws.Repo]) {
+			mainRoot[ws.ID] = true
+		}
+	}
 	marked := map[ids.WorkspaceID]bool{}
 	for _, ws := range workspaces {
-		if ws.OneShot && ws.ListedOpen() {
+		if ws.OneShot && ws.ListedOpen() && !mainRoot[root[ws.ID]] {
 			marked[root[ws.ID]] = true
 		}
 	}
