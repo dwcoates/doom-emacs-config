@@ -5986,11 +5986,11 @@ describe("the repository's subsections and the drag", () => {
     );
   });
 
-  it("draws a subsection's name in the one purple", () => {
-    expect(declarationsOf("#ws-sidebar .sb-subsection-label")).toMatch(/color:\s*var\(--blocked\)/);
+  it("draws a subsection's name in the canonical orange", () => {
+    expect(declarationsOf("#ws-sidebar .sb-subsection-label")).toMatch(/color:\s*var\(--canonical-orange\)/);
   });
 
-  it("keeps a folded subsection's name purple, with no folded override", () => {
+  it("keeps a folded subsection's name orange, with no folded override", () => {
     expect(declarationsOf("#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label")).toBeUndefined();
   });
 
@@ -6273,9 +6273,9 @@ describe("the answered label's pastel orange", () => {
   });
 
   it.each([
-    ["light", () => rootToken("--answer-label"), "#e08a4c"],
-    ["dark", () => /--answer-label:\s*([^;]+);/.exec(darkThemeBlock())?.[1]?.trim(), "#d99866"],
-  ])("defines the %s theme's pastel orange", (_theme, read, want) => {
+    ["light", () => rootToken("--canonical-orange"), "#e08a4c"],
+    ["dark", () => /--canonical-orange:\s*([^;]+);/.exec(darkThemeBlock())?.[1]?.trim(), "#d99866"],
+  ])("defines the %s theme's pastel orange as the canonical orange", (_theme, read, want) => {
     // Act
     const got = read();
 
@@ -6476,5 +6476,15 @@ describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
       tinted.includes("--name-bright: color-mix(in srgb, var(--name-tone) 86%, var(--fg));"),
       /0%, 100% \{ color: var\(--name-dark\); \}\s*50% \{ color: var\(--name-bright\); \}/.test(keyframes),
     ]).toEqual([expect.stringContaining("ws-pulse-tone"), true, true, true]);
+  });
+});
+
+describe("the canonical orange (owner ruling, 2026-10-30)", () => {
+  it("is what an answered branch's label reads", () => {
+    // Arrange / Act
+    const decls = withoutBlockComments(declarationsOf(":root") ?? "");
+
+    // Assert
+    expect([decls.includes("--answer-label: var(--canonical-orange);"), darkThemeBlock().includes("--answer-label:")]).toEqual([true, false]);
   });
 });
