@@ -335,6 +335,9 @@ const (
 	// AgentReplSelectInEditorProcedure is the fully-qualified name of the AgentRepl's SelectInEditor
 	// RPC.
 	AgentReplSelectInEditorProcedure = "/agentrepl.v1.AgentRepl/SelectInEditor"
+	// AgentReplLoadPageInEditorProcedure is the fully-qualified name of the AgentRepl's
+	// LoadPageInEditor RPC.
+	AgentReplLoadPageInEditorProcedure = "/agentrepl.v1.AgentRepl/LoadPageInEditor"
 	// AgentReplAdoptWebWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// AdoptWebWorkspace RPC.
 	AgentReplAdoptWebWorkspaceProcedure = "/agentrepl.v1.AgentRepl/AdoptWebWorkspace"
@@ -500,6 +503,7 @@ var (
 	agentReplOpenExternalMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("OpenExternal")
 	agentReplOpenInEditorMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("OpenInEditor")
 	agentReplSelectInEditorMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SelectInEditor")
+	agentReplLoadPageInEditorMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("LoadPageInEditor")
 	agentReplAdoptWebWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("AdoptWebWorkspace")
 	agentReplWatchPageMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("WatchPage")
 	agentReplSubscribePageMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SubscribePage")
@@ -868,6 +872,10 @@ type AgentReplClient interface {
 	// host stream so the editor makes the switch as it makes a key's. See
 	// endpoint_select_in_editor.proto.
 	SelectInEditor(context.Context, *connect.Request[v1.SelectInEditorRequest]) (*connect.Response[v1.SelectInEditorResponse], error)
+	// The webhost's load button for a held-back page (a cold-gated workspace's),
+	// relayed to the workspace's host stream so the editor loads the page. See
+	// endpoint_load_page_in_editor.proto.
+	LoadPageInEditor(context.Context, *connect.Request[v1.LoadPageInEditorRequest]) (*connect.Response[v1.LoadPageInEditorResponse], error)
 	// The webview's half of the handover rendezvous, called on the NEW
 	// daemon. See endpoint_adopt_web_workspace.proto.
 	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
@@ -1606,6 +1614,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSelectInEditorMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		loadPageInEditor: connect.NewClient[v1.LoadPageInEditorRequest, v1.LoadPageInEditorResponse](
+			httpClient,
+			baseURL+AgentReplLoadPageInEditorProcedure,
+			connect.WithSchema(agentReplLoadPageInEditorMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		adoptWebWorkspace: connect.NewClient[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplAdoptWebWorkspaceProcedure,
@@ -1832,6 +1846,7 @@ type agentReplClient struct {
 	openExternal               *connect.Client[v1.OpenExternalRequest, v1.OpenExternalResponse]
 	openInEditor               *connect.Client[v1.OpenInEditorRequest, v1.OpenInEditorResponse]
 	selectInEditor             *connect.Client[v1.SelectInEditorRequest, v1.SelectInEditorResponse]
+	loadPageInEditor           *connect.Client[v1.LoadPageInEditorRequest, v1.LoadPageInEditorResponse]
 	adoptWebWorkspace          *connect.Client[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse]
 	watchPage                  *connect.Client[v1.WatchPageRequest, v1.WatchPageResponse]
 	subscribePage              *connect.Client[v1.SubscribePageRequest, v1.SubscribePageResponse]
@@ -2402,6 +2417,11 @@ func (c *agentReplClient) SelectInEditor(ctx context.Context, req *connect.Reque
 	return c.selectInEditor.CallUnary(ctx, req)
 }
 
+// LoadPageInEditor calls agentrepl.v1.AgentRepl.LoadPageInEditor.
+func (c *agentReplClient) LoadPageInEditor(ctx context.Context, req *connect.Request[v1.LoadPageInEditorRequest]) (*connect.Response[v1.LoadPageInEditorResponse], error) {
+	return c.loadPageInEditor.CallUnary(ctx, req)
+}
+
 // AdoptWebWorkspace calls agentrepl.v1.AgentRepl.AdoptWebWorkspace.
 func (c *agentReplClient) AdoptWebWorkspace(ctx context.Context, req *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {
 	return c.adoptWebWorkspace.CallUnary(ctx, req)
@@ -2840,6 +2860,10 @@ type AgentReplHandler interface {
 	// host stream so the editor makes the switch as it makes a key's. See
 	// endpoint_select_in_editor.proto.
 	SelectInEditor(context.Context, *connect.Request[v1.SelectInEditorRequest]) (*connect.Response[v1.SelectInEditorResponse], error)
+	// The webhost's load button for a held-back page (a cold-gated workspace's),
+	// relayed to the workspace's host stream so the editor loads the page. See
+	// endpoint_load_page_in_editor.proto.
+	LoadPageInEditor(context.Context, *connect.Request[v1.LoadPageInEditorRequest]) (*connect.Response[v1.LoadPageInEditorResponse], error)
 	// The webview's half of the handover rendezvous, called on the NEW
 	// daemon. See endpoint_adopt_web_workspace.proto.
 	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
@@ -3574,6 +3598,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSelectInEditorMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplLoadPageInEditorHandler := connect.NewUnaryHandler(
+		AgentReplLoadPageInEditorProcedure,
+		svc.LoadPageInEditor,
+		connect.WithSchema(agentReplLoadPageInEditorMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplAdoptWebWorkspaceHandler := connect.NewUnaryHandler(
 		AgentReplAdoptWebWorkspaceProcedure,
 		svc.AdoptWebWorkspace,
@@ -3907,6 +3937,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplOpenInEditorHandler.ServeHTTP(w, r)
 		case AgentReplSelectInEditorProcedure:
 			agentReplSelectInEditorHandler.ServeHTTP(w, r)
+		case AgentReplLoadPageInEditorProcedure:
+			agentReplLoadPageInEditorHandler.ServeHTTP(w, r)
 		case AgentReplAdoptWebWorkspaceProcedure:
 			agentReplAdoptWebWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplWatchPageProcedure:
@@ -4390,6 +4422,10 @@ func (UnimplementedAgentReplHandler) OpenInEditor(context.Context, *connect.Requ
 
 func (UnimplementedAgentReplHandler) SelectInEditor(context.Context, *connect.Request[v1.SelectInEditorRequest]) (*connect.Response[v1.SelectInEditorResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SelectInEditor is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) LoadPageInEditor(context.Context, *connect.Request[v1.LoadPageInEditorRequest]) (*connect.Response[v1.LoadPageInEditorResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.LoadPageInEditor is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {

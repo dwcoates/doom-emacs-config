@@ -117,6 +117,12 @@ message WatchHostWorkspaceResponse {
     // late subscriber (2026-10-26: an Emacs never told kept re-adopting on a
     // successor that could not adopt it, reloading the page every 10s).
     HostWorkspaceTransferWithdrawn transfer_withdrawn = 16;
+    // THE USER ASKED FOR THIS WORKSPACE'S HELD-BACK PAGE (LoadPageInEditor):
+    // the webhost drew a load button where a cold-gated workspace's page would
+    // be, and the user clicked it. Emacs loads the page, which the host then
+    // shows in the button's place. An event, not state: never replayed to a
+    // late subscriber, because a click belongs to the moment it was made.
+    HostWorkspaceLoadPageRequested load_page_requested = 17;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -179,6 +185,10 @@ message HostWorkspaceChatTextHighlighted {}
 // it rides names the workspace, and requesting the switch to it is the whole
 // of Emacs's obligation.
 message HostWorkspaceSelectRequested {}
+// The user clicked the load button the webhost draws for this workspace's
+// held-back page. Empty: the stream it rides names the workspace, and loading
+// its page is the whole of Emacs's obligation.
+message HostWorkspaceLoadPageRequested {}
 // The node of a response's tree the reader clicked, which the composer opens
 // an entry answering.
 message HostWorkspaceComposeEntry {
