@@ -282,8 +282,10 @@
   --selected-entry: #2563eb;
   /* THE CANONICAL ORANGE (owner ruling, 2026-10-30): the one orange a new
      use of orange reads, rather than a hue of its own (webapp/AGENTS.md
-     "THE CANONICAL ORANGE"). It is the answered branch's pastel orange. */
-  --canonical-orange: #e08a4c;
+     "THE CANONICAL ORANGE"). It began as the answered branch's pastel
+     orange and was taken darker and richer (owner request, 2026-10-30): in
+     OKLCH, lightness -0.13, chroma x1.45, hue -3 degrees. */
+  --canonical-orange: #cc4d00;
   /* AN ANSWERED BRANCH'S LABEL (owner request, 2026-10-26): a pastel orange
      on both ends of an answer, the prompt's entry labels and the response's
      linked labels alike (feed/entries.ts). An entry's implied ancestor wears
@@ -656,9 +658,9 @@
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-entry ring still reads against the dark page. */
     --selected-entry: #6498da;
-    /* The canonical orange, the answered label's pastel orange lifted for the
-       dark page. --answer-label reads it from :root. */
-    --canonical-orange: #d99866;
+    /* The canonical orange for the dark page, the same darker and richer
+       step from the old pastel #d99866. --answer-label reads it from :root. */
+    --canonical-orange: #c26404;
     /* A moderate grey a little lighter than the dark --assistant (the dark
        --tool-card-bg, #191918). */
     --selected-bubble-bg: #313130;
