@@ -431,17 +431,9 @@ func TestTheFreenessEdgeReachesTheLifecycleSink(t *testing.T) {
 
 			// Act.
 			tc.edge(h)
-			h.w.dispatching.Wait()
 
 			// Assert.
-			select {
-			case ws := <-h.rec.frees:
-				if ws != h.w.ws {
-					t.Fatalf("OnFree named %q, want %q", ws, h.w.ws)
-				}
-			default:
-				t.Fatalf("the workspace fell free and OnFree was never told")
-			}
+			h.freeToldNow(t)
 		})
 	}
 }
@@ -461,26 +453,13 @@ func TestATurnOpenedOnAnIdleSessionRaisesTheFreenessEdgeAtItsEnd(t *testing.T) {
 		Id:    &conversationv1.TurnId{Value: "turn-1"},
 		Agent: agentID("main-1"),
 	}, nil)
-	h.w.dispatching.Wait()
-	select {
-	case ws := <-h.rec.frees:
-		t.Fatalf("OnFree(%q) was told while the turn runs", ws)
-	default:
-	}
+	h.noFree(t)
 
 	// Act.
 	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
-	h.w.dispatching.Wait()
 
 	// Assert.
-	select {
-	case ws := <-h.rec.frees:
-		if ws != h.w.ws {
-			t.Fatalf("OnFree named %q, want %q", ws, h.w.ws)
-		}
-	default:
-		t.Fatal("the turn ended and OnFree was never told")
-	}
+	h.freeToldNow(t)
 }
 
 // TestNoFreenessEdgeWhileDetachedWorkIsLive covers the half that is not
@@ -493,14 +472,9 @@ func TestNoFreenessEdgeWhileDetachedWorkIsLive(t *testing.T) {
 
 	// Act.
 	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
-	h.w.dispatching.Wait()
 
 	// Assert.
-	select {
-	case ws := <-h.rec.frees:
-		t.Fatalf("OnFree(%q) was told while a detached shell is still live", ws)
-	default:
-	}
+	h.noFree(t)
 }
 
 // TestNoFreenessEdgeForAWatcherThatWasNeverBusy covers the edge's shape: it is
@@ -511,14 +485,9 @@ func TestNoFreenessEdgeForAWatcherThatWasNeverBusy(t *testing.T) {
 
 	// Act.
 	h.quiet()
-	h.w.dispatching.Wait()
 
 	// Assert.
-	select {
-	case ws := <-h.rec.frees:
-		t.Fatalf("OnFree(%q) was told for a session that was never busy", ws)
-	default:
-	}
+	h.noFree(t)
 }
 
 // UNKNOWN IS NEVER FREE. A pure attach knows nothing of the turn its adopted

@@ -44,29 +44,6 @@ func (h *harness) pushActivity(t *testing.T, activity *conversationv1.SessionVen
 	h.rec.until(t, "footer.OnSessionUpdate")
 }
 
-// drainFrees empties the lifecycle sink's freeness edges told so far.
-func (h *harness) drainFrees() {
-	h.w.dispatching.Wait()
-	for {
-		select {
-		case <-h.rec.frees:
-		default:
-			return
-		}
-	}
-}
-
-// freeTold reports whether the lifecycle sink was told OnFree since the last drain.
-func (h *harness) freeTold() bool {
-	h.w.dispatching.Wait()
-	select {
-	case <-h.rec.frees:
-		return true
-	default:
-		return false
-	}
-}
-
 func TestVendorBusyOf(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -115,9 +92,10 @@ func TestTheVendorFallingIdleIsAFreenessEdge(t *testing.T) {
 	h.pushActivity(t, activityIdle())
 
 	// Assert.
-	if !h.w.Free() || !h.freeTold() {
-		t.Fatalf("Free() = %v with OnFree told = false, want free and told once the vendor states idle", h.w.Free())
+	if !h.w.Free() {
+		t.Fatal("Free() = false once the vendor states idle")
 	}
+	h.freeToldNow(t)
 }
 
 func TestATurnEndingOverABusyVendorRaisesNoFreenessEdge(t *testing.T) {
@@ -135,9 +113,7 @@ func TestATurnEndingOverABusyVendorRaisesNoFreenessEdge(t *testing.T) {
 	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
 
 	// Assert.
-	if h.freeTold() {
-		t.Fatal("OnFree was told while the vendor states itself busy")
-	}
+	h.noFree(t)
 }
 
 func TestTheOpeningsBusyVendorStartsTheWatcherNotFree(t *testing.T) {
