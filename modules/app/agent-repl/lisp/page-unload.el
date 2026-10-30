@@ -92,6 +92,15 @@ An hour (owner ruling, 2026-10-29)."
   :type 'integer
   :group 'agent-repl-page-unload)
 
+(defcustom agent-repl-page-unload-leave-grace 15
+  "Seconds a page is kept after the user switches away from it.
+A page held only while shown is unloaded this long after the switch away,
+not at it, so switching rapidly past a workspace several times, scanning,
+does not reload its page on every pass (owner request, 2026-10-29).  Coming
+back within it keeps the page; leaving again starts it afresh."
+  :type 'integer
+  :group 'agent-repl-page-unload)
+
 (defcustom agent-repl-page-unload-interval 60
   "Seconds between the passes that unload the pages no status holds."
   :type 'integer
@@ -124,6 +133,11 @@ ruling, 2026-10-29).")
 
 (defvar agent-repl-page-unload--timer nil
   "The repeating timer that runs the pass, while one is running.")
+
+(defvar agent-repl-page-unload--schedule #'run-with-timer
+  "Runs a function once after a delay, as `run-with-timer' with no repeat.
+Called (SECONDS nil FUNCTION ARG); answers what `cancel-timer' takes.
+Tests bind it.")
 
 (defun agent-repl-page-unload--now ()
   "The current time, in seconds."
@@ -166,16 +180,42 @@ a workspace that is not wanted is made with no page
 (defun agent-repl-page-unload-note-shown (ws)
   "Record that the host now shows WS's page.
 An unloaded page is put back first (`agent-repl-page-unload--return').  The
-page shown until now is judged at once: a page no status holds off screen
-is unloaded the moment the user switches away from it."
+page shown until now is LEFT: a page no status holds off screen is judged
+`agent-repl-page-unload-leave-grace' seconds after the switch away
+\(`agent-repl-page-unload--leave')."
   (let ((previous agent-repl-page-unload--shown))
     (when (agent-repl-page-unloaded-p ws)
       (agent-repl-page-unload--return ws))
     (unless (equal previous ws)
       (setq agent-repl-page-unload--shown ws)
       (when previous
-        (agent-repl-page-unload--judge previous (agent-repl-page-unload--now))))
+        (agent-repl-page-unload--leave previous)))
     (agent-repl-page-unload--report ws)))
+
+(defun agent-repl-page-unload--leave (ws)
+  "Record that the user switched away from WS's page, and judge it after the grace.
+Leaving again replaces the judgement the last leave scheduled."
+  (agent-repl--ws-put ws :page-left-at (agent-repl-page-unload--now))
+  (when-let ((pending (agent-repl--ws-get ws :page-leave-timer)))
+    (cancel-timer pending))
+  (agent-repl--ws-put ws :page-leave-timer
+                      (funcall agent-repl-page-unload--schedule
+                               agent-repl-page-unload-leave-grace nil
+                               #'agent-repl-page-unload--left ws))
+  (agent-repl-page-unload--report ws))
+
+(defun agent-repl-page-unload--left (ws)
+  "Judge WS's page, the grace after the user switched away from it."
+  (agent-repl--ws-put ws :page-leave-timer nil)
+  (agent-repl-page-unload--judge ws (agent-repl-page-unload--now))
+  (agent-repl-page-unload--report ws))
+
+(defun agent-repl-page-unload--leave-ends (ws now)
+  "When WS's grace after the user switched away ends, or nil.
+Nil once it has ended at NOW, or when WS was never switched away from."
+  (when-let ((left (agent-repl--ws-get ws :page-left-at)))
+    (let ((ends (+ left agent-repl-page-unload-leave-grace)))
+      (and (< now ends) ends))))
 
 (defun agent-repl-page-unload-note-mounted (ws)
   "Record that WS's page was just loaded: the start of its idle hold."
@@ -216,6 +256,8 @@ working on its own, and either way it is held as working."
     (when (eq bucket 'working)
       (agent-repl--ws-put ws :page-visit nil))
     (cond
+     ;; THE GRACE AFTER A SWITCH AWAY holds the page, whatever its status.
+     ((agent-repl-page-unload--leave-ends ws now) nil)
      ((agent-repl-page-unload--withheld-p ws) 'hidden)
      ((memq bucket '(nil working)) nil)
      ((not (eq bucket 'idle)) bucket)
@@ -338,6 +380,13 @@ rail\='s workspace memory hover (endpoint_report_page_residency.proto)."
                                  :value (list :unix-ms
                                               (round (* 1000 (+ (agent-repl-page-unload--idle-since ws)
                                                                 agent-repl-page-unload-after))))))
+                          ;; A PAGE IN ITS GRACE after the switch away goes
+                          ;; when the grace ends.
+                          ((agent-repl-page-unload--leave-ends ws (agent-repl-page-unload--now))
+                           (list :arm :at
+                                 :value (list :unix-ms
+                                              (round (* 1000 (agent-repl-page-unload--leave-ends
+                                                              ws (agent-repl-page-unload--now)))))))
                           (t (list :arm :on-leave :value nil))))))))
 
 (defun agent-repl-page-unload--report (ws)
