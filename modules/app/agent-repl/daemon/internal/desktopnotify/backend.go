@@ -97,20 +97,12 @@ type ExecRunner struct{}
 // is an error carrying the program's standard error.
 func (ExecRunner) Run(ctx context.Context, bin string, args []string, started func()) (string, error) {
 	cmd := childproc.CommandContext(ctx, childproc.Stable, bin, args...)
-	capture, err := childproc.CaptureOutput(cmd)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", bin, err)
-	}
-	if err := cmd.Start(); err != nil {
-		return "", errors.Join(fmt.Errorf("%s: %w", bin, err), capture.Close())
-	}
-	if started != nil {
-		started()
-	}
-	waitErr := cmd.Wait()
-	stdout, stderr, err := capture.Finish()
+	stdout, stderr, waitErr, err := childproc.Run(cmd, started)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", bin, errors.Join(waitErr, err))
+	}
+	if waitErr != nil && cmd.Process == nil {
+		return "", fmt.Errorf("%s: %w", bin, waitErr)
 	}
 	if waitErr != nil {
 		return stdout, fmt.Errorf("%s: %w: %s", bin, waitErr, strings.TrimSpace(stderr))

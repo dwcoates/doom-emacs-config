@@ -144,17 +144,12 @@ func SendArgs(thread Thread, payload slackfmt.Payload) ([]string, []byte, error)
 func RunCommand(ctx context.Context, name string, args []string, stdin []byte) (string, error) {
 	cmd := childproc.CommandContext(ctx, childproc.Stable, name, args...)
 	cmd.Stdin = bytes.NewReader(stdin)
-	capture, err := childproc.CaptureOutput(cmd)
+	stdout, stderr, waitErr, err := childproc.Run(cmd, nil)
 	if err != nil {
-		return "", fmt.Errorf("capture %s's output: %w", name, err)
+		return "", fmt.Errorf("capture %s's output: %w", name, errors.Join(waitErr, err))
 	}
-	if err := cmd.Start(); err != nil {
-		return "", errors.Join(fmt.Errorf("start %s: %w", name, err), capture.Close())
-	}
-	waitErr := cmd.Wait()
-	stdout, stderr, err := capture.Finish()
-	if err != nil {
-		return "", fmt.Errorf("read %s's output: %w", name, err)
+	if waitErr != nil && cmd.Process == nil {
+		return "", fmt.Errorf("start %s: %w", name, waitErr)
 	}
 	if waitErr != nil {
 		return "", fmt.Errorf("%s exited: %w: %s", name, waitErr, strings.TrimSpace(stderr))

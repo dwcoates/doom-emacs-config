@@ -26,12 +26,7 @@ func askBinary(ctx context.Context, bin, question string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, layoutProbeBound)
 	defer cancel()
 	cmd := childproc.CommandContext(ctx, childproc.Stable, bin, question)
-	capture, err := childproc.CaptureOutput(cmd)
-	if err != nil {
-		return "", fmt.Errorf("deploy: ask %s %s: %w", bin, question, err)
-	}
-	runErr := cmd.Run()
-	out, stderr, err := capture.Finish()
+	out, stderr, runErr, err := childproc.Run(cmd, nil)
 	if err != nil {
 		return "", fmt.Errorf("deploy: ask %s %s: %w", bin, question, errors.Join(runErr, err))
 	}

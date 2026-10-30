@@ -204,12 +204,7 @@ func execCLI(ctx context.Context, bin string, args, env []string, stdin string) 
 	cmd := childproc.CommandContext(ctx, childproc.Stable, bin, args...) //nolint:gosec // daemon-resolved binary, never client input
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Env = env
-	capture, err := childproc.CaptureOutput(cmd)
-	if err != nil {
-		return "", fmt.Errorf("%s %s: %w", bin, strings.Join(args, " "), err)
-	}
-	runErr := cmd.Run()
-	stdout, stderr, err := capture.Finish()
+	stdout, stderr, runErr, err := childproc.Run(cmd, nil)
 	if err != nil {
 		return "", fmt.Errorf("%s %s: %w", bin, strings.Join(args, " "), errors.Join(runErr, err))
 	}
