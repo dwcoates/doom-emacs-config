@@ -2,13 +2,11 @@
 // workspace: change its relationship (child of a parent, or peer), where its
 // merge lands, or both. SIDEBAR section.
 //
-// THE RELATIONSHIP AND THE LANDING TARGET ARE TWO FACTS, set together here
-// because the landing target's default follows the relationship
-// (WorkspaceLandingTarget): a child lands into its parent when the parent is of
-// the same repository, and on its own repository's primary branch otherwise; a
-// peer lands on the primary branch. A request that names no landing target
-// re-applies that default for the relationship it leaves; one that names one
-// lands there, whatever the relationship. Creation records both choices
+// THE RELATIONSHIP AND THE LANDING TARGET ARE TWO FACTS, set together here so
+// one notice says both. A request that names no landing target KEEPS where the
+// workspace lands now: its branch was cut from that target, and moving the
+// landing silently would merge a branch into one it was never cut from. One
+// that names a landing target lands there, whatever the relationship. Creation records both choices
 // (CreateWorkspaceStandard.relationship, .landing_target); this rpc is the one
 // way to change either afterwards. The roster nests the workspace under its
 // parent, or at the top level, on its next push.
@@ -87,8 +85,8 @@ export type SetWorkspaceParentRequest = Message<"agentrepl.v1.SetWorkspaceParent
   } | { case: undefined; value?: undefined };
 
   /**
-   * Where the workspace's merge lands from now on. UNSET = the default for
-   * the relationship the request leaves the workspace in. A workspace landing
+   * Where the workspace's merge lands from now on. UNSET = where it lands now,
+   * unchanged, whatever the relationship. A workspace landing
    * target must be an open workspace of the retargeted workspace's own
    * repository (`unknown_landing_target`), neither the workspace itself nor one
    * landing into it.
@@ -108,9 +106,7 @@ export const SetWorkspaceParentRequestSchema: GenMessage<SetWorkspaceParentReque
 /**
  * Make the workspace a CHILD of another workspace: the roster nests it there
  * and the parent coordinates it (WorkspaceRelationship.child). Its merge lands
- * as `landing_target` says, by default in the parent's checkout when the two
- * are of one repository, or in its own repository's main checkout when they
- * are not.
+ * as `landing_target` says, and where it lands now when that is unset.
  *
  * @generated from message agentrepl.v1.SetWorkspaceParentChild
  */
@@ -135,7 +131,7 @@ export const SetWorkspaceParentChildSchema: GenMessage<SetWorkspaceParentChild> 
 /**
  * Make the workspace a TOP-LEVEL PEER: the roster draws it at the top of its
  * section and nobody coordinates it. Its merge lands as `landing_target` says,
- * by default in its repository's main checkout, on the default branch.
+ * and where it lands now when that is unset.
  * DELIBERATELY EMPTY: the arm is the request.
  *
  * @generated from message agentrepl.v1.SetWorkspaceParentTopLevel
