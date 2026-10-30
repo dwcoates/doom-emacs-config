@@ -49,9 +49,9 @@ func TestBudget(t *testing.T) {
 		cpus int
 		want int
 	}{
-		{name: "sixteen cores budget ten", cpus: 16, want: 10},
-		{name: "ten cores budget six", cpus: 10, want: 6},
-		{name: "two cores budget one", cpus: 2, want: 1},
+		{name: "sixteen cores budget five", cpus: 16, want: 5},
+		{name: "ten cores budget three", cpus: 10, want: 3},
+		{name: "three cores budget one", cpus: 3, want: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

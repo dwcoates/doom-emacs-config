@@ -16,19 +16,19 @@ import (
 )
 
 func TestAllowance(t *testing.T) {
-	// Sixteen cores: the cap is 10.4 cores, 9.4 once the margin is kept.
+	// Sixteen cores: the cap is 5.6 cores, 4.6 once the margin is kept.
 	cases := []struct {
 		name      string
 		busyCores float64
 		rampSeats int
 		want      int
 	}{
-		{name: "an idle host hands out what the cap leaves, two cores a seat", busyCores: 0, want: 4},
-		{name: "a half-busy host leaves the tests a seat", busyCores: 7, want: 1},
-		{name: "a host at the cap hands out nothing", busyCores: 10.4, want: 0},
+		{name: "an idle host hands out what the cap leaves, two cores a seat", busyCores: 0, want: 2},
+		{name: "a host busy on two cores leaves the tests a seat", busyCores: 2, want: 1},
+		{name: "a host at the cap hands out nothing", busyCores: 5.6, want: 0},
 		{name: "a host past the cap hands out nothing", busyCores: 14, want: 0},
-		{name: "headroom short of a whole seat hands out nothing", busyCores: 8, want: 0},
-		{name: "seats taken too recently to show count against the headroom", busyCores: 1, rampSeats: 2, want: 2},
+		{name: "headroom short of a whole seat hands out nothing", busyCores: 3, want: 0},
+		{name: "seats taken too recently to show count against the headroom", busyCores: 0, rampSeats: 1, want: 1},
 		{name: "recent seats can use up the whole headroom", busyCores: 1, rampSeats: 5, want: 0},
 	}
 	for _, tc := range cases {
@@ -160,10 +160,10 @@ func TestHoldThatWaitsForTheCPUSaysSoAndWhenItEnds(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(waited) != 1 || waited[0] != "u1 72/65" || len(ended) != 1 || ended[0] != "u1" {
-		t.Fatalf("told waiting %v and ended %v; want u1 once each at 72/65", waited, ended)
+	if len(waited) != 1 || waited[0] != "u1 72/35" || len(ended) != 1 || ended[0] != "u1" {
+		t.Fatalf("told waiting %v and ended %v; want u1 once each at 72/35", waited, ended)
 	}
-	if !strings.Contains(log.text(), "core seats: unit u1 is waiting for CPU; the host is 72% busy against the 65% cap") {
+	if !strings.Contains(log.text(), "core seats: unit u1 is waiting for CPU; the host is 72% busy against the 35% cap") {
 		t.Fatalf("log = %q; want the CPU wait said", log.text())
 	}
 }
@@ -352,9 +352,9 @@ func TestGovernorHandsOutWhatTheCapLeaves(t *testing.T) {
 		wantFree  int
 		wantGated bool
 	}{
-		{name: "an idle host", share: 0, wantAllow: 4, wantFree: 4},
-		{name: "a host already half busy", share: 0.45, wantAllow: 1, wantFree: 1},
-		{name: "a host at the cap", share: 0.65, wantAllow: 0, wantFree: 0, wantGated: true},
+		{name: "an idle host", share: 0, wantAllow: 2, wantFree: 2},
+		{name: "a host already busy on two cores", share: 0.125, wantAllow: 1, wantFree: 1},
+		{name: "a host at the cap", share: 0.35, wantAllow: 0, wantFree: 0, wantGated: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -388,14 +388,14 @@ func TestGovernorCountsTheBusiestRecentRead(t *testing.T) {
 	r.start()
 	defer r.halt()
 	<-r.steps
-	r.tick(0.65)
+	r.tick(0.35)
 
 	// Act
 	first, second, third := r.tick(0), r.tick(0), r.tick(0)
 
 	// Assert: the busy read holds units back for PeakTicks reads.
-	if first.Allow != 0 || second.Allow != 0 || third.Allow != 4 {
-		t.Fatalf("allowances = %d, %d, %d; want 0, 0, 4", first.Allow, second.Allow, third.Allow)
+	if first.Allow != 0 || second.Allow != 0 || third.Allow != 2 {
+		t.Fatalf("allowances = %d, %d, %d; want 0, 0, 2", first.Allow, second.Allow, third.Allow)
 	}
 }
 
@@ -407,18 +407,18 @@ func TestGovernorCostsSeatsTheTestsJustTook(t *testing.T) {
 	<-r.steps
 	r.tick(0)
 
-	// Act: the tests take two of the four seats handed out; the host's reads
-	// do not show them yet.
-	held, err := r.pool.TakeN(2, 0, func() { t.Fatal("a handed-out seat waited") })
+	// Act: the tests take one of the two seats handed out; the host's reads
+	// do not show it yet.
+	held, err := r.pool.TakeN(1, 0, func() { t.Fatal("a handed-out seat waited") })
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer held.Release()
 	d := r.tick(0)
 
-	// Assert: 9.4 cores of headroom less 4 for the two new seats leaves 2.
-	if d.TestSeats != 2 || d.RampSeats != 2 || d.Allow != 2 {
-		t.Fatalf("decision = %+v; want 2 test seats, 2 of them recent, 2 more allowed", d)
+	// Assert: 4.6 cores of headroom less 2 for the new seat leaves 1.
+	if d.TestSeats != 1 || d.RampSeats != 1 || d.Allow != 1 {
+		t.Fatalf("decision = %+v; want 1 test seat, recent, 1 more allowed", d)
 	}
 }
 

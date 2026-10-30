@@ -241,10 +241,10 @@ the path as its FIRST line and again, with the exit status, as its LAST:
 ### One scheduled run: `bin/test-all.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
-and schedules it across the host's core budget: at most 65% of
+and schedules it across the host's core budget: at most 35% of
 `runtime.NumCPU()`, rounded down (`cores.Budget`, `cores.CapPercent`), and less
 whenever the rest of the host is busy, so the host's TOTAL CPU use stays under
-65% (owner rulings 2026-10-20, 2026-10-23 and 2026-10-26). The budget is
+35% (owner rulings 2026-10-20, 2026-10-23, 2026-10-26 and 2026-10-30). The budget is
 shared by every test run on the host (below), and the whole run is at
 nice 19, so it always yields the CPU to the owner's live runtime, input
 handling and apps. A host too small to budget one whole core is refused. The planner chooses each suite's chunk count by simulating

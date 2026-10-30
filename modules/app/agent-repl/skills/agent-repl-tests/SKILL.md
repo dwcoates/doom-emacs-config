@@ -100,8 +100,8 @@ Example, run from `modules/app/agent-repl`:
 
 ## Every test obeys the host CPU governor
 
-Owner ruling, 2026-10-26: tests together may only bring the host's TOTAL CPU
-use up to 65%. The governor (`testrun/internal/cores`, `cores.Governor`)
+Owner rulings, 2026-10-26 and 2026-10-30: tests together may only bring the host's TOTAL CPU
+use up to 35%. The governor (`testrun/internal/cores`, `cores.Governor`)
 only admits units: a unit starts once it holds its core seats, and while the
 host is at the cap no unit of any run starts ("waiting for CPU"). A running
 unit is never paused. The mechanics are in `modules/app/agent-repl/AGENTS.md`,
