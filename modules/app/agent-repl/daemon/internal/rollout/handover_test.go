@@ -2096,3 +2096,40 @@ func TestATakeBackCycleEndsInASurrenderAfterItsLastOffer(t *testing.T) {
 		t.Fatalf("Serving = (%v, %v), want the row released for the successor", owner, err)
 	}
 }
+
+// openAdoptionFault is the one writer of the workspace's adoption fault, for
+// an expired window and for a surrendered take-back cycle alike.
+func TestOpenAdoptionFaultRecordsTheWorkspacesFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	h.c.openAdoptionFault(context.Background(), ws, opHandover, "the detail", map[string]string{"k": "v"}, dlog.Context{})
+
+	// Assert
+	faults, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultAdoptionExpired})
+	if err != nil {
+		t.Fatalf("OpenFaults: %v", err)
+	}
+	if len(faults) != 1 || faults[0].Detail != "the detail" || faults[0].Evidence["k"] != "v" {
+		t.Fatalf("faults = %+v, want the one fault with its detail and evidence", faults)
+	}
+}
+
+func TestOpenAdoptionFaultThatCannotBeWrittenSaysSoAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if err := h.db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act
+	h.c.openAdoptionFault(context.Background(), ws, opHandover, "the detail", nil, dlog.Context{"workspace": string(ws)})
+
+	// Assert
+	if !loggedError(h.log, opHandover, "could not record the workspace's failed adoption") {
+		t.Fatalf("records = %+v, want the failed write stated at ERROR", h.log.Records())
+	}
+}

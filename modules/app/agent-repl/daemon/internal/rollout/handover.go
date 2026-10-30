@@ -862,6 +862,22 @@ func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handov
 	return c.fallBackToFreeness(ctx, ws, plan, windows, fields)
 }
 
+// openAdoptionFault opens the workspace's adoption_window_expired fault, the
+// one record every adoption that never landed leaves on the health and footer
+// path, and says so at ERROR under operation when it cannot be written.
+func (c *controller) openAdoptionFault(ctx context.Context, ws ids.WorkspaceID, operation, detail string, evidence map[string]string, fields dlog.Context) {
+	workspace := ws
+	if _, err := c.deps.DB.OpenFault(context.WithoutCancel(ctx), wsm.Fault{
+		Workspace: &workspace,
+		Kind:      FaultAdoptionExpired,
+		Detail:    detail,
+		Evidence:  evidence,
+		OpenedAt:  c.deps.Clock.Now(),
+	}); err != nil {
+		c.log.Error(operation, "could not record the workspace's failed adoption", dlog.WithCause(fields, err))
+	}
+}
+
 // maxReoffers bounds how many times a workspace taken back whole is offered
 // to the successor again. Unbounded, a workspace the successor would never
 // adopt kept both daemons alive forever (2026-10-30: six take-backs of one
@@ -881,21 +897,14 @@ const maxReoffers = 3
 // session's restart.
 func (c *controller) surrender(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, offers int, fields dlog.Context) bool {
 	evidence := dlog.Context{"offers": offers, "max_reoffers": maxReoffers}
-	workspace := ws.ID
-	if _, err := c.deps.DB.OpenFault(context.WithoutCancel(ctx), wsm.Fault{
-		Workspace: &workspace,
-		Kind:      FaultAdoptionExpired,
-		Detail: fmt.Sprintf("the successor did not adopt this workspace in %d offers; its session was stood down and the workspace handed over without one",
+	c.openAdoptionFault(ctx, ws.ID, opHandover,
+		fmt.Sprintf("the successor did not adopt this workspace in %d offers; its session was stood down and the workspace handed over without one",
 			offers),
-		Evidence: map[string]string{
+		map[string]string{
 			"offers":       fmt.Sprint(offers),
 			"max_reoffers": fmt.Sprint(maxReoffers),
 			"disposition":  "surrendered_sessionless",
-		},
-		OpenedAt: c.deps.Clock.Now(),
-	}); err != nil {
-		c.log.Error(opHandover, "could not record the end of the workspace's take-back cycle", dlog.WithCause(dlog.Merge(fields, evidence), err))
-	}
+		}, dlog.Merge(fields, evidence))
 	c.log.Error(opHandover, "the successor did not adopt the workspace in every offer; standing its session down and handing it over without one",
 		dlog.Merge(fields, evidence))
 	if _, live := c.deps.Shims.Client(ws.ID); live {
@@ -1039,17 +1048,10 @@ func (c *controller) awaitAdoption(ctx context.Context, ws ids.WorkspaceID, leas
 			dlog.WithCause(dlog.Merge(fields, window), err))
 		return adoptionAbandoned
 	}
-	workspace := ws
-	if _, faultErr := c.deps.DB.OpenFault(context.WithoutCancel(ctx), wsm.Fault{
-		Workspace: &workspace,
-		Kind:      FaultAdoptionExpired,
-		Detail: fmt.Sprintf("the successor did not claim this workspace within the %s adoption window; this daemon took it back",
+	c.openAdoptionFault(ctx, ws, opAdoption,
+		fmt.Sprintf("the successor did not claim this workspace within the %s adoption window; this daemon took it back",
 			c.deps.AdoptionWindow),
-		Evidence: map[string]string{"adoption_window": c.deps.AdoptionWindow.String()},
-		OpenedAt: c.deps.Clock.Now(),
-	}); faultErr != nil {
-		c.log.Error(opAdoption, "could not record the expired adoption window", dlog.WithCause(fields, faultErr))
-	}
+		map[string]string{"adoption_window": c.deps.AdoptionWindow.String()}, fields)
 	if err != nil {
 		c.log.Error(opAdoption, "the adoption window expired; the workspace was taken back, but not cleanly",
 			dlog.WithCause(dlog.Merge(fields, window), err))
