@@ -14,7 +14,9 @@
  *
  * THE ONE-SHOT SUBSECTION (frontend.v1.RosterSubsectionOneShot) is the
  * daemon's, not the user's: it holds every family with an open workspace
- * marked one-shot, and stands last in its repository while it has any. It
+ * marked one-shot, except a repository's main workspace's family (its
+ * one-shot children stay nested under it), and stands last in its
+ * repository while it has any. It
  * is drawn as a subsection is, without the rename or the delete, and it never
  * collapses. A row dragged into it marks its workspace one-shot
  * (SetWorkspaceOneShot), and a row dragged out of it is placed where it was

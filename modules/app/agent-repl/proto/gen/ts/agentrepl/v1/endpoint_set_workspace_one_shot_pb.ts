@@ -143,7 +143,9 @@ export type SetWorkspaceOneShotSuccess = Message<"agentrepl.v1.SetWorkspaceOneSh
    * The revision of the roster the daemon resolved after the change
    * (frontend.v1.WorkspaceRoster.revision): every roster at or above it draws
    * the workspace's family in, or out of, its repository's one-shot
-   * subsection (frontend.v1.RosterSubsectionOneShot). A sidebar that drew a
+   * subsection (frontend.v1.RosterSubsectionOneShot), except a family rooted
+   * at the repository's MAIN workspace, which a mark never moves: its
+   * one-shot child stays nested under the main workspace. A sidebar that drew a
    * drag into that subsection at once holds its drawing until a push at or
    * above it arrives, as it does for ArrangeSidebarSuccess.roster_revision.
    * 0 when the daemon has resolved no roster yet.
