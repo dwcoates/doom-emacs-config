@@ -3444,7 +3444,7 @@ and the current workspace sits in the other repository."
         (should (equal (plist-get request :model) "haiku"))
         (should (equal (agent-repl-test-verbs--relationship request) '(:arm :peer)))))))
 
-(ert-deftest agent-repl-verbs-create-workspace-in-repository-asks-repository-then-prompt-then-model ()
+(ert-deftest agent-repl-verbs-create-workspace-in-repository-asks-repository-then-model-then-prompt ()
   "`SPC TAB C-n\=' asks its three questions in that order."
   ;; Arrange.
   (let (asked)
@@ -3458,7 +3458,7 @@ and the current workspace sits in the other repository."
         ;; Act.
         (agent-repl-create-workspace-in-repository)
         ;; Assert.
-        (should (equal (reverse asked) '(repository prompt model)))))))
+        (should (equal (reverse asked) '(repository model prompt)))))))
 
 (ert-deftest agent-repl-verbs-create-workspace-in-repository-blank-model-omits-the-model ()
   "A blank model answer leaves the model to the daemon: none is sent."
@@ -3474,7 +3474,7 @@ and the current workspace sits in the other repository."
       ;; Assert.
       (should-not (plist-get (agent-repl-test-verbs--request :create) :model)))))
 
-(ert-deftest agent-repl-verbs-create-workspace-in-repository-quit-before-the-model-sends-nothing ()
+(ert-deftest agent-repl-verbs-create-workspace-in-repository-quit-at-the-model-sends-nothing ()
   "Quitting the model question aborts the create: nothing is sent."
   ;; Arrange.
   (agent-repl-test-verbs--with nil
@@ -3485,6 +3485,21 @@ and the current workspace sits in the other repository."
       ;; Act / Assert.
       (should (agent-repl-test-verbs--quits-p #'agent-repl-create-workspace-in-repository))
       (should-not agent-repl-test-verbs--sent))))
+
+(ert-deftest agent-repl-verbs-create-workspace-in-repository-quit-at-the-model-never-asks-the-prompt ()
+  "Quitting the model question ends the questions: the prompt is never asked."
+  ;; Arrange.
+  (let (prompt-asked)
+    (agent-repl-test-verbs--with nil
+      (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+                 (lambda () (agent-repl-test-verbs--repo-ref)))
+                ((symbol-function 'agent-repl-verbs--read-prompt)
+                 (lambda (&rest _) (setq prompt-asked t) "do a thing"))
+                ((symbol-function 'agent-repl-verbs--read-model) (lambda () (signal 'quit nil))))
+        ;; Act.
+        (agent-repl-test-verbs--quits-p #'agent-repl-create-workspace-in-repository)
+        ;; Assert.
+        (should-not prompt-asked)))))
 
 (ert-deftest agent-repl-verbs-standard-creates-share-one-body ()
   "Every standard create command runs `agent-repl-verbs--create-standard\=' under its own name."
