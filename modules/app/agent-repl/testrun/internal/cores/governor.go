@@ -51,9 +51,9 @@ import (
 
 const (
 	// CapPercent is the most of the host's CPU every process on the host
-	// together may use while tests or builds add to it (owner ruling,
-	// 2026-10-26).
-	CapPercent = 65
+	// together may use while tests or builds add to it (owner rulings,
+	// 2026-10-26 and 2026-10-30, which lowered it from 65).
+	CapPercent = 35
 	// MarginCores is how many of the cap's cores are never handed out.
 	MarginCores = 1.0
 	// SeatCost is how many cores a seat is assumed to cost.

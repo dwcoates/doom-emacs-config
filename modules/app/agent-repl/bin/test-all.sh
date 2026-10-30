@@ -20,7 +20,7 @@
 # program this script builds and runs) turns every selected suite into units —
 # one Go package, one chunk of ERT files, one chunk of vitest files, one chunk
 # of e2e tests, one harness script — each pinned to ONE core, and runs them on
-# the host's core budget (at most 65% of its cores, less while the rest of the
+# the host's core budget (at most 35% of its cores, less while the rest of the
 # host is busy, shared by every run on the host),
 # longest chain first. How many chunks a suite is cut into
 # is chosen per run by simulating the schedule against this host's measured
@@ -56,8 +56,8 @@
 # .claude/safe-test-run.sh's git-state net, so a unit that touched the
 # checkout's git state is caught. Every run on the host shares one core
 # budget, held unit by unit in priority order, that keeps the host's total
-# CPU use under 65% (testrun/internal/cores; owner rulings 2026-10-20 and
-# 2026-10-26).
+# CPU use under 35% (testrun/internal/cores; owner rulings 2026-10-20,
+# 2026-10-26 and 2026-10-30).
 #
 # --record ITSELF NEVER RUNS INSIDE THAT NET. `testrun run --record` only
 # STAGES this run's timing rows (to $RUN_TMP, outside the checkout); this
