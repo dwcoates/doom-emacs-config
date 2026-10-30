@@ -295,6 +295,11 @@ type Verbs interface {
 	// The boot calls it once its gone repositories are retired: a repository
 	// is known exactly as long as its main worktree is a registered workspace.
 	EnsureMainWorktrees(ctx context.Context) error
+	// EnsureHomeRepository registers agent-repl's own repository, the one the
+	// checkout DIR lives in, with its main worktree open, when the registry
+	// does not hold it: agent-repl is always a known project. An empty DIR
+	// registers nothing. The boot calls it before EnsureMainWorktrees.
+	EnsureHomeRepository(ctx context.Context, dir string) error
 	// OpenThreads has the chat service open every chat thread, naming each
 	// after its first question and abbreviating its questions; the threads
 	// open on their own goroutine.

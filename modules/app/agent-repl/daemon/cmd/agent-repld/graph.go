@@ -1719,9 +1719,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Log:               p.Surfaces,
 		},
 		Boot: boot.Deps{
-			Restarts:               p.Metrics,
-			BindViews:              verbs.BindViews,
-			EnsureMainWorktrees:    verbs.EnsureMainWorktrees,
+			Restarts:            p.Metrics,
+			BindViews:           verbs.BindViews,
+			EnsureMainWorktrees: verbs.EnsureMainWorktrees,
+			EnsureHomeRepository: func(ctx context.Context) error {
+				return verbs.EnsureHomeRepository(ctx, homeRepositoryCheckout(paths.Checkout, os.Getenv))
+			},
 			OpenThreads:            verbs.OpenThreads,
 			SettleMissingDirectory: verbs.SettleMissingDirectory,
 			Layout:                 p.Layout,
@@ -1839,6 +1842,20 @@ type paths struct {
 	// (sessionlock.ResolveRunDir), resolved once for the fleet, the boot
 	// sequence and the reaper alike.
 	RunDir string
+}
+
+// envNoHomeRepository, set to "1", has the daemon register no home
+// repository at boot: a test daemon's registry is its suite's.
+const envNoHomeRepository = "AGENT_REPL_NO_HOME_REPOSITORY"
+
+// homeRepositoryCheckout is the checkout whose repository the boot keeps
+// registered (workspace.Verbs.EnsureHomeRepository), empty when the
+// environment opts out.
+func homeRepositoryCheckout(checkout string, getenv func(string) string) string {
+	if getenv(envNoHomeRepository) == "1" {
+		return ""
+	}
+	return checkout
 }
 
 // envPromptsDir is the prompts directory's operator contract; the flag beats

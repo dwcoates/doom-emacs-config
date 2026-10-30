@@ -740,3 +740,26 @@ func TestShimLoadingFollowsTheBringUpsSteps(t *testing.T) {
 		})
 	}
 }
+
+func TestHomeRepositoryCheckout(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{name: "the checkout by default", env: map[string]string{}, want: "/checkout"},
+		{name: "none when the environment opts out", env: map[string]string{envNoHomeRepository: "1"}, want: ""},
+		{name: "the checkout for any other value", env: map[string]string{envNoHomeRepository: "0"}, want: "/checkout"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := homeRepositoryCheckout("/checkout", func(key string) string { return tc.env[key] })
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("homeRepositoryCheckout = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

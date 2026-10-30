@@ -227,6 +227,13 @@ type Deps struct {
 	// repositories are retired, so only a repository still on disk is asked
 	// for one. Required.
 	EnsureMainWorktrees func(ctx context.Context) error
+	// EnsureHomeRepository registers agent-repl's own repository, with its
+	// main worktree open, when the registry does not hold it
+	// (workspace.Verbs.EnsureHomeRepository bound to the daemon's checkout):
+	// agent-repl is always a known project, so a first start with nothing
+	// registered opens on it. It runs after the gone repositories are retired
+	// and before EnsureMainWorktrees. Required.
+	EnsureHomeRepository func(ctx context.Context) error
 	// OpenThreads opens every chat thread in the chat service, naming each
 	// after its first question and abbreviating its questions
 	// (workspace.Verbs.OpenThreads). It runs beside
@@ -404,6 +411,8 @@ func New(deps Deps) (Sequence, error) {
 		return nil, missing("a view binder")
 	case deps.EnsureMainWorktrees == nil:
 		return nil, missing("a main-worktree ensurer")
+	case deps.EnsureHomeRepository == nil:
+		return nil, missing("a home-repository ensurer")
 	case deps.OpenThreads == nil:
 		return nil, missing("a thread opener")
 	case deps.SettleMissingDirectory == nil:
