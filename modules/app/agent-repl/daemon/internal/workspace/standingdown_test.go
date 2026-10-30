@@ -120,3 +120,79 @@ func TestStartStillSpawnsWhenTheDaemonIsNotStandingDown(t *testing.T) {
 		t.Fatalf("spawn attempts = %d, want exactly 1", got)
 	}
 }
+
+// The bring-up of a workspace this daemon does not serve. Measured 2026-10-30
+// 17:49:27: the outgoing daemon of a long handover took a prompt for a
+// workspace its successor had created, revived it, and adopted the
+// successor's live shim.
+
+// TestStartBringsUpNoShimForAWorkspaceTheSuccessorServes is the guard at its
+// source: neither the lock nor the socket is probed, and nothing is spawned.
+func TestStartBringsUpNoShimForAWorkspaceTheSuccessorServes(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.standing = StandingTransferringAway
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	asRefusal(t, err, ArmTransferringAway)
+	if f.probes != 0 || f.supervisor.spawnAttempts != 0 {
+		t.Fatalf("probes = %d, spawn attempts = %d, want 0 and 0: the successor's shim is not this daemon's to adopt", f.probes, f.supervisor.spawnAttempts)
+	}
+}
+
+// TestStartRecordsTheSuccessorsWorkspaceRefusalAtInfo is its canonical record:
+// the refusal is the daemon's decision, so INFO with the standing named.
+func TestStartRecordsTheSuccessorsWorkspaceRefusalAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.standing = StandingTransferringAway
+
+	// Act.
+	_ = f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	var found bool
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "error" {
+			t.Fatalf("the refused bring-up recorded %q at ERROR", r.Message)
+		}
+		if r.Message == "no shim is brought up: the workspace is the successor's, not this daemon's" {
+			found = r.Level == "info" && r.Context["standing"] == "transferring_away" && r.Context["workspace"] == string(ws.ID)
+		}
+	}
+	if !found {
+		t.Fatal("no INFO record naming the transferring_away workspace")
+	}
+}
+
+// TestStartRefusesWhenTheServingStandingCannotBeRead covers the standing's
+// error: nothing is brought up on a standing the daemon could not determine,
+// and the failure is recorded.
+func TestStartRefusesWhenTheServingStandingCannotBeRead(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.standingErr = errors.New("unrecognized standing")
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil || f.supervisor.spawnAttempts != 0 {
+		t.Fatalf("Start = %v, spawn attempts = %d, want an error and no spawn", err, f.supervisor.spawnAttempts)
+	}
+	var logged bool
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "error" && r.Message == "could not read the serving standing; nothing is brought up" {
+			logged = true
+		}
+	}
+	if !logged {
+		t.Fatal("no ERROR record of the unreadable standing")
+	}
+}
