@@ -2,8 +2,8 @@
 
 ;;; Commentary:
 
-;; WHAT THIS GUARDS: that a word in the composer that begins an open
-;; workspace's name completes to it, and only to open workspaces' names;
+;; WHAT THIS GUARDS: that a word in the composer that begins a part of an
+;; open workspace's name completes to it, and only to open workspaces' names;
 ;; that a slash word is left to the command completion; and that a word
 ;; beginning no name falls through to the next completion function.  The
 ;; roster's open names are stubbed, so no daemon or roster push is needed.
@@ -24,24 +24,63 @@
      (cl-letf (((symbol-function 'agent-repl-roster-open-workspace-names) (lambda () ,names)))
        ,@body)))
 
+(defun agent-repl-test-workspace-completion--offered (capf)
+  "Every name CAPF's table holds, in its order."
+  (all-completions "" (nth 2 capf)))
+
 (ert-deftest agent-repl-test-workspace-completion-offers-the-names-a-word-begins ()
   "A word that begins an open workspace's name is completed over the names it begins."
   (agent-repl-test-workspace-completion--with "please ask agent-repl-ski"
       '("agent-repl-skill-migration" "agent-repl-skins" "parser-fix")
     (let ((capf (agent-repl-workspace-completion-at-point)))
       (should (equal (buffer-substring (nth 0 capf) (nth 1 capf)) "agent-repl-ski"))
-      (should (equal (sort (copy-sequence (nth 2 capf)) #'string<)
+      (should (equal (sort (agent-repl-test-workspace-completion--offered capf) #'string<)
                      '("agent-repl-skill-migration" "agent-repl-skins"))))))
 
-(ert-deftest agent-repl-test-workspace-completion-is-non-exclusive ()
-  "The completion lets the next completion function answer too."
+(ert-deftest agent-repl-test-workspace-completion-decides-its-own-fall-through ()
+  "The completion carries no `:exclusive': its nil is the fall-through."
   (agent-repl-test-workspace-completion--with "agent" '("agent-repl-skill-migration")
-    (should (eq (plist-get (nthcdr 3 (agent-repl-workspace-completion-at-point)) :exclusive) 'no))))
+    (should-not (plist-member (nthcdr 3 (agent-repl-workspace-completion-at-point)) :exclusive))))
 
-(ert-deftest agent-repl-test-workspace-completion-matches-by-prefix-alone ()
-  "A word inside a name, not at its start, offers nothing."
-  (agent-repl-test-workspace-completion--with "skill" '("agent-repl-skill-migration")
+(ert-deftest agent-repl-test-workspace-completion-offers-a-name-a-later-part-begins ()
+  "A word beginning a part past the name's first is completed to the name."
+  (agent-repl-test-workspace-completion--with "skill" '("agent-repl-skill-migration" "parser-fix")
+    (should (equal (agent-repl-test-workspace-completion--offered (agent-repl-workspace-completion-at-point))
+                   '("agent-repl-skill-migration")))))
+
+(ert-deftest agent-repl-test-workspace-completion-offers-a-word-spanning-parts ()
+  "A word running across a separator, from a part's start, is completed."
+  (agent-repl-test-workspace-completion--with "repl-ski" '("agent-repl-skill-migration")
+    (should (equal (agent-repl-test-workspace-completion--offered (agent-repl-workspace-completion-at-point))
+                   '("agent-repl-skill-migration")))))
+
+(ert-deftest agent-repl-test-workspace-completion-splits-at-underscore-and-dot ()
+  "`_' and `.' split a name into parts as `-' does."
+  (agent-repl-test-workspace-completion--with "two" '("one_two" "one.two" "onetwo")
+    (should (equal (agent-repl-test-workspace-completion--offered (agent-repl-workspace-completion-at-point)) '("one_two" "one.two")))))
+
+(ert-deftest agent-repl-test-workspace-completion-ignores-a-word-inside-a-part ()
+  "A word inside a part, not at its start, offers nothing."
+  (agent-repl-test-workspace-completion--with "on" '("agent-repl-skill-migration")
     (should-not (agent-repl-workspace-completion-at-point))))
+
+(ert-deftest agent-repl-test-workspace-completion-offers-a-later-part-past-the-wrapper ()
+  "A later part's match survives Emacs's capf wrapper, as company runs it."
+  (agent-repl-test-workspace-completion--with "skill" '("agent-repl-skill-migration")
+    (let ((capf (cdr (completion--capf-wrapper #'agent-repl-workspace-completion-at-point 'all))))
+      (should (equal (all-completions "skill" (nth 2 capf)) nil))
+      (should (equal (car (completion-all-completions
+                           "skill" (nth 2 capf) nil 5
+                           (completion-metadata "skill" (nth 2 capf) nil)))
+                     "agent-repl-skill-migration")))))
+
+(ert-deftest agent-repl-test-workspace-completion-table-states-its-category ()
+  "The table names its own category, given the substring style."
+  (let ((table (agent-repl--workspace-completion-table '("a"))))
+    (should (eq (completion-metadata-get (completion-metadata "" table nil) 'category)
+                'agent-repl-workspace-name))
+    (should (equal (alist-get 'agent-repl-workspace-name completion-category-defaults)
+                   '((styles substring basic))))))
 
 (ert-deftest agent-repl-test-workspace-completion-offers-nothing-with-no-workspace-open ()
   "With no open workspace there is nothing to complete."

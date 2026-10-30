@@ -347,6 +347,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; The composer's spellcheck (flyspell + hunspell); panels.el turns it on
 ;; for every composer it creates.
 (agent-repl--load-module "spell")
+;; WHY: completion-match.el is the one test both composer completions
+;; (command-completion.el and workspace-completion.el, below) answer by: a
+;; completion offers itself only when its own table's styles match.
+(agent-repl--load-module "completion-match")
 ;; WHY: command-completion.el is the composer's slash-command completion
 ;; (`agent-repl-input-mode' installs its capf).  It asks the daemon through
 ;; rpc.el and resolves the workspace's ref and connection through host.el,
