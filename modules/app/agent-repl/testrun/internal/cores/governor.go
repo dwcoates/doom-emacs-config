@@ -72,12 +72,26 @@ const (
 // cap leaves once the host's busiest recent read, the margin and the seats
 // taken too recently to show in the reads are counted, at SeatCost cores a
 // seat.
-func Allowance(numCPU int, peakBusyCores float64, rampSeats int) int {
-	headroom := float64(numCPU)*CapPercent/100 - MarginCores - peakBusyCores - SeatCost*float64(rampSeats)
-	if headroom <= 0 {
-		return 0
+//
+// THE FIRST SEAT IS NEVER STARVED by the margin and the seat cost: when the
+// tests hold no seat and took none too recently to show, one seat is allowed
+// while the host is under the cap at all. The margin and SeatCost exist so
+// that SEVERAL seats handed out together cannot overshoot the cap; one unit
+// cannot overshoot it by more than itself. Without this, the 35% cap
+// (2026-10-30) left 2.6 cores on sixteen once the margin and one seat's cost
+// were taken, so tests started only while everything else used under 16% of
+// the host, and the merge queue's head waited for CPU indefinitely beside the
+// owner's own agents.
+func Allowance(numCPU int, peakBusyCores float64, rampSeats, heldSeats int) int {
+	capCores := float64(numCPU) * CapPercent / 100
+	headroom := capCores - MarginCores - peakBusyCores - SeatCost*float64(rampSeats)
+	if headroom >= SeatCost {
+		return int(math.Floor(headroom / SeatCost))
 	}
-	return int(math.Floor(headroom / SeatCost))
+	if heldSeats == 0 && rampSeats == 0 && peakBusyCores < capCores {
+		return 1
+	}
+	return 0
 }
 
 // StateFile is the file the governor states the host's CPU in for every
@@ -260,7 +274,7 @@ func (g *Governor) step(s *governing) {
 	if d.Measured && ok {
 		d.BusyCores = slices.Max(s.busy)
 		d.RampSeats = max(0, tests-slices.Min(s.held))
-		d.Allow = Allowance(g.NumCPU, d.BusyCores, d.RampSeats)
+		d.Allow = Allowance(g.NumCPU, d.BusyCores, d.RampSeats, tests)
 	}
 	if d.Allow == 0 {
 		g.closeGate(s)

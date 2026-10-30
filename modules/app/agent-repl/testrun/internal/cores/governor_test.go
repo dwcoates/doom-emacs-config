@@ -21,24 +21,28 @@ func TestAllowance(t *testing.T) {
 		name      string
 		busyCores float64
 		rampSeats int
+		heldSeats int
 		want      int
 	}{
 		{name: "an idle host hands out what the cap leaves, two cores a seat", busyCores: 0, want: 2},
 		{name: "a host busy on two cores leaves the tests a seat", busyCores: 2, want: 1},
-		{name: "a host at the cap hands out nothing", busyCores: 5.6, want: 0},
+		{name: "a host at the cap hands out nothing, not even the first seat", busyCores: 5.6, want: 0},
 		{name: "a host past the cap hands out nothing", busyCores: 14, want: 0},
-		{name: "headroom short of a whole seat hands out nothing", busyCores: 3, want: 0},
+		{name: "headroom short of a whole seat still hands the first seat out", busyCores: 3, want: 1},
+		{name: "headroom short of a whole seat hands out nothing while the tests hold one", busyCores: 3, heldSeats: 1, want: 0},
+		{name: "a host just under the cap still hands the first seat out", busyCores: 5.5, want: 1},
 		{name: "seats taken too recently to show count against the headroom", busyCores: 0, rampSeats: 1, want: 1},
 		{name: "recent seats can use up the whole headroom", busyCores: 1, rampSeats: 5, want: 0},
+		{name: "a seat taken too recently to show withholds the first-seat allowance", busyCores: 3, rampSeats: 1, want: 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := Allowance(16, tc.busyCores, tc.rampSeats)
+			got := Allowance(16, tc.busyCores, tc.rampSeats, tc.heldSeats)
 
 			// Assert
 			if got != tc.want {
-				t.Fatalf("Allowance(16, %v, %d) = %d; want %d", tc.busyCores, tc.rampSeats, got, tc.want)
+				t.Fatalf("Allowance(16, %v, %d, %d) = %d; want %d", tc.busyCores, tc.rampSeats, tc.heldSeats, got, tc.want)
 			}
 		})
 	}
@@ -354,6 +358,7 @@ func TestGovernorHandsOutWhatTheCapLeaves(t *testing.T) {
 	}{
 		{name: "an idle host", share: 0, wantAllow: 2, wantFree: 2},
 		{name: "a host already busy on two cores", share: 0.125, wantAllow: 1, wantFree: 1},
+		{name: "a host a quarter busy, under the cap, with no seat held", share: 0.25, wantAllow: 1, wantFree: 1},
 		{name: "a host at the cap", share: 0.35, wantAllow: 0, wantFree: 0, wantGated: true},
 	}
 	for _, tc := range cases {
