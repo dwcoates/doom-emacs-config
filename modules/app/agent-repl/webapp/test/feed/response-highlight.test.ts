@@ -17,6 +17,7 @@ import {
   RESPONSE_HIGHLIGHT_NAME,
   cssHighlightPaint,
   installResponseHighlight,
+  onResponseHighlightWords,
   responseHighlightIn,
   responseHighlightTaken,
   type HighlightPaint,
@@ -393,6 +394,39 @@ describe("installResponseHighlight", () => {
     await answered();
     // Assert
     expect(page.painted).toEqual(["entropy"]);
+  });
+
+  it("tells the page's listeners the words it holds, then none once they end", async () => {
+    // Arrange
+    const host = feedWith([{ row: "r1", text: "the entropy rises" }]);
+    const page = scripted();
+    page.install(host);
+    const told: (string | null)[] = [];
+    const stop = onResponseHighlightWords(document, (words) => told.push(words));
+    // Act
+    select({ row: "r1", at: 4 }, { row: "r1", at: 11 });
+    settled();
+    page.presses.pressed();
+    await answered();
+    // Assert
+    stop();
+    expect(told).toEqual(["entropy", null]);
+  });
+
+  it("tells the page's listeners none once the sent prompt took the words", () => {
+    // Arrange
+    const host = feedWith([{ row: "r1", text: "the entropy rises" }]);
+    const page = scripted();
+    page.install(host);
+    select({ row: "r1", at: 4 }, { row: "r1", at: 11 });
+    settled();
+    const told: (string | null)[] = [];
+    const stop = onResponseHighlightWords(document, (words) => told.push(words));
+    // Act
+    responseHighlightTaken(document, "r1");
+    // Assert
+    stop();
+    expect(told).toEqual([null]);
   });
 
   it("drops the paint once uninstalled", () => {

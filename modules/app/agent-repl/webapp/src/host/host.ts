@@ -83,6 +83,8 @@ interface Frame {
   /** Facts the page pushed, which Emacs reads back. Reset when it reloads. */
   drawn: DrawnWhat | null;
   selection: { text: string | null; focused: boolean };
+  /** The words of a final response the page holds highlighted, or null. */
+  highlight: string | null;
   editing: boolean;
   /**
    * Whether the page now in the frame has said hello, so a message posted to
@@ -501,6 +503,7 @@ export function createHost(env: HostEnv): Host {
   const resetFacts = (frame: Frame): void => {
     frame.drawn = null;
     frame.selection = { text: "", focused: false };
+    frame.highlight = null;
     frame.editing = false;
   };
 
@@ -567,6 +570,9 @@ export function createHost(env: HostEnv): Host {
         return;
       case "selection":
         frame.selection = { text: message.text, focused: message.focused };
+        return;
+      case "responseHighlight":
+        frame.highlight = message.words;
         return;
       case "editing":
         frame.editing = message.editing;
@@ -671,6 +677,7 @@ export function createHost(env: HostEnv): Host {
       heldIngress: null,
       drawn: null,
       selection: { text: "", focused: false },
+      highlight: null,
       editing: false,
       attached: false,
       pendingSwitchStartedAtMs: null,
@@ -934,12 +941,15 @@ export function createHost(env: HostEnv): Host {
       // the pages cannot see it, and while it stands the user is not selecting
       // in a page.
       const own = selectedText(win);
-      if (own !== "") return answer("selection", null, "webhost", { text: own, focused: doc.hasFocus() });
+      // `held` is the shown page's held response highlight (null for none),
+      // which outlives the page's selection once Emacs takes the focus.
+      if (own !== "") return answer("selection", null, "webhost", { text: own, focused: doc.hasFocus(), held: null });
       const frame = shownId === null ? undefined : frames.get(shownId);
-      if (frame === undefined) return answer("selection", null, "none-shown", { text: null, focused: false });
+      if (frame === undefined) return answer("selection", null, "none-shown", { text: null, focused: false, held: null });
       return answer("selection", frame.id, "present", {
         text: frame.selection.text,
         focused: frame.selection.focused,
+        held: frame.highlight,
       });
     },
     editing() {

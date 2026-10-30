@@ -201,6 +201,19 @@ interface SelectionMessage {
   readonly focused: boolean;
 }
 
+/**
+ * page -> host: the words of a final response the page holds highlighted
+ * (feed/response-highlight.ts), or null when it holds none. The highlight
+ * outlives the reader's selection, which WebKit drops when Emacs's composer
+ * takes the focus, so Emacs copies these words (`s-c` in the composer) from
+ * the host's mirror rather than from the selection.
+ */
+interface ResponseHighlightMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "responseHighlight";
+  readonly words: string | null;
+}
+
 /** page -> host: whether a text field holds the page's keyboard focus. */
 interface EditingMessage {
   readonly channel: typeof HOST_CHANNEL;
@@ -238,6 +251,7 @@ export type PageToHost =
   | HelloMessage
   | DrawnMessage
   | SelectionMessage
+  | ResponseHighlightMessage
   | EditingMessage
   | BubbleOverlayMessage
   | RestyleTurnMessage
@@ -347,6 +361,10 @@ export function parsePageToHost(data: unknown): PageToHost | null {
     case "selection":
       return (data.text === null || typeof data.text === "string") && typeof data.focused === "boolean"
         ? { channel: HOST_CHANNEL, kind: "selection", text: data.text, focused: data.focused }
+        : null;
+    case "responseHighlight":
+      return data.words === null || (typeof data.words === "string" && data.words !== "")
+        ? { channel: HOST_CHANNEL, kind: "responseHighlight", words: data.words }
         : null;
     case "editing":
       return typeof data.editing === "boolean" ? { channel: HOST_CHANNEL, kind: "editing", editing: data.editing } : null;

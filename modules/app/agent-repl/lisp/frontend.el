@@ -670,15 +670,19 @@ The selection is read from the host's mirror (webhost.el): the shown page
 reports its selection and focus to the host as they change, so the host
 answers at once.  With no page shown the answer is an empty selection
 without focus, which copies nothing and lets the key fall through.
+`held' is the words of a final response the shown page holds highlighted,
+or null: the highlight outlives the page's selection once Emacs takes the
+focus, so the composer copies it from here (`agent-repl-frontend-copy-held').
 The answer is ALWAYS a string (a JSON object), never null or undefined:
 the NS port drops a null result without calling back, which would leave
 the waiting command waiting.  `text' is null only when the shown page has
 no selection object at all, an invariant violation the command reports."
   (format (concat "(function(){var h=window.agentReplHost;"
-                  "if(!h){return JSON.stringify({id:%d,text:'',focused:false});}"
+                  "if(!h){return JSON.stringify({id:%d,text:'',focused:false,held:null});}"
                   "var a=JSON.parse(h.selection());"
                   "var shown=a.outcome==='present';"
-                  "return JSON.stringify({id:%d,text:shown?a.text:'',focused:shown&&a.focused});})()")
+                  "var held=shown&&typeof a.held==='string'?a.held:null;"
+                  "return JSON.stringify({id:%d,text:shown?a.text:'',focused:shown&&a.focused,held:held});})()")
           id id))
 
 (defun agent-repl--frontend-copy-parse (raw)
@@ -768,17 +772,17 @@ answer whose text is null is an invariant violation: signalled."
    ((string-empty-p (plist-get answer :text)) 'empty)
    (t 'copy)))
 
-(defun agent-repl--frontend-copy-fall-through (keys held)
+(defun agent-repl--frontend-copy-fall-through (keys held mode)
   "Run KEYS as they would run without the copy chords, then HELD.
 KEYS and HELD are queued, in that order and ahead of anything already
-queued, and the key sequence is read and resolved with
-`agent-repl-frontend-webview-mode' bound off, so a prefix such as `C-c'
+queued, and the key sequence is read and resolved with MODE, the minor
+mode that bound the copy chord, bound off, so a prefix such as `C-c'
 completes with the reader's next key exactly as it always did."
   (setq unread-command-events
         (append (listify-key-sequence keys) held unread-command-events))
-  (let* ((seq (let ((agent-repl-frontend-webview-mode nil))
+  (let* ((seq (cl-progv (list mode) (list nil)
                 (read-key-sequence-vector nil)))
-         (cmd (let ((agent-repl-frontend-webview-mode nil))
+         (cmd (cl-progv (list mode) (list nil)
                 (key-binding seq t))))
     (agent-repl--log agent-repl--owning-workspace
                      "elisp.frontend.copy-selection: fall-through keys=%s command=%S"
@@ -814,19 +818,104 @@ is asked synchronously."
           (agent-repl--user-message ws "copied %d characters from the webview"
                                     (list (length text)))
           (setq unread-command-events (append held unread-command-events)))
-      (agent-repl--frontend-copy-fall-through keys held))))
+      (agent-repl--frontend-copy-fall-through keys held 'agent-repl-frontend-webview-mode))))
+
+(defun agent-repl--frontend-bind-evil-copy-keys (map keys command)
+  "Bind each of KEYS (`kbd' strings) to COMMAND in MAP's Evil state maps.
+Evil's state maps (`y' is `evil-yank' in normal state) outrank a plain
+minor-mode map, so a copy chord must live in its mode's own state maps,
+in every state the reader may be in."
+  (dolist (state '(normal motion visual insert emacs))
+    (dolist (key keys)
+      (evil-define-key* state map (kbd key) command))))
 
 (defun agent-repl--frontend-copy-bind-evil-keys ()
-  "Plant the copy chords in the mode map's Evil state maps.
-Evil's state maps (`y' is `evil-yank' in normal state) outrank a plain
-minor-mode map, so the chords must live in this mode's own state maps."
-  (dolist (state '(normal motion visual insert emacs))
-    (dolist (key agent-repl--frontend-copy-keys)
-      (evil-define-key* state agent-repl-frontend-webview-mode-map
-                        (kbd key) #'agent-repl-frontend-copy-selection))))
+  "Plant the webview's copy chords in its mode map's Evil state maps."
+  (agent-repl--frontend-bind-evil-copy-keys agent-repl-frontend-webview-mode-map
+                                            agent-repl--frontend-copy-keys
+                                            #'agent-repl-frontend-copy-selection))
 
 (with-eval-after-load 'evil
   (agent-repl--frontend-copy-bind-evil-keys))
+
+;; THE COMPOSER COPIES THE HELD RESPONSE HIGHLIGHT (owner request,
+;; 2026-10-30).  Highlighting words of a final response moves the keyboard
+;; to the composer, and WebKit drops the page's selection as the focus
+;; leaves, but the page keeps the words highlighted (purple) until the
+;; reader lets go of them.  So Command-c (`s-c') in the composer, with no
+;; Emacs region active, copies those words: the host answers them as
+;; `held' beside the selection (`agent-repl--frontend-copy-script').  With
+;; a region, or no words held, `s-c' does what it did before, through the
+;; same fall-through as the webview's chords.
+
+(defun agent-repl--frontend-held-copy-decision (answer)
+  "Decide what the composer's `s-c' does given the page's ANSWER.
+Returns `copy' when the shown page holds highlighted words, else
+`no-webview' or `none', each a fall-through."
+  (cond
+   ((null answer) 'no-webview)
+   ((let ((held (plist-get answer :held)))
+      (and (stringp held) (not (string-empty-p held))))
+    'copy)
+   (t 'none)))
+
+(defun agent-repl-frontend-copy-held ()
+  "Copy the words the webview holds highlighted, or do what this key did before.
+Bound to Command-c (`s-c') in the composer.  An active region is Emacs's
+own to copy, so the key falls through at once.  Otherwise the workspace's
+webview is asked (blocking, as `agent-repl-frontend-copy-selection' does),
+and words of a final response it holds highlighted go onto the kill ring
+and the system clipboard through `kill-new'."
+  (interactive)
+  (let* ((ws (agent-repl--ws-current-name))
+         (keys (this-command-keys-vector)))
+    (if (use-region-p)
+        (progn
+          (agent-repl--log ws "elisp.frontend.copy-held: keys=%s decision=region"
+                           (key-description keys))
+          (agent-repl--frontend-copy-fall-through keys nil 'agent-repl-frontend-composer-copy-mode))
+      (let* ((buf (agent-repl--ws-get ws :frontend-buffer))
+             (asked (if (buffer-live-p buf)
+                        (agent-repl--frontend-await-copy-answer buf)
+                      (cons nil nil)))
+             (answer (car asked))
+             (held (cdr asked))
+             (decision (agent-repl--frontend-held-copy-decision answer)))
+        (agent-repl--log ws "elisp.frontend.copy-held: keys=%s decision=%s held=%d"
+                         (key-description keys) decision (length held))
+        (if (eq decision 'copy)
+            (let ((text (plist-get answer :held)))
+              (kill-new text)
+              (agent-repl--user-message ws "copied %d highlighted characters from the webview"
+                                        (list (length text)))
+              (setq unread-command-events (append held unread-command-events)))
+          (agent-repl--frontend-copy-fall-through
+           keys held 'agent-repl-frontend-composer-copy-mode))))))
+
+(defvar agent-repl-frontend-composer-copy-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "s-c") #'agent-repl-frontend-copy-held)
+    map)
+  "Keymap of `agent-repl-frontend-composer-copy-mode': Command-c.")
+
+(define-minor-mode agent-repl-frontend-composer-copy-mode
+  "Give the composer Command-c (`s-c') for the webview's held highlight.
+Enabled in every composer (`agent-repl-input-mode-hook')."
+  :lighter nil
+  :keymap agent-repl-frontend-composer-copy-mode-map
+  (when (fboundp 'evil-normalize-keymaps)
+    (evil-normalize-keymaps)))
+
+(defun agent-repl--frontend-composer-copy-bind-evil-keys ()
+  "Plant the composer's Command-c in its copy mode map's Evil state maps."
+  (agent-repl--frontend-bind-evil-copy-keys agent-repl-frontend-composer-copy-mode-map
+                                            '("s-c")
+                                            #'agent-repl-frontend-copy-held))
+
+(with-eval-after-load 'evil
+  (agent-repl--frontend-composer-copy-bind-evil-keys))
+
+(add-hook 'agent-repl-input-mode-hook #'agent-repl-frontend-composer-copy-mode)
 
 ;; FEED TEXT ZOOM in the webview too (owner request, 2026-10-06): `C-+' / `C--'
 ;; zoom the feed whichever of the two windows holds the keyboard.

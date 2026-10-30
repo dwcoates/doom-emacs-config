@@ -2741,6 +2741,155 @@ Binds `resized' to the resize calls made, newest first."
   "An answer with no text key at all is refused."
   (should-error (agent-repl--frontend-copy-decision '(:id 1 :focused t))))
 
+;;;; ---- The composer's Command-c copies the held response highlight ----
+
+(defun agent-repl-test--held-copy-answer (held)
+  "The JSON the page answers the waited request with, holding HELD (nil for none)."
+  (json-encode `((id . ,agent-repl--frontend-copy-waiting)
+                 (text . "")
+                 (focused . :json-false)
+                 (held . ,held))))
+
+(defun agent-repl-test--copy-record-s-c ()
+  "Stand-in for `s-c' before the composer's chord: records that it ran."
+  (interactive)
+  (push 's-c agent-repl-test--copy-ran))
+
+(defmacro agent-repl-test--with-composer-copy (held &rest body)
+  "Run BODY in a composer-like buffer whose workspace's page holds HELD.
+Its local map binds `s-c' to a recorder standing in for the key's
+behavior before the chord existed.  Binds `asked' to how many times the
+page was asked."
+  (declare (indent 1))
+  `(let ((agent-repl-test--copy-ran nil)
+         (unread-command-events nil)
+         (kill-ring nil)
+         (asked 0)
+         (webview (generate-new-buffer "*agent-frontend-copy-held*")))
+     (unwind-protect
+         (with-temp-buffer
+           (let ((map (make-sparse-keymap)))
+             (define-key map (kbd "s-c") #'agent-repl-test--copy-record-s-c)
+             (use-local-map map))
+           (agent-repl-frontend-composer-copy-mode 1)
+           (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-1"))
+                     ((symbol-function 'agent-repl--ws-get)
+                      (lambda (_ws key) (and (eq key :frontend-buffer) webview)))
+                     ((symbol-function 'agent-repl--frontend-webview-live-widget)
+                      (lambda (_buf) 'live-widget))
+                     ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
+                      (lambda (_xw _script callback)
+                        (cl-incf asked)
+                        (funcall callback (agent-repl-test--held-copy-answer ,held))))
+                     ((symbol-function 'this-command-keys-vector) (lambda () (kbd "s-c"))))
+             ,@body))
+       (kill-buffer webview))))
+
+(ert-deftest agent-repl-test-composer-command-c-is-the-held-copy ()
+  "Command-c in the composer's copy mode is the held-highlight copy."
+  (should (eq (lookup-key agent-repl-frontend-composer-copy-mode-map (kbd "s-c"))
+              #'agent-repl-frontend-copy-held)))
+
+(ert-deftest agent-repl-test-composer-command-c-in-every-evil-state ()
+  "Every Evil state map of the composer's copy mode gets Command-c."
+  ;; Arrange
+  (let ((planted nil))
+    (cl-letf (((symbol-function 'evil-define-key*)
+               (lambda (state map key def) (push (list state map (key-description key) def) planted))))
+      ;; Act
+      (agent-repl--frontend-composer-copy-bind-evil-keys))
+    ;; Assert
+    (should (equal (sort (mapcar #'car planted) #'string<)
+                   (sort (list 'normal 'motion 'visual 'insert 'emacs) #'string<)))
+    (should (equal (seq-uniq (mapcar #'cdr planted))
+                   (list (list agent-repl-frontend-composer-copy-mode-map "s-c"
+                               #'agent-repl-frontend-copy-held))))))
+
+(ert-deftest agent-repl-test-both-copy-modes-plant-evil-keys-through-one-helper ()
+  "The webview's and the composer's chords are planted by the one helper."
+  ;; Arrange
+  (let ((maps nil))
+    (cl-letf (((symbol-function 'agent-repl--frontend-bind-evil-copy-keys)
+               (lambda (map _keys command) (push (cons map command) maps))))
+      ;; Act
+      (agent-repl--frontend-copy-bind-evil-keys)
+      (agent-repl--frontend-composer-copy-bind-evil-keys))
+    ;; Assert
+    (should (equal (nreverse maps)
+                   (list (cons agent-repl-frontend-webview-mode-map #'agent-repl-frontend-copy-selection)
+                         (cons agent-repl-frontend-composer-copy-mode-map #'agent-repl-frontend-copy-held))))))
+
+(ert-deftest agent-repl-test-composer-copy-mode-arms-in-every-composer ()
+  "Every composer turns its Command-c copy on."
+  (should (memq #'agent-repl-frontend-composer-copy-mode agent-repl-input-mode-hook)))
+
+(ert-deftest agent-repl-test-composer-copies-the-held-highlight ()
+  "With no region, Command-c copies the words the page holds highlighted."
+  (agent-repl-test--with-composer-copy "entropy rises"
+    ;; Act
+    (agent-repl-frontend-copy-held)
+    ;; Assert
+    (should (equal (list (current-kill 0 t) agent-repl-test--copy-ran) '("entropy rises" nil)))))
+
+(ert-deftest agent-repl-test-composer-with-nothing-held-runs-the-old-binding ()
+  "With no words held, Command-c does what it did before and kills nothing."
+  (agent-repl-test--with-composer-copy nil
+    ;; Act
+    (agent-repl-frontend-copy-held)
+    ;; Assert
+    (should (equal (list agent-repl-test--copy-ran kill-ring) '((s-c) nil)))))
+
+(ert-deftest agent-repl-test-composer-region-is-emacs-own-to-copy ()
+  "With a region active, Command-c runs the old binding without asking the page."
+  (agent-repl-test--with-composer-copy "entropy"
+    ;; Arrange
+    (insert "some words")
+    (set-mark (point-min))
+    (let ((transient-mark-mode t))
+      (activate-mark)
+      ;; Act
+      (agent-repl-frontend-copy-held))
+    ;; Assert
+    (should (equal (list agent-repl-test--copy-ran asked) '((s-c) 0)))))
+
+(ert-deftest agent-repl-test-composer-with-no-webview-runs-the-old-binding ()
+  "A workspace with no live webview buffer falls through to the old binding."
+  (agent-repl-test--with-composer-copy "entropy"
+    (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) nil)))
+      ;; Act
+      (agent-repl-frontend-copy-held))
+    ;; Assert
+    (should (equal (list agent-repl-test--copy-ran asked) '((s-c) 0)))))
+
+(ert-deftest agent-repl-test-composer-copy-is-logged ()
+  "The copy's decision is recorded."
+  (agent-repl-test--with-composer-copy "entropy"
+    (let ((logged nil))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        ;; Act
+        (agent-repl-frontend-copy-held))
+      ;; Assert
+      (should (seq-find (lambda (line) (string-match-p "copy-held: keys=s-c decision=copy" line)) logged)))))
+
+(ert-deftest agent-repl-test-held-copy-decision-copies-held-words ()
+  "An answer holding words decides `copy'."
+  (should (eq (agent-repl--frontend-held-copy-decision '(:id 1 :text "" :held "w")) 'copy)))
+
+(ert-deftest agent-repl-test-held-copy-decision-without-words-is-none ()
+  "An answer holding no words, or empty ones, decides `none'."
+  (should (equal (list (agent-repl--frontend-held-copy-decision '(:id 1 :text "" :held nil))
+                       (agent-repl--frontend-held-copy-decision '(:id 1 :text "" :held "")))
+                 '(none none))))
+
+(ert-deftest agent-repl-test-held-copy-decision-without-a-page-is-no-webview ()
+  "No answer at all decides `no-webview'."
+  (should (eq (agent-repl--frontend-held-copy-decision nil) 'no-webview)))
+
+(ert-deftest agent-repl-test-copy-script-answers-the-held-highlight ()
+  "The script answers the host's held words beside the selection."
+  (should (string-match-p "held:held" (agent-repl--frontend-copy-script 1))))
+
 (ert-deftest agent-repl-test-copy-script-answers-its-request-id ()
   "The script names its request id in the answer it builds."
   (should (string-match-p "id:42," (agent-repl--frontend-copy-script 42))))
@@ -2751,7 +2900,7 @@ Binds `resized' to the resize calls made, newest first."
 
 (ert-deftest agent-repl-test-copy-script-answers-an-empty-selection-without-a-host ()
   "With no host there is nothing to copy, so the key falls through."
-  (should (string-search "if(!h){return JSON.stringify({id:1,text:'',focused:false});}"
+  (should (string-search "if(!h){return JSON.stringify({id:1,text:'',focused:false,held:null});}"
                          (agent-repl--frontend-copy-script 1))))
 
 (ert-deftest agent-repl-test-webview-read-channel-injects-into-a-live-webview ()

@@ -156,6 +156,23 @@ export function onResponseHighlightTaken(doc: Document, listener: (row: string) 
   return takenOf(doc).add(listener);
 }
 
+/** The words each page holds highlighted, told to whoever relays them (the host link). */
+const heldWordsOf = perDocument((): Listeners<[string | null]> => createListeners<[string | null]>());
+
+/** DOC's page now holds WORDS highlighted, or none (null): told to every listener. */
+export function responseHighlightWords(doc: Document, words: string | null): void {
+  heldWordsOf(doc).notify(words);
+}
+
+/**
+ * Tell LISTENER the words DOC's page holds highlighted each time they change,
+ * null when it holds none; answers the unsubscribe. The host link relays
+ * them, so Emacs can copy the highlight after the selection is gone.
+ */
+export function onResponseHighlightWords(doc: Document, listener: (words: string | null) => void): () => void {
+  return heldWordsOf(doc).add(listener);
+}
+
 /** What the highlight's install reads, injectable for tests. */
 export interface ResponseHighlightEnv {
   /** The page whose selection is read; the document when omitted. */
@@ -182,11 +199,18 @@ export function installResponseHighlight(
   const paint = env.paint ?? cssHighlightPaint;
   let held: ResponseHighlight | null = null;
   let pressed = false;
-  const end = (why: string): void => {
-    if (held === null) return;
+  /** Drop the held words and their paint, answering the row they were in, or null when none were held. */
+  const release = (): string | null => {
+    if (held === null) return null;
     const row = held.row;
     held = null;
     paint.paint(null);
+    responseHighlightWords(doc, null);
+    return row;
+  };
+  const end = (why: string): void => {
+    const row = release();
+    if (row === null) return;
     log.debug("the response highlight ended; the daemon is told", {
       operation: "feed.response-highlight.cleared",
       context: { row, why },
@@ -198,6 +222,7 @@ export function installResponseHighlight(
     held = now;
     const selection = doc.getSelection();
     paint.paint(selection === null || selection.rangeCount === 0 ? null : selection.getRangeAt(0).cloneRange());
+    responseHighlightWords(doc, now.words);
     log.debug("the reader highlighted words of a final response; the next prompt revises it", {
       operation: "feed.response-highlight.held",
       context: { row: now.row, characters: now.words.length },
@@ -245,8 +270,7 @@ export function installResponseHighlight(
   });
   const stopTaken = onResponseHighlightTaken(doc, (row) => {
     if (held === null || held.row !== row) return;
-    held = null;
-    paint.paint(null);
+    release();
     log.debug("the sent prompt took the response highlight; its paint goes", {
       operation: "feed.response-highlight.taken",
       context: { row },
@@ -261,7 +285,6 @@ export function installResponseHighlight(
     doc.removeEventListener("selectionchange", onSelectionChange);
     stopPresses();
     stopTaken();
-    if (held !== null) paint.paint(null);
-    held = null;
+    release();
   };
 }

@@ -26,6 +26,7 @@ import type { EditorIngressEntry, EditorIngressView } from "../held/editor-ingre
 import type { HeldIngressWireEntry } from "./protocol.js";
 import type { RestyleTurnsSource } from "./restyle-turn.js";
 import type { WebhostPressSource } from "../webhost-pressed.js";
+import { onResponseHighlightWords } from "../feed/response-highlight.js";
 
 /**
  * The editor's ingress entries, decoded. An entry whose `said` is not a
@@ -261,6 +262,9 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
   overlayWatch.observe(doc.documentElement, { attributes: true, attributeFilter: [BUBBLE_OVERLAY_ATTRIBUTE] });
 
   win.addEventListener("message", onMessage);
+  const stopHighlightWords = onResponseHighlightWords(doc, (words) => {
+    send({ channel: HOST_CHANNEL, kind: "responseHighlight", words });
+  });
   doc.addEventListener("selectionchange", reportSelection);
   win.addEventListener("focus", reportSelection);
   win.addEventListener("blur", reportSelection);
@@ -277,6 +281,7 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
       drawnWatch.disconnect();
       overlayWatch.disconnect();
       win.removeEventListener("message", onMessage);
+      stopHighlightWords();
       doc.removeEventListener("selectionchange", reportSelection);
       win.removeEventListener("focus", reportSelection);
       win.removeEventListener("blur", reportSelection);

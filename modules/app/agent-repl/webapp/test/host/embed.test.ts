@@ -14,6 +14,7 @@ import { createWebhostFailureView, type WebhostFailureView } from "../../src/fai
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
 import { createRestyleTurns, type RestyleTurnsSource } from "../../src/host/restyle-turn.js";
 import { createWebhostPresses, type WebhostPressSource } from "../../src/webhost-pressed.js";
+import { responseHighlightWords } from "../../src/feed/response-highlight.js";
 
 let pageWin: Window;
 let pageDoc: Document;
@@ -286,6 +287,40 @@ describe("Emacs moving its focus", () => {
 
     // Assert
     expect(leftFor).toEqual([FOCUS_LEFT_EMACS]);
+  });
+});
+
+describe("the page's held response highlight", () => {
+  it("tells the host the words the page holds highlighted", async () => {
+    // Act
+    responseHighlightWords(pageDoc, "entropy");
+    await delivered();
+
+    // Assert
+    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "responseHighlight", words: "entropy" });
+  });
+
+  it("tells the host once the page holds none", async () => {
+    // Act
+    responseHighlightWords(pageDoc, null);
+    await delivered();
+
+    // Assert
+    expect(received).toContainEqual({ channel: HOST_CHANNEL, kind: "responseHighlight", words: null });
+  });
+
+  it("tells the host nothing once disposed", async () => {
+    // Arrange
+    link?.dispose();
+    link = null;
+    received.length = 0;
+
+    // Act
+    responseHighlightWords(pageDoc, "entropy");
+    await delivered();
+
+    // Assert
+    expect(received).toEqual([]);
   });
 });
 

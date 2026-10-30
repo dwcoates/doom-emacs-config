@@ -978,7 +978,46 @@ describe("mirrored facts", () => {
     expect(parsed(host.selection())).toMatchObject({
       outcome: "none-shown",
       text: null,
+      held: null,
     });
+  });
+
+  it("answers the words the shown page holds highlighted with its selection", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/");
+    host.show("a");
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "responseHighlight", words: "entropy" });
+
+    // Assert
+    expect(parsed(host.selection())).toMatchObject({ id: "a", text: "", held: "entropy" });
+  });
+
+  it("answers no held words once the shown page holds none", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/");
+    host.show("a");
+    fromPage("a", { channel: HOST_CHANNEL, kind: "responseHighlight", words: "entropy" });
+
+    // Act
+    fromPage("a", { channel: HOST_CHANNEL, kind: "responseHighlight", words: null });
+
+    // Assert
+    expect(parsed(host.selection())).toMatchObject({ id: "a", held: null });
+  });
+
+  it("answers another shown page's held words, not the hidden page's", () => {
+    // Arrange
+    pages(host, "a", "b");
+    host.show("a");
+    fromPage("a", { channel: HOST_CHANNEL, kind: "responseHighlight", words: "entropy" });
+
+    // Act
+    host.show("b");
+
+    // Assert
+    expect(parsed(host.selection())).toMatchObject({ id: "b", held: null });
   });
 
   it("answers whether a text field of the shown page holds the keyboard", () => {
