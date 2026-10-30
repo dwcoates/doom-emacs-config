@@ -688,6 +688,17 @@ export function createHost(env: HostEnv): Host {
   };
 
   /**
+   * Hide PREVIOUS, the page a switch left: off screen, its pending switch
+   * start forgotten, and told it is no longer shown. Every switch hides the
+   * page it leaves through here, a page's show and a held-back page's alike.
+   */
+  const hideSwitchedFrom = (previous: Frame): void => {
+    applyShown(previous, false);
+    previous.pendingSwitchStartedAtMs = null;
+    post(previous, presenceOf(previous));
+  };
+
+  /**
    * Show ID's held-back page: its load button, in place of a page. The page
    * shown until now is hidden, as any switch hides it.
    */
@@ -695,11 +706,7 @@ export function createHost(env: HostEnv): Host {
     if (shownId === id) return answer("show", id, "unchanged");
     const previous = shownId === null ? undefined : frames.get(shownId);
     shownId = id;
-    if (previous !== undefined) {
-      applyShown(previous, false);
-      previous.pendingSwitchStartedAtMs = null;
-      post(previous, presenceOf(previous));
-    }
+    if (previous !== undefined) hideSwitchedFrom(previous);
     syncHeldBackShown();
     // THE SIDEBAR'S HIGHLIGHT MOVES WITH THE SWITCH, page or no page.
     shownListeners.notify(id);
@@ -787,11 +794,7 @@ export function createHost(env: HostEnv): Host {
       syncHeldBackShown();
       // A PAGE STILL WAITING ITS TURN loads now: it is the one wanted.
       const jumped = loadNow(next);
-      if (previous !== undefined) {
-        applyShown(previous, false);
-        previous.pendingSwitchStartedAtMs = null;
-        post(previous, presenceOf(previous));
-      }
+      if (previous !== undefined) hideSwitchedFrom(previous);
       applyShown(next, true);
       // A LISTENING PAGE IS TOLD THE SWITCH NOW; one still loading is told
       // with the presence its hello replays.

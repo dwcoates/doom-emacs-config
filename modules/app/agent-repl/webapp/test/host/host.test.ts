@@ -672,6 +672,38 @@ describe("a held-back page", () => {
   });
 });
 
+describe("the page a switch leaves", () => {
+  it.each([
+    ["a page", (h: Host) => pages(h, "b")],
+    ["a held-back page", (h: Host) => h.holdBack("b", "/ws/b")],
+  ])("is hidden and told so when the switch is to %s", (_name, arrive) => {
+    // Arrange
+    pages(host, "a");
+    host.show("a");
+    arrive(host);
+    fromPage("a", { channel: HOST_CHANNEL, kind: "hello" });
+    const posted = postsTo("a");
+
+    // Act
+    host.show("b");
+
+    // Assert
+    expect(frame("a").hasAttribute(FRAME_SHOWN_ATTRIBUTE)).toBe(false);
+    expect(posted).toContainEqual({ channel: HOST_CHANNEL, kind: "presence", shown: false });
+  });
+
+  it("is hidden through one step shared by both kinds of show", () => {
+    // Arrange
+    const source = readFileSync(path.join(import.meta.dirname, "../../src/host/host.ts"), "utf8");
+
+    // Act
+    const hand = source.match(/applyShown\(previous, false\)/g) ?? [];
+
+    // Assert
+    expect(hand).toHaveLength(1);
+  });
+});
+
 describe("remove", () => {
   it("drops the workspace's iframe", () => {
     // Arrange
