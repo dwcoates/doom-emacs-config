@@ -420,6 +420,21 @@ message RosterOpenRow {
   RosterOpenRowTab tab = 2;
   // The workspace's open children, in drawn order, each followed by its own.
   repeated RosterOpenRow children = 3;
+  // SET when this row is of a different repository than the row drawn just
+  // before it in its family (its parent, or its previous sibling): the
+  // repository it begins, drawn as a divider (a rule, the name, a rule) above
+  // the row, inset to the row's indent and ending where the rows' durations
+  // begin. A child of its parent's repository after a run of
+  // other-repository siblings carries its parent's repository. UNSET on a
+  // top-level row, and on a row of the same repository as the one before it.
+  optional RosterOpenRowRepositoryDivider repository_divider = 4;
+}
+
+// The repository a run of rows in a family begins, drawn as a divider above
+// its first row (RosterOpenRow.repository_divider).
+message RosterOpenRowRepositoryDivider {
+  // The repository's name, as its section is headed.
+  string name = 1;
 }
 
 // An open row's tab. THE DAEMON NUMBERS EVERY TAB, so the number the sidebar

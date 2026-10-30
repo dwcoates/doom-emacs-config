@@ -1259,11 +1259,6 @@ func TestSetWorkspaceParentMapsTheRetargetsRefusals(t *testing.T) {
 	}{
 		{"unknown parent", &workspace.Refusal{Arm: workspace.ArmUnknownParent, Reason: "gone", NotFound: true},
 			func(e *agentreplv1.SetWorkspaceParentError) bool { return e.GetUnknownParent() != nil }},
-		{"parent in another repository", &workspace.Refusal{Arm: workspace.ArmParentInOtherRepository, Reason: "foreign",
-			Fields: map[string]any{"parent_repository_dir": "/other"}},
-			func(e *agentreplv1.SetWorkspaceParentError) bool {
-				return e.GetParentInOtherRepository().GetParentRepositoryDir() == "/other"
-			}},
 		{"cycle", &workspace.Refusal{Arm: workspace.ArmCycle, Reason: "loop"},
 			func(e *agentreplv1.SetWorkspaceParentError) bool { return e.GetCycle() != nil }},
 		{"no merge layout", &workspace.Refusal{Arm: workspace.ArmNoMergeLayout, Reason: "registered"},

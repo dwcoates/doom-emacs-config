@@ -298,13 +298,36 @@ func (r *resolver) openRows(nodes []openNode, folded bool, numbers *tabNumberer,
 	return out
 }
 
-// openRow composes one open row, its tab, and its open family below it.
+// openRow composes one open row, its tab, and its open family below it. A
+// child of another repository than the row drawn just before it in the
+// family (its parent, or its previous sibling) begins a repository divider
+// naming its repository (frontend.v1.RosterOpenRow.repository_divider).
 func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc rowContext, log dlog.Logger) *frontendv1.RosterOpenRow {
 	out := &frontendv1.RosterOpenRow{Row: r.row(node.ws, rc, log), Tab: numbers.tab(folded)}
+	before := node.ws.Repo
 	for _, child := range node.children {
-		out.Children = append(out.Children, r.openRow(child, folded, numbers, rc, log))
+		row := r.openRow(child, folded, numbers, rc, log)
+		if child.ws.Repo != before {
+			row.RepositoryDivider = r.repositoryDivider(child.ws, log)
+		}
+		before = child.ws.Repo
+		out.Children = append(out.Children, row)
 	}
 	return out
+}
+
+// repositoryDivider names WS's repository as its section is headed. A
+// workspace whose repository the registry does not carry is an invariant
+// violation (assertRepositoryInvariant) and fails hard.
+func (r *resolver) repositoryDivider(ws wsm.Workspace, log dlog.Logger) *frontendv1.RosterOpenRowRepositoryDivider {
+	for _, repo := range r.state.reg.Repositories {
+		if repo.ID == ws.Repo {
+			return &frontendv1.RosterOpenRowRepositoryDivider{Name: repo.Name}
+		}
+	}
+	log.Error("daemon.sidebar.repository_divider", "a nested workspace names a repository the registry does not carry",
+		dlog.Context{"workspace_id": string(ws.ID), "repo_id": string(ws.Repo), "invariant_violation": "workspace.Repo names no registered repository"})
+	panic(fmt.Sprintf("sidebar: workspace %s names repository %s, which the registry does not carry", ws.ID, ws.Repo))
 }
 
 // OneShotSubsectionTitle is the one-shot subsection's header label.

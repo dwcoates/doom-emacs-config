@@ -56,16 +56,18 @@ func arrange(reg Registry, workspaces []wsm.Workspace) ([]repoArrangement, map[i
 	unsectioned := map[ids.RepoID][]wsm.Workspace{}
 	held := oneShotHeld(workspaces)
 	oneShot := map[ids.RepoID][]wsm.Workspace{}
+	section := sectionRepos(workspaces)
 	for _, ws := range workspaces {
+		repo := section[ws.ID]
 		if held[ws.ID] {
-			oneShot[ws.Repo] = append(oneShot[ws.Repo], ws)
+			oneShot[repo] = append(oneShot[repo], ws)
 			continue
 		}
 		if ws.Subsection != nil {
 			bySubsection[*ws.Subsection] = append(bySubsection[*ws.Subsection], ws)
 			continue
 		}
-		unsectioned[ws.Repo] = append(unsectioned[ws.Repo], ws)
+		unsectioned[repo] = append(unsectioned[repo], ws)
 	}
 	subsections := map[ids.RepoID][]wsm.Subsection{}
 	for _, sub := range sortSubsections(reg.Subsections) {
@@ -85,6 +87,25 @@ func arrange(reg Registry, workspaces []wsm.Workspace) ([]repoArrangement, map[i
 		unsectioned[repo] = append(unsectioned[repo], members...)
 	}
 	return out, unsectioned
+}
+
+// sectionRepos answers, for every workspace of WORKSPACES, the repository
+// whose section draws it: its FAMILY ROOT's (familyRoots). A FAMILY NEVER
+// SPLITS ACROSS SECTIONS, as it never splits across subsections: a child of
+// another repository than its parent's nests under that parent, in the
+// parent's section, where its row begins a repository divider
+// (frontend.v1.RosterOpenRow.repository_divider).
+func sectionRepos(workspaces []wsm.Workspace) map[ids.WorkspaceID]ids.RepoID {
+	root := familyRoots(workspaces)
+	repoOf := make(map[ids.WorkspaceID]ids.RepoID, len(workspaces))
+	for _, ws := range workspaces {
+		repoOf[ws.ID] = ws.Repo
+	}
+	out := make(map[ids.WorkspaceID]ids.RepoID, len(workspaces))
+	for _, ws := range workspaces {
+		out[ws.ID] = repoOf[root[ws.ID]]
+	}
+	return out
 }
 
 // oneShotHeld answers which of WORKSPACES the one-shot subsection holds: every

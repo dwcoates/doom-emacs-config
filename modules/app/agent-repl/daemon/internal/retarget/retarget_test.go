@@ -156,6 +156,13 @@ func TestRetargetNoticeNamesTheNewAndPreviousTargets(t *testing.T) {
 			"lands in the repository's main checkout at `/repo`, on its default branch `master`",
 			"used to land in the workspace `parent-ws`",
 		}},
+		{name: "to a parent of another repository", change: func() wsm.ParentChange {
+			c := toParent()
+			c.After.Dir, c.After.CrossRepository = "/repo", true
+			return c
+		}, want: []string{
+			"lands in the repository's main checkout at `/repo`, on its default branch `master`, under the workspace `parent-ws` of another repository, which owns it",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

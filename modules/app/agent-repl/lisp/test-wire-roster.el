@@ -916,6 +916,28 @@ message."
                   (agent-repl-test-wire-roster--open-row ""))
                  '("RosterOpenRowTab" tab "oneof is unset"))))
 
+(ert-deftest agent-repl-test-wire-roster-open-row-decodes-its-repository-divider ()
+  "An open row that begins another repository in its family names it."
+  (let ((decoded (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-open-row
+                  (format "{\"row\":%s,\"tab\":{\"numbered\":{\"number\":2}},\"repositoryDivider\":{\"name\":\"beta\"}}"
+                          (agent-repl-test-wire-roster--row "\"ready\":{}")))))
+    (should (equal (plist-get decoded :repository-divider) '(:name "beta")))))
+
+(ert-deftest agent-repl-test-wire-roster-open-row-without-a-divider-decodes-none ()
+  "An open row of the same repository as the row before it carries no divider."
+  (should-not (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-open-row
+                          (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":1}"))
+                         :repository-divider)))
+
+(ert-deftest agent-repl-test-wire-roster-a-divider-with-an-unknown-field-is-a-breach ()
+  "The divider's keys are checked like every other message's."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-open-row-repository-divider
+                  "{\"name\":\"beta\",\"color\":\"red\"}")
+                 '("RosterOpenRowRepositoryDivider" color "unknown field"))))
+
 (ert-deftest agent-repl-test-wire-roster-open-row-children-decode-recursively ()
   "An open family decodes as open rows, to any depth, in render order."
   (let* ((grandchild (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}"))

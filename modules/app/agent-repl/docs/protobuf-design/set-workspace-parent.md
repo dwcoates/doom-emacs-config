@@ -31,7 +31,7 @@ separate manual step that an orchestrating agent forgot in practice:
   `child_of` (a `WorkspaceRef` of the new parent) or `top_level`. Refusal arms:
   `unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`,
   `not_yet_adopted`, `unknown_parent`, `parent_ref_mismatch`,
-  `parent_in_other_repository`, `cycle`, `no_merge_layout`.
+  `parent_in_other_repository` (retired, see 3), `cycle`, `no_merge_layout`.
 - **Why**: the owner's agreed design (2026-10-11): set `wsm.Workspace.Parent`
   to another workspace of the same repository or clear it, with typed arms for
   unknown workspace, unknown parent, cross-repository parent, a cycle, and the
@@ -74,6 +74,21 @@ separate manual step that an orchestrating agent forgot in practice:
 - **Consequences**: `lisp/wire-common.el`'s
   `agent-repl-wire-shim-only-prompt-origins` lists it, since no client sends
   it.
+
+### 3. A parent of another repository nests and owns, and `parent_in_other_repository` is retired
+
+- **What**: `agentrepl.v1.SetWorkspaceParentError.parent_in_other_repository`
+  (field 7) and its message `SetWorkspaceParentParentInOtherRepository` are
+  retired (`reserved 7; reserved "parent_in_other_repository";`). A parent of
+  another repository is recorded as the workspace's parent: the roster nests
+  the workspace under it and it owns the workspace, but the merge target stays
+  the workspace's own repository's main checkout. `frontend.v1.RosterOpenRow.
+  repository_divider` names the repository a nested row begins.
+- **Why**: owner ruling (2026-10-29): workspaces of different repositories
+  may stand in a parent/child relation so a governing workspace keeps its
+  cross-repository work nested under it, drawn under a repository divider like
+  the deploy queue's. No branch crosses repositories, so only the landing
+  stays per repository.
 
 ## Open question for the owner (not a contract dispute)
 

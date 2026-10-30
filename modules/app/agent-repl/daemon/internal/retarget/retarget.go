@@ -138,10 +138,15 @@ func (s *Service) notify(ctx context.Context, change wsm.ParentChange) (ids.Turn
 
 // Describe names a merge target as the notice states it: the parent
 // workspace's name and checkout, or the repository's main checkout and the
-// default branch it lands on.
+// default branch it lands on, under a parent of another repository when it
+// has one.
 func Describe(target wsm.MergeTarget) string {
-	if target.Parent == nil {
-		return fmt.Sprintf("the repository's main checkout at `%s`, on its default branch `%s`", target.Dir, target.DefaultBranch)
+	main := fmt.Sprintf("the repository's main checkout at `%s`, on its default branch `%s`", target.Dir, target.DefaultBranch)
+	switch {
+	case target.Parent == nil:
+		return main
+	case target.CrossRepository:
+		return fmt.Sprintf("%s, under the workspace `%s` of another repository, which owns it", main, target.ParentName)
 	}
 	return fmt.Sprintf("the workspace `%s`, whose checkout is `%s`", target.ParentName, target.Dir)
 }

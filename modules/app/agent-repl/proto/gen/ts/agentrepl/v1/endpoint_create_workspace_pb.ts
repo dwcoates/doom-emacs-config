@@ -993,7 +993,7 @@ export type CreateWorkspaceError = Message<"agentrepl.v1.CreateWorkspaceError"> 
   } | {
     /**
      * The forked workspace (context_origin.fork) is not in the daemon's
-     * registry, or is in another repository.
+     * registry, in any repository.
      *
      * @generated from field: agentrepl.v1.CreateWorkspaceUnknownForkSource unknown_fork_source = 16;
      */

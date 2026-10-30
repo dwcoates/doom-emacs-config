@@ -9,7 +9,7 @@ import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/
 import { SelectInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
-import { RosterRowSchema, type RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { RosterOpenRowRepositoryDividerSchema, RosterRowSchema, type RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { liveElapsedClock, liveElapsedReading } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { heatColor } from "../../src/heat.js";
@@ -38,6 +38,8 @@ import {
   drawRosterFamily,
   pathedFamilies,
   noteSelectRoute,
+  REPOSITORY_DIVIDER_CLASS,
+  drawRosterOpenRowRepositoryDivider,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
 import { codeOf } from "../source-text.js";
@@ -876,6 +878,36 @@ describe("the family", () => {
     const bad = openRow(row({ id: "ws-1" }));
     bad.row = undefined;
     expect(() => drawRosterFamily(bad, sidebarContext(), "R")).toThrow(/R\.row/);
+  });
+});
+
+describe("the repository divider", () => {
+  /** A parent ws-1 whose children ws-2 and ws-3 carry the dividers given. */
+  function familyWithDividers(second?: string, third?: string): HTMLElement {
+    const family = openRow(row({ id: "ws-1", children: [row({ id: "ws-2" }), row({ id: "ws-3" })] }));
+    if (second !== undefined) family.children[0].repositoryDivider = create(RosterOpenRowRepositoryDividerSchema, { name: second });
+    if (third !== undefined) family.children[1].repositoryDivider = create(RosterOpenRowRepositoryDividerSchema, { name: third });
+    return drawRosterFamily(family, sidebarContext(), "R");
+  }
+
+  it("draws a child's divider just above it, naming its repository", () => {
+    const kids = familyWithDividers("beta").querySelector(".kids")!;
+    const divider = kids.querySelector(`.${REPOSITORY_DIVIDER_CLASS}`)!;
+    expect(divider.textContent).toBe("beta");
+    expect((divider.nextElementSibling as HTMLElement).getAttribute("data-roster-row")).toBe("ws-2");
+  });
+
+  it("draws no divider for a child that carries none", () => {
+    expect(familyWithDividers().querySelector(`.${REPOSITORY_DIVIDER_CLASS}`)).toBeNull();
+  });
+
+  it("draws one divider per child that carries one, in order", () => {
+    const names = [...familyWithDividers("beta", "alpha").querySelectorAll(`.${REPOSITORY_DIVIDER_CLASS}`)].map((d) => d.textContent);
+    expect(names).toEqual(["beta", "alpha"]);
+  });
+
+  it("refuses a divider naming no repository", () => {
+    expect(() => drawRosterOpenRowRepositoryDivider(create(RosterOpenRowRepositoryDividerSchema, { name: "" }), "R.d")).toThrow(/R\.d\.name/);
   });
 });
 

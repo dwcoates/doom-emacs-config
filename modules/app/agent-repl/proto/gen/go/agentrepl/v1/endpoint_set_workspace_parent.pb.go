@@ -4,7 +4,10 @@
 // A workspace's PARENT is its merge target and its roster nesting at once: a
 // child's merge lands in its parent's checkout, and a top-level workspace's
 // lands in its repository's main checkout on the default branch
-// (CreateWorkspaceRequest.parent). Creation records that choice; this rpc is
+// (CreateWorkspaceRequest.parent). A parent of ANOTHER repository is the
+// child's owner and nesting only: no branch crosses repositories, so such a
+// child's merge lands in its own repository's main checkout, on the default
+// branch, while the roster nests it under that parent. Creation records that choice; this rpc is
 // the one way to change it afterwards. The roster nests the workspace under
 // its new parent, or at the top level, on its next push.
 //
@@ -48,8 +51,8 @@ type SetWorkspaceParentRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The workspace being retargeted, echoed from its roster row.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	// THE ARM IS THE NEW MERGE TARGET: another workspace of the same
-	// repository, or the repository's main checkout. Unset is a malformed
+	// THE ARM IS THE NEW MERGE TARGET: another workspace (of another
+	// repository, its owner only), or the repository's main checkout. Unset is a malformed
 	// request (Connect InvalidArgument), never "top-level": clearing a parent
 	// changes where work lands, so it is asked for by name. Asking for the
 	// parent a workspace already has is NOT refused; it re-sends the notice.
@@ -141,14 +144,15 @@ func (*SetWorkspaceParentRequest_ChildOf) isSetWorkspaceParentRequest_Parent() {
 
 func (*SetWorkspaceParentRequest_TopLevel) isSetWorkspaceParentRequest_Parent() {}
 
-// Make the workspace a CHILD of another workspace: its merge lands in that
-// workspace's checkout, on that workspace's branch, and the roster nests it
-// there.
+// Make the workspace a CHILD of another workspace: the roster nests it there,
+// and its merge lands in that workspace's checkout, on that workspace's
+// branch, when the two are of one repository, or in its own repository's main
+// checkout when they are not.
 type SetWorkspaceParentChild struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The new parent, echoed from its roster row. It must be a registered
-	// workspace of the SAME repository, and neither the retargeted workspace
-	// itself nor one of its descendants.
+	// workspace of any repository, and neither the retargeted workspace itself
+	// nor one of its descendants.
 	Parent        *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=parent,proto3" json:"parent,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -365,7 +369,6 @@ type SetWorkspaceParentError struct {
 	//	*SetWorkspaceParentError_NotYetAdopted
 	//	*SetWorkspaceParentError_UnknownParent
 	//	*SetWorkspaceParentError_ParentRefMismatch
-	//	*SetWorkspaceParentError_ParentInOtherRepository
 	//	*SetWorkspaceParentError_Cycle
 	//	*SetWorkspaceParentError_NoMergeLayout
 	//	*SetWorkspaceParentError_ColdGate
@@ -466,15 +469,6 @@ func (x *SetWorkspaceParentError) GetParentRefMismatch() *SetWorkspaceParentPare
 	return nil
 }
 
-func (x *SetWorkspaceParentError) GetParentInOtherRepository() *SetWorkspaceParentParentInOtherRepository {
-	if x != nil {
-		if x, ok := x.Cause.(*SetWorkspaceParentError_ParentInOtherRepository); ok {
-			return x.ParentInOtherRepository
-		}
-	}
-	return nil
-}
-
 func (x *SetWorkspaceParentError) GetCycle() *SetWorkspaceParentCycle {
 	if x != nil {
 		if x, ok := x.Cause.(*SetWorkspaceParentError_Cycle); ok {
@@ -547,12 +541,6 @@ type SetWorkspaceParentError_ParentRefMismatch struct {
 	ParentRefMismatch *SetWorkspaceParentParentRefMismatch `protobuf:"bytes,6,opt,name=parent_ref_mismatch,json=parentRefMismatch,proto3,oneof"`
 }
 
-type SetWorkspaceParentError_ParentInOtherRepository struct {
-	// The new parent belongs to a different repository; a merge only lands
-	// within one repository.
-	ParentInOtherRepository *SetWorkspaceParentParentInOtherRepository `protobuf:"bytes,7,opt,name=parent_in_other_repository,json=parentInOtherRepository,proto3,oneof"`
-}
-
 type SetWorkspaceParentError_Cycle struct {
 	// The new parent is the workspace itself or one of its descendants, so
 	// the family would become a cycle and no merge would ever reach the main
@@ -590,8 +578,6 @@ func (*SetWorkspaceParentError_NotYetAdopted) isSetWorkspaceParentError_Cause() 
 func (*SetWorkspaceParentError_UnknownParent) isSetWorkspaceParentError_Cause() {}
 
 func (*SetWorkspaceParentError_ParentRefMismatch) isSetWorkspaceParentError_Cause() {}
-
-func (*SetWorkspaceParentError_ParentInOtherRepository) isSetWorkspaceParentError_Cause() {}
 
 func (*SetWorkspaceParentError_Cycle) isSetWorkspaceParentError_Cause() {}
 
@@ -851,53 +837,6 @@ func (x *SetWorkspaceParentParentRefMismatch) GetRegistryDir() string {
 	return ""
 }
 
-// The new parent is a workspace of another repository.
-type SetWorkspaceParentParentInOtherRepository struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The main checkout of the repository the parent belongs to, so the
-	// refusal names where the parent actually lives.
-	ParentRepositoryDir string `protobuf:"bytes,1,opt,name=parent_repository_dir,json=parentRepositoryDir,proto3" json:"parent_repository_dir,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
-}
-
-func (x *SetWorkspaceParentParentInOtherRepository) Reset() {
-	*x = SetWorkspaceParentParentInOtherRepository{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetWorkspaceParentParentInOtherRepository) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetWorkspaceParentParentInOtherRepository) ProtoMessage() {}
-
-func (x *SetWorkspaceParentParentInOtherRepository) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetWorkspaceParentParentInOtherRepository.ProtoReflect.Descriptor instead.
-func (*SetWorkspaceParentParentInOtherRepository) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *SetWorkspaceParentParentInOtherRepository) GetParentRepositoryDir() string {
-	if x != nil {
-		return x.ParentRepositoryDir
-	}
-	return ""
-}
-
 // The new parent is the retargeted workspace or one of its descendants.
 // DELIBERATELY EMPTY: the request named both ends of the would-be cycle.
 type SetWorkspaceParentCycle struct {
@@ -908,7 +847,7 @@ type SetWorkspaceParentCycle struct {
 
 func (x *SetWorkspaceParentCycle) Reset() {
 	*x = SetWorkspaceParentCycle{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -920,7 +859,7 @@ func (x *SetWorkspaceParentCycle) String() string {
 func (*SetWorkspaceParentCycle) ProtoMessage() {}
 
 func (x *SetWorkspaceParentCycle) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[13]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -933,7 +872,7 @@ func (x *SetWorkspaceParentCycle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceParentCycle.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceParentCycle) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP(), []int{13}
+	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP(), []int{12}
 }
 
 // The workspace has no merge geometry to retarget. DELIBERATELY EMPTY.
@@ -945,7 +884,7 @@ type SetWorkspaceParentNoMergeLayout struct {
 
 func (x *SetWorkspaceParentNoMergeLayout) Reset() {
 	*x = SetWorkspaceParentNoMergeLayout{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -957,7 +896,7 @@ func (x *SetWorkspaceParentNoMergeLayout) String() string {
 func (*SetWorkspaceParentNoMergeLayout) ProtoMessage() {}
 
 func (x *SetWorkspaceParentNoMergeLayout) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[14]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -970,7 +909,7 @@ func (x *SetWorkspaceParentNoMergeLayout) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceParentNoMergeLayout.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceParentNoMergeLayout) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP(), []int{14}
+	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP(), []int{13}
 }
 
 // The workspace's session is parked at its cold gate. DELIBERATELY EMPTY: the
@@ -983,7 +922,7 @@ type SetWorkspaceParentColdGate struct {
 
 func (x *SetWorkspaceParentColdGate) Reset() {
 	*x = SetWorkspaceParentColdGate{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -995,7 +934,7 @@ func (x *SetWorkspaceParentColdGate) String() string {
 func (*SetWorkspaceParentColdGate) ProtoMessage() {}
 
 func (x *SetWorkspaceParentColdGate) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[15]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1008,7 +947,7 @@ func (x *SetWorkspaceParentColdGate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceParentColdGate.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceParentColdGate) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP(), []int{15}
+	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP(), []int{14}
 }
 
 var File_agentrepl_v1_endpoint_set_workspace_parent_proto protoreflect.FileDescriptor
@@ -1028,21 +967,20 @@ const file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2'.agentrepl.v1.SetWorkspaceParentSuccessH\x00R\asuccess\x12=\n" +
 	"\x05error\x18\x02 \x01(\v2%.agentrepl.v1.SetWorkspaceParentErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1b\n" +
-	"\x19SetWorkspaceParentSuccess\"\x91\b\n" +
+	"\x19SetWorkspaceParentSuccess\"\xbb\a\n" +
 	"\x17SetWorkspaceParentError\x12_\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v20.agentrepl.v1.SetWorkspaceParentUnknownWorkspaceH\x00R\x10unknownWorkspace\x12l\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v24.agentrepl.v1.SetWorkspaceParentWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12_\n" +
 	"\x11transferring_away\x18\x03 \x01(\v20.agentrepl.v1.SetWorkspaceParentTransferringAwayH\x00R\x10transferringAway\x12W\n" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2-.agentrepl.v1.SetWorkspaceParentNotYetAdoptedH\x00R\rnotYetAdopted\x12V\n" +
 	"\x0eunknown_parent\x18\x05 \x01(\v2-.agentrepl.v1.SetWorkspaceParentUnknownParentH\x00R\runknownParent\x12c\n" +
-	"\x13parent_ref_mismatch\x18\x06 \x01(\v21.agentrepl.v1.SetWorkspaceParentParentRefMismatchH\x00R\x11parentRefMismatch\x12v\n" +
-	"\x1aparent_in_other_repository\x18\a \x01(\v27.agentrepl.v1.SetWorkspaceParentParentInOtherRepositoryH\x00R\x17parentInOtherRepository\x12=\n" +
+	"\x13parent_ref_mismatch\x18\x06 \x01(\v21.agentrepl.v1.SetWorkspaceParentParentRefMismatchH\x00R\x11parentRefMismatch\x12=\n" +
 	"\x05cycle\x18\b \x01(\v2%.agentrepl.v1.SetWorkspaceParentCycleH\x00R\x05cycle\x12W\n" +
 	"\x0fno_merge_layout\x18\t \x01(\v2-.agentrepl.v1.SetWorkspaceParentNoMergeLayoutH\x00R\rnoMergeLayout\x12G\n" +
 	"\tcold_gate\x18\n" +
 	" \x01(\v2(.agentrepl.v1.SetWorkspaceParentColdGateH\x00R\bcoldGate\x12N\n" +
 	"\x0fparent_not_open\x18\v \x01(\v2$.agentrepl.v1.WorkspaceParentNotOpenH\x00R\rparentNotOpenB\a\n" +
-	"\x05cause\"$\n" +
+	"\x05causeJ\x04\b\a\x10\bR\x1aparent_in_other_repository\"$\n" +
 	"\"SetWorkspaceParentUnknownWorkspace\"K\n" +
 	"&SetWorkspaceParentWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\">\n" +
@@ -1051,9 +989,7 @@ const file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc = "" +
 	"\x1fSetWorkspaceParentNotYetAdopted\"!\n" +
 	"\x1fSetWorkspaceParentUnknownParent\"H\n" +
 	"#SetWorkspaceParentParentRefMismatch\x12!\n" +
-	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"_\n" +
-	")SetWorkspaceParentParentInOtherRepository\x122\n" +
-	"\x15parent_repository_dir\x18\x01 \x01(\tR\x13parentRepositoryDir\"\x19\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"\x19\n" +
 	"\x17SetWorkspaceParentCycle\"!\n" +
 	"\x1fSetWorkspaceParentNoMergeLayout\"\x1c\n" +
 	"\x1aSetWorkspaceParentColdGateB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
@@ -1070,32 +1006,31 @@ func file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP() []byte 
 	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_agentrepl_v1_endpoint_set_workspace_parent_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_endpoint_set_workspace_parent_proto_goTypes = []any{
-	(*SetWorkspaceParentRequest)(nil),                 // 0: agentrepl.v1.SetWorkspaceParentRequest
-	(*SetWorkspaceParentChild)(nil),                   // 1: agentrepl.v1.SetWorkspaceParentChild
-	(*SetWorkspaceParentTopLevel)(nil),                // 2: agentrepl.v1.SetWorkspaceParentTopLevel
-	(*SetWorkspaceParentResponse)(nil),                // 3: agentrepl.v1.SetWorkspaceParentResponse
-	(*SetWorkspaceParentSuccess)(nil),                 // 4: agentrepl.v1.SetWorkspaceParentSuccess
-	(*SetWorkspaceParentError)(nil),                   // 5: agentrepl.v1.SetWorkspaceParentError
-	(*SetWorkspaceParentUnknownWorkspace)(nil),        // 6: agentrepl.v1.SetWorkspaceParentUnknownWorkspace
-	(*SetWorkspaceParentWorkspaceRefMismatch)(nil),    // 7: agentrepl.v1.SetWorkspaceParentWorkspaceRefMismatch
-	(*SetWorkspaceParentTransferringAway)(nil),        // 8: agentrepl.v1.SetWorkspaceParentTransferringAway
-	(*SetWorkspaceParentNotYetAdopted)(nil),           // 9: agentrepl.v1.SetWorkspaceParentNotYetAdopted
-	(*SetWorkspaceParentUnknownParent)(nil),           // 10: agentrepl.v1.SetWorkspaceParentUnknownParent
-	(*SetWorkspaceParentParentRefMismatch)(nil),       // 11: agentrepl.v1.SetWorkspaceParentParentRefMismatch
-	(*SetWorkspaceParentParentInOtherRepository)(nil), // 12: agentrepl.v1.SetWorkspaceParentParentInOtherRepository
-	(*SetWorkspaceParentCycle)(nil),                   // 13: agentrepl.v1.SetWorkspaceParentCycle
-	(*SetWorkspaceParentNoMergeLayout)(nil),           // 14: agentrepl.v1.SetWorkspaceParentNoMergeLayout
-	(*SetWorkspaceParentColdGate)(nil),                // 15: agentrepl.v1.SetWorkspaceParentColdGate
-	(*v1.WorkspaceRef)(nil),                           // 16: workspace.v1.WorkspaceRef
-	(*WorkspaceParentNotOpen)(nil),                    // 17: agentrepl.v1.WorkspaceParentNotOpen
+	(*SetWorkspaceParentRequest)(nil),              // 0: agentrepl.v1.SetWorkspaceParentRequest
+	(*SetWorkspaceParentChild)(nil),                // 1: agentrepl.v1.SetWorkspaceParentChild
+	(*SetWorkspaceParentTopLevel)(nil),             // 2: agentrepl.v1.SetWorkspaceParentTopLevel
+	(*SetWorkspaceParentResponse)(nil),             // 3: agentrepl.v1.SetWorkspaceParentResponse
+	(*SetWorkspaceParentSuccess)(nil),              // 4: agentrepl.v1.SetWorkspaceParentSuccess
+	(*SetWorkspaceParentError)(nil),                // 5: agentrepl.v1.SetWorkspaceParentError
+	(*SetWorkspaceParentUnknownWorkspace)(nil),     // 6: agentrepl.v1.SetWorkspaceParentUnknownWorkspace
+	(*SetWorkspaceParentWorkspaceRefMismatch)(nil), // 7: agentrepl.v1.SetWorkspaceParentWorkspaceRefMismatch
+	(*SetWorkspaceParentTransferringAway)(nil),     // 8: agentrepl.v1.SetWorkspaceParentTransferringAway
+	(*SetWorkspaceParentNotYetAdopted)(nil),        // 9: agentrepl.v1.SetWorkspaceParentNotYetAdopted
+	(*SetWorkspaceParentUnknownParent)(nil),        // 10: agentrepl.v1.SetWorkspaceParentUnknownParent
+	(*SetWorkspaceParentParentRefMismatch)(nil),    // 11: agentrepl.v1.SetWorkspaceParentParentRefMismatch
+	(*SetWorkspaceParentCycle)(nil),                // 12: agentrepl.v1.SetWorkspaceParentCycle
+	(*SetWorkspaceParentNoMergeLayout)(nil),        // 13: agentrepl.v1.SetWorkspaceParentNoMergeLayout
+	(*SetWorkspaceParentColdGate)(nil),             // 14: agentrepl.v1.SetWorkspaceParentColdGate
+	(*v1.WorkspaceRef)(nil),                        // 15: workspace.v1.WorkspaceRef
+	(*WorkspaceParentNotOpen)(nil),                 // 16: agentrepl.v1.WorkspaceParentNotOpen
 }
 var file_agentrepl_v1_endpoint_set_workspace_parent_proto_depIdxs = []int32{
-	16, // 0: agentrepl.v1.SetWorkspaceParentRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	15, // 0: agentrepl.v1.SetWorkspaceParentRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.SetWorkspaceParentRequest.child_of:type_name -> agentrepl.v1.SetWorkspaceParentChild
 	2,  // 2: agentrepl.v1.SetWorkspaceParentRequest.top_level:type_name -> agentrepl.v1.SetWorkspaceParentTopLevel
-	16, // 3: agentrepl.v1.SetWorkspaceParentChild.parent:type_name -> workspace.v1.WorkspaceRef
+	15, // 3: agentrepl.v1.SetWorkspaceParentChild.parent:type_name -> workspace.v1.WorkspaceRef
 	4,  // 4: agentrepl.v1.SetWorkspaceParentResponse.success:type_name -> agentrepl.v1.SetWorkspaceParentSuccess
 	5,  // 5: agentrepl.v1.SetWorkspaceParentResponse.error:type_name -> agentrepl.v1.SetWorkspaceParentError
 	6,  // 6: agentrepl.v1.SetWorkspaceParentError.unknown_workspace:type_name -> agentrepl.v1.SetWorkspaceParentUnknownWorkspace
@@ -1104,16 +1039,15 @@ var file_agentrepl_v1_endpoint_set_workspace_parent_proto_depIdxs = []int32{
 	9,  // 9: agentrepl.v1.SetWorkspaceParentError.not_yet_adopted:type_name -> agentrepl.v1.SetWorkspaceParentNotYetAdopted
 	10, // 10: agentrepl.v1.SetWorkspaceParentError.unknown_parent:type_name -> agentrepl.v1.SetWorkspaceParentUnknownParent
 	11, // 11: agentrepl.v1.SetWorkspaceParentError.parent_ref_mismatch:type_name -> agentrepl.v1.SetWorkspaceParentParentRefMismatch
-	12, // 12: agentrepl.v1.SetWorkspaceParentError.parent_in_other_repository:type_name -> agentrepl.v1.SetWorkspaceParentParentInOtherRepository
-	13, // 13: agentrepl.v1.SetWorkspaceParentError.cycle:type_name -> agentrepl.v1.SetWorkspaceParentCycle
-	14, // 14: agentrepl.v1.SetWorkspaceParentError.no_merge_layout:type_name -> agentrepl.v1.SetWorkspaceParentNoMergeLayout
-	15, // 15: agentrepl.v1.SetWorkspaceParentError.cold_gate:type_name -> agentrepl.v1.SetWorkspaceParentColdGate
-	17, // 16: agentrepl.v1.SetWorkspaceParentError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	12, // 12: agentrepl.v1.SetWorkspaceParentError.cycle:type_name -> agentrepl.v1.SetWorkspaceParentCycle
+	13, // 13: agentrepl.v1.SetWorkspaceParentError.no_merge_layout:type_name -> agentrepl.v1.SetWorkspaceParentNoMergeLayout
+	14, // 14: agentrepl.v1.SetWorkspaceParentError.cold_gate:type_name -> agentrepl.v1.SetWorkspaceParentColdGate
+	16, // 15: agentrepl.v1.SetWorkspaceParentError.parent_not_open:type_name -> agentrepl.v1.WorkspaceParentNotOpen
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_workspace_parent_proto_init() }
@@ -1137,7 +1071,6 @@ func file_agentrepl_v1_endpoint_set_workspace_parent_proto_init() {
 		(*SetWorkspaceParentError_NotYetAdopted)(nil),
 		(*SetWorkspaceParentError_UnknownParent)(nil),
 		(*SetWorkspaceParentError_ParentRefMismatch)(nil),
-		(*SetWorkspaceParentError_ParentInOtherRepository)(nil),
 		(*SetWorkspaceParentError_Cycle)(nil),
 		(*SetWorkspaceParentError_NoMergeLayout)(nil),
 		(*SetWorkspaceParentError_ColdGate)(nil),
@@ -1149,7 +1082,7 @@ func file_agentrepl_v1_endpoint_set_workspace_parent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc), len(file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

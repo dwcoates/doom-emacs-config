@@ -1360,12 +1360,21 @@ func TestCreateDerivations(t *testing.T) {
 		{name: "a fresh child is its owner's to land", parent: "owner", notice: "fix the parser", wantLands: true, wantBase: "ABC/owner"},
 		{name: "a child forked from another workspace is its owner's to land and notes both", parent: "owner", fork: "other", notice: "use other's plan",
 			wantLands: true, wantBase: "ABC/owner", wantNote: "FORK OF other ON the branch of the workspace `owner`"},
+		{name: "a top-level fork of another repository's workspace notes both repositories", fork: "elsewhere", wantBase: "master",
+			wantNote: "FORK OF elsewhere ON the primary branch of the repository at `{repo}`, not the repository at `{elsewhere}` that `elsewhere` is of"},
+		{name: "a child forked from another repository's workspace is its owner's to land and notes both repositories", parent: "owner", fork: "elsewhere",
+			notice: "use elsewhere's plan", wantLands: true, wantBase: "ABC/owner",
+			wantNote: "FORK OF elsewhere ON the branch of the workspace `owner` of the repository at `{repo}`, not the repository at `{elsewhere}` that `elsewhere` is of"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			f, spec, owner, other := derivationFixture(t)
-			byName := map[string]ids.WorkspaceID{"owner": owner.ID, "other": other.ID}
+			elsewhereRepo := mainWorktree(t, f)
+			elsewhere := f.workspaceInRepo(t, "elsewhere", elsewhereRepo)
+			f.db.sessions[elsewhere.ID] = wsm.Session{Workspace: elsewhere.ID, VendorSessionID: "vendor-elsewhere"}
+			byName := map[string]ids.WorkspaceID{"owner": owner.ID, "other": other.ID, "elsewhere": elsewhere.ID}
+			wantNote := strings.NewReplacer("{repo}", spec.RepoDir, "{elsewhere}", elsewhereRepo).Replace(tc.wantNote)
 			if tc.parent != "" {
 				id := byName[tc.parent]
 				spec.Parent = &id
@@ -1397,14 +1406,85 @@ func TestCreateDerivations(t *testing.T) {
 			if tc.wantNote == "" && strings.Contains(first, "FORK OF") {
 				t.Errorf("first message = %q, want no forked-elsewhere note", first)
 			}
-			if tc.wantNote != "" && !strings.Contains(first, tc.wantNote) {
-				t.Errorf("first message = %q, want the note %q", first, tc.wantNote)
+			if wantNote != "" && !strings.Contains(first, wantNote) {
+				t.Errorf("first message = %q, want the note %q", first, wantNote)
 			}
 			want := []derivedEvent{{workspace: created.ID, ownerNotice: tc.notice}}
 			if !reflect.DeepEqual(f.derived.events, want) {
 				t.Errorf("derived events = %+v, want %+v", f.derived.events, want)
 			}
 		})
+	}
+}
+
+func TestCreateAChildOfAnOwnerOfAnotherRepository(t *testing.T) {
+	tests := []struct {
+		name      string
+		fork      bool
+		notice    string
+		wantLands bool
+	}{
+		{name: "forked from its owner, it lands itself", fork: true},
+		{name: "fresh, it is its owner's to land", notice: "build the proto side", wantLands: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f, spec, _, _ := derivationFixture(t)
+			elsewhere := f.workspaceInRepo(t, "elsewhere", mainWorktree(t, f))
+			f.db.sessions[elsewhere.ID] = wsm.Session{Workspace: elsewhere.ID, VendorSessionID: "vendor-elsewhere"}
+			spec.Parent = &elsewhere.ID
+			if tc.fork {
+				spec.ForkFrom = &elsewhere.ID
+			}
+			spec.OwnerNotice = tc.notice
+
+			// Act.
+			_, err := f.verbs.Create(context.Background(), spec)
+
+			// Assert: nested under and owned by the owner, but cut from and
+			// landing on its own repository's primary branch.
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			facts := f.db.registered[len(f.db.registered)-1]
+			if facts.Parent == nil || *facts.Parent != elsewhere.ID || facts.OwnerLands != tc.wantLands {
+				t.Errorf("parent = %v, owner lands = %v, want %s and %v", facts.Parent, facts.OwnerLands, elsewhere.ID, tc.wantLands)
+			}
+			if got := f.git.created[0].BaseRef; got != "master" {
+				t.Errorf("base = %q, want the own repository's primary branch", got)
+			}
+			if got := f.db.putJobs[0].Layout.TargetDir; got != spec.RepoDir {
+				t.Errorf("target dir = %q, want the own repository's main checkout %q", got, spec.RepoDir)
+			}
+		})
+	}
+}
+
+func TestCreateFailsWhenTheOwnersRepositoryCannotBeResolved(t *testing.T) {
+	// Arrange: the owner names a repository the registry does not carry.
+	f, spec, owner, _ := derivationFixture(t)
+	owner.Repo = "repo-gone"
+	f.db.with(owner)
+	id := owner.ID
+	spec.Parent, spec.ForkFrom = &id, &id
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Create succeeded, want the registry failure")
+	}
+	if len(f.git.created) != 0 {
+		t.Fatalf("worktrees %v, want nothing built", f.git.created)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Message: "could not resolve the repository of the child's owner"})
+	if !ok {
+		t.Fatalf("records = %+v, want the owner's repository failure at ERROR", f.log.logger.Records())
+	}
+	if record.Context["owner"] != string(owner.ID) || record.Context["repo_dir"] != spec.RepoDir {
+		t.Errorf("context = %v, want the owner and the repo_dir", record.Context)
 	}
 }
 
@@ -1451,20 +1531,10 @@ func TestCreateRefusesADerivationItCannotBuild(t *testing.T) {
 				id := ids.WorkspaceID("nope")
 				spec.Parent = &id
 			}},
-		{name: "an owner of another repository", wantArm: ArmUnknownOwner,
-			arrange: func(f *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
-				elsewhere := f.workspaceInRepo(t, "elsewhere", mainWorktree(t, f))
-				spec.Parent, spec.ForkFrom = &elsewhere.ID, &elsewhere.ID
-			}},
 		{name: "a fork source the registry does not hold", wantArm: ArmUnknownForkSource,
 			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
 				id := ids.WorkspaceID("nope")
 				spec.ForkFrom = &id
-			}},
-		{name: "a fork source of another repository", wantArm: ArmUnknownForkSource,
-			arrange: func(f *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
-				elsewhere := f.workspaceInRepo(t, "elsewhere", mainWorktree(t, f))
-				spec.ForkFrom = &elsewhere.ID
 			}},
 		{name: "a requester the registry does not hold", wantArm: ArmUnknownRequester,
 			arrange: func(_ *fixture, spec *CreateSpec, _, _ wsm.Workspace) {
@@ -1639,11 +1709,12 @@ func TestCreateNotesShareTheWorkspaceNoteComposition(t *testing.T) {
 	// own brief and values, so the two agree byte for byte.
 	f := newFixture(t)
 	forkedElsewhereBrief(f)
-	source := f.workspace("source", t.TempDir())
+	repoDir := mainWorktree(t, f)
+	source := f.workspaceInRepo(t, "source", repoDir)
 	v := f.mutable(t)
 
 	// Act.
-	fork, forkErr := v.decorateForkedElsewhere(context.Background(), f.log.logger, "raw", source.ID, nil)
+	fork, forkErr := v.decorateForkedElsewhere(context.Background(), f.log.logger, "raw", source.ID, nil, repoDir)
 	shared, sharedErr := v.decorateWithWorkspaceNote(context.Background(), f.log.logger, "raw", BriefForkedElsewhere, source.ID,
 		func(ws wsm.Workspace) map[string]string {
 			return map[string]string{"origin": ws.Name, "source": "the primary branch"}
@@ -1652,6 +1723,91 @@ func TestCreateNotesShareTheWorkspaceNoteComposition(t *testing.T) {
 	// Assert.
 	if forkErr != nil || sharedErr != nil || fork != shared {
 		t.Fatalf("fork note = (%q, %v), shared = (%q, %v), want them equal", fork, forkErr, shared, sharedErr)
+	}
+}
+
+func TestRegisteredAnswersAWorkspaceOfAnyRepository(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(f *fixture) ids.WorkspaceID
+		wantFound bool
+		wantErr   bool
+	}{
+		{name: "a workspace of another repository is found", wantFound: true,
+			arrange: func(f *fixture) ids.WorkspaceID { return f.workspaceInRepo(t, "elsewhere", mainWorktree(t, f)).ID }},
+		{name: "an unregistered workspace is nil",
+			arrange: func(*fixture) ids.WorkspaceID { return "nope" }},
+		{name: "a registry that cannot be read is an error", wantErr: true,
+			arrange: func(f *fixture) ids.WorkspaceID {
+				f.db.workspaceErr = errors.New("registry down")
+				return "any"
+			}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			repoDir := mainWorktree(t, f)
+			id := tc.arrange(f)
+			v := f.mutable(t)
+
+			// Act.
+			got, err := v.registered(context.Background(), f.log.logger, id, repoDir, "fork source")
+
+			// Assert.
+			if (err != nil) != tc.wantErr || (got != nil) != tc.wantFound {
+				t.Fatalf("registered = (%v, %v), want found %v, err %v", got, err, tc.wantFound, tc.wantErr)
+			}
+			if tc.wantFound && got.ID != id {
+				t.Errorf("ID = %s, want %s", got.ID, id)
+			}
+			record, logged := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opCreate})
+			if logged != tc.wantErr {
+				t.Fatalf("ERROR logged = %v, want %v (records %+v)", logged, tc.wantErr, f.log.logger.Records())
+			}
+			if tc.wantErr && (record.Context["workspace"] != string(id) || record.Context["role"] != "fork source" || record.Context["repo_dir"] != repoDir) {
+				t.Errorf("context = %v, want the workspace, role and repo_dir", record.Context)
+			}
+		})
+	}
+}
+
+func TestCreateForkedElsewhereNoteFailsWhenTheSourceCannotBeRead(t *testing.T) {
+	tests := []struct {
+		name        string
+		arrange     func(f *fixture)
+		wantMessage string
+	}{
+		{name: "the fork source read fails", wantMessage: "could not read the workspace a forked note names",
+			arrange: func(f *fixture) { f.db.workspaceErr = errors.New("registry down") }},
+		{name: "the fork source's repository read fails", wantMessage: "could not resolve the repository of the workspace a forked note names",
+			arrange: func(f *fixture) { f.db.listRepositoriesErr = errors.New("registry down") }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			forkedElsewhereBrief(f)
+			repoDir := mainWorktree(t, f)
+			source := f.workspaceInRepo(t, "source", repoDir)
+			v := f.mutable(t)
+			tc.arrange(f)
+
+			// Act.
+			got, err := v.decorateForkedElsewhere(context.Background(), f.log.logger, "raw", source.ID, nil, repoDir)
+
+			// Assert.
+			if err == nil || got != "" {
+				t.Fatalf("decorated = (%q, %v), want an error and no text", got, err)
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opCreate, Message: tc.wantMessage})
+			if !ok {
+				t.Fatalf("records = %+v, want the ERROR %q", f.log.logger.Records(), tc.wantMessage)
+			}
+			if record.Context["fork_from"] != string(source.ID) {
+				t.Errorf("fork_from = %v, want %s", record.Context["fork_from"], source.ID)
+			}
+		})
 	}
 }
 

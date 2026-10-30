@@ -84,9 +84,6 @@ func parentRefusal(log dlog.Logger, refused *wsm.ParentRefusedError) *Refusal {
 	switch refused.Refusal {
 	case wsm.ParentUnknown:
 		return refuse(log, rpcSetParent, ArmUnknownParent, reason, true)
-	case wsm.ParentOtherRepository:
-		return refuseWith(log, rpcSetParent, ArmParentInOtherRepository, reason, false,
-			map[string]any{"parent_repository_dir": refused.ParentRepositoryDir})
 	case wsm.ParentCycle:
 		return refuse(log, rpcSetParent, ArmCycle, reason, false)
 	case wsm.ParentNoMergeLayout:

@@ -233,7 +233,11 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 				return wsm.Workspace{}, fmt.Errorf("create %q: %w", branch, err)
 			}
 		}
-		if baseRef == "" {
+		ownBranch, err := v.sharesRepository(ctx, global, parentRecord, repoDir)
+		if err != nil {
+			return wsm.Workspace{}, fmt.Errorf("create %q: %w", branch, err)
+		}
+		if baseRef == "" && ownBranch {
 			baseRef = parentRecord.Branch
 		}
 		if priority == nil && origin == nil {
@@ -270,7 +274,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	if origin != nil {
 		targetDir, actions, parentBranch = origin.TargetDir, origin.Hooks, origin.ParentBranch
 	} else {
-		targetDir, err = v.mergeTargetDir(ctx, repoDir, parent)
+		targetDir, err = v.mergeTargetDir(ctx, global, repoDir, parent)
 		if err != nil {
 			global.Error(opCreate, "could not resolve the merge target directory", dlog.Context{"cause": err.Error()})
 			return wsm.Workspace{}, fmt.Errorf("create %q: merge target: %w", branch, err)
@@ -719,8 +723,9 @@ func (v *verbs) forkableParentSession(ctx context.Context, log dlog.Logger, pare
 
 // mergeTargetDir answers where this workspace's merge will land: the PARENT
 // workspace's worktree when it was cut from one, otherwise the repository's
-// main worktree. It is recorded at creation and never inferred later.
-func (v *verbs) mergeTargetDir(ctx context.Context, repoDir string, parent *ids.WorkspaceID) (string, error) {
+// main worktree (a top-level workspace, or a child of a parent of another
+// repository). It is recorded at creation and never inferred later.
+func (v *verbs) mergeTargetDir(ctx context.Context, log dlog.Logger, repoDir string, parent *ids.WorkspaceID) (string, error) {
 	if parent == nil {
 		return repoDir, nil
 	}
@@ -728,7 +733,27 @@ func (v *verbs) mergeTargetDir(ctx context.Context, repoDir string, parent *ids.
 	if err != nil {
 		return "", fmt.Errorf("parent workspace %q: %w", *parent, err)
 	}
+	ownBranch, err := v.sharesRepository(ctx, log, record, repoDir)
+	if err != nil {
+		return "", err
+	}
+	if !ownBranch {
+		return repoDir, nil
+	}
 	return record.Dir, nil
+}
+
+// sharesRepository reports whether OWNER is a workspace of the repository at
+// REPODIR, whose branch a child of it is cut from and lands into. An owner of
+// another repository owns and nests its child but lends it no branch. A
+// registry that cannot say is recorded at ERROR and returned.
+func (v *verbs) sharesRepository(ctx context.Context, log dlog.Logger, owner wsm.Workspace, repoDir string) (bool, error) {
+	dir, err := v.repoDirOf(ctx, owner)
+	if err != nil {
+		log.Error(opCreate, "could not resolve the repository of the child's owner", dlog.WithCause(dlog.Context{"owner": string(owner.ID), "repo_dir": repoDir}, err))
+		return false, fmt.Errorf("the owner %q's repository: %w", owner.ID, err)
+	}
+	return samePath(dir, repoDir), nil
 }
 
 // forkRefusalArm is the arm a fork whose source has no conversation is refused
@@ -786,7 +811,7 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 	}
 	text := spec.InitialPrompt
 	if spec.forkedElsewhere() {
-		decorated, err := v.decorateForkedElsewhere(ctx, log, text, *spec.ForkFrom, spec.Parent)
+		decorated, err := v.decorateForkedElsewhere(ctx, log, text, *spec.ForkFrom, spec.Parent, spec.RepoDir)
 		if err != nil {
 			return refuse(log, "CreateWorkspace", ArmBriefMissing, err.Error(), false)
 		}
@@ -927,11 +952,12 @@ const BriefForkedElsewhere = "workspace-forked-elsewhere-preamble"
 
 // decorateForkedElsewhere opens the first message with the BriefForkedElsewhere
 // note naming the workspace the conversation came from and what the worktree
-// was cut from instead (the primary branch, or the owner's branch),
-// meta-wrapped so the drawn bubble is the user's words alone. A brief that will
-// not load or splice fails the create loudly rather than sending the prompt
-// undecorated.
-func (v *verbs) decorateForkedElsewhere(ctx context.Context, log dlog.Logger, raw string, from ids.WorkspaceID, owner *ids.WorkspaceID) (string, error) {
+// was cut from instead (the primary branch, or the owner's branch), and the
+// repository at REPODIR that branch is of when the conversation came from a
+// workspace of another repository, meta-wrapped so the drawn bubble is the
+// user's words alone. A brief that will not load or splice fails the create
+// loudly rather than sending the prompt undecorated.
+func (v *verbs) decorateForkedElsewhere(ctx context.Context, log dlog.Logger, raw string, from ids.WorkspaceID, owner *ids.WorkspaceID, repoDir string) (string, error) {
 	source := "the primary branch"
 	if owner != nil {
 		record, err := v.deps.DB.Workspace(ctx, *owner)
@@ -940,6 +966,19 @@ func (v *verbs) decorateForkedElsewhere(ctx context.Context, log dlog.Logger, ra
 			return "", fmt.Errorf("read the owner %q the forked-elsewhere note names: %w", *owner, err)
 		}
 		source = "the branch of the workspace `" + record.Name + "`"
+	}
+	origin, err := v.deps.DB.Workspace(ctx, from)
+	if err != nil {
+		log.Error(opCreate, "could not read the workspace a forked note names", dlog.WithCause(dlog.Context{"fork_from": string(from)}, err))
+		return "", fmt.Errorf("read the fork source %q the forked-elsewhere note names: %w", from, err)
+	}
+	originDir, err := v.repoDirOf(ctx, origin)
+	if err != nil {
+		log.Error(opCreate, "could not resolve the repository of the workspace a forked note names", dlog.WithCause(dlog.Context{"fork_from": string(from)}, err))
+		return "", fmt.Errorf("resolve the repository of the fork source %q: %w", from, err)
+	}
+	if !samePath(originDir, repoDir) {
+		source += " of the repository at `" + repoDir + "`, not the repository at `" + originDir + "` that `" + origin.Name + "` is of"
 	}
 	return v.decorateWithWorkspaceNote(ctx, log, raw, BriefForkedElsewhere, from,
 		func(origin wsm.Workspace) map[string]string {
@@ -1092,25 +1131,31 @@ func (v *verbs) checkDerivation(ctx context.Context, log dlog.Logger, spec Creat
 			return fmt.Errorf("create: requester %q: %w", *spec.Requester, err)
 		}
 	}
+	// AN OWNER MAY BE OF ANY REPOSITORY: one of another repository nests and
+	// owns the child, which is cut from and lands on its own repository's
+	// primary branch, since no branch crosses repositories.
 	if spec.Parent != nil {
-		owner, err := v.inRepository(ctx, log, *spec.Parent, repoDir, "owner")
+		owner, err := v.registered(ctx, log, *spec.Parent, repoDir, "owner")
 		if err != nil {
 			return err
 		}
 		if owner == nil {
 			return refuseWith(log, "CreateWorkspace", ArmUnknownOwner,
-				fmt.Sprintf("no workspace %q of this repository owns a branch to cut from", *spec.Parent), true,
+				fmt.Sprintf("no workspace %q is registered to own the child", *spec.Parent), true,
 				map[string]any{"owner": &workspacev1.WorkspaceRef{Id: string(*spec.Parent)}})
 		}
 	}
+	// A FORK SOURCE MAY BE OF ANY REPOSITORY: the fork copies a conversation,
+	// never a branch, and every fork already lands in a worktree other than
+	// its source's, so a workspace of another repository forks the same way.
 	if spec.ForkFrom != nil {
-		source, err := v.inRepository(ctx, log, *spec.ForkFrom, repoDir, "fork source")
+		source, err := v.registered(ctx, log, *spec.ForkFrom, repoDir, "fork source")
 		if err != nil {
 			return err
 		}
 		if source == nil {
 			return refuseWith(log, "CreateWorkspace", ArmUnknownForkSource,
-				fmt.Sprintf("no workspace %q of this repository holds a conversation to fork", *spec.ForkFrom), true,
+				fmt.Sprintf("no workspace %q is registered to hold a conversation to fork", *spec.ForkFrom), true,
 				map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(*spec.ForkFrom)}})
 		}
 	}
@@ -1149,28 +1194,17 @@ func (v *verbs) checkDerivation(ctx context.Context, log dlog.Logger, spec Creat
 	return nil
 }
 
-// inRepository answers the registered workspace ID when it belongs to the
-// repository at repoDir, nil when it is unregistered or of another
-// repository, and an error recorded at ERROR when the registry cannot say.
-func (v *verbs) inRepository(ctx context.Context, log dlog.Logger, id ids.WorkspaceID, repoDir, role string) (*wsm.Workspace, error) {
-	fields := dlog.Context{"role": role, "workspace": string(id), "repo_dir": repoDir}
+// registered answers the registered workspace ID of any repository, nil when
+// it is unregistered, and an error recorded at ERROR when the registry cannot
+// say. REPODIR is the create's repository, carried for the log alone.
+func (v *verbs) registered(ctx context.Context, log dlog.Logger, id ids.WorkspaceID, repoDir, role string) (*wsm.Workspace, error) {
 	record, err := v.deps.DB.Workspace(ctx, id)
 	if errors.Is(err, wsm.ErrNotFound) {
 		return nil, nil
 	}
 	if err != nil {
-		log.Error(opCreate, "could not read a workspace the create names", dlog.WithCause(fields, err))
+		log.Error(opCreate, "could not read a workspace the create names", dlog.WithCause(dlog.Context{"role": role, "workspace": string(id), "repo_dir": repoDir}, err))
 		return nil, fmt.Errorf("create: %s %q: %w", role, id, err)
-	}
-	dir, err := v.repoDirOf(ctx, record)
-	if err != nil {
-		log.Error(opCreate, "could not resolve the repository of a workspace the create names", dlog.WithCause(fields, err))
-		return nil, fmt.Errorf("create: %s %q: %w", role, id, err)
-	}
-	if !samePath(dir, repoDir) {
-		fields["its_repo_dir"] = dir
-		log.Info(opCreate, "a workspace the create names is of another repository", fields)
-		return nil, nil
 	}
 	return &record, nil
 }

@@ -39,9 +39,6 @@ const (
 	// ArmUnknownParent is a retarget naming a parent the registry does not
 	// hold (SetWorkspaceParentError.unknown_parent).
 	ArmUnknownParent = "unknown_parent"
-	// ArmParentInOtherRepository is a retarget naming a parent of another
-	// repository. The arm carries `parent_repository_dir`.
-	ArmParentInOtherRepository = "parent_in_other_repository"
 	// ArmCycle is a retarget naming the workspace itself or one of its
 	// descendants as its parent.
 	ArmCycle = "cycle"
@@ -97,7 +94,7 @@ const (
 	// origin's primary branch failed.
 	ArmOriginFetchFailed = "origin_fetch_failed"
 	// ArmUnknownForkSource is a create whose context forks a workspace the
-	// registry does not hold in the create's repository.
+	// registry does not hold, in any repository.
 	ArmUnknownForkSource = "unknown_fork_source"
 	// ArmUnknownRequester is a create whose requesting workspace the registry
 	// does not hold.

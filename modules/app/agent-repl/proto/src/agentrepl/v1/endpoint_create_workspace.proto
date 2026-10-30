@@ -451,7 +451,7 @@ message CreateWorkspaceError {
     // a temporary directory.
     CreateWorkspaceInsideTemporaryDirectory inside_temporary_directory = 14;
     // The forked workspace (context_origin.fork) is not in the daemon's
-    // registry, or is in another repository.
+    // registry, in any repository.
     CreateWorkspaceUnknownForkSource unknown_fork_source = 16;
     // The forked workspace has no conversation to fork.
     CreateWorkspaceForkSourceHasNoConversation fork_source_has_no_conversation = 17;

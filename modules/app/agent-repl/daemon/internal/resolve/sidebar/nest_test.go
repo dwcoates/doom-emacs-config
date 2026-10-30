@@ -4,7 +4,10 @@ import (
 	"agentrepl/protohelpers/rosterwalk"
 	"testing"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/wsm"
 )
 
 func TestRosterDoesNotNestAWorkspaceUnderTheBranchItWasCutFrom(t *testing.T) {
@@ -258,5 +261,94 @@ func TestRosterStillNestsARecordedChildCutFromTheDefaultBranch(t *testing.T) {
 	}
 	if got := rowNames(innerRows(rows[0].GetChildren())); !equal(got, []string{"fork"}) {
 		t.Fatalf("children = %v, want the recorded child", got)
+	}
+}
+
+// crossRepositoryFamily is a parent of repo with, in order, two children of
+// otherRepo and then one of its own repository, all in one registry carrying
+// both repositories.
+func crossRepositoryFamily() sidebar.Registry {
+	parent := placed(workspace("w-p", "parent"), 1)
+	first := placed(workspace("w-b1", "beta-one"), 2)
+	second := placed(workspace("w-b2", "beta-two"), 3)
+	own := placed(workspace("w-a1", "alpha-one"), 4)
+	for _, ws := range []*wsm.Workspace{&first, &second} {
+		ws.Repo, ws.Dir = otherRepo.ID, "/repos/two/"+string(ws.ID)
+	}
+	for _, ws := range []*wsm.Workspace{&first, &second, &own} {
+		ws.Parent = &parent.ID
+	}
+	reg := registry(parent, first, second, own)
+	reg.Repositories = append(reg.Repositories, otherRepo)
+	return reg
+}
+
+func TestRosterNestsAChildOfAnotherRepositoryUnderItsParent(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(crossRepositoryFamily())
+
+	// Assert: the family stays whole in its root's section, and the other
+	// repository's section draws none of it.
+	sections := latest(t, r).GetRepository().GetSections()
+	if len(sections) != 2 {
+		t.Fatalf("sections = %d, want both repositories", len(sections))
+	}
+	alpha := rosterwalk.UnsectionedRows(sections[0])
+	if len(alpha) != 1 || rowNames(innerRows(alpha))[0] != "parent" {
+		t.Fatalf("alpha's rows = %v, want the parent alone at the top level", rowNames(innerRows(alpha)))
+	}
+	if got := rowNames(innerRows(alpha[0].GetChildren())); !equal(got, []string{"beta-one", "beta-two", "alpha-one"}) {
+		t.Fatalf("children = %v, want all three under the parent", got)
+	}
+	if beta := rosterwalk.UnsectionedRows(sections[1]); len(beta) != 0 {
+		t.Fatalf("beta's rows = %v, want none", rowNames(innerRows(beta)))
+	}
+}
+
+func TestRosterDividesAFamilyWhereItsRepositoryChanges(t *testing.T) {
+	tests := []struct {
+		name  string
+		child int
+		want  string
+	}{
+		{name: "the first child of another repository names it", child: 0, want: "beta"},
+		{name: "a sibling of the same repository as the one before draws none", child: 1, want: ""},
+		{name: "a child of the parent's repository after other-repository siblings names it", child: 2, want: "alpha"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+
+			// Act.
+			r.SetRegistry(crossRepositoryFamily())
+
+			// Assert.
+			parent := rosterwalk.UnsectionedRows(latest(t, r).GetRepository().GetSections()[0])[0]
+			child := parent.GetChildren()[tc.child]
+			if got := child.GetRepositoryDivider().GetName(); got != tc.want || (tc.want == "") != (child.RepositoryDivider == nil) {
+				t.Fatalf("divider = %v, want %q", child.GetRepositoryDivider(), tc.want)
+			}
+			if parent.RepositoryDivider != nil {
+				t.Fatalf("the top-level row carries a divider %v, want none", parent.GetRepositoryDivider())
+			}
+		})
+	}
+}
+
+func TestTheTabBarWalksAChildOfAnotherRepositoryWithItsFamily(t *testing.T) {
+	// Act.
+	got := sidebar.Tabs(crossRepositoryFamily(), dlog.NewTestLogger())
+
+	// Assert.
+	var tabs []string
+	for _, tab := range got {
+		tabs = append(tabs, string(tab.Workspace.ID))
+	}
+	if !equal(tabs, []string{"w-p", "w-b1", "w-b2", "w-a1"}) {
+		t.Fatalf("tabs = %v, want the family depth-first in its root's section", tabs)
 	}
 }

@@ -4,7 +4,10 @@
 // A workspace's PARENT is its merge target and its roster nesting at once: a
 // child's merge lands in its parent's checkout, and a top-level workspace's
 // lands in its repository's main checkout on the default branch
-// (CreateWorkspaceRequest.parent). Creation records that choice; this rpc is
+// (CreateWorkspaceRequest.parent). A parent of ANOTHER repository is the
+// child's owner and nesting only: no branch crosses repositories, so such a
+// child's merge lands in its own repository's main checkout, on the default
+// branch, while the roster nests it under that parent. Creation records that choice; this rpc is
 // the one way to change it afterwards. The roster nests the workspace under
 // its new parent, or at the top level, on its next push.
 //
@@ -32,8 +35,8 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 message SetWorkspaceParentRequest {
   // The workspace being retargeted, echoed from its roster row.
   workspace.v1.WorkspaceRef workspace = 1;
-  // THE ARM IS THE NEW MERGE TARGET: another workspace of the same
-  // repository, or the repository's main checkout. Unset is a malformed
+  // THE ARM IS THE NEW MERGE TARGET: another workspace (of another
+  // repository, its owner only), or the repository's main checkout. Unset is a malformed
   // request (Connect InvalidArgument), never "top-level": clearing a parent
   // changes where work lands, so it is asked for by name. Asking for the
   // parent a workspace already has is NOT refused; it re-sends the notice.
@@ -43,13 +46,14 @@ message SetWorkspaceParentRequest {
   }
 }
 
-// Make the workspace a CHILD of another workspace: its merge lands in that
-// workspace's checkout, on that workspace's branch, and the roster nests it
-// there.
+// Make the workspace a CHILD of another workspace: the roster nests it there,
+// and its merge lands in that workspace's checkout, on that workspace's
+// branch, when the two are of one repository, or in its own repository's main
+// checkout when they are not.
 message SetWorkspaceParentChild {
   // The new parent, echoed from its roster row. It must be a registered
-  // workspace of the SAME repository, and neither the retargeted workspace
-  // itself nor one of its descendants.
+  // workspace of any repository, and neither the retargeted workspace itself
+  // nor one of its descendants.
   workspace.v1.WorkspaceRef parent = 1;
 }
 
@@ -75,6 +79,10 @@ message SetWorkspaceParentSuccess {}
 // id) are Connect InvalidArgument, never an arm. Nothing is changed and no
 // notice is sent on any of them.
 message SetWorkspaceParentError {
+  // `parent_in_other_repository` (field 7) is RETIRED: a parent of another
+  // repository is its child's owner and nesting, never refused.
+  reserved 7;
+  reserved "parent_in_other_repository";
   oneof cause {
     // The retargeted workspace's id is not in the daemon's registry.
     SetWorkspaceParentUnknownWorkspace unknown_workspace = 1;
@@ -90,9 +98,6 @@ message SetWorkspaceParentError {
     // The new parent's echoed dir disagrees with the registry's dir for its
     // id.
     SetWorkspaceParentParentRefMismatch parent_ref_mismatch = 6;
-    // The new parent belongs to a different repository; a merge only lands
-    // within one repository.
-    SetWorkspaceParentParentInOtherRepository parent_in_other_repository = 7;
     // The new parent is the workspace itself or one of its descendants, so
     // the family would become a cycle and no merge would ever reach the main
     // branch.
@@ -138,12 +143,6 @@ message SetWorkspaceParentParentRefMismatch {
   string registry_dir = 1;
 }
 
-// The new parent is a workspace of another repository.
-message SetWorkspaceParentParentInOtherRepository {
-  // The main checkout of the repository the parent belongs to, so the
-  // refusal names where the parent actually lives.
-  string parent_repository_dir = 1;
-}
 
 // The new parent is the retargeted workspace or one of its descendants.
 // DELIBERATELY EMPTY: the request named both ends of the would-be cycle.
