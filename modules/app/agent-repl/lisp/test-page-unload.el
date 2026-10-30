@@ -481,20 +481,20 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
     (should (agent-repl-test-pu--said-p "elisp.page-unload.kept" "ws=alpha" "why=in-use-since-report"))))
 
 (ert-deftest agent-repl-test-pu-an-idle-page-within-the-hold-is-held ()
-  "An idle page loaded within the hold stays."
+  "An idle page within the hold after its last prompt stays."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
-    (agent-repl--ws-put "alpha" :page-loaded-at 900)
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
     (should-not agent-repl-test-pu--dropped)))
 
 (ert-deftest agent-repl-test-pu-an-idle-page-past-the-hold-is-unloaded ()
-  "An idle page held longer than the hold since its load is unloaded, and recorded."
+  "An idle page past the hold after its last prompt is unloaded, and recorded."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
-    (agent-repl--ws-put "alpha" :page-loaded-at 400)
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 400000)))
     ;; Act
     (let ((unloaded (agent-repl-page-unload-pass)))
       ;; Assert
@@ -511,6 +511,52 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
     (agent-repl-page-unload-pass)
     ;; Assert
     (should-not agent-repl-test-pu--dropped)))
+
+(ert-deftest agent-repl-test-pu-loading-a-page-never-restarts-the-idle-hold ()
+  "A page loaded just now, an hour past its last prompt, is unloaded off screen."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-loaded-at 1000)
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 400000)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal agent-repl-test-pu--dropped '("alpha")))))
+
+(ert-deftest agent-repl-test-pu-an-idle-page-with-no-prompt-is-past-its-hold ()
+  "An idle workspace never prompted holds its page only while shown."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-loaded-at 1000)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal agent-repl-test-pu--dropped '("alpha")))))
+
+(ert-deftest agent-repl-test-pu-a-visit-within-the-hold-is-kept-past-the-grace ()
+  "A page put back for a look within the hour after its last prompt stays."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--pages '("beta")
+          agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-page-unload-note-shown "beta")
+    ;; Act
+    (agent-repl-test-pu--grace-ends)
+    ;; Assert
+    (should-not agent-repl-test-pu--dropped)))
+
+(ert-deftest agent-repl-test-pu-a-look-does-not-move-the-holds-end ()
+  "A page put back for a look reports the hold's end its last prompt set."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil
+          agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
+    ;; Act
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Assert
+    (should (equal (plist-get (plist-get (agent-repl-page-unload-residency "alpha") :value) :release)
+                   '(:arm :at :value (:unix-ms 1400000))))))
 
 (ert-deftest agent-repl-test-pu-a-working-page-is-held-however-old ()
   "A working workspace's page is never unloaded off screen."
@@ -909,10 +955,10 @@ naming a dead buffer, and every switch back found its panels closed."
     (should-not agent-repl-test-pu--dropped)))
 
 (ert-deftest agent-repl-test-pu-switching-away-from-a-held-idle-page-keeps-it ()
-  "An idle page that was not a visit stays within its hold."
+  "An idle page within the hour after its last prompt stays."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha" "beta")
-    (agent-repl--ws-put "alpha" :page-loaded-at 900)
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
     (agent-repl-page-unload-note-shown "alpha")
     ;; Act
     (agent-repl-page-unload-note-shown "beta")
@@ -976,10 +1022,10 @@ naming a dead buffer, and every switch back found its panels closed."
     (should (eq (agent-repl-test-pu--release "alpha") :held))))
 
 (ert-deftest agent-repl-test-pu-an-idle-page-reports-its-holds-end ()
-  "An idle page that is no visit reports the instant its hold ends."
+  "An idle page within its hold reports the instant its hold ends."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
-    (agent-repl--ws-put "alpha" :page-loaded-at 900)
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
     ;; Act
     (let ((residency (agent-repl-page-unload-residency "alpha")))
       ;; Assert

@@ -88,7 +88,9 @@
 
 (defcustom agent-repl-page-unload-after 3600
   "Seconds an IDLE workspace's page is held after its last prompt.
-An hour (owner ruling, 2026-10-29)."
+An hour (owner ruling, 2026-10-29), counted from the end of the last
+prompt's turn only: showing or loading the page never restarts it (owner
+ruling, 2026-10-29)."
   :type 'integer
   :group 'agent-repl-page-unload)
 
@@ -232,9 +234,9 @@ as a flag beside them."
 (defun agent-repl-page-unload--return (ws)
   "Put WS's unloaded page back in the host, its slot being shown.
 The slot and its windows stood throughout; only the page comes back.  A
-page put back for a workspace that is not working is a VISIT: it is
-unloaded when the user switches away unless the workspace started working
-meanwhile (`agent-repl-page-unload--reason')."
+page put back for a workspace that is not working is a VISIT, which names
+its unload: it is held like any idle page, the hour after the last prompt
+\(`agent-repl-page-unload--reason'), and its look restarts nothing."
   (agent-repl--ws-put ws :page-visit
                       (not (eq (agent-repl-page-unload--ws-bucket ws) 'working)))
   (agent-repl-page-unload-note-mounted ws)
@@ -243,9 +245,11 @@ meanwhile (`agent-repl-page-unload--reason')."
   (agent-repl-webhost-ensure-page ws))
 
 (defun agent-repl-page-unload--idle-since (ws)
-  "When WS's idle hold began: its last turn's end or its page's load, later."
-  (max (/ (or (agent-repl-roster-last-turn-ended-ms ws) 0) 1000.0)
-       (or (agent-repl--ws-get ws :page-loaded-at) 0)))
+  "When WS's idle hold began: the end of its last prompt's turn, 0 for none.
+NEVER THE PAGE'S LOAD OR SHOW (owner ruling, 2026-10-29): switching to a
+workspace without prompting it leaves the hour running from its last
+prompt, so a page loaded for a look is held only what is left of it."
+  (/ (or (agent-repl-roster-last-turn-ended-ms ws) 0) 1000.0))
 
 (defun agent-repl-page-unload--reason (ws now)
   "Why WS's held page should be unloaded at NOW, or nil when it is held.
@@ -261,9 +265,10 @@ working on its own, and either way it is held as working."
      ((agent-repl-page-unload--withheld-p ws) 'hidden)
      ((memq bucket '(nil working)) nil)
      ((not (eq bucket 'idle)) bucket)
-     ((agent-repl--ws-get ws :page-visit) 'visited)
+     ;; AN IDLE PAGE IS HELD THE HOUR AFTER ITS LAST PROMPT however it was
+     ;; loaded; one loaded only for a look says so when it goes.
      ((> (- now (agent-repl-page-unload--idle-since ws)) agent-repl-page-unload-after)
-      'idle))))
+      (if (agent-repl--ws-get ws :page-visit) 'visited 'idle)))))
 
 (defun agent-repl-page-unload--holdable-p (ws)
   "The page of WS, when it is one a pass may unload, else nil.
@@ -361,9 +366,10 @@ before anyone switches to it (owner ruling, 2026-10-29)."
   "What Emacs holds of WS\='s page now, as a `PageResidency' plist.
 Not loaded, or loaded with the rule that lets it go: held while working
 (or with no status yet), unloaded at the idle hold\='s end for an idle
-page that is not a visit, and unloaded on the switch away for everything
-else (`agent-repl-page-unload--reason').  The daemon serves it on the
-rail\='s workspace memory hover (endpoint_report_page_residency.proto)."
+page within the hour after its last prompt, and unloaded on the switch
+away for everything else (`agent-repl-page-unload--reason').  The daemon
+serves it on the rail\='s workspace memory hover
+\(endpoint_report_page_residency.proto)."
   (if (not (agent-repl-webhost-has-page-p ws))
       (list :arm :not-loaded :value nil)
     (let ((bucket (agent-repl-page-unload--ws-bucket ws)))
@@ -375,7 +381,8 @@ rail\='s workspace memory hover (endpoint_report_page_residency.proto)."
                            (list :arm :held :value nil))
                           ((and (eq bucket 'idle)
                                 (not (agent-repl-page-unload--withheld-p ws))
-                                (not (agent-repl--ws-get ws :page-visit)))
+                                (<= (- (agent-repl-page-unload--now) (agent-repl-page-unload--idle-since ws))
+                                    agent-repl-page-unload-after))
                            (list :arm :at
                                  :value (list :unix-ms
                                               (round (* 1000 (+ (agent-repl-page-unload--idle-since ws)
