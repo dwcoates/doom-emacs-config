@@ -3,7 +3,7 @@
 // says what agent-repl holds in memory taken as a whole, and a workspace
 // row's hover, which says what that one workspace holds.
 //
-// EVERY FIGURE IS MEASURED. The process collector's latest scrape
+// EVERY FIGURE IS MEASURED. The process collector's latest sample
 // (procmetrics.Collector.Latest) gives each process group's physical
 // footprint, the stall detector (stallbeat) the page process's recent stalls,
 // and Emacs's reports (ReportPageResidency, kept here) each page's residency.
@@ -25,7 +25,7 @@ import (
 
 // Deps are the popups' sources, every one required.
 type Deps struct {
-	// Processes is the collector's latest scrape.
+	// Processes is the collector's latest sample.
 	Processes interface {
 		Latest() (procmetrics.Snapshot, bool)
 	}
@@ -80,7 +80,7 @@ func (p *Popups) Report(ws ids.WorkspaceID, residency *agentreplv1.PageResidency
 	return nil
 }
 
-// ErrMeasurementFailed is the latest scrape having failed to list the host's
+// ErrMeasurementFailed is the latest sample having failed to list the host's
 // processes; the collector logged its cause.
 var ErrMeasurementFailed = errors.New("memorypopup: the latest process sample could not list the host's processes")
 
@@ -104,7 +104,7 @@ func isShim(process string) bool {
 	return process == procmetrics.ProcessShim || process == procmetrics.ProcessShimTools
 }
 
-// Overview answers the version hover's popup, nil when no scrape has run yet.
+// Overview answers the version hover's popup, nil when no sample has run yet.
 // OPEN keeps the reported residencies of workspaces still open; a closed
 // workspace's last report is not counted.
 func (p *Popups) Overview(open func(ids.WorkspaceID) bool) (*frontendv1.SidebarMemoryOverview, error) {

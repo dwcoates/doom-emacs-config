@@ -229,8 +229,8 @@ type GetMemoryOverviewSuccess_Measured struct {
 }
 
 type GetMemoryOverviewSuccess_NotYetMeasured struct {
-	// No sample yet: the collector samples on the metrics store's scrape,
-	// seconds after the daemon starts.
+	// No sample yet: the daemon samples once just after it starts serving
+	// (and every minute after), so this answers only in that first moment.
 	NotYetMeasured *GetMemoryOverviewNotYetMeasured `protobuf:"bytes,2,opt,name=not_yet_measured,json=notYetMeasured,proto3,oneof"`
 }
 
