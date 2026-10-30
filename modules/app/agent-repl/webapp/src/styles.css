@@ -280,11 +280,15 @@
      detached-work jump landed on. A selected BUBBLE is marked by its fill
      instead (--selected-bubble-bg, below). */
   --selected-entry: #2563eb;
+  /* THE CANONICAL ORANGE (owner ruling, 2026-10-30): the one orange a new
+     use of orange reads, rather than a hue of its own (webapp/AGENTS.md
+     "THE CANONICAL ORANGE"). It is the answered branch's pastel orange. */
+  --canonical-orange: #e08a4c;
   /* AN ANSWERED BRANCH'S LABEL (owner request, 2026-10-26): a pastel orange
      on both ends of an answer, the prompt's entry labels and the response's
      linked labels alike (feed/entries.ts). An entry's implied ancestor wears
      the very same shade, never dimmed (owner request, 2026-10-27). */
-  --answer-label: #e08a4c;
+  --answer-label: var(--canonical-orange);
   /* THE SELECTED BUBBLE's fill (owner ruling, 2026-10-11): a neutral grey, a
      little lighter than the response bubble's own --assistant (the tool
      card's #eef1f4, the same day's ruling), worn
@@ -652,8 +656,9 @@
     /* Brighter blue for the dark theme, as the other state borders lift, so
        the selected-entry ring still reads against the dark page. */
     --selected-entry: #6498da;
-    /* The answered label's pastel orange, lifted for the dark page. */
-    --answer-label: #d99866;
+    /* The canonical orange, the answered label's pastel orange lifted for the
+       dark page. --answer-label reads it from :root. */
+    --canonical-orange: #d99866;
     /* A moderate grey a little lighter than the dark --assistant (the dark
        --tool-card-bg, #191918). */
     --selected-bubble-bg: #313130;
@@ -1201,11 +1206,10 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   font-weight: 600;
 }
 #ws-sidebar .sb-subsection-head .sb-count { font-size: 0.85em; }
-/* A SUBSECTION'S NAME IS THE ONE PURPLE (owner request, 2026-10-24,
-   superseding the repository headers' colour it wore from 2026-10-20), the
-   purple status --blocked the bands' headers wear, folded or not. Its
-   triangle and count keep the header's own colour. */
-#ws-sidebar .sb-subsection-label { color: var(--blocked); }
+/* A SUBSECTION'S NAME IS THE CANONICAL ORANGE (owner request, 2026-10-30,
+   superseding the --blocked purple it wore from 2026-10-24), folded or not.
+   Its triangle and count keep the header's own colour. */
+#ws-sidebar .sb-subsection-label { color: var(--canonical-orange); }
 #ws-sidebar .sb-subsection-delete {
   margin-left: auto;
   border: 0;
@@ -1820,6 +1824,10 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    full text color or, for a name held at its status tone, a brighter tone,
    and never dims below the resting ink. It still never changes
    size (owner ruling, 2026-10-14). */
+@keyframes ws-pulse-tone {
+  0%, 100% { color: var(--name-dark); }
+  50% { color: var(--name-bright); }
+}
 @keyframes ws-pulse {
   0%, 100% { color: var(--name-rest); }
   50% { color: var(--name-peak); }
@@ -6591,15 +6599,31 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar { --name-fade: 600s; }
 #ws-sidebar .row .name.tinted {
   --name-rest: var(--name-tone);
-  --name-peak: color-mix(in srgb, var(--name-tone) 55%, var(--fg));
+  --name-dark: color-mix(in srgb, var(--name-tone) 74%, var(--bg));
+  --name-bright: color-mix(in srgb, var(--name-tone) 86%, var(--fg));
   color: var(--name-tone);
 }
 #ws-sidebar .row .name.fading {
   animation: name-fade var(--name-fade) linear var(--name-fade-delay, 0s) 1 both;
 }
+/* THE FADE HOLDS, THEN ACCELERATES (owner request, 2026-10-29): the name keeps
+   its tone for the first half of the window, then fades along a logarithmic
+   progression, -ln(1 - 0.86 u) / -ln(0.14) over the second half: gentle at
+   first and steepening at the end, so the last 15% of the fade carries about
+   a third of the color change. The stops are that curve sampled every tenth,
+   each a mix of the tone and the resting grey. */
 @keyframes name-fade {
-  from { color: var(--name-tone); }
-  to { color: var(--name-rest); }
+  0%, 50% { color: var(--name-tone); }
+  55% { color: color-mix(in srgb, var(--name-tone) 95.4%, var(--name-rest)); }
+  60% { color: color-mix(in srgb, var(--name-tone) 90.4%, var(--name-rest)); }
+  65% { color: color-mix(in srgb, var(--name-tone) 84.8%, var(--name-rest)); }
+  70% { color: color-mix(in srgb, var(--name-tone) 78.6%, var(--name-rest)); }
+  75% { color: color-mix(in srgb, var(--name-tone) 71.4%, var(--name-rest)); }
+  80% { color: color-mix(in srgb, var(--name-tone) 63.1%, var(--name-rest)); }
+  85% { color: color-mix(in srgb, var(--name-tone) 53.1%, var(--name-rest)); }
+  90% { color: color-mix(in srgb, var(--name-tone) 40.8%, var(--name-rest)); }
+  95% { color: color-mix(in srgb, var(--name-tone) 24.4%, var(--name-rest)); }
+  100% { color: var(--name-rest); }
 }
 /* The glyph statuses are not discs: a box that centers a picture, so a
    breathing glyph shrinks about its own center. The box is the DOT'S width,
@@ -6663,6 +6687,10 @@ bubble-body.bubble-body { display: block; }
    background and the breath the opacity. */
 #ws-sidebar { --ws-mark-cycle: 2s; --ws-revive-cycle: 2.4s; }
 #ws-sidebar .row .name.breathes { animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite; }
+/* A COLORED NAME BREATHES BOTH WAYS (owner request, 2026-10-29): evenly darker
+   and brighter about its tone, with a shallower swing than the grey names'
+   brightening alone. */
+#ws-sidebar .row .name.tinted.breathes { animation: ws-pulse-tone var(--ws-mark-cycle) ease-in-out infinite; }
 #ws-sidebar .row .name.breathes.reviving {
   animation: ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite, ws-pulse var(--ws-mark-cycle) ease-in-out infinite;
 }
