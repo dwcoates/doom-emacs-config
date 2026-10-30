@@ -32,6 +32,9 @@ a main-checkout directory), its topology and its context:
   runs, when the work must start from what is pushed rather than the local
   main branch.
   `-topology child -owner WS` is cut from WS's branch and lands into WS.
+  WS may be of another repository: then the child nests under and is owned
+  by WS, but is cut from and lands on its own repository's main branch,
+  since no branch crosses repositories.
 - `-context fresh` starts an empty conversation. `-context fork -fork WS`
   copies WS's conversation (cut at its last concluded turn).
 - **A workspace created in another repository forks only to MOVE this
@@ -50,19 +53,24 @@ a main-checkout directory), its topology and its context:
   When workspace A in repository foo needs work in both foo and another
   repository baz:
   - A does the foo work itself in its own workspace, and does the baz work
-    by creating a workspace B with `workspace create -repository <baz>`.
-    A NEVER edits baz's checkout or cuts branches in it by hand.
+    by creating a workspace B as its child:
+    `workspace create -repository <baz> -topology child -owner here`.
+    B nests under A in the sidebar, under a divider naming baz, and A owns
+    and lands it. A NEVER edits baz's checkout or cuts branches in it by
+    hand.
   - If baz is not yet registered with agent-repl, A first registers it with
     `repository register` (see "Registering a repository" below), then
     creates B.
   - B is created `-context fresh` (per the cross-repository rule above),
-    with everything B needs carried in its `-prompt`.
+    with everything B needs carried in its `-prompt` and an `-owner-notice`
+    telling A what is coming.
   - A coordinates with B through `workspace prompt`, `workspace subscribe`
     and the awaiting mark (`workspace set -await`), e.g. integrating B's
     result. Example: baz owns the protobufs and foo holds the C++
     implementation: A asks B for the protobuf change, subscribes and marks
     itself awaiting, then builds A's C++ integration against B's protobufs.
-  - B lands its own change through baz's merge queue, and A lands foo's.
+  - A lands B's change through baz's deploy (`workspace finished B`) once
+    it has reviewed it, and lands foo's own.
 
 Choose the combination from what the work needs (every `fork` row is within
 one repository, except the move below):
@@ -134,11 +142,11 @@ user in the same response what it reorganized and why.
 1. Decide the repository the work principally belongs to, and every other
    repository it touches. Register any agent-repl does not know yet
    (`repository register`).
-2. When the principal repository is this one, do not move. Create one
-   workspace in each other repository it touches, as "Cross-repository work
-   goes through a workspace in the other repository" says, and subscribe to
-   each (`workspace subscribe WS -events turn_ended,needs_input,landed,closed`).
-   This workspace governs them.
+2. When the principal repository is this one, do not move. Give each other
+   repository it touches one child of this workspace: create it as
+   "Cross-repository work goes through a workspace in the other repository"
+   says, or adopt one that already exists there (`workspace set WS -parent
+   here`, "ADOPT" below). This workspace governs its children.
 3. When the principal repository is another one, MOVE:
    - a. Read this workspace's priority, one-shot mark and links with
      `workspace status here`.
@@ -151,14 +159,14 @@ user in the same response what it reorganized and why.
        agent-repl (a Slack thread's `/gns-sockets subscribe <url> respond`,
        for one), since a fork is a new session;
      - store this workspace's links with `workspace link here`;
-     - subscribe to each workspace this one governs or creates in step d.
-   - d. Work this workspace already committed or left uncommitted in its own
-     repository stays on its branch: rename this workspace to the piece it
-     now holds (`workspace set here -name NAME`), keep it open, and name it
-     in TEXT as one the governor governs. With no such work, run
-     `workspace close here` once the governor is created.
-   - e. Unsubscribe this workspace from every workspace it governed
-     (`workspace unsubscribe`), now that the governor follows them.
+     - adopt each workspace step d names (`workspace set WS -parent here`).
+   - d. Hand this workspace's children to the governor: TEXT names each
+     child, and the governor adopts them. Work this workspace already
+     committed or left uncommitted in its own repository stays on its
+     branch: rename this workspace to the piece it now holds (`workspace set
+     here -name NAME`), keep it open, and name it in TEXT among the
+     workspaces the governor adopts. With no such work, run `workspace close
+     here` once the governor has adopted this workspace's children.
 4. Edits made by hand in another repository's checkout move to that
    repository's one workspace: `SHA=$(git -C <checkout> stash create "<what>")`,
    then `git stash apply <SHA>` in the workspace's worktree, then restore
@@ -310,13 +318,13 @@ creating workspaces there with `-repository DIR`.
   - The old name stops resolving at once. Name the workspace by its new name
     from then on, and read its branch from `workspace status`, never from
     its name.
-- **ADOPT.** `workspace set WS -parent here` makes an existing workspace of
-  this repository this workspace's child. Its conversation is untouched. It
-  nests under this workspace in the sidebar, lands into this workspace's
-  branch, and this workspace is told of it as an owner is. `-top-level`
-  releases it. A parent in another repository is refused
-  `parent_in_other_repository`, because a child lands into its parent's
-  branch: follow such a workspace with `workspace subscribe` instead.
+- **ADOPT.** `workspace set WS -parent here` makes an existing workspace
+  this workspace's child. Its conversation is untouched. It nests under this
+  workspace in the sidebar, and this workspace owns it and is told of it as
+  an owner is. A child of this repository lands into this workspace's
+  branch. A child of another repository is drawn under a divider naming its
+  repository and lands on its own repository's main branch, since no branch
+  crosses repositories. `-top-level` releases it.
 - `-hidden` / `-shown` and `-priority` set the rest.
 
 ## Finishing, opening, closing
