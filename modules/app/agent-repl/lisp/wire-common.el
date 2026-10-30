@@ -668,17 +668,30 @@ RAW is the untyped Struct, kept verbatim: nothing is drawn from it."
      (list :kind (agent-repl-wire--decode-string "UnsupportedBlock" 'kind object)
            :raw (agent-repl-wire--raw object 'raw)))))
 
+(defun agent-repl-wire-decode-user-quote-block (value)
+  "Decode VALUE as a `UserQuoteBlock' plist `(:text :quoted-row)'.
+The bubble a prompt replied to, quoted ahead of the person's words."
+  (let ((object (agent-repl-wire--object "UserQuoteBlock" value)))
+    (agent-repl-wire--check-keys "UserQuoteBlock" object '(text quotedRow))
+    (agent-repl-wire--decoded
+     "UserQuoteBlock"
+     (list :text (agent-repl-wire--decode-string "UserQuoteBlock" 'text object)
+           :quoted-row (agent-repl-wire--decode-string "UserQuoteBlock" 'quotedRow object)))))
+
 (defun agent-repl-wire-decode-user-content-block (value)
-  "Decode VALUE as a `UserContentBlock', the oneof `(:arm :value)'."
+  "Decode VALUE as a `UserContentBlock', the oneof `(:arm :value)'.
+A `quote' is the daemon's, composed when a prompt replied to a bubble: it
+cannot be put back in the composer, which counts it among what it drops."
   (let ((object (agent-repl-wire--object "UserContentBlock" value)))
-    (agent-repl-wire--check-keys "UserContentBlock" object '(text image unsupported))
+    (agent-repl-wire--check-keys "UserContentBlock" object '(text image unsupported quote))
     (agent-repl-wire--decoded
      "UserContentBlock"
      (agent-repl-wire--decode-oneof
       "UserContentBlock" 'block object
       '((text :text agent-repl-wire-decode-text-block)
         (image :image agent-repl-wire-decode-image-block)
-        (unsupported :unsupported agent-repl-wire-decode-unsupported-block))))))
+        (unsupported :unsupported agent-repl-wire-decode-unsupported-block)
+        (quote :quote agent-repl-wire-decode-user-quote-block))))))
 
 (defun agent-repl-wire-decode-user-content (value)
   "Decode VALUE as a `UserContent' plist `(:blocks)', blocks in order."

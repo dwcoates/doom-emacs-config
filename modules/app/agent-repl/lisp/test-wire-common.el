@@ -912,6 +912,24 @@ that tells its three cases apart."
                                  :blocks))
                  '(:arm :unsupported :value (:kind "doc" :raw nil)))))
 
+(ert-deftest agent-repl-test-wire-common-user-said-decodes-a-quote-block ()
+  "A quote of the bubble a prompt replied to keeps its text and row."
+  (should (equal (car (plist-get (plist-get (agent-repl-test-wire-common--decode
+                                             #'agent-repl-wire-decode-user-said
+                                             "{\"content\":{\"blocks\":[{\"quote\":{\"text\":\"> hi\",\"quotedRow\":\"r1\"}}]}}")
+                                            :content)
+                                 :blocks))
+                 '(:arm :quote :value (:text "> hi" :quoted-row "r1")))))
+
+(ert-deftest agent-repl-test-wire-common-a-quote-block-refuses-an-unknown-field ()
+  "A quote carries its text and row, and nothing else."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-user-said
+                     (agent-repl-test-wire-common--parse
+                      "{\"content\":{\"blocks\":[{\"quote\":{\"text\":\"> hi\",\"tint\":1}}]}}"))))
+                 '("UserQuoteBlock" tint "unknown field"))))
+
 (ert-deftest agent-repl-test-wire-common-user-said-without-content-is-a-breach ()
   "`content' is REQUIRED on a UserSaid."
   (should (equal (agent-repl-test-wire-common--breach

@@ -4,12 +4,13 @@ go 1.24.0
 
 require (
 	agent-repld v0.0.0
+	agentrepl/proto v0.0.0
 	agentrepl/testrun v0.0.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
 	agentrepl/logging v0.0.0-00010101000000-000000000000 // indirect
-	agentrepl/proto v0.0.0 // indirect
 	agentrepl/protohelpers v0.0.0 // indirect
 	agentrepl/tldr v0.0.0 // indirect
 	agentrepl/tldrprompt v0.0.0 // indirect
@@ -26,7 +27,6 @@ require (
 	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
