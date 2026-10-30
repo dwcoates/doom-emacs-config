@@ -842,6 +842,9 @@ func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handov
 	plan.reoffers[ws.ID]++
 	attempt := plan.reoffers[ws.ID]
 	plan.mu.Unlock()
+	if attempt > maxReoffers {
+		return c.surrender(ctx, ws, plan, attempt-1, fields)
+	}
 	delay := c.deps.AdoptionWindow
 	for i := 1; i < attempt && delay < c.deps.HoldoutWarnEvery; i++ {
 		delay *= 2
@@ -857,6 +860,59 @@ func (c *controller) reoffer(ctx context.Context, ws wsm.Workspace, plan *handov
 	case <-c.deps.Clock.After(delay):
 	}
 	return c.fallBackToFreeness(ctx, ws, plan, windows, fields)
+}
+
+// maxReoffers bounds how many times a workspace taken back whole is offered
+// to the successor again. Unbounded, a workspace the successor would never
+// adopt kept both daemons alive forever (2026-10-30: six take-backs of one
+// workspace, the incumbent never exiting, the successor never taking over).
+const maxReoffers = 3
+
+// surrender ends the take-back cycle of a workspace the successor did not
+// adopt in maxReoffers offers: the cycle's end is recorded loudly as the
+// workspace's fault, its shim is stood down, and its serving row is released
+// with no adoption window, so the successor's own retrying adoption takes it
+// over on its facts alone (a free lock: adopted session-less, and started
+// there). It answers whether the workspace stays this daemon's, which is only
+// when the row could not be released.
+//
+// THE INCUMBENT MUST FINISH. A workspace kept here keeps the incumbent alive
+// and the successor joining; one handed over session-less costs only its
+// session's restart.
+func (c *controller) surrender(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, offers int, fields dlog.Context) bool {
+	evidence := dlog.Context{"offers": offers, "max_reoffers": maxReoffers}
+	workspace := ws.ID
+	if _, err := c.deps.DB.OpenFault(context.WithoutCancel(ctx), wsm.Fault{
+		Workspace: &workspace,
+		Kind:      FaultAdoptionExpired,
+		Detail: fmt.Sprintf("the successor did not adopt this workspace in %d offers; its session was stood down and the workspace handed over without one",
+			offers),
+		Evidence: map[string]string{
+			"offers":       fmt.Sprint(offers),
+			"max_reoffers": fmt.Sprint(maxReoffers),
+			"disposition":  "surrendered_sessionless",
+		},
+		OpenedAt: c.deps.Clock.Now(),
+	}); err != nil {
+		c.log.Error(opHandover, "could not record the end of the workspace's take-back cycle", dlog.WithCause(dlog.Merge(fields, evidence), err))
+	}
+	c.log.Error(opHandover, "the successor did not adopt the workspace in every offer; standing its session down and handing it over without one",
+		dlog.Merge(fields, evidence))
+	if _, live := c.deps.Shims.Client(ws.ID); live {
+		if err := c.deps.Shims.StandDown(ctx, ws.ID); err != nil {
+			c.log.Error(opHandover, "the surrendered workspace's shim would not stand down; it keeps the workspace lock",
+				dlog.WithCause(dlog.Merge(fields, evidence), err))
+		}
+	}
+	if _, err := c.releaseServing(ctx, ws.ID, fields); err != nil {
+		c.log.Error(opHandover, "the surrendered workspace's serving row could not be released; it stays served here",
+			dlog.WithCause(dlog.Merge(fields, evidence), err))
+		return true
+	}
+	c.recordTransfer(ws.ID, plan.successor)
+	c.log.Info(opHandover, "handed the workspace over without a session; the successor adopts it on its facts",
+		dlog.Merge(fields, evidence))
+	return false
 }
 
 // adoptionOutcome is how one transfer's adoption window ended.

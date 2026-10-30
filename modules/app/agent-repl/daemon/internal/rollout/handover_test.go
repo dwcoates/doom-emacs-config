@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2045,5 +2046,53 @@ func TestAManifestWhoseSessionReadFailsRecordsItOnce(t *testing.T) {
 	}
 	if failures != 1 {
 		t.Fatalf("manifest read failures recorded = %d, want exactly one; records = %+v", failures, h.log.Records())
+	}
+}
+
+// THE TAKE-BACK CYCLE IS BOUNDED. On 2026-10-30 one workspace was taken back
+// and offered again six times, and neither daemon could finish. After
+// maxReoffers offers the incumbent surrenders it session-less, records the
+// end of the cycle as the workspace's fault, and exits.
+func TestATakeBackCycleEndsInASurrenderAfterItsLastOffer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	expireAdoption(t, h)
+
+	// Act: every offer's window expires in turn.
+	pacing := adoptionWindow
+	for offer := 1; offer <= maxReoffers; offer++ {
+		h.clock.Fire(pacing)
+		h.clock.awaitArmed(t, adoptionWindow)
+		h.registry.wait()
+		h.clock.Fire(adoptionWindow)
+		h.registry.wait()
+		if offer < maxReoffers {
+			pacing *= 2
+			h.clock.awaitArmed(t, pacing)
+		}
+	}
+
+	// Assert
+	awaitExit(t, h)
+	faults, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultAdoptionExpired})
+	if err != nil {
+		t.Fatalf("OpenFaults: %v", err)
+	}
+	surrendered := false
+	for _, f := range faults {
+		if f.Evidence["disposition"] == "surrendered_sessionless" && f.Evidence["offers"] == fmt.Sprint(maxReoffers) {
+			surrendered = true
+		}
+	}
+	if !surrendered {
+		t.Fatalf("faults = %+v, want the cycle's end recorded with its offers", faults)
+	}
+	if !loggedError(h.log, opHandover, "the successor did not adopt the workspace in every offer; standing its session down and handing it over without one") {
+		t.Fatalf("records = %+v, want the surrender stated at ERROR", h.log.Records())
+	}
+	owner, err := h.db.Serving(context.Background(), ws)
+	if err != nil || owner != nil {
+		t.Fatalf("Serving = (%v, %v), want the row released for the successor", owner, err)
 	}
 }
