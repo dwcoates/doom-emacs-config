@@ -821,6 +821,14 @@ func TestTheMigratedHeldPromptsAreUncoalescedPrompts(t *testing.T) {
 // fixtureAt answers a database carried from layout 3 up to version by the
 // migration list's own steps, applied raw, so a test stands in for the file
 // the build at that layout left.
+// tableColumns answers a table's declared columns in the file at path, in
+// order, comma-joined: the one shape every migrated-versus-fresh comparison
+// and every column-drop pin reads.
+func tableColumns(t *testing.T, path, table string) string {
+	t.Helper()
+	return rawScalar[string](t, path, `SELECT group_concat(name, ',') FROM (SELECT name FROM pragma_table_info(?) ORDER BY cid)`, table)
+}
+
 func fixtureAt(t *testing.T, version int) string {
 	t.Helper()
 	path := layout3Fixture(t)
