@@ -1746,7 +1746,14 @@ func (x *ArrangeSidebarTransferringAway) GetAddress() string {
 
 // Adoption of a named workspace is still in progress.
 type ArrangeSidebarNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1779,6 +1786,13 @@ func (x *ArrangeSidebarNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ArrangeSidebarNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*ArrangeSidebarNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ArrangeSidebarNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 // DELIBERATELY EMPTY: the arm is the fact.
@@ -2044,8 +2058,11 @@ const file_agentrepl_v1_endpoint_arrange_sidebar_proto_rawDesc = "" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12!\n" +
 	"\fregistry_dir\x18\x02 \x01(\tR\vregistryDir\":\n" +
 	"\x1eArrangeSidebarTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1d\n" +
-	"\x1bArrangeSidebarNotYetAdopted\"\x19\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"H\n" +
+	"\x1bArrangeSidebarNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x19\n" +
 	"\x17ArrangeSidebarBlankName\"\x1f\n" +
 	"\x1dArrangeSidebarOtherRepository\"\x1f\n" +
 	"\x1dArrangeSidebarAnchorElsewhere\"\x1f\n" +
@@ -2205,6 +2222,7 @@ func file_agentrepl_v1_endpoint_arrange_sidebar_proto_init() {
 		(*ArrangeSidebarError_AnchorElsewhere)(nil),
 		(*ArrangeSidebarError_NoOpenWorkspace)(nil),
 	}
+	file_agentrepl_v1_endpoint_arrange_sidebar_proto_msgTypes[19].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

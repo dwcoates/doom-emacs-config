@@ -660,7 +660,14 @@ func (x *SwitchChatSiblingTransferringAway) GetAddress() string {
 
 // A joining daemon has not finished adopting this workspace yet.
 type SwitchChatSiblingNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -693,6 +700,13 @@ func (x *SwitchChatSiblingNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SwitchChatSiblingNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SwitchChatSiblingNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_switch_chat_sibling_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SwitchChatSiblingNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 // The workspace is an agent workspace, not a chat thread.
@@ -802,8 +816,11 @@ const file_agentrepl_v1_endpoint_switch_chat_sibling_proto_rawDesc = "" +
 	"%SwitchChatSiblingWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"=\n" +
 	"!SwitchChatSiblingTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\" \n" +
-	"\x1eSwitchChatSiblingNotYetAdopted\"\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"K\n" +
+	"\x1eSwitchChatSiblingNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x1d\n" +
 	"\x1bSwitchChatSiblingNotAThread\"\x1e\n" +
 	"\x1cSwitchChatSiblingUnknownNodeB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -879,6 +896,7 @@ func file_agentrepl_v1_endpoint_switch_chat_sibling_proto_init() {
 		(*SwitchChatSiblingError_NotAThread)(nil),
 		(*SwitchChatSiblingError_UnknownNode)(nil),
 	}
+	file_agentrepl_v1_endpoint_switch_chat_sibling_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -476,7 +476,14 @@ func (x *RestartWorkspaceTransferringAway) GetAddress() string {
 }
 
 type RestartWorkspaceNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -509,6 +516,13 @@ func (x *RestartWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RestartWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*RestartWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RestartWorkspaceNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type RestartWorkspaceRelaunchFailed struct {
@@ -580,8 +594,11 @@ const file_agentrepl_v1_endpoint_restart_workspace_proto_rawDesc = "" +
 	"$RestartWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"<\n" +
 	" RestartWorkspaceTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1f\n" +
-	"\x1dRestartWorkspaceNotYetAdopted\"8\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"J\n" +
+	"\x1dRestartWorkspaceNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"8\n" +
 	"\x1eRestartWorkspaceRelaunchFailed\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detailB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -642,6 +659,7 @@ func file_agentrepl_v1_endpoint_restart_workspace_proto_init() {
 		(*RestartWorkspaceError_NotYetAdopted)(nil),
 		(*RestartWorkspaceError_RelaunchFailed)(nil),
 	}
+	file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -859,7 +859,14 @@ func (x *ReportPageResidencyTransferringAway) GetAddress() string {
 
 // The joining daemon has not adopted the workspace yet. Empty: presence is the fact.
 type ReportPageResidencyNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -892,6 +899,13 @@ func (x *ReportPageResidencyNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ReportPageResidencyNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*ReportPageResidencyNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_report_page_residency_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ReportPageResidencyNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 var File_agentrepl_v1_endpoint_report_page_residency_proto protoreflect.FileDescriptor
@@ -934,8 +948,11 @@ const file_agentrepl_v1_endpoint_report_page_residency_proto_rawDesc = "" +
 	"'ReportPageResidencyWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"?\n" +
 	"#ReportPageResidencyTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\"\n" +
-	" ReportPageResidencyNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"M\n" +
+	" ReportPageResidencyNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_addressB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_report_page_residency_proto_rawDescOnce sync.Once
@@ -1014,6 +1031,7 @@ func file_agentrepl_v1_endpoint_report_page_residency_proto_init() {
 		(*ReportPageResidencyError_TransferringAway)(nil),
 		(*ReportPageResidencyError_NotYetAdopted)(nil),
 	}
+	file_agentrepl_v1_endpoint_report_page_residency_proto_msgTypes[14].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

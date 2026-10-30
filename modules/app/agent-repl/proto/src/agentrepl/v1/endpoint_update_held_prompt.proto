@@ -96,7 +96,15 @@ message UpdateHeldPromptTransferringAway {
   // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
   string address = 1;
 }
-message UpdateHeldPromptNotYetAdopted {}
+message UpdateHeldPromptNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+  // joining daemon adopts it: the handover's incumbent. A client views and
+  // acts on the workspace there in the meantime, and the incumbent's later
+  // `transferred` push re-homes it. UNSET when no live daemon serves the
+  // workspace (a takeover after the incumbent died), in which case the client
+  // waits for the adoption.
+  optional string address = 1;
+}
 message UpdateHeldPromptNoSuchHold {}
 message UpdateHeldPromptAlreadyDelivered {}
 message UpdateHeldPromptReleaseRefused {}

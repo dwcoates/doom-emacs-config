@@ -501,7 +501,14 @@ func (x *SetEffortTransferringAway) GetAddress() string {
 }
 
 type SetEffortNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -534,6 +541,13 @@ func (x *SetEffortNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SetEffortNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SetEffortNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_effort_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SetEffortNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type SetEffortNoSession struct {
@@ -680,8 +694,11 @@ const file_agentrepl_v1_endpoint_set_effort_proto_rawDesc = "" +
 	"\x1dSetEffortWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"5\n" +
 	"\x19SetEffortTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x18\n" +
-	"\x16SetEffortNotYetAdopted\"\x14\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"C\n" +
+	"\x16SetEffortNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x14\n" +
 	"\x12SetEffortNoSession\"\x17\n" +
 	"\x15SetEffortNotSupported\"0\n" +
 	"\x16SetEffortVendorRefused\x12\x16\n" +
@@ -752,6 +769,7 @@ func file_agentrepl_v1_endpoint_set_effort_proto_init() {
 		(*SetEffortError_NotSupported)(nil),
 		(*SetEffortError_VendorRefused)(nil),
 	}
+	file_agentrepl_v1_endpoint_set_effort_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

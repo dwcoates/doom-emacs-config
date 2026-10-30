@@ -474,7 +474,14 @@ func (x *LoadPageInEditorTransferringAway) GetAddress() string {
 }
 
 type LoadPageInEditorNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -507,6 +514,13 @@ func (x *LoadPageInEditorNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use LoadPageInEditorNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*LoadPageInEditorNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_load_page_in_editor_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *LoadPageInEditorNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type LoadPageInEditorNoEditor struct {
@@ -568,8 +582,11 @@ const file_agentrepl_v1_endpoint_load_page_in_editor_proto_rawDesc = "" +
 	"$LoadPageInEditorWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"<\n" +
 	" LoadPageInEditorTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1f\n" +
-	"\x1dLoadPageInEditorNotYetAdopted\"\x1a\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"J\n" +
+	"\x1dLoadPageInEditorNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x1a\n" +
 	"\x18LoadPageInEditorNoEditorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
@@ -629,6 +646,7 @@ func file_agentrepl_v1_endpoint_load_page_in_editor_proto_init() {
 		(*LoadPageInEditorError_NotYetAdopted)(nil),
 		(*LoadPageInEditorError_NoEditor)(nil),
 	}
+	file_agentrepl_v1_endpoint_load_page_in_editor_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -917,7 +917,14 @@ func (x *OpenWorkspaceTransferringAway) GetAddress() string {
 }
 
 type OpenWorkspaceNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -950,6 +957,13 @@ func (x *OpenWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use OpenWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*OpenWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *OpenWorkspaceNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type OpenWorkspaceSessionDeleted struct {
@@ -1135,8 +1149,11 @@ const file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc = "" +
 	"!OpenWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"9\n" +
 	"\x1dOpenWorkspaceTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1c\n" +
-	"\x1aOpenWorkspaceNotYetAdopted\"\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"G\n" +
+	"\x1aOpenWorkspaceNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x1d\n" +
 	"\x1bOpenWorkspaceSessionDeleted\"s\n" +
 	"\x1eOpenWorkspaceTranscriptMissing\x12*\n" +
 	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\x12%\n" +
@@ -1231,6 +1248,7 @@ func file_agentrepl_v1_endpoint_open_workspace_proto_init() {
 		(*OpenWorkspaceError_BriefMissing)(nil),
 		(*OpenWorkspaceError_ParentNotOpen)(nil),
 	}
+	file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[13].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

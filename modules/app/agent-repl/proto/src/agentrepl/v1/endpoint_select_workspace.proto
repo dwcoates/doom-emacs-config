@@ -74,7 +74,15 @@ message SelectWorkspaceTransferringAway {
   // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
   string address = 1;
 }
-message SelectWorkspaceNotYetAdopted {}
+message SelectWorkspaceNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+  // joining daemon adopts it: the handover's incumbent. A client views and
+  // acts on the workspace there in the meantime, and the incumbent's later
+  // `transferred` push re-homes it. UNSET when no live daemon serves the
+  // workspace (a takeover after the incumbent died), in which case the client
+  // waits for the adoption.
+  optional string address = 1;
+}
 // The answer of a daemon that is leaving: the selection stands in the state
 // it shares with whatever serves next, and no session is started for a
 // workspace this daemon is about to stop serving. It carries no address,

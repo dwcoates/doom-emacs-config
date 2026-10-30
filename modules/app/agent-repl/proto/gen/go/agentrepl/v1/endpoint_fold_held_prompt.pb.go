@@ -711,7 +711,14 @@ func (x *FoldHeldPromptTransferringAway) GetAddress() string {
 // A joining daemon has not finished adopting the workspace. DELIBERATELY
 // EMPTY: the arm's presence is the whole fact.
 type FoldHeldPromptNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -744,6 +751,13 @@ func (x *FoldHeldPromptNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use FoldHeldPromptNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*FoldHeldPromptNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *FoldHeldPromptNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 // No hold was ever recorded under `turn`. DELIBERATELY EMPTY: the arm's
@@ -1106,8 +1120,11 @@ const file_agentrepl_v1_endpoint_fold_held_prompt_proto_rawDesc = "" +
 	"\"FoldHeldPromptWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\":\n" +
 	"\x1eFoldHeldPromptTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1d\n" +
-	"\x1bFoldHeldPromptNotYetAdopted\"\x1a\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"H\n" +
+	"\x1bFoldHeldPromptNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x1a\n" +
 	"\x18FoldHeldPromptNoSuchHold\"\x17\n" +
 	"\x15FoldHeldPromptNotHeld\"\x1a\n" +
 	"\x18FoldHeldPromptNotAPrompt\"o\n" +
@@ -1206,6 +1223,7 @@ func file_agentrepl_v1_endpoint_fold_held_prompt_proto_init() {
 		(*FoldHeldPromptError_AboveOtherAuthor)(nil),
 		(*FoldHeldPromptError_ThreadQuestion)(nil),
 	}
+	file_agentrepl_v1_endpoint_fold_held_prompt_proto_msgTypes[8].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_fold_held_prompt_proto_msgTypes[12].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

@@ -555,7 +555,14 @@ func (x *SetModelTransferringAway) GetAddress() string {
 }
 
 type SetModelNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -588,6 +595,13 @@ func (x *SetModelNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SetModelNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SetModelNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *SetModelNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type SetModelNoSession struct {
@@ -736,8 +750,11 @@ const file_agentrepl_v1_endpoint_set_model_proto_rawDesc = "" +
 	"\x1cSetModelWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"4\n" +
 	"\x18SetModelTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x17\n" +
-	"\x15SetModelNotYetAdopted\"\x13\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"B\n" +
+	"\x15SetModelNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x13\n" +
 	"\x11SetModelNoSession\"\x16\n" +
 	"\x14SetModelNotInCatalog\"/\n" +
 	"\x15SetModelVendorRefused\x12\x16\n" +
@@ -811,6 +828,7 @@ func file_agentrepl_v1_endpoint_set_model_proto_init() {
 		(*SetModelError_VendorRefused)(nil),
 		(*SetModelError_Cold)(nil),
 	}
+	file_agentrepl_v1_endpoint_set_model_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

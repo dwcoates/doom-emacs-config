@@ -782,7 +782,14 @@ func (x *OpenInEditorTransferringAway) GetAddress() string {
 }
 
 type OpenInEditorNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -815,6 +822,13 @@ func (x *OpenInEditorNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use OpenInEditorNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*OpenInEditorNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *OpenInEditorNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type OpenInEditorPathEscapesWorkspace struct {
@@ -1361,8 +1375,11 @@ const file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc = "" +
 	" OpenInEditorWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"8\n" +
 	"\x1cOpenInEditorTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1b\n" +
-	"\x19OpenInEditorNotYetAdopted\"\"\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"F\n" +
+	"\x19OpenInEditorNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\"\n" +
 	" OpenInEditorPathEscapesWorkspace\"\xb9\x02\n" +
 	"\x1fOpenInEditorUnknownMergeTestLog\x12V\n" +
 	"\tmalformed\x18\x01 \x01(\v26.agentrepl.v1.OpenInEditorUnknownMergeTestLogMalformedH\x00R\tmalformed\x12a\n" +
@@ -1477,6 +1494,7 @@ func file_agentrepl_v1_endpoint_open_in_editor_proto_init() {
 		(*OpenInEditorError_UnknownMergeTestLog)(nil),
 		(*OpenInEditorError_LinkUnresolved)(nil),
 	}
+	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[10].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[12].OneofWrappers = []any{
 		(*OpenInEditorUnknownMergeTestLog_Malformed)(nil),
 		(*OpenInEditorUnknownMergeTestLog_NotDrawnHere)(nil),

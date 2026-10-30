@@ -1863,7 +1863,14 @@ func (x *OpenTabsRefusedTransferringAway) GetAddress() string {
 // A joining daemon has not finished adopting this workspace yet.
 // DELIBERATELY EMPTY.
 type OpenTabsRefusedNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1896,6 +1903,13 @@ func (x *OpenTabsRefusedNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use OpenTabsRefusedNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*OpenTabsRefusedNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_tabs_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *OpenTabsRefusedNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 // Every workspace of the request has had its `opened`.
@@ -2104,8 +2118,11 @@ const file_agentrepl_v1_endpoint_open_tabs_proto_rawDesc = "" +
 	"#OpenTabsRefusedWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\";\n" +
 	"\x1fOpenTabsRefusedTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1e\n" +
-	"\x1cOpenTabsRefusedNotYetAdopted\"}\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"I\n" +
+	"\x1cOpenTabsRefusedNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"}\n" +
 	"\x10OpenTabsFinished\x12\x14\n" +
 	"\x05ready\x18\x01 \x01(\rR\x05ready\x12\x14\n" +
 	"\x05total\x18\x02 \x01(\rR\x05total\x12=\n" +
@@ -2255,6 +2272,7 @@ func file_agentrepl_v1_endpoint_open_tabs_proto_init() {
 		(*OpenTabsOpenedRefused_TransferringAway)(nil),
 		(*OpenTabsOpenedRefused_NotYetAdopted)(nil),
 	}
+	file_agentrepl_v1_endpoint_open_tabs_proto_msgTypes[28].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

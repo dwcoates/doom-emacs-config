@@ -723,7 +723,14 @@ func (x *CloseWorkspaceTransferringAway) GetAddress() string {
 }
 
 type CloseWorkspaceNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -756,6 +763,13 @@ func (x *CloseWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CloseWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*CloseWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_close_workspace_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CloseWorkspaceNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 var File_agentrepl_v1_endpoint_close_workspace_proto protoreflect.FileDescriptor
@@ -794,8 +808,11 @@ const file_agentrepl_v1_endpoint_close_workspace_proto_rawDesc = "" +
 	"\"CloseWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\":\n" +
 	"\x1eCloseWorkspaceTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1d\n" +
-	"\x1bCloseWorkspaceNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"H\n" +
+	"\x1bCloseWorkspaceNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_addressB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_close_workspace_proto_rawDescOnce sync.Once
@@ -869,6 +886,7 @@ func file_agentrepl_v1_endpoint_close_workspace_proto_init() {
 		(*CloseWorkspaceError_NotYetAdopted)(nil),
 		(*CloseWorkspaceError_HasOpenChildren)(nil),
 	}
+	file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

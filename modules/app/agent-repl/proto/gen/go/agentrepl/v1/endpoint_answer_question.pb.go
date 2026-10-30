@@ -640,7 +640,14 @@ func (x *AnswerQuestionTransferringAway) GetAddress() string {
 }
 
 type AnswerQuestionNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -673,6 +680,13 @@ func (x *AnswerQuestionNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use AnswerQuestionNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*AnswerQuestionNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AnswerQuestionNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type AnswerQuestionAskNotStanding struct {
@@ -865,8 +879,11 @@ const file_agentrepl_v1_endpoint_answer_question_proto_rawDesc = "" +
 	"\"AnswerQuestionWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\":\n" +
 	"\x1eAnswerQuestionTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1d\n" +
-	"\x1bAnswerQuestionNotYetAdopted\"\x1e\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"H\n" +
+	"\x1bAnswerQuestionNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x1e\n" +
 	"\x1cAnswerQuestionAskNotStanding\"1\n" +
 	"\x1bAnswerQuestionUnservedValue\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"'\n" +
@@ -946,6 +963,7 @@ func file_agentrepl_v1_endpoint_answer_question_proto_init() {
 		(*AnswerQuestionError_MultiPickOnSingleSelect)(nil),
 		(*AnswerQuestionError_NoSession)(nil),
 	}
+	file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

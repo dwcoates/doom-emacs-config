@@ -493,7 +493,14 @@ func (x *ShowChatNodeTransferringAway) GetAddress() string {
 
 // A joining daemon has not finished adopting this workspace yet.
 type ShowChatNodeNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -526,6 +533,13 @@ func (x *ShowChatNodeNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ShowChatNodeNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*ShowChatNodeNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_show_chat_node_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ShowChatNodeNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 // The workspace is an agent workspace, not a chat thread.
@@ -628,8 +642,11 @@ const file_agentrepl_v1_endpoint_show_chat_node_proto_rawDesc = "" +
 	" ShowChatNodeWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"8\n" +
 	"\x1cShowChatNodeTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1b\n" +
-	"\x19ShowChatNodeNotYetAdopted\"\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"F\n" +
+	"\x19ShowChatNodeNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x18\n" +
 	"\x16ShowChatNodeNotAThread\"\x19\n" +
 	"\x17ShowChatNodeUnknownNodeB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -695,6 +712,7 @@ func file_agentrepl_v1_endpoint_show_chat_node_proto_init() {
 		(*ShowChatNodeError_NotAThread)(nil),
 		(*ShowChatNodeError_UnknownNode)(nil),
 	}
+	file_agentrepl_v1_endpoint_show_chat_node_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

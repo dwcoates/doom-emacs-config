@@ -789,7 +789,14 @@ func (x *EditHeldPromptTransferringAway) GetAddress() string {
 }
 
 type EditHeldPromptNotYetAdopted struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+	// joining daemon adopts it: the handover's incumbent. A client views and
+	// acts on the workspace there in the meantime, and the incumbent's later
+	// `transferred` push re-homes it. UNSET when no live daemon serves the
+	// workspace (a takeover after the incumbent died), in which case the client
+	// waits for the adoption.
+	Address       *string `protobuf:"bytes,1,opt,name=address,proto3,oneof" json:"address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -822,6 +829,13 @@ func (x *EditHeldPromptNotYetAdopted) ProtoReflect() protoreflect.Message {
 // Deprecated: Use EditHeldPromptNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*EditHeldPromptNotYetAdopted) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *EditHeldPromptNotYetAdopted) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
 }
 
 type EditHeldPromptNoSuchHold struct {
@@ -1127,8 +1141,11 @@ const file_agentrepl_v1_endpoint_edit_held_prompt_proto_rawDesc = "" +
 	"\"EditHeldPromptWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\":\n" +
 	"\x1eEditHeldPromptTransferringAway\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1d\n" +
-	"\x1bEditHeldPromptNotYetAdopted\"\x1a\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"H\n" +
+	"\x1bEditHeldPromptNotYetAdopted\x12\x1d\n" +
+	"\aaddress\x18\x01 \x01(\tH\x00R\aaddress\x88\x01\x01B\n" +
+	"\n" +
+	"\b_address\"\x1a\n" +
 	"\x18EditHeldPromptNoSuchHold\"\x17\n" +
 	"\x15EditHeldPromptNotHeld\" \n" +
 	"\x1eEditHeldPromptAlreadyDelivered\"W\n" +
@@ -1229,6 +1246,7 @@ func file_agentrepl_v1_endpoint_edit_held_prompt_proto_init() {
 		(*EditHeldPromptError_NoEditor)(nil),
 		(*EditHeldPromptError_BeingDelivered)(nil),
 	}
+	file_agentrepl_v1_endpoint_edit_held_prompt_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
