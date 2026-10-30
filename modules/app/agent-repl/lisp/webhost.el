@@ -297,6 +297,7 @@ the host buffer is never displayed itself; workspace slots display it."
         (with-current-buffer buf
           (setq-local xwidget-webkit-buffer-name-format agent-repl-webhost-buffer-name)
           (setq-local header-line-format nil)
+          (setq-local mode-line-format nil)
           (rename-buffer agent-repl-webhost-buffer-name t)
           (add-hook 'kill-buffer-query-functions #'agent-repl--webhost-refuse-kill nil t))
         (let ((xw (agent-repl--frontend-webview-live-widget buf)))
