@@ -196,15 +196,6 @@ func TestSetParentRefuses(t *testing.T) {
 			want: ParentUnknown,
 		},
 		{
-			name: "a parent of another repository",
-			arrange: func(t *testing.T, s *store) (WorkspaceID, *WorkspaceID) {
-				f := newParentFamily(t, s, "child")
-				g := newParentFamily(t, s, "foreign")
-				return f.byName["child"].ID, g.id("foreign")
-			},
-			want: ParentOtherRepository,
-		},
-		{
 			name: "the workspace as its own parent",
 			arrange: func(t *testing.T, s *store) (WorkspaceID, *WorkspaceID) {
 				f := newParentFamily(t, s, "child")
@@ -269,19 +260,53 @@ func TestSetParentRefuses(t *testing.T) {
 	}
 }
 
-func TestSetParentNamesTheForeignParentsRepository(t *testing.T) {
+func TestSetParentOfAnotherRepositoryNestsAndOwnsButLandsInTheOwnRepository(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	f := newParentFamily(t, s, "child")
 	g := newParentFamily(t, s, "foreign")
 
 	// Act
-	_, err := s.SetParent(context.Background(), f.byName["child"].ID, g.id("foreign"))
+	change, err := s.SetParent(context.Background(), f.byName["child"].ID, g.id("foreign"))
 
 	// Assert
-	refused, ok := AsParentRefused(err)
-	if !ok || refused.ParentRepositoryDir != g.repoDir {
-		t.Fatalf("refusal = %+v, want the foreign repository %q", refused, g.repoDir)
+	if err != nil {
+		t.Fatalf("SetParent: %v", err)
+	}
+	if ids.Optional(change.After.Parent) != string(*g.id("foreign")) || !change.After.CrossRepository ||
+		change.After.Dir != f.repoDir || change.After.ParentName != "foreign" {
+		t.Fatalf("after = %+v, want parent foreign of another repository, landing in %q", change.After, f.repoDir)
+	}
+	child, err := s.Workspace(context.Background(), f.byName["child"].ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if ids.Optional(child.Parent) != string(*g.id("foreign")) || !child.OwnerLands {
+		t.Fatalf("child = parent %q owner_lands %v, want parent foreign, landed by its owner", ids.Optional(child.Parent), child.OwnerLands)
+	}
+	if _, got := targetOf(t, s, child.ID); got != f.repoDir {
+		t.Fatalf("target_dir = %q, want the own repository's main checkout %q", got, f.repoDir)
+	}
+}
+
+func TestSetParentReportsAForeignParentBefore(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	f := newParentFamily(t, s, "child")
+	g := newParentFamily(t, s, "foreign")
+	if _, err := s.SetParent(context.Background(), f.byName["child"].ID, g.id("foreign")); err != nil {
+		t.Fatalf("SetParent: %v", err)
+	}
+
+	// Act
+	change, err := s.SetParent(context.Background(), f.byName["child"].ID, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SetParent: %v", err)
+	}
+	if !change.Before.CrossRepository || change.Before.ParentName != "foreign" || change.After.CrossRepository {
+		t.Fatalf("change = %+v, want a foreign parent before and none after", change)
 	}
 }
 

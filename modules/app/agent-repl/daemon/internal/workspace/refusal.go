@@ -39,9 +39,6 @@ const (
 	// ArmUnknownParent is a retarget naming a parent the registry does not
 	// hold (SetWorkspaceParentError.unknown_parent).
 	ArmUnknownParent = "unknown_parent"
-	// ArmParentInOtherRepository is a retarget naming a parent of another
-	// repository. The arm carries `parent_repository_dir`.
-	ArmParentInOtherRepository = "parent_in_other_repository"
 	// ArmCycle is a retarget naming the workspace itself or one of its
 	// descendants as its parent.
 	ArmCycle = "cycle"

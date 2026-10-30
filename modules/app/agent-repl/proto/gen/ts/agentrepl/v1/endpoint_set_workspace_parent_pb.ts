@@ -4,7 +4,10 @@
 // A workspace's PARENT is its merge target and its roster nesting at once: a
 // child's merge lands in its parent's checkout, and a top-level workspace's
 // lands in its repository's main checkout on the default branch
-// (CreateWorkspaceRequest.parent). Creation records that choice; this rpc is
+// (CreateWorkspaceRequest.parent). A parent of ANOTHER repository is the
+// child's owner and nesting only: no branch crosses repositories, so such a
+// child's merge lands in its own repository's main checkout, on the default
+// branch, while the roster nests it under that parent. Creation records that choice; this rpc is
 // the one way to change it afterwards. The roster nests the workspace under
 // its new parent, or at the top level, on its next push.
 //
@@ -36,7 +39,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_set_workspace_parent.proto.
  */
 export const file_agentrepl_v1_endpoint_set_workspace_parent: GenFile = /*@__PURE__*/
-  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9wYXJlbnQucHJvdG8SDGFnZW50cmVwbC52MSLOAQoZU2V0V29ya3NwYWNlUGFyZW50UmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjkKCGNoaWxkX29mGAIgASgLMiUuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudENoaWxkSAASPQoJdG9wX2xldmVsGAMgASgLMiguYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudFRvcExldmVsSABCCAoGcGFyZW50IkUKF1NldFdvcmtzcGFjZVBhcmVudENoaWxkEioKBnBhcmVudBgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiHAoaU2V0V29ya3NwYWNlUGFyZW50VG9wTGV2ZWwimgEKGlNldFdvcmtzcGFjZVBhcmVudFJlc3BvbnNlEjoKB3N1Y2Nlc3MYASABKAsyJy5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlUGFyZW50U3VjY2Vzc0gAEjYKBWVycm9yGAIgASgLMiUuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudEVycm9ySABCCAoGcmVzdWx0IhsKGVNldFdvcmtzcGFjZVBhcmVudFN1Y2Nlc3Mi3gYKF1NldFdvcmtzcGFjZVBhcmVudEVycm9yEk0KEXVua25vd25fd29ya3NwYWNlGAEgASgLMjAuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudFVua25vd25Xb3Jrc3BhY2VIABJWChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjQuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudFdvcmtzcGFjZVJlZk1pc21hdGNoSAASTQoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyMC5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlUGFyZW50VHJhbnNmZXJyaW5nQXdheUgAEkgKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzItLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VQYXJlbnROb3RZZXRBZG9wdGVkSAASRwoOdW5rbm93bl9wYXJlbnQYBSABKAsyLS5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlUGFyZW50VW5rbm93blBhcmVudEgAElAKE3BhcmVudF9yZWZfbWlzbWF0Y2gYBiABKAsyMS5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlUGFyZW50UGFyZW50UmVmTWlzbWF0Y2hIABJdChpwYXJlbnRfaW5fb3RoZXJfcmVwb3NpdG9yeRgHIAEoCzI3LmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VQYXJlbnRQYXJlbnRJbk90aGVyUmVwb3NpdG9yeUgAEjYKBWN5Y2xlGAggASgLMiUuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudEN5Y2xlSAASSAoPbm9fbWVyZ2VfbGF5b3V0GAkgASgLMi0uYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudE5vTWVyZ2VMYXlvdXRIABI9Cgljb2xkX2dhdGUYCiABKAsyKC5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlUGFyZW50Q29sZEdhdGVIABI/Cg9wYXJlbnRfbm90X29wZW4YCyABKAsyJC5hZ2VudHJlcGwudjEuV29ya3NwYWNlUGFyZW50Tm90T3BlbkgAQgcKBWNhdXNlIiQKIlNldFdvcmtzcGFjZVBhcmVudFVua25vd25Xb3Jrc3BhY2UiPgomU2V0V29ya3NwYWNlUGFyZW50V29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjUKIlNldFdvcmtzcGFjZVBhcmVudFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIhCh9TZXRXb3Jrc3BhY2VQYXJlbnROb3RZZXRBZG9wdGVkIiEKH1NldFdvcmtzcGFjZVBhcmVudFVua25vd25QYXJlbnQiOwojU2V0V29ya3NwYWNlUGFyZW50UGFyZW50UmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIkoKKVNldFdvcmtzcGFjZVBhcmVudFBhcmVudEluT3RoZXJSZXBvc2l0b3J5Eh0KFXBhcmVudF9yZXBvc2l0b3J5X2RpchgBIAEoCSIZChdTZXRXb3Jrc3BhY2VQYXJlbnRDeWNsZSIhCh9TZXRXb3Jrc3BhY2VQYXJlbnROb01lcmdlTGF5b3V0IhwKGlNldFdvcmtzcGFjZVBhcmVudENvbGRHYXRlQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
+  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9wYXJlbnQucHJvdG8SDGFnZW50cmVwbC52MSLOAQoZU2V0V29ya3NwYWNlUGFyZW50UmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEjkKCGNoaWxkX29mGAIgASgLMiUuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudENoaWxkSAASPQoJdG9wX2xldmVsGAMgASgLMiguYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudFRvcExldmVsSABCCAoGcGFyZW50IkUKF1NldFdvcmtzcGFjZVBhcmVudENoaWxkEioKBnBhcmVudBgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiHAoaU2V0V29ya3NwYWNlUGFyZW50VG9wTGV2ZWwimgEKGlNldFdvcmtzcGFjZVBhcmVudFJlc3BvbnNlEjoKB3N1Y2Nlc3MYASABKAsyJy5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlUGFyZW50U3VjY2Vzc0gAEjYKBWVycm9yGAIgASgLMiUuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudEVycm9ySABCCAoGcmVzdWx0IhsKGVNldFdvcmtzcGFjZVBhcmVudFN1Y2Nlc3MioQYKF1NldFdvcmtzcGFjZVBhcmVudEVycm9yEk0KEXVua25vd25fd29ya3NwYWNlGAEgASgLMjAuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudFVua25vd25Xb3Jrc3BhY2VIABJWChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjQuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudFdvcmtzcGFjZVJlZk1pc21hdGNoSAASTQoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyMC5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlUGFyZW50VHJhbnNmZXJyaW5nQXdheUgAEkgKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzItLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VQYXJlbnROb3RZZXRBZG9wdGVkSAASRwoOdW5rbm93bl9wYXJlbnQYBSABKAsyLS5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlUGFyZW50VW5rbm93blBhcmVudEgAElAKE3BhcmVudF9yZWZfbWlzbWF0Y2gYBiABKAsyMS5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlUGFyZW50UGFyZW50UmVmTWlzbWF0Y2hIABI2CgVjeWNsZRgIIAEoCzIlLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VQYXJlbnRDeWNsZUgAEkgKD25vX21lcmdlX2xheW91dBgJIAEoCzItLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VQYXJlbnROb01lcmdlTGF5b3V0SAASPQoJY29sZF9nYXRlGAogASgLMiguYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVBhcmVudENvbGRHYXRlSAASPwoPcGFyZW50X25vdF9vcGVuGAsgASgLMiQuYWdlbnRyZXBsLnYxLldvcmtzcGFjZVBhcmVudE5vdE9wZW5IAEIHCgVjYXVzZUoECAcQCFIacGFyZW50X2luX290aGVyX3JlcG9zaXRvcnkiJAoiU2V0V29ya3NwYWNlUGFyZW50VW5rbm93bldvcmtzcGFjZSI+CiZTZXRXb3Jrc3BhY2VQYXJlbnRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiNQoiU2V0V29ya3NwYWNlUGFyZW50VHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIiEKH1NldFdvcmtzcGFjZVBhcmVudE5vdFlldEFkb3B0ZWQiIQofU2V0V29ya3NwYWNlUGFyZW50VW5rbm93blBhcmVudCI7CiNTZXRXb3Jrc3BhY2VQYXJlbnRQYXJlbnRSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiGQoXU2V0V29ya3NwYWNlUGFyZW50Q3ljbGUiIQofU2V0V29ya3NwYWNlUGFyZW50Tm9NZXJnZUxheW91dCIcChpTZXRXb3Jrc3BhY2VQYXJlbnRDb2xkR2F0ZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_family, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SetWorkspaceParentRequest
@@ -50,8 +53,8 @@ export type SetWorkspaceParentRequest = Message<"agentrepl.v1.SetWorkspaceParent
   workspace?: WorkspaceRef | undefined;
 
   /**
-   * THE ARM IS THE NEW MERGE TARGET: another workspace of the same
-   * repository, or the repository's main checkout. Unset is a malformed
+   * THE ARM IS THE NEW MERGE TARGET: another workspace (of another
+   * repository, its owner only), or the repository's main checkout. Unset is a malformed
    * request (Connect InvalidArgument), never "top-level": clearing a parent
    * changes where work lands, so it is asked for by name. Asking for the
    * parent a workspace already has is NOT refused; it re-sends the notice.
@@ -81,17 +84,18 @@ export const SetWorkspaceParentRequestSchema: GenMessage<SetWorkspaceParentReque
   messageDesc(file_agentrepl_v1_endpoint_set_workspace_parent, 0);
 
 /**
- * Make the workspace a CHILD of another workspace: its merge lands in that
- * workspace's checkout, on that workspace's branch, and the roster nests it
- * there.
+ * Make the workspace a CHILD of another workspace: the roster nests it there,
+ * and its merge lands in that workspace's checkout, on that workspace's
+ * branch, when the two are of one repository, or in its own repository's main
+ * checkout when they are not.
  *
  * @generated from message agentrepl.v1.SetWorkspaceParentChild
  */
 export type SetWorkspaceParentChild = Message<"agentrepl.v1.SetWorkspaceParentChild"> & {
   /**
    * The new parent, echoed from its roster row. It must be a registered
-   * workspace of the SAME repository, and neither the retargeted workspace
-   * itself nor one of its descendants.
+   * workspace of any repository, and neither the retargeted workspace itself
+   * nor one of its descendants.
    *
    * @generated from field: workspace.v1.WorkspaceRef parent = 1;
    */
@@ -231,15 +235,6 @@ export type SetWorkspaceParentError = Message<"agentrepl.v1.SetWorkspaceParentEr
      */
     value: SetWorkspaceParentParentRefMismatch;
     case: "parentRefMismatch";
-  } | {
-    /**
-     * The new parent belongs to a different repository; a merge only lands
-     * within one repository.
-     *
-     * @generated from field: agentrepl.v1.SetWorkspaceParentParentInOtherRepository parent_in_other_repository = 7;
-     */
-    value: SetWorkspaceParentParentInOtherRepository;
-    case: "parentInOtherRepository";
   } | {
     /**
      * The new parent is the workspace itself or one of its descendants, so
@@ -398,28 +393,6 @@ export const SetWorkspaceParentParentRefMismatchSchema: GenMessage<SetWorkspaceP
   messageDesc(file_agentrepl_v1_endpoint_set_workspace_parent, 11);
 
 /**
- * The new parent is a workspace of another repository.
- *
- * @generated from message agentrepl.v1.SetWorkspaceParentParentInOtherRepository
- */
-export type SetWorkspaceParentParentInOtherRepository = Message<"agentrepl.v1.SetWorkspaceParentParentInOtherRepository"> & {
-  /**
-   * The main checkout of the repository the parent belongs to, so the
-   * refusal names where the parent actually lives.
-   *
-   * @generated from field: string parent_repository_dir = 1;
-   */
-  parentRepositoryDir: string;
-};
-
-/**
- * Describes the message agentrepl.v1.SetWorkspaceParentParentInOtherRepository.
- * Use `create(SetWorkspaceParentParentInOtherRepositorySchema)` to create a new message.
- */
-export const SetWorkspaceParentParentInOtherRepositorySchema: GenMessage<SetWorkspaceParentParentInOtherRepository> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_parent, 12);
-
-/**
  * The new parent is the retargeted workspace or one of its descendants.
  * DELIBERATELY EMPTY: the request named both ends of the would-be cycle.
  *
@@ -433,7 +406,7 @@ export type SetWorkspaceParentCycle = Message<"agentrepl.v1.SetWorkspaceParentCy
  * Use `create(SetWorkspaceParentCycleSchema)` to create a new message.
  */
 export const SetWorkspaceParentCycleSchema: GenMessage<SetWorkspaceParentCycle> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_parent, 13);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_parent, 12);
 
 /**
  * The workspace has no merge geometry to retarget. DELIBERATELY EMPTY.
@@ -448,7 +421,7 @@ export type SetWorkspaceParentNoMergeLayout = Message<"agentrepl.v1.SetWorkspace
  * Use `create(SetWorkspaceParentNoMergeLayoutSchema)` to create a new message.
  */
 export const SetWorkspaceParentNoMergeLayoutSchema: GenMessage<SetWorkspaceParentNoMergeLayout> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_parent, 14);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_parent, 13);
 
 /**
  * The workspace's session is parked at its cold gate. DELIBERATELY EMPTY: the
@@ -464,5 +437,5 @@ export type SetWorkspaceParentColdGate = Message<"agentrepl.v1.SetWorkspaceParen
  * Use `create(SetWorkspaceParentColdGateSchema)` to create a new message.
  */
 export const SetWorkspaceParentColdGateSchema: GenMessage<SetWorkspaceParentColdGate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_workspace_parent, 15);
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_parent, 14);
 

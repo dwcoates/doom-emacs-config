@@ -50,7 +50,6 @@ func TestSetParentRecordsTheRetargetAndRepublishesTheRoster(t *testing.T) {
 }
 
 func TestSetParentRefuses(t *testing.T) {
-	foreign := &wsm.ParentRefusedError{Refusal: wsm.ParentOtherRepository, Workspace: "w1", ParentRepositoryDir: "/other"}
 	tests := []struct {
 		name    string
 		arrange func(f *fixture)
@@ -73,10 +72,6 @@ func TestSetParentRefuses(t *testing.T) {
 			f.workspace("w1", "/w1")
 			f.db.setParentErr = &wsm.ParentRefusedError{Refusal: wsm.ParentUnknown, Workspace: "w1"}
 		}, want: ArmUnknownParent},
-		{name: "a parent of another repository", arrange: func(f *fixture) {
-			f.workspace("w1", "/w1")
-			f.db.setParentErr = foreign
-		}, want: ArmParentInOtherRepository},
 		{name: "a cycle", arrange: func(f *fixture) {
 			f.workspace("w1", "/w1")
 			f.db.setParentErr = &wsm.ParentRefusedError{Refusal: wsm.ParentCycle, Workspace: "w1"}
@@ -107,22 +102,6 @@ func TestSetParentRefuses(t *testing.T) {
 				t.Fatalf("records = %+v, want the refusal recorded at info", f.log.logger.Records())
 			}
 		})
-	}
-}
-
-func TestSetParentCarriesTheForeignRepositoryOnItsArm(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	f.workspace("w1", "/w1")
-	f.db.setParentErr = &wsm.ParentRefusedError{Refusal: wsm.ParentOtherRepository, Workspace: "w1", ParentRepositoryDir: "/other"}
-
-	// Act
-	_, err := f.verbs.SetParent(context.Background(), "w1", nil)
-
-	// Assert
-	refusal := asRefusal(t, err, ArmParentInOtherRepository)
-	if refusal.Fields["parent_repository_dir"] != "/other" {
-		t.Fatalf("fields = %v, want parent_repository_dir /other", refusal.Fields)
 	}
 }
 
