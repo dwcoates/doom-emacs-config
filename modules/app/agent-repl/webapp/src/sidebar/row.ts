@@ -57,6 +57,7 @@ import type {
   RosterRowReviving,
   RosterRowViewed,
   RosterRowWorkspace,
+  RosterOpenRowRepositoryDivider,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   SelectInEditorResponseSchema,
@@ -111,6 +112,11 @@ export interface RowFamily {
   row?: RosterRow;
   /** The row's family in the same list, in drawn order. */
   children?: readonly RowFamily[];
+  /**
+   * The repository this row begins within its family, when it differs from
+   * the row drawn just before it (frontend.v1.RosterOpenRow.repository_divider).
+   */
+  repositoryDivider?: RosterOpenRowRepositoryDivider;
 }
 
 /** One family of a rows region, with its message path. */
@@ -402,7 +408,9 @@ export function drawRosterRowStandIn(family: RowFamily, familyPath: string): HTM
 /**
  * Append CHILDREN, the family of the list row at FAMILY_PATH, to its box WS,
  * each drawn by DRAW, in the one `.kids` box the search and the stylesheet
- * look for a nested row in. A row with no child draws no box.
+ * look for a nested row in. A child that begins another repository is drawn
+ * under its repository divider (`drawRosterOpenRowRepositoryDivider`). A row
+ * with no child draws no box.
  */
 export function appendRowKids(
   ws: HTMLElement,
@@ -413,8 +421,32 @@ export function appendRowKids(
   if (children.length === 0) return;
   const kids = document.createElement("div");
   kids.className = "kids";
-  for (const child of pathedFamilies(children, `${familyPath}.children`)) kids.appendChild(draw(child.family, child.path));
+  for (const child of pathedFamilies(children, `${familyPath}.children`)) {
+    const divider = child.family.repositoryDivider;
+    if (divider) kids.appendChild(drawRosterOpenRowRepositoryDivider(divider, `${child.path}.repositoryDivider`));
+    kids.appendChild(draw(child.family, child.path));
+  }
   ws.appendChild(kids);
+}
+
+/** The class of a repository divider in a family (frontend.v1.RosterOpenRowRepositoryDivider). */
+export const REPOSITORY_DIVIDER_CLASS = "sb-repo-divider";
+
+/**
+ * Draw U, the divider above the first row of a run of one repository in a
+ * family: a rule, the repository's name, a rule, as the deploy queue heads
+ * a repository's group, inset to the row's indent and ending where the rows'
+ * durations begin.
+ */
+export function drawRosterOpenRowRepositoryDivider(u: RosterOpenRowRepositoryDivider, path: string): HTMLElement {
+  if (u.name === "") throw new Error(`${path}.name: a repository divider names its repository`);
+  const divider = document.createElement("div");
+  divider.className = REPOSITORY_DIVIDER_CLASS;
+  const label = document.createElement("span");
+  label.className = "sb-label";
+  label.textContent = u.name;
+  divider.appendChild(label);
+  return divider;
 }
 
 /**

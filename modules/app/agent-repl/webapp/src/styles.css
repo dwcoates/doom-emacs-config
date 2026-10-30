@@ -1638,6 +1638,30 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    indent. */
 #ws-sidebar .kids { --row-indent-parent: var(--row-indent); position: relative; }
 #ws-sidebar .kids > .ws { --row-indent: calc(var(--row-indent-parent) + 1.2rem); }
+/* A REPOSITORY DIVIDER IN A FAMILY (owner request, 2026-10-29;
+   frontend.v1.RosterOpenRow.repository_divider): a child of another
+   repository than the row before it is drawn under a rule, its repository's
+   name, a rule, as the deploy queue heads a repository's group. It starts at
+   the child's indent and ends where the rows' durations begin. */
+#ws-sidebar { --when-col-w: 2.2rem; }
+#ws-sidebar .kids > .sb-repo-divider {
+  --row-indent: calc(var(--row-indent-parent) + 1.2rem);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.15rem calc(0.7rem + var(--when-col-w)) 0.05rem calc(0.9rem + var(--row-indent));
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+#ws-sidebar .kids > .sb-repo-divider::before,
+#ws-sidebar .kids > .sb-repo-divider::after {
+  content: "";
+  height: 1px;
+  background: var(--border);
+}
+#ws-sidebar .kids > .sb-repo-divider::before { flex: 0 0 0.65rem; }
+#ws-sidebar .kids > .sb-repo-divider::after { flex: 1 1 0; min-width: 0.65rem; }
+#ws-sidebar .kids > .sb-repo-divider > .sb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #ws-sidebar .kids::before {
   content: "";
   position: absolute;
