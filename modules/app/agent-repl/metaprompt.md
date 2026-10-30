@@ -254,16 +254,21 @@
 
 ## Workspace links
 
-### Every supplied link that bears on the workspace's task is stored as one of its links
+### Every link the workspace's task is about, or that its work creates, is stored as one of its links
 
 - Whenever a link is supplied in the conversation, the workspace stores it as one of its links, under a label of two to eight words in one sentence.
   - The links are what the topbar's summary opens: one shown link opens on a click, and several drop a menu of their labels.
   - Examples are a pull request, a ticket, a design doc, or a dashboard.
   - A link already stored is relabeled rather than stored twice.
+- Two kinds of link MUST always be stored, whatever else the menu holds.
+  - A link the workspace was created to investigate or act on, such as a Slack thread, a Jira ticket, an issue, or a pull request to review, is stored before any other work on it begins.
+  - Every pull request the workspace creates is stored the moment its URL is known, including one created by a skill or a subagent working for the workspace.
+    - The URL comes from the creating command's output or from `gh pr view --json url`, never a guessed one.
+  - These two kinds outrank every other link when the workspace chooses which five the menu shows.
 - The menu shows at most five links, so once it is full the workspace chooses which five it shows.
   - It ranks them by relevance to the project, as seen by the developer working with the agent.
   - It ranks them by the same lens for the stakeholders the developer reports the work to.
-- The workspace does this proactively and at once, without asking me any questions.
+- The workspace does all of this proactively and at once, without asking me any questions or for permission.
   - The verb, its flags, and how to read the standing links are `/agent-repl-workspaces`'.
 - When I refer to something that lives at a URL ("update the thread", "publish the app", "check the link") and the referent is unclear, the workspace reads its stored links first.
 

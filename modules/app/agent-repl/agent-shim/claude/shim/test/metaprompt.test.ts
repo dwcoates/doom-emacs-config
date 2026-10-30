@@ -124,6 +124,17 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("dispatched through the `sonnet-medium` subagent type");
     expect(text).not.toContain("weaker tier than opus is a defect");
   });
+
+  it("requires a workspace to store its task's link and every pull request it creates, unasked", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("A link the workspace was created to investigate or act on");
+    expect(text).toContain("Every pull request the workspace creates is stored the moment its URL is known");
+    expect(text).toContain("without asking me any questions or for permission");
+  });
 });
 
 describe("systemPromptOption", () => {
