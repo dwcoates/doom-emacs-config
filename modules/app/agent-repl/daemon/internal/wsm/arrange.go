@@ -494,8 +494,20 @@ func placeFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID, into *Subs
 // sidebar's one-shot subsection, which is derived from those marks, for the
 // place it was put. A closed member keeps its mark: a finished one-shot is
 // still one, and its mark draws the family nowhere.
+//
+// THE MAIN WORKSPACE'S FAMILY KEEPS ITS MARKS. That family is never drawn in
+// the one-shot subsection (the sidebar's oneShotHeld), so moving it moves no
+// one out of it, and its marks are its one-shot children's, which must still
+// finish unattended wherever their parent is dragged.
 func clearFamilyOneShot(ctx context.Context, tx *sql.Tx, roots []WorkspaceID) error {
 	for _, root := range roots {
+		main, err := isMainWorkspace(ctx, tx, root)
+		if err != nil {
+			return err
+		}
+		if main {
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, `WITH RECURSIVE family(id) AS (
   SELECT ?
   UNION
@@ -788,4 +800,18 @@ func nullSubsection(v sql.NullString) *SubsectionID {
 	}
 	id := SubsectionID(v.String)
 	return &id
+}
+
+// isMainWorkspace reports whether workspace ID is its repository's main
+// workspace (IsMainWorktree), read inside TX.
+func isMainWorkspace(ctx context.Context, tx *sql.Tx, id WorkspaceID) (bool, error) {
+	var dir, repoDir string
+	err := tx.QueryRowContext(ctx, `SELECT workspaces.dir, repositories.dir FROM workspaces JOIN repositories ON repositories.id = workspaces.repo_id WHERE workspaces.id = ?`, id).Scan(&dir, &repoDir)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return false, fmt.Errorf("wsm: workspace %s's main-worktree standing: %w", id, err)
+	}
+	return IsMainWorktree(dir, repoDir), nil
 }
