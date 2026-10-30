@@ -5,12 +5,8 @@
  * `#feed-scroll.scroll-zone` > `main#feed`), so a feed rule keyed on any of
  * them matches here as it does in the app.
  */
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { pageStylesheet } from "./stylesheets";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** The page's markup: the feed column, with nothing in the feed. */
 export const FEED_SHELL = `<!doctype html><html><head></head><body>

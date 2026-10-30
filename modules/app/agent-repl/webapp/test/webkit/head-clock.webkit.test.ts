@@ -16,16 +16,12 @@
  * box's. A tool group's tabline clock, which closes the tabline the same way,
  * is measured against the tabline's right edge.
  */
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CLOCK_RESERVE_PROPERTY, ELAPSED_RESERVE_LABELS } from "../../src/elapsed-clock.js";
 import { FEED_TABLINE_CLASS, FEED_TABLINE_CLOCK_CLASS, FEED_TAB_STRIP_CLASS } from "../../src/feed/tabs.js";
 import { reserveLabelsCss } from "../../src/width-reserve.js";
 import { pageStylesheet } from "./stylesheets";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** A bubble's head row holding HEAD in its slot, as bubble.ts builds it. */
 function inBubble(head: string): string {
