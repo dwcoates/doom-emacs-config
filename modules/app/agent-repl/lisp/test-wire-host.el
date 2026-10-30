@@ -407,7 +407,8 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"selectRequested\":{}}" :select-requested)
                       (list "{\"loadPageRequested\":{}}" :load-page-requested)
                       (list "{\"composeEntry\":{\"label\":\"3.1\"}}" :compose-entry)
-                      (list "{\"chatTextHighlighted\":{}}" :chat-text-highlighted)))
+                      (list "{\"chatTextHighlighted\":{}}" :chat-text-highlighted)
+                      (list "{\"responseTextHighlighted\":{}}" :response-text-highlighted)))
     (should (equal (plist-get (agent-repl-test-wire-host--decode
                                #'agent-repl-wire-decode-watch-host-workspace-response
                                (nth 0 case))
@@ -704,6 +705,15 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   #'agent-repl-wire-decode-host-workspace-chat-text-highlighted
                   "{\"node\":\"n\"}")
                  '("HostWorkspaceChatTextHighlighted" node "unknown field"))))
+
+;;;; ---- The response highlight push ----
+
+(ert-deftest agent-repl-test-wire-host-response-text-highlighted-refuses-a-field ()
+  "A field on the empty response highlight message is refused, not ignored."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-response-text-highlighted
+                  "{\"row\":\"r\"}")
+                 '("HostWorkspaceResponseTextHighlighted" row "unknown field"))))
 
 ;;;; ---- The rail's row click push ----
 

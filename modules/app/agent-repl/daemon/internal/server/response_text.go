@@ -97,8 +97,25 @@ func (s *server) SelectResponseText(
 	subject.Log.Debug(rpc, "words of a final response were highlighted; the next prompt revises it", dlog.Context{
 		"row": row.GetValue(), "words": len(highlighted.GetWords()),
 	})
+	s.responseTextHighlighted(subject.Log, ws, row)
 	resp.Result = &agentreplv1.SelectResponseTextResponse_Success{Success: &agentreplv1.SelectResponseTextSuccess{}}
 	return connect.NewResponse(resp), nil
+}
+
+// responseTextHighlighted pushes response_text_highlighted onto the
+// workspace's host stream: the reader highlighted words the next prompt
+// revises, so Emacs puts the keyboard in the composer in insert state. It
+// rides the host EVENT stream, never a topic, so a reconnect never focuses
+// the composer again for a highlight made long before (as
+// chatTextHighlighted).
+func (s *server) responseTextHighlighted(log dlog.Logger, ws ids.WorkspaceID, row *frontendv1.FeedId) {
+	log.Info("SelectResponseText", "words of a final response were highlighted; asked the host to focus the composer",
+		dlog.Context{"row": row.GetValue()})
+	s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_ResponseTextHighlighted{
+			ResponseTextHighlighted: &agentreplv1.HostWorkspaceResponseTextHighlighted{},
+		},
+	})
 }
 
 // validateSelectResponseTextRequest requires the workspace and a selection: a
