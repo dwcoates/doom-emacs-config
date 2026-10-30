@@ -160,7 +160,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"compact":     {usage: "compact WS [-instructions TEXT] [-as-user]", run: workspaceCompact},
 		"status":      {usage: "status WS", run: workspaceStatus},
 		"list":        {usage: "list", run: workspaceList},
-		"find":        {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-standing open|closed|landed] [-text TEXT] [-limit N|-all]", run: workspaceFind},
+		"find":        {usage: "find [-repository here|DIR] [-since WHEN] [-until WHEN] [-standing open|closed|landed] [-text TEXT] [-created-by WS] [-limit N|-all]", run: workspaceFind},
 		"subscribe":   {usage: "subscribe WS -events turn_started,turn_ended,needs_input,landed,closed", run: workspaceSubscribe},
 		"unsubscribe": {usage: "unsubscribe WS", run: workspaceUnsubscribe},
 		"gate":        {usage: "gate WS pay|clear|compact|compact-and-resume [-model M -scope all|prompts|responses]", run: workspaceGate},
@@ -1229,6 +1229,7 @@ func workspaceFind(c *cliCall, args []string) int {
 	until := fs.String("until", "", "only workspaces created at or before WHEN, spelled as -since is")
 	standing := fs.String("standing", "", "only workspaces open, closed (landed or not), or landed")
 	text := fs.String("text", "", "only workspaces whose name, branch or summary contains TEXT, case-insensitively")
+	createdBy := fs.String("created-by", "", "only workspaces whose creation WS's agent asked for")
 	limit := fs.Int("limit", defaultFindLimit, "answer at most N workspaces")
 	all := fs.Bool("all", false, "answer every match, with no limit")
 	positionals, ok := c.parse(fs, args)
@@ -1291,6 +1292,11 @@ func workspaceFind(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	req.Repository = scope
+	if *createdBy != "" {
+		if req.CreatedBy, ok = c.named(*createdBy); !ok {
+			return exitFailure
+		}
+	}
 	resp, err := c.client.FindWorkspaces(c.ctx, connect.NewRequest(req))
 	return answer(c, resp, err)
 }

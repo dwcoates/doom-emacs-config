@@ -74,11 +74,12 @@ func mkdir(t *testing.T, dir string) string {
 	return dir
 }
 
-// retarget sets name's parent to parentName ("" for top-level) or fails the
-// test.
+// retarget sets name's parent to parentName ("" for top-level) and lands it
+// there (the parent's worktree, or the main checkout for top-level), or fails
+// the test.
 func (f parentFamily) retarget(t *testing.T, s *store, name, parentName string) ParentChange {
 	t.Helper()
-	change, err := s.SetParent(context.Background(), f.byName[name].ID, ToParent(f.id(parentName)))
+	change, err := s.SetParent(context.Background(), f.byName[name].ID, Retarget{Parent: f.id(parentName), Landing: &LandingChoice{Into: f.id(parentName)}})
 	if err != nil {
 		t.Fatalf("SetParent(%s -> %q): %v", name, parentName, err)
 	}
@@ -413,8 +414,13 @@ func TestSetParentLandsWhereTheRetargetSays(t *testing.T) {
 		wantParent    string
 		wantLandsInto string
 	}{
-		{name: "a child lands into its parent by default",
+		{name: "a new parent keeps where it lands",
 			retarget:   func(f parentFamily) Retarget { return ToParent(f.id("parent")) },
+			wantParent: "parent"},
+		{name: "a child lands into its parent when asked",
+			retarget: func(f parentFamily) Retarget {
+				return Retarget{Parent: f.id("parent"), Landing: &LandingChoice{Into: f.id("parent")}}
+			},
 			wantParent: "parent", wantLandsInto: "parent"},
 		{name: "a child lands on the primary branch when asked",
 			retarget:   func(f parentFamily) Retarget { return Retarget{Parent: f.id("parent"), Landing: &LandingChoice{}} },
@@ -428,9 +434,10 @@ func TestSetParentLandsWhereTheRetargetSays(t *testing.T) {
 		{name: "a peer landing into a workspace",
 			retarget:      func(f parentFamily) Retarget { return Retarget{Landing: &LandingChoice{Into: f.id("other")}} },
 			wantLandsInto: "other"},
-		{name: "a peer lands on the primary branch by default",
-			arrange:  func(t *testing.T, s *store, f parentFamily) { f.retarget(t, s, "child", "parent") },
-			retarget: func(f parentFamily) Retarget { return ToParent(nil) }},
+		{name: "a peer keeps landing into its former parent",
+			arrange:       func(t *testing.T, s *store, f parentFamily) { f.retarget(t, s, "child", "parent") },
+			retarget:      func(f parentFamily) Retarget { return ToParent(nil) },
+			wantLandsInto: "parent"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

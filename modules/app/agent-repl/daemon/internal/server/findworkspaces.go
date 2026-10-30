@@ -46,6 +46,19 @@ func (s *server) FindWorkspaces(
 	if err != nil {
 		return nil, fail(s.log, rpc, fmt.Errorf("list the workspaces: %w", err))
 	}
+	byID := make(map[wsm.WorkspaceID]wsm.Workspace, len(records))
+	for _, ws := range records {
+		byID[ws.ID] = ws
+	}
+	if ref := req.Msg.CreatedBy; ref != nil {
+		creator, ok := byID[wsm.WorkspaceID(ref.GetId())]
+		if !ok || (ref.GetDir() != "" && ref.GetDir() != creator.Dir) {
+			return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{
+				Arm: "unknown_creator", Reason: fmt.Sprintf("no registered workspace is named by id %q dir %q", ref.GetId(), ref.GetDir()), Info: true,
+			})))
+		}
+		query.CreatedBy = &creator.ID
+	}
 	summaries, err := s.deps.DB.ListWorkspaceSummaries(ctx)
 	if err != nil {
 		return nil, fail(s.log, rpc, fmt.Errorf("list the workspace summaries: %w", err))
@@ -56,7 +69,7 @@ func (s *server) FindWorkspaces(
 	}
 	found := make([]*agentreplv1.FoundWorkspace, 0, len(result.Found))
 	for _, f := range result.Found {
-		found = append(found, foundWorkspaceOf(f))
+		found = append(found, foundWorkspaceOf(f, byID))
 	}
 	success := &agentreplv1.FindWorkspacesSuccess{}
 	if result.Omitted > 0 {
@@ -67,7 +80,7 @@ func (s *server) FindWorkspaces(
 	}
 	s.log.Debug("daemon.server.find_workspaces", "answered a workspace find", dlog.Context{
 		"found": len(found), "omitted": result.Omitted, "repository": req.Msg.GetRepository().GetId() + req.Msg.GetRepository().GetDir(),
-		"text": req.Msg.GetText(), "standing": fmt.Sprint(query.Standing)})
+		"text": req.Msg.GetText(), "standing": fmt.Sprint(query.Standing), "created_by": req.Msg.GetCreatedBy().GetId()})
 	resp.Result = &agentreplv1.FindWorkspacesResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
@@ -90,6 +103,11 @@ func validateFindWorkspacesRequest(req *agentreplv1.FindWorkspacesRequest) *conn
 	}
 	if req.Limit != nil && req.GetLimit() == 0 {
 		return invalid("limit", "a limit is at least 1")
+	}
+	if req.CreatedBy != nil {
+		if err := validateWorkspaceRef("created_by", req.GetCreatedBy()); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -131,8 +149,11 @@ func findQueryOf(req *agentreplv1.FindWorkspacesRequest) workspacefind.Query {
 	return q
 }
 
-// foundWorkspaceOf renders one found workspace.
-func foundWorkspaceOf(f workspacefind.Found) *agentreplv1.FoundWorkspace {
+// foundWorkspaceOf renders one found workspace, naming its creator and its
+// parent by their records in BYID, the same listing. Both references are SET
+// NULL when their row is forgotten, so one the listing does not hold is an
+// invariant violation and panics.
+func foundWorkspaceOf(f workspacefind.Found, byID map[wsm.WorkspaceID]wsm.Workspace) *agentreplv1.FoundWorkspace {
 	ws := f.Workspace
 	standing := &agentreplv1.FoundWorkspaceStanding{}
 	switch {
@@ -148,7 +169,19 @@ func foundWorkspaceOf(f workspacefind.Found) *agentreplv1.FoundWorkspace {
 	default:
 		standing.Standing = &agentreplv1.FoundWorkspaceStanding_Open{Open: &agentreplv1.FoundWorkspaceStandingOpen{}}
 	}
+	refOf := func(id *wsm.WorkspaceID) *workspacev1.WorkspaceRef {
+		if id == nil {
+			return nil
+		}
+		record, ok := byID[*id]
+		if !ok {
+			panic(fmt.Sprintf("server: workspace %s names %s, which the registry listing does not hold", ws.ID, *id))
+		}
+		return record.Ref()
+	}
 	return &agentreplv1.FoundWorkspace{
+		CreatedBy:      refOf(ws.RequestedBy),
+		Parent:         refOf(ws.Parent),
 		Workspace:      ws.Ref(),
 		Name:           ws.Name,
 		Branch:         ws.Branch,

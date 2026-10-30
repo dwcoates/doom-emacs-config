@@ -100,6 +100,9 @@ func TestSetWorkspaceParentToTopLevelUnnestsTellsTheSessionAndMergesToTheMainChe
 	resp, err := f.d.Client().SetWorkspaceParent(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetWorkspaceParentRequest{
 		Workspace: f.child,
 		Parent:    &agentreplv1.SetWorkspaceParentRequest_TopLevel{TopLevel: &agentreplv1.SetWorkspaceParentTopLevel{}},
+		// A retarget keeps its landing unless it names one: unnesting AND
+		// landing on main is asked for by name.
+		LandingTarget: harness.LandsOnPrimary(),
 	}))
 
 	// Assert: answered, unnested, and told.
