@@ -476,6 +476,7 @@ unowned workspace webview unrepresentable rather than merely unlikely."
     (setq-local agent-repl--owning-workspace owner)
     (setq-local xwidget-webkit-buffer-name-format name)
     (setq-local header-line-format nil)
+    (setq-local mode-line-format nil)
     (rename-buffer name t)
     ;; Last, so consumers see a fully adopted buffer (final name, mode armed).
     ;; Wrapped because a decoration that fails must not cost the user a

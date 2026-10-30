@@ -2146,6 +2146,21 @@ panel, not a browser."
           (should (null (buffer-local-value 'header-line-format buf))))
       (kill-buffer buf))))
 
+(ert-deftest agent-repl-test-frontend-adopt-webview-buffer-clears-the-mode-line ()
+  "Adoption clears the mode line: a webview is a panel, and the editor's
+mode line under it is noise."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-adopt-mode-line*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf (setq-local mode-line-format '("%b")))
+          ;; Act
+          (agent-repl--frontend-adopt-webview-buffer
+           buf "*agent-repl-test-adopted-mode-line*" "ws-1")
+          ;; Assert
+          (should (null (buffer-local-value 'mode-line-format buf))))
+      (kill-buffer buf))))
+
 (ert-deftest agent-repl-test-frontend-adopt-remaps-stock-history-reload ()
   "Adoption remaps the broken stock `xwidget-webkit-history-reload' to ours.
 The stock command calls `xwidget-webkit-back-forward-list', void in this
