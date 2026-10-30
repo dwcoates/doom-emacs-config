@@ -1473,6 +1473,9 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .merged-group-head::before { flex: 0 0 0.65rem; }
 #ws-sidebar .merged-group-head::after { flex: 1 1 0; min-width: 0.65rem; }
 #ws-sidebar .merged-group-head > .sb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A REPOSITORY'S TITLE UNDER "RECENTLY DEPLOYED" IS PURPLE (owner request,
+   2026-10-30), the title only: the flanking rules keep --border. */
+#ws-sidebar .merged-group-head > .sb-label { color: var(--blocked); }
 /* A QUEUE GROUP'S "(N)", the merges in its line, and the "Recently Merged"
    heading's "(K today)" read as every section count does: plain, a step
    smaller than the label, in the muted grey, with no capitals. */

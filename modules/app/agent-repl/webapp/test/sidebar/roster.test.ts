@@ -1338,6 +1338,11 @@ describe("recently merged rows", () => {
     expect([name?.classList.contains("band-name"), name?.classList.contains("viewed")]).toEqual([true, false]);
   });
 
+  it("paints a Recently Deployed repository title purple and leaves its flanking rules alone", () => {
+    expect(css).toContain("#ws-sidebar .merged-group-head > .sb-label { color: var(--blocked); }");
+    expect(css).toMatch(/\.merged-group-head::after \{[^}]*background: var\(--border\);/);
+  });
+
   it("styles a merged name with the repository headers' colour variable", () => {
     expect(css).toContain("#ws-sidebar .row .name.band-name { color: var(--repo-head-expanded); }");
   });
