@@ -249,7 +249,7 @@ func TestAWaitingParticipantIsRecordedAtInfo(t *testing.T) {
 	// Assert
 	var waiting bool
 	for _, rec := range levelRecords(records(h.log, opAdoptHost), "info") {
-		if rec.Message == "an expected participant has not called yet; waiting for the rendezvous" &&
+		if rec.Message == "a participant called; it waits for the daemon's adoption of the workspace" &&
 			rec.Context["web_called"] == false {
 			waiting = true
 		}
@@ -526,20 +526,25 @@ func TestAnAdoptionWhoseShimWillNotAnswerStillDrainsTheIntake(t *testing.T) {
 }
 
 func TestDaemonAddrIsWrittenOnlyWhenEveryWorkspaceIsOwned(t *testing.T) {
-	// Arrange
+	// Arrange: the incumbent still holds the second workspace's serving row,
+	// so the daemon's own adoption of it waits on the release.
 	h := newHarness(t)
 	first, _ := h.workspace(t)
 	second, _ := h.workspace(t)
 	firstRecord, _ := h.db.Workspace(context.Background(), first)
 	secondRecord, _ := h.db.Workspace(context.Background(), second)
+	const outgoing = ids.InstanceID("daemon-outgoing-previous")
 	if err := h.c.writeManifest(context.Background(), Manifest{
-		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+		Daemon: outgoing, WrittenAt: instant,
 		Sessions: []ManifestSession{
 			{Workspace: first, Dir: firstRecord.Dir, Intent: IntentPreserve, ExpectedHost: true},
 			{Workspace: second, Dir: secondRecord.Dir, Intent: IntentPreserve, ExpectedHost: true},
 		},
 	}); err != nil {
 		t.Fatalf("writeManifest: %v", err)
+	}
+	if err := h.db.ClaimServing(context.Background(), second, outgoing); err != nil {
+		t.Fatalf("ClaimServing(second): %v", err)
 	}
 	if err := h.c.Join(context.Background()); err != nil {
 		t.Fatalf("Join: %v", err)
@@ -552,6 +557,11 @@ func TestDaemonAddrIsWrittenOnlyWhenEveryWorkspaceIsOwned(t *testing.T) {
 	h.mu.Lock()
 	afterFirst := h.addrWrites
 	h.mu.Unlock()
+	h.clock.awaitArmed(t, manifestPoll)
+	if err := h.db.ReleaseServing(context.Background(), second, outgoing); err != nil {
+		t.Fatalf("ReleaseServing(second): %v", err)
+	}
+	h.clock.Fire(manifestPoll)
 	if err := h.c.AdoptHost(context.Background(), second); err != nil {
 		t.Fatalf("AdoptHost(second): %v", err)
 	}
@@ -948,16 +958,21 @@ func TestAnAdoptionOutLivesTheCallerThatCompletedIt(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 
-	// Act
+	// Act: the caller gives up mid-adoption; a later call waits on the same
+	// adoption the daemon is still running.
 	go func() { done <- h.c.AdoptHost(ctx, ws) }()
 	<-entered
 	cancel()
+	gaveUp := <-done
 	close(release)
-	err := <-done
+	err := h.c.AdoptHost(context.Background(), ws)
 
 	// Assert
+	if !errors.Is(gaveUp, ErrNotYetAdopted) {
+		t.Fatalf("the cancelled AdoptHost = %v, want not_yet_adopted for the caller that gave up", gaveUp)
+	}
 	if err != nil {
-		t.Fatalf("AdoptHost = %v, want the adoption to complete after the caller gave up", err)
+		t.Fatalf("AdoptHost = %v, want the adoption to complete after the first caller gave up", err)
 	}
 	if seen != nil {
 		t.Fatalf("the adoption ran under a context the caller cancelled (%v), want one it cannot cancel", seen)
@@ -1412,7 +1427,7 @@ func TestALateCallerOfASatisfiedRendezvousDoesNotAdoptASecondTime(t *testing.T) 
 	// Act: a second web call arrives, then the incumbent lets go.
 	second := make(chan error, 1)
 	go func() { second <- h.c.AdoptWeb(context.Background(), ws) }()
-	awaitRecord(t, h, opAdoptWeb, "the rendezvous is satisfied and its adoption is already running; waiting on it")
+	awaitRecord(t, h, opAdoptWeb, "a participant called; it waits for the daemon's adoption of the workspace")
 	if err := h.db.ReleaseServing(context.Background(), ws, outgoing); err != nil {
 		t.Fatalf("ReleaseServing(outgoing): %v", err)
 	}
@@ -1490,7 +1505,7 @@ func TestACallerBehindARerunAdoptionWaitsForTheRerunNotTheEarlierFailure(t *test
 	// Act: a caller arrives while the re-run is in flight, then the re-run lands.
 	behind := make(chan error, 1)
 	go func() { behind <- h.c.AdoptHost(context.Background(), ws) }()
-	awaitRecord(t, h, opAdoptHost, "the rendezvous is satisfied and its adoption is already running; waiting on it")
+	awaitRecord(t, h, opAdoptHost, "a participant called; it waits for the daemon's adoption of the workspace")
 	close(release)
 
 	// Assert: both share the re-run's success.
@@ -2088,5 +2103,73 @@ func TestATakeoverWhoseHeldCreatesCannotBeReadSaysSoAndGoesOn(t *testing.T) {
 	}
 	if paid := h.reports.payments(); len(paid) != 1 {
 		t.Fatalf("payments = %+v, want the takeover to go on past the failed take-up", paid)
+	}
+}
+
+// THE DAEMON ADOPTS; NO PARTICIPANT DOES. On 2026-10-30 a workspace whose page
+// never called the successor (it kept calling the outgoing daemon) held the
+// whole handover for 25 minutes: the successor waited on its web slot, every
+// adoption window expired, and the incumbent took it back six times. These
+// pin that a workspace's adoption depends on the serving release alone.
+func TestTheDaemonAdoptsAWorkspaceWhoseParticipantsNeverCall(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected Participants
+		lock     sessionlock.State
+	}{
+		{name: "host and web expected, neither calls", expected: Participants{Host: true, Web: true}, lock: sessionlock.StateHeld},
+		{name: "web expected and never calls", expected: Participants{Web: true}, lock: sessionlock.StateHeld},
+		{name: "a start_failed workspace: participants expected, no shim behind it", expected: Participants{Host: true, Web: true}, lock: sessionlock.StateFree},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			adopted := make(chan ids.WorkspaceID, 4)
+			h := harnessSignallingAdoptions(t, adopted)
+			ws, dir := h.workspace(t)
+			h.mu.Lock()
+			h.lockStates[dir] = tt.lock
+			h.mu.Unlock()
+
+			// Act: the successor joins, and nobody calls in.
+			arm(t, h, ws, tt.expected)
+
+			// Assert
+			select {
+			case got := <-adopted:
+				if got != ws {
+					t.Fatalf("adopted %q, want %q", got, ws)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("the workspace was never adopted without its participants calling")
+			}
+		})
+	}
+}
+
+// A STALE PARTICIPANT CALLING LATE is answered by the adoption the daemon
+// already made, at once, and runs no second adoption.
+func TestAStaleParticipantIsAnsweredByTheDaemonsAdoption(t *testing.T) {
+	// Arrange
+	adopted := make(chan ids.WorkspaceID, 4)
+	h := harnessSignallingAdoptions(t, adopted)
+	ws, _ := h.workspace(t)
+	arm(t, h, ws, Participants{Host: true, Web: true})
+	select {
+	case <-adopted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the daemon never adopted the workspace")
+	}
+
+	// Act
+	hostErr := h.c.AdoptHost(context.Background(), ws)
+	webErr := h.c.AdoptWeb(context.Background(), ws)
+
+	// Assert
+	if hostErr != nil || webErr != nil {
+		t.Fatalf("AdoptHost = %v, AdoptWeb = %v, want both answered by the adoption already made", hostErr, webErr)
+	}
+	if got := h.fleet.Adoptions(); len(got) != 1 {
+		t.Fatalf("adoptions = %v, want exactly the daemon's one", got)
 	}
 }
