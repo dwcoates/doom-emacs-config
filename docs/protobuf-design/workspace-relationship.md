@@ -124,3 +124,36 @@ CONSEQUENCES (accepted).
   e2e tests, the elisp fake daemon). Elisp itself builds no create topology.
 - A workspace landing into a non-parent workspace blocks that workspace's close
   and finish exactly as a child does (`landing_into`).
+
+### 2. Implementation (daemon, Emacs, webapp, CLI, skill)
+
+WHAT. Landed on this branch in `a37d866dbd` (daemon), `d9f6d7af69` (Emacs),
+`0e46217f6b` (webapp), `c82e834fdc` (test-run investigation, briefs) and the
+`agent-repl-workspaces` skill commit.
+
+NON-OBVIOUS CONSEQUENCES.
+- `wsm.Workspace.LandsInto` is READ BACK, never stored: `landsIntoColumn`
+  (`daemon/internal/wsm/derivation.go`) joins `creation_jobs.target_dir` to the
+  workspace at that directory, excluding the repository's main checkout. No
+  migration was needed; every existing row already reads correctly.
+- `wsm.SetParent` takes a `wsm.Retarget` (keep or set the parent, plus an
+  optional `LandingChoice`). Refusal `ParentUnknownLandingTarget` covers an
+  unregistered target, one of another repository, the main workspace, the
+  workspace itself, and one whose landing chain reaches it (`landsInto` walk).
+- The family refusal counts open workspaces landing into a workspace
+  (`openLanders`), so a landing target cannot be closed, hidden or merged
+  away under work aimed at it. A repository's main workspace is never held
+  open this way.
+- A child's open parent follows it through `wsm.WorkspaceSubscribers`
+  (`ParentFollowedEvents`: turn ended, needs input, landed, closed), merged
+  into any explicit subscription. A merge workspace's requester is not
+  followed this way (its merge reports to it on its own path).
+- `workspacenotice.Recipients` now takes the event kind: a non-merge child's
+  parent is told only its creation there (its landing and close arrive by
+  following), and the workspace a branch lands into is told as the branch
+  source. Before this change a child created BY its parent was never told of
+  its landing or close at all, because the requester is never told.
+- The verb `workspace.verbs.create` asks `requireOpenParent` of the landing
+  workspace too (the guard test now pins three shared calls).
+- Emacs creates name `:relationship` (child of OWNER, else peer) and never a
+  landing target; `unknown_landing_target` is deliberately not decoded there.
