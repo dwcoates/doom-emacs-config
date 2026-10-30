@@ -284,6 +284,12 @@ type harness struct {
 	// is what they answer.
 	mainEnsures   atomic.Int64
 	mainEnsureErr error
+	// homeEnsures counts the boot's EnsureHomeRepository calls; homeEnsureErr
+	// is what they answer, and mainEnsuresAtHome is how many EnsureMainWorktrees
+	// calls had run when the last one was made.
+	homeEnsures       atomic.Int64
+	homeEnsureErr     error
+	mainEnsuresAtHome int64
 	// threadOpens counts the boot's OpenThreads calls;
 	// threadOpenErr fails them.
 	threadOpens   atomic.Int64
@@ -428,6 +434,11 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 		OpenThreads: func(context.Context) error {
 			h.threadOpens.Add(1)
 			return h.threadOpenErr
+		},
+		EnsureHomeRepository: func(context.Context) error {
+			h.homeEnsures.Add(1)
+			h.mainEnsuresAtHome = h.mainEnsures.Load()
+			return h.homeEnsureErr
 		},
 		EnsureMainWorktrees: func(ctx context.Context) error {
 			h.mainEnsures.Add(1)

@@ -201,6 +201,13 @@ func BuildIdentityEnv(checkout string) []string {
 	}
 }
 
+// NoHomeRepositoryEnv has a test daemon register no home repository at boot
+// (cmd/agent-repld envNoHomeRepository): the daemon's checkout is the
+// developer's own, and its repository would join every suite's registry.
+func NoHomeRepositoryEnv() []string {
+	return []string{"AGENT_REPL_NO_HOME_REPOSITORY=1"}
+}
+
 // HostNeutralNamingEnv clears the host's workspace-name prefix for a test
 // daemon. The prefix is read from the daemon's own environment
 // (workspace.PrefixEnv, else workspace.LegacyPrefixEnv) and makes every
@@ -866,6 +873,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	}
 	env = append(env, BuildIdentityEnv(PinnedCheckout(t))...)
 	env = append(env, HostNeutralNamingEnv()...)
+	env = append(env, NoHomeRepositoryEnv()...)
 	env = append(env, HostNeutralCheckoutEnv()...)
 	env = append(env, HostNeutralPowerEnv()...)
 	env = append(env, HostNeutralNewsDigestEnv()...)

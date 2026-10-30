@@ -139,6 +139,16 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		if err := s.retireGoneRepositories(ctx, log, &report); err != nil {
 			return Report{}, err
 		}
+		// AGENT-REPL'S OWN REPOSITORY IS ALWAYS KNOWN (owner ruling,
+		// 2026-10-30), so a first start with nothing registered opens on its
+		// main worktree. It is registered after the gone repositories are
+		// retired, so a stale row for it never stands in for it.
+		if err := s.deps.EnsureHomeRepository(ctx); err != nil {
+			log.Error("daemon.boot.run", "agent-repl's own repository could not be ensured", dlog.Context{
+				"error": err.Error(),
+			})
+			return Report{}, fmt.Errorf("boot: ensure the home repository: %w", err)
+		}
 		// EVERY REPOSITORY LEFT HOLDS ITS MAIN WORKTREE as a registered
 		// workspace once the gone ones are retired: a repository is known
 		// exactly as long as its main worktree is, and a registry written

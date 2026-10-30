@@ -2416,6 +2416,39 @@ func TestTheBootEnsuresTheMainWorktreesOnce(t *testing.T) {
 	}
 }
 
+func TestTheBootEnsuresTheHomeRepositoryOnceBeforeTheMainWorktrees(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.seq.Run(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := h.homeEnsures.Load(); got != 1 {
+		t.Fatalf("EnsureHomeRepository calls = %d, want 1", got)
+	}
+	if h.mainEnsuresAtHome != 0 {
+		t.Fatalf("EnsureHomeRepository ran after %d EnsureMainWorktrees calls, want before any", h.mainEnsuresAtHome)
+	}
+}
+
+func TestAHomeRepositoryEnsureFailureFailsTheBoot(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.homeEnsureErr = errors.New("git could not say what repository the checkout is in")
+
+	// Act
+	_, err := h.seq.Run(context.Background())
+
+	// Assert
+	if !errors.Is(err, h.homeEnsureErr) {
+		t.Fatalf("Run = %v, want the home-repository failure", err)
+	}
+}
+
 func TestTheMainWorktreesAreEnsuredAfterTheGoneRepositoriesAreRetired(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

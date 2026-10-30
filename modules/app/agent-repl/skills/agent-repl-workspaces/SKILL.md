@@ -268,6 +268,9 @@ creating workspaces there with `-repository DIR`.
 - Output is protojson. Refusals print an arm and exit 6: `not_in_a_repository`,
   `unreadable_path`, `inside_temporary_directory` (a path under the temp root).
 - `-dry-run` prints the request without sending it.
+- agent-repl's own repository never needs registering: every daemon boot
+  registers it, with its main worktree open, when the registry does not hold
+  it, so a first start opens on it.
 
 ## Filing a workspace into a subsection
 
