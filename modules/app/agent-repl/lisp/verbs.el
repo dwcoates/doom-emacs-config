@@ -339,8 +339,8 @@ sentence the shim and the daemon word it with."
   "Word the family refusal KEYWORD of verb OP from its FIELDS, or nil.
 KEYWORD `:has-open-children' names the parent's open children and the
 open workspaces landing into it, and for a merge (OP \"merge\") asks for
-them to be resolved and closed before a one-shot merge; `:parent-not-open' names the parent and what to do about
-it.  Nil for any other arm, which is not a family refusal."
+them to be resolved and closed before a one-shot merge;
+`:parent-not-open' names the parent and what to do about it.  Nil for any other arm, which is not a family refusal."
   (pcase keyword
     (:has-open-children
      (let* ((open (append (plist-get fields :children) (plist-get fields :landing-into)))
@@ -2232,8 +2232,8 @@ there."
 A repository used to enter the roster only as a SIDE EFFECT of registering
 a workspace in it, so a checkout nobody had worked in yet could not be
 named at all -- and the create that picks a repository by hand
-\(`agent-repl-create-workspace-in-repository\='), could offer only repositories some workspace had
-already minted.
+\(`agent-repl-create-workspace-in-repository\='), could offer only
+repositories some workspace had already minted.
 
 THE GESTURE IS PICKING A FILE, not naming a repository root: the daemon
 resolves the repository from any path inside it, so the file you happen to
@@ -2534,7 +2534,8 @@ the minibuffer closed lost whatever was typed."
       (exit-minibuffer))))
 
 (defun agent-repl-verbs--read-name (repository refusal)
-  "Read a REQUIRED name for a workspace in REPOSITORY, refusing a blank one with REFUSAL.
+  "Read a REQUIRED name for a workspace in REPOSITORY.
+A blank one is refused with REFUSAL.
 The daemon judges the name before the minibuffer closes
 \(`agent-repl-verbs-name-minibuffer-exit\=')."
   (let ((name (string-trim
@@ -2586,8 +2587,8 @@ recorded before the abandonment propagates."
 
 (defun agent-repl-create-workspace ()
   "Create a workspace in the doom repository from a prompt (`SPC TAB n\=').
-The repository is ALWAYS doom\='s own (`agent-repl-verbs--agent-repl-repository\='),
-whichever workspace (or none) this runs from, off its main branch; the
+The repository is ALWAYS doom\='s own
+\(`agent-repl-verbs--agent-repl-repository\='), whichever workspace (or none) this runs from, off its main branch; the
 daemon mints the name.  The only question is the prompt, which defaults to
 the composer\='s text.  `SPC TAB N\=' is the explanation-engine counterpart
 and `SPC TAB C-n\=' picks the repository and the model.
@@ -2601,7 +2602,7 @@ THE NEW WORKSPACE IS NOT SELECTED: its tab arrives and the user stays put."
    'agent-repl-create-workspace #'agent-repl-verbs--agent-repl-repository nil))
 
 (defun agent-repl-create-workspace-explanation-engine ()
-  "Create a workspace in the explanation-engine repository from a prompt (`SPC TAB N\=').
+  "Create a workspace in explanation-engine from a prompt (`SPC TAB N\=').
 Exactly `agent-repl-create-workspace\=', except the repository is always
 the explanation-engine checkout
 \(`agent-repl-verbs--explanation-engine-repository\=')."
@@ -2611,7 +2612,8 @@ the explanation-engine checkout
    #'agent-repl-verbs--explanation-engine-repository nil))
 
 (defun agent-repl-create-workspace-in-repository ()
-  "Create a workspace in a repository you pick, with a prompt and a model (`SPC TAB C-n\=').
+  "Create a workspace in a picked repository with a prompt and model.
+Bound to `SPC TAB C-n\='.
 The one creation that asks for the repository
 \(`agent-repl-verbs--read-repository\=', defaulting to the current
 workspace\='s), then the model (`agent-repl-verbs--read-model\=', blank

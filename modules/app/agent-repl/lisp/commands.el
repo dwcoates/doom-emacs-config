@@ -43,6 +43,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+(declare-function agent-repl-status-tab-state "status" (ws))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (defvar agent-repl--color-merging-purple)
@@ -1395,7 +1396,7 @@ neighbours (`agent-repl--step-workspace')."
   "Roster status arms that paint a tab red: a turn is running in the workspace.")
 
 (defconst agent-repl--recently-prompted-seconds 900
-  "How long after the user sends from the composer a workspace stays in the working ring.")
+  "How long a workspace stays in the working ring after a composer send.")
 
 (defun agent-repl--recently-prompted-p (name)
   "Non-nil when the user sent NAME a prompt from the composer within the window.
@@ -1418,12 +1419,12 @@ start from."
    (and (fboundp 'agent-repl-roster-tab-order) (agent-repl-roster-tab-order))))
 
 (defun agent-repl-switch-working-left ()
-  "Switch to the working or recently prompted tab LEFT of the current one, wrapping."
+  "Switch to the working or recently prompted tab LEFT of this one, wrapping."
   (interactive)
   (agent-repl--step-workspace -1 #'agent-repl--working-ring "working-cycle" 'cycle))
 
 (defun agent-repl-switch-working-right ()
-  "Switch to the working or recently prompted tab RIGHT of the current one, wrapping."
+  "Switch to the working or recently prompted tab RIGHT of this one, wrapping."
   (interactive)
   (agent-repl--step-workspace 1 #'agent-repl--working-ring "working-cycle" 'cycle))
 

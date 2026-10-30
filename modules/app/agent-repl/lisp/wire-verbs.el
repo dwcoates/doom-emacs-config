@@ -5513,7 +5513,8 @@ own refusal to make, before anything is sent."
                      "ValidateWorkspaceNameRequest" "name" (plist-get request :name)))))
 
 (defun agent-repl-wire-decode-validate-workspace-name-success (json)
-  "Decode ValidateWorkspaceNameSuccess from JSON into (:verdict (:arm ARM :value V)).
+  "Decode ValidateWorkspaceNameSuccess from JSON.
+The answer is (:verdict (:arm ARM :value V)).
 ARM is `:legal\=' with no value, or `:invalid\=' with the decoded
 CreateWorkspaceInvalidName -- the very shape a create\='s `invalid_name\='
 refusal carries, so one sentence words both."
