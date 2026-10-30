@@ -9,9 +9,18 @@
  */
 import type { shimv1 } from "../proto.js";
 
+/**
+ * How the agent's workspace stands within its repository
+ * (shim.v1.SessionProfileAgentStanding), which the system prompt states last
+ * (metaprompt.ts, standingSection).
+ */
+export type WorkspaceStanding = "main_workspace" | "linked_workspace";
+
 /** An agent working in a workspace. */
 export interface AgentProfile {
   readonly kind: "agent";
+  /** Whether the workspace is its repository's main workspace. */
+  readonly standing: WorkspaceStanding;
 }
 
 /** A chat answering questions under the daemon's system prompt. */
@@ -31,10 +40,25 @@ export type SessionProfile = AgentProfile | ChatProfile;
 export function profileFromProto(profile: shimv1.SessionProfile | undefined): SessionProfile {
   switch (profile?.kind.case) {
     case "agent":
-      return { kind: "agent" };
+      return { kind: "agent", standing: standingFromProto(profile.kind.value.standing) };
     case "chat":
       return { kind: "chat", systemPrompt: profile.kind.value.systemPrompt?.text ?? "" };
     default:
       throw new Error("shim session: StartSession reached the engine with no session profile");
+  }
+}
+
+/**
+ * Translate a validated agent profile's standing. An unset standing here is an
+ * invariant violation: validateStartSessionRequest refuses it first.
+ */
+function standingFromProto(standing: shimv1.SessionProfileAgentStanding | undefined): WorkspaceStanding {
+  switch (standing?.kind.case) {
+    case "mainWorkspace":
+      return "main_workspace";
+    case "linkedWorkspace":
+      return "linked_workspace";
+    default:
+      throw new Error("shim session: StartSession reached the engine with an agent profile that names no workspace standing");
   }
 }

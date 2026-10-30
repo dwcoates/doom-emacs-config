@@ -413,7 +413,9 @@ export function profileOptions(
   switch (spec.profile.kind) {
     case "agent":
       return {
-        systemPrompt: systemPromptOption(spec.workspaceName, spec.home),
+        // The system prompt is assembled in systemPromptOption alone, whose
+        // standing notice must stay its last section (metaprompt.ts).
+        systemPrompt: systemPromptOption(spec.workspaceName, spec.profile.standing, spec.home),
         mcpServers,
         allowedTools: [...AGENT_REPL_AUTO_ALLOWED_TOOLS],
         settingSources: ["user", "project", "local"],

@@ -18,7 +18,7 @@ import {
   type SpawnChild,
   type VendorChildExit,
 } from "../../src/sdk/real-query.js";
-import { METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH, workspaceSection } from "../../src/metaprompt.js";
+import { METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH, standingSection, workspaceSection } from "../../src/metaprompt.js";
 import { agentReplHooks } from "../../src/sdk/agent-repl-hooks.js";
 
 /** The servers argument of a test that is not about agent-repl's own MCP server. */
@@ -34,7 +34,7 @@ function homeWithMetaprompt(text: string): string {
 
 function spec(overrides: Partial<RealQuerySpec> = {}): RealQuerySpec {
   return {
-    profile: { kind: "agent" },
+    profile: { kind: "agent", standing: "linked_workspace" },
     cwd: "/ws",
     workspaceName: "parser-fix",
     claudeConfigDir: "/accounts/primary",
@@ -72,7 +72,20 @@ describe("realQueryOptions", () => {
     const options = realQueryOptions(spec(), NO_SERVERS);
 
     // Assert.
-    expect(options.systemPrompt).toEqual({ type: "preset", preset: "claude_code", append: workspaceSection("parser-fix") });
+    expect(options.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: `${workspaceSection("parser-fix")}\n\n${standingSection("linked_workspace")}`,
+    });
+  });
+
+  it("ends a main workspace's system prompt with the main-workspace notice", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec({ profile: { kind: "agent", standing: "main_workspace" } }), NO_SERVERS);
+
+    // Assert.
+    const append = (options.systemPrompt as { append?: string }).append ?? "";
+    expect(append.endsWith(standingSection("main_workspace"))).toBe(true);
   });
 
   it("appends the canonical metaprompt to the preset", () => {
@@ -86,7 +99,7 @@ describe("realQueryOptions", () => {
     expect(options.systemPrompt).toEqual({
       type: "preset",
       preset: "claude_code",
-      append: `BE EXCELLENT\n\n${workspaceSection("parser-fix")}`,
+      append: `BE EXCELLENT\n\n${workspaceSection("parser-fix")}\n\n${standingSection("linked_workspace")}`,
     });
   });
 

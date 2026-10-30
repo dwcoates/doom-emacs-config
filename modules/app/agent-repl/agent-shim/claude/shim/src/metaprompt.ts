@@ -26,6 +26,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import type { WorkspaceStanding } from "./engine/profile.js";
 
 /** The doom config checkout's location, relative to the user's home. */
 export const DOOM_CHECKOUT_REL_PATH = ".config/doom";
@@ -99,9 +100,34 @@ export function workspaceSection(workspaceName: string): string {
 }
 
 /**
+ * The section stating how the workspace stands within its repository: its
+ * repository's main workspace, or a linked worktree. Composed from the
+ * standing the daemon states at StartSession
+ * (`shim.v1.SessionProfileAgent.standing`); the main workspace's rules are
+ * what an agent there must not get wrong (it lands nothing, is never a
+ * one-shot, and splits work off into created workspaces).
+ */
+export function standingSection(standing: WorkspaceStanding): string {
+  switch (standing) {
+    case "main_workspace":
+      return (
+        "This workspace is its repository's MAIN workspace: it sits on the repository's main checkout, on the main branch. " +
+        "It lands nothing itself and is never a one-shot (`agent-repld workspace set here -one-shot` is refused), " +
+        "so separate work is split off into created workspaces (`agent-repld workspace create`), which land their own work."
+      );
+    case "linked_workspace":
+      return (
+        "This workspace is not its repository's main workspace: it is a linked worktree on its own branch, " +
+        "and it lands its own work."
+      );
+  }
+}
+
+/**
  * The session's `systemPrompt` option: the `claude_code` preset with the
  * metaprompt appended, then the section naming WORKSPACENAME, the workspace
- * the session runs in (workspaceSection).
+ * the session runs in (workspaceSection), then the section stating STANDING
+ * (standingSection), which is ALWAYS LAST.
  *
  * The PRESET STAYS. It carries the environment block (cwd, platform, home)
  * that interactive-CLI parity depends on — replacing it with the metaprompt
@@ -109,12 +135,26 @@ export function workspaceSection(workspaceName: string): string {
  * The metaprompt is additional guidelines, not a replacement for knowing where
  * it is running.
  */
-export function systemPromptOption(workspaceName: string, home: string = homedir()): SystemPromptOption {
+export function systemPromptOption(
+  workspaceName: string,
+  standing: WorkspaceStanding,
+  home: string = homedir(),
+): SystemPromptOption {
   if (workspaceName === "") {
     throw new Error("shim: the system prompt names its workspace, and the workspace name is empty");
   }
   const metaprompt = readMetaprompt(home);
-  const sections = [...(metaprompt !== undefined ? [metaprompt] : []), workspaceSection(workspaceName)];
+  // THE STANDING NOTICE MUST STAY THE LAST SECTION APPENDED. Whenever the
+  // system prompt is changed -- a section added, moved or reordered, here or
+  // anywhere else it is assembled -- standingSection stays at the very end, so
+  // the last thing every agent reads before acting is whether its workspace is
+  // its repository's main workspace. metaprompt.test.ts pins it last for both
+  // standings.
+  const sections = [
+    ...(metaprompt !== undefined ? [metaprompt] : []),
+    workspaceSection(workspaceName),
+    standingSection(standing),
+  ];
   return {
     type: "preset",
     preset: "claude_code",

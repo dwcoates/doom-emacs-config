@@ -39,7 +39,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
-      profile: { kind: { case: "agent", value: {} } },
+      profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "v-1" }),
@@ -58,6 +58,30 @@ describe("validateStartSessionRequest", () => {
 
     // Act, Assert.
     expect(codeOf(() => validate.validateStartSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses an agent profile that names no workspace standing", () => {
+    // Arrange.
+    const request = create(shimv1.StartSessionRequestSchema, {
+      workspaceName: "parser-fix",
+      profile: { kind: { case: "agent", value: {} } },
+      source: { case: "resume", value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "v-1" }) },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("accepts an agent profile in its repository's main workspace", () => {
+    // Arrange.
+    const request = create(shimv1.StartSessionRequestSchema, {
+      workspaceName: "main (doom)",
+      profile: { kind: { case: "agent", value: { standing: { kind: { case: "mainWorkspace", value: {} } } } } },
+      source: { case: "resume", value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "v-1" }) },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBeUndefined();
   });
 
   it("refuses a chat profile with a blank system prompt", () => {
@@ -95,7 +119,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
-      profile: { kind: { case: "agent", value: {} } },
+      profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, {
@@ -113,7 +137,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
-      profile: { kind: { case: "agent", value: {} } },
+      profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, {
@@ -131,7 +155,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
-      profile: { kind: { case: "agent", value: {} } },
+      profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, { vendorSessionId: "" }),
@@ -148,7 +172,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
-      profile: { kind: { case: "agent", value: {} } },
+      profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
       source: {
         case: "fresh",
         value: create(shimv1.StartSessionFreshSchema, {
@@ -166,7 +190,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
-      profile: { kind: { case: "agent", value: {} } },
+      profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
       source: {
         case: "fresh",
         value: create(shimv1.StartSessionFreshSchema, {
@@ -184,7 +208,7 @@ describe("validateStartSessionRequest", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
-      profile: { kind: { case: "agent", value: {} } },
+      profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
       source: {
         case: "fresh",
         value: create(shimv1.StartSessionFreshSchema, {
@@ -571,7 +595,7 @@ describe("validateStartSessionRequest cold remediation", () => {
   ): shimv1.StartSessionRequest {
     return create(shimv1.StartSessionRequestSchema, {
       workspaceName: "parser-fix",
-      profile: { kind: { case: "agent", value: {} } },
+      profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } },
       source: {
         case: "resume",
         value: create(shimv1.StartSessionResumeSchema, {

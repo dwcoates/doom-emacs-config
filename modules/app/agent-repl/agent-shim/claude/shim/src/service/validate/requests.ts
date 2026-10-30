@@ -55,6 +55,11 @@ export function validateStartSessionRequest(request: shimv1.StartSessionRequest)
     // as an agent session.
     switch (request.profile?.kind.case) {
       case "agent":
+        // THE STANDING IS NEVER GUESSED either: the system prompt's last
+        // section states it, and an agent told the wrong one acts wrongly.
+        if (request.profile.kind.value.standing?.kind.case === undefined) {
+          throw unsetOneof("start_session.profile.agent.standing");
+        }
         break;
       case "chat":
         if ((request.profile.kind.value.systemPrompt?.text ?? "").trim() === "") {
