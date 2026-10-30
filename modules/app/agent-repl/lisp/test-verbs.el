@@ -317,9 +317,9 @@ answers a bare success, which is what almost every verb's success is."
 
 ;;;; ---- Request shapes: one test per verb ----
 
-(defun agent-repl-test-verbs--topology (request)
-  "The topology REQUEST's creation form carries."
-  (plist-get (plist-get (plist-get request :form) :value) :topology))
+(defun agent-repl-test-verbs--relationship (request)
+  "The relationship REQUEST's creation form carries."
+  (plist-get (plist-get (plist-get request :form) :value) :relationship))
 
 (ert-deftest agent-repl-verbs-close-echoes-the-ref ()
   "CloseWorkspace carries the daemon-minted ref verbatim."
@@ -2015,7 +2015,7 @@ skipped a section the bar walks fails here rather than passing silently."
 
 (ert-deftest agent-repl-verbs-fork-into-primary-forks-the-context-of-a-primary ()
   "`SPC TAB f\=' forks the conversation into a PRIMARY workspace: the
-current workspace is the forked context, and the topology is primary."
+current workspace is the forked context, and the relationship is peer."
   (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--section-of-ws)
                (lambda (&rest _) (agent-repl-test-verbs--repo-section)))
@@ -2024,7 +2024,7 @@ current workspace is the forked context, and the topology is primary."
       (let ((request (agent-repl-test-verbs--request :create)))
         (should (equal (plist-get request :context-origin)
                        (list :arm :fork :value (agent-repl-test-verbs--ref))))
-        (should (equal (agent-repl-test-verbs--topology request) '(:arm :primary)))))))
+        (should (equal (agent-repl-test-verbs--relationship request) '(:arm :peer)))))))
 
 (ert-deftest agent-repl-verbs-fork-command-is-a-child-forked-from-its-owner ()
   "`SPC TAB c\=' makes a child of the current workspace, forked from it."
@@ -2034,8 +2034,8 @@ current workspace is the forked context, and the topology is primary."
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p &optional _history-file _unseeded) "fork it")))
       (agent-repl-fork-workspace)
       (let ((request (agent-repl-test-verbs--request :create)))
-        (should (equal (agent-repl-test-verbs--topology request)
-                       (list :arm :child :value (list :owner (agent-repl-test-verbs--ref)))))
+        (should (equal (agent-repl-test-verbs--relationship request)
+                       (list :arm :child :value (list :parent (agent-repl-test-verbs--ref)))))
         (should (equal (plist-get request :context-origin)
                        (list :arm :fork :value (agent-repl-test-verbs--ref))))))))
 
@@ -2270,7 +2270,7 @@ called with the request that answers or signals."
       (let ((request (agent-repl-test-verbs--request :create)))
         (should (equal (plist-get request :context-origin)
                        (list :arm :fork :value (agent-repl-test-verbs--ref))))
-        (should (equal (agent-repl-test-verbs--topology request) '(:arm :primary)))
+        (should (equal (agent-repl-test-verbs--relationship request) '(:arm :peer)))
         (should (equal (plist-get (plist-get (plist-get request :form) :value) :name)
                        "named-one"))
         (should-not (plist-get (plist-get (plist-get request :form) :value) :initial-prompt))))))
@@ -2290,8 +2290,8 @@ called with the request that answers or signals."
       (let ((request (agent-repl-test-verbs--request :create)))
         (should (equal (plist-get (plist-get (plist-get request :form) :value) :name)
                        "named-fork"))
-        (should (equal (agent-repl-test-verbs--topology request)
-                       (list :arm :child :value (list :owner (agent-repl-test-verbs--ref)))))
+        (should (equal (agent-repl-test-verbs--relationship request)
+                       (list :arm :child :value (list :parent (agent-repl-test-verbs--ref)))))
         (should (equal (plist-get request :context-origin)
                        (list :arm :fork :value (agent-repl-test-verbs--ref))))))))
 
@@ -2563,7 +2563,7 @@ Every prompt label the commission read is offered is pushed onto PROMPTS."
         (agent-repl-create-oneshot-for-current-workspace nil)
         ;; Assert.
         (let ((request (agent-repl-test-verbs--request :create)))
-          (should (equal (agent-repl-test-verbs--topology request) '(:arm :primary)))
+          (should (equal (agent-repl-test-verbs--relationship request) '(:arm :peer)))
           (should (equal (plist-get request :context-origin) '(:arm :fresh))))))))
 
 (ert-deftest agent-repl-verbs-oneshot-for-current-workspace-prompt-names-the-workspace ()
@@ -3348,14 +3348,14 @@ and the current workspace sits in the other repository."
     (should (equal agent-repl-test-verbs--asked-prompts '("Initial prompt (doom): ")))))
 
 (ert-deftest agent-repl-verbs-create-workspace-is-primary ()
-  "`SPC TAB n\=' is never a child: its topology is primary."
+  "`SPC TAB n\=' is never a child: its relationship is peer."
   ;; Arrange.
   (agent-repl-test-verbs--with-standard-creates
     ;; Act.
     (agent-repl-create-workspace)
     ;; Assert.
-    (should (equal (agent-repl-test-verbs--topology (agent-repl-test-verbs--request :create))
-                   '(:arm :primary)))))
+    (should (equal (agent-repl-test-verbs--relationship (agent-repl-test-verbs--request :create))
+                   '(:arm :peer)))))
 
 (ert-deftest agent-repl-verbs-create-workspace-works-without-a-current-workspace ()
   "`SPC TAB n\=' derives nothing from the current workspace, so none is needed."
@@ -3408,7 +3408,7 @@ and the current workspace sits in the other repository."
                           "ee-repo" "/tmp/agent-repl-test/work/explanation-engine")))
           (should (equal (plist-get (plist-get (plist-get request :form) :value) :initial-prompt)
                          (agent-repl-verbs--said "do a thing")))
-          (should (equal (agent-repl-test-verbs--topology request) '(:arm :primary)))
+          (should (equal (agent-repl-test-verbs--relationship request) '(:arm :peer)))
           (should-not (plist-get request :model)))))))
 
 (ert-deftest agent-repl-verbs-create-workspace-explanation-engine-refuses-without-multi-repo-root ()
@@ -3442,7 +3442,7 @@ and the current workspace sits in the other repository."
         (should (equal (plist-get (plist-get (plist-get request :form) :value) :initial-prompt)
                        (agent-repl-verbs--said "do a thing")))
         (should (equal (plist-get request :model) "haiku"))
-        (should (equal (agent-repl-test-verbs--topology request) '(:arm :primary)))))))
+        (should (equal (agent-repl-test-verbs--relationship request) '(:arm :peer)))))))
 
 (ert-deftest agent-repl-verbs-create-workspace-in-repository-asks-repository-then-prompt-then-model ()
   "`SPC TAB C-n\=' asks its three questions in that order."
@@ -4247,15 +4247,15 @@ pause sent."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
                             :owner (agent-repl-test-verbs--ref))
-    (should (equal (agent-repl-test-verbs--topology (agent-repl-test-verbs--request :create))
-                   (list :arm :child :value (list :owner (agent-repl-test-verbs--ref)))))))
+    (should (equal (agent-repl-test-verbs--relationship (agent-repl-test-verbs--request :create))
+                   (list :arm :child :value (list :parent (agent-repl-test-verbs--ref)))))))
 
-(ert-deftest agent-repl-verbs-create-without-owner-is-primary ()
-  "No owner makes the create a PRIMARY workspace: the topology is stated."
+(ert-deftest agent-repl-verbs-create-without-owner-is-a-peer ()
+  "No owner makes the create a PEER: the relationship is stated."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot :prompt "go")
-    (should (equal (agent-repl-test-verbs--topology (agent-repl-test-verbs--request :create))
-                   '(:arm :primary)))))
+    (should (equal (agent-repl-test-verbs--relationship (agent-repl-test-verbs--request :create))
+                   '(:arm :peer)))))
 
 (ert-deftest agent-repl-verbs-create-fork-of-forks-the-context ()
   "FORK-OF names the workspace whose conversation the create copies."
@@ -5174,6 +5174,18 @@ name or closed flag is roster.el's, so the two files cannot disagree."
                   '(:parent (:id "p" :dir "/w/parent")
                     :children ((:id "a" :dir "/w/child-a") (:id "b" :dir ""))))
                  "hide refused: child-a, b are still open under this workspace; close them first")))
+
+(ert-deftest agent-repl-verbs-family-sentence-names-the-workspaces-landing-into-it ()
+  "A refusal for workspaces landing into the parent names them with its children."
+  (should (equal (agent-repl-verbs-family-sentence
+                  "close" :has-open-children
+                  '(:parent (:id "p" :dir "/w/parent") :children ((:id "a" :dir "/w/child-a"))
+                    :landing-into ((:id "l" :dir "/w/lander"))))
+                 "close refused: child-a, lander are still open under or landing into this workspace; close them first"))
+  (should (equal (agent-repl-verbs-family-sentence
+                  "merge" :has-open-children
+                  '(:parent (:id "p" :dir "/w/parent") :landing-into ((:id "l" :dir "/w/lander"))))
+                 "parent still has open workspaces under or landing into it (lander); resolve and close all of them before a one-shot merge")))
 
 (ert-deftest agent-repl-verbs-family-sentence-asks-a-merge-to-resolve-the-children-first ()
   "A merge refused for open children asks them resolved and closed before a one-shot merge."

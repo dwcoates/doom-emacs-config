@@ -403,23 +403,28 @@ at INFO and reattaches to the live daemon rather than calling it lost."
 
 (defun agent-repl-wire-decode-workspace-has-open-children (value)
   "Decode VALUE as `WorkspaceHasOpenChildren'.
-A plist `(:parent REF :children REFS)'.  PARENT is the workspace the
-request would have taken out of the Open section, CHILDREN every one of
-its open descendants.  The contract says CHILDREN is never empty, so an
-empty list is refused as malformed."
+A plist `(:parent REF :children REFS :landing-into REFS)'.  PARENT is the
+workspace the request would have taken out of the Open section, CHILDREN
+every one of its open descendants, and LANDING-INTO every other open
+workspace whose merge lands into it.  The contract says the two are never
+both empty, so a refusal naming neither is refused as malformed."
   (let ((object (agent-repl-wire--object "WorkspaceHasOpenChildren" value)))
-    (agent-repl-wire--check-keys "WorkspaceHasOpenChildren" object '(parent children))
+    (agent-repl-wire--check-keys "WorkspaceHasOpenChildren" object '(parent children landingInto))
     (let ((children (agent-repl-wire--decode-repeated
                      "WorkspaceHasOpenChildren" 'children object
-                     #'agent-repl-wire-decode-workspace-ref)))
-      (unless children
-        (agent-repl-wire--fail "WorkspaceHasOpenChildren" 'children "names no child"))
+                     #'agent-repl-wire-decode-workspace-ref))
+          (landing-into (agent-repl-wire--decode-repeated
+                         "WorkspaceHasOpenChildren" 'landingInto object
+                         #'agent-repl-wire-decode-workspace-ref)))
+      (unless (or children landing-into)
+        (agent-repl-wire--fail "WorkspaceHasOpenChildren" 'children "names no child and no workspace landing into it"))
       (agent-repl-wire--decoded
        "WorkspaceHasOpenChildren"
        (list :parent (agent-repl-wire--decode-message
                       "WorkspaceHasOpenChildren" 'parent object
                       #'agent-repl-wire-decode-workspace-ref)
-             :children children)))))
+             :children children
+             :landing-into landing-into)))))
 
 (defun agent-repl-wire-decode-workspace-parent-not-open-state (value)
   "Decode VALUE as one empty `WorkspaceParentNotOpen' state arm."

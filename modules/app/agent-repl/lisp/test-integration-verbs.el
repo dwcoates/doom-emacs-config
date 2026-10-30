@@ -356,7 +356,7 @@ round-trip exists."
                        "fix the flake"))))))
 
 (ert-deftest agent-repl-itest-verbs-create-one-shot-sends-its-prompt-alone ()
-  "The one-shot form rides the request as its prompt and its topology alone.
+  "The one-shot form rides the request as its prompt and its relationship alone.
 ONE-SHOTS ride the wire now: Emacs supplies {prompt, model, parentage}
 and the DAEMON owns naming, worktree and decoration.  There is no finish
 choice at all -- completion is the repository's own directive."
@@ -372,10 +372,10 @@ choice at all -- completion is the repository's own directive."
       (let ((one-shot (agent-repl-itest--body-field
                        (agent-repl-itest-verbs--body daemon "CreateWorkspace") 'oneShot)))
         (should (assq 'prompt one-shot))
-        (should (equal (mapcar #'car one-shot) '(prompt topology)))))))
+        (should (equal (mapcar #'car one-shot) '(prompt relationship)))))))
 
 (ert-deftest agent-repl-itest-verbs-create-owner-carries-the-owners-ref ()
-  "A child workspace names its owner by ref, inside its topology.
+  "A child workspace names its parent by ref, inside its relationship.
 Ownership is a creation fact the daemon derives everything else from; the
 ref is echoed, never rebuilt from a path."
   ;; Arrange.
@@ -388,7 +388,7 @@ ref is echoed, never rebuilt from a path."
       ;; Assert.
       (should (equal (agent-repl-itest--body-field
                       (agent-repl-itest-verbs--body daemon "CreateWorkspace")
-                      'standard 'topology 'child 'owner 'id)
+                      'standard 'relationship 'child 'parent 'id)
                      (plist-get ref :id))))))
 
 (ert-deftest agent-repl-itest-verbs-create-fork-names-its-context ()
@@ -1844,7 +1844,7 @@ Mirrors pause's refusal exactly, on the other admin verb."
 
 ;; audit-3 #53(a)
 (ert-deftest agent-repl-itest-verbs-create-workspace-interactive-is-primary ()
-  "`agent-repl-create-workspace' states a PRIMARY topology.
+  "`agent-repl-create-workspace' states a PEER relationship.
 Pins fanout §9 \"the interactive create family\": a
 plain create is a TOP-LEVEL workspace, never implicitly parented onto the
 workspace the command was invoked from.  No git/gh boundary is reached by
@@ -1879,14 +1879,14 @@ are stubbed."
           (agent-repl-create-workspace)
           (agent-repl-itest--await-call daemon "CreateWorkspace")
           ;; Assert.
-          (should (assq 'primary (agent-repl-itest--body-field
+          (should (assq 'peer (agent-repl-itest--body-field
                                   (agent-repl-itest-verbs--body daemon "CreateWorkspace")
-                                  'standard 'topology))))))))
+                                  'standard 'relationship))))))))
 
 (ert-deftest agent-repl-itest-verbs-fork-into-primary-forks-the-context-of-a-primary ()
   "`agent-repl-fork-workspace-into-primary' copies the conversation into a
 PRIMARY workspace: `contextOrigin.fork.workspace.id' echoes the CURRENT
-workspace's ref verbatim, and the topology is primary."
+workspace's ref verbatim, and the relationship is peer."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -1913,7 +1913,7 @@ workspace's ref verbatim, and the topology is primary."
           (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
             (should (equal (agent-repl-itest--body-field body 'contextOrigin 'fork 'workspace 'id)
                            (plist-get ref :id)))
-            (should (assq 'primary (agent-repl-itest--body-field body 'standard 'topology)))))))))
+            (should (assq 'peer (agent-repl-itest--body-field body 'standard 'relationship)))))))))
 
 ;; audit-3 #53(c)
 (ert-deftest agent-repl-itest-verbs-fork-workspace-interactive-sends-owner-and-fork ()
@@ -1944,7 +1944,7 @@ the forked context: a child forked from its owner, which lands itself."
           (agent-repl-itest--await-call daemon "CreateWorkspace")
           ;; Assert.
           (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
-            (should (equal (agent-repl-itest--body-field body 'standard 'topology 'child 'owner 'id)
+            (should (equal (agent-repl-itest--body-field body 'standard 'relationship 'child 'parent 'id)
                            (plist-get ref :id)))
             (should (equal (agent-repl-itest--body-field body 'contextOrigin 'fork 'workspace 'id)
                            (plist-get ref :id)))))))))

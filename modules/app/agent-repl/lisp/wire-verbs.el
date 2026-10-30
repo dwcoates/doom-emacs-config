@@ -323,9 +323,10 @@ ENCODER).  An unset oneof and an unrecognized arm are contract breaches."
 ;;;; ---- The agent API's choices (workspace_topology.proto) -------------
 ;;
 ;; NOTHING IS IMPLIED: every create names its requester, its context origin
-;; and its topology, and every merge its requester and its placement, so
-;; each is a REQUIRED oneof here and an unset one is refused before it can
-;; be sent.
+;; and its relationship (child or peer), and every merge its requester and
+;; its placement, so each is a REQUIRED oneof here and an unset one is
+;; refused before it can be sent.  Where a workspace lands defaults by its
+;; relationship, and the editor never names a landing target.
 
 (defun agent-repl-wire-encode-workspace-requester-user (_value)
   "Encode WorkspaceRequesterUser.  Empty: the arm IS the fact."
@@ -363,28 +364,24 @@ VALUE is (:arm :fresh) or (:arm :fork :value REF)."
          (list (list :fresh 'fresh #'agent-repl-wire-encode-workspace-context-origin-fresh)
                (list :fork 'fork #'agent-repl-wire-encode-workspace-context-origin-fork)))))
 
-(defun agent-repl-wire-encode-workspace-topology-primary (_value)
-  "Encode WorkspaceTopologyPrimary.  Empty: the arm IS the fact."
+(defun agent-repl-wire-encode-workspace-relationship-peer (_value)
+  "Encode WorkspaceRelationshipPeer.  Empty: the arm IS the fact."
   nil)
 
-(defun agent-repl-wire-encode-workspace-topology-child (value)
-  "Encode WorkspaceTopologyChild from plist VALUE (:owner REF :owner-notice TEXT).
-The owner is required; the notice rides only when given."
-  (let ((message "WorkspaceTopologyChild"))
-    (append
-     (list (cons 'owner (agent-repl-wire-encode-workspace-ref
-                         (agent-repl-wire-verbs--require message "owner" (plist-get value :owner)))))
-     (when (plist-get value :owner-notice)
-       (list (cons 'ownerNotice (list (cons 'text (plist-get value :owner-notice)))))))))
+(defun agent-repl-wire-encode-workspace-relationship-child (value)
+  "Encode WorkspaceRelationshipChild from plist VALUE (:parent REF).
+The parent is required: a child IS its parent's."
+  (list (cons 'parent (agent-repl-wire-encode-workspace-ref
+                       (agent-repl-wire-verbs--require "WorkspaceRelationshipChild" "parent"
+                                                        (plist-get value :parent))))))
 
-(defun agent-repl-wire-encode-workspace-topology (value)
-  "Encode WorkspaceTopology from oneof VALUE.
-VALUE is (:arm :primary) or
-\(:arm :child :value (:owner REF :owner-notice TEXT))."
+(defun agent-repl-wire-encode-workspace-relationship (value)
+  "Encode WorkspaceRelationship from oneof VALUE.
+VALUE is (:arm :peer) or (:arm :child :value (:parent REF))."
   (list (agent-repl-wire-verbs--encode-oneof
-         "WorkspaceTopology" "shape" value
-         (list (list :primary 'primary #'agent-repl-wire-encode-workspace-topology-primary)
-               (list :child 'child #'agent-repl-wire-encode-workspace-topology-child)))))
+         "WorkspaceRelationship" "kind" value
+         (list (list :peer 'peer #'agent-repl-wire-encode-workspace-relationship-peer)
+               (list :child 'child #'agent-repl-wire-encode-workspace-relationship-child)))))
 
 (defun agent-repl-wire-encode-merge-queue-placement-back (_value)
   "Encode MergeQueuePlacementBack.  Empty: the arm IS the fact."
@@ -423,8 +420,8 @@ VALUE is (:arm :primary) or
 
 (defun agent-repl-wire-encode-create-workspace-one-shot (value)
   "Encode CreateWorkspaceOneShot from plist VALUE.
-VALUE is (:prompt SAID :topology TOPOLOGY :context WORKSPACE-REF).  The
-topology is required.  A one-shot IS its prompt,
+VALUE is (:prompt SAID :relationship RELATIONSHIP :context WORKSPACE-REF).
+The relationship is required.  A one-shot IS its prompt,
 so the prompt is required: there is no finish choice, because what
 happens on completion is the REPOSITORY\='s own directive, which the daemon
 appends to the commission and the agent carries out.  CONTEXT, when
@@ -435,9 +432,9 @@ commission with a note naming it."
      (list (cons 'prompt
                  (agent-repl-wire-encode-create-workspace-one-shot-prompt
                   (agent-repl-wire-verbs--require message "prompt" (plist-get value :prompt))))
-           (cons 'topology
-                 (agent-repl-wire-encode-workspace-topology
-                  (agent-repl-wire-verbs--require message "topology" (plist-get value :topology)))))
+           (cons 'relationship
+                 (agent-repl-wire-encode-workspace-relationship
+                  (agent-repl-wire-verbs--require message "relationship" (plist-get value :relationship)))))
      (when (plist-get value :context)
        (list (cons 'context
                    (agent-repl-wire-encode-create-workspace-one-shot-context
@@ -449,15 +446,19 @@ commission with a note naming it."
 
 (defun agent-repl-wire-encode-create-workspace-standard (value)
   "Encode CreateWorkspaceStandard from plist VALUE.
-The TOPOLOGY is required: where the workspace is cut from and lands.
-Every other field is optional: an absent initial prompt is an empty
-workspace, and an absent name means the daemon mints one.  The editor
-names no deploy hooks: a workspace it creates deploys by its
+The RELATIONSHIP is required: a child of a parent, or a peer.  Every
+other field is optional: an absent initial prompt is an empty workspace,
+an absent name means the daemon mints one, and an absent OWNER-NOTICE is
+none, which is right for a peer and for a child that forks its parent.
+The editor names no landing target, so the relationship\='s default
+applies, and no deploy hooks: a workspace it creates deploys by its
 repository\='s own config."
-  (let ((out (list (cons 'topology
-                         (agent-repl-wire-encode-workspace-topology
-                          (agent-repl-wire-verbs--require "CreateWorkspaceStandard" "topology"
-                                                           (plist-get value :topology)))))))
+  (let ((out (list (cons 'relationship
+                         (agent-repl-wire-encode-workspace-relationship
+                          (agent-repl-wire-verbs--require "CreateWorkspaceStandard" "relationship"
+                                                           (plist-get value :relationship)))))))
+    (when (plist-get value :owner-notice)
+      (push (cons 'ownerNotice (list (cons 'text (plist-get value :owner-notice)))) out))
     (when (plist-get value :initial-prompt)
       (push (cons 'initialPrompt
                   (agent-repl-wire-encode-create-workspace-standard-initial-prompt
@@ -793,9 +794,10 @@ The requesting workspace is not in the daemon\='s registry."
   "Decode CreateWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field.  The
-async-merge arms and `origin_fetch_failed' are not decoded: an async
-merge and a create cut from origin are an agent\='s requests, never the
-editor\='s, so one answering an editor create is a breach."
+async-merge arms, `origin_fetch_failed' and `unknown_landing_target' are
+not decoded: an async merge, a create cut from origin and a create naming
+a landing target are an agent\='s requests, never the editor\='s, so one
+answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
     (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected oneShotOwnerLands unknownRequester parentNotOpen transferringAway standingDown))
     (list :cause
