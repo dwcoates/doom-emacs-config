@@ -48,9 +48,9 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"ert", "e2e-emacs"},
 		},
 		{
-			name:  "lisp/ selects ert, the Emacs layer, which carries the Doom tier",
+			name:  "lisp/ selects ert, the Emacs layer, which carries the Doom tier, and the repo scans, which read its wire decoders",
 			paths: []string{"modules/app/agent-repl/lisp/core.el"},
-			want:  []string{"ert", "e2e-emacs"},
+			want:  []string{"ert", "repo-scans", "e2e-emacs"},
 		},
 		{
 			name:  "several regions union their selections",

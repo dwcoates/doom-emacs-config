@@ -186,7 +186,9 @@ var suiteRules = []suiteRule{
 	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".el", Suites: []string{"ert", "e2e-emacs"}},
 	// e2e-emacs carries the Doom tier too, which boots this elisp in a real
 	// Doom against the fake daemon under lisp/testsupport/.
-	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert", "e2e-emacs"}},
+	// The repo scans read the wire decoders against the schema
+	// (reposcans/wire_decoders_test.go).
+	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert", "e2e-emacs", repoScans}},
 
 	// OUTSIDE THE MODULE, the paths a roster harness reads select exactly the
 	// suites that read them (roster.Suites spells them with a leading "/").
