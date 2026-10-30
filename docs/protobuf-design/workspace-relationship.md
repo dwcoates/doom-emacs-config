@@ -91,12 +91,22 @@ independent. Landing keeps ONE arm for source and target together, so the old
 ownership rule (cut from what you land into) stays structural.
 
 DECISIONS AND WHY ALTERNATIVES LOST.
-- OWNER is a derived fact: a child's parent; else the workspace a peer lands
-  into; else none. Owner-lands (only the owner may land) = an owner exists and
-  the context was not forked from it. Alternative "owner = landing workspace"
-  lost because a cross-repository child (landing on its own main branch) is
-  still owned and landed by its parent, which `agent-repl-ack-emoji` shipped and
-  the skill relies on.
+- OWNER is the child's parent, and only that. A peer has no owner and always
+  lands itself. Owner-lands (only the owner may land) = a child whose context
+  was not forked from its parent. Alternative "owner = landing workspace" lost
+  because a cross-repository child (landing on its own main branch) is still
+  owned and landed by its parent, which `agent-repl-ack-emoji` shipped and the
+  skill relies on.
+  - CORRECTION (same day): the first landing of this entry also made the
+    workspace a peer lands into its owner. Retracted before any code used it:
+    the workspace a branch lands into is read back from the stored
+    `creation_jobs.target_dir` (one fact, no second column to drift), and that
+    row is keyed to the new workspace's id only AFTER registration, so an
+    owner derived from it would be absent in the window between registering and
+    re-keying, and the `owner_lands`-needs-an-owner decode invariant would
+    fail on a read in that window. Root cause: deriving an invariant-bearing
+    fact from a row written in a later transaction. The workspace landed into
+    may still LAND the work (it may act on it), but it does not own it.
 - The landing default lives in the daemon, not the CLI, so every client (Emacs,
   webapp drag-to-reparent, CLI) gets the same rule.
 - `SetWorkspaceParent` keeps its name and gains `unchanged` rather than a new

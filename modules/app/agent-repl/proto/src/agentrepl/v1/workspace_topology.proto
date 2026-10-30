@@ -100,9 +100,9 @@ message WorkspaceRelationship {
     // A PEER is tangential to its creator's work and self-sufficient: made,
     // then left to finish on its own. It sits at the top level of its
     // repository's section, nobody follows it unless someone subscribes, and
-    // it is the natural one-shot. Who asked for it is still recorded
-    // (WorkspaceStatus.relationship), for diagnosis. Its landing target
-    // defaults to its repository's primary branch.
+    // it is the natural one-shot. It has no owner and lands itself. Who asked
+    // for it is still recorded (WorkspaceStatus.created_by), for diagnosis. Its
+    // landing target defaults to its repository's primary branch.
     WorkspaceRelationshipPeer peer = 2;
   }
 }
@@ -169,16 +169,16 @@ message WorkspaceLandingTargetWorkspace {
 // The requester's notice to a new workspace's OWNER when the owner, not the
 // workspace itself, lands its work.
 //
-// WHO OWNS A WORKSPACE: a child's parent; a peer landing into a workspace,
-// that workspace; a peer landing on the primary branch has no owner. WHO
-// LANDS IT depends on whose context it starts with: a workspace whose context
+// WHO OWNS A WORKSPACE: a child's parent. A peer has no owner and always lands
+// itself, wherever it lands. WHO LANDS A CHILD depends on whose context it
+// starts with: a child whose context
 // is forked FROM ITS OWNER carries the owner's whole context and lands
 // itself; one that starts fresh, or forked from any other workspace, does not
 // know why its owner's work is shaped as it is, so its OWNER arbitrates and
 // lands it. Such a create must carry the notice, is refused as a one-shot, and
 // the workspace is refused merging itself (MergeWorkspaceError.owner_lands);
 // the owner lands it with FinishWorkspace. A create whose context is forked
-// from its owner, or that has no owner, must not carry one
+// from its owner, or a peer, must not carry one
 // (`owner_notice_unexpected`; `owner_notice_required` when one is owed and
 // absent).
 message WorkspaceOwnerNotice {

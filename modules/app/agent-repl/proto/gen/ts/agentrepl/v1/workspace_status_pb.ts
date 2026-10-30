@@ -124,8 +124,7 @@ export type WorkspaceStatus = Message<"agentrepl.v1.WorkspaceStatus"> & {
 
   /**
    * The workspace's owner and whether the owner lands its work
-   * (WorkspaceOwnerNotice). UNSET for a peer that lands on the primary
-   * branch, which nobody owns.
+   * (WorkspaceOwnerNotice). UNSET for a peer, which nobody owns.
    *
    * @generated from field: optional agentrepl.v1.WorkspaceStatusOwner owner = 13;
    */
@@ -237,8 +236,7 @@ export const WorkspaceStatusRelationshipPeerSchema: GenMessage<WorkspaceStatusRe
  */
 export type WorkspaceStatusOwner = Message<"agentrepl.v1.WorkspaceStatusOwner"> & {
   /**
-   * The owning workspace: the parent of a child, or the workspace a peer
-   * lands into.
+   * The owning workspace: the child's parent.
    *
    * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
    */

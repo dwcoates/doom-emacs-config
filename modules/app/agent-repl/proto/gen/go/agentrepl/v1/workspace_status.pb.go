@@ -70,8 +70,7 @@ type WorkspaceStatus struct {
 	// (WorkspaceRelationship).
 	Relationship *WorkspaceStatusRelationship `protobuf:"bytes,12,opt,name=relationship,proto3" json:"relationship,omitempty"`
 	// The workspace's owner and whether the owner lands its work
-	// (WorkspaceOwnerNotice). UNSET for a peer that lands on the primary
-	// branch, which nobody owns.
+	// (WorkspaceOwnerNotice). UNSET for a peer, which nobody owns.
 	Owner *WorkspaceStatusOwner `protobuf:"bytes,13,opt,name=owner,proto3,oneof" json:"owner,omitempty"`
 	// The workspace whose agent asked for this one's creation. UNSET when the
 	// user asked, or the workspace was registered rather than created. Recorded
@@ -386,8 +385,7 @@ func (*WorkspaceStatusRelationshipPeer) Descriptor() ([]byte, []int) {
 // A workspace's owner.
 type WorkspaceStatusOwner struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The owning workspace: the parent of a child, or the workspace a peer
-	// lands into.
+	// The owning workspace: the child's parent.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// TRUE when the owner arbitrates and lands this workspace's work, because
 	// its context was not forked from the owner; FALSE when it lands itself.

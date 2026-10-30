@@ -17,8 +17,8 @@
 // branch it was cut from. The daemon reads it from the
 // workspace's own record, so no request can deploy work anywhere else.
 //
-// WHO MAY ASK. The workspace itself, the user, its owner (a child's parent, or
-// the workspace a peer lands into), or the workspace it lands into. A workspace
+// WHO MAY ASK. The workspace itself, the user, its owner (a child's parent), or
+// the workspace it lands into. A workspace
 // whose context was not forked from its owner never finishes itself: its owner
 // arbitrates its work and finishes it (`owner_lands`).
 //
