@@ -12,15 +12,11 @@
  * through a frame whose page has not painted, in either theme, and the page's
  * own background through one whose page has.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HOST_ROOT_CLASS, WEBHOST_FRAMES_CLASS } from "../../src/host/main.js";
 import { screenshotPixels } from "./pixels";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { webhostStylesheet } from "./stylesheets";
 
 /** The color a painted page draws, apart from either theme's background. */
 const PAGE_RGB = [10, 120, 30];
@@ -47,9 +43,7 @@ describe("a shown workspace frame's canvas in WebKit", () => {
   let painted: Rgb;
 
   beforeAll(async () => {
-    const styles = await readFile(path.join(here, "../../src/styles.css"), "utf8");
-    const host = await readFile(path.join(here, "../../src/host/host.css"), "utf8");
-    const css = `${styles}\n${host}`;
+    const css = await webhostStylesheet();
     browser = await webkit.launch();
 
     for (const scheme of ["light", "dark"] as const) {

@@ -17,16 +17,12 @@
  * the gate looks and sizes exactly as the page's dock did; and a page in the
  * webhost draws no standing gate of its own.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DOCK_HEIGHT_PROPERTY, DOCKED_CARD_CLASS, WEBHOST_GATE_CLASS } from "../../src/feed/gate-dock.js";
 import { WEBHOST_GATE_ID } from "../../src/host/gate.js";
 import { HOST_ROOT_CLASS } from "../../src/host/main.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { pageStylesheet, webhostStylesheet } from "./stylesheets";
 
 /** The input window's height Emacs tells the page, in px. */
 const TOLD_HEIGHT = 160;
@@ -136,12 +132,11 @@ describe.each(DOCKS)("the docked gate in WebKit, in $name", (where) => {
   const draw = (p: Page, docked: boolean, submenu: boolean): Promise<Drawn> => drawIn(p, where.id, docked, submenu);
 
   beforeAll(async () => {
-    const styles = await readFile(path.join(here, "../../src/styles.css"), "utf8");
-    const host = where.host ? await readFile(path.join(here, "../../src/host/host.css"), "utf8") : "";
+    const css = where.host ? await webhostStylesheet() : await pageStylesheet();
     browser = await webkit.launch();
     page = await browser.newPage({ viewport: { width: 900, height: 700 } });
     await page.setContent(where.html);
-    await page.addStyleTag({ content: `${styles}\n${host}` });
+    await page.addStyleTag({ content: css });
   });
 
   afterAll(async () => {
@@ -227,7 +222,7 @@ describe("a page in the webhost, in WebKit", () => {
   const shown = new Map<string, string>();
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
+    const css = await pageStylesheet();
     browser = await webkit.launch();
     const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
     for (const state of ["standing", "resolved"]) {

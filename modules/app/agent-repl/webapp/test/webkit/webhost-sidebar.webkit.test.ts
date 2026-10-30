@@ -16,17 +16,13 @@
  * gate lays out exactly the slot Emacs told, grows to fit a taller selection
  * without scrolling, and the pages and the sidebar end exactly at its top.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DOCK_HEIGHT_PROPERTY } from "../../src/feed/gate-dock.js";
 import { WEBHOST_SIDEBAR_CLASS } from "../../src/host/embed.js";
 import { GATE_BAND_PROPERTY } from "../../src/host/gate.js";
 import { HOST_ROOT_CLASS } from "../../src/host/main.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { webhostStylesheet } from "./stylesheets";
 
 /** The gate band's height when one stands, in px. */
 const BAND = 160;
@@ -69,9 +65,7 @@ describe("the webhost's sidebar in WebKit", () => {
   const gated = new Map<"short" | "tall", { gate: Box; scrolls: boolean; frames: Box; sidebar: Box }>();
 
   beforeAll(async () => {
-    const styles = await readFile(path.join(here, "../../src/styles.css"), "utf8");
-    const host = await readFile(path.join(here, "../../src/host/host.css"), "utf8");
-    const css = `${styles}\n${host}`;
+    const css = await webhostStylesheet();
     browser = await webkit.launch();
     const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
     const told = `${DOCK_HEIGHT_PROPERTY}: ${BAND}px`;

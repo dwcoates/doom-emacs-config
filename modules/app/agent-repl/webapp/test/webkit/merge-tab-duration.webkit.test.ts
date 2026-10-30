@@ -10,13 +10,9 @@
  * pinned in test/feed/merge/tab-strip.test.ts) in real headless WebKit over
  * the real stylesheet, and measures it.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { pageStylesheet } from "./stylesheets";
 
 /** One tab: its label and its duration, or none to draw it without one. */
 interface Tab {
@@ -89,7 +85,7 @@ describe("a merge tab's duration in WebKit", () => {
   let page: Page;
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
+    const css = await pageStylesheet();
     browser = await webkit.launch();
     page = await browser.newPage({ viewport: { width: 700, height: 400 } });
     await page.setContent(`<!doctype html><html><head></head><body><div id="host"></div></body></html>`);

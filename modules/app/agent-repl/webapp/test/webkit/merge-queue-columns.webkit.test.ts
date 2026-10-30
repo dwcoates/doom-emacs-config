@@ -12,14 +12,10 @@
  * shapes it (its cells are pinned in test/feed/merge/queue.test.ts) in real
  * headless WebKit over the real stylesheet, and measures the cells.
  */
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { COLOR_TOKENS, colorValue } from "../../src/vocab.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
+import { pageStylesheet } from "./stylesheets";
 
 /** One queue row as `drawFeedMergeQueueEntry` shapes it. */
 interface Row {
@@ -161,7 +157,7 @@ describe("the merge queue tab's columns in WebKit", () => {
   let page: Page;
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
+    const css = await pageStylesheet();
     browser = await webkit.launch();
     page = await browser.newPage({ viewport: { width: 700, height: 400 } });
     await page.setContent(`<!doctype html><html><head></head><body><div id="host" style="width: 520px"></div></body></html>`);

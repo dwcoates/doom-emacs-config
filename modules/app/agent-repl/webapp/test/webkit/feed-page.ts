@@ -6,9 +6,9 @@
  * them matches here as it does in the app.
  */
 import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
+import { pageStylesheet } from "./stylesheets";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,7 +38,7 @@ export interface FeedPage {
 
 /** Launch WebKit and open the feed shell over the real stylesheet, then OPTS.styles. */
 export async function openFeedPage(opts: FeedPageOptions): Promise<FeedPage> {
-  const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
+  const css = await pageStylesheet();
   const browser = await webkit.launch();
   const page = await browser.newPage({
     viewport: { width: opts.width, height: opts.height },

@@ -17,13 +17,13 @@
  * is measured against the tabline's right edge.
  */
 import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CLOCK_RESERVE_PROPERTY, ELAPSED_RESERVE_LABELS } from "../../src/elapsed-clock.js";
 import { FEED_TABLINE_CLASS, FEED_TABLINE_CLOCK_CLASS, FEED_TAB_STRIP_CLASS } from "../../src/feed/tabs.js";
 import { reserveLabelsCss } from "../../src/width-reserve.js";
+import { pageStylesheet } from "./stylesheets";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -116,7 +116,7 @@ describe("a head's clock in WebKit", () => {
   let tablineGap = Infinity;
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
+    const css = await pageStylesheet();
     browser = await webkit.launch();
     const page = await browser.newPage({ viewport: { width: 900, height: 400 } });
     await page.setContent('<!doctype html><html><head></head><body><div id="host" style="width:800px"></div></body></html>');

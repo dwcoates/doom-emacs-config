@@ -8,10 +8,10 @@
  * loudly, rather than leaving a suite to measure a page that never mounted.
  */
 import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright-core";
 import { bundlePage } from "./bundle";
+import { pageStylesheet } from "./stylesheets";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,7 +19,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export async function pageAssets(entry: string, name: string): Promise<{ script: string; css: string }> {
   const [script, css] = await Promise.all([
     bundlePage(path.join(here, entry), name),
-    readFile(path.join(here, "../../src/styles.css"), "utf8"),
+    pageStylesheet(),
   ]);
   return { script, css };
 }

@@ -10,11 +10,11 @@
  * keeps running from the phase it was given.
  */
 import path from "node:path";
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { webkit, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundlePage } from "./bundle";
+import { pageStylesheet } from "./stylesheets";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -56,7 +56,7 @@ describe("the rail's loops on the wall clock in WebKit", () => {
   let page: Page;
 
   beforeAll(async () => {
-    const css = await readFile(path.join(here, "../../src/styles.css"), "utf8");
+    const css = await pageStylesheet();
     const script = await bundlePage(path.join(here, "wall-phase-page.ts"), "WallPhase");
     browser = await webkit.launch();
     page = await browser.newPage({ viewport: { width: 400, height: 400 } });
