@@ -1583,6 +1583,43 @@ describe("a shown page re-pointed at another daemon", () => {
     ]).toEqual(["replacing", true, false, "http://ws-a.localhost:2/"]);
   });
 
+  it("reloads the replacement, at the URL the page was re-pointed to, while it is loading", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a");
+    host.ensure("a", "http://ws-a.localhost:2/");
+    const [old, fresh] = framesOf("a");
+    const oldSrc = old.getAttribute("src");
+
+    // Act
+    const answer = parsed(host.reload("a"));
+
+    // Assert
+    expect([
+      answer.outcome,
+      framesOf("a"),
+      old.getAttribute("src"),
+      fresh.getAttribute("src"),
+    ]).toEqual(["reloaded", [old, fresh], oldSrc, "http://ws-a.localhost:2/"]);
+  });
+
+  it("shows a reloaded replacement once it has drawn", () => {
+    // Arrange
+    pages(host, "a");
+    host.show("a");
+    host.ensure("a", "http://ws-a.localhost:2/");
+    const [, fresh] = framesOf("a");
+    host.reload("a");
+    fromFrame(fresh, hello);
+
+    // Act
+    fromFrame(fresh, drew);
+
+    // Assert
+    expect(framesOf("a")).toEqual([fresh]);
+    expect(fresh.hasAttribute(FRAME_SHOWN_ATTRIBUTE)).toBe(true);
+  });
+
   it("shows the replacement and drops the old page once the replacement has drawn", () => {
     // Arrange
     pages(host, "a");

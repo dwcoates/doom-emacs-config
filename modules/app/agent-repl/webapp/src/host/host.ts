@@ -761,12 +761,20 @@ export function createHost(env: HostEnv): Host {
     },
     reload(id, reloadStartedAtMs = null) {
       return withFrame("reload", id, (frame) => {
-        dropIncoming(id);
-        resetFacts(frame);
-        frame.attached = false;
-        frame.pendingSwitchStartedAtMs = null;
-        frame.pendingReloadStartedAtMs = reloadStartedAtMs;
-        frame.iframe.src = frame.url;
+        // A PAGE BEING REPLACED RELOADS ITS REPLACEMENT, at the URL Emacs last
+        // pointed it to, and the shown page stays until that replacement has
+        // drawn. Dropping the replacement and reloading the shown frame booted
+        // the page against the address it was leaving: on the 2026-10-30
+        // 17:35 deploy Emacs re-pointed a shown page at the successor, then
+        // reloaded it on every adopt retry, and each reload booted it on the
+        // departing daemon (617 boots), so the successor's rendezvous waited
+        // for a page that never called and the handover never finished.
+        const target = incoming.get(id)?.fresh ?? frame;
+        resetFacts(target);
+        target.attached = false;
+        target.pendingSwitchStartedAtMs = null;
+        target.pendingReloadStartedAtMs = reloadStartedAtMs;
+        load(target);
         return "reloaded";
       });
     },
