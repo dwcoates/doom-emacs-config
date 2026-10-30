@@ -51,6 +51,9 @@
 (defvar agent-repl-test-pu--successor nil
   "The handover successor the harness's link answers, nil outside a handover.")
 
+(defvar agent-repl-test-pu--scheduled nil
+  "Every judgement a switch away scheduled, newest first: (SECONDS FUNCTION ARG TIMER).")
+
 (defvar agent-repl-test-pu--residencies nil
   "Every residency report sent, newest first, as (WS RESIDENCY).")
 
@@ -85,6 +88,12 @@
            (agent-repl-test-pu--residencies nil)
            (agent-repl-test-pu--successor nil)
            (agent-repl-test-pu--removals nil)
+           (agent-repl-test-pu--scheduled nil)
+           (agent-repl-page-unload--schedule
+            (lambda (seconds _repeat fn arg)
+              (let ((timer (timer-create)))
+                (push (list seconds fn arg timer) agent-repl-test-pu--scheduled)
+                timer)))
            (agent-repl-test-pu--residency-lands t)
            (agent-repl-test-pu--logged nil)
            (agent-repl-test-pu--report 'reported)
@@ -140,6 +149,12 @@
                         (agent-repl-test--record-into agent-repl-test-pu--logged)))
                ,@body))
          (mapc #'kill-buffer (seq-filter #'buffer-live-p buffers))))))
+
+(defun agent-repl-test-pu--grace-ends ()
+  "Move the clock past the newest scheduled grace and run its judgement."
+  (pcase-let ((`(,seconds ,fn ,arg ,_timer) (car agent-repl-test-pu--scheduled)))
+    (setq agent-repl-test-pu--now (+ agent-repl-test-pu--now seconds))
+    (funcall fn arg)))
 
 (defun agent-repl-test-pu--said-p (&rest parts)
   "Non-nil when one INFO record holds every one of PARTS."
@@ -466,20 +481,20 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
     (should (agent-repl-test-pu--said-p "elisp.page-unload.kept" "ws=alpha" "why=in-use-since-report"))))
 
 (ert-deftest agent-repl-test-pu-an-idle-page-within-the-hold-is-held ()
-  "An idle page loaded within the hold stays."
+  "An idle page within the hold after its last prompt stays."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
-    (agent-repl--ws-put "alpha" :page-loaded-at 900)
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
     ;; Act
     (agent-repl-page-unload-pass)
     ;; Assert
     (should-not agent-repl-test-pu--dropped)))
 
 (ert-deftest agent-repl-test-pu-an-idle-page-past-the-hold-is-unloaded ()
-  "An idle page held longer than the hold since its load is unloaded, and recorded."
+  "An idle page past the hold after its last prompt is unloaded, and recorded."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
-    (agent-repl--ws-put "alpha" :page-loaded-at 400)
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 400000)))
     ;; Act
     (let ((unloaded (agent-repl-page-unload-pass)))
       ;; Assert
@@ -496,6 +511,52 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
     (agent-repl-page-unload-pass)
     ;; Assert
     (should-not agent-repl-test-pu--dropped)))
+
+(ert-deftest agent-repl-test-pu-loading-a-page-never-restarts-the-idle-hold ()
+  "A page loaded just now, an hour past its last prompt, is unloaded off screen."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-loaded-at 1000)
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 400000)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal agent-repl-test-pu--dropped '("alpha")))))
+
+(ert-deftest agent-repl-test-pu-an-idle-page-with-no-prompt-is-past-its-hold ()
+  "An idle workspace never prompted holds its page only while shown."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (agent-repl--ws-put "alpha" :page-loaded-at 1000)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal agent-repl-test-pu--dropped '("alpha")))))
+
+(ert-deftest agent-repl-test-pu-a-visit-within-the-hold-is-kept-past-the-grace ()
+  "A page put back for a look within the hour after its last prompt stays."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--pages '("beta")
+          agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-page-unload-note-shown "beta")
+    ;; Act
+    (agent-repl-test-pu--grace-ends)
+    ;; Assert
+    (should-not agent-repl-test-pu--dropped)))
+
+(ert-deftest agent-repl-test-pu-a-look-does-not-move-the-holds-end ()
+  "A page put back for a look reports the hold's end its last prompt set."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil
+          agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
+    ;; Act
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Assert
+    (should (equal (plist-get (plist-get (agent-repl-page-unload-residency "alpha") :value) :release)
+                   '(:arm :at :value (:unix-ms 1400000))))))
 
 (ert-deftest agent-repl-test-pu-a-working-page-is-held-however-old ()
   "A working workspace's page is never unloaded off screen."
@@ -776,18 +837,94 @@ naming a dead buffer, and every switch back found its panels closed."
     ;; Assert
     (should-not agent-repl-test-pu--events)))
 
-(ert-deftest agent-repl-test-pu-switching-away-from-a-visit-unloads-it-at-once ()
-  "A page loaded only for a visit goes the moment the user switches away."
+(ert-deftest agent-repl-test-pu-switching-away-from-a-visit-keeps-it-through-the-grace ()
+  "A page loaded only for a visit is kept the grace after the switch away."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha" "beta")
     (setq agent-repl-test-pu--pages '("beta"))
     (agent-repl-page-unload-note-shown "alpha")
-    (setq agent-repl-test-pu--events nil)
     ;; Act
     (agent-repl-page-unload-note-shown "beta")
     ;; Assert
+    (should-not agent-repl-test-pu--dropped)))
+
+(ert-deftest agent-repl-test-pu-switching-away-schedules-the-judgement-at-the-grace ()
+  "The switch away judges the page the grace later, not at once."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Act
+    (agent-repl-page-unload-note-shown "beta")
+    ;; Assert
+    (should (equal (mapcar (lambda (s) (list (nth 0 s) (nth 2 s))) agent-repl-test-pu--scheduled)
+                   '((15 "alpha"))))))
+
+(ert-deftest agent-repl-test-pu-a-visit-is-unloaded-once-the-grace-ends ()
+  "A page loaded only for a visit goes when the grace after the switch away ends."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--pages '("beta"))
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-page-unload-note-shown "beta")
+    (setq agent-repl-test-pu--events nil)
+    ;; Act
+    (agent-repl-test-pu--grace-ends)
+    ;; Assert
     (should (equal (reverse agent-repl-test-pu--events) '((report "alpha") (drop "alpha"))))
     (should (agent-repl-test-pu--said-p "ws=alpha" "reason=visited"))))
+
+(ert-deftest agent-repl-test-pu-coming-back-within-the-grace-keeps-the-page ()
+  "A page shown again before the grace ends is kept when the grace ends."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--pages '("beta"))
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-page-unload-note-shown "beta")
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Act
+    (funcall (nth 1 (cadr agent-repl-test-pu--scheduled)) "alpha")
+    ;; Assert
+    (should-not agent-repl-test-pu--dropped)))
+
+(ert-deftest agent-repl-test-pu-leaving-again-replaces-the-earlier-judgement ()
+  "Leaving a page again cancels the judgement the earlier leave scheduled."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-page-unload-note-shown "beta")
+    (let ((earlier (nth 3 (car agent-repl-test-pu--scheduled))))
+      (agent-repl-page-unload-note-shown "alpha")
+      (cl-letf (((symbol-function 'cancel-timer)
+                 (lambda (timer) (push (list 'cancelled timer) agent-repl-test-pu--events))))
+        ;; Act
+        (agent-repl-page-unload-note-shown "beta"))
+      ;; Assert
+      (should (member (list 'cancelled earlier) agent-repl-test-pu--events)))))
+
+(ert-deftest agent-repl-test-pu-a-pass-within-the-grace-keeps-the-left-page ()
+  "A pass that runs during the grace unloads nothing the user just left."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--status '(("alpha" . :turn-died)))
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-page-unload-note-shown "beta")
+    (setq agent-repl-test-pu--now (+ agent-repl-test-pu--now 14))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should-not agent-repl-test-pu--dropped)))
+
+(ert-deftest agent-repl-test-pu-a-left-page-reports-it-goes-when-the-grace-ends ()
+  "A page in its grace reports the instant it is unloaded at."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--status '(("alpha" . :turn-died)))
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Act
+    (agent-repl-page-unload-note-shown "beta")
+    ;; Assert
+    (should (equal (plist-get (plist-get (agent-repl-page-unload-residency "alpha") :value) :release)
+                   '(:arm :at :value (:unix-ms 1015000))))))
 
 (ert-deftest agent-repl-test-pu-a-visit-that-started-working-is-kept ()
   "A workspace prompted during the visit is working, so its page stays."
@@ -796,8 +933,9 @@ naming a dead buffer, and every switch back found its panels closed."
     (setq agent-repl-test-pu--pages '("beta"))
     (agent-repl-page-unload-note-shown "alpha")
     (setq agent-repl-test-pu--status '(("alpha" . :submitting)))
-    ;; Act
     (agent-repl-page-unload-note-shown "beta")
+    ;; Act: judged once the grace after the switch away ends.
+    (agent-repl-test-pu--grace-ends)
     ;; Assert
     (should (equal (list agent-repl-test-pu--dropped (agent-repl--ws-get "alpha" :page-visit))
                    '(nil nil)))))
@@ -817,24 +955,25 @@ naming a dead buffer, and every switch back found its panels closed."
     (should-not agent-repl-test-pu--dropped)))
 
 (ert-deftest agent-repl-test-pu-switching-away-from-a-held-idle-page-keeps-it ()
-  "An idle page that was not a visit stays within its hold."
+  "An idle page within the hour after its last prompt stays."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha" "beta")
-    (agent-repl--ws-put "alpha" :page-loaded-at 900)
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
     (agent-repl-page-unload-note-shown "alpha")
     ;; Act
     (agent-repl-page-unload-note-shown "beta")
     ;; Assert
     (should-not agent-repl-test-pu--dropped)))
 
-(ert-deftest agent-repl-test-pu-switching-away-from-a-faulted-page-unloads-it ()
-  "A faulted page the user stood on goes the moment they switch away."
+(ert-deftest agent-repl-test-pu-switching-away-from-a-faulted-page-unloads-it-after-the-grace ()
+  "A faulted page the user stood on goes the grace after they switch away."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha" "beta")
     (setq agent-repl-test-pu--status '(("alpha" . :turn-died)))
     (agent-repl-page-unload-note-shown "alpha")
-    ;; Act
     (agent-repl-page-unload-note-shown "beta")
+    ;; Act
+    (agent-repl-test-pu--grace-ends)
     ;; Assert
     (should (member "alpha" agent-repl-test-pu--dropped))))
 
@@ -883,10 +1022,10 @@ naming a dead buffer, and every switch back found its panels closed."
     (should (eq (agent-repl-test-pu--release "alpha") :held))))
 
 (ert-deftest agent-repl-test-pu-an-idle-page-reports-its-holds-end ()
-  "An idle page that is no visit reports the instant its hold ends."
+  "An idle page within its hold reports the instant its hold ends."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
-    (agent-repl--ws-put "alpha" :page-loaded-at 900)
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
     ;; Act
     (let ((residency (agent-repl-page-unload-residency "alpha")))
       ;; Assert
