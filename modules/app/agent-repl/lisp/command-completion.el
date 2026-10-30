@@ -71,6 +71,7 @@
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-host-route-handover "agent-repl-host" (ws arm slug))
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
+(declare-function agent-repl-completion-match-table "completion-match" (category collection))
 (declare-function agent-repl-rpc-list-slash-commands "agent-repl-rpc" (conn request &rest keys))
 
 (defcustom agent-repl-command-completion-annotation-width 25
@@ -175,15 +176,15 @@ insert a second `/' -- while try-completion answers the whole slashed
 word."
   (let ((names (mapcar (lambda (candidate) (string-remove-prefix "/" candidate))
                        candidates)))
-    (lambda (string predicate action)
-      (cond
-       ((eq action 'metadata)
-        `(metadata (category . ,agent-repl--command-completion-category)))
-       ((string-prefix-p "/" string)
-        (completion-table-with-context "/" names (substring string 1) predicate action))
-       ((eq (car-safe action) 'boundaries)
-        (cons 'boundaries (cons 0 (length (cdr action)))))
-       (t (complete-with-action action candidates string predicate))))))
+    (agent-repl-completion-match-table
+     agent-repl--command-completion-category
+     (lambda (string predicate action)
+       (cond
+        ((string-prefix-p "/" string)
+         (completion-table-with-context "/" names (substring string 1) predicate action))
+        ((eq (car-safe action) 'boundaries)
+         (cons 'boundaries (cons 0 (length (cdr action)))))
+        (t (complete-with-action action candidates string predicate)))))))
 
 (defun agent-repl--command-completion-entry (catalog candidate)
   "Return the CATALOG entry CANDIDATE names, as its name or an alias, or nil."

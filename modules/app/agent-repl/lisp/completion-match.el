@@ -26,6 +26,17 @@
 (require 'cl-lib)
 (require 'minibuffer)
 
+(defun agent-repl-completion-match-table (category collection)
+  "Return a completion table over COLLECTION that names CATEGORY.
+A `metadata' ACTION answers CATEGORY, so the styles registered for it in
+`completion-category-defaults' are the table's.  Every other ACTION is
+COLLECTION's -- a list of strings, or a completion function -- through
+`complete-with-action'."
+  (lambda (string predicate action)
+    (if (eq action 'metadata)
+        `(metadata (category . ,category))
+      (complete-with-action action collection string predicate))))
+
 (defun agent-repl-completion-match-p (string table)
   "Return non-nil when TABLE offers a completion for STRING under its own styles.
 The styles are those of TABLE's `metadata' category, as

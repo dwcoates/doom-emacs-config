@@ -23,10 +23,47 @@
 
 (defun agent-repl-test-completion-match--table (names)
   "A completion table over NAMES in the tests' substring category."
-  (lambda (string predicate action)
-    (if (eq action 'metadata)
-        `(metadata (category . ,agent-repl-test-completion-match--category))
-      (complete-with-action action names string predicate))))
+  (agent-repl-completion-match-table agent-repl-test-completion-match--category names))
+
+(ert-deftest agent-repl-test-completion-match-table-names-its-category ()
+  "The table answers `metadata' with the category it was made with."
+  ;; Act / Assert
+  (should (eq (completion-metadata-get
+               (completion-metadata "" (agent-repl-test-completion-match--table '("a")) nil)
+               'category)
+              agent-repl-test-completion-match--category)))
+
+(ert-deftest agent-repl-test-completion-match-table-completes-a-list ()
+  "Over a list, every other action completes the list."
+  ;; Arrange
+  (let ((table (agent-repl-test-completion-match--table '("alpha" "beta"))))
+    ;; Act / Assert
+    (should (equal (all-completions "al" table) '("alpha")))
+    (should (equal (try-completion "be" table) "beta"))))
+
+(ert-deftest agent-repl-test-completion-match-table-delegates-to-a-function ()
+  "Over a completion function, every other action is the function's."
+  ;; Arrange
+  (let* ((seen nil)
+         (table (agent-repl-completion-match-table
+                 'any (lambda (string _predicate action) (push (list string action) seen) '("x")))))
+    ;; Act
+    (let ((answer (all-completions "s" table)))
+      ;; Assert
+      (should (equal answer '("x")))
+      (should (equal seen '(("s" t)))))))
+
+(ert-deftest agent-repl-test-completion-match-both-composer-tables-are-made-by-it ()
+  "The slash-command and workspace-name tables are both made by the helper."
+  ;; Arrange
+  (let ((categories nil))
+    (cl-letf (((symbol-function 'agent-repl-completion-match-table)
+               (lambda (category _collection) (push category categories) 'table)))
+      ;; Act
+      (agent-repl--command-completion-table '("/a"))
+      (agent-repl--workspace-completion-table '("a"))
+      ;; Assert
+      (should (equal categories '(agent-repl-workspace-name agent-repl-slash-command))))))
 
 (ert-deftest agent-repl-test-completion-match-p-follows-the-tables-styles ()
   "A substring the table's own style matches is a match."

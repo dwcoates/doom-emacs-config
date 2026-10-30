@@ -37,6 +37,7 @@
 
 (declare-function agent-repl-roster-open-workspace-names "agent-repl-roster" ())
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
+(declare-function agent-repl-completion-match-table "completion-match" (category collection))
 
 (defconst agent-repl--workspace-completion-name-chars "-a-zA-Z0-9_."
   "The characters a workspace name word is made of, as a `skip-chars' set.")
@@ -78,10 +79,7 @@ style only keeps a completion UI from narrowing them again by prefix.")
 
 (defun agent-repl--workspace-completion-table (names)
   "Return a completion table over NAMES, in this capf's own category."
-  (lambda (string predicate action)
-    (if (eq action 'metadata)
-        `(metadata (category . ,agent-repl--workspace-completion-category))
-      (complete-with-action action names string predicate))))
+  (agent-repl-completion-match-table agent-repl--workspace-completion-category names))
 
 (defun agent-repl-workspace-completion-at-point ()
   "Complete the name word at point against the open workspaces' names.
