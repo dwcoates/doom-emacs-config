@@ -1,6 +1,6 @@
 ---
 name: agent-repl-workspaces
-description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (the topbar summary''s menu), rename a workspace, hide or show a workspace, set its priority, retarget its parent, read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
+description: 'Work with agent-repl workspaces through the agent API: create a workspace (a child of this one or of another, or a primary workspace off the main branch, with a fresh context or one forked from a workspace''s conversation, as a one-shot or not), prompt another workspace, read a workspace''s status, list them all, or find workspaces open or closed by repository, time, standing or text with their summaries, mark this workspace a one-shot or as awaiting another workspace''s answer (which draws it in the background, yellow), store its links (the topbar summary''s menu), rename a workspace, hide or show a workspace, set its priority, retarget its parent, adopt an existing workspace as this one''s child, reorganize this workspace''s work across repositories (move to the repository the work principally belongs to and govern one workspace in each other repository it touches, proactively and without asking), read its repository''s sidebar subsections and file it into one, finish a workspace (deploy it as its repository''s `.agent-repl/deploy.yaml` says), open, close, kill, compact, restart, interrupt or select one, answer a cold gate, and subscribe this workspace to another''s turns, asks, landing and close, and register a repository with agent-repl (`repository register`). Use whenever work should be split off into another workspace, handed to one, or followed; whenever this workspace commits to finishing the rest of its work unattended, or is told to one-shot itself or to land its work when done (mark it a one-shot); whenever a one-shot is reopened or prompted for more work after it finished (take the mark back); whenever this workspace ends a turn to wait for another workspace (mark it awaiting) and when that answer arrives (clear the mark); whenever this workspace''s task has clearly moved away from its name (rename it, without asking); whenever a child created with a note to its owner must be landed or closed by its owner; whenever a repository''s deploy config or a deploy hook is written or read; whenever work is in a repository agent-repl does not know yet (register it before creating workspaces there); whenever this workspace''s work principally belongs to another repository or touches several (reorganize it); and whenever a workspace must be closed, compacted, killed or have its gate answered. Replaces /create-or-update-workspace and the workspace command files.'
 argument-hint: "create | async-merge | prompt | status | list | find | set | link | finished | open | close | kill | compact | restart | interrupt | select | gate | subscribe | unsubscribe | subsections | place | repository register"
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
@@ -34,16 +34,18 @@ a main-checkout directory), its topology and its context:
   `-topology child -owner WS` is cut from WS's branch and lands into WS.
 - `-context fresh` starts an empty conversation. `-context fork -fork WS`
   copies WS's conversation (cut at its last concluded turn).
-- **A workspace created in another repository is NEVER a fork.**
-  `-context fork -fork WS` needs WS to belong to the repository named by
-  `-repository`; a cross-repository create always takes `-context fresh`,
-  and its `-prompt` carries everything the new workspace needs.
-  - The forked conversation is about WS's repository: its files, paths,
-    branch, worktree, and its own `AGENTS.md`, `CLAUDE.md` and skills. In
-    another repository those references name code that is not there, so
-    the forked context misleads more than it helps.
-  - The daemon refuses a cross-repository fork (as `unknown_fork_source`),
-    so trying one only costs a round trip.
+- **A workspace created in another repository forks only to MOVE this
+  workspace.** `-context fork -fork here` with another `-repository` is the
+  move in "Reorganizing across repositories" below, where this workspace's
+  conversation continues in the repository its work belongs to. Every other
+  cross-repository create takes `-context fresh`, and its `-prompt` carries
+  everything the new workspace needs.
+  - The forked conversation is about the source's repository: its files,
+    paths, branch, worktree, and its own `AGENTS.md`, `CLAUDE.md` and
+    skills. Only the agent that is moving knows which of that still applies,
+    so nobody forks another workspace's conversation into a repository.
+  - The moved workspace's first message tells it which repository its
+    worktree is of, so it reads that repository's `AGENTS.md` before working.
 - **Cross-repository work goes through a workspace in the other repository.**
   When workspace A in repository foo needs work in both foo and another
   repository baz:
@@ -63,7 +65,7 @@ a main-checkout directory), its topology and its context:
   - B lands its own change through baz's merge queue, and A lands foo's.
 
 Choose the combination from what the work needs (every `fork` row is within
-one repository):
+one repository, except the move below):
 
 | want | topology | context | how common |
 |---|---|---|---|
@@ -120,6 +122,47 @@ one repository):
   Nothing needs to be relayed by hand.
 - A branch no workspace owns (a subagent's) is landed through an async merge,
   not a create: see `/agent-repl-merge-queue`.
+
+## Reorganizing across repositories
+
+Every piece of work has ONE repository it principally belongs to, and gets
+ONE workspace in each other repository it touches. This workspace organizes
+itself that way PROACTIVELY and WITHOUT asking, when its prompt says to run
+this skill or as soon as it is clear the work belongs elsewhere, and tells the
+user in the same response what it reorganized and why.
+
+1. Decide the repository the work principally belongs to, and every other
+   repository it touches. Register any agent-repl does not know yet
+   (`repository register`).
+2. When the principal repository is this one, do not move. Create one
+   workspace in each other repository it touches, as "Cross-repository work
+   goes through a workspace in the other repository" says, and subscribe to
+   each (`workspace subscribe WS -events turn_ended,needs_input,landed,closed`).
+   This workspace governs them.
+3. When the principal repository is another one, MOVE:
+   - a. Read this workspace's priority, one-shot mark and links with
+     `workspace status here`.
+   - b. Create the governor: `workspace create -repository <principal>
+     -topology primary -origin-master -context fork -fork here -prompt TEXT`,
+     adding `-priority P` and `-one-shot` when this workspace has them.
+   - c. TEXT tells the governor that it is this workspace moved, what is done
+     and what remains, and to do these first:
+     - re-establish every subscription this session held to anything outside
+       agent-repl (a Slack thread's `/gns-sockets subscribe <url> respond`,
+       for one), since a fork is a new session;
+     - store this workspace's links with `workspace link here`;
+     - subscribe to each workspace this one governs or creates in step d.
+   - d. Work this workspace already committed or left uncommitted in its own
+     repository stays on its branch: rename this workspace to the piece it
+     now holds (`workspace set here -name NAME`), keep it open, and name it
+     in TEXT as one the governor governs. With no such work, run
+     `workspace close here` once the governor is created.
+   - e. Unsubscribe this workspace from every workspace it governed
+     (`workspace unsubscribe`), now that the governor follows them.
+4. Edits made by hand in another repository's checkout move to that
+   repository's one workspace: `SHA=$(git -C <checkout> stash create "<what>")`,
+   then `git stash apply <SHA>` in the workspace's worktree, then restore
+   those files in the checkout so the edits live in one place.
 
 ## Talking to a workspace
 
@@ -267,8 +310,14 @@ creating workspaces there with `-repository DIR`.
   - The old name stops resolving at once. Name the workspace by its new name
     from then on, and read its branch from `workspace status`, never from
     its name.
-- `-hidden` / `-shown`, `-priority`, and `-parent WS` / `-top-level` (a
-  retarget, which re-applies the landing rules) set the rest.
+- **ADOPT.** `workspace set WS -parent here` makes an existing workspace of
+  this repository this workspace's child. Its conversation is untouched. It
+  nests under this workspace in the sidebar, lands into this workspace's
+  branch, and this workspace is told of it as an owner is. `-top-level`
+  releases it. A parent in another repository is refused
+  `parent_in_other_repository`, because a child lands into its parent's
+  branch: follow such a workspace with `workspace subscribe` instead.
+- `-hidden` / `-shown` and `-priority` set the rest.
 
 ## Finishing, opening, closing
 
