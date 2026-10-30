@@ -10,6 +10,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
+	"agent-repld/internal/netstate"
 	"agent-repld/internal/prompts"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
@@ -801,5 +802,53 @@ func TestEveryNameIsDisambiguatedByFreeNameAgainst(t *testing.T) {
 	// Assert
 	if loops != 1 {
 		t.Fatalf("name suffixes are composed at %d sites, want 1: freeNameAgainst", loops)
+	}
+}
+
+func TestATimedOutNamingCallTheNetworkClearedRecordsTheCheck(t *testing.T) {
+	// Arrange: the reachability check answered, so the timeout is no outage.
+	f := newFixture(t)
+	f.network.verdict = netstate.Verdict{Detail: "https://api.anthropic.com answered HEAD with 404"}
+	script(f, headlessAnswer{err: namingTimeout}, headlessAnswer{err: namingTimeout})
+
+	// Act
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
+
+	// Assert: refused, and each attempt's record names what cleared the network.
+	asRefusal(t, err, ArmNamingFailed)
+	records := f.log.logger.Records()
+	var seen int
+	for _, r := range records {
+		if r.Operation != opNaming || r.Message != "the workspace naming call did not answer" {
+			continue
+		}
+		seen++
+		if r.Context["cause"] != headless.CauseTimeout || r.Context["network"] != false ||
+			r.Context["network_detail"] != "https://api.anthropic.com answered HEAD with 404" {
+			t.Fatalf("did-not-answer record = %+v, want the timeout with the check's answer", r.Context)
+		}
+	}
+	if seen != NamingAttempts {
+		t.Fatalf("did-not-answer records = %d, want %d: %+v", seen, NamingAttempts, records)
+	}
+}
+
+func TestANamingCallTheNetworkCannotExplainRecordsNoCheck(t *testing.T) {
+	// Arrange: a guard refusal says nothing about the network.
+	f := newFixture(t)
+	refused := &headless.Error{Cause: headless.CauseGuardRefused, Detail: "forbidden"}
+	script(f, headlessAnswer{err: refused})
+
+	// Act
+	_, err := f.verbs.Create(context.Background(), standardSpec(t, f))
+
+	// Assert
+	asRefusal(t, err, ArmNamingFailed)
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opNaming, Message: "the workspace naming call did not answer"})
+	if !ok {
+		t.Fatalf("no did-not-answer record")
+	}
+	if _, has := r.Context["network"]; has {
+		t.Fatalf("record = %+v, want no network check on a guard refusal", r.Context)
 	}
 }

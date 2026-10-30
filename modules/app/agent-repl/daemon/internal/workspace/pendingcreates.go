@@ -539,8 +539,8 @@ func createKey(spec CreateSpec) string {
 	key := struct {
 		RepoDir, Parent, OwnerNotice, ContextWorkspace, ForkFrom, Landing string
 		FromOrigin, OneShot                                               bool
-		Name, Model, Priority, PermissionMode, Consent, Prompt   string
-		PreDeploy, PostDeploy                                    []string
+		Name, Model, Priority, PermissionMode, Consent, Prompt            string
+		PreDeploy, PostDeploy                                             []string
 	}{
 		RepoDir: filepath.Clean(spec.RepoDir), Parent: ids.Optional(spec.Parent), OwnerNotice: strings.TrimSpace(spec.OwnerNotice),
 		Landing:          landingKey(spec.Landing),
