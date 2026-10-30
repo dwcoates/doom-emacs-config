@@ -2551,9 +2551,11 @@ The daemon judges the name before the minibuffer closes
 
 (defun agent-repl-verbs--create-standard (command repository-fn pick-model)
   "Create a standard TOP-LEVEL workspace for COMMAND from a prompt.
-The repository is what REPOSITORY-FN answers, the initial prompt is read
-\(seeded from the composer\=', the repository named in its question), and
-the model is asked for only when PICK-MODEL.  A blank prompt sends none.
+The repository is what REPOSITORY-FN answers, the model is asked for next
+only when PICK-MODEL, and the initial prompt is read last (seeded from the
+composer\=', the repository named in its question), so the prompt is
+written knowing where and by which model it runs.  A blank prompt sends
+none.
 
 It is cut from the repository\='s primary branch and merges into it; a
 workspace that merges into another one is a CHILD FORK
@@ -2567,14 +2569,14 @@ recorded before any question is asked, and a question it abandons is
 recorded before the abandonment propagates."
   (agent-repl-verbs--create-invoked command)
   (let* ((repository (agent-repl-verbs--read-for command 'repository repository-fn))
+         (model (and pick-model
+                     (agent-repl-verbs--read-for
+                      command 'model #'agent-repl-verbs--read-model)))
          (prompt (agent-repl-verbs--read-for
                   command 'prompt
                   (lambda () (agent-repl-verbs--read-prompt
                                   (format "Initial prompt (%s): "
-                                          (agent-repl-verbs--repository-name repository))))))
-         (model (and pick-model
-                     (agent-repl-verbs--read-for
-                      command 'model #'agent-repl-verbs--read-model))))
+                                          (agent-repl-verbs--repository-name repository)))))))
     (agent-repl--info agent-repl-verbs--create-log-scope
                       "elisp.verbs.create-standard command=%s model=%S" command model)
     (agent-repl-verb-create
@@ -2612,8 +2614,8 @@ the explanation-engine checkout
   "Create a workspace in a repository you pick, with a prompt and a model (`SPC TAB C-n\=').
 The one creation that asks for the repository
 \(`agent-repl-verbs--read-repository\=', defaulting to the current
-workspace\='s), then the initial prompt, then the model
-\(`agent-repl-verbs--read-model\=', blank for the daemon\='s default).
+workspace\='s), then the model (`agent-repl-verbs--read-model\=', blank
+for the daemon\='s default), then the initial prompt.
 
 THE NEW WORKSPACE IS NOT SELECTED, exactly as `agent-repl-create-workspace\='s
 is not."
