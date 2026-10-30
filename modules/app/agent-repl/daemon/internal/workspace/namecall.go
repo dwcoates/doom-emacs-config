@@ -150,19 +150,26 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 			// is no timeout: the create is held until the network is restored
 			// (pendingcreates.go). Only a call that ran and did not answer can
 			// have been the network's; a refusal or a bad answer never is.
+			fields := dlog.Context{}
 			if networkMayExplain(cause) {
-				if verdict := v.deps.Network.Classify(ctx, err.Error()); verdict.Network {
+				verdict := v.deps.Network.Classify(ctx, err.Error())
+				if verdict.Network {
 					log.Info(opNaming, "the workspace naming call could not reach the network; the create waits for it", dlog.Context{
 						"cause": NamingCauseNetwork, "headless_cause": cause, "evidence": string(verdict.Evidence),
 						"evidence_detail": verdict.Detail, "detail": err.Error(), "attempt": attempt,
 					})
 					return "", &namingNetworkError{verdict: verdict, cause: cause}
 				}
+				// The record that the call did not answer carries why the
+				// network was cleared: the reachability check's own answer
+				// (or why it could not run), so a refusal names what the
+				// daemon saw of the network when it decided.
+				fields["network"] = false
+				fields["network_detail"] = verdict.Detail
 			}
 			last = namingFailure{Cause: cause, Detail: err.Error(), Attempts: uint32(attempt)}
-			log.Info(opNaming, "the workspace naming call did not answer", dlog.Context{
-				"cause": last.Cause, "detail": last.Detail, "attempt": attempt,
-			})
+			fields["cause"], fields["detail"], fields["attempt"] = last.Cause, last.Detail, attempt
+			log.Info(opNaming, "the workspace naming call did not answer", fields)
 			// A GUARD REFUSAL IS NOT RETRIED. It is a standing fact about this
 			// process, so a second call would be refused identically and would
 			// only cost the user another wait.
