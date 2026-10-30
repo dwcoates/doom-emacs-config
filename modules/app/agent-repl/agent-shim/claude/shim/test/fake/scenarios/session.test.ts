@@ -717,10 +717,15 @@ describe("an unsolicited model fallback", () => {
   it("emits the declared session_state_changed beat, which carries no model", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!model-fallback"]);
-    const beat = ofType(driven, "system", "session_state_changed")[0];
+    const beats = ofType(driven, "system", "session_state_changed");
 
-    // Assert
-    expect({ state: beat?.state, model: beat?.model }).toEqual({ state: "idle", model: undefined });
+    // Assert: the turn's start, the switch's mid-turn beat, and the idle after
+    // the result, none of them naming a model.
+    expect(beats.map((beat) => ({ state: beat.state, model: beat.model }))).toEqual([
+      { state: "running", model: undefined },
+      { state: "running", model: undefined },
+      { state: "idle", model: undefined },
+    ]);
   });
 
   it("answers on the FALLBACK model, which is the only evidence the swap happened", async () => {
