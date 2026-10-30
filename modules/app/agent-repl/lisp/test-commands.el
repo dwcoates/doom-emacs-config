@@ -2380,14 +2380,198 @@ and `--switched' to the workspace whose switch was requested of the daemon."
     (should (equal (all-completions "" table) '("one")))))
 
 (ert-deftest agent-repl-test-commands-switch-table-keeps-its-own-order ()
-  "The table states identity sort functions, so no UI re-sorts the recency order."
+  "The table states its own sort functions, so no UI re-sorts the recency order.
+With every name matching, the display sort answers the recency order even
+when a main workspace is named."
   ;; Arrange
-  (let ((metadata (cdr (funcall (agent-repl--switch-table
-                                 (list (cons "one" '(:row nil :section nil :state :open))) 0)
-                                "" nil 'metadata))))
+  (let* ((metadata (cdr (funcall (agent-repl--switch-table
+                                  (agent-repl-test-commands--alist '("one" "main (r)"))
+                                  0 "main (r)")
+                                 "" nil 'metadata)))
+         (sort (alist-get 'display-sort-function metadata)))
     ;; Act / Assert
-    (should (eq (alist-get 'display-sort-function metadata) 'identity))
+    (should (equal (funcall sort (list "one" "main (r)")) '("one" "main (r)")))
     (should (eq (alist-get 'cycle-sort-function metadata) 'identity))))
+
+;;;; ---- The current repository's main workspace tops the matches ----
+
+(defun agent-repl-test-commands--alist (names)
+  "Return a switcher display alist offering NAMES, each open and rowless."
+  (mapcar (lambda (name) (cons name (list :row nil :section nil :state :open)))
+          names))
+
+(defun agent-repl-test-commands--main-row (id updated-ms)
+  "Return the decoded row of the fixture repository's MAIN workspace.
+Its directory is the repository's own (`agent-repl-test-commands--roster'
+keys its section by \"/tmp\"), which is what makes it the main one."
+  (let ((row (agent-repl-test-commands--row "main (repo)" id updated-ms)))
+    (plist-put (plist-get row :workspace) :workspace (list :id id :dir "/tmp"))
+    row))
+
+(ert-deftest agent-repl-test-commands-switch-hoist-main-puts-main-first ()
+  "The main workspace moves to the front and every other keeps its order."
+  ;; Arrange
+  (let ((candidates (list "main-workspace-guard" "main (other)" "main (repo)" "x")))
+    ;; Act / Assert
+    (should (equal (agent-repl--switch-hoist-main candidates "main (repo)")
+                   '("main (repo)" "main-workspace-guard" "main (other)" "x")))))
+
+(ert-deftest agent-repl-test-commands-switch-hoist-main-leaves-unmatched-main-out ()
+  "A main workspace the input does not match is not added to the matches."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl--switch-hoist-main (list "a" "b") "main (repo)")
+                 '("a" "b"))))
+
+(ert-deftest agent-repl-test-commands-switch-hoist-main-without-a-main ()
+  "With no current repository's main workspace the matches keep their order."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl--switch-hoist-main (list "b" "a") nil) '("b" "a"))))
+
+(ert-deftest agent-repl-test-commands-switch-repository-main-finds-the-sections-main ()
+  "The main workspace is the offered one whose directory is the repository's."
+  ;; Arrange
+  (let* ((rows (list (agent-repl-test-commands--row "feature" "id-feature" 200)
+                     (agent-repl-test-commands--main-row "id-main" 100)))
+         (agent-repl-roster-view (agent-repl-test-commands--roster rows))
+         (alist (list (cons "feature" (list :dir "/tmp/feature"))
+                      (cons "main (repo)" (list :dir "/tmp")))))
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (ws key) (and (equal ws "feature") (eq key :ref)
+                                     (list :id "id-feature" :dir "/tmp/feature")))))
+      ;; Act / Assert
+      (should (equal (agent-repl--switch-repository-main alist "feature") "main (repo)")))))
+
+(ert-deftest agent-repl-test-commands-switch-repository-main-nil-off-the-roster ()
+  "A workspace no roster section holds names no repository, so no main."
+  ;; Arrange
+  (let ((agent-repl-roster-view (agent-repl-test-commands--roster nil))
+        (alist (list (cons "main (repo)" (list :dir "/tmp")))))
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (_ws _key) (list :id "id-unknown"))))
+      ;; Act / Assert
+      (should-not (agent-repl--switch-repository-main alist "unknown")))))
+
+(ert-deftest agent-repl-test-commands-switch-repository-main-nil-for-no-workspace ()
+  "A persp-mode placeholder or no perspective at all has no repository."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) nil)))
+    ;; Act / Assert
+    (should-not (agent-repl--switch-repository-main
+                 (list (cons "main (repo)" (list :dir "/tmp"))) "main"))
+    (should-not (agent-repl--switch-repository-main
+                 (list (cons "main (repo)" (list :dir "/tmp"))) nil))))
+
+(ert-deftest agent-repl-test-commands-switch-repository-main-nil-when-not-offered ()
+  "The repository's main workspace missing from the offer names no candidate."
+  ;; Arrange
+  (let ((agent-repl-roster-view
+         (agent-repl-test-commands--roster
+          (list (agent-repl-test-commands--row "feature" "id-feature" 200)))))
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (_ws _key) (list :id "id-feature"))))
+      ;; Act / Assert
+      (should-not (agent-repl--switch-repository-main
+                   (list (cons "feature" (list :dir "/tmp/feature"))) "feature")))))
+
+(ert-deftest agent-repl-test-commands-switch-table-hoists-main-in-narrowed-matches ()
+  "Once the input narrows the names, the display sort puts the main first."
+  ;; Arrange
+  (let ((sort (alist-get 'display-sort-function
+                         (cdr (funcall (agent-repl--switch-table
+                                        (agent-repl-test-commands--alist
+                                         '("main-guard" "main (o)" "main (r)" "x"))
+                                        0 "main (r)")
+                                       "" nil 'metadata)))))
+    ;; Act / Assert
+    (should (equal (funcall sort (list "main-guard" "main (o)" "main (r)"))
+                   '("main (r)" "main-guard" "main (o)")))))
+
+(ert-deftest agent-repl-test-commands-switch-ivy-sort-keeps-order-on-empty-input ()
+  "Ivy's sorter leaves the recency order alone before anything is typed."
+  ;; Arrange / Act / Assert
+  (should (equal (funcall (agent-repl--switch-ivy-sort "main (r)") "" (list "a" "main (r)"))
+                 '("a" "main (r)"))))
+
+(ert-deftest agent-repl-test-commands-switch-ivy-sort-hoists-main-on-input ()
+  "Ivy's sorter puts the main first once the input matches it."
+  ;; Arrange / Act / Assert
+  (should (equal (funcall (agent-repl--switch-ivy-sort "main (r)") "main"
+                          (list "main-guard" "main (r)"))
+                 '("main (r)" "main-guard"))))
+
+(ert-deftest agent-repl-test-commands-switch-sorts-share-the-hoist ()
+  "The table's display sort and ivy's sorter order narrowed matches alike.
+Both go through `agent-repl--switch-hoist-main', so the two UIs agree."
+  ;; Arrange
+  (let* ((matches (list "main-guard" "main (o)" "main (r)"))
+         (table-sort (alist-get 'display-sort-function
+                                (cdr (funcall (agent-repl--switch-table
+                                               (agent-repl-test-commands--alist
+                                                (append matches '("x")))
+                                               0 "main (r)")
+                                              "" nil 'metadata)))))
+    ;; Act / Assert
+    (should (equal (funcall table-sort (copy-sequence matches))
+                   (funcall (agent-repl--switch-ivy-sort "main (r)") "main"
+                            (copy-sequence matches))))))
+
+(defvar ivy-sort-matches-functions-alist nil
+  "Stands in for ivy's own definition, which these batch tests never load.")
+
+(ert-deftest agent-repl-test-commands-switch-read-binds-ivys-sorter ()
+  "Under ivy the read binds the hoisting sorter ahead of ivy's own entries."
+  ;; Arrange
+  (let ((ivy-sort-matches-functions-alist '((t . nil)))
+        (seen nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _)
+                 (setq seen (funcall (cdr (assq t ivy-sort-matches-functions-alist))
+                                     "m" (list "main-guard" "main (r)")))
+                 "main (r)")))
+      ;; Act
+      (should (equal (agent-repl--switch-read "p: " '("main (r)") "main (r)") "main (r)"))
+      ;; Assert
+      (should (equal seen '("main (r)" "main-guard")))
+      (should (equal ivy-sort-matches-functions-alist '((t . nil)))))))
+
+(ert-deftest agent-repl-test-commands-switch-read-without-ivy ()
+  "Without ivy the read is a plain `completing-read' over the table."
+  ;; Arrange
+  (let ((ivy-sort-matches-functions-alist nil)
+        (args nil))
+    (makunbound 'ivy-sort-matches-functions-alist)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest a) (setq args a) "one")))
+      ;; Act
+      (should (equal (agent-repl--switch-read "p: " 'table nil) "one"))
+      ;; Assert
+      (should (equal args '("p: " table nil t)))
+      (should-not (boundp 'ivy-sort-matches-functions-alist)))))
+
+(ert-deftest agent-repl-test-commands-switcher-hands-the-main-to-the-table ()
+  "`SPC p p' finds the current repository's main and tops narrowed matches with it."
+  ;; Arrange
+  (let ((sorted nil))
+    (agent-repl-test-commands--switcher
+        (list (agent-repl-test-commands--row "main-guard" "id-guard" 300)
+              (agent-repl-test-commands--row "feature" "id-feature" 200)
+              (agent-repl-test-commands--main-row "id-main" 100))
+        nil
+      (cl-letf (((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) nil))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "feature"))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws key) (and (equal ws "feature") (eq key :ref)
+                                       (list :id "id-feature"))))
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt table &rest _)
+                   (setq sorted (funcall (alist-get 'display-sort-function
+                                                    (cdr (funcall table "" nil 'metadata)))
+                                         (list "main-guard" "main (repo)")))
+                   "feature")))
+        ;; Act
+        (agent-repl-switch-to-project)
+        ;; Assert
+        (should (equal sorted '("main (repo)" "main-guard")))))))
 
 ;;;; ---- A project switch lands on the workspace's own panel ----
 
