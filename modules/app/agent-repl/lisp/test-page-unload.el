@@ -1398,6 +1398,29 @@ naming a dead buffer, and every switch back found its panels closed."
     ;; Assert
     (should (eq (plist-get (cadr (car agent-repl-test-pu--residencies)) :arm) :not-loaded))))
 
+(ert-deftest agent-repl-test-pu-a-reattach-reports-the-residency-again ()
+  "A workspace re-attached to another daemon reports its unchanged residency there."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :thinking)))
+    (agent-repl-page-unload-pass)
+    ;; Act
+    (run-hook-with-args 'agent-repl-host-reattached-functions "alpha")
+    ;; Assert
+    (should (= (length agent-repl-test-pu--residencies) 2))))
+
+(ert-deftest agent-repl-test-pu-a-reattach-reports-only-its-workspace ()
+  "A re-attach reports the re-attached workspace's residency, no other's."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (setq agent-repl-test-pu--status '(("alpha" . :thinking) ("beta" . :thinking)))
+    (agent-repl-page-unload-pass)
+    (setq agent-repl-test-pu--residencies nil)
+    ;; Act
+    (run-hook-with-args 'agent-repl-host-reattached-functions "beta")
+    ;; Assert
+    (should (equal (mapcar #'car agent-repl-test-pu--residencies) '("beta")))))
+
 (ert-deftest agent-repl-test-pu-a-report-that-did-not-land-is-sent-again ()
   "A residency the daemon did not take is not marked sent."
   ;; Arrange
