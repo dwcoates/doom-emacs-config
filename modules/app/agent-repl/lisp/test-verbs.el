@@ -899,7 +899,7 @@ still says where the question stands."
   (agent-repl-test-verbs--with
       (agent-repl-test-verbs--remote-control-answer :success '(:on t))
     (agent-repl-remote-control-toggle)
-    (should (equal agent-repl-test-verbs--messages
+    (should (equal (agent-repl-test--said agent-repl-test-verbs--messages)
                    '("agent-repl: remote control on for ws-one")))))
 
 (ert-deftest agent-repl-verbs-remote-control-says-off ()
@@ -907,7 +907,7 @@ still says where the question stands."
   (agent-repl-test-verbs--with
       (agent-repl-test-verbs--remote-control-answer :success '(:on nil))
     (agent-repl-remote-control-toggle)
-    (should (equal agent-repl-test-verbs--messages
+    (should (equal (agent-repl-test--said agent-repl-test-verbs--messages)
                    '("agent-repl: remote control off for ws-one")))))
 
 (ert-deftest agent-repl-verbs-remote-control-words-unknown-workspace ()
@@ -915,7 +915,7 @@ still says where the question stands."
   (agent-repl-test-verbs--with
       (agent-repl-test-verbs--remote-control-refused :unknown-workspace nil)
     (agent-repl-remote-control-toggle)
-    (should (equal agent-repl-test-verbs--messages
+    (should (equal (agent-repl-test--said agent-repl-test-verbs--messages)
                    '("agent-repl: remote control refused: the daemon does not know ws-one")))))
 
 (ert-deftest agent-repl-verbs-remote-control-words-workspace-ref-mismatch ()
@@ -924,7 +924,7 @@ still says where the question stands."
       (agent-repl-test-verbs--remote-control-refused
        :workspace-ref-mismatch '(:registry-dir "/w/registry"))
     (agent-repl-remote-control-toggle)
-    (should (equal agent-repl-test-verbs--messages
+    (should (equal (agent-repl-test--said agent-repl-test-verbs--messages)
                    '("agent-repl: remote control refused: ws-one's identity is stale; the daemon registers it at /w/registry")))))
 
 (ert-deftest agent-repl-verbs-remote-control-words-vendor-refused ()
@@ -933,7 +933,7 @@ still says where the question stands."
       (agent-repl-test-verbs--remote-control-refused
        :vendor-refused '(:detail "remote control is disabled for this account"))
     (agent-repl-remote-control-toggle)
-    (should (equal agent-repl-test-verbs--messages
+    (should (equal (agent-repl-test--said agent-repl-test-verbs--messages)
                    '("agent-repl: remote control for ws-one is recorded, but claude.ai refused the bridge: remote control is disabled for this account")))))
 
 (ert-deftest agent-repl-verbs-remote-control-transferring-away-goes-to-the-handover ()
@@ -951,7 +951,7 @@ still says where the question stands."
       (agent-repl-test-verbs--remote-control-refused
        :transferring-away '(:address "127.0.0.1:9999"))
     (agent-repl-remote-control-toggle)
-    (should-not agent-repl-test-verbs--messages)))
+    (should-not (agent-repl-test--said agent-repl-test-verbs--messages))))
 
 (ert-deftest agent-repl-verbs-remote-control-not-yet-adopted-goes-to-the-handover ()
   "`not_yet_adopted' is a handover signal, handed to host.el's handover."
