@@ -136,6 +136,16 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("Every pull request the workspace creates is stored the moment its URL is known");
     expect(text).toContain("without asking me any questions or for permission");
   });
+
+  it("requires a shell command to be one runnable block fenced as bash", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("A shell command for the user to run is always its own fenced block, opened with ```bash");
+    expect(text).toContain("The block holds exactly ONE runnable command");
+  });
 });
 
 describe("systemPromptOption", () => {
