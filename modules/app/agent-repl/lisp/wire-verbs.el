@@ -802,12 +802,6 @@ child not forked from its owner carries no owner notice."
 child forked from its owner carries a notice it may not carry."
   (agent-repl-wire-verbs--decode-empty "CreateWorkspaceOwnerNoticeUnexpected" json))
 
-(defun agent-repl-wire-decode-create-workspace-error-one-shot-owner-lands (json)
-  "Decode CreateWorkspaceError's `one_shot_owner_lands' arm into (:owner REF).
-Only the owner lands such a child, and a one-shot lands itself."
-  (agent-repl-wire-verbs--decode-ref-arm
-   "CreateWorkspaceOneShotOwnerLands" 'owner json))
-
 (defun agent-repl-wire-decode-create-workspace-error-unknown-requester (json)
   "Decode CreateWorkspaceError's `unknown_requester' arm into (:workspace REF).
 The requesting workspace is not in the daemon\='s registry."
@@ -823,7 +817,7 @@ not decoded: an async merge, a create cut from origin and a create naming
 a landing target are an agent\='s requests, never the editor\='s, so one
 answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved nameHeld invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected oneShotOwnerLands unknownRequester parentNotOpen transferringAway standingDown))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved nameHeld invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected unknownRequester parentNotOpen transferringAway standingDown))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -845,7 +839,6 @@ answering an editor create is a breach."
          (list 'unknownOwner :unknown-owner #'agent-repl-wire-decode-create-workspace-error-unknown-owner)
          (list 'ownerNoticeRequired :owner-notice-required #'agent-repl-wire-decode-create-workspace-error-owner-notice-required)
          (list 'ownerNoticeUnexpected :owner-notice-unexpected #'agent-repl-wire-decode-create-workspace-error-owner-notice-unexpected)
-         (list 'oneShotOwnerLands :one-shot-owner-lands #'agent-repl-wire-decode-create-workspace-error-one-shot-owner-lands)
          (list 'unknownRequester :unknown-requester #'agent-repl-wire-decode-create-workspace-error-unknown-requester)
          (list 'transferringAway :transferring-away #'agent-repl-wire-decode-create-workspace-error-transferring-away)
          (list 'standingDown :standing-down #'agent-repl-wire-decode-create-workspace-error-standing-down)
