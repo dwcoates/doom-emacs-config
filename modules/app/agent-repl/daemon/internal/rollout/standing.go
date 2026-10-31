@@ -53,9 +53,12 @@ func (s Standing) String() string {
 //   - transferring_away: this daemon handed the workspace over, OR it is
 //     handing over and the workspace is outside the served set it fixed
 //     (the successor minted it after the create gate closed here).
-//   - not_yet_adopted: the predecessor's manifest names the workspace and it
-//     is not adopted yet, or the manifest is still unread and this daemon did
-//     not create the workspace itself.
+//   - not_yet_adopted: this daemon is still joining (the outgoing daemon
+//     lives and may serve any workspace it did not hand over) or the
+//     predecessor's manifest names the workspace, and the workspace is
+//     neither adopted nor one this daemon created itself. A created
+//     workspace is in no manifest and no other daemon serves it, so it is
+//     owned from its creation.
 //
 // Anything else is OWNED: a daemon refusing on ignorance would refuse every
 // ordinary rpc.
@@ -71,7 +74,7 @@ func (c *controller) Standing(ws ids.WorkspaceID) Standing {
 	if c.owned[ws] || c.created[ws] {
 		return StandingOwned
 	}
-	if c.joining[ws] || (c.joiningMode && !c.manifestSeen) {
+	if c.joining[ws] || c.joiningMode {
 		return StandingNotYetAdopted
 	}
 	return StandingOwned

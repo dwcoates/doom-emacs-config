@@ -177,7 +177,7 @@ func TestStandingOnAJoiningSuccessorDerivesFromTheManifestAndItsOwnCreates(t *te
 		{name: "a workspace it created before the manifest was read is owned", ws: created, createIt: true, want: StandingOwned},
 		{name: "a manifested workspace is not yet adopted until it is adopted", manifestSeen: true, ws: manifested, want: StandingNotYetAdopted},
 		{name: "a manifested workspace is owned once adopted", manifestSeen: true, ws: manifested, adoptIt: true, want: StandingOwned},
-		{name: "a workspace the read manifest does not name is owned", manifestSeen: true, ws: unknown, want: StandingOwned},
+		{name: "a workspace the read manifest does not name is not yet adopted while joining", manifestSeen: true, ws: unknown, want: StandingNotYetAdopted},
 		{name: "an unknown workspace before the manifest is read is not yet adopted", ws: unknown, want: StandingNotYetAdopted},
 	}
 	for _, tc := range tests {
