@@ -205,6 +205,10 @@ purpose).
     threshold (daemon policy per call; the shim only measures) and no
     remediation is named. A model switch is a cold cache (cache is per model).
   - `SetSessionPermissionMode`: session state conditioning every gate.
+  - `SetSessionRemoteControl` (2026-10-31): the vendor's Remote Control
+    bridge (claude.ai) on or off, held by the shim and put back on every
+    vendor process it opens for the session, re-binding the latest bridge
+    session id. See the shim's `AGENTS.md`, "Remote Control".
   - `Hibernate` (ruled 2026-08-29, contract increment owed): hibernation is
     a first-class directive — the daemon calls it; the shim COMPACTS the
     session (its ordinary compaction mechanism), then acks; only after the

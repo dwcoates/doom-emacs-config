@@ -288,6 +288,55 @@ export function setSessionEffortRefused(
 }
 
 // ---------------------------------------------------------------------------
+// SetSessionRemoteControl
+// ---------------------------------------------------------------------------
+
+/** Why the Remote Control bridge could not be put in the requested state. */
+type SetSessionRemoteControlCause = { readonly kind: "noSession" } | { readonly kind: "vendorRefused" };
+
+/** The base constructor for `shim.v1.SetSessionRemoteControlFailure`. */
+export function setSessionRemoteControlFailure(
+  cause: SetSessionRemoteControlCause,
+  detail: string,
+): shimv1.SetSessionRemoteControlFailure {
+  return create(shimv1.SetSessionRemoteControlFailureSchema, {
+    detail,
+    cause:
+      cause.kind === "noSession"
+        ? { case: "noSession", value: create(shimv1.SetSessionRemoteControlNoSessionSchema, {}) }
+        : { case: "vendorRefused", value: create(shimv1.SetSessionRemoteControlVendorRefusedSchema, {}) },
+  });
+}
+
+/** The refusal as the whole response the handler returns. */
+export function setSessionRemoteControlRefused(
+  cause: SetSessionRemoteControlCause,
+  detail: string,
+): shimv1.SetSessionRemoteControlResponse {
+  return create(shimv1.SetSessionRemoteControlResponseSchema, {
+    result: { case: "failure", value: setSessionRemoteControlFailure(cause, detail) },
+  });
+}
+
+/**
+ * The bridge is in the requested state. ON states the bridge's claude.ai
+ * session id; OFF states none, and a caller that passed one anyway is a defect.
+ */
+export function setSessionRemoteControlSucceeded(
+  bridge: { readonly enabled: true; readonly bridgeSessionId: string } | { readonly enabled: false },
+): shimv1.SetSessionRemoteControlResponse {
+  return create(shimv1.SetSessionRemoteControlResponseSchema, {
+    result: {
+      case: "success",
+      value: create(shimv1.SetSessionRemoteControlSuccessSchema, {
+        enabled: bridge.enabled,
+        bridgeSessionId: bridge.enabled ? bridge.bridgeSessionId : "",
+      }),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Hibernate
 // ---------------------------------------------------------------------------
 

@@ -15,6 +15,7 @@ const UNARY_VERBS = [
   "startSession",
   "setSessionModel",
   "setSessionPermissionMode",
+  "setSessionRemoteControl",
   "hibernate",
   "killSession",
   "startTurn",

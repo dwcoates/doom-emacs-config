@@ -81,6 +81,18 @@
  * Every other lifecycle state, and a lifecycle frame about any other send,
  * attributes nothing: an ordinary send is still matched by its echo alone.
  *
+ * A REMOTE PROMPT IS NAMED BY ITS OWN ECHO, NEVER GUESSED. A prompt typed on
+ * claude.ai reaches the vendor through its Remote Control bridge, not through
+ * the shim, and the vendor's replay of it (engine/replays.ts) states the uuid
+ * it runs under. The session states that uuid here ({@link SendLedger.foreign})
+ * before any reply to it can arrive, so a frame stamped with it is the remote
+ * prompt's turn rather than an echo of a uuid nobody sent:
+ *   - between turns, it opens a VENDOR-STARTED turn, which the session adopts
+ *     as the remote prompt's (PROMPT_ORIGIN_REMOTE_CONTROL);
+ *   - while a vendor-started turn runs, it is that turn's;
+ *   - while one of the shim's sends' turns runs, the turn goes on as that
+ *     send's: the remote prompt was folded into it.
+ *
  * CONSTANT SIZE. The open sends are bounded by the session's own turn slots
  * (one daemon or network-resume turn, or one keep-alive) and the prompts
  * waiting to join it, enforced here as an invariant
@@ -113,6 +125,15 @@ export const OPEN_SENDS_BOUND = 64;
  * and recognizing them keeps them from reading as an unknown uuid.
  */
 export const RETIRED_SENDS_REMEMBERED = 16;
+
+/**
+ * How many remote prompts' uuids are still recognized by their echo.
+ *
+ * A remote prompt's uuid is stated when its replay arrives, at its turn's
+ * start, and only that turn's frames name it. Prompts typed on claude.ai come
+ * one by one, a person's pace, so a handful is a wide margin.
+ */
+export const FOREIGN_PROMPTS_REMEMBERED = 16;
 
 /** One send the shim pushed into the vendor, under the uuid the vendor will echo. */
 export interface Send {
@@ -234,6 +255,8 @@ export class SendLedger {
   private readonly retired = new Map<string, Send>();
   /** A batch member's uuid -> the uuid of the batch's first send ({@link batched}). */
   private readonly batchedUnder = new Map<string, string>();
+  /** Remote prompts' uuids, oldest first, bounded by {@link FOREIGN_PROMPTS_REMEMBERED}. */
+  private readonly foreignPrompts = new Set<string>();
   private running: VendorTurn = UNSTATED;
 
   /**
@@ -317,6 +340,25 @@ export class SendLedger {
     );
   }
 
+  /**
+   * The vendor took a prompt the shim did not send (a Remote Control prompt,
+   * engine/replays.ts) under `uuid`: a frame naming it is that prompt's turn,
+   * never an unknown echo (see the file comment).
+   */
+  foreign(uuid: string): void {
+    this.foreignPrompts.delete(uuid);
+    this.foreignPrompts.add(uuid);
+    while (this.foreignPrompts.size > FOREIGN_PROMPTS_REMEMBERED) {
+      const oldest = this.foreignPrompts.keys().next();
+      if (oldest.done === true) break;
+      this.foreignPrompts.delete(oldest.value);
+    }
+    LOGGER.debug(
+      { client_uuid: uuid, running: describe(this.running) },
+      "the vendor took a prompt the shim did not send; a frame naming it is that prompt's turn",
+    );
+  }
+
   /** The open send of `turnId`, if the ledger holds one. */
   openSendOf(turnId: string): Send | undefined {
     for (const send of this.open.values()) if (send.turnId === turnId) return send;
@@ -340,7 +382,9 @@ export class SendLedger {
     const stamps = stampedSends(message);
     const absorbed: AbsorbedTurn[] = [];
     let openedVendorTurn = false;
-    if (stamps !== undefined) {
+    if (stamps !== undefined && this.namesOnlyForeign(stamps.all)) {
+      openedVendorTurn = this.foreignStamped(stamps.answers);
+    } else if (stamps !== undefined) {
       const next = this.stated(stamps.answers, stamps.all);
       const answered = next.kind === "send" ? next.send.uuid : undefined;
       if (next.kind === "send" && this.running.kind === "vendor") {
@@ -408,6 +452,40 @@ export class SendLedger {
     this.running = UNSTATED;
     if (turn.kind === "send" && this.open.delete(turn.send.uuid)) this.retire(turn.send);
     return { turn, openedVendorTurn, absorbed, ended: true };
+  }
+
+  /** Whether a frame's stamps name a remote prompt and none of the shim's sends. */
+  private namesOnlyForeign(all: readonly string[]): boolean {
+    return (
+      all.some((uuid) => this.foreignPrompts.has(uuid)) &&
+      !all.some((uuid) => this.open.has(uuid) || this.retired.has(uuid))
+    );
+  }
+
+  /**
+   * A frame stamped with a remote prompt's uuid alone (see the file comment).
+   * Between turns it opens a vendor-started turn, and answers true; otherwise
+   * the running turn goes on.
+   */
+  private foreignStamped(answers: string): boolean {
+    switch (this.running.kind) {
+      case "unstated":
+      case "unknown":
+        this.running = { kind: "vendor" };
+        LOGGER.debug(
+          { answers },
+          "a vendor turn's first reply named a prompt the vendor queued itself; it opens a vendor-started turn",
+        );
+        return true;
+      case "vendor":
+        return false;
+      case "send":
+        LOGGER.debug(
+          { answers, turn_id: this.running.send.turnId },
+          "a frame of one of the shim's sends' turns named a prompt the vendor queued itself; that prompt was folded into the turn",
+        );
+        return false;
+    }
   }
 
   /**
@@ -484,7 +562,9 @@ export class SendLedger {
    * single field when it is ours, else the last of ours in the list.
    */
   private stated(answers: string, all: readonly string[]): VendorTurn {
-    const unknown = all.filter((uuid) => !this.open.has(uuid) && !this.retired.has(uuid));
+    const unknown = all.filter(
+      (uuid) => !this.open.has(uuid) && !this.retired.has(uuid) && !this.foreignPrompts.has(uuid),
+    );
     if (unknown.length > 0) {
       // AN INVARIANT VIOLATION, NEVER A GUESS: the vendor named a send this
       // process never registered. Nothing is attributed to any send of ours on

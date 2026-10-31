@@ -11,7 +11,7 @@ import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { conversationv1 } from "../../src/proto.js";
 import type { PersistEntry } from "../../src/store/persistence.js";
-import type { PermissionResultLike, PermissionUpdateLike } from "../../src/sdk/types.js";
+import type { PermissionResultLike, PermissionUpdateLike, SdkMessage } from "../../src/sdk/types.js";
 import {
   ASK_USER_QUESTION_TOOL,
   DEFAULT_PERMISSION_MODE,
@@ -36,6 +36,7 @@ function gateWith(
   turn: (agentId: conversationv1.AgentId) => conversationv1.TurnId | undefined = () => undefined,
   nowMs: () => number = () => 1000,
   unattended: () => boolean = () => false,
+  remoteControl: () => boolean = () => false,
 ): {
   gate: PermissionGate;
   written: PersistEntry[];
@@ -56,6 +57,7 @@ function gateWith(
     onPermissionModeSet: (mode) => modes.push(mode),
     onAskOpened: () => asksOpened.push(written.length),
     unattended,
+    remoteControl,
   });
   return { gate, written, modes, asksOpened };
 }
@@ -897,6 +899,7 @@ describe("an ask whose book is resolved asynchronously", () => {
       onPermissionModeSet: () => undefined,
       onAskOpened: () => undefined,
       unattended: () => false,
+      remoteControl: () => false,
     });
     return { gate, written, settle: (agent) => settle(agent) };
   }
@@ -1678,5 +1681,303 @@ describe("an ask in an unattended merge remediation turn", () => {
 
     // Assert
     expect([gate.askOpen, asksOpened.length]).toEqual([true, 1]);
+  });
+});
+
+/**
+ * AN ASK THE VENDOR WITHDRAWS (the file comment's rule). With Remote Control
+ * on, the vendor withdraws an ask claude.ai answered, and one its turn was
+ * interrupted under, the same way: the abort of the signal it handed
+ * `canUseTool`. The gate tells the two apart by the vendor's next word, and
+ * never reports an interrupt as an answer from claude.ai.
+ */
+describe("an ask the vendor withdraws", () => {
+  /** A gate with Remote Control on, or off. */
+  const gate = (remoteControl: boolean) =>
+    gateWith(undefined, undefined, undefined, undefined, () => remoteControl);
+
+  /** Open a permission on `toolUseID` and withdraw it, as a `control_cancel_request` does. */
+  async function withdrawn(
+    opened: ReturnType<typeof gateWith>,
+    options: Record<string, unknown> = {},
+  ): Promise<{ answer: Promise<PermissionResultLike>; withdraw: () => void }> {
+    const controller = new AbortController();
+    const answer = opened.gate.canUseTool("Bash", { command: "git push" }, callOptions({ signal: controller.signal, ...options }));
+    await Promise.resolve();
+    return { answer, withdraw: () => controller.abort() };
+  }
+
+  /** How the latest permission row settled: the decision's arm, or "open". */
+  const settledAs = (written: PersistEntry[]): string => {
+    const item = written.at(-1)?.item;
+    const update = item?.kind === "frame" && item.frame.result.case === "update" ? item.frame.result.value.update : undefined;
+    if (update?.case !== "permission") return "none";
+    return update.value.result.case === "success" ? (update.value.result.value.decision.case ?? "unset") : "open";
+  };
+
+  const result = (terminalReason?: string): SdkMessage =>
+    ({ type: "result", subtype: terminalReason === undefined ? "success" : "error_during_execution", terminal_reason: terminalReason, uuid: "r", session_id: "s" }) as unknown as SdkMessage;
+  const assistant = (parent: string | null): SdkMessage =>
+    ({ type: "assistant", parent_tool_use_id: parent, uuid: "a", session_id: "s", message: { role: "assistant", content: [] } }) as unknown as SdkMessage;
+  const toolResult = (toolUseId: string, isError: boolean): SdkMessage =>
+    ({
+      type: "user",
+      parent_tool_use_id: null,
+      uuid: "u",
+      session_id: "s",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolUseId, content: "x", is_error: isError }] },
+    }) as unknown as SdkMessage;
+  const progress = (toolUseId: string): SdkMessage =>
+    ({ type: "tool_progress", tool_use_id: toolUseId, tool_name: "Bash", parent_tool_use_id: null, elapsed_time_seconds: 1, uuid: "p", session_id: "s" }) as unknown as SdkMessage;
+
+  it("leaves the ask open when Remote Control is off", async () => {
+    // Arrange
+    const opened = gate(false);
+    const { withdraw } = await withdrawn(opened);
+
+    // Act
+    withdraw();
+
+    // Assert
+    expect([opened.gate.pendingAsk("toolu_1"), settledAs(opened.written)]).toEqual([{ kind: "permission" }, "open"]);
+  });
+
+  it("takes the ask out of the asks this host can answer when Remote Control is on", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+
+    // Act
+    withdraw();
+
+    // Assert
+    expect([opened.gate.pendingAsk("toolu_1"), opened.gate.askOpen, opened.gate.openAsks()]).toEqual([undefined, false, []]);
+  });
+
+  it("releases the vendor's callback when it withdraws the ask", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { answer, withdraw } = await withdrawn(opened);
+
+    // Act
+    withdraw();
+
+    // Assert
+    expect((await answer).behavior).toBe("deny");
+  });
+
+  it("records no settlement until the vendor's next word says how the ask ended", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+
+    // Act
+    withdraw();
+
+    // Assert
+    expect(settledAs(opened.written)).toBe("open");
+  });
+
+  it("withdraws at once an ask whose signal was already aborted when it was posed", async () => {
+    // Arrange
+    const opened = gate(true);
+    const controller = new AbortController();
+    controller.abort();
+
+    // Act
+    const answer = opened.gate.canUseTool("Bash", {}, callOptions({ signal: controller.signal }));
+
+    // Assert
+    expect([(await answer).behavior, opened.gate.pendingAsk("toolu_1")]).toEqual(["deny", undefined]);
+  });
+
+  it.each([
+    { name: "the gated call's progress", message: progress("toolu_1") },
+    { name: "the gated call's result that is no error", message: toolResult("toolu_1", false) },
+    { name: "the main agent speaking again", message: assistant(null) },
+    { name: "its turn ending other than by a user stop", message: result() },
+  ])("settles a withdrawn ask as answered remotely on $name", async ({ message }) => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+    withdraw();
+
+    // Act
+    opened.gate.noteVendorMessage(message);
+
+    // Assert
+    expect(settledAs(opened.written)).toBe("answeredRemotely");
+  });
+
+  it.each([
+    { name: "a streaming abort", reason: "aborted_streaming" },
+    { name: "a tools abort", reason: "aborted_tools" },
+  ])("settles a withdrawn ask as the interrupt's denial when its turn ends by $name", async ({ reason }) => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+    withdraw();
+
+    // Act
+    opened.gate.noteVendorMessage(result(reason));
+
+    // Assert
+    expect(settledAs(opened.written)).toBe("denied");
+  });
+
+  it.each([
+    { name: "the gated call's error result (an interrupt's cancel)", message: toolResult("toolu_1", true) },
+    { name: "another call's progress", message: progress("toolu_other") },
+    { name: "another call's result", message: toolResult("toolu_other", false) },
+    { name: "a subagent speaking", message: assistant("toolu_spawn") },
+  ])("leaves a withdrawn ask unsettled on $name", async ({ message }) => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+    withdraw();
+
+    // Act
+    opened.gate.noteVendorMessage(message);
+
+    // Assert
+    expect(settledAs(opened.written)).toBe("open");
+  });
+
+  it("settles a subagent's withdrawn ask when that subagent speaks again", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened, { agentID: SUBAGENT.value });
+    withdraw();
+
+    // Act
+    opened.gate.noteVendorMessage(assistant(SUBAGENT.value));
+
+    // Assert
+    expect(settledAs(opened.written)).toBe("answeredRemotely");
+  });
+
+  it("leaves a subagent's withdrawn ask unsettled when the main agent speaks", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened, { agentID: SUBAGENT.value });
+    withdraw();
+
+    // Act
+    opened.gate.noteVendorMessage(assistant(null));
+
+    // Assert
+    expect(settledAs(opened.written)).toBe("open");
+  });
+
+  it("settles a withdrawn ask once, whatever the vendor says after", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+    withdraw();
+    opened.gate.noteVendorMessage(assistant(null));
+    const rows = opened.written.length;
+
+    // Act
+    opened.gate.noteVendorMessage(result("aborted_streaming"));
+
+    // Assert
+    expect(opened.written.length).toBe(rows);
+  });
+
+  it("refuses a late local answer for a withdrawn ask as no open ask", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+    withdraw();
+
+    // Act
+    const outcome = opened.gate.decidePermission(
+      create(conversationv1.AgentPermissionDecisionSchema, {
+        ask: create(conversationv1.AgentPermissionIdSchema, { value: "toolu_1" }),
+        decision: { case: "allowed", value: create(conversationv1.AgentPermissionAllowedSchema, { scope: { case: "once", value: {} } }) },
+      }),
+    );
+
+    // Assert
+    expect([outcome, settledAs(opened.written)]).toEqual(["no_open_ask", "open"]);
+  });
+
+  it("ignores the abort of an ask answered here first", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+    opened.gate.decidePermission(
+      create(conversationv1.AgentPermissionDecisionSchema, {
+        ask: create(conversationv1.AgentPermissionIdSchema, { value: "toolu_1" }),
+        decision: { case: "allowed", value: create(conversationv1.AgentPermissionAllowedSchema, { scope: { case: "once", value: {} } }) },
+      }),
+    );
+    const rows = opened.written.length;
+
+    // Act
+    withdraw();
+    opened.gate.noteVendorMessage(assistant(null));
+
+    // Assert
+    expect([opened.written.length, settledAs(opened.written)]).toEqual([rows, "allowed"]);
+  });
+
+  it("never reports the shim's own interrupt as an answer: the stand-down settles the ask first", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+    opened.gate.standDown("turn t was killed");
+
+    // Act: the vendor's cancel for the interrupt the shim just made.
+    withdraw();
+    opened.gate.noteVendorMessage(result());
+
+    // Assert
+    expect(settledAs(opened.written)).toBe("denied");
+  });
+
+  it("settles a withdrawn ask as denied on a stand-down", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+    withdraw();
+
+    // Act
+    opened.gate.standDown("the vendor query died");
+
+    // Assert
+    expect(settledAs(opened.written)).toBe("denied");
+  });
+
+  it("settles every withdrawn ask as denied when the query is replaced", async () => {
+    // Arrange
+    const opened = gate(true);
+    const { withdraw } = await withdrawn(opened);
+    withdraw();
+
+    // Act
+    const settled = opened.gate.settleWithdrawn("the vendor query was replaced");
+
+    // Assert
+    expect([settled, settledAs(opened.written)]).toEqual([1, "denied"]);
+  });
+
+  it("settles a withdrawn question as unanswered here when its turn goes on", async () => {
+    // Arrange
+    const opened = gate(true);
+    const controller = new AbortController();
+    void opened.gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, callOptions({ signal: controller.signal }));
+    await Promise.resolve();
+    controller.abort();
+
+    // Act
+    opened.gate.noteVendorMessage(assistant(null));
+
+    // Assert
+    const item = opened.written.at(-1)?.item;
+    const update = item?.kind === "frame" && item.frame.result.case === "update" ? item.frame.result.value.update : undefined;
+    expect(
+      update?.case === "question" && update.value.result.case === "success" ? update.value.result.value.outcome.case : undefined,
+    ).toBe("unanswered");
   });
 });
