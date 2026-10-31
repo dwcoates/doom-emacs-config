@@ -45,12 +45,12 @@
 (defconst agent-repl-workspace-progress-phases
   '((:create
      (:requested . "creating workspace…")
-     (:accepted . "the daemon accepted the workspace create…")
-     (:deriving-name . "deriving the workspace's name…")
-     (:creating-worktree . "creating the workspace's git worktree…")
-     (:starting-session . "starting the workspace's session…")
-     (:waiting-for-network . "no network: the workspace create waits, and completes once the network is back…")
-     (:joined . "an identical workspace create is already under way; this request joined it…")
+     (:accepted . "creating workspace: request accepted…")
+     (:deriving-name . "creating workspace: deriving its name…")
+     (:creating-worktree . "creating workspace: creating its git worktree…")
+     (:starting-session . "creating workspace: starting its session…")
+     (:waiting-for-network . "creating workspace: no network, so it waits and completes once the network is back…")
+     (:joined . "creating workspace: an identical create is already under way, and this request joined it…")
      (:completed . "workspace created: %s")
      (:failed . "workspace creation FAILED: %s"))
     (:open
@@ -91,6 +91,13 @@ is the first fact of the sequence the user is shown.  It carries
 `:joined\=' for an ack that joined an identical pending create, and
 `:waiting-for-network\=' for a create held until the network is back,
 which is a wait and never a failure.
+
+EVERY IN-FLIGHT CREATE LINE OPENS WITH \"creating workspace\".  Emacs
+echoes `:requested\=' the instant the command sends, but the first
+daemon-reported stage lands milliseconds later and replaces it, so a
+stage line that did not repeat the denotation would leave the user never
+seeing that a workspace is being created.  None of the lines names the
+daemon: which process does the work is not the user\='s concern.
 
 The wording follows the startup phases\=' own: a lowercase clause, a
 trailing ellipsis while the work is in flight, none once it has landed,

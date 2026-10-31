@@ -333,7 +333,7 @@ the daemon's stages, created or FAILED -- reaches the minibuffer."
   (let ((said (agent-repl-test-mp--echoed
                (lambda () (agent-repl-workspace-progress-report :create :accepted)))))
     ;; Assert.
-    (should (equal said '("the daemon accepted the workspace create…")))))
+    (should (equal said '("creating workspace: request accepted…")))))
 
 (ert-deftest agent-repl-test-mp-create-echoes-starting-the-session ()
   "A create's starting_session stage reaches the minibuffer in its own words."
@@ -341,7 +341,26 @@ the daemon's stages, created or FAILED -- reaches the minibuffer."
   (let ((said (agent-repl-test-mp--echoed
                (lambda () (agent-repl-workspace-progress-report :create :starting-session)))))
     ;; Assert.
-    (should (equal said '("starting the workspace's session…")))))
+    (should (equal said '("creating workspace: starting its session…")))))
+
+(ert-deftest agent-repl-test-mp-create-in-flight-lines-say-creating-workspace ()
+  "Every in-flight create line opens with \"creating workspace\": the first
+daemon stage replaces Emacs's own line within milliseconds, so a stage line
+without the denotation would hide that a workspace is being created."
+  ;; Arrange.
+  (let ((in-flight (cl-remove-if (lambda (entry) (memq (car entry) '(:completed :failed)))
+                                 (alist-get :create agent-repl-workspace-progress-phases))))
+    ;; Act / Assert.
+    (should in-flight)
+    (dolist (entry in-flight)
+      (should (string-prefix-p "creating workspace" (cdr entry))))))
+
+(ert-deftest agent-repl-test-mp-create-lines-never-name-the-daemon ()
+  "No create line names the daemon: which process does the work is not the
+user's concern."
+  ;; Arrange / Act / Assert.
+  (dolist (entry (alist-get :create agent-repl-workspace-progress-phases))
+    (should-not (string-match-p "daemon" (cdr entry)))))
 
 (provide 'test-mutation-progress)
 
