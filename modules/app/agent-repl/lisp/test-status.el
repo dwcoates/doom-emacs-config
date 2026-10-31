@@ -1956,7 +1956,7 @@ livelock."
   "A repaint invalidates tab data without invoking Emacs's line recalculator.
 On Emacs 30.2 `tab-bar--update-tab-bar-lines' sets every frame and the
 future-frame default to one line when `tab-bar-show' is t.  The fixed
-two-line contract therefore requires the redraw path never to call it."
+line-count contract therefore requires the redraw path never to call it."
   ;; Arrange
   (let ((agent-repl--tabline-space-toggle nil)
         (agent-repl--tabbar-observation-states
@@ -2048,35 +2048,69 @@ mock."
                   (lambda () "ws-five")))
          ,@body))))
 
-(ert-deftest agent-repl-test-workspace-tabline-formatted-two-rows-when-few-tabs ()
-  "With only a couple of tabs, the segment is STILL exactly two rows.
-The entries need one row, so the second renders blank — but it renders,
-because the fixed two-row count is what keeps the tab-bar's pixel
-height constant."
+(defun agent-repl-test-status--visible (line)
+  "Return LINE's characters that are not `invisible', without properties.
+The formatter's render key and cache-buster are invisible runs, so a
+test about what the bar SHOWS reads only the rest."
+  (apply #'string
+         (cl-loop for i below (length line)
+                  unless (get-text-property i 'invisible line)
+                  collect (aref line i))))
+
+(ert-deftest agent-repl-test-status-visible-drops-invisible-runs ()
+  "The visible-text helper drops exactly the `invisible' characters."
+  (should (equal (agent-repl-test-status--visible
+                  (concat (propertize "7" 'invisible t) "ab" (propertize " " 'invisible t)))
+                 "ab")))
+
+(ert-deftest agent-repl-test-workspace-tabline-formatted-is-one-row ()
+  "The segment is exactly ONE row: the fixed one-row count is what keeps
+the tab-bar's pixel height constant."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-list-names) (lambda () '("ws1" "ws2")))
               ((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'frame-width) (lambda () 80)))
       (let ((agent-repl--tabline-space-toggle nil))
-        (should (= 1 (cl-count ?\n (agent-repl-workspace-tabline-formatted))))))))
+        (should (= 0 (cl-count ?\n (agent-repl-workspace-tabline-formatted))))))))
 
-(ert-deftest agent-repl-test-workspace-tabline-formatted-pads-unfilled-row ()
-  "The row the entries do not fill is blank-padded to the full line width.
-A zero-length second line would not occupy the pixel row the pinned
+(ert-deftest agent-repl-test-workspace-tabline-formatted-pads-an-empty-row ()
+  "With no tabs the one row is blank-padded to the full line width.
+A zero-length line would not occupy the pixel row the pinned
 `tab-bar-lines' reserves for it."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-list-names) (lambda () '("ws1" "ws2")))
-              ((symbol-function '+workspace-current-name) (lambda () "ws1"))
+    (cl-letf (((symbol-function 'agent-repl--ws-tabline-names) (lambda () nil))
+              ((symbol-function '+workspace-current-name) (lambda () nil))
               ((symbol-function 'frame-width) (lambda () 80)))
       (let* ((agent-repl--tabline-space-toggle nil)
-             (lines (split-string
-                     (substring-no-properties
-                      (agent-repl-workspace-tabline-formatted))
-                     "\n")))
-        (should (= 2 (length lines)))
-        ;; Second line: 79 pad columns plus the join's unfaced terminator.
-        (should (string-blank-p (nth 1 lines)))
-        (should (= 80 (length (nth 1 lines))))))))
+             (line (agent-repl-test-status--visible
+                    (agent-repl-workspace-tabline-formatted))))
+        ;; 79 pad columns plus the join's unfaced terminator.
+        (should (string-blank-p line))
+        (should (= 80 (length line)))))))
+
+(ert-deftest agent-repl-test-workspace-tabline-formatted-draws-the-newest-turns ()
+  "Tabs that do not all fit are filtered to those whose turns most recently
+started or ended, drawn in the bar's order behind a trailing count."
+  ;; Arrange: six tabs at a 40-column frame overflow the line.
+  (agent-repl-test--with-clean-state
+    (let ((names '("alpha" "bravo" "charlie" "delta" "echo" "foxtrot"))
+          (ranks '(("alpha" . 10) ("bravo" . 60) ("charlie" . 20)
+                   ("delta" . 50) ("echo" . 30) ("foxtrot" . 40))))
+      (cl-letf (((symbol-function 'agent-repl--ws-tabline-names) (lambda () names))
+                ((symbol-function '+workspace-current-name) (lambda () "alpha"))
+                ((symbol-function 'frame-width) (lambda () 40))
+                ((symbol-function 'agent-repl-roster-drawn-tab-numbers)
+                 (lambda (ns) (number-sequence 1 (length ns))))
+                ((symbol-function 'agent-repl-roster-last-turn-boundary-ms)
+                 (lambda (ws) (cdr (assoc ws ranks)))))
+        (let ((agent-repl--tabline-space-toggle nil))
+          ;; Act
+          (let ((visible (string-trim (agent-repl-test-status--visible
+                                       (agent-repl-workspace-tabline-formatted)))))
+            ;; Assert: bravo (60) then delta (50), in bar order, the rest counted.
+            (should (string-match-p "bravo .*delta .*\\+[0-9]+\\'" visible))
+            (dolist (omitted '("alpha" "charlie" "echo"))
+              (should-not (string-search omitted visible)))))))))
 
 ;;;; ---- Tests: the render key (structural repaint identity) ----
 
@@ -2822,49 +2856,6 @@ blue (owner ruling, 2026-09-14), plus the underline."
     (should (equal (plist-get spec :bg) agent-repl--color-selected-bg))
     (should (eq t (plist-get spec :underline)))))
 
-;;;; ---- Tests: tabline first-fit packing primitive ----
-
-(ert-deftest agent-repl-test-pack-first-fit-all-fit-one-row ()
-  "Entries that fit the first row all land there; later rows stay empty."
-  (should (equal (agent-repl--pack-first-fit '(3 3 3) '(80 80))
-                 '(3 0))))
-
-(ert-deftest agent-repl-test-pack-first-fit-spills-to-next-row ()
-  "Entries that overflow the first row spill into the second."
-  ;; Row cap 9: "aaaa"(4)+sep+"bbbb"(4)=9 fits; +sep+"cccc" would be 14 > 9.
-  (should (equal (agent-repl--pack-first-fit '(4 4 4) '(9 9))
-                 '(2 1))))
-
-(ert-deftest agent-repl-test-pack-first-fit-returns-nil-when-overflow ()
-  "When the entries cannot all fit the given rows, nil is returned."
-  (should (null (agent-repl--pack-first-fit '(4 4 4 4 4) '(9 9)))))
-
-(ert-deftest agent-repl-test-pack-first-fit-counts-sum-to-entries ()
-  "Per-row counts sum to the number of entries placed."
-  (let ((counts (agent-repl--pack-first-fit '(4 4 4 4) '(9 9))))
-    (should (= 4 (apply #'+ counts)))))
-
-;;;; ---- Tests: pack-prefix (partial placement) ----
-
-(ert-deftest agent-repl-test-pack-prefix-places-all-when-they-fit ()
-  "When every entry fits, the prefix is the whole list."
-  ;; Arrange / Act / Assert
-  (should (equal (agent-repl--pack-prefix '(3 3 3) '(80 80)) '(3 0))))
-
-(ert-deftest agent-repl-test-pack-prefix-stops-at-overflow ()
-  "Entries past what the rows hold are simply not placed — unlike
-`agent-repl--pack-first-fit', which discards the whole placement."
-  ;; Arrange / Act
-  (let ((counts (agent-repl--pack-prefix '(4 4 4 4 4) '(9 9))))
-    ;; Assert: two rows of two, the fifth entry left unplaced.
-    (should (equal counts '(2 2)))
-    (should (= 4 (apply #'+ counts)))))
-
-(ert-deftest agent-repl-test-pack-prefix-zero-when-nothing-fits ()
-  "An entry too wide for every row places nothing at all."
-  ;; Arrange / Act / Assert
-  (should (equal (agent-repl--pack-prefix '(40) '(9 9)) '(0 0))))
-
 ;;;; ---- Tests: unfilled-row padding ----
 
 (ert-deftest agent-repl-test-pad-tabline-row-pads-empty-row ()
@@ -3071,330 +3062,15 @@ without a stub so the suite covers the live-runtime dependency surface."
       ;; Act: two identical observations followed by one changed raw row.
       (dotimes (_ 2)
         (agent-repl--tabbar-log-render
-         'frame-a 80 79 '("ws") '(("ws" . :ready)) "ws" '(8) 0
+         'frame-a 80 79 '("ws") '(("ws" . :ready)) "ws" '(8) '(nil)
          '("row" "") '("row" "   ") '(" row" "   ")
          " row \n    " " row \n    "))
       (agent-repl--tabbar-log-render
-       'frame-a 80 79 '("ws") '(("ws" . :thinking)) "ws" '(12) 0
+       'frame-a 80 79 '("ws") '(("ws" . :thinking)) "ws" '(12) '(nil)
        '("changed" "") '("changed" "   ") '(" changed" "   ")
        " changed \n    " " changed \n    ")
       ;; Assert
       (should (= 2 log-count)))))
-
-;;;; ---- Tests: tabline row packing (livelock guard) ----
-;;
-;; `agent-repl--tabline-rows' returns a LIST of exactly MAX-ROWS
-;; strings.  The single-row (MAX-ROWS 1) cases below preserve the
-;; pre-two-row packing invariants; the two-row cases cover the fixed
-;; two-row tab-bar.
-
-(defun agent-repl-test--single-row (entries current-pos width)
-  "Return the sole row `agent-repl--tabline-rows' packs with MAX-ROWS 1."
-  (car (agent-repl--tabline-rows entries current-pos width 1)))
-
-(ert-deftest agent-repl-test-tabline-rows-empty ()
-  "Empty entry list renders to MAX-ROWS empty rows."
-  (should (equal (agent-repl--tabline-rows nil 0 80 1) '("")))
-  (should (equal (agent-repl--tabline-rows nil 0 80 2) '("" ""))))
-
-(ert-deftest agent-repl-test-tabline-rows-exact-count ()
-  "The result always has exactly MAX-ROWS elements, even when tabs fit one row."
-  (should (= 2 (length (agent-repl--tabline-rows '("abc" "def") 0 80 2))))
-  (should (= 3 (length (agent-repl--tabline-rows '("abc" "def") 0 80 3)))))
-
-(ert-deftest agent-repl-test-tabline-rows-single-all-fit ()
-  "Entries that fit join with single-space separators, no badges."
-  (should (equal (agent-repl-test--single-row '("abc" "def" "ghi") 0 80)
-                 "abc def ghi")))
-
-(ert-deftest agent-repl-test-tabline-rows-never-contains-newline ()
-  "No packed row ever contains a newline — wrapping is elision, not a
-newline, so the join controls the row count and thus the tab-bar height."
-  (dolist (width '(1 4 10 20 40))
-    (dolist (max-rows '(1 2))
-      (dolist (row (agent-repl--tabline-rows
-                    '("aaaa" "bbbb" "cccc" "dddd" "eeee" "ffff") 2 width max-rows))
-        (should-not (string-search "\n" row))))))
-
-(ert-deftest agent-repl-test-tabline-rows-single-overflow-keeps-current ()
-  "When entries overflow, the current entry is always in the row."
-  (let ((entries '("aaaa" "bbbb" "cccc" "dddd" "eeee")))
-    (dotimes (cur 5)
-      (let ((row (agent-repl-test--single-row entries cur 12)))
-        (should (string-search (nth cur entries) row))))))
-
-(ert-deftest agent-repl-test-tabline-rows-single-overflow-badges ()
-  "Elided neighbors are summarized by +N badges on the matching side.
-The window STARTS at the anchor and runs right; the two entries before
-the anchor are what the leading badge counts."
-  ;; budget = 20 - 2*(2 + 1) = 14; window from index 2 ("cccc") holds
-  ;; "cccc dddd eeee" (14) exactly, so nothing is elided on the right.
-  (let ((row (agent-repl-test--single-row
-              '("aaaa" "bbbb" "cccc" "dddd" "eeee") 2 20)))
-    (should (equal row "+2 cccc dddd eeee"))))
-
-(ert-deftest agent-repl-test-tabline-rows-overflow-fits-width ()
-  "No packed row (window + badges) ever exceeds WIDTH columns."
-  (let ((entries '("aaaa" "bbbb" "cccc" "dddd" "eeee" "ffff" "gggg")))
-    (dolist (width '(8 12 16 20 24))
-      (dolist (max-rows '(1 2))
-        (dotimes (cur 7)
-          (dolist (row (agent-repl--tabline-rows entries cur width max-rows))
-            (should (<= (length row) width))))))))
-
-(ert-deftest agent-repl-test-tabline-rows-single-nil-current-pos ()
-  "A nil CURRENT-POS falls back to windowing around the first entry."
-  (let ((row (agent-repl-test--single-row
-              '("aaaa" "bbbb" "cccc" "dddd" "eeee") nil 12)))
-    (should (string-search "aaaa" row))
-    (should-not (string-prefix-p "+" row))))
-
-(ert-deftest agent-repl-test-tabline-rows-two-fit-blank-second-row ()
-  "When all tabs fit one row, MAX-ROWS 2 leaves the second row blank."
-  (should (equal (agent-repl--tabline-rows '("abc" "def" "ghi") 0 80 2)
-                 '("abc def ghi" ""))))
-
-(ert-deftest agent-repl-test-tabline-rows-two-uses-second-row-before-eliding ()
-  "Entries that overflow one row fill the second row rather than eliding."
-  ;; Width 12 fits only "aaaa bbbb" (9) per row; two rows hold four entries
-  ;; with none elided, so neither a leading nor trailing badge appears.
-  (let* ((rows (agent-repl--tabline-rows
-                '("aaaa" "bbbb" "cccc" "dddd") 0 12 2)))
-    (should (= 2 (length rows)))
-    (dolist (e '("aaaa" "bbbb" "cccc" "dddd"))
-      (should (cl-some (lambda (r) (string-search e r)) rows)))
-    (should-not (cl-some (lambda (r) (string-search "+" r)) rows))))
-
-(ert-deftest agent-repl-test-tabline-rows-two-overflow-keeps-current ()
-  "With more tabs than two rows hold, the current tab stays visible."
-  (let ((entries '("aaaa" "bbbb" "cccc" "dddd" "eeee" "ffff" "gggg" "hhhh")))
-    (dotimes (cur 8)
-      (let ((rows (agent-repl--tabline-rows entries cur 14 2)))
-        (should (cl-some (lambda (r) (string-search (nth cur entries) r)) rows))))))
-
-(ert-deftest agent-repl-test-tabline-rows-two-overflow-badges ()
-  "Overflow past two rows shows a trailing +N badge on the last row."
-  (let ((rows (agent-repl--tabline-rows
-               '("aaaa" "bbbb" "cccc" "dddd" "eeee" "ffff" "gggg" "hhhh") 0 12 2)))
-    ;; Current is index 0, so the leading side has nothing elided (no "+N ")
-    ;; but the trailing side does — the badge lands on the second row.
-    (should-not (string-prefix-p "+" (car rows)))
-    (should (string-match-p "\\+[0-9]+\\'" (cadr rows)))))
-
-;;;; ---- Tests: anchored tab-bar view window ----
-;;
-;; The rendered window STARTS at an anchor workspace and runs right; it
-;; is never recentered on the current workspace.  Fixture below: eight
-;; 4-column entries at WIDTH 12 over two rows.  Badge reserve is
-;; `2 + (length "8")' = 3, so each row's budget is 9 and holds exactly
-;; two entries — every window is exactly FOUR entries wide, whatever it
-;; is anchored at, which makes the anchor arithmetic readable.
-;;
-;; NSWindow geometry (`ns_change_tab_bar_height', the clipped-resize
-;; livelock, the actual pixel height of the tab-bar strip) cannot be
-;; exercised in batch: there is no graphical frame.  These tests pin the
-;; STRING contract only — which entries render, in which order, in how
-;; many rows.  The installation tests separately pin the frame-parameter
-;; contract and the no-native-recalculation redraw contract.
-
-(defconst agent-repl-test--anchor-names
-  '("n1" "n2" "n3" "n4" "n5" "n6" "n7" "n8")
-  "Eight workspace names for the anchored-window fixture.")
-
-(defun agent-repl-test--anchor-widths (&optional n)
-  "Return N (default 8) uniform 4-column entry widths."
-  (make-list (or n 8) 4))
-
-(defun agent-repl-test--anchor-at (current anchor &optional names width)
-  "Return the window anchor index for CURRENT given a previous ANCHOR.
-NAMES defaults to the eight-name fixture and WIDTH to 12; the previous
-name list is NAMES, i.e. no membership change."
-  (let ((names (or names agent-repl-test--anchor-names)))
-    (agent-repl--tabline-window-anchor
-     names current anchor names
-     (agent-repl-test--anchor-widths (length names))
-     (or width 12) 2)))
-
-(ert-deftest agent-repl-test-tabline-anchor-inside-window-does-not-move ()
-  "A current workspace already inside the window moves the anchor NOT AT ALL.
-This is the invariant the whole redesign exists for: switching between
-two visible tabs must not reshuffle the view."
-  ;; Arrange: anchored at n1, the window covers n1..n4.
-  (dolist (current '("n1" "n2" "n3" "n4"))
-    ;; Act / Assert
-    (should (= 0 (agent-repl-test--anchor-at current "n1")))))
-
-(ert-deftest agent-repl-test-tabline-anchor-left-of-window-becomes-current ()
-  "A current workspace LEFT of the window makes the anchor the current one."
-  ;; Arrange: anchored at n5, the window covers n5..n8.
-  (dolist (case '(("n1" . 0) ("n2" . 1) ("n3" . 2) ("n4" . 3)))
-    ;; Act
-    (let ((lo (agent-repl-test--anchor-at (car case) "n5")))
-      ;; Assert
-      (should (= (cdr case) lo)))))
-
-(ert-deftest agent-repl-test-tabline-anchor-past-window-advances-minimally ()
-  "A current workspace past the window's end advances the anchor the
-SMALLEST number of positions that brings it back into view — never more."
-  ;; Arrange: anchored at n1 (window n1..n4); each window holds four.
-  (dolist (case '(("n5" . 1) ("n6" . 2) ("n7" . 3) ("n8" . 4)))
-    ;; Act
-    (let ((lo (agent-repl-test--anchor-at (car case) "n1")))
-      ;; Assert
-      (should (= (cdr case) lo)))))
-
-(ert-deftest agent-repl-test-tabline-anchor-all-entries-fit-anchors-at-head ()
-  "With nothing to elide the window is the whole list, anchored at index 0,
-whatever stale anchor was carried in."
-  ;; Arrange / Act / Assert
-  (should (= 0 (agent-repl-test--anchor-at "n8" "n5" nil 80))))
-
-(ert-deftest agent-repl-test-tabline-surviving-anchor-keeps-live-anchor ()
-  "A membership change that spares the anchor workspace keeps it."
-  ;; Arrange / Act / Assert
-  (should (equal "n3" (agent-repl--tabline-surviving-anchor
-                       "n3" '("n1" "n2" "n3" "n4") '("n1" "n3" "n4")))))
-
-(ert-deftest agent-repl-test-tabline-surviving-anchor-prefers-right-neighbor ()
-  "When the anchor dies and both neighbors survive, the RIGHT one takes
-its place — that is the entry that slides into the leftmost slot."
-  ;; Arrange / Act / Assert
-  (should (equal "n4" (agent-repl--tabline-surviving-anchor
-                       "n3" '("n1" "n2" "n3" "n4") '("n1" "n2" "n4")))))
-
-(ert-deftest agent-repl-test-tabline-surviving-anchor-falls-back-left ()
-  "When the anchor dies with no surviving entry to its right, the nearest
-surviving entry to its LEFT takes over."
-  ;; Arrange / Act / Assert
-  (should (equal "n2" (agent-repl--tabline-surviving-anchor
-                       "n4" '("n1" "n2" "n3" "n4") '("n1" "n2")))))
-
-(ert-deftest agent-repl-test-tabline-surviving-anchor-unknown-anchor-heads-list ()
-  "An anchor absent from BOTH name lists falls back to the first entry."
-  ;; Arrange / Act / Assert
-  (should (equal "n1" (agent-repl--tabline-surviving-anchor
-                       "gone" '("n2" "n3") '("n1" "n2" "n3")))))
-
-(ert-deftest agent-repl-test-tabline-anchor-index-records-state ()
-  "The stateful wrapper records anchor state under the supplied frame."
-  ;; Arrange
-  (let ((agent-repl--tabline-view-states (make-hash-table :test #'eq)))
-    (puthash 'frame-a
-             (list :anchor "n5"
-                   :width nil
-                   :names agent-repl-test--anchor-names)
-             agent-repl--tabline-view-states)
-    ;; Act
-    (let ((lo (agent-repl--tabline-anchor-index
-               'frame-a (agent-repl-test--anchor-widths)
-               agent-repl-test--anchor-names "n6" 12 2)))
-      ;; Assert
-      (let ((state (gethash 'frame-a agent-repl--tabline-view-states)))
-        (should (= 4 lo))
-        (should (equal "n5" (plist-get state :anchor)))
-        (should (= 12 (plist-get state :width)))
-        (should (equal agent-repl-test--anchor-names
-                       (plist-get state :names)))))))
-
-(ert-deftest agent-repl-test-tabline-anchor-resize-recomputes-from-anchor ()
-  "A width change recomputes the window FROM the anchor: the anchor
-workspace does not teleport, only the recorded width changes."
-  ;; Arrange: twelve entries, overflowing at both widths under test.
-  (let* ((names (mapcar (lambda (i) (format "e%03d" i)) (number-sequence 1 12)))
-         (widths (agent-repl-test--anchor-widths 12))
-         (agent-repl--tabline-view-states (make-hash-table :test #'eq)))
-    (puthash 'frame-a
-             (list :anchor "e005" :width 12 :names names)
-             agent-repl--tabline-view-states)
-    ;; Act
-    (let* ((narrow (agent-repl--tabline-anchor-index
-                    'frame-a widths names "e005" 12 2))
-           (narrow-anchor
-            (plist-get (gethash 'frame-a agent-repl--tabline-view-states)
-                       :anchor))
-           (wide (agent-repl--tabline-anchor-index
-                  'frame-a widths names "e005" 20 2))
-           (state (gethash 'frame-a agent-repl--tabline-view-states)))
-      ;; Assert
-      (should (= 4 narrow))
-      (should (= 4 wide))
-      (should (equal "e005" narrow-anchor))
-      (should (equal "e005" (plist-get state :anchor)))
-      (should (= 20 (plist-get state :width))))))
-
-(ert-deftest agent-repl-test-tabline-rows-identical-across-visible-tab-switch ()
-  "Switching between two tabs that are both already visible renders a
-LITERALLY identical set of rows — same entries, same order, same string."
-  ;; Arrange: twelve entries anchored at e005; e006 and e007 are both
-  ;; inside the six-wide window the 20-column frame renders.
-  (let* ((names (mapcar (lambda (i) (format "e%03d" i)) (number-sequence 1 12)))
-         (widths (agent-repl-test--anchor-widths 12))
-         (agent-repl--tabline-view-states (make-hash-table :test #'eq))
-         (render (lambda (current)
-                   (agent-repl--tabline-rows
-                    names
-                    (agent-repl--tabline-anchor-index
-                     'frame-a widths names current 20 2)
-                    20 2 widths))))
-    (puthash 'frame-a
-             (list :anchor "e005" :width 20 :names names)
-             agent-repl--tabline-view-states)
-    ;; Act
-    (let ((before (funcall render "e006"))
-          (after (funcall render "e007")))
-      ;; Assert
-      (should (equal before after))
-      (should
-       (equal "e005"
-              (plist-get
-               (gethash 'frame-a agent-repl--tabline-view-states)
-               :anchor))))))
-
-(ert-deftest agent-repl-test-tabline-anchor-state-is-frame-local ()
-  "Redisplaying one frame never changes another frame's anchor window."
-  ;; Arrange
-  (let* ((names agent-repl-test--anchor-names)
-         (widths (agent-repl-test--anchor-widths))
-         (agent-repl--tabline-view-states (make-hash-table :test #'eq)))
-    (puthash 'frame-a
-             (list :anchor "n1" :width 12 :names names)
-             agent-repl--tabline-view-states)
-    (puthash 'frame-b
-             (list :anchor "n5" :width 12 :names names)
-             agent-repl--tabline-view-states)
-    ;; Act
-    (agent-repl--tabline-anchor-index 'frame-a widths names "n4" 12 2)
-    (agent-repl--tabline-anchor-index 'frame-b widths names "n8" 12 2)
-    ;; Assert
-    (should
-     (equal "n1"
-            (plist-get (gethash 'frame-a agent-repl--tabline-view-states)
-                       :anchor)))
-    (should
-     (equal "n5"
-            (plist-get (gethash 'frame-b agent-repl--tabline-view-states)
-                       :anchor)))))
-
-(ert-deftest agent-repl-test-tabline-rows-badges-on-both-ends ()
-  "Entries elided on EITHER side of the window get their own badge: the
-leading count on the first row, the trailing count on the last."
-  ;; Arrange
-  (let ((entries (mapcar (lambda (i) (format "e%03d" i)) (number-sequence 1 12))))
-    ;; Act
-    (let ((rows (agent-repl--tabline-rows entries 4 20 2)))
-      ;; Assert
-      (should (string-prefix-p "+4 " (nth 0 rows)))
-      (should (string-suffix-p " +2" (nth 1 rows))))))
-
-(ert-deftest agent-repl-test-tabline-rows-no-leading-badge-at-head-anchor ()
-  "An anchor at index 0 elides nothing on the left, so no leading badge."
-  ;; Arrange
-  (let ((entries (mapcar (lambda (i) (format "e%03d" i)) (number-sequence 1 12))))
-    ;; Act
-    (let ((rows (agent-repl--tabline-rows entries 0 20 2)))
-      ;; Assert
-      (should-not (string-prefix-p "+" (nth 0 rows)))
-      (should (string-suffix-p " +6" (nth 1 rows))))))
 
 ;;;; ---- Tests: tabline entry width (pixel-accurate measurement) ----
 
@@ -3424,12 +3100,85 @@ estimate never under-reserves and a row can never pixel-overflow."
   "An empty entry never measures less than one column."
   (should (= 1 (agent-repl--tabline-entry-width ""))))
 
-(ert-deftest agent-repl-test-tabline-rows-image-pixel-width-forces-elision ()
-  "An image-bearing entry whose PIXEL width overflows the row budget is
-elided behind a `+N' badge and the forced anchor entry is physically
-truncated when even that entry exceeds the row budget.  Character-count
+;;;; ---- Tests: the one-line recency filter ----
+;;
+;; `agent-repl--tabline-recency-keep' chooses which tabs one line draws:
+;; newest turn boundary first, stopping at the first that does not fit,
+;; returned in tab order.  Fixture arithmetic: N 4-column entries joined
+;; by single spaces; once they overflow, `2 + digits(N)' columns are
+;; reserved for the trailing " +N".
+
+(ert-deftest agent-repl-test-tabline-recency-order-newest-first ()
+  "Indices are ordered newest rank first."
+  (should (equal (agent-repl--tabline-recency-order '(10 30 20)) '(1 2 0))))
+
+(ert-deftest agent-repl-test-tabline-recency-order-ties-keep-tab-order ()
+  "Equal ranks keep their tab order."
+  (should (equal (agent-repl--tabline-recency-order '(5 9 5)) '(1 0 2))))
+
+(ert-deftest agent-repl-test-tabline-recency-order-unranked-come-last ()
+  "A tab with no turn yet ranks after every ranked tab, in tab order."
+  (should (equal (agent-repl--tabline-recency-order '(nil 1 nil 2)) '(3 1 0 2))))
+
+(ert-deftest agent-repl-test-tabline-recency-keep-all-fit ()
+  "When every entry fits the line, every index is kept, whatever the ranks."
+  (should (equal (agent-repl--tabline-recency-keep '(3 3 3) '(1 nil 2) 80)
+                 '(0 1 2))))
+
+(ert-deftest agent-repl-test-tabline-recency-keep-newest-in-tab-order ()
+  "On overflow the newest entries that fit are kept, returned in tab order."
+  ;; Arrange: five 4-wide entries at width 14 overflow (24 columns); the
+  ;; budget is 14 - 3 = 11, which holds two entries (4 + 1 + 4).
+  ;; Act
+  (let ((kept (agent-repl--tabline-recency-keep
+               '(4 4 4 4 4) '(10 50 20 40 30) 14)))
+    ;; Assert: ranks 50 (index 1) and 40 (index 3), in tab order.
+    (should (equal kept '(1 3)))))
+
+(ert-deftest agent-repl-test-tabline-recency-keep-stops-at-first-misfit ()
+  "The fill stops at the first entry that does not fit, so no drawn tab is
+older than an omitted one."
+  ;; Arrange: budget 12 - 3 = 9; the newest (4) fits, the next (8) does
+  ;; not, and the narrow oldest (2) would fit but must not be drawn.
+  ;; Act / Assert
+  (should (equal (agent-repl--tabline-recency-keep '(4 8 2) '(30 20 10) 12)
+                 '(0))))
+
+(ert-deftest agent-repl-test-tabline-recency-keep-newest-even-when-too-wide ()
+  "The newest entry is kept even when it alone is wider than the line."
+  (should (equal (agent-repl--tabline-recency-keep '(4 40 4) '(1 3 2) 20)
+                 '(1))))
+
+(ert-deftest agent-repl-test-tabline-row-empty ()
+  "No entries render an empty line."
+  (should (equal (agent-repl--tabline-row nil nil 80) "")))
+
+(ert-deftest agent-repl-test-tabline-row-all-fit-has-no-badge ()
+  "Entries that all fit join with single spaces and carry no badge."
+  (should (equal (agent-repl--tabline-row '("abc" "def" "ghi") '(nil nil nil) 80)
+                 "abc def ghi")))
+
+(ert-deftest agent-repl-test-tabline-row-counts-the-omitted ()
+  "On overflow the kept entries are drawn in tab order and a trailing
+\" +N\" counts the omitted ones."
+  (should (equal (agent-repl--tabline-row
+                  '("aaaa" "bbbb" "cccc" "dddd" "eeee") '(10 50 20 40 30) 14)
+                 "bbbb dddd +3")))
+
+(ert-deftest agent-repl-test-tabline-row-never-contains-newline ()
+  "No line ever contains a newline: overflow is filtered, never wrapped."
+  (dolist (width '(1 4 10 20 40))
+    (should-not (string-search
+                 "\n" (agent-repl--tabline-row
+                       '("aaaa" "bbbb" "cccc" "dddd" "eeee" "ffff")
+                       '(1 2 3 4 5 6) width)))))
+
+(ert-deftest agent-repl-test-tabline-row-image-pixel-width-is-truncated ()
+  "An image-bearing entry is measured by its PIXEL width, and a newest
+entry wider than the line is physically truncated to it.  Character-count
 truncation cannot enforce this because the image occupies one source
-character but thirty rendered columns."
+character but thirty rendered columns.  The identical hot-path overflow
+is logged once."
   ;; Arrange
   (let ((agent-repl--tabline-last-truncation nil)
         (log-count 0))
@@ -3443,21 +3192,14 @@ character but thirty rendered columns."
               ((symbol-function 'frame-char-width) (lambda (&rest _) 1))
               ((symbol-function 'agent-repl--log-verbose)
                (lambda (&rest _) (cl-incf log-count))))
-      (let ((img (propertize " " 'display "badge"))) ; 1 char, 30 columns
+      (let ((entries (list "aa" (propertize " " 'display "badge") "bb")) ; 30 columns
+            (ranks '(1 3 2)))
         ;; Act
-        (let ((first
-               (agent-repl--tabline-rows
-                (list "aa" img "bb" "cc" "dd") 1 20 2))
-              (second
-               (agent-repl--tabline-rows
-                (list "aa" img "bb" "cc" "dd") 1 20 2)))
+        (let ((first (agent-repl--tabline-row entries ranks 20))
+              (second (agent-repl--tabline-row entries ranks 20)))
           ;; Assert
-          (should (cl-some (lambda (row)
-                             (string-match-p "\\+[0-9]+" row))
-                           first))
-          (dolist (row (append first second))
-            (should (<= (agent-repl--tabline-entry-width row) 20)))
-          ;; The identical hot-path overflow is logged once.
+          (should (<= (agent-repl--tabline-entry-width first) 20))
+          (should (equal first second))
           (should (= 1 log-count)))))))
 
 ;;;; ---- Tests: tabline row join (face-extension guard) ----

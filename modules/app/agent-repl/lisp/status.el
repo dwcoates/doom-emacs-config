@@ -35,6 +35,7 @@
 (declare-function agent-repl--ws-tab-face "workspace")
 (declare-function agent-repl--ws-tabline-names "workspace")
 (declare-function agent-repl-roster-drawn-tab-numbers "roster" (names))
+(declare-function agent-repl-roster-last-turn-boundary-ms "roster" (ws))
 (declare-function agent-repl--ws-window-conf "workspace")
 (declare-function agent-repl-host-mark-viewed "host")
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
@@ -206,7 +207,7 @@ replace this with a bare \" \" — see the block comment above
 GENERATION is the integer `agent-repl--tabline-render-key' embedded in
 the frame's last render, and RENDERED is the propertized string it
 was derived from.  Keyed by frame because each frame renders its own
-anchor and width, and a shared last-render would advance the generation
+width, and a shared last-render would advance the generation
 on every alternate frame's redisplay and repaint both bars for nothing.")
 
 (defun agent-repl--tabline-render-key (rendered &optional frame)
@@ -2234,8 +2235,8 @@ for the corresponding workspace, numbered as the daemon numbers it
 \(`agent-repl-roster-drawn-tab-numbers'), the number the sidebar paints
 beside the same workspace's row.  Used by both
 `agent-repl--tabline-advice' (which mapconcats with a space separator)
-and `agent-repl-workspace-tabline-formatted' (which packs entries
-into a single row, eliding overflow behind \"+N\" badges).
+and `agent-repl-workspace-tabline-formatted' (which draws the
+entries that fit one row, newest turn first, behind a \"+N\" badge).
 
 No hide-project-dirs filtering happens here: that mode hides matching
 workspaces at the persp layer (they are killed and leave
@@ -2256,19 +2257,18 @@ and every number matches the `M-<n>' chord that reaches it."
              for number in (agent-repl-roster-drawn-tab-numbers names)
              collect (agent-repl--render-tab-entry name current-name number))))
 
-(defconst agent-repl--tabline-row-count 2
-  "Number of rows the workspace tab-bar ALWAYS renders.
+(defconst agent-repl--tabline-row-count 1
+  "Number of rows the workspace tab-bar ALWAYS renders: one.
 Fixed (never varies with workspace count), so the tab-bar's pixel
 height is constant.  A height change resizes the NSWindow on macOS,
 and a clipped resize livelocks redisplay at 100% CPU
 \(`ns_change_tab_bar_height' -> `adjust_frame_size' in src/); pinning
 the row count sidesteps that entirely.
 
-Two rows, always exactly two.  `agent-repl--tabline-rows' returns this
-many strings whatever the workspace count, and
-`agent-repl-workspace-tabline-formatted' blank-pads a row the entries
-do not fill to the full line width, so the rendered segment is always
-two full-width lines and the tab-bar's pixel height never varies.
+One row, always exactly one (owner ruling, 2026-10-31): the bar shows
+only while the agent panels are closed, and the tabs that do not fit
+are filtered out by turn recency (`agent-repl--tabline-recency-keep')
+rather than wrapped to a further row.
 
 The height contract is carried by `tab-bar-lines', which
 `agent-repl--install-fixed-height-tab-bar' pins to this value on every
@@ -2279,93 +2279,77 @@ first adds `tab-bar-lines' to `frame-inhibit-implied-resize', so changing
 a live frame consumes text-area height instead of requesting an outer
 NSWindow resize.")
 
-(defun agent-repl--pack-prefix (widths caps)
-  "Greedily first-fit as long a PREFIX of WIDTHS as fits rows sized by CAPS.
-WIDTHS is a list of entry column-widths in display order.  CAPS is a
-list of each row's maximum column budget; its length is the row count.
-Entries are placed left to right: each is appended to the current row
-when it (plus a one-column separator after the first entry already on
-that row) still fits that row's CAPS budget, otherwise the next row is
-started.  Placement stops at the first entry that fits no remaining
-row.  Returns a list of per-row entry COUNTS (same length as CAPS)
-whose sum is the length of the placed prefix — which may be shorter
-than WIDTHS, and may be zero when even the first entry fits nowhere."
-  (let* ((nrows (length caps))
-         (counts (make-list nrows 0))
-         (row 0)
-         (used 0)
-         (rest widths)
-         (done nil))
-    (while (and (not done) rest)
-      (let* ((w (car rest))
-             (sep (if (> (nth row counts) 0) 1 0)))
-        (cond
-         ((<= (+ used sep w) (nth row caps))
-          (setf (nth row counts) (1+ (nth row counts)))
-          (setq used (+ used sep w)
-                rest (cdr rest)))
-         ((< row (1- nrows))
-          (setq row (1+ row) used 0))
-         (t (setq done t)))))
-    counts))
+(defun agent-repl--tabline-recency-order (ranks)
+  "Return the 0-based indices of RANKS, newest rank first.
+RANKS are epoch-ms turn boundaries (`agent-repl-roster-last-turn-boundary-ms'),
+one per tab in tab order, nil for a tab with no turn yet.  Equal ranks keep
+their tab order, and nil ranks come last in tab order, because the sort is
+stable over the indices in tab order."
+  (sort (number-sequence 0 (1- (length ranks)))
+        (lambda (i j)
+          (let ((ri (nth i ranks)) (rj (nth j ranks)))
+            (and ri (or (null rj) (> ri rj)))))))
 
-(defun agent-repl--pack-first-fit (widths caps)
-  "Greedily first-fit WIDTHS into rows sized by CAPS.
-Returns a list of per-row entry COUNTS (same length as CAPS) when
-EVERY entry is placed, or nil when the entries do not all fit in
-`(length CAPS)' rows.  The placement itself is
-`agent-repl--pack-prefix'; this is the all-or-nothing wrapper the
-no-elision fit decision uses."
-  (let ((counts (agent-repl--pack-prefix widths caps)))
-    (and (= (apply #'+ counts) (length widths)) counts)))
+(defun agent-repl--tabline-recency-keep (widths ranks width)
+  "Return the indices of the tabs one WIDTH-column line draws, in tab order.
+WIDTHS are the entries' column widths (`agent-repl--tabline-entry-width')
+and RANKS their turn boundaries, both in tab order.  Adjacent entries
+take a one-column separator.
 
-(defun agent-repl--tabline-overflow-caps (width max-rows badge-w)
-  "Return per-row column budgets for an overflowing MAX-ROWS tab-bar.
-Reserves a `+N' overflow badge worth of columns (BADGE-W) at the start
-of the first row and the end of the last row, so the leading/trailing
-badges never push a row past WIDTH; interior rows keep the full WIDTH.
-With a single row both badges share it."
-  (if (= max-rows 1)
-      (list (max 1 (- width (* 2 badge-w))))
-    (let ((edge (max 1 (- width badge-w))))
-      (append (list edge)
-              (make-list (- max-rows 2) width)
-              (list edge)))))
+When every entry fits, every index is kept.  Otherwise a trailing \" +N\"
+badge's columns are reserved, and entries are taken newest rank first
+\(`agent-repl--tabline-recency-order'), stopping at the FIRST that does
+not fit: every drawn tab then turned over a turn more recently than every
+omitted one, which a skip-and-continue fill would not guarantee.  The
+newest entry is always kept, even when it alone is wider than the line
+\(`agent-repl--tabline-truncate-row' then cuts it).  The kept indices
+are returned in TAB ORDER, so filtering never reorders the bar."
+  (let* ((n (length widths))
+         (total (+ (apply #'+ widths) (max 0 (1- n)))))
+    (if (<= total width)
+        (number-sequence 0 (1- n))
+      (let ((budget (- width (+ 2 (length (number-to-string n)))))
+            (used 0)
+            (kept nil)
+            (done nil))
+        (dolist (i (agent-repl--tabline-recency-order ranks))
+          (unless done
+            (let ((cost (+ (nth i widths) (if kept 1 0))))
+              (if (or (null kept) (<= (+ used cost) budget))
+                  (setq used (+ used cost) kept (cons i kept))
+                (setq done t)))))
+        (sort kept #'<)))))
 
-(defun agent-repl--tabline-render-rows (entries counts lead trail width)
-  "Render ENTRIES into rows per COUNTS, with LEAD/TRAIL badge strings.
-COUNTS is a per-row entry count (see `agent-repl--pack-first-fit').
-Each row joins its slice of ENTRIES with single spaces; LEAD is
-prepended to the first row and TRAIL appended to the last row.  Every
-row is hard-truncated to WIDTH columns as a final guard, so a
-pathologically narrow frame can never make a row wrap.  Returns a list
-of `(length COUNTS)' strings, none containing a newline."
-  (let ((idx 0)
-        (nrows (length counts))
-        (rows nil))
-    (dotimes (r nrows)
-      (let* ((k (nth r counts))
-             (slice (seq-subseq entries idx (+ idx k)))
-             (row (mapconcat #'identity slice " ")))
-        (setq idx (+ idx k))
-        (when (= r 0)
-          (setq row (concat lead row)))
-        (when (= r (1- nrows))
-          (setq row (concat row trail)))
-        (setq row (agent-repl--tabline-truncate-row row width))
-        (push row rows)))
-    (nreverse rows)))
+(defun agent-repl--tabline-row (entries ranks width &optional widths)
+  "Return the ONE tab-bar line drawing the ENTRIES that fit WIDTH columns.
+ENTRIES are rendered tab-entry strings in tab order
+\(`agent-repl--tabline-rendered-entries') and RANKS their turn
+boundaries.  `agent-repl--tabline-recency-keep' chooses which entries
+are drawn; they are joined by single spaces in tab order, and a trailing
+\" +N\" counts the omitted ones.  The line is hard-truncated to
+WIDTH as the final guard, so it never wraps to a further physical row.
+WIDTHS may supply the entries' measured widths when the caller already
+took them, since `string-pixel-width' is far from free inside redisplay."
+  (if (null entries)
+      ""
+    (let* ((widths (or widths (mapcar #'agent-repl--tabline-entry-width entries)))
+           (kept (agent-repl--tabline-recency-keep widths ranks width))
+           (omitted (- (length entries) (length kept)))
+           (row (mapconcat (lambda (i) (nth i entries)) kept " ")))
+      (agent-repl--tabline-truncate-row
+       (if (> omitted 0) (concat row (format " +%d" omitted)) row)
+       width))))
 
 (defun agent-repl--tabline-entry-width (entry)
   "Return ENTRY's rendered width in character-column units.
 
 The tab-bar packs entries against a column budget (see
-`agent-repl--tabline-rows'), but physical line wrapping is decided in
+`agent-repl--tabline-recency-keep'), but physical line wrapping is decided in
 PIXELS.  Measuring an entry by its character `length' undercounts any
 entry carrying a `display' image: a priority badge is one space wide
 in characters but a whole glyph wide in pixels (see
 `agent-repl--tab-priority-image-str').  A row the packer believed fit
-could then overflow the frame in pixels and wrap to a third physical
+could then overflow the frame in pixels and wrap to a second physical
 row — the `ns_change_tab_bar_height' livelock this whole subsystem
 exists to prevent.
 
@@ -2394,9 +2378,9 @@ redisplay.")
 Uses `agent-repl--tabline-entry-width' for every candidate prefix, so a
 `display' image and a wide glyph consume their real pixel-derived column
 width rather than their character count.  This is the final physical
-overflow guard after row packing.  It is especially important for the
-degenerate branch that deliberately keeps one anchor entry even when
-the entry is wider than every row budget.
+overflow guard after the recency filter.  It is especially important
+for the degenerate branch that deliberately keeps the newest entry even
+when that entry alone is wider than the line.
 
 Truncation removes complete source characters from the right until the
 rendered prefix fits.  The function logs only when the overflow signature
@@ -2425,26 +2409,6 @@ changes because tab-bar redisplay is an extremely hot path."
              width original-width (length row) (substring-no-properties row)
              result-width (length result) (substring-no-properties result)))
           result)))))
-
-(defun agent-repl--tabline-window-size (widths caps start)
-  "Return how many consecutive WIDTHS from START fit rows sized by CAPS.
-Never returns less than 1: a window always shows its leading entry,
-even one too wide for any row's budget (the render guard truncates it)."
-  (max 1 (apply #'+ (agent-repl--pack-prefix (nthcdr start widths) caps))))
-
-(defvar agent-repl--tabline-view-states
-  (make-hash-table :test #'eq :weakness 'key)
-  "Weak hash table mapping frames to their tab-bar view-state plists.
-
-Each value carries `:anchor', `:width', and `:names'.  The state says
-where that FRAME's rendered workspace window starts.  Frame ownership is
-essential because frames can have different widths and can redisplay in
-alternation; a single global anchor lets one frame continually rewrite
-another frame's view.
-
-The table is deliberately outside `agent-repl--workspaces': tab-bar
-position is frame view state rather than workspace lifecycle state.
-Weak keys ensure deleting a frame also makes its cached view collectible.")
 
 (defvar agent-repl--tabbar-observation-states
   (make-hash-table :test #'eq :weakness 'key)
@@ -2491,180 +2455,6 @@ boundary for logging performed from redisplay."
             state (plist-put state time-key now))
       (puthash frame state agent-repl--tabbar-observation-states))
     due))
-
-(defun agent-repl--tabline-surviving-anchor (anchor prev-names names)
-  "Return the anchor name to render NAMES from, given the previous ANCHOR.
-
-Implements the membership-change rule: keep ANCHOR when it still
-appears in NAMES, otherwise fall back to its nearest surviving
-neighbor in PREV-NAMES (the ordering ANCHOR was chosen against).  Ties
-at equal distance resolve to the RIGHT neighbor: when the anchor
-workspace is killed, the entry that follows it is the one that
-naturally slides into the leftmost slot.  With no anchor, no survivor,
-and for an empty NAMES, falls back to the first name (or nil)."
-  (cond
-   ((null names) nil)
-   ((null anchor) (car names))
-   ((member anchor names) anchor)
-   (t
-    (let ((idx (cl-position anchor prev-names :test #'equal))
-          (prev-n (length prev-names)))
-      (or (and idx
-               (cl-loop for d from 1 to prev-n
-                        for right = (+ idx d)
-                        for left = (- idx d)
-                        thereis (or (and (< right prev-n)
-                                         (let ((c (nth right prev-names)))
-                                           (and (member c names) c)))
-                                    (and (>= left 0)
-                                         (let ((c (nth left prev-names)))
-                                           (and (member c names) c))))))
-          (car names))))))
-
-(defun agent-repl--tabline-window-anchor (names current anchor prev-names
-                                                widths width max-rows)
-  "Return the 0-based index in NAMES the tab-bar window should start at.
-
-Pure: computes the anchor position without touching the frame view-state
-table (`agent-repl--tabline-anchor-index' is the stateful wrapper).
-ANCHOR is the previous anchor name and PREV-NAMES the name list it was
-chosen against; CURRENT is the current workspace name; WIDTHS are the
-entries' column widths, matching NAMES positionally.
-
-When every entry fits MAX-ROWS full-width rows there is nothing to
-elide, so the window is the whole list and the anchor is index 0.
-Otherwise exactly three rules move the anchor, in order:
-
-  1. membership — keep the anchor workspace if it survives in NAMES,
-     else its nearest surviving neighbor
-     \(`agent-repl--tabline-surviving-anchor');
-  2. CURRENT left of the window — the anchor becomes CURRENT;
-  3. CURRENT beyond the window's end — the anchor advances by the
-     SMALLEST number of positions that brings CURRENT back inside.
-
-Nothing else moves it.  In particular a CURRENT already inside the
-window moves it not at all, so switching between two visible tabs
-renders an identical set of entries in identical places."
-  (let ((n (length names)))
-    (cond
-     ((= n 0) 0)
-     ;; No elision needed: the window is everything, anchored at the head.
-     ((agent-repl--pack-first-fit widths (make-list max-rows width)) 0)
-     (t
-      (let* ((badge-w (+ 2 (length (number-to-string n)))) ; "+N " / " +N"
-             (caps (agent-repl--tabline-overflow-caps width max-rows badge-w))
-             (survivor (agent-repl--tabline-surviving-anchor
-                        anchor prev-names names))
-             (lo (min (or (cl-position survivor names :test #'equal) 0)
-                      (1- n)))
-             (cur (cl-position current names :test #'equal)))
-        (when cur
-          ;; Rule 2: current sits left of the window.
-          (when (< cur lo) (setq lo cur))
-          ;; Rule 3: current sits past the window's last entry.  Advance
-          ;; one position at a time so the move is the smallest one that
-          ;; works; LO reaching CUR always terminates the loop, since a
-          ;; window shows at least its own leading entry.
-          (while (and (< lo cur)
-                      (> (1+ cur)
-                         (+ lo (agent-repl--tabline-window-size
-                                widths caps lo))))
-            (setq lo (1+ lo))))
-        lo)))))
-
-(defun agent-repl--tabline-anchor-index (frame widths names current width max-rows)
-  "Update FRAME's tab-bar anchor state for NAMES and return its 0-based index.
-
-Stateful wrapper over `agent-repl--tabline-window-anchor': applies the
-three anchor rules to FRAME's current `:anchor' and `:names', then
-records the resulting anchor name, WIDTH, and NAMES back under FRAME.
-WIDTHS are the rendered entries' column widths, matching NAMES
-positionally; returns the index `agent-repl--tabline-rows' should render
-its window from.
-
-This function runs inside redisplay more than once per second, so the
-frame-local state write is deliberately not logged."
-  (let* ((state (gethash frame agent-repl--tabline-view-states))
-         (lo (agent-repl--tabline-window-anchor
-              names current
-              (plist-get state :anchor)
-              (plist-get state :names)
-              widths width max-rows)))
-    (puthash frame
-             (list :anchor (nth lo names)
-                   :width width
-                   :names names)
-             agent-repl--tabline-view-states)
-    lo))
-
-(defun agent-repl--tabline-rows (entries anchor-pos width max-rows &optional widths)
-  "Pack ENTRIES into EXACTLY MAX-ROWS rows, each no wider than WIDTH.
-
-ENTRIES is a list of rendered tab-entry strings (see
-`agent-repl--tabline-rendered-entries').  Returns a list of MAX-ROWS
-strings, adjacent entries joined by a single space within a row and no
-string ever containing a newline.  Unused trailing rows are the empty
-string, so the row COUNT is fixed at MAX-ROWS regardless of how many
-entries there are.
-
-When all ENTRIES fit within MAX-ROWS full-width rows they are all
-shown with no badges.  Otherwise the rendered window STARTS at
-ANCHOR-POS (0-based; nil falls back to 0) and runs as far right as the
-rows hold — the window is anchored, never recentered on the current
-workspace, so switching between two visible tabs changes nothing about
-what renders where.  `agent-repl--tabline-anchor-index' owns the
-anchor and its three update rules.
-
-Entries elided on EITHER side of the window are summarized by a
-badge: a leading \"+N \" on the first row counts the entries before
-ANCHOR-POS, a trailing \" +N\" on the last row counts those past the
-window's end.
-
-The row count must be FIXED, never varying with the entry count: a
-change in row count alters the tab-bar's pixel height, and on macOS a
-tab-bar height change resizes the NSWindow; when that resize is clipped
-\(e.g. by the screen edge) the requested and realized frame sizes never
-agree and redisplay livelocks at 100% CPU retrying the resize
-\(`ns_change_tab_bar_height' -> `adjust_frame_size' in src/).  Elision
-behind badges, not wrapping to a further row, absorbs any overflow.
-
-WIDTH and the per-row caps are column budgets.  Entry widths are
-measured with `agent-repl--tabline-entry-width', which counts an
-image-bearing entry by its pixel width (converted to columns), not
-its character length — a column-accurate width is what keeps this
-fixed two-row fit decision from letting a badge-bearing row overflow
-the frame in pixels and wrap to a third physical row.  WIDTHS may
-supply that measurement when the caller has already taken it (the
-formatter measures once for both the anchor and the rows), since
-`string-pixel-width' is far from free inside redisplay."
-  (let ((n (length entries)))
-    (if (= n 0)
-        (make-list max-rows "")
-      (let* ((widths (or widths (mapcar #'agent-repl--tabline-entry-width entries)))
-             ;; Do all entries fit MAX-ROWS full-width rows?  If so, no
-             ;; badges and no windowing are needed.
-             (full (agent-repl--pack-first-fit
-                    widths (make-list max-rows width))))
-        (if full
-            (agent-repl--tabline-render-rows entries full "" "" width)
-          ;; Overflow: render the window that starts at the anchor,
-          ;; with badge columns reserved conservatively on the first
-          ;; and last rows for the two elision counts.
-          (let* ((lo (min (max (or anchor-pos 0) 0) (1- n)))
-                 (badge-w (+ 2 (length (number-to-string n)))) ; "+N " / " +N"
-                 (caps (agent-repl--tabline-overflow-caps width max-rows badge-w))
-                 (packed (agent-repl--pack-prefix (nthcdr lo widths) caps))
-                 (counts (if (> (apply #'+ packed) 0)
-                             packed
-                           ;; Degenerate: the anchor entry alone is wider
-                           ;; than any row's budget; still show it
-                           ;; (truncated by the render guard).
-                           (cons 1 (make-list (1- max-rows) 0))))
-                 (hi (+ lo (max 1 (apply #'+ packed)) -1))
-                 (window (seq-subseq entries lo (1+ hi)))
-                 (lead (if (> lo 0) (format "+%d " lo) ""))
-                 (trail (if (< hi (1- n)) (format " +%d" (- n 1 hi)) "")))
-            (agent-repl--tabline-render-rows window counts lead trail width)))))))
 
 (defun agent-repl--join-tabline-rows (lines)
   "Join LINES (pre-centered tab-bar rows) with row separators.
@@ -2760,13 +2550,13 @@ and therefore deliberately performs no logging."
             row)))
 
 (defun agent-repl--tabbar-log-render
-    (frame width line-width names states current widths anchor-pos rows padded
+    (frame width line-width names states current widths ranks rows padded
            centered joined output)
   "Log one diagnostic observation of the visible tab-bar render boundary.
 
 FRAME and WIDTH describe the rendering frame.  LINE-WIDTH is the physical
-row budget; NAMES, STATES, CURRENT, WIDTHS, and ANCHOR-POS describe window
-selection; ROWS, PADDED, CENTERED, JOINED, and OUTPUT capture every
+row budget; NAMES, STATES, CURRENT, WIDTHS, and RANKS describe which
+tabs are drawn; ROWS, PADDED, CENTERED, JOINED, and OUTPUT capture every
 formatter stage.  Text properties are stripped only in the diagnostic
 payload so the rendered values themselves remain untouched.
 
@@ -2784,7 +2574,7 @@ runs before the canonical logger."
          (centered-widths
           (mapcar #'agent-repl--tabline-entry-width centered))
          (signature
-          (list width line-width names states current widths anchor-pos
+          (list width line-width names states current widths ranks
                 plain-rows row-widths padded-widths plain-centered
                 centered-widths plain-joined
                 (frame-parameter frame 'tab-bar-lines)
@@ -2797,51 +2587,48 @@ runs before the canonical logger."
       (agent-repl--log-verbose
        (agent-repl--status-log-scope
         "tab-bar rendering can run before workspace activation")
-       "tabbar-render: frame=%S frame-width=%d frame-pixel-width=%d frame-char-width=%d line-width=%d configured-rows=%d tab-bar-lines=%S keep-state=%S tab-bar-mode=%S tab-bar-show=%S auto-resize=%S auto-width=%S inhibit-implied-resize=%S format=%S names=%S states=%S current=%S entry-widths=%S anchor-pos=%d rows=%S row-widths=%S padded-widths=%S centered=%S centered-widths=%S joined-newlines=%d output-newlines=%d output-chars=%d output=%S"
+       "tabbar-render: frame=%S frame-width=%d frame-pixel-width=%d frame-char-width=%d line-width=%d configured-rows=%d tab-bar-lines=%S keep-state=%S tab-bar-mode=%S tab-bar-show=%S auto-resize=%S auto-width=%S inhibit-implied-resize=%S format=%S names=%S states=%S current=%S entry-widths=%S ranks=%S rows=%S row-widths=%S padded-widths=%S centered=%S centered-widths=%S joined-newlines=%d output-newlines=%d output-chars=%d output=%S"
        frame width (frame-pixel-width frame) (frame-char-width frame)
        line-width agent-repl--tabline-row-count
        (frame-parameter frame 'tab-bar-lines)
        (frame-parameter frame 'tab-bar-lines-keep-state)
        tab-bar-mode tab-bar-show auto-resize-tab-bars tab-bar-auto-width
        frame-inhibit-implied-resize tab-bar-format names states current widths
-       anchor-pos plain-rows row-widths padded-widths plain-centered
+       ranks plain-rows row-widths padded-widths plain-centered
        centered-widths (cl-count ?\n plain-joined)
        (cl-count ?\n plain-output) (length output) plain-output))))
 
 (defun agent-repl-workspace-tabline-formatted ()
-  "Format workspace list for tab-bar display as a FIXED row count.
-Renders `agent-repl--tabline-row-count' rows, each no wider than
-`(1- (frame-width))', via `agent-repl--tabline-rows', which renders an
-anchored window of workspaces and elides overflow behind \"+N\" badges
-on both ends.  The window start is
-`agent-repl--tabline-anchor-index' — a stable anchor, not a recentering
-on the current workspace, so switching between two visible tabs leaves
-the rendered rows identical.
+  "Format the workspace tabs for the tab-bar as ONE fixed row.
+Renders `agent-repl--tabline-row-count' (one) row no wider than
+`(1- (frame-width))', via `agent-repl--tabline-row': when the tabs do
+not all fit, only those whose turns most recently started or ended are
+drawn (`agent-repl-roster-last-turn-boundary-ms', owner ruling
+2026-10-31), still in the sidebar's order, and a trailing \"+N\" counts
+the rest.
 
-The row count is FIXED even when the tabs need only one row: the
-unfilled row is blank-padded to the full line width
-\(`agent-repl--pad-tabline-row') so the segment is ALWAYS exactly
-`agent-repl--tabline-row-count' full lines.  A row-count change alters
+The row is blank-padded when empty (`agent-repl--pad-tabline-row') so
+the segment is ALWAYS exactly one full line.  A row-count change alters
 the tab-bar pixel height, and on macOS `ns_change_tab_bar_height'
-resizes the NSWindow — when that resize is clipped by the screen edge,
-redisplay retries it forever and Emacs livelocks at 100% CPU (see
-`agent-repl--tabline-rows').  Pinning the row count sidesteps that.
+resizes the NSWindow -- when that resize is clipped by the screen edge,
+redisplay retries it forever and Emacs livelocks at 100% CPU.  Pinning
+the row count sidesteps that.
 
 The `(1- (frame-width))' cap also keeps the unfaced terminator that
 `agent-repl--join-tabline-rows' appends within the visible columns
-\(col < `frame-width'), and each row is centered by rendered pixel width
+\(col < `frame-width'), and the row is centered by rendered pixel width
 through `agent-repl--center-tabline-row'.
 Appends two zero-width runs: the render key
 \(`agent-repl--tabline-render-key'), which changes the string's CONTENT
-exactly when the rows change in any way including their faces, so a
+exactly when the row changes in any way including its faces, so a
 face-only transition (e.g. :thinking -> :done) is a different string
 to the tab bar's `equal'-keyed items cache and is repainted at the very
 next redisplay; and the clock-driven cache-buster
 \(`agent-repl--tabline-cache-buster').
 
 Enumerates `agent-repl--ws-tabline-names', so workspaces belonging to
-a folded repo are absent from the rendered rows and the
-remaining tabs carry contiguous 1-based numbers."
+a folded repo are absent from the rendered row and the remaining tabs
+carry the daemon's numbers."
   ;; The visible formatter runs in redisplay, often more than once per
   ;; second.  Its per-branch values are deliberately not logged.
   (let* ((width (frame-width))
@@ -2855,14 +2642,11 @@ remaining tabs carry contiguous 1-based numbers."
                   names))
          (entries (agent-repl--tabline-rendered-entries names))
          (current (agent-repl--ws-current-name))
-         ;; Measured once and handed to both the anchor and the rows:
+         ;; Measured once and handed to the row and the render log:
          ;; `string-pixel-width' is expensive and this runs in redisplay.
          (widths (mapcar #'agent-repl--tabline-entry-width entries))
-         (anchor-pos (agent-repl--tabline-anchor-index
-                      (selected-frame) widths names current line-width
-                      agent-repl--tabline-row-count))
-         (rows (agent-repl--tabline-rows entries anchor-pos line-width
-                                          agent-repl--tabline-row-count widths))
+         (ranks (mapcar #'agent-repl-roster-last-turn-boundary-ms names))
+         (rows (list (agent-repl--tabline-row entries ranks line-width widths)))
          (padded (mapcar (lambda (row)
                            (agent-repl--pad-tabline-row row line-width))
                          rows))
@@ -2871,14 +2655,14 @@ remaining tabs carry contiguous 1-based numbers."
                     (agent-repl--center-tabline-row row line-width))
                   padded))
          (joined (agent-repl--join-tabline-rows centered))
-         ;; The render key LEADS the rows: an invisible run at the front
-         ;; of the first row leaves the last row's own characters exactly
-         ;; as the padding and join produced them.
+         ;; The render key LEADS the row: an invisible run at its front
+         ;; leaves the row's own characters exactly as the padding and
+         ;; join produced them.
          (output (concat (agent-repl--tabline-render-key joined (selected-frame))
                          joined
                          (agent-repl--tabline-cache-buster))))
     (agent-repl--tabbar-log-render
-     (selected-frame) width line-width names states current widths anchor-pos
+     (selected-frame) width line-width names states current widths ranks
      rows padded centered joined output)
     output))
 
@@ -2886,7 +2670,7 @@ remaining tabs carry contiguous 1-based numbers."
   "Show nothing when the mouse is over an agent-repl tab-bar item.
 The tab bar's C code shows an item's CAPTION as its help when the item
 has no `:help', and with `tooltip-mode' off that help is echoed in the
-echo area -- so hovering the tabline painted the whole two-row bar a
+echo area -- so hovering the tabline painted the whole bar a
 second time at the bottom of the frame.  A function as the help is
 called by `show_help_echo' and a nil answer shows nothing; every item
 `agent-repl--tabline-items' builds carries this one."
@@ -2916,7 +2700,7 @@ Each maximal run of RENDERED that names one workspace under
 to that workspace (`agent-repl--tab-bar-click-binding'), and every run
 between them (centering, separators, row breaks, badges and the
 zero-width cache-busting runs) an item bound to `ignore'.  The captions
-concatenate back to RENDERED exactly, so the fixed two-row height and
+concatenate back to RENDERED exactly, so the fixed one-row height and
 the repaint keys the formatter guarantees carry over unchanged.
 
 Every item carries `agent-repl--tab-bar-item-help' as its `:help', so
