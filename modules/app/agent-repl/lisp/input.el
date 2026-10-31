@@ -71,6 +71,7 @@
 
 (declare-function agent-repl--ws-put "workspace" (ws key val))
 (declare-function agent-repl-webhost-dismiss-digest "webhost" (ws))
+(declare-function agent-repl-webhost-show-editor-notice "webhost" (ws text))
 (declare-function agent-repl-prompt-entries-opening "prompt-entries" (label))
 (declare-function agent-repl--frontend-webview-buffer-name "frontend" (ws))
 (declare-function evil-normal-state "evil-states" (&optional arg))
@@ -219,39 +220,14 @@ composer wears it too (`agent-repl-input-help-bar-background')."
   :type 'string
   :group 'agent-repl)
 
-(defvar-local agent-repl-input-notice nil
-  "The composer's standing notice, drawn in the input buffer's mode line.
-Set to the refusal flash when a submission comes back refused, and
-cleared when the gate opens.  Buffer-local to the input buffer, because
-the notice is about THIS composer and no other.")
-
 (defvar-local agent-repl-input-waiting nil
   "The composer's held-prompt waiting line, or nil.
 \"N prompts waiting for the daemon\" while prompts this workspace's
 composer could not hand to a live daemon sit in the durable ingress
-(`held-ingress.el'), which is the only writer.  Drawn beside the notice
-and never replaced by it: a refusal flash must not hide that prompts are
-still owed.")
-
-(defvar-local agent-repl--input-flash-timer-key nil
-  "Unique core timer-registry key for this composer's notice dwell.")
-
-(defun agent-repl--input-cancel-flash-timer ()
-  "Cancel this composer's pending notice dwell during buffer teardown.
-This is a best-effort cleanup hook: a composer with no armed dwell has nothing
-to cancel, while core's timer boundary reports whether a keyed timer existed."
-  (when agent-repl--input-flash-timer-key
-    (agent-repl--cancel-timer-key agent-repl--input-flash-timer-key)))
-
-(defconst agent-repl--input-mode-line-spec
-  '(:eval (agent-repl--input-notice-segment))
-  "The composer's mode-line segment: the standing notice, or nothing.")
-
-(defun agent-repl--input-notice-segment ()
-  "Return the input buffer's mode-line notice text, or the empty string.
-The standing notice first, then the held-prompt waiting line."
-  (concat (if agent-repl-input-notice (concat " " agent-repl-input-notice) "")
-          (if agent-repl-input-waiting (concat " [" agent-repl-input-waiting "]") "")))
+(`held-ingress.el'), which is the only writer.  It is the count's RECORD,
+re-read to decide whether the line changed; each change is told to the
+page as an editor notice (`agent-repl--input-notify'), since the composer
+draws no mode line.")
 
 (defun agent-repl--input-waiting (ws)
   "Return WS's composer's waiting line, or nil (also with no composer)."
@@ -259,21 +235,26 @@ The standing notice first, then the held-prompt waiting line."
     (and buf (buffer-local-value 'agent-repl-input-waiting buf))))
 
 (defun agent-repl--input-set-waiting (ws text)
-  "Set WS's composer waiting line to TEXT (nil clears it)."
+  "Set WS's composer waiting line to TEXT (nil clears it).
+A new line is told to the page as an editor notice; a cleared one tells
+nothing, since the transient it raised lapses on its own."
   (let ((buf (agent-repl--input-buffer ws)))
     (agent-repl--log ws "elisp.input.waiting ws=%s text=%S buffer=%s" ws text (and buf t))
     (when buf
       (with-current-buffer buf
-        (setq agent-repl-input-waiting text)
-        (force-mode-line-update)))))
+        (setq agent-repl-input-waiting text)))
+    (when text (agent-repl--input-notify ws text))))
 
 (define-derived-mode agent-repl-input-mode fundamental-mode "Agent Input"
   "Major mode for the host-native composer buffer."
   (agent-repl-input-help-install)
   (agent-repl--set-buffer-background agent-repl-input-background)
-  (unless (member agent-repl--input-mode-line-spec mode-line-format)
-    (setq-local mode-line-format
-                (append mode-line-format (list agent-repl--input-mode-line-spec))))
+  ;; THE COMPOSER HAS NO MODE LINE (owner ruling, 2026-10-31).  What it said
+  ;; (a refused send, a held-prompt edit, the prompts waiting for the daemon)
+  ;; is an editor notice the page's footer draws as a transient line
+  ;; (`agent-repl--input-notify'), and the line it took is the composer's.
+  ;; Buffer-local, so no other window loses its mode line.
+  (setq-local mode-line-format nil)
   ;; Widen the fill column so wrapped prose and `fill-paragraph' reflow to
   ;; 150 columns rather than the 70-column default.
   (setq-local fill-column 150)
@@ -296,7 +277,7 @@ The standing notice first, then the held-prompt waiting line."
   (add-hook 'completion-at-point-functions #'agent-repl-workspace-completion-at-point nil t)
   ;; Only `TAB' takes a company completion (`agent-repl--input-use-company-map').
   (add-hook 'company-mode-hook #'agent-repl--input-use-company-map nil t)
-  (add-hook 'kill-buffer-hook #'agent-repl--input-cancel-flash-timer nil t))
+)
 
 (defun agent-repl--input-buffer (ws)
   "Return WS's live input buffer, or nil."
@@ -445,65 +426,27 @@ Run once the composer's history is restored.  Returns `restored',
             'restored)))))))
 
 ;;;; ---- The composer notice ---------------------------------------------
+;;
+;; THE NOTICE IS THE PAGE'S TO DRAW.  The composer has no mode line, so a
+;; notice (a refused or unanswered send, a held-prompt edit beginning, the
+;; prompts waiting for the daemon) is handed to the workspace's page through
+;; the web view host, and its footer draws it as a transient line for the one
+;; transient window (frontend.v1.FooterTransientWindow).  It travels through
+;; the host, never the daemon, because most notices are raised exactly when
+;; the daemon cannot be reached.  Emacs keeps no copy and runs no timer: the
+;; page lets the line lapse.
 
-(defcustom agent-repl-input-flash-seconds 4
-  "Seconds a composer refusal flash stays in the input buffer's mode line."
-  :type 'number
-  :group 'agent-repl)
-
-(defun agent-repl--input-set-notice (ws text)
-  "Set WS's composer mode-line notice to TEXT (nil clears it)."
-  (let ((buf (agent-repl--input-buffer ws)))
-    (agent-repl--log ws "elisp.input.notice ws=%s text=%S buffer=%s"
-                     ws text (and buf t))
-    (when buf
-      (with-current-buffer buf
-        (setq agent-repl-input-notice text)
-        (force-mode-line-update)))))
-
-(defun agent-repl--input-expire-flash (ws buffer text)
-  "Clear BUFFER's composer notice, but only while it still shows this TEXT.
-
-THE DWELL OUTLIVES THE FLASH THAT ARMED IT.  The timer fires seconds
-later, and by then WS may have a DIFFERENT composer buffer and that
-buffer a DIFFERENT notice -- a later refusal's own flash, most of all.  A
-dwell that resolved the buffer by name and cleared whatever it found would
-erase a notice it never set: the first flash's timer would cut the second
-flash's dwell short.
-
-So the expiry is bound to what it flashed on both axes -- the BUFFER it
-wrote to and the TEXT it wrote -- and clears nothing else.  WS is carried
-for the log line only."
-  (cond
-   ((not (buffer-live-p buffer))
-    (agent-repl--log ws "elisp.input.flash-expired-dead-buffer ws=%s text=%S" ws text))
-   ((not (equal (buffer-local-value 'agent-repl-input-notice buffer) text))
-    (agent-repl--log ws "elisp.input.flash-superseded ws=%s text=%S standing=%S"
-                     ws text (buffer-local-value 'agent-repl-input-notice buffer)))
-   (t
-    (with-current-buffer buffer
-      (setq agent-repl-input-notice nil)
-      (force-mode-line-update))
-    (agent-repl--log ws "elisp.input.flash-cleared ws=%s text=%S" ws text))))
+(defun agent-repl--input-notify (ws text)
+  "Hand TEXT to WS's page as an editor notice, drawn as a transient footer line.
+Recorded at INFO with whether the host took it: a workspace with no page in
+the host yet has nowhere to draw it."
+  (if (agent-repl-webhost-show-editor-notice ws text)
+      (agent-repl--info ws "elisp.input.notice ws=%s text=%S outcome=sent" ws text)
+    (agent-repl--info ws "elisp.input.notice ws=%s text=%S outcome=no-page" ws text)))
 
 (defun agent-repl--input-flash (ws text)
-  "Show TEXT as WS\='s composer notice, clearing it after a short dwell.
-The dwell is presentation only: nothing downstream reads the notice, so a
-timer that never fires costs a stale badge and nothing else.  What it must
-NOT cost is another notice: see `agent-repl--input-expire-flash\=', which
-is why the buffer and the text are captured here rather than resolved when
-the timer fires."
-  (agent-repl--input-set-notice ws text)
-  (let ((buffer (agent-repl--input-buffer ws)))
-    (when buffer
-      (with-current-buffer buffer
-        (unless agent-repl--input-flash-timer-key
-          (setq agent-repl--input-flash-timer-key
-                (make-symbol (format "agent-repl-input-flash-%s" ws))))
-        (agent-repl--register-timer
-         agent-repl--input-flash-timer-key
-         (run-at-time agent-repl-input-flash-seconds nil
-                      #'agent-repl--input-expire-flash ws buffer text))))))
+  "Show TEXT as WS\='s composer notice: a transient footer line on its page."
+  (agent-repl--input-notify ws text))
 
 ;;;; ---- Images in the composer ------------------------------------------
 
@@ -1650,7 +1593,6 @@ user keeps every word they wrote."
       gate)
      (t
       (agent-repl--log ws "elisp.input.gate-open ws=%s gate=%S" ws gate)
-      (agent-repl--input-set-notice ws nil)
       gate))))
 
 ;;;; ---- The submission --------------------------------------------------

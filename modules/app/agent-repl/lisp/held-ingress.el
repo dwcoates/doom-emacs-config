@@ -28,8 +28,10 @@
 ;; so name order is write order (the daemon ingests in name order) and the
 ;; composer can count a workspace's waiting prompts from the names alone.
 ;;
-;; THE WAITING LINE.  While a workspace has entries on disk its composer's
-;; mode line says "N prompts waiting for the daemon".  It is drawn from the
+;; THE WAITING LINE.  While a workspace has entries on disk its composer
+;; records "N prompts waiting for the daemon", and each new count is told to
+;; the page as an editor notice its footer draws as a transient line (the
+;; composer has no mode line).  It is drawn from the
 ;; directory, never from memory, so an Emacs restart shows it again as soon
 ;; as the composer exists.  It is re-counted when an entry is written, when
 ;; the composer is created, and on every host push while it stands: the

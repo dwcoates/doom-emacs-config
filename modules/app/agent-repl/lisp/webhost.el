@@ -603,6 +603,14 @@ during an outage is seen as taken."
     (puthash id entries agent-repl--webhost-held-ingress)
     (agent-repl--webhost-call "setHeldIngress" id entries)))
 
+(defun agent-repl-webhost-show-editor-notice (ws text)
+  "Hand WS's page TEXT, a notice from its composer; non-nil when sent.
+The page's footer draws it as a transient line (webapp/src/footer/
+editor-notice.ts).  Not kept for the page's reloads: a transient is over
+once its window passes, so a page that loads later has nothing to draw."
+  (when-let ((id (agent-repl--webhost-id ws)))
+    (agent-repl--webhost-call "showEditorNotice" id text)))
+
 (defun agent-repl-webhost-set-log-level (level until-ms)
   "Raise the host and every page to LEVEL until UNTIL-MS (epoch ms).
 LEVEL `info', with UNTIL-MS nil, closes the window.  Kept for the host's
