@@ -16,6 +16,9 @@
 ;;   `SPC TAB T'  the thread last asked a question;
 ;;   `SPC TAB .'  a thread picked by name.
 ;;
+;; `SPC SPC' (`agent-repl-switch-sidebar-app', commands.el) reaches the
+;; thread viewed last, or this file's new-thread prompt when none is fresh.
+;;
 ;; and the daemon's push asking for the new-thread prompt, which the
 ;; sidebar's new-thread button sends (`DaemonNewThreadRequested').
 ;;

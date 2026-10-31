@@ -311,6 +311,12 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
     ("commands.el" agent-repl-switch-to-previous-workspace
      "[agent-repl] No previous workspace or thread to switch to"
      "tells the user SPC TAB TAB found no other workspace or thread to go back to")
+    ("commands.el" agent-repl-switch-sidebar-app
+     "[agent-repl] The sidebar shows no app yet to switch from"
+     "tells the user SPC SPC pressed before the first roster had nothing to switch from")
+    ("commands.el" agent-repl-switch-sidebar-app
+     "[agent-repl] No workspace to switch to"
+     "tells the user SPC SPC from Chat found no workspace to go back to")
     ("commands.el" agent-repl-switch-to-last-finished-workspace
      "[agent-repl] No other workspace has finished"
      "tells the user SPC TAB g found no other finished workspace to jump to")

@@ -906,6 +906,133 @@ for, each landing as an activation."
     (agent-repl-switch-to-previous-workspace)
     (should (equal requests '("b")))))
 
+;;;; ---- SPC SPC : the other sidebar app ----
+
+(defmacro agent-repl-test-commands--with-sidebar-app (app recent threads viewed &rest body)
+  "Run BODY with the rail showing APP, standing on \"here\".
+RECENT is the workspaces' recency order, THREADS the open threads' (both
+already ordered), VIEWED an alist of thread to `:last-viewed-at'; now is
+10000 seconds.  Binds `switched' to the requested switch, `prompted' to
+whether the new-thread prompt ran, `logged' and `said'."
+  (declare (indent 4))
+  `(let ((switched nil) (prompted nil) (logged nil) (said nil))
+     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "here"))
+               ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+               ((symbol-function 'agent-repl-roster-shown-app) (lambda (&optional _) ,app))
+               ((symbol-function 'agent-repl--roster-recent-names) (lambda () ,recent))
+               ((symbol-function 'agent-repl--open-thread-names) (lambda () ,threads))
+               ((symbol-function 'agent-repl-roster-selection-recency-order) (lambda (names) names))
+               ((symbol-function 'agent-repl--ws-get)
+                (lambda (ws key) (and (eq key :last-viewed-at) (cdr (assoc ws ,viewed)))))
+               ((symbol-function 'current-time) (lambda () 10000))
+               ((symbol-function 'agent-repl-thread-new)
+                (lambda () (interactive) (setq prompted t)))
+               ((symbol-function 'agent-repl--info) (agent-repl-test--record-into logged))
+               ((symbol-function 'agent-repl--error) (agent-repl-test--record-into logged))
+               ((symbol-function 'agent-repl-host-request-switch)
+                (lambda (ws trigger) (setq switched (cons ws trigger))))
+               ((symbol-function 'message)
+                (lambda (fmt &rest args) (setq said (apply #'format fmt args)))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-commands-sidebar-app-from-workspaces-opens-the-last-thread ()
+  "From Workspaces, a thread viewed within the hour is switched to."
+  (agent-repl-test-commands--with-sidebar-app :workspaces '("a") '("chat/t" "chat/u")
+      '(("chat/t" . 9000))
+    (agent-repl-switch-sidebar-app)
+    (should (equal switched '("chat/t" . sidebar-app)))
+    (should-not prompted)
+    (should (member "elisp.commands.sidebar-app from=here app=workspaces target=chat/t" logged))))
+
+(ert-deftest agent-repl-test-commands-sidebar-app-from-workspaces-without-a-thread-prompts ()
+  "From Workspaces with no open thread, the new-thread prompt runs."
+  (agent-repl-test-commands--with-sidebar-app :workspaces '("a") nil nil
+    (agent-repl-switch-sidebar-app)
+    (should prompted)
+    (should-not switched)
+    (should (member "elisp.commands.sidebar-app-new-thread from=here last-thread=none reason=no-thread" logged))))
+
+(ert-deftest agent-repl-test-commands-sidebar-app-from-workspaces-with-a-stale-thread-prompts ()
+  "From Workspaces, a last thread viewed over an hour ago prompts for a new one."
+  (agent-repl-test-commands--with-sidebar-app :workspaces '("a") '("chat/t")
+      '(("chat/t" . 6399))
+    (agent-repl-switch-sidebar-app)
+    (should prompted)
+    (should-not switched)
+    (should (member "elisp.commands.sidebar-app-new-thread from=here last-thread=chat/t reason=stale" logged))))
+
+(ert-deftest agent-repl-test-commands-sidebar-app-from-workspaces-with-a-never-viewed-thread-prompts ()
+  "From Workspaces, a last thread with no view stamp prompts for a new one."
+  (agent-repl-test-commands--with-sidebar-app :workspaces '("a") '("chat/t") nil
+    (agent-repl-switch-sidebar-app)
+    (should prompted)
+    (should-not switched)))
+
+(ert-deftest agent-repl-test-commands-sidebar-app-from-workspaces-only-the-last-thread-counts ()
+  "A fresher thread further down the order does not stand in for a stale last one."
+  (agent-repl-test-commands--with-sidebar-app :workspaces '("a") '("chat/t" "chat/u")
+      '(("chat/t" . 100) ("chat/u" . 9999))
+    (agent-repl-switch-sidebar-app)
+    (should prompted)
+    (should-not switched)))
+
+(ert-deftest agent-repl-test-commands-sidebar-app-from-chat-opens-the-last-workspace ()
+  "From Chat, the workspace selected last is switched to."
+  (agent-repl-test-commands--with-sidebar-app :chat '("a" "b") '("here") nil
+    (agent-repl-switch-sidebar-app)
+    (should (equal switched '("a" . sidebar-app)))
+    (should-not prompted)
+    (should (member "elisp.commands.sidebar-app from=here app=chat target=a" logged))))
+
+(ert-deftest agent-repl-test-commands-sidebar-app-from-chat-without-a-workspace-is-a-logged-no-op ()
+  "From Chat with no workspace, nothing is requested and the user is told."
+  (agent-repl-test-commands--with-sidebar-app :chat nil '("here") nil
+    (agent-repl-switch-sidebar-app)
+    (should-not switched)
+    (should (equal said "[agent-repl] No workspace to switch to"))
+    (should (member "elisp.commands.sidebar-app-none from=here app=chat reason=no-workspace" logged))))
+
+(ert-deftest agent-repl-test-commands-sidebar-app-before-a-roster-is-a-logged-no-op ()
+  "Before any roster no app is shown: nothing is requested and the user is told."
+  (agent-repl-test-commands--with-sidebar-app nil '("a") '("chat/t") '(("chat/t" . 9000))
+    (agent-repl-switch-sidebar-app)
+    (should-not switched)
+    (should-not prompted)
+    (should (equal said "[agent-repl] The sidebar shows no app yet to switch from"))
+    (should (member "elisp.commands.sidebar-app-none from=here reason=no-roster" logged))))
+
+(ert-deftest agent-repl-test-commands-sidebar-app-an-unknown-app-fails-hard ()
+  "An app the decoder never answers is a bug: logged at ERROR and signalled."
+  (agent-repl-test-commands--with-sidebar-app :mail '("a") '("chat/t") nil
+    (should-error (agent-repl-switch-sidebar-app))
+    (should-not switched)
+    (should-not prompted)
+    (should (member "elisp.commands.sidebar-app-unknown from=here app=:mail" logged))))
+
+(ert-deftest agent-repl-test-commands-sidebar-app-logs-under-the-jump-log-ws ()
+  "The sidebar-app switch takes its log target from `agent-repl--jump-log-ws'."
+  (let ((used nil))
+    (agent-repl-test-commands--with-sidebar-app :chat '("a") nil nil
+      (cl-letf (((symbol-function 'agent-repl--jump-log-ws)
+                 (lambda (_shown) (setq used t) "log")))
+        (agent-repl-switch-sidebar-app)
+        (should used)))))
+
+(ert-deftest agent-repl-test-commands-sidebar-app-last-thread-orders-by-selection-recency ()
+  "The last thread is the first open thread in the one selection-recency order."
+  (cl-letf (((symbol-function 'agent-repl--open-thread-names) (lambda () '("chat/t" "chat/u")))
+            ((symbol-function 'agent-repl-roster-selection-recency-order)
+             (lambda (names) (reverse names))))
+    (should (equal (agent-repl--sidebar-app-last-thread) "chat/u"))))
+
+(ert-deftest agent-repl-test-commands-thread-viewed-within-counts-the-boundary ()
+  "A view exactly SECONDS before now is within; a second earlier is not."
+  (cl-letf (((symbol-function 'agent-repl--ws-get)
+             (lambda (ws _key) (cdr (assoc ws '(("in" . 6400) ("out" . 6399)))))))
+    (should (agent-repl--thread-viewed-within-p "in" 10000 3600))
+    (should-not (agent-repl--thread-viewed-within-p "out" 10000 3600))
+    (should-not (agent-repl--thread-viewed-within-p "never" 10000 3600))))
+
 ;;;; ---- The candidate lists the recency jumps order ----
 
 (ert-deftest agent-repl-test-commands-open-thread-names-are-the-opened-threads-in-row-order ()
