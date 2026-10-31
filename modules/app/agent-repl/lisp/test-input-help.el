@@ -55,11 +55,6 @@ for that map.  A `:composer' KEY-VECTOR may start with an Evil
           :leader (map-of (plist-get bindings :leader))
           :leader-key "SPC")))
 
-(defun agent-repl-test-input-help--click-event (string pos)
-  "Return a header-line `mouse-1' event on STRING at POS."
-  `(mouse-1 (,(selected-window) header-line (0 . 0) 0 (,string . ,pos)
-             nil (0 . 0) nil (0 . 0) (0 . 0))))
-
 (defun agent-repl-test-input-help--binding-commands (binding)
   "Return the commands BINDING's row lists: one, or its list."
   (let ((command (car binding)))
@@ -140,122 +135,26 @@ map's `[intercept-state] all'."
       (setq found (append (agent-repl-test-input-help--source-commands file) found)))
     (delete-dups found)))
 
-;;;; ---- The header line ----
-
-(ert-deftest agent-repl-test-input-help-header-line-is-settings-then-help ()
-  "The header line's only words, apart from the bar, are its two buttons."
-  (let ((line (agent-repl--input-help-header-line-text)))
-    (should (equal (split-string (substring-no-properties line)) '("Settings" "Help")))
-    (dolist (word '("Settings" "Help"))
-      (should (eq (get-text-property (string-search word line) 'face line)
-                  'agent-repl-input-help-button)))))
-
-(ert-deftest agent-repl-test-input-help-help-button-click-runs-the-menu ()
-  "The Help button's `mouse-1' in the header line drops the topic menu."
-  (let ((line (agent-repl--input-help-header-line-text)))
-    (should (eq (lookup-key (get-text-property (string-search "Help" line) 'local-map line)
-                            [header-line mouse-1])
-                #'agent-repl-input-help-click))))
-
-(ert-deftest agent-repl-test-input-help-settings-button-click-opens-settings ()
-  "The Settings button's `mouse-1' in the header line opens the Settings page."
-  (let ((line (agent-repl--input-help-header-line-text)))
-    (should (eq (lookup-key (get-text-property (string-search "Settings" line) 'local-map line)
-                            [header-line mouse-1])
-                #'agent-repl-settings))))
-
-(ert-deftest agent-repl-test-input-help-button-is-raised-and-highlights ()
-  "A bar button wears the button face, highlights under the mouse, and clicks through its map."
-  (let* ((map (make-sparse-keymap))
-         (button (agent-repl--input-help-button "  X  " "echo" map)))
-    (should (eq (get-text-property 1 'face button) 'agent-repl-input-help-button))
-    (should (eq (get-text-property 1 'mouse-face button) 'mode-line-highlight))
-    (should (eq (get-text-property 1 'local-map button) map))
-    (should (equal (get-text-property 1 'help-echo button) "echo"))))
-
-;;;; ---- The bar's colors ----
+;;;; ---- The button colors ----
 
 (defun agent-repl-test-input-help--rgb (hex)
   "Return HEX, a #rrggbb string, as a list of three channel integers."
   (mapcar (lambda (i) (string-to-number (substring hex i (+ i 2)) 16)) '(1 3 5)))
 
-(ert-deftest agent-repl-test-input-help-bar-is-the-composer-ground ()
-  "The bar's ground is the composer's own, so the two never drift."
-  (should (equal agent-repl-input-help-bar-background agent-repl-input-background)))
-
 (ert-deftest agent-repl-test-input-help-button-is-darker-than-the-selected-row ()
-  "A button's fill sits between the bar's ground and the selected-row tint.
+  "A button's fill sits between the composer's ground and the selected-row tint.
 The sidebar's selected row is #262626 in the dark theme, pinned by
 webapp/test/styles.test.ts."
   (let ((button (agent-repl-test-input-help--rgb agent-repl-input-help-button-background)))
     (should (cl-every #'< button (agent-repl-test-input-help--rgb "#262626")))
-    (should (cl-every #'> button (agent-repl-test-input-help--rgb agent-repl-input-help-bar-background)))))
+    (should (cl-every #'> button (agent-repl-test-input-help--rgb agent-repl-input-background)))))
 
-(ert-deftest agent-repl-test-input-help-faces-take-the-bar-colors ()
-  "The bar and button faces are filled with their two colors."
-  (should (equal (face-attribute 'agent-repl-input-help-bar :background)
-                 agent-repl-input-help-bar-background))
+;;;; ---- The button face ----
+
+(ert-deftest agent-repl-test-input-help-button-face-takes-its-color ()
+  "The button face is filled with `agent-repl-input-help-button-background'."
   (should (equal (face-attribute 'agent-repl-input-help-button :background)
                  agent-repl-input-help-button-background)))
-
-(ert-deftest agent-repl-test-input-help-header-line-grounds-every-gap-with-the-bar ()
-  "Every character outside the buttons carries the bar's face."
-  (let ((line (agent-repl--input-help-header-line-text)))
-    (dotimes (i (length line))
-      (unless (eq (get-text-property i 'face line) 'agent-repl-input-help-button)
-        (should (eq (get-text-property i 'face line) 'agent-repl-input-help-bar))))))
-
-(ert-deftest agent-repl-test-input-help-header-line-puts-the-buttons-at-the-right-edge ()
-  "The bar stretches to just short of the right edge, where the buttons sit."
-  (let* ((line (agent-repl--input-help-header-line-text))
-         (buttons (substring-no-properties line 1 (1- (length line)))))
-    (should (equal (get-text-property 0 'display line)
-                   `(space :align-to (- right ,(1+ (string-width buttons))))))
-    (should (equal buttons "  Settings     Help  "))))
-
-;;;; ---- Installing the header line ----
-
-(ert-deftest agent-repl-test-input-help-header-line-variable-is-the-buttons ()
-  "The shared variable holds the buttons, properties and all."
-  (should (equal-including-properties agent-repl-input-help-header-line
-                                      (agent-repl--input-help-header-line-text))))
-
-(ert-deftest agent-repl-test-input-help-header-line-variable-is-risky ()
-  "The variable is risky, so redisplay keeps its buttons' text properties."
-  (should (get 'agent-repl-input-help-header-line 'risky-local-variable)))
-
-(ert-deftest agent-repl-test-input-help-install-points-at-the-variable ()
-  "Installing makes the buffer's header line the shared variable's name."
-  (with-temp-buffer
-    (agent-repl-input-help-install)
-    (should (eq header-line-format 'agent-repl-input-help-header-line))))
-
-(ert-deftest agent-repl-test-input-help-install-in-composers-updates-stale-composers ()
-  "Every open composer holding an older header line is pointed at the variable."
-  (let (logged)
-    (with-temp-buffer
-      (agent-repl-input-mode)
-      (setq-local header-line-format "C-c C-c: clear+save")
-      (cl-letf (((symbol-function 'agent-repl--log)
-                 (agent-repl-test--record-into logged)))
-        (should (>= (agent-repl--input-help-install-in-composers) 1)))
-      (should (eq header-line-format 'agent-repl-input-help-header-line))
-      (should (string-match-p "install-in-composers: composers=[1-9]" (car logged))))))
-
-(ert-deftest agent-repl-test-input-help-install-in-composers-leaves-other-buffers ()
-  "A buffer that is not a composer keeps its own header line."
-  (with-temp-buffer
-    (setq-local header-line-format "mine")
-    (agent-repl--input-help-install-in-composers)
-    (should (equal header-line-format "mine"))))
-
-(ert-deftest agent-repl-test-input-help-reload-updates-open-composers ()
-  "Loading input-help.el again updates a composer an older load set up."
-  (with-temp-buffer
-    (agent-repl-input-mode)
-    (setq-local header-line-format "C-c C-c: clear+save")
-    (load (symbol-file 'agent-repl-input-help-install) nil t)
-    (should (eq header-line-format 'agent-repl-input-help-header-line))))
 
 ;;;; ---- Finding a command's keys ----
 
@@ -675,15 +574,6 @@ Compared in description order: a keymap's own order says nothing."
           (should-not agent-repl-test--popups-shown)
           (should (equal (buffer-list) before)))))))
 
-(defun agent-repl-test-input-help--menu-items (menu)
-  "Return MENU's (LABEL . BINDING) items, in order."
-  (let (items)
-    (map-keymap (lambda (_event item)
-                  (when (eq (car-safe item) 'menu-item)
-                    (push (cons (nth 1 item) (nth 2 item)) items)))
-                menu)
-    (nreverse items)))
-
 (ert-deftest agent-repl-test-input-help-groups-keep-table-order ()
   "Topics are grouped by `:group', groups and topics in table order."
   (should (equal (mapcar (lambda (group)
@@ -692,29 +582,6 @@ Compared in description order: a keymap's own order says nothing."
                                 '((:id a :group "G1") (:id b :group "G2") (:id c :group "G1"))))
                            (agent-repl--input-help-groups)))
                  '(("G1" a c) ("G2" b)))))
-
-(ert-deftest agent-repl-test-input-help-menu-has-a-submenu-per-group ()
-  "The menu's items are the groups, each a submenu of its topics' titles."
-  (let ((items (agent-repl-test-input-help--menu-items (agent-repl--input-help-menu))))
-    (should (equal (mapcar #'car items) (mapcar #'car (agent-repl--input-help-groups))))
-    (should (equal (mapcar #'car (agent-repl-test-input-help--menu-items (cdr (car items))))
-                   (mapcar (lambda (topic) (plist-get topic :title))
-                           (cdr (car (agent-repl--input-help-groups))))))))
-
-(ert-deftest agent-repl-test-input-help-menu-item-shows-its-topic ()
-  "Choosing a submenu's item shows that item's topic."
-  (let (shown)
-    (cl-letf (((symbol-function 'agent-repl-input-help-show) (lambda (id) (push id shown))))
-      (call-interactively (lookup-key (agent-repl--input-help-menu) [Composer history])))
-    (should (equal shown '(history)))))
-
-(ert-deftest agent-repl-test-input-help-click-drops-the-menu-at-the-click ()
-  "Clicking the button pops the topic menu at the click's event."
-  (let ((event (agent-repl-test-input-help--click-event "  Help  " 2))
-        popped)
-    (cl-letf (((symbol-function 'popup-menu) (lambda (menu position) (push (list menu position) popped))))
-      (agent-repl-input-help-click event))
-    (should (equal popped (list (list (agent-repl--input-help-menu) event))))))
 
 (ert-deftest agent-repl-test-input-help-command-shows-the-chosen-topic ()
   "`agent-repl-input-help' shows the topic it is given as GROUP: TITLE."
