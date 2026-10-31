@@ -179,6 +179,10 @@ func (o *orchestrator) claimRace(ctx context.Context, r *run, base string) {
 		"workspace": string(r.ws), "head": string(head.ws), "tip": tip})
 	o.log(ctx, head.ws).Info(op, "the merge behind this one passed its gate on the target's tip first; this merge is suspended at its step and resumes there once the winner is done", dlog.Context{
 		"workspace": string(head.ws), "winner": string(r.ws), "tip": tip})
+	// THE LOSER LEAVES THE HEAD SLOT, so its head clock starts again from
+	// zero when it heads the queue again (register): cleared before the
+	// suspension records its progress.
+	head.headMS.Store(0)
 	settle := context.WithoutCancel(ctx)
 	lost := suspension{op: op, cause: &raceLost{winner: r.ws},
 		moved:     "the merge that lost the race to land is suspended at the step it recorded; it resumes there once it heads the queue again",

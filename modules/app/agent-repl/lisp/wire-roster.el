@@ -1308,14 +1308,16 @@ of the merge's work runs."
 
 (defun agent-repl-wire-decode-roster-merge-queue-head (value)
   "Decode VALUE as `RosterMergeQueueHead'.
-A plist `(:subject SUBJECT :stages STAGES :standing (:arm ARM :value V))',
-ARM `:waiting' or `:merging'.  The standing is never unset."
+A plist `(:subject SUBJECT :head-since-ms MS :stages STAGES :standing
+\(:arm ARM :value V))', ARM `:waiting' or `:merging', MS when the merge
+reached the head.  The standing is never unset."
   (let ((object (agent-repl-wire--object "RosterMergeQueueHead" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueHead" object '(subject stages waiting merging))
+    (agent-repl-wire--check-keys "RosterMergeQueueHead" object '(subject stages waiting merging headSinceMs))
     (agent-repl-wire--decoded
      "RosterMergeQueueHead"
      (list :subject (agent-repl-wire--decode-message
                      "RosterMergeQueueHead" 'subject object #'agent-repl-wire-decode-roster-merge-queue-subject)
+           :head-since-ms (agent-repl-wire--decode-int64 "RosterMergeQueueHead" 'headSinceMs object)
            :stages (agent-repl-wire--decode-repeated
                     "RosterMergeQueueHead" 'stages object #'agent-repl-wire-decode-roster-merge-queue-stage)
            :standing (agent-repl-wire--decode-oneof

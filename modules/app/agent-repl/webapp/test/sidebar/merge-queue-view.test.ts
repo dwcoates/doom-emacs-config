@@ -377,7 +377,7 @@ describe("drawRosterMergeQueueHead", () => {
   it("stops a paused head's clock at the pause", () => {
     const ticker = fakeTicker(NOW);
     const sc = sidebarContext(appContext({}, ticker));
-    const head = mergingHead("w1", { stages: [stage("tests", "live", 1, BigInt(NOW - 5_000))] });
+    const head = mergingHead("w1", { stages: [stage("tests", "live", 1, BigInt(NOW - 5_000))], headSinceMs: BigInt(NOW - 5_000) });
     const card = drawRosterMergeQueueHead(head, paused({ atMs: NOW - 2_000 }), sc, "head");
     ticker.tick(NOW + 60_000);
     expect(card.querySelector(".sb-mq-clock")?.textContent).toBe(formatElapsed(3_000));
@@ -404,19 +404,26 @@ describe("drawRosterMergeQueueHead", () => {
     expect(drawRosterMergeQueueHead(head, undefined, sc, "head").getAttribute("data-standing")).toBe(standing);
   });
 
-  it("ticks a merging head's clock from its first stage's start", () => {
+  it("ticks a merging head's clock from when it reached the head, not its first stage", () => {
     const ticker = fakeTicker(NOW);
     const sc = sidebarContext(appContext({}, ticker));
-    const head = mergingHead("w1", { stages: [stage("queue", "succeeded", 1, BigInt(NOW - 5_000)), stage("tests", "live", 1, BigInt(NOW - 1_000))] });
+    const head = mergingHead("w1", {
+      stages: [stage("rebasing", "succeeded", 1, BigInt(NOW - 3 * 3_600_000)), stage("tests", "live", 1, BigInt(NOW - 1_000))],
+      headSinceMs: BigInt(NOW - 5_000),
+    });
     const card = drawRosterMergeQueueHead(head, undefined, sc, "head");
     ticker.tick(NOW + 60_000);
     expect(card.querySelector(".sb-mq-clock")?.textContent).toBe(formatTickedElapsed(65_000));
   });
 
-  it("ticks a waiting head's clock from when it was put in line", () => {
+  it("ticks a waiting head's clock from when it reached the head, not when it was put in line", () => {
     const ticker = fakeTicker(NOW);
     const sc = sidebarContext(appContext({}, ticker));
-    const head = create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1"), standing: { case: "waiting", value: { queuedAtMs: BigInt(NOW - 2_000) } } });
+    const head = create(RosterMergeQueueHeadSchema, {
+      subject: queueSubject("w1"),
+      headSinceMs: BigInt(NOW - 2_000),
+      standing: { case: "waiting", value: { queuedAtMs: BigInt(NOW - 3 * 3_600_000) } },
+    });
     const card = drawRosterMergeQueueHead(head, undefined, sc, "head");
     expect(card.querySelector(".sb-mq-clock")?.textContent).toBe(formatTickedElapsed(2_000));
   });

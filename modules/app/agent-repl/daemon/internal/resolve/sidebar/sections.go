@@ -130,7 +130,7 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 	}
 	front := q.line[0]
 	if sub, ok := subject(front); ok {
-		head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages}
+		head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages, HeadSinceMs: front.HeadSince.UnixMilli()}
 		if front.Admitted {
 			merging := &frontendv1.RosterMergeQueueHeadMerging{}
 			if words, ok := mergeStepWords(r.mergeFacts(front.Workspace)); ok {

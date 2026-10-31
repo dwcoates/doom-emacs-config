@@ -4546,7 +4546,11 @@ type RosterMergeQueueHead struct {
 	//
 	//	*RosterMergeQueueHead_Waiting
 	//	*RosterMergeQueueHead_Merging
-	Standing      isRosterMergeQueueHead_Standing `protobuf_oneof:"standing"`
+	Standing isRosterMergeQueueHead_Standing `protobuf_oneof:"standing"`
+	// WHEN THIS MERGE REACHED THE HEAD, epoch ms: the head's clock ticks from
+	// it, so a merge that waited hours in line reads zero as it takes the
+	// head slot (owner ruling, 2026-10-30). Never zero.
+	HeadSinceMs   int64 `protobuf:"varint,6,opt,name=head_since_ms,json=headSinceMs,proto3" json:"head_since_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4618,6 +4622,13 @@ func (x *RosterMergeQueueHead) GetMerging() *RosterMergeQueueHeadMerging {
 		}
 	}
 	return nil
+}
+
+func (x *RosterMergeQueueHead) GetHeadSinceMs() int64 {
+	if x != nil {
+		return x.HeadSinceMs
+	}
+	return 0
 }
 
 type isRosterMergeQueueHead_Standing interface {
@@ -11098,12 +11109,13 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\x05async\x18\x02 \x01(\v2&.frontend.v1.RosterMergeQueueModeAsyncH\x00R\x05asyncB\x06\n" +
 	"\x04mode\"\x1a\n" +
 	"\x18RosterMergeQueueModeSync\"\x1b\n" +
-	"\x19RosterMergeQueueModeAsync\"\xb8\x02\n" +
+	"\x19RosterMergeQueueModeAsync\"\xdc\x02\n" +
 	"\x14RosterMergeQueueHead\x12>\n" +
 	"\asubject\x18\x01 \x01(\v2$.frontend.v1.RosterMergeQueueSubjectR\asubject\x12:\n" +
 	"\x06stages\x18\x02 \x03(\v2\".frontend.v1.RosterMergeQueueStageR\x06stages\x12D\n" +
 	"\awaiting\x18\x03 \x01(\v2(.frontend.v1.RosterMergeQueueHeadWaitingH\x00R\awaiting\x12D\n" +
-	"\amerging\x18\x04 \x01(\v2(.frontend.v1.RosterMergeQueueHeadMergingH\x00R\amergingB\n" +
+	"\amerging\x18\x04 \x01(\v2(.frontend.v1.RosterMergeQueueHeadMergingH\x00R\amerging\x12\"\n" +
+	"\rhead_since_ms\x18\x06 \x01(\x03R\vheadSinceMsB\n" +
 	"\n" +
 	"\bstandingJ\x04\b\x05\x10\x06R\x06failed\"?\n" +
 	"\x1bRosterMergeQueueHeadWaiting\x12 \n" +

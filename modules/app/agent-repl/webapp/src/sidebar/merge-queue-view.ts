@@ -326,16 +326,17 @@ export function drawRosterMergeQueueHead(
     const drawn = drawHeadClock(sc, startedMs, paused, `${path}.paused`);
     if (drawn !== null) line.appendChild(drawn);
   };
+  // THE HEAD'S CLOCK STARTS AS IT TAKES THE HEAD SLOT (owner ruling,
+  // 2026-10-30), never at its first stage or its enqueueing: a merge that
+  // rebased in the background and waited hours in line reads zero here.
+  clock(msOf(u.headSinceMs, `${path}.head_since_ms`));
   switch (standing.case) {
     case "waiting": {
       detail.textContent = pauseWord ?? "next";
-      clock(msOf(standing.value.queuedAtMs, `${path}.waiting.queued_at_ms`));
       break;
     }
     case "merging": {
       detail.textContent = standing.value.step ?? "";
-      const first = u.stages[0];
-      if (first !== undefined) clock(stageStartedMs(first, `${path}.stages[0]`));
       if (pauseWord !== undefined) detail.append(detail.textContent === "" ? pauseWord : ` · ${pauseWord}`);
       card.toggleAttribute(MERGE_QUEUE_SUSPENDED_ATTRIBUTE, standing.value.suspended !== undefined);
       break;
@@ -384,12 +385,6 @@ export function drawRosterMergeQueueStage(u: RosterMergeQueueStage, path: string
   label.textContent = `${u.label}${roundSuffix(u.round)}`;
   el.append(glyph, label);
   return el;
-}
-
-/** When STAGE began, epoch ms, whatever its state. */
-function stageStartedMs(stage: RosterMergeQueueStage, path: string): number {
-  const state = requireCase(stage.state, `${path}.state`);
-  return msOf(state.value.startedAtMs, `${path}.state.started_at_ms`);
 }
 
 /** The class of the bullet a waiting merge's line opens with. */
