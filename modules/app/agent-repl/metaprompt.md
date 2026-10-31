@@ -261,6 +261,7 @@
   - It sits on the main branch and lands nothing itself, so the daemon refuses the mark (`main_workspace`).
 - Told to one-shot itself, the main workspace instead splits the work off into a created one-shot workspace, which lands it.
   - It writes that workspace's prompt and creates it with `-one-shot`, per `/agent-repl-workspaces`.
+- How a main workspace dispatches work is the notice that ends its system prompt.
 
 ## Handed failures
 
@@ -271,9 +272,11 @@
   - The brief is the request to change code, so the workspace does not stop to ask whether to fix it.
 - The diagnosis names the root cause, along with the log records that show it.
   - Diagnosis follows the evidence rules of the `/agent-repl-debug` skill.
-- The fix is implemented by a one-shot child forked from this workspace, which lands into master through the merge queue.
-  - The command is `agent-repld workspace create -repository <repository> -relationship child -parent here -lands-into main -context fork -fork here -one-shot -prompt <the fix>`.
-  - `<repository>` is the repository the fix belongs in, which for an agent-repl failure is agent-repl's own, even from an unrelated repository.
+- The fix is implemented by a one-shot child of this workspace, which lands into its repository's main branch through the merge queue.
+  - The fix belongs in a repository, which for an agent-repl failure is agent-repl's own, even from an unrelated repository.
+  - When that is this workspace's own repository, the child forks this workspace: `agent-repld workspace create -relationship child -parent here -lands-into main -context fork -fork here -one-shot -prompt <the fix>`.
+  - When it is another repository, the child starts fresh, because a fork never crosses repositories: `agent-repld workspace create -repository <repository> -relationship child -parent here -lands-into main -context fresh -one-shot -prompt <the fix>`.
+    - Its prompt carries everything the fix needs: the root cause, the log records, and the change to make.
   - The rest of the verb's flags are `/agent-repl-workspaces`'.
 - The workspace then reports the root cause, the records, and the child it dispatched, by name.
 - A fix that genuinely turns on a decision that is mine to make is the one exception.
