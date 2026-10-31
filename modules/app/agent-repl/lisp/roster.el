@@ -634,6 +634,14 @@ a name the roster opened no workspace under, nil included, is no thread."
 Nil while the thread's workspace is not open yet."
   (agent-repl--ws-by-ref-id (plist-get (plist-get row :thread) :id)))
 
+(defun agent-repl-roster-shown-app (&optional roster)
+  "Return the sidebar app ROSTER says the rail shows: `:workspaces' or `:chat'.
+ROSTER defaults to the last accepted roster (`agent-repl-roster-view').
+The daemon resolves it from the selection's kind (a thread on screen shows
+Chat), and every roster carries it, so nil means no roster has arrived."
+  (let ((roster (or roster agent-repl-roster-view)))
+    (and roster (plist-get (plist-get roster :app-switcher) :shown))))
+
 (defun agent-repl-roster-thread-workspace-name (row)
   "Return the workspace name a thread ROW is opened under: `chat/' and its ID.
 NEVER ITS DISPLAY NAME.  That is words with spaces (\"Why fusion stops at iron\"),

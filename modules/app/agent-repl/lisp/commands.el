@@ -98,6 +98,8 @@
 (declare-function agent-repl-roster-selection-recency-order "agent-repl-roster" (names))
 (declare-function agent-repl-roster-threads "agent-repl-roster" (&optional roster))
 (declare-function agent-repl-roster-thread-row-ws "agent-repl-roster" (row))
+(declare-function agent-repl-roster-shown-app "agent-repl-roster" (&optional roster))
+(declare-function agent-repl-thread-new "threads" ())
 (declare-function agent-repl-roster-last-finished-name "agent-repl-roster" (names))
 (declare-function agent-repl-roster-last-turn-ended-ms "agent-repl-roster" (ws))
 (declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
@@ -1327,6 +1329,76 @@ target is REQUESTED of the daemon, never switched to here."
           (message "[agent-repl] No previous workspace or thread to switch to"))
       (agent-repl--info log-ws "elisp.commands.previous from=%s target=%s" shown target)
       (agent-repl-host-request-switch target 'previous))))
+
+;;;; ---- SPC SPC : the other sidebar app ----------------------------------
+
+(defconst agent-repl-sidebar-app-thread-fresh-seconds 3600
+  "How recently a chat thread must have been viewed for `SPC SPC' to return to it.
+A thread last viewed longer ago than this is a finished conversation, so
+`agent-repl-switch-sidebar-app' asks for a new thread instead.")
+
+(defun agent-repl--thread-viewed-within-p (ws now seconds)
+  "Return non-nil when the workspace WS was on screen within SECONDS of NOW.
+Reads `:last-viewed-at', which every recorded visit stamps on arrival and
+on departure (`agent-repl--record-workspace-history',
+`agent-repl--stamp-workspace-departure'), so a thread read for an hour and
+left a minute ago counts as viewed a minute ago.  Never viewed is nil."
+  (let ((at (agent-repl--ws-get ws :last-viewed-at)))
+    (and at (<= (float-time (time-subtract now at)) seconds))))
+
+(defun agent-repl--sidebar-app-last-thread ()
+  "Return the open chat thread viewed most recently, or nil.
+The open threads (`agent-repl--open-thread-names') in the ONE
+selection-recency order (`agent-repl-roster-selection-recency-order')."
+  (car (agent-repl-roster-selection-recency-order (agent-repl--open-thread-names))))
+
+(defun agent-repl-switch-sidebar-app ()
+  "Switch to the sidebar app the rail is NOT showing (`SPC SPC').
+Which app the rail shows is the roster's (`agent-repl-roster-shown-app'):
+
+- Workspaces shown: go to the chat thread viewed last
+  \(`agent-repl--sidebar-app-last-thread').  With no open thread, or none
+  viewed within `agent-repl-sidebar-app-thread-fresh-seconds', read a new
+  thread's question instead, as `SPC TAB t' does (`agent-repl-thread-new').
+- Chat shown: go to the workspace selected last
+  \(`agent-repl--roster-recent-names', which holds no thread).  None is a
+  reported, logged no-op.
+
+Before any roster has arrived the rail shows no app, and the press is a
+reported, logged no-op.  A target is REQUESTED of the daemon, never
+switched to here."
+  (interactive)
+  (let* ((shown (agent-repl--ws-current-name))
+         (log-ws (agent-repl--jump-log-ws shown))
+         (app (agent-repl-roster-shown-app)))
+    (pcase app
+      ('nil
+       (agent-repl--info log-ws "elisp.commands.sidebar-app-none from=%s reason=no-roster" shown)
+       (message "[agent-repl] The sidebar shows no app yet to switch from"))
+      (:chat
+       (let ((target (car (remove shown (agent-repl--roster-recent-names)))))
+         (if (null target)
+             (progn
+               (agent-repl--info log-ws "elisp.commands.sidebar-app-none from=%s app=chat reason=no-workspace" shown)
+               (message "[agent-repl] No workspace to switch to"))
+           (agent-repl--info log-ws "elisp.commands.sidebar-app from=%s app=chat target=%s" shown target)
+           (agent-repl-host-request-switch target 'sidebar-app))))
+      (:workspaces
+       (let ((thread (agent-repl--sidebar-app-last-thread)))
+         (if (and thread
+                  (agent-repl--thread-viewed-within-p
+                   thread (current-time) agent-repl-sidebar-app-thread-fresh-seconds))
+             (progn
+               (agent-repl--info log-ws "elisp.commands.sidebar-app from=%s app=workspaces target=%s"
+                                 shown thread)
+               (agent-repl-host-request-switch thread 'sidebar-app))
+           (agent-repl--info log-ws "elisp.commands.sidebar-app-new-thread from=%s last-thread=%s reason=%s"
+                             shown (or thread "none") (if thread "stale" "no-thread"))
+           (call-interactively #'agent-repl-thread-new))))
+      ;; The wire decoder answers only the two arms, so a third is a bug.
+      (_
+       (agent-repl--error log-ws "elisp.commands.sidebar-app-unknown from=%s app=%S" shown app)
+       (error "agent-repl: the roster shows an unknown sidebar app %S" app)))))
 
 (defun agent-repl-switch-to-last-finished-workspace ()
   "Switch to the workspace that most recently FINISHED its turn.

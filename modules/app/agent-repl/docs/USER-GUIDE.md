@@ -1051,6 +1051,10 @@ A **chat thread** is a chat, in the style of claude.ai, whose questions and answ
 - **Opening one:**
   - `SPC TAB T` opens the thread you used last.
   - `SPC TAB .` picks one by name, the most recent first.
+  - `SPC SPC` switches between the sidebar's two apps.
+    - From Workspaces it opens the thread you viewed last.
+    - If no thread was viewed in the last hour, or there is none, it asks for a new thread's question instead, as `SPC TAB t` does.
+    - From Chat it goes back to the workspace you selected last.
   - The sidebar's title is a menu of apps. Pick **Chat** to list the threads, and click one to open it.
   - Threads are never on the tab bar, and the tab keys (cycling, `M-1`..`M-9`, `SPC p p`) never land on one.
 - **Asking:** type in the input window, as in any workspace, and send.

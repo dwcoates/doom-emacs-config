@@ -1898,6 +1898,73 @@ transiently activated workspace while eager-open is in progress."
         (agent-repl--record-workspace-history)
         (should-not (agent-repl--ws-get "generated" :last-viewed-at))))))
 
+(ert-deftest agent-repl-test-stamp-workspace-viewed-stamps-a-known-workspace ()
+  "A known workspace is stamped viewed now."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "a" :project-dir "/tmp/a")
+    (cl-letf (((symbol-function 'current-time) (lambda () '(25000 0))))
+      (agent-repl--stamp-workspace-viewed "a")
+      (should (equal (agent-repl--ws-get "a" :last-viewed-at) '(25000 0))))))
+
+(ert-deftest agent-repl-test-stamp-workspace-viewed-leaves-an-unknown-name-unknown ()
+  "An unknown name is not stub-created by the stamp."
+  (agent-repl-test--with-clean-state
+    (agent-repl--stamp-workspace-viewed "main")
+    (should-not (agent-repl--ws-known-p "main"))))
+
+(ert-deftest agent-repl-test-stamp-workspace-viewed-is-the-one-stamp-writer ()
+  "Arrival and departure both stamp through `agent-repl--stamp-workspace-viewed'."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history nil)
+          (stamped nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
+                ((symbol-function 'agent-repl--stamp-workspace-viewed)
+                 (lambda (name) (push name stamped))))
+        (agent-repl--record-workspace-history)
+        (agent-repl--stamp-workspace-departure)
+        (should (equal stamped '("a" "a")))))))
+
+(ert-deftest agent-repl-test-stamp-workspace-departure-stamps-the-departing-workspace ()
+  "Leaving a known workspace restamps its `:last-viewed-at' with now."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "a" :project-dir "/tmp/a")
+    (agent-repl--ws-put "a" :last-viewed-at '(100 0))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
+              ((symbol-function 'current-time) (lambda () '(25000 0))))
+      (agent-repl--stamp-workspace-departure 'frame)
+      (should (equal (agent-repl--ws-get "a" :last-viewed-at) '(25000 0))))))
+
+(ert-deftest agent-repl-test-stamp-workspace-departure-skips-an-unknown-persp ()
+  "Leaving a foreign persp stub-creates no workspace entry."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "main")))
+      (agent-repl--stamp-workspace-departure)
+      (should-not (agent-repl--ws-known-p "main")))))
+
+(ert-deftest agent-repl-test-stamp-workspace-departure-skips-no-current-workspace ()
+  "With no current workspace the departure stamps nothing and does not fail."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
+      (should-not (agent-repl--stamp-workspace-departure)))))
+
+(ert-deftest agent-repl-test-stamp-workspace-departure-skips-an-eager-open ()
+  "Leaving a workspace during an eager open stamps nothing: it was no visit."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--eager-open-in-progress t))
+      (agent-repl--ws-put "generated" :project-dir "/tmp/g")
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "generated")))
+        (agent-repl--stamp-workspace-departure)
+        (should-not (agent-repl--ws-get "generated" :last-viewed-at))))))
+
+(ert-deftest agent-repl-test-stamp-workspace-departure-skips-a-walk-landing ()
+  "Leaving a recency-walk landing stamps nothing: its arrival recorded no visit."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--recency-walk-landing "b"))
+      (agent-repl--ws-put "b" :project-dir "/tmp/b")
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "b")))
+        (agent-repl--stamp-workspace-departure)
+        (should-not (agent-repl--ws-get "b" :last-viewed-at))))))
+
 (ert-deftest agent-repl-test-record-workspace-history-keeps-a-walk-landing-out ()
   "The workspace a recency-walk step landed on is not recorded as a visit."
   (agent-repl-test--with-clean-state

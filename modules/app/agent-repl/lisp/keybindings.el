@@ -124,6 +124,13 @@ the module."
        :desc "Switch to workspace" "p" #'agent-repl-switch-to-project
        :desc "Switch to any workspace" "P" #'agent-repl-switch-to-any-workspace))
 
+;;;; ---- SPC SPC : the other sidebar app -----------------------------------
+
+;; Replaces Doom's `SPC SPC' (find a file in the project): from Workspaces
+;; to the chat thread viewed last, from Chat to the workspace selected last.
+(map! :leader
+      :desc "Switch to the other sidebar app (Workspaces / Chat)" "SPC" #'agent-repl-switch-sidebar-app)
+
 ;;;; ---- SPC TAB : workspaces ---------------------------------------------
 
 (map! :leader

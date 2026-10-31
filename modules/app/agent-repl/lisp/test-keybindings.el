@@ -94,6 +94,16 @@
            (regexp-quote "\"C-<return>\" #'agent-repl-push-release")
            (agent-repl-test-keybindings--source))))
 
+(ert-deftest agent-repl-test-keybindings-spc-spc-switches-the-sidebar-app ()
+  "`SPC SPC' switches to the sidebar app the rail is not showing."
+  (should (string-match-p
+           (regexp-quote "\"SPC\" #'agent-repl-switch-sidebar-app")
+           (agent-repl-test-keybindings--source))))
+
+(ert-deftest agent-repl-test-keybindings-sidebar-app-switch-is-defined ()
+  "The sidebar-app switch the binding names is an interactive command."
+  (should (commandp 'agent-repl-switch-sidebar-app)))
+
 (ert-deftest agent-repl-test-keybindings-push-release-is-defined ()
   "The release push the binding names is an interactive command."
   (should (commandp 'agent-repl-push-release)))

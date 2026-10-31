@@ -4002,6 +4002,21 @@ judged as any roster is."
       (agent-repl-threads--open '(:name "t") 'thread-picker)
       (should (equal rows '((:name "t") (:name "t")))))))
 
+(ert-deftest agent-repl-test-roster-shown-app-reads-the-switcher ()
+  "The shown app is the accepted roster's switcher's `:shown'."
+  (let ((agent-repl-roster-view '(:app-switcher (:shown :chat))))
+    (should (eq (agent-repl-roster-shown-app) :chat))))
+
+(ert-deftest agent-repl-test-roster-shown-app-reads-a-given-roster ()
+  "A roster passed in is read instead of the accepted one."
+  (let ((agent-repl-roster-view '(:app-switcher (:shown :chat))))
+    (should (eq (agent-repl-roster-shown-app '(:app-switcher (:shown :workspaces))) :workspaces))))
+
+(ert-deftest agent-repl-test-roster-shown-app-is-nil-before-a-roster ()
+  "Before any roster has arrived no app is shown."
+  (let ((agent-repl-roster-view nil))
+    (should-not (agent-repl-roster-shown-app))))
+
 (ert-deftest agent-repl-test-roster-threads-read-the-last-roster ()
   "The thread rows are the accepted roster's, newest first."
   (let ((agent-repl-roster-view (agent-repl-test-roster--roster :threads '(("t2" . "b") ("t1" . "a")))))
