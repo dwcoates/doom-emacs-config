@@ -599,6 +599,68 @@ func TestReclaimTakesDownADeadRunsRAMDisk(t *testing.T) {
 	}
 }
 
+func TestReclaimLeavesADeviceAnotherRunNowHoldsAttached(t *testing.T) {
+	tests := []struct {
+		name string
+		// info is what `hdiutil info` answers: /dev/disk7 attached.
+		info string
+		// otherRecord, when set, is another run's record naming /dev/disk7.
+		otherRecord bool
+	}{
+		{
+			name: "the device is mounted at another run's mount point",
+			info: "framework : 1\n================================================\nimage-path      : ram://2048\n/dev/disk7\t\t\n/dev/disk8s1\t\t/private/tmp/artr-9\n",
+		},
+		{
+			name:        "another run's record names the device",
+			info:        attachedInfo,
+			otherRecord: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := &fakeHost{info: tc.info}
+			m := newManager(t, h)
+			mount := filepath.Join(t.TempDir(), "artr-7")
+			record := deadRecord(t, m, "7", "/dev/disk7", mount)
+			if tc.otherRecord {
+				other := filepath.Join(m.Registry, "9.lock")
+				if err := os.WriteFile(other, []byte("device=/dev/disk7\nmount=/tmp/artr-9\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				held, err := os.OpenFile(other, os.O_RDWR, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer held.Close()
+				if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			done, err := m.Reclaim()
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Reclaim: %v", err)
+			}
+			for _, call := range h.calls {
+				if strings.HasPrefix(call, "hdiutil detach") {
+					t.Fatalf("calls = %v, want the reused device left attached", h.calls)
+				}
+			}
+			if len(done) != 1 || done[0].Pid != 7 || done[0].Attached {
+				t.Fatalf("reclaimed = %+v, want pid 7's record reclaimed with no disk of its own attached", done)
+			}
+			if _, statErr := os.Stat(record); !os.IsNotExist(statErr) {
+				t.Fatalf("the dead record survives (stat err = %v)", statErr)
+			}
+		})
+	}
+}
+
 func TestReclaimLeavesALiveRunAlone(t *testing.T) {
 	// Arrange
 	h := &fakeHost{info: attachedInfo}
