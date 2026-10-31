@@ -366,7 +366,7 @@ var errUnknownTarget = errors.New("no such target")
 func TestEveryFoldThatHidesTabsGoesThroughFoldTabs(t *testing.T) {
 	// Act.
 	shared := sourcescan.Count(t, "v.foldTabs(ctx, log, foldTabsSpec{")
-	byHand := sourcescan.Count(t, "v.deps.StandDowns.StandDownWithheld(ws.ID)")
+	byHand := sourcescan.Count(t, "v.deps.StandDowns.StandDownFolded(ws.ID)")
 
 	// Assert.
 	if shared != 2 || byHand != 1 {

@@ -53,7 +53,7 @@ type foldedHarness struct {
 	runs []chan struct{}
 }
 
-func newFoldedHarness(t *testing.T) *foldedHarness {
+func newFoldedHarness(t *testing.T, adjust ...func(*Deps)) *foldedHarness {
 	t.Helper()
 	f := &foldedHarness{waits: newWaitsClock()}
 	f.ctx, f.cancel = context.WithCancel(context.Background())
@@ -70,6 +70,9 @@ func newFoldedHarness(t *testing.T) *foldedHarness {
 				defer close(done)
 				run(f.ctx)
 			}()
+		}
+		for _, a := range adjust {
+			a(d)
 		}
 	})
 	t.Cleanup(func() {
@@ -120,6 +123,20 @@ func TestTheDelayIsFiveMinutes(t *testing.T) {
 	// Assert: the owner's request, 2026-10-30.
 	if FoldStandDownDelay != 5*time.Minute {
 		t.Fatalf("FoldStandDownDelay = %v, want 5m", FoldStandDownDelay)
+	}
+}
+
+func TestAConfiguredFoldDelayIsTheWait(t *testing.T) {
+	// Arrange: the --fold-stand-down-delay a test compresses.
+	f := newFoldedHarness(t, func(d *Deps) { d.FoldDelay = time.Millisecond })
+	ws := f.collapsed(t)
+
+	// Act
+	f.c.StandDownFolded(ws)
+
+	// Assert
+	if waited := f.awaitWait(t); waited != time.Millisecond {
+		t.Fatalf("waited %v, want the configured 1ms", waited)
 	}
 }
 

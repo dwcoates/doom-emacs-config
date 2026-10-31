@@ -98,6 +98,10 @@ type Deps struct {
 	// hibernates it (the --idle-cutoff flag). AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS
 	// BEATS it; New applies that override itself so no wiring can forget to.
 	IdleCutoff time.Duration
+	// FoldDelay is how long a session a collapse folded keeps running before
+	// its stand-down is asked for (the --fold-stand-down-delay flag); zero is
+	// FoldStandDownDelay. Tests compress it.
+	FoldDelay time.Duration
 	// SweepEvery is the idle sweep's cadence under Run.
 	SweepEvery time.Duration
 	// RefusalWindow is how long one refusal WARN suppresses its successors.
@@ -384,6 +388,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.StandBound <= 0 {
 		deps.StandBound = DefaultStandBound
+	}
+	if deps.FoldDelay <= 0 {
+		deps.FoldDelay = FoldStandDownDelay
 	}
 	cutoff, err := ResolveIdleCutoff(deps.IdleCutoff)
 	if err != nil {

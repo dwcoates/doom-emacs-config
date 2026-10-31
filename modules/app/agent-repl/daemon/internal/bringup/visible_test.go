@@ -79,20 +79,22 @@ func TestOnlyVisibleSplitsPending(t *testing.T) {
 
 func TestOnlyVisibleReadsTheSubsectionFolds(t *testing.T) {
 	folded, open := ids.SubsectionID("folded-sub"), ids.SubsectionID("open-sub")
+	// Every workspace is a worktree apart from the repository's main one: a
+	// one-shot mark on the main worktree's family files nothing.
 	cases := []struct {
 		name    string
 		ws      wsm.Workspace
 		wantRun bool
 	}{
-		{name: "a workspace in a collapsed subsection is withheld", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Subsection: &folded}},
-		{name: "a workspace in an expanded subsection runs", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Subsection: &open}, wantRun: true},
-		{name: "a one-shot filed in a collapsed subsection runs, its tab drawn in the one-shot subsection", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Subsection: &folded, OneShot: true}, wantRun: true},
+		{name: "a workspace in a collapsed subsection is withheld", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded}},
+		{name: "a workspace in an expanded subsection runs", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &open}, wantRun: true},
+		{name: "a one-shot filed in a collapsed subsection runs, its tab drawn in the one-shot subsection", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded, OneShot: true}, wantRun: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			reg := &fakeRegistry{
-				repos:       []wsm.Repository{{ID: "r", Place: 1}},
+				repos:       []wsm.Repository{{ID: "r", Place: 1, Dir: "/repo"}},
 				subsections: []wsm.Subsection{{ID: folded, Repo: "r", Name: "folded", Place: 1, Folded: true}, {ID: open, Repo: "r", Name: "open", Place: 2}},
 				arranged:    []wsm.Workspace{tc.ws},
 			}

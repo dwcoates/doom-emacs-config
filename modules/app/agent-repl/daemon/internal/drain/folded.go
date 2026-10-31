@@ -12,12 +12,13 @@ import (
 const opFolded = "daemon.drain.folded"
 
 // FoldStandDownDelay is how long a session in a collapsed section keeps
-// running before it is stood down (owner request, 2026-10-30). Its page is
+// running before it is stood down (owner request, 2026-10-30), unless
+// Deps.FoldDelay names another. Its page is
 // unloaded at the collapse; its shim waits this long, so a section folded
 // and unfolded again within it finds every session still up.
 const FoldStandDownDelay = 5 * time.Minute
 
-// A COLLAPSE STANDS ITS SECTION'S SESSIONS DOWN FoldStandDownDelay AFTER THE
+// A COLLAPSE STANDS ITS SECTION'S SESSIONS DOWN Deps.FoldDelay AFTER THE
 // LATEST COLLAPSE, never sooner. Every collapse that holds a workspace starts
 // a fresh wait for it and supersedes the one before, so a section folded,
 // unfolded and folded again is stood down the delay after the LAST fold: a
@@ -28,7 +29,7 @@ const FoldStandDownDelay = 5 * time.Minute
 // session: nothing needs to cancel a wait.
 
 // StandDownFolded asks for the stand-down of a workspace a collapse folded,
-// FoldStandDownDelay from now. It returns at once; the wait runs on the
+// Deps.FoldDelay from now. It returns at once; the wait runs on the
 // detached lifetime, and the daemon's exit ends it with nothing stood down.
 func (c *controller) StandDownFolded(ws ids.WorkspaceID) {
 	c.mu.Lock()
@@ -38,14 +39,14 @@ func (c *controller) StandDownFolded(ws ids.WorkspaceID) {
 	c.folded[ws]++
 	wait := c.folded[ws]
 	c.mu.Unlock()
-	fields := dlog.Context{"workspace": string(ws), "wait": wait, "delay": FoldStandDownDelay.String()}
+	fields := dlog.Context{"workspace": string(ws), "wait": wait, "delay": c.deps.FoldDelay.String()}
 	c.log.Debug(opFolded, "a folded workspace's stand-down waits out the fold's delay", fields)
 	c.deps.Detach(func(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			c.log.Info(opFolded, "the daemon is leaving; a folded workspace's stand-down is not taken", dlog.WithCause(fields, ctx.Err()))
 			return
-		case <-c.deps.Clock.After(FoldStandDownDelay):
+		case <-c.deps.Clock.After(c.deps.FoldDelay):
 		}
 		c.mu.Lock()
 		latest := c.folded[ws] == wait
