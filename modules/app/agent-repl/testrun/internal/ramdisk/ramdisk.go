@@ -869,6 +869,23 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 			return r, false, fmt.Errorf("list the attached images to reclaim %s: %w", device, err)
 		}
 		r.Attached = isAttachedRAMDisk(info, device)
+		// A DEVICE NUMBER IS REUSED once its disk is detached: the kernel
+		// hands the same /dev/diskN to the next attach. A dead run's record
+		// can therefore name a device that is now a LIVE run's disk, and
+		// detaching it took that run's whole root away (2026-10-30: two runs
+		// reclaiming records of dead runs 18131 and 20318 force-detached
+		// /dev/disk4 seconds after the merge queue's head had attached and
+		// mounted it, and the head's 537 units failed "no such file").
+		if r.Attached {
+			reused, err := m.deviceReused(info, device, mount, path)
+			if err != nil {
+				return r, false, err
+			}
+			if reused {
+				m.Log.Infof("the RAM disk record %s names %s, which is now another run's disk; it is left attached and only the dead run's record and mount point go", path, device)
+				r.Attached = false
+			}
+		}
 	}
 	if r.Attached {
 		if mount != "" {
@@ -1196,6 +1213,43 @@ func parseImages(info string) []image {
 		images = append(images, img)
 	}
 	return images
+}
+
+// deviceReused reports whether device, which the dead run's record at
+// recordPath names with mount as its mount point, now belongs to another run:
+// its image is mounted somewhere other than that mount point, or another
+// record names it.
+func (m Manager) deviceReused(info, device, mount, recordPath string) (bool, error) {
+	for _, img := range parseImages(info) {
+		if !img.isRAM() || !slices.Contains(img.Devices, device) {
+			continue
+		}
+		for _, at := range img.Mounts {
+			if filepath.Base(at) != filepath.Base(mount) {
+				return true, nil
+			}
+		}
+	}
+	records, err := filepath.Glob(filepath.Join(m.Registry, "*.lock"))
+	if err != nil {
+		return false, fmt.Errorf("list the RAM disk records: %w", err)
+	}
+	for _, other := range records {
+		if other == recordPath || filepath.Base(other) == registryLockName {
+			continue
+		}
+		raw, err := os.ReadFile(other)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return false, fmt.Errorf("read the RAM disk record %s: %w", other, err)
+		}
+		if parseRecord(string(raw)).Device == device {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // isAttachedRAMDisk reports whether `hdiutil info` lists device as a device of
