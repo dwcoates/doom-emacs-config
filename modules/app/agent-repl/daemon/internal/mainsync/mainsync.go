@@ -388,10 +388,8 @@ func (s *Syncer) repository(ctx context.Context, id ids.RepoID) (wsm.Repository,
 	if err != nil {
 		return wsm.Repository{}, err
 	}
-	for _, r := range repos {
-		if r.ID == id {
-			return r, nil
-		}
+	if repo, ok := wsm.RepositoryWithID(repos, id); ok {
+		return repo, nil
 	}
 	return wsm.Repository{}, fmt.Errorf("mainsync: repository %s is not registered", id)
 }

@@ -113,6 +113,11 @@ func (w *Watcher) Tick(ctx context.Context, prompts prompthandler.Submitter) {
 // to it.
 func (w *Watcher) poll(ctx context.Context) {
 	subs, err := w.deps.Store.LivePullRequestSubscriptions(ctx)
+	if err != nil && ctx.Err() != nil {
+		// The daemon is stopping: no fact about the store.
+		w.deps.Log.Debug(opPoll, "the poll stopped with its context", nil)
+		return
+	}
 	if err != nil {
 		w.deps.Log.Error(opPoll, "could not read the pull-request subscriptions; nothing is polled this tick", dlog.WithCause(nil, err))
 		return
@@ -247,6 +252,10 @@ func failureOf(err error, now time.Time) wsm.PullRequestFailure {
 // subscriber's superseded notice said.
 func (w *Watcher) deliverOwed(ctx context.Context, prompts prompthandler.Submitter) {
 	owed, err := w.deps.Store.OwedPullRequestNotices(ctx)
+	if err != nil && ctx.Err() != nil {
+		w.deps.Log.Debug(opNotice, "the delivery stopped with its context", nil)
+		return
+	}
 	if err != nil {
 		w.deps.Log.Error(opNotice, "could not read the owed pull-request notices; none is told this tick", dlog.WithCause(nil, err))
 		return

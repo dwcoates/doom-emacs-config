@@ -672,3 +672,19 @@ func (s *fakeServer) WatchChat(ctx context.Context, req *connect.Request[v1.Watc
 	return connect.NewError(connect.CodeUnimplemented,
 		fmt.Errorf("fakedaemon: WatchChat is not mocked"))
 }
+
+func (s *fakeServer) SubscribePullRequest(ctx context.Context, req *connect.Request[v1.SubscribePullRequestRequest]) (*connect.Response[v1.SubscribePullRequestResponse], error) {
+	return handleUnary[v1.SubscribePullRequestRequest, v1.SubscribePullRequestResponse](ctx, s, "SubscribePullRequest", req.Msg)
+}
+
+func (s *fakeServer) UnsubscribePullRequest(ctx context.Context, req *connect.Request[v1.UnsubscribePullRequestRequest]) (*connect.Response[v1.UnsubscribePullRequestResponse], error) {
+	return handleUnary[v1.UnsubscribePullRequestRequest, v1.UnsubscribePullRequestResponse](ctx, s, "UnsubscribePullRequest", req.Msg)
+}
+
+func (s *fakeServer) ListPullRequestSubscriptions(ctx context.Context, req *connect.Request[v1.ListPullRequestSubscriptionsRequest]) (*connect.Response[v1.ListPullRequestSubscriptionsResponse], error) {
+	return handleUnary[v1.ListPullRequestSubscriptionsRequest, v1.ListPullRequestSubscriptionsResponse](ctx, s, "ListPullRequestSubscriptions", req.Msg)
+}
+
+func (s *fakeServer) CommentOnPullRequest(ctx context.Context, req *connect.Request[v1.CommentOnPullRequestRequest]) (*connect.Response[v1.CommentOnPullRequestResponse], error) {
+	return handleUnary[v1.CommentOnPullRequestRequest, v1.CommentOnPullRequestResponse](ctx, s, "CommentOnPullRequest", req.Msg)
+}

@@ -562,13 +562,10 @@ func deletePullRequestSubscription(ctx context.Context, tx *sql.Tx, subscriber W
 // ErrSubscriberClosed for a closed one.
 func requireOpenSubscriber(ctx context.Context, tx *sql.Tx, ws WorkspaceID) error {
 	var closed bool
-	err := tx.QueryRowContext(ctx, `SELECT closed FROM workspaces WHERE id = ?`, ws).Scan(&closed)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return fmt.Errorf("wsm: subscription of %s: %w", ws, ErrNotFound)
-	case err != nil:
+	if err := scanWorkspaceRow(ctx, tx, ws, "closed", &closed); err != nil {
 		return err
-	case closed:
+	}
+	if closed {
 		return ErrSubscriberClosed
 	}
 	return nil
