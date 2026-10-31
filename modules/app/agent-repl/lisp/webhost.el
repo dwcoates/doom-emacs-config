@@ -234,15 +234,22 @@ into.  The host's own page commits after it."
   (when-let ((xw (agent-repl-webhost-xwidget)))
     (xwidget-webkit-uri xw)))
 
-(defun agent-repl--webhost-strayed-uri (uri)
-  "Return URI when the host committed it outside its own origin, else nil.
-The host only ever loads its own page (`agent-repl--webhost-url'); any other
-origin is an outward link that navigated the whole webview."
-  (when (and agent-repl--webhost-url (stringp uri) (not (string-empty-p uri))
-             (string-match "\\`https?://[^/]+" agent-repl--webhost-url))
-    (let ((origin (match-string 0 agent-repl--webhost-url)))
+(defun agent-repl--webview-strayed-uri (own-url uri)
+  "Return URI when a web view loaded at OWN-URL committed it outside that origin.
+Each of Emacs's web views (the host, and the sidebar, sidebar-view.el) only
+ever loads its own page; any other origin is an outward link that navigated
+the whole web view.  Nil when OWN-URL is nil, URI is empty, or URI is on
+OWN-URL's origin."
+  (when (and own-url (stringp uri) (not (string-empty-p uri))
+             (string-match "\\`https?://[^/]+" own-url))
+    (let ((origin (match-string 0 own-url)))
       (unless (or (string= uri origin) (string-prefix-p (concat origin "/") uri))
         uri))))
+
+(defun agent-repl--webhost-strayed-uri (uri)
+  "Return URI when the host committed it outside its own origin, else nil.
+The host only ever loads its own page (`agent-repl--webhost-url')."
+  (agent-repl--webview-strayed-uri agent-repl--webhost-url uri))
 
 (defun agent-repl--webhost-take-back (uri)
   "Navigate the host, which strayed to URI, back to its own page.
@@ -302,23 +309,37 @@ The host is created once and lives for the session.  No window is touched:
 the host buffer is never displayed itself; workspace slots display it."
   (or (agent-repl-webhost-xwidget)
       (let* ((url (agent-repl-webhost-url conn))
-             (buf (save-window-excursion (agent-repl--frontend-make-webview-buffer url))))
-        (with-current-buffer buf
-          (setq-local xwidget-webkit-buffer-name-format agent-repl-webhost-buffer-name)
-          (setq-local header-line-format nil)
-          (setq-local mode-line-format nil)
-          (rename-buffer agent-repl-webhost-buffer-name t)
-          (add-hook 'kill-buffer-query-functions #'agent-repl--webhost-refuse-kill nil t))
-        (let ((xw (agent-repl--frontend-webview-live-widget buf)))
-          (unless xw
-            (let ((agent-repl--webhost-killing t))
-              (agent-repl--frontend-kill-webview buf))
-            (error "agent-repl: the web view host was created without a live xwidget"))
-          (setq agent-repl--webhost-buffer buf
-                agent-repl--webhost-url url)
-          (agent-repl--webhost-watch-load xw)
-          (agent-repl--info agent-repl--webhost-central "elisp.webhost.created url=%s" url)
-          xw))))
+             (buf (agent-repl--webview-make-hidden
+                   url agent-repl-webhost-buffer-name #'agent-repl--webhost-refuse-kill
+                   (lambda (buf)
+                     (let ((agent-repl--webhost-killing t))
+                       (agent-repl--frontend-kill-webview buf)))
+                   "the web view host"))
+             (xw (agent-repl--frontend-webview-live-widget buf)))
+        (setq agent-repl--webhost-buffer buf
+              agent-repl--webhost-url url)
+        (agent-repl--webhost-watch-load xw)
+        (agent-repl--info agent-repl--webhost-central "elisp.webhost.created url=%s" url)
+        xw)))
+
+(defun agent-repl--webview-make-hidden (url name refuse-kill kill what)
+  "Create a hidden web view buffer NAME at URL, guarded by REFUSE-KILL.
+The shape every one of Emacs's own web views shares (the host, and the
+sidebar, sidebar-view.el): no window is touched, the buffer has no header or
+mode line, and REFUSE-KILL stands on its `kill-buffer-query-functions'.
+A buffer created without a live xwidget is killed through KILL, a function
+of the buffer, and signals an error naming WHAT.  Returns the buffer."
+  (let ((buf (save-window-excursion (agent-repl--frontend-make-webview-buffer url))))
+    (with-current-buffer buf
+      (setq-local xwidget-webkit-buffer-name-format name)
+      (setq-local header-line-format nil)
+      (setq-local mode-line-format nil)
+      (rename-buffer name t)
+      (add-hook 'kill-buffer-query-functions refuse-kill nil t))
+    (unless (agent-repl--frontend-webview-live-widget buf)
+      (funcall kill buf)
+      (error "agent-repl: %s was created without a live xwidget" what))
+    buf))
 
 (defun agent-repl-webhost-kill ()
   "Kill the host and forget its desired state.  Every page goes with it."
@@ -331,25 +352,33 @@ the host buffer is never displayed itself; workspace slots display it."
 
 ;;;; ---- Calls -----------------------------------------------------------------
 
-(defun agent-repl--webhost-script (method &rest args)
-  "The script calling the host's METHOD with ARGS, queued until the host starts.
+(defun agent-repl--webview-script (global pending method args)
+  "The script calling METHOD with ARGS on the page object at window.GLOBAL.
+Each of Emacs's own web views hands Emacs one such object (the host's
+`agentReplHost', the sidebar's `agentReplSidebar').  A call made before the
+page has started is queued on window.PENDING and run when it starts.
 Each of ARGS is JSON-encoded, so nothing is spliced into the script unquoted.
 A queued call answers `queued', naming the workspace id when the first of
-ARGS is one, so the caller can ask again.  A host that has no METHOD (one
+ARGS is one, so the caller can ask again.  A page that has no METHOD (one
 loaded from a build older than this elisp) answers `unknown-call' rather
-than throwing, so the gap between the two is seen
-\(`agent-repl--webhost-answered').
+than throwing, so the gap between the two is seen.
 The answer is always a string: a null answer is dropped without a callback."
   (let ((call (format "h.%s(%s)" method (mapconcat #'json-encode args ",")))
         (op (json-encode method))
         (id (if (stringp (car args)) (json-encode (car args)) "null")))
     (format (concat "(function(){var c=function(h){return typeof h[%s]===\"function\"?%s:"
                     "JSON.stringify({op:%s,id:%s,outcome:\"unknown-call\",notes:[]});};"
-                    "var h=window.agentReplHost;"
+                    "var h=window.%s;"
                     "if(h){return c(h);}"
-                    "(window.__agentReplHostPending=window.__agentReplHostPending||[]).push(c);"
+                    "(window.%s=window.%s||[]).push(c);"
                     "return JSON.stringify({op:%s,id:%s,outcome:\"queued\",notes:[]});})()")
-            op call op id op id)))
+            op call op id global pending pending op id)))
+
+(defun agent-repl--webhost-script (method &rest args)
+  "The script calling the host's METHOD with ARGS, queued until the host starts.
+See `agent-repl--webview-script'; an unknown call is handled by
+`agent-repl--webhost-answered'."
+  (agent-repl--webview-script "agentReplHost" "__agentReplHostPending" method args))
 
 (defun agent-repl--webhost-predates-call (op)
   "The host has no OP: it was loaded from a build older than this elisp.

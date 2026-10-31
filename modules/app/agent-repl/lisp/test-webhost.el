@@ -99,6 +99,99 @@ RAW defaults to `agent-repl-test-wh--retired'."
     (should (string-search "typeof h[\"setDaemon\"]===\"function\"?h.setDaemon(" script))
     (should (string-search "outcome:\"unknown-call\"" script))))
 
+;;;; ---- The shapes every one of Emacs's web views shares ----
+
+(ert-deftest agent-repl-test-wh-a-view-script-calls-the-page-object-it-names ()
+  "A web view's script calls METHOD on the page object at the global named."
+  ;; Act
+  (let ((script (agent-repl--webview-script "agentReplSidebar" "__agentReplSidebarPending" "markShown" '("id-a"))))
+    ;; Assert
+    (should (string-search "var h=window.agentReplSidebar;" script))
+    (should (string-search "h.markShown(\"id-a\")" script))))
+
+(ert-deftest agent-repl-test-wh-a-view-script-queues-on-the-pending-list-it-names ()
+  "A call made before the page started is queued on the pending list named."
+  ;; Act
+  (let ((script (agent-repl--webview-script "agentReplSidebar" "__agentReplSidebarPending" "markShown" '("id-a"))))
+    ;; Assert
+    (should (string-search "(window.__agentReplSidebarPending=window.__agentReplSidebarPending||[]).push(c);" script))))
+
+(ert-deftest agent-repl-test-wh-the-host-script-is-the-view-script-on-the-host-globals ()
+  "The host's call script is the shared view script, never a divergent copy."
+  ;; Act
+  (let ((host (agent-repl--webhost-script "ensure" "id-a" "http://x/"))
+        (view (agent-repl--webview-script "agentReplHost" "__agentReplHostPending" "ensure" '("id-a" "http://x/"))))
+    ;; Assert
+    (should (equal host view))))
+
+(ert-deftest agent-repl-test-wh-a-view-strays-off-its-own-origin ()
+  "A URI on another origin than the view's own URL has strayed."
+  (should (equal (agent-repl--webview-strayed-uri "http://host.localhost:1/?sidebar=1" "https://example.com/x")
+                 "https://example.com/x")))
+
+(ert-deftest agent-repl-test-wh-a-view-on-its-own-origin-has-not-strayed ()
+  "A URI on the view's own origin, at any path, has not strayed."
+  (should-not (agent-repl--webview-strayed-uri "http://host.localhost:1/?sidebar=1" "http://host.localhost:1/other")))
+
+(ert-deftest agent-repl-test-wh-a-view-with-no-url-has-not-strayed ()
+  "A view not yet loaded at a URL of its own has nothing to stray from."
+  (should-not (agent-repl--webview-strayed-uri nil "https://example.com/x")))
+
+(ert-deftest agent-repl-test-wh-the-host-strays-as-every-view-does ()
+  "The host's stray check is the shared one over its own URL."
+  (let ((agent-repl--webhost-url "http://host.localhost:1/?host=1"))
+    (should (equal (agent-repl--webhost-strayed-uri "https://example.com/x")
+                   (agent-repl--webview-strayed-uri agent-repl--webhost-url "https://example.com/x")))))
+
+(defmacro agent-repl-test-wh--with-made-view (live &rest body)
+  "Run BODY with web view creation stubbed: a fresh buffer, an xwidget when LIVE.
+Binds `killed' to the buffers the kill function was handed."
+  (declare (indent 1))
+  `(let ((killed nil)
+         (made (generate-new-buffer " *test-view*")))
+     (unwind-protect
+         (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer) (lambda (_url) made))
+                   ((symbol-function 'agent-repl--frontend-webview-live-widget) (lambda (_buf) (and ,live 'xw))))
+           ,@body)
+       (when (buffer-live-p made)
+         (with-current-buffer made (setq kill-buffer-query-functions nil))
+         (kill-buffer made)))))
+
+(defun agent-repl-test-wh--refuse () "A kill guard for the made-view tests." nil)
+
+(ert-deftest agent-repl-test-wh-a-made-view-has-no-mode-line ()
+  "A hidden web view shows no mode line in any window it is shown in."
+  (agent-repl-test-wh--with-made-view t
+    (let ((buf (agent-repl--webview-make-hidden "http://x/" " *made-view*" #'agent-repl-test-wh--refuse #'ignore "a view")))
+      (should-not (buffer-local-value 'mode-line-format buf)))))
+
+(ert-deftest agent-repl-test-wh-a-made-view-has-no-header-line ()
+  "A hidden web view shows no header line."
+  (agent-repl-test-wh--with-made-view t
+    (let ((buf (agent-repl--webview-make-hidden "http://x/" " *made-view*" #'agent-repl-test-wh--refuse #'ignore "a view")))
+      (should-not (buffer-local-value 'header-line-format buf)))))
+
+(ert-deftest agent-repl-test-wh-a-made-view-takes-its-name ()
+  "A hidden web view's buffer carries the name it was made with."
+  (agent-repl-test-wh--with-made-view t
+    (let ((buf (agent-repl--webview-make-hidden "http://x/" " *made-view*" #'agent-repl-test-wh--refuse #'ignore "a view")))
+      (should (equal (buffer-name buf) " *made-view*")))))
+
+(ert-deftest agent-repl-test-wh-a-made-view-stands-its-kill-guard ()
+  "A hidden web view's kill guard stands on its own kill query hook."
+  (agent-repl-test-wh--with-made-view t
+    (let ((buf (agent-repl--webview-make-hidden "http://x/" " *made-view*" #'agent-repl-test-wh--refuse #'ignore "a view")))
+      (should (memq #'agent-repl-test-wh--refuse (buffer-local-value 'kill-buffer-query-functions buf))))))
+
+(ert-deftest agent-repl-test-wh-a-made-view-without-an-xwidget-is-killed-and-signals ()
+  "A view created without a live xwidget is killed through its kill function and signals."
+  (agent-repl-test-wh--with-made-view nil
+    (let ((err (should-error (agent-repl--webview-make-hidden
+                              "http://x/" " *made-view*" #'agent-repl-test-wh--refuse
+                              (lambda (buf) (push buf killed)) "a view"))))
+      (should (equal (length killed) 1))
+      (should (string-search "a view was created without a live xwidget" (cadr err))))))
+
 (defmacro agent-repl-test-wh--with-predates (link &rest body)
   "Run BODY with LINK as the live link, host reloads and records captured.
 Binds `reloads' and `records', newest first."
