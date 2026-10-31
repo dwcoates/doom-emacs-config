@@ -34,6 +34,42 @@ What the phone sends goes straight into the CLI, past agent-repl's prompt queue
 - **An interrupt or a stop** ends the turn inside the CLI. The shim sees the
   turn's interrupted result as it sees one it asked for.
 
+### What was verified against a real bridge
+
+These claims were first read from the SDK's minified code. They were then run
+against a live bridge (SDK and CLI 0.3.311, 2026-10-31, from the Claude mobile
+app):
+
+- `enableRemoteControl` brings the bridge up with no prompt sent, so a
+  workspace needs no first turn before it can be reached. It answered in
+  0.6-1.0s with `session_url`, `connect_url`, `environment_id`, `bridge_epoch`
+  and `bridge_session_id`.
+- A second vendor process passed the first one's `bridge_session_id` as
+  `reattachSessionId` got the same bridge session back. claude.ai kept the
+  same session.
+- A prompt typed on the phone arrived as `{type: "user", isReplay: true}` with
+  a uuid the shim never sent, followed by the turn it started.
+- A permission answered on the phone aborted `canUseTool`'s `AbortSignal`
+  2-3.5s after the ask, and the gated call then ran.
+- A stop pressed on the phone ended the running tool call as a rejected tool
+  use, then `[Request interrupted by user for tool use]`, then a `result` of
+  `error_during_execution`. That is the same shape as a stop asked for here.
+- A turn started from the phone runs with the session's own working directory
+  and permission mode. It reads and writes this machine's worktree like any
+  local turn, including `git commit`.
+
+### Gaps that are known and open
+
+- **The bridge's health.** The CLI states it as `system`/`bridge_state`
+  messages: `ready`, `connected` (with `bridge_epoch`), `failed` (with
+  `failure_kind`) and `policy_disabled`. No shim converter owns them, so they
+  land as residue, and a bridge that fails after it was turned on leaves the
+  chip saying on. The contract has no field for the bridge's health.
+- **A question answered on claude.ai** has no "answered remotely" arm, so it
+  is recorded `unanswered`.
+- **A rollback past a remote prompt** is untested and probably refuses
+  `unseen_prompt`.
+
 ## The mode
 
 The mode belongs to the daemon and is kept per workspace in wsm
