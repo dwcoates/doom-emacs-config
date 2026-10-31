@@ -3,6 +3,7 @@ package wsm
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"agent-repld/internal/dlog"
 )
@@ -30,4 +31,22 @@ func (s *store) SetSubsectionFolded(ctx context.Context, id SubsectionID, folded
 			}
 			return requireSubsectionRow(res, id)
 		})
+}
+
+// expandSubsection expands, within TX, subsection ID when it is collapsed,
+// answering whether it was. It is THE ONE EXPANSION of a subsection the
+// daemon makes on its own: a workspace placed in a subsection
+// (placeFamilies, MoveWorkspace) and a workspace starting work or being
+// selected (expandSubsectionHolding) all come here, so a workspace is never
+// put or left hidden inside a collapsed subsection.
+func expandSubsection(ctx context.Context, tx *sql.Tx, id SubsectionID) (bool, error) {
+	res, err := tx.ExecContext(ctx, `UPDATE subsections SET folded = 0 WHERE folded = 1 AND id = ?`, id)
+	if err != nil {
+		return false, fmt.Errorf("wsm: expand subsection %s: %w", id, err)
+	}
+	expanded, err := touchedRow(res)
+	if err != nil {
+		return false, fmt.Errorf("wsm: expand subsection %s: %w", id, err)
+	}
+	return expanded, nil
 }

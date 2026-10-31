@@ -2,8 +2,12 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"strings"
 	"testing"
+
+	"agent-repld/internal/sourcescan"
 )
 
 // subsectionNow reads subsection ID back through the arrangement.
@@ -126,5 +130,67 @@ func TestExpandSubsectionHoldingOfAnOpenSubsectionTouchesNothing(t *testing.T) {
 	// Assert
 	if err != nil || got {
 		t.Fatalf("ExpandSubsectionHolding = %v, %v; want false, nil", got, err)
+	}
+}
+
+func TestExpandSubsection(t *testing.T) {
+	tests := []struct {
+		name       string
+		folded     bool
+		id         func(Subsection) SubsectionID
+		want       bool
+		wantFolded bool
+	}{
+		{name: "a collapsed subsection is expanded", folded: true, id: func(sub Subsection) SubsectionID { return sub.ID }, want: true},
+		{name: "an open subsection is left open", id: func(sub Subsection) SubsectionID { return sub.ID }},
+		{name: "an unknown subsection touches nothing", folded: true, id: func(Subsection) SubsectionID { return "absent" }, wantFolded: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := registerIn(t, s, arrangeRepo(t, "repo"), "w", nil)
+			sub := mustSubsection(t, s, ws.Repo, "later")
+			if err := s.SetSubsectionFolded(context.Background(), sub.ID, tt.folded); err != nil {
+				t.Fatalf("SetSubsectionFolded: %v", err)
+			}
+
+			// Act
+			var got bool
+			err := s.write(context.Background(), "test.expand_subsection", nil, func(ctx context.Context, tx *sql.Tx) error {
+				var err error
+				got, err = expandSubsection(ctx, tx, tt.id(sub))
+				return err
+			})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("expandSubsection: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("expanded = %v, want %v", got, tt.want)
+			}
+			if folded := subsectionNow(t, s, sub.ID).Folded; folded != tt.wantFolded {
+				t.Errorf("subsection folded = %v, want %v", folded, tt.wantFolded)
+			}
+		})
+	}
+}
+
+// TestEverySubsectionExpansionAsksExpandSubsection pins that no store write
+// hand-rolls a subsection's expansion: a placement, a move, a selection and
+// a turn's start all expand through expandSubsection.
+func TestEverySubsectionExpansionAsksExpandSubsection(t *testing.T) {
+	// Arrange
+	const expansion = "UPDATE subsections SET folded = 0"
+
+	for _, file := range sourcescan.Production(t) {
+		// Act
+		n := strings.Count(string(file.Source), expansion)
+
+		// Assert
+		if want := map[bool]int{true: 1, false: 0}[strings.HasSuffix(file.Name, "subsectionfolds.go")]; n != want {
+			t.Errorf("%s states the subsection expansion %d times, want %d", file.Name, n, want)
+		}
 	}
 }
