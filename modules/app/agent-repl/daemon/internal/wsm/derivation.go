@@ -6,7 +6,7 @@ package wsm
 //   - owner_lands: the workspace is a child whose context was not forked from
 //     its owner (parent_id). It is only the CONTEXT half of who lands the
 //     workspace: a one-shot always lands itself, so the owner -- or the user
-//     -- lands it only while it is not a one-shot (ownerLands, applied where
+//     -- lands it only while it is not a one-shot (OwnerLands, applied where
 //     the row is read). The column keeps its name; it is not the effective
 //     rule.
 //   - context_from: the workspace whose conversation was forked into this one
@@ -30,13 +30,13 @@ ALTER TABLE workspaces ADD COLUMN context_from TEXT REFERENCES workspaces(id) ON
 ALTER TABLE workspaces ADD COLUMN requested_by TEXT REFERENCES workspaces(id) ON DELETE SET NULL;
 `
 
-// ownerLands is the ONE home of who lands a workspace (owner ruling,
+// OwnerLands is the ONE home of who lands a workspace (owner ruling,
 // 2026-10-31, agentrepl.v1.WorkspaceStatusOwner.owner_lands): its owner does
 // when the workspace is a child whose context was not forked from its owner
 // (LACKSPARENTCONTEXT, the stored owner_lands column) and it is not a ONESHOT;
 // a one-shot always lands itself. Deriving it on read rather than storing it
 // means no write of the one-shot mark can leave it stale.
-func ownerLands(lacksParentContext, oneShot bool) bool {
+func OwnerLands(lacksParentContext, oneShot bool) bool {
 	return lacksParentContext && !oneShot
 }
 

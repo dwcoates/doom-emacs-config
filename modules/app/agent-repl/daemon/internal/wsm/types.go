@@ -66,7 +66,7 @@ type Workspace struct {
 	Parent *WorkspaceID
 	// OwnerLands marks a child only its owner (Parent), or the user, lands:
 	// one that is not a one-shot and whose context was not forked from its
-	// owner. DERIVED where the row is read (ownerLands): the row records only
+	// owner. DERIVED where the row is read (OwnerLands): the row records only
 	// the context half, so every write of the one-shot mark moves it. Never
 	// set without Parent.
 	OwnerLands bool

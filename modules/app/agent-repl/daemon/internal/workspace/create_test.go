@@ -1467,6 +1467,28 @@ func TestCreateAOneShotChildLandsItself(t *testing.T) {
 	}
 }
 
+// TestCreateSpecOwnerLandsSharesTheStoresRule pins that a create decides who
+// lands it by the store's one rule (wsm.OwnerLands), never a copy of it.
+func TestCreateSpecOwnerLandsSharesTheStoresRule(t *testing.T) {
+	owner, other := ids.WorkspaceID("owner"), ids.WorkspaceID("other")
+	for _, parent := range []*ids.WorkspaceID{nil, &owner} {
+		for _, fork := range []*ids.WorkspaceID{nil, &owner, &other} {
+			for _, oneShot := range []bool{false, true} {
+				// Arrange.
+				spec := CreateSpec{Parent: parent, ForkFrom: fork, OneShot: oneShot}
+
+				// Act.
+				got := spec.OwnerLands()
+
+				// Assert.
+				if want := wsm.OwnerLands(spec.lacksParentContext(), oneShot); got != want {
+					t.Errorf("CreateSpec{parent %v, fork %v, one-shot %v}.OwnerLands() = %v, want the store's rule %v", parent, fork, oneShot, got, want)
+				}
+			}
+		}
+	}
+}
+
 func TestCreateAChildOfAnOwnerOfAnotherRepository(t *testing.T) {
 	tests := []struct {
 		name      string

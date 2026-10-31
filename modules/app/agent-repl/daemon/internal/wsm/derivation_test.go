@@ -175,11 +175,11 @@ func TestOwnerLands(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := ownerLands(tc.lacksParentContext, tc.oneShot)
+			got := OwnerLands(tc.lacksParentContext, tc.oneShot)
 
 			// Assert
 			if got != tc.want {
-				t.Errorf("ownerLands(%v, %v) = %v, want %v", tc.lacksParentContext, tc.oneShot, got, tc.want)
+				t.Errorf("OwnerLands(%v, %v) = %v, want %v", tc.lacksParentContext, tc.oneShot, got, tc.want)
 			}
 		})
 	}

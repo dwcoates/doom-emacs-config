@@ -873,7 +873,7 @@ func (s CreateSpec) lacksParentContext() bool {
 // a child lacking its owner's context that is not a one-shot. A one-shot
 // always lands itself, whatever its context (owner ruling, 2026-10-31).
 func (s CreateSpec) OwnerLands() bool {
-	return s.lacksParentContext() && !s.OneShot
+	return wsm.OwnerLands(s.lacksParentContext(), s.OneShot)
 }
 
 // forkedElsewhere reports whether the conversation is forked from a workspace

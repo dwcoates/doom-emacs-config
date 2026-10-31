@@ -112,7 +112,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		cacheCold     sql.NullInt64
 		landsInto     sql.NullString
 		// lacksContext is the stored owner_lands column, the context half
-		// of Workspace.OwnerLands (ownerLands).
+		// of Workspace.OwnerLands (OwnerLands).
 		lacksContext bool
 	)
 	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &lacksContext, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &ws.OneShot, &ws.MergePending, &ended, &asked, &mergeTurn, &landsInto); err != nil {
@@ -169,7 +169,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	if lacksContext && ws.Parent == nil {
 		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "owner_lands", Err: errors.New("a workspace its owner lands records its owner")}
 	}
-	ws.OwnerLands = ownerLands(lacksContext, ws.OneShot)
+	ws.OwnerLands = OwnerLands(lacksContext, ws.OneShot)
 	if contextFrom.Valid {
 		id := WorkspaceID(contextFrom.String)
 		ws.ContextFrom = &id
@@ -316,7 +316,7 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			Priority:     facts.Priority,
 			CreatedAt:    time.Now().UTC(),
 			MergeOf:      facts.MergeOf,
-			OwnerLands:   ownerLands(facts.LacksParentContext, facts.OneShot),
+			OwnerLands:   OwnerLands(facts.LacksParentContext, facts.OneShot),
 			OneShot:      facts.OneShot,
 			ContextFrom:  facts.ContextFrom,
 			RequestedBy:  facts.RequestedBy,
