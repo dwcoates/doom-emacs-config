@@ -1052,7 +1052,12 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: var(--repo-head-pad-top) 0.7rem var(--repo-head-pad-bottom);
+  /* The sides come first: jsdom's parser (the paint tests) drops every
+     padding longhand of a block whose first one is a var(). */
+  padding-right: 0.7rem;
+  padding-left: 0.7rem;
+  padding-top: var(--repo-head-pad-top);
+  padding-bottom: var(--repo-head-pad-bottom);
   cursor: pointer;
   font-size: 0.75rem;
   letter-spacing: 0.06em;
@@ -1187,7 +1192,10 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    request, 2026-10-20): the gap above it and the gap below it, whether the
    neighbour is another repository, a subsection, a workspace or the OPEN
    header, are the band headers' 0.45rem and 0.25rem cut by 30%. */
-#ws-sidebar .repo.repo-section > .repo-head { padding-top: 0.315rem; padding-bottom: 0.175rem; }
+#ws-sidebar .repo.repo-section > .repo-head {
+  padding-top: calc(var(--repo-head-pad-top) * 0.7);
+  padding-bottom: calc(var(--repo-head-pad-bottom) * 0.7);
+}
 #ws-sidebar .repo.repo-section.folded > .repo-head { color: var(--repo-head-collapsed); }
 
 /* A REPOSITORY'S SUBSECTIONS (src/sidebar/subsections.ts) stand among its
