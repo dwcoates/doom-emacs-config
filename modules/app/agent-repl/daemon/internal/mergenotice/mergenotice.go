@@ -40,12 +40,12 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/briefprompt"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/noticeloop"
 	"agent-repld/internal/prompthandler"
-	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/untoldnotice"
 	"agent-repld/internal/wsm"
 )
@@ -229,19 +229,17 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, t
 // submits it to TOLD, answering the turn it was submitted as, or the record a
 // failure is written with and why.
 func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, told Recipient, sentences []string, change merge.QueueChange) (ids.TurnID, string, error) {
-	text, err := s.deps.Briefs(BriefNotice, Values(told.Detail, sentences, change))
-	if err != nil {
+	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}.
+		Submit(ctx, prompts, told.Subscriber, BriefNotice, Values(told.Detail, sentences, change), "merge-queue-notice", Origin)
+	switch briefprompt.StepOf(err) {
+	case briefprompt.StepCompose:
 		return "", "could not compose a merge queue notice; the subscriber is not told of the change", err
-	}
-	key, err := s.deps.MintKey("merge-queue-notice")
-	if err != nil {
+	case briefprompt.StepMint:
 		return "", "could not mint a merge queue notice's idempotency key; the subscriber is not told of the change", err
-	}
-	outcome, err := prompts.Submit(ctx, told.Subscriber, feed.SaidText(text), key, Origin, nil, wsm.DeliveryDeferred, nil)
-	if err != nil {
+	case briefprompt.StepSubmit:
 		return "", "could not submit a merge queue notice to its subscriber", err
 	}
-	return outcome.Turn, "", nil
+	return turn, "", nil
 }
 
 // carried answers the sentences the subscriber's untold notice of REPO's queue

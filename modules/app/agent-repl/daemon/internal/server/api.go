@@ -36,6 +36,7 @@ import (
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/prwatch"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
@@ -69,6 +70,12 @@ type Deps struct {
 	HeldRollback promptqueue.HeldRollback
 	// Verbs backs every workspace, task, answer and link verb.
 	Verbs workspace.Verbs
+	// PullRequests backs the pull-request subscription and comment rpcs
+	// (prwatch.Watcher).
+	PullRequests PullRequests
+	// Remotes reads a workspace's `origin`, so `#<number>` names a pull
+	// request in its repository.
+	Remotes prwatch.RemoteReader
 	// Retarget backs SetWorkspaceParent: the retarget and its notice to the
 	// workspace's session, as one operation.
 	Retarget retarget.Retargeter

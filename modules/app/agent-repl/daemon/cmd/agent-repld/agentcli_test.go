@@ -174,6 +174,22 @@ func (c *cliClient) SubscribeWorkspace(_ context.Context, req *connect.Request[a
 	return connect.NewResponse(&agentreplv1.SubscribeWorkspaceResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) SubscribePullRequest(_ context.Context, req *connect.Request[agentreplv1.SubscribePullRequestRequest]) (*connect.Response[agentreplv1.SubscribePullRequestResponse], error) {
+	return connect.NewResponse(&agentreplv1.SubscribePullRequestResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) UnsubscribePullRequest(_ context.Context, req *connect.Request[agentreplv1.UnsubscribePullRequestRequest]) (*connect.Response[agentreplv1.UnsubscribePullRequestResponse], error) {
+	return connect.NewResponse(&agentreplv1.UnsubscribePullRequestResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) ListPullRequestSubscriptions(_ context.Context, req *connect.Request[agentreplv1.ListPullRequestSubscriptionsRequest]) (*connect.Response[agentreplv1.ListPullRequestSubscriptionsResponse], error) {
+	return connect.NewResponse(&agentreplv1.ListPullRequestSubscriptionsResponse{}), c.record(req.Msg)
+}
+
+func (c *cliClient) CommentOnPullRequest(_ context.Context, req *connect.Request[agentreplv1.CommentOnPullRequestRequest]) (*connect.Response[agentreplv1.CommentOnPullRequestResponse], error) {
+	return connect.NewResponse(&agentreplv1.CommentOnPullRequestResponse{}), c.record(req.Msg)
+}
+
 func (c *cliClient) AnswerColdGate(_ context.Context, req *connect.Request[agentreplv1.AnswerColdGateRequest]) (*connect.Response[agentreplv1.AnswerColdGateResponse], error) {
 	return connect.NewResponse(&agentreplv1.AnswerColdGateResponse{}), c.record(req.Msg)
 }
@@ -2231,5 +2247,90 @@ func TestTheRepositoryNounListsRegisterInItsUsage(t *testing.T) {
 	// Assert
 	if code != exitFailure || !strings.Contains(f.errOut.String(), "agent-repld repository register here|PATH") {
 		t.Fatalf("exit %d, stderr %q; want the usage listing register", code, f.errOut.String())
+	}
+}
+
+func TestPullRequestVerbsSendTheirRequests(t *testing.T) {
+	ref := &agentreplv1.PullRequestRef{Owner: "o", Repo: "r", Number: 7}
+	tests := []struct {
+		name  string
+		args  []string
+		check func(t *testing.T, f *cliFixture)
+	}{
+		{name: "pr-subscribe sends #N for the daemon to resolve, asking every event by default", args: []string{"pr-subscribe", "here", "-pr", "#7"},
+			check: func(t *testing.T, f *cliFixture) {
+				req := only[*agentreplv1.SubscribePullRequestRequest](t, f)
+				if req.GetText() != "#7" || len(req.GetEvents()) != 5 {
+					t.Errorf("request = %v, want #7 with every event", req)
+				}
+			}},
+		{name: "pr-subscribe sends OWNER/REPO#N as a ref", args: []string{"pr-subscribe", "here", "-pr", "o/r#7", "-events", "checks"},
+			check: func(t *testing.T, f *cliFixture) {
+				req := only[*agentreplv1.SubscribePullRequestRequest](t, f)
+				if !proto.Equal(req.GetRef(), ref) || len(req.GetEvents()) != 1 {
+					t.Errorf("request = %v, want the ref and checks", req)
+				}
+			}},
+		{name: "pr-unsubscribe sends a url as a ref", args: []string{"pr-unsubscribe", "here", "-pr", "https://github.com/o/r/pull/7"},
+			check: func(t *testing.T, f *cliFixture) {
+				if req := only[*agentreplv1.UnsubscribePullRequestRequest](t, f); !proto.Equal(req.GetPullRequest(), ref) {
+					t.Errorf("request = %v, want the ref", req)
+				}
+			}},
+		{name: "pr-subscriptions lists", args: []string{"pr-subscriptions", "here"},
+			check: func(t *testing.T, f *cliFixture) {
+				if req := only[*agentreplv1.ListPullRequestSubscriptionsRequest](t, f); req.GetSubscriber() == nil {
+					t.Errorf("request = %v, want the subscriber", req)
+				}
+			}},
+		{name: "pr-comment replies in a thread", args: []string{"pr-comment", "here", "-pr", "o/r#7", "-body", "done", "-in-reply-to", "5"},
+			check: func(t *testing.T, f *cliFixture) {
+				req := only[*agentreplv1.CommentOnPullRequestRequest](t, f)
+				if req.GetReply().GetInReplyToCommentId() != 5 || req.GetReply().GetMarkdown() != "done" || !proto.Equal(req.GetPullRequest(), ref) {
+					t.Errorf("request = %v, want a reply to 5", req)
+				}
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, tt.args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			tt.check(t, f)
+		})
+	}
+}
+
+func TestPullRequestVerbsRefuseAMalformedCall(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "pr-subscribe naming no pull request", args: []string{"pr-subscribe", "here"}},
+		{name: "pr-subscribe naming an unknown event", args: []string{"pr-subscribe", "here", "-pr", "#7", "-events", "pushes"}},
+		{name: "pr-unsubscribe naming #N", args: []string{"pr-unsubscribe", "here", "-pr", "#7"}},
+		{name: "pr-comment with no body", args: []string{"pr-comment", "here", "-pr", "o/r#7"}},
+		{name: "pr-comment with both bodies", args: []string{"pr-comment", "here", "-pr", "o/r#7", "-body", "x", "-body-file", "/f"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, tt.args...)
+
+			// Assert
+			if code == exitSuccess {
+				t.Fatalf("exit %d, want a usage failure", code)
+			}
+		})
 	}
 }

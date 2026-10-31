@@ -110,6 +110,11 @@ func (a QueueOfferAnswer) String() string {
 
 // Orchestrator is the merge queue's whole surface.
 type Orchestrator interface {
+	// HoldTargetForSync holds the target of the repository holding DIR for
+	// a main sync (synchold.go): held only while no merge of the repository
+	// is in line or running, and admitting none until the answered release
+	// is called.
+	HoldTargetForSync(ctx context.Context, dir string) (release func(), held bool, err error)
 	// Enqueue records a merge request. It REFUSES pre-state: no layout facts
 	// recorded at creation, a deleted session, a source workspace or branch
 	// that is not there, or a workspace already requested, queued or merging.

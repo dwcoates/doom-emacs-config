@@ -290,7 +290,9 @@
 - Every stored link says whether the workspace's work made what it points at.
   - It is owned when the work made it, such as a pull request the workspace opened or a doc it wrote.
   - It is a reference when it exists apart from the work, such as the thread or ticket the task came from.
+  - A pull request the workspace did not open is a reference, even one its work amends, such as an already merged one.
   - The daemon posts every owned link into the Slack thread a workspace was created for when its finish's deploy ends, so a wrong ownership shows the thread the wrong things.
+  - The daemon follows an owned pull request, telling the workspace about every comment, review and finished check on it until it merges or closes.
 - Two kinds of link MUST always be stored, whatever else the menu holds.
   - A link the workspace was created to investigate or act on, such as a Slack thread, a Jira ticket, an issue, or a pull request to review, is stored before any other work on it begins.
   - Every pull request the workspace creates is stored the moment its URL is known, including one created by a skill or a subagent working for the workspace.
@@ -300,7 +302,7 @@
   - It ranks them by relevance to the project, as seen by the developer working with the agent.
   - It ranks them by the same lens for the stakeholders the developer reports the work to.
 - The workspace does all of this proactively and at once, without asking me any questions or for permission.
-  - The verb, its flags, and how to read the standing links are `/agent-repl-workspaces`'.
+  - The verb, its flags, how to reply on a pull request, and how to read the standing links are `/agent-repl-workspaces`'.
 - When I refer to something that lives at a URL ("update the thread", "publish the app", "check the link") and the referent is unclear, the workspace reads its stored links first.
 
 ## Deleted worktrees

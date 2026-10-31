@@ -191,7 +191,7 @@ func mainIn(m *testing.M, module, root string) int {
 		// THE DAEMON RUNS THE MOCKED GIT BY CONSTRUCTION: it is linked in as
 		// the daemon's git binary, so no PATH a test or a child sets can
 		// reach the host's git.
-		{&daemonBinary, "agent-repld", "./cmd/agent-repld", true, func() []string { return []string{MockedGitLink(gitBinary)} }},
+		{&daemonBinary, "agent-repld", "./cmd/agent-repld", true, func() []string { return []string{MockedGitLink(gitBinary), NoGitHubLink} }},
 	} {
 		path, err := testenv.ProgramOr(os.Getenv, b.name, func() (string, error) {
 			d, err := binDir()
@@ -410,6 +410,14 @@ func RepoRoot(t testing.TB) string {
 
 // gitBinaryVar is the daemon's link-time git binary (internal/gitclient).
 const gitBinaryVar = "agent-repld/internal/gitclient.gitBinary"
+
+// ghBinaryVar is the daemon's link-time `gh` binary (internal/ghclient).
+const ghBinaryVar = "agent-repld/internal/ghclient.ghBinary"
+
+// NoGitHubLink is the -X binding that makes a daemon build's `gh` a path no
+// file can hold, so a test daemon cannot reach GitHub by construction: a call
+// fails as the leaf's unreachable failure. Every test build carries it.
+const NoGitHubLink = "-X " + ghBinaryVar + "=/dev/null/no-github-in-tests"
 
 // MockedGitLink is the -X binding that makes a daemon build run gitPath as its
 // git. Every test build of the daemon carries it.

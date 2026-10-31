@@ -35,12 +35,12 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/briefprompt"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/noticeloop"
 	"agent-repld/internal/prompthandler"
-	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/untoldnotice"
 	"agent-repld/internal/wsm"
 )
@@ -190,20 +190,17 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 // workspace standing STATUS, and submits it to SUBSCRIBER, answering the turn
 // it was submitted as, or the record a failure is written with and why.
 func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, sub wsm.WorkspaceSubscription, event wsm.WorkspaceEvent, sentences []string, status *agentreplv1.WorkspaceStatus) (ids.TurnID, string, error) {
-	subscriber := sub.Subscriber
-	text, err := s.deps.Briefs(BriefNotice, NoticeValues(event, sentences, status, sub.ParentFollows))
-	if err != nil {
+	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}.
+		Submit(ctx, prompts, sub.Subscriber, BriefNotice, NoticeValues(event, sentences, status, sub.ParentFollows), "workspace-notice", Origin)
+	switch briefprompt.StepOf(err) {
+	case briefprompt.StepCompose:
 		return "", "could not compose a workspace notice; the subscriber is not told of the edge", err
-	}
-	key, err := s.deps.MintKey("workspace-notice")
-	if err != nil {
+	case briefprompt.StepMint:
 		return "", "could not mint a workspace notice's idempotency key; the subscriber is not told", err
-	}
-	outcome, err := prompts.Submit(ctx, subscriber, feed.SaidText(text), key, Origin, nil, wsm.DeliveryDeferred, nil)
-	if err != nil {
+	case briefprompt.StepSubmit:
 		return "", "could not submit a workspace notice to its subscriber", err
 	}
-	return outcome.Turn, "", nil
+	return turn, "", nil
 }
 
 // carried answers the sentences SUBSCRIBER's untold notice about FOLLOWED said

@@ -1,0 +1,50 @@
+// endpoint_list_pull_request_subscriptions.proto —
+// ListPullRequestSubscriptions: the pull requests one workspace follows, each
+// with its subscription's health. AGENT API section. A READ.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/pull_request.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ListPullRequestSubscriptionsRequest {
+  // The workspace whose subscriptions are listed.
+  workspace.v1.WorkspaceRef subscriber = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ListPullRequestSubscriptionsResponse {
+  oneof result {
+    ListPullRequestSubscriptionsSuccess success = 1;
+    ListPullRequestSubscriptionsError error = 2;
+  }
+}
+
+// The workspace's subscriptions.
+message ListPullRequestSubscriptionsSuccess {
+  // Every subscription the workspace holds, each with the pull request as
+  // last read. Empty when it holds none.
+  repeated ListPullRequestSubscriptionsEntry subscriptions = 1;
+}
+
+// One subscription and what the daemon last read of its pull request.
+message ListPullRequestSubscriptionsEntry {
+  // The subscription.
+  PullRequestSubscription subscription = 1;
+  // The pull request as last read. UNSET before the first successful read.
+  optional PullRequestStatus status = 2;
+}
+
+message ListPullRequestSubscriptionsError {
+  oneof cause {
+    // The workspace is not in the daemon's registry.
+    ListPullRequestSubscriptionsUnknownSubscriber unknown_subscriber = 1;
+  }
+}
+
+// The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
+message ListPullRequestSubscriptionsUnknownSubscriber {}

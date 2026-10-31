@@ -228,4 +228,16 @@ enum PromptOrigin {
   //
   // Never submitted by a client: only the shim produces it.
   PROMPT_ORIGIN_REMOTE_CONTROL = 45;
+  // The daemon's brief asking a repository's main workspace to repair its
+  // main checkout after the daemon's fast-forward of the primary branch to
+  // its upstream failed in the index or the worktree
+  // (agentrepl.v1.MainSyncFailure). Submitted as a deferred prompt, reopening
+  // a closed main workspace first, and drawn as an ordinary prompt bubble, so
+  // the user follows the repair from the workspace's feed.
+  PROMPT_ORIGIN_MAIN_SYNC_REPAIR = 46;
+  // A notice of a followed GitHub pull request's activity
+  // (agentrepl.v1.PullRequestNotice): comments, reviews, line comments,
+  // edits, deletions, state changes and finished checks since the subscriber
+  // was last told. Submitted and drawn as a workspace notice is.
+  PROMPT_ORIGIN_PULL_REQUEST_NOTICE = 47;
 }

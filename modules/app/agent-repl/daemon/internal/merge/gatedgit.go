@@ -490,3 +490,11 @@ func (g *gatedGit) AheadBehind(ctx context.Context, dir, local, upstream string)
 	defer g.leave()
 	return g.inner.AheadBehind(ctx, dir, local, upstream)
 }
+
+func (g *gatedGit) RemoteURL(ctx context.Context, repoDir, remote string) (string, error) {
+	if err := g.enter("RemoteURL"); err != nil {
+		return "", err
+	}
+	defer g.leave()
+	return g.inner.RemoteURL(ctx, repoDir, remote)
+}

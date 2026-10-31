@@ -94,3 +94,9 @@ func parseLeftRightCount(out string) (int, int, error) {
 	}
 	return ahead, behind, nil
 }
+
+// RemoteURL answers the url REMOTE fetches from in REPODIR, as `git remote
+// get-url` prints it. A remote that does not exist is git's failure.
+func (c *client) RemoteURL(ctx context.Context, repoDir, remote string) (string, error) {
+	return c.run(ctx, "daemon.gitclient.remote_url", repoDir, "remote", "get-url", remote)
+}

@@ -247,6 +247,10 @@ type fakeDB struct {
 	slackOriginReadErr error
 	linksErr           error
 	linksReadErr       error
+	// linkSets is every link set the verbs wrote, in order.
+	linkSets []wsm.LinkSet
+	// prSubs answers WorkspacePullRequestSubscriptions.
+	prSubs map[ids.WorkspaceID][]wsm.PullRequestSubscription
 	// setNameErr fails SetName; listWorkspacesErrAfterRename becomes
 	// listWorkspacesErr once SetName writes, for a test that fails only the
 	// reads after a rename is recorded.
@@ -765,16 +769,19 @@ func (d *fakeDB) WorkspaceLinks(_ context.Context, id ids.WorkspaceID) ([]wsm.Wo
 }
 
 // SetWorkspaceLink stores or relabels a link at the front, shown while fewer
-// than wsm.ShownLinkLimit are, as the store does; linksErr fails it.
-func (d *fakeDB) SetWorkspaceLink(_ context.Context, id ids.WorkspaceID, url, label string, owned bool) ([]wsm.WorkspaceLink, error) {
+// than wsm.ShownLinkLimit are, as the store does, and records the set it was
+// given; linksErr fails it.
+func (d *fakeDB) SetWorkspaceLink(_ context.Context, id ids.WorkspaceID, set wsm.LinkSet) ([]wsm.WorkspaceLink, error) {
 	if d.linksErr != nil {
 		return nil, d.linksErr
 	}
+	d.linkSets = append(d.linkSets, set)
+	url, label := set.URL, set.Label
 	if d.links == nil {
 		d.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{}
 	}
 	links := d.links[id]
-	link := wsm.WorkspaceLink{URL: url, Label: label, Owned: owned}
+	link := wsm.WorkspaceLink{URL: url, Label: label, Owned: set.Owned, PullRequest: set.PullRequest}
 	if i := slices.IndexFunc(links, func(l wsm.WorkspaceLink) bool { return l.URL == url }); i >= 0 {
 		link.Shown = links[i].Shown
 		links = slices.Delete(links, i, i+1)
@@ -3038,7 +3045,9 @@ type fixture struct {
 	banners    *fakeBanners
 	browser    *fakeBrowser
 	slack      *fakeSlack
-	fleet      *fakeSessions
+	// anchors anchors an owned pull-request link's subscription.
+	anchors *fakeAnchors
+	fleet   *fakeSessions
 	// threads is the threads' graphs a nuke deletes.
 	threads  *fakeThreadGraphs
 	shim     *fakeShim
@@ -3134,6 +3143,7 @@ func newFixture(t *testing.T) *fixture {
 		banners:    &fakeBanners{},
 		browser:    &fakeBrowser{},
 		slack:      &fakeSlack{},
+		anchors:    &fakeAnchors{},
 		fleet:      newFakeSessions(),
 		threads:    &fakeThreadGraphs{},
 		shim:       &fakeShim{},
@@ -3176,7 +3186,7 @@ func newFixture(t *testing.T) *fixture {
 			return rec
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings}, Browser: f.browser, Slack: f.slack,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings}, Browser: f.browser, Slack: f.slack, PullRequests: f.anchors,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers, SettingsVisits: f.ensureVisits(), Drain: &f.visitDrain,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -4077,4 +4087,26 @@ func (s stubTopbar) SetRemoteControl(_ ids.WorkspaceID, on bool) {
 	if s.remoteControl != nil {
 		*s.remoteControl = append(*s.remoteControl, on)
 	}
+}
+
+// WorkspacePullRequestSubscriptions answers prSubs.
+func (d *fakeDB) WorkspacePullRequestSubscriptions(_ context.Context, id ids.WorkspaceID) ([]wsm.PullRequestSubscription, error) {
+	return d.prSubs[id], nil
+}
+
+// fakeAnchors answers each Anchor with a subscription told "anchored", or
+// with err and an unanchored one, recording every pull request asked.
+type fakeAnchors struct {
+	err   error
+	asked []wsm.PullRequestKey
+}
+
+func (a *fakeAnchors) Anchor(_ context.Context, ws ids.WorkspaceID, pr wsm.PullRequestKey, events wsm.PullRequestEvents, origin wsm.PullRequestOrigin) (wsm.PullRequestSubscription, *agentreplv1.PullRequestStatus, error) {
+	a.asked = append(a.asked, pr)
+	sub := wsm.PullRequestSubscription{Subscriber: ws, PullRequest: pr, Events: events, Origin: origin}
+	if a.err != nil {
+		return sub, nil, a.err
+	}
+	sub.Told = "anchored"
+	return sub, &agentreplv1.PullRequestStatus{}, nil
 }

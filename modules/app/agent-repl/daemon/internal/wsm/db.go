@@ -638,9 +638,9 @@ type DB interface {
 	// first (workspacelinks.go).
 	WorkspaceLinks(ctx context.Context, id WorkspaceID) ([]WorkspaceLink, error)
 	// SetWorkspaceLink stores a link under its label and ownership, or
-	// relabels a stored one and sets its ownership anew, answering every link
-	// the workspace then holds.
-	SetWorkspaceLink(ctx context.Context, id WorkspaceID, url, label string, owned bool) ([]WorkspaceLink, error)
+	// relabels a stored one, keeping an owned pull request's subscription in
+	// step, and answers every link the workspace then holds.
+	SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSet) ([]WorkspaceLink, error)
 	// RemoveWorkspaceLink removes a stored link, answering the rest; a url
 	// the workspace does not hold is an *UnknownLinkError.
 	RemoveWorkspaceLink(ctx context.Context, id WorkspaceID, url string) ([]WorkspaceLink, error)
@@ -678,6 +678,33 @@ type DB interface {
 	UnsubscribeWorkspace(ctx context.Context, subscriber, followed WorkspaceID) (bool, error)
 	// WorkspaceSubscribers loads every subscription following a workspace.
 	WorkspaceSubscribers(ctx context.Context, followed WorkspaceID) ([]WorkspaceSubscription, error)
+	// SubscribePullRequest records a pull-request subscription, replacing the
+	// events of one held, and answers whether it replaced one
+	// (pullrequests.go).
+	SubscribePullRequest(ctx context.Context, sub PullRequestSubscription) (bool, error)
+	// UnsubscribePullRequest ends a subscription, answering whether one stood.
+	UnsubscribePullRequest(ctx context.Context, subscriber WorkspaceID, pr PullRequestKey) (bool, error)
+	// LivePullRequestSubscriptions loads every subscription not yet ended.
+	LivePullRequestSubscriptions(ctx context.Context) ([]PullRequestSubscription, error)
+	// WorkspacePullRequestSubscriptions loads a workspace's subscriptions.
+	WorkspacePullRequestSubscriptions(ctx context.Context, subscriber WorkspaceID) ([]PullRequestSubscription, error)
+	// AdvancePullRequestTold compares and sets a subscription's told
+	// snapshot with the notice it owes.
+	AdvancePullRequestTold(ctx context.Context, a PullRequestAdvance) (bool, error)
+	// MainSyncTold answers the main-sync failure a repository's main
+	// workspace was last told (mainsync.go).
+	MainSyncTold(ctx context.Context, repo RepoID) (MainSyncTold, bool, error)
+	// RecordMainSyncTold records the failure told.
+	RecordMainSyncTold(ctx context.Context, repo RepoID, told MainSyncTold) error
+	// OwePullRequestNotice appends sentences about a subscription itself to
+	// its owed notice.
+	OwePullRequestNotice(ctx context.Context, subscriber WorkspaceID, pr PullRequestKey, sentences []string) error
+	// RecordPullRequestReadFailure records a failed read of a pull request.
+	RecordPullRequestReadFailure(ctx context.Context, pr PullRequestKey, f PullRequestFailure) ([]WorkspaceID, error)
+	// OwedPullRequestNotices loads every notice with sentences pending.
+	OwedPullRequestNotices(ctx context.Context) ([]PullRequestOwed, error)
+	// RecordPullRequestNoticeSubmitted records a submitted notice.
+	RecordPullRequestNoticeSubmitted(ctx context.Context, subscriber WorkspaceID, pr PullRequestKey, turn TurnID, sentences []string, took int) error
 
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)

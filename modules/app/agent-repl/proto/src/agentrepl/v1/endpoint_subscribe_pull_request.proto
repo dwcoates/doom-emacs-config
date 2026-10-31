@@ -1,0 +1,137 @@
+// endpoint_subscribe_pull_request.proto — SubscribePullRequest: tell one
+// workspace's agent about a GitHub pull request's comments, reviews, line
+// comments, state changes and finished checks. AGENT API section.
+//
+// FOR PROGRAMS AND TESTS; AGENTS SUBSCRIBE BY OWNERSHIP. A workspace that
+// stores a pull request it created as an OWNED link
+// (ChangeWorkspaceLinksSet.ownership) is subscribed by the daemon, for every
+// event, with no call of this rpc. This rpc takes the same subscription
+// explicitly (PullRequestSubscriptionOriginRequested).
+//
+// DELIVERY. Each notice (PullRequestNotice) is submitted to the subscriber's
+// session as a deferred prompt of origin
+// conversation.v1.PromptOrigin.PROMPT_ORIGIN_PULL_REQUEST_NOTICE: it waits
+// behind a running turn, wakes an idle agent, and the feed draws no row for
+// it. How the daemon reads GitHub, and why nothing can be lost or told twice,
+// is pull_request.proto's header.
+//
+// NOTHING SLIPS BETWEEN READING AND FOLLOWING. The answer carries the pull
+// request as it stands when the subscription is taken, and every piece of
+// activity after that read is told.
+//
+// SCOPE AND LIFETIME. A subscriber holds at most one subscription per pull
+// request; subscribing again replaces its events and keeps what it was
+// already told. A subscription ends when the pull request merges or closes
+// (after the notice saying so), when the subscriber unsubscribes, and when the
+// subscriber closes however it closes. It is DURABLE across a daemon restart
+// and a handover.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/pull_request.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SubscribePullRequestRequest {
+  // The workspace whose agent is told: the caller's own when an agent
+  // subscribes itself. Must be open (`subscriber_closed`).
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // Which pull request. THE ARM IS HOW IT IS NAMED. Unset is a malformed
+  // request (Connect InvalidArgument).
+  oneof pull_request {
+    // Named exactly.
+    PullRequestRef ref = 2;
+    // Named as a caller writes it: a github.com pull request url, or
+    // `#<number>` in the subscriber's repository, resolved through that
+    // repository's `origin` remote.
+    string text = 3;
+  }
+  // The activity kinds to be told. REQUIRED: at least one; repeats are
+  // ignored.
+  repeated PullRequestNoticeEvent events = 4;
+}
+
+// THE ARM IS THE OUTCOME.
+message SubscribePullRequestResponse {
+  oneof result {
+    SubscribePullRequestSuccess success = 1;
+    SubscribePullRequestError error = 2;
+  }
+}
+
+// The request was served.
+message SubscribePullRequestSuccess {
+  // The pull request the request named, resolved.
+  PullRequestRef pull_request = 1;
+  // The pull request as the daemon read it in serving the request.
+  PullRequestStatus status = 2;
+  // What the request came to. THE ARM IS WHICH.
+  oneof taken {
+    // The subscriber held no subscription to this pull request, and now
+    // does.
+    SubscribePullRequestSuccessSubscribed subscribed = 3;
+    // The subscriber's subscription now has the requested events.
+    SubscribePullRequestSuccessResubscribed resubscribed = 4;
+    // The pull request is already merged or closed (`status.state` says
+    // which), so there is nothing to follow and nothing was subscribed. An
+    // answer, not a failure.
+    SubscribePullRequestSuccessAlreadyEnded already_ended = 5;
+  }
+}
+
+// A new subscription.
+message SubscribePullRequestSuccessSubscribed {
+  // The subscription as taken.
+  PullRequestSubscription subscription = 1;
+}
+
+// A replaced subscription.
+message SubscribePullRequestSuccessResubscribed {
+  // The subscription as it now stands.
+  PullRequestSubscription subscription = 1;
+}
+
+// Nothing to follow. DELIBERATELY EMPTY: the success's `status` says how the
+// pull request ended.
+message SubscribePullRequestSuccessAlreadyEnded {}
+
+// The daemon's refusals; nothing was subscribed. Validation failures (an
+// unset arm, no events, an UNSPECIFIED event) are Connect InvalidArgument.
+message SubscribePullRequestError {
+  oneof cause {
+    // The subscriber is not in the daemon's registry.
+    SubscribePullRequestUnknownSubscriber unknown_subscriber = 1;
+    // The subscriber is closed: it runs no agent to tell, and a close is
+    // what ends a subscription, so one taken while closed would never end.
+    SubscribePullRequestSubscriberClosed subscriber_closed = 2;
+    // `text` names no pull request.
+    SubscribePullRequestUnparsable unparsable = 3;
+    // The pull request could not be read, so its standing to subscribe from
+    // is unknown.
+    SubscribePullRequestUnreadable unreadable = 4;
+  }
+}
+
+// The subscriber id is not in the daemon's registry. DELIBERATELY EMPTY.
+message SubscribePullRequestUnknownSubscriber {}
+
+// The subscriber is closed. DELIBERATELY EMPTY.
+message SubscribePullRequestSubscriberClosed {}
+
+// The text names no pull request.
+message SubscribePullRequestUnparsable {
+  // The text, verbatim.
+  string text = 1;
+  // Why it names none: not a github.com pull request url, or `#<number>` in
+  // a repository whose `origin` is not on github.com.
+  string reason = 2;
+}
+
+// The read that would anchor the subscription failed.
+message SubscribePullRequestUnreadable {
+  // Why.
+  PullRequestGitHubFailure cause = 1;
+}

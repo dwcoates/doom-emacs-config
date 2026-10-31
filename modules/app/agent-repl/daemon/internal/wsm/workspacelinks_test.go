@@ -36,7 +36,7 @@ func applyLinkSteps(t *testing.T, s *store, ws WorkspaceID, steps []linkStep) []
 	for _, step := range steps {
 		switch {
 		case step.set != nil:
-			got, err = s.SetWorkspaceLink(ctx, ws, step.set.URL, step.set.Label, step.set.Owned)
+			got, err = s.SetWorkspaceLink(ctx, ws, LinkSet{URL: step.set.URL, Label: step.set.Label, Owned: step.set.Owned})
 		case step.remove != "":
 			got, err = s.RemoveWorkspaceLink(ctx, ws, step.remove)
 		case step.show != nil:
@@ -186,12 +186,12 @@ func TestWorkspaceLinksRefusals(t *testing.T) {
 			}, isDefect: true, errorOp: "daemon.wsm.show_workspace_links"},
 		{name: "a set with no label is a defect",
 			act: func(s *store, ws WorkspaceID) error {
-				_, err := s.SetWorkspaceLink(context.Background(), ws, linkURL(2), "", false)
+				_, err := s.SetWorkspaceLink(context.Background(), ws, LinkSet{URL: linkURL(2)})
 				return err
 			}, isDefect: true, errorOp: "daemon.wsm.set_workspace_link"},
 		{name: "a set on an unknown workspace is not found",
 			act: func(s *store, _ WorkspaceID) error {
-				_, err := s.SetWorkspaceLink(context.Background(), WorkspaceID("absent"), linkURL(2), "two a", false)
+				_, err := s.SetWorkspaceLink(context.Background(), WorkspaceID("absent"), LinkSet{URL: linkURL(2), Label: "two a"})
 				return err
 			}, notFound: true},
 		{name: "a clear on an unknown workspace is not found",

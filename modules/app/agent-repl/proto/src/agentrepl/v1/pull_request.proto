@@ -1,0 +1,503 @@
+// pull_request.proto — A GITHUB PULL REQUEST AS THE DAEMON FOLLOWS IT for a
+// workspace: which pull request, the subscription that follows it, what the
+// pull request is now, and each piece of activity the daemon tells the
+// subscriber about. Shared by the pull-request endpoints (subscribe,
+// unsubscribe, list, comment), by a workspace's owned links
+// (WorkspaceLinkOwned), and by the notice the daemon delivers
+// (PullRequestNotice).
+//
+// THE DAEMON READS, THE AGENT IS TOLD. No GitHub event is ever pushed to the
+// laptop. The daemon reads each followed pull request's authoritative lists
+// (conversation comments, line comments, reviews, the pull request itself,
+// and its head commit's check runs) with conditional requests, compares them
+// with what it already told each subscriber, and tells only the difference. A
+// read the daemon missed while it was down, asleep or offline is made up by
+// the next read, because the next read covers everything since the last one
+// told: no activity can be lost, only told late.
+//
+// TOLD ONCE. What a subscriber was told is recorded with the subscription in
+// the same transaction as its notice, so a restart between a read and its
+// notice repeats the read and a second daemon during a handover cannot tell
+// it again.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "google/protobuf/timestamp.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// ---- Identity: which pull request ----
+
+// One pull request on github.com, by its repository and number. The daemon
+// resolves it from a url or from `#<number>` against the workspace's
+// repository's `origin` remote, never from a checkout's directory name, which
+// need not match the repository's name on GitHub.
+message PullRequestRef {
+  // The repository's owner: a user or an organization login.
+  string owner = 1;
+  // The repository's name on GitHub.
+  string repo = 2;
+  // The pull request's number within the repository; at least one.
+  uint32 number = 3;
+}
+
+// ---- The subscription: who follows which pull request, and how it fares ----
+
+// One workspace's subscription to one pull request. A workspace holds at most
+// one per pull request.
+message PullRequestSubscription {
+  // The workspace whose agent is told.
+  workspace.v1.WorkspaceRef subscriber = 1;
+  // The pull request followed.
+  PullRequestRef pull_request = 2;
+  // The activity kinds the subscriber is told; never empty. A subscription
+  // the daemon took for an owned link asks for every kind.
+  repeated PullRequestNoticeEvent events = 3;
+  // How the subscription came to be, which says what else ends it.
+  PullRequestSubscriptionOrigin origin = 4;
+  // Whether the daemon's reads of the pull request are succeeding.
+  PullRequestSubscriptionHealth health = 5;
+}
+
+// A kind of pull-request activity a subscription may ask to be told. A closed
+// set of activity kinds, not a state: each notice item names its own kind by
+// its arm (PullRequestActivity).
+enum PullRequestNoticeEvent {
+  // Never sent; a request that carries it is refused as invalid.
+  PULL_REQUEST_NOTICE_EVENT_UNSPECIFIED = 0;
+  // A conversation comment was posted, edited or deleted.
+  PULL_REQUEST_NOTICE_EVENT_COMMENT = 1;
+  // A review was submitted, or a submitted review's body was edited.
+  PULL_REQUEST_NOTICE_EVENT_REVIEW = 2;
+  // A line comment or a reply in a review thread was posted, edited or
+  // deleted.
+  PULL_REQUEST_NOTICE_EVENT_REVIEW_COMMENT = 3;
+  // The pull request merged, closed, reopened, or became ready for review.
+  PULL_REQUEST_NOTICE_EVENT_STATE = 4;
+  // A check run on the pull request's head commit finished.
+  PULL_REQUEST_NOTICE_EVENT_CHECKS = 5;
+}
+
+// How a subscription came to be. THE ARM IS THE ORIGIN.
+message PullRequestSubscriptionOrigin {
+  oneof origin {
+    // The workspace stored the pull request as an OWNED link
+    // (WorkspaceLinkOwned), and the daemon subscribed it. Removing the
+    // link, or changing it to a reference, ends the subscription.
+    PullRequestSubscriptionOriginOwnedLink owned_link = 1;
+    // A caller asked through SubscribePullRequest. Only an unsubscribe, the
+    // subscriber's close, or the pull request's end ends it.
+    PullRequestSubscriptionOriginRequested requested = 2;
+  }
+}
+
+// Taken for an owned link. DELIBERATELY EMPTY: the arm is the origin.
+message PullRequestSubscriptionOriginOwnedLink {}
+
+// Taken by SubscribePullRequest. DELIBERATELY EMPTY: the arm is the origin.
+message PullRequestSubscriptionOriginRequested {}
+
+// Whether the daemon's reads of a followed pull request succeed. THE ARM IS
+// THE HEALTH. A failing subscription is still read on schedule; there is no
+// other path its activity could reach the subscriber by, so its failure is
+// stated rather than absorbed. The first failure after a healthy stretch is
+// told to the subscriber once (PullRequestNotice.health), and every failing
+// read is logged.
+message PullRequestSubscriptionHealth {
+  oneof health {
+    // The last read succeeded.
+    PullRequestSubscriptionHealthy healthy = 1;
+    // Reads have failed since `since`.
+    PullRequestSubscriptionFailing failing = 2;
+  }
+}
+
+// The last read succeeded.
+message PullRequestSubscriptionHealthy {
+  // When the last read succeeded, so a reader can see how fresh what it was
+  // told is. UNSET before the first read.
+  optional google.protobuf.Timestamp last_read = 1;
+}
+
+// Reads are failing.
+message PullRequestSubscriptionFailing {
+  // When the first read of the current failing stretch failed.
+  google.protobuf.Timestamp since = 1;
+  // Why the latest read failed.
+  PullRequestGitHubFailure cause = 2;
+}
+
+// Why a call to GitHub (a read, or a post) failed. THE ARM IS THE CAUSE. A set wrapper whose
+// oneof is unassigned is a cause this schema revision does not name.
+message PullRequestGitHubFailure {
+  oneof cause {
+    // GitHub refused the `gh` login's credentials (401). Reads resume once
+    // the user logs in again with `gh auth login`.
+    PullRequestGitHubFailureUnauthorized unauthorized = 1;
+    // The pull request or its repository is not visible to the `gh` login
+    // (404): deleted, renamed, or never readable.
+    PullRequestGitHubFailureNotFound not_found = 2;
+    // GitHub's rate limit is spent; reads resume at `resets_at`.
+    PullRequestGitHubFailureRateLimited rate_limited = 3;
+    // GitHub could not be reached, or answered with a server error.
+    PullRequestGitHubFailureUnreachable unreachable = 4;
+    // GitHub understood the call and refused it (a 4xx other than the arms
+    // above, such as 422 for a comment it will not take), saying why.
+    PullRequestGitHubFailureRefused refused = 5;
+  }
+}
+
+// 401. DELIBERATELY EMPTY: the arm is the cause.
+message PullRequestGitHubFailureUnauthorized {}
+
+// 404. DELIBERATELY EMPTY: the arm is the cause.
+message PullRequestGitHubFailureNotFound {}
+
+// The rate limit is spent.
+message PullRequestGitHubFailureRateLimited {
+  // When GitHub resets the limit (`X-RateLimit-Reset`); no read is made
+  // before it.
+  google.protobuf.Timestamp resets_at = 1;
+}
+
+// Refused by GitHub.
+message PullRequestGitHubFailureRefused {
+  // The HTTP status GitHub answered.
+  uint32 http_status = 1;
+  // GitHub's message, verbatim.
+  string message = 2;
+}
+
+// No usable answer.
+message PullRequestGitHubFailureUnreachable {
+  // The failure as the `gh` leaf reported it: the transport error, or the
+  // HTTP status and GitHub's message, for the reader to judge.
+  string detail = 1;
+}
+
+// ---- The pull request now ----
+
+// A followed pull request as the daemon last read it: what a subscriber is
+// given when it subscribes, and with every notice, so it never has to read
+// GitHub itself to know where the pull request stands.
+message PullRequestStatus {
+  // The pull request's title.
+  string title = 1;
+  // The pull request's web address.
+  string url = 2;
+  // Where the pull request stands.
+  PullRequestState state = 3;
+  // The commit at the head of the pull request's branch.
+  string head_sha = 4;
+}
+
+// Where a pull request stands. THE ARM IS THE STATE.
+message PullRequestState {
+  oneof state {
+    // Open and marked draft.
+    PullRequestStateDraft draft = 1;
+    // Open and ready for review.
+    PullRequestStateOpen open = 2;
+    // Merged. A merged pull request ends every subscription to it once the
+    // notice carrying this state is told.
+    PullRequestStateMerged merged = 3;
+    // Closed without merging. Ends every subscription to it, as a merge does.
+    PullRequestStateClosed closed = 4;
+  }
+}
+
+// Open, draft. DELIBERATELY EMPTY: the arm is the state.
+message PullRequestStateDraft {}
+
+// Open, ready. DELIBERATELY EMPTY: the arm is the state.
+message PullRequestStateOpen {}
+
+// Merged.
+message PullRequestStateMerged {
+  // The commit the merge produced on the base branch.
+  string merge_commit_sha = 1;
+}
+
+// Closed without merging. DELIBERATELY EMPTY: the arm is the state.
+message PullRequestStateClosed {}
+
+// ---- Activity: what a notice tells ----
+
+// What the daemon tells one subscriber about one pull request, delivered as a
+// deferred prompt of origin
+// conversation.v1.PromptOrigin.PROMPT_ORIGIN_PULL_REQUEST_NOTICE. A
+// subscriber holds at most one untold notice per pull request: a newer read
+// supersedes it with a notice listing everything since the subscriber was
+// last told, so a busy agent is told once, whole, and never twice.
+message PullRequestNotice {
+  // The pull request.
+  PullRequestRef pull_request = 1;
+  // Every item since the subscriber was last told, in the order GitHub
+  // recorded them. Empty only when the notice exists to tell `health`.
+  repeated PullRequestActivity activity = 2;
+  // The pull request as it stands after the activity.
+  PullRequestStatus status = 3;
+  // The subscription's health. SET only when the health changed since the
+  // subscriber was last told: the first failure of a stretch, or the
+  // recovery that ends it.
+  optional PullRequestSubscriptionHealth health = 4;
+  // SET when this notice is the subscription's last: the pull request merged
+  // or closed, and the daemon ended the subscription after telling it.
+  optional PullRequestNoticeEnded ended = 5;
+}
+
+// The subscription ended with this notice. DELIBERATELY EMPTY: the pull
+// request's `status.state` says whether it merged or closed.
+message PullRequestNoticeEnded {}
+
+// One piece of activity on a followed pull request. THE ARM IS THE KIND.
+// Items the subscriber itself posted through CommentOnPullRequest are never
+// told back to it; items anyone else posted, the user included, are.
+message PullRequestActivity {
+  oneof activity {
+    // A conversation comment was posted.
+    PullRequestActivityComment comment = 1;
+    // A review was submitted.
+    PullRequestActivityReview review = 2;
+    // A line comment, or a reply in a review thread, was posted.
+    PullRequestActivityReviewComment review_comment = 3;
+    // A comment, line comment or review body already told was edited.
+    PullRequestActivityEdited edited = 4;
+    // A comment or line comment already told was deleted.
+    PullRequestActivityDeleted deleted = 5;
+    // The pull request changed state.
+    PullRequestActivityStateChanged state_changed = 6;
+    // A check run on the head commit finished. Told in one line, since a
+    // pull request can run many.
+    PullRequestActivityCheckFinished check_finished = 7;
+  }
+}
+
+// Who wrote a piece of activity.
+message PullRequestActivityAuthor {
+  // The author's GitHub login.
+  string login = 1;
+  // The author's standing in the repository, which the notice states beside
+  // the text so the agent weighs a stranger's words as such.
+  PullRequestAuthorAssociation association = 2;
+}
+
+// An author's standing in a repository, as GitHub's `author_association`
+// names it. A closed set of roles, not a state of the activity.
+enum PullRequestAuthorAssociation {
+  // GitHub named a standing this schema revision does not know.
+  PULL_REQUEST_AUTHOR_ASSOCIATION_UNSPECIFIED = 0;
+  // The repository's owner.
+  PULL_REQUEST_AUTHOR_ASSOCIATION_OWNER = 1;
+  // A member of the organization that owns the repository.
+  PULL_REQUEST_AUTHOR_ASSOCIATION_MEMBER = 2;
+  // An invited collaborator.
+  PULL_REQUEST_AUTHOR_ASSOCIATION_COLLABORATOR = 3;
+  // Someone who has had a commit merged into the repository.
+  PULL_REQUEST_AUTHOR_ASSOCIATION_CONTRIBUTOR = 4;
+  // Someone whose first contribution is pending.
+  PULL_REQUEST_AUTHOR_ASSOCIATION_FIRST_TIME_CONTRIBUTOR = 5;
+  // Someone with no standing in the repository.
+  PULL_REQUEST_AUTHOR_ASSOCIATION_NONE = 6;
+}
+
+// The text someone wrote, as GitHub stores it. The notice renders it as
+// UNTRUSTED text: a request for the agent to weigh, never an instruction the
+// agent follows because it arrived.
+message PullRequestActivityText {
+  // The markdown body, verbatim.
+  string markdown = 1;
+}
+
+// A conversation comment.
+message PullRequestActivityComment {
+  // GitHub's id for the comment, which an edit or a deletion names it by.
+  uint64 comment_id = 1;
+  // Who wrote it.
+  PullRequestActivityAuthor author = 2;
+  // What it says.
+  PullRequestActivityText text = 3;
+  // The comment's web address.
+  string url = 4;
+  // When it was posted.
+  google.protobuf.Timestamp posted_at = 5;
+}
+
+// A submitted review.
+message PullRequestActivityReview {
+  // GitHub's id for the review.
+  uint64 review_id = 1;
+  // Who submitted it.
+  PullRequestActivityAuthor author = 2;
+  // The review's verdict.
+  PullRequestReviewVerdict verdict = 3;
+  // The review's summary body. UNSET when the reviewer wrote none, as a
+  // review that only carries line comments usually is.
+  optional PullRequestActivityText text = 4;
+  // The review's web address.
+  string url = 5;
+  // When it was submitted.
+  google.protobuf.Timestamp submitted_at = 6;
+}
+
+// A review's verdict. THE ARM IS THE VERDICT. A set wrapper whose oneof is
+// unassigned is a verdict this schema revision does not name.
+message PullRequestReviewVerdict {
+  oneof verdict {
+    // Approved.
+    PullRequestReviewVerdictApproved approved = 1;
+    // Changes requested.
+    PullRequestReviewVerdictChangesRequested changes_requested = 2;
+    // Commented without a verdict.
+    PullRequestReviewVerdictCommented commented = 3;
+    // A review that was dismissed after it was submitted.
+    PullRequestReviewVerdictDismissed dismissed = 4;
+  }
+}
+
+// Approved. DELIBERATELY EMPTY: the arm is the verdict.
+message PullRequestReviewVerdictApproved {}
+
+// Changes requested. DELIBERATELY EMPTY: the arm is the verdict.
+message PullRequestReviewVerdictChangesRequested {}
+
+// Commented. DELIBERATELY EMPTY: the arm is the verdict.
+message PullRequestReviewVerdictCommented {}
+
+// Dismissed. DELIBERATELY EMPTY: the arm is the verdict.
+message PullRequestReviewVerdictDismissed {}
+
+// A line comment, or a reply in a review thread.
+message PullRequestActivityReviewComment {
+  // GitHub's id for the comment: what an edit or deletion names it by, and
+  // what CommentOnPullRequestReply names to answer in its thread.
+  uint64 comment_id = 1;
+  // Who wrote it.
+  PullRequestActivityAuthor author = 2;
+  // What it says.
+  PullRequestActivityText text = 3;
+  // Where in the diff it sits.
+  PullRequestActivityReviewCommentLocation location = 4;
+  // The thread's first comment, when this one is a reply. UNSET when it
+  // starts its thread.
+  optional uint64 in_reply_to_comment_id = 5;
+  // The review it was submitted with. UNSET for a comment GitHub records
+  // with no review.
+  optional uint64 review_id = 6;
+  // The comment's web address.
+  string url = 7;
+  // When it was posted.
+  google.protobuf.Timestamp posted_at = 8;
+}
+
+// Where a line comment sits.
+message PullRequestActivityReviewCommentLocation {
+  // The file's path in the repository.
+  string path = 1;
+  // The line in the file the comment ends on. UNSET for a comment on the
+  // whole file, or one whose line no longer exists in the diff.
+  optional uint32 line = 2;
+}
+
+// Something already told was edited. Told with its new text, never a diff,
+// so the agent reads what now stands.
+message PullRequestActivityEdited {
+  // What was edited. THE ARM IS WHICH KIND OF ITEM.
+  oneof item {
+    // A conversation comment, as it now reads.
+    PullRequestActivityComment comment = 1;
+    // A review whose body was edited, as it now reads.
+    PullRequestActivityReview review = 2;
+    // A line comment, as it now reads.
+    PullRequestActivityReviewComment review_comment = 3;
+  }
+  // When the edit was made.
+  google.protobuf.Timestamp edited_at = 4;
+}
+
+// Something already told was deleted. The daemon learns of a deletion by the
+// item's absence from a list it read before, so no time of deletion exists.
+message PullRequestActivityDeleted {
+  // What was deleted. THE ARM IS WHICH KIND OF ITEM.
+  oneof item {
+    // A conversation comment, by its id.
+    PullRequestActivityDeletedComment comment = 1;
+    // A line comment, by its id.
+    PullRequestActivityDeletedReviewComment review_comment = 2;
+  }
+}
+
+// A deleted conversation comment.
+message PullRequestActivityDeletedComment {
+  // The id it was told under.
+  uint64 comment_id = 1;
+}
+
+// A deleted line comment.
+message PullRequestActivityDeletedReviewComment {
+  // The id it was told under.
+  uint64 comment_id = 1;
+}
+
+// The pull request changed state.
+message PullRequestActivityStateChanged {
+  // The state it moved to.
+  PullRequestState state = 1;
+  // Who moved it. UNSET when GitHub names no actor, as for a merge made by a
+  // merge queue.
+  optional PullRequestActivityAuthor actor = 2;
+}
+
+// A check run finished: its name and its result, and nothing else, so many
+// checks cost the agent's context a line each.
+message PullRequestActivityCheckFinished {
+  // The check run's name as GitHub shows it (`test (ubuntu-latest)`).
+  string name = 1;
+  // How it finished.
+  PullRequestCheckConclusion conclusion = 2;
+}
+
+// How a check run finished. THE ARM IS THE CONCLUSION. A set wrapper whose
+// oneof is unassigned is a conclusion this schema revision does not name.
+message PullRequestCheckConclusion {
+  oneof conclusion {
+    // Passed.
+    PullRequestCheckConclusionSuccess success = 1;
+    // Failed.
+    PullRequestCheckConclusionFailure failure = 2;
+    // Cancelled before it finished.
+    PullRequestCheckConclusionCancelled cancelled = 3;
+    // Ran out of time.
+    PullRequestCheckConclusionTimedOut timed_out = 4;
+    // Skipped.
+    PullRequestCheckConclusionSkipped skipped = 5;
+    // Finished with neither a pass nor a failure.
+    PullRequestCheckConclusionNeutral neutral = 6;
+    // Waits on a person to act before it can pass.
+    PullRequestCheckConclusionActionRequired action_required = 7;
+  }
+}
+
+// Passed. DELIBERATELY EMPTY: the arm is the conclusion.
+message PullRequestCheckConclusionSuccess {}
+
+// Failed. DELIBERATELY EMPTY: the arm is the conclusion.
+message PullRequestCheckConclusionFailure {}
+
+// Cancelled. DELIBERATELY EMPTY: the arm is the conclusion.
+message PullRequestCheckConclusionCancelled {}
+
+// Timed out. DELIBERATELY EMPTY: the arm is the conclusion.
+message PullRequestCheckConclusionTimedOut {}
+
+// Skipped. DELIBERATELY EMPTY: the arm is the conclusion.
+message PullRequestCheckConclusionSkipped {}
+
+// Neutral. DELIBERATELY EMPTY: the arm is the conclusion.
+message PullRequestCheckConclusionNeutral {}
+
+// Action required. DELIBERATELY EMPTY: the arm is the conclusion.
+message PullRequestCheckConclusionActionRequired {}

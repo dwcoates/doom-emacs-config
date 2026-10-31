@@ -9,6 +9,11 @@
 // the account the workspace's session spends as. A workspace with no summary
 // draws nothing clickable, whatever its links.
 //
+// OWNED OR A REFERENCE. Every link says whether the workspace's work made
+// what it points at (WorkspaceLinkOwnership). The daemon follows an owned
+// GitHub pull request for the workspace (SubscribePullRequest's notices), and
+// ends that subscription itself when the pull request merges or closes.
+//
 // THE AGENT KEEPS THEM CURRENT. An agent stores, without asking anyone, every
 // link supplied in its conversation that bears on the workspace's task (a pull
 // request, a ticket, a design doc, a dashboard), each under a short label.
@@ -126,7 +131,10 @@ export type ChangeWorkspaceLinksSet = Message<"agentrepl.v1.ChangeWorkspaceLinks
   /**
    * Whether the workspace's work made what the link points at. REQUIRED: an
    * unset ownership is a malformed request (Connect InvalidArgument), so
-   * every stored link says which it is. A relabel sets it anew.
+   * every stored link says which it is. A relabel sets it anew. A pull
+   * request the workspace opened is OWNED, and storing it owned subscribes
+   * the workspace to it; changing it to a reference, or removing it, ends
+   * that subscription.
    *
    * @generated from field: agentrepl.v1.WorkspaceLinkOwnership ownership = 3;
    */
@@ -141,7 +149,8 @@ export const ChangeWorkspaceLinksSetSchema: GenMessage<ChangeWorkspaceLinksSet> 
   messageDesc(file_agentrepl_v1_endpoint_change_workspace_links, 1);
 
 /**
- * Remove one stored link. A url the workspace does not hold is refused
+ * Remove one stored link. Removing an owned pull request ends its
+ * subscription. A url the workspace does not hold is refused
  * (`unknown_link`).
  *
  * @generated from message agentrepl.v1.ChangeWorkspaceLinksRemove

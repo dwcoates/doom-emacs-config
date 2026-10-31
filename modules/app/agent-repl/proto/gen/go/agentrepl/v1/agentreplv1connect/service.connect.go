@@ -381,6 +381,18 @@ const (
 	// AgentReplUnsubscribeMergeQueueProcedure is the fully-qualified name of the AgentRepl's
 	// UnsubscribeMergeQueue RPC.
 	AgentReplUnsubscribeMergeQueueProcedure = "/agentrepl.v1.AgentRepl/UnsubscribeMergeQueue"
+	// AgentReplSubscribePullRequestProcedure is the fully-qualified name of the AgentRepl's
+	// SubscribePullRequest RPC.
+	AgentReplSubscribePullRequestProcedure = "/agentrepl.v1.AgentRepl/SubscribePullRequest"
+	// AgentReplUnsubscribePullRequestProcedure is the fully-qualified name of the AgentRepl's
+	// UnsubscribePullRequest RPC.
+	AgentReplUnsubscribePullRequestProcedure = "/agentrepl.v1.AgentRepl/UnsubscribePullRequest"
+	// AgentReplListPullRequestSubscriptionsProcedure is the fully-qualified name of the AgentRepl's
+	// ListPullRequestSubscriptions RPC.
+	AgentReplListPullRequestSubscriptionsProcedure = "/agentrepl.v1.AgentRepl/ListPullRequestSubscriptions"
+	// AgentReplCommentOnPullRequestProcedure is the fully-qualified name of the AgentRepl's
+	// CommentOnPullRequest RPC.
+	AgentReplCommentOnPullRequestProcedure = "/agentrepl.v1.AgentRepl/CommentOnPullRequest"
 	// AgentReplRunTestsProcedure is the fully-qualified name of the AgentRepl's RunTests RPC.
 	AgentReplRunTestsProcedure = "/agentrepl.v1.AgentRepl/RunTests"
 	// AgentReplRunRedundancyProcedure is the fully-qualified name of the AgentRepl's RunRedundancy RPC.
@@ -395,137 +407,141 @@ const (
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
 var (
-	agentReplServiceDescriptor                          = v1.File_agentrepl_v1_service_proto.Services().ByName("AgentRepl")
-	agentReplSubmitPromptMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SubmitPrompt")
-	agentReplSelectFeedRowMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SelectFeedRow")
-	agentReplSelectResponseTextMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SelectResponseText")
-	agentReplReportComposerEntriesMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("ReportComposerEntries")
-	agentReplFindEntryNeighborMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("FindEntryNeighbor")
-	agentReplFoldMergeBubbleMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("FoldMergeBubble")
-	agentReplAdjustFeedTextScaleMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("AdjustFeedTextScale")
-	agentReplOpenFeedImageMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("OpenFeedImage")
-	agentReplCloseFeedImageMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("CloseFeedImage")
-	agentReplRequestCommandSupportMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("RequestCommandSupport")
-	agentReplOpenFeedMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("OpenFeed")
-	agentReplWatchFeedMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("WatchFeed")
-	agentReplGetFeedPageMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("GetFeedPage")
-	agentReplLoadFeedThroughMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("LoadFeedThrough")
-	agentReplInterruptMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("Interrupt")
-	agentReplRetryVendorErrorMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("RetryVendorError")
-	agentReplInspectChessBoardSquareMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("InspectChessBoardSquare")
-	agentReplPlanRollbackMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("PlanRollback")
-	agentReplRollBackMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("RollBack")
-	agentReplListRollbackPromptsMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ListRollbackPrompts")
-	agentReplAnswerPermissionMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("AnswerPermission")
-	agentReplAnswerQuestionMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("AnswerQuestion")
-	agentReplUpdateQuestionDraftMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("UpdateQuestionDraft")
-	agentReplAnswerColdGateMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("AnswerColdGate")
-	agentReplWatchWorkspaceRosterMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("WatchWorkspaceRoster")
-	agentReplGetMemoryOverviewMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("GetMemoryOverview")
-	agentReplGetWorkspaceMemoryMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("GetWorkspaceMemory")
-	agentReplCreateWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("CreateWorkspace")
-	agentReplValidateWorkspaceNameMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("ValidateWorkspaceName")
-	agentReplRegisterRepositoryMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("RegisterRepository")
-	agentReplOpenWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("OpenWorkspace")
-	agentReplListWorkspaceTranscriptsMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("ListWorkspaceTranscripts")
-	agentReplBindWorkspaceSessionMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("BindWorkspaceSession")
-	agentReplCloseWorkspaceMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("CloseWorkspace")
-	agentReplKillWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("KillWorkspace")
-	agentReplNukeWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("NukeWorkspace")
-	agentReplForgetWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("ForgetWorkspace")
-	agentReplFinishWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("FinishWorkspace")
-	agentReplCompactWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("CompactWorkspace")
-	agentReplSetWorkspaceOneShotMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceOneShot")
-	agentReplSetWorkspaceCorrespondenceMethodDescriptor = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceCorrespondence")
-	agentReplChangeWorkspaceLinksMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("ChangeWorkspaceLinks")
-	agentReplSetWorkspaceNameMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceName")
-	agentReplRestartWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
-	agentReplParkWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("ParkWorkspace")
-	agentReplSetWorkspacePriorityMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
-	agentReplSetWorkspaceHiddenMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceHidden")
-	agentReplSendHiddenKeepalivesMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("SendHiddenKeepalives")
-	agentReplSetWorkspaceParentMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceParent")
-	agentReplSwapWorkspacesMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SwapWorkspaces")
-	agentReplMoveWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("MoveWorkspace")
-	agentReplFoldRepositoryMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("FoldRepository")
-	agentReplUpdateSidebarViewMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("UpdateSidebarView")
-	agentReplArrangeSidebarMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("ArrangeSidebar")
-	agentReplGetSidebarArrangementMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("GetSidebarArrangement")
-	agentReplCreateTaskMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("CreateTask")
-	agentReplUpdateTaskMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("UpdateTask")
-	agentReplAssignWorkspaceTaskMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("AssignWorkspaceTask")
-	agentReplShowSidebarAppMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("ShowSidebarApp")
-	agentReplCreateThreadMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("CreateThread")
-	agentReplRequestNewThreadMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("RequestNewThread")
-	agentReplWatchChatMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("WatchChat")
-	agentReplSwitchChatSiblingMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SwitchChatSibling")
-	agentReplShowChatNodeMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("ShowChatNode")
-	agentReplReportChatSightingsMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportChatSightings")
-	agentReplSelectChatTextMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SelectChatText")
-	agentReplSearchChatsMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SearchChats")
-	agentReplWatchTopbarMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchTopbar")
-	agentReplSetModelMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("SetModel")
-	agentReplSetDefaultModelMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SetDefaultModel")
-	agentReplSetEffortMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("SetEffort")
-	agentReplUpdateRemoteControlModeMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("UpdateRemoteControlMode")
-	agentReplSetPermissionModeMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SetPermissionMode")
-	agentReplSelectAccountMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SelectAccount")
-	agentReplWatchFooterMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchFooter")
-	agentReplUpdateHeldPromptMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdateHeldPrompt")
-	agentReplEditHeldPromptMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("EditHeldPrompt")
-	agentReplFoldHeldPromptMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("FoldHeldPrompt")
-	agentReplUpdateClassifierPromptMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("UpdateClassifierPrompt")
-	agentReplAnswerMergeQueueOfferMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AnswerMergeQueueOffer")
-	agentReplUpdateShutdownScheduleMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("UpdateShutdownSchedule")
-	agentReplDeployMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("Deploy")
-	agentReplUpdateMergeQueueMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdateMergeQueue")
-	agentReplUpdateDeployHoldMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("UpdateDeployHold")
-	agentReplRollOutLandingMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("RollOutLanding")
-	agentReplPruneStorageMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("PruneStorage")
-	agentReplReapWorktreesMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("ReapWorktrees")
-	agentReplDaemonHealthMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("DaemonHealth")
-	agentReplSessionHealthMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SessionHealth")
-	agentReplClientLogMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("ClientLog")
-	agentReplReportLatenciesMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("ReportLatencies")
-	agentReplUpdatePersistentWifiModeMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("UpdatePersistentWifiMode")
-	agentReplRegisterWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
-	agentReplSelectWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
-	agentReplMarkWorkspaceViewedMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("MarkWorkspaceViewed")
-	agentReplReportPageUnloadingMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportPageUnloading")
-	agentReplReportPageResidencyMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportPageResidency")
-	agentReplReportEditorFocusMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ReportEditorFocus")
-	agentReplWatchHostWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("WatchHostWorkspace")
-	agentReplWatchDaemonMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
-	agentReplOpenTabsMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("OpenTabs")
-	agentReplAdoptHostWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("AdoptHostWorkspace")
-	agentReplListSlashCommandsMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ListSlashCommands")
-	agentReplWatchWebWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("WatchWebWorkspace")
-	agentReplOpenLoginMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("OpenLogin")
-	agentReplWatchLoginTerminalMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("WatchLoginTerminal")
-	agentReplSendLoginInputMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SendLoginInput")
-	agentReplCloseLoginMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("CloseLogin")
-	agentReplOpenExternalMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("OpenExternal")
-	agentReplOpenInEditorMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("OpenInEditor")
-	agentReplSelectInEditorMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SelectInEditor")
-	agentReplLoadPageInEditorMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("LoadPageInEditor")
-	agentReplAdoptWebWorkspaceMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("AdoptWebWorkspace")
-	agentReplWatchPageMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("WatchPage")
-	agentReplSubscribePageMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SubscribePage")
-	agentReplUnsubscribePageMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("UnsubscribePage")
-	agentReplReportPageDrawnMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("ReportPageDrawn")
-	agentReplDismissNewsDigestMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("DismissNewsDigest")
-	agentReplRefreshNewsDigestMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("RefreshNewsDigest")
-	agentReplGetWorkspaceStatusMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("GetWorkspaceStatus")
-	agentReplGetMergeQueueStatusMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("GetMergeQueueStatus")
-	agentReplFindWorkspacesMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("FindWorkspaces")
-	agentReplSubscribeWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SubscribeWorkspace")
-	agentReplUnsubscribeWorkspaceMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("UnsubscribeWorkspace")
-	agentReplSubscribeMergeQueueMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("SubscribeMergeQueue")
-	agentReplUnsubscribeMergeQueueMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("UnsubscribeMergeQueue")
-	agentReplRunTestsMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("RunTests")
-	agentReplRunRedundancyMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("RunRedundancy")
-	agentReplEvaluateInEditorMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("EvaluateInEditor")
-	agentReplAnswerEditorEvaluationMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("AnswerEditorEvaluation")
+	agentReplServiceDescriptor                            = v1.File_agentrepl_v1_service_proto.Services().ByName("AgentRepl")
+	agentReplSubmitPromptMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("SubmitPrompt")
+	agentReplSelectFeedRowMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SelectFeedRow")
+	agentReplSelectResponseTextMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("SelectResponseText")
+	agentReplReportComposerEntriesMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ReportComposerEntries")
+	agentReplFindEntryNeighborMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("FindEntryNeighbor")
+	agentReplFoldMergeBubbleMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("FoldMergeBubble")
+	agentReplAdjustFeedTextScaleMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("AdjustFeedTextScale")
+	agentReplOpenFeedImageMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("OpenFeedImage")
+	agentReplCloseFeedImageMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("CloseFeedImage")
+	agentReplRequestCommandSupportMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("RequestCommandSupport")
+	agentReplOpenFeedMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("OpenFeed")
+	agentReplWatchFeedMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("WatchFeed")
+	agentReplGetFeedPageMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("GetFeedPage")
+	agentReplLoadFeedThroughMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("LoadFeedThrough")
+	agentReplInterruptMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("Interrupt")
+	agentReplRetryVendorErrorMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("RetryVendorError")
+	agentReplInspectChessBoardSquareMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("InspectChessBoardSquare")
+	agentReplPlanRollbackMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("PlanRollback")
+	agentReplRollBackMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("RollBack")
+	agentReplListRollbackPromptsMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ListRollbackPrompts")
+	agentReplAnswerPermissionMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("AnswerPermission")
+	agentReplAnswerQuestionMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("AnswerQuestion")
+	agentReplUpdateQuestionDraftMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("UpdateQuestionDraft")
+	agentReplAnswerColdGateMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("AnswerColdGate")
+	agentReplWatchWorkspaceRosterMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("WatchWorkspaceRoster")
+	agentReplGetMemoryOverviewMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("GetMemoryOverview")
+	agentReplGetWorkspaceMemoryMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("GetWorkspaceMemory")
+	agentReplCreateWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("CreateWorkspace")
+	agentReplValidateWorkspaceNameMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("ValidateWorkspaceName")
+	agentReplRegisterRepositoryMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("RegisterRepository")
+	agentReplOpenWorkspaceMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("OpenWorkspace")
+	agentReplListWorkspaceTranscriptsMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("ListWorkspaceTranscripts")
+	agentReplBindWorkspaceSessionMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("BindWorkspaceSession")
+	agentReplCloseWorkspaceMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("CloseWorkspace")
+	agentReplKillWorkspaceMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("KillWorkspace")
+	agentReplNukeWorkspaceMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("NukeWorkspace")
+	agentReplForgetWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("ForgetWorkspace")
+	agentReplFinishWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("FinishWorkspace")
+	agentReplCompactWorkspaceMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("CompactWorkspace")
+	agentReplSetWorkspaceOneShotMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceOneShot")
+	agentReplSetWorkspaceCorrespondenceMethodDescriptor   = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceCorrespondence")
+	agentReplChangeWorkspaceLinksMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("ChangeWorkspaceLinks")
+	agentReplSetWorkspaceNameMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceName")
+	agentReplRestartWorkspaceMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("RestartWorkspace")
+	agentReplParkWorkspaceMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("ParkWorkspace")
+	agentReplSetWorkspacePriorityMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SetWorkspacePriority")
+	agentReplSetWorkspaceHiddenMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceHidden")
+	agentReplSendHiddenKeepalivesMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SendHiddenKeepalives")
+	agentReplSetWorkspaceParentMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("SetWorkspaceParent")
+	agentReplSwapWorkspacesMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SwapWorkspaces")
+	agentReplMoveWorkspaceMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("MoveWorkspace")
+	agentReplFoldRepositoryMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("FoldRepository")
+	agentReplUpdateSidebarViewMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("UpdateSidebarView")
+	agentReplArrangeSidebarMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("ArrangeSidebar")
+	agentReplGetSidebarArrangementMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("GetSidebarArrangement")
+	agentReplCreateTaskMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("CreateTask")
+	agentReplUpdateTaskMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("UpdateTask")
+	agentReplAssignWorkspaceTaskMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("AssignWorkspaceTask")
+	agentReplShowSidebarAppMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("ShowSidebarApp")
+	agentReplCreateThreadMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("CreateThread")
+	agentReplRequestNewThreadMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("RequestNewThread")
+	agentReplWatchChatMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("WatchChat")
+	agentReplSwitchChatSiblingMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SwitchChatSibling")
+	agentReplShowChatNodeMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("ShowChatNode")
+	agentReplReportChatSightingsMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ReportChatSightings")
+	agentReplSelectChatTextMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SelectChatText")
+	agentReplSearchChatsMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("SearchChats")
+	agentReplWatchTopbarMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("WatchTopbar")
+	agentReplSetModelMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("SetModel")
+	agentReplSetDefaultModelMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SetDefaultModel")
+	agentReplSetEffortMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("SetEffort")
+	agentReplUpdateRemoteControlModeMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("UpdateRemoteControlMode")
+	agentReplSetPermissionModeMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SetPermissionMode")
+	agentReplSelectAccountMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SelectAccount")
+	agentReplWatchFooterMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("WatchFooter")
+	agentReplUpdateHeldPromptMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("UpdateHeldPrompt")
+	agentReplEditHeldPromptMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("EditHeldPrompt")
+	agentReplFoldHeldPromptMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("FoldHeldPrompt")
+	agentReplUpdateClassifierPromptMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("UpdateClassifierPrompt")
+	agentReplAnswerMergeQueueOfferMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("AnswerMergeQueueOffer")
+	agentReplUpdateShutdownScheduleMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("UpdateShutdownSchedule")
+	agentReplDeployMethodDescriptor                       = agentReplServiceDescriptor.Methods().ByName("Deploy")
+	agentReplUpdateMergeQueueMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("UpdateMergeQueue")
+	agentReplUpdateDeployHoldMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("UpdateDeployHold")
+	agentReplRollOutLandingMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("RollOutLanding")
+	agentReplPruneStorageMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("PruneStorage")
+	agentReplReapWorktreesMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("ReapWorktrees")
+	agentReplDaemonHealthMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("DaemonHealth")
+	agentReplSessionHealthMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SessionHealth")
+	agentReplClientLogMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("ClientLog")
+	agentReplReportLatenciesMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("ReportLatencies")
+	agentReplUpdatePersistentWifiModeMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("UpdatePersistentWifiMode")
+	agentReplRegisterWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("RegisterWorkspace")
+	agentReplSelectWorkspaceMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SelectWorkspace")
+	agentReplMarkWorkspaceViewedMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("MarkWorkspaceViewed")
+	agentReplReportPageUnloadingMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ReportPageUnloading")
+	agentReplReportPageResidencyMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("ReportPageResidency")
+	agentReplReportEditorFocusMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("ReportEditorFocus")
+	agentReplWatchHostWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("WatchHostWorkspace")
+	agentReplWatchDaemonMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
+	agentReplOpenTabsMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("OpenTabs")
+	agentReplAdoptHostWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("AdoptHostWorkspace")
+	agentReplListSlashCommandsMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("ListSlashCommands")
+	agentReplWatchWebWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("WatchWebWorkspace")
+	agentReplOpenLoginMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("OpenLogin")
+	agentReplWatchLoginTerminalMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("WatchLoginTerminal")
+	agentReplSendLoginInputMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SendLoginInput")
+	agentReplCloseLoginMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("CloseLogin")
+	agentReplOpenExternalMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("OpenExternal")
+	agentReplOpenInEditorMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("OpenInEditor")
+	agentReplSelectInEditorMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("SelectInEditor")
+	agentReplLoadPageInEditorMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("LoadPageInEditor")
+	agentReplAdoptWebWorkspaceMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("AdoptWebWorkspace")
+	agentReplWatchPageMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("WatchPage")
+	agentReplSubscribePageMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("SubscribePage")
+	agentReplUnsubscribePageMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("UnsubscribePage")
+	agentReplReportPageDrawnMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("ReportPageDrawn")
+	agentReplDismissNewsDigestMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("DismissNewsDigest")
+	agentReplRefreshNewsDigestMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("RefreshNewsDigest")
+	agentReplGetWorkspaceStatusMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("GetWorkspaceStatus")
+	agentReplGetMergeQueueStatusMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("GetMergeQueueStatus")
+	agentReplFindWorkspacesMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("FindWorkspaces")
+	agentReplSubscribeWorkspaceMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("SubscribeWorkspace")
+	agentReplUnsubscribeWorkspaceMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("UnsubscribeWorkspace")
+	agentReplSubscribeMergeQueueMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SubscribeMergeQueue")
+	agentReplUnsubscribeMergeQueueMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("UnsubscribeMergeQueue")
+	agentReplSubscribePullRequestMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("SubscribePullRequest")
+	agentReplUnsubscribePullRequestMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("UnsubscribePullRequest")
+	agentReplListPullRequestSubscriptionsMethodDescriptor = agentReplServiceDescriptor.Methods().ByName("ListPullRequestSubscriptions")
+	agentReplCommentOnPullRequestMethodDescriptor         = agentReplServiceDescriptor.Methods().ByName("CommentOnPullRequest")
+	agentReplRunTestsMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("RunTests")
+	agentReplRunRedundancyMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("RunRedundancy")
+	agentReplEvaluateInEditorMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("EvaluateInEditor")
+	agentReplAnswerEditorEvaluationMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("AnswerEditorEvaluation")
 )
 
 // AgentReplClient is a client for the agentrepl.v1.AgentRepl service.
@@ -925,6 +941,20 @@ type AgentReplClient interface {
 	// End a merge-queue subscription. See
 	// endpoint_unsubscribe_merge_queue.proto.
 	UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error)
+	// Tell one workspace's agent about a GitHub pull request's activity,
+	// answering with the pull request now. Agents are subscribed by owning a
+	// link instead (ChangeWorkspaceLinksSet.ownership). See
+	// endpoint_subscribe_pull_request.proto.
+	SubscribePullRequest(context.Context, *connect.Request[v1.SubscribePullRequestRequest]) (*connect.Response[v1.SubscribePullRequestResponse], error)
+	// End a pull-request subscription. See
+	// endpoint_unsubscribe_pull_request.proto.
+	UnsubscribePullRequest(context.Context, *connect.Request[v1.UnsubscribePullRequestRequest]) (*connect.Response[v1.UnsubscribePullRequestResponse], error)
+	// The pull requests one workspace follows. See
+	// endpoint_list_pull_request_subscriptions.proto.
+	ListPullRequestSubscriptions(context.Context, *connect.Request[v1.ListPullRequestSubscriptionsRequest]) (*connect.Response[v1.ListPullRequestSubscriptionsResponse], error)
+	// Post a comment on a pull request for a workspace, recorded as its own so
+	// it is never told back to it. See endpoint_comment_on_pull_request.proto.
+	CommentOnPullRequest(context.Context, *connect.Request[v1.CommentOnPullRequestRequest]) (*connect.Response[v1.CommentOnPullRequestResponse], error)
 	// Run the named tests from one workspace's worktree, streaming what the run
 	// reports; the daemon is the one runner of tests on the host. See
 	// endpoint_run_tests.proto.
@@ -1720,6 +1750,31 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplUnsubscribeMergeQueueMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		subscribePullRequest: connect.NewClient[v1.SubscribePullRequestRequest, v1.SubscribePullRequestResponse](
+			httpClient,
+			baseURL+AgentReplSubscribePullRequestProcedure,
+			connect.WithSchema(agentReplSubscribePullRequestMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		unsubscribePullRequest: connect.NewClient[v1.UnsubscribePullRequestRequest, v1.UnsubscribePullRequestResponse](
+			httpClient,
+			baseURL+AgentReplUnsubscribePullRequestProcedure,
+			connect.WithSchema(agentReplUnsubscribePullRequestMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		listPullRequestSubscriptions: connect.NewClient[v1.ListPullRequestSubscriptionsRequest, v1.ListPullRequestSubscriptionsResponse](
+			httpClient,
+			baseURL+AgentReplListPullRequestSubscriptionsProcedure,
+			connect.WithSchema(agentReplListPullRequestSubscriptionsMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		commentOnPullRequest: connect.NewClient[v1.CommentOnPullRequestRequest, v1.CommentOnPullRequestResponse](
+			httpClient,
+			baseURL+AgentReplCommentOnPullRequestProcedure,
+			connect.WithSchema(agentReplCommentOnPullRequestMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		runTests: connect.NewClient[v1.RunTestsRequest, v1.RunTestsResponse](
 			httpClient,
 			baseURL+AgentReplRunTestsProcedure,
@@ -1749,136 +1804,140 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 
 // agentReplClient implements AgentReplClient.
 type agentReplClient struct {
-	submitPrompt               *connect.Client[v1.SubmitPromptRequest, v1.SubmitPromptResponse]
-	selectFeedRow              *connect.Client[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse]
-	selectResponseText         *connect.Client[v1.SelectResponseTextRequest, v1.SelectResponseTextResponse]
-	reportComposerEntries      *connect.Client[v1.ReportComposerEntriesRequest, v1.ReportComposerEntriesResponse]
-	findEntryNeighbor          *connect.Client[v1.FindEntryNeighborRequest, v1.FindEntryNeighborResponse]
-	foldMergeBubble            *connect.Client[v1.FoldMergeBubbleRequest, v1.FoldMergeBubbleResponse]
-	adjustFeedTextScale        *connect.Client[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse]
-	openFeedImage              *connect.Client[v1.OpenFeedImageRequest, v1.OpenFeedImageResponse]
-	closeFeedImage             *connect.Client[v1.CloseFeedImageRequest, v1.CloseFeedImageResponse]
-	requestCommandSupport      *connect.Client[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse]
-	openFeed                   *connect.Client[v1.OpenFeedRequest, v1.OpenFeedResponse]
-	watchFeed                  *connect.Client[v1.WatchFeedRequest, v1.WatchFeedResponse]
-	getFeedPage                *connect.Client[v1.GetFeedPageRequest, v1.GetFeedPageResponse]
-	loadFeedThrough            *connect.Client[v1.LoadFeedThroughRequest, v1.LoadFeedThroughResponse]
-	interrupt                  *connect.Client[v1.InterruptRequest, v1.InterruptResponse]
-	retryVendorError           *connect.Client[v1.RetryVendorErrorRequest, v1.RetryVendorErrorResponse]
-	inspectChessBoardSquare    *connect.Client[v1.InspectChessBoardSquareRequest, v1.InspectChessBoardSquareResponse]
-	planRollback               *connect.Client[v1.PlanRollbackRequest, v1.PlanRollbackResponse]
-	rollBack                   *connect.Client[v1.RollBackRequest, v1.RollBackResponse]
-	listRollbackPrompts        *connect.Client[v1.ListRollbackPromptsRequest, v1.ListRollbackPromptsResponse]
-	answerPermission           *connect.Client[v1.AnswerPermissionRequest, v1.AnswerPermissionResponse]
-	answerQuestion             *connect.Client[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse]
-	updateQuestionDraft        *connect.Client[v1.UpdateQuestionDraftRequest, v1.UpdateQuestionDraftResponse]
-	answerColdGate             *connect.Client[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse]
-	watchWorkspaceRoster       *connect.Client[v1.WatchWorkspaceRosterRequest, v1.WatchWorkspaceRosterResponse]
-	getMemoryOverview          *connect.Client[v1.GetMemoryOverviewRequest, v1.GetMemoryOverviewResponse]
-	getWorkspaceMemory         *connect.Client[v1.GetWorkspaceMemoryRequest, v1.GetWorkspaceMemoryResponse]
-	createWorkspace            *connect.Client[v1.CreateWorkspaceRequest, v1.CreateWorkspaceResponse]
-	validateWorkspaceName      *connect.Client[v1.ValidateWorkspaceNameRequest, v1.ValidateWorkspaceNameResponse]
-	registerRepository         *connect.Client[v1.RegisterRepositoryRequest, v1.RegisterRepositoryResponse]
-	openWorkspace              *connect.Client[v1.OpenWorkspaceRequest, v1.OpenWorkspaceResponse]
-	listWorkspaceTranscripts   *connect.Client[v1.ListWorkspaceTranscriptsRequest, v1.ListWorkspaceTranscriptsResponse]
-	bindWorkspaceSession       *connect.Client[v1.BindWorkspaceSessionRequest, v1.BindWorkspaceSessionResponse]
-	closeWorkspace             *connect.Client[v1.CloseWorkspaceRequest, v1.CloseWorkspaceResponse]
-	killWorkspace              *connect.Client[v1.KillWorkspaceRequest, v1.KillWorkspaceResponse]
-	nukeWorkspace              *connect.Client[v1.NukeWorkspaceRequest, v1.NukeWorkspaceResponse]
-	forgetWorkspace            *connect.Client[v1.ForgetWorkspaceRequest, v1.ForgetWorkspaceResponse]
-	finishWorkspace            *connect.Client[v1.FinishWorkspaceRequest, v1.FinishWorkspaceResponse]
-	compactWorkspace           *connect.Client[v1.CompactWorkspaceRequest, v1.CompactWorkspaceResponse]
-	setWorkspaceOneShot        *connect.Client[v1.SetWorkspaceOneShotRequest, v1.SetWorkspaceOneShotResponse]
-	setWorkspaceCorrespondence *connect.Client[v1.SetWorkspaceCorrespondenceRequest, v1.SetWorkspaceCorrespondenceResponse]
-	changeWorkspaceLinks       *connect.Client[v1.ChangeWorkspaceLinksRequest, v1.ChangeWorkspaceLinksResponse]
-	setWorkspaceName           *connect.Client[v1.SetWorkspaceNameRequest, v1.SetWorkspaceNameResponse]
-	restartWorkspace           *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
-	parkWorkspace              *connect.Client[v1.ParkWorkspaceRequest, v1.ParkWorkspaceResponse]
-	setWorkspacePriority       *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
-	setWorkspaceHidden         *connect.Client[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse]
-	sendHiddenKeepalives       *connect.Client[v1.SendHiddenKeepalivesRequest, v1.SendHiddenKeepalivesResponse]
-	setWorkspaceParent         *connect.Client[v1.SetWorkspaceParentRequest, v1.SetWorkspaceParentResponse]
-	swapWorkspaces             *connect.Client[v1.SwapWorkspacesRequest, v1.SwapWorkspacesResponse]
-	moveWorkspace              *connect.Client[v1.MoveWorkspaceRequest, v1.MoveWorkspaceResponse]
-	foldRepository             *connect.Client[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse]
-	updateSidebarView          *connect.Client[v1.UpdateSidebarViewRequest, v1.UpdateSidebarViewResponse]
-	arrangeSidebar             *connect.Client[v1.ArrangeSidebarRequest, v1.ArrangeSidebarResponse]
-	getSidebarArrangement      *connect.Client[v1.GetSidebarArrangementRequest, v1.GetSidebarArrangementResponse]
-	createTask                 *connect.Client[v1.CreateTaskRequest, v1.CreateTaskResponse]
-	updateTask                 *connect.Client[v1.UpdateTaskRequest, v1.UpdateTaskResponse]
-	assignWorkspaceTask        *connect.Client[v1.AssignWorkspaceTaskRequest, v1.AssignWorkspaceTaskResponse]
-	showSidebarApp             *connect.Client[v1.ShowSidebarAppRequest, v1.ShowSidebarAppResponse]
-	createThread               *connect.Client[v1.CreateThreadRequest, v1.CreateThreadResponse]
-	requestNewThread           *connect.Client[v1.RequestNewThreadRequest, v1.RequestNewThreadResponse]
-	watchChat                  *connect.Client[v1.WatchChatRequest, v1.WatchChatResponse]
-	switchChatSibling          *connect.Client[v1.SwitchChatSiblingRequest, v1.SwitchChatSiblingResponse]
-	showChatNode               *connect.Client[v1.ShowChatNodeRequest, v1.ShowChatNodeResponse]
-	reportChatSightings        *connect.Client[v1.ReportChatSightingsRequest, v1.ReportChatSightingsResponse]
-	selectChatText             *connect.Client[v1.SelectChatTextRequest, v1.SelectChatTextResponse]
-	searchChats                *connect.Client[v1.SearchChatsRequest, v1.SearchChatsResponse]
-	watchTopbar                *connect.Client[v1.WatchTopbarRequest, v1.WatchTopbarResponse]
-	setModel                   *connect.Client[v1.SetModelRequest, v1.SetModelResponse]
-	setDefaultModel            *connect.Client[v1.SetDefaultModelRequest, v1.SetDefaultModelResponse]
-	setEffort                  *connect.Client[v1.SetEffortRequest, v1.SetEffortResponse]
-	updateRemoteControlMode    *connect.Client[v1.UpdateRemoteControlModeRequest, v1.UpdateRemoteControlModeResponse]
-	setPermissionMode          *connect.Client[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse]
-	selectAccount              *connect.Client[v1.SelectAccountRequest, v1.SelectAccountResponse]
-	watchFooter                *connect.Client[v1.WatchFooterRequest, v1.WatchFooterResponse]
-	updateHeldPrompt           *connect.Client[v1.UpdateHeldPromptRequest, v1.UpdateHeldPromptResponse]
-	editHeldPrompt             *connect.Client[v1.EditHeldPromptRequest, v1.EditHeldPromptResponse]
-	foldHeldPrompt             *connect.Client[v1.FoldHeldPromptRequest, v1.FoldHeldPromptResponse]
-	updateClassifierPrompt     *connect.Client[v1.UpdateClassifierPromptRequest, v1.UpdateClassifierPromptResponse]
-	answerMergeQueueOffer      *connect.Client[v1.AnswerMergeQueueOfferRequest, v1.AnswerMergeQueueOfferResponse]
-	updateShutdownSchedule     *connect.Client[v1.UpdateShutdownScheduleRequest, v1.UpdateShutdownScheduleResponse]
-	deploy                     *connect.Client[v1.DeployRequest, v1.DeployResponse]
-	updateMergeQueue           *connect.Client[v1.UpdateMergeQueueRequest, v1.UpdateMergeQueueResponse]
-	updateDeployHold           *connect.Client[v1.UpdateDeployHoldRequest, v1.UpdateDeployHoldResponse]
-	rollOutLanding             *connect.Client[v1.RollOutLandingRequest, v1.RollOutLandingResponse]
-	pruneStorage               *connect.Client[v1.PruneStorageRequest, v1.PruneStorageResponse]
-	reapWorktrees              *connect.Client[v1.ReapWorktreesRequest, v1.ReapWorktreesResponse]
-	daemonHealth               *connect.Client[v1.DaemonHealthRequest, v1.DaemonHealthResponse]
-	sessionHealth              *connect.Client[v1.SessionHealthRequest, v1.SessionHealthResponse]
-	clientLog                  *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
-	reportLatencies            *connect.Client[v1.ReportLatenciesRequest, v1.ReportLatenciesResponse]
-	updatePersistentWifiMode   *connect.Client[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse]
-	registerWorkspace          *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
-	selectWorkspace            *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
-	markWorkspaceViewed        *connect.Client[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse]
-	reportPageUnloading        *connect.Client[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse]
-	reportPageResidency        *connect.Client[v1.ReportPageResidencyRequest, v1.ReportPageResidencyResponse]
-	reportEditorFocus          *connect.Client[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse]
-	watchHostWorkspace         *connect.Client[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse]
-	watchDaemon                *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
-	openTabs                   *connect.Client[v1.OpenTabsRequest, v1.OpenTabsResponse]
-	adoptHostWorkspace         *connect.Client[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse]
-	listSlashCommands          *connect.Client[v1.ListSlashCommandsRequest, v1.ListSlashCommandsResponse]
-	watchWebWorkspace          *connect.Client[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse]
-	openLogin                  *connect.Client[v1.OpenLoginRequest, v1.OpenLoginResponse]
-	watchLoginTerminal         *connect.Client[v1.WatchLoginTerminalRequest, v1.LoginTerminalOutput]
-	sendLoginInput             *connect.Client[v1.SendLoginInputRequest, v1.SendLoginInputResponse]
-	closeLogin                 *connect.Client[v1.CloseLoginRequest, v1.CloseLoginResponse]
-	openExternal               *connect.Client[v1.OpenExternalRequest, v1.OpenExternalResponse]
-	openInEditor               *connect.Client[v1.OpenInEditorRequest, v1.OpenInEditorResponse]
-	selectInEditor             *connect.Client[v1.SelectInEditorRequest, v1.SelectInEditorResponse]
-	loadPageInEditor           *connect.Client[v1.LoadPageInEditorRequest, v1.LoadPageInEditorResponse]
-	adoptWebWorkspace          *connect.Client[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse]
-	watchPage                  *connect.Client[v1.WatchPageRequest, v1.WatchPageResponse]
-	subscribePage              *connect.Client[v1.SubscribePageRequest, v1.SubscribePageResponse]
-	unsubscribePage            *connect.Client[v1.UnsubscribePageRequest, v1.UnsubscribePageResponse]
-	reportPageDrawn            *connect.Client[v1.ReportPageDrawnRequest, v1.ReportPageDrawnResponse]
-	dismissNewsDigest          *connect.Client[v1.DismissNewsDigestRequest, v1.DismissNewsDigestResponse]
-	refreshNewsDigest          *connect.Client[v1.RefreshNewsDigestRequest, v1.RefreshNewsDigestResponse]
-	getWorkspaceStatus         *connect.Client[v1.GetWorkspaceStatusRequest, v1.GetWorkspaceStatusResponse]
-	getMergeQueueStatus        *connect.Client[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse]
-	findWorkspaces             *connect.Client[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse]
-	subscribeWorkspace         *connect.Client[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse]
-	unsubscribeWorkspace       *connect.Client[v1.UnsubscribeWorkspaceRequest, v1.UnsubscribeWorkspaceResponse]
-	subscribeMergeQueue        *connect.Client[v1.SubscribeMergeQueueRequest, v1.SubscribeMergeQueueResponse]
-	unsubscribeMergeQueue      *connect.Client[v1.UnsubscribeMergeQueueRequest, v1.UnsubscribeMergeQueueResponse]
-	runTests                   *connect.Client[v1.RunTestsRequest, v1.RunTestsResponse]
-	runRedundancy              *connect.Client[v1.RunRedundancyRequest, v1.RunRedundancyResponse]
-	evaluateInEditor           *connect.Client[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse]
-	answerEditorEvaluation     *connect.Client[v1.AnswerEditorEvaluationRequest, v1.AnswerEditorEvaluationResponse]
+	submitPrompt                 *connect.Client[v1.SubmitPromptRequest, v1.SubmitPromptResponse]
+	selectFeedRow                *connect.Client[v1.SelectFeedRowRequest, v1.SelectFeedRowResponse]
+	selectResponseText           *connect.Client[v1.SelectResponseTextRequest, v1.SelectResponseTextResponse]
+	reportComposerEntries        *connect.Client[v1.ReportComposerEntriesRequest, v1.ReportComposerEntriesResponse]
+	findEntryNeighbor            *connect.Client[v1.FindEntryNeighborRequest, v1.FindEntryNeighborResponse]
+	foldMergeBubble              *connect.Client[v1.FoldMergeBubbleRequest, v1.FoldMergeBubbleResponse]
+	adjustFeedTextScale          *connect.Client[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse]
+	openFeedImage                *connect.Client[v1.OpenFeedImageRequest, v1.OpenFeedImageResponse]
+	closeFeedImage               *connect.Client[v1.CloseFeedImageRequest, v1.CloseFeedImageResponse]
+	requestCommandSupport        *connect.Client[v1.RequestCommandSupportRequest, v1.RequestCommandSupportResponse]
+	openFeed                     *connect.Client[v1.OpenFeedRequest, v1.OpenFeedResponse]
+	watchFeed                    *connect.Client[v1.WatchFeedRequest, v1.WatchFeedResponse]
+	getFeedPage                  *connect.Client[v1.GetFeedPageRequest, v1.GetFeedPageResponse]
+	loadFeedThrough              *connect.Client[v1.LoadFeedThroughRequest, v1.LoadFeedThroughResponse]
+	interrupt                    *connect.Client[v1.InterruptRequest, v1.InterruptResponse]
+	retryVendorError             *connect.Client[v1.RetryVendorErrorRequest, v1.RetryVendorErrorResponse]
+	inspectChessBoardSquare      *connect.Client[v1.InspectChessBoardSquareRequest, v1.InspectChessBoardSquareResponse]
+	planRollback                 *connect.Client[v1.PlanRollbackRequest, v1.PlanRollbackResponse]
+	rollBack                     *connect.Client[v1.RollBackRequest, v1.RollBackResponse]
+	listRollbackPrompts          *connect.Client[v1.ListRollbackPromptsRequest, v1.ListRollbackPromptsResponse]
+	answerPermission             *connect.Client[v1.AnswerPermissionRequest, v1.AnswerPermissionResponse]
+	answerQuestion               *connect.Client[v1.AnswerQuestionRequest, v1.AnswerQuestionResponse]
+	updateQuestionDraft          *connect.Client[v1.UpdateQuestionDraftRequest, v1.UpdateQuestionDraftResponse]
+	answerColdGate               *connect.Client[v1.AnswerColdGateRequest, v1.AnswerColdGateResponse]
+	watchWorkspaceRoster         *connect.Client[v1.WatchWorkspaceRosterRequest, v1.WatchWorkspaceRosterResponse]
+	getMemoryOverview            *connect.Client[v1.GetMemoryOverviewRequest, v1.GetMemoryOverviewResponse]
+	getWorkspaceMemory           *connect.Client[v1.GetWorkspaceMemoryRequest, v1.GetWorkspaceMemoryResponse]
+	createWorkspace              *connect.Client[v1.CreateWorkspaceRequest, v1.CreateWorkspaceResponse]
+	validateWorkspaceName        *connect.Client[v1.ValidateWorkspaceNameRequest, v1.ValidateWorkspaceNameResponse]
+	registerRepository           *connect.Client[v1.RegisterRepositoryRequest, v1.RegisterRepositoryResponse]
+	openWorkspace                *connect.Client[v1.OpenWorkspaceRequest, v1.OpenWorkspaceResponse]
+	listWorkspaceTranscripts     *connect.Client[v1.ListWorkspaceTranscriptsRequest, v1.ListWorkspaceTranscriptsResponse]
+	bindWorkspaceSession         *connect.Client[v1.BindWorkspaceSessionRequest, v1.BindWorkspaceSessionResponse]
+	closeWorkspace               *connect.Client[v1.CloseWorkspaceRequest, v1.CloseWorkspaceResponse]
+	killWorkspace                *connect.Client[v1.KillWorkspaceRequest, v1.KillWorkspaceResponse]
+	nukeWorkspace                *connect.Client[v1.NukeWorkspaceRequest, v1.NukeWorkspaceResponse]
+	forgetWorkspace              *connect.Client[v1.ForgetWorkspaceRequest, v1.ForgetWorkspaceResponse]
+	finishWorkspace              *connect.Client[v1.FinishWorkspaceRequest, v1.FinishWorkspaceResponse]
+	compactWorkspace             *connect.Client[v1.CompactWorkspaceRequest, v1.CompactWorkspaceResponse]
+	setWorkspaceOneShot          *connect.Client[v1.SetWorkspaceOneShotRequest, v1.SetWorkspaceOneShotResponse]
+	setWorkspaceCorrespondence   *connect.Client[v1.SetWorkspaceCorrespondenceRequest, v1.SetWorkspaceCorrespondenceResponse]
+	changeWorkspaceLinks         *connect.Client[v1.ChangeWorkspaceLinksRequest, v1.ChangeWorkspaceLinksResponse]
+	setWorkspaceName             *connect.Client[v1.SetWorkspaceNameRequest, v1.SetWorkspaceNameResponse]
+	restartWorkspace             *connect.Client[v1.RestartWorkspaceRequest, v1.RestartWorkspaceResponse]
+	parkWorkspace                *connect.Client[v1.ParkWorkspaceRequest, v1.ParkWorkspaceResponse]
+	setWorkspacePriority         *connect.Client[v1.SetWorkspacePriorityRequest, v1.SetWorkspacePriorityResponse]
+	setWorkspaceHidden           *connect.Client[v1.SetWorkspaceHiddenRequest, v1.SetWorkspaceHiddenResponse]
+	sendHiddenKeepalives         *connect.Client[v1.SendHiddenKeepalivesRequest, v1.SendHiddenKeepalivesResponse]
+	setWorkspaceParent           *connect.Client[v1.SetWorkspaceParentRequest, v1.SetWorkspaceParentResponse]
+	swapWorkspaces               *connect.Client[v1.SwapWorkspacesRequest, v1.SwapWorkspacesResponse]
+	moveWorkspace                *connect.Client[v1.MoveWorkspaceRequest, v1.MoveWorkspaceResponse]
+	foldRepository               *connect.Client[v1.FoldRepositoryRequest, v1.FoldRepositoryResponse]
+	updateSidebarView            *connect.Client[v1.UpdateSidebarViewRequest, v1.UpdateSidebarViewResponse]
+	arrangeSidebar               *connect.Client[v1.ArrangeSidebarRequest, v1.ArrangeSidebarResponse]
+	getSidebarArrangement        *connect.Client[v1.GetSidebarArrangementRequest, v1.GetSidebarArrangementResponse]
+	createTask                   *connect.Client[v1.CreateTaskRequest, v1.CreateTaskResponse]
+	updateTask                   *connect.Client[v1.UpdateTaskRequest, v1.UpdateTaskResponse]
+	assignWorkspaceTask          *connect.Client[v1.AssignWorkspaceTaskRequest, v1.AssignWorkspaceTaskResponse]
+	showSidebarApp               *connect.Client[v1.ShowSidebarAppRequest, v1.ShowSidebarAppResponse]
+	createThread                 *connect.Client[v1.CreateThreadRequest, v1.CreateThreadResponse]
+	requestNewThread             *connect.Client[v1.RequestNewThreadRequest, v1.RequestNewThreadResponse]
+	watchChat                    *connect.Client[v1.WatchChatRequest, v1.WatchChatResponse]
+	switchChatSibling            *connect.Client[v1.SwitchChatSiblingRequest, v1.SwitchChatSiblingResponse]
+	showChatNode                 *connect.Client[v1.ShowChatNodeRequest, v1.ShowChatNodeResponse]
+	reportChatSightings          *connect.Client[v1.ReportChatSightingsRequest, v1.ReportChatSightingsResponse]
+	selectChatText               *connect.Client[v1.SelectChatTextRequest, v1.SelectChatTextResponse]
+	searchChats                  *connect.Client[v1.SearchChatsRequest, v1.SearchChatsResponse]
+	watchTopbar                  *connect.Client[v1.WatchTopbarRequest, v1.WatchTopbarResponse]
+	setModel                     *connect.Client[v1.SetModelRequest, v1.SetModelResponse]
+	setDefaultModel              *connect.Client[v1.SetDefaultModelRequest, v1.SetDefaultModelResponse]
+	setEffort                    *connect.Client[v1.SetEffortRequest, v1.SetEffortResponse]
+	updateRemoteControlMode      *connect.Client[v1.UpdateRemoteControlModeRequest, v1.UpdateRemoteControlModeResponse]
+	setPermissionMode            *connect.Client[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse]
+	selectAccount                *connect.Client[v1.SelectAccountRequest, v1.SelectAccountResponse]
+	watchFooter                  *connect.Client[v1.WatchFooterRequest, v1.WatchFooterResponse]
+	updateHeldPrompt             *connect.Client[v1.UpdateHeldPromptRequest, v1.UpdateHeldPromptResponse]
+	editHeldPrompt               *connect.Client[v1.EditHeldPromptRequest, v1.EditHeldPromptResponse]
+	foldHeldPrompt               *connect.Client[v1.FoldHeldPromptRequest, v1.FoldHeldPromptResponse]
+	updateClassifierPrompt       *connect.Client[v1.UpdateClassifierPromptRequest, v1.UpdateClassifierPromptResponse]
+	answerMergeQueueOffer        *connect.Client[v1.AnswerMergeQueueOfferRequest, v1.AnswerMergeQueueOfferResponse]
+	updateShutdownSchedule       *connect.Client[v1.UpdateShutdownScheduleRequest, v1.UpdateShutdownScheduleResponse]
+	deploy                       *connect.Client[v1.DeployRequest, v1.DeployResponse]
+	updateMergeQueue             *connect.Client[v1.UpdateMergeQueueRequest, v1.UpdateMergeQueueResponse]
+	updateDeployHold             *connect.Client[v1.UpdateDeployHoldRequest, v1.UpdateDeployHoldResponse]
+	rollOutLanding               *connect.Client[v1.RollOutLandingRequest, v1.RollOutLandingResponse]
+	pruneStorage                 *connect.Client[v1.PruneStorageRequest, v1.PruneStorageResponse]
+	reapWorktrees                *connect.Client[v1.ReapWorktreesRequest, v1.ReapWorktreesResponse]
+	daemonHealth                 *connect.Client[v1.DaemonHealthRequest, v1.DaemonHealthResponse]
+	sessionHealth                *connect.Client[v1.SessionHealthRequest, v1.SessionHealthResponse]
+	clientLog                    *connect.Client[v1.ClientLogRequest, v1.ClientLogResponse]
+	reportLatencies              *connect.Client[v1.ReportLatenciesRequest, v1.ReportLatenciesResponse]
+	updatePersistentWifiMode     *connect.Client[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse]
+	registerWorkspace            *connect.Client[v1.RegisterWorkspaceRequest, v1.RegisterWorkspaceResponse]
+	selectWorkspace              *connect.Client[v1.SelectWorkspaceRequest, v1.SelectWorkspaceResponse]
+	markWorkspaceViewed          *connect.Client[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse]
+	reportPageUnloading          *connect.Client[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse]
+	reportPageResidency          *connect.Client[v1.ReportPageResidencyRequest, v1.ReportPageResidencyResponse]
+	reportEditorFocus            *connect.Client[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse]
+	watchHostWorkspace           *connect.Client[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse]
+	watchDaemon                  *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
+	openTabs                     *connect.Client[v1.OpenTabsRequest, v1.OpenTabsResponse]
+	adoptHostWorkspace           *connect.Client[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse]
+	listSlashCommands            *connect.Client[v1.ListSlashCommandsRequest, v1.ListSlashCommandsResponse]
+	watchWebWorkspace            *connect.Client[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse]
+	openLogin                    *connect.Client[v1.OpenLoginRequest, v1.OpenLoginResponse]
+	watchLoginTerminal           *connect.Client[v1.WatchLoginTerminalRequest, v1.LoginTerminalOutput]
+	sendLoginInput               *connect.Client[v1.SendLoginInputRequest, v1.SendLoginInputResponse]
+	closeLogin                   *connect.Client[v1.CloseLoginRequest, v1.CloseLoginResponse]
+	openExternal                 *connect.Client[v1.OpenExternalRequest, v1.OpenExternalResponse]
+	openInEditor                 *connect.Client[v1.OpenInEditorRequest, v1.OpenInEditorResponse]
+	selectInEditor               *connect.Client[v1.SelectInEditorRequest, v1.SelectInEditorResponse]
+	loadPageInEditor             *connect.Client[v1.LoadPageInEditorRequest, v1.LoadPageInEditorResponse]
+	adoptWebWorkspace            *connect.Client[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse]
+	watchPage                    *connect.Client[v1.WatchPageRequest, v1.WatchPageResponse]
+	subscribePage                *connect.Client[v1.SubscribePageRequest, v1.SubscribePageResponse]
+	unsubscribePage              *connect.Client[v1.UnsubscribePageRequest, v1.UnsubscribePageResponse]
+	reportPageDrawn              *connect.Client[v1.ReportPageDrawnRequest, v1.ReportPageDrawnResponse]
+	dismissNewsDigest            *connect.Client[v1.DismissNewsDigestRequest, v1.DismissNewsDigestResponse]
+	refreshNewsDigest            *connect.Client[v1.RefreshNewsDigestRequest, v1.RefreshNewsDigestResponse]
+	getWorkspaceStatus           *connect.Client[v1.GetWorkspaceStatusRequest, v1.GetWorkspaceStatusResponse]
+	getMergeQueueStatus          *connect.Client[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse]
+	findWorkspaces               *connect.Client[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse]
+	subscribeWorkspace           *connect.Client[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse]
+	unsubscribeWorkspace         *connect.Client[v1.UnsubscribeWorkspaceRequest, v1.UnsubscribeWorkspaceResponse]
+	subscribeMergeQueue          *connect.Client[v1.SubscribeMergeQueueRequest, v1.SubscribeMergeQueueResponse]
+	unsubscribeMergeQueue        *connect.Client[v1.UnsubscribeMergeQueueRequest, v1.UnsubscribeMergeQueueResponse]
+	subscribePullRequest         *connect.Client[v1.SubscribePullRequestRequest, v1.SubscribePullRequestResponse]
+	unsubscribePullRequest       *connect.Client[v1.UnsubscribePullRequestRequest, v1.UnsubscribePullRequestResponse]
+	listPullRequestSubscriptions *connect.Client[v1.ListPullRequestSubscriptionsRequest, v1.ListPullRequestSubscriptionsResponse]
+	commentOnPullRequest         *connect.Client[v1.CommentOnPullRequestRequest, v1.CommentOnPullRequestResponse]
+	runTests                     *connect.Client[v1.RunTestsRequest, v1.RunTestsResponse]
+	runRedundancy                *connect.Client[v1.RunRedundancyRequest, v1.RunRedundancyResponse]
+	evaluateInEditor             *connect.Client[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse]
+	answerEditorEvaluation       *connect.Client[v1.AnswerEditorEvaluationRequest, v1.AnswerEditorEvaluationResponse]
 }
 
 // SubmitPrompt calls agentrepl.v1.AgentRepl.SubmitPrompt.
@@ -2511,6 +2570,26 @@ func (c *agentReplClient) UnsubscribeMergeQueue(ctx context.Context, req *connec
 	return c.unsubscribeMergeQueue.CallUnary(ctx, req)
 }
 
+// SubscribePullRequest calls agentrepl.v1.AgentRepl.SubscribePullRequest.
+func (c *agentReplClient) SubscribePullRequest(ctx context.Context, req *connect.Request[v1.SubscribePullRequestRequest]) (*connect.Response[v1.SubscribePullRequestResponse], error) {
+	return c.subscribePullRequest.CallUnary(ctx, req)
+}
+
+// UnsubscribePullRequest calls agentrepl.v1.AgentRepl.UnsubscribePullRequest.
+func (c *agentReplClient) UnsubscribePullRequest(ctx context.Context, req *connect.Request[v1.UnsubscribePullRequestRequest]) (*connect.Response[v1.UnsubscribePullRequestResponse], error) {
+	return c.unsubscribePullRequest.CallUnary(ctx, req)
+}
+
+// ListPullRequestSubscriptions calls agentrepl.v1.AgentRepl.ListPullRequestSubscriptions.
+func (c *agentReplClient) ListPullRequestSubscriptions(ctx context.Context, req *connect.Request[v1.ListPullRequestSubscriptionsRequest]) (*connect.Response[v1.ListPullRequestSubscriptionsResponse], error) {
+	return c.listPullRequestSubscriptions.CallUnary(ctx, req)
+}
+
+// CommentOnPullRequest calls agentrepl.v1.AgentRepl.CommentOnPullRequest.
+func (c *agentReplClient) CommentOnPullRequest(ctx context.Context, req *connect.Request[v1.CommentOnPullRequestRequest]) (*connect.Response[v1.CommentOnPullRequestResponse], error) {
+	return c.commentOnPullRequest.CallUnary(ctx, req)
+}
+
 // RunTests calls agentrepl.v1.AgentRepl.RunTests.
 func (c *agentReplClient) RunTests(ctx context.Context, req *connect.Request[v1.RunTestsRequest]) (*connect.ServerStreamForClient[v1.RunTestsResponse], error) {
 	return c.runTests.CallServerStream(ctx, req)
@@ -2928,6 +3007,20 @@ type AgentReplHandler interface {
 	// End a merge-queue subscription. See
 	// endpoint_unsubscribe_merge_queue.proto.
 	UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error)
+	// Tell one workspace's agent about a GitHub pull request's activity,
+	// answering with the pull request now. Agents are subscribed by owning a
+	// link instead (ChangeWorkspaceLinksSet.ownership). See
+	// endpoint_subscribe_pull_request.proto.
+	SubscribePullRequest(context.Context, *connect.Request[v1.SubscribePullRequestRequest]) (*connect.Response[v1.SubscribePullRequestResponse], error)
+	// End a pull-request subscription. See
+	// endpoint_unsubscribe_pull_request.proto.
+	UnsubscribePullRequest(context.Context, *connect.Request[v1.UnsubscribePullRequestRequest]) (*connect.Response[v1.UnsubscribePullRequestResponse], error)
+	// The pull requests one workspace follows. See
+	// endpoint_list_pull_request_subscriptions.proto.
+	ListPullRequestSubscriptions(context.Context, *connect.Request[v1.ListPullRequestSubscriptionsRequest]) (*connect.Response[v1.ListPullRequestSubscriptionsResponse], error)
+	// Post a comment on a pull request for a workspace, recorded as its own so
+	// it is never told back to it. See endpoint_comment_on_pull_request.proto.
+	CommentOnPullRequest(context.Context, *connect.Request[v1.CommentOnPullRequestRequest]) (*connect.Response[v1.CommentOnPullRequestResponse], error)
 	// Run the named tests from one workspace's worktree, streaming what the run
 	// reports; the daemon is the one runner of tests on the host. See
 	// endpoint_run_tests.proto.
@@ -3719,6 +3812,31 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplUnsubscribeMergeQueueMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplSubscribePullRequestHandler := connect.NewUnaryHandler(
+		AgentReplSubscribePullRequestProcedure,
+		svc.SubscribePullRequest,
+		connect.WithSchema(agentReplSubscribePullRequestMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplUnsubscribePullRequestHandler := connect.NewUnaryHandler(
+		AgentReplUnsubscribePullRequestProcedure,
+		svc.UnsubscribePullRequest,
+		connect.WithSchema(agentReplUnsubscribePullRequestMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplListPullRequestSubscriptionsHandler := connect.NewUnaryHandler(
+		AgentReplListPullRequestSubscriptionsProcedure,
+		svc.ListPullRequestSubscriptions,
+		connect.WithSchema(agentReplListPullRequestSubscriptionsMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplCommentOnPullRequestHandler := connect.NewUnaryHandler(
+		AgentReplCommentOnPullRequestProcedure,
+		svc.CommentOnPullRequest,
+		connect.WithSchema(agentReplCommentOnPullRequestMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplRunTestsHandler := connect.NewServerStreamHandler(
 		AgentReplRunTestsProcedure,
 		svc.RunTests,
@@ -3997,6 +4115,14 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSubscribeMergeQueueHandler.ServeHTTP(w, r)
 		case AgentReplUnsubscribeMergeQueueProcedure:
 			agentReplUnsubscribeMergeQueueHandler.ServeHTTP(w, r)
+		case AgentReplSubscribePullRequestProcedure:
+			agentReplSubscribePullRequestHandler.ServeHTTP(w, r)
+		case AgentReplUnsubscribePullRequestProcedure:
+			agentReplUnsubscribePullRequestHandler.ServeHTTP(w, r)
+		case AgentReplListPullRequestSubscriptionsProcedure:
+			agentReplListPullRequestSubscriptionsHandler.ServeHTTP(w, r)
+		case AgentReplCommentOnPullRequestProcedure:
+			agentReplCommentOnPullRequestHandler.ServeHTTP(w, r)
 		case AgentReplRunTestsProcedure:
 			agentReplRunTestsHandler.ServeHTTP(w, r)
 		case AgentReplRunRedundancyProcedure:
@@ -4516,6 +4642,22 @@ func (UnimplementedAgentReplHandler) SubscribeMergeQueue(context.Context, *conne
 
 func (UnimplementedAgentReplHandler) UnsubscribeMergeQueue(context.Context, *connect.Request[v1.UnsubscribeMergeQueueRequest]) (*connect.Response[v1.UnsubscribeMergeQueueResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UnsubscribeMergeQueue is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SubscribePullRequest(context.Context, *connect.Request[v1.SubscribePullRequestRequest]) (*connect.Response[v1.SubscribePullRequestResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SubscribePullRequest is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UnsubscribePullRequest(context.Context, *connect.Request[v1.UnsubscribePullRequestRequest]) (*connect.Response[v1.UnsubscribePullRequestResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UnsubscribePullRequest is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ListPullRequestSubscriptions(context.Context, *connect.Request[v1.ListPullRequestSubscriptionsRequest]) (*connect.Response[v1.ListPullRequestSubscriptionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListPullRequestSubscriptions is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) CommentOnPullRequest(context.Context, *connect.Request[v1.CommentOnPullRequestRequest]) (*connect.Response[v1.CommentOnPullRequestResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CommentOnPullRequest is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RunTests(context.Context, *connect.Request[v1.RunTestsRequest], *connect.ServerStream[v1.RunTestsResponse]) error {

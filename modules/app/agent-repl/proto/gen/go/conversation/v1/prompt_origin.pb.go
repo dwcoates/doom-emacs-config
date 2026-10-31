@@ -239,6 +239,18 @@ const (
 	//
 	// Never submitted by a client: only the shim produces it.
 	PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL PromptOrigin = 45
+	// The daemon's brief asking a repository's main workspace to repair its
+	// main checkout after the daemon's fast-forward of the primary branch to
+	// its upstream failed in the index or the worktree
+	// (agentrepl.v1.MainSyncFailure). Submitted as a deferred prompt, reopening
+	// a closed main workspace first, and drawn as an ordinary prompt bubble, so
+	// the user follows the repair from the workspace's feed.
+	PromptOrigin_PROMPT_ORIGIN_MAIN_SYNC_REPAIR PromptOrigin = 46
+	// A notice of a followed GitHub pull request's activity
+	// (agentrepl.v1.PullRequestNotice): comments, reviews, line comments,
+	// edits, deletions, state changes and finished checks since the subscriber
+	// was last told. Submitted and drawn as a workspace notice is.
+	PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE PromptOrigin = 47
 )
 
 // Enum value maps for PromptOrigin.
@@ -289,6 +301,8 @@ var (
 		43: "PROMPT_ORIGIN_DEPLOY_HOOK",
 		44: "PROMPT_ORIGIN_SUBSECTION_PLACEMENT",
 		45: "PROMPT_ORIGIN_REMOTE_CONTROL",
+		46: "PROMPT_ORIGIN_MAIN_SYNC_REPAIR",
+		47: "PROMPT_ORIGIN_PULL_REQUEST_NOTICE",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -336,6 +350,8 @@ var (
 		"PROMPT_ORIGIN_DEPLOY_HOOK":                 43,
 		"PROMPT_ORIGIN_SUBSECTION_PLACEMENT":        44,
 		"PROMPT_ORIGIN_REMOTE_CONTROL":              45,
+		"PROMPT_ORIGIN_MAIN_SYNC_REPAIR":            46,
+		"PROMPT_ORIGIN_PULL_REQUEST_NOTICE":         47,
 	}
 )
 
@@ -370,7 +386,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xa7\r\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xf2\r\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -417,7 +433,9 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x1fPROMPT_ORIGIN_WORKSPACE_COMPACT\x10*\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_DEPLOY_HOOK\x10+\x12&\n" +
 	"\"PROMPT_ORIGIN_SUBSECTION_PLACEMENT\x10,\x12 \n" +
-	"\x1cPROMPT_ORIGIN_REMOTE_CONTROL\x10-B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\x1cPROMPT_ORIGIN_REMOTE_CONTROL\x10-\x12\"\n" +
+	"\x1ePROMPT_ORIGIN_MAIN_SYNC_REPAIR\x10.\x12%\n" +
+	"!PROMPT_ORIGIN_PULL_REQUEST_NOTICE\x10/B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

@@ -135,6 +135,9 @@ type orchestrator struct {
 	// running. The pump reads it under the same lock before it goes idle, so
 	// a kick is never lost between the pump's last look and its exit.
 	kicked map[wsm.RepoKey]bool
+	// syncing marks the repositories whose target a main sync holds
+	// (synchold.go): no merge is admitted while it does. Guarded by mu.
+	syncing map[wsm.RepoKey]bool
 	// displaces records the workspaces whose merge the USER asked for, which
 	// alone may displace the turn in flight at admission (see Requester).
 	displaces map[ids.WorkspaceID]bool
@@ -347,6 +350,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		waitingAgain:       map[wsm.RepoKey]bool{},
 		repoLocks:          map[wsm.RepoKey]*repoLock{},
 		kicked:             map[wsm.RepoKey]bool{},
+		syncing:            map[wsm.RepoKey]bool{},
 		displaces:          map[ids.WorkspaceID]bool{},
 		runsByWorkspace:    map[ids.WorkspaceID]*run{},
 		requested:          map[ids.WorkspaceID]*requestWait{},
