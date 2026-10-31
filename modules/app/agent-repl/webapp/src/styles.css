@@ -1042,15 +1042,17 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    each section's rows to the room, and each section scrolls its own.
    NO PADDING AT ITS FOOT (owner request, 2026-10-19): the lowest section's
    rows reach the rail's bottom edge, so nothing is left blank under them. */
-#ws-sidebar .sb-scroll { flex: 1 1 0; min-height: 0; overflow-y: hidden; padding: 0.35rem 0 0; }
+#ws-sidebar { --rail-body-pad-top: 0.35rem; }
+#ws-sidebar .sb-scroll { flex: 1 1 0; min-height: 0; overflow-y: hidden; padding: var(--rail-body-pad-top) 0 0; }
 
 /* Repo section header: the repo label, the header itself folding, in the --info-ws hue the
    topbar already uses for the workspace datapoint. */
+#ws-sidebar { --repo-head-pad-top: 0.45rem; --repo-head-pad-bottom: 0.25rem; }
 #ws-sidebar .repo-head {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.45rem 0.7rem 0.25rem;
+  padding: var(--repo-head-pad-top) 0.7rem var(--repo-head-pad-bottom);
   cursor: pointer;
   font-size: 0.75rem;
   letter-spacing: 0.06em;
@@ -1421,8 +1423,31 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 /* Above the rule: the gap less the 3.3px a row or a folded subsection
    header reaches below its baseline (Deploys), or the 0.8px a folded
    group's header does (Hidden). */
-#ws-sidebar .repo.merged-section { margin-top: calc(var(--rule-gap) - 3.3px); }
-#ws-sidebar .repo.hidden-section { margin-top: calc(var(--rule-gap) - 0.8px); }
+#ws-sidebar {
+  --merged-rule-lead: calc(var(--rule-gap) - 3.3px);
+  --hidden-rule-lead: calc(var(--rule-gap) - 0.8px);
+}
+#ws-sidebar .repo.merged-section { margin-top: var(--merged-rule-lead); }
+#ws-sidebar .repo.hidden-section { margin-top: var(--hidden-rule-lead); }
+/* A FOLDED SECTION'S HEADER SPANS RULE TO RULE (owner request, 2026-10-31):
+   its hover wash fills the whole band between the rule above it and the rule
+   below, with no strip left bare at either edge. The space above the next
+   band's rule is the folded header's own bottom padding rather than the next
+   band's margin, and the rail's top padding is the Open header's own top
+   padding; every line stands exactly where it stood. */
+#ws-sidebar .repo.folded + .repo.merged-section,
+#ws-sidebar .repo.folded + .repo.hidden-section { margin-top: 0; }
+#ws-sidebar .repo.open-section.folded:has(+ .repo.merged-section) > .repo-head {
+  padding-bottom: calc(var(--repo-head-pad-bottom) + var(--merged-rule-lead));
+}
+#ws-sidebar .repo.open-section.folded:has(+ .repo.hidden-section) > .repo-head {
+  padding-bottom: calc(var(--repo-head-pad-bottom) + var(--hidden-rule-lead));
+}
+#ws-sidebar .repo.merged-section.folded:has(+ .repo.hidden-section) > .repo-head {
+  padding-bottom: var(--hidden-rule-lead);
+}
+#ws-sidebar .sb-scroll:has(> .sb-roster) { padding-top: 0; }
+#ws-sidebar .repo.open-section > .repo-head { padding-top: calc(var(--repo-head-pad-top) + var(--rail-body-pad-top)); }
 /* Below the rule: the gap less the 3.6px a band header's line puts above
    its cap top (Hidden's count line, 2.6px). */
 #ws-sidebar .repo.merged-section > .repo-head { padding-top: calc(var(--rule-gap) - 3.6px); }
