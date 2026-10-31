@@ -42,8 +42,6 @@ const (
 	// ArmNoCreationJob is a one-shot mark on a registered workspace, which
 	// records no creation to mark.
 	ArmNoCreationJob = "no_creation_job"
-	// ArmOwnerLands is a one-shot mark on a child its owner lands.
-	ArmOwnerLands = "owner_lands"
 	// ArmRequesterMayNotSet is a standing asked by a workspace the rule does
 	// not let set it.
 	ArmRequesterMayNotSet = "requester_may_not_set"
@@ -58,7 +56,9 @@ const (
 // SetOneShot marks WS a one-shot, or unmarks it, as ASKER asks (nil for the
 // user), and answers the completion directive a marked workspace now follows
 // (empty when unmarked). The workspace itself, its owner, or the user may
-// ask (wsm.Workspace.MayAct); a child its owner lands is never a one-shot.
+// ask (wsm.Workspace.MayAct). Any created workspace may be marked, a child
+// whose owner would otherwise land it included: a one-shot always lands
+// itself, so the mark moves who lands it (wsm.Workspace.OwnerLands).
 func (v *verbs) SetOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.WorkspaceID, oneShot bool) (string, error) {
 	directive, placement, err := v.setOneShot(ctx, ws, asker, oneShot)
 	if err != nil {
@@ -122,10 +122,6 @@ func (v *verbs) setOneShot(ctx context.Context, ws ids.WorkspaceID, asker *ids.W
 	}
 	if !record.MayAct(optionalAsker(asker)) {
 		return "", PendingPlacement{}, refuse(log, rpc, ArmRequesterMayNotSet, fmt.Sprintf("workspace %s is neither the workspace nor its owner", optionalAsker(asker)), false)
-	}
-	if oneShot && record.OwnerLands {
-		return "", PendingPlacement{}, refuseWith(log, rpc, ArmOwnerLands, "a child its owner lands is landed by the owner, so it is never a one-shot", false,
-			map[string]any{"owner": &workspacev1.WorkspaceRef{Id: string(*record.Parent)}})
 	}
 	var directive string
 	if oneShot {

@@ -909,15 +909,15 @@ func TestSetWorkspaceOneShotAnswersTheRosterRevisionThatCarriesTheChange(t *test
 func TestSetWorkspaceOneShotAnswersTheVerbsRefusal(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.Verbs.api.oneShotErr = &workspace.Refusal{Arm: workspace.ArmOwnerLands, Reason: "owner lands", Fields: map[string]any{"owner": &workspacev1.WorkspaceRef{Id: "ws-owner"}}}
+	h.Verbs.api.oneShotErr = &workspace.Refusal{Arm: workspace.ArmClosed, Reason: "closed"}
 
 	// Act
 	resp, err := h.Client.SetWorkspaceOneShot(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceOneShotRequest{
 		Workspace: ref(), Requester: userRequester(), OneShot: true}))
 
 	// Assert
-	if err != nil || resp.Msg.GetError().GetOwnerLands().GetOwner().GetId() != "ws-owner" {
-		t.Fatalf("SetWorkspaceOneShot = %v, %v; want owner_lands naming the owner", resp, err)
+	if err != nil || resp.Msg.GetError().GetClosed() == nil {
+		t.Fatalf("SetWorkspaceOneShot = %v, %v; want the closed arm", resp, err)
 	}
 }
 

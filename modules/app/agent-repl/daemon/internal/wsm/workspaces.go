@@ -111,8 +111,11 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		lastKeepalive sql.NullInt64
 		cacheCold     sql.NullInt64
 		landsInto     sql.NullString
+		// lacksContext is the stored owner_lands column, the context half
+		// of Workspace.OwnerLands (ownerLands).
+		lacksContext bool
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OwnerLands, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &ws.OneShot, &ws.MergePending, &ended, &asked, &mergeTurn, &landsInto); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &lacksContext, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &ws.OneShot, &ws.MergePending, &ended, &asked, &mergeTurn, &landsInto); err != nil {
 		return Workspace{}, err
 	}
 	switch WorkspaceKind(kind) {
@@ -161,11 +164,12 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		id := WorkspaceID(parent.String)
 		ws.Parent = &id
 	}
-	// AN OWNER-LANDED WORKSPACE HAS AN OWNER: owner_lands names who lands it,
-	// so a row that sets it with no parent is corrupt.
-	if ws.OwnerLands && ws.Parent == nil {
+	// A CHILD LACKING ITS PARENT'S CONTEXT HAS A PARENT: owner_lands says
+	// whose context it lacks, so a row that sets it with no parent is corrupt.
+	if lacksContext && ws.Parent == nil {
 		return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "owner_lands", Err: errors.New("a workspace its owner lands records its owner")}
 	}
+	ws.OwnerLands = ownerLands(lacksContext, ws.OneShot)
 	if contextFrom.Valid {
 		id := WorkspaceID(contextFrom.String)
 		ws.ContextFrom = &id
@@ -312,12 +316,13 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			Priority:     facts.Priority,
 			CreatedAt:    time.Now().UTC(),
 			MergeOf:      facts.MergeOf,
-			OwnerLands:   facts.OwnerLands,
+			OwnerLands:   ownerLands(facts.LacksParentContext, facts.OneShot),
+			OneShot:      facts.OneShot,
 			ContextFrom:  facts.ContextFrom,
 			RequestedBy:  facts.RequestedBy,
 			LandsInto:    facts.LandsInto,
 		}
-		if out.OwnerLands && out.Parent == nil {
+		if facts.LacksParentContext && out.Parent == nil {
 			return fmt.Errorf("wsm: register %s: a workspace its owner lands names its owner", normalized)
 		}
 		var mergeOf, request, forkHead, closeOnLanding, cleanupDir any
@@ -351,7 +356,7 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, place, owner_lands, context_from, requested_by, closure_at, closure_by)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, 0, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), out.Closed, priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place, out.OwnerLands, nullWorkspace(out.ContextFrom), nullWorkspace(out.RequestedBy), closureAt, closureBy)
+			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), out.Closed, priority, nanos(out.CreatedAt), mergeOf, request, forkHead, compactAfter, closeOnLanding, cleanupWorktree, cleanupDir, out.Place, facts.LacksParentContext, nullWorkspace(out.ContextFrom), nullWorkspace(out.RequestedBy), closureAt, closureBy)
 		if err != nil {
 			return err
 		}

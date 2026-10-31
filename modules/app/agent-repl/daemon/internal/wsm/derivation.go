@@ -4,8 +4,11 @@ package wsm
 // recorded at its creation (agentrepl.v1.CreateWorkspaceRequest).
 //
 //   - owner_lands: the workspace is a child whose context was not forked from
-//     its owner (parent_id), so only the owner -- or the user -- lands it
-//     (agentrepl.v1.WorkspaceTopologyChild).
+//     its owner (parent_id). It is only the CONTEXT half of who lands the
+//     workspace: a one-shot always lands itself, so the owner -- or the user
+//     -- lands it only while it is not a one-shot (ownerLands, applied where
+//     the row is read). The column keeps its name; it is not the effective
+//     rule.
 //   - context_from: the workspace whose conversation was forked into this one
 //     (agentrepl.v1.WorkspaceContextOrigin.fork), NULL for a fresh context.
 //   - requested_by: the workspace whose agent asked for the create
@@ -26,6 +29,16 @@ ALTER TABLE workspaces ADD COLUMN owner_lands INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE workspaces ADD COLUMN context_from TEXT REFERENCES workspaces(id) ON DELETE SET NULL;
 ALTER TABLE workspaces ADD COLUMN requested_by TEXT REFERENCES workspaces(id) ON DELETE SET NULL;
 `
+
+// ownerLands is the ONE home of who lands a workspace (owner ruling,
+// 2026-10-31, agentrepl.v1.WorkspaceStatusOwner.owner_lands): its owner does
+// when the workspace is a child whose context was not forked from its owner
+// (LACKSPARENTCONTEXT, the stored owner_lands column) and it is not a ONESHOT;
+// a one-shot always lands itself. Deriving it on read rather than storing it
+// means no write of the one-shot mark can leave it stale.
+func ownerLands(lacksParentContext, oneShot bool) bool {
+	return lacksParentContext && !oneShot
+}
 
 // MayAct reports whether ASKER may act on the workspace's own work -- land
 // it, or mark it a one-shot: the user (an empty ASKER), the workspace itself,

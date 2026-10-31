@@ -64,9 +64,11 @@ type Workspace struct {
 	// registered by Emacs (never created through the daemon) carries none, and
 	// the roster falls back to the branch lineage for it.
 	Parent *WorkspaceID
-	// OwnerLands marks a child whose context was not forked from its owner
-	// (Parent): only the owner, or the user, lands it. Recorded at creation;
-	// never set without Parent.
+	// OwnerLands marks a child only its owner (Parent), or the user, lands:
+	// one that is not a one-shot and whose context was not forked from its
+	// owner. DERIVED where the row is read (ownerLands): the row records only
+	// the context half, so every write of the one-shot mark moves it. Never
+	// set without Parent.
 	OwnerLands bool
 	// ContextFrom is the workspace whose conversation was forked into this
 	// one at its creation, nil for a fresh context or a registered workspace.
@@ -350,11 +352,17 @@ type RegisterFacts struct {
 	// MergeOf marks a MERGE WORKSPACE at its creation, nil for every other
 	// workspace. Only the creation path supplies it.
 	MergeOf *MergeOrigin
-	// OwnerLands, ContextFrom and RequestedBy are Workspace's derivation
-	// facts, supplied only by the creation path.
-	OwnerLands  bool
-	ContextFrom *WorkspaceID
-	RequestedBy *WorkspaceID
+	// LacksParentContext, ContextFrom and RequestedBy are Workspace's
+	// derivation facts, supplied only by the creation path. LacksParentContext
+	// marks a child whose context was not forked from its Parent, the stored
+	// half of Workspace.OwnerLands.
+	LacksParentContext bool
+	ContextFrom        *WorkspaceID
+	RequestedBy        *WorkspaceID
+	// OneShot is the one-shot standing the creation job records for the
+	// workspace, echoed onto the record Register answers (Workspace.OneShot)
+	// and so onto its OwnerLands; the row stores no such column.
+	OneShot bool
 	// LandsInto is the workspace the creation job's target directory names,
 	// echoed onto the record Register answers; the row stores no such column
 	// (Workspace.LandsInto).
