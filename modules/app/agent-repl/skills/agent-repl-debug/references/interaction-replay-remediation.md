@@ -35,7 +35,7 @@ webview. See Fidelity limits.
 
 ## 1. Start Emacs with recording live, then hand over
 
-Bounce Emacs with the recorder enabled:
+Restart Emacs with the recorder enabled:
 
 ```sh
 AGENT_REPL_RECORD_INTERACTIONS=1 emacs
@@ -92,7 +92,7 @@ is still worth measuring.
 
 Each iteration:
 
-1. Clear the observation logs before the bounce, per "Clear the observation
+1. Clear the observation logs before the deploy, per "Clear the observation
    logs first" in `iterative-fix-verify-loop.md` step 1: the global Emacs
    agent-repl log and the daemon log, plus any further sink this case's replay
    window is mined on in step 4. The previous iteration's findings are already
@@ -104,9 +104,9 @@ Each iteration:
    instruction to STOP clearing and surface it to the user the moment clearing
    costs something, such as a forensic trail that was still needed or a
    comparison across replays that became impossible.
-2. Bounce the stack and Emacs per `iterative-fix-verify-loop.md` step 1.
-   Recording must be OFF for these bounces; replay refuses to run while the
-   recorder is armed, so a bounce that re-reads
+2. Deploy the stack and restart Emacs per `iterative-fix-verify-loop.md`
+   step 1. Recording must be OFF for that restart; replay refuses to run while
+   the recorder is armed, so a restart that re-reads
    `AGENT_REPL_RECORD_INTERACTIONS=1` will block the replay.
 3. Replay the saved sequence:
 
