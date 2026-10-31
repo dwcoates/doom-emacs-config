@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -127,12 +128,16 @@ func (m Manager) leaksLocked(info string) ([]Leak, error) {
 		if !img.isRAM() || len(img.Devices) == 0 {
 			continue
 		}
+		// A LIVE RUN'S RECORD OUTRANKS A DEAD ONE naming the same device:
+		// macOS reuses device numbers, so a dead record (one a failed reclaim
+		// left) may name a disk a live run attached since.
 		var named *recordInfo
 		for i := range records {
-			for _, device := range img.Devices {
-				if records[i].device == device {
-					named = &records[i]
-				}
+			if !slices.Contains(img.Devices, records[i].device) {
+				continue
+			}
+			if named == nil || records[i].live {
+				named = &records[i]
 			}
 		}
 		if named != nil && named.live {

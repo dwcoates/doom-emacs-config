@@ -306,6 +306,9 @@ type Volume struct {
 	SizeMiB int
 
 	m Manager
+	// mounted is set once the volume is mounted at Mount: from then on the
+	// release finds its disk by that mount, never by Device (diskMountedAt).
+	mounted bool
 	// use records the space in use over the run (WatchUse).
 	use  *use
 	lock *os.File
@@ -424,6 +427,7 @@ func (m Manager) Acquire(sizeMiB int) (_ *Volume, err error) {
 	if _, err := m.Run("diskutil", "mount", "nobrowse", "-mountPoint", v.Mount, volume); err != nil {
 		return v, fmt.Errorf("mount the RAM disk's volume %s at %s: %w", volume, v.Mount, err)
 	}
+	v.mounted = true
 	end := m.Now()
 	m.Log.Infof("RAM disk acquire: %s mounted at %s in %s (attach %s, format %s, mount %s)",
 		v.Device, v.Mount, end.Sub(start), attached.Sub(start), formatted.Sub(attached), end.Sub(formatted))
@@ -560,7 +564,22 @@ func (v *Volume) Release() error {
 			detached = false
 		}
 	}
+	gone := false
 	if v.Device != "" && detached {
+		var err error
+		gone, err = v.gone()
+		if err != nil {
+			errs = append(errs, err)
+			detached = false
+		}
+		if gone {
+			// A DISK ALREADY GONE IS NOT DETACHED BY ITS NUMBER, which by now
+			// may name another run's disk: the mount point and the record go,
+			// and the loss is answered to the run, which records it at ERROR.
+			errs = append(errs, fmt.Errorf("the RAM disk %s was already gone from %s before its release, so nothing was detached", v.Device, v.Mount))
+		}
+	}
+	if v.Device != "" && detached && !gone {
 		if _, err := v.m.Run("hdiutil", "detach", v.Device); err != nil {
 			// WHO HELD IT IS READ BEFORE THE FORCE, which would close every
 			// holder's files and leave nothing to name.
@@ -604,6 +623,29 @@ func (v *Volume) Release() error {
 		v.m.Log.Infof("RAM disk release: %s released in %s", v.Device, v.m.Now().Sub(start))
 	}
 	return errors.Join(errs...)
+}
+
+// gone says whether the volume's disk is already gone: once the volume was
+// mounted, whether no RAM disk is mounted at Mount any more. Before that,
+// the disk is the one this run attached moments ago, and is never gone. A
+// disk mounted there that is not Device is an error, and nothing is
+// detached.
+func (v *Volume) gone() (bool, error) {
+	if !v.mounted {
+		return false, nil
+	}
+	info, err := v.m.listImages()
+	if err != nil {
+		return false, fmt.Errorf("list the attached images to find the RAM disk mounted at %s before detaching it: %w", v.Mount, err)
+	}
+	device, err := v.m.diskMountedAt(info, v.Mount)
+	if err != nil {
+		return false, err
+	}
+	if device != "" && device != v.Device {
+		return false, fmt.Errorf("the RAM disk mounted at %s is %s, not this run's %s, so nothing is detached", v.Mount, device, v.Device)
+	}
+	return device == "", nil
 }
 
 // holders names the processes with a file open on the volume, as
@@ -654,11 +696,20 @@ func holderNames(out string) []string {
 
 // Reclaimed is one dead run's RAM disk that Reclaim took down.
 type Reclaimed struct {
-	Pid    int
+	Pid int
+	// Device is the disk found mounted at Mount and detached; empty when
+	// nothing was mounted there.
 	Device string
 	Mount  string
-	// Attached is false when the record's device was no longer a RAM disk
-	// (the host rebooted since), so only the record and mount point went.
+	// Recorded is the device the dead run's record named. It is never what
+	// is detached: macOS reuses device numbers, so it may be another run's.
+	Recorded string
+	// RecordedNow says what Recorded is now, when it is not Device (it is
+	// never touched).
+	RecordedNow string
+	// Attached is false when no RAM disk was mounted at Mount (the host
+	// rebooted, or the disk went before its run did), so only the record and
+	// mount point went, and nothing was detached.
 	Attached bool
 	Killed   int
 	// Stray is set when no record named the mount point (Device is then
@@ -819,7 +870,18 @@ func (m Manager) logReclaimed(r Reclaimed) {
 		m.Log.Infof("removed the mount point %s left by dead run pid %d, which no record named (killed %d leftover processes)", r.Mount, r.Pid, r.Killed)
 		return
 	}
-	m.Log.Infof("reclaimed the RAM disk %s at %s left by dead run pid %d (attached %v, killed %d leftover processes)", r.Device, r.Mount, r.Pid, r.Attached, r.Killed)
+	recorded := "the record named " + r.Recorded
+	if r.Recorded == "" {
+		recorded = "the record named no device"
+	}
+	if r.RecordedNow != "" {
+		recorded += ", which was not touched: it is now " + r.RecordedNow
+	}
+	if !r.Attached {
+		m.Log.Infof("retired the RAM disk record of dead run pid %d: no RAM disk was mounted at %s, so nothing was detached (%s)", r.Pid, r.Mount, recorded)
+		return
+	}
+	m.Log.Infof("reclaimed the RAM disk %s at %s left by dead run pid %d: the disk mounted there was detached (%s; killed %d leftover processes)", r.Device, r.Mount, r.Pid, recorded, r.Killed)
 }
 
 // ReclaimRun reclaims the RAM disk of the run of pid, which has died: the
@@ -861,54 +923,51 @@ func (m Manager) reclaimOne(path string) (Reclaimed, bool, error) {
 		return Reclaimed{}, false, fmt.Errorf("read the RAM disk record %s: %w", path, err)
 	}
 	rec := parseRecord(string(raw))
-	device, mount := rec.Device, rec.Mount
-	r := Reclaimed{Pid: pid, Device: device, Mount: mount}
-	if device != "" {
+	mount := rec.Mount
+	r := Reclaimed{Pid: pid, Recorded: rec.Device, Mount: mount}
+	// A recursive removal never follows a record it cannot vouch for: the
+	// record must name the mount point a run of that pid is given, or nothing
+	// at all is touched.
+	if mount != "" && (!filepath.IsAbs(mount) || filepath.Base(mount) != fmt.Sprintf("artr-%d", pid)) {
+		return r, false, fmt.Errorf("the RAM disk record %s names %q, which is no mount point a run of pid %d is given", path, mount, pid)
+	}
+	// THE DISK IS FOUND BY THE DEAD RUN'S MOUNT, NEVER BY ITS RECORDED DEVICE.
+	// macOS hands a detached disk's number to the next attach, so the device
+	// a dead record names may by now be another live run's disk: reclaims
+	// that detached by the recorded device took live runs' disks away
+	// mid-run (2026-10-30, /dev/disk4 recorded by dead run 31920 and attached
+	// by live run 32482). Only the disk mounted at the dead run's own mount
+	// point, read now, is the dead run's; an entry whose mount point has
+	// nothing mounted is retired without detaching anything.
+	if mount != "" {
 		info, err := m.listImages()
 		if err != nil {
-			return r, false, fmt.Errorf("list the attached images to reclaim %s: %w", device, err)
+			return r, false, fmt.Errorf("list the attached images to find the disk mounted at %s: %w", mount, err)
 		}
-		r.Attached = isAttachedRAMDisk(info, device)
-		// A DEVICE NUMBER IS REUSED once its disk is detached: the kernel
-		// hands the same /dev/diskN to the next attach. A dead run's record
-		// can therefore name a device that is now a LIVE run's disk, and
-		// detaching it took that run's whole root away (2026-10-30: two runs
-		// reclaiming records of dead runs 18131 and 20318 force-detached
-		// /dev/disk4 seconds after the merge queue's head had attached and
-		// mounted it, and the head's 537 units failed "no such file").
-		if r.Attached {
-			reused, err := m.deviceReused(info, device, mount, path)
-			if err != nil {
-				return r, false, err
-			}
-			if reused {
-				m.Log.Infof("the RAM disk record %s names %s, which is now another run's disk; it is left attached and only the dead run's record and mount point go", path, device)
-				r.Attached = false
-			}
+		r.Device, err = m.diskMountedAt(info, mount)
+		if err != nil {
+			return r, false, err
+		}
+		r.Attached = r.Device != ""
+		if rec.Device != "" && rec.Device != r.Device {
+			r.RecordedNow = describeDevice(info, rec.Device)
 		}
 	}
 	if r.Attached {
-		if mount != "" {
-			res, err := m.reapMembers(reap.Members{What: fmt.Sprintf("dead run pid %d", pid), Session: rec.Session, Since: rec.Since, Except: []int{m.Pid}}, mount)
-			r.Killed = len(res.Killed)
-			if err != nil {
-				return r, false, fmt.Errorf("kill what still runs out of %s: %w", mount, err)
-			}
+		res, err := m.reapMembers(reap.Members{What: fmt.Sprintf("dead run pid %d", pid), Session: rec.Session, Since: rec.Since, Except: []int{m.Pid}}, mount)
+		r.Killed = len(res.Killed)
+		if err != nil {
+			return r, false, fmt.Errorf("kill what still runs out of %s: %w", mount, err)
 		}
-		if _, err := m.Run("hdiutil", "detach", "-force", device); err != nil {
-			return r, false, fmt.Errorf("detach the dead run's RAM disk %s: %w", device, err)
+		if _, err := m.Run("hdiutil", "detach", "-force", r.Device); err != nil {
+			return r, false, fmt.Errorf("detach the dead run's RAM disk %s mounted at %s: %w", r.Device, mount, err)
 		}
 	}
 	if mount != "" {
 		// THE MOUNT POINT GOES WITH EVERYTHING UNDER IT. Once the disk is
 		// detached, whatever the dead run left under its mount point sits on
 		// the host's own filesystem (a write that landed after the volume went
-		// away), and all of it is that dead run's. The record must name the
-		// mount point a run of that pid is given, or nothing is removed: a
-		// recursive removal never follows a record it cannot vouch for.
-		if !filepath.IsAbs(mount) || filepath.Base(mount) != fmt.Sprintf("artr-%d", pid) {
-			return r, false, fmt.Errorf("the RAM disk record %s names %q, which is no mount point a run of pid %d is given", path, mount, pid)
-		}
+		// away), and all of it is that dead run's.
 		if err := os.RemoveAll(mount); err != nil {
 			return r, false, fmt.Errorf("remove the dead run's mount point %s: %w", mount, err)
 		}
@@ -1215,50 +1274,64 @@ func parseImages(info string) []image {
 	return images
 }
 
-// deviceReused reports whether device, which the dead run's record at
-// recordPath names with mount as its mount point, now belongs to another run:
-// its image is mounted somewhere other than that mount point, or another
-// record names it.
-func (m Manager) deviceReused(info, device, mount, recordPath string) (bool, error) {
+// describeDevice says what `hdiutil info` lists device as now: a device of a
+// RAM disk and where that is mounted, or not a RAM disk's device at all.
+func describeDevice(info, device string) string {
 	for _, img := range parseImages(info) {
 		if !img.isRAM() || !slices.Contains(img.Devices, device) {
 			continue
 		}
-		for _, at := range img.Mounts {
-			if filepath.Base(at) != filepath.Base(mount) {
-				return true, nil
+		if len(img.Mounts) == 0 {
+			return fmt.Sprintf("a device of the RAM disk %s, mounted nowhere", img.Devices[0])
+		}
+		return fmt.Sprintf("a device of the RAM disk %s, mounted at %s", img.Devices[0], strings.Join(img.Mounts, ", "))
+	}
+	return "no RAM disk's device"
+}
+
+// diskMountedAt answers the whole disk of the RAM disk mounted at mount, as
+// info (`hdiutil info`, read by the caller just now) lists it: the image one
+// of whose devices is mounted at a spelling of mount. It answers "" when
+// nothing is mounted there.
+//
+// A DISK IS DETACHED ONLY BY WHAT IS MOUNTED AT ITS RUN'S MOUNT POINT. A
+// device number names whichever disk attached last under it, so only the
+// mount (artr-<pid>, which no other run is given) still names the run's own
+// disk. A volume mounted there that no RAM disk image lists is an error,
+// so that nothing there is detached or removed.
+func (m Manager) diskMountedAt(info, mount string) (string, error) {
+	spellings, err := reap.Spellings(mount)
+	if err != nil {
+		return "", fmt.Errorf("resolve the mount point %s to find the disk mounted there: %w", mount, err)
+	}
+	var found []string
+	for _, img := range parseImages(info) {
+		if !img.isRAM() || len(img.Devices) == 0 {
+			continue
+		}
+		for _, s := range spellings {
+			if slices.Contains(img.Mounts, s) {
+				found = append(found, img.Devices[0])
+				break
 			}
 		}
 	}
-	records, err := filepath.Glob(filepath.Join(m.Registry, "*.lock"))
+	switch len(found) {
+	case 1:
+		return found[0], nil
+	case 0:
+	default:
+		return "", fmt.Errorf("hdiutil info lists %d RAM disks (%s) mounted at %s, where one mount point holds one volume", len(found), strings.Join(found, ", "), mount)
+	}
+	mounted, err := m.Mounted(mount)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
 	if err != nil {
-		return false, fmt.Errorf("list the RAM disk records: %w", err)
+		return "", fmt.Errorf("tell whether a volume is mounted at %s: %w", mount, err)
 	}
-	for _, other := range records {
-		if other == recordPath || filepath.Base(other) == registryLockName {
-			continue
-		}
-		raw, err := os.ReadFile(other)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return false, fmt.Errorf("read the RAM disk record %s: %w", other, err)
-		}
-		if parseRecord(string(raw)).Device == device {
-			return true, nil
-		}
+	if mounted {
+		return "", fmt.Errorf("a volume is mounted at %s that no RAM disk image lists, so nothing there is detached or removed", mount)
 	}
-	return false, nil
-}
-
-// isAttachedRAMDisk reports whether `hdiutil info` lists device as a device of
-// an image whose path is a ram:// URL.
-func isAttachedRAMDisk(info, device string) bool {
-	for _, img := range parseImages(info) {
-		if img.isRAM() && slices.Contains(img.Devices, device) {
-			return true
-		}
-	}
-	return false
+	return "", nil
 }

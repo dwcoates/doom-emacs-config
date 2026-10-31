@@ -355,9 +355,11 @@ func TestSetupReclaimsADeadRunsDiskBeforeTheLeakCheck(t *testing.T) {
 
 func TestSetupLogsAFailedReclaimAtError(t *testing.T) {
 	// Arrange: the dead run's disk will not detach.
-	h := &fakeHost{info: attachedInfo, fail: map[string]bool{"hdiutil detach": true}}
+	h := &fakeHost{fail: map[string]bool{"hdiutil detach": true}}
 	m := newManager(t, h)
-	deadRecord(t, m, "7", "/dev/disk7", filepath.Join(t.TempDir(), "artr-7"))
+	mount := filepath.Join(t.TempDir(), "artr-7")
+	h.info = ramInfo("/dev/disk7=" + mount)
+	deadRecord(t, m, "7", "/dev/disk7", mount)
 	log := m.Log.(*fakeLog)
 
 	// Act
@@ -820,4 +822,22 @@ func TestSetupLogsAStrayMountPointItRemoved(t *testing.T) {
 	if !log.has("INFO removed the mount point " + dir + " left by dead run pid 28386, which no record named (killed 12 leftover processes)") {
 		t.Fatalf("log = %q, want the stray's removal at INFO", log.snapshot())
 	}
+}
+
+func TestAcquireTakesADeviceALiveRecordNamesAsTheLiveRunsBesideADeadRecord(t *testing.T) {
+	// Arrange: a dead record a failed reclaim left names /dev/disk4, which a
+	// live run attached since; "9.lock" sorts after the live "35768.lock".
+	h := &fakeHost{info: ramInfo("/dev/disk4=/private/tmp/artr-35768")}
+	m := newManager(t, h)
+	liveRecord(t, m, "35768", "/dev/disk4", "/tmp/artr-35768")
+	deadRecord(t, m, "9", "/dev/disk4", "/tmp/artr-9")
+
+	// Act
+	v, err := m.Acquire(16)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Acquire = %v, want the live run's disk taken as no leak", err)
+	}
+	v.Release() //nolint:errcheck // cleanup
 }
