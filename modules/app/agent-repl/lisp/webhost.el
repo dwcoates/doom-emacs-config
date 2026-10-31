@@ -281,9 +281,27 @@ it went back to one, every load signalling \"Wrong number of arguments\"
 and replaying nothing (2026-10-17).  By name, the host runs whatever this
 module's current definitions are, and the prior handler rides the xwidget's
 `agent-repl-prior-callback' property."
-  (let ((prior (xwidget-get xwidget 'agent-repl-prior-callback)))
-    (when (functionp prior) (funcall prior xwidget event-type)))
+  (agent-repl--webview-call-prior xwidget event-type)
   (agent-repl--webhost-on-load event-type))
+
+(defun agent-repl--webview-call-prior (xwidget event-type)
+  "Hand EVENT-TYPE to the handler XWIDGET had before Emacs's own wrapped it.
+Every one of Emacs's web views wraps its xwidget's `callback' by name
+\(`agent-repl--webview-watch-load'), keeping the prior handler on the
+xwidget's `agent-repl-prior-callback' property; the webkit machinery still
+gets every event through it."
+  (let ((prior (xwidget-get xwidget 'agent-repl-prior-callback)))
+    (when (functionp prior) (funcall prior xwidget event-type))))
+
+(defun agent-repl--webview-watch-load (xw callback)
+  "Make XW's events reach CALLBACK, a symbol, keeping its own handler.
+The xwidget event handler calls the widget's `callback' property, so the
+existing one is WRAPPED rather than replaced: it is kept on
+`agent-repl-prior-callback' for CALLBACK to hand on
+\(`agent-repl--webview-call-prior').  CALLBACK is installed BY NAME, never as
+a closure, so a hot reload reaches it (`agent-repl--webhost-callback')."
+  (xwidget-put xw 'agent-repl-prior-callback (xwidget-get xw 'callback))
+  (xwidget-put xw 'callback callback))
 
 (defun agent-repl--webhost-watch-load (xw)
   "Make XW replay the desired state on every load, keeping its own handler.
@@ -291,8 +309,7 @@ The xwidget event handler calls the widget's `callback' property, so the
 existing one is WRAPPED rather than replaced: the webkit machinery still gets
 every event it needs.  The wrapper is `agent-repl--webhost-callback', by
 name (see that function)."
-  (xwidget-put xw 'agent-repl-prior-callback (xwidget-get xw 'callback))
-  (xwidget-put xw 'callback 'agent-repl--webhost-callback))
+  (agent-repl--webview-watch-load xw 'agent-repl--webhost-callback))
 
 (defun agent-repl--webhost-rewatch ()
   "Put the live host's callback back on `agent-repl--webhost-callback'.

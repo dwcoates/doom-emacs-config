@@ -53,8 +53,8 @@
 (declare-function agent-repl--webview-script "webhost" (global pending method args))
 (declare-function agent-repl--webview-strayed-uri "webhost" (own-url uri))
 (declare-function agent-repl--webview-make-hidden "webhost" (url name refuse-kill kill what))
-(declare-function xwidget-get "xwidget" (xwidget propname))
-(declare-function xwidget-put "xwidget" (xwidget propname value))
+(declare-function agent-repl--webview-call-prior "webhost" (xwidget event-type))
+(declare-function agent-repl--webview-watch-load "webhost" (xw callback))
 (declare-function xwidget-webkit-uri "xwidget" (xwidget))
 
 (defvar agent-repl--webhost-log-level)
@@ -163,14 +163,12 @@ Created once and kept for the session.  No window is touched."
   "The sidebar XWIDGET's `callback': its prior handler, then the load handler.
 INSTALLED BY NAME, never as a closure, so a hot reload reaches it (see
 `agent-repl--webhost-callback')."
-  (let ((prior (xwidget-get xwidget 'agent-repl-prior-callback)))
-    (when (functionp prior) (funcall prior xwidget event-type)))
+  (agent-repl--webview-call-prior xwidget event-type)
   (agent-repl--sidebar-view-on-load event-type))
 
 (defun agent-repl--sidebar-view-watch-load (xw)
   "Make XW replay the desired state on every load, keeping its own handler."
-  (xwidget-put xw 'agent-repl-prior-callback (xwidget-get xw 'callback))
-  (xwidget-put xw 'callback 'agent-repl--sidebar-view-callback))
+  (agent-repl--webview-watch-load xw 'agent-repl--sidebar-view-callback))
 
 (defun agent-repl--sidebar-view-on-load (event-type)
   "Replay the desired state when the sidebar's EVENT-TYPE commits a load.

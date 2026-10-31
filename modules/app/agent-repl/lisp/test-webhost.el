@@ -143,6 +143,65 @@ RAW defaults to `agent-repl-test-wh--retired'."
     (should (equal (agent-repl--webhost-strayed-uri "https://example.com/x")
                    (agent-repl--webview-strayed-uri agent-repl--webhost-url "https://example.com/x")))))
 
+(defmacro agent-repl-test-wh--with-props (&rest body)
+  "Run BODY with xwidget properties held in the alist `props'."
+  (declare (indent 0))
+  `(let ((props nil))
+     (cl-letf (((symbol-function 'xwidget-get) (lambda (_xw prop) (alist-get prop props)))
+               ((symbol-function 'xwidget-put) (lambda (_xw prop value) (setf (alist-get prop props) value))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-wh-watching-a-view-installs-its-callback-by-name ()
+  "A watched view's callback is the symbol named, never a closure."
+  (agent-repl-test-wh--with-props
+    (setf (alist-get 'callback props) 'xwidget-webkit-callback)
+    (agent-repl--webview-watch-load 'xw 'agent-repl--sidebar-view-callback)
+    (should (eq (alist-get 'callback props) 'agent-repl--sidebar-view-callback))))
+
+(ert-deftest agent-repl-test-wh-watching-a-view-keeps-its-prior-handler ()
+  "A watched view keeps the handler it had, for the callback to hand on."
+  (agent-repl-test-wh--with-props
+    (setf (alist-get 'callback props) 'xwidget-webkit-callback)
+    (agent-repl--webview-watch-load 'xw 'agent-repl--sidebar-view-callback)
+    (should (eq (alist-get 'agent-repl-prior-callback props) 'xwidget-webkit-callback))))
+
+(ert-deftest agent-repl-test-wh-a-view-hands-its-prior-handler-every-event ()
+  "The prior handler is handed the xwidget and the event."
+  (let ((handed nil))
+    (agent-repl-test-wh--with-props
+      (setf (alist-get 'agent-repl-prior-callback props) (lambda (xw ev) (push (list xw ev) handed)))
+      (agent-repl--webview-call-prior 'xw 'load-changed)
+      (should (equal handed '((xw load-changed)))))))
+
+(ert-deftest agent-repl-test-wh-a-view-with-no-prior-handler-hands-nothing-on ()
+  "A view whose prior handler is no function hands nothing on, and does not signal."
+  (agent-repl-test-wh--with-props
+    (should-not (agent-repl--webview-call-prior 'xw 'load-changed))))
+
+(defconst agent-repl-test-wh--lisp-dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "The directory this suite and the sources it reads live in.")
+
+(defun agent-repl-test-wh--count-in-source (file needle)
+  "How many times NEEDLE occurs in lisp/FILE."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name file agent-repl-test-wh--lisp-dir))
+    (let ((n 0))
+      (while (search-forward needle nil t) (cl-incf n))
+      n)))
+
+(ert-deftest agent-repl-test-wh-both-views-watch-their-loads-through-the-shared-helper ()
+  "The host and the sidebar install their callbacks through the one helper."
+  (should (= 1 (agent-repl-test-wh--count-in-source "webhost.el" "(agent-repl--webview-watch-load xw '")))
+  (should (= 1 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(agent-repl--webview-watch-load xw '"))))
+
+(ert-deftest agent-repl-test-wh-no-view-sets-its-callback-by-hand ()
+  "Only the shared helper puts an xwidget's callback.
+The host's one other put is its hot-reload heal (`agent-repl--webhost-rewatch'),
+which restores a known prior handler rather than keeping the current one."
+  (should (= 2 (agent-repl-test-wh--count-in-source "webhost.el" "(xwidget-put xw 'callback")))
+  (should (= 0 (agent-repl-test-wh--count-in-source "sidebar-view.el" "(xwidget-put xw 'callback"))))
+
 (defmacro agent-repl-test-wh--with-made-view (live &rest body)
   "Run BODY with web view creation stubbed: a fresh buffer, an xwidget when LIVE.
 Binds `killed' to the buffers the kill function was handed."
