@@ -230,3 +230,33 @@ func TestASpeculativeMergeFirstInItsChainStandsOnTheTargetsTip(t *testing.T) {
 		t.Fatalf("base = %q, want the target's tip, tip-1", place.base)
 	}
 }
+
+func TestASuspensionWithdrawsTheWaitOnAFixingTurnRatherThanReturningTheMerge(t *testing.T) {
+	// Arrange: the failed head remediating, its wait armed.
+	c := stepAsideScenario(t)
+	c.h.o.mu.Lock()
+	_, armed := c.h.o.remediating[theWorkspace]
+	c.h.o.mu.Unlock()
+	if !armed {
+		t.Fatal("no wait armed for the remediating merge")
+	}
+
+	// Act: its workspace is handed on.
+	if err := c.h.o.suspendFor(context.Background(), theWorkspace, suspendTransfer); err != nil {
+		t.Fatalf("suspendFor: %v", err)
+	}
+
+	// Assert
+	c.h.o.mu.Lock()
+	_, still := c.h.o.remediating[theWorkspace]
+	c.h.o.mu.Unlock()
+	queue, err := c.h.db.MergeQueue(context.Background(), c.h.repoKey())
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	if still || !slices.ContainsFunc(queue, func(e wsm.MergeQueueEntry) bool {
+		return e.Workspace == theWorkspace && e.State == wsm.MergeRemediating
+	}) {
+		t.Fatalf("wait still armed=%v, queue %+v; want the wait withdrawn and the merge still remediating", still, queue)
+	}
+}

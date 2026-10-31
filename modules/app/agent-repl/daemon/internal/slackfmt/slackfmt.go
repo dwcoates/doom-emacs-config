@@ -291,7 +291,7 @@ func (r Renderer) linkBareRefs(text string) string {
 	for _, m := range bareRefs(text) {
 		number := text[m[2]:m[3]]
 		out.WriteString(text[last:m[0]])
-		fmt.Fprintf(&out, "[#%s](https://github.com/%s/pull/%s)", number, r.PRRepo, number)
+		out.WriteString("[#" + number + "](https://github.com/" + r.PRRepo + "/pull/" + number + ")")
 		last = m[1]
 	}
 	out.WriteString(text[last:])
