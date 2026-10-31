@@ -89,10 +89,12 @@ export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}):
   // its workspaces at a handover (`Host.setDaemon`).
   const daemon = createDaemonOrigin(win.location.origin);
   const host = createHost({ doc, win, frames, level, daemon });
-  win.agentReplHost = host;
-  const pending = win.__agentReplHostPending ?? [];
-  delete win.__agentReplHostPending;
-  for (const call of pending) call(host);
+  // THE SERVICES START BEFORE EMACS'S QUEUED CALLS RUN: they install the
+  // webhost's logger, and a queued call that logs (`focusMoved` does, through
+  // the focus-left signal) threw without one, which ended the start there:
+  // every call queued after it was lost and the services never started
+  // (2026-10-31, the merge gate's e2e run). Every listener the services add
+  // is told the state the queued calls then set, or replays it.
   (deps.startServices ?? startWebhostServices)(doc, win, host, { level, daemon, gate, load });
   // THE SIDEBAR'S OPEN ROW PANELS, drawn over the pages (sidebar-popups.ts).
   (deps.installPopups ?? installPopupLayer)({
@@ -101,6 +103,10 @@ export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}):
     channel: (deps.popupChannel ?? openPopupChannel)(),
     onOffset: (listener) => host.onSidebarOffset(listener),
   });
+  win.agentReplHost = host;
+  const pending = win.__agentReplHostPending ?? [];
+  delete win.__agentReplHostPending;
+  for (const call of pending) call(host);
   const answerFocus = (): boolean => hostHasFocus(doc, host);
   win.xwHasFocus = answerFocus;
   // Emacs injects its own definition as a user script, which can run after

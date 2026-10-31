@@ -2,6 +2,8 @@
 // The host page's start: the workspace shell cleared, the root marked, the
 // host and its focus answer handed to Emacs. See src/host/main.ts.
 import { afterEach, describe, expect, it } from "vitest";
+import { resetLoggingForTests, setLogger } from "../../src/log.js";
+import { captureLogRecords } from "../log-capture.js";
 
 import { HOST_ROOT_CLASS, WEBHOST_FRAMES_CLASS, startHost } from "../../src/host/main.js";
 import { WEBHOST_GATE_ID } from "../../src/host/gate.js";
@@ -104,7 +106,7 @@ describe("startHost", () => {
     expect(document.querySelector(`.${WEBHOST_FRAMES_CLASS} iframe`)).not.toBeNull();
   });
 
-  it("starts the services once the queued calls have run", () => {
+  it("starts the services before the queued calls run", () => {
     // Arrange
     const order: string[] = [];
     window.__agentReplHostPending = [() => order.push("queued call")];
@@ -114,11 +116,53 @@ describe("startHost", () => {
       startServices: () => {
         order.push("services");
       },
+      installPopups: () => {
+        order.push("popups");
+      },
+    });
+
+    // Assert
+    expect(order).toEqual(["services", "popups", "queued call"]);
+  });
+
+  it("runs a queued call that logs with the logger the services installed", () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    resetLoggingForTests();
+    window.__agentReplHostPending = [(host) => host.focusMoved()];
+
+    // Act
+    started = startHost(document, window, {
+      startServices: () => {
+        setLogger(capture.logger);
+      },
       installPopups: noPopups,
     });
 
     // Assert
-    expect(order).toEqual(["queued call", "services"]);
+    capture.logger.flush();
+    expect(capture.sent.some((r) => r.operation === "page.focus-left")).toBe(true);
+  });
+
+  it("runs every call queued after one that logs", () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    resetLoggingForTests();
+    window.__agentReplHostPending = [
+      (host) => host.focusMoved(),
+      (host) => host.ensure("a", "http://ws-a.localhost:1/"),
+    ];
+
+    // Act
+    started = startHost(document, window, {
+      startServices: () => {
+        setLogger(capture.logger);
+      },
+      installPopups: noPopups,
+    });
+
+    // Assert
+    expect(document.querySelectorAll(`.${WEBHOST_FRAMES_CLASS} iframe`).length).toBe(1);
   });
 
   it("draws no sidebar of its own", () => {
