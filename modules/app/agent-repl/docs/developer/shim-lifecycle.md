@@ -22,6 +22,7 @@ shim still draws its whole conversation.
 | A cold gate's answer, whichever choice | `workspace.Fleet.ResumeCold` (`heldForAnswer`) |
 | A keep-alive restore before the next beat | `cachelapse.Keeper` (`Deps.Restore`) |
 | A create with an initial prompt, and every fork | `workspace.verbs.Create`, `CreateThread` |
+| Turning remote control on for a workspace with no shim | `UpdateRemoteControlMode` (`remote-control.md`) |
 | The restart verb, which starts one at once when none is up | `workspace.verbs.Restart` (`startForRestart`) |
 | A rebind to another transcript | `workspace.Fleet.StartRebound` |
 | A model, permission-mode or effort pick on a workspace with no shim | `promptqueue` settings revival (`SubmitSessionAct`, `ReviveForSettings`) |
@@ -117,6 +118,12 @@ timer of its own. The details live in `daemon/internal/cachelapse`:
   `keepalive_cycle`). It is restored `RestoreLead` (one minute) before its next
   beat, at most `MaxRestores` (3) at once. An idle workspace's memory is free
   between beats.
+- **Remote control keeps the shim up between beats** (owner ruling,
+  2026-10-31). A workspace whose remote-control mode is on still gets every
+  beat, but no beat is followed by the park, and no settings visit stands it
+  down: claude.ai must always find the session served. Since it is never
+  parked it never needs the restore. The cutoff below still hibernates it.
+  The mode is read when each stand-down is decided. See `remote-control.md`.
 - **Cutoff.** Beats stop once the workspace has been idle for
   `drain.DefaultIdleCutoff` (24 hours, owner ruling 2026-10-28). The idle sweep
   then hibernates the session.

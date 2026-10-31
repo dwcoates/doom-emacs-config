@@ -25,7 +25,8 @@ of its surfaces shares.
 
 `docs/developer/` holds the developer reference for how agent-repl's subsystems
 behave across their code, one file per subsystem. `shim-lifecycle.md` covers
-when a shim runs, and the keep-alives. These files are living documents.
+when a shim runs, and the keep-alives. `remote-control.md` covers making a
+workspace's session reachable from claude.ai. These files are living documents.
 
 - Read the file for a subsystem before complex work on it, and work from what it
   states.
