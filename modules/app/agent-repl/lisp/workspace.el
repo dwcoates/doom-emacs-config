@@ -2590,6 +2590,15 @@ the product."
 (with-eval-after-load 'persp-mode
   (agent-repl--ws-install-persp-policy))
 
+(defun agent-repl--stamp-workspace-viewed (name)
+  "Stamp `:last-viewed-at' on the workspace NAME with now, when it is known.
+The one writer of the stamp, on a visit's arrival and departure alike.
+Only known agent-repl workspaces are stamped: a foreign persp (the main
+persp, a non-agent-repl one) has no hash entry, and `agent-repl--ws-put'
+would otherwise STUB-CREATE a spurious :project-dir-less entry."
+  (when (agent-repl--ws-known-p name)
+    (agent-repl--ws-put name :last-viewed-at (current-time))))
+
 (defun agent-repl--record-workspace-history (&rest _)
   "Record the current workspace at the front of `agent-repl--workspace-history'.
 Removes any prior occurrence of the name so the list stays
@@ -2621,11 +2630,7 @@ perspective activation funnels through, so the project picker
           (agent-repl--info name "elisp.workspace.recency-walk-ended ws=%s landing=%s"
                             name agent-repl--recency-walk-landing)
           (setq agent-repl--recency-walk-landing nil))
-        ;; Stamp only known agent-repl workspaces; a foreign persp (the main
-        ;; persp, a non-agent-repl one) has no hash entry, and `--ws-put'
-        ;; would otherwise STUB-CREATE a spurious :project-dir-less entry.
-        (when (agent-repl--ws-known-p name)
-          (agent-repl--ws-put name :last-viewed-at (current-time)))
+        (agent-repl--stamp-workspace-viewed name)
         (setq agent-repl--workspace-history
               (cons name (cl-remove name agent-repl--workspace-history
                                     :test #'string=))))))))
@@ -2645,9 +2650,8 @@ the persp before-deactivation hook below."
   (let ((name (agent-repl--ws-current-name)))
     (when (and name
                (not agent-repl--eager-open-in-progress)
-               (not (equal name agent-repl--recency-walk-landing))
-               (agent-repl--ws-known-p name))
-      (agent-repl--ws-put name :last-viewed-at (current-time)))))
+               (not (equal name agent-repl--recency-walk-landing)))
+      (agent-repl--stamp-workspace-viewed name))))
 
 (agent-repl--ws-add-before-deactivate-hook #'agent-repl--stamp-workspace-departure)
 

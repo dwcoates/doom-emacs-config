@@ -1898,6 +1898,32 @@ transiently activated workspace while eager-open is in progress."
         (agent-repl--record-workspace-history)
         (should-not (agent-repl--ws-get "generated" :last-viewed-at))))))
 
+(ert-deftest agent-repl-test-stamp-workspace-viewed-stamps-a-known-workspace ()
+  "A known workspace is stamped viewed now."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "a" :project-dir "/tmp/a")
+    (cl-letf (((symbol-function 'current-time) (lambda () '(25000 0))))
+      (agent-repl--stamp-workspace-viewed "a")
+      (should (equal (agent-repl--ws-get "a" :last-viewed-at) '(25000 0))))))
+
+(ert-deftest agent-repl-test-stamp-workspace-viewed-leaves-an-unknown-name-unknown ()
+  "An unknown name is not stub-created by the stamp."
+  (agent-repl-test--with-clean-state
+    (agent-repl--stamp-workspace-viewed "main")
+    (should-not (agent-repl--ws-known-p "main"))))
+
+(ert-deftest agent-repl-test-stamp-workspace-viewed-is-the-one-stamp-writer ()
+  "Arrival and departure both stamp through `agent-repl--stamp-workspace-viewed'."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--workspace-history nil)
+          (stamped nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
+                ((symbol-function 'agent-repl--stamp-workspace-viewed)
+                 (lambda (name) (push name stamped))))
+        (agent-repl--record-workspace-history)
+        (agent-repl--stamp-workspace-departure)
+        (should (equal stamped '("a" "a")))))))
+
 (ert-deftest agent-repl-test-stamp-workspace-departure-stamps-the-departing-workspace ()
   "Leaving a known workspace restamps its `:last-viewed-at' with now."
   (agent-repl-test--with-clean-state
