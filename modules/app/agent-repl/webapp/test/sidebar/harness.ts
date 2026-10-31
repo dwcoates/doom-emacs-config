@@ -389,7 +389,6 @@ export function mergedBand(
     header: { label: { text: "Deploys" } },
     groups,
     queues: queues.queues ?? [],
-    queueLabel: { text: "Deploy Queue" },
     mergedLabel: { text: "Recently Deployed" },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });

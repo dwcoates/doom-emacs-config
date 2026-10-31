@@ -50,7 +50,6 @@ import {
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
   MERGE_QUEUE_SUSPENDED_ATTRIBUTE,
   MERGE_QUEUES_CLASS,
-  DEPLOY_QUEUE_LABEL_CLASS,
 } from "../../src/sidebar/merge-queue-view.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
@@ -1670,11 +1669,10 @@ describe("the Merge Queue section's queues", () => {
     expect(drawn.querySelector(".repo-section .sb-merge-queue")).toBeNull();
   });
 
-  it("stands the Deploy Queue heading off the Deploys header by a little less than a section's header stands off its rule", () => {
+  it("stands the queues off the Deploys header by 0.3rem", () => {
     const drawn = drawWorkspaceRoster(withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]), sidebarContext());
     const box = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGE_QUEUES_CLASS}`)!;
-    const section = pane(drawn).querySelector<HTMLElement>(".merged-section")!;
-    expect(inRail(drawn, () => [cascadedValue(box, "padding-top"), cascadedValue(section, "padding-top")])).toEqual(["0.3rem", "0.4rem"]);
+    expect(inRail(drawn, () => cascadedValue(box, "padding-top"))).toBe("0.3rem");
   });
 
   it("draws the head's name just under its repository header's text size", () => {
@@ -1699,14 +1697,10 @@ describe("the Merge Queue section's queues", () => {
     ]).toEqual([true, SECTION_LABEL_CLASS, null, "none"]);
   });
 
-  it("indents the Recently Deployed heading as far as the Deploy Queue heading", () => {
-    const drawn = drawWorkspaceRoster(
-      withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })], [mergedGroup({ id: "repo-1", rows: [merged("m1")] })]),
-      sidebarContext(),
-    );
-    const queue = mergedRegion(drawn).querySelector<HTMLElement>(`.${DEPLOY_QUEUE_LABEL_CLASS}`)!;
+  it("indents the Recently Deployed heading by 1.1rem", () => {
+    const drawn = drawWorkspaceRoster(withQueues([], [mergedGroup({ id: "repo-1", rows: [merged("m1")] })]), sidebarContext());
     const recent = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGED_LABEL_CLASS}`)!;
-    expect(inRail(drawn, () => [cascadedValue(recent, "padding-left"), cascadedValue(queue, "padding-left")])).toEqual(["1.1rem", "1.1rem"]);
+    expect(inRail(drawn, () => cascadedValue(recent, "padding-left"))).toBe("1.1rem");
   });
 
   it("shows the Recently Deployed groups once the heading is clicked", () => {
@@ -1736,13 +1730,13 @@ describe("the Merge Queue section's queues", () => {
     expect(inRail(drawn, () => [cascadedValue(count, "margin-left"), cascadedValue(group, "gap")])).toEqual(["0.4rem", "0.4rem"]);
   });
 
-  it.each(["merged-section", "hidden-section"])("draws no space above the rule over the %s, only below it", (cls) => {
+  it.each(["merged-section", "hidden-section"])("draws 0.2rem above the rule over the %s, and 0.2rem below it", (cls) => {
     const drawn = drawWorkspaceRoster(
       roster({ hidden: hiddenSection([HIDDEN_ROW]), merged: mergedSection([merged("m1")], false) }),
       sidebarContext(),
     );
     const section = pane(drawn).querySelector<HTMLElement>(`.${cls}`)!;
-    expect(inRail(drawn, () => [cascadedValue(section, "margin-top"), cascadedValue(section, "padding-top")])).toEqual(["0", "0.4rem"]);
+    expect(inRail(drawn, () => [cascadedValue(section, "margin-top"), cascadedValue(section, "padding-top")])).toEqual(["0.2rem", "0.2rem"]);
   });
 
   it("draws the queues above the Recently Deployed heading and its groups", () => {
@@ -1754,11 +1748,10 @@ describe("the Merge Queue section's queues", () => {
     expect(mergedRegion(drawn).querySelector(`.${MERGED_LABEL_CLASS} .${SECTION_LABEL_CLASS}`)?.textContent).toBe("Recently Deployed");
   });
 
-  it("draws the Deploy Queue heading first in the queue box, over the queues", () => {
+  it("draws no heading over the queues, its first queue group standing first in the queue box", () => {
     const drawn = drawWorkspaceRoster(withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]), sidebarContext());
     const box = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGE_QUEUES_CLASS}`)!;
-    const heading = box.firstElementChild as HTMLElement;
-    expect([heading.className, heading.textContent]).toEqual([DEPLOY_QUEUE_LABEL_CLASS, "Deploy Queue"]);
+    expect([...box.children].map((el) => el.querySelector(`.${MERGE_QUEUE_GROUP_HEAD_CLASS}`) !== null)).toEqual([true]);
   });
 
   it("draws each repository's queue under its label, in the wire's order", () => {
@@ -1778,10 +1771,10 @@ describe("the Merge Queue section's queues", () => {
     expect(mergedRegion(drawn).querySelector(`.${MERGED_LABEL_CLASS}`)).toBeNull();
   });
 
-  it("draws no Deploy Queue heading while no queue is listed", () => {
+  it("draws an empty queue box while no queue is listed", () => {
     const drawn = drawWorkspaceRoster(roster({ merged: mergedSection([merged("m1")], false) }), sidebarContext());
     const box = mergedRegion(drawn).querySelector<HTMLElement>(`.${MERGE_QUEUES_CLASS}`)!;
-    expect([box.children.length, mergedRegion(drawn).querySelector(`.${DEPLOY_QUEUE_LABEL_CLASS}`)]).toEqual([0, null]);
+    expect(box.children.length).toBe(0);
   });
 
 
@@ -1932,11 +1925,6 @@ describe("the Merge Queue section's queues", () => {
     expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
   });
 
-  it("refuses a section without its Deploy Queue heading as a malformed view", () => {
-    const bare = roster({ merged: mergedSection([merged("m1")], false) });
-    bare.recentlyMerged!.queueLabel = undefined;
-    expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
-  });
 });
 
 describe("the roster drawer: a push redraws only what it changed", () => {
@@ -2538,16 +2526,8 @@ describe("drawDeploysHeading", () => {
   });
 
   it("draws a heading of its label alone when nothing follows", () => {
-    const heading = drawDeploysHeading(DEPLOY_QUEUE_LABEL_CLASS, label("Deploy Queue"));
-    expect([...heading.children].map((el) => el.textContent)).toEqual(["Deploy Queue"]);
+    const heading = drawDeploysHeading(MERGED_LABEL_CLASS, label("Recently Deployed"));
+    expect([...heading.children].map((el) => el.textContent)).toEqual(["Recently Deployed"]);
   });
 
-  it("is how the roster draws both of the Deploys section's headings", () => {
-    const code = rosterSource;
-    expect([
-      code.includes("drawDeploysHeading(DEPLOY_QUEUE_LABEL_CLASS,"),
-      code.includes("drawDeploysHeading(MERGED_LABEL_CLASS,"),
-      /className = (DEPLOY_QUEUE_LABEL_CLASS|MERGED_LABEL_CLASS)/.test(code.replace(/export function drawDeploysHeading[\s\S]*?\n}\n/, "")),
-    ]).toEqual([true, true, false]);
-  });
 });

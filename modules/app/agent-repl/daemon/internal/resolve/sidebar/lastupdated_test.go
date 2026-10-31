@@ -83,7 +83,7 @@ func statusChangeResolver(t *testing.T, durable *time.Time) (sidebar.Resolver, *
 	var reports []statusChangeReport
 	now := epoch
 	r, _ := newResolver(t,
-		sidebar.WithClock(func() time.Time { return now }),
+		sidebar.WithClock(func() time.Time { return now }, (&manualTimers{}).after),
 		sidebar.WithStatusChangeSink(func(ws ids.WorkspaceID, at time.Time) {
 			mu.Lock()
 			defer mu.Unlock()

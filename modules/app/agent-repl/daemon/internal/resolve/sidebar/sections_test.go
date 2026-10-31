@@ -120,9 +120,6 @@ func TestTheDeploysSectionComposesItsHeadings(t *testing.T) {
 	if got := section.GetHeader().GetLabel().GetText(); got != "Deploys" {
 		t.Fatalf("heading = %q, want the section's one label", got)
 	}
-	if got := section.GetQueueLabel().GetText(); got != "Deploy Queue" {
-		t.Fatalf("queue heading = %q, want the queues' one label, set while no queue is listed", got)
-	}
 	if got := section.GetMergedLabel().GetText(); got != "Recently Deployed" {
 		t.Fatalf("merged heading = %q, want the merged groups' one label", got)
 	}

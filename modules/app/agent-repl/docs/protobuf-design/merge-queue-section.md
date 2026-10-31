@@ -111,6 +111,9 @@ section, above Hidden. The message keeps its name
 
 ### `frontend.v1.RosterMergedSection.queue_label`
 
+> RETIRED 2026-10-31 (owner request): tag 9 is reserved, and the queues stand
+> directly under the section's header with no heading of their own.
+
 - WHAT: the heading over the queues, "Deploy Queue". Always set, and drawn
   even while no queue is listed, so the section always draws.
 - WHY: the owner asked for an empty queue to read as empty rather than

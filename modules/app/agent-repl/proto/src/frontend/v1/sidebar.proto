@@ -1324,9 +1324,10 @@ message RosterRepoKey {
 
 // The recently-merged section: header and one group per repository. It has
 // no key of its own — the roster carries exactly one, so its fold identity is
-// fixed. It holds the 100 MOST RECENT merges (owner ruling, 2026-10-15): an
-// older merge is drawn in no section, and leaves the band in the push that
-// carries the newer merge displacing it.
+// fixed. It holds EVERY MERGE OF THE LAST 24 HOURS (owner request,
+// 2026-10-31; it was the 100 most recent merges): an older merge is drawn in
+// no section, and leaves the band in the push the daemon makes the instant it
+// ages out.
 //
 //   ▾ Recently Merged            (2)        RosterMergedSection
 //     repo-a                                  RosterMergedRepoGroup → header
@@ -1371,11 +1372,11 @@ message RosterMergedSection {
   // group is drawn: "Recently Deployed" (owner request, 2026-10-27; it was
   // "Recently Merged"). Always set.
   RosterLabel merged_label = 7;
-  // The heading drawn over the queues, at the top of the section: "Deploy
-  // Queue" (owner request, 2026-10-27). It is drawn ALWAYS, even while no
-  // queue is listed, so an empty queue reads as empty rather than absent.
-  // Always set.
-  RosterLabel queue_label = 9;
+  // Tag 9 (`queue_label`, the "Deploy Queue" heading over the queues) is
+  // RETIRED (owner request, 2026-10-31): the queues stand directly under the
+  // section's header, with no heading of their own.
+  reserved 9;
+  reserved "queue_label";
   // Tag 8 (`merge_queue_paused`, the section-wide pause marker) is RETIRED
   // (2026-10-27): each queue carries its own pause
   // (RosterRepoMergeQueue.paused), drawn on its own group.
