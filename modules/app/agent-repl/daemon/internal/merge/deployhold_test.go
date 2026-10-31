@@ -334,3 +334,22 @@ func TestEveryOwnerlessScriptRunsThroughRunOwnerlessScript(t *testing.T) {
 		t.Fatalf("HookRunner.RunLinesWith is called in %v, want once in deploy.go (a deploy's own hooks) and once in deployhold.go (runOwnerlessScript)", calls)
 	}
 }
+
+func TestTheBootRecordsEachRegisteredRepositorysInheritedHold(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.heldWith(2)
+	registered, err := h.o.registeredQueues(context.Background(), "daemon.merge.recover")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err = h.o.recordInheritedHolds(context.Background(), registered)
+
+	// Assert
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.recover", Message: "a repository's deploy stage is held: its deploys land, and skip their deploy hook until it is released"})
+	if err != nil || !ok || record.Context["repository"] != h.repoRoot || record.Context["skipped"] != 2 {
+		t.Fatalf("recordInheritedHolds = %v, records %+v; want the held repository recorded with its skips", err, h.logs.Records())
+	}
+}

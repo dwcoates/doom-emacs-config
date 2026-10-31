@@ -65,6 +65,8 @@ type fakeDB struct {
 	tabErr error
 	// byDirErr, when set, is what WorkspaceByDir answers.
 	byDirErr error
+	// reposErr, when set, is what ListRepositories answers.
+	reposErr error
 
 	mu sync.Mutex
 
@@ -1140,6 +1142,8 @@ type fakeGit struct {
 	commonDirs    map[string]string
 	// commonDirErr, when set, fails every CommonDir.
 	commonDirErr error
+	// commonDirErrs fails the CommonDir of each directory it names.
+	commonDirErrs map[string]error
 	// mainWorktreeErr, when set, fails every MainWorktree.
 	mainWorktreeErr error
 	refs            map[string]string
@@ -1404,6 +1408,9 @@ func (g *fakeGit) CommonDir(_ context.Context, dir string) (string, error) {
 	g.record("common_dir")
 	if g.commonDirErr != nil {
 		return "", g.commonDirErr
+	}
+	if err := g.commonDirErrs[dir]; err != nil {
+		return "", err
 	}
 	if common, ok := g.commonDirs[dir]; ok {
 		return common, nil
@@ -3212,6 +3219,9 @@ func (f *fakeFeed) topTabSequence() []string {
 func (d *fakeDB) ListRepositories(ctx context.Context) ([]wsm.Repository, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.reposErr != nil {
+		return nil, d.reposErr
+	}
 	out := make([]wsm.Repository, len(d.repos))
 	copy(out, d.repos)
 	return out, nil

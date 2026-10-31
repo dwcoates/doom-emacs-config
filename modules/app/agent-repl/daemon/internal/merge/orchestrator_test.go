@@ -1,12 +1,17 @@
 package merge
 
 import (
+	"context"
+	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/wsm"
 )
 
 // TestNewRefusesAnIncompleteDependencySet covers the construction guard:
@@ -166,5 +171,88 @@ func TestAMergeWithItsQueueInstantOrNoneStandingIsNotRecorded(t *testing.T) {
 				t.Fatalf("recorded %v for a merge that keeps the invariant", record)
 			}
 		})
+	}
+}
+
+func TestRegisteredQueuesKeysEveryRegisteredRepositoryInOrder(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	other := t.TempDir()
+	h.registerRepo("repo-2", other)
+
+	// Act
+	got, err := h.o.registeredQueues(context.Background(), "daemon.merge.test")
+
+	// Assert
+	if err != nil || len(got) != 2 {
+		t.Fatalf("registeredQueues = %+v, %v; want both repositories", got, err)
+	}
+	if got[0].repository.ID != theRepository || got[0].key != wsm.RepoKey(h.repoRoot+"/.git") ||
+		got[1].repository.ID != "repo-2" || got[1].key != wsm.RepoKey(other+"/.git") {
+		t.Fatalf("registeredQueues = %+v, want each repository keyed by its common dir, in registration order", got)
+	}
+}
+
+func TestRegisteredQueuesPassesOverARepositoryWhoseKeyCannotBeRead(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	gone := t.TempDir()
+	h.registerRepo("repo-2", gone)
+	h.git.commonDirErrs = map[string]error{gone: errors.New("not a git repository")}
+
+	// Act
+	got, err := h.o.registeredQueues(context.Background(), "daemon.merge.test")
+
+	// Assert
+	if err != nil || len(got) != 1 || got[0].repository.ID != theRepository {
+		t.Fatalf("registeredQueues = %+v, %v; want the readable repository alone", got, err)
+	}
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelWarn, Operation: "daemon.merge.test"})
+	if cause, _ := record.Context["error"].(string); !ok || record.Context["repository"] != gone || !strings.Contains(cause, "not a git repository") {
+		t.Fatalf("records = %+v, want a WARN naming the repository passed over and why", h.logs.Records())
+	}
+}
+
+func TestRegisteredQueuesSurfacesAFailedRegistryRead(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.reposErr = errors.New("database is closed")
+
+	// Act
+	got, err := h.o.registeredQueues(context.Background(), "daemon.merge.test")
+
+	// Assert
+	if err == nil || got != nil {
+		t.Fatalf("registeredQueues = %+v, %v; want the registry's error", got, err)
+	}
+}
+
+func TestOnlyRegisteredQueuesAndTheStatusReadKeyTheRegistry(t *testing.T) {
+	// Arrange: the status read refuses a repository it cannot key, so it
+	// keys the registry itself; every other walk of it is registeredQueues'.
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var walkers []string
+
+	// Act
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "repoKeyFor(ctx, repository.Dir)") {
+			walkers = append(walkers, name)
+		}
+	}
+
+	// Assert
+	if !slices.Equal(walkers, []string{"orchestrator.go", "status.go"}) {
+		t.Fatalf("the registry is keyed by hand in %v, want orchestrator.go (registeredQueues) and status.go alone", walkers)
 	}
 }

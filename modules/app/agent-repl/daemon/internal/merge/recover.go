@@ -48,7 +48,11 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	if err := o.recordInherited(ctx, o.racingSwitch()); err != nil {
 		return err
 	}
-	if err := o.recordInheritedHolds(ctx); err != nil {
+	registered, err := o.registeredQueues(ctx, op)
+	if err != nil {
+		return err
+	}
+	if err := o.recordInheritedHolds(ctx, registered); err != nil {
 		return err
 	}
 	o.sweepOrphanedState(ctx)

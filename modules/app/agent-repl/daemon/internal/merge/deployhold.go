@@ -200,25 +200,15 @@ func (o *orchestrator) runOwnerlessScript(ctx context.Context, repoDir string, s
 // recordInheritedHolds records, at boot, every repository whose deploy stage
 // the previous daemon left held, so a reader of this daemon's log knows its
 // landings there will not deploy until the hold is released.
-func (o *orchestrator) recordInheritedHolds(ctx context.Context) error {
-	repositories, err := o.deps.DB.ListRepositories(ctx)
-	if err != nil {
-		return err
-	}
-	for _, repository := range repositories {
-		key, err := o.repoKeyFor(ctx, repository.Dir)
-		if err != nil {
-			o.deps.Log.Global().Warn("daemon.merge.recover", "could not resolve a registered repository's queue to read its deploy hold", dlog.Context{
-				"repository": repository.Dir, "error": err.Error()})
-			continue
-		}
-		hold, err := o.deps.DB.DeployHoldOf(ctx, key)
+func (o *orchestrator) recordInheritedHolds(ctx context.Context, registered []registeredQueue) error {
+	for _, q := range registered {
+		hold, err := o.deps.DB.DeployHoldOf(ctx, q.key)
 		if err != nil {
 			return err
 		}
 		if hold.Held {
 			o.deps.Log.Global().Info("daemon.merge.recover", "a repository's deploy stage is held: its deploys land, and skip their deploy hook until it is released", dlog.Context{
-				"repository": repository.Dir, "held_since": hold.Since, "skipped": hold.Skipped})
+				"repository": q.repository.Dir, "held_since": hold.Since, "skipped": hold.Skipped})
 		}
 	}
 	return nil
