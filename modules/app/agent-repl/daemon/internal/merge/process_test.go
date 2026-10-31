@@ -18,6 +18,7 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
@@ -2288,5 +2289,209 @@ func TestCutShort(t *testing.T) {
 				t.Fatalf("cutShort = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// fixTurnsLeave scripts what each of the merge's repair turns leaves in the
+// worktree: the nth MERGE_TEST_REPAIR submission leaves it clean when
+// states[n-1] is true and dirty when it is false, standing for an agent that
+// committed its work or did not. A submission past states leaves it as it is.
+func fixTurnsLeave(h *harness, states ...bool) {
+	n := 0
+	h.queue.onSubmit = func(sub promptqueue.Submission) {
+		if sub.Origin != fixOrigin {
+			return
+		}
+		n++
+		if n > len(states) {
+			return
+		}
+		h.git.mu.Lock()
+		h.git.clean = states[n-1]
+		h.git.mu.Unlock()
+	}
+}
+
+// repairSubmissions answers how many repair turns the merge submitted.
+func repairSubmissions(h *harness) int {
+	h.queue.mu.Lock()
+	defer h.queue.mu.Unlock()
+	count := 0
+	for _, sub := range h.queue.submissions {
+		if sub.Origin == fixOrigin {
+			count++
+		}
+	}
+	return count
+}
+
+// commitBriefs answers the values of every commit brief the merge composed.
+func commitBriefs(h *harness) []map[string]string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []map[string]string
+	for _, values := range h.briefValues {
+		if _, ok := values["max_prompts"]; ok {
+			out = append(out, values)
+		}
+	}
+	return out
+}
+
+// fixingMerge arranges a merge whose gate fails once and then passes, so it
+// takes exactly one fixing attempt.
+func fixingMerge(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	landing(h, 1)
+	h.runner.runs = nil
+	h.gateFails("daemon")
+	h.gatePasses("daemon")
+	return h
+}
+
+func TestAFixingTurnThatCommitsItsFixIsNotPromptedToCommit(t *testing.T) {
+	// Arrange: the fixing turn leaves the worktree clean.
+	h := fixingMerge(t)
+	fixTurnsLeave(h, true)
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
+		t.Fatalf("facts = %+v, want the merge landed", facts)
+	}
+	if got := repairSubmissions(h); got != 1 {
+		t.Fatalf("repair turns submitted = %d, want the one fixing turn", got)
+	}
+	if got := commitBriefs(h); len(got) != 0 {
+		t.Fatalf("commit briefs composed = %v, want none for a committed fix", got)
+	}
+}
+
+func TestAFixingTurnThatLeavesItsFixUncommittedIsPromptedToCommitAndTheMergeLands(t *testing.T) {
+	// Arrange: the fixing turn leaves the worktree dirty, and the commit turn
+	// it is prompted for leaves it clean.
+	h := fixingMerge(t)
+	fixTurnsLeave(h, false, true)
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
+		t.Fatalf("facts = %+v, want the merge landed in its place, not aborted", facts)
+	}
+	if got := repairSubmissions(h); got != 2 {
+		t.Fatalf("repair turns submitted = %d, want the fixing turn and one commit turn", got)
+	}
+	briefs := commitBriefs(h)
+	if len(briefs) != 1 || briefs[0]["prompt"] != "1" || briefs[0]["max_prompts"] != fmt.Sprint(MaxCommitPrompts) || briefs[0]["worktree_dir"] != h.sourceD {
+		t.Fatalf("commit briefs = %v, want prompt 1 of %d naming the worktree %s", briefs, MaxCommitPrompts, h.sourceD)
+	}
+}
+
+func TestAnUncommittedFixIsLoggedWhenPromptedAndWhenCommitted(t *testing.T) {
+	// Arrange.
+	h := fixingMerge(t)
+	fixTurnsLeave(h, false, true)
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	records := h.logs.Records()
+	prompted, ok := dlog.FindRecord(records, dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.fixes",
+		Message: "the fixing turn ended with uncommitted changes; the workspace is prompted to commit them and the merge keeps its place"})
+	if !ok {
+		t.Fatalf("no record of the commit prompt: %+v", records)
+	}
+	if prompted.Context["worktree"] != h.sourceD || prompted.Context["prompt"] != 1 || prompted.Context["of"] != MaxCommitPrompts {
+		t.Fatalf("the commit prompt's record carries %+v, want its worktree and prompt 1 of %d", prompted.Context, MaxCommitPrompts)
+	}
+	if _, ok := dlog.FindRecord(records, dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.fixes",
+		Message: "the fixing attempt's changes are committed; the merge goes on"}); !ok {
+		t.Fatalf("no record of the committed fix: %+v", records)
+	}
+	if _, ok := dlog.FindRecord(records, dlog.RecordQuery{Operation: "daemon.merge.abort"}); ok {
+		t.Fatalf("the merge aborted: %+v", records)
+	}
+}
+
+func TestAFixStillUncommittedAfterTheLastPromptFailsTheMergeInTests(t *testing.T) {
+	// Arrange: neither the fixing turn nor any commit turn cleans the tree.
+	h := fixingMerge(t)
+	fixTurnsLeave(h, false)
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	got := h.footer.last()
+	if got.State != StateFailed || got.FailedArea != "tests" {
+		t.Fatalf("facts = %+v, want the merge failed in tests", got)
+	}
+	if n := repairSubmissions(h); n != 1+MaxCommitPrompts {
+		t.Fatalf("repair turns submitted = %d, want the fixing turn and %d commit turns", n, MaxCommitPrompts)
+	}
+	want := fmt.Sprintf("the fixing attempt left uncommitted changes in %s after %d prompts to commit them", h.sourceD, MaxCommitPrompts)
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.fixes",
+		Message: "the fixing attempt gave up; the merge fails"})
+	if !ok || record.Context["why"] != want {
+		t.Fatalf("give-up record = %+v (found %v), want why %q", record.Context, ok, want)
+	}
+}
+
+func TestAFixingAttemptWhoseWorktreeCannotBeReadSurfacesTheError(t *testing.T) {
+	// Arrange: the fixing turn ends and the clean check fails.
+	h := fixingMerge(t)
+	h.queue.onSubmit = func(sub promptqueue.Submission) {
+		if sub.Origin != fixOrigin {
+			return
+		}
+		h.git.mu.Lock()
+		h.git.cleanErr = errors.New("git status: index locked")
+		h.git.mu.Unlock()
+	}
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	want := "reading whether " + h.sourceD + " is clean after the fixing turn"
+	fault, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.merge.fault"})
+	if !ok || !strings.Contains(fmt.Sprint(fault.Context["summary"]), want) {
+		t.Fatalf("fault record = %+v (found %v), want its summary to name %q", fault.Context, ok, want)
+	}
+	if got := h.footer.last(); got.State != StateFailed {
+		t.Fatalf("facts = %+v, want the merge failed", got)
+	}
+	if n := repairSubmissions(h); n != 1 {
+		t.Fatalf("repair turns submitted = %d, want only the fixing turn", n)
+	}
+}
+
+func TestAResumedFixingTurnThatLeftItsFixUncommittedIsPromptedToCommitAndTheMergeLands(t *testing.T) {
+	// Arrange: a restart cut the merge in its fixing step, and the fixing turn
+	// it resumes leaves the worktree dirty (2026-10-31, the merge of
+	// workspace-handover-viewability).
+	h := newHarness(t)
+	interruptedAt(t, h, atFix(t))
+	landsAfterResume(h)
+	fixTurnsLeave(h, false, true)
+
+	// Act.
+	resume(t, h)
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
+		t.Fatalf("facts = %+v, want the resumed merge landed, not aborted", facts)
+	}
+	if got := commitBriefs(h); len(got) != 1 {
+		t.Fatalf("commit briefs = %v, want one prompt to commit", got)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Operation: "daemon.merge.abort"}); ok {
+		t.Fatalf("the resumed merge aborted: %+v", h.logs.Records())
 	}
 }

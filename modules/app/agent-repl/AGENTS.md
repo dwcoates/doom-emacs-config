@@ -1331,6 +1331,13 @@ like an improvement still needs that conversation. Code:
   again. The agent loops on exactly those test cases: run them with their
   targeted commands, fix, rerun them, and repeat until every one passes. Only
   then is the remediation resolved, and the agent commits and ends its turn.
+- **A fixing turn never hands the merge back with uncommitted work.** When
+  the turn ends, the daemon reads whether the worktree is clean
+  (`run.requireCommitted`). If it is not, the merge keeps its place in the
+  queue and prompts the workspace to commit (`prompts/merge-fix-commit.md`), up
+  to `MaxCommitPrompts` times, and fails the merge only if the worktree is
+  still dirty after the last prompt. This covers fixing turns in line, out of
+  line and resumed after a restart, since every one ends in `fixSettled`.
 - **After remediation, the selected suites run again**, selected afresh from
   the branch's whole diff, fixing commits included.
 - **One fixing attempt, five consecutive conflict failures, and
