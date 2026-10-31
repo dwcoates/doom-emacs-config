@@ -35,6 +35,7 @@ import {
   openExternalRefusal,
   openInEditorRefusal,
   renderEditorLink,
+  unknownMergeTestLogRefusal,
   renderExternalLink,
   renderMergeCommitLink,
   renderMergeTestLogLink,
@@ -59,6 +60,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   workspaceRefMismatch: { registryDir: "/w/registry" },
   transferringAway: { address: "127.0.0.1:7777" },
   launchFailed: { detail: "no such file" },
+  unknownMergeTestLog: { reason: { case: "agedOut", value: {} } },
 };
 
 
@@ -815,6 +817,36 @@ describe("openExternalRefusal: an arm this build has no words for", () => {
     } catch (err) {
       expect((err as MalformedView).path).toBe("OpenExternalError.cause");
     }
+  });
+});
+
+describe("unknownMergeTestLogRefusal: the sentence names why the token was refused", () => {
+  it("says an aged-out log is no longer available", () => {
+    expect(unknownMergeTestLogRefusal({ reason: { case: "agedOut", value: {} } } as never)).toBe(
+      "that test log was removed after three days and is no longer available",
+    );
+  });
+
+  it("says a merge this feed does not draw is not shown here, never that the log is gone", () => {
+    const text = unknownMergeTestLogRefusal({ reason: { case: "notDrawnHere", value: {} } } as never);
+    expect(text).toBe("that test log belongs to a merge this workspace does not show");
+    expect(text).not.toContain("no longer available");
+  });
+
+  it("says a token the daemon did not make is not one of its links", () => {
+    const text = unknownMergeTestLogRefusal({ reason: { case: "malformed", value: {} } } as never);
+    expect(text).toBe("that test log link is not one the daemon made");
+    expect(text).not.toContain("no longer available");
+  });
+
+  it("refuses a refusal that sets no reason", () => {
+    expect(() => unknownMergeTestLogRefusal({ reason: { case: undefined } } as never)).toThrow(MalformedView);
+  });
+
+  it("refuses a reason a newer daemon added", () => {
+    expect(() =>
+      unknownMergeTestLogRefusal({ reason: { case: "somethingNewer", value: {} } } as never),
+    ).toThrow(MalformedView);
   });
 });
 

@@ -56,6 +56,7 @@ import {
 import {
   OpenInEditorResponseSchema,
   type OpenInEditorError,
+  type OpenInEditorUnknownMergeTestLog,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import { isFileLinkHref } from "./href.js";
 import type {
@@ -597,10 +598,34 @@ export function openInEditorRefusal(cause: OpenInEditorCause): string {
     case "pathEscapesWorkspace":
       return "that path is outside this workspace";
     case "unknownMergeTestLog":
-      return "that test log is no longer available";
+      return unknownMergeTestLogRefusal(cause.value);
     default: {
       const other: { case: string } = cause;
       return unreachableArm("OpenInEditorError.cause", other.case);
+    }
+  }
+}
+
+/**
+ * A refused merge test log token, worded by WHY the daemon refused it.
+ *
+ * Only a log the retention pass removed is "no longer available"; a token the
+ * daemon did not make, or one for a merge this feed draws no bubble for, is a
+ * different refusal and says so (2026-10-30: an async merge's link, refused as
+ * another workspace's, was drawn as "no longer available" with its log on disk).
+ */
+export function unknownMergeTestLogRefusal(refused: OpenInEditorUnknownMergeTestLog): string {
+  const reason = requireCase(refused.reason, "OpenInEditorUnknownMergeTestLog.reason");
+  switch (reason.case) {
+    case "malformed":
+      return "that test log link is not one the daemon made";
+    case "notDrawnHere":
+      return "that test log belongs to a merge this workspace does not show";
+    case "agedOut":
+      return "that test log was removed after three days and is no longer available";
+    default: {
+      const other: { case: string } = reason;
+      return unreachableArm("OpenInEditorUnknownMergeTestLog.reason", other.case);
     }
   }
 }
@@ -622,8 +647,8 @@ const EXTERNAL_SENTENCES: SentenceTable = {
 const EDITOR_SENTENCES: SentenceTable = {
   pathEscapesWorkspace: () =>
     openInEditorRefusal({ case: "pathEscapesWorkspace", value: {} } as OpenInEditorCause),
-  unknownMergeTestLog: () =>
-    openInEditorRefusal({ case: "unknownMergeTestLog", value: {} } as OpenInEditorCause),
+  unknownMergeTestLog: (value: OpenInEditorUnknownMergeTestLog) =>
+    openInEditorRefusal({ case: "unknownMergeTestLog", value }),
 };
 
 function clearRefusal(anchor: HTMLElement): void {
