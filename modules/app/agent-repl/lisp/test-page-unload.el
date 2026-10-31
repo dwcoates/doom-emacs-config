@@ -193,9 +193,21 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
      (lambda (why) (push (list 'kept why) outcomes)))
     (lambda () outcomes)))
 
-(ert-deftest agent-repl-test-pu-an-idle-page-is-held-an-hour-by-default ()
-  "An idle page is held for an hour past its last prompt (owner ruling, 2026-10-29)."
-  (should (= (eval (car (get 'agent-repl-page-unload-after 'standard-value)) t) 3600)))
+(ert-deftest agent-repl-test-pu-the-hold-is-the-shared-page-hold ()
+  "The hold is page-hold.json's, the window the sidebar's name fades over."
+  ;; Arrange
+  (let ((path (expand-file-name "../proto/vocab/page-hold.json"
+                                (file-name-directory (symbol-file (quote agent-repl-page-unload-pass))))))
+    ;; Act
+    (let ((shared (with-temp-buffer
+                    (insert-file-contents path)
+                    (gethash "hold_seconds" (json-parse-buffer)))))
+      ;; Assert
+      (should (equal (list agent-repl-page-unload-after shared) '(600 600))))))
+
+(ert-deftest agent-repl-test-pu-the-hold-is-no-user-option ()
+  "The hold is not customizable, so no setting parts it from the fade."
+  (should-not (custom-variable-p 'agent-repl-page-unload-after)))
 
 (ert-deftest agent-repl-test-pu-an-announced-drop-reports-before-it-drops ()
   "The daemon is told first, and the drop runs once it answers."
@@ -548,7 +560,7 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
     (should-not agent-repl-test-pu--dropped)))
 
 (ert-deftest agent-repl-test-pu-loading-a-page-never-restarts-the-idle-hold ()
-  "A page loaded just now, an hour past its last prompt, is unloaded off screen."
+  "A page loaded just now, past the hold after its last turn, is unloaded off screen."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha")
     (agent-repl--ws-put "alpha" :page-loaded-at 1000)
@@ -569,7 +581,7 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
     (should (equal agent-repl-test-pu--dropped '("alpha")))))
 
 (ert-deftest agent-repl-test-pu-a-visit-within-the-hold-is-kept-past-the-grace ()
-  "A page put back for a look within the hour after its last prompt stays."
+  "A page put back for a look within the hold after its last turn stays."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha" "beta")
     (setq agent-repl-test-pu--pages '("beta")
@@ -671,6 +683,73 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
     (agent-repl-page-unload-pass)
     ;; Assert
     (should (agent-repl-test-pu--said-p "ws=alpha" "reason=merged"))))
+
+(ert-deftest agent-repl-test-pu-a-page-finished-within-the-hold-is-held-whatever-its-status ()
+  "A merging, faulted or transitional page whose last turn ended within the hold stays."
+  (dolist (arm '(:merging :merge-queued :turn-failed :severed :waiting :init))
+    ;; Arrange
+    (agent-repl-test-pu--with '("alpha")
+      (setq agent-repl-test-pu--status `(("alpha" . ,arm))
+            agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
+      ;; Act
+      (agent-repl-page-unload-pass)
+      ;; Assert
+      (should (equal (list arm agent-repl-test-pu--dropped) (list arm nil))))))
+
+(ert-deftest agent-repl-test-pu-a-faulted-page-past-the-hold-is-unloaded ()
+  "A faulted page whose last turn ended past the hold is unloaded off screen."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :turn-failed))
+          agent-repl-test-pu--turn-ended '(("alpha" . 400000)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal agent-repl-test-pu--dropped '("alpha")))
+    (should (agent-repl-test-pu--said-p "ws=alpha" "reason=faulted"))))
+
+(ert-deftest agent-repl-test-pu-a-page-at-the-holds-end-is-unloaded ()
+  "A page whose hold ends at the pass's instant is no longer held."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 500000)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (equal agent-repl-test-pu--dropped '("alpha")))))
+
+(ert-deftest agent-repl-test-pu-a-cold-gated-page-finished-within-the-hold-is-unloaded ()
+  "A cold gate holds its page back however recently its last turn ended."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :cold-gate))
+          agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (agent-repl-test-pu--said-p "ws=alpha" "reason=cold-gated"))))
+
+(ert-deftest agent-repl-test-pu-a-merged-page-finished-within-the-hold-is-unloaded ()
+  "A merged workspace is ending, so its page goes however recently its turn ended."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :merged))
+          agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (agent-repl-test-pu--said-p "ws=alpha" "reason=merged"))))
+
+(ert-deftest agent-repl-test-pu-a-hidden-page-finished-within-the-hold-is-unloaded ()
+  "A hidden workspace holds no page off screen however recently its turn ended."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--hidden '("alpha")
+          agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (agent-repl-test-pu--said-p "ws=alpha" "reason=hidden"))))
 
 (ert-deftest agent-repl-test-pu-a-hidden-workspace-page-is-unloaded-at-once ()
   "A hidden workspace's page is unloaded off screen, working or not."
@@ -1173,7 +1252,7 @@ naming a dead buffer, and every switch back found its panels closed."
     (should-not agent-repl-test-pu--dropped)))
 
 (ert-deftest agent-repl-test-pu-switching-away-from-a-held-idle-page-keeps-it ()
-  "An idle page within the hour after its last prompt stays."
+  "An idle page within the hold after its last turn stays."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha" "beta")
     (setq agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
@@ -1249,6 +1328,27 @@ naming a dead buffer, and every switch back found its panels closed."
       ;; Assert
       (should (equal (plist-get (plist-get residency :value) :release)
                      '(:arm :at :value (:unix-ms 1400000)))))))
+
+(ert-deftest agent-repl-test-pu-a-faulted-page-within-the-hold-reports-its-holds-end ()
+  "A faulted page whose last turn ended within the hold reports the hold's end."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :turn-failed))
+          agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
+    ;; Act
+    (let ((residency (agent-repl-page-unload-residency "alpha")))
+      ;; Assert
+      (should (equal (plist-get (plist-get residency :value) :release)
+                     '(:arm :at :value (:unix-ms 1400000)))))))
+
+(ert-deftest agent-repl-test-pu-a-cold-gated-page-within-the-hold-reports-on-leave ()
+  "A cold-gated page reports it goes on the switch away, whatever its turn's end."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--status '(("alpha" . :cold-gate))
+          agent-repl-test-pu--turn-ended '(("alpha" . 900000)))
+    ;; Act / Assert
+    (should (eq (agent-repl-test-pu--release "alpha") :on-leave))))
 
 (ert-deftest agent-repl-test-pu-an-idle-visit-reports-on-leave ()
   "An idle page loaded only for a visit reports that it goes on the switch away."

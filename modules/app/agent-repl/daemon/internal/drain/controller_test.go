@@ -1014,14 +1014,15 @@ func TestNewRefusesWithoutASpawnSweep(t *testing.T) {
 func TestNewRefusesWithoutAMergeSuspension(t *testing.T) {
 	// Arrange & Act
 	_, err := New(Deps{
-		DB:        newHarness(t).db,
-		Stand:     newFakeStand(),
-		Spawns:    newFakeSpawns(),
-		Freeness:  newFakeFreeness(),
-		Reviving:  newFakeReviving().Reviving,
-		Announcer: &fakeAnnouncer{},
-		Exit:      func(context.Context) error { return nil },
-		Log:       dlog.NewTestSurfaces(),
+		DB:         newHarness(t).db,
+		Stand:      newFakeStand(),
+		Spawns:     newFakeSpawns(),
+		Freeness:   newFakeFreeness(),
+		Reviving:   newFakeReviving().Reviving,
+		Delivering: func(ids.WorkspaceID) bool { return false },
+		Announcer:  &fakeAnnouncer{},
+		Exit:       func(context.Context) error { return nil },
+		Log:        dlog.NewTestSurfaces(),
 	})
 
 	// Assert
@@ -1049,6 +1050,29 @@ func TestNewRefusesWithoutARevivalAnswer(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "revival") {
 		t.Fatalf("New = %v, want the missing revival answer refused", err)
+	}
+}
+
+// TestNewRefusesWithoutADeliveryAnswer pins that the prompt queue's delivery
+// state is REQUIRED wiring: a stand-down that cannot see a delivery under way
+// hibernates the shim the prompt is on its way to.
+func TestNewRefusesWithoutADeliveryAnswer(t *testing.T) {
+	// Arrange & Act
+	_, err := New(Deps{
+		DB:        newHarness(t).db,
+		Stand:     newFakeStand(),
+		Spawns:    newFakeSpawns(),
+		Merges:    &fakeMerges{},
+		Freeness:  newFakeFreeness(),
+		Reviving:  newFakeReviving().Reviving,
+		Announcer: &fakeAnnouncer{},
+		Exit:      func(context.Context) error { return nil },
+		Log:       dlog.NewTestSurfaces(),
+	})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "delivery") {
+		t.Fatalf("New = %v, want the missing delivery answer refused", err)
 	}
 }
 

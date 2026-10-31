@@ -10,6 +10,7 @@
 (declare-function agent-repl-roster-thread-p "roster" (ws))
 (declare-function agent-repl--ws-frame-name "workspace" (frame))
 (declare-function agent-repl-defface "core" (face spec doc &rest args))
+(declare-function agent-repl-vocab-read "core" (file &rest keys))
 (declare-function agent-repl--agent-view-buffer-name-p "core")
 (declare-function agent-repl--agent-view-buffer-p "core")
 (declare-function agent-repl--agent-input-buffer-name-p "core")
@@ -358,12 +359,7 @@ exist before its workspace directory is known."
 ;; --- Named color / style constants --- ;;
 
 (defconst agent-repl-status--color-values
-  ;; `proto/' sits at the module root; this file lives in `lisp/'.
-  (let ((path (expand-file-name "../proto/vocab/render-colors.json"
-                                (file-name-directory (or load-file-name buffer-file-name)))))
-    (with-temp-buffer
-      (insert-file-contents path)
-      (gethash "dark" (gethash "color_values" (json-parse-buffer)))))
+  (agent-repl-vocab-read "render-colors.json" "color_values" "dark")
   "The six colors\=' values: render-colors.json\='s `color_values\=' dark row.
 THE ONE VALUE OF EACH STATUS COLOR (owner ruling, 2026-10-17): the webapp
 paints its dots, tones and borders from this same row, so a tab and the

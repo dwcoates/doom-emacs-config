@@ -335,6 +335,33 @@ no-op while it is set:
 ;; scripts.  It exists so the test suite can isolate state to a temp dir;
 ;; production leaves it unset and uses the `~/.claude-emacs' fallback.
 
+;; ---- The shared vocabulary (proto/vocab/) ----
+;;
+;; A value two runtimes must agree on lives in one JSON file under
+;; proto/vocab/, and the elisp side reads it at load rather than spelling it.
+
+(defconst agent-repl--vocab-dir
+  ;; `proto/' sits at the module root; this file lives in `lisp/'.
+  (expand-file-name "../proto/vocab/" (file-name-directory (or load-file-name buffer-file-name)))
+  "The directory of the shared cross-language vocabulary files.")
+
+(defun agent-repl-vocab-read (file &rest keys)
+  "The value at KEYS in the shared vocabulary FILE under proto/vocab/.
+FILE is the file\='s name, e.g. \"page-hold.json\"; each of KEYS names one
+object member deeper.  The files are checked in, so a missing member is a
+broken contract and signals."
+  (let ((value (with-temp-buffer
+                 (insert-file-contents (expand-file-name file agent-repl--vocab-dir))
+                 (json-parse-buffer)))
+        (path nil))
+    (dolist (key keys value)
+      (push key path)
+      (unless (hash-table-p value)
+        (error "agent-repl: %s at %S is no object" file (reverse (cdr path))))
+      (setq value (gethash key value 'agent-repl--vocab-missing))
+      (when (eq value 'agent-repl--vocab-missing)
+        (error "agent-repl: %s has no member %S" file (reverse path))))))
+
 (defconst agent-repl--state-dir-env "AGENT_REPL_STATE_DIR"
   "Name of the environment variable overriding `agent-repl--global-state-dir'.
 Honored identically by the managed shell scripts.  Unset in production;

@@ -249,7 +249,11 @@ func (c *Coordinator) PageDrawn(id string, ws ids.WorkspaceID) error {
 	p.drawn[ws] = true
 	runs := c.runsLocked()
 	c.mu.Unlock()
-	c.deps.Log.Debug(opPage, "a page reported its workspace drawn", dlog.Context{
+	// INFO, NOT DEBUG: an open waits on this report, and a workspace whose
+	// open never answered could not be told apart from a page that never
+	// drew in logs kept at info (e2e TestEmacsUnfocusedTurnEndRaisesTheDaemonsBanner,
+	// 2026-10-31). It is once per page per workspace drawn.
+	c.deps.Log.Info(opPage, "a page reported its workspace drawn", dlog.Context{
 		"page": id, dlog.KeyWorkspaceID: string(ws), "again": again,
 	})
 	for _, r := range runs {

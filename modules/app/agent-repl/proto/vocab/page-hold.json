@@ -1,0 +1,12 @@
+{
+  "_comment": [
+    "THE ONE WINDOW A FINISHED WORKSPACE'S PAGE IS HELD FOR (owner ruling,",
+    "2026-10-30). A workspace whose last turn ended less than hold_seconds ago",
+    "keeps its page loaded (lisp/page-unload.el), and the sidebar fades its",
+    "name from its status tone to its resting grey over the same hold_seconds",
+    "(webapp/src/sidebar/name-tint.ts). So the fade is the indicator of how",
+    "close the page is to being unloaded: a name fully faded is a page that",
+    "may be unloaded. Both runtimes read this file; neither spells the value."
+  ],
+  "hold_seconds": 600
+}

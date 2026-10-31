@@ -545,11 +545,13 @@ type harness struct {
 	announcer *fakeAnnouncer
 	freeness  *fakeFreeness
 	reviving  *fakeReviving
-	stand     *fakeStand
-	spawns    *fakeSpawns
-	merges    *fakeMerges
-	log       *dlog.TestSurfaces
-	exits     chan struct{}
+	// delivering answers Deps.Delivering: nil answers false.
+	delivering func(ws ids.WorkspaceID) bool
+	stand      *fakeStand
+	spawns     *fakeSpawns
+	merges     *fakeMerges
+	log        *dlog.TestSurfaces
+	exits      chan struct{}
 }
 
 // newHarness builds a controller over a real (in-memory) WSM store —
@@ -587,8 +589,14 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		Merges:        h.merges,
 		Freeness:      h.freeness,
 		Reviving:      h.reviving.Reviving,
-		Announcer:     h.announcer,
-		Exit:          func(context.Context) error { h.exits <- struct{}{}; return nil },
+		Delivering: func(ws ids.WorkspaceID) bool {
+			if h.delivering == nil {
+				return false
+			}
+			return h.delivering(ws)
+		},
+		Announcer: h.announcer,
+		Exit:      func(context.Context) error { h.exits <- struct{}{}; return nil },
 		// A WITHHELD STAND-DOWN RUNS IN LINE in tests, so its outcome is
 		// settled when the call returns; a test that needs it parked
 		// overrides this.

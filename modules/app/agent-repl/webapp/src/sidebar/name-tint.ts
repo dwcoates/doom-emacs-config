@@ -5,7 +5,11 @@
  * While a turn runs the name wears the status tone steadily. When a turn
  * ends the name starts at the tone and the stylesheet fades it to the name's
  * resting grey (`--name-rest`: unviewed, viewed or cold-gated) over
- * `--name-fade` (10 minutes). The fade is a finite CSS animation whose delay
+ * `--name-fade`, the page hold (`proto/vocab/page-hold.json`, ten minutes).
+ * THE FADE IS THE UNLOAD'S INDICATOR (owner ruling, 2026-10-30): Emacs holds
+ * a workspace's page for that same window after its last turn ends
+ * (lisp/page-unload.el), so a name fully faded is a page that may be
+ * unloaded. The fade is a finite CSS animation whose delay
  * is minus the time since the turn ended, so a row redrawn by a roster push
  * rejoins the fade where the clock says it has got to, and a turn that ended
  * long ago draws at rest.
@@ -16,12 +20,17 @@
  * `.viewed` class's color, so a fading name would otherwise stay in its tone
  * for the rest of the window however long the user looked at it.
  */
+import pageHold from "../../../proto/vocab/page-hold.json";
 import { toneClass } from "../vocab.js";
 
 /** The class of a name held at its status tone (a turn is running). */
 export const NAME_STEADY_CLASS = "tinted";
 /** The class of a name fading from its status tone to its resting grey. */
 export const NAME_FADING_CLASS = "fading";
+/** The custom property carrying the fade's length: the page hold. */
+export const NAME_FADE_PROPERTY = "--name-fade";
+/** How long a finished workspace's page is held, and its name fades over. */
+export const NAME_FADE_MS = pageHold.hold_seconds * 1000;
 /** The custom property carrying minus the time since the turn ended. */
 export const NAME_FADE_DELAY_PROPERTY = "--name-fade-delay";
 
@@ -58,5 +67,6 @@ export function applyNameTint(label: HTMLElement, tint: NameTint | null): void {
     return;
   }
   label.classList.add(NAME_FADING_CLASS);
+  label.style.setProperty(NAME_FADE_PROPERTY, `${NAME_FADE_MS}ms`);
   label.style.setProperty(NAME_FADE_DELAY_PROPERTY, `-${Math.round(tint.elapsedMs)}ms`);
 }

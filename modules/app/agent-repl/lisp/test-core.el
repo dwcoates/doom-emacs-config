@@ -7242,6 +7242,65 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
       ;; Assert
       (should (agent-repl-test--log-record-for path "persisted-central")))))
 
+;;;; ---- Tests: the shared vocabulary reader ----
+
+(defmacro agent-repl-test-core--with-vocab (json &rest body)
+  "Run BODY with `agent-repl--vocab-dir' a temp dir holding t.json = JSON."
+  (declare (indent 1))
+  `(let* ((dir (make-temp-file "agent-repl-vocab" t))
+          (agent-repl--vocab-dir (file-name-as-directory dir)))
+     (unwind-protect
+         (progn
+           (with-temp-file (expand-file-name "t.json" dir) (insert ,json))
+           ,@body)
+       (delete-directory dir t))))
+
+(ert-deftest agent-repl-test-core-vocab-read-answers-a-nested-member ()
+  "Each key names one member deeper."
+  ;; Arrange
+  (agent-repl-test-core--with-vocab "{\"a\": {\"b\": 7}}"
+    ;; Act / Assert
+    (should (= (agent-repl-vocab-read "t.json" "a" "b") 7))))
+
+(ert-deftest agent-repl-test-core-vocab-read-signals-a-missing-member ()
+  "A member the file lacks is a broken contract."
+  ;; Arrange
+  (agent-repl-test-core--with-vocab "{\"a\": {}}"
+    ;; Act
+    (let ((err (should-error (agent-repl-vocab-read "t.json" "a" "b"))))
+      ;; Assert
+      (should (equal (cadr err) "agent-repl: t.json has no member (\"a\" \"b\")")))))
+
+(ert-deftest agent-repl-test-core-vocab-read-signals-a-member-of-no-object ()
+  "A key below a value that is no object signals."
+  ;; Arrange
+  (agent-repl-test-core--with-vocab "{\"a\": 3}"
+    ;; Act
+    (let ((err (should-error (agent-repl-vocab-read "t.json" "a" "b"))))
+      ;; Assert
+      (should (equal (cadr err) "agent-repl: t.json at (\"a\") is no object")))))
+
+(ert-deftest agent-repl-test-core-vocab-read-reads-the-checked-in-files ()
+  "The real vocabulary directory resolves beside the module."
+  (should (natnump (agent-repl-vocab-read "page-hold.json" "hold_seconds"))))
+
+(ert-deftest agent-repl-test-core-every-vocab-file-is-read-through-the-reader ()
+  "No source outside core.el resolves a proto/vocab path by hand."
+  ;; Arrange
+  (let* ((dir (file-name-directory (symbol-file 'agent-repl-vocab-read)))
+         (sources (seq-remove (lambda (f) (string-prefix-p "test-" (file-name-nondirectory f)))
+                              (directory-files dir t "\\.el\\'"))))
+    ;; Act
+    (let ((hand-rolled
+           (seq-filter (lambda (f)
+                         (and (not (equal (file-name-nondirectory f) "core.el"))
+                              (with-temp-buffer
+                                (insert-file-contents f)
+                                (re-search-forward "\"\\.\\./proto/vocab/" nil t))))
+                       sources)))
+      ;; Assert
+      (should-not hand-rolled))))
+
 ;;;; ---- Tests: a durable level other than info is a window ----
 
 (defvar agent-repl-test--level-window-fixture-path
