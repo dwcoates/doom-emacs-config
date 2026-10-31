@@ -410,13 +410,15 @@ func lineView(line []wsm.MergeQueueEntry) string {
 // standingFront answers the chain's members still in line, and the queue's
 // line without the entries of the members that left it (run.leftLine).
 //
-// A RUN LEAVES ITS LINE BEFORE ITS CHAIN. Its teardown removes its queue
-// entry, then closes what it closes, and only then releases its slot; the
-// queue read the chain is checked against may fall on either side of that
-// removal. Leaving the run out of BOTH sides makes every such read agree with
-// the chain, because the mark precedes the removal: a read that still holds
-// the entry is answered without it, and a read that lacks it meets a chain
-// that no longer counts it. Called with o.mu held.
+// A RUN LEAVES ITS LINE BEFORE ITS CHAIN (leaveLine). Its teardown removes
+// its queue entry, and its step aside takes it out of line, before it
+// releases its slot; the queue read the chain is checked against may fall on
+// either side of that write. Leaving the run out of BOTH sides makes every
+// such read agree with the chain, because the mark precedes the write: a read
+// that still holds the entry is answered without it, and a read that lacks
+// it meets a chain that no longer counts it. The write is made under the line
+// lock the read is held under, so the run can never leave its chain between a
+// read that held its entry and the check. Called with o.mu held.
 func standingFront(chain []*run, line []wsm.MergeQueueEntry) ([]*run, []wsm.MergeQueueEntry) {
 	left := map[ids.WorkspaceID]bool{}
 	front := make([]*run, 0, len(chain))

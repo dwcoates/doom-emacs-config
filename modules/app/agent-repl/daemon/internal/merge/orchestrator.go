@@ -195,9 +195,12 @@ type orchestrator struct {
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
 	// lines serializes, per repository, every decision that reads its line
-	// and acts on the order it read: the pump admitting its front
-	// (admitFront), a merge joining the chain behind the head (extendOnce),
-	// and a remediated merge returning (returnRemediated). See lineLock.
+	// and acts on the order it read -- the pump admitting its front
+	// (admitFront), a merge joining the chain behind the head (extendOnce) --
+	// with every write that moves an entry ahead of, behind or out of the
+	// chain's members: a remediated merge returning (returnRemediated), a
+	// race recorded (claimRace), and a run leaving its line (leaveLine). See
+	// lineWrite.
 	lines map[wsm.RepoKey]*sync.Mutex
 	// headLeases are the merge leases admitFront took for the heads it
 	// admitted, handed to start: the lease goes first and the admission
@@ -280,6 +283,10 @@ type orchestrator struct {
 	// take-back goroutine begins (takeBackSteppedAside, remediate.go): THE TEST
 	// SEAM, NIL IN PRODUCTION, that holds it to show the run was cut before it.
 	onStepAside func(ws ids.WorkspaceID)
+	// onLineWait, when set, is called with the repository as a line write
+	// begins waiting for its line lock (lineWrite): THE TEST SEAM, NIL IN
+	// PRODUCTION, that shows the write held behind a decision reading the line.
+	onLineWait func(repo wsm.RepoKey)
 	// onBoundaryAsk, when set, is called once a restart has asked a running
 	// merge to stop at its next step boundary, before the restart waits for
 	// it. Nil in production; tests release the step in flight from it.

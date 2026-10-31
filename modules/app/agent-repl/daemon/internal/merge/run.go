@@ -71,9 +71,10 @@ type run struct {
 	speculative bool
 	// leftLine reports that the run's queue entry is gone or going: its merge
 	// is over, and only its teardown keeps it in its chain until releaseSlot.
-	// It is set BEFORE the entry is removed (teardown), so the chain's check
-	// against a queue it read (extendOnce) leaves the run out on both sides
-	// whichever side of the removal that read fell. Guarded by o.mu.
+	// It is set BEFORE the entry leaves the line, under the line lock
+	// (leaveLine), so the chain's check against a queue it read (extendOnce)
+	// leaves the run out on both sides whichever side of that write the read
+	// fell. Guarded by o.mu.
 	leftLine bool
 	// landing reports the run began committing: nothing overtakes it from
 	// here (race.go). Guarded by o.mu.
