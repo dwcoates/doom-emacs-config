@@ -648,8 +648,9 @@ func nullableText(v string) any {
 }
 
 // setMergeQueueState is the one state-write path for a queue entry, refusing an
-// entry that is not in the queue rather than affecting no rows.
-func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey, id WorkspaceID, state MergeQueueState, fields dlog.Context) error {
+// entry that is not in the queue rather than affecting no rows. ALSO runs in
+// the same transaction once the entry is written.
+func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey, id WorkspaceID, state MergeQueueState, fields dlog.Context, also func(context.Context, *sql.Tx, RepoKey) error) error {
 	key, err := normalizeRepoKey(repo)
 	if err != nil {
 		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
@@ -668,7 +669,10 @@ func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey,
 		if err != nil {
 			return err
 		}
-		return requireOneRow(res, fmt.Sprintf("wsm: merge queue entry for workspace %s in repo %q", id, key))
+		if err := requireOneRow(res, fmt.Sprintf("wsm: merge queue entry for workspace %s in repo %q", id, key)); err != nil {
+			return err
+		}
+		return also(ctx, tx, key)
 	})
 }
 
@@ -803,9 +807,11 @@ func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id Work
 	})
 }
 
-// AdmitMerge marks the entry the orchestrator is running now.
+// AdmitMerge marks the entry the orchestrator is running now, and marks its
+// repository as owing its queue_drained scripts IN THE SAME WRITE, so no
+// admitted merge leaves the repository without the debt.
 func (s *store) AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
-	return s.setMergeQueueState(ctx, "daemon.wsm.admit_merge", repo, id, MergeAdmitted, dlog.Context{})
+	return s.setMergeQueueState(ctx, "daemon.wsm.admit_merge", repo, id, MergeAdmitted, dlog.Context{}, oweQueueDrain)
 }
 
 // ReturnAdmittedMerge puts an ADMITTED merge that has no run back in line AT
