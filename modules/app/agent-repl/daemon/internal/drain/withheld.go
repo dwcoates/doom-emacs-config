@@ -167,7 +167,7 @@ func (c *controller) standDownWithheld(ctx context.Context, ws ids.WorkspaceID) 
 	// close are read afresh on every attempt. A CLOSED workspace is withheld
 	// whatever its visibility: its cache lapsed after its last keep-alive
 	// round (cachelapse.Keeper).
-	visible, err := bringup.Visible(ctx, c.deps.DB, ws)
+	visible, err := bringup.Visible(ctx, c.deps.DB, log, ws)
 	if err != nil {
 		log.Error(opWithheld, "could not read whether the workspace is still withheld; its stand-down is dropped", dlog.WithCause(fields, err))
 		return withheldSettled

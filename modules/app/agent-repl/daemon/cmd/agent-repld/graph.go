@@ -1234,6 +1234,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	drainController, err = drain.New(drain.Deps{
 		DB:         p.DB,
 		IdleCutoff: p.Opts.idleCutoff,
+		FoldDelay:  p.Opts.foldStandDownDelay,
 		Stand:      fleet,
 		// THE SUPERVISOR ITSELF, not the fleet: an immediate shutdown must
 		// also reach the shims that were spawned and have not yet reached the

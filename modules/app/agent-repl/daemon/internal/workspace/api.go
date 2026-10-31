@@ -784,7 +784,7 @@ type Deps struct {
 	// verb refuses an unowned workspace mid-handover rather than acting on it.
 	Ownership Ownership
 	// StandDowns stands down the session of a workspace whose repository
-	// section the user collapsed (drain.Controller.StandDownWithheld).
+	// section or subsection the user collapsed (drain.Controller.StandDownFolded).
 	StandDowns StandDowns
 	// CacheLapses holds a hidden workspace's keep-alives and stands its
 	// session down once its cache lapses (cachelapse.Keeper).
@@ -860,7 +860,9 @@ type Summaries interface {
 // StandDowns stands a withheld workspace's session down as the idle sweep
 // does, never under a turn. drain.Controller is the production one.
 type StandDowns interface {
-	StandDownWithheld(ws ids.WorkspaceID)
+	// StandDownFolded stands down a workspace a collapse folded, once the
+	// fold's delay after the latest such collapse is over.
+	StandDownFolded(ws ids.WorkspaceID)
 }
 
 // PromptLoader reads one brief by name from a prompts directory at use time.

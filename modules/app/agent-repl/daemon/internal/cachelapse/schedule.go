@@ -134,7 +134,7 @@ func (k *Keeper) beatDue(ctx context.Context, log dlog.Logger, ws ids.WorkspaceI
 	if _, gated := k.deps.ColdGate(ws); gated {
 		return none("its session stands at the cold gate")
 	}
-	runs, _, err := bringup.OnlyVisible(ctx, k.deps.DB, []wsm.Workspace{record})
+	runs, _, err := bringup.OnlyVisible(ctx, k.deps.DB, log, []wsm.Workspace{record})
 	if err != nil {
 		if !leaving(ctx, log, opDrive, "reading whether the workspace runs", err) {
 			log.Error(opDrive, "could not read whether the workspace runs; its keep-alive is not armed", dlog.Context{"cause": err.Error()})

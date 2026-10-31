@@ -95,6 +95,9 @@ type controller struct {
 	// withheld are the stand-downs of withheld workspaces, pending or
 	// running, by workspace (withheld.go).
 	withheld map[ids.WorkspaceID]*withheldState
+	// folded is each folded workspace's latest wait, by workspace: a wait
+	// that ends as anything but the latest does nothing (folded.go).
+	folded map[ids.WorkspaceID]uint64
 	// cycles are the keep-alive cycle's stand-downs, pending or running, by
 	// workspace (cycle.go).
 	cycles map[ids.WorkspaceID]*cycleState

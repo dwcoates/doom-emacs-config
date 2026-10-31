@@ -4,6 +4,7 @@ package integration
 
 import (
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -167,7 +168,7 @@ func collapseRepository(t *testing.T, f *fixture) {
 func TestCollapsingARepositoryStandsItsWorkspacesSessionDown(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{FoldStandDownDelay: time.Millisecond})
 	f.d.ExpectWarnings(standDownWarnings...)
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 
@@ -182,7 +183,7 @@ func TestCollapsingARepositoryStandsItsWorkspacesSessionDown(t *testing.T) {
 func TestCollapsingARepositoryNeverStandsDownAWorkspaceUnderItsTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn running in the repository's one workspace.
-	f := newOpened(t, harness.Opts{})
+	f := newOpened(t, harness.Opts{FoldStandDownDelay: time.Millisecond})
 	f.d.ExpectWarnings(standDownWarnings...)
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	if got := f.submit("keep working", "k-fold-busy", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {

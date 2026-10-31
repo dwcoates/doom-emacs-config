@@ -122,7 +122,7 @@ func (s *server) resolveOpens(ctx context.Context, rpc string, asked []*agentrep
 		records = append(records, subject.Record)
 	}
 	// ONE READ OF THE FOLDS, through the one filter every bring-up shares.
-	_, withheld, err := bringup.OnlyVisible(ctx, s.deps.DB, records)
+	_, withheld, err := bringup.OnlyVisible(ctx, s.deps.DB, s.log, records)
 	if err != nil {
 		return nil, fail(s.log, rpc, err)
 	}

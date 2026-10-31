@@ -20,10 +20,11 @@
 ;;     anything; when it is shown again it is asked for again, and when an
 ;;     open one is hidden by the user its page is dropped (the daemon leaves
 ;;     its cache to lapse, then stands its session down);
-;;   - A FOLD DROPS NO PAGE (owner ruling, 2026-10-26).  Folding a repository
-;;     section or a subsection takes its tabs off the bar and nothing else:
-;;     their pages are held, and age out on page-unload.el's clock like any
-;;     other page;
+;;   - A FOLD UNLOADS ITS PAGES AT ONCE (owner request, 2026-10-30, which
+;;     supersedes the ruling of 2026-10-26 that a fold dropped no page).
+;;     Folding a repository section or a subsection takes its tabs off the
+;;     bar and unloads their pages, keeping their slots (page-unload.el);
+;;     the daemon stands their sessions down five minutes later;
 ;;   - A DAEMON-ONLY RESTART NEVER CLOSES A TAB.  What is open is this
 ;;     process's own record, so a daemon that restarts finds every open tab
 ;;     still standing; only an open still in flight when its stream ends is
@@ -58,6 +59,7 @@
 (declare-function agent-repl--frontend-detach-webview "frontend" (ws buf))
 (declare-function agent-repl-webhost-has-page-p "webhost" (ws))
 (declare-function agent-repl-page-drop-announced "page-unload" (ws still-p drop on-kept))
+(declare-function agent-repl-page-unload-judge "page-unload" (ws))
 (declare-function agent-repl-open-progress-note-loaded "open-progress" (ws))
 (declare-function agent-repl-rpc-open-tabs "rpc" (conn workspaces on-push on-close))
 (declare-function agent-repl-link-primary "daemon-link" ())
@@ -134,17 +136,36 @@ request was sent.  The daemon boundary: a test answers through its own.")
 Until it has, the frame has no workspace of the user's to move to."
   (and (agent-repl-open-tabs-starting-p) (null agent-repl-open-tabs--startup-selected)))
 
+(defun agent-repl-open-tabs--ws-row (ws)
+  "Return workspace WS\='s row of the last roster walk, or nil."
+  (let ((id (plist-get (agent-repl--ws-get ws :ref) :id)))
+    (and id (agent-repl-open-tabs--row id))))
+
 (defun agent-repl-open-tabs-hidden-p (ws)
   "Return non-nil when the user hid workspace WS.
-A workspace in a collapsed section is not hidden: a fold withholds nothing.
-Read from the last roster walk; a workspace it did not meet is not hidden."
-  (let* ((id (plist-get (agent-repl--ws-get ws :ref) :id))
-         (row (and id (agent-repl-open-tabs--row id))))
+A workspace in a collapsed section is not hidden but folded
+\(`agent-repl-open-tabs-folded-p').  Read from the last roster walk; a
+workspace it did not meet is not hidden."
+  (let ((row (agent-repl-open-tabs--ws-row ws)))
     (and row (plist-get row :hidden) t)))
 
+(defun agent-repl-open-tabs-folded-p (ws)
+  "Return non-nil when a collapsed section folds WS\='s tab off the bar.
+That is a repository section or a subsection the user folded, never the
+user\='s hide (`agent-repl-open-tabs-hidden-p'), and never the workspace
+the user is looking at.  A folded workspace keeps its slot and holds no
+page (page-unload.el).  Read from the last roster walk."
+  (let ((row (agent-repl-open-tabs--ws-row ws)))
+    (and row
+         (plist-get row :collapsed)
+         (not (plist-get row :hidden))
+         (not (equal ws (agent-repl--ws-current-name)))
+         t)))
+
 (defun agent-repl-open-tabs-withheld-p (ws)
-  "Return non-nil when workspace WS holds no page: hidden, and not looked at.
-Only the user\='s hide withholds a page; a fold never does.
+  "Return non-nil when workspace WS holds no slot: hidden, and not looked at.
+Only the user\='s hide withholds the slot; a fold keeps it and withholds
+only the page (`agent-repl-open-tabs-folded-p').
 THE WORKSPACE THE USER IS LOOKING AT IS NEVER WITHHELD (owner ruling,
 2026-10-17), the daemon\='s own rule (`wsm.Workspace.Runs'): selecting a
 hidden workspace revives its session, so its page is made too.  Without
@@ -223,8 +244,9 @@ Returns nil, sending nothing, when there is no daemon connection."
 `:loading' when the host holds NAME's page now (made here, or already
 standing), `:none' when it is HIDDEN or holds no page: a slot is made with
 a page only where one is wanted (`agent-repl-page-unload-wanted-p': on
-screen, or working), so most tabs open with none and load it at their
-show.  A FOLDED one is made as a drawn one is: a fold withholds nothing.  A
+screen, or working and neither hidden nor folded), so most tabs open with
+none and load it at their show.  A FOLDED one\='s slot is made as a drawn
+one\='s is, with no page.  A
 page that FAILS to load is recorded at ERROR and asked `:none', so the
 workspace still opens (its tab shows no page) and no other row's open is
 lost."
@@ -329,15 +351,17 @@ Outside a walk the order is re-derived at once; a walk derives it itself."
 
 (defun agent-repl-open-tabs--withdraw (row)
   "Take open ROW's tab off the bar, now that it is folded or hidden.
-A HIDDEN one drops its page (`agent-repl-open-tabs--hide').  A FOLDED one
-only goes dormant, its page held (owner ruling, 2026-10-26): its unfold
-asks for it again, and page-unload.el\='s clock alone unloads its page."
+A HIDDEN one drops its page and slot (`agent-repl-open-tabs--hide').  A
+FOLDED one goes dormant and its page is unloaded at once, its slot kept
+\(owner request, 2026-10-30; `agent-repl-page-unload-judge'): its unfold
+asks for it again, and its show loads the page back."
   (if (plist-get row :hidden)
       (agent-repl-open-tabs--hide row)
     (let ((name (plist-get row :name)))
       (agent-repl-open-tabs--dormant (plist-get row :id))
       (agent-repl--info name "elisp.open-tabs.folded ws=%s page=%s" name
-                        (buffer-live-p (agent-repl--ws-get name :frontend-buffer))))))
+                        (buffer-live-p (agent-repl--ws-get name :frontend-buffer)))
+      (agent-repl-page-unload-judge name))))
 
 (defun agent-repl-open-tabs--hide (row)
   "Drop open ROW's page, now that the user hid it: it shows nothing.
@@ -514,8 +538,8 @@ there is no reattach left to wait for, so it is asked for again at once."
   "Workspace WS was re-attached to the daemon that serves it.
 Held by a handover refusal, it is asked for again now; with its open in
 flight, the refusal that may still come is asked for again on arrival."
-  (let* ((id (plist-get (agent-repl--ws-get ws :ref) :id))
-         (row (and id (agent-repl-open-tabs--row id))))
+  (let* ((row (agent-repl-open-tabs--ws-row ws))
+         (id (plist-get row :id)))
     (pcase (and row (gethash id agent-repl-open-tabs--state))
       ('handover (agent-repl-open-tabs--ask-again row "reattached"))
       ('in-flight (puthash id t agent-repl-open-tabs--reattached-while-asked)))))

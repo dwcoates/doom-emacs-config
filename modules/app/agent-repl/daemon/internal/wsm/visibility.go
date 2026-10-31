@@ -11,7 +11,8 @@ const (
 	Drawn Withholding = iota
 	// WithheldHidden is a workspace the user hid (SetWorkspaceHidden).
 	WithheldHidden
-	// WithheldCollapsed is a workspace whose repository section is collapsed.
+	// WithheldCollapsed is a workspace whose repository section or
+	// subsection is collapsed.
 	WithheldCollapsed
 )
 
@@ -30,13 +31,14 @@ func (w Withholding) String() string {
 }
 
 // Withheld answers whether the tab bar withholds the workspace's tab, given
-// whether its repository's section is collapsed. A hidden workspace has no tab
-// at all; a folded repository's open workspaces keep a folded one.
-func (ws Workspace) Withheld(repoFolded bool) Withholding {
+// whether a collapsed section folds its tab (its repository's, or its
+// subsection's). A hidden workspace has no tab at all; a folded section's
+// open workspaces keep a folded one.
+func (ws Workspace) Withheld(folded bool) Withholding {
 	switch {
 	case ws.InHiddenSection():
 		return WithheldHidden
-	case repoFolded:
+	case folded:
 		return WithheldCollapsed
 	default:
 		return Drawn
@@ -67,8 +69,8 @@ func (ws Workspace) LetsCacheLapse() bool {
 
 // Runs reports whether the daemon runs the workspace's session (owner
 // principle, docs/protobuf-design/open-tabs.md: ONLY OPEN AND VISIBLE
-// WORKSPACES RUN). A workspace the user hid, or whose repository section is
-// collapsed, is started by nothing; a hidden one already running is kept until
+// WORKSPACES RUN). A workspace the user hid, or whose repository section or
+// subsection is collapsed, is started by nothing; a hidden one already running is kept until
 // its cache lapses (cachelapse.Keeper).
 //
 // EVERY WORKSPACE IN A MERGE QUEUE RUNS (MERGEQUEUED: an entry of it stands
@@ -86,14 +88,14 @@ func (ws Workspace) LetsCacheLapse() bool {
 // hidden or collapsed: selecting one revives it, and a rule that withheld it
 // stood that session down the moment it came up, so its cold gate stood again
 // after every answer. Moving off it withholds it again.
-func (ws Workspace) Runs(repoFolded, mergeQueued bool) bool {
+func (ws Workspace) Runs(folded, mergeQueued bool) bool {
 	if ws.Current || mergeQueued {
 		return true
 	}
 	if ws.MergeHidden() {
 		return false
 	}
-	return ws.Withheld(repoFolded) == Drawn
+	return ws.Withheld(folded) == Drawn
 }
 
 // KeepaliveHeld reports whether the workspace's keep-alives are held from

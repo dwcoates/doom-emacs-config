@@ -106,7 +106,9 @@ type foldTabsSpec struct {
 //
 // A FOLD HIDES; IT NEVER CHANGES A STATUS (owner ruling, 2026-10-25). A
 // workspace its record spares (wsm.Workspace.FoldSpare: a one-shot, a merge
-// pending) keeps its session. Every other one is asked to stand down, and
+// pending) keeps its session. Every other one is asked to stand down
+// drain.FoldStandDownDelay after the latest collapse that folded it (owner
+// request, 2026-10-30: the pages go at once, the shims the delay later), and
 // the stand-down gate holds that back while a turn or detached work is in
 // flight, taking it only on the free edge after (drain's withheld path).
 func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec) error {
@@ -130,9 +132,9 @@ func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec
 			continue
 		}
 		standingDown = append(standingDown, string(ws.ID))
-		v.deps.StandDowns.StandDownWithheld(ws.ID)
+		v.deps.StandDowns.StandDownFolded(ws.ID)
 	}
-	log.Info(spec.op, "the collapsed "+spec.what+"'s open workspaces are hidden; the spared keep running, the rest stand down once free",
+	log.Info(spec.op, "the collapsed "+spec.what+"'s open workspaces are hidden; the spared keep running, the rest stand down once the fold's delay is over and they are free",
 		dlog.Context{"hidden": hidden, "spared": spared, "standing_down": standingDown})
 	return nil
 }

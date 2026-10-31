@@ -366,7 +366,7 @@ var errUnknownTarget = errors.New("no such target")
 func TestEveryFoldThatHidesTabsGoesThroughFoldTabs(t *testing.T) {
 	// Act.
 	shared := sourcescan.Count(t, "v.foldTabs(ctx, log, foldTabsSpec{")
-	byHand := sourcescan.Count(t, "v.deps.StandDowns.StandDownWithheld(ws.ID)")
+	byHand := sourcescan.Count(t, "v.deps.StandDowns.StandDownFolded(ws.ID)")
 
 	// Assert.
 	if shared != 2 || byHand != 1 {
@@ -526,7 +526,7 @@ func TestCollapsingARepositoryRecordsWhoAskedAndWhatItHid(t *testing.T) {
 
 	// Assert
 	rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Operation: opFoldRepository,
-		Message: "the collapsed repository's open workspaces are hidden; the spared keep running, the rest stand down once free"})
+		Message: "the collapsed repository's open workspaces are hidden; the spared keep running, the rest stand down once the fold's delay is over and they are free"})
 	if !ok {
 		t.Fatal("the collapse recorded nothing of what it hid")
 	}

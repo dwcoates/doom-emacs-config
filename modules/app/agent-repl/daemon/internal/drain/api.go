@@ -69,6 +69,10 @@ type Controller interface {
 	// under a turn: a busy one is stood down once its turn ends (withheld.go).
 	// It returns at once.
 	StandDownWithheld(ws ids.WorkspaceID)
+	// StandDownFolded asks for StandDownWithheld FoldStandDownDelay after the
+	// latest collapse that folded the workspace (folded.go). It returns at
+	// once.
+	StandDownFolded(ws ids.WorkspaceID)
 	// RetryWithheld is the daemon's own edge for a workspace (the free edge
 	// a turn's end raises, a session coming up): a stand-down pending on it --
 	// a withheld one or a keep-alive cycle's -- is asked again.
@@ -94,6 +98,10 @@ type Deps struct {
 	// hibernates it (the --idle-cutoff flag). AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS
 	// BEATS it; New applies that override itself so no wiring can forget to.
 	IdleCutoff time.Duration
+	// FoldDelay is how long a session a collapse folded keeps running before
+	// its stand-down is asked for (the --fold-stand-down-delay flag); zero is
+	// FoldStandDownDelay. Tests compress it.
+	FoldDelay time.Duration
 	// SweepEvery is the idle sweep's cadence under Run.
 	SweepEvery time.Duration
 	// RefusalWindow is how long one refusal WARN suppresses its successors.
@@ -380,6 +388,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.StandBound <= 0 {
 		deps.StandBound = DefaultStandBound
+	}
+	if deps.FoldDelay <= 0 {
+		deps.FoldDelay = FoldStandDownDelay
 	}
 	cutoff, err := ResolveIdleCutoff(deps.IdleCutoff)
 	if err != nil {

@@ -341,6 +341,10 @@ type Opts struct {
 	// hibernation tests
 	// use so the cutoff can be a handful of milliseconds.
 	IdleCutoffMS int
+	// FoldStandDownDelay compresses how long a collapsed section's sessions
+	// keep running before their stand-down (--fold-stand-down-delay); zero
+	// leaves the daemon's five minutes.
+	FoldStandDownDelay time.Duration
 	// KeepaliveInterval compresses the daemon's keep-alive cadence through
 	// its test-run seam (cachelapse.EnvTestKeepaliveInterval): the Keeper
 	// asks the shim for a beat this long after the cache clock instead of
@@ -826,6 +830,9 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		args = append(args, "--idle-cutoff", opts.IdleCutoff.String())
 	case opts.IdleCutoffMS > 0:
 		args = append(args, "--idle-cutoff", (time.Duration(opts.IdleCutoffMS) * time.Millisecond).String())
+	}
+	if opts.FoldStandDownDelay > 0 {
+		args = append(args, "--fold-stand-down-delay", opts.FoldStandDownDelay.String())
 	}
 	if opts.FooterMomentaryDwell > 0 {
 		args = append(args, "--footer-momentary-dwell", opts.FooterMomentaryDwell.String())
