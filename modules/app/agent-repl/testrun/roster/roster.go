@@ -296,7 +296,7 @@ var Suites = []Suite{
 			"/.githooks/reference-transaction",
 			// deployconfig pins the repository's own deploy config to the
 			// pipeline its queue runs, and to the scripts it names.
-			"/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh",
+			"/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh", "bin/push-release.sh",
 			// The daemon half of every mocked-vendor scenario
 			// (integration/scenariogoldens_test.go) reads the shim's goldens
 			// and keeps its own feed.json beside them.

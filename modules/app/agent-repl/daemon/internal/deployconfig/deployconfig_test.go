@@ -228,11 +228,6 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
-// TestAgentReplsOwnConfigIsTodaysPipeline pins agent-repl's committed
-// `.agent-repl/deploy.yaml` to exactly the steps the queue ran for its own
-// repository before deploys were configured: rebase, agent-repl's suites, the
-// merge commit and the version tag, then the runtime's redeploy on landings
-// into master, and no hook besides.
 func TestParseAcceptsConcurrentStages(t *testing.T) {
 	// Arrange: explanation-engine's shape, a pull request in the deploy stage
 	// run concurrently and the main checkout's update one at a time.
@@ -303,6 +298,12 @@ func TestConcurrent(t *testing.T) {
 	}
 }
 
+// TestAgentReplsOwnConfigIsTodaysPipeline pins agent-repl's committed
+// `.agent-repl/deploy.yaml` to exactly the steps the queue ran for its own
+// repository before deploys were configured: rebase, agent-repl's suites, the
+// merge commit and the version tag, then the runtime's redeploy on landings
+// into master, and no hook besides; and once the queue fully depletes, the
+// release push.
 func TestAgentReplsOwnConfigIsTodaysPipeline(t *testing.T) {
 	// Arrange
 	root := repoRoot(t)
@@ -336,6 +337,14 @@ func TestAgentReplsOwnConfigIsTodaysPipeline(t *testing.T) {
 	info, err := os.Stat(filepath.Join(root, hook.GetPath()))
 	if err != nil || info.Mode()&0o111 == 0 {
 		t.Fatalf("the deploy script %s = %v, %v; want an executable script", hook.GetPath(), info, err)
+	}
+	drained := cfg.GetQueueDrained()
+	if len(drained) != 1 || drained[0].GetPath() != "modules/app/agent-repl/bin/push-release.sh" || drained[0].GetTimeoutSeconds() != 120 {
+		t.Fatalf("queue_drained = %v, want push-release.sh alone with a 120s timeout", drained)
+	}
+	info, err = os.Stat(filepath.Join(root, drained[0].GetPath()))
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+		t.Fatalf("the queue-drained script %s = %v, %v; want an executable file", drained[0].GetPath(), info, err)
 	}
 }
 
