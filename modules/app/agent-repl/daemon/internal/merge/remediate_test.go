@@ -340,10 +340,7 @@ func stepAsideRun(t *testing.T, h *harness, state wsm.MergeQueueState) (*run, fu
 		h.db.queues[h.repoKey()][i].State = state
 	}
 	h.db.mu.Unlock()
-	ctx, cancel := context.WithCancelCause(context.Background())
-	t.Cleanup(func() { cancel(nil) })
-	r := h.o.newRun(ctx, cancel, h.repoKey(), theWorkspace, 1)
-	return r, func() error { return context.Cause(ctx) }
+	return causedRun(t, h)
 }
 
 // entryState answers the state of the harness's merge's entry.

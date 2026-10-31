@@ -669,13 +669,11 @@ func TestEverySuspensionCutsAndLetsGoThroughTheSharedHelpers(t *testing.T) {
 // WHY, and the cause its context was cut with.
 func suspendedRun(t *testing.T, h *harness, why suspension) (*run, func() error) {
 	t.Helper()
-	ctx, cancel := context.WithCancelCause(context.Background())
-	t.Cleanup(func() { cancel(nil) })
-	r := h.o.newRun(ctx, cancel, h.repoKey(), theWorkspace, 1)
+	r, cause := causedRun(t, h)
 	h.o.mu.Lock()
 	r.suspendLocked(why)
 	h.o.mu.Unlock()
-	return r, func() error { return context.Cause(ctx) }
+	return r, cause
 }
 
 func TestCutSuspendedCutsTheRunWithItsSuspensionsCause(t *testing.T) {
