@@ -1103,6 +1103,63 @@ func TestPlaceWorkspacesFilesSeveralAsOneBlockInTheirOrder(t *testing.T) {
 	}
 }
 
+func TestPlaceWorkspacesExpandsTheCollapsedSubsectionItPlacesInto(t *testing.T) {
+	tests := []struct {
+		name         string
+		folded       bool
+		into         bool
+		wantFolded   bool
+		wantExpanded bool
+	}{
+		{name: "into a collapsed subsection expands it", folded: true, into: true, wantExpanded: true},
+		{name: "into an open subsection leaves it open", into: true},
+		{name: "into no subsection leaves a collapsed one collapsed", folded: true, wantFolded: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ctx := context.Background()
+			repoDir := arrangeRepo(t, "repo")
+			ws := registerIn(t, s, repoDir, "w", nil)
+			held := registerIn(t, s, repoDir, "held", nil)
+			later := mustSubsection(t, s, ws.Repo, "later")
+			mustPlace(t, s, held.ID, &later.ID, AtEnd{})
+			if err := s.SetSubsectionFolded(ctx, later.ID, tt.folded); err != nil {
+				t.Fatalf("SetSubsectionFolded: %v", err)
+			}
+			if err := s.SetRepositoryFolded(ctx, ws.Repo, true); err != nil {
+				t.Fatalf("SetRepositoryFolded: %v", err)
+			}
+			var into *SubsectionID
+			if tt.into {
+				into = &later.ID
+			}
+
+			// Act
+			err := s.PlaceWorkspaces(ctx, []WorkspaceID{ws.ID}, into, AtEnd{}, ClearOneShotMarks)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("PlaceWorkspaces: %v", err)
+			}
+			if got := subsectionNow(t, s, later.ID).Folded; got != tt.wantFolded {
+				t.Errorf("subsection folded = %v, want %v", got, tt.wantFolded)
+			}
+			if !repositoryFolded(t, s, ws.Repo) {
+				t.Error("the repository's own fold was expanded")
+			}
+			rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.wsm.place_workspaces", Message: "expanded the collapsed subsection the workspaces were placed in"})
+			if ok != tt.wantExpanded {
+				t.Fatalf("expansion record found = %v, want %v: %v", ok, tt.wantExpanded, log.Records())
+			}
+			if ok && (rec.Context["into"] != string(later.ID) || !slices.Equal(rec.Context["workspaces"].([]WorkspaceID), []WorkspaceID{ws.ID})) {
+				t.Errorf("the expansion record's context = %v", rec.Context)
+			}
+		})
+	}
+}
+
 func TestPlaceWorkspacesIsAppliedWholeOrNotAtAll(t *testing.T) {
 	// Arrange -- the second of two workspaces is unknown.
 	s, _ := testStore(t)
@@ -1231,6 +1288,35 @@ func TestMoveWorkspaceFromAnEarlierListJoinsTheTargetsSubsectionAfterIt(t *testi
 	}
 	if got, want := namesAmong(t, s, "w", "target", "after"), []string{"target", "w", "after"}; !slices.Equal(got, want) {
 		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
+func TestMoveWorkspaceExpandsTheCollapsedSubsectionItJoins(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ctx := context.Background()
+	repoDir := arrangeRepo(t, "repo")
+	ws := registerIn(t, s, repoDir, "w", nil)
+	target := registerIn(t, s, repoDir, "target", nil)
+	later := mustSubsection(t, s, ws.Repo, "later")
+	mustPlace(t, s, target.ID, &later.ID, AtEnd{})
+	if err := s.SetSubsectionFolded(ctx, later.ID, true); err != nil {
+		t.Fatalf("SetSubsectionFolded: %v", err)
+	}
+
+	// Act
+	err := s.MoveWorkspace(ctx, ws.ID, target.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("MoveWorkspace: %v", err)
+	}
+	if subsectionNow(t, s, later.ID).Folded {
+		t.Error("the subsection the workspace joined is still collapsed")
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.wsm.move_workspace", Message: "expanded the collapsed subsection the workspace was moved into"})
+	if !ok || rec.Context["workspace"] != ws.ID || rec.Context["target"] != target.ID {
+		t.Fatalf("expansion record = %+v (found %v), want an INFO naming the workspace and target", rec, ok)
 	}
 }
 

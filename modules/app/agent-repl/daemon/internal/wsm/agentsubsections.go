@@ -85,7 +85,8 @@ func (s *store) CreateAgentSubsection(ctx context.Context, creator WorkspaceID, 
 		if err := insertSubsection(ctx, tx, &out); err != nil {
 			return err
 		}
-		if err := placeFamilies(ctx, tx, members, &out.ID, AtEnd{}, KeepOneShotMarks); err != nil {
+		// A subsection just made is open, so the placement expands nothing.
+		if _, err := placeFamilies(ctx, tx, members, &out.ID, AtEnd{}, KeepOneShotMarks); err != nil {
 			return err
 		}
 		empty, err := listRows(ctx, tx, emptyAgentSubsectionsQuery+` AND id = ?`, scanSubsection, out.ID)
