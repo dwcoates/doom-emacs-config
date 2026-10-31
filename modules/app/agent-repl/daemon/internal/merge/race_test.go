@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/promptqueue"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
@@ -515,4 +516,32 @@ func (c *chain) parkRunsNextAsk(t *testing.T, ws ids.WorkspaceID) (release func(
 	c.turns.mu.Unlock()
 	var once sync.Once
 	return func() { once.Do(func() { close(p.held) }) }
+}
+
+// TestAHeadEnteringItsFixingStepByAnyPathWidensItsWindow pins the mark where
+// every run enters a step, so a head that resumes fixing -- taken back after
+// losing a race to land -- lets the next merge test as a fresh failure does.
+func TestAHeadEnteringItsFixingStepByAnyPathWidensItsWindow(t *testing.T) {
+	// Arrange: the head, held inside its gate, on a window of one.
+	c := newChainOfWidth(t, 1)
+	enqueue(t, c.h)
+	headGate, releaseHead := c.runner.hold(c.dirs[theWorkspace])
+	done := admitAsync(c.h, context.Background())
+	<-headGate
+	r, ok := c.h.o.runFor(theWorkspace)
+	if !ok {
+		t.Fatal("no run of the head")
+	}
+
+	// Act
+	r.setStep(context.Background(), footer.StepFixing, nil)
+
+	// Assert
+	window := c.h.o.windowFor(r)
+	close(releaseHead)
+	<-done
+	c.drain(t)
+	if window != 2 {
+		t.Fatalf("the window behind a head at its fixing step = %d, want 2", window)
+	}
 }
