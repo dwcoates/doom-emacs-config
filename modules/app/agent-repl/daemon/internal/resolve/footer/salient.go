@@ -65,6 +65,26 @@ func (r *resolver) sharedSalient(s *wsState) (sharedLine, bool) {
 	return sharedLine{}, false
 }
 
+// sharedOrUnpinned resolves ACTIVITY, the activity cell of a status arm that
+// has no salient kind of its own (`loading`, `updating`): the shared salient
+// line stamped into SALIENT when one stands, the unpinned tier otherwise. Both
+// cells name their tiers `salient` and `unpinned`; a cell missing either is a
+// contract defect and panics, as fillShared does.
+func sharedOrUnpinned[A, S proto.Message](r *resolver, s *wsState, activity A, salient S) A {
+	m := activity.ProtoReflect()
+	fields := m.Descriptor().Fields()
+	salientField, unpinnedField := fields.ByName("salient"), fields.ByName("unpinned")
+	if salientField == nil || unpinnedField == nil {
+		panic("footer: " + string(m.Descriptor().FullName()) + " lacks the salient or the unpinned tier")
+	}
+	if line, ok := r.sharedSalient(s); ok {
+		m.Set(salientField, protoreflect.ValueOfMessage(fillShared(salient, line).ProtoReflect()))
+		return activity
+	}
+	m.Set(unpinnedField, protoreflect.ValueOfMessage(r.unpinned(s).ProtoReflect()))
+	return activity
+}
+
 // fillShared stamps LINE into SALIENT, a status arm's salient message. Every
 // arm's salient message carries `at` and the shared kinds under the same field
 // names (TestEverySalientMessageCarriesTheSharedKinds pins it), so one filling
