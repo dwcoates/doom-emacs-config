@@ -10,7 +10,7 @@ import { log, setLogger, type ForwardingLogger } from "../../src/log.js";
 import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import type { DaemonContext } from "../../src/rpc/context.js";
 import { createSidebarNotices } from "../../src/sidebar/notices.js";
-import type { PopupChannel } from "../../src/host/sidebar-popups.js";
+import { fakePopupChannel, quietPopupChannel } from "./popup-channel.js";
 import type { WebhostSidebarDeps } from "../../src/sidebar/sidebar.js";
 import { captureLogRecords } from "../log-capture.js";
 import { clientLogRecorder } from "../rpc/client-log-recorder.js";
@@ -39,11 +39,6 @@ function recordingRail() {
   return { mount, told };
 }
 
-/** A channel that carries nothing. */
-function quietChannel(): PopupChannel {
-  return { postMessage: () => undefined, addEventListener: () => undefined, removeEventListener: () => undefined, close: () => undefined };
-}
-
 /** Start the page with DEPS over a quiet client. */
 function start(deps: StartSidebarPageDeps = {}) {
   const { client } = clientLogRecorder();
@@ -53,7 +48,7 @@ function start(deps: StartSidebarPageDeps = {}) {
     installCensus: () => ({ stop: () => undefined }),
     webappBuild: () => "Web1",
     mount: recordingRail().mount,
-    popupChannel: quietChannel(),
+    popupChannel: quietPopupChannel(),
     ...deps,
   });
 }
@@ -117,8 +112,7 @@ describe("startSidebarPage", () => {
   it("hands the rail a mirror that draws its open panels over the feed, on the page's channel", () => {
     // Arrange
     const { mount, told } = recordingRail();
-    const posted: unknown[] = [];
-    const channel: PopupChannel = { ...quietChannel(), postMessage: (m) => void posted.push(m) };
+    const { channel, posted } = fakePopupChannel();
     const detail = document.createElement("div");
     const line = document.createElement("div");
 

@@ -8,6 +8,7 @@ import { WEBHOST_GATE_ID } from "../../src/host/gate.js";
 import { WEBHOST_LOAD_ID } from "../../src/host/load-button.js";
 import type { Host } from "../../src/host/host.js";
 import type { PopupLayerEnv } from "../../src/host/sidebar-popups.js";
+import { quietPopupChannel } from "./popup-channel.js";
 
 let started: Host | null = null;
 
@@ -200,7 +201,7 @@ describe("startHost", () => {
 
   it("installs the sidebar's popup layer on the channel it opens, placed by the host's sidebar offset", () => {
     // Arrange
-    const channel = { postMessage: () => undefined, addEventListener: () => undefined, removeEventListener: () => undefined, close: () => undefined };
+    const channel = quietPopupChannel();
     let env: PopupLayerEnv | null = null;
 
     // Act

@@ -10,29 +10,13 @@ import {
   installPopupLayer,
   parsePopupPointerMessage,
   parseSidebarPopupMessage,
-  type PopupChannel,
   type PopupLayer,
   type PopupMirror,
 } from "../../src/host/sidebar-popups.js";
 import type { Rect } from "../../src/topbar/clamp.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
 import { captureLogRecords } from "../log-capture.js";
-
-/** A channel that records what is posted and delivers what the test sends it. */
-function fakeChannel() {
-  const posted: unknown[] = [];
-  const listeners = new Set<(event: MessageEvent) => void>();
-  const channel: PopupChannel = {
-    postMessage: (message) => void posted.push(message),
-    addEventListener: (_type, listener) => void listeners.add(listener),
-    removeEventListener: (_type, listener) => void listeners.delete(listener),
-    close: () => listeners.clear(),
-  };
-  const deliver = (data: unknown): void => {
-    for (const listener of [...listeners]) listener(new MessageEvent("message", { data }));
-  };
-  return { channel, posted, deliver, listeners };
-}
+import { fakePopupChannel } from "./popup-channel.js";
 
 /** A box of HEIGHT at the top-left, as a measured panel. */
 function box(height: number, width = 200): Rect {
@@ -120,7 +104,7 @@ describe("hostAnchor", () => {
 describe("the host's popup layer", () => {
   /** Install the layer over a fake channel, its panel measured at HEIGHT, with the offset told through OFFSET. */
   function install(height = 100) {
-    const fake = fakeChannel();
+    const fake = fakePopupChannel();
     let tellOffset: ((pixels: number) => void) | null = null;
     layer = installPopupLayer({
       doc: document,
@@ -261,7 +245,7 @@ describe("the host's popup layer", () => {
 describe("the sidebar's popup mirror", () => {
   /** A row line at TOP to TOP+22 and its panel, in the document; the mirror's watch is triggered by hand. */
   function setUp(top = 40) {
-    const fake = fakeChannel();
+    const fake = fakePopupChannel();
     const line = document.createElement("div");
     line.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: top, width: 300, height: 22 });
     const detail = document.createElement("div");
