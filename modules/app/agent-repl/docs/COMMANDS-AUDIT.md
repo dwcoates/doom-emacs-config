@@ -121,8 +121,10 @@ Findings are collected at the end, in "Audit findings".
 | `agent-repl-fork-workspace` | Create a child workspace forking the current conversation. | `SPC TAB f` | leader | leader |
 | `agent-repl-fork-workspace-static` | Fork into a named child, no prompt. | `SPC TAB F` | leader | leader |
 | `agent-repl-create-oneshot` | Create a one-shot workspace for a commission. | `SPC TAB o` | leader | leader |
-| `agent-repl-create-oneshot-for-current-workspace` | Create a one-shot whose commission is about the current workspace. | `SPC TAB C-o` | leader | leader |
+| `agent-repl-create-oneshot-with-model` | Create a one-shot in agent-repl's repository, asking for the model. | `SPC TAB C-o` | leader | leader |
+| `agent-repl-create-oneshot-for-current-workspace` | Create a one-shot whose commission is about the current workspace. | `SPC TAB M-o` | leader | leader |
 | `agent-repl-create-explanation-engine-oneshot` | Create a one-shot in the explanation-engine repository, from any workspace. | `SPC TAB O` | leader | leader |
+| `agent-repl-create-explanation-engine-oneshot-with-model` | Create a one-shot in the explanation-engine repository, asking for the model. | `SPC TAB C-S-o` | leader | leader |
 | `agent-repl-add-project-workspace` | Onboard a directory as a workspace. | `SPC TAB p` | leader | leader |
 | `agent-repl-register-repository` | Register the repository a picked file is inside. | `SPC j .` | leader | leader |
 

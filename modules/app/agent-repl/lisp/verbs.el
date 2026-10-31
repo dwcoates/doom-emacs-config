@@ -2210,7 +2210,7 @@ is READ from the roster section the current workspace's row sits in, and
 never picked.  The exceptions are the creations bound to FIXED
 repositories: `SPC TAB n\=' and `SPC TAB o\=' always land in doom\='s own
 repository, `SPC TAB N\=' and `SPC TAB O\=' in explanation-engine\='s, and
-`SPC TAB C-n\=' picks one by hand; `SPC TAB C-o\=' derives.
+`SPC TAB C-n\=' picks one by hand; `SPC TAB M-o\=' derives.
 
 COMMAND names the mode in the refusal, which is raised when the current
 buffer has no workspace to derive from -- a dynamic create has nothing to
@@ -2805,7 +2805,7 @@ THE FORK IS NOT SELECTED."
 ;; one file what is to be done on completion, and the agent carries it out.
 ;; The repository is FIXED, not the current workspace's (owner ruling,
 ;; 2026-10-19): `SPC TAB o' lands in agent-repl's own repository and
-;; `SPC TAB O' in explanation-engine's.  Only `SPC TAB C-o', a one-shot
+;; `SPC TAB O' in explanation-engine's.  Only `SPC TAB M-o', a one-shot
 ;; ABOUT the current workspace, takes the current workspace's repository.
 
 (defcustom agent-repl-oneshot-model-candidates '("opus" "sonnet" "haiku")
@@ -2864,9 +2864,16 @@ A prefix argument PICK-MODEL asks for the model."
   (agent-repl-verbs--create-oneshot
    'agent-repl-create-oneshot pick-model nil #'agent-repl-verbs--agent-repl-repository))
 
+(defun agent-repl-create-oneshot-with-model ()
+  "Create a ONE-SHOT in agent-repl\='s own repository, asking for the model.
+Bound to `SPC TAB C-o\='.  Exactly `agent-repl-create-oneshot\=' under a
+prefix argument: the model is asked for too."
+  (interactive)
+  (agent-repl-create-oneshot t))
+
 (defun agent-repl-create-oneshot-for-current-workspace (&optional pick-model)
   "Create a ONE-SHOT that fixes something wrong with the CURRENT workspace.
-Bound to `SPC TAB C-o\='.  Exactly `agent-repl-create-oneshot\=', except
+Bound to `SPC TAB M-o\='.  Exactly `agent-repl-create-oneshot\=', except
 the commission is ABOUT the workspace this runs from: the request names it
 as the one-shot\='s context (`CreateWorkspaceOneShot.context\='), and the
 daemon opens the commission with a note saying the issue it cites -- a bug
@@ -2885,7 +2892,7 @@ A prefix argument PICK-MODEL asks for the model."
    #'agent-repl-verbs--oneshot-repository))
 
 (defun agent-repl-verbs--oneshot-repository ()
-  "Return the current workspace\='s repository, the one `SPC TAB C-o\=' is cut in."
+  "Return the current workspace\='s repository, the one `SPC TAB M-o\=' is cut in."
   (agent-repl-verbs--dynamic-repository "a one-shot"))
 
 ;; THE EXPLANATION-ENGINE ONE-SHOT (`SPC TAB O') is the one-shot whose
@@ -2940,6 +2947,14 @@ A prefix argument PICK-MODEL asks for the model."
   (agent-repl-verbs--create-oneshot
    'agent-repl-create-explanation-engine-oneshot pick-model nil
    #'agent-repl-verbs--explanation-engine-repository))
+
+(defun agent-repl-create-explanation-engine-oneshot-with-model ()
+  "Create a ONE-SHOT in explanation-engine, asking for the model.
+Bound to `SPC TAB C-S-o\='.  Exactly
+`agent-repl-create-explanation-engine-oneshot\=' under a prefix argument:
+the model is asked for too."
+  (interactive)
+  (agent-repl-create-explanation-engine-oneshot t))
 
 (defun agent-repl-verbs--create-oneshot (command pick-model about-current repository-fn)
   "Create a one-shot for COMMAND, asking for the model when PICK-MODEL.

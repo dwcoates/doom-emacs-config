@@ -591,14 +591,14 @@ The input window underlines misspelled words as you type.
 - The repository is the one agent-repl's source lives in, by its main checkout.
   - It must be on the roster. If it is not, the command says so. Add it with `SPC TAB p`.
 - It asks for the commission alone, and the daemon names the workspace.
-  - `SPC u SPC TAB o` asks for the model too.
+  - `SPC TAB C-o` asks for the model too.
 - It is cut from the repository's primary branch and merges back into it.
 - What happens when the work is done is the repository's own deploy, in `.agent-repl/deploy.yaml` at its main checkout.
   - agent-repl's deploy tests the branch, lands it on master one deploy at a time, and rolls out what landed.
 
 ## A one-shot that fixes the current workspace
 
-`SPC TAB C-o` makes a one-shot about the workspace you press it in.
+`SPC TAB M-o` makes a one-shot about the workspace you press it in.
 
 - Describe what is wrong with this workspace, for example a bug in its feed.
   - The prompt names the workspace, so you can see which one the commission is about.
@@ -608,12 +608,12 @@ The input window underlines misspelled words as you type.
 - When a bubble in this workspace's feed is selected, the one-shot's commission quotes it too.
   - The quote follows the note, and gives the bubble's kind, its feed row and its text.
   - The agent is told to start from that bubble when your commission says "this" or "the response".
-  - Select the bubble you mean before pressing `SPC TAB C-o`. With nothing selected, only the note is added.
+  - Select the bubble you mean before pressing `SPC TAB M-o`. With nothing selected, only the note is added.
 - Unlike `SPC TAB o`, the one-shot is in this workspace's repository.
 - Otherwise it is an ordinary `SPC TAB o` one-shot.
   - It is cut from the primary branch and merges back into it.
   - It copies nothing from this workspace's conversation or worktree.
-  - `SPC u SPC TAB C-o` asks for the model too.
+  - `SPC u SPC TAB M-o` asks for the model too.
 
 ## A one-shot in explanation-engine
 
@@ -622,7 +622,7 @@ The input window underlines misspelled words as you type.
 - The repository is always `$MULTI_REPO_ROOT/explanation-engine` (see Setup).
   - It must be on the roster. If it is not, the command says so. Add it with `SPC TAB p`.
 - Otherwise it is an ordinary `SPC TAB o` one-shot.
-  - `SPC u SPC TAB O` asks for the model too.
+  - `SPC TAB C-S-o` asks for the model too.
 - What happens when the work is done is explanation-engine's own deploy, in `.agent-repl/deploy.yaml` at its main checkout.
   - Its deploy hook is a prompt to the one-shot: open a pull request, and wait for it to merge on GitHub.
   - Its post-deploy hook then updates the main checkout.
@@ -634,7 +634,7 @@ The input window underlines misspelled words as you type.
 
 ## One-shot commissions across a crash
 
-The one-shot commission prompt (`SPC TAB o` and `SPC TAB C-o`) saves what you type to its history on every keystroke.
+The one-shot commission prompt (`SPC TAB o` and `SPC TAB M-o`) saves what you type to its history on every keystroke.
 
 - The prompt always starts empty.
   - Unlike the other creation prompts, it never copies in the text of your current workspace's input window.
