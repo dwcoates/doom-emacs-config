@@ -613,12 +613,34 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 	return h
 }
 
-// workspace registers one workspace with a live session engaged at engagedAt.
+// workspace registers one workspace with a live session engaged at engagedAt,
+// on its own repository's main checkout.
 func (h *harness) workspace(t *testing.T, engagedAt time.Time) ids.WorkspaceID {
 	t.Helper()
 	dir := t.TempDir()
+	return h.sessioned(t, dir, dir, engagedAt)
+}
+
+// linkedWorkspace registers one workspace with a live session engaged at
+// engagedAt on a LINKED worktree of a repository whose main checkout it
+// registers first, session-less: the shape of every created workspace, and
+// the only one a one-shot can be (wsm.ErrMainWorkspaceOneShot).
+func (h *harness) linkedWorkspace(t *testing.T, engagedAt time.Time) ids.WorkspaceID {
+	t.Helper()
+	main := h.bare(t)
+	record, err := h.db.Workspace(context.Background(), main)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	return h.sessioned(t, t.TempDir(), record.Dir, engagedAt)
+}
+
+// sessioned registers the workspace at dir, in the repository whose main
+// checkout is repoDir, with a live session engaged at engagedAt.
+func (h *harness) sessioned(t *testing.T, dir, repoDir string, engagedAt time.Time) ids.WorkspaceID {
+	t.Helper()
 	ws, _, err := h.db.RegisterWorkspace(context.Background(), dir, wsm.RegisterFacts{
-		Name: filepath.Base(dir), Branch: "feature", ParentBranch: "master", RepoDir: dir,
+		Name: filepath.Base(dir), Branch: "feature", ParentBranch: "master", RepoDir: repoDir,
 	})
 	if err != nil {
 		t.Fatalf("RegisterWorkspace: %v", err)

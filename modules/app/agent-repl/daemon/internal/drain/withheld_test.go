@@ -18,7 +18,12 @@ import (
 // hidden registers one workspace with a live, free session, and hides it.
 func (h *harness) hidden(t *testing.T) ids.WorkspaceID {
 	t.Helper()
-	ws := h.workspace(t, instant)
+	return h.hide(t, h.workspace(t, instant))
+}
+
+// hide hides ws, as the user hiding it does.
+func (h *harness) hide(t *testing.T, ws ids.WorkspaceID) ids.WorkspaceID {
+	t.Helper()
 	if err := h.db.SetHidden(context.Background(), ws, true, time.Unix(1_700_000_000, 0)); err != nil {
 		t.Fatalf("SetHidden: %v", err)
 	}
@@ -411,7 +416,12 @@ func TestAnEdgeDuringARunningAttemptRunsOneMore(t *testing.T) {
 // repository's section.
 func (h *harness) collapsed(t *testing.T) ids.WorkspaceID {
 	t.Helper()
-	ws := h.workspace(t, instant)
+	return h.fold(t, h.workspace(t, instant))
+}
+
+// fold collapses ws's repository section.
+func (h *harness) fold(t *testing.T, ws ids.WorkspaceID) ids.WorkspaceID {
+	t.Helper()
 	record, err := h.db.Workspace(context.Background(), ws)
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
@@ -444,19 +454,27 @@ func (h *harness) mergePending(t *testing.T, ws ids.WorkspaceID) {
 
 func TestAFoldSparesWhatTheRecordSpares(t *testing.T) {
 	tests := []struct {
-		name  string
-		spare func(h *harness, t *testing.T, ws ids.WorkspaceID)
-		want  wsm.FoldSpare
+		name   string
+		spared func(h *harness, t *testing.T) ids.WorkspaceID
+		want   wsm.FoldSpare
 	}{
-		{"a one-shot", (*harness).oneShot, wsm.FoldSpareOneShot},
-		{"a merge pending", (*harness).mergePending, wsm.FoldSpareMergePending},
+		// A one-shot is a created workspace, so a linked worktree.
+		{"a one-shot", func(h *harness, t *testing.T) ids.WorkspaceID {
+			ws := h.fold(t, h.linkedWorkspace(t, instant))
+			h.oneShot(t, ws)
+			return ws
+		}, wsm.FoldSpareOneShot},
+		{"a merge pending", func(h *harness, t *testing.T) ids.WorkspaceID {
+			ws := h.collapsed(t)
+			h.mergePending(t, ws)
+			return ws
+		}, wsm.FoldSpareMergePending},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
-			ws := h.collapsed(t)
-			tt.spare(h, t, ws)
+			ws := tt.spared(h, t)
 
 			// Act
 			h.c.StandDownWithheld(ws)
@@ -487,7 +505,7 @@ func TestAFoldSparesWhatTheRecordSpares(t *testing.T) {
 func TestAHiddenOneShotIsStillStoodDown(t *testing.T) {
 	// Arrange: the user hid it, which no fold spare reaches.
 	h := newHarness(t)
-	ws := h.hidden(t)
+	ws := h.hide(t, h.linkedWorkspace(t, instant))
 	h.oneShot(t, ws)
 
 	// Act
