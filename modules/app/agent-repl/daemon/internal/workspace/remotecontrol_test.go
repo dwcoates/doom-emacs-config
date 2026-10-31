@@ -438,6 +438,26 @@ func TestAShimGoneBeforeItsBridgeIsAskedIsNoFailure(t *testing.T) {
 	}
 }
 
+func TestAShimWhoseSessionEndedBeforeItsBridgeIsAskedIsNoFailure(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.setRemote(ws.ID, wsm.RemoteControl{On: true})
+	f.client.remoteControlResponse = remoteControlFailure(&shimv1.SetSessionRemoteControlFailure{
+		Cause: &shimv1.SetSessionRemoteControlFailure_NoSession{NoSession: &shimv1.SetSessionRemoteControlNoSession{}},
+	})
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert: the session's end is recorded where it is observed, once.
+	if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 0 || len(f.topbarWarnings) != 0 {
+		t.Fatalf("errors %v, warnings %v; want neither for a session that ended", records, f.topbarWarnings)
+	}
+}
+
 func TestAChangeWhoseShimDiedUnderItIsLeftToTheNextBringUp(t *testing.T) {
 	// Arrange.
 	f, ws := startedFleet(t)

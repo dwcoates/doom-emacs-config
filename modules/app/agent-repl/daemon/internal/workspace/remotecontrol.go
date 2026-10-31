@@ -156,6 +156,14 @@ func (f *Fleet) reapplyRemoteControl(ctx context.Context, log dlog.Logger, ws id
 			log.Info(opRemoteControl, "the new shim went before its bridge was asked; the next bring-up puts it in force", dlog.Context{"cause": err.Error()})
 			return
 		}
+		var refusal *ShimRefusal
+		if errors.As(err, &refusal) && refusal.Arm == ArmShimNoSession {
+			// THE SESSION DIED BEFORE ITS BRIDGE WAS ASKED (its vendor query
+			// ended). Its turn's end records the death, and the session that
+			// replaces it comes up through here again.
+			log.Info(opRemoteControl, "the new shim's session ended before its bridge was asked; the next bring-up puts it in force", dlog.Context{"cause": err.Error()})
+			return
+		}
 		log.Error(opRemoteControl, "the new shim could not be put in remote control", dlog.Context{
 			"remote_control_recorded": standing.Recorded, "cause": err.Error(),
 		})
