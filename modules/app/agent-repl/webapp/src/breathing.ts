@@ -223,8 +223,9 @@ export const STATUS_WAVE_PROGRESS = "progress";
  *
  * `working` is the turn itself and carries every one of its steps —
  * `submitting`, the main agent's own steps (`thinking`, `executing`,
- * `reading`, …), and the two context cuts `clearing` and `compacting`. `loading` is a context item being taken on, `merging` a merge
- * running, `closing` a teardown running: all three are an operation underway.
+ * `reading`, …), and the two context cuts `clearing` and `compacting`. `loading` is a context item being taken on, `updating` a final
+ * response being rewritten, `merging` a merge running, `closing` a teardown
+ * running: each is an operation underway.
  *
  * Everything else stands still because the session does: `waiting` is waiting on
  * a human or the vendor, `blocked` is blocked, `disconnected` is severed, `idle`
@@ -234,6 +235,7 @@ export const STATUS_WAVE_PROGRESS = "progress";
 export const WAVING_STATUS_ARMS: ReadonlySet<string> = new Set([
   "working",
   "loading",
+  "updating",
   "merging",
   "closing",
 ]);

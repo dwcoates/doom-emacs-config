@@ -2121,6 +2121,49 @@ describe("the held glimmer", () => {
   });
 });
 
+/**
+ * THE REVISING SHIMMER (owner request, 2026-10-30): a final response whose
+ * revision is on its way carries a soft band sweeping across it, never the
+ * purple border it once wore.
+ */
+describe("the revising shimmer", () => {
+  const BAND = ".bubble.response-revising::after";
+
+  it.each([
+    ["covers the whole bubble", /inset:\s*0/],
+    ["follows the bubble's corners", /border-radius:\s*inherit/],
+    ["draws the band from the --fg ink at 6%", /color-mix\(in srgb, var\(--fg\) 6%, transparent\)/],
+    ["never takes a click", /pointer-events:\s*none/],
+    ["sweeps every 2.4 seconds", /animation:\s*response-revising-shimmer 2\.4s ease-in-out infinite/],
+  ])("%s", (_label, pattern) => {
+    // Arrange / Act
+    const band = declarationsOf(BAND) ?? "";
+    // Assert
+    expect(band).toMatch(pattern);
+  });
+
+  it("draws the band only where motion is welcome", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).toMatch(
+      /@media \(prefers-reduced-motion: no-preference\)\s*\{\s*\.bubble\.response-revising::after\s*\{/,
+    );
+  });
+
+  it("sweeps the band across the bubble", () => {
+    // Arrange / Act
+    const keyframes = keyframesOf("response-revising-shimmer");
+    // Assert
+    expect(keyframes).toMatch(/from\s*\{\s*background-position:\s*100% 0;?\s*\}\s*to\s*\{\s*background-position:\s*0% 0;?\s*\}/);
+  });
+
+  it("no longer turns the border purple", () => {
+    // Arrange / Act
+    const own = rulesOf(stylesheet).filter((rule) => rule.selectors.includes(".bubble.response-revising"));
+    // Assert
+    expect(own.filter((rule) => /border-color/.test(rule.declarations))).toEqual([]);
+  });
+});
+
 describe("the still prompt bubble", () => {
   /** The rightmost compound of SELECTOR: the element the rule paints. */
   function subjectOf(selector: string): string {
@@ -2128,7 +2171,7 @@ describe("the still prompt bubble", () => {
     return parts[parts.length - 1] ?? "";
   }
 
-  it("declares no animation on any rule painting a bubble element but the held glimmer", () => {
+  it("declares no animation on any rule painting a bubble element but the held glimmer and the revising shimmer", () => {
     // Arrange / Act
     const animated = rulesOf(stylesheet).filter(
       (rule) =>
@@ -2137,7 +2180,10 @@ describe("the still prompt bubble", () => {
     );
 
     // Assert
-    expect(animated.flatMap((rule) => rule.selectors)).toEqual(['.bubble[data-variant="held"]::before']);
+    expect(animated.flatMap((rule) => rule.selectors)).toEqual([
+      '.bubble[data-variant="held"]::before',
+      ".bubble.response-revising::after",
+    ]);
   });
 
   it.each([

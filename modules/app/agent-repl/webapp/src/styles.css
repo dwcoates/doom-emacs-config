@@ -9803,11 +9803,32 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   color: white;
 }
 
-/* A REVISION ON ITS WAY turns the bubble's border the same purple until the
-   revised prose lands (FeedResponse.revision `pending`). A bubble state rule
-   sets the border and nothing else, and no bubble animates. */
-.bubble.response-revising {
-  border-color: var(--blocked);
+/* A REVISION ON ITS WAY SHIMMERS SOFTLY (owner request, 2026-10-30) until
+   the revised prose lands (FeedResponse.revision `pending`): a faint band of
+   the `--fg` ink at 6% sweeps across the bubble, over its content and under
+   every click, and the border stays the bubble's own. It is the one bubble
+   state that moves besides the held glimmer, and it moves only where motion is
+   welcome: under reduced motion the footer's `updating` word says it alone.
+   NO GRADIENT MIXES `currentColor` (the sidebar shimmer's WebKitGTK note). */
+@media (prefers-reduced-motion: no-preference) {
+  .bubble.response-revising::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(100deg,
+      transparent 35%,
+      color-mix(in srgb, var(--fg) 6%, transparent) 50%,
+      transparent 65%);
+    background-size: 250% 100%;
+    background-repeat: no-repeat;
+    pointer-events: none;
+    animation: response-revising-shimmer 2.4s ease-in-out infinite;
+  }
+}
+@keyframes response-revising-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
 }
 
 /* A REVISION THAT FAILED says why under the prose, which stands as it was
