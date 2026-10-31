@@ -158,7 +158,6 @@ func TestAgentReplSessionLogContextNamesEveryFact(t *testing.T) {
 	}
 }
 
-
 func TestTheMigrationDropsTheSessionsTrafficColumns(t *testing.T) {
 	// Arrange: a layout-25 file, whose session table still counts traffic.
 	path := fixtureAt(t, 25)
