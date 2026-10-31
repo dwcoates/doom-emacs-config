@@ -115,8 +115,9 @@ When the user authorizes restarting both:
 Never restart both concurrently. Cursor recovery is connection-scoped and the
 sidecar must not begin against an unavailable store.
 
-The daemon follows the bounce policy in `../../../AGENTS.md`. Do not bounce it in
-the middle of an active turn.
+Bring the daemon up to date with an unforced deploy. A forced stop of it is an
+emergency last resort, run only on the user's request in the moment
+(`/agent-repl-runtime` step 2b).
 
 ## Escalation
 

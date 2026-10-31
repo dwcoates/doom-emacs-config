@@ -1,8 +1,8 @@
 # Iterative fix-verify loop
 
 Use this runbook when the question is not "why did this one thing fail" but
-"is the whole stack being driven to a healthy steady state?" The loop bounces
-the full stack to current builds, bounces Emacs, observes startup and an
+"is the whole stack being driven to a healthy steady state?" The loop deploys
+the full stack to current builds, restarts Emacs, observes startup and an
 all-workspace probe sweep, root-causes every issue it finds, fans the fixes
 out to parallel implementation subagents, merges them, and repeats until the
 exit criteria hold.
@@ -29,11 +29,11 @@ Do not select it for a single reproducible bug with a known symptom. That is
 diagnosis: this loop mutates source, deployed artifacts, and runtime state,
 and it requires the user to have asked for an implementation.
 
-## 1. Bounce the stack to current builds
+## 1. Deploy the stack to current builds
 
 ### Clear the observation logs first
 
-Before the bounce, truncate the two sinks step 2 observes: the global Emacs
+Before the deploy, truncate the two sinks step 2 observes: the global Emacs
 agent-repl log and the daemon log. Resolve both through
 `agent-repl-log-discovery.sh` per `structured-logs.md` rather than guessing
 paths, and clear exactly those files — nothing else.
@@ -76,8 +76,14 @@ over, bounces stale shims through the bounce registry (never mid-turn unless
 webviews. Never reorder the store and sidecar by hand; see the restart-safety
 section of `health-and-readiness.md`.
 
-Then bounce Emacs itself. A daemon bounce does not re-prove Emacs-side
-startup, and Emacs-side startup is what this loop measures.
+Then restart Emacs itself. A deploy does not re-prove Emacs-side startup, and
+Emacs-side startup is what this loop measures. Restarting Emacs stops no
+daemon, shim or running turn.
+
+CRITICAL: the loop NEVER bounces or hard-bounces the backends, and never
+deploys with `-force`. Each of those ends every running turn and every
+subagent, shell and monitor; they are an emergency last resort, run only on
+the user's request in the moment (`/agent-repl-runtime` step 2b).
 
 ## 2. Observe the startup
 

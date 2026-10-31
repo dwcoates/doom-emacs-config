@@ -6,6 +6,15 @@ green suite, deploys, forces a bounce of the backend services, and then renders
 a verdict against fixed criteria — each with an exact probe — before looping
 into remediation.
 
+CRITICAL: every bounce this runbook forces ends every running turn and every
+subagent, shell and monitor in every workspace. A forced bounce is an
+emergency last resort (`/agent-repl-runtime` step 2b), so this runbook runs
+ONLY when the user asks for it in the current conversation, in that moment,
+having been told it ends their running work. NEVER select it on your own
+initiative, from a memory, or as a routine verification step. Before each
+re-bounce of step 5's loop, say what it will end and wait for the user's
+go-ahead.
+
 This runbook owns the bounce-and-verdict discipline and nothing else. The
 iteration mechanics belong to `iterative-fix-verify-loop.md`, the log routing
 and JSONL shape belong to `../../logging-contract.md`, the deploy ordering
@@ -293,7 +302,8 @@ exists for. After the fixes land and are deployed:
 2. Wait long enough for those queries to be genuinely in flight — verify it,
    do not assume it, the same way the async probes are verified by a growing
    tick file rather than a pid.
-3. Bounce the backend again and re-render the verdict, criterion 7 included.
+3. With the user's go-ahead for this bounce, bounce the backend again and
+   re-render the verdict, criterion 7 included.
 4. If anything was interrupted again, remediate and repeat from step 1.
 
 The loop exits only when a bounce lands on genuinely live work and interrupts
