@@ -479,6 +479,26 @@ func TestPageDetachedOfAnUnknownPageIsAnInvariantViolation(t *testing.T) {
 	t.Fatalf("records = %+v, want an ERROR naming the unknown detach", w.log.Records())
 }
 
+func TestPageDrawnIsRecordedAtInfo(t *testing.T) {
+	// Arrange
+	w := newWorld(t)
+	w.c.PageAttached("p")
+
+	// Act
+	if err := w.c.PageDrawn("p", "a"); err != nil {
+		t.Fatalf("PageDrawn: %v", err)
+	}
+
+	// Assert
+	for _, r := range w.log.Records() {
+		if r.Level == dlog.LevelInfo && r.Operation == opPage && r.Message == "a page reported its workspace drawn" &&
+			r.Context["page"] == "p" && r.Context[dlog.KeyWorkspaceID] == "a" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want an INFO naming the drawn page and workspace", w.log.Records())
+}
+
 // ---- a bring-up in flight is relayed, never waited for ----
 
 func TestEveryRelayedStepIsTold(t *testing.T) {
