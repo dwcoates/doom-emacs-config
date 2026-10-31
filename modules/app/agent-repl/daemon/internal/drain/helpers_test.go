@@ -623,7 +623,23 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 
 // workspace registers one workspace with a live session engaged at engagedAt,
 // on its own repository's main checkout.
+//
+// IT IS A REPOSITORY'S MAIN WORKTREE, whose remote control is on by default
+// (wsm.RemoteControl), so the mode is RECORDED OFF: every stand-down test
+// stands for an ordinary workspace, and a test about the default arranges a
+// main worktree that keeps it (mainWorktree).
 func (h *harness) workspace(t *testing.T, engagedAt time.Time) ids.WorkspaceID {
+	t.Helper()
+	ws := h.mainWorktree(t, engagedAt)
+	if _, err := h.db.SetRemoteControlMode(context.Background(), ws, wsm.RemoteControlOff); err != nil {
+		t.Fatalf("SetRemoteControlMode: %v", err)
+	}
+	return ws
+}
+
+// mainWorktree registers a repository's main worktree workspace with a live
+// session engaged at engagedAt, its remote control left at the default: on.
+func (h *harness) mainWorktree(t *testing.T, engagedAt time.Time) ids.WorkspaceID {
 	t.Helper()
 	dir := t.TempDir()
 	return h.sessioned(t, dir, dir, engagedAt)

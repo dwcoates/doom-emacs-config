@@ -550,6 +550,13 @@ func (s *requestLoggingServer) UpdatePersistentWifiMode(
 	return serveUnary(s, ctx, "UpdatePersistentWifiMode", req, s.server.UpdatePersistentWifiMode)
 }
 
+func (s *requestLoggingServer) UpdateRemoteControlMode(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.UpdateRemoteControlModeRequest],
+) (*connect.Response[agentreplv1.UpdateRemoteControlModeResponse], error) {
+	return serveUnary(s, ctx, "UpdateRemoteControlMode", req, s.server.UpdateRemoteControlMode)
+}
+
 func (s *requestLoggingServer) RegisterWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.RegisterWorkspaceRequest],

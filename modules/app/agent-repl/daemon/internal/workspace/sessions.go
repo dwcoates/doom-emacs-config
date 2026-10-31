@@ -388,6 +388,10 @@ type Fleet struct {
 	// its shim is up. The map is guarded by mu; each gate is held ACROSS a
 	// whole start, which is why it is not mu itself.
 	startGates map[ids.WorkspaceID]*sync.Mutex
+	// remoteControlGates serialize, per workspace, every read of the
+	// remote-control mode with the SetSessionRemoteControl that puts it in
+	// force (remotecontrol.go). The map is guarded by mu.
+	remoteControlGates map[ids.WorkspaceID]*sync.Mutex
 	// startSlots caps the vendor starts in flight across every workspace,
 	// shared with the bounce registry's shim restarts (startslots).
 	startSlots *startslots.Pool
@@ -614,20 +618,21 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 			Clock: deps.Clock,
 		},
 
-		sessions:       map[ids.WorkspaceID]*live{},
-		sessionsMoved:  make(chan struct{}),
-		coldGates:      map[ids.WorkspaceID]coldGate{},
-		heldAtGate:     map[ids.WorkspaceID]int{},
-		handedOver:     map[ids.WorkspaceID]bool{},
-		lastCold:       map[ids.WorkspaceID]*conversationv1.SessionCold{},
-		reapedAt:       map[ids.WorkspaceID]time.Time{},
-		generation:     map[ids.WorkspaceID]int{},
-		startGates:     map[ids.WorkspaceID]*sync.Mutex{},
-		startSlots:     startSlotsOf(deps.StartSlots),
-		startsUnderWay: map[ids.WorkspaceID]bool{},
-		watched:        map[ids.WorkspaceID]sessionwatcher.Watcher{},
-		carried:        map[ids.WorkspaceID]sessionwatcher.Pointers{},
-		selected:       map[ids.WorkspaceID]bool{},
+		sessions:           map[ids.WorkspaceID]*live{},
+		sessionsMoved:      make(chan struct{}),
+		coldGates:          map[ids.WorkspaceID]coldGate{},
+		heldAtGate:         map[ids.WorkspaceID]int{},
+		handedOver:         map[ids.WorkspaceID]bool{},
+		lastCold:           map[ids.WorkspaceID]*conversationv1.SessionCold{},
+		reapedAt:           map[ids.WorkspaceID]time.Time{},
+		generation:         map[ids.WorkspaceID]int{},
+		startGates:         map[ids.WorkspaceID]*sync.Mutex{},
+		remoteControlGates: map[ids.WorkspaceID]*sync.Mutex{},
+		startSlots:         startSlotsOf(deps.StartSlots),
+		startsUnderWay:     map[ids.WorkspaceID]bool{},
+		watched:            map[ids.WorkspaceID]sessionwatcher.Watcher{},
+		carried:            map[ids.WorkspaceID]sessionwatcher.Pointers{},
+		selected:           map[ids.WorkspaceID]bool{},
 	}, nil
 }
 
@@ -1650,6 +1655,11 @@ func (f *Fleet) sessionUp(
 	// changed, and nothing the server can see says so.
 	f.publishHost(ws)
 	f.deps.SessionsUp(ws)
+	// A NEW SHIM STARTS WITH NO BRIDGE, while the workspace's mode may be on:
+	// put it in remote control. AFTER the session is called up, so a held
+	// prompt is never kept waiting on claude.ai's bridge; an ADOPTED shim
+	// never comes through here, and kept its bridge (remotecontrol.go).
+	f.reapplyRemoteControl(ctx, log, ws, client)
 	return nil
 }
 

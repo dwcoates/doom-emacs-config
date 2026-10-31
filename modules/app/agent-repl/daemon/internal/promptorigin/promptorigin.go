@@ -1,5 +1,6 @@
 // Package promptorigin is what a prompt's origin decides: whether the USER
-// sent it, which takes a one-shot back (UserSent); whether the prompt
+// sent it, which takes a one-shot back (UserSent); whether its turn is one the
+// shim ADOPTED, which no queue delivered (Adopted); whether the prompt
 // is DRAWN, shared by the two resolvers that draw a prompt (the feed's prompt
 // rows in resolve/feed and the held section's cards in resolve/holds), and
 // whether it NAMES ITS SENDER, shared by every layer that carries a prompt's
@@ -81,6 +82,26 @@ func UserSent(origin conversationv1.PromptOrigin) bool {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT_WITH_PREFIX,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT:
+		return true
+	}
+	return false
+}
+
+// Adopted reports whether a prompt of ORIGIN opens a turn the SHIM adopted:
+// one no queue delivered, so its prompt row, written as the turn's first, is
+// the only statement that the turn opened. Two origins are: a turn the vendor
+// started on its own (PROMPT_ORIGIN_VENDOR_STARTED), and one a prompt typed on
+// claude.ai started through the session's Remote Control bridge
+// (PROMPT_ORIGIN_REMOTE_CONTROL). Neither is ever submitted by a client.
+//
+// A REMOTE-CONTROL PROMPT IS THE USER'S WORDS, but not UserSent: that answers
+// for a prompt this daemon's submit pipeline took from the editor or the
+// webapp, and this one went to the vendor past it. The feed draws it as a
+// prompt the user said (resolve/feed AuthorLabel).
+func Adopted(origin conversationv1.PromptOrigin) bool {
+	switch origin {
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_VENDOR_STARTED,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL:
 		return true
 	}
 	return false

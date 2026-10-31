@@ -102,18 +102,39 @@ Commits `e5cab96`, `b5d7c59`. Generated Go in `proto/gen/go`, TS in
   1250 topbar+styles tests pass. WebKit suite UNRUN (no webkit browser here);
   one pre-existing integration failure (`page-mux … lets go of the page's one
   stream`) unrelated to this work.
-- **daemon** — IN WORKING TREE, UNCOMMITTED (agent finishing/finished). Must
-  make `go build ./...` pass (server + fakeshim need the two new methods).
-  Covers: wsm layer (new migration after 90 `cache_cold`), default resolution,
-  `UpdateRemoteControlMode` verb + server wiring, drain skip for `CycleDown`
-  and `VisitDown` while mode on (hibernation unchanged), reapply on every shim
-  bring-up (incl. adoption paths), topbar chip resolution + push,
-  `PROMPT_ORIGIN_REMOTE_CONTROL` feed drawing, `answered_remotely` handling.
-- **shim** — IN WORKING TREE, UNCOMMITTED (agent finishing/finished). Covers:
+- **shim** — DONE, committed (`f5182d0`). tsc clean, eslint clean, integration
+  suite green (417); unit suite green except 4 chmod-based tests that fail only
+  because this container runs as root (unrelated to the change). Covers:
   `SetSessionRemoteControl` route/validate/failures, `enableRemoteControl`
   typing, `--replay-user-messages` + own-uuid filtering, foreign-replay turn
   adoption with REMOTE_CONTROL origin, `canUseTool` signal → `answered_remotely`,
-  fake vendor modelling, reapply on reopen with reattach id.
+  fake vendor modelling, reapply on reopen with reattach id. Its own open issues
+  (shim report): questions answered on claude.ai have no "answered remotely"
+  contract arm (recorded `unanswered`); rollback past a remote prompt likely
+  refuses `unseen_prompt` (untested); a small stop-vs-allow misreport window;
+  coverage gate not run.
+- **daemon** — COMMITTED as a SNAPSHOT (this commit), **not a clean finish.**
+  The subagent was STOPPED mid-investigation of a possible full-package `go
+  test` hang; I pushed its tree as-is on the user's instruction to transfer
+  everything. State I verified before committing: `go build ./...` passes and
+  `go vet ./...` is clean. NOT verified: the daemon test suite — the agent's
+  last note said a full-package run hangs and it was about to compare against a
+  pristine HEAD export to tell if that is pre-existing. **A local takeover must
+  resolve that hang first** (bisect the new integration test
+  `integration/remote_control_test.go` and the new unit tests; a hang usually
+  means an unbounded wait — see daemon/AGENTS.md's wait-bound table). Files:
+  new `internal/wsm/remotecontrol.go`(+test), `internal/resolve/topbar/
+  remotecontrol.go`(+test), `internal/server/remotecontrol.go`(+test),
+  `internal/workspace/remotecontrol.go`, `integration/remote_control_test.go`;
+  edits across `internal/drain/{api,cycle}.go` (the keep-alive/visit stand-down
+  skip), `internal/workspace/sessions.go` (reapply on bring-up),
+  `internal/promptorigin/`, `internal/resolve/feed/{permission,prompt,marker}.go`,
+  `internal/shimclient/`, `internal/sessionwatcher/`, `internal/wsm/{migrate,
+  schema,db,open}.go` (new migration layer), `internal/server/{validate,
+  requestlog_server}.go`, fakeshim + harness. Cross-check every item against
+  the daemon agent's own report (it did not hand back a summary — it was killed;
+  read the design against docs/developer/remote-control.md and this file's
+  contract section).
 
 ## Environment quirks (cloud container — a local machine won't have these)
 
@@ -131,10 +152,14 @@ Commits `e5cab96`, `b5d7c59`. Generated Go in `proto/gen/go`, TS in
 
 ## What a local takeover must do (in order)
 
-1. `git fetch && git checkout remote-control`.
-2. Review the uncommitted daemon + shim trees (both agents' output). Confirm
-   `cd daemon && go build ./...` and `cd agent-shim/claude/shim && npx tsc
-   --noEmit -p .` pass. Commit each part separately (daemon, then shim) with the
+1. `git fetch && git checkout remote-control`. **Everything is already
+   committed and pushed** (proto, docs, Emacs, webapp, shim, daemon snapshot).
+   Nothing is left in a cloud working tree. Re-fetch if an earlier fetch pre-
+   dated `f5182d0`/the daemon commit.
+2. **Resolve the daemon test hang first** (see the daemon status above): the
+   daemon builds and vets clean but its full `go test` run was reported to
+   hang and was never confirmed green. Then run the full suites. Previously the
+   plan was "commit each part separately"; that is now done — with the
    attribution footer below.
 3. Run the real test suites via `agent-repld test run`, naming the changed
    packages/files (daemon unit + the one integration wiring test; shim vitest
