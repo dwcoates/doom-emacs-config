@@ -3288,9 +3288,10 @@ export const RosterRepoKeySchema: GenMessage<RosterRepoKey> = /*@__PURE__*/
 /**
  * The recently-merged section: header and one group per repository. It has
  * no key of its own — the roster carries exactly one, so its fold identity is
- * fixed. It holds the 100 MOST RECENT merges (owner ruling, 2026-10-15): an
- * older merge is drawn in no section, and leaves the band in the push that
- * carries the newer merge displacing it.
+ * fixed. It holds EVERY MERGE OF THE LAST 24 HOURS (owner request,
+ * 2026-10-31; it was the 100 most recent merges): an older merge is drawn in
+ * no section, and leaves the band in the push the daemon makes the instant it
+ * ages out.
  *
  *   ▾ Recently Merged            (2)        RosterMergedSection
  *     repo-a                                  RosterMergedRepoGroup → header

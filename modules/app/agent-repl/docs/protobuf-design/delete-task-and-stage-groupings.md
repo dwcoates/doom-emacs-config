@@ -50,6 +50,10 @@ merged workspaces, the merged ones static.
 
 ### 2. The recently-merged band is the 100 newest merges (owner ruling, 2026-10-15)
 
+> SUPERSEDED 2026-10-31 (owner request): the band holds every merge of the
+> last 24 hours (`sidebar.MergedWindow`), re-rendered the instant the oldest
+> shown merge ages out. There is no count cap.
+
 - WHAT: the band lists the 100 most recently merged workspaces, newest first;
   the 7-day window and the re-render armed for a merge aging out of it are
   retired.
