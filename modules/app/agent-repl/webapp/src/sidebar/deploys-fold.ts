@@ -64,14 +64,25 @@ interface Choice {
   line: string | null;
 }
 
-/** The repository GROUP is drawn for. A group always names one. */
-function repositoryOf(group: HTMLElement): string {
+/**
+ * The repository GROUP is drawn for: THE ONE READ every page-own Deploys
+ * state (its fold, its older deploys) keys a group by. A group always names
+ * one, so one that names none is logged under OPERATION and refused.
+ */
+export function deploysGroupRepository(group: HTMLElement, operation: string): string {
   const repository = group.getAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE);
   if (repository === null || repository === "") {
-    throw new Error(`deploys fold: a Deploys group carries no ${DEPLOYS_REPOSITORY_ATTRIBUTE}`);
+    log.error("a Deploys group cannot be keyed: it names no repository", {
+      operation,
+      context: { attribute: DEPLOYS_REPOSITORY_ATTRIBUTE, found: repository },
+    });
+    throw new Error(`${operation}: a Deploys group carries no ${DEPLOYS_REPOSITORY_ATTRIBUTE}`);
   }
   return repository;
 }
+
+/** The repository GROUP's fold is kept under. */
+const repositoryOf = (group: HTMLElement): string => deploysGroupRepository(group, "sidebar.deploys-fold.malformed");
 
 /** GROUP's fold by its activity alone: a queued group is open, an idle one folded. */
 export function automaticFold(group: HTMLElement): boolean {

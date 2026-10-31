@@ -20,7 +20,7 @@
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import type { Timers } from "../timers.js";
-import { DEPLOYS_GROUP_CLASS, DEPLOYS_REPOSITORY_ATTRIBUTE } from "./deploys-fold.js";
+import { DEPLOYS_GROUP_CLASS, deploysGroupRepository } from "./deploys-fold.js";
 
 /** How many deploys a group shows before its arrow is clicked, and how many each click adds. */
 export const DEPLOYS_PAGE_SIZE = 10;
@@ -58,18 +58,8 @@ interface Shown {
   linger: number | null;
 }
 
-/** The repository GROUP is drawn for. A group always names one. */
-function repositoryOf(group: HTMLElement): string {
-  const repository = group.getAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE);
-  if (repository === null || repository === "") {
-    log.error("a Deploys group's older deploys cannot be counted: it names no repository", {
-      operation: "sidebar.deploys-more.malformed",
-      context: { attribute: DEPLOYS_REPOSITORY_ATTRIBUTE, found: repository },
-    });
-    throw new Error(`deploys more: a Deploys group carries no ${DEPLOYS_REPOSITORY_ATTRIBUTE}`);
-  }
-  return repository;
-}
+/** The repository GROUP's pages are counted under. */
+const repositoryOf = (group: HTMLElement): string => deploysGroupRepository(group, "sidebar.deploys-more.malformed");
 
 /** GROUP's pages of older deploys, in order. */
 function pagesOf(group: HTMLElement): HTMLElement[] {
@@ -82,7 +72,7 @@ function regionOf(group: HTMLElement): HTMLElement {
   if (region === null) {
     log.error("a Deploys group's older deploys cannot be looked at: it hangs in no Deploys viewport", {
       operation: "sidebar.deploys-more.malformed",
-      context: { repository: group.getAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE) },
+      context: { repository: repositoryOf(group) },
     });
     throw new Error("deploys more: a Deploys group hangs in no Deploys viewport");
   }

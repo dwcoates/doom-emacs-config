@@ -10,19 +10,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resetLoggingForTests } from "../../src/log.js";
 import { createRailScrollKeep } from "../../src/sidebar/scroll-keep.js";
 import { captureLogRecords, forwardedRecord, forwardedRecords } from "../log-capture.js";
+import { scrollable } from "./harness.js";
 
-/** Give EL a scroll offset that clamps at MAX. */
-function scrollable<T extends HTMLElement>(el: T, max = 1000): T {
-  let top = 0;
-  Object.defineProperty(el, "scrollTop", {
-    configurable: true,
-    get: () => top,
-    set: (v: number) => {
-      top = Math.max(0, Math.min(v, max));
-    },
-  });
-  return el;
-}
 
 /** A section of class CLS holding a rows region of class REGION, scrolling up to MAX. */
 function section(cls: string, region: string, max = 1000): { section: HTMLElement; region: HTMLElement } {

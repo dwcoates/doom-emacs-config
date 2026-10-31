@@ -104,6 +104,22 @@ export function fakeTicker(now: number = NOW): Ticker & {
   };
 }
 
+/**
+ * Give EL a scroll offset that clamps between 0 and MAX, as the engine
+ * clamps it: jsdom keeps no scroll offset of its own.
+ */
+export function scrollable<T extends HTMLElement>(el: T, max = 1000): T {
+  let top = 0;
+  Object.defineProperty(el, "scrollTop", {
+    configurable: true,
+    get: () => top,
+    set: (v: number) => {
+      top = Math.max(0, Math.min(v, max));
+    },
+  });
+  return el;
+}
+
 /** Timers a suite advances by hand, for the blink cadence. */
 export function fakeTimers(): Timers & { run(): boolean } {
   let next = 1;

@@ -17,6 +17,7 @@ import {
 } from "../../src/sidebar/deploys-more.js";
 import type { Timers } from "../../src/timers.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { scrollable } from "./harness.js";
 
 /** Timers that record each one armed, with its delay, and fire them by hand. */
 function recordedTimers(): Timers & { armed: Map<number, { fn: () => void; ms: number }>; fire(): void } {
@@ -42,7 +43,7 @@ function recordedTimers(): Timers & { armed: Map<number, { fn: () => void; ms: n
 
 /** Stub EL's rectangle as spanning TOP to BOTTOM. */
 function placeAt(el: HTMLElement, top: number, bottom: number): void {
-  el.getBoundingClientRect = () => ({ top, bottom, height: bottom - top, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
+  el.getBoundingClientRect = () => new DOMRect(0, top, 0, bottom - top);
 }
 
 /** A Deploys group of REPOSITORY holding PAGES pages of older deploys and the arrow, in a Deploys viewport. */
@@ -271,14 +272,7 @@ describe("createDeploysMore", () => {
     const timers = recordedTimers();
     const more = createDeploysMore(root, timers, () => undefined);
     more.more(group);
-    let top = 100;
-    Object.defineProperty(region, "scrollTop", {
-      configurable: true,
-      get: () => top,
-      set: (v: number) => {
-        top = v;
-      },
-    });
+    scrollable(region).scrollTop = 100;
     // Act
     timers.fire();
     // Assert
