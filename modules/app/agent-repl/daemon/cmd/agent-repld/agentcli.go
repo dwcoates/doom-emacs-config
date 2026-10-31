@@ -1200,15 +1200,27 @@ func workspaceInterrupt(c *cliCall, args []string) int {
 // workspace on its own.
 func onWorkspace[Res any](c *cliCall, args []string, call func(*workspacev1.WorkspaceRef) (*connect.Response[Res], error)) int {
 	fs, stateDir := c.flags()
-	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	ref, ok := c.onlyWorkspace(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
-	if len(rest) != 0 {
-		return c.usageFailed("the command names its workspace and nothing after it")
-	}
 	resp, err := call(ref)
 	return answer(c, resp, err)
+}
+
+// onlyWorkspace parses ARGS against FS for a verb that names one workspace
+// and nothing after it, refusing anything after it. It is onWorkspace's parse,
+// shared by a verb that also takes flags of its own.
+func (c *cliCall) onlyWorkspace(fs *flag.FlagSet, stateDir *string, args []string) (*workspacev1.WorkspaceRef, bool) {
+	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
+	if !ok {
+		return nil, false
+	}
+	if len(rest) != 0 {
+		c.usageFailed("the command names its workspace and nothing after it")
+		return nil, false
+	}
+	return ref, true
 }
 
 func workspaceCompact(c *cliCall, args []string) int {
