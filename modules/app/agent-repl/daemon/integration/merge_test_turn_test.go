@@ -129,6 +129,12 @@ func (g *turnGate) runs() []string {
 	return strings.Split(strings.TrimSpace(string(body)), "\n")
 }
 
+// TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap
+// drives two failing merges through the STEP ASIDE (owner ruling,
+// 2026-10-31): a head whose whole suite fails gives the head to the merge
+// behind it and fixes out of line; once its fix ends it returns next after
+// the merge being worked on. So the gates alternate A, B, A, B, one at a
+// time.
 func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *testing.T) {
 	t.Parallel()
 	// Arrange: two children of one repository, each with work to land.
@@ -150,32 +156,39 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 			return r.Operation == "daemon.merge.test_turn" && strings.Contains(r.Message, text)
 		})
 	}
+	remediateLog := func(f *fixture, text string) {
+		t.Helper()
+		d.AwaitLogRecord(harness.WorkspaceLogPath(f.ws.GetDir(), "daemon"), text, func(r harness.LogRecord) bool {
+			return r.Operation == "daemon.merge.remediate" && strings.Contains(r.Message, text)
+		})
+	}
 
 	// Act: A, the head, runs first; B is put in line once A is testing.
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(a.ws))); err != nil {
 		t.Fatalf("FinishWorkspace(alpha): %v", err)
 	}
 	gate.awaitStart(d, a.ws.GetDir())
-	aBubble := awaitRow(t, a, aRoot, "alpha's merge bubble", func(row *frontendv1.FeedRow) bool {
+	awaitRow(t, a, aRoot, "alpha's merge bubble", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge() != nil
 	})
 	if _, err := d.Client().FinishWorkspace(d.Ctx(), connect.NewRequest(harness.FinishRequest(b.ws))); err != nil {
 		t.Fatalf("FinishWorkspace(beta): %v", err)
 	}
 	turnLog(b, "joined the line")
-	// A fails: B's tests run while A fixes.
+	// A fails: it steps aside to fix, and B takes the head and tests.
 	gate.release(1)
 	a.shim.ExpectStartTurn()
+	remediateLog(a, "stepped aside")
 	gate.awaitStart(d, b.ws.GetDir())
-	// A's fix ends while B's tests run: A waits in line for them.
+	// A's fix ends while B's tests run: A returns next after B, never
+	// evicting it.
 	pushConcludedTurn(a.shim, mainAgent, "alpha-fix")
-	turnLog(a, "joined the line")
-	waiting := a.awaitRowInFeed(aBubble.GetId(), "alpha's run waiting for the turn", func(row *frontendv1.FeedRow) bool {
-		return row.GetMergeTab().GetTestsRun().GetWaitingForTurn() != nil
-	})
-	// B fails: A runs again while B fixes, and passes.
+	remediateLog(a, "back in line")
+	// B fails: it steps aside in turn, and A, next, takes the head, runs
+	// again and passes.
 	gate.release(1)
 	b.shim.ExpectStartTurn()
+	remediateLog(b, "stepped aside")
 	gate.awaitStart(d, a.ws.GetDir())
 	gate.release(0)
 	aMerge := awaitRow(t, a, aRoot, "alpha's terminal", isMergeTerminal)
@@ -190,9 +203,6 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 	// Assert.
 	if aMerge.GetActivity().GetMerge().GetSuccess() == nil || bMerge.GetActivity().GetMerge().GetSuccess() == nil {
 		t.Fatalf("alpha ended %v, beta %v; want both landed", aMerge.GetActivity().GetMerge(), bMerge.GetActivity().GetMerge())
-	}
-	if got := waiting.GetMergeTab().GetTestsRun().GetWaitingForTurn().GetHolder().GetWorkspaceName(); got != "beta" {
-		t.Fatalf("alpha's waiting run named %q holding the turn, want beta", got)
 	}
 	runs := gate.runs()
 	want := []string{a.ws.GetDir(), b.ws.GetDir(), a.ws.GetDir(), b.ws.GetDir()}

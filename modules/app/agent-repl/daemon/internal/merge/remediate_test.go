@@ -192,3 +192,41 @@ func TestTheRosterIsToldTheMergeRemediatingOutOfLine(t *testing.T) {
 		t.Fatalf("line = %+v, want the remediating merge out of it", queue.Line)
 	}
 }
+
+func TestAMergeRacingBehindAFailedHeadKeepsItsRunningTestsAndLands(t *testing.T) {
+	// Arrange: on the two-merge window, ws-b tests behind the head; the
+	// head's suite fails.
+	c := newChain(t)
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	c.runner.script(c.dirs[theWorkspace], failingSuiteRun)
+
+	// Act
+	c.drainUntil(t, "ws-b landing", func() bool { return len(c.git.landedOwn()) == 1 })
+
+	// Assert
+	if got := c.git.landedOwn(); !slices.Equal(got[0], []string{"b1"}) {
+		t.Fatalf("first landing brought %v, want b1", got[0])
+	}
+	if n := c.runner.ran(c.dirs["ws-b"]); n != 1 {
+		t.Fatalf("ws-b's tests ran %d times, want once: the head stepping aside must not cut them", n)
+	}
+}
+
+func TestASpeculativeMergeFirstInItsChainStandsOnTheTargetsTip(t *testing.T) {
+	// Arrange: a speculative run alone in its chain, its head gone.
+	h := newHarness(t)
+	r := &run{o: h.o, ws: theWorkspace, repo: h.repoKey(), speculative: true}
+	h.o.mu.Lock()
+	h.o.chains[h.repoKey()] = []*run{r}
+	h.o.targetTips[h.repoKey()] = "tip-1"
+	h.o.mu.Unlock()
+
+	// Act
+	place := h.o.chainPosition(r)
+
+	// Assert
+	if place.base != "tip-1" {
+		t.Fatalf("base = %q, want the target's tip, tip-1", place.base)
+	}
+}
