@@ -181,7 +181,7 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 	for _, entry := range entries {
 		queue.Workspaces = append(queue.Workspaces, entry.Workspace)
 	}
-	line, err := o.rosterLine(ctx, inLine(entries))
+	line, err := o.rosterLine(ctx, inLine(entries), true)
 	if err != nil {
 		recordFailed(o.deps.Log.Global(), op, "could not resolve the merges in line as the roster draws them, so the roster is not told the queue",
 			"the line's read ended when its context was cancelled; the roster is not told the queue",
@@ -189,6 +189,17 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 		return
 	}
 	queue.Line = line
+	remediating, err := o.rosterLine(ctx, outOfLine(entries), false)
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), op, "could not resolve the merges remediating out of line as the roster draws them, so the roster is not told the queue",
+			"the remediating merges' read ended when its context was cancelled; the roster is not told the queue",
+			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
+		return
+	}
+	for i := range remediating {
+		remediating[i].RemediatingSince = o.remediatingSince(remediating[i].Workspace)
+	}
+	queue.Remediating = remediating
 	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "requesters": ids.Strings(requesters)}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue", fields)
 	o.deps.Sidebar.SetMergeQueue(repo, queue)
@@ -231,10 +242,12 @@ func (o *orchestrator) creditOf(ctx context.Context, ws ids.WorkspaceID, detache
 	return ws, false, nil
 }
 
-// rosterLine answers the merges in line as the roster draws them, front
-// first: each one's credit and the bubble a click on it opens, and the front's
-// stages read from its ledger.
-func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntry) ([]sidebar.QueueEntry, error) {
+// rosterLine answers the merges of LINE as the roster draws them, front
+// first: each one's credit and the bubble a click on it opens. HEADED says
+// LINE is the queue's line, whose front is the head: its stages are read from
+// its ledger and its head clock stamped (headSince). The merges remediating
+// out of line are drawn unheaded.
+func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntry, headed bool) ([]sidebar.QueueEntry, error) {
 	out := make([]sidebar.QueueEntry, 0, len(line))
 	for i, entry := range line {
 		credited, async, err := o.creditOf(ctx, entry.Workspace, entry.Source.Detach != "")
@@ -249,12 +262,12 @@ func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntr
 			PlacedAtFront: entry.Source.Front,
 			Admitted:      entry.State != wsm.MergeQueued,
 		}
-		if i == 0 {
+		if headed && i == 0 {
 			drawn.HeadSince = o.headSince(entry.Repo, entry.Workspace)
 		}
 		if lease, ok := o.leaseOf(entry.Workspace); ok {
 			drawn.Reveal = o.bubbleHeadID(entry.Workspace, lease)
-			if i == 0 {
+			if headed && i == 0 {
 				stages, err := o.ledgerStages(ctx, entry.Workspace, lease)
 				if err != nil {
 					return nil, err

@@ -1870,9 +1870,10 @@ func TestEveryReorderingReadsItsPlaceThroughEntryPlace(t *testing.T) {
 	calls := strings.Count(string(code), "entryPlace(ctx, tx, key, id)")
 
 	// Assert: the helper's own query, and one call per reordering (move,
-	// move to a place, prioritize, and the yield's read of both racers).
-	if reads != 1 || calls != 4 {
-		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 4", reads, calls)
+	// move to a place, prioritize, the yield's read of both racers, a failed
+	// head stepping aside and a remediated merge returning).
+	if reads != 1 || calls != 6 {
+		t.Fatalf("state/seq reads = %d, entryPlace calls = %d; want 1 and 6", reads, calls)
 	}
 }
 
@@ -2179,5 +2180,129 @@ func TestRequestMergeRefusesAMergePlacedFrontAndBehind(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "placed at the front or behind") {
 		t.Fatalf("RequestMerge = %v, want the contradiction refused", err)
+	}
+}
+
+// stepAsideFixture is a queue whose head, failed, stepped aside: the head
+// remediating, a second merge now admitted at the front, a third waiting.
+func stepAsideFixture(t *testing.T) (*store, RepoKey, WorkspaceID, WorkspaceID, WorkspaceID) {
+	t.Helper()
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	failed, next, waiting := testWorkspace(t, s), testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, failed.ID, instant)
+	queued(t, s, repo, next.ID, instant.Add(time.Minute))
+	queued(t, s, repo, waiting.ID, instant.Add(2*time.Minute))
+	if err := s.AdmitMerge(ctx, repo, failed.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	if err := s.StepAsideMerge(ctx, repo, failed.ID); err != nil {
+		t.Fatalf("StepAsideMerge: %v", err)
+	}
+	if err := s.AdmitMerge(ctx, repo, next.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	return s, repo, failed.ID, next.ID, waiting.ID
+}
+
+func TestStepAsideMergeTakesTheHeadOutOfLine(t *testing.T) {
+	// Arrange + Act
+	s, repo, failed, next, waiting := stepAsideFixture(t)
+
+	// Assert
+	got, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	if len(got) != 3 || got[0].Workspace != next || got[1].Workspace != waiting || got[2].Workspace != failed || got[2].State != MergeRemediating {
+		t.Fatalf("queue = %+v, want next, waiting, then the failed merge remediating", got)
+	}
+}
+
+func TestStepAsideMergeRefusesAMergeNotAdmitted(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+	queued(t, s, repo, ws.ID, instant)
+
+	// Act
+	err := s.StepAsideMerge(context.Background(), repo, ws.ID)
+
+	// Assert
+	if err == nil {
+		t.Fatal("StepAsideMerge of a waiting merge = nil, want a refusal")
+	}
+}
+
+func TestReturnRemediatedMergePutsItAheadOfTheWaitingBehindTheWorkedOn(t *testing.T) {
+	// Arrange
+	s, repo, failed, next, waiting := stepAsideFixture(t)
+
+	// Act
+	if err := s.ReturnRemediatedMerge(context.Background(), repo, failed); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Assert
+	got, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	if len(got) != 3 || got[0].Workspace != next || got[1].Workspace != failed || got[2].Workspace != waiting {
+		t.Fatalf("queue = %+v, want the merge being worked on, the returned merge, then the waiting one", got)
+	}
+	if got[1].State != MergeAdmitted {
+		t.Fatalf("the returned merge is %s, want admitted (it resumes from its record)", got[1].State)
+	}
+}
+
+func TestReturnRemediatedMergeWithNobodyWaitingStandsBehindTheWorkedOn(t *testing.T) {
+	// Arrange: the failed head stepped aside behind one merge, nobody waits.
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	failed, next := testWorkspace(t, s), testWorkspace(t, s)
+	queued(t, s, repo, failed.ID, instant)
+	queued(t, s, repo, next.ID, instant.Add(time.Minute))
+	if err := s.AdmitMerge(ctx, repo, failed.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	if err := s.StepAsideMerge(ctx, repo, failed.ID); err != nil {
+		t.Fatalf("StepAsideMerge: %v", err)
+	}
+	if err := s.AdmitMerge(ctx, repo, next.ID); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+
+	// Act
+	if err := s.ReturnRemediatedMerge(ctx, repo, failed.ID); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Assert
+	got, err := s.MergeQueue(ctx, repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	if len(got) != 2 || got[0].Workspace != next.ID || got[1].Workspace != failed.ID {
+		t.Fatalf("queue = %+v, want the merge being worked on, then the returned merge", got)
+	}
+}
+
+func TestReturnRemediatedMergeRefusesAMergeNotRemediating(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	repo := RepoKey(t.TempDir())
+	ws := testWorkspace(t, s)
+	queued(t, s, repo, ws.ID, instant)
+
+	// Act
+	err := s.ReturnRemediatedMerge(context.Background(), repo, ws.ID)
+
+	// Assert
+	if err == nil {
+		t.Fatal("ReturnRemediatedMerge of a waiting merge = nil, want a refusal")
 	}
 }

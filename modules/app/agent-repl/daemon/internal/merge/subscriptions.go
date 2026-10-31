@@ -160,6 +160,9 @@ type QueueSnapshot struct {
 	// Members are the merges in line, front first. A merge only requested
 	// (its asking turn still running) is not in line.
 	Members []QueueMember
+	// Remediating are the merges remediating out of line (remediate.go),
+	// oldest first. They are in no place in line.
+	Remediating []QueueMember
 }
 
 // QueueChange is one change of a merge queue, as its observer is told it.
@@ -495,7 +498,14 @@ func (o *orchestrator) readQueue(ctx context.Context, db wsm.DB, repo wsm.RepoKe
 	if err != nil {
 		return QueueSnapshot{}, err
 	}
-	return QueueSnapshot{Repo: repo, Paused: paused, Members: members}, nil
+	var remediating []QueueMember
+	if aside := outOfLine(stored); len(aside) > 0 {
+		remediating, err = o.queueMembers(ctx, db, aside)
+		if err != nil {
+			return QueueSnapshot{}, err
+		}
+	}
+	return QueueSnapshot{Repo: repo, Paused: paused, Members: members, Remediating: remediating}, nil
 }
 
 // queueMembers describes each in-line entry as a member.

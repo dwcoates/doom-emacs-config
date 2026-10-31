@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/merge_queue_status.proto.
  */
 export const file_agentrepl_v1_merge_queue_status: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvbWVyZ2VfcXVldWVfc3RhdHVzLnByb3RvEgxhZ2VudHJlcGwudjEisQEKEE1lcmdlUXVldWVTdGF0dXMSLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEjYKB2FkdmFuY2UYAiABKAsyJS5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2USNAoHZW50cmllcxgDIAMoCzIjLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnkiogEKF01lcmdlUXVldWVTdGF0dXNBZHZhbmNlEj8KB3J1bm5pbmcYASABKAsyLC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2VSdW5uaW5nSAASPQoGcGF1c2VkGAIgASgLMisuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNBZHZhbmNlUGF1c2VkSABCBwoFc3RhdGUiIAoeTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2VSdW5uaW5nIh8KHU1lcmdlUXVldWVTdGF0dXNBZHZhbmNlUGF1c2VkIu0BChVNZXJnZVF1ZXVlU3RhdHVzRW50cnkSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJEg4KBmJyYW5jaBgDIAEoCRI1CgRraW5kGAQgASgLMicuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmQSNwoFc3RhZ2UYBSABKAsyKC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2USFwoPcGxhY2VkX2F0X2Zyb250GAYgASgIIrUBChlNZXJnZVF1ZXVlU3RhdHVzRW50cnlLaW5kEkYKCm93bl9icmFuY2gYASABKAsyMC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5S2luZE93bkJyYW5jaEgAEkgKC2FzeW5jX21lcmdlGAIgASgLMjEuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmRBc3luY01lcmdlSABCBgoEa2luZCIkCiJNZXJnZVF1ZXVlU3RhdHVzRW50cnlLaW5kT3duQnJhbmNoIlQKI01lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmRBc3luY01lcmdlEi0KCXJlcXVlc3RlchgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYirQEKGk1lcmdlUXVldWVTdGF0dXNFbnRyeVN0YWdlEkIKB3dhaXRpbmcYASABKAsyLy5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VXYWl0aW5nSAASQgoHcnVubmluZxgCIAEoCzIvLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVJ1bm5pbmdIAEIHCgVzdGFnZSIjCiFNZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVdhaXRpbmciPQohTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VSdW5uaW5nEhgKEHN0ZXBfZGVzY3JpcHRpb24YASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvbWVyZ2VfcXVldWVfc3RhdHVzLnByb3RvEgxhZ2VudHJlcGwudjEisQEKEE1lcmdlUXVldWVTdGF0dXMSLwoKcmVwb3NpdG9yeRgBIAEoCzIbLndvcmtzcGFjZS52MS5SZXBvc2l0b3J5UmVmEjYKB2FkdmFuY2UYAiABKAsyJS5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2USNAoHZW50cmllcxgDIAMoCzIjLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnkiogEKF01lcmdlUXVldWVTdGF0dXNBZHZhbmNlEj8KB3J1bm5pbmcYASABKAsyLC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2VSdW5uaW5nSAASPQoGcGF1c2VkGAIgASgLMisuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNBZHZhbmNlUGF1c2VkSABCBwoFc3RhdGUiIAoeTWVyZ2VRdWV1ZVN0YXR1c0FkdmFuY2VSdW5uaW5nIh8KHU1lcmdlUXVldWVTdGF0dXNBZHZhbmNlUGF1c2VkIu0BChVNZXJnZVF1ZXVlU3RhdHVzRW50cnkSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIMCgRuYW1lGAIgASgJEg4KBmJyYW5jaBgDIAEoCRI1CgRraW5kGAQgASgLMicuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmQSNwoFc3RhZ2UYBSABKAsyKC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2USFwoPcGxhY2VkX2F0X2Zyb250GAYgASgIIrUBChlNZXJnZVF1ZXVlU3RhdHVzRW50cnlLaW5kEkYKCm93bl9icmFuY2gYASABKAsyMC5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5S2luZE93bkJyYW5jaEgAEkgKC2FzeW5jX21lcmdlGAIgASgLMjEuYWdlbnRyZXBsLnYxLk1lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmRBc3luY01lcmdlSABCBgoEa2luZCIkCiJNZXJnZVF1ZXVlU3RhdHVzRW50cnlLaW5kT3duQnJhbmNoIlQKI01lcmdlUXVldWVTdGF0dXNFbnRyeUtpbmRBc3luY01lcmdlEi0KCXJlcXVlc3RlchgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYi+QEKGk1lcmdlUXVldWVTdGF0dXNFbnRyeVN0YWdlEkIKB3dhaXRpbmcYASABKAsyLy5hZ2VudHJlcGwudjEuTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VXYWl0aW5nSAASQgoHcnVubmluZxgCIAEoCzIvLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVJ1bm5pbmdIABJKCgtyZW1lZGlhdGluZxgDIAEoCzIzLmFnZW50cmVwbC52MS5NZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVJlbWVkaWF0aW5nSABCBwoFc3RhZ2UiJwolTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VSZW1lZGlhdGluZyIjCiFNZXJnZVF1ZXVlU3RhdHVzRW50cnlTdGFnZVdhaXRpbmciPQohTWVyZ2VRdWV1ZVN0YXR1c0VudHJ5U3RhZ2VSdW5uaW5nEhgKEHN0ZXBfZGVzY3JpcHRpb24YASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * One repository's merge queue.
@@ -287,6 +287,16 @@ export type MergeQueueStatusEntryStage = Message<"agentrepl.v1.MergeQueueStatusE
      */
     value: MergeQueueStatusEntryStageRunning;
     case: "running";
+  } | {
+    /**
+     * Out of line, fixing the failures its test suite finished with; it
+     * returns to the line once its fixing turn ends (owner ruling,
+     * 2026-10-31). Listed after every entry in line.
+     *
+     * @generated from field: agentrepl.v1.MergeQueueStatusEntryStageRemediating remediating = 3;
+     */
+    value: MergeQueueStatusEntryStageRemediating;
+    case: "remediating";
   } | { case: undefined; value?: undefined };
 };
 
@@ -296,6 +306,21 @@ export type MergeQueueStatusEntryStage = Message<"agentrepl.v1.MergeQueueStatusE
  */
 export const MergeQueueStatusEntryStageSchema: GenMessage<MergeQueueStatusEntryStage> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_merge_queue_status, 8);
+
+/**
+ * Remediating out of line. No fields.
+ *
+ * @generated from message agentrepl.v1.MergeQueueStatusEntryStageRemediating
+ */
+export type MergeQueueStatusEntryStageRemediating = Message<"agentrepl.v1.MergeQueueStatusEntryStageRemediating"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeQueueStatusEntryStageRemediating.
+ * Use `create(MergeQueueStatusEntryStageRemediatingSchema)` to create a new message.
+ */
+export const MergeQueueStatusEntryStageRemediatingSchema: GenMessage<MergeQueueStatusEntryStageRemediating> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_merge_queue_status, 9);
 
 /**
  * Waiting. No fields.
@@ -310,7 +335,7 @@ export type MergeQueueStatusEntryStageWaiting = Message<"agentrepl.v1.MergeQueue
  * Use `create(MergeQueueStatusEntryStageWaitingSchema)` to create a new message.
  */
 export const MergeQueueStatusEntryStageWaitingSchema: GenMessage<MergeQueueStatusEntryStageWaiting> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_merge_queue_status, 9);
+  messageDesc(file_agentrepl_v1_merge_queue_status, 10);
 
 /**
  * Running, at a step.
@@ -334,5 +359,5 @@ export type MergeQueueStatusEntryStageRunning = Message<"agentrepl.v1.MergeQueue
  * Use `create(MergeQueueStatusEntryStageRunningSchema)` to create a new message.
  */
 export const MergeQueueStatusEntryStageRunningSchema: GenMessage<MergeQueueStatusEntryStageRunning> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_merge_queue_status, 10);
+  messageDesc(file_agentrepl_v1_merge_queue_status, 11);
 

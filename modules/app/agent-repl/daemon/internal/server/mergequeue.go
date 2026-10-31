@@ -133,14 +133,29 @@ func mergeQueueStatusOf(status merge.QueueStatus) *agentreplv1.MergeQueueStatus 
 		Repository: &workspacev1.RepositoryRef{Id: string(status.Repository.ID), Dir: status.Repository.Dir},
 		Advance:    advance,
 	}
+	type listed struct {
+		member      merge.QueueMember
+		remediating bool
+	}
+	var entries []listed
 	for _, member := range status.Queue.Members {
+		entries = append(entries, listed{member: member})
+	}
+	for _, member := range status.Queue.Remediating {
+		entries = append(entries, listed{member: member, remediating: true})
+	}
+	for _, e := range entries {
+		member := e.member
 		kind := &agentreplv1.MergeQueueStatusEntryKind{Kind: &agentreplv1.MergeQueueStatusEntryKind_OwnBranch{OwnBranch: &agentreplv1.MergeQueueStatusEntryKindOwnBranch{}}}
 		if member.Requester != "" {
 			kind.Kind = &agentreplv1.MergeQueueStatusEntryKind_AsyncMerge{AsyncMerge: &agentreplv1.MergeQueueStatusEntryKindAsyncMerge{
 				Requester: &workspacev1.WorkspaceRef{Id: string(member.Requester)}}}
 		}
 		stage := &agentreplv1.MergeQueueStatusEntryStage{Stage: &agentreplv1.MergeQueueStatusEntryStage_Waiting{Waiting: &agentreplv1.MergeQueueStatusEntryStageWaiting{}}}
-		if member.Started {
+		switch {
+		case e.remediating:
+			stage.Stage = &agentreplv1.MergeQueueStatusEntryStage_Remediating{Remediating: &agentreplv1.MergeQueueStatusEntryStageRemediating{}}
+		case member.Started:
 			stage.Stage = &agentreplv1.MergeQueueStatusEntryStage_Running{Running: &agentreplv1.MergeQueueStatusEntryStageRunning{
 				StepDescription: member.Step.Words()}}
 		}

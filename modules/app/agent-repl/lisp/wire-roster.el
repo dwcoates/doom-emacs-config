@@ -1368,11 +1368,14 @@ them), and t for a hard stop."
 
 (defun agent-repl-wire-decode-roster-repo-merge-queue (value)
   "Decode VALUE as `RosterRepoMergeQueue'.
-A plist `(:head HEAD :waiting WAITING :paused PAUSED)': the merge at the
-head, the merges waiting behind it, and the queue's pause
-\(`agent-repl-wire-decode-roster-merge-queue-paused'), nil while it runs."
+A plist `(:head HEAD :waiting WAITING :paused PAUSED :remediating
+REMEDIATING)': the merge at the head (nil only while the line is empty and a
+merge remediates), the merges waiting behind it, the queue's pause
+\(`agent-repl-wire-decode-roster-merge-queue-paused'), nil while it runs,
+and the merges remediating out of line
+\(`agent-repl-wire-decode-roster-merge-queue-remediating')."
   (let ((object (agent-repl-wire--object "RosterRepoMergeQueue" value)))
-    (agent-repl-wire--check-keys "RosterRepoMergeQueue" object '(head waiting paused))
+    (agent-repl-wire--check-keys "RosterRepoMergeQueue" object '(head waiting paused remediating))
     (agent-repl-wire--decoded
      "RosterRepoMergeQueue"
      (list :head (agent-repl-wire--decode-optional-message
@@ -1381,7 +1384,23 @@ head, the merges waiting behind it, and the queue's pause
                      "RosterRepoMergeQueue" 'waiting object #'agent-repl-wire-decode-roster-merge-queue-waiting)
            :paused (agent-repl-wire--decode-optional-message
                     "RosterRepoMergeQueue" 'paused object
-                    #'agent-repl-wire-decode-roster-merge-queue-paused)))))
+                    #'agent-repl-wire-decode-roster-merge-queue-paused)
+           :remediating (agent-repl-wire--decode-repeated
+                         "RosterRepoMergeQueue" 'remediating object
+                         #'agent-repl-wire-decode-roster-merge-queue-remediating)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-remediating (value)
+  "Decode VALUE as `RosterMergeQueueRemediating'.
+A plist `(:subject SUBJECT :since-ms MS)': a merge remediating its failing
+tests out of line, and when it stepped aside."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueRemediating" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueRemediating" object '(subject sinceMs))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueRemediating"
+     (list :subject (agent-repl-wire--decode-message
+                     "RosterMergeQueueRemediating" 'subject object
+                     #'agent-repl-wire-decode-roster-merge-queue-subject)
+           :since-ms (agent-repl-wire--decode-int64 "RosterMergeQueueRemediating" 'sinceMs object)))))
 
 (defun agent-repl-wire-decode-roster-repo-section (value)
   "Decode VALUE as `RosterRepoSection'.

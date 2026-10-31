@@ -1100,6 +1100,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    with the workspaces' rows, a row's hover, and a clock that reads as a
    row's when-column. */
 #ws-sidebar .sb-mq-head,
+#ws-sidebar .sb-mq-remediating,
 #ws-sidebar .sb-mq-waiting {
   padding: var(--row-pad-y) 0.7rem var(--row-pad-y) 0.9rem;
   cursor: pointer;
@@ -1155,6 +1156,24 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* THE SECOND SPOT (owner ruling, 2026-10-31): a merge remediating its
+   failing tests out of line. It is a card like the head's, one step quieter
+   -- its name in regular weight, a step smaller, in the waiting merges' grey
+   lifted toward the head's ink, its glyph dimmed -- and it stands above the
+   merges waiting, indented like them, so it reads as below the head and
+   above the line. */
+#ws-sidebar .sb-mq-remediating {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding-left: calc(0.9rem + var(--ws-mark-width) * 0.5);
+}
+#ws-sidebar .sb-mq-remediating .sb-mq-name {
+  font-size: calc(var(--merged-group-head-font-size) * 0.92);
+  color: color-mix(in srgb, var(--repo-head-expanded) 80%, var(--repo-head-collapsed));
+}
+#ws-sidebar .sb-mq-remediating .sb-mq-glyph { opacity: 0.6; }
+#ws-sidebar .sb-mq-remediating .sb-mq-detail { font-style: italic; }
 /* A waiting merge's front mark. */
 #ws-sidebar .sb-mq-front { flex: 0 0 auto; color: var(--blocked); font-size: 0.65rem; }
 /* A folded open workspaces section folds away every grouping section it
@@ -1342,6 +1361,7 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    request, 2026-10-26: the two highlights are one brightness). */
 #ws-sidebar:not(.sb-hover-suspended) .row:hover,
 #ws-sidebar:not(.sb-hover-suspended) .sb-mq-head:hover,
+#ws-sidebar:not(.sb-hover-suspended) .sb-mq-remediating:hover,
 #ws-sidebar:not(.sb-hover-suspended) .sb-mq-waiting:hover,
 #ws-sidebar:not(.sb-hover-suspended) .sb-outline-row:hover { background: var(--row-highlight-tint); }
 

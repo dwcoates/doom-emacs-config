@@ -120,6 +120,8 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 		return nil
 	case wsm.MergeAdmitted:
 		return o.recoverAdmitted(ctx, repo, entry)
+	case wsm.MergeRemediating:
+		return o.recoverRemediating(ctx, repo, entry)
 	}
 	requeued, err := o.recoverWaiting(ctx, repo, entry)
 	if err != nil || !requeued {
@@ -228,7 +230,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		return err
 	}
 	if recorded {
-		return o.recoverResumable(ctx, repo, lease, doc)
+		return o.recoverResumable(ctx, repo, lease, doc, false)
 	}
 	target, jobErr := o.targetDirOf(ctx, ws, entry.Source)
 	// CORRUPTION REFUSES THE LOAD, it is never an unmergeable outcome. A
@@ -345,7 +347,7 @@ func (o *orchestrator) loadProgress(ctx context.Context, ws ids.WorkspaceID, lea
 // recoverResumable takes a merge with a progress record back: its lease
 // adopted by this process, its bubble and its footer drawn as they stood, and
 // the run itself handed to the admission pump, which resumes it first.
-func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, lease wsm.Lease, doc progressDoc) error {
+func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, lease wsm.Lease, doc progressDoc, remediating bool) error {
 	const op = "daemon.merge.recover"
 	ws := lease.Workspace
 	// A PAUSED QUEUE RESUMES NOTHING (pumpOnce), so the record below says the
@@ -384,11 +386,47 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "step": doc.Step,
 		"round": doc.Active.N, "turn": doc.Turn, "paused": paused}
 	message := "a merge a restart interrupted resumes at the step it recorded"
-	if paused {
+	switch {
+	case remediating:
+		message = "a merge remediating its failing tests out of line is taken back; it returns to the line once its fixing turn ends"
+	case paused:
 		message = "a suspended merge is taken back at the step it recorded; its queue is paused, so it stays suspended until the queue is resumed"
 	}
 	o.log(ctx, ws).Info(op, message, fields)
 	o.deps.Log.Global().Info(op, message, fields)
+	return nil
+}
+
+// recoverRemediating takes back a merge remediating out of line (remediate.go):
+// its record is taken as any resume's is, held out of the resumes until it
+// returns to the line, and the wait on its fixing turn is armed again. A
+// remediating merge with no progress record under its lease is a defect and
+// refuses the take-back, loudly.
+func (o *orchestrator) recoverRemediating(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry) error {
+	ws := entry.Workspace
+	lease, held, err := o.deps.DB.Lease(ctx, ws)
+	if err != nil {
+		return err
+	}
+	doc, recorded, err := o.loadProgress(ctx, ws, lease, held)
+	if err != nil {
+		return err
+	}
+	if !recorded {
+		o.log(ctx, ws).Error(opRemediate, "a merge remediating out of line has no progress record under its lease; it is not taken back",
+			dlog.Context{"workspace": string(ws), "repo": string(repo), "lease_held": held})
+		return fmt.Errorf("merge: the remediating merge of %q has no progress record", ws)
+	}
+	o.mu.Lock()
+	o.remediating[ws] = &remediation{repo: repo, cancel: func() {}, since: o.deps.Now()}
+	o.mu.Unlock()
+	if err := o.recoverResumable(ctx, repo, lease, doc, true); err != nil {
+		o.mu.Lock()
+		delete(o.remediating, ws)
+		o.mu.Unlock()
+		return err
+	}
+	o.awaitRemediation(ws, repo, ids.TurnID(doc.Turn))
 	return nil
 }
 

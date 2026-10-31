@@ -221,6 +221,10 @@ type MergeQueue struct {
 	// showing its merge queue draws the first as its head and the rest as
 	// its waiting merges (frontend.v1.RosterRepoMergeQueue).
 	Line []QueueEntry
+	// Remediating are the merges remediating their failing tests OUT OF LINE
+	// (owner ruling, 2026-10-31), oldest first: drawn as the queue's second
+	// spot (frontend.v1.RosterRepoMergeQueue.remediating).
+	Remediating []QueueEntry
 	// AsyncRequesters are the workspaces whose own branch has an async merge
 	// on the queue, from the moment the async request is recorded until its
 	// merge leaves the queue. Each row carries the `async_merging` marker
@@ -268,6 +272,10 @@ type QueueEntry struct {
 	// (frontend.v1.RosterMergeQueueHead.head_since_ms). Only the front of the
 	// line carries it.
 	HeadSince time.Time
+	// RemediatingSince is when a merge remediating out of line stepped aside
+	// (frontend.v1.RosterMergeQueueRemediating.since_ms). Only a remediating
+	// merge carries it.
+	RemediatingSince time.Time
 }
 
 // FooterStatus is the footer resolver's answers to what a workspace's strip

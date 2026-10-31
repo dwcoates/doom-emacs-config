@@ -334,13 +334,15 @@ func (s MergeQueueState) String() string {
 		return "admitted"
 	case MergeRequested:
 		return "requested"
+	case MergeRemediating:
+		return "remediating"
 	default:
 		return fmt.Sprintf("merge_queue_state(%d)", int(s))
 	}
 }
 
 // valid reports whether the merge queue state is one of the declared arms.
-func (s MergeQueueState) valid() bool { return s >= MergeQueued && s <= MergeRequested }
+func (s MergeQueueState) valid() bool { return s >= MergeQueued && s <= MergeRemediating }
 
 // String names a merge source kind, for logs and refusals.
 func (k MergeSourceKind) String() string {

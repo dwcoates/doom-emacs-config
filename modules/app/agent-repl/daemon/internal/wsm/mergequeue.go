@@ -630,8 +630,8 @@ func positionOf(ctx context.Context, tx *sql.Tx, key RepoKey, seq int64) (int, e
 // the entries IN LINE: a requested entry is in nobody's line.
 func inLinePositionOf(ctx context.Context, tx *sql.Tx, key RepoKey, seq int64) (int, error) {
 	var ahead int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM merge_queue WHERE repo_key = ? AND seq < ? AND state != ?`,
-		key, seq, int(MergeRequested)).Scan(&ahead); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM merge_queue WHERE repo_key = ? AND seq < ? AND state NOT IN (?, ?)`,
+		key, seq, int(MergeRequested), int(MergeRemediating)).Scan(&ahead); err != nil {
 		return 0, err
 	}
 	return ahead + 1, nil
@@ -717,6 +717,78 @@ func (s *store) YieldMergeHead(ctx context.Context, repo RepoKey, loser, winner 
 	})
 }
 
+// StepAsideMerge takes the admitted merge ID out of REPO's line to fix the
+// failures its test suite finished with (MergeRemediating): it goes to the
+// back of the sequence, where it passes nobody, and keeps its lease and its
+// progress record. Anything but an admitted entry is a refusal: only the
+// merge being worked on steps aside.
+func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
+	const op = "daemon.wsm.step_aside_merge"
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
+		return err
+	}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id)}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		_, state, err := entryPlace(ctx, tx, key, id)
+		if err != nil {
+			return err
+		}
+		if state != MergeAdmitted {
+			return fmt.Errorf("wsm: workspace %s in repo %q steps aside to remediate while %s, not admitted", id, key, state)
+		}
+		back, err := nextSeq(ctx, tx, key)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, seq = ? WHERE repo_key = ? AND workspace_id = ?`,
+			int(MergeRemediating), back, key, id)
+		return err
+	})
+}
+
+// ReturnRemediatedMerge puts the remediating merge ID back in REPO's line, as
+// admitted, at the FIRST WAITING PLACE: ahead of every merge waiting in line,
+// behind every merge being worked on, which it never evicts (owner ruling,
+// 2026-10-31). With no merge waiting it stays at the back, which is then the
+// first place after whatever runs. Anything but a remediating entry is a
+// refusal.
+func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
+	const op = "daemon.wsm.return_remediated_merge"
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
+		return err
+	}
+	fields := dlog.Context{"repo": string(key), "workspace": string(id)}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		_, state, err := entryPlace(ctx, tx, key, id)
+		if err != nil {
+			return err
+		}
+		if state != MergeRemediating {
+			return fmt.Errorf("wsm: workspace %s in repo %q returns from remediating while %s", id, key, state)
+		}
+		back, err := nextSeq(ctx, tx, key)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET state = ?, seq = ?, source_front = 1 WHERE repo_key = ? AND workspace_id = ?`,
+			int(MergeAdmitted), back, key, id); err != nil {
+			return err
+		}
+		var waiting sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT min(seq) FROM merge_queue WHERE repo_key = ? AND state = ?`, key, int(MergeQueued)).Scan(&waiting); err != nil {
+			return err
+		}
+		if !waiting.Valid {
+			return nil
+		}
+		return moveAhead(ctx, tx, key, id, waiting.Int64)
+	})
+}
+
 // AdmitMerge marks the entry the orchestrator is running now.
 func (s *store) AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error {
 	return s.setMergeQueueState(ctx, "daemon.wsm.admit_merge", repo, id, MergeAdmitted, dlog.Context{})
@@ -788,11 +860,15 @@ func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id Workspac
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease), "cause": cause}
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM merge_queue WHERE repo_key = ? AND workspace_id = ? AND state = ?`, key, id, int(MergeAdmitted))
+		// A REMEDIATING MERGE IS ADMITTED WORK OUT OF LINE: it holds its lease
+		// and its progress record just as an admitted one does, and ends the
+		// same way.
+		res, err := tx.ExecContext(ctx, `DELETE FROM merge_queue WHERE repo_key = ? AND workspace_id = ? AND state IN (?, ?)`,
+			key, id, int(MergeAdmitted), int(MergeRemediating))
 		if err != nil {
 			return err
 		}
-		if err := requireOneRow(res, fmt.Sprintf("wsm: admitted merge queue entry for workspace %s in repo %q", id, key)); err != nil {
+		if err := requireOneRow(res, fmt.Sprintf("wsm: admitted or remediating merge queue entry for workspace %s in repo %q", id, key)); err != nil {
 			return err
 		}
 		res, err = tx.ExecContext(ctx, `DELETE FROM leases WHERE id = ? AND workspace_id = ? AND holder = ?`, lease, id, int(HolderMerge))

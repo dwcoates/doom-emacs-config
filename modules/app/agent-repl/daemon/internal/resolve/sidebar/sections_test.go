@@ -1591,3 +1591,47 @@ func TestTheMergeQueueHeadCarriesWhenItReachedTheHead(t *testing.T) {
 		t.Fatalf("head_since_ms = %d, want when it reached the head, 1700000900000", got)
 	}
 }
+
+func TestTheMergeQueueDrawsAMergeRemediatingOutOfLineAsItsSecondSpot(t *testing.T) {
+	// Arrange: w2 heads the line; w1 stepped aside to fix its tests.
+	r, _ := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
+		Workspaces:  []ids.WorkspaceID{"w2", "w1"},
+		Line:        inLine("w2"),
+		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", RemediatingSince: time.UnixMilli(1_700_000_000_000)}},
+	})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+	// Assert.
+	queue := latest(t, r).GetRecentlyMerged().GetQueues()[0].GetQueue()
+	if got := queue.GetHead().GetSubject().GetName(); got != "two" {
+		t.Fatalf("head = %q, want two, the merge now at the head", got)
+	}
+	aside := queue.GetRemediating()
+	if len(aside) != 1 || aside[0].GetSubject().GetName() != "one" || aside[0].GetSinceMs() != 1_700_000_000_000 {
+		t.Fatalf("remediating = %v, want one, since 1700000000000", aside)
+	}
+}
+
+func TestAQueueWhoseOnlyMergeRemediatesIsListedWithNoHead(t *testing.T) {
+	// Arrange: the line is empty; w1 remediates out of line.
+	r, _ := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
+		Workspaces:  []ids.WorkspaceID{"w1"},
+		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", RemediatingSince: time.UnixMilli(1)}},
+	})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Assert.
+	groups := latest(t, r).GetRecentlyMerged().GetQueues()
+	if len(groups) != 1 {
+		t.Fatalf("queue groups = %d, want the queue listed while a merge remediates", len(groups))
+	}
+	if groups[0].GetQueue().Head != nil || len(groups[0].GetQueue().GetRemediating()) != 1 {
+		t.Fatalf("queue = %v, want no head and the remediating merge", groups[0].GetQueue())
+	}
+}

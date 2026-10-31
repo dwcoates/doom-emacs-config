@@ -88,8 +88,14 @@ message MergeQueueStatusEntryStage {
     MergeQueueStatusEntryStageWaiting waiting = 1;
     // Running.
     MergeQueueStatusEntryStageRunning running = 2;
+    // Out of line, fixing the failures its test suite finished with; it
+    // returns to the line once its fixing turn ends (owner ruling,
+    // 2026-10-31). Listed after every entry in line.
+    MergeQueueStatusEntryStageRemediating remediating = 3;
   }
 }
+// Remediating out of line. No fields.
+message MergeQueueStatusEntryStageRemediating {}
 // Waiting. No fields.
 message MergeQueueStatusEntryStageWaiting {}
 // Running, at a step.
