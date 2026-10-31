@@ -1307,21 +1307,37 @@ func (c *controller) tookOverSignal() <-chan struct{} {
 // never not_yet_adopted), and its running shim, if one survived, is adopted
 // through the same path a headless workspace takes. An adoption that fails is
 // that workspace's own logged error; the workspace stays owned either way.
+//
+// A WORKSPACE MID-ADOPTION AT THE TAKEOVER IS OWNED TOO. A carry look
+// (followCarries) can claim a workspace for a headless adoption in the very
+// instant the incumbent exits; that adoption marks it owned only when it
+// finishes, so until then the workspace read not_yet_adopted with no other
+// daemon left to serve it (TestAWorkspaceWhoseHandoverNeverFinishedIsOwnedAfterTheTakeover,
+// under the merge queue's full run, 2026-10-31). Its own adoption carries on;
+// no straggler adoption is started beside it.
 func (c *controller) adoptStragglers(fields dlog.Context) {
 	c.mu.Lock()
 	var stragglers []ids.WorkspaceID
-	for ws := range c.joining {
-		if !c.owned[ws] && !c.adopting[ws] {
-			stragglers = append(stragglers, ws)
-		}
-	}
+	midAdoption := 0
 	if c.owned == nil {
 		c.owned = map[ids.WorkspaceID]bool{}
 	}
-	for _, ws := range stragglers {
+	for ws := range c.joining {
+		if c.owned[ws] {
+			continue
+		}
 		c.owned[ws] = true
+		if c.adopting[ws] {
+			midAdoption++
+			continue
+		}
+		stragglers = append(stragglers, ws)
 	}
 	c.mu.Unlock()
+	if midAdoption > 0 {
+		c.log.Info(opAdopt, "workspaces still mid-adoption at the takeover are owned from now; their own adoptions finish them",
+			dlog.Merge(fields, dlog.Context{"workspaces": midAdoption}))
+	}
 	if len(stragglers) == 0 {
 		return
 	}
