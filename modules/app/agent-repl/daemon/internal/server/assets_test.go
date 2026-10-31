@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agent-repld/internal/dlog"
 )
 
 // TestEntryPointIsNoStore pins that the ENTRY POINT is answered no-store, which
@@ -303,5 +305,51 @@ func TestEntryPointWithoutAnHTMLTagIsRefused(t *testing.T) {
 	}
 	if cause, _ := rec.Context["cause"].(string); !strings.Contains(cause, "carries 0") {
 		t.Fatalf("cause = %v, want the tag count", rec.Context["cause"])
+	}
+}
+
+// TestPageLoadAssetsAreRecordedAtTheirLevels pins that a page's load leaves an
+// INFO trace (its entry document and its entry bundle) and nothing louder for
+// every other asset: an e2e whose page never attached left no record of how
+// far its load got.
+func TestPageLoadAssetsAreRecordedAtTheirLevels(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		write     string
+		wantLevel string
+		wantMsg   string
+	}{
+		{name: "the entry document is recorded at INFO", path: "/", wantLevel: "info", wantMsg: "served the webapp entry point"},
+		{name: "the entry bundle is recorded at INFO", path: "/assets/index-AbC123.js", write: "assets/index-AbC123.js", wantLevel: "info", wantMsg: "served the webapp's entry bundle"},
+		{name: "any other asset is recorded at DEBUG", path: "/assets/chunk-Zz9.js", write: "assets/chunk-Zz9.js", wantLevel: "debug", wantMsg: "served an asset"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+			if tt.write != "" {
+				target := filepath.Join(h.WebappDist, tt.write)
+				if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+					t.Fatalf("make the asset's directory: %v", err)
+				}
+				if err := os.WriteFile(target, []byte("//"), 0o644); err != nil {
+					t.Fatalf("write the asset: %v", err)
+				}
+			}
+
+			// Act.
+			resp, err := h.HTTP.Client().Get(h.HTTP.URL + tt.path)
+			if err != nil {
+				t.Fatalf("get %s: %v", tt.path, err)
+			}
+			resp.Body.Close()
+
+			// Assert.
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: "daemon.server.assets", Message: tt.wantMsg}); !ok {
+				t.Fatalf("records = %+v, want a %s %q record", log.Records(), tt.wantLevel, tt.wantMsg)
+			}
+		})
 	}
 }

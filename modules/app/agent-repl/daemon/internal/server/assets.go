@@ -63,7 +63,15 @@ func (s *server) assets() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		s.log.Debug(opAssets, "served an asset", dlog.Context{"path": clean})
+		// THE ENTRY BUNDLE IS PAGE LIFECYCLE, recorded at INFO: a page whose
+		// load finished but that never attached is told apart from one whose
+		// script was never fetched only by this record (2026-10-31, an e2e
+		// whose host page never connected and left no record of why).
+		if isEntryBundle(clean) {
+			s.log.Info(opAssets, "served the webapp's entry bundle", dlog.Context{"path": clean})
+		} else {
+			s.log.Debug(opAssets, "served an asset", dlog.Context{"path": clean})
+		}
 		http.ServeFile(w, r, target)
 	})
 }
@@ -97,7 +105,7 @@ func (s *server) serveEntryPoint(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	s.log.Debug(opAssets, "served the webapp entry point",
+	s.log.Info(opAssets, "served the webapp entry point",
 		dlog.Context{"path": target, "bytes": len(body), "modified": info.ModTime().String(), "feed_text_scale": scale})
 	if r.Method == http.MethodHead {
 		w.WriteHeader(http.StatusOK)
@@ -107,6 +115,12 @@ func (s *server) serveEntryPoint(w http.ResponseWriter, r *http.Request) {
 		s.log.Debug(opAssets, "the client went away mid-entry-point",
 			dlog.Context{"cause": err.Error()})
 	}
+}
+
+// isEntryBundle reports whether PATH is the webapp's entry script, the one
+// index.html names (buildid's webappEntry).
+func isEntryBundle(path string) bool {
+	return strings.HasPrefix(path, "assets/index-") && strings.HasSuffix(path, ".js")
 }
 
 // htmlOpenTag is the entry document's root element's opening, the one place

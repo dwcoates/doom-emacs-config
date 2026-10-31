@@ -1,6 +1,7 @@
 package server
 
 import (
+	"agent-repld/internal/dlog"
 	"context"
 	"errors"
 	"fmt"
@@ -1319,5 +1320,24 @@ func TestPageTestsSubscribeThroughTheHelper(t *testing.T) {
 	// Assert
 	if len(offenders) != 0 {
 		t.Fatalf("%v subscribe a page by hand; use subscribePage", offenders)
+	}
+}
+
+// TestAPageAttachingIsRecordedAtInfo pins that a page's attach is page
+// lifecycle, recorded at INFO: an e2e whose page never attached could not tell
+// that from one that attached and never drew.
+func TestAPageAttachingIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act.
+	attachPageStream(t, h, ctx, "page-1")
+
+	// Assert.
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "WatchPage", Message: "attached a page's one standing stream"}); !ok {
+		t.Fatalf("records = %+v, want the page's attach at INFO", log.Records())
 	}
 }
