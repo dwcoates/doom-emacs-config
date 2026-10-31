@@ -162,6 +162,19 @@ message FooterStrip {
 //   daemon runs no expiry timer and pushes nothing when a transient lapses:
 //   what is drawn is a pure function of the last push and the client's clock,
 //   the same client-side ticking the turn clock does.
+// - ONE TRANSIENT KIND IS THE EDITOR'S, NOT THE DAEMON'S: `editor_notice`.
+//   The editor's composer notices (a refused or unanswered send, the
+//   held-prompt edit beginning, the count of prompts waiting for the daemon)
+//   are raised mostly WHEN THE DAEMON CANNOT BE REACHED, so the daemon can
+//   never be the one to push them. The editor hands the notice to the page
+//   over the web view host, and the page composes the transient itself: `at`
+//   is the instant it arrived, `expiry` that instant plus the one transient
+//   window (FooterTransientWindow). It joins the transient tier as any other
+//   transient does: the newest wins, and a salient line outranks it. The
+//   daemon never sets this arm.
+// - THE TRANSIENT WINDOW IS ONE NUMBER, declared once here
+//   (FooterTransientWindow), so the daemon's expiry and the page's own for an
+//   editor notice can never disagree.
 //
 // THE FAULT PARTITION — where every daemon fault kind lands on the strip.
 //
@@ -2058,7 +2071,30 @@ message FooterActivityTransient {
     // The API answered again after failed attempts: the retrying line ended
     // because a response landed.
     FooterActivityTransientApiRestored api_restored = 20;
+    // A notice from the editor's composer, composed by the page from what the
+    // web view host handed it. NEVER SET BY THE DAEMON: see "ONE TRANSIENT
+    // KIND IS THE EDITOR'S" above.
+    FooterActivityTransientEditorNotice editor_notice = 21;
   }
+}
+
+// A notice from the editor's composer (owner ruling, 2026-10-31: the composer
+// has no mode line, and what its mode line said is a transient footer line).
+message FooterActivityTransientEditorNotice {
+  // The notice as the editor composed it ("send: no daemon connection",
+  // "editing held prompt", "2 prompts waiting for the daemon"), drawn
+  // verbatim.
+  string text = 1;
+}
+
+// THE TRANSIENT WINDOW: how long a transient line is drawn before the line
+// beneath it shows again (owner rulings: 10 s on 2026-09-28, 5 s on
+// 2026-10-31). An enum only because protobuf has no constants: its one
+// non-zero value IS the window, in milliseconds, and the daemon's expiry and
+// the page's own for an editor notice both read it.
+enum FooterTransientWindow {
+  FOOTER_TRANSIENT_WINDOW_UNSPECIFIED = 0;
+  FOOTER_TRANSIENT_WINDOW_MS = 5000;
 }
 
 // A compaction concluded.
@@ -2109,8 +2145,8 @@ message FooterActivityTransientNetworkResumeAbandoned {
 message FooterActivityTransientExpiry {
   // Epoch ms, on the daemon's clock. The daemon and the client run on the
   // same host, so the client compares it to its own clock directly. The
-  // daemon sets it to the event instant plus its transient window (10 s by
-  // default); a newer transient replaces the line before then.
+  // daemon sets it to the event instant plus the transient window
+  // (FooterTransientWindow); a newer transient replaces the line before then.
   int64 expires_at_ms = 1;
 }
 
