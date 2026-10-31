@@ -16,9 +16,9 @@ Runs agent-repl's build, bounce, deploy, hot-reload, health and daemon-request o
 |---|---|
 | `build [--force] [component...]` | Build every stale component, or every component with `--force`. Starts and stops nothing. |
 | `byte-compile` | Byte-compile the elisp as a warning gate; any warning fails it. |
-| `bounce` | Rebuild everything and stand down the daemon, every other daemon serving the same state root, and every shim. Emacs stays up and starts the fresh daemon, whose boot restarts a stale store and sidecar before any shim starts. |
-| `hard-bounce` | `byte-compile`, then hot-load the fresh elisp into the running Emacs when it is stale (a failed load stops with nothing stopped), then `bounce`, then quit and relaunch Emacs.app, so the editor and every backend run the fresh build. Refuses while Emacs holds unsaved file buffers. |
-| `deploy [-force]` | Rolling deploy: the running daemon rebuilds what is stale and moves every workspace onto it without killing turns; `-force` ends them. |
+| `bounce` | EMERGENCY ONLY (step 2b). Rebuild everything and stand down the daemon, every other daemon serving the same state root, and every shim. Emacs stays up and starts the fresh daemon, whose boot restarts a stale store and sidecar before any shim starts. |
+| `hard-bounce` | EMERGENCY ONLY (step 2b). `byte-compile`, then hot-load the fresh elisp into the running Emacs when it is stale (a failed load stops with nothing stopped), then `bounce`, then quit and relaunch Emacs.app, so the editor and every backend run the fresh build. Refuses while Emacs holds unsaved file buffers. |
+| `deploy [-force]` | Rolling deploy: the running daemon rebuilds what is stale and moves every workspace onto it without killing turns. This is how the runtime is brought up to date. `-force` ends every turn and is EMERGENCY ONLY (step 2b). |
 | `hot-reload FILE.el...` | Load changed elisp files into the running Emacs. Refuses any `test-*.el`. |
 | `call [-workspace DIR] METHOD [JSON]` | Send one unary request to the running daemon and print its answer; `-workspace DIR`, which comes BEFORE the method, fills the request's workspace from that workspace directory. |
 | `doctor` | Read-only health sweep of the running services. |
@@ -33,8 +33,8 @@ Runs agent-repl's build, bounce, deploy, hot-reload, health and daemon-request o
 
     | The user says | Argument | What happens |
     |---|---|---|
-    | "hard bounce agent-repl" (or "hard bounce", "bounce everything") | `hard-bounce` | Rebuild everything, byte-compile, hot-load stale elisp, stand down every daemon of the state root and every shim AND restart Emacs.app, unless the user says to leave Emacs running, in which case use `bounce`. |
-    | "bounce" / "force bounce the backends" | `bounce` | The same without restarting Emacs. |
+    | "hard bounce agent-repl" (or "hard bounce", "bounce everything") | `hard-bounce` | EMERGENCY ONLY (step 2b). Rebuild everything, byte-compile, hot-load stale elisp, stand down every daemon of the state root and every shim AND restart Emacs.app, unless the user says to leave Emacs running, in which case use `bounce`. |
+    | "bounce" / "force bounce the backends" | `bounce` | EMERGENCY ONLY (step 2b). The same without restarting Emacs. |
     | "deploy" / "roll out" | `deploy` | Rolling deploy; running turns continue. |
     | "restart the workspace" / "bounce this workspace" | `agent-repld workspace restart WS` | Immediate: the workspace's shim is relaunched on the same session and its webapp page reloads. The user's own key is `SPC o C-c`. |
     | "park WS" / "park every workspace" / "stand the shims down between keep-alives" | `agent-repld workspace park WS` or `agent-repld workspace park -all` | Immediate: the workspace's shim is stood down as the keep-alive cycle stands one down; the daemon restores it a minute before its next keep-alive, or at once for a prompt, a look or a history read. Never the selected, a hidden or closed workspace; a busy one parks when it falls free. |
@@ -46,13 +46,18 @@ Runs agent-repl's build, bounce, deploy, hot-reload, health and daemon-request o
     | "hot reload" / "reload the lisp" | `hot-reload FILE.el...` | Loads the changed non-test `.el` files into the running Emacs. |
     | "reload the page" / "reload the webview" | *(no argument)* | The user's own key is `SPC o l`; suggest it, do not act. |
 
-  - b. CRITICAL: there is NO graceful daemon hot reload. When the user asks for one, say so and offer `deploy` (rolling) or `bounce` instead.
+  - b. CRITICAL: there is NO graceful daemon hot reload. When the user asks for one, say so and offer `deploy` (rolling) instead. `bounce` is never an alternative to it (step 2b).
   - c. When the request names none of these, STOP and ask which argument they mean.
 
 2. Decide whether to act or to suggest the user's own control.
   - a. When the request is a single workspace operation the user can do with a key (`SPC o C-c`, `C-c C-k`, `SPC o l`) and the user is at the editor, name the key and offer to run it instead of running it unasked.
-  - b. CRITICAL: ONLY the lead session (the one the user is talking to directly) may run `bounce`, `hard-bounce` or `deploy`. A dispatched subagent NEVER runs them; it reports back instead.
-  - c. IMPORTANT: before `bounce`, `hard-bounce` or `deploy`, confirm the user asked for it in this conversation. These restart what the user is working in.
+  - b. CRITICAL: a FORCED STOP is an EMERGENCY LAST RESORT. Forced stops are `bounce`, `hard-bounce`, `deploy -force`, `call UpdateShutdownSchedule` with `now`, and Emacs's `agent-repl-frontend-daemon-restart` and `agent-repl-runtime-restart`.
+    - i. Each one ends every running turn and every subagent, shell and monitor in every workspace.
+    - ii. Run one ONLY to unstick a broken runtime that an unforced `deploy` cannot fix.
+    - iii. Run one ONLY when the user asks for that forced stop in the current conversation, in that moment. A request in an earlier conversation, a memory, a runbook or a standing routine NEVER authorizes one.
+    - iv. NEVER run one as a routine step: not to pick up a new build, not after a merge or a landing, not to start a loop iteration, not to verify a change. An unforced `deploy` brings the runtime up to date, and a merge-queue landing already rolls out that way.
+  - c. CRITICAL: ONLY the lead session (the one the user is talking to directly) may run a forced stop or `deploy`. A dispatched subagent NEVER runs them; it reports back instead.
+  - d. IMPORTANT: before an unforced `deploy`, confirm the user asked for it in this conversation. It restarts what the user is working in.
 
 3. Run the argument.
   - a. Call `~/.claude/skills/agent-repl-runtime/run.sh --<argument> [args...]`, passing the argument's own flags, files, method and JSON through verbatim.
@@ -184,7 +189,7 @@ through `run.sh --call` (a typed `agent-repld` verb comes once they land on mast
 ## Notes
 
 - **CRITICAL NOTE: Changes to build, deploy, bounce or daemon-request infrastructure update this skill in the same commit.** That includes a new verb, a changed verb, and a new daemon request worth naming in the terminology table, and it updates agent-repl `AGENTS.md` in the same commit too.
-- **CRITICAL: Only the lead session restarts Emacs or the backends.** Subagents never run `bounce`, `hard-bounce` or `deploy`.
+- **CRITICAL: A forced stop is an emergency last resort, run only on the user's request in the moment (step 2b).** Only the lead session restarts Emacs or the backends; subagents never do.
 - **IMPORTANT NOTE: Health diagnosis is `/agent-repl-debug`'s job.** This skill runs operations; when one fails or the sweep reports a failure, hand the investigation to that skill.
 - **CRITICAL NOTE: Do not self-remediate a `run.sh` failure or read its internals.** React only to the documented exit codes.
 - **IMPORTANT NOTE: NEVER hot-reload a `test-*.el` file into the running Emacs.** Test files are a batch-only harness.
