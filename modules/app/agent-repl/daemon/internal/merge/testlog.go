@@ -15,6 +15,8 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/refusalarm"
+	"agent-repld/internal/wsm"
 )
 
 // This file is a merge's TEST LOG as a link: the token the tests tab serves,
@@ -25,9 +27,12 @@ import (
 // tests round, which is exactly what names the log file under the state root,
 // so a daemon that restarted -- or a successor that took over -- resolves a
 // token the bubble served before it, for as long as the log is there. A token
-// is resolved FOR ONE WORKSPACE: its lease must be one of that workspace's own
-// merges, read off the workspace's durable merge ledger, so a token cannot open
-// another workspace's log.
+// is resolved FOR ONE WORKSPACE: the FEED THAT DRAWS ITS MERGE'S BUBBLE. The
+// lease's durable ledger names the workspace that ran the merge, and bubbleOf
+// names the feed its bubble is drawn in -- the workspace itself, or for an
+// async merge the workspace that requested it -- so every link the daemon drew
+// opens from where it was drawn, and a token cannot open a log whose bubble the
+// asking feed does not hold.
 
 // mergeLogsDir is where every log the queue writes lives, under the state
 // root.
@@ -113,40 +118,50 @@ func tildePath(path, home string) string {
 	return path
 }
 
+// The reasons a test log token is refused, spelled as the
+// agentrepl.v1.OpenInEditorUnknownMergeTestLog.reason arms.
+const (
+	reasonTestLogMalformed    = refusalarm.Nested("malformed")
+	reasonTestLogNotDrawnHere = refusalarm.Nested("not_drawn_here")
+	reasonTestLogAgedOut      = refusalarm.Nested("aged_out")
+)
+
 // TestLogPath resolves a token the tests tab served to the log's path, for
-// one workspace. A token that is malformed, names a merge that is not the
-// workspace's own, or names a log that is no longer there is REFUSED
-// (unknown_merge_test_log). The first two are recorded at WARN. A log of the
-// workspace's own merge that is gone is recorded at INFO: the log retention
-// pass removes every test log three days after its last write, so a link the
-// feed drew before then outliving its file is the ordinary course.
+// the workspace whose feed the link was clicked in. A token that is malformed,
+// names a merge whose bubble that feed does not draw, or names a log that is no
+// longer there is REFUSED (unknown_merge_test_log), its `reason` naming which.
+// The first two are recorded at WARN. A log of a merge the feed draws that is
+// gone is recorded at INFO: the log retention pass removes every test log
+// three days after its last write, so a link the feed drew before then
+// outliving its file is the ordinary course.
 func (o *orchestrator) TestLogPath(ctx context.Context, ws ids.WorkspaceID, token string) (string, error) {
 	const op = "daemon.merge.test_log"
 	log := o.log(ctx, ws)
-	refusal := func(why string) error {
-		log.Warn(op, "refused a test log token", dlog.Context{"workspace": string(ws), "token": token, "why": why})
-		return &RefusalError{Arm: ArmUnknownMergeTestLog, Workspace: ws, Reason: why}
+	refusal := func(why string, reason refusalarm.Nested, fields dlog.Context) error {
+		record := dlog.Context{"workspace": string(ws), "token": token, "why": why}
+		for name, value := range fields {
+			record[name] = value
+		}
+		log.Warn(op, "refused a test log token", record)
+		return &RefusalError{Arm: ArmUnknownMergeTestLog, Workspace: ws, Reason: why, Fields: map[string]any{"reason": reason}}
 	}
 	lease, n, found := strings.Cut(token, "/")
 	round, err := strconv.Atoi(n)
 	if !found || lease == "" || err != nil || round < 1 {
-		return "", refusal("the token is not one this daemon mints")
+		return "", refusal("the token is not one this daemon mints", reasonTestLogMalformed, nil)
 	}
-	entries, err := o.deps.DB.MergeLedger(ctx, ws)
+	ran, err := o.deps.DB.MergeLedgerWorkspace(ctx, ids.LeaseID(lease))
+	if errors.Is(err, wsm.ErrNotFound) {
+		return "", refusal("the token names no merge this daemon's ledger holds", reasonTestLogNotDrawnHere, nil)
+	}
 	if err != nil {
-		log.Error(op, "could not read the workspace's merge ledger to resolve a test log token",
+		log.Error(op, "could not read the merge ledger to resolve a test log token",
 			dlog.Context{"workspace": string(ws), "token": token, "error": err.Error()})
 		return "", err
 	}
-	owned := false
-	for _, entry := range entries {
-		if string(entry.Lease) == lease {
-			owned = true
-			break
-		}
-	}
-	if !owned {
-		return "", refusal("the token names no merge of this workspace")
+	if drawnIn := o.bubbleOf(ran).ws; drawnIn != ws {
+		return "", refusal("the token names a merge whose bubble another workspace's feed draws", reasonTestLogNotDrawnHere,
+			dlog.Context{"merge_workspace": string(ran), "drawn_in": string(drawnIn)})
 	}
 	path := o.testLog(ids.LeaseID(lease), round).path
 	if _, err := os.Stat(path); err != nil {
@@ -154,7 +169,8 @@ func (o *orchestrator) TestLogPath(ctx context.Context, ws ids.WorkspaceID, toke
 			why := fmt.Sprintf("the log %s is no longer there", path)
 			log.Info(op, "refused a test log token whose log aged out of the log retention", dlog.Context{
 				"workspace": string(ws), "token": token, "why": why, "retention": logging.DefaultRetention.String()})
-			return "", &RefusalError{Arm: ArmUnknownMergeTestLog, Workspace: ws, Reason: why}
+			return "", &RefusalError{Arm: ArmUnknownMergeTestLog, Workspace: ws, Reason: why,
+				Fields: map[string]any{"reason": reasonTestLogAgedOut}}
 		}
 		log.Error(op, "could not read a test log's file", dlog.Context{"workspace": string(ws), "path": path, "error": err.Error()})
 		return "", err

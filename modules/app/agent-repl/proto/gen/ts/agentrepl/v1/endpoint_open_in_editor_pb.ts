@@ -26,7 +26,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_in_editor.proto.
  */
 export const file_agentrepl_v1_endpoint_open_in_editor: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9pbl9lZGl0b3IucHJvdG8SDGFnZW50cmVwbC52MSLbAgoTT3BlbkluRWRpdG9yUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEkEKDndvcmtzcGFjZV9maWxlGAQgASgLMicuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZUZpbGVIABI8Cg5tZXJnZV90ZXN0X2xvZxgFIAEoCzIiLmZyb250ZW5kLnYxLkZlZWRNZXJnZVRlc3RMb2dUb2tlbkgAEjcKCWZlZWRfbGluaxgGIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JGZWVkTGlua0gAEjkKCmNvbW1pdF9sb2cYByABKAsyIy5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yQ29tbWl0TG9nSABCCAoGdGFyZ2V0SgQIAhADSgQIAxAEUgRwYXRoUgRsaW5lIk8KFU9wZW5JbkVkaXRvckNvbW1pdExvZxIWCg5yZXBvc2l0b3J5X2RpchgBIAEoCRIOCgZicmFuY2gYAiABKAkSDgoGY29tbWl0GAMgASgJIkUKGU9wZW5JbkVkaXRvcldvcmtzcGFjZUZpbGUSDAoEcGF0aBgBIAEoCRIRCgRsaW5lGAIgASgNSACIAQFCBwoFX2xpbmUiiAEKFE9wZW5JbkVkaXRvclJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvckVycm9ySABCCAoGcmVzdWx0IhUKE09wZW5JbkVkaXRvclN1Y2Nlc3MirAQKEU9wZW5JbkVkaXRvckVycm9yEkcKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiouYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclVua25vd25Xb3Jrc3BhY2VIABJQChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi4uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZVJlZk1pc21hdGNoSAASRwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKi5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yVHJhbnNmZXJyaW5nQXdheUgAEkIKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzInLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JOb3RZZXRBZG9wdGVkSAASUAoWcGF0aF9lc2NhcGVzX3dvcmtzcGFjZRgFIAEoCzIuLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JQYXRoRXNjYXBlc1dvcmtzcGFjZUgAEk8KFnVua25vd25fbWVyZ2VfdGVzdF9sb2cYBiABKAsyLS5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yVW5rbm93bk1lcmdlVGVzdExvZ0gAEkMKD2xpbmtfdW5yZXNvbHZlZBgHIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JMaW5rVW5yZXNvbHZlZEgAQgcKBWNhdXNlIh4KHE9wZW5JbkVkaXRvclVua25vd25Xb3Jrc3BhY2UiOAogT3BlbkluRWRpdG9yV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIi8KHE9wZW5JbkVkaXRvclRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIbChlPcGVuSW5FZGl0b3JOb3RZZXRBZG9wdGVkIiIKIE9wZW5JbkVkaXRvclBhdGhFc2NhcGVzV29ya3NwYWNlIiEKH09wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2ci4QEKFE9wZW5JbkVkaXRvckZlZWRMaW5rEgwKBGhyZWYYASABKAkSJwoKc291cmNlX3JvdxgCIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZBI6CgZyZXBvcnQYAyABKAsyKC5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yRmVlZExpbmtSZXBvcnRIABJFCgx3ZWJfZmFsbGJhY2sYBCABKAsyLS5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yRmVlZExpbmtXZWJGYWxsYmFja0gAQg8KDW9uX3VucmVzb2x2ZWQiHAoaT3BlbkluRWRpdG9yRmVlZExpbmtSZXBvcnQiIQofT3BlbkluRWRpdG9yRmVlZExpbmtXZWJGYWxsYmFjayIqChpPcGVuSW5FZGl0b3JMaW5rVW5yZXNvbHZlZBIMCgRocmVmGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_frontend_v1_feed, file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9pbl9lZGl0b3IucHJvdG8SDGFnZW50cmVwbC52MSLbAgoTT3BlbkluRWRpdG9yUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEkEKDndvcmtzcGFjZV9maWxlGAQgASgLMicuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZUZpbGVIABI8Cg5tZXJnZV90ZXN0X2xvZxgFIAEoCzIiLmZyb250ZW5kLnYxLkZlZWRNZXJnZVRlc3RMb2dUb2tlbkgAEjcKCWZlZWRfbGluaxgGIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JGZWVkTGlua0gAEjkKCmNvbW1pdF9sb2cYByABKAsyIy5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yQ29tbWl0TG9nSABCCAoGdGFyZ2V0SgQIAhADSgQIAxAEUgRwYXRoUgRsaW5lIk8KFU9wZW5JbkVkaXRvckNvbW1pdExvZxIWCg5yZXBvc2l0b3J5X2RpchgBIAEoCRIOCgZicmFuY2gYAiABKAkSDgoGY29tbWl0GAMgASgJIkUKGU9wZW5JbkVkaXRvcldvcmtzcGFjZUZpbGUSDAoEcGF0aBgBIAEoCRIRCgRsaW5lGAIgASgNSACIAQFCBwoFX2xpbmUiiAEKFE9wZW5JbkVkaXRvclJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvckVycm9ySABCCAoGcmVzdWx0IhUKE09wZW5JbkVkaXRvclN1Y2Nlc3MirAQKEU9wZW5JbkVkaXRvckVycm9yEkcKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiouYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclVua25vd25Xb3Jrc3BhY2VIABJQChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi4uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZVJlZk1pc21hdGNoSAASRwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKi5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yVHJhbnNmZXJyaW5nQXdheUgAEkIKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzInLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JOb3RZZXRBZG9wdGVkSAASUAoWcGF0aF9lc2NhcGVzX3dvcmtzcGFjZRgFIAEoCzIuLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JQYXRoRXNjYXBlc1dvcmtzcGFjZUgAEk8KFnVua25vd25fbWVyZ2VfdGVzdF9sb2cYBiABKAsyLS5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yVW5rbm93bk1lcmdlVGVzdExvZ0gAEkMKD2xpbmtfdW5yZXNvbHZlZBgHIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JMaW5rVW5yZXNvbHZlZEgAQgcKBWNhdXNlIh4KHE9wZW5JbkVkaXRvclVua25vd25Xb3Jrc3BhY2UiOAogT3BlbkluRWRpdG9yV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIi8KHE9wZW5JbkVkaXRvclRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIbChlPcGVuSW5FZGl0b3JOb3RZZXRBZG9wdGVkIiIKIE9wZW5JbkVkaXRvclBhdGhFc2NhcGVzV29ya3NwYWNlIpcCCh9PcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nEksKCW1hbGZvcm1lZBgBIAEoCzI2LmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nTWFsZm9ybWVkSAASUwoObm90X2RyYXduX2hlcmUYAiABKAsyOS5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yVW5rbm93bk1lcmdlVGVzdExvZ05vdERyYXduSGVyZUgAEkgKCGFnZWRfb3V0GAMgASgLMjQuYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2dBZ2VkT3V0SABCCAoGcmVhc29uIioKKE9wZW5JbkVkaXRvclVua25vd25NZXJnZVRlc3RMb2dNYWxmb3JtZWQiLQorT3BlbkluRWRpdG9yVW5rbm93bk1lcmdlVGVzdExvZ05vdERyYXduSGVyZSIoCiZPcGVuSW5FZGl0b3JVbmtub3duTWVyZ2VUZXN0TG9nQWdlZE91dCLhAQoUT3BlbkluRWRpdG9yRmVlZExpbmsSDAoEaHJlZhgBIAEoCRInCgpzb3VyY2Vfcm93GAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEjoKBnJlcG9ydBgDIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JGZWVkTGlua1JlcG9ydEgAEkUKDHdlYl9mYWxsYmFjaxgEIAEoCzItLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JGZWVkTGlua1dlYkZhbGxiYWNrSABCDwoNb25fdW5yZXNvbHZlZCIcChpPcGVuSW5FZGl0b3JGZWVkTGlua1JlcG9ydCIhCh9PcGVuSW5FZGl0b3JGZWVkTGlua1dlYkZhbGxiYWNrIioKGk9wZW5JbkVkaXRvckxpbmtVbnJlc29sdmVkEgwKBGhyZWYYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_frontend_v1_feed, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.OpenInEditorRequest
@@ -257,8 +257,8 @@ export type OpenInEditorError = Message<"agentrepl.v1.OpenInEditorError"> & {
     case: "pathEscapesWorkspace";
   } | {
     /**
-     * The merge test log token names no log this daemon holds for the
-     * workspace: it was never served, or the log has since been removed.
+     * The merge test log token names no log this daemon opens for the
+     * workspace; its `reason` says which check refused it.
      *
      * @generated from field: agentrepl.v1.OpenInEditorUnknownMergeTestLog unknown_merge_test_log = 6;
      */
@@ -362,9 +362,42 @@ export const OpenInEditorPathEscapesWorkspaceSchema: GenMessage<OpenInEditorPath
   messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 10);
 
 /**
+ * Why a merge test log token was refused. Exactly one is set.
+ *
  * @generated from message agentrepl.v1.OpenInEditorUnknownMergeTestLog
  */
 export type OpenInEditorUnknownMergeTestLog = Message<"agentrepl.v1.OpenInEditorUnknownMergeTestLog"> & {
+  /**
+   * @generated from oneof agentrepl.v1.OpenInEditorUnknownMergeTestLog.reason
+   */
+  reason: {
+    /**
+     * The token is not one the daemon mints (no lease, or no round number).
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorUnknownMergeTestLogMalformed malformed = 1;
+     */
+    value: OpenInEditorUnknownMergeTestLogMalformed;
+    case: "malformed";
+  } | {
+    /**
+     * The token names a merge whose bubble is not drawn in the asking
+     * workspace's feed: its own merges, and the async merges it requested,
+     * are the bubbles it draws.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorUnknownMergeTestLogNotDrawnHere not_drawn_here = 2;
+     */
+    value: OpenInEditorUnknownMergeTestLogNotDrawnHere;
+    case: "notDrawnHere";
+  } | {
+    /**
+     * The merge is one this feed draws, but its log is gone: the log
+     * retention pass removed it.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorUnknownMergeTestLogAgedOut aged_out = 3;
+     */
+    value: OpenInEditorUnknownMergeTestLogAgedOut;
+    case: "agedOut";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -373,6 +406,51 @@ export type OpenInEditorUnknownMergeTestLog = Message<"agentrepl.v1.OpenInEditor
  */
 export const OpenInEditorUnknownMergeTestLogSchema: GenMessage<OpenInEditorUnknownMergeTestLog> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 11);
+
+/**
+ * The token is not one the daemon mints.
+ *
+ * @generated from message agentrepl.v1.OpenInEditorUnknownMergeTestLogMalformed
+ */
+export type OpenInEditorUnknownMergeTestLogMalformed = Message<"agentrepl.v1.OpenInEditorUnknownMergeTestLogMalformed"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorUnknownMergeTestLogMalformed.
+ * Use `create(OpenInEditorUnknownMergeTestLogMalformedSchema)` to create a new message.
+ */
+export const OpenInEditorUnknownMergeTestLogMalformedSchema: GenMessage<OpenInEditorUnknownMergeTestLogMalformed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 12);
+
+/**
+ * The token names a merge this workspace's feed draws no bubble for.
+ *
+ * @generated from message agentrepl.v1.OpenInEditorUnknownMergeTestLogNotDrawnHere
+ */
+export type OpenInEditorUnknownMergeTestLogNotDrawnHere = Message<"agentrepl.v1.OpenInEditorUnknownMergeTestLogNotDrawnHere"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorUnknownMergeTestLogNotDrawnHere.
+ * Use `create(OpenInEditorUnknownMergeTestLogNotDrawnHereSchema)` to create a new message.
+ */
+export const OpenInEditorUnknownMergeTestLogNotDrawnHereSchema: GenMessage<OpenInEditorUnknownMergeTestLogNotDrawnHere> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 13);
+
+/**
+ * The log retention pass removed the log.
+ *
+ * @generated from message agentrepl.v1.OpenInEditorUnknownMergeTestLogAgedOut
+ */
+export type OpenInEditorUnknownMergeTestLogAgedOut = Message<"agentrepl.v1.OpenInEditorUnknownMergeTestLogAgedOut"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorUnknownMergeTestLogAgedOut.
+ * Use `create(OpenInEditorUnknownMergeTestLogAgedOutSchema)` to create a new message.
+ */
+export const OpenInEditorUnknownMergeTestLogAgedOutSchema: GenMessage<OpenInEditorUnknownMergeTestLogAgedOut> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 14);
 
 /**
  * A non-web link clicked in a prompt or response bubble.
@@ -447,7 +525,7 @@ export type OpenInEditorFeedLink = Message<"agentrepl.v1.OpenInEditorFeedLink"> 
  * Use `create(OpenInEditorFeedLinkSchema)` to create a new message.
  */
 export const OpenInEditorFeedLinkSchema: GenMessage<OpenInEditorFeedLink> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 12);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 15);
 
 /**
  * Report an unresolved link to the user and the agent.
@@ -462,7 +540,7 @@ export type OpenInEditorFeedLinkReport = Message<"agentrepl.v1.OpenInEditorFeedL
  * Use `create(OpenInEditorFeedLinkReportSchema)` to create a new message.
  */
 export const OpenInEditorFeedLinkReportSchema: GenMessage<OpenInEditorFeedLinkReport> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 13);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 16);
 
 /**
  * Resolve silently; the client falls back to the web.
@@ -477,7 +555,7 @@ export type OpenInEditorFeedLinkWebFallback = Message<"agentrepl.v1.OpenInEditor
  * Use `create(OpenInEditorFeedLinkWebFallbackSchema)` to create a new message.
  */
 export const OpenInEditorFeedLinkWebFallbackSchema: GenMessage<OpenInEditorFeedLinkWebFallback> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 14);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 17);
 
 /**
  * The feed link resolved to no file.
@@ -498,5 +576,5 @@ export type OpenInEditorLinkUnresolved = Message<"agentrepl.v1.OpenInEditorLinkU
  * Use `create(OpenInEditorLinkUnresolvedSchema)` to create a new message.
  */
 export const OpenInEditorLinkUnresolvedSchema: GenMessage<OpenInEditorLinkUnresolved> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 15);
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 18);
 

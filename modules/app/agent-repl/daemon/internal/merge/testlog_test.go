@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,9 @@ import (
 
 	"agentrepl/logging"
 
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/refusalarm"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -18,7 +22,14 @@ import (
 // its token.
 func servedLog(t *testing.T, h *harness, lease wsm.LeaseID, round int) (string, string) {
 	t.Helper()
-	if err := h.db.OpenMergeLedger(context.Background(), theWorkspace, lease); err != nil {
+	return servedLogOf(t, h, theWorkspace, lease, round)
+}
+
+// servedLogOf writes one test log of a lease in workspace RAN's ledger, the
+// workspace that ran the merge, and answers its token and path.
+func servedLogOf(t *testing.T, h *harness, ran ids.WorkspaceID, lease wsm.LeaseID, round int) (string, string) {
+	t.Helper()
+	if err := h.db.OpenMergeLedger(context.Background(), ran, lease); err != nil {
 		t.Fatalf("OpenMergeLedger: %v", err)
 	}
 	log := h.o.testLog(lease, round)
@@ -42,14 +53,55 @@ func TestATokenResolvesToItsLogForItsWorkspace(t *testing.T) {
 	}
 }
 
-func TestATokenIsRefusedWhenItNamesNoLogOfTheWorkspace(t *testing.T) {
+func TestAnAsyncMergeTokenResolvesInTheRequesterFeedThatDrawsItsBubble(t *testing.T) {
+	// Arrange: an async merge's lease is in the MERGE workspace's ledger, and
+	// its bubble is drawn in the requester's feed (2026-10-30:
+	// shim-stand-down-authority-2 requested by agent-repl-hot-reload).
+	h := newHarness(t)
+	h.registerMergeWorkspaceFor(wsm.MergeOrigin{Requester: theWorkspace}, "feature")
+	token, path := servedLogOf(t, h, theMergeWorkspace, "lease-async", 5)
+
+	// Act.
+	got, err := h.o.TestLogPath(context.Background(), theWorkspace, token)
+
+	// Assert.
+	if err != nil || got != path {
+		t.Fatalf("TestLogPath = (%q, %v), want %q", got, err, path)
+	}
+	if _, warned := h.recordFor("warn", "daemon.merge.test_log"); warned {
+		t.Fatalf("a link the daemon drew was refused: %+v", h.logs.Records())
+	}
+}
+
+func TestATokenIsRefusedWhenItNamesNoLogTheFeedDraws(t *testing.T) {
 	tests := []struct {
-		name  string
-		token func(t *testing.T, h *harness) string
+		name       string
+		token      func(t *testing.T, h *harness) string
+		wantReason string
+		wantFields dlog.Context
 	}{
-		{name: "a malformed token", token: func(*testing.T, *harness) string { return "nonsense" }},
-		{name: "a round that is no number", token: func(*testing.T, *harness) string { return "lease-1/x" }},
-		{name: "another workspace's merge", token: func(t *testing.T, h *harness) string { return "lease-other/1" }},
+		{name: "a malformed token", token: func(*testing.T, *harness) string { return "nonsense" }, wantReason: "malformed"},
+		{name: "a round that is no number", token: func(*testing.T, *harness) string { return "lease-1/x" }, wantReason: "malformed"},
+		{name: "a lease no ledger holds", token: func(*testing.T, *harness) string { return "lease-other/1" }, wantReason: "not_drawn_here"},
+		{
+			name: "another workspace's own merge",
+			token: func(t *testing.T, h *harness) string {
+				token, _ := servedLogOf(t, h, "ws-foreign", "lease-foreign", 1)
+				return token
+			},
+			wantReason: "not_drawn_here",
+			wantFields: dlog.Context{"merge_workspace": "ws-foreign", "drawn_in": "ws-foreign"},
+		},
+		{
+			name: "an async merge another workspace requested",
+			token: func(t *testing.T, h *harness) string {
+				h.registerMergeWorkspaceFor(wsm.MergeOrigin{Requester: "ws-requester"}, "feature")
+				token, _ := servedLogOf(t, h, theMergeWorkspace, "lease-async", 1)
+				return token
+			},
+			wantReason: "not_drawn_here",
+			wantFields: dlog.Context{"merge_workspace": string(theMergeWorkspace), "drawn_in": "ws-requester"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -61,13 +113,43 @@ func TestATokenIsRefusedWhenItNamesNoLogOfTheWorkspace(t *testing.T) {
 			_, err := h.o.TestLogPath(context.Background(), theWorkspace, token)
 
 			// Assert.
-			if refusal, refused := Refused(err); !refused || refusal.Arm != ArmUnknownMergeTestLog {
+			refusal, refused := Refused(err)
+			if !refused || refusal.Arm != ArmUnknownMergeTestLog {
 				t.Fatalf("TestLogPath = %v, want unknown_merge_test_log", err)
 			}
-			if _, logged := h.recordFor("warn", "daemon.merge.test_log"); !logged {
-				t.Fatalf("the refusal was not recorded at WARN: %+v", h.logs.Records())
+			if got := refusal.Fields["reason"]; got != refusalarm.Nested(tt.wantReason) {
+				t.Fatalf("reason = %v, want %s", got, tt.wantReason)
+			}
+			record, logged := h.recordFor("warn", "daemon.merge.test_log")
+			if !logged || record.Context["token"] != token || record.Context["workspace"] != string(theWorkspace) {
+				t.Fatalf("the refusal was not recorded at WARN with its token: %+v", h.logs.Records())
+			}
+			for name, want := range tt.wantFields {
+				if record.Context[name] != want {
+					t.Fatalf("record %s = %v, want %v", name, record.Context[name], want)
+				}
 			}
 		})
+	}
+}
+
+func TestATokenWhoseLedgerCannotBeReadIsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.db.ledgerReadErr = errors.New("disk gone")
+
+	// Act.
+	_, err := h.o.TestLogPath(context.Background(), theWorkspace, "lease-1/1")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "disk gone") {
+		t.Fatalf("TestLogPath = %v, want the ledger read error", err)
+	}
+	if _, refused := Refused(err); refused {
+		t.Fatalf("a ledger read error was answered as a refusal: %v", err)
+	}
+	if _, logged := h.recordFor("error", "daemon.merge.test_log"); !logged {
+		t.Fatalf("the read error was not recorded at ERROR: %+v", h.logs.Records())
 	}
 }
 
@@ -83,8 +165,9 @@ func TestATokenWhoseLogAgedOutIsRefusedAtInfo(t *testing.T) {
 	_, err := h.o.TestLogPath(context.Background(), theWorkspace, token)
 
 	// Assert.
-	if refusal, refused := Refused(err); !refused || refusal.Arm != ArmUnknownMergeTestLog {
-		t.Fatalf("TestLogPath = %v, want unknown_merge_test_log", err)
+	if refusal, refused := Refused(err); !refused || refusal.Arm != ArmUnknownMergeTestLog ||
+		refusal.Fields["reason"] != refusalarm.Nested("aged_out") {
+		t.Fatalf("TestLogPath = %v, want unknown_merge_test_log aged_out", err)
 	}
 	if _, logged := h.recordFor("info", "daemon.merge.test_log"); !logged {
 		t.Fatalf("the refusal was not recorded at INFO: %+v", h.logs.Records())

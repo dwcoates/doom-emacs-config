@@ -260,3 +260,42 @@ func TestForgetDeletesAWorkspacesLedger(t *testing.T) {
 		t.Fatalf("%d intervals survived the nuke, want none", n)
 	}
 }
+
+func TestMergeLedgerWorkspace(t *testing.T) {
+	tests := []struct {
+		name     string
+		known    bool
+		wantErr  error
+		wantOwns bool
+	}{
+		{name: "a lease a ledger holds answers its workspace", known: true, wantOwns: true},
+		{name: "a lease no ledger holds is not found", known: false, wantErr: ErrNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			lease := NewLeaseID()
+			if tt.known {
+				if err := s.OpenMergeLedger(context.Background(), ws.ID, lease); err != nil {
+					t.Fatalf("OpenMergeLedger: %v", err)
+				}
+			}
+
+			// Act
+			got, err := s.MergeLedgerWorkspace(context.Background(), lease)
+
+			// Assert
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) || got != "" {
+					t.Fatalf("MergeLedgerWorkspace = (%q, %v), want %v", got, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != ws.ID {
+				t.Fatalf("MergeLedgerWorkspace = (%q, %v), want %q", got, err, ws.ID)
+			}
+		})
+	}
+}
