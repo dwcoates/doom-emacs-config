@@ -626,6 +626,22 @@ workspace has not been created yet; BRANCH is what the name resolves to."
     (agent-repl-wire-verbs--check-keys message json '(branch))
     (list :branch (agent-repl-wire-verbs--decode-string message 'branch json))))
 
+(defun agent-repl-wire-decode-create-workspace-name-held (json)
+  "Decode CreateWorkspaceNameHeld from JSON into (:branch B :workspace REF :open O).
+The supplied name is already the name or branch of workspace REF, which
+has not landed; B is the branch the name resolves to, and O is non-nil
+when REF is open."
+  (let ((message "CreateWorkspaceNameHeld"))
+    (agent-repl-wire-verbs--check-keys message json '(branch workspace open))
+    (list :branch (agent-repl-wire-verbs--decode-string message 'branch json)
+          :workspace (agent-repl-wire-verbs--decode-optional-message
+                      message 'workspace json #'agent-repl-wire-decode-workspace-ref)
+          :open (agent-repl-wire--decode-bool message 'open json))))
+
+(defun agent-repl-wire-decode-create-workspace-error-name-held (json)
+  "Decode CreateWorkspaceError's `name_held' cause arm."
+  (agent-repl-wire-decode-create-workspace-name-held json))
+
 ;; A SUPPLIED NAME THAT BREAKS THE NAMING RULE is refused before anything is
 ;; built (CreateWorkspaceError.invalid_name).  The arm says which component
 ;; broke which rule, so the sentence is worded from the arm alone.
@@ -799,7 +815,7 @@ not decoded: an async merge, a create cut from origin and a create naming
 a landing target are an agent\='s requests, never the editor\='s, so one
 answering an editor create is a breach."
   (let ((message "CreateWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected oneShotOwnerLands unknownRequester parentNotOpen transferringAway standingDown))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug briefMissing unknownRepository worktreeCreationFailed spawnFailed oneShotPolicyMissing namingFailed insideTemporaryDirectory unknownForkSource forkSourceHasNoConversation nameReserved nameHeld invalidName unknownContextWorkspace unknownOwner ownerNoticeRequired ownerNoticeUnexpected oneShotOwnerLands unknownRequester parentNotOpen transferringAway standingDown))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -815,6 +831,7 @@ answering an editor create is a breach."
          (list 'unknownForkSource :unknown-fork-source #'agent-repl-wire-decode-create-workspace-error-unknown-fork-source)
          (list 'forkSourceHasNoConversation :fork-source-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-source-has-no-conversation)
          (list 'nameReserved :name-reserved #'agent-repl-wire-decode-create-workspace-error-name-reserved)
+         (list 'nameHeld :name-held #'agent-repl-wire-decode-create-workspace-error-name-held)
          (list 'invalidName :invalid-name #'agent-repl-wire-decode-create-workspace-error-invalid-name)
          (list 'unknownContextWorkspace :unknown-context-workspace #'agent-repl-wire-decode-create-workspace-error-unknown-context-workspace)
          (list 'unknownOwner :unknown-owner #'agent-repl-wire-decode-create-workspace-error-unknown-owner)
