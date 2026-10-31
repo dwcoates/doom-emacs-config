@@ -87,7 +87,7 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 		}
 		o.kick(repo)
 	}
-	return nil
+	return o.offerOwedDrains(ctx, op, repos)
 }
 
 // recoverEntry takes one durable queue entry back into this daemon: a request

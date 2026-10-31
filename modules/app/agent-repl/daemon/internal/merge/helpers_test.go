@@ -67,6 +67,11 @@ type fakeDB struct {
 	byDirErr error
 	// reposErr, when set, is what ListRepositories answers.
 	reposErr error
+	// drainOwed is each queue's owed drain, which AdmitMerge sets as the
+	// store's does; drainReadErr and drainClearErr fail its read and clear.
+	drainOwed     map[wsm.RepoKey]bool
+	drainReadErr  error
+	drainClearErr error
 
 	mu sync.Mutex
 
@@ -206,7 +211,27 @@ func newFakeDB() *fakeDB {
 		policies:      map[wsm.LeaseID]wsm.LeasePolicy{},
 		progress:      map[ids.WorkspaceID]wsm.MergeProgress{},
 		held:          map[wsm.TurnID]wsm.HeldPrompt{},
+		drainOwed:     map[wsm.RepoKey]bool{},
 	}
+}
+
+func (f *fakeDB) QueueDrainOwed(_ context.Context, repo wsm.RepoKey) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.drainReadErr != nil {
+		return false, f.drainReadErr
+	}
+	return f.drainOwed[repo], nil
+}
+
+func (f *fakeDB) ClearQueueDrainOwed(_ context.Context, repo wsm.RepoKey) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.drainClearErr != nil {
+		return f.drainClearErr
+	}
+	delete(f.drainOwed, repo)
+	return nil
 }
 
 func (f *fakeDB) PutMergeProgress(_ context.Context, p wsm.MergeProgress) error {
@@ -839,6 +864,7 @@ func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 	for i, entry := range f.queues[repo] {
 		if entry.Workspace == id {
 			f.queues[repo][i].State = wsm.MergeAdmitted
+			f.drainOwed[repo] = true
 			return nil
 		}
 	}

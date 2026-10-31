@@ -482,5 +482,9 @@ func (o *orchestrator) ReviewQueues(ctx context.Context) error {
 		o.kick(wsm.RepoKey(repo))
 	}
 	o.deps.Log.Global().Info(op, "offered every merge queue to this daemon's pump", dlog.Context{"repos": repos})
-	return nil
+	offered := make([]wsm.RepoKey, 0, len(repos))
+	for _, repo := range repos {
+		offered = append(offered, wsm.RepoKey(repo))
+	}
+	return o.offerOwedDrains(ctx, op, offered)
 }
