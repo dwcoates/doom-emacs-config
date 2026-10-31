@@ -1282,7 +1282,11 @@ func TestRestartWorkspaceReapsTheOldShimBeforeResumingOnTheNew(t *testing.T) {
 	harness.AwaitProcessGone(t, shortTimeout(t, f.d.Ctx(), 200*time.Millisecond), oldPID)
 }
 
-func TestRestartWorkspaceForcedDoesNotRedriveTheInterruptedTurn(t *testing.T) {
+// TestRestartWorkspaceForcedContinuesTheInterruptedTurnWithoutResubmittingIt
+// pins both halves of a restart's cut: the interrupted prompt is never sent
+// again as a fresh turn, and the cut work is continued by the resumption
+// (owner ruling, 2026-10-30), the restarted session's one turn.
+func TestRestartWorkspaceForcedContinuesTheInterruptedTurnWithoutResubmittingIt(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -1315,9 +1319,12 @@ func TestRestartWorkspaceForcedDoesNotRedriveTheInterruptedTurn(t *testing.T) {
 		t.Fatalf("StartSession on the resumed shim = %v, want a resume source", resume)
 	}
 
-	// Assert: the interrupted turn is NOT re-driven -- the daemon never
-	// resubmits it as a fresh StartTurn once the resumed shim is up.
-	expectNoRPC(t, second, harness.RPCStartTurn, harness.ProbeWindow)
+	// Assert: the one turn the resumed shim is asked to start is the
+	// resumption, never the interrupted prompt resubmitted.
+	if st := second.ExpectStartTurn(); st.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART {
+		t.Fatalf("the resumed shim's turn has origin %v, want the resumption, never the cut prompt again", st.GetOrigin())
+	}
+	expectRPCCount(t, second, harness.RPCStartTurn, 1, harness.ProbeWindow)
 }
 
 // ---- critique 13: bounce accountability ----

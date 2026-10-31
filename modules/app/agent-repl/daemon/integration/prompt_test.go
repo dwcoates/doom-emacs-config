@@ -1840,7 +1840,10 @@ func TestADeferredHoldSurvivesADaemonRestartStillDeferred(t *testing.T) {
 // TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn pins that a
 // prompt deferred behind a running turn is never lost to a workspace restart:
 // the restart stops the running turn, and the deferred prompt is delivered to
-// the restarted session as its own turn.
+// the restarted session as its own turn. THE CUT WORK IS CONTINUED FIRST
+// (owner ruling, 2026-10-30): the restart owes the turn it cut its
+// resumption, so the restarted session's first turn is the "continue", and
+// the deferred prompt runs once that turn ends.
 func TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange: a running turn with a prompt deferred behind it.
@@ -1858,6 +1861,14 @@ func TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn(t *testing.
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("RestartWorkspace = %v, %v, want a success", resp, err)
 	}
+
+	// The restarted session continues the cut work first; that turn ends.
+	restarted := f.d.ShimAt(prelaunchControlSocket(f.d, f.ws, 1))
+	restarted.ExpectStartSession()
+	if st := restarted.ExpectStartTurn(); st.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART {
+		t.Fatalf("the restarted session's first turn has origin %v, want the resumption of the cut turn", st.GetOrigin())
+	}
+	restarted.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
 
 	// Assert: the restarted session is handed the deferred prompt as its own
 	// turn. READ FROM THE SHIM'S DURABLE LOG: the restart answers once it
