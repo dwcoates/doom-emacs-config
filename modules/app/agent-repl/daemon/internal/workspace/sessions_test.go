@@ -911,9 +911,14 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 }
 
 // workspace records one workspace in the fleet fixture's registry.
+// workspace registers ID as a linked worktree of repo-1, whose main checkout
+// is /tree: a workspace's repository is always registered (wsm/repoinvariant.go).
 func (f *fleetFixture) workspace(id ids.WorkspaceID) wsm.Workspace {
 	ws := wsm.Workspace{ID: id, Dir: "/tree/" + string(id), Repo: "repo-1", Name: "name-" + string(id)}
 	f.db.with(ws)
+	if _, found := wsm.RepositoryWithID(f.db.repositories, "repo-1"); !found {
+		f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Dir: "/tree"})
+	}
 	return ws
 }
 

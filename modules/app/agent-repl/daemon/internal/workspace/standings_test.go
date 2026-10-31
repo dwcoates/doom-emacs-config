@@ -92,6 +92,8 @@ func TestSetOneShotRefuses(t *testing.T) {
 			f.db.with(ws)
 		}, arm: ArmOwnerLands},
 		{name: "a registered workspace", arrange: func(f *fixture) { delete(f.db.jobs, "w1") }, arm: ArmNoCreationJob},
+		{name: "its repository's main workspace", arrange: asMainWorkspace, arm: ArmMainWorkspace},
+		{name: "its repository's main workspace, asked by a stranger", arrange: asMainWorkspace, asker: idOf("ws-stranger"), arm: ArmMainWorkspace},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,6 +110,66 @@ func TestSetOneShotRefuses(t *testing.T) {
 				t.Error("a refused mark marked the workspace")
 			}
 		})
+	}
+}
+
+// asMainWorkspace makes w1 its repository's main workspace: the repository
+// is registered at w1's own directory.
+func asMainWorkspace(f *fixture) {
+	f.db.repositories = []wsm.Repository{{ID: "repo-1", Dir: f.db.workspaces["w1"].Dir}}
+}
+
+func TestSetOneShotRecordsTheMainWorkspaceRefusal(t *testing.T) {
+	// Arrange
+	f := standingWorkspace(t)
+	asMainWorkspace(f)
+
+	// Act
+	_, err := f.verbs.SetOneShot(context.Background(), "w1", idOf("w1"), true)
+
+	// Assert
+	asRefusal(t, err, ArmMainWorkspace)
+	rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Operation: opRefusal})
+	if !ok || rec.Context["arm"] != ArmMainWorkspace || rec.Context["rpc"] != "SetWorkspaceOneShot" {
+		t.Fatalf("refusal record = %+v, %v; want the main_workspace arm under SetWorkspaceOneShot", rec, ok)
+	}
+}
+
+func TestSetOneShotUnmarksAMainWorkspace(t *testing.T) {
+	// Arrange: a main workspace that somehow carries a mark can still lose it.
+	f := standingWorkspace(t)
+	asMainWorkspace(f)
+	job := f.db.jobs["w1"]
+	job.OneShot = true
+	f.db.jobs["w1"] = job
+
+	// Act
+	directive, err := f.verbs.SetOneShot(context.Background(), "w1", nil, false)
+
+	// Assert
+	if err != nil || directive != "" || f.db.jobs["w1"].OneShot {
+		t.Fatalf("SetOneShot(false) = %q, %v, one-shot %v; want unmarked", directive, err, f.db.jobs["w1"].OneShot)
+	}
+}
+
+func TestSetOneShotFailsHardWhenTheStandingCannotBeResolved(t *testing.T) {
+	// Arrange
+	f := standingWorkspace(t)
+	f.db.listRepositoriesErr = errors.New("registry gone")
+
+	// Act
+	_, err := f.verbs.SetOneShot(context.Background(), "w1", nil, true)
+
+	// Assert
+	if _, refused := AsRefusal(err); err == nil || refused {
+		t.Fatalf("SetOneShot = %v, want a hard failure", err)
+	}
+	if f.db.jobs["w1"].OneShot {
+		t.Error("a failed mark marked the workspace")
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opSetOneShot,
+		Message: "could not resolve whether the workspace is its repository's main workspace"}); !ok {
+		t.Errorf("no error record: %+v", f.log.logger.Records())
 	}
 }
 

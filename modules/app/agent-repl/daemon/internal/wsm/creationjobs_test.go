@@ -11,7 +11,7 @@ import (
 func TestPutCreationJobRoundTripsTheMergeGeometry(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
+	ws := testLinkedWorkspace(t, s)
 	job := CreationJob{
 		Workspace:            ws.ID,
 		Layout:               MergeLayout{SourceBranch: "feature", SourceDir: "/src", TargetDir: "/target", Origin: "create"},

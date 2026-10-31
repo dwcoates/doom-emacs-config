@@ -2449,7 +2449,11 @@ func (f *Fleet) sessionProfile(ctx context.Context, log dlog.Logger, ws ids.Work
 		return nil, fmt.Errorf("start session for %q: read the workspace: %w", ws, err)
 	}
 	if !record.IsThread() {
-		return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Agent{Agent: &shimv1.SessionProfileAgent{}}}, nil
+		standing, err := f.agentStanding(ctx, log, ws, record)
+		if err != nil {
+			return nil, err
+		}
+		return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Agent{Agent: &shimv1.SessionProfileAgent{Standing: standing}}}, nil
 	}
 	text, err := f.deps.ChatSystemPrompt()
 	if err == nil && strings.TrimSpace(text) == "" {
@@ -2463,6 +2467,22 @@ func (f *Fleet) sessionProfile(ctx context.Context, log dlog.Logger, ws ids.Work
 	return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Chat{Chat: &shimv1.SessionProfileChat{
 		SystemPrompt: &shimv1.SessionProfileChatSystemPrompt{Text: text},
 	}}}, nil
+}
+
+// agentStanding is how an agent's workspace stands within its repository, as
+// the session's system prompt states it last (shim.v1.SessionProfileAgent):
+// its repository's main workspace, or a linked worktree.
+func (f *Fleet) agentStanding(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, record wsm.Workspace) (*shimv1.SessionProfileAgentStanding, error) {
+	main, err := isMainWorkspace(ctx, f.deps.DB, record)
+	if err != nil {
+		log.Error(opBringUp, "could not resolve whether the workspace is its repository's main workspace; the session was not started", dlog.Context{"cause": err.Error(), "dir": record.Dir})
+		return nil, fmt.Errorf("start session for %q: the workspace's standing: %w", ws, err)
+	}
+	if main {
+		log.Debug(opBringUp, "the session starts in its repository's main workspace", dlog.Context{"dir": record.Dir})
+		return &shimv1.SessionProfileAgentStanding{Kind: &shimv1.SessionProfileAgentStanding_MainWorkspace{MainWorkspace: &shimv1.SessionProfileAgentMainWorkspace{}}}, nil
+	}
+	return &shimv1.SessionProfileAgentStanding{Kind: &shimv1.SessionProfileAgentStanding_LinkedWorkspace{LinkedWorkspace: &shimv1.SessionProfileAgentLinkedWorkspace{}}}, nil
 }
 
 // DefaultStartSessionBound bounds ONE StartSession call.

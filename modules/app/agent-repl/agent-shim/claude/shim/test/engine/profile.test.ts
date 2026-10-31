@@ -7,8 +7,15 @@ describe("profileFromProto", () => {
   it.each([
     {
       name: "an agent profile",
-      wire: create(shimv1.SessionProfileSchema, { kind: { case: "agent", value: {} } }),
-      want: { kind: "agent" },
+      wire: create(shimv1.SessionProfileSchema, { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } } } } }),
+      want: { kind: "agent", standing: "linked_workspace" },
+    },
+    {
+      name: "an agent profile in its repository's main workspace",
+      wire: create(shimv1.SessionProfileSchema, {
+        kind: { case: "agent", value: { standing: { kind: { case: "mainWorkspace", value: {} } } } },
+      }),
+      want: { kind: "agent", standing: "main_workspace" },
     },
     {
       name: "a chat profile with its prompt",
@@ -29,5 +36,13 @@ describe("profileFromProto", () => {
   ])("throws on $name, which validation refuses first", ({ wire }) => {
     // Arrange, Act, Assert.
     expect(() => profileFromProto(wire)).toThrow(/no session profile/);
+  });
+
+  it("throws on an agent profile with no standing, which validation refuses first", () => {
+    // Arrange
+    const wire = create(shimv1.SessionProfileSchema, { kind: { case: "agent", value: {} } });
+
+    // Act, Assert
+    expect(() => profileFromProto(wire)).toThrow(/names no workspace standing/);
   });
 });

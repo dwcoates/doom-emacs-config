@@ -8,6 +8,7 @@ import {
   METAPROMPT_REL_PATH,
   metapromptPath,
   readMetaprompt,
+  standingSection,
   systemPromptOption,
   workspaceSection,
 } from "../src/metaprompt.js";
@@ -142,12 +143,12 @@ describe("systemPromptOption", () => {
     // Arrange
     const home = makeHome("Be terse.\n");
     // Act
-    const option = systemPromptOption("parser-fix", home);
+    const option = systemPromptOption("parser-fix", "linked_workspace", home);
     // Assert
     expect(option).toEqual({
       type: "preset",
       preset: "claude_code",
-      append: `Be terse.\n\n${workspaceSection("parser-fix")}`,
+      append: `Be terse.\n\n${workspaceSection("parser-fix")}\n\n${standingSection("linked_workspace")}`,
     });
   });
 
@@ -155,17 +156,55 @@ describe("systemPromptOption", () => {
     // Arrange
     const home = makeHome();
     // Act
-    const option = systemPromptOption("parser-fix", home);
+    const option = systemPromptOption("parser-fix", "linked_workspace", home);
     // Assert — the preset itself is never dropped: it carries the
     // environment block the model needs to resolve `~`.
-    expect(option).toEqual({ type: "preset", preset: "claude_code", append: workspaceSection("parser-fix") });
+    expect(option).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: `${workspaceSection("parser-fix")}\n\n${standingSection("linked_workspace")}`,
+    });
   });
 
   it("refuses a workspace with no name", () => {
     // Arrange
     const home = makeHome("Be terse.\n");
     // Act, Assert
-    expect(() => systemPromptOption("", home)).toThrow("the workspace name is empty");
+    expect(() => systemPromptOption("", "linked_workspace", home)).toThrow("the workspace name is empty");
+  });
+});
+
+describe("the standing notice", () => {
+  it.each([
+    { standing: "main_workspace" as const, home: "Be terse.\n" },
+    { standing: "linked_workspace" as const, home: "Be terse.\n" },
+    { standing: "main_workspace" as const, home: undefined },
+    { standing: "linked_workspace" as const, home: undefined },
+  ])("is the last section of the system prompt for a $standing (metaprompt: $home)", ({ standing, home }) => {
+    // Arrange
+    const dir = makeHome(home);
+    // Act
+    const append = systemPromptOption("parser-fix", standing, dir).append ?? "";
+    // Assert — nothing may ever be appended after it.
+    expect(append.endsWith(standingSection(standing))).toBe(true);
+    expect(append.lastIndexOf(workspaceSection("parser-fix"))).toBeLessThan(append.lastIndexOf(standingSection(standing)));
+  });
+
+  it("tells a main workspace it lands nothing, is never a one-shot, and splits work off", () => {
+    // Act
+    const section = standingSection("main_workspace");
+    // Assert
+    expect(section).toContain("its repository's MAIN workspace");
+    expect(section).toContain("It lands nothing itself and is never a one-shot");
+    expect(section).toContain("`agent-repld workspace create`");
+  });
+
+  it("tells a linked worktree it is not the main workspace and lands its own work", () => {
+    // Act
+    const section = standingSection("linked_workspace");
+    // Assert
+    expect(section).toContain("not its repository's main workspace");
+    expect(section).toContain("it lands its own work");
   });
 });
 

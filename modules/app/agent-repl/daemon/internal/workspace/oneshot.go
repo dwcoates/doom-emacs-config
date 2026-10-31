@@ -154,12 +154,5 @@ func (v *verbs) repositoryRegisteredAt(ctx context.Context, repoDir string) (boo
 // root, which is what its policy source is derived from. The workspace record
 // names its repository by id; the registry holds the directory.
 func (v *verbs) repositoryRootOf(ctx context.Context, repo ids.RepoID) (string, error) {
-	repositories, err := v.deps.DB.ListRepositories(ctx)
-	if err != nil {
-		return "", fmt.Errorf("read the repository registry: %w", err)
-	}
-	if repository, found := wsm.RepositoryWithID(repositories, repo); found {
-		return repository.Dir, nil
-	}
-	return "", fmt.Errorf("no repository %q is registered", repo)
+	return repositoryRoot(ctx, v.deps.DB, repo)
 }

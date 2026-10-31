@@ -192,11 +192,11 @@ func (v *verbs) childrenOf(ctx context.Context, ws ids.WorkspaceID) ([]ids.Works
 // under record's repository when record is that repository's main worktree,
 // and zero for any other workspace.
 func (v *verbs) othersUnderMainWorktree(ctx context.Context, record wsm.Workspace) (int, error) {
-	repoDir, err := v.repositoryRootOf(ctx, record.Repo)
+	main, err := isMainWorkspace(ctx, v.deps.DB, record)
 	if err != nil {
 		return 0, err
 	}
-	if !wsm.IsMainWorktree(record.Dir, repoDir) {
+	if !main {
 		return 0, nil
 	}
 	workspaces, err := v.deps.DB.ListWorkspaces(ctx)

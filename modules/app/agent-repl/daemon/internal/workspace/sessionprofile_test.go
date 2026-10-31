@@ -84,3 +84,61 @@ func TestAThreadWhoseChatPromptCannotBeReadIsNotStarted(t *testing.T) {
 		})
 	}
 }
+
+func TestAnAgentSessionNamesItsWorkspacesStanding(t *testing.T) {
+	cases := []struct {
+		name string
+		main bool
+	}{
+		{name: "its repository's main workspace", main: true},
+		{name: "a linked worktree", main: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if tc.main {
+				f.db.repositories = []wsm.Repository{{ID: ws.Repo, Dir: ws.Dir}}
+			}
+			f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID}
+
+			// Act
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+
+			// Assert
+			standing := f.client.requests[0].GetProfile().GetAgent().GetStanding()
+			if got := standing.GetMainWorkspace() != nil; got != tc.main {
+				t.Fatalf("standing = %v, want main %v", standing, tc.main)
+			}
+			if got := standing.GetLinkedWorkspace() != nil; got == tc.main {
+				t.Fatalf("standing = %v, want linked %v", standing, !tc.main)
+			}
+		})
+	}
+}
+
+func TestAnAgentWhoseStandingCannotBeResolvedIsNotStarted(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID}
+	f.db.listRepositoriesErr = errors.New("registry gone")
+
+	// Act
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Start answered no error")
+	}
+	if len(f.client.requests) != 0 {
+		t.Fatalf("a StartSession was sent: %v", f.client.requests)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error",
+		Message: "could not resolve whether the workspace is its repository's main workspace; the session was not started"}); !ok {
+		t.Fatalf("records = %+v, want the standing failure", f.log.logger.Records())
+	}
+}
