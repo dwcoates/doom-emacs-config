@@ -123,6 +123,14 @@ message WatchHostWorkspaceResponse {
     // shows in the button's place. An event, not state: never replayed to a
     // late subscriber, because a click belongs to the moment it was made.
     HostWorkspaceLoadPageRequested load_page_requested = 17;
+    // THE READER HIGHLIGHTED WORDS OF A FINAL RESPONSE IN THE WEBVIEW
+    // (SelectResponseText's `highlighted`): the next prompt revises that
+    // response, so Emacs puts the keyboard in this workspace's composer, in
+    // insert state, ready to type the revision, exactly as for
+    // `chat_text_highlighted`. Sent for every highlight the daemon takes,
+    // never for a cleared one. An event, not state: never replayed to a late
+    // subscriber, because a highlight belongs to the moment it was made.
+    HostWorkspaceResponseTextHighlighted response_text_highlighted = 18;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -180,6 +188,12 @@ message HostWorkspaceFinalResponseClicked {}
 // it rides names the thread, and the daemon holds the highlight, so focusing
 // the composer in insert state is the whole of Emacs's obligation.
 message HostWorkspaceChatTextHighlighted {}
+
+// The reader highlighted words of a final response in this workspace's
+// webview. Empty: the stream it rides names the workspace, and the daemon
+// holds the highlight, so focusing the composer in insert state is the whole
+// of Emacs's obligation.
+message HostWorkspaceResponseTextHighlighted {}
 
 // The user clicked this workspace's row in a page's rail. Empty: the stream
 // it rides names the workspace, and requesting the switch to it is the whole

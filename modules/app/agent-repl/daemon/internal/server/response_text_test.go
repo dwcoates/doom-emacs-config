@@ -259,3 +259,50 @@ func TestSelectResponseTextRefusesAMalformedSelection(t *testing.T) {
 		})
 	}
 }
+
+// TestSelectResponseTextAsksTheHostToFocusTheComposerOnlyForAHighlight pins
+// which selections push response_text_highlighted: only a highlight the
+// daemon takes. Each selection is followed by a notification click, which
+// must then be the first event the host stream carries when no focus was
+// asked, so a stray response_text_highlighted shows as the wrong first event.
+func TestSelectResponseTextAsksTheHostToFocusTheComposerOnlyForAHighlight(t *testing.T) {
+	tests := []struct {
+		name      string
+		selection *agentreplv1.SelectResponseTextSelection
+		wantFocus bool
+	}{
+		{name: "a highlight", wantFocus: true, selection: &agentreplv1.SelectResponseTextSelection{State: &agentreplv1.SelectResponseTextSelection_Highlighted{
+			Highlighted: &agentreplv1.SelectResponseTextHighlighted{Row: &frontendv1.FeedId{Value: "row-1"}, Words: "entropy"},
+		}}},
+		{name: "a refused highlight", selection: &agentreplv1.SelectResponseTextSelection{State: &agentreplv1.SelectResponseTextSelection_Highlighted{
+			Highlighted: &agentreplv1.SelectResponseTextHighlighted{Row: &frontendv1.FeedId{Value: "row-9"}, Words: "entropy"},
+		}}},
+		{name: "a clear", selection: &agentreplv1.SelectResponseTextSelection{State: &agentreplv1.SelectResponseTextSelection_Cleared{
+			Cleared: &agentreplv1.SelectResponseTextCleared{},
+		}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			withRevisable(h)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := dialHostStream(t, h, ctx)
+
+			// Act.
+			if _, err := h.Client.SelectResponseText(context.Background(), connect.NewRequest(&agentreplv1.SelectResponseTextRequest{
+				Workspace: ref(), Selection: tc.selection,
+			})); err != nil {
+				t.Fatalf("SelectResponseText: %v", err)
+			}
+			h.Server.NotificationClicked(testWorkspaceID)
+			first := receiveHostEventPastSelection(t, stream)
+
+			// Assert.
+			if got := first.GetResponseTextHighlighted() != nil; got != tc.wantFocus {
+				t.Fatalf("first event = %v, want response_text_highlighted %v", first, tc.wantFocus)
+			}
+		})
+	}
+}

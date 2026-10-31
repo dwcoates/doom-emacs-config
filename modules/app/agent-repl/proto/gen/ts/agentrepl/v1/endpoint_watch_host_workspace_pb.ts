@@ -33,7 +33,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_host_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_host_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfaG9zdF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJKChlXYXRjaEhvc3RXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYisggKGldhdGNoSG9zdFdvcmtzcGFjZVJlc3BvbnNlEisKBGhvc3QYASABKAsyGy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZUgAEj0KC3RyYW5zZmVycmVkGAMgASgLMiYuYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VUcmFuc2ZlcnJlZEgAEkAKDXJlbG9hZF93ZWJhcHAYBCABKAsyJy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVJlbG9hZFdlYmFwcEgAEjgKDm9wZW5faW5fZWRpdG9yGAUgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RPcGVuSW5FZGl0b3JIABIyCgZlbmRpbmcYBiABKAsyIC5hZ2VudHJlcGwudjEuRGFlbW9uU3RyZWFtRW5kaW5nSAASTgoUbm90aWZpY2F0aW9uX2NsaWNrZWQYByABKAsyLi5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZU5vdGlmaWNhdGlvbkNsaWNrZWRIABI5CglzZWxlY3Rpb24YCCABKAsyJC5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvbkgAEj4KD29wZW5fY29tbWl0X2xvZxgJIAEoCzIjLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JDb21taXRMb2dIABIuCghldmFsdWF0ZRgKIAEoCzIaLmFnZW50cmVwbC52MS5Ib3N0RXZhbHVhdGVIABJRChZmaW5hbF9yZXNwb25zZV9jbGlja2VkGAsgASgLMi8uYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VGaW5hbFJlc3BvbnNlQ2xpY2tlZEgAEkYKEHNlbGVjdF9yZXF1ZXN0ZWQYDCABKAsyKi5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdFJlcXVlc3RlZEgAEkAKDWNvbXBvc2VfZW50cnkYDiABKAsyJy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZUNvbXBvc2VFbnRyeUgAEk8KFWNoYXRfdGV4dF9oaWdobGlnaHRlZBgPIAEoCzIuLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlQ2hhdFRleHRIaWdobGlnaHRlZEgAEkoKEnRyYW5zZmVyX3dpdGhkcmF3bhgQIAEoCzIsLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlVHJhbnNmZXJXaXRoZHJhd25IABJLChNsb2FkX3BhZ2VfcmVxdWVzdGVkGBEgASgLMiwuYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VMb2FkUGFnZVJlcXVlc3RlZEgAQgYKBHB1c2hKBAgCEANKBAgNEA5SDG5vdGlmaWNhdGlvblIUcHJvbXB0X2VudHJ5X2NsaWNrZWQiPAoQSG9zdE9wZW5JbkVkaXRvchIMCgRwYXRoGAEgASgJEhEKBGxpbmUYAiABKA1IAIgBAUIHCgVfbGluZSJQCgxIb3N0RXZhbHVhdGUSMgoFdG9rZW4YASABKAsyIy5hZ2VudHJlcGwudjEuRWRpdG9yRXZhbHVhdGlvblRva2VuEgwKBHRleHQYAiABKAkiGgoYSG9zdFdvcmtzcGFjZVRyYW5zZmVycmVkIiAKHkhvc3RXb3Jrc3BhY2VUcmFuc2ZlcldpdGhkcmF3biJHChlIb3N0V29ya3NwYWNlUmVsb2FkV2ViYXBwEhkKDHdlYmFwcF9idWlsZBgBIAEoCUgAiAEBQg8KDV93ZWJhcHBfYnVpbGQiIgogSG9zdFdvcmtzcGFjZU5vdGlmaWNhdGlvbkNsaWNrZWQiIwohSG9zdFdvcmtzcGFjZUZpbmFsUmVzcG9uc2VDbGlja2VkIiIKIEhvc3RXb3Jrc3BhY2VDaGF0VGV4dEhpZ2hsaWdodGVkIh4KHEhvc3RXb3Jrc3BhY2VTZWxlY3RSZXF1ZXN0ZWQiIAoeSG9zdFdvcmtzcGFjZUxvYWRQYWdlUmVxdWVzdGVkIioKGUhvc3RXb3Jrc3BhY2VDb21wb3NlRW50cnkSDQoFbGFiZWwYASABKAkikQMKDUhvc3RXb3Jrc3BhY2USLQoEbm9uZRgBIAEoCzIdLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvbk5vbmVIABI1CghleGlzdGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvbkV4aXN0aW5nSAASMQoGbmFtaW5nGAMgASgLMiEuYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VOYW1pbmcSOgoQaGVsZF9wcm9tcHRfZWRpdBgEIAEoCzIgLmFnZW50cmVwbC52MS5Ib3N0SGVsZFByb21wdEVkaXQSKQoEZ2F0ZRgFIAEoCzIWLmFnZW50cmVwbC52MS5Ib3N0R2F0ZUgBiAEBEicKA2FzaxgGIAEoCzIVLmFnZW50cmVwbC52MS5Ib3N0QXNrSAKIAQESOwoQY29tcG9zZXJfZW50cmllcxgHIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJFbnRyaWVzQgkKB3Nlc3Npb25CBwoFX2dhdGVCBgoEX2FzayIpChNIb3N0Q29tcG9zZXJFbnRyaWVzEhIKCnVuYW5zd2VyZWQYASADKAkinQEKB0hvc3RBc2sSIAoDcm93GAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEjEKCHF1ZXN0aW9uGAIgASgLMh0uYWdlbnRyZXBsLnYxLkhvc3RBc2tRdWVzdGlvbkgAEjUKCnBlcm1pc3Npb24YAyABKAsyHy5hZ2VudHJlcGwudjEuSG9zdEFza1Blcm1pc3Npb25IAEIGCgRraW5kIrsBCg9Ib3N0QXNrUXVlc3Rpb24SFQoNcXVlc3Rpb25fdGV4dBgBIAEoCRJCCg1zaW5nbGVfc2VsZWN0GAIgASgLMikuYWdlbnRyZXBsLnYxLkhvc3RBc2tRdWVzdGlvblNpbmdsZVNlbGVjdEgAEkAKDG11bHRpX3NlbGVjdBgDIAEoCzIoLmFnZW50cmVwbC52MS5Ib3N0QXNrUXVlc3Rpb25NdWx0aVNlbGVjdEgAQgsKCXNlbGVjdGlvbiJTChtIb3N0QXNrUXVlc3Rpb25TaW5nbGVTZWxlY3QSNAoHb3B0aW9ucxgBIAMoCzIjLmFnZW50cmVwbC52MS5Ib3N0QXNrUXVlc3Rpb25PcHRpb24iUgoaSG9zdEFza1F1ZXN0aW9uTXVsdGlTZWxlY3QSNAoHb3B0aW9ucxgBIAMoCzIjLmFnZW50cmVwbC52MS5Ib3N0QXNrUXVlc3Rpb25PcHRpb24iJgoVSG9zdEFza1F1ZXN0aW9uT3B0aW9uEg0KBWxhYmVsGAEgASgJIncKEUhvc3RBc2tQZXJtaXNzaW9uEk0KEHN0YW5kaW5nX29mZmVyZWQYASABKAsyLi5hZ2VudHJlcGwudjEuSG9zdEFza1Blcm1pc3Npb25TdGFuZGluZ09mZmVyZWRIAIgBAUITChFfc3RhbmRpbmdfb2ZmZXJlZCIiCiBIb3N0QXNrUGVybWlzc2lvblN0YW5kaW5nT2ZmZXJlZCJHCghIb3N0R2F0ZRIzCgljb2xkX2dhdGUYASABKAsyHi5hZ2VudHJlcGwudjEuSG9zdEdhdGVDb2xkR2F0ZUgAQgYKBGtpbmQiEgoQSG9zdEdhdGVDb2xkR2F0ZSJyChJIb3N0SGVsZFByb21wdEVkaXQSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBIMCgRlZGl0GAMgASgEIhEKD0hvc3RTZXNzaW9uTm9uZSKwAQoTSG9zdFNlc3Npb25FeGlzdGluZxInCgJpZBgBIAEoCzIbLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvbklkEi0KBGxpdmUYAiABKAsyHS5hZ2VudHJlcGwudjEuSG9zdFNlc3Npb25MaXZlSAASNQoIdGVybWluYWwYAyABKAsyIS5hZ2VudHJlcGwudjEuSG9zdFNlc3Npb25UZXJtaW5hbEgAQgoKCHN0YW5kaW5nIu4DCg9Ib3N0U2Vzc2lvbkxpdmUSMgoKZ2VuZXJhdGlvbhgBIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0R2VuZXJhdGlvbklkEhUKDXNoaW1fYXR0YWNoZWQYAiABKAgSMAoGY2xhdWRlGAMgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RWZW5kb3JDbGF1ZGVIABIsCghiYWNrZmlsbBgEIAEoCzIaLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGwSLgoEb3BlbhgFIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJPcGVuSAESNAoHbWVyZ2luZxgGIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJNZXJnaW5nSAESNgoIZHJhaW5pbmcYByABKAsyIi5hZ2VudHJlcGwudjEuSG9zdENvbXBvc2VyRHJhaW5pbmdIARI6CgpyZXN0YXJ0aW5nGAggASgLMiQuYWdlbnRyZXBsLnYxLkhvc3RDb21wb3NlclJlc3RhcnRpbmdIARInCgZmYXVsdHMYCSADKAsyFy5hZ2VudHJlcGwudjEuSG9zdEZhdWx0Qg0KC3ZlbmRvcl9pbmZvQgoKCGNvbXBvc2VySgQIChALUgxtZXJnZV9wYXJrZWQiKwoTSG9zdFNlc3Npb25UZXJtaW5hbBIUCgxyZWh5ZHJhdGFibGUYASABKAgiHgoNSG9zdFNlc3Npb25JZBINCgV2YWx1ZRgBIAEoCSIhChBIb3N0R2VuZXJhdGlvbklkEg0KBXZhbHVlGAEgASgJIjoKEEhvc3RWZW5kb3JDbGF1ZGUSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpjb25maWdfZGlyGAIgASgJIk8KE0hvc3RXb3Jrc3BhY2VOYW1pbmcSEQoEc2x1ZxgBIAEoCUgAiAEBEhIKBXRpdGxlGAIgASgJSAGIAQFCBwoFX3NsdWdCCAoGX3RpdGxlIuEBCgxIb3N0QmFja2ZpbGwSLgoEbm9uZRgBIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxOb25lSAASNAoHcGVuZGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxQZW5kaW5nSAASLgoEZG9uZRgDIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxEb25lSAASMgoGZmFpbGVkGAQgASgLMiAuYWdlbnRyZXBsLnYxLkhvc3RCYWNrZmlsbEZhaWxlZEgAQgcKBXN0YXRlIhIKEEhvc3RCYWNrZmlsbE5vbmUiFQoTSG9zdEJhY2tmaWxsUGVuZGluZyISChBIb3N0QmFja2ZpbGxEb25lIiQKEkhvc3RCYWNrZmlsbEZhaWxlZBIOCgZkZXRhaWwYASABKAkiEgoQSG9zdENvbXBvc2VyT3BlbiIVChNIb3N0Q29tcG9zZXJNZXJnaW5nIhYKFEhvc3RDb21wb3NlckRyYWluaW5nIhgKFkhvc3RDb21wb3NlclJlc3RhcnRpbmcijAoKCUhvc3RGYXVsdBIOCgZkZXRhaWwYASABKAkSFAoMb3BlbmVkX2F0X21zGAIgASgDEkYKEXNoaW1fc3RhcnRfZmFpbGVkGAMgASgLMikuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFNoaW1TdGFydEZhaWxlZEgAEjcKCXNoaW1fZGllZBgEIAEoCzIiLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltRGllZEgAEj0KDGxpbmtfc2V2ZXJlZBgFIAEoCzIlLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRMaW5rU2V2ZXJlZEgAEj8KDXJlc3VtZV9mYWlsZWQYBiABKAsyJi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0UmVzdW1lRmFpbGVkSAASOwoLYm91bmNlX2RpZWQYByABKAsyJC5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0Qm91bmNlRGllZEgAEkEKDmJvdW5jZV91bmtub3duGAggASgLMicuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEJvdW5jZVVua25vd25IABJHChFjbGFzc2lmaWVyX2ZhaWxlZBgJIAEoCzIqLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRDbGFzc2lmaWVyRmFpbGVkSAASPwoNc2hpbV9yZXBvcnRlZBgKIAEoCzImLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltUmVwb3J0ZWRIABJRChZjb252ZXJzYXRpb25fYWJhbmRvbmVkGAsgASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdENvbnZlcnNhdGlvbkFiYW5kb25lZEgAEkEKDnNlc3Npb25fYWJzZW50GAwgASgLMicuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFNlc3Npb25BYnNlbnRIABJIChJ3YXRjaF9vcGVuX3JlZnVzZWQYDSABKAsyKi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0V2F0Y2hPcGVuUmVmdXNlZEgAElIKF2RhZW1vbl9zdGF0ZV91bnJlYWRhYmxlGA4gASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdERhZW1vblN0YXRlVW5yZWFkYWJsZUgAElIKF2Fkb3B0aW9uX3dpbmRvd19leHBpcmVkGA8gASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZEgAElIKF2ZpbmFsX2Fuc3dlcl91bnJlc29sdmVkGBAgASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEZpbmFsQW5zd2VyVW5yZXNvbHZlZEgAEk4KFXZlbmRvcl9zdGFydF9yZXRyeWluZxgRIAEoCzItLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRWZW5kb3JTdGFydFJldHJ5aW5nSAASTgoVdmVuZG9yX3N0YXJ0X3JlamVjdGVkGBIgASgLMi0uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFZlbmRvclN0YXJ0UmVqZWN0ZWRIABJKChN2ZW5kb3Jfc3RhcnRfZmFpbGVkGBMgASgLMisuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFZlbmRvclN0YXJ0RmFpbGVkSABCBgoEa2luZCKdAgoWSG9zdFdvcmtzcGFjZVNlbGVjdGlvbhI4CgRub25lGAEgASgLMiguYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VTZWxlY3Rpb25Ob25lSAASQAoIcmVzcG9uc2UYAiABKAsyLC5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvblJlc3BvbnNlSAASPAoGcHJvbXB0GAMgASgLMiouYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VTZWxlY3Rpb25Qcm9tcHRIABI8CgZidWJibGUYBCABKAsyKi5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvbkJ1YmJsZUgAQgsKCXNlbGVjdGlvbiIcChpIb3N0V29ya3NwYWNlU2VsZWN0aW9uTm9uZSJgCh5Ib3N0V29ya3NwYWNlU2VsZWN0aW9uUmVzcG9uc2USPgoIbWFya2Rvd24YASABKAsyLC5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvbk1hcmtkb3duIl4KHEhvc3RXb3Jrc3BhY2VTZWxlY3Rpb25Qcm9tcHQSPgoIbWFya2Rvd24YASABKAsyLC5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvbk1hcmtkb3duIl4KHEhvc3RXb3Jrc3BhY2VTZWxlY3Rpb25CdWJibGUSPgoIbWFya2Rvd24YASABKAsyLC5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvbk1hcmtkb3duIi4KHkhvc3RXb3Jrc3BhY2VTZWxlY3Rpb25NYXJrZG93bhIMCgR0ZXh0GAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_agentrepl_v1_daemon_stream_ending, file_agentrepl_v1_editor_evaluation, file_agentrepl_v1_endpoint_open_in_editor, file_agentrepl_v1_endpoint_session_health, file_conversation_v1_turn, file_conversation_v1_user, file_frontend_v1_feed]);
+  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfaG9zdF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJKChlXYXRjaEhvc3RXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYiiwkKGldhdGNoSG9zdFdvcmtzcGFjZVJlc3BvbnNlEisKBGhvc3QYASABKAsyGy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZUgAEj0KC3RyYW5zZmVycmVkGAMgASgLMiYuYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VUcmFuc2ZlcnJlZEgAEkAKDXJlbG9hZF93ZWJhcHAYBCABKAsyJy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVJlbG9hZFdlYmFwcEgAEjgKDm9wZW5faW5fZWRpdG9yGAUgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RPcGVuSW5FZGl0b3JIABIyCgZlbmRpbmcYBiABKAsyIC5hZ2VudHJlcGwudjEuRGFlbW9uU3RyZWFtRW5kaW5nSAASTgoUbm90aWZpY2F0aW9uX2NsaWNrZWQYByABKAsyLi5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZU5vdGlmaWNhdGlvbkNsaWNrZWRIABI5CglzZWxlY3Rpb24YCCABKAsyJC5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvbkgAEj4KD29wZW5fY29tbWl0X2xvZxgJIAEoCzIjLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JDb21taXRMb2dIABIuCghldmFsdWF0ZRgKIAEoCzIaLmFnZW50cmVwbC52MS5Ib3N0RXZhbHVhdGVIABJRChZmaW5hbF9yZXNwb25zZV9jbGlja2VkGAsgASgLMi8uYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VGaW5hbFJlc3BvbnNlQ2xpY2tlZEgAEkYKEHNlbGVjdF9yZXF1ZXN0ZWQYDCABKAsyKi5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdFJlcXVlc3RlZEgAEkAKDWNvbXBvc2VfZW50cnkYDiABKAsyJy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZUNvbXBvc2VFbnRyeUgAEk8KFWNoYXRfdGV4dF9oaWdobGlnaHRlZBgPIAEoCzIuLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlQ2hhdFRleHRIaWdobGlnaHRlZEgAEkoKEnRyYW5zZmVyX3dpdGhkcmF3bhgQIAEoCzIsLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlVHJhbnNmZXJXaXRoZHJhd25IABJLChNsb2FkX3BhZ2VfcmVxdWVzdGVkGBEgASgLMiwuYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VMb2FkUGFnZVJlcXVlc3RlZEgAElcKGXJlc3BvbnNlX3RleHRfaGlnaGxpZ2h0ZWQYEiABKAsyMi5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVJlc3BvbnNlVGV4dEhpZ2hsaWdodGVkSABCBgoEcHVzaEoECAIQA0oECA0QDlIMbm90aWZpY2F0aW9uUhRwcm9tcHRfZW50cnlfY2xpY2tlZCI8ChBIb3N0T3BlbkluRWRpdG9yEgwKBHBhdGgYASABKAkSEQoEbGluZRgCIAEoDUgAiAEBQgcKBV9saW5lIlAKDEhvc3RFdmFsdWF0ZRIyCgV0b2tlbhgBIAEoCzIjLmFnZW50cmVwbC52MS5FZGl0b3JFdmFsdWF0aW9uVG9rZW4SDAoEdGV4dBgCIAEoCSIaChhIb3N0V29ya3NwYWNlVHJhbnNmZXJyZWQiIAoeSG9zdFdvcmtzcGFjZVRyYW5zZmVyV2l0aGRyYXduIkcKGUhvc3RXb3Jrc3BhY2VSZWxvYWRXZWJhcHASGQoMd2ViYXBwX2J1aWxkGAEgASgJSACIAQFCDwoNX3dlYmFwcF9idWlsZCIiCiBIb3N0V29ya3NwYWNlTm90aWZpY2F0aW9uQ2xpY2tlZCIjCiFIb3N0V29ya3NwYWNlRmluYWxSZXNwb25zZUNsaWNrZWQiIgogSG9zdFdvcmtzcGFjZUNoYXRUZXh0SGlnaGxpZ2h0ZWQiJgokSG9zdFdvcmtzcGFjZVJlc3BvbnNlVGV4dEhpZ2hsaWdodGVkIh4KHEhvc3RXb3Jrc3BhY2VTZWxlY3RSZXF1ZXN0ZWQiIAoeSG9zdFdvcmtzcGFjZUxvYWRQYWdlUmVxdWVzdGVkIioKGUhvc3RXb3Jrc3BhY2VDb21wb3NlRW50cnkSDQoFbGFiZWwYASABKAkikQMKDUhvc3RXb3Jrc3BhY2USLQoEbm9uZRgBIAEoCzIdLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvbk5vbmVIABI1CghleGlzdGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvbkV4aXN0aW5nSAASMQoGbmFtaW5nGAMgASgLMiEuYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VOYW1pbmcSOgoQaGVsZF9wcm9tcHRfZWRpdBgEIAEoCzIgLmFnZW50cmVwbC52MS5Ib3N0SGVsZFByb21wdEVkaXQSKQoEZ2F0ZRgFIAEoCzIWLmFnZW50cmVwbC52MS5Ib3N0R2F0ZUgBiAEBEicKA2FzaxgGIAEoCzIVLmFnZW50cmVwbC52MS5Ib3N0QXNrSAKIAQESOwoQY29tcG9zZXJfZW50cmllcxgHIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJFbnRyaWVzQgkKB3Nlc3Npb25CBwoFX2dhdGVCBgoEX2FzayIpChNIb3N0Q29tcG9zZXJFbnRyaWVzEhIKCnVuYW5zd2VyZWQYASADKAkinQEKB0hvc3RBc2sSIAoDcm93GAEgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEjEKCHF1ZXN0aW9uGAIgASgLMh0uYWdlbnRyZXBsLnYxLkhvc3RBc2tRdWVzdGlvbkgAEjUKCnBlcm1pc3Npb24YAyABKAsyHy5hZ2VudHJlcGwudjEuSG9zdEFza1Blcm1pc3Npb25IAEIGCgRraW5kIrsBCg9Ib3N0QXNrUXVlc3Rpb24SFQoNcXVlc3Rpb25fdGV4dBgBIAEoCRJCCg1zaW5nbGVfc2VsZWN0GAIgASgLMikuYWdlbnRyZXBsLnYxLkhvc3RBc2tRdWVzdGlvblNpbmdsZVNlbGVjdEgAEkAKDG11bHRpX3NlbGVjdBgDIAEoCzIoLmFnZW50cmVwbC52MS5Ib3N0QXNrUXVlc3Rpb25NdWx0aVNlbGVjdEgAQgsKCXNlbGVjdGlvbiJTChtIb3N0QXNrUXVlc3Rpb25TaW5nbGVTZWxlY3QSNAoHb3B0aW9ucxgBIAMoCzIjLmFnZW50cmVwbC52MS5Ib3N0QXNrUXVlc3Rpb25PcHRpb24iUgoaSG9zdEFza1F1ZXN0aW9uTXVsdGlTZWxlY3QSNAoHb3B0aW9ucxgBIAMoCzIjLmFnZW50cmVwbC52MS5Ib3N0QXNrUXVlc3Rpb25PcHRpb24iJgoVSG9zdEFza1F1ZXN0aW9uT3B0aW9uEg0KBWxhYmVsGAEgASgJIncKEUhvc3RBc2tQZXJtaXNzaW9uEk0KEHN0YW5kaW5nX29mZmVyZWQYASABKAsyLi5hZ2VudHJlcGwudjEuSG9zdEFza1Blcm1pc3Npb25TdGFuZGluZ09mZmVyZWRIAIgBAUITChFfc3RhbmRpbmdfb2ZmZXJlZCIiCiBIb3N0QXNrUGVybWlzc2lvblN0YW5kaW5nT2ZmZXJlZCJHCghIb3N0R2F0ZRIzCgljb2xkX2dhdGUYASABKAsyHi5hZ2VudHJlcGwudjEuSG9zdEdhdGVDb2xkR2F0ZUgAQgYKBGtpbmQiEgoQSG9zdEdhdGVDb2xkR2F0ZSJyChJIb3N0SGVsZFByb21wdEVkaXQSJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSJwoEc2FpZBgCIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBIMCgRlZGl0GAMgASgEIhEKD0hvc3RTZXNzaW9uTm9uZSKwAQoTSG9zdFNlc3Npb25FeGlzdGluZxInCgJpZBgBIAEoCzIbLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvbklkEi0KBGxpdmUYAiABKAsyHS5hZ2VudHJlcGwudjEuSG9zdFNlc3Npb25MaXZlSAASNQoIdGVybWluYWwYAyABKAsyIS5hZ2VudHJlcGwudjEuSG9zdFNlc3Npb25UZXJtaW5hbEgAQgoKCHN0YW5kaW5nIu4DCg9Ib3N0U2Vzc2lvbkxpdmUSMgoKZ2VuZXJhdGlvbhgBIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0R2VuZXJhdGlvbklkEhUKDXNoaW1fYXR0YWNoZWQYAiABKAgSMAoGY2xhdWRlGAMgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RWZW5kb3JDbGF1ZGVIABIsCghiYWNrZmlsbBgEIAEoCzIaLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGwSLgoEb3BlbhgFIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJPcGVuSAESNAoHbWVyZ2luZxgGIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJNZXJnaW5nSAESNgoIZHJhaW5pbmcYByABKAsyIi5hZ2VudHJlcGwudjEuSG9zdENvbXBvc2VyRHJhaW5pbmdIARI6CgpyZXN0YXJ0aW5nGAggASgLMiQuYWdlbnRyZXBsLnYxLkhvc3RDb21wb3NlclJlc3RhcnRpbmdIARInCgZmYXVsdHMYCSADKAsyFy5hZ2VudHJlcGwudjEuSG9zdEZhdWx0Qg0KC3ZlbmRvcl9pbmZvQgoKCGNvbXBvc2VySgQIChALUgxtZXJnZV9wYXJrZWQiKwoTSG9zdFNlc3Npb25UZXJtaW5hbBIUCgxyZWh5ZHJhdGFibGUYASABKAgiHgoNSG9zdFNlc3Npb25JZBINCgV2YWx1ZRgBIAEoCSIhChBIb3N0R2VuZXJhdGlvbklkEg0KBXZhbHVlGAEgASgJIjoKEEhvc3RWZW5kb3JDbGF1ZGUSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpjb25maWdfZGlyGAIgASgJIk8KE0hvc3RXb3Jrc3BhY2VOYW1pbmcSEQoEc2x1ZxgBIAEoCUgAiAEBEhIKBXRpdGxlGAIgASgJSAGIAQFCBwoFX3NsdWdCCAoGX3RpdGxlIuEBCgxIb3N0QmFja2ZpbGwSLgoEbm9uZRgBIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxOb25lSAASNAoHcGVuZGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxQZW5kaW5nSAASLgoEZG9uZRgDIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxEb25lSAASMgoGZmFpbGVkGAQgASgLMiAuYWdlbnRyZXBsLnYxLkhvc3RCYWNrZmlsbEZhaWxlZEgAQgcKBXN0YXRlIhIKEEhvc3RCYWNrZmlsbE5vbmUiFQoTSG9zdEJhY2tmaWxsUGVuZGluZyISChBIb3N0QmFja2ZpbGxEb25lIiQKEkhvc3RCYWNrZmlsbEZhaWxlZBIOCgZkZXRhaWwYASABKAkiEgoQSG9zdENvbXBvc2VyT3BlbiIVChNIb3N0Q29tcG9zZXJNZXJnaW5nIhYKFEhvc3RDb21wb3NlckRyYWluaW5nIhgKFkhvc3RDb21wb3NlclJlc3RhcnRpbmcijAoKCUhvc3RGYXVsdBIOCgZkZXRhaWwYASABKAkSFAoMb3BlbmVkX2F0X21zGAIgASgDEkYKEXNoaW1fc3RhcnRfZmFpbGVkGAMgASgLMikuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFNoaW1TdGFydEZhaWxlZEgAEjcKCXNoaW1fZGllZBgEIAEoCzIiLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltRGllZEgAEj0KDGxpbmtfc2V2ZXJlZBgFIAEoCzIlLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRMaW5rU2V2ZXJlZEgAEj8KDXJlc3VtZV9mYWlsZWQYBiABKAsyJi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0UmVzdW1lRmFpbGVkSAASOwoLYm91bmNlX2RpZWQYByABKAsyJC5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0Qm91bmNlRGllZEgAEkEKDmJvdW5jZV91bmtub3duGAggASgLMicuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEJvdW5jZVVua25vd25IABJHChFjbGFzc2lmaWVyX2ZhaWxlZBgJIAEoCzIqLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRDbGFzc2lmaWVyRmFpbGVkSAASPwoNc2hpbV9yZXBvcnRlZBgKIAEoCzImLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltUmVwb3J0ZWRIABJRChZjb252ZXJzYXRpb25fYWJhbmRvbmVkGAsgASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdENvbnZlcnNhdGlvbkFiYW5kb25lZEgAEkEKDnNlc3Npb25fYWJzZW50GAwgASgLMicuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFNlc3Npb25BYnNlbnRIABJIChJ3YXRjaF9vcGVuX3JlZnVzZWQYDSABKAsyKi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0V2F0Y2hPcGVuUmVmdXNlZEgAElIKF2RhZW1vbl9zdGF0ZV91bnJlYWRhYmxlGA4gASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdERhZW1vblN0YXRlVW5yZWFkYWJsZUgAElIKF2Fkb3B0aW9uX3dpbmRvd19leHBpcmVkGA8gASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZEgAElIKF2ZpbmFsX2Fuc3dlcl91bnJlc29sdmVkGBAgASgLMi8uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEZpbmFsQW5zd2VyVW5yZXNvbHZlZEgAEk4KFXZlbmRvcl9zdGFydF9yZXRyeWluZxgRIAEoCzItLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRWZW5kb3JTdGFydFJldHJ5aW5nSAASTgoVdmVuZG9yX3N0YXJ0X3JlamVjdGVkGBIgASgLMi0uYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFZlbmRvclN0YXJ0UmVqZWN0ZWRIABJKChN2ZW5kb3Jfc3RhcnRfZmFpbGVkGBMgASgLMisuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFZlbmRvclN0YXJ0RmFpbGVkSABCBgoEa2luZCKdAgoWSG9zdFdvcmtzcGFjZVNlbGVjdGlvbhI4CgRub25lGAEgASgLMiguYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VTZWxlY3Rpb25Ob25lSAASQAoIcmVzcG9uc2UYAiABKAsyLC5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvblJlc3BvbnNlSAASPAoGcHJvbXB0GAMgASgLMiouYWdlbnRyZXBsLnYxLkhvc3RXb3Jrc3BhY2VTZWxlY3Rpb25Qcm9tcHRIABI8CgZidWJibGUYBCABKAsyKi5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvbkJ1YmJsZUgAQgsKCXNlbGVjdGlvbiIcChpIb3N0V29ya3NwYWNlU2VsZWN0aW9uTm9uZSJgCh5Ib3N0V29ya3NwYWNlU2VsZWN0aW9uUmVzcG9uc2USPgoIbWFya2Rvd24YASABKAsyLC5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvbk1hcmtkb3duIl4KHEhvc3RXb3Jrc3BhY2VTZWxlY3Rpb25Qcm9tcHQSPgoIbWFya2Rvd24YASABKAsyLC5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvbk1hcmtkb3duIl4KHEhvc3RXb3Jrc3BhY2VTZWxlY3Rpb25CdWJibGUSPgoIbWFya2Rvd24YASABKAsyLC5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVNlbGVjdGlvbk1hcmtkb3duIi4KHkhvc3RXb3Jrc3BhY2VTZWxlY3Rpb25NYXJrZG93bhIMCgR0ZXh0GAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_agentrepl_v1_daemon_stream_ending, file_agentrepl_v1_editor_evaluation, file_agentrepl_v1_endpoint_open_in_editor, file_agentrepl_v1_endpoint_session_health, file_conversation_v1_turn, file_conversation_v1_user, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.WatchHostWorkspaceRequest
@@ -247,6 +247,20 @@ export type WatchHostWorkspaceResponse = Message<"agentrepl.v1.WatchHostWorkspac
      */
     value: HostWorkspaceLoadPageRequested;
     case: "loadPageRequested";
+  } | {
+    /**
+     * THE READER HIGHLIGHTED WORDS OF A FINAL RESPONSE IN THE WEBVIEW
+     * (SelectResponseText's `highlighted`): the next prompt revises that
+     * response, so Emacs puts the keyboard in this workspace's composer, in
+     * insert state, ready to type the revision, exactly as for
+     * `chat_text_highlighted`. Sent for every highlight the daemon takes,
+     * never for a cleared one. An event, not state: never replayed to a late
+     * subscriber, because a highlight belongs to the moment it was made.
+     *
+     * @generated from field: agentrepl.v1.HostWorkspaceResponseTextHighlighted response_text_highlighted = 18;
+     */
+    value: HostWorkspaceResponseTextHighlighted;
+    case: "responseTextHighlighted";
   } | { case: undefined; value?: undefined };
 };
 
@@ -417,6 +431,24 @@ export const HostWorkspaceChatTextHighlightedSchema: GenMessage<HostWorkspaceCha
   messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 9);
 
 /**
+ * The reader highlighted words of a final response in this workspace's
+ * webview. Empty: the stream it rides names the workspace, and the daemon
+ * holds the highlight, so focusing the composer in insert state is the whole
+ * of Emacs's obligation.
+ *
+ * @generated from message agentrepl.v1.HostWorkspaceResponseTextHighlighted
+ */
+export type HostWorkspaceResponseTextHighlighted = Message<"agentrepl.v1.HostWorkspaceResponseTextHighlighted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.HostWorkspaceResponseTextHighlighted.
+ * Use `create(HostWorkspaceResponseTextHighlightedSchema)` to create a new message.
+ */
+export const HostWorkspaceResponseTextHighlightedSchema: GenMessage<HostWorkspaceResponseTextHighlighted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 10);
+
+/**
  * The user clicked this workspace's row in a page's rail. Empty: the stream
  * it rides names the workspace, and requesting the switch to it is the whole
  * of Emacs's obligation.
@@ -431,7 +463,7 @@ export type HostWorkspaceSelectRequested = Message<"agentrepl.v1.HostWorkspaceSe
  * Use `create(HostWorkspaceSelectRequestedSchema)` to create a new message.
  */
 export const HostWorkspaceSelectRequestedSchema: GenMessage<HostWorkspaceSelectRequested> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 10);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 11);
 
 /**
  * The user clicked the load button the webhost draws for this workspace's
@@ -448,7 +480,7 @@ export type HostWorkspaceLoadPageRequested = Message<"agentrepl.v1.HostWorkspace
  * Use `create(HostWorkspaceLoadPageRequestedSchema)` to create a new message.
  */
 export const HostWorkspaceLoadPageRequestedSchema: GenMessage<HostWorkspaceLoadPageRequested> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 11);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 12);
 
 /**
  * The node of a response's tree the reader clicked, which the composer opens
@@ -470,7 +502,7 @@ export type HostWorkspaceComposeEntry = Message<"agentrepl.v1.HostWorkspaceCompo
  * Use `create(HostWorkspaceComposeEntrySchema)` to create a new message.
  */
 export const HostWorkspaceComposeEntrySchema: GenMessage<HostWorkspaceComposeEntry> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 12);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 13);
 
 /**
  * The host-facing state of one workspace: what Emacs needs to correlate
@@ -575,7 +607,7 @@ export type HostWorkspace = Message<"agentrepl.v1.HostWorkspace"> & {
  * Use `create(HostWorkspaceSchema)` to create a new message.
  */
 export const HostWorkspaceSchema: GenMessage<HostWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 13);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 14);
 
 /**
  * What the daemon reads of the composer's reported entries.
@@ -599,7 +631,7 @@ export type HostComposerEntries = Message<"agentrepl.v1.HostComposerEntries"> & 
  * Use `create(HostComposerEntriesSchema)` to create a new message.
  */
 export const HostComposerEntriesSchema: GenMessage<HostComposerEntries> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 14);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 15);
 
 /**
  * The standing ask Emacs answers by number. The card it names is drawn by the
@@ -648,7 +680,7 @@ export type HostAsk = Message<"agentrepl.v1.HostAsk"> & {
  * Use `create(HostAskSchema)` to create a new message.
  */
 export const HostAskSchema: GenMessage<HostAsk> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 15);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 16);
 
 /**
  * A standing question batch, as its SHOWN question (the draft's active one,
@@ -698,7 +730,7 @@ export type HostAskQuestion = Message<"agentrepl.v1.HostAskQuestion"> & {
  * Use `create(HostAskQuestionSchema)` to create a new message.
  */
 export const HostAskQuestionSchema: GenMessage<HostAskQuestion> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 16);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 17);
 
 /**
  * A single-select question: option N is `options[N-1]`, numbered from 1 in
@@ -720,7 +752,7 @@ export type HostAskQuestionSingleSelect = Message<"agentrepl.v1.HostAskQuestionS
  * Use `create(HostAskQuestionSingleSelectSchema)` to create a new message.
  */
 export const HostAskQuestionSingleSelectSchema: GenMessage<HostAskQuestionSingleSelect> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 17);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 18);
 
 /**
  * A multi-select question: option N is `options[N-1]`, numbered from 1 in
@@ -742,7 +774,7 @@ export type HostAskQuestionMultiSelect = Message<"agentrepl.v1.HostAskQuestionMu
  * Use `create(HostAskQuestionMultiSelectSchema)` to create a new message.
  */
 export const HostAskQuestionMultiSelectSchema: GenMessage<HostAskQuestionMultiSelect> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 18);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 19);
 
 /**
  * One numbered option of the shown question.
@@ -763,7 +795,7 @@ export type HostAskQuestionOption = Message<"agentrepl.v1.HostAskQuestionOption"
  * Use `create(HostAskQuestionOptionSchema)` to create a new message.
  */
 export const HostAskQuestionOptionSchema: GenMessage<HostAskQuestionOption> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 19);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 20);
 
 /**
  * A standing consent card. ITS NUMBERS ARE ITS BUTTONS IN DRAWN ORDER, and
@@ -788,7 +820,7 @@ export type HostAskPermission = Message<"agentrepl.v1.HostAskPermission"> & {
  * Use `create(HostAskPermissionSchema)` to create a new message.
  */
 export const HostAskPermissionSchema: GenMessage<HostAskPermission> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 20);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 21);
 
 /**
  * The standing offer's presence. Empty: presence is the whole fact.
@@ -803,7 +835,7 @@ export type HostAskPermissionStandingOffered = Message<"agentrepl.v1.HostAskPerm
  * Use `create(HostAskPermissionStandingOfferedSchema)` to create a new message.
  */
 export const HostAskPermissionStandingOfferedSchema: GenMessage<HostAskPermissionStandingOffered> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 21);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 22);
 
 /**
  * One standing gate. THE ARM IS THE KIND; set-but-unassigned is a gate this
@@ -833,7 +865,7 @@ export type HostGate = Message<"agentrepl.v1.HostGate"> & {
  * Use `create(HostGateSchema)` to create a new message.
  */
 export const HostGateSchema: GenMessage<HostGate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 22);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 23);
 
 /**
  * @generated from message agentrepl.v1.HostGateColdGate
@@ -846,7 +878,7 @@ export type HostGateColdGate = Message<"agentrepl.v1.HostGateColdGate"> & {
  * Use `create(HostGateColdGateSchema)` to create a new message.
  */
 export const HostGateColdGateSchema: GenMessage<HostGateColdGate> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 23);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 24);
 
 /**
  * One standing held-prompt edit.
@@ -885,7 +917,7 @@ export type HostHeldPromptEdit = Message<"agentrepl.v1.HostHeldPromptEdit"> & {
  * Use `create(HostHeldPromptEditSchema)` to create a new message.
  */
 export const HostHeldPromptEditSchema: GenMessage<HostHeldPromptEdit> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 24);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 25);
 
 /**
  * @generated from message agentrepl.v1.HostSessionNone
@@ -898,7 +930,7 @@ export type HostSessionNone = Message<"agentrepl.v1.HostSessionNone"> & {
  * Use `create(HostSessionNoneSchema)` to create a new message.
  */
 export const HostSessionNoneSchema: GenMessage<HostSessionNone> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 25);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 26);
 
 /**
  * A session that exists: its identity, and its standing.
@@ -941,7 +973,7 @@ export type HostSessionExisting = Message<"agentrepl.v1.HostSessionExisting"> & 
  * Use `create(HostSessionExistingSchema)` to create a new message.
  */
 export const HostSessionExistingSchema: GenMessage<HostSessionExisting> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 26);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 27);
 
 /**
  * @generated from message agentrepl.v1.HostSessionLive
@@ -1044,7 +1076,7 @@ export type HostSessionLive = Message<"agentrepl.v1.HostSessionLive"> & {
  * Use `create(HostSessionLiveSchema)` to create a new message.
  */
 export const HostSessionLiveSchema: GenMessage<HostSessionLive> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 27);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 28);
 
 /**
  * @generated from message agentrepl.v1.HostSessionTerminal
@@ -1064,7 +1096,7 @@ export type HostSessionTerminal = Message<"agentrepl.v1.HostSessionTerminal"> & 
  * Use `create(HostSessionTerminalSchema)` to create a new message.
  */
 export const HostSessionTerminalSchema: GenMessage<HostSessionTerminal> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 28);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 29);
 
 /**
  * A daemon-minted session identity — the echo token Emacs correlates by.
@@ -1083,7 +1115,7 @@ export type HostSessionId = Message<"agentrepl.v1.HostSessionId"> & {
  * Use `create(HostSessionIdSchema)` to create a new message.
  */
 export const HostSessionIdSchema: GenMessage<HostSessionId> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 29);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 30);
 
 /**
  * A daemon-minted controller-generation identity; rotates on restart within
@@ -1103,7 +1135,7 @@ export type HostGenerationId = Message<"agentrepl.v1.HostGenerationId"> & {
  * Use `create(HostGenerationIdSchema)` to create a new message.
  */
 export const HostGenerationIdSchema: GenMessage<HostGenerationId> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 30);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 31);
 
 /**
  * The vendor conversation's identifiers, for transcripts and support reports.
@@ -1132,7 +1164,7 @@ export type HostVendorClaude = Message<"agentrepl.v1.HostVendorClaude"> & {
  * Use `create(HostVendorClaudeSchema)` to create a new message.
  */
 export const HostVendorClaudeSchema: GenMessage<HostVendorClaude> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 31);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 32);
 
 /**
  * What Emacs names buffers from. Facts only — their DRAWN home is the
@@ -1162,7 +1194,7 @@ export type HostWorkspaceNaming = Message<"agentrepl.v1.HostWorkspaceNaming"> & 
  * Use `create(HostWorkspaceNamingSchema)` to create a new message.
  */
 export const HostWorkspaceNamingSchema: GenMessage<HostWorkspaceNaming> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 32);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 33);
 
 /**
  * Whether the on-disk transcript has been backfilled into the store. THE ARM
@@ -1214,7 +1246,7 @@ export type HostBackfill = Message<"agentrepl.v1.HostBackfill"> & {
  * Use `create(HostBackfillSchema)` to create a new message.
  */
 export const HostBackfillSchema: GenMessage<HostBackfill> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 33);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 34);
 
 /**
  * @generated from message agentrepl.v1.HostBackfillNone
@@ -1227,7 +1259,7 @@ export type HostBackfillNone = Message<"agentrepl.v1.HostBackfillNone"> & {
  * Use `create(HostBackfillNoneSchema)` to create a new message.
  */
 export const HostBackfillNoneSchema: GenMessage<HostBackfillNone> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 34);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 35);
 
 /**
  * @generated from message agentrepl.v1.HostBackfillPending
@@ -1240,7 +1272,7 @@ export type HostBackfillPending = Message<"agentrepl.v1.HostBackfillPending"> & 
  * Use `create(HostBackfillPendingSchema)` to create a new message.
  */
 export const HostBackfillPendingSchema: GenMessage<HostBackfillPending> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 35);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 36);
 
 /**
  * @generated from message agentrepl.v1.HostBackfillDone
@@ -1253,7 +1285,7 @@ export type HostBackfillDone = Message<"agentrepl.v1.HostBackfillDone"> & {
  * Use `create(HostBackfillDoneSchema)` to create a new message.
  */
 export const HostBackfillDoneSchema: GenMessage<HostBackfillDone> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 36);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 37);
 
 /**
  * @generated from message agentrepl.v1.HostBackfillFailed
@@ -1274,7 +1306,7 @@ export type HostBackfillFailed = Message<"agentrepl.v1.HostBackfillFailed"> & {
  * Use `create(HostBackfillFailedSchema)` to create a new message.
  */
 export const HostBackfillFailedSchema: GenMessage<HostBackfillFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 37);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 38);
 
 /**
  * @generated from message agentrepl.v1.HostComposerOpen
@@ -1287,7 +1319,7 @@ export type HostComposerOpen = Message<"agentrepl.v1.HostComposerOpen"> & {
  * Use `create(HostComposerOpenSchema)` to create a new message.
  */
 export const HostComposerOpenSchema: GenMessage<HostComposerOpen> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 38);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 39);
 
 /**
  * @generated from message agentrepl.v1.HostComposerMerging
@@ -1300,7 +1332,7 @@ export type HostComposerMerging = Message<"agentrepl.v1.HostComposerMerging"> & 
  * Use `create(HostComposerMergingSchema)` to create a new message.
  */
 export const HostComposerMergingSchema: GenMessage<HostComposerMerging> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 39);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 40);
 
 /**
  * @generated from message agentrepl.v1.HostComposerDraining
@@ -1313,7 +1345,7 @@ export type HostComposerDraining = Message<"agentrepl.v1.HostComposerDraining"> 
  * Use `create(HostComposerDrainingSchema)` to create a new message.
  */
 export const HostComposerDrainingSchema: GenMessage<HostComposerDraining> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 40);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 41);
 
 /**
  * @generated from message agentrepl.v1.HostComposerRestarting
@@ -1326,7 +1358,7 @@ export type HostComposerRestarting = Message<"agentrepl.v1.HostComposerRestartin
  * Use `create(HostComposerRestartingSchema)` to create a new message.
  */
 export const HostComposerRestartingSchema: GenMessage<HostComposerRestarting> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 41);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 42);
 
 /**
  * One standing fault — the same kinds SessionHealth's SessionFault carries,
@@ -1499,7 +1531,7 @@ export type HostFault = Message<"agentrepl.v1.HostFault"> & {
  * Use `create(HostFaultSchema)` to create a new message.
  */
 export const HostFaultSchema: GenMessage<HostFault> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 42);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 43);
 
 /**
  * What the workspace's feed has selected, as Emacs needs it: which kind of
@@ -1555,7 +1587,7 @@ export type HostWorkspaceSelection = Message<"agentrepl.v1.HostWorkspaceSelectio
  * Use `create(HostWorkspaceSelectionSchema)` to create a new message.
  */
 export const HostWorkspaceSelectionSchema: GenMessage<HostWorkspaceSelection> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 43);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 44);
 
 /**
  * Nothing is selected.
@@ -1570,7 +1602,7 @@ export type HostWorkspaceSelectionNone = Message<"agentrepl.v1.HostWorkspaceSele
  * Use `create(HostWorkspaceSelectionNoneSchema)` to create a new message.
  */
 export const HostWorkspaceSelectionNoneSchema: GenMessage<HostWorkspaceSelectionNone> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 44);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 45);
 
 /**
  * A final response is selected.
@@ -1591,7 +1623,7 @@ export type HostWorkspaceSelectionResponse = Message<"agentrepl.v1.HostWorkspace
  * Use `create(HostWorkspaceSelectionResponseSchema)` to create a new message.
  */
 export const HostWorkspaceSelectionResponseSchema: GenMessage<HostWorkspaceSelectionResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 45);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 46);
 
 /**
  * A prompt a rollback can reach is selected.
@@ -1612,7 +1644,7 @@ export type HostWorkspaceSelectionPrompt = Message<"agentrepl.v1.HostWorkspaceSe
  * Use `create(HostWorkspaceSelectionPromptSchema)` to create a new message.
  */
 export const HostWorkspaceSelectionPromptSchema: GenMessage<HostWorkspaceSelectionPrompt> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 46);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 47);
 
 /**
  * Any other bubble is selected: an interim or thinking response, an agent
@@ -1634,7 +1666,7 @@ export type HostWorkspaceSelectionBubble = Message<"agentrepl.v1.HostWorkspaceSe
  * Use `create(HostWorkspaceSelectionBubbleSchema)` to create a new message.
  */
 export const HostWorkspaceSelectionBubbleSchema: GenMessage<HostWorkspaceSelectionBubble> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 47);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 48);
 
 /**
  * A selected bubble's text as markdown source, verbatim: a response's prose,
@@ -1657,5 +1689,5 @@ export type HostWorkspaceSelectionMarkdown = Message<"agentrepl.v1.HostWorkspace
  * Use `create(HostWorkspaceSelectionMarkdownSchema)` to create a new message.
  */
 export const HostWorkspaceSelectionMarkdownSchema: GenMessage<HostWorkspaceSelectionMarkdown> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 48);
+  messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 49);
 

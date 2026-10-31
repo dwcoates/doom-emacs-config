@@ -25,6 +25,8 @@ import { UserSaidSchema } from "../../../proto/gen/ts/conversation/v1/user_pb";
 import type { EditorIngressEntry, EditorIngressView } from "../held/editor-ingress.js";
 import type { HeldIngressWireEntry } from "./protocol.js";
 import type { RestyleTurnsSource } from "./restyle-turn.js";
+import type { WebhostPressSource } from "../webhost-pressed.js";
+import { onResponseHighlightWords } from "../feed/response-highlight.js";
 
 /**
  * The editor's ingress entries, decoded. An entry whose `said` is not a
@@ -64,6 +66,8 @@ export interface EmbedEnv {
   readonly editorIngress: EditorIngressView;
   /** The page's focus-left signal, which Emacs moving its focus fires (`focusMoved`). */
   readonly focusLeft: FocusLeftSource;
+  /** The page's webhost-press signal, which the reader pressing the webhost fires (`webhostPressed`). */
+  readonly webhostPresses: WebhostPressSource;
   /** The page's restyle turns, which ask the host and which its grant runs (`restyleGranted`). */
   readonly restyleTurns: RestyleTurnsSource;
 }
@@ -88,7 +92,7 @@ function isTextField(element: Element | null): boolean {
 
 /** Connect the page in ENV to its host; null when the page is in no host. */
 export function connectToHost(env: EmbedEnv): HostLink | null {
-  const { doc, win, presence, webhostFailures, levelWindow, editorIngress, focusLeft, restyleTurns } = env;
+  const { doc, win, presence, webhostFailures, levelWindow, editorIngress, focusLeft, webhostPresses, restyleTurns } = env;
   if (win.parent === win) return null;
   const host = win.parent;
   const send = (message: PageToHost): void => {
@@ -129,6 +133,9 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         return;
       case "focusMoved":
         focusLeft.left(FOCUS_LEFT_EMACS);
+        return;
+      case "webhostPressed":
+        webhostPresses.pressed();
         return;
       case "restyleGranted":
         restyleTurns.granted();
@@ -255,6 +262,9 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
   overlayWatch.observe(doc.documentElement, { attributes: true, attributeFilter: [BUBBLE_OVERLAY_ATTRIBUTE] });
 
   win.addEventListener("message", onMessage);
+  const stopHighlightWords = onResponseHighlightWords(doc, (words) => {
+    send({ channel: HOST_CHANNEL, kind: "responseHighlight", words });
+  });
   doc.addEventListener("selectionchange", reportSelection);
   win.addEventListener("focus", reportSelection);
   win.addEventListener("blur", reportSelection);
@@ -271,6 +281,7 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
       drawnWatch.disconnect();
       overlayWatch.disconnect();
       win.removeEventListener("message", onMessage);
+      stopHighlightWords();
       doc.removeEventListener("selectionchange", reportSelection);
       win.removeEventListener("focus", reportSelection);
       win.removeEventListener("blur", reportSelection);

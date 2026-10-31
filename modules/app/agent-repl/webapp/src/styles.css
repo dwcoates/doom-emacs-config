@@ -9767,6 +9767,15 @@ ar-button.merge-queue-move[aria-disabled="true"] {
   color: white;
 }
 
+/* THE HELD WORDS KEEP THE SAME PURPLE once the reader's selection is gone
+   (owner request, 2026-10-30): WebKit drops the page's selection when Emacs's
+   composer takes the focus, and the highlight lives on until the reader lets
+   go of it (feed/response-highlight.ts paints it under this name). */
+::highlight(response-highlight) {
+  background: var(--blocked);
+  color: white;
+}
+
 /* A REVISION ON ITS WAY turns the bubble's border the same purple until the
    revised prose lands (FeedResponse.revision `pending`). A bubble state rule
    sets the border and nothing else, and no bubble animates. */

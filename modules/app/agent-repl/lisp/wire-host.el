@@ -629,6 +629,14 @@ The reader selected words in a chat thread's answer, so focusing the
 composer for the question is all that is left."
   (agent-repl-wire--decode-empty "HostWorkspaceChatTextHighlighted" value))
 
+;;;; ---- The response highlight push ----
+
+(defun agent-repl-wire-decode-host-workspace-response-text-highlighted (value)
+  "Decode VALUE as the empty message `HostWorkspaceResponseTextHighlighted'.
+The reader highlighted words of a final response, so focusing the composer
+for the revision is all that is left."
+  (agent-repl-wire--decode-empty "HostWorkspaceResponseTextHighlighted" value))
+
 ;;;; ---- The rail's row click push ----
 
 (defun agent-repl-wire-decode-host-workspace-select-requested (value)
@@ -914,6 +922,10 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `chat_text_highlighted' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-chat-text-highlighted value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-response-text-highlighted (value)
+  "Decode the `response_text_highlighted' push arm VALUE."
+  (agent-repl-wire-decode-host-workspace-response-text-highlighted value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-select-requested (value)
   "Decode the `select_requested' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-select-requested value))
@@ -987,7 +999,9 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
      (composeEntry :compose-entry
                    agent-repl-wire-decode-watch-host-workspace-response-compose-entry)
      (chatTextHighlighted :chat-text-highlighted
-                          agent-repl-wire-decode-watch-host-workspace-response-chat-text-highlighted))))
+                          agent-repl-wire-decode-watch-host-workspace-response-chat-text-highlighted)
+     (responseTextHighlighted :response-text-highlighted
+                              agent-repl-wire-decode-watch-host-workspace-response-response-text-highlighted))))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response (value)
   "Decode VALUE as `WatchHostWorkspaceResponse', the push oneof plist."
@@ -996,7 +1010,7 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
      "WatchHostWorkspaceResponse" object
      '(host transferred reloadWebapp openInEditor openCommitLog ending notificationClicked selection evaluate
        finalResponseClicked selectRequested loadPageRequested composeEntry chatTextHighlighted
-       transferWithdrawn))
+       transferWithdrawn responseTextHighlighted))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

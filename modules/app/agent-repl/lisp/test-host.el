@@ -2346,8 +2346,30 @@ answers `:unknown' and records the breach rather than opening."
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.chat-text-highlighted ws=ws-1"))))
 
+;;;; ---- The response highlight ----
+
+(ert-deftest agent-repl-test-host-response-highlight-focuses-this-workspaces-composer ()
+  "A `response_text_highlighted' push focuses the composer of the workspace its stream carries."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :response-text-highlighted :value nil))
+    ;; Assert
+    (should (equal (car agent-repl-test-host--effects) '(:focus-for-reply . "ws-1")))))
+
+(ert-deftest agent-repl-test-host-response-highlight-is-logged ()
+  "The response highlight reaching Emacs leaves an INFO record naming the workspace."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :response-text-highlighted :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.response-text-highlighted ws=ws-1"))))
+
 (ert-deftest agent-repl-test-host-both-reply-picks-share-one-handler ()
-  "A final response's click and a chat highlight both go through one handler."
+  "A final response's click and both highlights go through one handler."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
@@ -2356,10 +2378,12 @@ answers `:unknown' and records the breach rather than opening."
                  (lambda (ws event) (push (cons ws event) picked))))
         ;; Act
         (agent-repl-test-host--push "ws-1" (list :arm :final-response-clicked :value nil))
-        (agent-repl-test-host--push "ws-1" (list :arm :chat-text-highlighted :value nil)))
+        (agent-repl-test-host--push "ws-1" (list :arm :chat-text-highlighted :value nil))
+        (agent-repl-test-host--push "ws-1" (list :arm :response-text-highlighted :value nil)))
       ;; Assert
       (should (equal (nreverse picked)
-                     '(("ws-1" . "final-response-clicked") ("ws-1" . "chat-text-highlighted")))))))
+                     '(("ws-1" . "final-response-clicked") ("ws-1" . "chat-text-highlighted")
+                       ("ws-1" . "response-text-highlighted")))))))
 
 ;;;; ---- The branch click ----
 

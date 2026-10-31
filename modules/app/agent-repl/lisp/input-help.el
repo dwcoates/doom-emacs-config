@@ -114,8 +114,9 @@
      :group "Feed"
      :title "Reading the feed"
      :keymaps (agent-repl-frontend-webview-mode-map agent-repl-input-mode-map
-               agent-repl-input-selection-mode-map)
+               agent-repl-input-selection-mode-map agent-repl-frontend-composer-copy-mode-map)
      :bindings ((agent-repl-frontend-copy-selection "Copy the feed's highlighted text.")
+                (agent-repl-frontend-copy-held "From the composer, copy the words held purple in a response.")
                 (agent-repl-response-search-buffer "Search the selected bubble's text.")
                 (agent-repl-response-search-forward "Search the selected bubble's text forward.")
                 (agent-repl-response-search-backward "Search the selected bubble's text backward.")

@@ -1324,6 +1324,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:selection (agent-repl-host--apply-selection ws value))
     (:final-response-clicked (agent-repl-host--reply-target-picked ws "final-response-clicked"))
     (:chat-text-highlighted (agent-repl-host--reply-target-picked ws "chat-text-highlighted"))
+    (:response-text-highlighted (agent-repl-host--reply-target-picked ws "response-text-highlighted"))
     (:select-requested (agent-repl-host--select-requested ws))
     (:load-page-requested (agent-repl-host--load-page-requested ws))
     (:compose-entry (agent-repl-host--compose-entry ws value))
@@ -1430,8 +1431,9 @@ Nil exactly while nothing is selected (or no push has arrived yet)."
 (defun agent-repl-host--reply-target-picked (ws event)
   "Focus WS's composer: the reader picked in its webview what to reply to.
 EVENT names the push, recorded as `elisp.host.EVENT': a final response's
-click (`final-response-clicked') or words highlighted in a chat answer
-\(`chat-text-highlighted').  Either way the next prompt answers the pick
+click (`final-response-clicked'), words highlighted in a chat answer
+\(`chat-text-highlighted') or in a final response
+\(`response-text-highlighted').  Each way the next prompt answers the pick
 and the keyboard is still in the webview, so the composer takes it in
 insert state (`agent-repl-input-focus-for-reply').  Both are events,
 never replayed, so a reconnect never moves the keyboard."

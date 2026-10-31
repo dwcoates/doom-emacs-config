@@ -80,6 +80,17 @@ interface FocusMovedMessage {
 }
 
 /**
+ * host -> page: the reader pressed the webhost's own document (its sidebar):
+ * a click inside the webapp outside every page, which ends what a click on
+ * the page's own background would (webhost-pressed.ts). Sent to every page,
+ * since a press never lands in a page's document.
+ */
+interface WebhostPressedMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "webhostPressed";
+}
+
+/**
  * host -> page: whether the webhost draws the sidebar over the page's sidebar
  * column. While it does, the page keeps that column empty and reserved, so its
  * main column and docked gate sit exactly where they would beside its own
@@ -164,6 +175,7 @@ export type HostToPage =
   | PresenceMessage
   | DismissDigestMessage
   | FocusMovedMessage
+  | WebhostPressedMessage
   | SidebarDockMessage
   | WebhostFailuresMessage;
 
@@ -187,6 +199,19 @@ interface SelectionMessage {
   /** The selected text; null only when the page has no selection object. */
   readonly text: string | null;
   readonly focused: boolean;
+}
+
+/**
+ * page -> host: the words of a final response the page holds highlighted
+ * (feed/response-highlight.ts), or null when it holds none. The highlight
+ * outlives the reader's selection, which WebKit drops when Emacs's composer
+ * takes the focus, so Emacs copies these words (`s-c` in the composer) from
+ * the host's mirror rather than from the selection.
+ */
+interface ResponseHighlightMessage {
+  readonly channel: typeof HOST_CHANNEL;
+  readonly kind: "responseHighlight";
+  readonly words: string | null;
 }
 
 /** page -> host: whether a text field holds the page's keyboard focus. */
@@ -226,6 +251,7 @@ export type PageToHost =
   | HelloMessage
   | DrawnMessage
   | SelectionMessage
+  | ResponseHighlightMessage
   | EditingMessage
   | BubbleOverlayMessage
   | RestyleTurnMessage
@@ -265,6 +291,8 @@ export function parseHostToPage(data: unknown): HostToPage | null {
       return { channel: HOST_CHANNEL, kind: "restyleGranted" };
     case "focusMoved":
       return { channel: HOST_CHANNEL, kind: "focusMoved" };
+    case "webhostPressed":
+      return { channel: HOST_CHANNEL, kind: "webhostPressed" };
     case "logLevel": {
       if (!isWindowLevel(data.level)) return null;
       if (data.level === "info") {
@@ -333,6 +361,10 @@ export function parsePageToHost(data: unknown): PageToHost | null {
     case "selection":
       return (data.text === null || typeof data.text === "string") && typeof data.focused === "boolean"
         ? { channel: HOST_CHANNEL, kind: "selection", text: data.text, focused: data.focused }
+        : null;
+    case "responseHighlight":
+      return data.words === null || (typeof data.words === "string" && data.words !== "")
+        ? { channel: HOST_CHANNEL, kind: "responseHighlight", words: data.words }
         : null;
     case "editing":
       return typeof data.editing === "boolean" ? { channel: HOST_CHANNEL, kind: "editing", editing: data.editing } : null;
