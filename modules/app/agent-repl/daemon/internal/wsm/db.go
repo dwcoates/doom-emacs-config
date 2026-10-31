@@ -550,6 +550,12 @@ type DB interface {
 	RecordDeploySkip(ctx context.Context, repo RepoKey) error
 	// DeployHoldOf reports one repository's deploy hold.
 	DeployHoldOf(ctx context.Context, repo RepoKey) (DeployHold, error)
+	// QueueDrainOwed reports whether a merge was admitted into one
+	// repository's queue since its queue_drained scripts last all succeeded.
+	QueueDrainOwed(ctx context.Context, repo RepoKey) (bool, error)
+	// ClearQueueDrainOwed records that one repository's queue_drained
+	// scripts have all succeeded.
+	ClearQueueDrainOwed(ctx context.Context, repo RepoKey) error
 	// SetMergeRacingDisabled disables the merge queue's racing daemon-wide
 	// from at, or (disabled false) enables it again.
 	SetMergeRacingDisabled(ctx context.Context, disabled bool, at time.Time) error

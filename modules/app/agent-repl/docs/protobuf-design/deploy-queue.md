@@ -293,6 +293,33 @@ origin) is the next repository to be described this way, and is deferred.
   until the deploy ended, which never happened. It now passes the lease as
   the pre- and post-deploy prompt hooks always did.
 
+### 12. A deploy config names the scripts run once its queue fully depletes
+
+- **What.** `repoconfig.v1.DeployConfig.queue_drained` is a list of
+  `repoconfig.v1.DeployHookScript`, checked by the one script rule a stage's
+  script hook is held to (`agent-repld.internal.deployconfig.checkScript()`).
+  agent-repl's config names `bin/push-release.sh` there (see the last bullet), so a fully depleted queue pushes
+  master to origin as a release.
+- **Scripts only.** A prompt hook is a turn of a deploy's owner, and an empty
+  queue has none, so the field is not a `repoconfig.v1.DeployHookEntry` and
+  carries no `runs_for`.
+- **The debt is durable.** `wsm`'s `merge_queue_repos.drain_owed` (layout 94)
+  is set in the write that admits a merge (`AdmitMerge`) and cleared only once
+  every script succeeded. A landing's own rollout replaces the daemon right
+  after the landing, so a debt held in memory would be lost on exactly the
+  landing that owes it. The boot (`agent-repld.internal.merge.Recover()`) and
+  a successor's takeover (`agent-repld.internal.merge.ReviewQueues()`) offer
+  every registered queue that owes its drain to the pump
+  (`agent-repld.internal.merge.offerOwedDrains()`).
+- **Nothing lands while the scripts run.** The pump runs them
+  (`agent-repld.internal.merge.settleDrained()`) after its last empty look and
+  before it goes idle, under the repository's kernel lock, so neither this
+  daemon nor another admits a merge until they end.
+- **Rolled out in two landings.** The daemon that lands the field's support
+  is replaced by that landing's rollout, and until then it refuses
+  `queue_drained` as an unknown key. So agent-repl's config names the script
+  only in a later landing, once the daemon running its queue reads the field.
+
 ## Open gaps
 
 - **Opening a hook log.** A script hook's log and a released deploy hook's log

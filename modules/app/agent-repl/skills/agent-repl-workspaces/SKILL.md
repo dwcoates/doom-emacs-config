@@ -471,6 +471,21 @@ creating workspaces there with `-repository DIR`.
   `runtime deploy-hold`): its deploys still run `pre_deploy` (agent-repl's
   merges still land on master) and `post_deploy`, and SKIP their deploy hook.
   Releasing the hold runs a skipped script deploy hook once.
+- **`queue_drained:` lists scripts the daemon runs once the repository's
+  queue FULLY DEPLETES**: nothing waits in it or runs, it is not paused, and a
+  merge was admitted since the scripts last all succeeded. Each entry is a
+  script's `path:` and `timeout_seconds:`; prompts are refused, since an
+  empty queue has no workspace to prompt.
+  - The debt is durable: it is owed from each merge's admission and cleared
+    only once every script succeeded. A restart in between (a landing's own
+    rollout) leaves it to the next daemon, which runs the scripts once it
+    finds the queue empty.
+  - Nothing lands while they run. A merge enqueued meanwhile is admitted
+    after them.
+  - A failed script stops the rest, is recorded at ERROR under
+    `daemon.merge.queue_drained` with its log's path, and leaves the debt
+    owed, so the queue's next emptying runs them all again. Each must bear
+    running twice on the same state.
 - A deploy hook asks the runtime to roll out what landed with
   `agent-repld runtime roll-out-landing -deploy "$AGENT_REPL_DEPLOY_LEDGER"`.
 - agent-repl's own config:
@@ -500,6 +515,7 @@ deploy:
 | whether a local merge runs, and its test runner | the local merge's own steps: rebase with conflict resolution, the test gate with fixing attempts, the non-fast-forward merge commit |
 | whether the repository is versioned (`version_tag`) | the version arithmetic and the tag's form |
 | the rollout, as a deploy hook calling `roll-out-landing` | when a requested rollout fires (after the deploy's report) |
+| what runs once the queue fully depletes (`queue_drained`) | when it is owed, that it runs with the queue's admissions held, and that a failure leaves it owed |
 | | holding the deploy stage, the hand-back of a failure, closing the workspace on success, the bubble, footer and roster |
 
 ## Restarting, interrupting, selecting

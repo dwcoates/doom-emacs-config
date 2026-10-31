@@ -589,6 +589,34 @@ func (o *orchestrator) repoKeyFor(ctx context.Context, dir string) (wsm.RepoKey,
 	return wsm.RepoKey(common), nil
 }
 
+// registeredQueue is a registered repository and its merge queue's key.
+type registeredQueue struct {
+	repository wsm.Repository
+	key        wsm.RepoKey
+}
+
+// registeredQueues resolves the queue key of every registered repository, in
+// the registry's order. A repository whose key cannot be read (its directory
+// gone) is recorded under OP at WARN and passed over, so one broken
+// registration never stops the rest.
+func (o *orchestrator) registeredQueues(ctx context.Context, op string) ([]registeredQueue, error) {
+	repositories, err := o.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]registeredQueue, 0, len(repositories))
+	for _, repository := range repositories {
+		key, err := o.repoKeyFor(ctx, repository.Dir)
+		if err != nil {
+			o.deps.Log.Global().Warn(op, "could not resolve a registered repository's queue; it is passed over", dlog.Context{
+				"repository": repository.Dir, "error": err.Error()})
+			continue
+		}
+		out = append(out, registeredQueue{repository: repository, key: key})
+	}
+	return out, nil
+}
+
 // layoutFor loads a workspace's recorded merge geometry, refusing the merge
 // when the creation job holds none. Geometry is recorded at creation and NEVER
 // inferred later: a workspace materialized without it can never be merged, and

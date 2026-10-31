@@ -132,6 +132,11 @@ func check(cfg *repoconfigv1.DeployConfig) error {
 			return err
 		}
 	}
+	for i, script := range cfg.GetQueueDrained() {
+		if err := checkScript(fmt.Sprintf("queue_drained[%d]", i), script); err != nil {
+			return err
+		}
+	}
 	if cfg.Concurrent != nil {
 		if cfg.GetConcurrent().GetThrough() == nil {
 			return errors.New("concurrent names no stage: `through_pre_deploy: {}` or `through_deploy: {}`")
@@ -188,21 +193,29 @@ func checkEntry(at string, entry *repoconfigv1.DeployHookEntry) error {
 func CheckHook(at string, hook *repoconfigv1.DeployHook) error {
 	switch h := hook.GetHook().(type) {
 	case *repoconfigv1.DeployHook_Script:
-		if strings.TrimSpace(h.Script.GetPath()) == "" {
-			return fmt.Errorf("%s.script.path is required", at)
-		}
-		if filepath.IsAbs(h.Script.GetPath()) {
-			return fmt.Errorf("%s.script.path %q must be relative to the repository's main checkout root", at, h.Script.GetPath())
-		}
-		if h.Script.GetTimeoutSeconds() < 1 {
-			return fmt.Errorf("%s.script.timeout_seconds is required and at least 1", at)
-		}
+		return checkScript(at+".script", h.Script)
 	case *repoconfigv1.DeployHook_Prompt:
 		if strings.TrimSpace(h.Prompt.GetText()) == "" {
 			return fmt.Errorf("%s.prompt.text is required and never blank", at)
 		}
 	default:
 		return fmt.Errorf("%s is required: `script: {...}` or `prompt: {...}`", at)
+	}
+	return nil
+}
+
+// checkScript refuses a script with no relative path or no timeout of at
+// least a second, wherever the config gives one: a stage's script hook and a
+// queue_drained script are held to the same rules.
+func checkScript(at string, script *repoconfigv1.DeployHookScript) error {
+	if strings.TrimSpace(script.GetPath()) == "" {
+		return fmt.Errorf("%s.path is required", at)
+	}
+	if filepath.IsAbs(script.GetPath()) {
+		return fmt.Errorf("%s.path %q must be relative to the repository's main checkout root", at, script.GetPath())
+	}
+	if script.GetTimeoutSeconds() < 1 {
+		return fmt.Errorf("%s.timeout_seconds is required and at least 1", at)
 	}
 	return nil
 }

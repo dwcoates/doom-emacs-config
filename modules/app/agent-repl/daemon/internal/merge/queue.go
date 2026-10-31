@@ -1124,6 +1124,10 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 				return
 			}
 			if !ran {
+				// THE DRAIN RUNS BEFORE THE PUMP GOES IDLE, while it still
+				// holds the repository's admissions: a merge put in line
+				// meanwhile is remembered by its kick, and admitted after.
+				o.settleDrained(context.Background(), repo)
 				o.mu.Lock()
 				again := o.kicked[repo]
 				o.kicked[repo] = false

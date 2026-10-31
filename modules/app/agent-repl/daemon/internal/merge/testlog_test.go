@@ -268,6 +268,8 @@ func TestIsLog(t *testing.T) {
 		{"00bfb96b635b498a-deploy-2.log", true},
 		{"00bfb96b635b498a-post_deploy-3.log", true},
 		{"release-1760000000000000000.log", true},
+		{"queue_drained-1760000000000000000-0.log", true},
+		{"queue_drained-1760000000000000000-.log", false},
 		{"00bfb96b635b498a-tests-1.log.1", false},
 		{"00bfb96b635b498a-linting-1.log", false},
 		{"release-.log", false},

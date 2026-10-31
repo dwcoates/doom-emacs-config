@@ -54,6 +54,25 @@ message DeployConfig {
   // order. UNSET: every stage runs one deploy at a time, which is how a
   // repository with a local merge always runs.
   optional DeployConcurrentStages concurrent = 4;
+  // Scripts run, in order, when the repository's queue FULLY DEPLETES: no
+  // deploy waits in it or runs, it is not paused, and a deploy was admitted
+  // since these scripts last all succeeded (agent-repl's: push master to
+  // origin as a release).
+  //
+  // THEY ARE OWED DURABLY from each deploy's admission, in the write that
+  // admits it, so a restart between a landing and the queue emptying (the
+  // rollout a landing deploys is one) leaves them owed, and the next daemon
+  // runs them once it finds the queue empty. They run under the repository's
+  // queue lock with the queue's admissions held, so no deploy lands while
+  // they run. A failed or killed script leaves them owed and stops the rest;
+  // the queue's next emptying runs them all again, so each must bear running
+  // again on the same state.
+  //
+  // SCRIPTS ONLY: a prompt hook is a turn of a deploy's owner, and an empty
+  // queue has none. Each runs as a script hook does, with no deploy
+  // environment, its output kept among the queue's logs. Empty when the
+  // repository runs nothing then.
+  repeated DeployHookScript queue_drained = 5;
 }
 
 // THE CONCURRENT STAGES ARE A LEADING RUN, and the arm is the stage it runs
