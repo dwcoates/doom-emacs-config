@@ -3585,3 +3585,13 @@ type startHold struct {
 	at      int
 	release bool
 }
+
+// causedRun answers a run of the harness's merge, built as production builds
+// one (newRun), and a read of the cause its context was cut with.
+func causedRun(t *testing.T, h *harness) (*run, func() error) {
+	t.Helper()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(nil) })
+	r := h.o.newRun(ctx, cancel, h.repoKey(), theWorkspace, 1)
+	return r, func() error { return context.Cause(ctx) }
+}

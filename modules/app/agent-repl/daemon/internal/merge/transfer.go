@@ -231,7 +231,6 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 		return nil
 	}
 	fields["lease"] = string(r.lease.ID)
-	bound := o.letGoBound(r)
 	if abandoned {
 		return o.awaitOwnEnd(log, op, ws, withField(fields, "cause", string(r.abandonedFor())), r.finished, ownEnd{
 			refusal: "merge: the abandoned merge of %s did not end within %s",
@@ -278,21 +277,37 @@ func (o *orchestrator) suspendFor(ctx context.Context, ws ids.WorkspaceID, why s
 		fields["step"] = r.progressStep()
 		log.Info(op, why.moved, fields)
 	} else {
-		o.awaitStoppingPoints(op, []*run{r})
-		fields["step"] = r.progressStep()
-		log.Info(op, why.moved, fields)
-		r.cancel(why.cause)
+		o.cutSuspended(log, r, why, fields)
 	}
+	return o.awaitLetGo(ctx, log, op, r, fields)
+}
+
+// cutSuspended cuts R, marked suspending for WHY, at its stopping point: its
+// git gate stops and the commands in flight end (awaitStoppingPoints), the
+// move is recorded, and its context is cancelled with the suspension's cause.
+func (o *orchestrator) cutSuspended(log dlog.Logger, r *run, why suspension, fields dlog.Context) {
+	o.awaitStoppingPoints(why.op, []*run{r})
+	fields["step"] = r.progressStep()
+	log.Info(why.op, why.moved, fields)
+	r.cancel(why.cause)
+}
+
+// awaitLetGo waits, within its let-go bound, for the cut run R to finish,
+// then forgets what this daemon remembers of its merges in memory: their
+// durable rows are what a take-back reads. A run that outlives the bound is
+// an ERROR and refuses the suspension.
+func (o *orchestrator) awaitLetGo(ctx context.Context, log dlog.Logger, op string, r *run, fields dlog.Context) error {
+	bound := o.letGoBound(r)
 	select {
 	case <-r.finished:
 	case <-time.After(bound):
-		err := fmt.Errorf("merge: the merge of %s did not let go within %s", ws, bound)
+		err := fmt.Errorf("merge: the merge of %s did not let go within %s", r.ws, bound)
 		log.Error(op, "a suspended merge did not let go before the transfer's bound; the transfer is refused", withField(fields, "error", err.Error()))
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	o.forgetMoved(ws)
+	o.forgetMoved(r.ws)
 	return nil
 }
 

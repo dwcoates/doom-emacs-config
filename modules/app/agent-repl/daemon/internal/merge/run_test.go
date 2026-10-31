@@ -1121,3 +1121,58 @@ func TestEveryTabIntervalTheRunRecordsReachesTheRosterQueue(t *testing.T) {
 		t.Fatalf("the roster saw the rebasing stage live=%v settled=%v, want both", sawLive, sawSettled)
 	}
 }
+
+func TestCausedRunReadsTheCauseItsRunWasCutWith(t *testing.T) {
+	cases := []struct {
+		name string
+		cut  error
+	}{
+		{name: "an uncut run reads no cause"},
+		{name: "a cut run reads its cut's cause", cut: errPaused},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			r, cause := causedRun(t, h)
+
+			// Act.
+			if tc.cut != nil {
+				r.cancel(tc.cut)
+			}
+
+			// Assert.
+			if got := cause(); !errors.Is(got, tc.cut) || (tc.cut == nil && got != nil) {
+				t.Fatalf("cause = %v, want %v", got, tc.cut)
+			}
+			if r.ws != theWorkspace || r.repo != h.repoKey() || r.finished == nil {
+				t.Fatalf("run = %+v, want the harness's merge as newRun builds it", r)
+			}
+		})
+	}
+}
+
+// TestEveryTestRunWithACauseIsBuiltByCausedRun holds the suite's runs that
+// read their cut's cause to causedRun, so no test hand-rolls a copy.
+func TestEveryTestRunWithACauseIsBuiltByCausedRun(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("listing the test files: %v", err)
+	}
+
+	// Act.
+	sites := 0
+	for _, name := range files {
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		sites += strings.Count(string(src), "func() error { return context.Cause(ctx) }")
+	}
+
+	// Assert: causedRun's own, and this test's needle.
+	if sites != 2 {
+		t.Fatalf("%d sites read a run's cause, want causedRun's alone", sites-1)
+	}
+}

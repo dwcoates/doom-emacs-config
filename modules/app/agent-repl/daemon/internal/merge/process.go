@@ -902,7 +902,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		// (remediate.go); otherwise it fixes in place.
 		var aside func()
 		if r.o.stepsAside(ctx, r) {
-			aside = func() { r.o.goStepAside(r) }
+			aside = func() { r.o.stepAside(r) }
 		}
 		if gaveUp, err := r.fixThen(ctx, attempt+1, verdict.result, targetBranch, aside); err != nil || gaveUp != nil {
 			return "", gaveUp, err
