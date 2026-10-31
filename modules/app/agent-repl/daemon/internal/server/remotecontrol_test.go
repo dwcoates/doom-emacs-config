@@ -53,6 +53,41 @@ func TestUpdateRemoteControlModeRelaysEachActionToTheVerb(t *testing.T) {
 	}
 }
 
+func TestUpdateRemoteControlModeChangesTheWorkspaceTheRefNames(t *testing.T) {
+	// Arrange: an agent's `workspace set WS -remote-control` names a workspace
+	// other than its own.
+	h := newHarness(t)
+	h.DB.workspaces["ws-2"] = wsm.Workspace{ID: "ws-2", Dir: "/tmp/ws-2", Name: "two"}
+	req := remoteControlRequest("on")
+	req.Workspace = &workspacev1.WorkspaceRef{Id: "ws-2", Dir: "/tmp/ws-2"}
+
+	// Act.
+	resp, err := h.Client.UpdateRemoteControlMode(context.Background(), connect.NewRequest(req))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateRemoteControlMode = (%v, %v), want a success", resp, err)
+	}
+	if len(h.Verbs.remoteWorkspaces) != 1 || h.Verbs.remoteWorkspaces[0] != "ws-2" {
+		t.Fatalf("verb was asked of %v, want ws-2 alone", h.Verbs.remoteWorkspaces)
+	}
+}
+
+func TestUpdateRemoteControlModeAnswersARefTheRegistryLacks(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	req := remoteControlRequest("off")
+	req.Workspace = &workspacev1.WorkspaceRef{Id: "ws-gone", Dir: "/tmp/ws-gone"}
+
+	// Act.
+	resp, err := h.Client.UpdateRemoteControlMode(context.Background(), connect.NewRequest(req))
+
+	// Assert.
+	if err != nil || resp.Msg.GetError().GetUnknownWorkspace() == nil || len(h.Verbs.remoteChanges) != 0 {
+		t.Fatalf("UpdateRemoteControlMode = (%v, %v), verb saw %v; want unknown_workspace and no change", resp, err, h.Verbs.remoteChanges)
+	}
+}
+
 func TestUpdateRemoteControlModeAnswersTheModeLeft(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
