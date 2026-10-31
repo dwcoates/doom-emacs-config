@@ -649,9 +649,10 @@ func (v *verbs) branchFor(ctx context.Context, log dlog.Logger, spec CreateSpec,
 // claimSupplied resolves a SUPPLIED name to its branch and claims it. A name a
 // standing async merge reserved is refused (ArmNameReserved), unless the
 // reservation is HOLDER's own (the fork it was made for); a name another
-// allocation claims is refused the same way. A supplied name is otherwise not
-// disambiguated: the user typed it, and is owed git's own refusal if it is
-// already a branch.
+// allocation claims is refused the same way, and a standard create's name an
+// unlanded workspace holds is refused as ArmNameHeld. A supplied name is
+// otherwise not disambiguated: the user typed it, and is owed git's own
+// refusal if it is a branch no workspace names.
 func (v *verbs) claimSupplied(ctx context.Context, log dlog.Logger, repoDir, name string, holder wsm.WorkspaceID) (string, func(), error) {
 	if strings.TrimSpace(name) == "" {
 		err := errors.New("create: a merge workspace is named by the request it was forked for, and this one carries no name")
@@ -676,7 +677,43 @@ func (v *verbs) claimSupplied(ctx context.Context, log dlog.Logger, repoDir, nam
 		return "", nil, refuseWith(log, "CreateWorkspace", ArmNameReserved,
 			fmt.Sprintf("the name %q is being claimed by another create or async merge", branch), false, map[string]any{"branch": branch})
 	}
+	// A NAME AN UNLANDED WORKSPACE HOLDS IS REFUSED HERE, under the lock that
+	// claims names, so "is it already there" and "take it" are one step: two
+	// creates of one name can never both pass it. A landed workspace's name
+	// is free again, its branch deleted at its landing (landedbranch.Retire).
+	// A merge workspace (a HOLDER) skips it: its request already checked the
+	// name against every registered workspace and reserved it (ClaimMergeName).
+	if holder == "" {
+		if err := v.refuseHeldLocked(ctx, log, branch); err != nil {
+			return "", nil, err
+		}
+	}
 	return branch, v.claimLocked(branch), nil
+}
+
+// refuseHeldLocked refuses BRANCH, a supplied name's branch, when a registered
+// workspace that has not landed holds it as its name or its branch
+// (ArmNameHeld, naming that workspace and whether it is open). The caller
+// holds v.names.mu.
+func (v *verbs) refuseHeldLocked(ctx context.Context, log dlog.Logger, branch string) error {
+	records, err := v.deps.DB.ListWorkspaces(ctx)
+	if err != nil {
+		log.Error(opCreate, "could not read the registered workspaces to check the supplied name", dlog.Context{"branch": branch, "cause": err.Error()})
+		return fmt.Errorf("create %q: list the registered workspaces: %w", branch, err)
+	}
+	for _, record := range records {
+		if record.MergedAt != nil || (record.Name != branch && record.Branch != branch) {
+			continue
+		}
+		return refuseWith(log, "CreateWorkspace", ArmNameHeld,
+			fmt.Sprintf("the name %q is already workspace %s's name or branch, and it has not landed", branch, record.ID), false,
+			map[string]any{
+				"branch":    branch,
+				"workspace": &workspacev1.WorkspaceRef{Id: string(record.ID), Dir: record.Dir},
+				"open":      !record.Closed,
+			})
+	}
+	return nil
 }
 
 // forkNamingConversation answers the summary of the conversation a FORK

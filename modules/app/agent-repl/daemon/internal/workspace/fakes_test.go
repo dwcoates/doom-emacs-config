@@ -1288,7 +1288,9 @@ type fakeGit struct {
 	// existingBranches are the branches this repository already holds, which
 	// is what the naming call's collision probe asks for.
 	existingBranches map[string]bool
-	branchExistsErr  error
+	// branchExistsErrFor fails BranchExists for one branch alone.
+	branchExistsErrFor map[string]error
+	branchExistsErr    error
 
 	created   []createdWorktree
 	createErr error
@@ -1322,6 +1324,10 @@ type fakeGit struct {
 	// dirty makes IsClean answer false; isCleanErr fails it.
 	dirty      bool
 	isCleanErr error
+	// deletedBranches records every DeleteBranchAt as BRANCH@HEAD;
+	// deleteBranchErr fails it.
+	deletedBranches []string
+	deleteBranchErr error
 	// removedClean records every RemoveCleanWorktree; removeCleanErr fails it.
 	removedClean   []nukedWorktree
 	removeCleanErr error
@@ -1374,7 +1380,19 @@ func (g *fakeGit) FastForward(_ context.Context, dir, commit string) error {
 	return nil
 }
 
+// DeleteBranchAt records a landed branch's deletion (landedbranch.Retire).
+func (g *fakeGit) DeleteBranchAt(_ context.Context, _, branch, head string) error {
+	if g.deleteBranchErr != nil {
+		return g.deleteBranchErr
+	}
+	g.deletedBranches = append(g.deletedBranches, branch+"@"+head)
+	return nil
+}
+
 func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error) {
+	if err := g.branchExistsErrFor[branch]; err != nil {
+		return false, err
+	}
 	return g.existingBranches[branch], g.branchExistsErr
 }
 

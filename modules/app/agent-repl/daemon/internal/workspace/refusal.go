@@ -126,6 +126,10 @@ const (
 	// or one another allocation is claiming (CreateWorkspaceError
 	// .name_reserved). Its `branch` field names the branch.
 	ArmNameReserved = "name_reserved"
+	// ArmNameHeld refuses a supplied create name a registered workspace that
+	// has not landed already holds (agentrepl.v1.CreateWorkspaceError
+	// .name_held), naming it and whether it is open.
+	ArmNameHeld = "name_held"
 	// ArmInvalidName refuses a supplied name that breaks the naming rule
 	// (CreateWorkspaceError.invalid_name, ValidateSuppliedName). It carries
 	// `name`, `component` and the nested `rule` arm.
