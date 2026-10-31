@@ -549,6 +549,10 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "confirms the user's hide or show of a workspace")
     ("verbs.el" agent-repl-verb-retry-vendor-error "%s"
      "reports what the user's RET in an empty composer did to the scheduled retry")
+    ("verbs.el" agent-repl-remote-control-toggle "agent-repl: remote control %s for %s"
+     "reports the remote-control mode the user's toggle left")
+    ("verbs.el" agent-repl-remote-control-toggle "agent-repl: %s"
+     "reports why the user's remote-control toggle was refused")
     ("verbs.el" agent-repl-send-hidden-keepalives "agent-repl: %s"
      "reports how the user's keep-alive to the hidden workspaces went")
     ("verbs.el" agent-repl-verb-swap "agent-repl: swapped %s with %s"

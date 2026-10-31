@@ -7,7 +7,8 @@
 ;; CloseWorkspace, KillWorkspace, NukeWorkspace, FinishWorkspace,
 ;; RestartWorkspace, SetWorkspacePriority, SetWorkspaceHidden,
 ;; SwapWorkspaces, MoveWorkspace, SubmitPrompt, UpdateShutdownSchedule, Deploy,
-;; UpdateMergeQueue, DaemonHealth, SessionHealth and ReportLatencies.
+;; UpdateMergeQueue, UpdateRemoteControlMode, DaemonHealth, SessionHealth
+;; and ReportLatencies.
 ;;
 ;; SCOPE.  This file owns exactly the messages declared in those endpoint
 ;; protos.  The shared leaf vocabularies — WorkspaceRef, RepositoryRef,
@@ -3251,6 +3252,61 @@ and display steps went."
    "UpdatePersistentWifiModeResponse" json
    #'agent-repl-wire-decode-update-persistent-wifi-mode-success
    #'agent-repl-wire-decode-update-persistent-wifi-mode-error))
+
+;;;; ---- UpdateRemoteControlMode ----------------------------------------
+;;
+;; Turn a workspace's remote control (its session reachable from claude.ai
+;; through the vendor's Remote Control bridge) on, off or over.  See
+;; endpoint_update_remote_control_mode.proto.
+
+(defun agent-repl-wire-encode-update-remote-control-mode-request (request)
+  "Encode UpdateRemoteControlModeRequest from plist REQUEST.
+REQUEST is (:workspace REF :action ONEOF), ONEOF `(:arm :on)', `(:arm
+:off)' or `(:arm :toggle)'; every arm is empty, so the arm is the whole
+action.  Both are required: an unset one is refused before anything is
+sent."
+  (let ((message "UpdateRemoteControlModeRequest"))
+    (list (cons 'workspace
+                (agent-repl-wire-encode-workspace-ref
+                 (agent-repl-wire-verbs--require message "workspace"
+                                                  (plist-get request :workspace))))
+          (agent-repl-wire-verbs--encode-oneof
+           message "action" (plist-get request :action)
+           (list (list :on 'on #'ignore)
+                 (list :off 'off #'ignore)
+                 (list :toggle 'toggle #'ignore))))))
+
+(defun agent-repl-wire-decode-update-remote-control-mode-success (json)
+  "Decode UpdateRemoteControlModeSuccess from JSON into (:on BOOL).
+BOOL is the mode the request left, t for on and nil for off: protojson
+omits a false bool, so `{}' is a success that left the mode off."
+  (let ((message "UpdateRemoteControlModeSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(on))
+    (list :on (agent-repl-wire--decode-bool message 'on json))))
+
+(defun agent-repl-wire-decode-update-remote-control-mode-error (json)
+  "Decode UpdateRemoteControlModeError from JSON into (:cause ONEOF).
+THE ARM IS THE REFUSAL: the four cross-cutting ownership arms, and
+`vendor_refused' carrying the vendor's `:detail' -- the mode is recorded
+as asked even then."
+  (let ((message "UpdateRemoteControlModeError"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted vendorRefused))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (append (agent-repl-wire-verbs--handover-arms "UpdateRemoteControlMode")
+                   (list (list 'vendorRefused :vendor-refused
+                               (lambda (value)
+                                 (agent-repl-wire-verbs--decode-detail
+                                  "UpdateRemoteControlModeVendorRefused" value)))))))))
+
+(defun agent-repl-wire-decode-update-remote-control-mode-response (json)
+  "Decode UpdateRemoteControlModeResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "UpdateRemoteControlModeResponse" json
+   #'agent-repl-wire-decode-update-remote-control-mode-success
+   #'agent-repl-wire-decode-update-remote-control-mode-error))
 
 
 ;;;; ---- Deploy -------------------------------------------------------

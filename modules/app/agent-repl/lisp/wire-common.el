@@ -770,7 +770,8 @@ no client ever sends them.")
     "PROMPT_ORIGIN_MERGE_REVERT" "PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE"
     "PROMPT_ORIGIN_OWNER_NOTICE" "PROMPT_ORIGIN_WORKSPACE_NOTICE"
     "PROMPT_ORIGIN_AGENT_SENT" "PROMPT_ORIGIN_WORKSPACE_COMPACT"
-    "PROMPT_ORIGIN_DEPLOY_HOOK" "PROMPT_ORIGIN_SUBSECTION_PLACEMENT")
+    "PROMPT_ORIGIN_DEPLOY_HOOK" "PROMPT_ORIGIN_SUBSECTION_PLACEMENT"
+    "PROMPT_ORIGIN_REMOTE_CONTROL")
   "PromptOrigin values no client ever sends: only the shim or the daemon does.
 VENDOR_STARTED names a turn the vendor began on its own, which the shim
 adopts; an editor submit carrying it would claim the vendor started a
@@ -791,8 +792,10 @@ child's owner, and to a workspace subscriber.  AGENT_SENT is a prompt an
 agent sent through the agent API, and WORKSPACE_COMPACT the compaction it
 asked for.  DEPLOY_HOOK is a deploy's deploy-stage prompt hook.
 SUBSECTION_PLACEMENT is the daemon's brief asking a workspace that left
-its one-shot state to file itself into a sidebar subsection.  None has
-an elisp spelling at all.")
+its one-shot state to file itself into a sidebar subsection.
+REMOTE_CONTROL is a prompt typed on claude.ai into a workspace whose
+remote control is on, which the shim adopts as the turn's first row.
+None has an elisp spelling at all.")
 
 (defun agent-repl-wire-encode-prompt-origin (value)
   "Encode the PromptOrigin keyword VALUE as its protojson enum name.

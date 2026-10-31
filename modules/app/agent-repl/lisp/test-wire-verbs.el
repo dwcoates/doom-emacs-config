@@ -5993,6 +5993,130 @@ instead diverges from it unseen."
                        #'string<)
                  '("off" "on" "toggle"))))
 
+;;;; ---- UpdateRemoteControlMode ----------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-toggle-request ()
+  "A toggle carries the workspace and the empty `toggle' arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-remote-control-mode-request
+                     (list :workspace agent-repl-test-wire-verbs--ref
+                           :action '(:arm :toggle :value nil))))
+                   "{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"},\"toggle\":{}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-on-request ()
+  "An on carries the empty `on' arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (cdr (agent-repl-wire-encode-update-remote-control-mode-request
+                         (list :workspace agent-repl-test-wire-verbs--ref
+                               :action '(:arm :on :value nil))))
+                   '((on))))))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-off-request ()
+  "An off carries the empty `off' arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (cdr (agent-repl-wire-encode-update-remote-control-mode-request
+                         (list :workspace agent-repl-test-wire-verbs--ref
+                               :action '(:arm :off :value nil))))
+                   '((off))))))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-without-workspace ()
+  "A request naming no workspace errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-remote-control-mode-request
+                   '(:action (:arm :toggle :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-without-action ()
+  "A request naming no action errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-remote-control-mode-request
+                   (list :workspace agent-repl-test-wire-verbs--ref))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-success-on ()
+  "A success that left the mode on decodes `:on' as t."
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
+                  #'agent-repl-wire-decode-update-remote-control-mode-response
+                  "{\"success\":{\"on\":true}}")
+                 '(:arm :success :value (:on t)))))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-success-off ()
+  "protojson omits a false bool, so an empty success left the mode off."
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
+                  #'agent-repl-wire-decode-update-remote-control-mode-response
+                  "{\"success\":{}}")
+                 '(:arm :success :value (:on nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-success-unknown-field-refused ()
+  "A success field the codec does not hold is refused, not dropped."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-update-remote-control-mode-success
+                   (agent-repl-test-wire-verbs--parse "{\"on\":true,\"since\":1}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-error-unknown-workspace ()
+  "An unknown workspace decodes to its empty arm."
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
+                  #'agent-repl-wire-decode-update-remote-control-mode-response
+                  "{\"error\":{\"unknownWorkspace\":{}}}")
+                 '(:arm :error :value (:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-error-workspace-ref-mismatch ()
+  "A stale ref decodes carrying the registry's directory."
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
+                  #'agent-repl-wire-decode-update-remote-control-mode-response
+                  "{\"error\":{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}}")
+                 '(:arm :error
+                   :value (:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-error-transferring-away ()
+  "A released workspace decodes carrying the successor's address."
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
+                  #'agent-repl-wire-decode-update-remote-control-mode-response
+                  "{\"error\":{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}}")
+                 '(:arm :error
+                   :value (:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-error-not-yet-adopted ()
+  "A workspace the successor has not adopted decodes to its empty arm."
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
+                  #'agent-repl-wire-decode-update-remote-control-mode-response
+                  "{\"error\":{\"notYetAdopted\":{}}}")
+                 '(:arm :error :value (:cause (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-error-vendor-refused ()
+  "A bridge the vendor refused decodes carrying the vendor's detail."
+  (should (equal (agent-repl-test-wire-verbs--decode-quietly
+                  #'agent-repl-wire-decode-update-remote-control-mode-response
+                  "{\"error\":{\"vendorRefused\":{\"detail\":\"not entitled\"}}}")
+                 '(:arm :error
+                   :value (:cause (:arm :vendor-refused :value (:detail "not entitled")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-error-refuses-an-unknown-arm ()
+  "An arm this codec does not know is refused as an unknown field."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-update-remote-control-mode-error
+                   (agent-repl-test-wire-verbs--parse "{\"bridgeDown\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-action-arms-pinned ()
+  "UpdateRemoteControlModeRequest's action oneof has the arms encoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_update_remote_control_mode.pb.go"
+                        "UpdateRemoteControlModeRequest")
+                       #'string<)
+                 '("off" "on" "toggle"))))
+
+(ert-deftest agent-repl-test-wire-verbs-remote-control-error-arms-pinned ()
+  "UpdateRemoteControlModeError's cause oneof has the arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_update_remote_control_mode.pb.go"
+                        "UpdateRemoteControlModeError")
+                       #'string<)
+                 '("notYetAdopted" "transferringAway" "unknownWorkspace" "vendorRefused"
+                   "workspaceRefMismatch"))))
+
 ;;;; ---- UpdateQuestionDraft ----
 
 (ert-deftest agent-repl-test-wire-verbs-update-question-draft-pick-shape ()

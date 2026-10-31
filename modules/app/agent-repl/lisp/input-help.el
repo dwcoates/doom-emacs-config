@@ -279,7 +279,8 @@
                 (agent-repl-daemon-shutdown-cancel "Cancel a scheduled drain.")
                 (agent-repl-daemon-shutdown-now "Stop the daemon now.")
                 (agent-repl-send-hidden-keepalives "Send a keep-alive to every hidden workspace.")
-                (agent-repl-persistent-wifi-mode-toggle "Turn persistent wifi mode, for lid-closed operation, on or off.")))
+                (agent-repl-persistent-wifi-mode-toggle "Turn persistent wifi mode, for lid-closed operation, on or off.")
+                (agent-repl-remote-control-toggle "Turn this workspace's remote control, its session reachable from claude.ai, on or off.")))
     (:id config
      :group "Daemon"
      :title "Logging and config"

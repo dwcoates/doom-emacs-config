@@ -77,6 +77,6 @@ off lets the next beat park the shim as usual. See `shim-lifecycle.md`,
   chip is: a black phone glyph on a green disc when the mode is on and a white
   disc when it is off. It pulses while a toggle is in flight, and the tooltip
   is worded by the daemon.
-- **Emacs.** `agent-repl-remote-control-toggle`.
+- **Emacs.** `agent-repl-remote-control-toggle` (`SPC j C`).
 - **Not surfaced.** The bridge's claude.ai URL is an implementation detail, so
   no view shows it (owner ruling, 2026-10-31).

@@ -75,6 +75,12 @@
            (regexp-quote "\"R\"  #'agent-repl-send-hidden-keepalives")
            (agent-repl-test-keybindings--source))))
 
+(ert-deftest agent-repl-test-keybindings-spc-j-C-toggles-remote-control ()
+  "`SPC j C' turns the current workspace's remote control over."
+  (should (string-match-p
+           (regexp-quote "\"C\"   #'agent-repl-remote-control-toggle")
+           (agent-repl-test-keybindings--source))))
+
 (ert-deftest agent-repl-test-keybindings-spc-j-C-r-reloads-the-config ()
   "`SPC j C-r' reloads the agent-repl config, `SPC j R' being the keep-alives."
   (should (string-match-p

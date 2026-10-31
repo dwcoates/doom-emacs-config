@@ -111,6 +111,9 @@ would abort the very branch a test is asserting."
     ("SetWorkspaceHidden" agent-repl-rpc-set-workspace-hidden
      agent-repl-wire-encode-set-workspace-hidden-request
      agent-repl-wire-decode-set-workspace-hidden-response)
+    ("UpdateRemoteControlMode" agent-repl-rpc-update-remote-control-mode
+     agent-repl-wire-encode-update-remote-control-mode-request
+     agent-repl-wire-decode-update-remote-control-mode-response)
     ("SwapWorkspaces" agent-repl-rpc-swap-workspaces
      agent-repl-wire-encode-swap-workspaces-request
      agent-repl-wire-decode-swap-workspaces-response)

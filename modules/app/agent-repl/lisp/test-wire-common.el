@@ -481,6 +481,10 @@ does not write to the durable sink."
                   (lambda () (agent-repl-wire-encode-prompt-origin :vendor-started)))
                  '("PromptOrigin" origin "unknown prompt origin"))))
 
+(ert-deftest agent-repl-test-wire-common-prompt-origin-remote-control-is-shim-only ()
+  "A prompt typed on claude.ai is the shim's to record, so no client sends it."
+  (should (member "PROMPT_ORIGIN_REMOTE_CONTROL" agent-repl-wire-shim-only-prompt-origins)))
+
 (ert-deftest agent-repl-test-wire-common-prompt-origin-table-matches-the-bindings ()
   "The keyword table covers the declared enum exactly, minus UNSPECIFIED
 and the shim-only values. Read from the checked-in Go bindings, so a value
