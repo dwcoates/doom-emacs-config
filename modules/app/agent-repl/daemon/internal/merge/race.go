@@ -163,7 +163,9 @@ func (o *orchestrator) claimRace(ctx context.Context, r *run, base string) {
 	if o.onRaceClaimed != nil {
 		o.onRaceClaimed(head.ws)
 	}
-	err = o.deps.DB.YieldMergeHead(context.WithoutCancel(ctx), r.repo, head.ws, r.ws)
+	err = o.lineWrite(r.repo, func() error {
+		return o.deps.DB.YieldMergeHead(context.WithoutCancel(ctx), r.repo, head.ws, r.ws)
+	})
 	if errors.Is(err, wsm.ErrMergeHeadLeft) {
 		log.Info(op, "the head left the queue before the race to land was recorded; there is no race, and the merge behind it heads the queue", dlog.Context{
 			"workspace": string(r.ws), "head": string(head.ws), "tip": tip})

@@ -24,8 +24,8 @@ import (
 //     in line behind it has nobody to yield to, and fixes in place.
 //   - STEPPING ASIDE: the fixing prompt is delivered first (the queue's
 //     hand-off is whole, so the turn lives on in the session), then the
-//     entry leaves the line (wsm.StepAsideMerge, MergeRemediating) and the
-//     run is cut, on its own goroutine, before it waits for the fixing turn
+//     entry leaves the line (wsm.StepAsideMerge, MergeRemediating) BEFORE the
+//     run leaves its chain (leaveLine), and the run is cut, on its own goroutine, before it waits for the fixing turn
 //     (stepAside), keeping its lease and its progress record, and taken back
 //     (AdoptWorkspace) as a merge remediating once it let go.
 //   - RETURNING: once the fixing turn ends, the merge goes back in line at
@@ -102,7 +102,11 @@ func (o *orchestrator) stepAside(r *run) {
 	ctx := context.Background()
 	log := o.log(ctx, r.ws)
 	fields := dlog.Context{"workspace": string(r.ws), "repo": string(r.repo)}
-	if err := o.deps.DB.StepAsideMerge(ctx, r.repo, r.ws); err != nil {
+	// THE ENTRY LEAVES THE LINE BEFORE THE RUN LEAVES ITS CHAIN (leaveLine),
+	// under the line lock: a chain decision that read the line with the head
+	// still in it never meets a chain the head already left (2026-10-31,
+	// TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap).
+	if err := o.leaveLine(r, func() error { return o.deps.DB.StepAsideMerge(ctx, r.repo, r.ws) }); err != nil {
 		log.Error(opRemediate, "could not take the failing head out of line; it fixes its tests at the head", withField(fields, "error", err.Error()))
 		return
 	}
@@ -209,11 +213,9 @@ func (o *orchestrator) waitThenReturn(ctx context.Context, ws ids.WorkspaceID, r
 // chain then stood behind an entry it held no run for (2026-10-31,
 // TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap).
 func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) error {
-	line := o.lineLock(repo)
-	line.Lock()
-	err := o.deps.DB.ReturnRemediatedMerge(ctx, repo, ws, o.workedOn(repo))
-	line.Unlock()
-	if err != nil {
+	if err := o.lineWrite(repo, func() error {
+		return o.deps.DB.ReturnRemediatedMerge(ctx, repo, ws, o.workedOn(repo))
+	}); err != nil {
 		return err
 	}
 	o.mu.Lock()
@@ -238,6 +240,42 @@ func (o *orchestrator) lineLock(repo wsm.RepoKey) *sync.Mutex {
 		o.lines[repo] = line
 	}
 	return line
+}
+
+// lineWrite makes WRITE, a store write that moves an entry of REPO's line
+// ahead of, behind or out of the chain's members, under the line lock: a
+// decision that read the line (admitFront, extendOnce) never meets a line
+// that moved under it.
+func (o *orchestrator) lineWrite(repo wsm.RepoKey, write func() error) error {
+	line := o.lineLock(repo)
+	if o.onLineWait != nil {
+		o.onLineWait(repo)
+	}
+	line.Lock()
+	defer line.Unlock()
+	return write()
+}
+
+// leaveLine takes R's entry out of its line through WRITE (a removal, a step
+// aside), under the line lock and with R marked as having left it first
+// (run.leftLine), so every read of the line agrees with the chain: one before
+// the write meets R in its chain, unmarked, and one after it meets R marked
+// or already gone. Every run leaves its line this way BEFORE it leaves its
+// chain (releaseSlot). A write that fails leaves the entry standing, and the
+// mark is taken back.
+func (o *orchestrator) leaveLine(r *run, write func() error) error {
+	return o.lineWrite(r.repo, func() error {
+		o.mu.Lock()
+		r.leftLine = true
+		o.mu.Unlock()
+		err := write()
+		if err != nil {
+			o.mu.Lock()
+			r.leftLine = false
+			o.mu.Unlock()
+		}
+		return err
+	})
 }
 
 // workedOn answers the merges of REPO this orchestrator has taken up: its

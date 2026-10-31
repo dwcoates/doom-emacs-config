@@ -3,7 +3,12 @@ package merge
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -408,10 +413,10 @@ func TestAStepAsideThatCannotLeaveTheLineFixesAtTheHead(t *testing.T) {
 	}
 	h.o.mu.Lock()
 	_, away := h.o.takenAway[theWorkspace]
-	suspending := r.suspending
+	suspending, left := r.suspending, r.leftLine
 	h.o.mu.Unlock()
-	if away || suspending {
-		t.Fatalf("taken away %v, suspending %v, want neither", away, suspending)
+	if away || suspending || left {
+		t.Fatalf("taken away %v, suspending %v, marked out of line %v, want none", away, suspending, left)
 	}
 	if got := entryState(t, h); got != wsm.MergeQueued {
 		t.Fatalf("entry state = %v, want it unchanged", got)
@@ -454,4 +459,258 @@ func TestATakeBackAfterAStepAsideRecordsWhatFailed(t *testing.T) {
 			}
 		})
 	}
+}
+
+// offFront is the record of a chain checked against a line it does not
+// stand at the front of (extendOnce).
+var offFront = logLike{level: "error", op: "daemon.merge.chain", text: "does not stand at the front of its queue"}
+
+// TestAStepAsideWaitsForTheChainDecisionThatReadItsLine covers the 2026-10-31
+// interleaving of TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap:
+// the chain read its line with the failing head still admitted first, the
+// head's step aside then took it out of line, and the chain checked that read
+// against a chain that no longer held the head. The step aside's write waits
+// for the decision that read the line.
+func TestAStepAsideWaitsForTheChainDecisionThatReadItsLine(t *testing.T) {
+	// Arrange: ws-a heads ws-b, both admitted in line. The chain's queue read
+	// starts ws-a's step aside and returns only once its write waits for the
+	// line; the paused read, still inside the decision, records the line.
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-a"), admittedEntry("ws-b")})
+	runs := standChain(t, h, []ids.WorkspaceID{"ws-a", "ws-b"}, "")
+	waiting := make(chan struct{})
+	var waitOnce, readOnce sync.Once
+	h.o.onLineWait = func(wsm.RepoKey) { waitOnce.Do(func() { close(waiting) }) }
+	stepped := make(chan error, 1)
+	h.db.onQueueRead = func() {
+		readOnce.Do(func() {
+			go func() {
+				stepped <- h.o.leaveLine(runs[0], func() error {
+					return h.db.StepAsideMerge(context.Background(), h.repoKey(), "ws-a")
+				})
+			}()
+			<-waiting
+		})
+	}
+	var duringDecision []wsm.MergeQueueEntry
+	h.db.onPausedRead = func() {
+		h.db.mu.Lock()
+		duringDecision = append([]wsm.MergeQueueEntry(nil), h.db.queues[h.repoKey()]...)
+		h.db.mu.Unlock()
+	}
+
+	// Act
+	h.o.extendOnce(context.Background(), h.repoKey())
+	err := receiveWithin(t, stepped, "the step aside's line write")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("the step aside's line write = %v, want nil", err)
+	}
+	if len(duringDecision) == 0 || duringDecision[0].Workspace != "ws-a" || duringDecision[0].State != wsm.MergeAdmitted {
+		t.Fatalf("the line inside the chain's decision = %+v, want ws-a still admitted first: the step aside wrote under it", duringDecision)
+	}
+	if loggedLike(h, offFront) {
+		t.Fatal("the chain was recorded as off its queue's front")
+	}
+	queue, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if !slices.ContainsFunc(queue, func(e wsm.MergeQueueEntry) bool { return e.Workspace == "ws-a" && e.State == wsm.MergeRemediating }) {
+		t.Fatalf("queue %+v, want ws-a remediating once the decision let the step aside write", queue)
+	}
+}
+
+// TestALineReadAfterAStepAsideMeetsTheHeadMarked covers the read on the far
+// side of the step aside's write: the head, still in its chain until it
+// releases its slot, is marked as having left its line, so the chain agrees
+// with a line that no longer holds it.
+func TestALineReadAfterAStepAsideMeetsTheHeadMarked(t *testing.T) {
+	// Arrange
+	h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-a"), admittedEntry("ws-b")})
+	runs := standChain(t, h, []ids.WorkspaceID{"ws-a", "ws-b"}, "")
+	if err := h.o.leaveLine(runs[0], func() error {
+		return h.db.StepAsideMerge(context.Background(), h.repoKey(), "ws-a")
+	}); err != nil {
+		t.Fatalf("leaveLine: %v", err)
+	}
+
+	// Act
+	h.o.extendOnce(context.Background(), h.repoKey())
+
+	// Assert
+	if loggedLike(h, offFront) {
+		t.Fatal("the chain was recorded as off its queue's front")
+	}
+}
+
+// TestLeaveLine covers the mark and the lock leaveLine gives every write that
+// takes a run's entry out of its line.
+func TestLeaveLine(t *testing.T) {
+	refused := errors.New("refused")
+	cases := []struct {
+		name     string
+		writeErr error
+		wantLeft bool
+	}{
+		{name: "a write that took the entry out leaves the run marked", wantLeft: true},
+		{name: "a write that failed takes the mark back and answers its error", writeErr: refused},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-a")})
+			runs := standChain(t, h, []ids.WorkspaceID{"ws-a"}, "")
+			var markedAtWrite, lockedAtWrite bool
+
+			// Act
+			err := h.o.leaveLine(runs[0], func() error {
+				h.o.mu.Lock()
+				markedAtWrite = runs[0].leftLine
+				h.o.mu.Unlock()
+				line := h.o.lineLock(h.repoKey())
+				if line.TryLock() {
+					line.Unlock()
+				} else {
+					lockedAtWrite = true
+				}
+				return tc.writeErr
+			})
+
+			// Assert
+			if !errors.Is(err, tc.writeErr) || (tc.writeErr == nil) != (err == nil) {
+				t.Fatalf("leaveLine = %v, want %v", err, tc.writeErr)
+			}
+			if !markedAtWrite || !lockedAtWrite {
+				t.Fatalf("at its write the run was marked=%v under the line lock=%v, want both", markedAtWrite, lockedAtWrite)
+			}
+			h.o.mu.Lock()
+			left := runs[0].leftLine
+			h.o.mu.Unlock()
+			if left != tc.wantLeft {
+				t.Fatalf("the run's mark after the write = %v, want %v", left, tc.wantLeft)
+			}
+		})
+	}
+}
+
+// TestAStepAsideTakesTheEntryOutOfLineBeforeItCutsTheRun covers stepAside's
+// order: the head's entry leaves the line, marked, while its run still stands
+// uncut, so the run never releases its slot ahead of its entry.
+func TestAStepAsideTakesTheEntryOutOfLineBeforeItCutsTheRun(t *testing.T) {
+	// Arrange: the take-back is held until the test ends.
+	h := newHarness(t)
+	r, cause := stepAsideRun(t, h, wsm.MergeAdmitted)
+	held := make(chan struct{})
+	t.Cleanup(func() { close(held); h.o.live.Wait() })
+	h.o.onStepAside = func(ids.WorkspaceID) { <-held }
+	var cutAtWrite, markedAtWrite bool
+	h.db.beforeStepAside = func(ids.WorkspaceID) {
+		cutAtWrite = cause() != nil
+		h.o.mu.Lock()
+		markedAtWrite = r.leftLine
+		h.o.mu.Unlock()
+	}
+
+	// Act
+	h.o.stepAside(r)
+
+	// Assert
+	if cutAtWrite || !markedAtWrite {
+		t.Fatalf("at the line write the run was cut=%v marked=%v, want uncut and marked", cutAtWrite, markedAtWrite)
+	}
+	if !errors.Is(cause(), errSteppedAside) {
+		t.Fatalf("the run's cause after the step aside = %v, want errSteppedAside", cause())
+	}
+}
+
+// TestEveryWriteThatMovesTheChainsEntriesHoldsTheLineLock covers the shape
+// every such write shares: it runs inside a lineWrite or leaveLine closure,
+// so no hand-rolled write moves the line under a decision that read it.
+func TestEveryWriteThatMovesTheChainsEntriesHoldsTheLineLock(t *testing.T) {
+	// Arrange: the writes that move a chain member's entry, and the files
+	// whose every call of them must hold the lock (nil: every file).
+	guarded := map[string][]string{
+		"StepAsideMerge":        nil,
+		"ReturnRemediatedMerge": nil,
+		"YieldMergeHead":        nil,
+		"RemoveMergeQueueEntry": {"terminal.go"},
+	}
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("listing the package's files: %v", err)
+	}
+	fset := token.NewFileSet()
+	seen := map[string]int{}
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(fset, file, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", file, err)
+		}
+
+		// Act: walk every call, tracking the lock closures it stands in.
+		var stack []ast.Node
+		ast.Inspect(parsed, func(n ast.Node) bool {
+			if n == nil {
+				stack = stack[:len(stack)-1]
+				return true
+			}
+			stack = append(stack, n)
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			only, guardedCall := guarded[sel.Sel.Name]
+			if !guardedCall || only != nil && !slices.Contains(only, file) || forwards(stack, sel.Sel.Name) {
+				return true
+			}
+			seen[sel.Sel.Name]++
+
+			// Assert
+			if !underLineLock(stack) {
+				t.Errorf("%s: %s is called outside a lineWrite or leaveLine closure", fset.Position(call.Pos()), sel.Sel.Name)
+			}
+			return true
+		})
+	}
+	for name := range guarded {
+		if seen[name] == 0 {
+			t.Errorf("no call of %s was found; the guarded set is stale", name)
+		}
+	}
+}
+
+// forwards reports whether the innermost node of STACK stands in a method
+// named NAME: a store decorator (rosterQueueDB, queueEventsDB) handing the
+// write on to the store it wraps, which its caller's lock already covers.
+func forwards(stack []ast.Node, name string) bool {
+	for _, n := range stack {
+		if decl, ok := n.(*ast.FuncDecl); ok {
+			return decl.Recv != nil && decl.Name.Name == name
+		}
+	}
+	return false
+}
+
+// underLineLock reports whether the innermost node of STACK stands inside a
+// function literal passed to lineWrite or leaveLine.
+func underLineLock(stack []ast.Node) bool {
+	for i := len(stack) - 2; i > 0; i-- {
+		lit, ok := stack[i].(*ast.FuncLit)
+		if !ok {
+			continue
+		}
+		call, ok := stack[i-1].(*ast.CallExpr)
+		if !ok || !slices.Contains(call.Args, ast.Expr(lit)) {
+			continue
+		}
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "lineWrite" || sel.Sel.Name == "leaveLine") {
+			return true
+		}
+	}
+	return false
 }

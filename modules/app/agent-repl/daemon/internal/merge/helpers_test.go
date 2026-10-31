@@ -168,6 +168,9 @@ type fakeDB struct {
 	// beforeRemove, when set, runs under the fake's lock as a queue entry's
 	// removal begins.
 	beforeRemove func(id ids.WorkspaceID)
+	// beforeStepAside, when set, runs under the fake's lock as a step aside's
+	// write begins.
+	beforeStepAside func(id ids.WorkspaceID)
 	// progress is each workspace's merge progress record, and progressSteps
 	// every step a record was written at, in order. adopted records the merge
 	// leases adopted for a resume; held stands for the prompt queue's held
@@ -793,6 +796,9 @@ func (f *fakeDB) YieldMergeHead(_ context.Context, repo wsm.RepoKey, loser, winn
 func (f *fakeDB) StepAsideMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.beforeStepAside != nil {
+		f.beforeStepAside(id)
+	}
 	queue := f.queues[repo]
 	for i, entry := range queue {
 		if entry.Workspace != id {
