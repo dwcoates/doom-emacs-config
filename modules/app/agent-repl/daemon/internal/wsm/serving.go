@@ -31,7 +31,26 @@ func (s *store) ClaimServing(ctx context.Context, id WorkspaceID, daemon Instanc
 	if err := s.requireInstance(op, fields, daemon, "refused a serving claim with no instance"); err != nil {
 		return err
 	}
-	return s.setWorkspaceField(ctx, op, "serving_instance", id, string(daemon), fields)
+	var previous sql.NullString
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		if err := scanWorkspaceRow(ctx, tx, id, "serving_instance", &previous); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE workspaces SET serving_instance = ? WHERE id = ?`, string(daemon), id)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	// A CLAIM THAT TAKES THE ROW FROM ANOTHER INSTANCE IS RECORDED AT INFO.
+	// Silent, it hid the 2026-10-31 split: an incumbent's registrations
+	// re-took workspaces its successor had adopted, and no log said who held
+	// the row when the take-back ran.
+	if previous.Valid && previous.String != "" && InstanceID(previous.String) != daemon {
+		s.log.Info(op, "took the workspace's serving ownership from another instance",
+			dlog.Merge(fields, dlog.Context{"previous_instance": previous.String}))
+	}
+	return nil
 }
 
 // ClaimUnownedServing records daemon as the workspace's serving owner ONLY
