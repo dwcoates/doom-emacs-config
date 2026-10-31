@@ -6096,11 +6096,11 @@ instead diverges from it unseen."
                    :value (:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
 
 (ert-deftest agent-repl-test-wire-verbs-remote-control-error-not-yet-adopted ()
-  "A workspace the successor has not adopted decodes to its empty arm."
+  "A workspace the successor has not adopted decodes with no serving daemon named."
   (should (equal (agent-repl-test-wire-verbs--decode-quietly
                   #'agent-repl-wire-decode-update-remote-control-mode-response
                   "{\"error\":{\"notYetAdopted\":{}}}")
-                 '(:arm :error :value (:cause (:arm :not-yet-adopted :value nil))))))
+                 '(:arm :error :value (:cause (:arm :not-yet-adopted :value (:address nil)))))))
 
 (ert-deftest agent-repl-test-wire-verbs-remote-control-error-vendor-refused ()
   "A bridge the vendor refused decodes carrying the vendor's detail."
