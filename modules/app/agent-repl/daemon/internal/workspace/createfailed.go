@@ -97,25 +97,77 @@ func createHandedOver(err error) bool {
 		errors.Is(err, context.Canceled)
 }
 
-// callerInputArms are the create refusals the caller's own input causes:
-// a supplied name that breaks the naming rule, a supplied name a pending
-// merge, a create in flight or an unlanded workspace already holds, and a
-// promptless one-shot. Each
-// is answered to the caller, who corrects the input; none is a fault of the
-// daemon or the repository.
-var callerInputArms = map[string]bool{
-	ArmInvalidName:  true,
-	ArmNameReserved: true,
-	ArmNameHeld:     true,
-	ArmNoSlug:       true,
+// createRefusalArms classifies EVERY arm of agentrepl.v1.CreateWorkspaceError
+// by whether the CALLER'S OWN INPUT causes it (true): a name, a workspace, a
+// repository, a mode or a merge request the caller supplied and is answered
+// about, to correct and ask again. Nothing there is a fault of the daemon or
+// the repository, so none is reported to the main worktree. An arm marked
+// false is a fault of the daemon, the repository or the machine, which the
+// main worktree investigates, or a handover (createHandedOver), which is no
+// failure at all.
+//
+// THE MAP IS EXHAUSTIVE (TestCreateRefusalArmsClassifyEveryArm checks it
+// against the contract), so a new arm cannot reach the main worktree as a
+// failed create merely because nobody remembered to exclude it. Arms only the
+// async-merge path or the transport raise are classified too; they are named
+// by their contract spelling where this package declares no constant.
+var createRefusalArms = map[string]bool{
+	// The caller's input.
+	ArmUngatedWithoutConsent:                true,
+	ArmNoSlug:                               true,
+	ArmInsideTemporaryDirectory:             true,
+	ArmUnknownForkSource:                    true,
+	ArmForkSourceHasNoConversation:          true,
+	ArmNameReserved:                         true,
+	ArmNameHeld:                             true,
+	ArmInvalidName:                          true,
+	"unknown_context_workspace":             true,
+	"parent_not_open":                       true,
+	ArmUnknownOwner:                         true,
+	ArmOwnerNoticeRequired:                  true,
+	ArmOwnerNoticeUnexpected:                true,
+	ArmUnknownLandingTarget:                 true,
+	ArmUnknownRequester:                     true,
+	"async_merge_unknown_branch":            true,
+	"async_merge_branch_owned":              true,
+	"async_merge_unknown_subagent":          true,
+	"async_merge_unknown_maker":             true,
+	"async_merge_context_not_maker":         true,
+	"async_merge_name_taken":                true,
+	"placement_behind_not_in_line":          true,
+	"async_merge_unknown_close_after":       true,
+	"op_id_with_async_merge":                true,
+	"version_increment_required":            true,
+	"version_increment_unexpected":          true,
+	"async_merge_requester_queued":          true,
+	"async_merge_requester_merging":         true,
+	"async_merge_requester_session_deleted": true,
+	// A fault of the daemon, the repository or the machine.
+	ArmBriefMissing:                     false,
+	ArmUnknownRepository:                false,
+	"worktree_creation_failed":          false,
+	ArmSpawnFailed:                      false,
+	ArmOneShotPolicyMissing:             false,
+	ArmNamingFailed:                     false,
+	ArmOriginFetchFailed:                false,
+	"async_merge_no_deploy_config":      false,
+	"async_merge_deploy_config_invalid": false,
+	// A handover.
+	ArmTransferringAway: false,
+	ArmStandingDown:     false,
 }
 
 // callerInputRefusal answers the arm of a create's error when it is a refusal
-// of the caller's own input (callerInputArms).
+// of the caller's own input (createRefusalArms). A family rule's refusal
+// (wsm.ParentNotOpenError) is the create's `parent_not_open` arm.
 func callerInputRefusal(err error) (string, bool) {
 	var refusal *Refusal
-	if errors.As(err, &refusal) && callerInputArms[refusal.Arm] {
+	if errors.As(err, &refusal) && createRefusalArms[refusal.Arm] {
 		return refusal.Arm, true
+	}
+	var parent *wsm.ParentNotOpenError
+	if errors.As(err, &parent) && createRefusalArms["parent_not_open"] {
+		return "parent_not_open", true
 	}
 	return "", false
 }
