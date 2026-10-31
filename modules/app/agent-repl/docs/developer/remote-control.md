@@ -82,7 +82,9 @@ id).
   2026-10-31).
 - **Changing it.** `agentrepl.v1.UpdateRemoteControlMode` takes `on`, `off` or
   `toggle`. A toggle turns over the mode read at that moment. The topbar chip
-  and `agent-repl-remote-control-toggle` both send `toggle`.
+  and `agent-repl-remote-control-toggle` both send `toggle`. An agent sends
+  `on` or `off` for any workspace with `agent-repld workspace set WS
+  -remote-control on|off`.
   - With a shim up, the daemon sends `shim.v1.SetSessionRemoteControl`.
   - Turning it on with no shim starts one.
   - Turning it off with no shim only records it.
