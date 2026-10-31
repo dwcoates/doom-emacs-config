@@ -73,6 +73,30 @@ keep-alive cycle's rules: never under a turn, never for the workspace in view,
 and never once a real turn has run since the pick. It leaves the keep-alive
 cycle's park, so the workspace is drawn as the idle session it was.
 
+## The shim alone decides whether it may stand down
+
+Owner ruling, 2026-10-30: no unforced stand-down ever ends or loses work, and
+the shim is the sole authority on that. Its unforced `shim.v1.KillSession`
+refuses while a turn is served, while detached work is live, or while the
+vendor states itself busy (`conversation.v1.SessionVendorActivity`).
+
+- **Why the vendor's own state.** The moment a background subagent or task
+  ends, the vendor queues its notification and runs a turn to hand the result
+  back. Until that turn's first reply nothing on the turn or live-work planes
+  says anything runs, and a stand-down in that window lost the hand-back
+  (2026-10-29, `emudhra-cert-compromise-response`). A pending wakeup or cron job
+  also keeps the vendor busy.
+- **Where it comes from.** The shim runs the vendor with
+  `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` (`sdk/real-query.ts`), takes its
+  `session_state_changed`, and pushes the level on change
+  (`engine/session.ts` `refreshVendorActivity`). The shim's own keep-alive is
+  never served as busy.
+- **The daemon's side.** `sessionwatcher` counts a busy vendor as not free
+  (`vendoractivity.go`), so the move to idle is a freeness edge. That edge
+  re-runs a replacement the shim refused (`promptqueue.deferReplacementLocked`).
+- **Force still ends work.** A forced deploy and `UpdateShutdownSchedule{now}`
+  stand shims down over anything.
+
 ## No UX waits on a shim
 
 - An editor's open answers once the conversation's newest page is read from the

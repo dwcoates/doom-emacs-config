@@ -223,6 +223,15 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		})
 		w.pendingSkillsChanged = append([]string{}, paths...)
 
+	case *conversationv1.SessionUpdate_VendorActivity:
+		// THE VENDOR'S ACTIVITY LEVEL, half of no other fact: taken even ahead
+		// of the facts (the facts restate it), and a change once they are in
+		// is a freeness edge, which is what re-runs a replacement the shim
+		// refused while the vendor was busy.
+		if w.takeVendorActivityLocked(u.VendorActivity, "session_update") && w.started {
+			w.signalFreenessLocked()
+		}
+
 	case *conversationv1.SessionUpdate_JoinWithdrawn:
 		// A PROMPT SENT TO JOIN THE RUNNING TURN WAS GIVEN BACK before the
 		// vendor took it in: its own turn ends unrun, and the lifecycle sink
@@ -271,7 +280,9 @@ func (w *watcher) routeQueryDiedLocked(update *conversationv1.SessionUpdate) {
 			w.sinks.Feed.OnTurnOpened(w.ws, *w.turn)
 		}
 	}
-	// NOTHING SURVIVES THE SESSION'S QUERY, so every live item concludes here.
+	// NOTHING SURVIVES THE SESSION'S QUERY, so every live item concludes here,
+	// and the vendor that ran them owes nothing.
+	w.vendorBusy = false
 	if changed := w.concludeAllLocked(concludedQueryDied); changed {
 		w.publishProcessEndedLocked()
 	}
@@ -329,6 +340,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "skills_changed"
 	case *conversationv1.SessionUpdate_JoinWithdrawn:
 		return "join_withdrawn"
+	case *conversationv1.SessionUpdate_VendorActivity:
+		return "vendor_activity"
 	default:
 		return "unset"
 	}

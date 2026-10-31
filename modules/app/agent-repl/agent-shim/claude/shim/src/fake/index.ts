@@ -670,6 +670,51 @@ export function createFakeQuery(
    */
   let vendorTurnQueued = false;
   /**
+   * WHETHER A TURN IS RUNNING right now: from a turn's start to its result.
+   * Read by the session state below, never by a scenario.
+   */
+  let turnRunning = false;
+  /**
+   * THE SESSION STATE LAST STATED (sdk.d.ts `session_state_changed`), as the
+   * real CLI states it when the host sets CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS
+   * (the shim always does). A fresh process has stated nothing and is idle.
+   */
+  let statedSessionState: "idle" | "running" = "idle";
+  /**
+   * THE REAL CLI'S IDLE RULE: idle only once no turn runs, no background task
+   * runs and no notification turn is owed; running otherwise. The CLI's own
+   * predicate also counts a pending scheduled wakeup, which no scenario
+   * schedules.
+   */
+  const sessionStateNow = (): "idle" | "running" => {
+    if (turnRunning || vendorTurnQueued) return "running";
+    for (const task of liveTasks.values()) if (task.backgrounded) return "running";
+    return "idle";
+  };
+  /** State the session state when it changed, as the CLI does: on change only. */
+  const settleSessionState = (why: string): void => {
+    const now = sessionStateNow();
+    if (now === statedSessionState) return;
+    statedSessionState = now;
+    LOGGER.debug({ claude_session_id: sessionUuid, state: now, why }, "fake vendor stated its session state");
+    emitSessionState(now);
+  };
+  /**
+   * How many session states this process has stated, for their uuids. A state
+   * frame is never a record (nothing writes it), so its uuid comes from its own
+   * sequence rather than the session's: drawing from the session's would shift
+   * every later record's uuid, and with it every golden keyed by them.
+   */
+  let sessionStatesStated = 0;
+  const emitSessionState = (state: "idle" | "running"): void => {
+    sessionStatesStated++;
+    emitWithUuid(`5e55107e-0000-4000-8000-${sessionStatesStated.toString(16).padStart(12, "0")}`, {
+      type: "system",
+      subtype: "session_state_changed",
+      state,
+    });
+  };
+  /**
    * THE SHIP-GNS REPLAY (2026-10-02), armed by `!stop-on-rewind`: every
    * truncating resume of the session reports a background task STOPPED, and
    * the vendor answers that stop in a turn of its own ahead of the next send.
@@ -1166,6 +1211,7 @@ export function createFakeQuery(
 
   const result = (spec: ResultSpec): void => {
     resultEmitted = true;
+    turnRunning = false;
     // BOTH PLANES, ONE UUID, exactly as `attachment` does it. The turn's
     // terminal row is keyed `terminal:<AgentId>:<vendor record uuid>`, and that
     // key only collides with the sidecar's row for the SAME turn if the uuid on
@@ -1226,6 +1272,9 @@ export function createFakeQuery(
           }
         : { errors: spec.errors ?? [] }),
     });
+    // AFTER THE RESULT, as the CLI flushes it: idle only when nothing else runs
+    // or is owed.
+    settleSessionState("turn_result");
     if (spec.streamOnly === true) return;
     files.transcript.append({
       type: "system",
@@ -1460,6 +1509,7 @@ export function createFakeQuery(
     announceLiveTasks,
     endTask: (taskId: string) => {
       liveTasks.delete(taskId);
+      settleSessionState("task_ended");
     },
     setMcpArm: (arm) => {
       mcpArm = arm;
@@ -1489,6 +1539,8 @@ export function createFakeQuery(
         "fake vendor queued a turn of its OWN, to run ahead of the next send",
       );
       vendorTurnQueued = true;
+      // A NOTIFICATION TURN OWED IS WORK: the CLI is not idle while one waits.
+      settleSessionState("vendor_turn_queued");
     },
     fallbackTo: (next) => {
       LOGGER.debug(
@@ -1506,6 +1558,8 @@ export function createFakeQuery(
    * its result says where it came from (`origin`, sdk.d.ts).
    */
   const runVendorTurn = (): void => {
+    turnRunning = true;
+    settleSessionState("vendor_turn_started");
     turn++;
     resultEmitted = false;
     answering = undefined;
@@ -1777,6 +1831,8 @@ export function createFakeQuery(
         vendorTurnQueued = false;
         runVendorTurn();
       }
+      turnRunning = true;
+      settleSessionState("turn_started");
       turn++;
       interrupted = false;
       resultEmitted = false;
@@ -1897,6 +1953,8 @@ export function createFakeQuery(
       summary,
     });
     announceLiveTasks();
+    // AFTER THE STOP'S OWN NOTIFICATION, as the CLI orders them.
+    settleSessionState("task_stopped");
     // THE FAN-WIDE CANCEL'S OWN RECORD. `agents_killed` states that the live
     // set EMPTIED, which no individual stop can know, so it is written here
     // rather than by a scenario. The corpus carries it as a bare system line
@@ -2015,7 +2073,7 @@ export function createFakeQuery(
       // signal a model switch produces is a `session_state_changed` beat, and
       // the REAL evidence is the next assistant message reporting the new model
       // — which every scenario does, because `assistant` reads `model` live.
-      systemMessage("session_state_changed", { state: "idle" });
+      emitSessionState(sessionStateNow());
     },
 
     supportedModels: (): Promise<ModelInfoLike[]> => control(() => FAKE_MODELS),

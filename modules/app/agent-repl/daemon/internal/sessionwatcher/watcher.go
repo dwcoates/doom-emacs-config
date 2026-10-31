@@ -203,6 +203,10 @@ type watcher struct {
 	// handed to the lifecycle sink, as the paths the shim named; nil when none
 	// is pending.
 	pendingSkillsChanged []string
+	// vendorBusy is the vendor's activity level as the shim last stated it
+	// (vendoractivity.go): true while the vendor runs or owes anything. Half of
+	// nothing else: it is its own term of freeLocked.
+	vendorBusy bool
 	// pendingVendorSessionID is the vendor session id in force, as the shim
 	// last stated it (a rotation, a re-announced start), not yet handed to the
 	// lifecycle sink, which records it as what a later resume names.
@@ -605,7 +609,8 @@ func (w *watcher) TurnInFlight() *ids.TurnID {
 	return &turn
 }
 
-// Free reports freeness: no turn in flight AND an empty live-work set.
+// Free reports freeness: no turn in flight, an empty live-work set, and a
+// vendor that states itself idle.
 func (w *watcher) Free() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -613,7 +618,9 @@ func (w *watcher) Free() bool {
 }
 
 // freeLocked is THE freeness judgement: the session facts are in, and they
-// leave no turn in flight and no live detached work.
+// leave no turn in flight, no live detached work, and no vendor activity
+// (vendoractivity.go): a vendor about to run the turn that hands a finished
+// task's result back is busy before either of the others says so.
 //
 // UNKNOWN IS NEVER FREE. A pure attach (an adopted shim) knows nothing about
 // the turn the shim may be running until the shim re-announces its facts, and
@@ -623,7 +630,7 @@ func (w *watcher) Free() bool {
 // force-killed a running conversation (2026-09-30, 18:39). The facts arriving
 // with nothing in flight is the freeness edge instead.
 func (w *watcher) freeLocked() bool {
-	return w.started && w.turn == nil && w.liveWorkLocked().Empty()
+	return w.started && w.turn == nil && w.liveWorkLocked().Empty() && !w.vendorBusy
 }
 
 // SetMainAgent names the session's main agent, from StartTurnSuccess.prompt.agent.
@@ -2063,6 +2070,11 @@ func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted, open
 		w.log.Debug("daemon.sessionwatcher.watch_session",
 			"ignored a re-announced SessionStarted's facts; they are already held, and only its live membership is reconciled",
 			dlog.Context{"vendor_session_id": started.GetVendorSessionId()})
+		// THE RE-ANNOUNCEMENT STATES THE VENDOR'S ACTIVITY NOW, and a change in
+		// it is a freeness edge like any other.
+		if activity := started.GetVendorActivity(); activity != nil && w.takeVendorActivityLocked(activity, "reannounced") {
+			w.signalFreenessLocked()
+		}
 		if w.levelModeLocked() {
 			// THE RE-ANNOUNCEMENT IS A LEVEL: its descriptions first, so the
 			// items it names are admitted whole rather than pending.
@@ -2121,6 +2133,11 @@ func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStart
 	// until adoptLiveWorkLocked routes their descriptions, which admits them.
 	if w.levelModeLocked() {
 		w.applyLevelLocked(startedLevel(started), "session_started")
+	}
+	// AND THE VENDOR'S ACTIVITY AT THIS INSTANT, for a shim that states it;
+	// the caller's freeness judgement reads it.
+	if activity := started.GetVendorActivity(); activity != nil {
+		w.takeVendorActivityLocked(activity, "session_started")
 	}
 	// THE EDGE IS SIGNALLED AFTER THE FACTS ARE TAKEN UP, under the same lock
 	// (the deferred close runs before this function's caller releases it), so

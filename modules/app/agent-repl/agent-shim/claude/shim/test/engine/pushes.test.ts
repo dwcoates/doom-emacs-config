@@ -823,6 +823,38 @@ describe("the vendor's skill set gone stale", () => {
   });
 });
 
+describe("the vendor's activity level", () => {
+  function activity(busy: boolean): conversationv1.SessionUpdate {
+    return create(conversationv1.SessionUpdateSchema, {
+      update: {
+        case: "vendorActivity",
+        value: create(conversationv1.SessionVendorActivitySchema, {
+          state: busy
+            ? { case: "busy", value: create(conversationv1.SessionVendorActivityBusySchema, {}) }
+            : { case: "idle", value: create(conversationv1.SessionVendorActivityIdleSchema, {}) },
+        }),
+      },
+    });
+  }
+
+  it("is replayed to a consumer that joins after it was stated", async () => {
+    // A daemon attaching while the vendor is busy must not read it free.
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(activity(true));
+
+    const opening = await take(pushes.subscribe(), 2);
+
+    expect(opening[1]).toEqual(activity(true));
+  });
+
+  it("drops an unchanged level", () => {
+    const pushes = new SessionPushes(() => 1, "test-build-sha");
+    pushes.push(activity(true));
+
+    expect(pushes.push(activity(true))).toBe(false);
+  });
+});
+
 describe("withdrawing a standing fact", () => {
   function cacheLapse(atMs: bigint): conversationv1.SessionUpdate {
     return create(conversationv1.SessionUpdateSchema, {

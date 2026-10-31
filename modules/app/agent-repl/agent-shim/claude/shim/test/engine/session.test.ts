@@ -6756,7 +6756,9 @@ describe("GetLiveWork reconciliation", () => {
     // The re-announcement and the replayed current view sit ahead of the
     // restated diagnostics the fault produces; this drains past them and stops
     // as soon as one is seen, so it never waits on a frame that will not come.
-    for (let taken = 0; taken < 8 && !unhealthy.includes(true); taken++) {
+    // The bound covers the re-announcement and every replayed arm
+    // (SessionPushes.REPLAYED) with room to spare; stopping early costs nothing.
+    for (let taken = 0; taken < 16 && !unhealthy.includes(true); taken++) {
       const next = await iterator.next();
       if (next.done === true) break;
       const frame = next.value.frame;
@@ -6833,7 +6835,8 @@ describe("GetLiveWork reconciliation", () => {
     ]();
     await iterator.next();
     const unhealthy: boolean[] = [];
-    for (let taken = 0; taken < 8 && !unhealthy.includes(true); taken++) {
+    // Bounded as the drain above is: the re-announcement and every replayed arm.
+    for (let taken = 0; taken < 16 && !unhealthy.includes(true); taken++) {
       const next = await iterator.next();
       if (next.done === true) break;
       const frame = next.value.frame;
@@ -16121,8 +16124,213 @@ describe("the live-work level the shim pushes", () => {
 
     // Assert
     expect(response.result.case === "success" ? response.result.value.session?.contract : undefined).toBe(
-      conversationv1.SessionContract.LIVE_WORK_LEVEL,
+      conversationv1.SessionContract.VENDOR_ACTIVITY_LEVEL,
     );
+  });
+});
+
+/**
+ * THE VENDOR'S ACTIVITY LEVEL AND THE STAND-DOWN AUTHORITY
+ * (conversation.v1.SessionVendorActivity; owner ruling 2026-10-30): the shim
+ * is the sole authority on whether its session may stand down, and it counts
+ * the vendor's own state, which is busy across the span between a background
+ * task's end and its hand-back turn's first reply -- the span a deploy's
+ * replacement used to kill (2026-10-29, emudhra-cert-compromise-response).
+ */
+describe("the vendor's activity level", () => {
+  /** The vendor stating its session state, as it does under CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS. */
+  function vendorState(state: string): SdkMessage {
+    return { type: "system", subtype: "session_state_changed", state, uuid: `state-${state}`, session_id: "s" } as never;
+  }
+
+  /** Every activity level pushed while ACT ran, each as its arm. */
+  function activityWhile(h: Harness, act: () => Promise<void>): Promise<string[]> {
+    return pushedUpdates(
+      h,
+      (update) => (update.case === "vendorActivity" ? (update.value.state.case ?? "unknown") : undefined),
+      act,
+    );
+  }
+
+  /** The refusal's cause and the activity it names, or the outcome when it was not refused. */
+  function refusalOf(response: shimv1.KillSessionResponse): { cause: string; activity: string } {
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    if (failure === undefined) return { cause: response.result.case ?? "unset", activity: "" };
+    const live = failure.cause.case === "live" ? failure.cause.value : undefined;
+    return { cause: failure.cause.case ?? "unset", activity: live?.vendorActivity?.state.case ?? "unset" };
+  }
+
+  it("refuses an unforced KillSession while the vendor is busy with nothing the shim has seen start", async () => {
+    // Arrange: a background task just ended and its hand-back turn is queued.
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(vendorState("running"));
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    expect(refusalOf(response)).toEqual({ cause: "live", activity: "busy" });
+  });
+
+  it("records the vendor's busy state on the refusal", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(vendorState("running"));
+    const mark = logSinkMark();
+
+    // Act
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    const refusal = logRecordsSince(mark).find(
+      (record) => record.message === "refused KillSession because the session is live and force was not set",
+    );
+    expect(refusal?.context.vendor_busy).toBe(true);
+  });
+
+  it("allows an unforced KillSession once the vendor states idle", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(vendorState("running"));
+    await h.engine.onSdkMessage(vendorState("idle"));
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    expect(response.result.case).not.toBe("failure");
+  });
+
+  it("reads a state it does not know as busy", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(vendorState("requires_action"));
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    expect(refusalOf(response).activity).toBe("busy");
+  });
+
+  it("lets force stand a busy vendor down", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(vendorState("running"));
+
+    // Act
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    // Assert
+    expect(response.result.case).not.toBe("failure");
+  });
+
+  it("pushes busy and then idle as the vendor states them", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const levels = await activityWhile(h, async () => {
+      await h.engine.onSdkMessage(vendorState("running"));
+      await h.engine.onSdkMessage(vendorState("idle"));
+    });
+
+    // Assert: the level in force is replayed first, and the stand-down that
+    // ends the collection states nothing new.
+    expect(levels).toEqual(["idle", "busy", "idle"]);
+  });
+
+  it("pushes an unchanged level once", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const levels = await activityWhile(h, async () => {
+      await h.engine.onSdkMessage(vendorState("running"));
+      await h.engine.onSdkMessage(vendorState("running"));
+    });
+
+    // Assert
+    expect(levels.filter((level) => level === "busy")).toHaveLength(1);
+  });
+
+  it("states idle when the vendor process ends", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act: the vendor is busy, then the session stands down (pushedUpdates).
+    const levels = await activityWhile(h, () => h.engine.onSdkMessage(vendorState("running")));
+
+    // Assert
+    expect(levels.at(-1)).toBe("idle");
+  });
+
+  it("states the level on its opening", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const response = await started(h);
+
+    // Assert
+    const session = response.result.case === "success" ? response.result.value.session : undefined;
+    expect(session?.vendorActivity?.state.case).toBe("idle");
+  });
+
+  it("re-announces the level in force to a new watch", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(vendorState("running"));
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+    await iterator.next();
+
+    // Act
+    const second = await nextPush(iterator);
+    await iterator.return?.();
+
+    // Assert
+    expect(second.frame.case === "sessionStarted" ? second.frame.value.vendorActivity?.state.case : "not-started").toBe(
+      "busy",
+    );
+  });
+
+  it("serves no busy for the vendor running the shim's own keep-alive", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    keepaliveNow(h);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Act
+    await h.engine.onSdkMessage(vendorState("running"));
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert
+    expect(response.result.case).not.toBe("failure");
+  });
+
+  it("serves busy once the keep-alive ends with the vendor still owing work", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const levels = await activityWhile(h, () =>
+      keepaliveTurn(h, [vendorState("running")]),
+    );
+
+    // Assert: the replayed idle, no busy during the keep-alive, busy once its
+    // slot closed, and idle at the stand-down that ends the collection.
+    expect(levels).toEqual(["idle", "busy", "idle"]);
   });
 });
 

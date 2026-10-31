@@ -1476,8 +1476,9 @@ How the daemon puts each component into service:
    - a stale DAEMON is replaced by the blue-green handover, and its successor
      bounces the stale shims it adopts through its own bounce registry;
    - each stale SHIM goes to the prompt queue's BOUNCE REGISTRY: bounced now
-     when it has no turn and no detached work, otherwise registered and
-     bounced on its freeness edge (a turn or the last detached item ending).
+     when it has no turn, no detached work and a vendor that states itself
+     idle, otherwise registered and bounced on its freeness edge (a turn or
+     the last detached item ending, or the vendor falling idle).
      A shim that DIES under a registered bounce is itself that edge: its work
      ended with it, so the bounce relaunches it at once, or is unregistered
      when this daemon ended the session, the workspace is closed, or a newer
@@ -1488,7 +1489,10 @@ How the daemon puts each component into service:
      AN UNFORCED SHIM REPLACEMENT NEVER ENDS LIVE WORK: freeness is a reading
      the vendor can overtake (it starts a turn on its own the moment a
      subagent concludes), but the shim's `KillSession{force:false}` refusal is
-     atomic and authoritative. A `live` refusal, or a stand-down the shim never
+     atomic and authoritative, and it counts the vendor's own busy state
+     (`conversation.v1.SessionVendorActivity`), which covers that turn before
+     its first reply and every pending wakeup or cron job
+     (`docs/developer/shim-lifecycle.md`). A `live` refusal, or a stand-down the shim never
      answered and did not leave inside the window, is never forced: the old
      shim keeps serving untouched, the prelaunch is retired, the hold released,
      and the bounce is re-registered behind that work (`bounce.ErrDeferred`)
@@ -3095,7 +3099,7 @@ session is stood down (`drain.Controller.CycleDown`) with the
 `keepalive_cycle` terminal until a minute before its next beat, when it is
 restored, at most three at once, earliest beat first. A shim runs no timer of
 its own. It is stood down only once the session has been free (no turn, no
-live detached work) a whole interval, so the user has about an hour after
+live detached work, an idle vendor) a whole interval, so the user has about an hour after
 the work ends to prompt with no shim start; never under a turn or live
 detached work, nor for the selected workspace, nor once a real turn ran
 since the beat. A CACHE KNOWN COLD IS NEVER BEATEN (owner ruling,

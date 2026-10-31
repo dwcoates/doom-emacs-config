@@ -2,6 +2,9 @@ package sessionwatcher
 
 import (
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,8 +35,69 @@ func (h *harness) noFree(t *testing.T) {
 	h.w.dispatching.Wait()
 	select {
 	case ws := <-h.rec.frees:
-		t.Fatalf("OnFree(%q) was told while detached work is still live", ws)
+		t.Fatalf("OnFree(%q) was told while work is still in flight", ws)
 	default:
+	}
+}
+
+// freeToldNow asserts the freeness edge has already been told, for this
+// watcher's workspace, once every dispatch so far has run.
+func (h *harness) freeToldNow(t *testing.T) {
+	t.Helper()
+	h.w.dispatching.Wait()
+	select {
+	case ws := <-h.rec.frees:
+		if ws != h.w.ws {
+			t.Fatalf("OnFree named %q, want %q", ws, h.w.ws)
+		}
+	default:
+		t.Fatal("the workspace fell free and OnFree was never told")
+	}
+}
+
+// TestFreenessEdgeAssertionsGoThroughTheHarnessHelpers keeps every read of the
+// lifecycle sink's freeness edges inside awaitFree, noFree, freeToldNow and
+// drainFrees, so no test hand-rolls a select whose deadline or workspace check
+// drifts from theirs.
+func TestFreenessEdgeAssertionsGoThroughTheHarnessHelpers(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatalf("list the package's test files: %v", err)
+	}
+
+	// Act.
+	var outside []string
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		reads := strings.Count(string(body), "<-h.rec.frees")
+		if file == "livework_test.go" {
+			// The four helpers' own reads, and this test's needle.
+			reads -= 5
+		}
+		if reads != 0 {
+			outside = append(outside, file)
+		}
+	}
+
+	// Assert.
+	if len(outside) != 0 {
+		t.Fatalf("freeness edges read outside the harness helpers in %v", outside)
+	}
+}
+
+// drainFrees discards every freeness edge told so far.
+func (h *harness) drainFrees() {
+	h.w.dispatching.Wait()
+	for {
+		select {
+		case <-h.rec.frees:
+		default:
+			return
+		}
 	}
 }
 

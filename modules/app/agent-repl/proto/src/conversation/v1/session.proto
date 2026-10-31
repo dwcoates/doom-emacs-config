@@ -71,6 +71,13 @@ message SessionStarted {
   // the user. EMPTY when nothing is asked. An ask a keep-alive raised on the
   // main agent is never listed, as its turn is never served.
   repeated SessionOpenAsk open_asks = 11;
+  // Whether the vendor process is doing anything at the opening, as the level
+  // SessionUpdate.vendor_activity carries afterwards (see
+  // SessionVendorActivity). A daemon that attaches to a running shim learns
+  // from it whether the vendor is mid-turn, waiting on background work or a
+  // scheduled wakeup, or idle, without waiting for the next change. UNSET only
+  // for a shim whose contract predates SESSION_CONTRACT_VENDOR_ACTIVITY_LEVEL.
+  optional SessionVendorActivity vendor_activity = 12;
 
   // Tag 8 is RETIRED: the vendor handshake block is deferred.
 
@@ -327,6 +334,11 @@ message SessionUpdate {
     // because a joining prompt has no stream of its own. See
     // SessionJoinWithdrawn, which carries the arm's whole contract.
     SessionJoinWithdrawn join_withdrawn = 40;
+    // THE VENDOR'S ACTIVITY LEVEL: whether the vendor process is doing or owes
+    // anything at all. A STANDING LEVEL with replace semantics, stated whenever
+    // it changes and restated on every WatchSession open. See
+    // SessionVendorActivity, which carries the level's whole contract.
+    SessionVendorActivity vendor_activity = 41;
   }
 }
 
@@ -797,7 +809,69 @@ enum SessionContract {
   // empty level whenever its vendor process ends or restarts, so liveness is
   // the level and nothing else (owner ruling, 2026-10-07).
   SESSION_CONTRACT_LIVE_WORK_LEVEL = 1;
+  // The shim also states the vendor's activity level
+  // (SessionStarted.vendor_activity, SessionUpdate.vendor_activity), and
+  // refuses every unforced KillSession while that level is not idle, so a
+  // consumer counts a non-idle vendor as work in flight (owner ruling,
+  // 2026-10-30).
+  SESSION_CONTRACT_VENDOR_ACTIVITY_LEVEL = 2;
 }
+
+// THE VENDOR'S ACTIVITY LEVEL (owner ruling, 2026-10-30): the SHIM is the sole
+// authority on whether its session may be stood down, and it judges that from
+// the vendor's own account of itself.
+//
+// WHY A LEVEL OF ITS OWN. The turn in flight and the live-work level say what
+// the shim has SEEN start. The vendor starts work the shim has not seen yet:
+// the moment a background subagent or task concludes, the vendor queues its
+// notification and runs a turn to hand the result to the main agent, and a
+// scheduled wakeup or cron job fires a turn on its own clock. Between those
+// causes and the turn's first reply nothing on the turn or live-work planes
+// says anything runs, so a stand-down judged from them alone ended the
+// hand-back mid-flight and the conclusion was lost. The vendor's own state is
+// busy across that whole span.
+//
+// - REPLACE SEMANTICS. Each statement is the whole truth; a consumer replaces
+//   what it holds and pairs nothing.
+// - IDLE MEANS NOTHING RUNS AND NOTHING IS OWED: no turn running or queued, no
+//   background task running, no notification waiting to be delivered, and no
+//   scheduled wakeup or cron job pending. Anything else is busy.
+// - SCOPED TO ONE VENDOR PROCESS. A vendor process that has just started, and
+//   been sent nothing, is idle; the shim states idle when its vendor process
+//   ends or restarts.
+// - THE STAND-DOWN RULE. The shim refuses every unforced KillSession while the
+//   level is busy (SessionLive.vendor_activity names it on the refusal), and a
+//   consumer counts a busy vendor as work in flight, so the transition to idle
+//   is a freeness edge. The consumer's reading is advice for when to ask; the
+//   shim's refusal is the answer.
+// - UNKNOWN IS BUSY. A statement with no arm set is a state this revision
+//   does not name, and a consumer treats it as busy: an unknown state is never
+//   read as permission to stand the session down.
+//
+// ONLY A SHIM STAMPED SESSION_CONTRACT_VENDOR_ACTIVITY_LEVEL (or later) states
+// it; see SessionContract.
+message SessionVendorActivity {
+  // The vendor's state. Exactly one arm is set for every state this revision
+  // names; none set means a state it does not, read as busy.
+  oneof state {
+    // Nothing runs and nothing is owed: the session may be stood down without
+    // ending any work.
+    SessionVendorActivityIdle idle = 1;
+    // A turn runs or is owed, background work runs, a notification waits to
+    // be delivered, an ask waits on the user, or a scheduled wakeup or cron
+    // job is pending. Standing the session down now ends or loses work.
+    SessionVendorActivityBusy busy = 2;
+  }
+}
+
+// The vendor is idle: no turn, no background task, no undelivered
+// notification, no pending wakeup or cron job.
+message SessionVendorActivityIdle {}
+
+// The vendor is doing, or owes, something; what it is lives on the turn,
+// live-work and ask planes when the shim has seen it start, and nowhere yet
+// when it has not.
+message SessionVendorActivityBusy {}
 
 // The model in effect for subsequent responses.
 message SessionModelChanged {
@@ -1154,6 +1228,11 @@ message SessionLive {
   // PRODUCER NOTE: filled from the shim's OWN live-work tracking (its open
   // detached-work streams), never from any vendor record.
   repeated DetachedWorkId live_work = 2;
+  // The vendor's activity level at the refusal. A refusal with no turn and no
+  // live work still stands when this is busy: the vendor is about to run, or
+  // waits to run, something the shim has not seen start yet. UNSET only from
+  // a shim whose contract predates SESSION_CONTRACT_VENDOR_ACTIVITY_LEVEL.
+  optional SessionVendorActivity vendor_activity = 3;
 }
 
 // The session's CURRENT CONTEXT USAGE, as the vendor's own control answer

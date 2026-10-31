@@ -33,7 +33,7 @@ import { RESUME_DROPS_TURN_REFUSAL_PREFIX } from "../../src/engine/rollback.js";
 import {
   FAKE_DEFAULT_EFFORT,
 } from "../../src/fake/catalogs.js";
-import { HARNESS_NOW_MS, driveScenario, ofType, recordsOfType, theResult } from "./harness.js";
+import { HARNESS_NOW_MS, driveScenario, ofType, recordsOfType, theResult, type Driven } from "./harness.js";
 
 const ALLOW: CanUseToolLike = async (_n, input) =>
   ({ behavior: "allow", updatedInput: input });
@@ -145,8 +145,61 @@ describe("the turn loop", () => {
     // reaching this assertion at all is the fact under test.
     const driven = await driveScenario(["hello"]);
 
+    // Assert: the last turn's result, then the idle the CLI states after it.
+    expect(driven.messages.slice(-2)).toMatchObject([
+      { type: "result" },
+      { type: "system", subtype: "session_state_changed", state: "idle" },
+    ]);
+  });
+});
+
+/**
+ * THE SESSION STATE THE MOCKED VENDOR STATES (sdk.d.ts
+ * `session_state_changed`), as the real CLI states it under
+ * CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: running from a turn's start, idle
+ * only once no turn runs, no background task runs and no notification turn is
+ * owed. The shim's stand-down guard reads exactly this.
+ */
+describe("the session state", () => {
+  /** Every state the drive stated, in order. */
+  function states(driven: Driven): string[] {
+    return driven.messages
+      .filter((m) => m.type === "system" && (m as { subtype?: string }).subtype === "session_state_changed")
+      .map((m) => (m as { state?: string }).state ?? "");
+  }
+
+  it("states running at a turn's start and idle after its result", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"]);
+
     // Assert
-    expect(driven.messages.at(-1)).toMatchObject({ type: "result" });
+    expect(states(driven)).toEqual(["running", "idle"]);
+  });
+
+  it("states running before the turn's first reply", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["hello"]);
+
+    // Assert
+    const running = driven.messages.findIndex((m) => (m as { state?: string }).state === "running");
+    const firstReply = driven.messages.findIndex((m) => m.type === "assistant");
+    expect(running).toBeLessThan(firstReply);
+  });
+
+  it("stays running after the result while a background task runs", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!bash-detach-live"]);
+
+    // Assert
+    expect(states(driven)).toEqual(["running"]);
+  });
+
+  it("states nothing between two turns that leave nothing running", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["one", "two"]);
+
+    // Assert
+    expect(states(driven)).toEqual(["running", "idle", "running", "idle"]);
   });
 });
 

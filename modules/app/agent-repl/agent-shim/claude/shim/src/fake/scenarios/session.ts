@@ -200,8 +200,9 @@ const MODEL_FALLBACK = scenario({
     });
     ctx.fallbackTo(fallback);
     // The declared beat a model switch produces. It carries NO model, which is
-    // exactly why the assistant message below is the evidence.
-    ctx.systemMessage("session_state_changed", { state: "idle" });
+    // exactly why the assistant message below is the evidence. It restates the
+    // session's state, which is running: the turn is not over.
+    ctx.systemMessage("session_state_changed", { state: "running" });
     conclude(ctx, `Answered on ${fallback} after the fallback.`);
   },
 });
