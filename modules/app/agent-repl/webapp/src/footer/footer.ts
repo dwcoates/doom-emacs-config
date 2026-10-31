@@ -79,6 +79,7 @@ import {
 } from "./expanded.js";
 import { salientKind } from "./activity.js";
 import { createTransientExpiry } from "./expiry.js";
+import { liveEditorNotice, TRANSIENT_WINDOW_MS, type EditorNotices } from "./editor-notice.js";
 import { publishCompactionProgress } from "./progress.js";
 import {
   drawClientDisconnectedStrip,
@@ -98,6 +99,8 @@ export interface FooterDeps {
   readonly selectDetachedWork: (id: FeedId) => Promise<boolean>;
   /** Whether the host shows this page (`presence.ts`): its shows are switches. */
   readonly presence: Pick<Presence, "shown" | "onChange" | "embedded">;
+  /** The editor's composer notices, drawn as transient lines (editor-notice.ts). */
+  readonly editorNotices: Pick<EditorNotices, "current" | "subscribe">;
 }
 
 export interface FooterHandle extends Handle {
@@ -181,6 +184,11 @@ export function mountFooter(
   const expiry = createTransientExpiry(ctx.ticker, () => {
     redraw("footer.expiry-redraw-undecodable");
   });
+  // A NEW EDITOR NOTICE IS A NEW TRANSIENT: nothing else redraws this
+  // component between pushes, and the notices come mostly while no push can.
+  const unsubscribeFromEditorNotices = deps.editorNotices.subscribe(() => {
+    redraw("footer.editor-notice-redraw-undecodable");
+  });
   // THE FIFTH: the hovered response's usage, standing in for the activity
   // line while the pointer is on its bubble (`showResponseUsage`).
   let hoveredUsage: ResponseUsage | null = null;
@@ -232,6 +240,7 @@ export function mountFooter(
       });
       unsubscribeFromVerdict();
       unsubscribeFromPresence();
+      unsubscribeFromEditorNotices();
       expiry.cancel();
       watch.cancel();
       // The page's compaction line belongs to the stream that just stopped.
@@ -262,6 +271,18 @@ export function mountFooter(
     tooltips.refresh();
   }
 
+  /**
+   * The client-verdict strip's activity line: a live editor notice over the
+   * verdict's own line, since the notice is the newer event (the transient
+   * tier's rule), scheduling the one re-render at its expiry.
+   */
+  function verdictActivity(activity: string): string {
+    const notice = liveEditorNotice(deps.editorNotices.current(), ctx.ticker.now());
+    if (notice === null) return activity;
+    expiry.schedule(notice.atMs + TRANSIENT_WINDOW_MS);
+    return notice.text;
+  }
+
   /** The body of `draw`: the strip, divider and panel for the last view. */
   function drawView(): void {
     // Whatever the last draw scheduled belongs to the view it drew; this draw
@@ -283,7 +304,7 @@ export function mountFooter(
       bare.setAttribute("aria-live", "polite");
       bare.setAttribute("data-client-verdict", verdict.kind);
       bare.appendChild(
-        drawClientDisconnectedStrip(verdict.substatus, verdict.activity),
+        drawClientDisconnectedStrip(verdict.substatus, verdictActivity(verdict.activity)),
       );
       stopTicking(host);
       host.replaceChildren(bare);
@@ -325,11 +346,11 @@ export function mountFooter(
     );
     section = panel;
     notices.prune(drawnRowKeys(panel));
-    const stripDeps = { ctx, selection: shown, onSelect: select, stops, expiry };
+    const stripDeps = { ctx, selection: shown, onSelect: select, stops, expiry, editorNotice: deps.editorNotices.current() };
     const stripEl =
       verdict === null
         ? drawFooterStrip(strip, stripDeps)
-        : drawClientDisconnectedStrip(verdict.substatus, verdict.activity, {
+        : drawClientDisconnectedStrip(verdict.substatus, verdictActivity(verdict.activity), {
             strip,
             deps: stripDeps,
           });

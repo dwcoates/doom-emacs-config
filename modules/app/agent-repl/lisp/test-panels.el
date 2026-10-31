@@ -28,8 +28,9 @@
   (should (= (default-value 'agent-repl-input-height-fraction) 0.184)))
 
 (ert-deftest agent-repl-test-panels-input-height-line-offset-default ()
-  "The composer defaults to one line shorter than the fraction alone."
-  (should (= (default-value 'agent-repl-input-height-line-offset) -1)))
+  "The composer defaults to two lines shorter than the fraction alone:
+one by the 2026-10-02 ruling, one more for the mode line it no longer draws."
+  (should (= (default-value 'agent-repl-input-height-line-offset) -2)))
 
 ;;;; ---- Tests: Panel visibility predicates ----
 

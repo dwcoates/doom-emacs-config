@@ -28,8 +28,9 @@
 ;;   closing (the daemon scopes the claim to it).  The composer is never
 ;;   erased on that edge; nothing here decides the claim ended.
 ;;
-;; The edit mode is shown by one mode-line segment on the composer,
-;; `agent-repl-held-edit-indicator', and by nothing else.
+;; The edit beginning is announced by one editor notice,
+;; `agent-repl-held-edit-indicator', which the page's footer draws as a
+;; transient line (`agent-repl--input-notify'); the composer has no mode line.
 
 ;;; Code:
 
@@ -38,6 +39,7 @@
 
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
+(declare-function agent-repl--input-notify "input" (ws text))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--input-buffer "input" (ws))
 (declare-function agent-repl--input-restore "input" (ws snapshot))
@@ -55,7 +57,7 @@
 (defvar agent-repl-verbs--handover-arms)
 
 (defconst agent-repl-held-edit-indicator "editing held prompt"
-  "The composer's mode-line indicator while a held-prompt edit stands.")
+  "The editor notice a held-prompt edit beginning raises (`agent-repl--input-notify').")
 
 (defvar-local agent-repl--held-edit nil
   "The held-prompt edit this composer took, or nil when none stands.
@@ -63,16 +65,6 @@ A plist `(:turn TURN :edit ID)': TURN is the decoded TurnId a commit or
 cancel echoes, ID the daemon-minted edit identity that tells a new edit
 from the one already taken.  Buffer-local to the composer, because the
 edit is about THIS composer's contents.")
-
-(defconst agent-repl--held-edit-mode-line-spec
-  '(:eval (agent-repl--held-edit-segment))
-  "The composer's held-prompt edit mode-line segment.")
-
-(defun agent-repl--held-edit-segment ()
-  "Return the mode-line indicator text while an edit stands, else \"\"."
-  (if agent-repl--held-edit
-      (concat " " agent-repl-held-edit-indicator)
-    ""))
 
 ;;;; ---- State ----------------------------------------------------------
 
@@ -128,11 +120,10 @@ cancelled, said, and logged, rather than left claimed by nobody."
       (let ((saved (agent-repl--held-edit-save-draft ws buf)))
         (agent-repl--input-fill-said ws buf said parts)
         (with-current-buffer buf
-          (setq agent-repl--held-edit (list :turn (plist-get edit :turn) :edit (plist-get edit :edit)))
-          (unless (member agent-repl--held-edit-mode-line-spec mode-line-format)
-            (setq-local mode-line-format
-                        (append mode-line-format (list agent-repl--held-edit-mode-line-spec))))
-          (force-mode-line-update))
+          (setq agent-repl--held-edit (list :turn (plist-get edit :turn) :edit (plist-get edit :edit))))
+        ;; The edit beginning is an editor notice: the composer has no mode
+        ;; line, so the page's footer draws it as a transient line.
+        (agent-repl--input-notify ws agent-repl-held-edit-indicator)
         (agent-repl--info ws "elisp.held-edit.began ws=%s turn=%s edit=%s draft-saved=%s images=%d"
                           ws turn (plist-get edit :edit) saved
                           (length (agent-repl--input-parts-images parts))))))))
@@ -142,8 +133,7 @@ cancelled, said, and logged, rather than left claimed by nobody."
 The composer's contents are left exactly as they are."
   (let ((standing (buffer-local-value 'agent-repl--held-edit buf)))
     (with-current-buffer buf
-      (setq agent-repl--held-edit nil)
-      (force-mode-line-update))
+      (setq agent-repl--held-edit nil))
     (agent-repl--info ws "elisp.held-edit.ended ws=%s turn=%s edit=%s"
                       ws (plist-get (plist-get standing :turn) :value) (plist-get standing :edit))))
 

@@ -78,6 +78,7 @@ import { mintConnectionId } from "./connection-id.js";
 import { watchShownEdge } from "./host/shown-edge.js";
 import { createWebhostFailureView, mergeFailureViews } from "./failure/webhost.js";
 import { createEditorIngressView } from "./held/editor-ingress.js";
+import { createEditorNotices, type EditorNotices } from "./footer/editor-notice.js";
 import { createStreamCostMeter, regionNodes } from "./stream-cost.js";
 import { pagePresence } from "./presence.js";
 import { installPageDrawnReport } from "./page-drawn-report.js";
@@ -174,6 +175,9 @@ export async function boot(): Promise<void> {
     // The editor's own held-prompt ingress entries, which the held section
     // draws while this page cannot reach the daemon (held/section.ts).
     const editorIngress = createEditorIngressView();
+    // The editor's composer notices, which the footer draws as transient
+    // lines (footer/editor-notice.ts).
+    const editorNotices = createEditorNotices();
     connectToHost({
       doc: document,
       win: window,
@@ -181,6 +185,7 @@ export async function boot(): Promise<void> {
       webhostFailures,
       levelWindow,
       editorIngress,
+      editorNotices,
       focusLeft: pageFocusLeft(),
       webhostPresses: pageWebhostPresses(document),
       restyleTurns: pageRestyleTurns(document),
@@ -415,7 +420,7 @@ export async function boot(): Promise<void> {
       shell.footer.hidden = true;
       log.info("a chat thread's page mounts no footer", { operation: "main.thread-no-footer" });
     } else {
-      mountWorkspaceFooter(shell, ctx, workspaceFeed, gate);
+      mountWorkspaceFooter(shell, ctx, workspaceFeed, gate, editorNotices);
     }
 
     if (address.composer) {
@@ -444,10 +449,12 @@ function mountWorkspaceFooter(
   ctx: AppContext,
   feed: { selectDetachedWork(id: FeedId): Promise<boolean> },
   gate: ReturnType<typeof createComposerGate>,
+  editorNotices: EditorNotices,
 ): void {
   const footer = mountFooter(shell.footer, ctx, {
     selectDetachedWork: (id) => feed.selectDetachedWork(id),
     presence: pagePresence(),
+    editorNotices,
   });
   // A HOVERED RESPONSE'S USAGE IS READ IN THE FOOTER (owner request,
   // 2026-10-25): the bubble draws no figure of its own, and the footer's

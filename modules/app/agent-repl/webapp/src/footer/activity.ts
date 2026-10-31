@@ -42,6 +42,7 @@ import type {
   FooterActivityTransientContextInjected,
   FooterActivityTransientDaemonError,
   FooterActivityTransientDaemonWarning,
+  FooterActivityTransientEditorNotice,
   FooterActivityTransientHook,
   FooterActivityTransientNetworkResume,
   FooterActivityTransientOverEnduring,
@@ -116,6 +117,7 @@ import {
   unreachableArm,
 } from "../rpc/strict.js";
 import type { TransientExpirySchedule } from "./expiry.js";
+import { withEditorNotice, type EditorNotice } from "./editor-notice.js";
 import { footerAgeSpan, footerClockSpan } from "./clock-span.js";
 import { drawFooterStatusActivityMergeStep } from "./merge-step.js";
 import { coldGateFiguredLine, statusWords, textLine } from "./parts.js";
@@ -139,6 +141,11 @@ export interface AllowanceDeps {
 export interface ActivityDeps extends AllowanceDeps {
   /** Asks for the one re-render at a drawn transient's expiry instant. */
   readonly expiry: TransientExpirySchedule;
+  /**
+   * The editor's newest composer notice, which joins the transient tier
+   * (editor-notice.ts); null when the editor never raised one.
+   */
+  readonly editorNotice: EditorNotice | null;
 }
 
 // ---- the tier walk --------------------------------------------------------
@@ -337,10 +344,13 @@ function drawTier(
  * drawn transient schedules the one re-render at its expiry.
  */
 function drawUnpinned(
-  u: FooterActivityTransientOverEnduring,
+  pushed: FooterActivityTransientOverEnduring,
   deps: ActivityDeps,
   path: string,
 ): DrawnLine {
+  // THE EDITOR'S NOTICE COMPETES IN THE SAME TIER: the newer of it and the
+  // daemon's transient is the one drawn, by the same clock decision below.
+  const u = withEditorNotice(pushed, deps.editorNotice);
   const enduring = requireMessage(u.enduring, `${path}.enduring`);
   if (u.transient !== undefined) {
     const transientPath = `${path}.transient`;
@@ -511,6 +521,8 @@ function drawTransientKind(
       return drawFooterActivityTransientCompactionConcluded(kind.value);
     case "apiRestored":
       return drawFooterActivityTransientApiRestored(kind.value);
+    case "editorNotice":
+      return drawFooterActivityTransientEditorNotice(kind.value);
     default: {
       const other: { case: string } = kind;
       return unreachableArm(path, other.case);
@@ -1518,4 +1530,14 @@ export function footerCountdownSpan(
   return footerClockSpan(ticker, "countdown", className, (span, nowMs) => {
     span.textContent = `${label}${remainingLabel(atMs - nowMs)}`;
   });
+}
+
+/** The editor's composer notice, verbatim, as the composer's mode line used to say it. */
+export function drawFooterActivityTransientEditorNotice(
+  u: FooterActivityTransientEditorNotice,
+): HTMLElement {
+  const line = document.createElement("span");
+  line.className = "footer-activity-editor-notice";
+  line.textContent = u.text;
+  return line;
 }

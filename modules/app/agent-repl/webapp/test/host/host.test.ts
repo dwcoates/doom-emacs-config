@@ -864,6 +864,36 @@ describe("commands", () => {
     ]);
   });
 
+  it("sends an editor notice to the page", () => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/");
+    const posted = postsTo("a");
+
+    // Act
+    const outcome = parsed(host.showEditorNotice("a", "editing held prompt")).outcome;
+
+    // Assert
+    expect([outcome, posted]).toEqual([
+      "sent",
+      [{ channel: HOST_CHANNEL, kind: "editorNotice", text: "editing held prompt" }],
+    ]);
+  });
+
+  it.each([
+    ["an empty notice", ""],
+    ["a notice that is no string", 7],
+  ])("refuses %s, posting nothing", (_name, text) => {
+    // Arrange
+    host.ensure("a", "http://ws-a.localhost:1/");
+    const posted = postsTo("a");
+
+    // Act
+    const answer = parsed(host.showEditorNotice("a", text));
+
+    // Assert
+    expect([answer.outcome, posted, (answer.notes as unknown[]).length]).toEqual(["refused", [], 1]);
+  });
+
   it("refuses ingress entries that are not ingress entries, posting nothing", () => {
     // Arrange
     host.ensure("a", "http://ws-a.localhost:1/");

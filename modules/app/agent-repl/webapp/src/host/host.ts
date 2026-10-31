@@ -174,6 +174,11 @@ export interface Host {
    * `parseHeldIngressEntry`) refuses the call whole, answered `refused`.
    */
   setHeldIngress(id: string, entries: unknown): string;
+  /**
+   * Hand ID's page a notice from the editor's composer, which its footer
+   * draws as a transient line. An empty or non-string TEXT is refused.
+   */
+  showEditorNotice(id: string, text: unknown): string;
   /** Ask ID's page to close its standing news digest. */
   dismissDigest(id: string): string;
   /**
@@ -899,6 +904,16 @@ export function createHost(env: HostEnv): Host {
         }
         frame.heldIngress = parsed;
         post(frame, { channel: HOST_CHANNEL, kind: "heldIngress", entries: parsed });
+        return "sent";
+      });
+    },
+    showEditorNotice(id, text) {
+      return withFrame("showEditorNotice", id, (frame) => {
+        if (typeof text !== "string" || text === "") {
+          note("warn", `showEditorNotice was handed a notice that is not text: ${JSON.stringify(text)}`);
+          return "refused";
+        }
+        post(frame, { channel: HOST_CHANNEL, kind: "editorNotice", text });
         return "sent";
       });
     },

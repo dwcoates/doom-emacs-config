@@ -23,6 +23,7 @@ import { pageMutationObserver } from "../dom.js";
 import { fromJson, type JsonObject } from "@bufbuild/protobuf";
 import { UserSaidSchema } from "../../../proto/gen/ts/conversation/v1/user_pb";
 import type { EditorIngressEntry, EditorIngressView } from "../held/editor-ingress.js";
+import type { EditorNotices } from "../footer/editor-notice.js";
 import type { HeldIngressWireEntry } from "./protocol.js";
 import type { RestyleTurnsSource } from "./restyle-turn.js";
 import type { WebhostPressSource } from "../webhost-pressed.js";
@@ -64,6 +65,8 @@ export interface EmbedEnv {
   readonly levelWindow: LevelWindow;
   /** The editor's held-prompt ingress entries, which the host hands over (`heldIngress`). */
   readonly editorIngress: EditorIngressView;
+  /** The editor's composer notices, which the host hands over (`editorNotice`). */
+  readonly editorNotices: Pick<EditorNotices, "raise">;
   /** The page's focus-left signal, which Emacs moving its focus fires (`focusMoved`). */
   readonly focusLeft: FocusLeftSource;
   /** The page's webhost-press signal, which the reader pressing the webhost fires (`webhostPressed`). */
@@ -92,7 +95,7 @@ function isTextField(element: Element | null): boolean {
 
 /** Connect the page in ENV to its host; null when the page is in no host. */
 export function connectToHost(env: EmbedEnv): HostLink | null {
-  const { doc, win, presence, webhostFailures, levelWindow, editorIngress, focusLeft, webhostPresses, restyleTurns } = env;
+  const { doc, win, presence, webhostFailures, levelWindow, editorIngress, editorNotices, focusLeft, webhostPresses, restyleTurns } = env;
   if (win.parent === win) return null;
   const host = win.parent;
   const send = (message: PageToHost): void => {
@@ -127,6 +130,9 @@ export function connectToHost(env: EmbedEnv): HostLink | null {
         return;
       case "heldIngress":
         editorIngress.set(decodeHeldIngress(message.entries));
+        return;
+      case "editorNotice":
+        editorNotices.raise(message.text, Date.now());
         return;
       case "logLevel":
         applyLogLevel(message.level, message.untilMs);

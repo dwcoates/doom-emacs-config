@@ -22,6 +22,7 @@ import {
   readSelection,
   writeSelection,
 } from "../../src/footer/footer.js";
+import { createEditorNotices, type EditorNotices } from "../../src/footer/editor-notice.js";
 import {
   AGENT_ROW,
   CRON_ROW,
@@ -76,12 +77,14 @@ function mount(
   h: Harness = harness(),
   selectDetachedWork: () => Promise<boolean> = async () => true,
   presence: Pick<Presence, "shown" | "onChange" | "embedded"> = pagePresence(),
+  editorNotices: EditorNotices = createEditorNotices(),
 ) {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
   const footer = mountFooter(host, h.ctx, {
     selectDetachedWork,
     presence,
+    editorNotices,
   });
   mounted.push(footer);
   return { host, h, footer };

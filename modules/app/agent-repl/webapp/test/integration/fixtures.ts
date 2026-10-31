@@ -1889,6 +1889,7 @@ export const FOOTER_TRANSIENT_KINDS: Record<string, object> = {
   networkResume: { edge: { case: "waiting", value: { givesUpAtMs: 1_810_000n } } },
   compactionConcluded: { text: "compacted and resumed (101.6k → 12.4k)" },
   apiRestored: { failedAttempts: 8 },
+  editorNotice: { text: "send: no daemon connection" },
 };
 
 /**

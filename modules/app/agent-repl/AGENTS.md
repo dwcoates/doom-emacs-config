@@ -3018,7 +3018,7 @@ tiers, and the tier is defined by WHAT ENDS the line:
 | tier | ends when | examples |
 | --- | --- | --- |
 | **salient** | the condition it describes stops being true — never a timer | escalating faults (a severed link, a failed bring-up, an impaired daemon); anything waiting on the user (a gated call, a question batch, the cold gate, the agent's `PushNotification` message, which ends at the next prompt); an act in progress with its own end signal (a compaction running, an interrupt, a refused close, a deploy, a pending wakeup, a retry until the response lands); the dead-query line (ends at the next prompt) |
-| **transient** | its 10 s display window lapses, or a newer transient replaces it | task-tracker moves; hook starts; injected context; a concluded compaction; every non-blocking error or warning (non-escalating faults, daemon Warn/Error records); session changes; a finished deploy; network-resume edges; a detached run finishing while the session is `background` |
+| **transient** | its 5 s display window (`frontend.v1.FooterTransientWindow`) lapses, or a newer transient replaces it | task-tracker moves; hook starts; injected context; a concluded compaction; every non-blocking error or warning (non-escalating faults, daemon Warn/Error records); session changes; a finished deploy; network-resume edges; a detached run finishing while the session is `background`; the editor's composer notices (`editor_notice`) |
 | **enduring** | never — it is always true, so the cell is never empty | the ACCOUNT's usage: its weekly windows and overage; `unobserved` until anything is read, drawn in words, fed by the vendor's rate-limit events, which stand no salient line of their own (owner rulings, 2026-10-01 and 2026-10-06) |
 
 **PRECEDENCE IS BY TIER, ALWAYS:** salient, then transient, then enduring. A
@@ -3087,6 +3087,16 @@ event is a missing end signal, and the fix is the end signal, not an expiry.
 The transient window is a presentation choice, which is why it alone is timed,
 and it is never shortened or lengthened by what arrives next: the next event
 may never come.
+
+**THE COMPOSER'S NOTICES ARE THE EDITOR'S TRANSIENTS.** The composer has no
+mode line (owner ruling, 2026-10-31). A refused or unanswered send, a
+held-prompt edit beginning, and the count of prompts waiting for the daemon
+are handed by Emacs to the page through the web view host
+(`agent-repl--input-notify`, `showEditorNotice`), because most of them happen
+while the daemon cannot be reached. The page composes the
+`frontend.v1.FooterActivityTransientEditorNotice` transient itself, stamped
+with its arrival and the one window, and it joins the transient tier like any
+other: the newest wins, a salient line outranks it.
 
 **THE DAEMON DECIDES THE EXPIRY; THE CLIENT APPLIES IT.** Every push carries
 the standing transient WITH its expiry instant, AND the enduring line beneath

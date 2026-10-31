@@ -47,6 +47,9 @@
 (defvar agent-repl-test-input--retries nil
   "Workspaces an empty send asked for the vendor-error retry now, newest first.")
 
+(defvar agent-repl-test-input--notices nil
+  "Notices the composer handed its page, newest first.")
+
 (defvar agent-repl-test-input--answer nil
   "The scripted answer: `(:response PLIST)' or `(:failure PLIST)'.")
 
@@ -71,8 +74,9 @@
 (defmacro agent-repl-test-input--with (&rest body)
   "Run BODY against a live composer buffer with the wire stubbed.
 The buffer is a real `agent-repl-input-mode' buffer, because the
-images in its text and the mode-line notice are buffer state and a
-fake would not exercise them."
+images in its text are buffer state and a fake would not exercise them.
+The notices it hands its page are captured in
+`agent-repl-test-input--notices'."
   (declare (indent 0))
   `(let ((agent-repl-test-input--submitted nil)
          (agent-repl-test-input--gone nil)
@@ -82,6 +86,7 @@ fake would not exercise them."
          (agent-repl-test-input--refusals nil)
          (agent-repl-test-input--messages nil)
          (agent-repl-test-input--retries nil)
+         (agent-repl-test-input--notices nil)
          (agent-repl-test-input--answer (agent-repl-test-input--turn-answer))
          (agent-repl-test-input--gate :open)
          (agent-repl-test-input--buffer nil))
@@ -93,6 +98,9 @@ fake would not exercise them."
              (agent-repl-input-mode)
              (setq-local agent-repl--owning-workspace "ws-one"))
            (cl-letf* (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
+                      ;; The page the composer's notices go to.
+                      ((symbol-function 'agent-repl-webhost-show-editor-notice)
+                       (lambda (_ws text) (push text agent-repl-test-input--notices) t))
                       ;; Images name files no test writes: each is present
                       ;; unless a test says its file is gone.
                       ((symbol-function 'agent-repl--input-image-present-p)
@@ -922,14 +930,13 @@ once the merge resolves -- from the composer, where they left it."
     (should (equal (agent-repl-test-input--composer-text) "hello"))))
 
 (ert-deftest agent-repl-input-merging-error-flashes-the-refusal ()
-  "The merging refusal draws its own mode-line flash."
+  "The merging refusal raises its own notice on the page."
   (agent-repl-test-input--with
     (setq agent-repl-test-input--answer
           '(:response (:arm :error :value (:reason (:arm :merging :value nil)))))
     (agent-repl-test-input--type "hello")
     (agent-repl--send :user-sent)
-    (should (equal (buffer-local-value 'agent-repl-input-notice
-                                       agent-repl-test-input--buffer)
+    (should (equal (agent-repl-test-input--notice)
                    "refused: merge in flight"))))
 
 (ert-deftest agent-repl-input-merging-error-does-not-queue ()
@@ -1580,99 +1587,113 @@ workspace from the working directory, so no source tag rides it."
   (should (agent-repl--slash-command-p "/clear")))
 
 
-;;;; ---- The flash dwell -------------------------------------------------
+;;;; ---- The composer notice ----------------------------------------------
 ;;
-;; `agent-repl--input-flash' arms a timer that clears the notice after a
-;; dwell.  The timer fires seconds later, long after the flash's own
-;; scenario, so what it is allowed to clear is the whole contract:
-;; `agent-repl--input-expire-flash' is called directly here rather than
-;; through a real timer, which is what makes these tests deterministic.
+;; The composer has no mode line: a notice is handed to the page through the
+;; web view host (`agent-repl--input-notify'), whose footer draws it as a
+;; transient line and lets it lapse (webapp/test/footer/editor-notice.test.ts).
 
-(ert-deftest agent-repl-input-expire-flash-clears-its-own-text ()
-  "The dwell clears the notice it flashed."
+(ert-deftest agent-repl-input-mode-draws-no-mode-line ()
+  "The composer draws no mode line: its line is the composer's own."
   ;; Arrange.
-  (let ((buffer (generate-new-buffer " *agent-repl-test-input-flash*")))
+  (with-temp-buffer
+    ;; Act.
+    (agent-repl-input-mode)
+    ;; Assert.
+    (should (local-variable-p 'mode-line-format))
+    (should (null mode-line-format))))
+
+(ert-deftest agent-repl-input-mode-leaves-other-buffers-their-mode-line ()
+  "Only the composer loses its mode line; every other buffer keeps its own."
+  ;; Arrange.
+  (let ((other (generate-new-buffer " *agent-repl-test-not-a-composer*")))
     (unwind-protect
         (progn
-          (with-current-buffer buffer
-            (setq-local agent-repl-input-notice "refused: merge in flight"))
           ;; Act.
-          (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
-            (agent-repl--input-expire-flash "ws" buffer "refused: merge in flight"))
+          (with-temp-buffer (agent-repl-input-mode))
           ;; Assert.
-          (should (null (buffer-local-value 'agent-repl-input-notice buffer))))
-      (kill-buffer buffer))))
+          (should (default-value 'mode-line-format))
+          (should (buffer-local-value 'mode-line-format other)))
+      (kill-buffer other))))
 
-(ert-deftest agent-repl-input-expire-flash-leaves-a-later-flash-standing ()
-  "The dwell NEVER clears a notice it did not set.
-A second refusal flashed within the first one's dwell would otherwise have
-its own dwell cut short by the first flash's timer."
+(ert-deftest agent-repl-input-mode-window-has-no-mode-line ()
+  "A window showing the composer gives no line to a mode line."
   ;; Arrange.
-  (let ((buffer (generate-new-buffer " *agent-repl-test-input-flash*")))
+  (let ((buffer (generate-new-buffer " *agent-repl-test-composer-window*"))
+        (config (current-window-configuration)))
     (unwind-protect
         (progn
-          (with-current-buffer buffer
-            (setq-local agent-repl-input-notice "composer closed: restarting"))
-          ;; Act.
-          (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
-            (agent-repl--input-expire-flash "ws" buffer "refused: merge in flight"))
-          ;; Assert.
-          (should (equal (buffer-local-value 'agent-repl-input-notice buffer)
-                         "composer closed: restarting")))
+          (with-current-buffer buffer (agent-repl-input-mode))
+          (delete-other-windows)
+          (let ((win (split-window nil nil 'below)))
+            ;; Act.
+            (set-window-buffer win buffer)
+            ;; Assert.
+            (should (= 0 (window-mode-line-height win)))))
+      (set-window-configuration config)
       (kill-buffer buffer))))
 
-(ert-deftest agent-repl-input-expire-flash-tolerates-a-dead-buffer ()
-  "A composer killed before the dwell elapses is not an error."
+(ert-deftest agent-repl-input-notify-hands-the-notice-to-the-page ()
+  "A notice goes to the workspace's page and is recorded as sent."
   ;; Arrange.
-  (let ((buffer (generate-new-buffer " *agent-repl-test-input-flash*")))
-    (kill-buffer buffer)
-    ;; Act / Assert.
-    (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
-      (should-not (agent-repl--input-expire-flash
-                   "ws" buffer "refused: merge in flight")))))
-
-(ert-deftest agent-repl-input-flash-arms-the-dwell-on-the-buffer-it-wrote ()
-  "The dwell is armed with the buffer and text of THIS flash.
-Resolving the composer by NAME when the timer fires is what let one
-workspace's dwell clear another composer's badge."
-  ;; Arrange.
-  (agent-repl-test-input--with
-    (let ((armed nil)
-          (registered nil))
-      (cl-letf (((symbol-function 'run-at-time)
-                 (lambda (_secs _repeat fn &rest args)
-                   (setq armed (cons fn args))
-                   'fake-timer))
-                ((symbol-function 'agent-repl--register-timer)
-                 (lambda (key timer)
-                   (setq registered (list key timer))
-                   timer)))
-        ;; Act.
-        (agent-repl--input-flash "ws-one" "refused: merge in flight"))
+  (let ((sent nil) (infos nil))
+    (cl-letf (((symbol-function 'agent-repl-webhost-show-editor-notice)
+               (lambda (ws text) (push (list ws text) sent) t))
+              ((symbol-function 'agent-repl--info)
+               (agent-repl-test--record-into infos)))
+      ;; Act.
+      (agent-repl--input-notify "ws" "send: no daemon connection")
       ;; Assert.
-      (should (eq (car armed) #'agent-repl--input-expire-flash))
-      (should (equal (cdr armed)
-                     (list "ws-one"
-                           agent-repl-test-input--buffer
-                           "refused: merge in flight")))
-      (should (equal (cadr registered) 'fake-timer)))))
+      (should (equal sent '(("ws" "send: no daemon connection"))))
+      (should (string-match-p "outcome=sent" (car infos))))))
 
-(ert-deftest agent-repl-input-mode-cancels-its-flash-timer-on-kill ()
-  "Killing a composer prevents its delayed diagnostic from outliving the sink."
+(ert-deftest agent-repl-input-notify-records-a-workspace-with-no-page ()
+  "A notice the host could not take is recorded, never an error."
   ;; Arrange.
-  (let ((buffer (generate-new-buffer " *agent-repl-test-flash-cleanup*"))
-        (cancelled nil))
+  (let ((infos nil))
+    (cl-letf (((symbol-function 'agent-repl-webhost-show-editor-notice) (lambda (_ws _text) nil))
+              ((symbol-function 'agent-repl--info)
+               (agent-repl-test--record-into infos)))
+      ;; Act.
+      (agent-repl--input-notify "ws" "refused: merge in flight")
+      ;; Assert.
+      (should (string-match-p "outcome=no-page" (car infos))))))
+
+(ert-deftest agent-repl-input-set-waiting-notifies-a-new-line ()
+  "A new waiting line is recorded on the composer and told to the page."
+  ;; Arrange.
+  (let ((buffer (generate-new-buffer " *agent-repl-test-waiting*"))
+        (sent nil))
     (unwind-protect
-        (cl-letf (((symbol-function 'agent-repl--cancel-timer-key)
-                   (lambda (key) (setq cancelled key))))
-          (with-current-buffer buffer
-            (agent-repl-input-mode)
-            (setq-local agent-repl--input-flash-timer-key 'composer-flash))
+        (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) buffer))
+                  ((symbol-function 'agent-repl--log) #'ignore)
+                  ((symbol-function 'agent-repl--info) #'ignore)
+                  ((symbol-function 'agent-repl-webhost-show-editor-notice)
+                   (lambda (_ws text) (push text sent) t)))
           ;; Act.
-          (kill-buffer buffer)
+          (agent-repl--input-set-waiting "ws" "2 prompts waiting for the daemon")
           ;; Assert.
-          (should (eq cancelled 'composer-flash)))
-      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+          (should (equal (buffer-local-value 'agent-repl-input-waiting buffer)
+                         "2 prompts waiting for the daemon"))
+          (should (equal sent '("2 prompts waiting for the daemon"))))
+      (kill-buffer buffer))))
+
+(ert-deftest agent-repl-input-set-waiting-cleared-tells-the-page-nothing ()
+  "A cleared waiting line tells the page nothing: its transient lapses alone."
+  ;; Arrange.
+  (let ((buffer (generate-new-buffer " *agent-repl-test-waiting*"))
+        (sent nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) buffer))
+                  ((symbol-function 'agent-repl--log) #'ignore)
+                  ((symbol-function 'agent-repl-webhost-show-editor-notice)
+                   (lambda (_ws text) (push text sent) t)))
+          ;; Act.
+          (agent-repl--input-set-waiting "ws" nil)
+          ;; Assert.
+          (should (null (buffer-local-value 'agent-repl-input-waiting buffer)))
+          (should (null sent)))
+      (kill-buffer buffer))))
 
 (ert-deftest agent-repl-input-mode-header-line-is-the-help-buttons ()
   "The composer's header line is input-help.el's row of help buttons."
@@ -2105,8 +2126,7 @@ unknown arm."
     (agent-repl-test-input--type "use OAuth")
     (agent-repl-test-input--capturing-rungs
       (agent-repl--send :user-sent)
-      (should (equal (buffer-local-value 'agent-repl-input-notice
-                                         agent-repl-test-input--buffer)
+      (should (equal (agent-repl-test-input--notice)
                      agent-repl--input-ask-not-standing-flash))
       (should (agent-repl-test-input--rung-has-p
                agent-repl-test-input--info "elisp.input.refused-ask-not-standing"))
@@ -2144,8 +2164,7 @@ unknown arm."
     (agent-repl-test-input--type "and then?")
     (agent-repl-test-input--capturing-rungs
       (agent-repl--send :user-sent)
-      (should (equal (buffer-local-value 'agent-repl-input-notice
-                                         agent-repl-test-input--buffer)
+      (should (equal (agent-repl-test-input--notice)
                      agent-repl--input-thread-awaiting-first-answer-flash))
       (should (agent-repl-test-input--rung-has-p
                agent-repl-test-input--info "elisp.input.refused-thread-awaiting-first-answer"))
@@ -2156,7 +2175,7 @@ unknown arm."
   "The helper flashes the sentence in the composer and echoes it alone."
   (agent-repl-test-input--with
     (agent-repl--input-say-refusal "ws-one" "refused for a reason")
-    (should (equal (buffer-local-value 'agent-repl-input-notice agent-repl-test-input--buffer)
+    (should (equal (agent-repl-test-input--notice)
                    "refused for a reason"))
     (should (member "agent-repl: refused for a reason" agent-repl-test-input--messages))))
 
@@ -2187,8 +2206,7 @@ unknown arm."
     ;; Act
     (agent-repl--send :user-sent)
     ;; Assert
-    (should (equal (buffer-local-value 'agent-repl-input-notice
-                                       agent-repl-test-input--buffer)
+    (should (equal (agent-repl-test-input--notice)
                    "cold gate: answer it in the panel (clear / compact / resume)"))))
 
 (ert-deftest agent-repl-input-cold-gate-echoes-the-daemons-detail ()
@@ -2290,8 +2308,7 @@ the words stay in front of the user rather than only in the ring."
     ;; Act
     (agent-repl--send :user-sent)
     ;; Assert
-    (should (equal (buffer-local-value 'agent-repl-input-notice
-                                       agent-repl-test-input--buffer)
+    (should (equal (agent-repl-test-input--notice)
                    "no session; the daemon is starting it"))))
 
 (ert-deftest agent-repl-input-no-session-echoes-the-sentence-plainly ()
@@ -2570,8 +2587,8 @@ stubbed rpc received is pushed onto `requests'."
   "A `SelectFeedRow' refusal answer.")
 
 (defun agent-repl-test-input--notice ()
-  "Return the composer's mode-line notice."
-  (buffer-local-value 'agent-repl-input-notice agent-repl-test-input--buffer))
+  "Return the newest notice the composer handed its page, or nil."
+  (car agent-repl-test-input--notices))
 
 (defun agent-repl-test-input--last-move ()
   "Return the move of the last `SelectFeedRow' request sent."

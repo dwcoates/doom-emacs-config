@@ -828,8 +828,8 @@ persp-mode activated, and \"main\"/\"none\" own no durable log sink."
                                 (window-total-height (frame-root-window))))
                       agent-repl-input-height-line-offset)))))))
 
-(ert-deftest agent-repl-window-test-input-height-default-is-one-line-under-the-fraction ()
-  "By default the composer is exactly one line shorter than the fraction alone."
+(ert-deftest agent-repl-window-test-input-height-default-is-two-lines-under-the-fraction ()
+  "By default the composer is exactly two lines shorter than the fraction alone."
   (agent-repl-window-test--with-temp-frame
     (agent-repl-window-test--with-fresh-height-cache
       ;; Arrange
@@ -839,7 +839,11 @@ persp-mode activated, and \"main\"/\"none\" own no durable log sink."
         ;; Act
         (let ((lines (agent-repl-window--input-height)))
           ;; Assert
-          (should (= lines (1- unadjusted))))))))
+          (should (= lines (- unadjusted 2))))))))
+
+(ert-deftest agent-repl-window-test-input-height-minimum-is-two-body-lines ()
+  "The floor is two lines, every one of them body: the composer has no mode line."
+  (should (= agent-repl-window--input-height-minimum 2)))
 
 (ert-deftest agent-repl-window-test-input-height-ignores-the-window-being-split ()
   "A smaller host window does not shrink the composer's height.
@@ -1113,6 +1117,30 @@ next show reads the gate (`agent-repl--frontend-display-webview')."
               ((symbol-function 'frame-char-height) (lambda (&optional _f) 20)))
       ;; Act / Assert
       (should (= 180 (agent-repl-window--gate-dock-pixels "ws"))))))
+
+(ert-deftest agent-repl-window-test-the-dock-takes-exactly-the-composer-lines ()
+  "A live composer window and the mount height give the gate one height.
+With no mode line, every line the composer is given is a text line, so the
+dock read from the live window equals the mount height's line count at the
+frame's line height: the gate neither overlaps the feed nor leaves a gap."
+  (agent-repl-window-test--with-temp-frame
+    (agent-repl-window-test--with-fresh-height-cache
+      (agent-repl-test--with-clean-state
+        ;; Arrange
+        (let* ((lines (agent-repl-window--input-height))
+               (buffer (generate-new-buffer " *agent-repl-test-dock-composer*"))
+               (win (split-window nil (- lines) 'below)))
+          (unwind-protect
+              (progn
+                (with-current-buffer buffer (agent-repl-input-mode))
+                (set-window-buffer win buffer)
+                (cl-letf (((symbol-function 'agent-repl-window--panel-window)
+                           (lambda (_kind &optional _ws _frame) win)))
+                  ;; Act
+                  (let ((live (agent-repl-window--gate-dock-pixels "ws")))
+                    ;; Assert
+                    (should (= live (* lines (frame-char-height)))))))
+            (kill-buffer buffer)))))))
 
 (ert-deftest agent-repl-window-test-the-dock-height-with-no-host-is-recorded ()
   "No host to tell is recorded, never an error; the slot is kept for it."

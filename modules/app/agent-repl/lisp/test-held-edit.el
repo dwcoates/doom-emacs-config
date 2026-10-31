@@ -161,14 +161,16 @@
     ;; Assert
     (should (equal (agent-repl-held-edit-state "ws-one") '(:turn (:value "t-1") :edit 4)))))
 
-(ert-deftest agent-repl-held-edit-the-edit-mode-shows-its-indicator ()
-  "The mode line carries the edit-mode indicator while the edit stands."
+(ert-deftest agent-repl-held-edit-the-edit-begin-is-a-page-notice ()
+  "The edit beginning hands its indicator to the page as an editor notice."
   (agent-repl-test-he--with
-    ;; Act
-    (agent-repl-held-edit-on-host-update "ws-one" (agent-repl-test-he--edit "w"))
-    ;; Assert
-    (with-current-buffer agent-repl-test-he--buffer
-      (should (equal (agent-repl--held-edit-segment) " editing held prompt")))))
+    (let ((sent nil))
+      (cl-letf (((symbol-function 'agent-repl-webhost-show-editor-notice)
+                 (lambda (ws text) (push (list ws text) sent) t)))
+        ;; Act
+        (agent-repl-held-edit-on-host-update "ws-one" (agent-repl-test-he--edit "w"))
+        ;; Assert
+        (should (equal sent '(("ws-one" "editing held prompt"))))))))
 
 (ert-deftest agent-repl-held-edit-the-begin-is-logged-at-info ()
   "Taking an edit is recorded on the info rung."
