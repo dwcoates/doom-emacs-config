@@ -113,7 +113,9 @@ Either kind:
   subscription was taken for calls for; otherwise report it in one line and
   STOP. NEVER poll the queue between notices. A notice that waited behind your
   turns lists every change since the last one you were told, oldest first, and
-  its queue is the queue as it stands when it reaches you.
+  its queue is the queue as it stands when it reaches you. A notice saying the
+  subscription ended is the last; subscribe again only if the work you
+  subscribed for still needs it.
 - e. A landing report for an instrumentation round: reproduce, read the records
   the round added, and either remediate (landing the fix as the next round) or
   add the records still missing and land them as the next async merge. While a
@@ -151,8 +153,11 @@ Either kind:
   fixes in place.
 - `merge-queue subscribe -detail every_change|deploys|advances|depletes
   [-repository here|DIR]` has this workspace told as the queue changes (to land
-  after it drains, to report a landing) instead of polling it;
-  `merge-queue unsubscribe` ends it. `deploys` tells each merge leaving the
+  after it drains, to report a landing) instead of polling it. It ends on
+  `merge-queue unsubscribe`, on the workspace's close, and on its own when a
+  queue in scope depletes (a merge leaves and none is left in line), that
+  notice being its last; subscribe again to follow the next work, and to hear
+  a deploy that ends after the depletion. `deploys` tells each merge leaving the
   queue and each deploy of the daemon's own checkout ending (its build
   running, or failed), naming the reported landings it carries: the level
   for watching what a landing's rollout did.
