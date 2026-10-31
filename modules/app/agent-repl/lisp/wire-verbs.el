@@ -2956,9 +2956,9 @@ logs, and is never switched on."
   "Decode SubmitPromptError from JSON into (:reason (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset reason is a contract breach and an
 arm this codec does not know is refused as an unknown field.
-`slash_command_from_agent\' and `unknown_sender\' are not decoded: they
-refuse only an agent\='s prompt, and every prompt the editor sends is the
-user\='s."
+`slash_command_from_agent\', `unknown_sender\' and `fan_out_refused\' are
+not decoded: they refuse only an agent\='s prompt, and every prompt the
+editor sends is the user\='s."
   (let ((message "SubmitPromptError"))
     (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused coldGate modelNotInCatalog modelRefused askNotStanding threadAwaitingFirstAnswer))
     (list :reason

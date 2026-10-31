@@ -2066,14 +2066,14 @@ here."
 
 (ert-deftest agent-repl-test-wire-verbs-submit-reason-arms-pinned ()
   "SubmitPromptError's reason oneof is the arms this codec decodes and
-`slash_command_from_agent' and `unknown_sender', which refuse only an
-agent\='s prompt and so never answer the editor\='s."
+`slash_command_from_agent', `unknown_sender' and `fan_out_refused', which
+refuse only an agent\='s prompt and so never answer the editor\='s."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptError")
                        #'string<)
                  '("askNotStanding" "bubbleRefused" "coldGate" "duplicateSubmission"
-                   "feedNotInWorkspace" "feedUndecodable" "merging"
+                   "fanOutRefused" "feedNotInWorkspace" "feedUndecodable" "merging"
                    "modelNotInCatalog" "modelRefused" "noSession"
                    "notYetAdopted" "slashCommandFromAgent" "threadAwaitingFirstAnswer" "transferringAway"
                    "unknownSender" "unknownWorkspace" "workspaceRefMismatch"))))
@@ -3322,7 +3322,7 @@ decodes."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptError")
                        #'string<)
-                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused" "askNotStanding" "slashCommandFromAgent" "unknownSender" "threadAwaitingFirstAnswer")
+                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused" "coldGate" "modelNotInCatalog" "modelRefused" "askNotStanding" "slashCommandFromAgent" "unknownSender" "threadAwaitingFirstAnswer" "fanOutRefused")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-error-nothing-scheduled-arm ()
