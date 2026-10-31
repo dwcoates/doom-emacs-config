@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"agentrepl/testrun/internal/cores"
 )
 
 func TestNamesAreUniqueAndInRosterOrder(t *testing.T) {
@@ -317,6 +319,26 @@ func TestNoSuiteHashesTheBuiltWebappDistItDoesNotRead(t *testing.T) {
 			// Assert
 			if !generated {
 				t.Fatalf("%s hashes webapp/ but does not declare webapp/dist/ generated", s.Name)
+			}
+		})
+	}
+}
+
+// TestNoUnitIsWiderThanTheGovernorsFirstUnit keeps every unit startable on a
+// busy host: the CPU governor's first-unit allowance (cores.FirstUnitSeats)
+// is the most seats it lets a run take while the host is near its cap, so a
+// wider unit would wait there for good, and every unit behind it with it.
+func TestNoUnitIsWiderThanTheGovernorsFirstUnit(t *testing.T) {
+	for _, s := range Suites {
+		t.Run(s.Name, func(t *testing.T) {
+			// Assert
+			if s.Slots > cores.FirstUnitSeats {
+				t.Fatalf("suite %s holds %d slots, more than the governor's first unit (%d)", s.Name, s.Slots, cores.FirstUnitSeats)
+			}
+			for pkg, p := range s.TestParallel {
+				if p.Slots > cores.FirstUnitSeats {
+					t.Fatalf("suite %s package %s holds %d slots a chunk, more than the governor's first unit (%d)", s.Name, pkg, p.Slots, cores.FirstUnitSeats)
+				}
 			}
 		})
 	}
