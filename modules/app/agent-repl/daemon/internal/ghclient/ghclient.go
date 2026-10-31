@@ -154,22 +154,15 @@ func (c *client) call(ctx context.Context, op, method, path string, args []strin
 	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "NO_COLOR=1", "GH_NO_UPDATE_NOTIFIER=1")
 	fields := dlog.Context{"method": method, "path": path}
 	// The output goes to files, never pipes, as every captured child's does
-	// (childproc.CaptureOutput).
-	capture, err := childproc.CaptureOutput(cmd)
-	if err != nil {
-		f := &Failure{Kind: KindUnreachable, Method: method, Path: path, Message: err.Error()}
-		c.cfg.Log.Error(op, "could not capture gh's output", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "cause": err.Error()}))
-		return Response{}, f
-	}
-	runErr := cmd.Run()
-	stdout, stderr, finishErr := capture.Finish()
+	// (childproc.Run).
+	stdout, stderr, runErr, captureErr := childproc.Run(cmd, nil)
 	if ctx.Err() != nil {
 		// The daemon stopped the call: no fact about GitHub.
 		return Response{}, ctx.Err()
 	}
-	if finishErr != nil {
-		f := &Failure{Kind: KindUnreachable, Method: method, Path: path, Message: finishErr.Error()}
-		c.cfg.Log.Error(op, "could not read gh's output", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "cause": finishErr.Error()}))
+	if captureErr != nil {
+		f := &Failure{Kind: KindUnreachable, Method: method, Path: path, Message: captureErr.Error()}
+		c.cfg.Log.Error(op, "could not capture gh's output", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "cause": captureErr.Error()}))
 		return Response{}, f
 	}
 	resp, parsed := parse([]byte(stdout))
