@@ -999,12 +999,12 @@ never a silently-empty view."
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
-      ;; The raw-context needle is the Recently Deployed heading, NOT the row's
-      ;; marker: the rows live inside `repository', so deleting that field
-      ;; deletes them with it and no row text is on the wire at all.  What is
-      ;; left of the roster is what the raw context must still carry.
+      ;; The raw-context needle is the Deploys section's header, NOT the
+      ;; row's marker: the rows live inside `repository', so deleting that
+      ;; field deletes them with it and no row text is on the wire at all.
+      ;; What is left of the roster is what the raw context must still carry.
       (should (agent-repl-itest-roster--push-invalid-carries-raw
-               daemon "recently deployed")))))
+               daemon "merge queue")))))
 
 (ert-deftest agent-repl-itest-roster-roster-missing-recently-merged-is-refused ()
   "A `WorkspaceRoster' with no `recentlyMerged' field at all: ERROR, dropped."

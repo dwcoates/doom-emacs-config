@@ -1068,9 +1068,8 @@ html.webhost-sidebar #ws-sidebar[hidden] {
      and so does Hidden Workspaces, whose count is every row it holds,
      scrolled out of its viewport or not (owner request, 2026-10-19).
    - The Deploys section's header counts nothing (owner request,
-     2026-10-27): each repository's queue group counts the merges in its
-     line, and the "Recently Deployed" heading today's merges (the rules with
-     the merge queue groups, below).
+     2026-10-27): each repository's group counts its merges of today on its
+     own header (the rules with the Deploys groups, below).
    - The open workspaces section's "(N)" takes the same grey and shows whether
      the section is folded or not (owner request, 2026-10-13;
      src/sidebar/roster.ts drawRosterOpenSection), and so does Hidden
@@ -1186,11 +1185,6 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    header, are the band headers' 0.45rem and 0.25rem cut by 30%. */
 #ws-sidebar .repo.repo-section > .repo-head { padding-top: 0.315rem; padding-bottom: 0.175rem; }
 #ws-sidebar .repo.repo-section.folded > .repo-head { color: var(--repo-head-collapsed); }
-/* THE SIDEBAR DRAWS NO FOLD TRIANGLE (owner request, 2026-10-31;
-   src/sidebar/section-fold.ts foldOnClick): a click anywhere on a section's
-   or a subsection's header folds or opens it, so the whole header shows the
-   pointer. */
-#ws-sidebar .sb-subsection-head { cursor: pointer; }
 
 /* A REPOSITORY'S SUBSECTIONS (src/sidebar/subsections.ts) stand among its
    rows wherever they were arranged, each a small header over its rows, and
@@ -1202,6 +1196,10 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 #ws-sidebar .sb-subsection > .rows { --row-indent-parent: var(--row-indent); }
 #ws-sidebar .sb-subsection > .rows > .ws { --row-indent: calc(var(--row-indent-parent) + 0.9rem); }
 #ws-sidebar .sb-subsection-head {
+  /* THE SIDEBAR DRAWS NO FOLD TRIANGLE (owner request, 2026-10-31;
+     src/sidebar/section-fold.ts foldOnClick): a click anywhere on the header
+     folds or opens the subsection, so the whole header shows the pointer. */
+  cursor: pointer;
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -1418,8 +1416,8 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
   padding-top: 0;
   border-top: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
 }
-/* Above the rule: the gap less the 3.5px a row or a folded subsection
-   header reaches below its baseline (Deploys), or the 1.25px a folded
+/* Above the rule: the gap less the 3.3px a row or a folded subsection
+   header reaches below its baseline (Deploys), or the 0.8px a folded
    group's header does (Hidden). */
 #ws-sidebar .repo.merged-section { margin-top: calc(var(--rule-gap) - 3.3px); }
 #ws-sidebar .repo.hidden-section { margin-top: calc(var(--rule-gap) - 0.8px); }
@@ -1427,7 +1425,6 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    its cap top (Hidden's count line, 2.6px). */
 #ws-sidebar .repo.merged-section > .repo-head { padding-top: calc(var(--rule-gap) - 3.6px); }
 #ws-sidebar .repo.hidden-section > .repo-head { padding-top: calc(var(--rule-gap) - 2.6px); }
-}
 /* EACH SECTION'S ROWS SCROLL once the rail is out of room (owner requests,
    2026-10-11 and 2026-10-18): src/sidebar/band-fit.ts caps the rows region's
    height at a whole number of lines, and the rest scroll inside it. */
@@ -1517,7 +1514,7 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .merged-group-head::before { flex: 0 0 0.65rem; }
 #ws-sidebar .merged-group-head::after { flex: 1 1 0; min-width: 0.65rem; }
 #ws-sidebar .merged-group-head > .sb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-#ws-sidebar .merged-group-head { cursor: pointer; user-select: none; }
+#ws-sidebar .merged-group-head { cursor: pointer; }
 /* A FOLDED GROUP shows its header alone: its queue and its merged rows are
    drawn as nothing until it opens. */
 #ws-sidebar .merged-group.folded > .rows { display: none; }

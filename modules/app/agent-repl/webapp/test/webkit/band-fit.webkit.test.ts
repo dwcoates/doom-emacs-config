@@ -117,7 +117,7 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
       const box = region.getBoundingClientRect();
       let whole = 0;
       let cut = 0;
-      for (const line of region.querySelectorAll(".row, .sb-merged-label[data-collapsed]")) {
+      for (const line of region.querySelectorAll(".row, .merged-group.folded > .merged-group-head")) {
         if (line.getBoundingClientRect().height === 0) continue;
         const r = line.getBoundingClientRect();
         if (r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5) whole += 1;
