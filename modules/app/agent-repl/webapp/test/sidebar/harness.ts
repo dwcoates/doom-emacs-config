@@ -6,6 +6,7 @@
  * suite builds its own idea of what a roster looks like.
  */
 import { createDeploysFold, type DeploysFold } from "../../src/sidebar/deploys-fold.js";
+import { createDeploysMore, type DeploysMore } from "../../src/sidebar/deploys-more.js";
 import { clone, create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -187,6 +188,7 @@ export function sidebarContext(
   openDetails: Set<string> = new Set(),
   reveal: RowReveal = drawsAtOnce,
   deploysFold: DeploysFold = createDeploysFold(document, () => undefined),
+  deploysMore: DeploysMore = createDeploysMore(document, timers, () => undefined),
 ): SidebarContext & RailContext & { view: DrawnView & SidebarView; attention: AttentionRegistry; disposers: Array<() => void> } {
   const disposers: Array<() => void> = [];
   const dropdowns = createDropdowns();
@@ -213,6 +215,7 @@ export function sidebarContext(
       status: document.createElement("div"),
     },
     deploysFold,
+    deploysMore,
     disposers,
     onDispose: (fn) => {
       disposers.push(fn);

@@ -33,6 +33,7 @@ import { AttentionRegistry } from "./attention.js";
 import { createDropdowns } from "./dropdowns.js";
 import { createRowHover } from "./row-hover.js";
 import { createDeploysFold, installDeploysFoldReset } from "./deploys-fold.js";
+import { createDeploysMore } from "./deploys-more.js";
 import { pageFocusLeft, type FocusLeft } from "../focus-left.js";
 import { installTransients } from "./transients.js";
 import { createArrangeHold } from "./arrange.js";
@@ -261,8 +262,14 @@ function mountSidebarIn(
     shownAhead: () => shownAhead,
     arrange: { hold: createArrangeHold((roster) => drawRoster(roster)), layer: arrangeLayer, status: arrangeStatus },
     // A CHANGE IS FITTED AT ONCE: the rows shown or let go are the Deploys
-    // band's lines (band-fit.ts).
-    deploysFold: createDeploysFold(body, () => bandFit.refit()),
+    // band's lines (band-fit.ts). A group folded or opened also hides or
+    // shows its older deploys, which starts or stops their linger.
+    deploysFold: createDeploysFold(body, () => {
+      bandFit.refit();
+      rail.deploysMore.check();
+    }),
+    // EACH GROUP'S OLDER DEPLOYS (deploys-more.ts), fitted the same way.
+    deploysMore: createDeploysMore(body, deps.timers ?? WINDOW_TIMERS, () => bandFit.refit()),
   };
   // THE BAND FIT (band-fit.ts): the Open, Hidden Workspaces and Recently
   // Merged viewports, re-fitted after every draw, on every resize of the rail
@@ -274,7 +281,15 @@ function mountSidebarIn(
   });
   // Every viewport's scroll, the reader's or the rail's, notes whether the
   // selected row still shows, which decides whether a resize brings it back.
-  body.addEventListener("scroll", () => selectionScroll.scrolled(body), true);
+  // A Deploys group's older deploys scrolled out of view start their linger.
+  body.addEventListener(
+    "scroll",
+    () => {
+      selectionScroll.scrolled(body);
+      rail.deploysMore.check();
+    },
+    true,
+  );
   // THE SEARCH NARROWS THE DRAWN ROWS (search.ts): on every keystroke, and
   // again after every push and every row drawn as it came into view, since
   // either draws rows the query has not narrowed.
@@ -454,6 +469,9 @@ function mountSidebarIn(
     scrollKeep.restore(body, chatShown ? "chat" : "workspaces");
     // Followed once the bands are fitted, so it scrolls the viewport they drew.
     selectionScroll.follow(body);
+    // Looked at once the viewports stand where they will, so a group's older
+    // deploys are in view or not as the reader sees them.
+    rail.deploysMore.check();
     // Seeked once the draw is in the document, where its animations run.
     wallPhase.seek();
     mark("hooks");
@@ -493,6 +511,7 @@ function mountSidebarIn(
       host.removeEventListener("click", dismiss);
       transients.dispose();
       removeDeploysFoldReset();
+      rail.deploysMore.dispose();
       rail.rowHover.dispose();
       disposeWorkspaceRoster(rail);
       disposeThreadList(rail);
