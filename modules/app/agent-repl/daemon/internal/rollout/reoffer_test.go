@@ -138,7 +138,11 @@ func TestATransferWithNoParticipantIsClaimedHeadlessOnceItsRowIsReleased(t *test
 	}
 }
 
-func TestATransferWithNoParticipantIsNotFollowedWhileTheRowIsHeld(t *testing.T) {
+// TestAWorkspaceWhoseRowIsHeldIsStillClaimedForTheDaemonsAdoption: the
+// daemon claims every armed workspace whatever its participants, and the
+// adoption it runs waits on the serving release and arbitrates the claim
+// (adopt), so a row the incumbent holds is never adopted from under it.
+func TestAWorkspaceWhoseRowIsHeldIsStillClaimedForTheDaemonsAdoption(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
@@ -156,8 +160,8 @@ func TestATransferWithNoParticipantIsNotFollowedWhileTheRowIsHeld(t *testing.T) 
 	headless := h.c.followCarriesOnce()
 
 	// Assert
-	if len(headless) != 0 {
-		t.Fatalf("claimed headless = %v, want none while the incumbent holds the row", headless)
+	if len(headless) != 1 || headless[0] != ws {
+		t.Fatalf("claimed = %v, want the armed workspace claimed for the daemon's own adoption", headless)
 	}
 	if got := expectedOf(t, h, ws); got != (Participants{Host: true, Web: true}) {
 		t.Fatalf("expected = %+v, want the announcement's host and web", got)

@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2045,5 +2046,90 @@ func TestAManifestWhoseSessionReadFailsRecordsItOnce(t *testing.T) {
 	}
 	if failures != 1 {
 		t.Fatalf("manifest read failures recorded = %d, want exactly one; records = %+v", failures, h.log.Records())
+	}
+}
+
+// THE TAKE-BACK CYCLE IS BOUNDED. On 2026-10-30 one workspace was taken back
+// and offered again six times, and neither daemon could finish. After
+// maxReoffers offers the incumbent surrenders it session-less, records the
+// end of the cycle as the workspace's fault, and exits.
+func TestATakeBackCycleEndsInASurrenderAfterItsLastOffer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	expireAdoption(t, h)
+
+	// Act: every offer's window expires in turn.
+	pacing := adoptionWindow
+	for offer := 1; offer <= maxReoffers; offer++ {
+		h.clock.Fire(pacing)
+		h.clock.awaitArmed(t, adoptionWindow)
+		h.registry.wait()
+		h.clock.Fire(adoptionWindow)
+		h.registry.wait()
+		if offer < maxReoffers {
+			pacing *= 2
+			h.clock.awaitArmed(t, pacing)
+		}
+	}
+
+	// Assert
+	awaitExit(t, h)
+	faults, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultAdoptionExpired})
+	if err != nil {
+		t.Fatalf("OpenFaults: %v", err)
+	}
+	surrendered := false
+	for _, f := range faults {
+		if f.Evidence["disposition"] == "surrendered_sessionless" && f.Evidence["offers"] == fmt.Sprint(maxReoffers) {
+			surrendered = true
+		}
+	}
+	if !surrendered {
+		t.Fatalf("faults = %+v, want the cycle's end recorded with its offers", faults)
+	}
+	if !loggedError(h.log, opHandover, "the successor did not adopt the workspace in every offer; standing its session down and handing it over without one") {
+		t.Fatalf("records = %+v, want the surrender stated at ERROR", h.log.Records())
+	}
+	owner, err := h.db.Serving(context.Background(), ws)
+	if err != nil || owner != nil {
+		t.Fatalf("Serving = (%v, %v), want the row released for the successor", owner, err)
+	}
+}
+
+// openAdoptionFault is the one writer of the workspace's adoption fault, for
+// an expired window and for a surrendered take-back cycle alike.
+func TestOpenAdoptionFaultRecordsTheWorkspacesFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	h.c.openAdoptionFault(context.Background(), ws, opHandover, "the detail", map[string]string{"k": "v"}, dlog.Context{})
+
+	// Assert
+	faults, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultAdoptionExpired})
+	if err != nil {
+		t.Fatalf("OpenFaults: %v", err)
+	}
+	if len(faults) != 1 || faults[0].Detail != "the detail" || faults[0].Evidence["k"] != "v" {
+		t.Fatalf("faults = %+v, want the one fault with its detail and evidence", faults)
+	}
+}
+
+func TestOpenAdoptionFaultThatCannotBeWrittenSaysSoAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	if err := h.db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act
+	h.c.openAdoptionFault(context.Background(), ws, opHandover, "the detail", nil, dlog.Context{"workspace": string(ws)})
+
+	// Assert
+	if !loggedError(h.log, opHandover, "could not record the workspace's failed adoption") {
+		t.Fatalf("records = %+v, want the failed write stated at ERROR", h.log.Records())
 	}
 }

@@ -24,7 +24,7 @@ func TestASelectOnTheSuccessorReachesTheIncumbentsRosterMidHandover(t *testing.T
 	t.Parallel()
 	// Arrange: two open workspaces, so the incumbent outlives the first one's
 	// adoption, and a roster watched on the incumbent as Emacs's is.
-	selfRepo, d := drainSelfRepoDaemon(t)
+	selfRepo, d := drainSelfRepoDaemon(t, adoptAwaitsParticipantsEnv)
 	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	held := drainOpenWorkspace(t, d)
 	held.shim.ExpectStartSession()

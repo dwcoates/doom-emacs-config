@@ -367,6 +367,13 @@ type Deps struct {
 	// reopens it when it ends with this daemon still serving (creategate).
 	// REQUIRED.
 	Creates *creategate.Gate
+	// AdoptAwaitsParticipants is a TEST RUN'S seam
+	// (EnvTestAdoptAwaitsParticipants): the successor's own adoption of a
+	// workspace that names participants waits until every one of them has
+	// called, which holds the transferred-but-not-adopted gap open for a test
+	// that observes it. A live daemon never sets it: there no participant
+	// holds an adoption (adoptClaimed).
+	AdoptAwaitsParticipants bool
 	// HoldoutWarnEvery is the cadence a handover waiting on busy workspaces
 	// names them at. A never-free workspace is waited on FOREVER; this is only
 	// how often it is named.
@@ -679,6 +686,9 @@ type SystemClock = clock.System
 // The rendezvous refusals. Each is one arm of AdoptHostWorkspaceError and
 // AdoptWebWorkspaceError; the server maps them onto the typed arm.
 var (
+	// EnvTestAdoptAwaitsParticipants names the test-run seam behind
+	// Deps.AdoptAwaitsParticipants: "1" sets it, and only a test run may.
+	EnvTestAdoptAwaitsParticipants = "AGENT_REPL_TEST_ADOPT_AWAITS_PARTICIPANTS"
 	// ErrNoTransferAnnounced is the ORDINARY answer on every non-handover boot:
 	// no transfer was announced for this workspace.
 	ErrNoTransferAnnounced = errors.New("rollout: no transfer was announced for this workspace")

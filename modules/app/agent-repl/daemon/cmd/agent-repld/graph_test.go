@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/envc"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/opentabs"
@@ -759,6 +760,41 @@ func TestHomeRepositoryCheckout(t *testing.T) {
 			// Assert
 			if got != tc.want {
 				t.Fatalf("homeRepositoryCheckout = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveAdoptAwaitsParticipants(t *testing.T) {
+	tests := []struct {
+		name    string
+		forbid  string
+		value   string
+		want    bool
+		wantErr string
+	}{
+		{name: "unset leaves the seam off", value: "", want: false},
+		{name: "a test run sets it", forbid: "1", value: "1", want: true},
+		{name: "a live daemon refuses it", forbid: "", value: "1", wantErr: "honored only with " + envc.EnvForbidVendorCalls},
+		{name: "any other value is refused", forbid: "1", value: "yes", wantErr: "is not 1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			t.Setenv(envc.EnvForbidVendorCalls, tc.forbid)
+
+			// Act
+			got, err := resolveAdoptAwaitsParticipants(envc.Load(), tc.value)
+
+			// Assert
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("resolveAdoptAwaitsParticipants = (%v, %v), want an error naming %q", got, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("resolveAdoptAwaitsParticipants = (%v, %v), want (%v, nil)", got, err, tc.want)
 			}
 		})
 	}
