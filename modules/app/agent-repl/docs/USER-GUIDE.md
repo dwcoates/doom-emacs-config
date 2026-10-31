@@ -546,11 +546,15 @@ The input window underlines misspelled words as you type.
 
 ## Completing workspace names in the input window
 
-- A word you type in the input window completes to the name of any open workspace it begins.
-  - Typing `agent-repl-ski` offers `agent-repl-skill-migration` while that workspace is open.
+- A word you type in the input window completes to the name of any open workspace that has a part starting with that word.
+  - A name's parts are split at `-`, `_` and `.`.
+  - Typing `agent-repl-ski`, `skill` or `repl-ski` offers `agent-repl-skill-migration` while that workspace is open.
   - Closed workspaces are never offered.
-- A word matches a name only from the name's start, so ordinary prose doesn't offer workspaces.
+- A word matches only from the start of a part, so ordinary prose doesn't offer workspaces.
+  - `on` never offers `agent-repl-skill-migration`.
 - A word that begins with `/` completes against slash commands instead.
+  - A slash command matches anywhere in its name, so `/workspaces` offers `/agent-repl-workspaces`.
+  - Failing that, it matches the typed letters in order, so `/arinst` offers `/agent-repl-install`.
 
 ## A one-shot in agent-repl
 

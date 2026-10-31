@@ -23,8 +23,12 @@
 ;; on the bare `/', before its minimum prefix length lets it draw anything,
 ;; so the answer is normally in hand by the word's second character.
 ;;
-;; THE COMPLETION IS NON-EXCLUSIVE.  `/usr/local' or any slash word that
-;; names no command falls through to the next completion function.
+;; A SLASH WORD NAMING NO COMMAND FALLS THROUGH.  `/usr/local', or any slash
+;; word the catalog's styles match nothing for, answers nil, so the next
+;; completion function answers it.  The capf decides that itself, by its own
+;; styles (`agent-repl-completion-match-capf', completion-match.el), never by
+;; Emacs's prefix-only `:exclusive no' test, which dropped every substring
+;; match before company saw it.
 ;;
 ;; MATCHING IS BY SUBSTRING, NOT ONLY PREFIX.  Typing `/profile' or `/prof'
 ;; offers `/agent-repl-profile'.  The candidates are not a plain list: they
@@ -66,6 +70,8 @@
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-host-route-handover "agent-repl-host" (ws arm slug))
+(declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
+(declare-function agent-repl-completion-match-table "completion-match" (category collection))
 (declare-function agent-repl-rpc-list-slash-commands "agent-repl-rpc" (conn request &rest keys))
 
 (defcustom agent-repl-command-completion-annotation-width 25
@@ -170,15 +176,15 @@ insert a second `/' -- while try-completion answers the whole slashed
 word."
   (let ((names (mapcar (lambda (candidate) (string-remove-prefix "/" candidate))
                        candidates)))
-    (lambda (string predicate action)
-      (cond
-       ((eq action 'metadata)
-        `(metadata (category . ,agent-repl--command-completion-category)))
-       ((string-prefix-p "/" string)
-        (completion-table-with-context "/" names (substring string 1) predicate action))
-       ((eq (car-safe action) 'boundaries)
-        (cons 'boundaries (cons 0 (length (cdr action)))))
-       (t (complete-with-action action candidates string predicate))))))
+    (agent-repl-completion-match-table
+     agent-repl--command-completion-category
+     (lambda (string predicate action)
+       (cond
+        ((string-prefix-p "/" string)
+         (completion-table-with-context "/" names (substring string 1) predicate action))
+        ((eq (car-safe action) 'boundaries)
+         (cons 'boundaries (cons 0 (length (cdr action)))))
+        (t (complete-with-action action candidates string predicate)))))))
 
 (defun agent-repl--command-completion-entry (catalog candidate)
   "Return the CATALOG entry CANDIDATE names, as its name or an alias, or nil."
@@ -311,7 +317,7 @@ composer that has never asked, keyed the same way."
 The composer's `completion-at-point-functions' entry.  Asks the daemon
 again when a slash has just been typed (see
 `agent-repl--command-completion-ask-key'), and answers from the catalog
-in hand.  Deliberately unlogged per call:
+in hand, or nil when nothing in it matches.  Deliberately unlogged per call:
 completion runs per keystroke."
   (when-let* ((bounds (agent-repl--command-completion-bounds))
               (ws (agent-repl--buffer-owner (current-buffer))))
@@ -320,14 +326,14 @@ completion runs per keystroke."
         (setq agent-repl--command-completion-asked-at key)
         (agent-repl-command-completion-refresh ws)))
     (let ((catalog agent-repl--command-completion-catalog))
-      (list (car bounds) (cdr bounds)
-            (agent-repl--command-completion-table
-             (agent-repl--command-completion-candidates catalog))
-            :exclusive 'no
-            :annotation-function
-            (lambda (candidate) (agent-repl--command-completion-annotation catalog candidate))
-            :company-docsig
-            (lambda (candidate) (agent-repl--command-completion-description catalog candidate))))))
+      (agent-repl-completion-match-capf
+       (car bounds) (cdr bounds)
+       (agent-repl--command-completion-table
+        (agent-repl--command-completion-candidates catalog))
+       :annotation-function
+       (lambda (candidate) (agent-repl--command-completion-annotation catalog candidate))
+       :company-docsig
+       (lambda (candidate) (agent-repl--command-completion-description catalog candidate))))))
 
 (provide 'command-completion)
 ;;; command-completion.el ends here

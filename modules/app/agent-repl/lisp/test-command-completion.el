@@ -494,7 +494,7 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
 ;;;; ---- completion-at-point ----
 
 (ert-deftest agent-repl-test-command-completion-capf-completes-from-the-catalog ()
-  "A slash word completes over the stated catalog, non-exclusively."
+  "A slash word completes over the stated catalog, deciding its own fall-through."
   (agent-repl-test-command-completion--with
       (list :response (agent-repl-test-command-completion--stated
                        agent-repl-test-command-completion--catalog))
@@ -508,7 +508,39 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
       (should (equal (list (nth 0 capf) (nth 1 capf)) '(1 4)))
       (should (equal (agent-repl-test-command-completion--words "/me" (nth 2 capf))
                      '("/merge-queue")))
-      (should (eq (plist-get (nthcdr 3 capf) :exclusive) 'no)))))
+      (should-not (plist-member (nthcdr 3 capf) :exclusive)))))
+
+(ert-deftest agent-repl-test-command-completion-capf-offers-a-substring-past-the-wrapper ()
+  "`/workspaces' offers `/agent-repl-workspaces' through Emacs's capf wrapper."
+  (agent-repl-test-command-completion--with nil
+    ;; Arrange
+    (setq agent-repl--command-completion-catalog
+          '((:name "agent-repl-workspaces" :description nil :argument-hint nil :aliases nil)))
+    (setq agent-repl--command-completion-asked-at '(1 . 0))
+    (agent-repl-test-command-completion--type "/workspaces")
+    ;; Act
+    (let ((capf (cdr (completion--capf-wrapper #'agent-repl-command-completion-at-point 'all))))
+      ;; Assert
+      (should (equal (agent-repl-test-command-completion--words "/workspaces" (nth 2 capf))
+                     '("/agent-repl-workspaces"))))))
+
+(ert-deftest agent-repl-test-command-completion-capf-is-nil-for-a-word-naming-nothing ()
+  "A slash word the catalog matches nothing for falls through, as `/usr/local' does."
+  (agent-repl-test-command-completion--with nil
+    ;; Arrange
+    (setq agent-repl--command-completion-catalog agent-repl-test-command-completion--catalog)
+    (setq agent-repl--command-completion-asked-at '(1 . 0))
+    (agent-repl-test-command-completion--type "/usr/local")
+    ;; Act / Assert
+    (should-not (agent-repl-command-completion-at-point))))
+
+(ert-deftest agent-repl-test-command-completion-capf-is-nil-without-a-catalog ()
+  "A slash word in a composer with no catalog in hand falls through."
+  (agent-repl-test-command-completion--with nil
+    ;; Arrange
+    (agent-repl-test-command-completion--type "/")
+    ;; Act / Assert
+    (should-not (agent-repl-command-completion-at-point))))
 
 (ert-deftest agent-repl-test-command-completion-capf-completes-inside-parens ()
   "A slash word inside parens completes over its slash and name only."

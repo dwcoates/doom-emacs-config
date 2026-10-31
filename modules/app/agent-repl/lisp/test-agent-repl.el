@@ -33,6 +33,7 @@
   (load (expand-file-name "test-autosave.el" dir) nil t)
   (load (expand-file-name "test-clipboard-image.el" dir) nil t)
   (load (expand-file-name "test-close-panels-on-open.el" dir) nil t)
+  (load (expand-file-name "test-completion-match.el" dir) nil t)
   (load (expand-file-name "test-command-completion.el" dir) nil t)
   (load (expand-file-name "test-workspace-completion.el" dir) nil t)
   (load (expand-file-name "test-commands.el" dir) nil t)
