@@ -32,12 +32,12 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/briefprompt"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/noticeloop"
 	"agent-repld/internal/prompthandler"
-	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/wsm"
 )
 
@@ -253,22 +253,20 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, t
 	if ownerNotice {
 		brief, origin, values = BriefOwner, OriginOwner, OwnerValues(event, s.requesterName(ctx, event.Workspace))
 	}
-	text, err := s.deps.Briefs(brief, values)
-	if err != nil {
+	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey}.
+		Submit(ctx, prompts, told.Source, brief, values, "derived-workspace-notice", origin)
+	switch briefprompt.StepOf(err) {
+	case briefprompt.StepCompose:
 		log.Error(op, "could not compose a derived workspace notice; the source is not told", dlog.WithCause(fields, err))
 		return
-	}
-	key, err := s.deps.MintKey("derived-workspace-notice")
-	if err != nil {
+	case briefprompt.StepMint:
 		log.Error(op, "could not mint a derived workspace notice's idempotency key; the source is not told", dlog.WithCause(fields, err))
 		return
-	}
-	outcome, err := prompts.Submit(ctx, told.Source, feed.SaidText(text), key, origin, nil, wsm.DeliveryDeferred, nil)
-	if err != nil {
+	case briefprompt.StepSubmit:
 		log.Error(op, "could not submit a derived workspace notice to its source", dlog.WithCause(fields, err))
 		return
 	}
-	fields["turn"], fields["origin"] = string(outcome.Turn), origin.String()
+	fields["turn"], fields["origin"] = string(turn), origin.String()
 	log.Info(op, "told a source workspace about a workspace derived from it", fields)
 }
 

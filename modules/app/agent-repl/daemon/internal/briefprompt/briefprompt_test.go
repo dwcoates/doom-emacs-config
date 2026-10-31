@@ -3,6 +3,9 @@ package briefprompt
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -96,5 +99,35 @@ func TestStepOfAnErrorNoSubmissionAnsweredIsZero(t *testing.T) {
 	// Act, Assert
 	if StepOf(errors.New("other")) != 0 || StepOf(nil) != 0 {
 		t.Fatal("StepOf answered a step for an error no submission made")
+	}
+}
+
+// TestEveryNotifierSubmitsThroughTheComposer holds the notifiers to the one
+// shape: each submits its brief prompts through Composer, and none calls the
+// prompt handler itself, so a hand-rolled site fails here.
+func TestEveryNotifierSubmitsThroughTheComposer(t *testing.T) {
+	for _, file := range []string{
+		"../mergenotice/mergenotice.go",
+		"../workspacesubs/workspacesubs.go",
+		"../workspacenotice/workspacenotice.go",
+		"../prwatch/poller.go",
+		"../mainsync/mainsync.go",
+	} {
+		t.Run(filepath.Base(file), func(t *testing.T) {
+			// Arrange
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := string(raw)
+
+			// Assert
+			if !strings.Contains(source, "briefprompt.Composer{") {
+				t.Errorf("%s does not submit through briefprompt.Composer", file)
+			}
+			if strings.Contains(source, "prompts.Submit(") || strings.Contains(source, ".MintKey(\"") {
+				t.Errorf("%s composes or submits a brief prompt by hand", file)
+			}
+		})
 	}
 }
