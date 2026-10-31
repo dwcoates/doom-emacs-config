@@ -260,3 +260,27 @@ func TestASuspensionWithdrawsTheWaitOnAFixingTurnRatherThanReturningTheMerge(t *
 		t.Fatalf("wait still armed=%v, queue %+v; want the wait withdrawn and the merge still remediating", still, queue)
 	}
 }
+
+func TestAHeadThatStepsAsideNeverRunsItsTestsAgainBeforeItReturns(t *testing.T) {
+	// Arrange: the step aside's goroutine is held, and the fake's fixing turn
+	// ends at once -- so only a run cut before it reads that end stops.
+	c := newChainOfWidth(t, 1)
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	c.runner.script(c.dirs[theWorkspace], failingSuiteRun)
+	held := make(chan struct{})
+	c.h.o.onStepAside = func(ids.WorkspaceID) { <-held }
+
+	// Act
+	err := receiveWithin(t, admitAsync(c.h, context.Background()), "the failing head's admission ending")
+	ran := c.runner.ran(c.dirs[theWorkspace])
+	close(held)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("the failing head's admission ended on: %v", err)
+	}
+	if ran != 1 {
+		t.Fatalf("the failed head's tests ran %d times before its step aside, want once: its run went on", ran)
+	}
+}
