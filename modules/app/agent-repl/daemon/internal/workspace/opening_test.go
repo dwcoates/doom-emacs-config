@@ -81,6 +81,22 @@ func TestStartWatcherOpeningFollowsTheReplayRule(t *testing.T) {
 			wantOpening: "resumed",
 			wantMain:    openingPointer,
 		},
+		{
+			name:        "a handover's adoption resumes from the incumbent's carried pointers",
+			before:      handedOver,
+			act:         func(f *fleetFixture, ws ids.WorkspaceID) error { return f.fleet.Start(context.Background(), ws) },
+			wantOpening: "resumed",
+			wantMain:    carriedPointer,
+		},
+		{
+			name: "a fresh conversation forgets the carried pointers too",
+			before: func(_ *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
+				f.fleet.ResumeWatchesFrom(ws, sessionwatcher.Pointers{Main: openingPointer})
+				delete(f.db.sessions, ws)
+			},
+			act:         func(f *fleetFixture, ws ids.WorkspaceID) error { return f.fleet.Start(context.Background(), ws) },
+			wantOpening: "workspace_opened",
+		},
 	}
 
 	for _, tt := range tests {
@@ -212,6 +228,22 @@ func startedThenStopped(t *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
 	}
 }
 
+// carriedPointer is the main-watch pointer a handover's incumbent carried in
+// these scenarios.
+var carriedPointer = &conversationv1.HistoryPointer{Value: "ptr-carried-3"}
+
+// handedOver brings ws to where a handover's successor stands: a resumable
+// session this process holds no watcher of, and the incumbent's carried
+// pointers.
+func handedOver(t *testing.T, f *fleetFixture, ws ids.WorkspaceID) {
+	t.Helper()
+	startedThenStopped(t, f, ws)
+	f.fleet.mu.Lock()
+	delete(f.fleet.watched, ws)
+	f.fleet.mu.Unlock()
+	f.fleet.ResumeWatchesFrom(ws, sessionwatcher.Pointers{Main: carriedPointer})
+}
+
 // daemonRoot is the daemon module's root: the directory holding go.mod.
 func daemonRoot(t *testing.T) string {
 	t.Helper()
@@ -302,4 +334,61 @@ func firstPageSites(t *testing.T, root string, watched map[string][]string) map[
 		sort.Strings(got[name])
 	}
 	return got
+}
+
+func TestCarriedPointersAreSpentByTheWatcherThatStarts(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	handedOver(t, f, ws.ID)
+
+	// Act
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.fleet.mu.Lock()
+	_, still := f.fleet.carried[ws.ID]
+	f.fleet.mu.Unlock()
+	if still {
+		t.Fatalf("the carried pointers are still held after a watcher started from them")
+	}
+}
+
+func TestWatchPointersAnswersTheLastWatchersPointers(t *testing.T) {
+	tests := []struct {
+		name        string
+		before      func(t *testing.T, f *fleetFixture, ws ids.WorkspaceID)
+		wantWatched bool
+		wantMain    *conversationv1.HistoryPointer
+	}{
+		{
+			name:   "a workspace this process never watched answers none",
+			before: func(*testing.T, *fleetFixture, ids.WorkspaceID) {},
+		},
+		{
+			name:        "a watched workspace answers its retired watcher's pointers",
+			before:      startedThenStopped,
+			wantWatched: true,
+			wantMain:    openingPointer,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			tt.before(t, f, ws.ID)
+
+			// Act
+			got, watched := f.fleet.WatchPointers(ws.ID)
+
+			// Assert
+			if watched != tt.wantWatched || got.Main.GetValue() != tt.wantMain.GetValue() {
+				t.Fatalf("WatchPointers = (%q, %v), want (%q, %v)", got.Main.GetValue(), watched, tt.wantMain.GetValue(), tt.wantWatched)
+			}
+		})
+	}
 }

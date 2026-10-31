@@ -24,7 +24,9 @@ import (
 //   - a workspace this process has never watched, or whose session is coming
 //     up FRESH (a new conversation, a new book) -> WorkspaceOpened;
 //   - anything else (a restart, a revival, a rollout's relaunch, a cold gate's
-//     re-open) resumes from the pointers of the watcher it replaces.
+//     re-open) resumes from the pointers of the watcher it replaces;
+//   - a handover's adoption resumes from the pointers its incumbent CARRIED
+//     (ResumeWatchesFrom): the watcher it replaces ran in another daemon.
 //
 // The feed keeps a workspace's rows across every bring-up but a bind
 // (resolve/feed ResetWorkspace), which is what makes the resume correct: the
@@ -38,6 +40,7 @@ func (f *Fleet) openingFor(ws ids.WorkspaceID) sessionwatcher.Opening {
 	f.mu.Lock()
 	selected := f.selected[ws]
 	prior, watched := f.watched[ws]
+	carried, handed := f.carried[ws]
 	f.mu.Unlock()
 	switch {
 	case selected:
@@ -46,6 +49,8 @@ func (f *Fleet) openingFor(ws ids.WorkspaceID) sessionwatcher.Opening {
 		// OFF THE FLEET'S LOCK: the watcher takes its own, and it calls the
 		// fleet's sinks while holding it.
 		return sessionwatcher.ResumeFrom(prior.Pointers())
+	case handed:
+		return sessionwatcher.ResumeFrom(carried)
 	default:
 		return sessionwatcher.WorkspaceOpened()
 	}
@@ -59,6 +64,27 @@ func (f *Fleet) noteTranscriptSelected(ws ids.WorkspaceID) {
 	defer f.mu.Unlock()
 	f.selected[ws] = true
 	delete(f.watched, ws)
+	delete(f.carried, ws)
+}
+
+// ResumeWatchesFrom records the pointers a handover's incumbent carried for
+// ws: the next watcher started here catches up from them (openingFor).
+func (f *Fleet) ResumeWatchesFrom(ws ids.WorkspaceID, from sessionwatcher.Pointers) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.carried[ws] = from
+}
+
+// WatchPointers answers the pointers of the last watcher this process started
+// for ws, false when it never started one: what a handover carries.
+func (f *Fleet) WatchPointers(ws ids.WorkspaceID) (sessionwatcher.Pointers, bool) {
+	f.mu.Lock()
+	prior, watched := f.watched[ws]
+	f.mu.Unlock()
+	if !watched {
+		return sessionwatcher.Pointers{}, false
+	}
+	return prior.Pointers(), true
 }
 
 // forgetPointers drops the previous watcher's pointers because the session
@@ -70,6 +96,7 @@ func (f *Fleet) forgetPointers(ws ids.WorkspaceID) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.watched, ws)
+	delete(f.carried, ws)
 }
 
 // startWatcher opens a workspace's watch fleet with the opening openingFor
@@ -100,6 +127,7 @@ func (f *Fleet) startWatcher(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	// still owes the selected transcript its first page on the next attempt.
 	f.mu.Lock()
 	delete(f.selected, ws)
+	delete(f.carried, ws)
 	f.watched[ws] = watcher
 	f.mu.Unlock()
 	log.Info(opBringUp, "opened the session's watches", dlog.Context{

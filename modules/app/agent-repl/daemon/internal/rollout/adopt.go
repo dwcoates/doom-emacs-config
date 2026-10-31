@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/sessionlock"
+	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/standdown"
 	"agent-repld/internal/wsm"
 )
@@ -685,6 +686,15 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 			return fmt.Errorf("rollout: adopt %q: decode the carried cold gate: %w", ws, err)
 		}
 	}
+	var resumeFrom *sessionwatcher.Pointers
+	if carried && carry.Pointers != nil {
+		from, err := carry.Pointers.decode()
+		if err != nil {
+			c.log.Error(opAdopt, "could not decode the carried watch pointers; the workspace is not adopted", dlog.WithCause(fields, err))
+			return fmt.Errorf("rollout: adopt %q: decode the carried watch pointers: %w", ws, err)
+		}
+		resumeFrom = &from
+	}
 	// A SHIM PARKED AT ITS COLD GATE HOLDS NO LOCK, and it is running: it
 	// refused the resume before it took one (workspace.Fleet.AdoptParked), and
 	// the incumbent detached it for this daemon. Its free lock is not "no
@@ -746,6 +756,12 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// workspace served without a session, which its next prompt revives.
 	var dialErr error
 	if dial {
+		// THE WATCHES THIS DIAL OPENS CATCH UP FROM THE INCUMBENT'S POINTERS
+		// (CarriedPointers): what the shim wrote while no daemon watched it
+		// reaches this one.
+		if resumeFrom != nil {
+			c.deps.Shims.ResumeWatchesFrom(ws, *resumeFrom)
+		}
 		dialErr = c.dialAdopted(ctx, ws, parked, fields)
 	}
 	// A MID-WORK ADOPTION LETS NO HELD PROMPT GO BEFORE IT KNOWS THE TURN IN
