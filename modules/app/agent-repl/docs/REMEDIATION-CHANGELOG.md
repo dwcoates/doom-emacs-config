@@ -1327,3 +1327,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-30 elisp-warning-free-2 (landed off the merge queue): The editor's remaining over-wide docstrings are rewrapped, so the byte-compile gate passes.
 - 2026-10-30 elisp-warning-free-3 (landed off the merge queue): The last over-wide editor docstring is rewrapped.
 - 2026-10-30 ramdisk-reused-device (landed off the merge queue): A test run's RAM disk is no longer detached under it when another run reclaims a dead run's disk that had the same device number.
+- 2026-10-30 governor-first-unit (landed off the merge queue): Test runs on a busy host no longer stall on a two-seat unit: while no test holds a seat, the first unit gets all the seats it needs.
