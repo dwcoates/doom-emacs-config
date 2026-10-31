@@ -415,6 +415,49 @@ Binds `made' to that buffer; it is killed afterwards."
     (agent-repl-test-sv--with-frame
       (should-not (agent-repl-sidebar-view-hide)))))
 
+;;;; ---- The offset the host places panels by ----
+
+(ert-deftest agent-repl-test-sv-the-offset-is-the-gap-between-the-windows-tops ()
+  "The offset is how far below the view's content top the sidebar's starts."
+  (cl-letf (((symbol-function 'window-inside-pixel-edges)
+             (lambda (win) (if (eq win 'sidebar) '(0 30 200 900) '(200 18 1200 700)))))
+    (should (= (agent-repl--sidebar-view-offset 'sidebar 'view) 12))))
+
+(ert-deftest agent-repl-test-sv-telling-the-offset-measures-both-windows ()
+  "With the sidebar and the current workspace's view on the frame, their gap is told."
+  (let ((told nil))
+    (cl-letf (((symbol-function 'agent-repl-sidebar-view-window) (lambda (&optional _frame) 'sidebar))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "alpha"))
+              ((symbol-function 'agent-repl-window--panel-window) (lambda (_kind _ws &optional _frame) 'view))
+              ((symbol-function 'window-live-p) (lambda (win) (memq win '(sidebar view))))
+              ((symbol-function 'agent-repl--sidebar-view-offset) (lambda (_s _v) 5))
+              ((symbol-function 'agent-repl-webhost-set-sidebar-offset) (lambda (px) (push px told))))
+      (agent-repl-sidebar-view-tell-offset)
+      (should (equal told '(5))))))
+
+(ert-deftest agent-repl-test-sv-telling-the-offset-without-a-view-tells-nothing ()
+  "With no view window on the frame there is nothing to measure against."
+  (let ((told nil))
+    (cl-letf (((symbol-function 'agent-repl-sidebar-view-window) (lambda (&optional _frame) 'sidebar))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "alpha"))
+              ((symbol-function 'agent-repl-window--panel-window) (lambda (_kind _ws &optional _frame) nil))
+              ((symbol-function 'agent-repl-webhost-set-sidebar-offset) (lambda (px) (push px told))))
+      (agent-repl-sidebar-view-tell-offset)
+      (should-not told))))
+
+(ert-deftest agent-repl-test-sv-telling-the-offset-runs-on-every-window-resize ()
+  "A layout change is told at once, from the window size hook."
+  (should (memq #'agent-repl-sidebar-view-tell-offset (default-value 'window-size-change-functions))))
+
+(ert-deftest agent-repl-test-sv-showing-tells-the-offset ()
+  "A sidebar shown tells the host where it starts."
+  (agent-repl-test-sv--with-created
+    (agent-repl-test-sv--with-frame
+      (let ((told 0))
+        (cl-letf (((symbol-function 'agent-repl-sidebar-view-tell-offset) (lambda (&rest _) (cl-incf told))))
+          (agent-repl-sidebar-view-show (agent-repl-test-sv--conn "127.0.0.1:5"))
+          (should (= told 1)))))))
+
 (provide 'test-sidebar-view)
 
 ;;; test-sidebar-view.el ends here

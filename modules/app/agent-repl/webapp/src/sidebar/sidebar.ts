@@ -22,6 +22,7 @@
 import { installVersionHover } from "./memory.js";
 import { installVersionNotices, type SidebarNotices } from "./notices.js";
 import type { LocalFailureView } from "../failure/local.js";
+import type { PopupMirror } from "../host/sidebar-popups.js";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { createDrawnStatusLog } from "../drawn-status.js";
 import { log } from "../log.js";
@@ -182,6 +183,8 @@ export type WebhostSidebarDeps = Pick<SidebarDeps, "storage" | "timers" | "wallP
   revealed?: () => void;
   /** The sidebar document's failures and notices, which its version lists (notices.ts). */
   notices?: { failures: LocalFailureView; notices: SidebarNotices };
+  /** Where the open row panels are drawn over the feed (host/sidebar-popups.ts); beside the rows when absent. */
+  popupMirror?: PopupMirror;
 };
 
 /** Where a sidebar is drawn, and what that placement needs. */
@@ -257,7 +260,7 @@ function mountSidebarIn(
     openDetails,
     drawnStatus: createDrawnStatusLog("sidebar row", "sidebar.drawn-status"),
     dropdowns,
-    rowHover: createRowHover(dropdowns, openDetails),
+    rowHover: createRowHover(dropdowns, openDetails, deps.popupMirror ?? null),
     attention,
     reveal,
     selectionFade: createSelectionFade(body),
@@ -335,6 +338,7 @@ function mountSidebarIn(
   // inside a nested scroller does not bubble to the window.
   const replace = (): void => {
     placeOpenRowDetails(body);
+    rail.rowHover.mirrorOpen();
   };
   window.addEventListener("resize", replace);
   window.addEventListener("scroll", replace, true);
@@ -464,6 +468,8 @@ function mountSidebarIn(
     // means it can only be measured once it is ON the page: a row drawn
     // already-expanded is placed here, after the draw is in the document.
     placeOpenRowDetails(body);
+    // A PANEL DRAWN OVER THE FEED follows its row's new drawing (sidebar-popups.ts).
+    rail.rowHover.mirrorOpen();
     // THE FIRST PUSH REVEALS THE RAIL, and nothing else ever does.
     if (host.hidden) {
       host.hidden = false;

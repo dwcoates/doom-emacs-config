@@ -834,6 +834,7 @@ re-routes their frontend resolution instead."
          (agent-repl--sidebar-view-shown nil)
          (agent-repl--sidebar-view-daemon-origin nil)
          (agent-repl--sidebar-view-reloaded-for-call nil)
+         (agent-repl--webhost-sidebar-offset 0)
          ;; Repo-fold set: global UI state, so a test that folds a repo
          ;; would otherwise leak that fold into every later test's
          ;; tab-bar render.

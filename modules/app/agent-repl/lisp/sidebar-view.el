@@ -56,6 +56,9 @@
 (declare-function agent-repl--webview-call-prior "webhost" (xwidget event-type))
 (declare-function agent-repl--webview-watch-load "webhost" (xw callback))
 (declare-function xwidget-webkit-uri "xwidget" (xwidget))
+(declare-function agent-repl-webhost-set-sidebar-offset "webhost" (pixels))
+(declare-function agent-repl-window--panel-window "window" (kind &optional ws frame))
+(declare-function agent-repl--ws-current-name "workspace" ())
 
 (defvar agent-repl--webhost-log-level)
 
@@ -330,7 +333,28 @@ no mode line.  Nothing is changed when it already stands.  Returns the window."
           (error "agent-repl: the sidebar's window could not be made (buffer=%S)" buf))
         (window-preserve-size win t t)
         (agent-repl--info agent-repl--sidebar-view-central "elisp.sidebar-view.shown window=%S width=%d" win width)
+        (agent-repl-sidebar-view-tell-offset)
         win)))
+
+(defun agent-repl--sidebar-view-offset (sidebar-win view-win)
+  "How far below VIEW-WIN's content top SIDEBAR-WIN's content starts, in pixels."
+  (- (nth 1 (window-inside-pixel-edges sidebar-win))
+     (nth 1 (window-inside-pixel-edges view-win))))
+
+(defun agent-repl-sidebar-view-tell-offset (&rest _)
+  "Tell the host how far below its window the sidebar's window starts.
+The host draws the sidebar's row panels at the row's height plus this
+\(webapp/src/host/sidebar-popups.ts), so a row and its panel share a line
+whatever stands above either window.  Measured from the sidebar's window and
+the current workspace's view window, when both are on the selected frame; run
+from `window-size-change-functions' too, so a layout change is told at once."
+  (let* ((sidebar (agent-repl-sidebar-view-window))
+         (ws (and (fboundp 'agent-repl--ws-current-name) (agent-repl--ws-current-name)))
+         (view (and ws (agent-repl-window--panel-window :view ws))))
+    (when (and (window-live-p sidebar) (window-live-p view))
+      (agent-repl-webhost-set-sidebar-offset (agent-repl--sidebar-view-offset sidebar view)))))
+
+(add-hook 'window-size-change-functions #'agent-repl-sidebar-view-tell-offset)
 
 (defun agent-repl-sidebar-view-hide ()
   "Take the sidebar's window off the frame, keeping its web view.

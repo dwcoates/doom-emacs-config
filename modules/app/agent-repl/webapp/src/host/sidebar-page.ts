@@ -28,6 +28,7 @@ import { mountWebhostSidebar } from "../sidebar/sidebar.js";
 import { createSidebarNotices, type SidebarNotices } from "../sidebar/notices.js";
 import { installColorValues } from "../vocab.js";
 import { createCallAnswers } from "./answers.js";
+import { createPopupMirror, openPopupChannel, type PopupChannel } from "./sidebar-popups.js";
 import { startWebhostDocument, type WebhostDocumentDeps } from "./document.js";
 import "./sidebar-page.css";
 
@@ -82,6 +83,8 @@ export interface StartSidebarPageDeps extends WebhostDocumentDeps {
   notices?: SidebarNotices;
   /** The page's focus-left signal, which `focusMoved` fires; the document's own when absent. */
   focusLeft?: FocusLeftSource;
+  /** The channel the open row panels are handed to the host on; the host origin's own when absent. */
+  popupChannel?: PopupChannel;
 }
 
 /** Turn the page in DOC and WIN into the sidebar, and hand it to Emacs. */
@@ -116,8 +119,12 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
   let markShown = (_id: string): void => undefined;
   try {
     log.info("the sidebar page is starting", { operation: "sidebar-page.start", context: {} });
+    // THE OPEN ROW PANELS ARE DRAWN OVER THE FEED, by the host
+    // (sidebar-popups.ts): this window ends at the feed's edge.
+    const popupMirror = createPopupMirror({ channel: deps.popupChannel ?? openPopupChannel() });
     const rail = (deps.mount ?? mountWebhostSidebar)(nav, started.ctx, {
       focusLeft,
+      popupMirror,
       notices: { failures: started.failures, notices },
       revealed: () => {
         log.info("the sidebar page drew its rail", { operation: "sidebar-page.revealed", context: {} });

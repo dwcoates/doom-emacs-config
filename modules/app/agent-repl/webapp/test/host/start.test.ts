@@ -7,11 +7,15 @@ import { HOST_ROOT_CLASS, WEBHOST_FRAMES_CLASS, startHost } from "../../src/host
 import { WEBHOST_GATE_ID } from "../../src/host/gate.js";
 import { WEBHOST_LOAD_ID } from "../../src/host/load-button.js";
 import type { Host } from "../../src/host/host.js";
+import type { PopupLayerEnv } from "../../src/host/sidebar-popups.js";
 
 let started: Host | null = null;
 
 /** The services a suite not about them start: none, and no daemon dialed. */
 const noServices = (): void => undefined;
+
+/** The popup layer a suite not about it installs: none, and no channel opened. */
+const noPopups = (): void => undefined;
 
 afterEach(() => {
   started?.dispose();
@@ -30,7 +34,7 @@ describe("startHost", () => {
     document.body.innerHTML = '<nav id="ws-sidebar"></nav><div id="main-col"></div>';
 
     // Act
-    started = startHost(document, window, { startServices: noServices });
+    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(document.getElementById("main-col")).toBeNull();
@@ -38,7 +42,7 @@ describe("startHost", () => {
 
   it("installs the status colors' values before the gate draws", () => {
     // Act
-    started = startHost(document, window, { startServices: noServices });
+    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(document.head.querySelector('style[data-source="render-colors.json#color_values"]')).not.toBeNull();
@@ -46,7 +50,7 @@ describe("startHost", () => {
 
   it("lays out the stack of workspace pages, the load button over it, and the gate below them", () => {
     // Act
-    started = startHost(document, window, { startServices: noServices });
+    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect([...document.body.children].map((e) => e.className || e.id)).toEqual([
@@ -65,6 +69,7 @@ describe("startHost", () => {
       startServices: (_doc, _win, _host, deps) => {
         handed = deps.load;
       },
+      installPopups: noPopups,
     });
 
     // Assert
@@ -80,6 +85,7 @@ describe("startHost", () => {
       startServices: (_doc, _win, _host, deps) => {
         handed = deps.gate;
       },
+      installPopups: noPopups,
     });
 
     // Assert
@@ -88,7 +94,7 @@ describe("startHost", () => {
 
   it("holds the workspace pages in the stack", () => {
     // Arrange
-    started = startHost(document, window, { startServices: noServices });
+    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
 
     // Act
     started.ensure("a", "http://ws-a.localhost:1/");
@@ -107,6 +113,7 @@ describe("startHost", () => {
       startServices: () => {
         order.push("services");
       },
+      installPopups: noPopups,
     });
 
     // Assert
@@ -115,7 +122,7 @@ describe("startHost", () => {
 
   it("draws no sidebar of its own", () => {
     // Act
-    started = startHost(document, window, { startServices: noServices });
+    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(document.getElementById("ws-sidebar")).toBeNull();
@@ -123,7 +130,7 @@ describe("startHost", () => {
 
   it("marks the root as the host", () => {
     // Act
-    started = startHost(document, window, { startServices: noServices });
+    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(document.documentElement.classList.contains(HOST_ROOT_CLASS)).toBe(true);
@@ -131,7 +138,7 @@ describe("startHost", () => {
 
   it("hands the host to Emacs", () => {
     // Act
-    started = startHost(document, window, { startServices: noServices });
+    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(window.agentReplHost).toBe(started);
@@ -139,7 +146,7 @@ describe("startHost", () => {
 
   it("answers Emacs's focus question for the host", () => {
     // Arrange
-    started = startHost(document, window, { startServices: noServices });
+    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
     const field = document.createElement("textarea");
     document.body.append(field);
 
@@ -152,7 +159,7 @@ describe("startHost", () => {
 
   it("puts its focus answer back once the page has loaded", () => {
     // Arrange
-    started = startHost(document, window, { startServices: noServices });
+    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
     window.xwHasFocus = () => false;
     const field = document.createElement("textarea");
     document.body.append(field);
@@ -174,7 +181,7 @@ describe("startHost", () => {
     ];
 
     // Act
-    started = startHost(document, window, { startServices: noServices });
+    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(order.map((answer) => (JSON.parse(answer) as { outcome: string }).outcome)).toEqual(["created", "shown"]);
@@ -185,9 +192,30 @@ describe("startHost", () => {
     window.__agentReplHostPending = [];
 
     // Act
-    started = startHost(document, window, { startServices: noServices });
+    started = startHost(document, window, { startServices: noServices, installPopups: noPopups });
 
     // Assert
     expect(window.__agentReplHostPending).toBeUndefined();
+  });
+
+  it("installs the sidebar's popup layer on the channel it opens, placed by the host's sidebar offset", () => {
+    // Arrange
+    const channel = { postMessage: () => undefined, addEventListener: () => undefined, removeEventListener: () => undefined, close: () => undefined };
+    let env: PopupLayerEnv | null = null;
+
+    // Act
+    started = startHost(document, window, {
+      startServices: noServices,
+      popupChannel: () => channel,
+      installPopups: (e) => {
+        env = e;
+      },
+    });
+    const offsets: number[] = [];
+    (env as PopupLayerEnv | null)?.onOffset?.((pixels) => offsets.push(pixels));
+    started.setSidebarOffset(7);
+
+    // Assert
+    expect([(env as PopupLayerEnv | null)?.channel, offsets]).toEqual([channel, [0, 7]]);
   });
 });

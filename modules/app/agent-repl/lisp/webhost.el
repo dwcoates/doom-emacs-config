@@ -132,6 +132,11 @@ handed with every page the next replay loads, then cleared: each page
 measures how long it stood blank from it (`reload_blank').  Nil for the
 host's first load, which is the editor starting, not a reload.")
 
+(defvar agent-repl--webhost-sidebar-offset 0
+  "How far below the host's window top the sidebar's window content starts,
+in pixels, as last measured (`agent-repl-sidebar-view-tell-offset').
+Replayed to a host that loads.")
+
 (defvar agent-repl--webhost-held-ingress (make-hash-table :test #'equal)
   "Workspace id -> the vector of its held-prompt ingress entries the page draws
 while it cannot reach the daemon (`agent-repl-webhost-set-held-ingress').")
@@ -650,6 +655,17 @@ The host draws the gate whether or not WS's page is loaded."
     (puthash id pixels agent-repl--webhost-gate-docks)
     (agent-repl--webhost-call "setGateDock" id pixels)))
 
+(defun agent-repl-webhost-set-sidebar-offset (pixels)
+  "Tell the host the sidebar's window starts PIXELS below its own.
+Kept for the host's reloads.
+The host draws the sidebar's row panels beside it, at the row's height plus
+this (webapp/src/host/sidebar-popups.ts).  Nothing is sent when PIXELS is
+the offset already told."
+  (unless (equal pixels agent-repl--webhost-sidebar-offset)
+    (setq agent-repl--webhost-sidebar-offset pixels)
+    (agent-repl--info agent-repl--webhost-central "elisp.webhost.sidebar-offset pixels=%d" pixels)
+    (agent-repl--webhost-call "setSidebarOffset" pixels)))
+
 (defun agent-repl-webhost-set-held-ingress (ws entries)
   "Tell WS's page the held-prompt ingress ENTRIES for WS; kept for its reloads.
 ENTRIES is a vector of hash tables, each an entry's `key', `queuedAt' and
@@ -769,6 +785,9 @@ successor\='s rendezvous completes only once the page has called, inside
 the host\='s own 10s call bound.  Queued behind a lane\='s other pages, two
 such pages missed it on the 2026-10-22 11:14 deploy, and both adopts timed
 out (`agent-repl-host-adopting-p')."
+  ;; THE SIDEBAR'S OFFSET, which places the sidebar's row panels.
+  (unless (zerop agent-repl--webhost-sidebar-offset)
+    (agent-repl--webhost-call "setSidebarOffset" agent-repl--webhost-sidebar-offset))
   ;; EVERY GATE SLOT FIRST, a loaded page's or not: the host draws the gate
   ;; of whichever workspace is shown (webapp/src/host/gate.ts).
   (maphash (lambda (id pixels) (agent-repl--webhost-call "setGateDock" id pixels))

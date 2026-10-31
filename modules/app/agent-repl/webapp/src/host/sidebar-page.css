@@ -96,3 +96,10 @@ html.agent-repl-sidebar #ws-sidebar .sb-notices-none {
   margin: 0;
   color: var(--muted);
 }
+
+/* AN OPEN ROW'S PANEL IS DRAWN OVER THE FEED, by the host
+   (host/sidebar-popups.ts): this window ends at the feed's edge, so the
+   rail's own copy stays undrawn and only hands its contents over. */
+html.agent-repl-sidebar #ws-sidebar .ws.open > .detail {
+  display: none;
+}

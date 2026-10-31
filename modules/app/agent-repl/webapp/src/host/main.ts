@@ -23,6 +23,7 @@
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { createHost, hostHasFocus, type Host } from "./host.js";
 import { startWebhostServices } from "./services.js";
+import { installPopupLayer, openPopupChannel, type PopupChannel, type PopupLayerEnv } from "./sidebar-popups.js";
 import { WEBHOST_GATE_ID } from "./gate.js";
 import { WEBHOST_LOAD_ID } from "./load-button.js";
 import { installColorValues } from "../vocab.js";
@@ -55,6 +56,10 @@ export interface StartHostDeps {
     host: Host,
     deps: { level: LevelWindow; daemon: DaemonOrigin; gate: HTMLElement; load: HTMLElement },
   ) => unknown;
+  /** Install the layer the sidebar's popups are drawn in; the real one listens on the channel. */
+  installPopups?: (env: PopupLayerEnv) => unknown;
+  /** Open the channel the sidebar's popups arrive on; the host origin's own when absent. */
+  popupChannel?: () => PopupChannel;
 }
 
 /** Turn the page in DOC and WIN into the host, and hand it to Emacs. */
@@ -89,6 +94,13 @@ export function startHost(doc: Document, win: Window, deps: StartHostDeps = {}):
   delete win.__agentReplHostPending;
   for (const call of pending) call(host);
   (deps.startServices ?? startWebhostServices)(doc, win, host, { level, daemon, gate, load });
+  // THE SIDEBAR'S OPEN ROW PANELS, drawn over the pages (sidebar-popups.ts).
+  (deps.installPopups ?? installPopupLayer)({
+    doc,
+    win,
+    channel: (deps.popupChannel ?? openPopupChannel)(),
+    onOffset: (listener) => host.onSidebarOffset(listener),
+  });
   const answerFocus = (): boolean => hostHasFocus(doc, host);
   win.xwHasFocus = answerFocus;
   // Emacs injects its own definition as a user script, which can run after

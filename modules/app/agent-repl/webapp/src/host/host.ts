@@ -171,6 +171,16 @@ export interface Host {
   /** Tell LISTENER every slot recorded from now on; answers the stop. */
   onGateSlot(listener: (id: string, pixels: number) => void): () => void;
   /**
+   * Record how far below the host's own top the sidebar's window starts, in
+   * pixels (negative when it starts above): Emacs measures both windows. A row
+   * at height Y in the sidebar stands at Y plus this in the host, where its
+   * panel is drawn (sidebar-popups.ts). A value that is not a finite number is
+   * refused. Answers `kept`.
+   */
+  setSidebarOffset(pixels: number): string;
+  /** Tell LISTENER the sidebar's offset now and at every change; answers the stop. */
+  onSidebarOffset(listener: (pixels: number) => void): () => void;
+  /**
    * Tell ID's page the editor's held-prompt ingress entries for its
    * workspace, the whole list. An entry that is not one (host/protocol.ts
    * `parseHeldIngressEntry`) refuses the call whole, answered `refused`.
@@ -277,6 +287,10 @@ export function createHost(env: HostEnv): Host {
    * screen.
    */
   const incoming = new Map<string, { fresh: Frame; bound: number }>();
+  /** How far below the host's top the sidebar's window starts, as Emacs last measured it. */
+  let sidebarOffset = 0;
+  /** Who is told every sidebar offset Emacs records: the popup layer. */
+  const sidebarOffsets = createListeners<[number]>();
   /** Who is told every page shown (`onShown`): the webhost's gate. */
   const shownListeners = createListeners<[string]>();
   /**
@@ -870,6 +884,19 @@ export function createHost(env: HostEnv): Host {
       // queued calls first), so a new listener is handed every slot kept.
       for (const [id, pixels] of slots) listener(id, pixels);
       return gateSlots.add(listener);
+    },
+    setSidebarOffset(pixels) {
+      if (typeof pixels !== "number" || !Number.isFinite(pixels)) {
+        note("warn", `setSidebarOffset was handed ${JSON.stringify(pixels)}, which is no pixel offset; the offset stays ${sidebarOffset}`);
+        return answer("setSidebarOffset", null, "refused");
+      }
+      sidebarOffset = pixels;
+      sidebarOffsets.notify(pixels);
+      return answer("setSidebarOffset", null, "kept", { pixels });
+    },
+    onSidebarOffset(listener) {
+      listener(sidebarOffset);
+      return sidebarOffsets.add(listener);
     },
     setHeldIngress(id, entries) {
       return withFrame("setHeldIngress", id, (frame) => {

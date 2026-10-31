@@ -1246,6 +1246,36 @@ The current tab's page, not shown here, is the nearest of all."
           (agent-repl-webhost-kill))
         (should (equal told '((kill))))))))
 
+;;;; ---- The sidebar's offset ----
+
+(ert-deftest agent-repl-test-wh-the-sidebar-offset-is-told-to-the-host ()
+  "A measured offset is handed to the host."
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-set-sidebar-offset 12)
+    (should (equal (agent-repl-test-wh--sent "setSidebarOffset")
+                   (list (agent-repl--webhost-script "setSidebarOffset" 12))))))
+
+(ert-deftest agent-repl-test-wh-the-same-sidebar-offset-is-told-once ()
+  "An offset the host already has sends nothing."
+  (agent-repl-test-wh--with-host
+    (agent-repl-webhost-set-sidebar-offset 12)
+    (agent-repl-webhost-set-sidebar-offset 12)
+    (should (= 1 (length (agent-repl-test-wh--sent "setSidebarOffset"))))))
+
+(ert-deftest agent-repl-test-wh-a-loading-host-is-handed-the-sidebar-offset ()
+  "A host that loads is handed the offset it lost."
+  (agent-repl-test-wh--with-host
+    (setq agent-repl--webhost-sidebar-offset 9)
+    (agent-repl--webhost-replay)
+    (should (equal (agent-repl-test-wh--sent "setSidebarOffset")
+                   (list (agent-repl--webhost-script "setSidebarOffset" 9))))))
+
+(ert-deftest agent-repl-test-wh-a-loading-host-is-handed-no-level-offset ()
+  "Both windows level, the host's own zero stands and nothing is sent."
+  (agent-repl-test-wh--with-host
+    (agent-repl--webhost-replay)
+    (should-not (agent-repl-test-wh--sent "setSidebarOffset"))))
+
 ;;;; ---- The log level window ----
 
 (ert-deftest agent-repl-test-wh-set-log-level-tells-the-host-the-window ()
