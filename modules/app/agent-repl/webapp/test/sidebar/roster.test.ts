@@ -1329,12 +1329,8 @@ describe("recently merged rows", () => {
     expect(css).toContain("#ws-sidebar .row .name.band-name { --name-rest: var(--repo-head-expanded); color: var(--repo-head-expanded); }");
   });
 
-  it("draws a row merged today with the off-white gutter bar", () => {
-    expect(css).toContain("#ws-sidebar .row.merged-today {\n  border-left: var(--row-gutter-w) solid var(--merged-today-gutter);");
-  });
-
-  it("declares the one rail gutter width every row bar draws in", () => {
-    expect(css).toContain("#ws-sidebar { --row-gutter-w: 3px; }");
+  it("draws no gutter bar on a row merged today", () => {
+    expect(css).not.toContain("merged-today");
   });
 
   it.each(BAND_FOOT_FADES)("$name", ({ cls, region, attrs, want }) => {
@@ -1379,15 +1375,6 @@ describe("recently merged rows", () => {
 
   it("restates no row vertical padding of its own", () => {
     expect(css).not.toContain("--merged-row-pad-y");
-  });
-
-  it("draws the merge-today bar at the gutter width", () => {
-    const bar = css.split("#ws-sidebar .row.merged-today {\n")[1]?.split("}")[0];
-    expect(bar?.includes("border-left: var(--row-gutter-w) solid") && bar.includes("padding-left: calc(0.9rem - var(--row-gutter-w)")).toBe(true);
-  });
-
-  it("no longer colours a name merged today", () => {
-    expect(css).not.toContain(".name.band-name.merged-today");
   });
 
   it("keeps the merged arm on the row, the hook contract's", () => {

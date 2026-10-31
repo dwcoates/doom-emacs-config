@@ -16,11 +16,6 @@
      step darker, mixed toward black so it is darker in either theme and
      reads apart from the status badge beside it (owner request, 2026-10-29). */
   --queued-age-ink: color-mix(in srgb, var(--muted) 65%, #000000);
-  /* The gutter bar a Recently Merged row merged TODAY carries: a slight
-     off-white beside the selection's accent bar (owner request, 2026-10-11).
-     The light theme cannot draw off-white on its white ground, so it takes a
-     pale warm grey instead. */
-  --merged-today-gutter: #d6d3cc;
   --border: #e5e7eb;
   /* ONE STEP DARKER THAN `--border`, and derived from it rather than picked:
      the rule that partitions two SECTIONS of one surface, where `--border`
@@ -560,7 +555,6 @@
        sits a little below it, still well above the collapsed grey. */
     --repo-head-expanded: #d2cfc8;
     --repo-head-collapsed: #898782;
-    --merged-today-gutter: #ece8df;
     --border: #2a2a2a;
     /* Above the #1a1a1a sidebar, so its hover and detail washes still lift
        off the rail. */
@@ -1324,8 +1318,6 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
 
 /* Workspace rows. Children nest inside .kids, which draws the family guide
    line; indentation compounds per generation (THE ROW INDENT, below). */
-/* THE GUTTER WIDTH of the bar a merge-today row draws on its left. */
-#ws-sidebar { --row-gutter-w: 3px; }
 /* ONE VERTICAL PADDING for every rail row, read wherever a row's height is
    built out of it (Recently Merged's --merged-row-h), so the two never drift.
    Halved from 0.28rem so the rows sit closer (owner request, 2026-10-19). */
@@ -1627,14 +1619,6 @@ html.sb-dragging * { -webkit-user-select: none; user-select: none; }
    repository section headers' colour (owner requests, 2026-10-03 and
    2026-10-13); a merged row's timestamp keeps its grey. */
 #ws-sidebar .row .name.band-name { --name-rest: var(--repo-head-expanded); color: var(--repo-head-expanded); }
-/* A merge that landed TODAY (local date) keeps the name's grey and marks the
-   ROW with an off-white gutter bar (owner request, 2026-10-11). `merged-today` is toggled on the row by the shared ticker in
-   src/sidebar/row.ts, so the bar goes at midnight. The selector stays below
-   `.ws.current > .row`'s weight, so a current merged row shows the accent. */
-#ws-sidebar .row.merged-today {
-  border-left: var(--row-gutter-w) solid var(--merged-today-gutter);
-  padding-left: calc(0.9rem - var(--row-gutter-w));
-}
 /* REVIVING (frontend.v1.RosterRowReviving): the daemon is bringing this
    workspace's shim up. A SUBTLE shimmer on the NAME alone (owner ruling,
    2026-09-19): one soft band of reduced ink (40%) ripples across the text and
