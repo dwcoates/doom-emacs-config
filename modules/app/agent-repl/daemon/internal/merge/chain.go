@@ -685,7 +685,7 @@ func (r *run) speculativeGate(ctx context.Context, place chainPlace, targetBranc
 	// failed at the head, so it steps aside as a head does (remediate.go).
 	var aside func()
 	if r.o.stepsAside(ctx, r) {
-		aside = func() { r.o.goStepAside(r) }
+		aside = func() { r.o.stepAside(r) }
 	}
 	if gaveUp, err := r.fixThen(ctx, attempt, verdict.result, targetBranch, aside); err != nil || gaveUp != nil {
 		return gaveUp, err

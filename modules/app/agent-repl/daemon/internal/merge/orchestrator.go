@@ -277,8 +277,8 @@ type orchestrator struct {
 	// it claimed the race to land, before the race is recorded (race.go).
 	onRaceClaimed func(head ids.WorkspaceID)
 	// onStepAside, when set, is called with the workspace as the step aside's
-	// goroutine begins (remediate.go): THE TEST SEAM, NIL IN PRODUCTION, that
-	// holds it to show the run was cut before it.
+	// take-back goroutine begins (takeBackSteppedAside, remediate.go): THE TEST
+	// SEAM, NIL IN PRODUCTION, that holds it to show the run was cut before it.
 	onStepAside func(ws ids.WorkspaceID)
 	// onBoundaryAsk, when set, is called once a restart has asked a running
 	// merge to stop at its next step boundary, before the restart waits for

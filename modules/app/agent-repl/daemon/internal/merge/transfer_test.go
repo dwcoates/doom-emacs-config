@@ -645,6 +645,8 @@ func TestEverySuspensionCutsAndLetsGoThroughTheSharedHelpers(t *testing.T) {
 		cuts, letsGo int
 	}{
 		{method: "suspendFor", cuts: 1, letsGo: 1},
+		{method: "stepAside", cuts: 1},
+		{method: "takeBackSteppedAside", letsGo: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method, func(t *testing.T) {

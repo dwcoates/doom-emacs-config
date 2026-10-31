@@ -25,9 +25,9 @@ import (
 //   - STEPPING ASIDE: the fixing prompt is delivered first (the queue's
 //     hand-off is whole, so the turn lives on in the session), then the
 //     entry leaves the line (wsm.StepAsideMerge, MergeRemediating) and the
-//     run is suspended as a race's loser is (suspendFor), keeping its lease
-//     and its progress record, and taken back (AdoptWorkspace) as a merge
-//     remediating.
+//     run is cut, on its own goroutine, before it waits for the fixing turn
+//     (stepAside), keeping its lease and its progress record, and taken back
+//     (AdoptWorkspace) as a merge remediating once it let go.
 //   - RETURNING: once the fixing turn ends, the merge goes back in line at
 //     the FIRST WAITING PLACE -- ahead of every merge waiting, behind every
 //     merge being worked on, which it never evicts (wsm.ReturnRemediatedMerge)
@@ -87,15 +87,18 @@ func (o *orchestrator) stepsAside(ctx context.Context, r *run) bool {
 	return false
 }
 
-// stepAside takes R out of the head once its fixing prompt was handed off:
-// its entry leaves the line, its run is suspended, and it is taken back as a
-// merge remediating. It runs on its own goroutine, since the suspension
-// waits for the very run that asked for it. A step that fails is recorded at
-// ERROR; the merge then fixes at the head as before.
+// stepAside takes R out of the head once its fixing prompt was handed off.
+// It runs ON THE RUN'S OWN GOROUTINE, as the hand-off's SUBMITTED, before the
+// run waits for the fixing turn's end: the entry leaves the line, and the run
+// is marked suspending and cut right here, so the wait it goes on to begins
+// already cut and the run can never go on past the hand-off -- to read the
+// turn's end, test again and land at the head it gave up (2026-10-31: a
+// step aside on its own goroutine lost that race to a fixing turn that ended
+// at once, and the merge landed under its remediating entry). The take-back
+// waits for the run to let go, so it alone runs on its own goroutine
+// (takeBackSteppedAside). A step that fails is recorded at ERROR; the merge
+// then fixes at the head as before.
 func (o *orchestrator) stepAside(r *run) {
-	if o.onStepAside != nil {
-		o.onStepAside(r.ws)
-	}
 	ctx := context.Background()
 	log := o.log(ctx, r.ws)
 	fields := dlog.Context{"workspace": string(r.ws), "repo": string(r.repo)}
@@ -103,8 +106,39 @@ func (o *orchestrator) stepAside(r *run) {
 		log.Error(opRemediate, "could not take the failing head out of line; it fixes its tests at the head", withField(fields, "error", err.Error()))
 		return
 	}
-	if err := o.suspendFor(ctx, r.ws, suspendStepAside); err != nil {
-		log.Error(opRemediate, "could not suspend the failing head that stepped aside", withField(fields, "error", err.Error()))
+	o.mu.Lock()
+	// A RUN ANOTHER END TOOK FIRST -- a dequeue's abandonment, or a pause, a
+	// transfer or the daemon's exit suspending it -- is that end's: its entry
+	// stands remediating, which that end's drop or take-back reads
+	// (recoverRemediating).
+	if r.suspending || r.abandonedBy != "" {
+		o.mu.Unlock()
+		log.Info(opRemediate, "the failing head stepped aside as another end took its run; that end settles the merge remediating", fields)
+		return
+	}
+	o.takenAway[r.ws] = suspendStepAside
+	r.suspendLocked(suspendStepAside)
+	o.mu.Unlock()
+	fields["lease"] = string(r.lease.ID)
+	o.cutSuspended(o.deps.Log.Global(), r, suspendStepAside, fields)
+	o.live.Add(1)
+	go func() {
+		defer o.live.Done()
+		o.takeBackSteppedAside(r, fields)
+	}()
+}
+
+// takeBackSteppedAside waits for R, cut by its step aside, to let go, and
+// takes it back as a merge remediating (AdoptWorkspace, recoverRemediating).
+// A take-back that fails is recorded at ERROR.
+func (o *orchestrator) takeBackSteppedAside(r *run, fields dlog.Context) {
+	if o.onStepAside != nil {
+		o.onStepAside(r.ws)
+	}
+	ctx := context.Background()
+	log := o.log(ctx, r.ws)
+	if err := o.awaitLetGo(ctx, o.deps.Log.Global(), opRemediate, r, fields); err != nil {
+		log.Error(opRemediate, "the failing head that stepped aside did not let go", withField(fields, "error", err.Error()))
 		return
 	}
 	if err := o.AdoptWorkspace(ctx, r.ws); err != nil {
@@ -113,29 +147,6 @@ func (o *orchestrator) stepAside(r *run) {
 	}
 	log.Info(opRemediate, "the head's tests failed; it stepped aside to fix them out of line, and the next merge takes the head", fields)
 	o.kick(r.repo)
-}
-
-// goStepAside runs stepAside for R on its own goroutine, counted among the
-// orchestrator's live work so a drain waits for it.
-//
-// THE RUN IS CUT HERE, AT ONCE, BEFORE IT WAITS FOR ITS FIXING TURN. It is
-// called the moment the fixing prompt is handed off, from the run's own
-// goroutine, with no git in flight: the run is marked suspended and its
-// context cut before it can read the turn's end. Left to the goroutine, a
-// fixing turn that ended first let the run go on at the head -- gate again,
-// even land -- while the store already held it remediating (2026-10-31:
-// TestARemediatedMergeReturnsAndLandsAfterTheMergeAtTheHead under load).
-func (o *orchestrator) goStepAside(r *run) {
-	o.mu.Lock()
-	o.takenAway[r.ws] = suspendStepAside
-	r.suspendLocked(suspendStepAside)
-	o.mu.Unlock()
-	r.cancel(suspendStepAside.cause)
-	o.live.Add(1)
-	go func() {
-		defer o.live.Done()
-		o.stepAside(r)
-	}()
 }
 
 // awaitRemediation arms the wait on WS's fixing TURN, after which the merge

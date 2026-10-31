@@ -2,10 +2,13 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
@@ -18,7 +21,15 @@ var failingSuiteRun = scriptedRun{Output: "[agent-repl-tests] ERROR: daemon fail
 // until the failing head stepped aside and its step-aside settled.
 func stepAsideScenario(t *testing.T) *chain {
 	t.Helper()
+	return stepAsideScenarioWith(t, func(*chain) {})
+}
+
+// stepAsideScenarioWith is stepAsideScenario, with ARRANGE run on the chain
+// before the failing head is admitted.
+func stepAsideScenarioWith(t *testing.T, arrange func(*chain)) *chain {
+	t.Helper()
 	c := newChainOfWidth(t, 1)
+	arrange(c)
 	enqueue(t, c.h)
 	c.queue(t, "ws-b", "b1")
 	c.runner.script(c.dirs[theWorkspace], failingSuiteRun)
@@ -282,5 +293,168 @@ func TestAHeadThatStepsAsideNeverRunsItsTestsAgainBeforeItReturns(t *testing.T) 
 	}
 	if ran != 1 {
 		t.Fatalf("the failed head's tests ran %d times before its step aside, want once: its run went on", ran)
+	}
+}
+
+func TestAHeadSteppingAsideIsCutBeforeItWaitsForItsFixingTurn(t *testing.T) {
+	// Arrange: every wait on a turn's end records how its context stood when
+	// the wait began, then ends at once, as a fixing turn that ended at once.
+	var mu sync.Mutex
+	causes := map[ids.TurnID]error{}
+	c := stepAsideScenarioWith(t, func(c *chain) {
+		await := c.h.o.deps.AwaitTurnEnd
+		c.h.o.deps.AwaitTurnEnd = func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error) {
+			mu.Lock()
+			if _, seen := causes[turn]; !seen {
+				causes[turn] = context.Cause(ctx)
+			}
+			mu.Unlock()
+			return await(ctx, ws, turn)
+		}
+	})
+
+	// Act
+	c.h.o.mu.Lock()
+	doc := c.h.o.resumes[theWorkspace]
+	c.h.o.mu.Unlock()
+
+	// Assert
+	mu.Lock()
+	cause, waited := causes[ids.TurnID(doc.Turn)]
+	mu.Unlock()
+	if !waited || !errors.Is(cause, errSteppedAside) {
+		t.Fatalf("the fixing turn's wait began with cause %v (waited %v), want it already cut by the step aside", cause, waited)
+	}
+	if got := c.git.landedOwn(); len(got) != 0 {
+		t.Fatalf("landings brought %v, want none: the head stepped aside", got)
+	}
+}
+
+// stepAsideRun answers a run of the harness's merge, its entry admitted at
+// the head, and the cause its context was cut with.
+func stepAsideRun(t *testing.T, h *harness, state wsm.MergeQueueState) (*run, func() error) {
+	t.Helper()
+	enqueue(t, h)
+	h.db.mu.Lock()
+	for i := range h.db.queues[h.repoKey()] {
+		h.db.queues[h.repoKey()][i].State = state
+	}
+	h.db.mu.Unlock()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(nil) })
+	r := h.o.newRun(ctx, cancel, h.repoKey(), theWorkspace, 1)
+	return r, func() error { return context.Cause(ctx) }
+}
+
+// entryState answers the state of the harness's merge's entry.
+func entryState(t *testing.T, h *harness) wsm.MergeQueueState {
+	t.Helper()
+	entry, err := h.o.entryOf(context.Background(), h.repoKey(), theWorkspace)
+	if err != nil {
+		t.Fatalf("entryOf: %v", err)
+	}
+	return entry.State
+}
+
+func TestAStepAsideLeavesARunAnotherEndTookFirstToThatEnd(t *testing.T) {
+	cases := []struct {
+		name string
+		took func(o *orchestrator, r *run)
+	}{
+		{name: "a pause suspended the run first", took: func(o *orchestrator, r *run) { r.suspendLocked(suspendPause) }},
+		{name: "a dequeue abandoned the run first", took: func(o *orchestrator, r *run) { r.abandonedBy = CauseUserDequeue }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			r, cause := stepAsideRun(t, h, wsm.MergeAdmitted)
+			h.o.mu.Lock()
+			tc.took(h.o, r)
+			h.o.mu.Unlock()
+
+			// Act
+			h.o.stepAside(r)
+
+			// Assert
+			if err := cause(); err != nil {
+				t.Fatalf("the run was cut with %v, want it left to the end that took it", err)
+			}
+			h.o.mu.Lock()
+			why, away := h.o.takenAway[theWorkspace]
+			h.o.mu.Unlock()
+			if away && why.by == suspendStepAside.by {
+				t.Fatal("the step aside marked the run taken away, want it left to the end that took it")
+			}
+			if got := entryState(t, h); got != wsm.MergeRemediating {
+				t.Fatalf("entry state = %v, want remediating for that end to read", got)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediate,
+				Message: "the failing head stepped aside as another end took its run; that end settles the merge remediating"}); !ok {
+				t.Fatal("no INFO record of the step aside left to another end")
+			}
+		})
+	}
+}
+
+func TestAStepAsideThatCannotLeaveTheLineFixesAtTheHead(t *testing.T) {
+	// Arrange: the entry is not admitted, so the store refuses the step aside.
+	h := newHarness(t)
+	r, cause := stepAsideRun(t, h, wsm.MergeQueued)
+
+	// Act
+	h.o.stepAside(r)
+
+	// Assert
+	if err := cause(); err != nil {
+		t.Fatalf("the run was cut with %v, want it fixing at the head", err)
+	}
+	h.o.mu.Lock()
+	_, away := h.o.takenAway[theWorkspace]
+	suspending := r.suspending
+	h.o.mu.Unlock()
+	if away || suspending {
+		t.Fatalf("taken away %v, suspending %v, want neither", away, suspending)
+	}
+	if got := entryState(t, h); got != wsm.MergeQueued {
+		t.Fatalf("entry state = %v, want it unchanged", got)
+	}
+	record, ok := h.recordFor("error", opRemediate)
+	if !ok || record.Context["workspace"] != string(theWorkspace) || record.Context["error"] == nil {
+		t.Fatalf("ERROR record = %+v (found %v), want one naming the workspace and the error", record, ok)
+	}
+}
+
+func TestATakeBackAfterAStepAsideRecordsWhatFailed(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(h *harness, r *run)
+		message string
+	}{
+		{name: "the run never lets go", arrange: func(h *harness, r *run) { h.o.drainBound = time.Nanosecond },
+			message: "the failing head that stepped aside did not let go"},
+		{name: "the take-back cannot read the queues", arrange: func(h *harness, r *run) {
+			close(r.finished)
+			h.db.mu.Lock()
+			h.db.allQueuesErr = errors.New("store gone")
+			h.db.mu.Unlock()
+		}, message: "could not take back the merge that stepped aside to remediate"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			r, _ := stepAsideRun(t, h, wsm.MergeRemediating)
+			tc.arrange(h, r)
+
+			// Act
+			h.o.takeBackSteppedAside(r, dlog.Context{"workspace": string(theWorkspace)})
+
+			// Assert
+			record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediate, Message: tc.message})
+			if !ok || record.Context["workspace"] != string(theWorkspace) || record.Context["error"] == nil {
+				t.Fatalf("ERROR record = %+v (found %v), want %q naming the workspace and the error", record, ok, tc.message)
+			}
+		})
 	}
 }
