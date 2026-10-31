@@ -1363,3 +1363,103 @@ func TestOpenFailsWhenTheParentCannotBeRead(t *testing.T) {
 		t.Fatalf("starts = %v, want none", f.fleet.startCalls)
 	}
 }
+
+// TestOpenCutsAMergedWorkspacesLandedBranchAgain covers reopening a merged
+// workspace whose landed branch was deleted at its landing
+// (landedbranch.Retire): the branch is cut again at its parent's tip, where
+// its work now lives. A merged workspace whose parent branch is gone too, and
+// an unmerged one whose branch is gone, have nothing to restore from.
+func TestOpenCutsAMergedWorkspacesLandedBranchAgain(t *testing.T) {
+	merged := time.Unix(1_700_000_000, 0).UTC()
+	cases := []struct {
+		name         string
+		mergedAt     *time.Time
+		parentExists bool
+		wantCut      bool
+	}{
+		{name: "a merged workspace whose parent branch exists is cut again at its tip", mergedAt: &merged, parentExists: true, wantCut: true},
+		{name: "a merged workspace whose parent branch is gone is refused", mergedAt: &merged, parentExists: false},
+		{name: "an unmerged workspace whose branch is gone is refused", mergedAt: nil, parentExists: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			ws := goneWorkspace(t, f)
+			ws.MergedAt = tc.mergedAt
+			ws.Closed = true
+			ws.ParentBranch = "master"
+			f.db.with(ws)
+			f.git.existingBranches = map[string]bool{"master": tc.parentExists}
+
+			// Act.
+			err := f.verbs.Open(context.Background(), "w1", nil)
+
+			// Assert.
+			if !tc.wantCut {
+				asRefusal(t, err, ArmWorktreeUnrestorable)
+				if len(f.git.created) != 0 || len(f.git.restored) != 0 {
+					t.Fatalf("created %+v, restored %+v; want nothing cut or restored", f.git.created, f.git.restored)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			want := createdWorktree{filepath.Dir(ws.Dir), ws.Branch, "master", ws.Dir}
+			if len(f.git.created) != 1 || f.git.created[0] != want || len(f.git.restored) != 0 {
+				t.Fatalf("created %+v, restored %+v; want exactly %+v cut", f.git.created, f.git.restored, want)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opOpen,
+				Message: "the workspace's directory was gone; cut its landed branch again at its parent branch's tip"}); !ok {
+				t.Fatalf("no INFO %s record of the cut: %+v", opOpen, f.log.logger.Records())
+			}
+		})
+	}
+}
+
+// TestOpenFailsLoudlyWhenAMergedWorkspacesBranchCannotBeCutAgain covers the
+// two git failures of the cut: the parent branch's probe, and the cut itself.
+func TestOpenFailsLoudlyWhenAMergedWorkspacesBranchCannotBeCutAgain(t *testing.T) {
+	merged := time.Unix(1_700_000_000, 0).UTC()
+	boom := errors.New("boom")
+	cases := []struct {
+		name        string
+		probeErr    error
+		createErr   error
+		wantMessage string
+	}{
+		{name: "the parent branch's probe fails", probeErr: boom,
+			wantMessage: "could not tell whether the merged workspace's parent branch still exists"},
+		{name: "the cut fails", createErr: boom,
+			wantMessage: "could not cut the merged workspace's branch again at its parent branch's tip"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			ws := goneWorkspace(t, f)
+			ws.MergedAt = &merged
+			ws.Closed = true
+			ws.ParentBranch = "master"
+			f.db.with(ws)
+			f.git.existingBranches = map[string]bool{"master": true}
+			f.git.createErr = tc.createErr
+			f.git.branchExistsErrFor = map[string]error{"master": tc.probeErr}
+
+			// Act.
+			err := f.verbs.Open(context.Background(), "w1", nil)
+
+			// Assert.
+			if !errors.Is(err, boom) {
+				t.Fatalf("Open = %v, want it to wrap %v", err, boom)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opOpen, Message: tc.wantMessage}); !ok {
+				t.Fatalf("no ERROR %s record %q: %+v", opOpen, tc.wantMessage, f.log.logger.Records())
+			}
+			if f.db.workspaces[ws.ID].Closed != true {
+				t.Fatal("the workspace was reopened although its worktree was not restored")
+			}
+		})
+	}
+}

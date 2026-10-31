@@ -279,8 +279,9 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 		}
 		return log, nil
 	}
-	// A MERGED WORKSPACE IS RESTORED LIKE ANY OTHER: the merge keeps its
-	// branch, and opening one is the user taking it back to revise it.
+	// A MERGED WORKSPACE IS RESTORED LIKE ANY OTHER, opening one being the
+	// user taking it back to revise it; its landed branch, deleted at its
+	// landing, is cut again at its parent's tip below.
 	if record.Branch == "" {
 		return nil, unrestorable(fmt.Sprintf(
 			"the workspace's directory %s is gone and no branch was recorded to restore it from", record.Dir))
@@ -316,7 +317,22 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 		})
 		return nil, fmt.Errorf("open %q: probe branch %q: %w", record.ID, record.Branch, err)
 	}
-	if !exists {
+	// A MERGED WORKSPACE'S BRANCH WAS DELETED ON PURPOSE when it landed
+	// (landedbranch.Retire): its work lives in its parent branch, which is
+	// where a reopened merged workspace starts anyway (advanceMerged). So its
+	// branch is cut again at the parent's tip.
+	recut := false
+	if !exists && record.MergedAt != nil && record.ParentBranch != "" {
+		parentExists, err := v.deps.Git.BranchExists(ctx, repoDir, record.ParentBranch)
+		if err != nil {
+			log.Error(opOpen, "could not tell whether the merged workspace's parent branch still exists", dlog.Context{
+				"dir": record.Dir, "branch": record.Branch, "parent_branch": record.ParentBranch, "repository": repoDir, "cause": err.Error(),
+			})
+			return nil, fmt.Errorf("open %q: probe parent branch %q: %w", record.ID, record.ParentBranch, err)
+		}
+		recut = parentExists
+	}
+	if !exists && !recut {
 		return nil, unrestorable(fmt.Sprintf(
 			"the workspace's directory %s is gone and its branch %s no longer exists in %s; there is nothing to restore it from",
 			record.Dir, record.Branch, repoDir))
@@ -326,15 +342,24 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 	if err := v.clearStaleRegistration(ctx, log, record, repoDir); err != nil {
 		return nil, err
 	}
-	if err := v.deps.Git.RestoreWorktree(ctx, repoDir, record.Dir, record.Branch); err != nil {
+	restored := "restored its worktree from its branch"
+	if recut {
+		restored = "cut its landed branch again at its parent branch's tip"
+		if err := v.deps.Git.CreateWorktree(ctx, repoDir, record.Branch, record.ParentBranch, record.Dir); err != nil {
+			log.Error(opOpen, "could not cut the merged workspace's branch again at its parent branch's tip", dlog.Context{
+				"dir": record.Dir, "branch": record.Branch, "parent_branch": record.ParentBranch, "repository": repoDir, "cause": err.Error(),
+			})
+			return nil, fmt.Errorf("open %q: cut %q again at %q: %w", record.ID, record.Branch, record.ParentBranch, err)
+		}
+	} else if err := v.deps.Git.RestoreWorktree(ctx, repoDir, record.Dir, record.Branch); err != nil {
 		log.Error(opOpen, "could not restore the workspace's worktree from its branch", dlog.Context{
 			"dir": record.Dir, "branch": record.Branch, "repository": repoDir, "cause": err.Error(),
 		})
 		return nil, fmt.Errorf("open %q: restore %q from %q: %w", record.ID, record.Dir, record.Branch, err)
 	}
 	log = v.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{"workspace": string(record.ID)})
-	log.Info(opOpen, "the workspace's directory was gone; restored its worktree from its branch", dlog.Context{
-		"dir": record.Dir, "branch": record.Branch, "repository": repoDir,
+	log.Info(opOpen, "the workspace's directory was gone; "+restored, dlog.Context{
+		"dir": record.Dir, "branch": record.Branch, "parent_branch": record.ParentBranch, "repository": repoDir,
 	})
 	// THE VIEWS BOOT PASSED OVER ARE BOUND NOW. Boot binds the resolvers and
 	// publishes the topbar's naming only for a workspace whose directory
