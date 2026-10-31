@@ -841,21 +841,28 @@ func (s *server) ReportPageUnloading(
 	if done {
 		return answer(resp, cerr)
 	}
-	ws := subject.Record.ID
+	s.awaitPage(subject.Record.ID, subject.Log, "Emacs is unloading the workspace's page; its web hop is awaited until a page connects again")
+	resp.Result = &agentreplv1.ReportPageUnloadingResponse_Success{
+		Success: &agentreplv1.ReportPageUnloadingSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// awaitPage records that WS holds no page on purpose, so its web hop is
+// AWAITED rather than broken until a page connects again, and publishes the
+// hops: Emacs's announcement of an unload, or its statement that it holds no
+// page (ReportPageResidency). MESSAGE is the record's.
+func (s *server) awaitPage(ws ids.WorkspaceID, log dlog.Logger, message string) {
 	s.mu.Lock()
 	delete(s.webSeen, ws)
 	hostLive, webLive, webHop := s.participantHopsLocked(ws)
 	moving := s.movedAway[ws]
 	s.mu.Unlock()
-	subject.Log.Info("daemon.server.participants", "Emacs is unloading the workspace's page; its web hop is awaited until a page connects again",
+	log.Info("daemon.server.participants", message,
 		dlog.Context{"workspace": string(ws), "host_stream": hostLive, "web_stream": webLive, "web_hop": webHop, "moving": moving})
 	if !moving {
 		s.publishParticipants(ws, hostLive, webHop)
 	}
-	resp.Result = &agentreplv1.ReportPageUnloadingResponse_Success{
-		Success: &agentreplv1.ReportPageUnloadingSuccess{},
-	}
-	return connect.NewResponse(resp), nil
 }
 
 // participantHopsLocked answers a workspace's host stream, its web stream, and
