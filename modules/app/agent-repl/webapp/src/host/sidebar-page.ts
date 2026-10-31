@@ -27,6 +27,7 @@ import { createDaemonOrigin, isDaemonOrigin, type DaemonOrigin } from "../rpc/da
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
 import { createSidebarNotices, type SidebarNotices } from "../sidebar/notices.js";
 import { installColorValues } from "../vocab.js";
+import { createCallAnswers } from "./answers.js";
 import { startWebhostDocument, type WebhostDocumentDeps } from "./document.js";
 import "./sidebar-page.css";
 
@@ -132,16 +133,7 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
     started.failures.report(bootFailed(cause));
   }
 
-  let notes: { level: "info" | "warn"; text: string }[] = [];
-  const note = (noteLevel: "info" | "warn", text: string): void => {
-    notes.push({ level: noteLevel, text });
-    if (notes.length > NOTE_LIMIT) notes = notes.slice(notes.length - NOTE_LIMIT);
-  };
-  const answer = (op: string, id: string | null, outcome: string, extra: Record<string, unknown> = {}): string => {
-    const taken = notes;
-    notes = [];
-    return JSON.stringify({ op, id, outcome, ...extra, notes: taken });
-  };
+  const { note, answer } = createCallAnswers(NOTE_LIMIT);
 
   const page: SidebarPage = {
     markShown(id) {

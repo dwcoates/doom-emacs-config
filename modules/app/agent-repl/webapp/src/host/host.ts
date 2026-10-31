@@ -48,6 +48,7 @@ import {
 } from "./protocol.js";
 import { isDaemonOrigin, type DaemonOrigin } from "../rpc/daemon-origin.js";
 import { createListeners } from "../listeners.js";
+import { createCallAnswers } from "./answers.js";
 import { nextFrame } from "../frame.js";
 
 /** What the host needs from its environment, injectable for tests. */
@@ -239,16 +240,6 @@ export const FRAME_OVERLAY_ATTRIBUTE = "data-bubble-overlay";
 /** The attribute the shown iframe wears. */
 export const FRAME_SHOWN_ATTRIBUTE = "data-shown";
 
-/**
- * One note the host made for Emacs to record, at the level it deserves: INFO
- * for what a working webhost does (a page cooling, a page from another build
- * mid-rollout), WARN for what it should never see.
- */
-export interface HostNote {
-  readonly level: "info" | "warn";
-  readonly text: string;
-}
-
 /** The longest a run of notes grows before the oldest are dropped. */
 const NOTE_LIMIT = 50;
 
@@ -261,7 +252,6 @@ export function createHost(env: HostEnv): Host {
   const frameParent = env.frames ?? doc.body;
   let shownId: string | null = null;
   let failures: readonly WebhostFailure[] = [];
-  let notes: HostNote[] = [];
   const now = env.now ?? Date.now;
   /** The log level window every page is told, while one stands. */
   let logLevel: { level: WindowLevel; untilMs: number } | null = null;
@@ -310,16 +300,7 @@ export function createHost(env: HostEnv): Host {
   const gateSlots = createListeners<[string, number]>();
   /** Every gate slot Emacs recorded, by workspace id. */
   const slots = new Map<string, number>();
-  const note = (level: HostNote["level"], text: string): void => {
-    notes.push({ level, text });
-    if (notes.length > NOTE_LIMIT) notes = notes.slice(notes.length - NOTE_LIMIT);
-  };
-
-  const answer = (op: string, id: string | null, outcome: string, extra: Record<string, unknown> = {}): string => {
-    const taken = notes;
-    notes = [];
-    return JSON.stringify({ op, id, outcome, ...extra, notes: taken });
-  };
+  const { note, answer } = createCallAnswers(NOTE_LIMIT);
 
   const post = (frame: Frame, message: HostToPage): void => {
     const target = frame.iframe.contentWindow;
