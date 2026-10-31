@@ -709,7 +709,7 @@ func (v *verbs) refuseHeldLocked(ctx context.Context, log dlog.Logger, branch st
 			fmt.Sprintf("the name %q is already workspace %s's name or branch, and it has not landed", branch, record.ID), false,
 			map[string]any{
 				"branch":    branch,
-				"workspace": &workspacev1.WorkspaceRef{Id: string(record.ID), Dir: record.Dir},
+				"workspace": record.Ref(),
 				"open":      !record.Closed,
 			})
 	}
