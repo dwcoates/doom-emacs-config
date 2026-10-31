@@ -56,6 +56,8 @@
 (declare-function agent-repl-wire-decode-send-hidden-keepalives-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-update-persistent-wifi-mode-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-update-persistent-wifi-mode-response "wire-verbs" (json))
+(declare-function agent-repl-wire-encode-update-remote-control-mode-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-update-remote-control-mode-response "wire-verbs" (json))
 (declare-function agent-repl-wire-decode-register-workspace-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-create-thread-request "wire-chat" (request))
 (declare-function agent-repl-wire-decode-create-thread-response "wire-chat" (alist))
@@ -671,6 +673,17 @@ Daemon-scoped: nothing names a workspace.  A toggle is resolved by the
 daemon from the mode it reads under its own lock.  Only a refused power
 step is an error; the hotspot and display steps report how they went
 inside the success.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-update-remote-control-mode
+  "UpdateRemoteControlMode"
+  agent-repl-wire-encode-update-remote-control-mode-request
+  agent-repl-wire-decode-update-remote-control-mode-response
+  "Turn a workspace's remote control on, off or over.
+Remote control makes the workspace's session reachable from claude.ai.
+The mode is the daemon's, persisted per workspace; a toggle is resolved by
+the daemon from the mode it reads at that moment.  The success carries the
+mode the request left; `vendor_refused' is an error arm although the mode
+is still recorded as asked.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-deploy
   "Deploy"

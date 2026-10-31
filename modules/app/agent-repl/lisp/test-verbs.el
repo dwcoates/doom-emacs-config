@@ -243,6 +243,8 @@ answers a bare success, which is what almost every verb's success is."
                  (agent-repl-test-verbs--stub :update-sidebar-view))
                 ((symbol-function 'agent-repl-rpc-retry-vendor-error)
                  (agent-repl-test-verbs--stub :retry-vendor-error))
+                ((symbol-function 'agent-repl-rpc-update-remote-control-mode)
+                 (agent-repl-test-verbs--stub :remote-control))
                 ((symbol-function 'agent-repl-rpc-session-health)
                  (agent-repl-test-verbs--stub :session-health)))
        (agent-repl-test--recording-popups ,@body))))
@@ -855,6 +857,133 @@ still says where the question stands."
          . (:response (:arm :error :value (:cause (:arm :no-session :value nil))))))
     (agent-repl-verb-retry-vendor-error "ws-one")
     (should (agent-repl-test-verbs--messaged-p "retry-vendor-error refused"))))
+
+;;;; ---- UpdateRemoteControlMode (`SPC j C') ------------------------------
+
+(defun agent-repl-test-verbs--remote-control-answer (arm value)
+  "Return the answers alist for an UpdateRemoteControlMode ARM carrying VALUE."
+  (list (cons :remote-control (list :response (list :arm arm :value value)))))
+
+(defun agent-repl-test-verbs--remote-control-refused (cause value)
+  "Return the answers alist for an UpdateRemoteControlMode refused with CAUSE."
+  (agent-repl-test-verbs--remote-control-answer
+   :error (list :cause (list :arm cause :value value))))
+
+(ert-deftest agent-repl-verbs-remote-control-sends-the-toggle-arm ()
+  "The command sends the `toggle' action: the daemon resolves the mode."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-remote-control-toggle)
+    (should (equal (plist-get (agent-repl-test-verbs--request :remote-control) :action)
+                   '(:arm :toggle :value nil)))))
+
+(ert-deftest agent-repl-verbs-remote-control-names-the-current-workspace ()
+  "The command addresses the current workspace by its daemon ref."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-remote-control-toggle)
+    (should (equal (plist-get (agent-repl-test-verbs--request :remote-control) :workspace)
+                   (agent-repl-test-verbs--ref)))))
+
+(ert-deftest agent-repl-verbs-remote-control-waits-for-a-bring-up ()
+  "The command waits its own deadline: turning it on may start a shim."
+  (let (keys)
+    (cl-letf (((symbol-function 'agent-repl-verbs--send)
+               (lambda (_rpc _conn _request &rest rest) (setq keys rest)))
+              ((symbol-function 'agent-repl-verbs--conn) (lambda (&optional _) 'conn))
+              ((symbol-function 'agent-repl-verbs--ref) (lambda (_ws) '(:id "i" :dir "/d")))
+              ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
+              ((symbol-function 'agent-repl--pseudo-workspace-name-p) #'ignore))
+      (agent-repl-remote-control-toggle))
+    (should (equal (plist-get keys :timeout) agent-repl-remote-control-timeout-seconds))))
+
+(ert-deftest agent-repl-verbs-remote-control-says-on ()
+  "A success that left the mode on says so, naming the workspace."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--remote-control-answer :success '(:on t))
+    (agent-repl-remote-control-toggle)
+    (should (equal agent-repl-test-verbs--messages
+                   '("agent-repl: remote control on for ws-one")))))
+
+(ert-deftest agent-repl-verbs-remote-control-says-off ()
+  "A success that left the mode off says so, naming the workspace."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--remote-control-answer :success '(:on nil))
+    (agent-repl-remote-control-toggle)
+    (should (equal agent-repl-test-verbs--messages
+                   '("agent-repl: remote control off for ws-one")))))
+
+(ert-deftest agent-repl-verbs-remote-control-words-unknown-workspace ()
+  "A workspace the daemon does not know is refused in words."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--remote-control-refused :unknown-workspace nil)
+    (agent-repl-remote-control-toggle)
+    (should (equal agent-repl-test-verbs--messages
+                   '("agent-repl: remote control refused: the daemon does not know ws-one")))))
+
+(ert-deftest agent-repl-verbs-remote-control-words-workspace-ref-mismatch ()
+  "A stale ref is refused naming where the daemon holds the workspace."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--remote-control-refused
+       :workspace-ref-mismatch '(:registry-dir "/w/registry"))
+    (agent-repl-remote-control-toggle)
+    (should (equal agent-repl-test-verbs--messages
+                   '("agent-repl: remote control refused: ws-one's identity is stale; the daemon registers it at /w/registry")))))
+
+(ert-deftest agent-repl-verbs-remote-control-words-vendor-refused ()
+  "A bridge the vendor refused says the mode is recorded and why it is down."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--remote-control-refused
+       :vendor-refused '(:detail "remote control is disabled for this account"))
+    (agent-repl-remote-control-toggle)
+    (should (equal agent-repl-test-verbs--messages
+                   '("agent-repl: remote control for ws-one is recorded, but claude.ai refused the bridge: remote control is disabled for this account")))))
+
+(ert-deftest agent-repl-verbs-remote-control-transferring-away-goes-to-the-handover ()
+  "`transferring_away' is a handover signal, handed to host.el's handover."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--remote-control-refused
+       :transferring-away '(:address "127.0.0.1:9999"))
+    (agent-repl-remote-control-toggle)
+    (should (equal agent-repl-test-verbs--handover
+                   '(("ws-one" (:arm :transferring-away :value (:address "127.0.0.1:9999"))))))))
+
+(ert-deftest agent-repl-verbs-remote-control-transferring-away-draws-nothing ()
+  "A handover signal is not a failure to show the user."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--remote-control-refused
+       :transferring-away '(:address "127.0.0.1:9999"))
+    (agent-repl-remote-control-toggle)
+    (should-not agent-repl-test-verbs--messages)))
+
+(ert-deftest agent-repl-verbs-remote-control-not-yet-adopted-goes-to-the-handover ()
+  "`not_yet_adopted' is a handover signal, handed to host.el's handover."
+  (agent-repl-test-verbs--with
+      (agent-repl-test-verbs--remote-control-refused :not-yet-adopted nil)
+    (agent-repl-remote-control-toggle)
+    (should (equal agent-repl-test-verbs--handover
+                   '(("ws-one" (:arm :not-yet-adopted :value nil)))))))
+
+(ert-deftest agent-repl-verbs-remote-control-unworded-arm-fails-loudly ()
+  "A refusal arm with no wording is a contract breach, never silence."
+  (should-error (agent-repl-verbs--remote-control-refusal-text
+                 "ws-one" '(:arm :mystery :value nil))))
+
+(ert-deftest agent-repl-verbs-remote-control-without-a-workspace-is-a-user-error ()
+  "With no current workspace the command refuses before any wire call."
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
+      (should-error (agent-repl-remote-control-toggle) :type 'user-error))
+    (should-not (agent-repl-test-verbs--request :remote-control))))
+
+(ert-deftest agent-repl-verbs-remote-control-in-a-pseudo-perspective-is-a-user-error ()
+  "persp-mode's own perspective is not a workspace, so nothing is sent."
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "main")))
+      (should-error (agent-repl-remote-control-toggle) :type 'user-error))
+    (should-not (agent-repl-test-verbs--request :remote-control))))
+
+(ert-deftest agent-repl-verbs-remote-control-toggle-is-interactive ()
+  "The toggle is a command, so `SPC j C' can run it."
+  (should (commandp #'agent-repl-remote-control-toggle)))
 
 ;;;; ---- SendHiddenKeepalives (`SPC j R') ---------------------------------
 

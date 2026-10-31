@@ -247,6 +247,7 @@ Scope keys, shared by every generated diff family: `w` worktree, `s` staged,
 | Command | Does | Evil key | Context | Emacs mode |
 | --- | --- | --- | --- | --- |
 | `agent-repl-persistent-wifi-mode-toggle` | Toggle the machine's persistent wifi mode. | `SPC j w` | leader | leader |
+| `agent-repl-remote-control-toggle` | Toggle the workspace's remote control (its session reachable from claude.ai). | `SPC j C` | leader | leader |
 | `agent-repl-install-commit-emoji-hook` | Install the prepare-commit-msg emoji hook. | - | - | - |
 | `agent-repl-tabbar-apply-row-count` | Reapply the tab bar's fixed row count to the frame. | - | - | - |
 | `agent-repl-prompt-summary-attach-all` | Attach the prompt-summary segment to every workspace vterm. | - | - | - |
