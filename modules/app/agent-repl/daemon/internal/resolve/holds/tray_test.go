@@ -942,6 +942,19 @@ func TestTrayOffersFoldAbove(t *testing.T) {
 			},
 			want: []string{"", "t1"},
 		},
+		{
+			name: "an entry drawn nowhere between two prompts is skipped: the fold names the drawn one",
+			holds: []wsm.HeldPrompt{
+				hold("t1", "first"),
+				func() wsm.HeldPrompt {
+					h := queuedSecond("t2", "file yourself into a subsection")
+					h.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT.String()
+					return h
+				}(),
+				func() wsm.HeldPrompt { h := hold("t3", "third"); h.QueuedAt = queuedAt.Add(2 * time.Second); return h }(),
+			},
+			want: []string{"", "t1"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
