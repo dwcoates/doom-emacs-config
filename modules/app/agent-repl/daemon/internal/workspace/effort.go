@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 
@@ -56,8 +55,7 @@ func (v *verbs) SetEffort(ctx context.Context, ws ids.WorkspaceID, level convers
 			fmt.Sprintf("the selector served %v and never offered %v", served, level), false)
 	}
 	err = v.deps.Sessions.SetEffort(ctx, log, ws, level)
-	var refusal *ShimRefusal
-	if errors.As(err, &refusal) && refusal.Arm == ArmShimNoSession {
+	if refusedNoSession(err) {
 		// A PICK WITH NO SHIM STARTS ONE (owner request, 2026-10-29). The
 		// topbar holds the pick, which every start puts back in force
 		// (reapplyEffort), so the shim started for it runs at the pick.

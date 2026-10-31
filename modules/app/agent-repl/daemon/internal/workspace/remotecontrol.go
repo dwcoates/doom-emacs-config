@@ -69,8 +69,7 @@ func (v *verbs) UpdateRemoteControlMode(ctx context.Context, ws ids.WorkspaceID,
 		return false, err
 	}
 	on, err := v.deps.Sessions.SetRemoteControl(ctx, log, ws, change)
-	var refusal *ShimRefusal
-	if !errors.As(err, &refusal) || refusal.Arm != ArmShimNoSession {
+	if !refusedNoSession(err) {
 		return on, err
 	}
 	if !on {
@@ -110,8 +109,7 @@ func (f *Fleet) SetRemoteControl(ctx context.Context, log dlog.Logger, ws ids.Wo
 		return on, &ShimRefusal{Verb: "SetSessionRemoteControl", Arm: ArmShimNoSession, Detail: "the workspace has no live shim"}
 	}
 	if err := f.applyRemoteControl(ctx, log, ws, client, on); err != nil {
-		var refusal *ShimRefusal
-		if errors.As(err, &refusal) && refusal.Arm == ArmShimNoSession {
+		if refusedNoSession(err) {
 			log.Info(opRemoteControl, "the shim holds no session yet; its session's start puts the mode in force", fields)
 			return on, err
 		}
@@ -156,8 +154,7 @@ func (f *Fleet) reapplyRemoteControl(ctx context.Context, log dlog.Logger, ws id
 			log.Info(opRemoteControl, "the new shim went before its bridge was asked; the next bring-up puts it in force", dlog.Context{"cause": err.Error()})
 			return
 		}
-		var refusal *ShimRefusal
-		if errors.As(err, &refusal) && refusal.Arm == ArmShimNoSession {
+		if refusedNoSession(err) {
 			// THE SESSION DIED BEFORE ITS BRIDGE WAS ASKED (its vendor query
 			// ended). Its turn's end records the death, and the session that
 			// replaces it comes up through here again.

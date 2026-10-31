@@ -93,6 +93,14 @@ type ShimRefusal struct {
 	Detail string
 }
 
+// refusedNoSession reports whether ERR is a shim's refusal because it holds
+// no session, whatever verb was refused. THE ONE such check (shimarms_test.go
+// holds every caller to it).
+func refusedNoSession(err error) bool {
+	var refusal *ShimRefusal
+	return errors.As(err, &refusal) && refusal.Arm == ArmShimNoSession
+}
+
 // Is matches promptqueue.ErrShimHasNoSession for a StartTurn the shim refused
 // because it holds no session: the queue holds that prompt under the
 // reconnect hold rather than retiring it. It matches promptqueue.ErrAskOpen

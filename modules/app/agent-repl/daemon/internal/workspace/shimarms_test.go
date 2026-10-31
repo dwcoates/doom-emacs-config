@@ -3,6 +3,10 @@ package workspace
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -398,5 +402,61 @@ func TestAStartTurnNoSessionRefusalMatchesTheQueuesReconnectSentinel(t *testing.
 				t.Fatalf("errors.Is(..., ErrShimHasNoSession) = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRefusedNoSession(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"a no_session refusal", &ShimRefusal{Verb: "SetSessionRemoteControl", Arm: ArmShimNoSession}, true},
+		{"a wrapped no_session refusal", fmt.Errorf("start: %w", &ShimRefusal{Verb: "SetSessionEffort", Arm: ArmShimNoSession}), true},
+		{"another arm", &ShimRefusal{Verb: "SetSessionRemoteControl", Arm: ArmShimVendorRefused}, false},
+		{"no refusal", errors.New("transport"), false},
+		{"no error", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := refusedNoSession(tt.err)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("refusedNoSession(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNoCallerHandRollsTheNoSessionCheck holds every caller in this package
+// to refusedNoSession: a hand-rolled arm comparison is where the checks drift.
+func TestNoCallerHandRollsTheNoSessionCheck(t *testing.T) {
+	// Arrange.
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	pattern := regexp.MustCompile(`\.Arm\s*[!=]=\s*ArmShimNoSession`)
+
+	// Act.
+	var offenders []string
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") || f == "shimarms.go" {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if pattern.Match(src) {
+			offenders = append(offenders, f)
+		}
+	}
+
+	// Assert.
+	if len(offenders) != 0 {
+		t.Fatalf("hand-rolled no_session checks in %v, want refusedNoSession", offenders)
 	}
 }
