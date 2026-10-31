@@ -652,10 +652,8 @@ func TestReclaimLeavesADeviceAnotherRunNowHoldsAttached(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Reclaim: %v", err)
 			}
-			for _, call := range h.calls {
-				if strings.HasPrefix(call, "hdiutil detach") {
-					t.Fatalf("calls = %v, want the reused device left attached", h.calls)
-				}
+			if !slices.Equal(h.calls, []string{"hdiutil info"}) {
+				t.Fatalf("calls = %v, want only the images listed and the reused device left attached", h.calls)
 			}
 			if len(done) != 1 || done[0].Pid != 7 || done[0].Attached {
 				t.Fatalf("reclaimed = %+v, want pid 7's record reclaimed with no disk of its own attached", done)
