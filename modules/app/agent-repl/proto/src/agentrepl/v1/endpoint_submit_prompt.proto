@@ -100,6 +100,11 @@ message SubmitPromptRequest {
   // the sending workspace's name. A ref naming no registered workspace is
   // refused (`unknown_sender`).
   optional workspace.v1.WorkspaceRef sent_by = 9;
+  // THE USER ASKED FOR THIS AGENT-SENT PROMPT (`workspace prompt -as-user`).
+  // Only meaningful with `sent_by`; it lifts the fan-out cap
+  // (SubmitPromptError.fan_out_refused). An agent sets it only when the user
+  // typed the send themselves or explicitly asked for it.
+  bool as_user = 10;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -279,7 +284,26 @@ message SubmitPromptError {
     // thread has no node yet for another question to be asked of. Nothing was
     // submitted; the composer keeps the text, to send once the answer lands.
     SubmitPromptThreadAwaitingFirstAnswer thread_awaiting_first_answer = 18;
+    // An agent-sent prompt would widen its sender's FAN-OUT past the cap: in
+    // the trailing window the sender already prompted `cap` distinct
+    // workspaces it has no relationship with (not its parent or child, not
+    // the workspace it was forked from or lands into, not its merge's
+    // requester, and not one that prompted it in the window). Nothing was
+    // submitted. Every recipient of such a prompt wakes and resends its whole
+    // context, and an agent broadcasting a notice to every workspace did so
+    // to 33 of them at once (owner's report, 2026-10-30). Lifted only by
+    // `as_user`.
+    SubmitPromptFanOutRefused fan_out_refused = 19;
   }
+}
+// The fan-out refusal.
+message SubmitPromptFanOutRefused {
+  // How many distinct unrelated workspaces a sender may prompt in the window.
+  uint32 cap = 1;
+  // The trailing window, in minutes.
+  uint32 window_minutes = 2;
+  // A sentence naming the cap and what lifts it.
+  string detail = 3;
 }
 // Names the sender that is no other registered workspace.
 message SubmitPromptUnknownSender {
