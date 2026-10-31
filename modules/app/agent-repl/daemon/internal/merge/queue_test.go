@@ -2127,8 +2127,9 @@ func TestReviewQueuesOffersEveryQueueToThePump(t *testing.T) {
 	h := newHarness(t)
 	other := wsm.RepoKey("/other/.git")
 	h.db.mu.Lock()
-	h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{{Workspace: theWorkspace, State: wsm.MergeQueued}}
-	h.db.queues[other] = []wsm.MergeQueueEntry{{Workspace: "ws-other", State: wsm.MergeQueued}}
+	at := time.Unix(1_700_000_000, 0)
+	h.db.queues[h.repoKey()] = []wsm.MergeQueueEntry{{Workspace: theWorkspace, State: wsm.MergeQueued, EnqueuedAt: at}}
+	h.db.queues[other] = []wsm.MergeQueueEntry{{Workspace: "ws-other", State: wsm.MergeQueued, EnqueuedAt: at}}
 	h.db.mu.Unlock()
 	var kicked []wsm.RepoKey
 	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
@@ -2141,6 +2142,52 @@ func TestReviewQueuesOffersEveryQueueToThePump(t *testing.T) {
 	sort.Slice(want, func(i, j int) bool { return want[i] < want[j] })
 	if err != nil || !reflect.DeepEqual(kicked, want) {
 		t.Fatalf("ReviewQueues = %v, kicks %v; want every queue offered, %v", err, kicked, want)
+	}
+}
+
+func TestReviewQueuesTakesUpAMergeNoHandoverGaveThisDaemon(t *testing.T) {
+	// Arrange: an admitted merge with a surviving lease that this daemon never
+	// recovered, as a successor finds a hidden merge workspace's merge the
+	// outgoing daemon suspended at its exit.
+	h := newHarness(t)
+	enqueue(t, h)
+	interruptMerge(t, h)
+	h.o.forgetMoved(theWorkspace)
+
+	// Act
+	err := h.o.ReviewQueues(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ReviewQueues: %v", err)
+	}
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if len(entries) != 1 || entries[0].State != wsm.MergeQueued {
+		t.Fatalf("the entry is %+v, want it recovered and waiting again", entries)
+	}
+	if !h.o.holds(theWorkspace) {
+		t.Fatal("this daemon does not hold the merge it took up")
+	}
+}
+
+func TestReviewQueuesLeavesAMergeThisDaemonHoldsAlone(t *testing.T) {
+	// Arrange: a merge this daemon queued itself.
+	h := newHarness(t)
+	enqueue(t, h)
+	before, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+
+	// Act
+	err := h.o.ReviewQueues(context.Background())
+
+	// Assert
+	after, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("ReviewQueues = %v; the queue went from %+v to %+v, want it untouched", err, before, after)
+	}
+	for _, r := range h.logs.Records() {
+		if r.Message == "takes up a merge no handover gave this daemon" {
+			t.Fatalf("a held merge was taken up again: %+v", r)
+		}
 	}
 }
 
