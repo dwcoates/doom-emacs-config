@@ -87,6 +87,29 @@ post_deploy:
 	}
 }
 
+func TestParseAcceptsQueueDrainedScriptsInOrder(t *testing.T) {
+	// Arrange
+	doc := `
+pre_deploy: {}
+queue_drained:
+  - path: bin/push-release.sh
+    timeout_seconds: 120
+  - path: bin/announce.sh
+    timeout_seconds: 5
+`
+	// Act
+	cfg, err := Parse("deploy.yaml", []byte(doc))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Parse = %v", err)
+	}
+	got := cfg.GetQueueDrained()
+	if len(got) != 2 || got[0].GetPath() != "bin/push-release.sh" || got[0].GetTimeoutSeconds() != 120 || got[1].GetPath() != "bin/announce.sh" {
+		t.Fatalf("queue_drained = %v, want push-release.sh then announce.sh", got)
+	}
+}
+
 func TestParseRefusesUnusableConfigs(t *testing.T) {
 	tests := []struct {
 		name string
@@ -107,6 +130,10 @@ func TestParseRefusesUnusableConfigs(t *testing.T) {
 		{name: "a blank prompt", doc: "pre_deploy: {}\npost_deploy:\n  - hook:\n      prompt:\n        text: \"  \"\n    runs_for:\n      any_target: {}\n", want: "never blank"},
 		{name: "concurrent naming no stage", doc: "pre_deploy: {}\nconcurrent: {}\n", want: "concurrent names no stage"},
 		{name: "concurrent with a local merge", doc: "pre_deploy:\n  local_merge:\n    tests:\n      agent_repl_suites:\n        script_path: t.sh\nconcurrent:\n  through_pre_deploy: {}\n", want: "cannot be set with pre_deploy.local_merge"},
+		{name: "a queue_drained script with no path", doc: "pre_deploy: {}\nqueue_drained:\n  - timeout_seconds: 5\n", want: "queue_drained[0].path is required"},
+		{name: "an absolute queue_drained path", doc: "pre_deploy: {}\nqueue_drained:\n  - path: /bin/x\n    timeout_seconds: 5\n", want: "queue_drained[0].path \"/bin/x\" must be relative"},
+		{name: "a queue_drained script with no timeout", doc: "pre_deploy: {}\nqueue_drained:\n  - path: x.sh\n", want: "queue_drained[0].timeout_seconds is required"},
+		{name: "a queue_drained prompt", doc: "pre_deploy: {}\nqueue_drained:\n  - prompt:\n      text: release\n", want: "prompt"},
 		{name: "concurrent through a stage the schema does not name", doc: "pre_deploy: {}\nconcurrent:\n  through_post_deploy: {}\n", want: "through_post_deploy"},
 	}
 	for _, tt := range tests {
@@ -373,6 +400,23 @@ func TestNoProductionCodeHandBuildsAHook(t *testing.T) {
 	}
 	if len(byHand) != 0 {
 		t.Fatalf("hooks built by hand in %v, want PromptHook and ScriptHook", byHand)
+	}
+}
+
+func TestEveryScriptIsCheckedByCheckScript(t *testing.T) {
+	// Arrange: a stage's script hook and a queue_drained script are held to
+	// one set of rules, so the timeout rule is spelled once.
+	raw, err := os.ReadFile("deployconfig.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	spelled := strings.Count(string(raw), "GetTimeoutSeconds() < 1")
+
+	// Assert
+	if spelled != 1 {
+		t.Fatalf("the script timeout rule is spelled %d times in deployconfig.go, want once, in checkScript", spelled)
 	}
 }
 

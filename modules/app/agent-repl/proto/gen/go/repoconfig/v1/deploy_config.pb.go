@@ -71,7 +71,26 @@ type DeployConfig struct {
 	// turn; the stages after them run one deploy at a time, entered in queue
 	// order. UNSET: every stage runs one deploy at a time, which is how a
 	// repository with a local merge always runs.
-	Concurrent    *DeployConcurrentStages `protobuf:"bytes,4,opt,name=concurrent,proto3,oneof" json:"concurrent,omitempty"`
+	Concurrent *DeployConcurrentStages `protobuf:"bytes,4,opt,name=concurrent,proto3,oneof" json:"concurrent,omitempty"`
+	// Scripts run, in order, when the repository's queue FULLY DEPLETES: no
+	// deploy waits in it or runs, it is not paused, and a deploy was admitted
+	// since these scripts last all succeeded (agent-repl's: push master to
+	// origin as a release).
+	//
+	// THEY ARE OWED DURABLY from each deploy's admission, in the write that
+	// admits it, so a restart between a landing and the queue emptying (the
+	// rollout a landing deploys is one) leaves them owed, and the next daemon
+	// runs them once it finds the queue empty. They run under the repository's
+	// queue lock with the queue's admissions held, so no deploy lands while
+	// they run. A failed or killed script leaves them owed and stops the rest;
+	// the queue's next emptying runs them all again, so each must bear running
+	// again on the same state.
+	//
+	// SCRIPTS ONLY: a prompt hook is a turn of a deploy's owner, and an empty
+	// queue has none. Each runs as a script hook does, with no deploy
+	// environment, its output kept among the queue's logs. Empty when the
+	// repository runs nothing then.
+	QueueDrained  []*DeployHookScript `protobuf:"bytes,5,rep,name=queue_drained,json=queueDrained,proto3" json:"queue_drained,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -130,6 +149,13 @@ func (x *DeployConfig) GetPostDeploy() []*DeployHookEntry {
 func (x *DeployConfig) GetConcurrent() *DeployConcurrentStages {
 	if x != nil {
 		return x.Concurrent
+	}
+	return nil
+}
+
+func (x *DeployConfig) GetQueueDrained() []*DeployHookScript {
+	if x != nil {
+		return x.QueueDrained
 	}
 	return nil
 }
@@ -1013,7 +1039,7 @@ var File_repoconfig_v1_deploy_config_proto protoreflect.FileDescriptor
 
 const file_repoconfig_v1_deploy_config_proto_rawDesc = "" +
 	"\n" +
-	"!repoconfig/v1/deploy_config.proto\x12\rrepoconfig.v1\"\xb6\x02\n" +
+	"!repoconfig/v1/deploy_config.proto\x12\rrepoconfig.v1\"\xfc\x02\n" +
 	"\fDeployConfig\x12B\n" +
 	"\n" +
 	"pre_deploy\x18\x01 \x01(\v2#.repoconfig.v1.DeployPreDeployStageR\tpreDeploy\x12;\n" +
@@ -1022,7 +1048,8 @@ const file_repoconfig_v1_deploy_config_proto_rawDesc = "" +
 	"postDeploy\x12J\n" +
 	"\n" +
 	"concurrent\x18\x04 \x01(\v2%.repoconfig.v1.DeployConcurrentStagesH\x01R\n" +
-	"concurrent\x88\x01\x01B\t\n" +
+	"concurrent\x88\x01\x01\x12D\n" +
+	"\rqueue_drained\x18\x05 \x03(\v2\x1f.repoconfig.v1.DeployHookScriptR\fqueueDrainedB\t\n" +
 	"\a_deployB\r\n" +
 	"\v_concurrent\"\xdb\x01\n" +
 	"\x16DeployConcurrentStages\x12_\n" +
@@ -1105,24 +1132,25 @@ var file_repoconfig_v1_deploy_config_proto_depIdxs = []int32{
 	9,  // 1: repoconfig.v1.DeployConfig.deploy:type_name -> repoconfig.v1.DeployHookEntry
 	9,  // 2: repoconfig.v1.DeployConfig.post_deploy:type_name -> repoconfig.v1.DeployHookEntry
 	1,  // 3: repoconfig.v1.DeployConfig.concurrent:type_name -> repoconfig.v1.DeployConcurrentStages
-	2,  // 4: repoconfig.v1.DeployConcurrentStages.through_pre_deploy:type_name -> repoconfig.v1.DeployConcurrentThroughPreDeploy
-	3,  // 5: repoconfig.v1.DeployConcurrentStages.through_deploy:type_name -> repoconfig.v1.DeployConcurrentThroughDeploy
-	9,  // 6: repoconfig.v1.DeployPreDeployStage.hooks:type_name -> repoconfig.v1.DeployHookEntry
-	5,  // 7: repoconfig.v1.DeployPreDeployStage.local_merge:type_name -> repoconfig.v1.DeployLocalMerge
-	6,  // 8: repoconfig.v1.DeployLocalMerge.tests:type_name -> repoconfig.v1.DeployLocalMergeTests
-	8,  // 9: repoconfig.v1.DeployLocalMerge.version_tag:type_name -> repoconfig.v1.DeployVersionTag
-	7,  // 10: repoconfig.v1.DeployLocalMergeTests.agent_repl_suites:type_name -> repoconfig.v1.DeployTestsAgentReplSuites
-	10, // 11: repoconfig.v1.DeployHookEntry.hook:type_name -> repoconfig.v1.DeployHook
-	13, // 12: repoconfig.v1.DeployHookEntry.runs_for:type_name -> repoconfig.v1.DeployHookRunsFor
-	11, // 13: repoconfig.v1.DeployHook.script:type_name -> repoconfig.v1.DeployHookScript
-	12, // 14: repoconfig.v1.DeployHook.prompt:type_name -> repoconfig.v1.DeployHookPrompt
-	14, // 15: repoconfig.v1.DeployHookRunsFor.main:type_name -> repoconfig.v1.DeployHookRunsForMain
-	15, // 16: repoconfig.v1.DeployHookRunsFor.any_target:type_name -> repoconfig.v1.DeployHookRunsForAnyTarget
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	11, // 4: repoconfig.v1.DeployConfig.queue_drained:type_name -> repoconfig.v1.DeployHookScript
+	2,  // 5: repoconfig.v1.DeployConcurrentStages.through_pre_deploy:type_name -> repoconfig.v1.DeployConcurrentThroughPreDeploy
+	3,  // 6: repoconfig.v1.DeployConcurrentStages.through_deploy:type_name -> repoconfig.v1.DeployConcurrentThroughDeploy
+	9,  // 7: repoconfig.v1.DeployPreDeployStage.hooks:type_name -> repoconfig.v1.DeployHookEntry
+	5,  // 8: repoconfig.v1.DeployPreDeployStage.local_merge:type_name -> repoconfig.v1.DeployLocalMerge
+	6,  // 9: repoconfig.v1.DeployLocalMerge.tests:type_name -> repoconfig.v1.DeployLocalMergeTests
+	8,  // 10: repoconfig.v1.DeployLocalMerge.version_tag:type_name -> repoconfig.v1.DeployVersionTag
+	7,  // 11: repoconfig.v1.DeployLocalMergeTests.agent_repl_suites:type_name -> repoconfig.v1.DeployTestsAgentReplSuites
+	10, // 12: repoconfig.v1.DeployHookEntry.hook:type_name -> repoconfig.v1.DeployHook
+	13, // 13: repoconfig.v1.DeployHookEntry.runs_for:type_name -> repoconfig.v1.DeployHookRunsFor
+	11, // 14: repoconfig.v1.DeployHook.script:type_name -> repoconfig.v1.DeployHookScript
+	12, // 15: repoconfig.v1.DeployHook.prompt:type_name -> repoconfig.v1.DeployHookPrompt
+	14, // 16: repoconfig.v1.DeployHookRunsFor.main:type_name -> repoconfig.v1.DeployHookRunsForMain
+	15, // 17: repoconfig.v1.DeployHookRunsFor.any_target:type_name -> repoconfig.v1.DeployHookRunsForAnyTarget
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_repoconfig_v1_deploy_config_proto_init() }
