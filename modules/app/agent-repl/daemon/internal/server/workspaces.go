@@ -151,6 +151,11 @@ func (s *server) CreateWorkspace(
 			}
 			id := subject.Record.ID
 			spec.ContextWorkspace = &id
+			// The bubble its feed has selected as the request arrives is the
+			// part of its view the commission most likely cites.
+			spec.ContextSelection = s.contextSelection(id)
+			subject.Log.Info("daemon.server.create_workspace", "a one-shot names this workspace as its context",
+				dlog.Context{"selected": spec.ContextSelection != nil})
 		}
 	}
 	if req.Msg.Model != nil {

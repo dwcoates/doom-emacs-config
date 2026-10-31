@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/prompts"
+	"agent-repld/internal/replyquote"
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/titlesynth"
@@ -543,6 +544,14 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 		})
 		return fmt.Errorf("create: only a one-shot names a context workspace, and this create is not one (context %s)", *spec.ContextWorkspace)
 	}
+	// A CONTEXT SELECTION IS THE CONTEXT WORKSPACE'S: the server reads it from
+	// the workspace it names, so one without that workspace is a defect too.
+	if spec.ContextSelection != nil && spec.ContextWorkspace == nil {
+		log.Error(opCreate, "a create spec carries a context selection without a context workspace", dlog.Context{
+			"kind": string(spec.ContextSelection.Kind), "row": spec.ContextSelection.Row,
+		})
+		return fmt.Errorf("create: a context selection belongs to a context workspace, and this create names none (row %s)", spec.ContextSelection.Row)
+	}
 	if spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == "" {
 		log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == \"\""})
 		return refuse(log, "CreateWorkspace", ArmNoSlug,
@@ -864,7 +873,7 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 		text = decorated
 	}
 	if spec.ContextWorkspace != nil {
-		decorated, err := v.decorateOneShotContext(ctx, log, text, *spec.ContextWorkspace)
+		decorated, err := v.decorateOneShotContext(ctx, log, text, *spec.ContextWorkspace, spec.ContextSelection)
 		if err != nil {
 			return refuse(log, "CreateWorkspace", ArmBriefMissing, err.Error(), false)
 		}
@@ -1104,11 +1113,83 @@ const BriefOneShotContext = "workspace-oneshot-context-preamble"
 // BriefOneShotContext note naming the workspace the commission concerns, by
 // name, worktree and branch. It runs before the one-shot decoration, so the
 // note sits between the autonomous preamble and the user's words.
-func (v *verbs) decorateOneShotContext(ctx context.Context, log dlog.Logger, raw string, about ids.WorkspaceID) (string, error) {
+func (v *verbs) decorateOneShotContext(ctx context.Context, log dlog.Logger, raw string, about ids.WorkspaceID, selected *ContextSelection) (string, error) {
+	if selected != nil {
+		// The quote sits between the workspace note and the commission, so
+		// the agent reads which workspace, then what in it, then what to do.
+		quoted, err := v.contextSelectionNote(log, about, *selected)
+		if err != nil {
+			return "", err
+		}
+		raw = quoted + raw
+	}
 	return v.decorateWithWorkspaceNote(ctx, log, raw, BriefOneShotContext, about,
 		func(concerned wsm.Workspace) map[string]string {
 			return map[string]string{"context": concerned.Name, "context_dir": concerned.Dir, "context_branch": concerned.Branch}
 		})
+}
+
+// BriefOneShotContextSelection is the note that follows BriefOneShotContext
+// when the context workspace's feed had a bubble selected: the selected
+// bubble is quoted as the part of that workspace's view the commission most
+// likely cites.
+const BriefOneShotContextSelection = "workspace-oneshot-context-selection"
+
+// ContextSelectionKind is which kind of bubble the context workspace's feed
+// had selected (agentrepl.v1.HostWorkspaceSelection's arms). Its value is
+// what a held create's row stores.
+type ContextSelectionKind string
+
+const (
+	// ContextSelectionResponse is a final response of the agent's.
+	ContextSelectionResponse ContextSelectionKind = "response"
+	// ContextSelectionPrompt is a prompt a rollback can reach.
+	ContextSelectionPrompt ContextSelectionKind = "prompt"
+	// ContextSelectionBubble is any other bubble: an interim or thinking
+	// response, an agent prompt, or a user prompt a rollback cannot reach.
+	ContextSelectionBubble ContextSelectionKind = "bubble"
+)
+
+// phrase is how the selection note names the kind to the agent.
+func (k ContextSelectionKind) phrase() string {
+	switch k {
+	case ContextSelectionResponse:
+		return "a final response of its agent's"
+	case ContextSelectionPrompt:
+		return "a prompt sent to its agent"
+	case ContextSelectionBubble:
+		return "an interim or thinking response, an agent prompt, or an older prompt"
+	}
+	panic(fmt.Sprintf("workspace: unknown context selection kind %q", string(k)))
+}
+
+// ContextSelection is the bubble a context workspace's feed had selected when
+// a one-shot about it was asked for, as the daemon held it then.
+type ContextSelection struct {
+	// Kind is which kind of bubble it is.
+	Kind ContextSelectionKind
+	// Row is its feed row id (frontend.v1.FeedId.value).
+	Row string
+	// Markdown is its text as the feed draws it.
+	Markdown string
+}
+
+// contextSelectionNote is the BriefOneShotContextSelection note naming the
+// bubble the context workspace ABOUT had selected, followed by the bubble's
+// text inside its own code fence (replyquote.Fenced). The text is appended
+// after the splice, never spliced: it is the feed's text, not the daemon's,
+// and may carry anything a brief's placeholders would be read from.
+func (v *verbs) contextSelectionNote(log dlog.Logger, about ids.WorkspaceID, selected ContextSelection) (string, error) {
+	fields := dlog.Context{"brief": BriefOneShotContextSelection, "workspace": string(about),
+		"kind": string(selected.Kind), "row": selected.Row, "text_len": len(selected.Markdown)}
+	note, err := v.corpusNote(log, opCreate, fields, BriefOneShotContextSelection, map[string]string{
+		"selection_kind": selected.Kind.phrase(), "selection_row": selected.Row,
+	})
+	if err != nil {
+		return "", err
+	}
+	log.Debug(opCreate, "quoted the context workspace's selected bubble in the one-shot's commission", fields)
+	return prompts.Wrap("\n\n" + note + "\n\n" + replyquote.Fenced(selected.Markdown) + "\n\n"), nil
 }
 
 // decorateWithWorkspaceNote opens raw with the meta-wrapped note BRIEF, spliced

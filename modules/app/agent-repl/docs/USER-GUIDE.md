@@ -583,6 +583,10 @@ The input window underlines misspelled words as you type.
 - The daemon opens the one-shot's commission with a note naming this workspace.
   - The note gives its name, worktree and branch.
   - It tells the agent that the issue you describe is this workspace's, not the one-shot's own.
+- When a bubble in this workspace's feed is selected, the one-shot's commission quotes it too.
+  - The quote follows the note, and gives the bubble's kind, its feed row and its text.
+  - The agent is told to start from that bubble when your commission says "this" or "the response".
+  - Select the bubble you mean before pressing `SPC TAB C-o`. With nothing selected, only the note is added.
 - Unlike `SPC TAB o`, the one-shot is in this workspace's repository.
 - Otherwise it is an ordinary `SPC TAB o` one-shot.
   - It is cut from the primary branch and merges back into it.

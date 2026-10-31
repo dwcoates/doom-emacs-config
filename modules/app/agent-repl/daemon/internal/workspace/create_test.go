@@ -1937,6 +1937,143 @@ func TestCreateRejectsAContextWorkspaceOutsideAOneShot(t *testing.T) {
 	}
 }
 
+// selectionBrief arranges the context selection note's brief.
+func selectionBrief(f *fixture) {
+	f.briefs[BriefOneShotContextSelection] = prompts.Prompt{
+		Name: BriefOneShotContextSelection, Body: "SELECTED {{selection_kind}} ROW {{selection_row}}",
+		Placeholders: []string{"selection_kind", "selection_row"},
+	}
+}
+
+func TestCreateQuotesTheContextWorkspacesSelectionAfterItsNote(t *testing.T) {
+	tests := []struct {
+		name     string
+		selected ContextSelection
+		fence    string
+	}{
+		{name: "a final response", fence: "```",
+			selected: ContextSelection{Kind: ContextSelectionResponse, Row: "row-1", Markdown: "the feed {{drops}} a row"}},
+		{name: "a prompt", fence: "```",
+			selected: ContextSelection{Kind: ContextSelectionPrompt, Row: "row-2", Markdown: "fix it"}},
+		{name: "a bubble whose text holds a fence", fence: "````",
+			selected: ContextSelection{Kind: ContextSelectionBubble, Row: "row-3", Markdown: "```go\nx\n```"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			oneShotBriefs(f)
+			contextBrief(f)
+			selectionBrief(f)
+			about := f.workspace("about", t.TempDir())
+			spec := standardSpec(t, f)
+			spec.OneShot = true
+			spec.ContextWorkspace = &about.ID
+			spec.ContextSelection = &tt.selected
+
+			// Act.
+			if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// Assert: the context note, then the selection note with the
+			// bubble's text verbatim in its own fence, then the user's words.
+			sent := f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
+			want := prompts.Wrap("PREAMBLE\n") +
+				prompts.Wrap("ABOUT "+about.Name+" AT "+about.Dir+" ON "+about.Branch+"\n") +
+				prompts.Wrap("\n\nSELECTED "+tt.selected.Kind.phrase()+" ROW "+tt.selected.Row+"\n\n"+
+					tt.fence+"\n"+tt.selected.Markdown+"\n"+tt.fence+"\n\n") +
+				"fix the login bug" + prompts.Wrap("\n"+completionDirectiveLead+"DIRECTIVE")
+			if sent != want {
+				t.Fatalf("the one-shot prompt = %q, want %q", sent, want)
+			}
+		})
+	}
+}
+
+func TestCreateRefusesAOneShotWhoseSelectionNoteCannotBeComposed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	contextBrief(f)
+	about := f.workspace("about", t.TempDir())
+	spec := standardSpec(t, f)
+	spec.OneShot = true
+	spec.ContextWorkspace = &about.ID
+	spec.ContextSelection = &ContextSelection{Kind: ContextSelectionResponse, Row: "row-1", Markdown: "text"}
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	asRefusal(t, err, ArmBriefMissing)
+	if len(f.queue.submissions) != 0 {
+		t.Fatalf("submissions = %d, want none", len(f.queue.submissions))
+	}
+	if !loggedAtError(f, opCreate) {
+		t.Fatal("the failed note was not logged at error")
+	}
+}
+
+func TestCreateRejectsAContextSelectionWithoutAContextWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	spec := standardSpec(t, f)
+	spec.OneShot = true
+	spec.ContextSelection = &ContextSelection{Kind: ContextSelectionResponse, Row: "row-1", Markdown: "text"}
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Create succeeded, want the contradictory spec rejected")
+	}
+	if _, refused := AsRefusal(err); refused {
+		t.Fatalf("err = %v, want an invariant failure rather than a refusal", err)
+	}
+	if len(f.git.created) != 0 {
+		t.Fatalf("worktrees created = %v, want none", f.git.created)
+	}
+	if !loggedAtError(f, opCreate) {
+		t.Fatal("the contradictory spec was not logged at error")
+	}
+}
+
+func TestContextSelectionKindPhrase(t *testing.T) {
+	tests := []struct {
+		kind ContextSelectionKind
+		want string
+	}{
+		{kind: ContextSelectionResponse, want: "a final response of its agent's"},
+		{kind: ContextSelectionPrompt, want: "a prompt sent to its agent"},
+		{kind: ContextSelectionBubble, want: "an interim or thinking response, an agent prompt, or an older prompt"},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.kind), func(t *testing.T) {
+			// Act.
+			got := tt.kind.phrase()
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("phrase = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContextSelectionKindPhrasePanicsOnAnUnknownKind(t *testing.T) {
+	// Assert.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("phrase of an unknown kind did not panic")
+		}
+	}()
+
+	// Act.
+	_ = ContextSelectionKind("nope").phrase()
+}
+
 func TestCreateRefusesAChildOfAParentThatIsNotOpenBeforeMaterializingIt(t *testing.T) {
 	// Arrange.
 	f, spec, parent, _ := derivationFixture(t)

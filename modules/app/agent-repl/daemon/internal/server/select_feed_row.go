@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/workspace"
 )
 
 const opSelectFeedRow = "daemon.server.select_feed_row"
@@ -559,6 +560,32 @@ func (s *server) currentSelection(ws ids.WorkspaceID) (row *frontendv1.FeedId, k
 	s.selectionMu.Lock()
 	defer s.selectionMu.Unlock()
 	return selectedRow(s.selections[ws].GetSelection())
+}
+
+// contextSelection answers the workspace's selected bubble as a one-shot
+// about it quotes it (workspace.CreateSpec.ContextSelection), nil when
+// nothing is selected. It is read once, under selectionMu, so the kind, the
+// row and the text are of one selection.
+func (s *server) contextSelection(ws ids.WorkspaceID) *workspace.ContextSelection {
+	s.selectionMu.Lock()
+	defer s.selectionMu.Unlock()
+	state := s.selections[ws]
+	row, kind, held := selectedRow(state.GetSelection())
+	if !held {
+		return nil
+	}
+	return &workspace.ContextSelection{Kind: kind.contextKind(), Row: row.GetValue(), Markdown: state.markdown}
+}
+
+// contextKind is the kind as a one-shot's context selection names it.
+func (k selectionKind) contextKind() workspace.ContextSelectionKind {
+	switch k {
+	case selectionPrompt:
+		return workspace.ContextSelectionPrompt
+	case selectionBubble:
+		return workspace.ContextSelectionBubble
+	}
+	return workspace.ContextSelectionResponse
 }
 
 // selectionState is one workspace's selection as every client receives it:
