@@ -171,7 +171,10 @@ func TestAPromptSentRightAfterAShimDiesIsDelivered(t *testing.T) {
 	expectRPCCount(t, revived, harness.RPCStartTurn, 1, harness.ProbeWindow)
 }
 
-func TestAShimThatDiesMidTurnEndsThatTurnTruthfully(t *testing.T) {
+// A SHIM THAT DIES UNDER A TURN CUT IT (owner ruling, 2026-10-30): the turn
+// ends interrupted and the revived session continues it. The death itself is
+// still agent-repl's defect, recorded at ERROR (deadShimRecords).
+func TestAShimThatDiesMidTurnEndsThatTurnInterrupted(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn running when the shim dies.
 	f := newOpened(t, harness.Opts{})
@@ -182,53 +185,61 @@ func TestAShimThatDiesMidTurnEndsThatTurnTruthfully(t *testing.T) {
 	f.shim.ExpectStartTurn()
 	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, 1)
 	feed := f.watchRootFeed()
-	footer := f.d.WatchFooter(f.ws)
 
 	// Act
 	killShim(t, f, f.shim)
 
-	// Assert: the feed ends the cut turn as the agent process's death.
-	awaitRow(t, f, feed, "the cut turn's agent-process-death ending", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == cut && r.GetTurnEnded().GetErrored().GetAgentProcessDied() != nil
-	})
-	// Assert: its durable row is closed, as the agent dying, by the queue.
-	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the cut turn's agent-died close", func(r harness.LogRecord) bool {
-		return r.Operation == harness.OpTurnEnded && r.Context["turn"] == cut && r.Context["close"] == "agent_died"
-	})
-	// Assert: the revived session is not drawn as the cut turn thinking: the
-	// cut turn stands as agent-repl's turn_died fault until the next turn
-	// (owner ruling, 2026-10-06), worded as the agent process dying.
-	awaitFooter(t, f, footer, "the footer drawing the death", footerDisconnected)
-	f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl").ExpectStartSession()
-	awaitFooter(t, f, footer, "the footer on the turn_died fault, with the death's line", func(v *frontendv1.FooterView) bool {
-		fault := v.GetStrip().GetStatus().GetAgentReplFault()
-		return fault.GetTurnDied() != nil &&
-			fault.GetActivity().GetSalient().GetTurnEnded().GetText() == "the agent process died, and the turn it was running ended with it"
+	// Assert
+	awaitRow(t, f, feed, "the cut turn's interrupted ending", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == cut && r.GetTurnEnded().GetInterrupted() != nil
 	})
 }
 
-// TestAShimThatDiesMidTurnLeavesTheRevivedRowOnTurnDied covers
-// RosterRowStatusTurnDied: a turn the agent process cut by dying is
-// agent-repl's fault (owner ruling, 2026-10-06), so once the revived session
-// is up the row reports it, blue, until the next turn, rather than a green
-// done.
-func TestAShimThatDiesMidTurnLeavesTheRevivedRowOnTurnDied(t *testing.T) {
+func TestAShimThatDiesMidTurnHasThatTurnContinuedOnTheRevivedSession(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn running when the shim dies.
+	f := newOpened(t, harness.Opts{})
+	f.d.RequireWarnings(deadShimRecords...)
+	f.shim.ExpectStartSession()
+	f.submit("the turn the death cuts", "k-dead-shim-continue", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.ExpectStartTurn()
+	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, 1)
+
+	// Act
+	killShim(t, f, f.shim)
+
+	// Assert
+	revived := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	revived.ExpectStartSession()
+	if st := revived.ExpectStartTurn(); st.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART {
+		t.Fatalf("the revived session's first turn has origin %v, want the resumption", st.GetOrigin())
+	}
+}
+
+// TestAResumptionWhoseShimDiesLeavesTheRowOnTurnDied covers
+// RosterRowStatusTurnDied: a shim that dies again under the resumption of the
+// work it cut is not revived into it again, so its failure stands, blue,
+// until the next turn.
+func TestAResumptionWhoseShimDiesLeavesTheRowOnTurnDied(t *testing.T) {
+	t.Parallel()
+	// Arrange: the shim died under a turn, and its resumption runs.
 	f := newOpened(t, harness.Opts{})
 	f.d.RequireWarnings(deadShimRecords...)
 	f.shim.ExpectStartSession()
 	f.submit("the turn the death cuts", "k-dead-shim-failed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
 	f.d.AwaitWorkspaceLogOperationCount(f.repo.Dir, harness.OpTurnOpened, 1)
+	killShim(t, f, f.shim)
+	revived := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	revived.ExpectStartSession()
+	revived.ExpectStartTurn()
 	roster := f.d.WatchRoster()
 
 	// Act
-	killShim(t, f, f.shim)
-	f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl").ExpectStartSession()
+	killShim(t, f, revived)
 
 	// Assert
-	got := awaitRoster(t, f.d, roster, "turn_died once the revived session is up", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, f.d, roster, "turn_died once the resumption died", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetTurnDied() != nil
 	})

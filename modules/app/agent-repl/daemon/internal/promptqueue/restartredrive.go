@@ -116,6 +116,44 @@ func (q *queue) oweResumption(ctx context.Context, ws ids.WorkspaceID, turn ids.
 	log.Info(opResume, "the daemon's own stand-down cut the turn; the next session that serves the workspace resumes it", fields)
 }
 
+// resumeShimCrash answers how a turn its shim's death ended is closed.
+//
+// A SHIM THAT DIES UNDER A TURN CUT IT (owner ruling, 2026-10-30): the work
+// was not the turn's own failure, so the turn closes as killed, which every
+// surface draws "interrupted", and the workspace is owed its resumption, which
+// the revived session pays with the "continue" prompt. The death itself stays
+// loud: the shim's exit is recorded at ERROR where the daemon sees it.
+//
+// A RESUMPTION THAT DIES IS NOT RESUMED AGAIN. A shim that crashes on the
+// same work would otherwise be revived into it, crash, and be revived again
+// forever, so a dead turn of origin PROMPT_ORIGIN_RESUME_AFTER_RESTART keeps
+// its agent-died close, which draws the failure for the user to act on.
+// Every close that is not a shim's death passes through unchanged.
+func (q *queue) resumeShimCrash(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose, log dlog.Logger) sessionwatcher.TurnClose {
+	if how != wsm.CloseAgentDied {
+		return how
+	}
+	row, err := q.deps.DB.Turn(ctx, ws, turn)
+	if err != nil {
+		log.Error(opResume, "could not read the turn the shim's death cut; it is not resumed and its failure stands",
+			dlog.Context{"cause": err.Error()})
+		return how
+	}
+	if row.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_RESUME_AFTER_RESTART.String() {
+		// ONE DEATH IS ONE ERROR: the shim's exit is recorded at ERROR where
+		// the daemon sees it, so this decision about it is INFO.
+		log.Info(opResume, "the shim died again under the resumption of work a cut ended; it is not resumed again, and its failure stands", nil)
+		return how
+	}
+	if err := q.deps.DB.OweResumption(ctx, ws, turn, q.deps.Now()); err != nil {
+		log.Error(opResume, "could not record the resumption the shim's death owes; the cut turn will not be resumed and its failure stands",
+			dlog.Context{"cause": err.Error()})
+		return how
+	}
+	log.Info(opResume, "the shim died under the turn; it ends interrupted and the revived session resumes it", nil)
+	return wsm.CloseKilled
+}
+
 // redriveOwedLocked resumes what the workspace is owed, as the first turn the
 // serving session runs, and reports whether it started one. The caller holds
 // the delivery lock (d), has seen the session serve and its facts in.
