@@ -18,10 +18,10 @@ import {
   RosterMergeQueueHeadSchema,
   RosterMergeQueuePausedSchema,
   RosterMergeQueueRemediatingSchema,
-  RosterMergeQueueRepoGroupSchema,
   RosterMergeQueueStageSchema,
   RosterRepoMergeQueueSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { RepositoryRefSchema as WorkspaceRepositorySchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { formatAge, formatElapsed, formatTickedElapsed } from "../../src/duration.js";
 import { roundSuffix, STATE_GLYPHS } from "../../src/feed/merge/tab-strip.js";
 import { MERGE_GLYPH } from "../../src/merge-glyph.js";
@@ -30,12 +30,10 @@ import {
   drawHeadClock,
   drawRosterMergeQueue,
   drawRosterMergeQueueHead,
-  drawRosterMergeQueueRepoGroup,
+  drawQueuedGroupHead,
   drawRosterMergeQueueStage,
   drawRosterMergeQueueWaiting,
   MERGE_QUEUE_CLASS,
-  MERGE_QUEUE_GROUP_CLASS,
-  MERGE_QUEUE_GROUP_HEAD_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
   MERGE_QUEUE_REMEDIATING_CLASS,
@@ -44,6 +42,8 @@ import {
   pausedText,
   placeBeside,
   queueDrag,
+  queueHoverText,
+  queueLine,
 } from "../../src/sidebar/merge-queue-view.js";
 import { BUCKET_ATTRIBUTE } from "../../src/sidebar/subsections.js";
 import {
@@ -51,7 +51,6 @@ import {
   fakeTicker,
   mergingHead,
   NOW,
-  queueGroup,
   queueSubject,
   sidebarContext,
   waitingMerge,
@@ -97,9 +96,9 @@ function queueDaemon(answer: () => ReturnType<typeof create<typeof UpdateMergeQu
 
 describe("pausedText", () => {
   it.each([
-    { name: "the user's pause", pause: () => paused({ atMs: NOW - 90_000 }), want: `Paused ${formatAge(90_000)} ago by you. Click to resume.` },
-    { name: "a workspace's hard stop", pause: () => paused({ atMs: NOW - 90_000, workspace: "doom", hard: true }), want: `Stopped ${formatAge(90_000)} ago by doom. Click to resume.` },
-    { name: "a pause recorded before its record was kept", pause: () => create(RosterMergeQueuePausedSchema, {}), want: "Paused. Click to resume." },
+    { name: "the user's pause", pause: () => paused({ atMs: NOW - 90_000 }), want: `Paused ${formatAge(90_000)} ago by you. Double-click to resume.` },
+    { name: "a workspace's hard stop", pause: () => paused({ atMs: NOW - 90_000, workspace: "doom", hard: true }), want: `Stopped ${formatAge(90_000)} ago by doom. Double-click to resume.` },
+    { name: "a pause recorded before its record was kept", pause: () => create(RosterMergeQueuePausedSchema, {}), want: "Paused. Double-click to resume." },
   ])("says $name", ({ pause, want }) => {
     expect(pausedText(pause(), NOW, "paused")).toBe(want);
   });
@@ -109,94 +108,82 @@ describe("pausedText", () => {
   });
 });
 
-describe("drawRosterMergeQueueRepoGroup", () => {
-  const header = (path: string): HTMLElement => {
+describe("queueLine", () => {
+  it("lists the head, then each merge remediating, then each waiting, by workspace", () => {
+    const queue = create(RosterRepoMergeQueueSchema, {
+      head: mergingHead("w1"),
+      remediating: [create(RosterMergeQueueRemediatingSchema, { subject: queueSubject("w2"), sinceMs: BigInt(NOW) })],
+      waiting: [waitingMerge("w3"), waitingMerge("w4")],
+    });
+    expect(queueLine(queue)).toBe("w1 w2 w3 w4");
+  });
+
+  it("states an empty line for a queue drawing no merge", () => {
+    expect(queueLine(create(RosterRepoMergeQueueSchema, {}))).toBe("");
+  });
+});
+
+describe("queueHoverText", () => {
+  it.each([
+    { name: "a running queue's double click", pause: undefined, want: "Double-click to pause the queue." },
+    { name: "a paused queue's record", pause: paused({ atMs: NOW, workspace: "doom" }), want: pausedText(paused({ atMs: NOW, workspace: "doom" }), NOW, "p") },
+  ])("says $name", ({ pause, want }) => {
+    expect(queueHoverText(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), paused: pause }), NOW, "queue")).toBe(want);
+  });
+});
+
+describe("drawQueuedGroupHead", () => {
+  const repository = { id: "repo-1", dir: "/r/repo-1" } as const;
+
+  /** A queued group's box and header, the header made the queue's control. */
+  function drawn(sc: ReturnType<typeof daemon>["sc"], pause?: ReturnType<typeof paused>): { group: HTMLElement; head: HTMLElement } {
+    const group = document.createElement("div");
     const head = document.createElement("div");
-    head.textContent = path;
-    return head;
-  };
-
-  it("draws the header the caller draws, then the queue", () => {
-    const { sc } = daemon();
-    const group = drawRosterMergeQueueRepoGroup(queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } }), sc, "queues[0]", header);
-    expect([...group.children].map((el) => el.className)).toEqual([MERGE_QUEUE_GROUP_HEAD_CLASS, `rows ${MERGE_QUEUE_CLASS}`]);
-    expect(group.firstElementChild?.textContent).toBe("queues[0].header(1)");
-  });
-
-  it("names its repository", () => {
-    const { sc } = daemon();
-    const group = drawRosterMergeQueueRepoGroup(queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } }), sc, "queues[0]", header);
-    expect([group.className, group.getAttribute("data-repository")]).toEqual([MERGE_QUEUE_GROUP_CLASS, "repo-1"]);
-  });
-
-  it("counts the merges in its line beside the header's label", () => {
-    const { sc } = daemon();
-    const group = drawRosterMergeQueueRepoGroup(
-      queueGroup({ id: "repo-1", queue: { head: mergingHead("w1"), waiting: [waitingMerge("w2"), waitingMerge("w3")] } }),
-      sc,
-      "queues[0]",
-      header,
-    );
-    expect(group.querySelector(`.${MERGE_QUEUE_GROUP_HEAD_CLASS} .sb-count`)?.textContent).toBe("(3)");
-  });
+    group.appendChild(head);
+    const queue = create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), paused: pause });
+    drawQueuedGroupHead(group, head, queue, create(WorkspaceRepositorySchema, repository), sc, "groups[0].activity.queued.queue");
+    return { group, head };
+  }
 
   it.each([
     { name: "a running queue", pause: undefined, want: null },
     { name: "a paused queue", pause: paused(), want: "pause" },
     { name: "a hard-stopped queue", pause: paused({ hard: true }), want: "hard" },
   ])("marks $name", ({ pause, want }) => {
-    const { sc } = daemon();
-    const group = drawRosterMergeQueueRepoGroup(queueGroup({ id: "repo-1", queue: { head: mergingHead("w1"), paused: pause } }), sc, "queues[0]", header);
-    expect(group.getAttribute(MERGE_QUEUE_PAUSED_ATTRIBUTE)).toBe(want);
+    expect(drawn(daemon().sc, pause).group.getAttribute(MERGE_QUEUE_PAUSED_ATTRIBUTE)).toBe(want);
   });
 
-  it("says on a paused queue's header who paused it and when", () => {
-    const { sc } = daemon();
-    const group = drawRosterMergeQueueRepoGroup(
-      queueGroup({ id: "repo-1", queue: { head: mergingHead("w1"), paused: paused({ atMs: NOW, workspace: "doom" }) } }),
-      sc,
-      "queues[0]",
-      header,
-    );
-    expect(group.querySelector<HTMLElement>(`.${MERGE_QUEUE_GROUP_HEAD_CLASS}`)?.title).toBe(pausedText(paused({ atMs: NOW, workspace: "doom" }), NOW, "p"));
-  });
-
-  it("resumes a paused queue on a click of its header", async () => {
+  it.each([
+    { name: "pauses a running queue", pause: undefined, want: "pause" },
+    { name: "resumes a paused queue", pause: paused(), want: "resume" },
+  ])("$name on a double click of its header", async ({ pause, want }) => {
     const { asked, sc } = queueDaemon();
-    const group = drawRosterMergeQueueRepoGroup(queueGroup({ id: "repo-1", queue: { head: mergingHead("w1"), paused: paused() } }), sc, "queues[0]", header);
-    group.querySelector<HTMLElement>(`.${MERGE_QUEUE_GROUP_HEAD_CLASS}`)?.click();
+    drawn(sc, pause).head.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     await settled();
-    expect(asked.map((r) => [r.action.case, r.action.case === "resume" ? r.action.value.repository?.id : undefined, r.requester?.asker.case])).toEqual([
-      ["resume", "repo-1", "user"],
-    ]);
+    expect(
+      asked.map((r) => [
+        r.action.case,
+        r.action.case === "resume" || r.action.case === "pause" ? r.action.value.repository?.id : undefined,
+        r.requester?.asker.case,
+      ]),
+    ).toEqual([[want, "repo-1", "user"]]);
   });
 
   it("draws a refused resume at the header", async () => {
     const { sc } = queueDaemon(() =>
       create(UpdateMergeQueueResponseSchema, { result: { case: "error", value: { cause: { case: "notPaused", value: {} } } } }),
     );
-    const group = drawRosterMergeQueueRepoGroup(queueGroup({ id: "repo-1", queue: { head: mergingHead("w1"), paused: paused() } }), sc, "queues[0]", header);
-    const head = group.querySelector<HTMLElement>(`.${MERGE_QUEUE_GROUP_HEAD_CLASS}`);
-    head?.click();
+    const { group, head } = drawn(sc, paused());
+    head.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     await settled();
-    expect(group.querySelector('.refusal[data-arm="notPaused"]') !== null || head?.parentElement?.querySelector('.refusal[data-arm="notPaused"]') !== null).toBe(true);
+    expect(group.querySelector('.refusal[data-arm="notPaused"]') !== null || head.parentElement?.querySelector('.refusal[data-arm="notPaused"]') !== null).toBe(true);
   });
 
-  it("asks nothing on a click of a running queue's header", async () => {
+  it("asks nothing on a single click of its header", async () => {
     const { asked, sc } = queueDaemon();
-    const group = drawRosterMergeQueueRepoGroup(queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } }), sc, "queues[0]", header);
-    group.querySelector<HTMLElement>(`.${MERGE_QUEUE_GROUP_HEAD_CLASS}`)?.click();
+    drawn(sc, paused()).head.click();
     await settled();
     expect(asked).toEqual([]);
-  });
-
-  it.each([
-    { name: "key", init: { header: { label: { text: "r" } }, queue: { head: mergingHead("w1") }, count: { workspaces: 1 } } },
-    { name: "queue", init: { key: { repository: { id: "r" } }, header: { label: { text: "r" } }, count: { workspaces: 1 } } },
-    { name: "count", init: { key: { repository: { id: "r" } }, header: { label: { text: "r" } }, queue: { head: mergingHead("w1") } } },
-  ])("refuses a group without its $name", ({ init }) => {
-    const { sc } = daemon();
-    expect(() => drawRosterMergeQueueRepoGroup(create(RosterMergeQueueRepoGroupSchema, init), sc, "queues[0]", header)).toThrow(MalformedView);
   });
 });
 

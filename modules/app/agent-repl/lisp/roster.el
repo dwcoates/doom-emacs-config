@@ -434,12 +434,6 @@ THE DAEMON DECIDES IT (`frontend.v1.RosterOpenRow.tab'): a collapsed
 repository's or subsection's rows carry a folded tab."
   (null (agent-repl-roster-tab-number (plist-get open :tab))))
 
-(defun agent-repl-roster--merged-group-collapsed-p (group)
-  "Return non-nil when recently-merged GROUP's repository is collapsed.
-The daemon resolves the group's `drawn' arm from the repository's own fold,
-so its workspaces leave the bar exactly as that repository's others do."
-  (eq (plist-get (plist-get group :drawn) :arm) :repository-collapsed))
-
 (defun agent-repl-roster-walk (roster)
   "Return ROSTER's rows in tab order, as `agent-repl-roster--walk-rows' entries.
 THE ROSTER IS ONE LISTING (`frontend.v1.WorkspaceRoster'): every workspace
@@ -474,13 +468,12 @@ that reach every workspace (the switcher, the log retention)."
     (let* ((merged (plist-get roster :recently-merged))
            (label (plist-get (plist-get (plist-get merged :header) :label) :text)))
       (dolist (group (plist-get merged :groups))
-        (let ((collapsed (agent-repl-roster--merged-group-collapsed-p group)))
-          (agent-repl-roster--walk-rows
-           (plist-get (plist-get group :merged-rows) :rows)
-           label
-           :merged
-           acc
-           (lambda (_) collapsed)))))
+        (agent-repl-roster--walk-rows
+         (plist-get (plist-get group :merged-rows) :rows)
+         label
+         :merged
+         acc
+         #'ignore)))
     (agent-repl-roster--walk-rows
      (plist-get (plist-get roster :closed) :rows) nil :closed acc (lambda (_) t))
     (nreverse (car acc))))

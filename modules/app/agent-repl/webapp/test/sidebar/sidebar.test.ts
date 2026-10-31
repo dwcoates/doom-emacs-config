@@ -206,18 +206,19 @@ describe("the preferences a page stored before the view was the daemon's", () =>
   });
 });
 
-describe("the rail's Recently Deployed rows", () => {
+describe("the rail's Deploys groups", () => {
   /** The page's focus-left signal, fired by hand through its own writer. */
   function manualFocus(): FocusLeftSource {
     return createFocusLeft(window, createPresence(document, true));
   }
 
-  const heading = (host: HTMLElement): HTMLElement => host.querySelector<HTMLElement>(".sb-merged-label")!;
+  const group = (host: HTMLElement): HTMLElement => host.querySelector<HTMLElement>(".merged-group")!;
+  const heading = (host: HTMLElement): HTMLElement => group(host).querySelector<HTMLElement>(".merged-group-head")!;
 
   it.each([
-    { name: "draws its heading collapsed when the rail mounts", clicks: 0, leave: false, want: true },
-    { name: "shows them when the heading is clicked", clicks: 1, leave: false, want: false },
-    { name: "collapses them again once the focus leaves the page", clicks: 1, leave: true, want: true },
+    { name: "draws an idle group folded when the rail mounts", clicks: 0, leave: false, want: true },
+    { name: "opens it when its header is clicked", clicks: 1, leave: false, want: false },
+    { name: "folds it again once the focus leaves the page", clicks: 1, leave: true, want: true },
   ])("$name", async ({ clicks, leave, want }) => {
     // Arrange
     const host = document.createElement("nav");
@@ -232,7 +233,7 @@ describe("the rail's Recently Deployed rows", () => {
     for (let i = 0; i < clicks; i += 1) await click(heading(host));
     if (leave) focus.left("the page lost focus");
     // Assert
-    expect(heading(host).hasAttribute("data-collapsed")).toBe(want);
+    expect(group(host).classList.contains("folded")).toBe(want);
   });
 });
 

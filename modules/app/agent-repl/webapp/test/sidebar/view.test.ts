@@ -4,7 +4,7 @@ import {
   createSidebarView,
   foldViewKey,
   paintSectionFold,
-  paintTriangle,
+  paintFoldControl,
 } from "../../src/sidebar/view.js";
 
 /** A fresh view, and one scope of it to track copies in. */
@@ -119,26 +119,25 @@ describe("abandon", () => {
 });
 
 describe("paintSectionFold", () => {
-  it.each([true, false])("states folded=%s on the section and every triangle of its own header", (folded) => {
+  it.each([true, false])("states folded=%s on the section and its own header", (folded) => {
     // Arrange
     const section = document.createElement("div");
-    section.innerHTML =
-      "<div class=\"repo-head\"><span data-section-fold></span></div><div class=\"task-head\"><span data-section-fold></span></div>";
+    section.innerHTML = "<div class=\"repo-head\" data-section-fold></div><div class=\"rows\"></div>";
     // Act
     paintSectionFold(section, folded);
     // Assert
-    expect([
-      section.classList.contains("folded"),
-      ...[...section.querySelectorAll("[data-section-fold]")].map((t) => t.getAttribute("data-folded")),
-    ]).toEqual([folded, String(folded), String(folded)]);
+    expect([section.classList.contains("folded"), section.querySelector("[data-section-fold]")?.getAttribute("data-folded")]).toEqual([
+      folded,
+      String(folded),
+    ]);
   });
 
-  it("leaves a nested section's triangle to that section's own fold", () => {
+  it("leaves a nested section's header to that section's own fold", () => {
     // Arrange: the open-workspaces section holds whole sections.
     const outer = document.createElement("div");
     outer.innerHTML =
-      "<div class=\"repo-head\"><span id=\"own\" data-section-fold></span></div>" +
-      "<div class=\"sb-sections\"><div class=\"repo\"><div class=\"repo-head\"><span id=\"nested\" data-section-fold data-folded=\"false\"></span></div></div></div>";
+      "<div id=\"own\" class=\"repo-head\" data-section-fold></div>" +
+      "<div class=\"sb-sections\"><div class=\"repo\"><div id=\"nested\" class=\"repo-head\" data-section-fold data-folded=\"false\"></div></div></div>";
     // Act
     paintSectionFold(outer, true);
     // Assert
@@ -149,13 +148,10 @@ describe("paintSectionFold", () => {
   });
 });
 
-describe("paintTriangle", () => {
-  it.each([
-    [true, "▸"],
-    [false, "▾"],
-  ])("draws folded=%s as %s", (folded, glyph) => {
-    const triangle = document.createElement("span");
-    paintTriangle(triangle, folded);
-    expect(triangle.textContent).toBe(glyph);
+describe("paintFoldControl", () => {
+  it.each([true, false])("states folded=%s on the control and draws it no glyph", (folded) => {
+    const control = document.createElement("div");
+    paintFoldControl(control, folded);
+    expect([control.getAttribute("data-folded"), control.textContent]).toEqual([String(folded), ""]);
   });
 });

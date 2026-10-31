@@ -11,7 +11,7 @@ import {
 import {
   CURRENT_FLASH_CLASS,
   HOLDS_CURRENT_ATTRIBUTE,
-  drawFoldToggle,
+  foldOnClick,
   drawRosterHoldsCurrent,
   drawRosterSectionFold,
   paintHoldsCurrent,
@@ -37,37 +37,55 @@ function recording(): { asked: UpdateSidebarViewRequest[]; sc: ReturnType<typeof
   return { asked, sc };
 }
 
-describe("drawFoldToggle", () => {
-  it.each([
-    { folded: true, glyph: "▸" },
-    { folded: false, glyph: "▾" },
-  ])("draws a section folded $folded as $glyph", ({ folded, glyph }) => {
+describe("foldOnClick", () => {
+  it.each([true, false])("marks the header as the fold control of a section folded %s", (folded) => {
     // Arrange
     const section = document.createElement("div");
     section.classList.toggle("folded", folded);
+    const header = document.createElement("div");
 
     // Act
-    const triangle = drawFoldToggle(section, () => {});
+    foldOnClick(header, section, () => {});
 
     // Assert
-    expect([triangle.textContent, triangle.getAttribute("data-folded")]).toEqual([glyph, String(folded)]);
+    expect([header.hasAttribute("data-section-fold"), header.getAttribute("data-folded"), header.textContent]).toEqual([
+      true,
+      String(folded),
+      "",
+    ]);
   });
 
-  it("hands a click to the gesture without letting it reach the header", () => {
+  it("hands a click anywhere on the header to the gesture, the header as its control", () => {
     // Arrange
     const section = document.createElement("div");
     const header = document.createElement("div");
-    const calls: HTMLElement[] = [];
-    let headerClicks = 0;
-    header.addEventListener("click", () => headerClicks++);
-    const triangle = drawFoldToggle(section, (_section, control) => calls.push(control));
-    header.appendChild(triangle);
+    const label = document.createElement("span");
+    header.appendChild(label);
+    const calls: Array<[HTMLElement, HTMLElement]> = [];
+    foldOnClick(header, section, (s, control) => calls.push([s, control]));
 
     // Act
-    triangle.click();
+    label.click();
 
     // Assert
-    expect([calls, headerClicks]).toEqual([[triangle], 0]);
+    expect(calls).toEqual([[section, header]]);
+  });
+
+  it("asks nothing for a click a control inside the header stops", () => {
+    // Arrange
+    const section = document.createElement("div");
+    const header = document.createElement("div");
+    const control = document.createElement("button");
+    control.addEventListener("click", (event) => event.stopPropagation());
+    header.appendChild(control);
+    let calls = 0;
+    foldOnClick(header, section, () => (calls += 1));
+
+    // Act
+    control.click();
+
+    // Assert
+    expect(calls).toBe(0);
   });
 });
 
@@ -264,8 +282,8 @@ describe("drawRosterHoldsCurrent", () => {
 });
 
 describe("the sidebar's folds", () => {
-  it("draw their triangle and ask their fold only through section-fold", () => {
-    // A triangle or a fold ask spelled by hand could fold one way here and another there.
+  it("make their fold control and ask their fold only through section-fold", () => {
+    // A fold control or a fold ask spelled by hand could fold one way here and another there.
     const dir = join(__dirname, "..", "..", "src", "sidebar");
     const offenders = readdirSync(dir)
       .filter((name) => name.endsWith(".ts") && name !== "section-fold.ts")

@@ -37,23 +37,19 @@ function bandSection(cls: string, label: string, count: number, inner: string): 
   return `<div class="repo ${cls}"><div class="repo-head"><span class="sb-label">${label}</span><span class="sb-count" data-section-count>(${count})</span></div><div class="rows">${inner}</div></div>`;
 }
 
-/** The Deploys band's merged groups: MERGED rows, the first TODAY of them today's, dealt round-robin into GROUPS repository groups. */
-function mergedGroups(merged: number, today: number, groups: number): string {
+/**
+ * The Deploys band's idle repository groups: MERGED rows, the first TODAY of
+ * them today's, dealt round-robin into GROUPS groups, each folded
+ * (deploys-fold.ts) unless OPENED by hand.
+ */
+function mergedGroups(merged: number, today: number, groups: number, opened: boolean): string {
   return Array.from({ length: groups }, (_, g) => {
     const rows = Array.from({ length: merged }, (_, i) => i)
       .filter((i) => i % groups === g)
       .map((i) => wsRow(`merged-${i}`, i < today ? TODAY : OLDER))
       .join("");
-    return `<div class="merged-group" data-repository="repo-${g}" data-repository-collapsed="false"><div class="merged-group-head"><span class="sb-label">repo-${g}</span></div><div class="rows">${rows}</div></div>`;
+    return `<div class="merged-group${opened ? "" : " folded"}" data-repository="repo-${g}"><div class="merged-group-head"><span class="sb-label">repo-${g}</span><span class="sb-count sb-today-count">(${today} today, last 1m ago)</span></div><div class="rows">${rows}</div></div>`;
   }).join("");
-}
-
-/** The Deploys band's queue box over no queue: empty. */
-const EMPTY_DEPLOY_QUEUE = '<div class="sb-merge-queues"></div>';
-
-/** The "Recently Deployed" heading over the Deploys band's merged groups, collapsed (recently-deployed.ts) unless EXPANDED. */
-function recentlyDeployed(expanded: boolean): string {
-  return `<div class="sb-merged-label"${expanded ? "" : ' data-collapsed=""'}><span class="tri">${expanded ? "▾" : "▸"}</span><span class="sb-label">Recently Deployed</span></div>`;
 }
 
 /** What a rail is drawn with: its rows per section, how many merges are today's, the merged groups, and the Open section's repositories. */
@@ -64,7 +60,7 @@ interface Drawing {
   today?: number;
   groups?: number;
   repos?: number;
-  /** Whether "Recently Deployed" shows its rows; collapsed, as the rail mounts, unless said. */
+  /** Whether the idle Deploys groups were opened by hand; folded, as they draw, unless said. */
   expanded?: boolean;
 }
 
@@ -77,7 +73,7 @@ function rail(height: number, { live, hidden, merged, today = merged, groups = 1
   }).join("");
   return `<nav id="ws-sidebar" style="height:${height}px"><div class="sb-head"><span class="sb-title">Workspaces</span></div><div class="sb-scroll"><div class="sb-roster">
 <div class="sb-pane"><div class="repo open-section"><div class="repo-head"><span class="sb-label">Open</span></div><div class="sb-sections">${repoSections}</div></div>
-${bandSection("merged-section", "Deploys", merged, `${EMPTY_DEPLOY_QUEUE}${merged === 0 ? "" : recentlyDeployed(expanded)}${mergedGroups(merged, today, groups)}`)}
+${bandSection("merged-section", "Deploys", merged, merged === 0 ? "" : mergedGroups(merged, today, groups, expanded))}
 ${bandSection("hidden-section", "Hidden Workspaces", hidden, ids("hidden", hidden).map((id) => wsRow(id, null)).join(""))}
 </div></div></div></nav>`;
 }
@@ -121,7 +117,7 @@ async function fit(page: Page, markup: string): Promise<Fitted> {
       const box = region.getBoundingClientRect();
       let whole = 0;
       let cut = 0;
-      for (const line of region.querySelectorAll(".row, .sb-merged-label[data-collapsed]")) {
+      for (const line of region.querySelectorAll(".row, .merged-group.folded > .merged-group-head")) {
         if (line.getBoundingClientRect().height === 0) continue;
         const r = line.getBoundingClientRect();
         if (r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5) whole += 1;
@@ -219,12 +215,12 @@ describe("the band fit in WebKit", () => {
     await browser.close();
   });
 
-  it("shares six lines in a rail the Open section fills: Deploys' one heading, Hidden Workspaces five", async () => {
+  it("shares six lines in a rail the Open section fills: Deploys' one folded group, Hidden Workspaces five", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20 }));
     expect([got.hidden.whole, got.merged.whole]).toEqual([5, 1]);
   });
 
-  it("keeps an expanded Recently Deployed's five rows under its heading, taking Hidden Workspaces' lines", async () => {
+  it("keeps an open Deploys group's five rows under its header, taking Hidden Workspaces' lines", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, expanded: true }));
     expect([got.hidden.whole, got.merged.whole, got.open.whole > 0]).toEqual([1, 5, true]);
   });
@@ -254,7 +250,7 @@ describe("the band fit in WebKit", () => {
     expect([got.hidden.whole, got.merged.whole]).toEqual([6, 0]);
   });
 
-  it("gives Hidden Workspaces five lines beside the heading of one merge today", async () => {
+  it("gives Hidden Workspaces five lines beside the folded group of one merge today", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 1 }));
     expect([got.hidden.whole, got.merged.whole]).toEqual([5, 1]);
   });
@@ -278,7 +274,7 @@ describe("the band fit in WebKit", () => {
     ]).toEqual([false, true]);
   });
 
-  it("shows an expanded Recently Deployed's five rows across several repository groups", async () => {
+  it("shows open Deploys groups' five rows across several repositories", async () => {
     const got = await fit(page, rail(500, { live: 40, hidden: 20, merged: 20, groups: 3, expanded: true }));
     expect(got.merged.whole).toBe(5);
   });
@@ -323,11 +319,11 @@ describe("the band fit in WebKit", () => {
     const heights = Array.from({ length: 701 }, (_, i) => 200 + i);
     expect(await unsettled(page, heights, { live: 12, hidden: 9, merged: 9, today: 4 })).toEqual([]);
     // MEASURED: 1,402 fits in one page pass run 1.0-1.2s healthy since each
-    // fit also reads Recently Deployed's floor (2026-10-27), at and over the
+    // fit also reads the open Deploys groups' floor (2026-10-27), at and over the
     // suite's 850ms. Its own bound is just over twice that.
   }, 2_500);
 
-  it("grows an expanded Recently Deployed's merges of today, not Hidden Workspaces, into the room a whole Open section leaves", async () => {
+  it("grows an open Deploys group's merges of today, not Hidden Workspaces, into the room a whole Open section leaves", async () => {
     const got = await fit(page, rail(880, { live: 2, hidden: 40, merged: 40, expanded: true }));
     // Hidden Workspaces, the lowest section, keeps only the line at the
     // rail's foot that no further merged row fits in.

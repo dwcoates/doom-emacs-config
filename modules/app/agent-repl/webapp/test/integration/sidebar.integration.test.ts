@@ -88,7 +88,7 @@ describe("arm coverage", () => {
 });
 
 /** A repository section's fold triangle. */
-const REPOSITORY_FOLD = '.sb-pane .repo-section [data-section-fold]';
+const REPOSITORY_FOLD = '.sb-pane .repo-section > .repo-head[data-section-fold]';
 
 /** The fold the one recorded UpdateSidebarView asked for, and of which section. */
 function askedFold(): { section: string | undefined; fold: string | undefined } {
@@ -142,7 +142,7 @@ describe("repository folds", () => {
 });
 
 /** The open workspaces section's own fold triangle, in the repository grouping's copy. */
-const OPEN_FOLD = '.sb-pane .open-section > .repo-head [data-section-fold]';
+const OPEN_FOLD = '.sb-pane .open-section > .repo-head[data-section-fold]';
 
 describe("the open workspaces section's fold", () => {
   it("starts unfolded, as the daemon's default is", async () => {
@@ -164,7 +164,7 @@ describe("the open workspaces section's fold", () => {
 });
 
 /** The merged band's fold triangle, in the repository grouping's copy. */
-const MERGED_FOLD = '.sb-pane .merged-section [data-section-fold]';
+const MERGED_FOLD = '.sb-pane .merged-section > .repo-head[data-section-fold]';
 
 describe("the recently-merged band's fold", () => {
   it("starts folded, as the daemon's default is", async () => {
@@ -287,11 +287,11 @@ describe("row decoration", () => {
     ).toBe(true);
   });
 
-  it("draws the recently deployed heading", async () => {
+  it("draws each Deploys group's deploy summary on its header", async () => {
     // Arrange / Act
     await withRoster({});
     // Assert
-    expect(harness.$('[data-component="sidebar"]')?.textContent).toContain("recently deployed");
+    expect(harness.$(".sb-pane .merged-group-head .sb-today-count")?.textContent).toMatch(/^\(\d+ today, last .+ ago\)$/);
   });
 
   it("draws a merged row in the merged section", async () => {
@@ -306,15 +306,15 @@ describe("row decoration", () => {
     await withRoster({ mergedCollapsed: false });
     // Assert
     const group = harness.$('.sb-pane .merged-group [data-roster-row="ws-merged"]')?.closest(".merged-group");
-    expect(group?.querySelector(".merged-group-head")?.textContent).toBe("doom");
+    expect(group?.querySelector(".merged-group-head > .sb-label")?.textContent).toBe("doom");
   });
 
-  it("leaves a collapsed repository's merges out of the band, the band still drawn", async () => {
+  it("draws an idle repository's group folded, the band still drawn", async () => {
     // Arrange / Act
-    await withRoster({ mergedCollapsed: false, mergedRepositoryCollapsed: true });
+    await withRoster({ mergedCollapsed: false });
     // Assert
     const band = harness.$(".sb-pane .merged-section") as HTMLElement | null;
-    expect([band?.hidden, band?.querySelector<HTMLElement>(".merged-group")?.hidden]).toEqual([false, true]);
+    expect([band?.hidden, band?.querySelector<HTMLElement>(".merged-group")?.classList.contains("folded")]).toEqual([false, true]);
   });
 });
 

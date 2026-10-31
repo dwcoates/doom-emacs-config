@@ -15,7 +15,7 @@ import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { changeView } from "./view-change.js";
-import { foldViewKey, paintSectionFold, paintTriangle } from "./view.js";
+import { FOLD_CONTROL_ATTRIBUTE, foldViewKey, paintFoldControl, paintSectionFold } from "./view.js";
 
 /**
  * What a section header's fold gesture does, handed the section and the
@@ -125,17 +125,19 @@ export function trackDaemonFold(section: HTMLElement, foldKey: string, wireFolde
   section.classList.toggle("folded", folded);
 }
 
-/** The ▸/▾ fold triangle, drawn the way its section stands. */
-export function drawFoldToggle(section: HTMLElement, gesture: FoldGesture): HTMLElement {
-  const triangle = document.createElement("span");
-  triangle.className = "tri";
-  triangle.setAttribute("data-section-fold", "");
-  triangle.addEventListener("click", (event) => {
-    event.stopPropagation();
-    gesture(section, triangle);
-  });
-  paintTriangle(triangle, section.classList.contains("folded"));
-  return triangle;
+/**
+ * Make HEADER the fold control of SECTION: a click on it asks GESTURE for
+ * the other fold. THE SIDEBAR DRAWS NO FOLD TRIANGLE (owner request,
+ * 2026-10-31): the header itself is what is clicked, and it reports the fold
+ * as the control (`[data-section-fold][data-folded]`, `view.ts`). A drag
+ * from the header is no click (`drag.ts` swallows the click a drag leaves),
+ * so a header that is also a drag grip both folds and drags. A control
+ * inside the header stops its own click.
+ */
+export function foldOnClick(header: HTMLElement, section: HTMLElement, gesture: FoldGesture): void {
+  header.setAttribute(FOLD_CONTROL_ATTRIBUTE, "");
+  header.addEventListener("click", () => gesture(section, header));
+  paintFoldControl(header, section.classList.contains("folded"));
 }
 
 /**

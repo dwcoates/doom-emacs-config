@@ -69,7 +69,7 @@ import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { sendArrangement, sendHeld } from "./arrange.js";
 import { openNamePopup } from "./name-popup.js";
 import { subsectionFoldKey, type SidebarContext } from "./context.js";
-import { drawFoldToggle, drawRosterSectionFold, neverFolds, sectionFold, trackDaemonFold } from "./section-fold.js";
+import { drawRosterSectionFold, foldOnClick, neverFolds, sectionFold, trackDaemonFold } from "./section-fold.js";
 import { pressToDrag, type DragSpec } from "./drag.js";
 import { userRequester } from "../rpc/requester.js";
 
@@ -209,7 +209,7 @@ export function drawRosterSubsection(
     const id = bucket.id;
     const foldKey = subsectionFoldKey(id);
     trackDaemonFold(element, foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
-    const triangle = drawFoldToggle(element, sectionFold(sc, foldKey, { case: "subsection", value: { id } }));
+    foldOnClick(head, element, sectionFold(sc, foldKey, { case: "subsection", value: { id } }));
     label.title = "double-click to rename";
     label.addEventListener("dblclick", (event) => {
       event.preventDefault();
@@ -232,10 +232,11 @@ export function drawRosterSubsection(
       event.stopPropagation();
       void sendArrangement(sc, sc.arrange.status, { case: "deleteSubsection", value: { subsection: { id } } });
     });
-    head.append(triangle, label, shown, remove);
+    head.append(label, shown, remove);
   } else {
     if (!neverCollapses) throw new MalformedView(`${path}.fold`, "the one-shot subsection is always expanded and never collapses");
-    head.append(drawFoldToggle(element, neverFolds(ONE_SHOT_FOLD_KEY)), label, shown);
+    foldOnClick(head, element, neverFolds(ONE_SHOT_FOLD_KEY));
+    head.append(label, shown);
   }
   element.appendChild(head);
 

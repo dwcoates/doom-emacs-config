@@ -944,7 +944,7 @@ describe("a subsection's fold", () => {
     ).toEqual(["sub-1", fold]);
   });
 
-  it("is not folded by a click on its name, which renames on a double-click", async () => {
+  it("is folded by a click on its name, the whole header folding it", async () => {
     // Arrange
     const { sc, asked } = viewing();
     const pane = mount(subsectionOf(false), sc);
@@ -954,7 +954,12 @@ describe("a subsection's fold", () => {
     await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 
     // Assert
-    expect(asked).toEqual([]);
+    const change = asked[0]?.change;
+    expect(
+      change?.case === "foldSection" && change.value.section.case === "subsection"
+        ? [change.value.section.value.id, change.value.fold.case]
+        : change,
+    ).toEqual(["sub-1", "collapse"]);
   });
 
   it("refuses a subsection with no fold as a malformed view", () => {

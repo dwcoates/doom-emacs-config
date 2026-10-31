@@ -120,9 +120,6 @@ func TestTheDeploysSectionComposesItsHeadings(t *testing.T) {
 	if got := section.GetHeader().GetLabel().GetText(); got != "Deploys" {
 		t.Fatalf("heading = %q, want the section's one label", got)
 	}
-	if got := section.GetMergedLabel().GetText(); got != "Recently Deployed" {
-		t.Fatalf("merged heading = %q, want the merged groups' one label", got)
-	}
 }
 
 func TestRosterRecordsAWorkspaceNamingAnUnregisteredRepository(t *testing.T) {
@@ -626,31 +623,61 @@ func TestRecentlyMergedLeavesARepositoryWithNoMergeWithoutAGroup(t *testing.T) {
 	}
 }
 
-func TestRecentlyMergedGroupFollowsItsRepositorysFold(t *testing.T) {
+func TestADeploysGroupStatesWhetherItsQueueIsActive(t *testing.T) {
 	tests := []struct {
-		name          string
-		folded        bool
-		wantCollapsed bool
+		name       string
+		queue      sidebar.MergeQueue
+		wantQueued bool
+		wantMerged []string
 	}{
-		{"an expanded repository's group is shown", false, false},
-		{"a collapsed repository's group is not", true, true},
+		{"a repository with only a merge is idle", sidebar.MergeQueue{}, false, []string{"merged"}},
+		{"a repository with a merge in line is queued", sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")}, true, []string{"merged"}},
+		{"a paused queue holding nothing is idle", sidebar.MergeQueue{Pause: pausedBy()}, false, []string{"merged"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			r, _ := newResolver(t)
-			reg := registry(mergedIn("a1", repo, 0))
-			reg.Repositories[0].Folded = tt.folded
+			r.SetMergeQueue(theRepo, tt.queue)
+			landed := workspace("w-merged", "merged")
+			landed.MergedAt = at(0)
+			landed.Closed = true
 
 			// Act.
-			r.SetRegistry(reg)
+			r.SetRegistry(queueView(workspace("w1", "one"), landed))
 
-			// Assert: the arm is always set, and it is the repository's fold.
-			group := latest(t, r).GetRecentlyMerged().GetGroups()[0]
-			if (group.GetRepositoryCollapsed() != nil) != tt.wantCollapsed || (group.GetShown() != nil) == tt.wantCollapsed {
-				t.Fatalf("drawn = %v, want repository_collapsed=%v", group.GetDrawn(), tt.wantCollapsed)
+			// Assert: one group, its arm always set, its merged rows under it.
+			groups := latest(t, r).GetRecentlyMerged().GetGroups()
+			if len(groups) != 1 {
+				t.Fatalf("groups = %d, want the one repository's", len(groups))
+			}
+			group := groups[0]
+			if (group.GetQueued() != nil) != tt.wantQueued || (group.GetIdle() != nil) == tt.wantQueued {
+				t.Fatalf("activity = %v, want queued=%v", group.GetActivity(), tt.wantQueued)
+			}
+			var got []string
+			for _, row := range group.GetMergedRows().GetRows() {
+				got = append(got, row.GetRow().GetName().GetText())
+			}
+			if !equal(got, tt.wantMerged) {
+				t.Fatalf("merged rows = %v, want %v", got, tt.wantMerged)
 			}
 		})
+	}
+}
+
+func TestADeploysGroupIsListedForAQueueWithNoMerge(t *testing.T) {
+	// Arrange: a merge in line and nothing landed.
+	r, _ := newResolver(t)
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("w1", "one")))
+
+	// Assert.
+	group := queueGroup(latest(t, r), repo)
+	if group == nil || len(group.GetMergedRows().GetRows()) != 0 {
+		t.Fatalf("group = %v, want the queued repository with no merged rows", group)
 	}
 }
 
@@ -1026,8 +1053,8 @@ func inLine(ws ...ids.WorkspaceID) []sidebar.QueueEntry {
 
 // queueSubjectIDs reads the workspace ids a queue group draws: its head's,
 // then each waiting merge's.
-func queueSubjectIDs(group *frontendv1.RosterMergeQueueRepoGroup) []string {
-	queue := group.GetQueue()
+func queueSubjectIDs(group *frontendv1.RosterMergedRepoGroup) []string {
+	queue := group.GetQueued().GetQueue()
 	var out []string
 	if head := queue.GetHead(); head != nil {
 		out = append(out, head.GetSubject().GetWorkspace().GetId())
@@ -1038,10 +1065,10 @@ func queueSubjectIDs(group *frontendv1.RosterMergeQueueRepoGroup) []string {
 	return out
 }
 
-// queueGroup reads REPO's queue group off the merge queue section, nil when
-// the section does not list it.
-func queueGroup(roster *frontendv1.WorkspaceRoster, repo wsm.Repository) *frontendv1.RosterMergeQueueRepoGroup {
-	for _, group := range roster.GetRecentlyMerged().GetQueues() {
+// queueGroup reads REPO's Deploys group off the section while its queue is
+// active, nil when the group is idle or not listed.
+func queueGroup(roster *frontendv1.WorkspaceRoster, repo wsm.Repository) *frontendv1.RosterMergedRepoGroup {
+	for _, group := range queuedGroups(roster) {
 		if group.GetKey().GetRepository().GetId() == string(repo.ID) {
 			return group
 		}
@@ -1049,10 +1076,21 @@ func queueGroup(roster *frontendv1.WorkspaceRoster, repo wsm.Repository) *fronte
 	return nil
 }
 
+// queuedGroups reads the Deploys groups whose queue is active, in drawn order.
+func queuedGroups(roster *frontendv1.WorkspaceRoster) []*frontendv1.RosterMergedRepoGroup {
+	var out []*frontendv1.RosterMergedRepoGroup
+	for _, group := range roster.GetRecentlyMerged().GetGroups() {
+		if group.GetQueued() != nil {
+			out = append(out, group)
+		}
+	}
+	return out
+}
+
 // firstQueue reads the fixture repository's merge queue.
 func firstQueue(t *testing.T, r sidebar.Resolver) *frontendv1.RosterRepoMergeQueue {
 	t.Helper()
-	return queueGroup(latest(t, r), repo).GetQueue()
+	return queueGroup(latest(t, r), repo).GetQueued().GetQueue()
 }
 
 // pausedBy is a pause record the user wrote at epoch.
@@ -1151,7 +1189,7 @@ func TestTheMergeQueueSectionListsAQueueThatHoldsAMerge(t *testing.T) {
 			if got := queueGroup(roster, repo) != nil; got != tt.listed {
 				t.Fatalf("fixture repository's queue listed = %v, want %v", got, tt.listed)
 			}
-			if got := len(roster.GetRecentlyMerged().GetQueues()); got != map[bool]int{true: 1, false: 0}[tt.listed] {
+			if got := len(queuedGroups(roster)); got != map[bool]int{true: 1, false: 0}[tt.listed] {
 				t.Fatalf("queues listed = %d, want only the fixture repository's when it is listed", got)
 			}
 		})
@@ -1189,9 +1227,9 @@ func TestAQueueGroupIsListedThoughItsRepositoryIsCollapsed(t *testing.T) {
 	}
 }
 
-func TestEveryMergeQueueSectionGroupDrawsItsRepositorysHeader(t *testing.T) {
+func TestARepositoryWithAQueueAndAMergeIsOneDeploysGroup(t *testing.T) {
 	// Arrange: the fixture repository has a merge in line and a merge
-	// landed, so it draws a queue group and a merged group.
+	// landed.
 	r, _ := newResolver(t)
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")})
 	landed := workspace("w-merged", "merged")
@@ -1201,15 +1239,19 @@ func TestEveryMergeQueueSectionGroupDrawsItsRepositorysHeader(t *testing.T) {
 	// Act.
 	r.SetRegistry(queueView(workspace("w1", "one"), landed))
 
-	// Assert: both groups draw one header, the repository's label.
-	section := latest(t, r).GetRecentlyMerged()
-	queueHead := queueGroup(latest(t, r), repo).GetHeader()
-	mergedHead := section.GetGroups()[0].GetHeader()
-	if queueHead.GetLabel().GetText() != repo.Name {
-		t.Fatalf("queue group header = %v, want the repository's label %q", queueHead, repo.Name)
+	// Assert: one group, headed by the repository's label, holding both.
+	groups := latest(t, r).GetRecentlyMerged().GetGroups()
+	if len(groups) != 1 {
+		t.Fatalf("groups = %d, want the repository's one group", len(groups))
 	}
-	if !proto.Equal(queueHead, mergedHead) {
-		t.Fatalf("queue group header %v and merged group header %v differ, want one shape", queueHead, mergedHead)
+	if got := groups[0].GetHeader().GetLabel().GetText(); got != repo.Name {
+		t.Fatalf("header = %q, want the repository's label %q", got, repo.Name)
+	}
+	if got := queueSubjectIDs(groups[0]); !slices.Equal(got, []string{"w1"}) {
+		t.Fatalf("queue = %v, want w1", got)
+	}
+	if got := len(groups[0].GetMergedRows().GetRows()); got != 1 {
+		t.Fatalf("merged rows = %d, want the landed merge", got)
 	}
 }
 
@@ -1232,11 +1274,11 @@ func TestTheMergeQueueSectionDrawsEachFrontAsItsHeadAndTheRestWaiting(t *testing
 	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two"), workspace("w3", "three"), workspace("w-idle", "idle"), other))
 
 	// Assert: the groups go in the repository sections' order.
-	groups := latest(t, r).GetRecentlyMerged().GetQueues()
+	groups := queuedGroups(latest(t, r))
 	if len(groups) != 2 {
 		t.Fatalf("queue groups = %d, want one per repository with a merge", len(groups))
 	}
-	if got := groups[0].GetQueue().GetHead().GetSubject().GetName(); got != "three" {
+	if got := groups[0].GetQueued().GetQueue().GetHead().GetSubject().GetName(); got != "three" {
 		t.Fatalf("first group's head = %q, want the front, three", got)
 	}
 	if got, want := queueSubjectIDs(groups[0]), []string{"w3", "w1", "w2"}; !slices.Equal(got, want) {
@@ -1247,7 +1289,7 @@ func TestTheMergeQueueSectionDrawsEachFrontAsItsHeadAndTheRestWaiting(t *testing
 	}
 }
 
-func TestEachQueueGroupCountsTheMergesInItsOwnLine(t *testing.T) {
+func TestAQueuedMergeLeavesTheOpenCountsAlone(t *testing.T) {
 	// Arrange: two merges on the fixture repository's queue, one on
 	// otherRepo's.
 	r, _ := newResolver(t)
@@ -1259,16 +1301,9 @@ func TestEachQueueGroupCountsTheMergesInItsOwnLine(t *testing.T) {
 	// Act.
 	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two"), workspace("w3", "three"), other))
 
-	// Assert: each group counts its own line, the section's header counts
-	// nothing, and the repository section and the open count still count the
-	// open workspaces.
+	// Assert: the section's header counts nothing, and the repository
+	// section and the open count still count the open workspaces.
 	roster := latest(t, r)
-	if got := queueGroup(roster, repo).GetCount().GetWorkspaces(); got != 2 {
-		t.Fatalf("fixture repository's count = %d, want its 2 merges in line", got)
-	}
-	if got := queueGroup(roster, otherRepo).GetCount().GetWorkspaces(); got != 1 {
-		t.Fatalf("other repository's count = %d, want its 1 merge in line", got)
-	}
 	if got := roster.GetRecentlyMerged().GetHeader().GetCount(); got != nil {
 		t.Fatalf("header count = %v, want none", got)
 	}
@@ -1583,7 +1618,7 @@ func TestTheMergeQueueHeadCarriesWhenItReachedTheHead(t *testing.T) {
 	r.SetRegistry(queueView(workspace("w1", "one")))
 
 	// Assert.
-	head := latest(t, r).GetRecentlyMerged().GetQueues()[0].GetQueue().GetHead()
+	head := queuedGroups(latest(t, r))[0].GetQueued().GetQueue().GetHead()
 	if got := head.GetHeadSinceMs(); got != 1_700_000_900_000 {
 		t.Fatalf("head_since_ms = %d, want when it reached the head, 1700000900000", got)
 	}
@@ -1602,7 +1637,7 @@ func TestTheMergeQueueDrawsAMergeRemediatingOutOfLineAsItsSecondSpot(t *testing.
 	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
 
 	// Assert.
-	queue := latest(t, r).GetRecentlyMerged().GetQueues()[0].GetQueue()
+	queue := queuedGroups(latest(t, r))[0].GetQueued().GetQueue()
 	if got := queue.GetHead().GetSubject().GetName(); got != "two" {
 		t.Fatalf("head = %q, want two, the merge now at the head", got)
 	}
@@ -1624,11 +1659,11 @@ func TestAQueueWhoseOnlyMergeRemediatesIsListedWithNoHead(t *testing.T) {
 	r.SetRegistry(queueView(workspace("w1", "one")))
 
 	// Assert.
-	groups := latest(t, r).GetRecentlyMerged().GetQueues()
+	groups := queuedGroups(latest(t, r))
 	if len(groups) != 1 {
 		t.Fatalf("queue groups = %d, want the queue listed while a merge remediates", len(groups))
 	}
-	if groups[0].GetQueue().Head != nil || len(groups[0].GetQueue().GetRemediating()) != 1 {
-		t.Fatalf("queue = %v, want no head and the remediating merge", groups[0].GetQueue())
+	if queue := groups[0].GetQueued().GetQueue(); queue.Head != nil || len(queue.GetRemediating()) != 1 {
+		t.Fatalf("queue = %v, want no head and the remediating merge", queue)
 	}
 }

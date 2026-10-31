@@ -27,7 +27,6 @@
  * through here.
  */
 import { log } from "../log.js";
-import { childrenMatching } from "../dom.js";
 
 /** A piece of view state's value: a fold, collapsed or not, or the merge queues, shown or not. */
 export type ViewValue = boolean;
@@ -40,25 +39,27 @@ export function foldViewKey(sectionKey: string): string {
   return `fold:${sectionKey}`;
 }
 
+/** The attribute a section's fold control, its header, carries (`section-fold.ts`). */
+export const FOLD_CONTROL_ATTRIBUTE = "data-section-fold";
+
 /**
- * Say on a section, and on its OWN header's fold triangle, which way it stands.
+ * Say on a section, and on its OWN header, which way it stands.
  *
- * The triangle carries the state as `[data-section-fold][data-folded]`, so the
+ * The header carries the state as `[data-section-fold][data-folded]`, so the
  * element that takes the gesture is also the one that reports it. Only the
- * triangles of the section's own header are painted: the open-workspaces
- * section holds whole sections, whose triangles answer their own folds.
+ * section's own header is painted: the open-workspaces section holds whole
+ * sections, whose headers answer their own folds.
  */
 export function paintSectionFold(section: HTMLElement, folded: boolean): void {
   section.classList.toggle("folded", folded);
-  for (const triangle of [...section.children].flatMap((child) => childrenMatching<HTMLElement>(child, "[data-section-fold]"))) {
-    paintTriangle(triangle, folded);
+  for (const control of [...section.children].filter((child): child is HTMLElement => child.hasAttribute(FOLD_CONTROL_ATTRIBUTE))) {
+    paintFoldControl(control, folded);
   }
 }
 
-/** One triangle, told which way its section stands. */
-export function paintTriangle(triangle: HTMLElement, folded: boolean): void {
-  triangle.setAttribute("data-folded", folded ? "true" : "false");
-  triangle.textContent = folded ? "▸" : "▾";
+/** One fold control, told which way its section stands. */
+export function paintFoldControl(control: HTMLElement, folded: boolean): void {
+  control.setAttribute("data-folded", folded ? "true" : "false");
 }
 
 /** What a drawn section reaches of the view: its copies, and the page's asks. */

@@ -24,11 +24,11 @@
  *     (a repository's header riding with its first row), fills Deploys
  *     through today's merges, then Hidden Workspaces, then Deploys' older
  *     merges, each as far as its lines fit.
- *   - AN EXPANDED "RECENTLY DEPLOYED" KEEPS `RECENTLY_DEPLOYED_FLOOR` ROWS
- *     (owner request, 2026-10-27; recently-deployed.ts): Deploys keeps every
- *     line through its fifth merged row, taken from Hidden Workspaces'
- *     share first and then from the Open section. Collapsed, its heading is
- *     one line Deploys claims.
+ *   - AN OPEN DEPLOYS GROUP KEEPS `DEPLOYS_FLOOR` ROWS (owner request,
+ *     2026-10-27; deploys-fold.ts): Deploys keeps every line through its
+ *     fifth merged row shown, taken from Hidden Workspaces' share first and
+ *     then from the Open section. A folded group's header is one line
+ *     Deploys claims.
  *   - A RAIL TOO SHORT FOR THE BANDS' SHARE SHRINKS HIDDEN WORKSPACES FIRST
  *     (owner request, 2026-10-27: Deploys stands above Hidden, and a merge
  *     in flight matters more than a workspace put away), down to no lines,
@@ -49,7 +49,7 @@
  *     drawn (Deploys over a folded Hidden Workspaces), never takes the room
  *     left over: the lowest section above it that cuts a line through takes
  *     it instead, and with none, it lies under the pane at the rail's foot.
- *     So "Recently Deployed", expanded or not, always stands off the rule
+ *     So the last Deploys group, open or folded, always stands off the rule
  *     below it by the same gap.
  *   - A LINE CUT AT THE FOOT FADES OUT (owner request, 2026-10-19). While the
  *     stretched viewport has more below its edge, the section is marked
@@ -62,8 +62,8 @@
  * as a folded repository's header is), and in the Deploys section a queue's
  * head card and each merge waiting behind it. A viewport of K lines is
  * exactly as tall as the first K lines are drawn, the header above a line (a
- * repository section's, a subsection's, a Deploys repository group's, the
- * "Recently Deployed" heading) riding with it, so no
+ * repository section's, a subsection's, an open Deploys group's) riding with
+ * it, so no
  * line is cut through but the lowest section's last. A folded section shows no
  * lines and takes no room.
  *
@@ -95,13 +95,9 @@ import {
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_REMEDIATING_CLASS,
   MERGE_QUEUE_WAITING_CLASS,
-  MERGE_QUEUES_CLASS,
+  MERGE_QUEUE_CLASS,
 } from "./merge-queue-view.js";
-import {
-  RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE,
-  RECENTLY_DEPLOYED_FLOOR,
-  RECENTLY_DEPLOYED_LABEL_CLASS,
-} from "./recently-deployed.js";
+import { DEPLOYS_FLOOR, DEPLOYS_GROUP_CLASS, DEPLOYS_GROUP_FOLDED_CLASS } from "./deploys-fold.js";
 import { mergedToday } from "./row.js";
 
 /** The classes the three sections are drawn with. */
@@ -143,7 +139,7 @@ export const EMPTY_SUBSECTION_ATTRIBUTE = "data-empty";
 /**
  * What one line is: a row, a folded repository section's header, the
  * header of a subsection that is folded or empty, a queue's head card or
- * waiting merge, or the collapsed "Recently Deployed" heading.
+ * waiting merge, or a folded Deploys group's header.
  */
 const LINE_SELECTOR = [
   ".row",
@@ -153,7 +149,7 @@ const LINE_SELECTOR = [
   `.${MERGE_QUEUE_HEAD_CLASS}`,
   `.${MERGE_QUEUE_REMEDIATING_CLASS}`,
   `.${MERGE_QUEUE_WAITING_CLASS}`,
-  `.${RECENTLY_DEPLOYED_LABEL_CLASS}[${RECENTLY_DEPLOYED_COLLAPSED_ATTRIBUTE}]`,
+  `.${DEPLOYS_GROUP_CLASS}.${DEPLOYS_GROUP_FOLDED_CLASS} > .merged-group-head`,
 ].join(", ");
 
 /** How many lines each section's viewport shows. */
@@ -179,8 +175,8 @@ export interface SectionStops {
   mergedToday: number;
   /**
    * How many of Deploys' first lines it keeps ahead of Hidden Workspaces and
-   * the Open section: through its `RECENTLY_DEPLOYED_FLOOR`th merged row
-   * while "Recently Deployed" is expanded, else 0.
+   * the Open section: through its `DEPLOYS_FLOOR`th merged row shown, or 0
+   * while every group is folded.
    */
   mergedFloor: number;
 }
@@ -226,7 +222,7 @@ export function allocateSectionLines(room: number, stops: SectionStops): Section
   const fits = (o: number, m: number, h: number): boolean => open[o] + merged[m] + hidden[h] <= room;
   if (fits(totalO, totalM, totalH)) return { open: totalO, merged: totalM, hidden: totalH };
   let { merged: m, hidden: h } = bandShare(today, totalH);
-  // AN EXPANDED "RECENTLY DEPLOYED" KEEPS ITS FLOOR, taking the lines from
+  // AN OPEN DEPLOYS GROUP KEEPS ITS FLOOR, taking the lines from
   // Hidden Workspaces' share first and then from the Open section's room.
   if (floor > m) {
     m = floor;
@@ -240,8 +236,8 @@ export function allocateSectionLines(room: number, stops: SectionStops): Section
 
   /**
    * Grow the bands from M and H lines beside an Open section of O lines, in
-   * the room it leaves: Deploys through today's merges and an expanded
-   * "Recently Deployed"'s floor, then Hidden Workspaces, then Deploys' older
+   * the room it leaves: Deploys through today's merges and its open groups'
+   * floor, then Hidden Workspaces, then Deploys' older
    * merges.
    */
   function fillBands(o: number, m: number, h: number): { merged: number; hidden: number } {
@@ -309,17 +305,16 @@ export function regionStops(region: HTMLElement, lines: readonly HTMLElement[] =
 }
 
 /**
- * How many of Deploys' first LINES an expanded "Recently Deployed" keeps
- * ahead of the other sections: through its `RECENTLY_DEPLOYED_FLOOR`th
- * merged row (a line inside a row stamped `MERGED_AT_ATTRIBUTE`), or its
- * last when it has fewer. A collapsed one draws no merged row, so it keeps
- * none.
+ * How many of Deploys' first LINES its open groups keep ahead of the other
+ * sections: through its `DEPLOYS_FLOOR`th merged row (a line inside a row
+ * stamped `MERGED_AT_ATTRIBUTE`), or its last when it shows fewer. A folded
+ * group draws no merged row, so with every group folded it keeps none.
  */
-export function recentlyDeployedFloorLines(lines: readonly HTMLElement[]): number {
+export function deploysFloorLines(lines: readonly HTMLElement[]): number {
   let rows = 0;
   let through = 0;
   lines.forEach((line, i) => {
-    if (rows === RECENTLY_DEPLOYED_FLOOR || line.closest(`[${MERGED_AT_ATTRIBUTE}]`) === null) return;
+    if (rows === DEPLOYS_FLOOR || line.closest(`[${MERGED_AT_ATTRIBUTE}]`) === null) return;
     rows += 1;
     through = i + 1;
   });
@@ -329,14 +324,14 @@ export function recentlyDeployedFloorLines(lines: readonly HTMLElement[]): numbe
 /**
  * How many of Deploys' first LINES it takes to show its queues and every
  * merge that landed on NOW_MS's local date: through the last line that is a
- * queue's (inside `MERGE_QUEUES_CLASS`), the collapsed "Recently Deployed"
- * heading, or whose row carries a merged instant of today. Any other line
- * outside a stamped row is malformed.
+ * queue's (inside `MERGE_QUEUE_CLASS`), a folded group's header, or whose
+ * row carries a merged instant of today. Any other line outside a stamped
+ * row is malformed.
  */
 export function mergedTodayLines(lines: readonly HTMLElement[], nowMs: number): number {
   let through = 0;
   lines.forEach((line, i) => {
-    if (line.closest(`.${MERGE_QUEUES_CLASS}`) !== null || line.matches(`.${RECENTLY_DEPLOYED_LABEL_CLASS}`)) {
+    if (line.closest(`.${MERGE_QUEUE_CLASS}`) !== null || line.matches(`.${DEPLOYS_GROUP_CLASS} > .merged-group-head`)) {
       through = i + 1;
       return;
     }
@@ -529,7 +524,7 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   const merged = measure(mergedSection);
   const hidden = measure(hiddenSection);
   const today = merged === null ? 0 : mergedTodayLines(merged.lines, nowMs);
-  const floor = merged === null ? 0 : recentlyDeployedFloorLines(merged.lines);
+  const floor = merged === null ? 0 : deploysFloorLines(merged.lines);
   const lines = allocateSectionLines(room, {
     open: open?.stops ?? [0],
     merged: merged?.stops ?? [0],
@@ -594,7 +589,7 @@ export interface BandFit {
  * The boxes whose size the fit is a function of inside PANE: the pane, and
  * every child of each section's rows region, whose size a capped region
  * hides from the pane (a repository folded inside the Open section, a
- * Recently Deployed group collapsed).
+ * Deploys group folded).
  */
 function watchedBoxes(pane: HTMLElement): HTMLElement[] {
   const regions = SECTION_REGIONS.map(([className, regionClass]) =>

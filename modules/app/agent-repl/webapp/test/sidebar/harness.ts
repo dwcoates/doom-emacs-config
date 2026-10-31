@@ -5,7 +5,7 @@
  * Not a test file — the shared arrangement every sidebar suite reuses, so no
  * suite builds its own idea of what a roster looks like.
  */
-import { createRecentlyDeployed, type RecentlyDeployed } from "../../src/sidebar/recently-deployed.js";
+import { createDeploysFold, type DeploysFold } from "../../src/sidebar/deploys-fold.js";
 import { clone, create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -19,7 +19,6 @@ import {
   RosterOpenSectionSchema,
   RosterMergedRepoGroupSchema,
   RosterMergedSectionSchema,
-  RosterMergeQueueRepoGroupSchema,
   RosterRepoEntrySchema,
   RosterMergeQueueHeadSchema,
   RosterMergeQueueSubjectSchema,
@@ -35,7 +34,6 @@ import {
   type RosterOpenSection,
   type RosterMergedRepoGroup,
   type RosterMergedSection,
-  type RosterMergeQueueRepoGroup,
   type RosterRepoSection,
   type RosterRow,
   type WorkspaceRoster,
@@ -188,7 +186,7 @@ export function sidebarContext(
   view: SidebarView = createSidebarView(),
   openDetails: Set<string> = new Set(),
   reveal: RowReveal = drawsAtOnce,
-  recentlyDeployed: RecentlyDeployed = createRecentlyDeployed(document, () => undefined),
+  deploysFold: DeploysFold = createDeploysFold(document, () => undefined),
 ): SidebarContext & RailContext & { view: DrawnView & SidebarView; attention: AttentionRegistry; disposers: Array<() => void> } {
   const disposers: Array<() => void> = [];
   const dropdowns = createDropdowns();
@@ -214,7 +212,7 @@ export function sidebarContext(
       layer: document.createElement("div"),
       status: document.createElement("div"),
     },
-    recentlyDeployed,
+    deploysFold,
     disposers,
     onDispose: (fn) => {
       disposers.push(fn);
@@ -369,50 +367,48 @@ function sectionFold(
 }
 
 /**
- * The Merge Queue section with no queue listed. Its daemon-held fold is
- * COLLAPSED unless said, as the daemon draws a section nobody has unfolded.
+ * The Deploys section with one idle group holding ROWS, or none. Its
+ * daemon-held fold is COLLAPSED unless said, as the daemon draws a section
+ * nobody has unfolded.
  */
 export function mergedSection(rows: RosterRow[] = [], collapsed: boolean = true): RosterMergedSection {
   return mergedBand(rows.length === 0 ? [] : [mergedGroup({ id: "repo-1", rows })], collapsed);
 }
 
 /**
- * The Merge Queue section carrying merged GROUPS and its fold stated, and the
- * QUEUES unless said none. Its header counts nothing, as the daemon draws it.
+ * The Deploys section carrying GROUPS and its fold stated. Its header counts
+ * nothing, as the daemon draws it.
  */
-export function mergedBand(
-  groups: RosterMergedRepoGroup[],
-  collapsed: boolean = true,
-  queues: { queues?: RosterMergeQueueRepoGroup[] } = {},
-): RosterMergedSection {
+export function mergedBand(groups: RosterMergedRepoGroup[], collapsed: boolean = true): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
     header: { label: { text: "Deploys" } },
     groups,
-    queues: queues.queues ?? [],
-    mergedLabel: { text: "Recently Deployed" },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
   });
 }
 
-/** One repository's queue group inside the Merge Queue section. */
-export function queueGroup(init: { id: string; label?: string; queue?: MessageInitShape<typeof RosterRepoMergeQueueSchema> }): RosterMergeQueueRepoGroup {
-  const queue = create(RosterRepoMergeQueueSchema, init.queue ?? {});
-  return create(RosterMergeQueueRepoGroupSchema, {
-    key: { repository: { id: init.id, dir: `/r/${init.id}` } },
-    header: { label: { text: init.label ?? init.id } },
-    queue,
-    // The daemon counts the line: the head and every merge waiting behind it.
-    count: { workspaces: (queue.head === undefined ? 0 : 1) + queue.waiting.length },
-  });
+/** One repository's QUEUED group inside the Deploys section: its queue, and ROWS merged unless said none. */
+export function queueGroup(init: {
+  id: string;
+  label?: string;
+  rows?: RosterRow[];
+  queue?: MessageInitShape<typeof RosterRepoMergeQueueSchema>;
+}): RosterMergedRepoGroup {
+  return mergedGroup({ ...init, queue: init.queue ?? {} });
 }
 
 /**
- * One repository's group inside the recently-merged band, SHOWN unless its
- * repository is said to be collapsed. A row left on `row`'s default when arm
- * (no turn running) is stamped on the merged arm, as the daemon stamps every
- * merged row, a minute apart and most recent first.
+ * One repository's group inside the Deploys section, QUEUED when a QUEUE is
+ * given and idle otherwise. A row left on `row`'s default when arm (no turn
+ * running) is stamped on the merged arm, as the daemon stamps every merged
+ * row, a minute apart and most recent first.
  */
-export function mergedGroup(init: { id: string; label?: string; rows?: RosterRow[]; repositoryCollapsed?: boolean }): RosterMergedRepoGroup {
+export function mergedGroup(init: {
+  id: string;
+  label?: string;
+  rows?: RosterRow[];
+  queue?: MessageInitShape<typeof RosterRepoMergeQueueSchema>;
+}): RosterMergedRepoGroup {
   const rows = (init.rows ?? []).map((r, i) => {
     if (r.when === undefined || r.when.shown.case !== "noTurnRunning") return r;
     const stamped = clone(RosterRowSchema, r);
@@ -423,7 +419,10 @@ export function mergedGroup(init: { id: string; label?: string; rows?: RosterRow
     key: { repository: { id: init.id, dir: `/r/${init.id}` } },
     header: { label: { text: init.label ?? init.id } },
     mergedRows: { rows: rows.map((row) => ({ row })) },
-    drawn: init.repositoryCollapsed === true ? { case: "repositoryCollapsed", value: {} } : { case: "shown", value: {} },
+    activity:
+      init.queue === undefined
+        ? { case: "idle", value: {} }
+        : { case: "queued", value: { queue: create(RosterRepoMergeQueueSchema, init.queue) } },
   });
 }
 

@@ -126,7 +126,7 @@ are the hidden section's rows."
                                             (list (list :key (list :repository (agent-repl-test-verbs--repo-ref))
                                                         :header (list :label (list :text "repo-one"))
                                                         :merged-rows (agent-repl-test--merged-rows merged-rows)
-                                                        :drawn (list :arm :shown :value nil)))))
+                                                        :activity (list :arm :idle :value nil)))))
         :closed (agent-repl-test--closed-rows (seq-filter #'agent-repl-roster-row-closed-p rows))
         :current nil))
 
