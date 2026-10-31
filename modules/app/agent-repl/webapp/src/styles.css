@@ -1042,7 +1042,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
    rows reach the rail's bottom edge, so nothing is left blank under them. */
 #ws-sidebar .sb-scroll { flex: 1 1 0; min-height: 0; overflow-y: hidden; padding: 0.35rem 0 0; }
 
-/* Repo section header: fold triangle + repo label in the --info-ws hue the
+/* Repo section header: the repo label, the header itself folding, in the --info-ws hue the
    topbar already uses for the workspace datapoint. */
 #ws-sidebar .repo-head {
   display: flex;
@@ -1057,12 +1057,6 @@ html.webhost-sidebar #ws-sidebar[hidden] {
   font-weight: 700;
 }
 #ws-sidebar:not(.sb-hover-suspended) .repo-head:hover { background: var(--card); }
-/* THE GLYPH IS THE DIRECTION. `paintTriangle` (sidebar/roster.ts) writes the
-   triangle itself -- ▸ folded, ▾ open -- so a CSS rotation on top of it turns
-   the folded ▸ a further quarter turn and draws ▲, which reads as "collapse
-   me" on a section that is already collapsed. One author for the direction,
-   and it is the element's own text. */
-#ws-sidebar .repo-head .tri { font-size: 1.05rem; line-height: 1; }
 #ws-sidebar .repo-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
 #ws-sidebar .repo.folded .rows { display: none; }
 /* NO SECTION HEADER'S COUNT WEARS A BADGE (owner request, 2026-10-19): each
@@ -1182,30 +1176,21 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 /* A repository section's header takes its fold's grey rather than the
    --info-ws hue the task and merged headers keep. */
 #ws-sidebar .repo.repo-section > .repo-head { color: var(--repo-head-expanded); }
-/* A REPOSITORY'S NAME, ITS COUNT AND ITS FOLD TRIANGLE READ A STEP SMALLER
-   (owner requests, 2026-10-17), the name still above the workspace names it
-   heads; the count scales with it (0.85em), and the triangle shrinks by the
-   name's own step (1.05rem x 0.7/0.75). */
+/* A REPOSITORY'S NAME AND ITS COUNT READ A STEP SMALLER (owner requests,
+   2026-10-17), the name still above the workspace names it heads; the count
+   scales with it (0.85em). */
 #ws-sidebar .repo.repo-section > .repo-head { font-size: 0.7rem; }
-#ws-sidebar .repo.repo-section > .repo-head .tri { font-size: 0.98rem; }
 /* A REPOSITORY'S HEADER STANDS 30% CLOSER TO WHAT SURROUNDS IT (owner
    request, 2026-10-20): the gap above it and the gap below it, whether the
    neighbour is another repository, a subsection, a workspace or the OPEN
    header, are the band headers' 0.45rem and 0.25rem cut by 30%. */
 #ws-sidebar .repo.repo-section > .repo-head { padding-top: 0.315rem; padding-bottom: 0.175rem; }
 #ws-sidebar .repo.repo-section.folded > .repo-head { color: var(--repo-head-collapsed); }
-/* A HEADER THAT FOLDS FROM ITS TRIANGLE ALONE (owner request, 2026-10-20;
-   src/sidebar/roster.ts FoldHitArea) takes the click in the area around the
-   triangle, not only on the glyph: padding widens the box the click lands
-   in, and the matching negative margin keeps the triangle where it was. The
-   rest of the line is no button, so only the triangle shows the pointer. */
-#ws-sidebar .repo-head[data-fold-hit="triangle"] { cursor: default; }
-#ws-sidebar .repo-head[data-fold-hit="triangle"] > .tri,
-#ws-sidebar .sb-subsection-head > .tri {
-  cursor: pointer;
-  padding: 0.3rem 0.35rem;
-  margin: -0.3rem -0.35rem;
-}
+/* THE SIDEBAR DRAWS NO FOLD TRIANGLE (owner request, 2026-10-31;
+   src/sidebar/section-fold.ts foldOnClick): a click anywhere on a section's
+   or a subsection's header folds or opens it, so the whole header shows the
+   pointer. */
+#ws-sidebar .sb-subsection-head { cursor: pointer; }
 
 /* A REPOSITORY'S SUBSECTIONS (src/sidebar/subsections.ts) stand among its
    rows wherever they were arranged, each a small header over its rows, and
@@ -1234,7 +1219,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 /* A SUBSECTION'S NAME WEARS THE REPOSITORY NAMES' INK (owner request,
    2026-10-30, superseding the canonical orange it wore earlier that day):
    --repo-head-expanded open, --repo-head-collapsed folded, as a repository's
-   name does. Its triangle and count keep the header's own colour. */
+   name does. Its count keeps the header's own colour. */
 #ws-sidebar .sb-subsection-label { color: var(--repo-head-expanded); }
 #ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label { color: var(--repo-head-collapsed); }
 #ws-sidebar .sb-subsection-delete {
@@ -1248,7 +1233,7 @@ html.webhost-sidebar #ws-sidebar[hidden] {
 }
 #ws-sidebar:not(.sb-hover-suspended) .sb-subsection-head:hover .sb-subsection-delete { visibility: visible; }
 #ws-sidebar:not(.sb-hover-suspended) .sb-subsection-delete:hover { color: var(--fg); }
-/* A COLLAPSED SUBSECTION (its triangle, src/sidebar/subsections.ts) shows its
+/* A COLLAPSED SUBSECTION (its header's click, src/sidebar/subsections.ts) shows its
    header alone: its rows are hidden, and its header greys as a collapsed
    repository's does. */
 #ws-sidebar .sb-subsection.folded > .rows { display: none; }

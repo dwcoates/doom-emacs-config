@@ -76,7 +76,7 @@ import {
   type ArrangeRefs,
 } from "./subsections.js";
 import {
-  drawFoldToggle,
+  foldOnClick,
   drawRosterHoldsCurrent,
   drawRosterSectionFold,
   paintHoldsCurrent,
@@ -462,7 +462,6 @@ export function drawRosterOpenSection(
     drawSectionLabel(requireMessage(u.label, `${path}.label`), `${path}.label`),
     section,
     sectionFold(sc, OPEN_FOLD_KEY, { case: "open", value: {} }),
-    "header",
   );
   const count = document.createElement("span");
   count.className = OPEN_COUNT_CLASS;
@@ -516,7 +515,6 @@ export function drawRosterRepoSection(
       foldKey: repoFoldKey(key.id),
       className: "repo-section",
       target: { case: "repository", value: key },
-      foldBy: "triangle",
       decorateHeader: (header) => {
         headerLabel(header).title = divergence;
         header.appendChild(drawCreateSubsectionControl(key, sc));
@@ -592,8 +590,6 @@ export interface HeadedBoxShape {
   className: string;
   /** The section UpdateSidebarView folds. */
   target: FoldTarget;
-  /** Where a click on its header asks for the other fold. */
-  foldBy: FoldHitArea;
   /** Anything the kind adds to its header, after the folded count. */
   decorateHeader?: (header: HTMLElement, section: HTMLElement) => void;
   /**
@@ -660,7 +656,6 @@ export function drawHeadedBox(
     header,
     section,
     sectionFold(sc, shape.foldKey, shape.target),
-    shape.foldBy,
     `${path}.header`,
     shape.countless === true,
   );
@@ -713,7 +708,6 @@ export function drawRosterMergedSection(
       foldKey: MERGED_FOLD_KEY,
       className: MERGED_SECTION_CLASS,
       target: { case: "recentlyMerged", value: {} },
-      foldBy: "header",
       countless: true,
     },
     () => {
@@ -956,7 +950,6 @@ export function drawRosterHiddenSection(
       foldKey: HIDDEN_FOLD_KEY,
       className: HIDDEN_SECTION_CLASS,
       target: { case: "hidden", value: {} },
-      foldBy: "header",
       place: "hidden",
       leftOut: {
         when: (header, headerPath) =>
@@ -969,12 +962,11 @@ export function drawRosterHiddenSection(
   );
 }
 
-/** The header repos and the Deploys section share: a label and a fold toggle. */
+/** The header repos and the Deploys section share: a label, the header itself folding. */
 export function drawRosterSectionHeader(
   u: RosterSectionHeader,
   section: HTMLElement,
   gesture: FoldGesture,
-  hit: FoldHitArea,
   path: string,
   countless = false,
 ): HTMLElement {
@@ -982,7 +974,6 @@ export function drawRosterSectionHeader(
     drawSectionLabel(requireMessage(u.label, `${path}.label`), `${path}.label`),
     section,
     gesture,
-    hit,
   );
   if (countless) {
     if (u.count !== undefined) throw new MalformedView(`${path}.count`, "this section's header carries no count");
@@ -1002,42 +993,20 @@ export function drawRosterSectionHeader(
 }
 
 /**
- * Where a section header's click asks for the other fold: anywhere on the
- * header, or on its fold triangle alone.
- *
- * A REPOSITORY FOLDS FROM ITS TRIANGLE ALONE (owner request, 2026-10-20), as
- * its subsections do (`subsections.ts`): the rest of its line is the grip it
- * is dragged by, and a click there asks nothing.
+ * THE ONE `repo-head` every folding section box draws: LABEL, the header
+ * itself folding SECTION through GESTURE on a click (`foldOnClick`; owner
+ * request, 2026-10-31: no fold triangle anywhere in the sidebar). A
+ * repository's header is also the grip it is dragged by, and a drag is no
+ * click. Whatever a kind of section adds (a count, a control) is appended
+ * after.
  */
-export type FoldHitArea = "header" | "triangle";
-
-/**
- * THE ONE `repo-head` every folding section box draws: its fold triangle,
- * then LABEL, with a click on HIT asking GESTURE for the other fold.
- * Whatever a kind of section adds (a count, a control) is appended after.
- */
-export function drawFoldHeader(label: HTMLElement, section: HTMLElement, gesture: FoldGesture, hit: FoldHitArea): HTMLElement {
+export function drawFoldHeader(label: HTMLElement, section: HTMLElement, gesture: FoldGesture): HTMLElement {
   const header = document.createElement("div");
   header.className = "repo-head";
-  header.setAttribute(FOLD_HIT_ATTRIBUTE, hit);
-  header.appendChild(drawFoldToggle(section, gesture));
   header.appendChild(label);
-  switch (hit) {
-    case "header":
-      header.addEventListener("click", () => gesture(section, header));
-      break;
-    case "triangle":
-      break;
-    default: {
-      const other: string = hit;
-      throw new Error(`drawFoldHeader: unknown fold hit area ${other}`);
-    }
-  }
+  foldOnClick(header, section, gesture);
   return header;
 }
-
-/** The attribute a section header carries naming its `FoldHitArea`, which the stylesheet's cursor reads. */
-export const FOLD_HIT_ATTRIBUTE = "data-fold-hit";
 
 /** The section's workspace count, exactly as the daemon resolved it. */
 export function drawRosterSectionCount(u: RosterSectionCount, path: string): number {

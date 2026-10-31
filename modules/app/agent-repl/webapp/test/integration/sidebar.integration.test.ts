@@ -88,7 +88,7 @@ describe("arm coverage", () => {
 });
 
 /** A repository section's fold triangle. */
-const REPOSITORY_FOLD = '.sb-pane .repo-section [data-section-fold]';
+const REPOSITORY_FOLD = '.sb-pane .repo-section > .repo-head[data-section-fold]';
 
 /** The fold the one recorded UpdateSidebarView asked for, and of which section. */
 function askedFold(): { section: string | undefined; fold: string | undefined } {
@@ -142,7 +142,7 @@ describe("repository folds", () => {
 });
 
 /** The open workspaces section's own fold triangle, in the repository grouping's copy. */
-const OPEN_FOLD = '.sb-pane .open-section > .repo-head [data-section-fold]';
+const OPEN_FOLD = '.sb-pane .open-section > .repo-head[data-section-fold]';
 
 describe("the open workspaces section's fold", () => {
   it("starts unfolded, as the daemon's default is", async () => {
@@ -164,7 +164,7 @@ describe("the open workspaces section's fold", () => {
 });
 
 /** The merged band's fold triangle, in the repository grouping's copy. */
-const MERGED_FOLD = '.sb-pane .merged-section [data-section-fold]';
+const MERGED_FOLD = '.sb-pane .merged-section > .repo-head[data-section-fold]';
 
 describe("the recently-merged band's fold", () => {
   it("starts folded, as the daemon's default is", async () => {

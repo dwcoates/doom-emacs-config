@@ -27,8 +27,6 @@ import {
   createRosterDrawer,
   disposeWorkspaceRoster,
   drawFoldHeader,
-  FOLD_HIT_ATTRIBUTE,
-  type FoldHitArea,
   drawHeadedSection,
   drawRosterRepoDivergence,
   drawSectionLabel,
@@ -188,16 +186,10 @@ describe("the sections", () => {
     });
   });
 
-  it("sets a repository's fold triangle a step smaller than the band headers'", () => {
-    // Arrange
-    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
-    // Act
-    const sizes = inRail(drawn, (rail) => [
-      cascadedValue(rail.querySelector(".repo-section > .repo-head .tri") as HTMLElement, "font-size"),
-      cascadedValue(rail.querySelector(".open-section > .repo-head .tri") as HTMLElement, "font-size"),
-    ]);
-    // Assert
-    expect(sizes).toEqual(["0.98rem", "1.05rem"]);
+  it.each([".repo-section", ".open-section", ".merged-section"])("draws no fold triangle on the %s header, the header itself the fold control", (selector) => {
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })], merged: mergedSection([], false) }), sidebarContext());
+    const header = pane(drawn).querySelector<HTMLElement>(`${selector} > .repo-head`)!;
+    expect([header.querySelector(".tri"), header.hasAttribute("data-section-fold"), header.textContent?.includes("▾")]).toEqual([null, true, false]);
   });
 
   it("pads a repository's header above and below 30% less than the band headers'", () => {
@@ -229,22 +221,9 @@ describe("the sections", () => {
     expect(sides).toEqual(["0.7rem", "0.7rem"]);
   });
 
-  it("widens a repository's fold triangle's hit box without moving it, the pointer on the triangle alone", () => {
-    // Arrange
+  it("shows the pointer across a repository's whole header", () => {
     const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })] }), sidebarContext());
-    // Act
-    const values = inRail(drawn, (rail) => {
-      const header = rail.querySelector(".repo-section > .repo-head") as HTMLElement;
-      const triangle = header.querySelector(".tri") as HTMLElement;
-      return [
-        cascadedValue(header, "cursor"),
-        cascadedValue(triangle, "cursor"),
-        cascadedValue(triangle, "padding"),
-        cascadedValue(triangle, "margin"),
-      ];
-    });
-    // Assert
-    expect(values).toEqual(["default", "pointer", "0.3rem 0.35rem", "-0.3rem -0.35rem"]);
+    expect(inRail(drawn, (rail) => cascadedValue(rail.querySelector(".repo-section > .repo-head") as HTMLElement, "cursor"))).toBe("pointer");
   });
 
   it("sets a repository's name a step smaller than the band headers, its count scaling with it", () => {
@@ -407,8 +386,8 @@ describe("folding a section is the daemon's view, shared by every page", () => {
     expect(asked.map(foldAsked)).toEqual([{ section: kind, id, fold: want }]);
   });
 
-  it.each(FOLDING_SECTIONS.map((s) => ({ ...s, want: s.kind === "repository" ? [] : [s.kind] })))(
-    "asks for the other fold of a $kind section from a click on its label only if it folds from its whole header",
+  it.each(FOLDING_SECTIONS.map((s) => ({ ...s, want: [s.kind] })))(
+    "asks for the other fold of a $kind section from a click on its label, the whole header folding",
     async ({ roster: make, selector, want }) => {
       // Arrange
       const { asked, sc } = viewDaemon();
@@ -605,7 +584,7 @@ describe("drawHeadedSection", () => {
     const drawn = drawWorkspaceRoster(made, sidebarContext());
     const section = drawn.querySelector(selector) as HTMLElement;
     expect([
-      section.querySelector(":scope > .repo-head > [data-section-fold]") !== null,
+      section.querySelector(":scope > .repo-head[data-section-fold]") !== null,
       section.querySelector(":scope > .repo-head > [data-section-count]") !== null,
       section.querySelector(":scope > .rows") !== null,
     ]).toEqual([true, counted, true]);
@@ -647,23 +626,9 @@ describe("recently merged", () => {
     ).toBe(true);
   });
 
-  it("points its folded triangle at the rows it is hiding", () => {
+  it("states its fold on its header, the fold control", () => {
     const drawn = drawWorkspaceRoster(landed(), sidebarContext());
-    expect(
-      pane(drawn).querySelector(".merged-section [data-section-fold]")?.textContent,
-    ).toBe("\u25b8");
-  });
-
-  it("lets the glyph state the fold, with no second turn from the stylesheet", () => {
-    // The glyph is written by `paintTriangle`; a CSS rotation on top of it
-    // turned the folded \u25b8 a further quarter turn and drew \u25b2, which
-    // reads as "collapse me" on a section already collapsed.
-    inRail(drawWorkspaceRoster(landed(), sidebarContext()), (rail) => {
-      const triangle = rail.querySelector(
-        ".merged-section.folded [data-section-fold]",
-      ) as HTMLElement;
-      expect(cascadedValue(triangle, "transform")).toBe("none");
-    });
+    expect(pane(drawn).querySelector(".merged-section > .repo-head")?.getAttribute("data-folded")).toBe("true");
   });
 
   it("draws unfolded when the daemon says every page has it unfolded", () => {
@@ -1480,70 +1445,32 @@ describe("the repository label's divergence hover", () => {
 });
 
 describe("drawFoldHeader", () => {
-  const draw = (hit: FoldHitArea = "header"): { header: HTMLElement; section: HTMLElement; calls: HTMLElement[] } => {
+  const draw = (): { header: HTMLElement; section: HTMLElement; calls: HTMLElement[] } => {
     const section = document.createElement("div");
     const label = document.createElement("span");
     label.textContent = "alpha";
     const calls: HTMLElement[] = [];
-    const header = drawFoldHeader(label, section, (_section, control) => calls.push(control), hit);
+    const header = drawFoldHeader(label, section, (_section, control) => calls.push(control));
     return { header, section, calls };
   };
 
-  it("draws the fold triangle, then the label, in a repo-head", () => {
+  it("draws the label alone in a repo-head, with no fold triangle", () => {
     // Arrange, Act
     const { header } = draw();
     // Assert
-    expect([header.className, ...[...header.children].map((c) => c.className || c.textContent)]).toEqual([
-      "repo-head",
-      "tri",
-      "alpha",
-    ]);
+    expect([header.className, ...[...header.children].map((c) => c.className || c.textContent)]).toEqual(["repo-head", "alpha"]);
   });
 
-  it("asks for the other fold from a click anywhere on the header", () => {
+  it.each([
+    { name: "the header", target: (header: HTMLElement) => header },
+    { name: "the label", target: (header: HTMLElement) => header.firstElementChild as HTMLElement },
+  ])("asks for the other fold once from a click on $name, the header the control", ({ target }) => {
     // Arrange
     const { header, calls } = draw();
     // Act
-    header.click();
+    target(header).click();
     // Assert
     expect(calls).toEqual([header]);
-  });
-
-  it("asks nothing from a click on the header off the triangle when it folds from the triangle", () => {
-    // Arrange
-    const { header, calls } = draw("triangle");
-    // Act
-    header.click();
-    (header.children[1] as HTMLElement).click();
-    // Assert
-    expect(calls).toEqual([]);
-  });
-
-  it("asks once, from the triangle, when the triangle of a triangle-folding header is clicked", () => {
-    // Arrange
-    const { header, calls } = draw("triangle");
-    const triangle = header.querySelector<HTMLElement>("[data-section-fold]")!;
-    // Act
-    triangle.click();
-    // Assert
-    expect(calls).toEqual([triangle]);
-  });
-
-  it.each(["header", "triangle"] as const)("names its %s fold hit area on the header", (hit) => {
-    // Arrange, Act
-    const { header } = draw(hit);
-    // Assert
-    expect(header.getAttribute(FOLD_HIT_ATTRIBUTE)).toBe(hit);
-  });
-
-  it("asks once, from the triangle, when the triangle is clicked", () => {
-    // Arrange
-    const { header, calls } = draw();
-    const triangle = header.querySelector<HTMLElement>("[data-section-fold]")!;
-    // Act
-    triangle.click();
-    // Assert
-    expect(calls).toEqual([triangle]);
   });
 
   it("is the header every headed section draws", () => {
@@ -1556,11 +1483,11 @@ describe("drawFoldHeader", () => {
       }),
       sidebarContext(),
     );
-    // Assert: each section's header is a repo-head opening on the triangle then the label.
+    // Assert: each section's header is a repo-head and its fold control, opening on the label.
     const heads = [...pane(drawn).querySelectorAll<HTMLElement>(".repo > .repo-head")];
     expect(heads.length).toBeGreaterThanOrEqual(3);
     for (const head of heads) {
-      expect([...head.children].slice(0, 2).map((c) => c.className)).toEqual(["tri", SECTION_LABEL_CLASS]);
+      expect([head.hasAttribute("data-section-fold"), head.firstElementChild?.className]).toEqual([true, SECTION_LABEL_CLASS]);
     }
   });
 });
@@ -1668,7 +1595,7 @@ describe("the Merge Queue section's queues", () => {
 
   it("draws no merge-queue control on the OPEN header line", () => {
     const drawn = drawWorkspaceRoster(roster(), sidebarContext());
-    expect([...openHead(drawn).children].map((el) => el.className)).toEqual(["tri", SECTION_LABEL_CLASS, OPEN_COUNT_CLASS]);
+    expect([...openHead(drawn).children].map((el) => el.className)).toEqual([SECTION_LABEL_CLASS, OPEN_COUNT_CLASS]);
   });
 
   it("draws a repository section's workspaces, never its queue", () => {
