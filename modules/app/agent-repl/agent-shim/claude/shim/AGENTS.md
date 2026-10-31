@@ -64,6 +64,8 @@ src/
                        sender's class, and the admission a vendor hold refuses
     network-reach.ts   what each SDK message says about the network: raises and resolves
                        the `network_unreachable` session fault (component "network")
+    remote-control.ts  the Remote Control bridge (claude.ai), held and put back on every vendor process
+    replays.ts         the vendor's echo of a user message: the shim's own, or a prompt typed on claude.ai
   convert/
     fold.ts            the fold seam and FoldOutput
     ids.ts             the four identifier spaces, minted
@@ -300,6 +302,7 @@ comma-separated:
 | `apply_flag_settings` | `applyFlagSettings()` rejects | `SetSessionEffort{vendor_refused}` |
 | `get_settings` | `getSettings()` rejects | the `vendor-applied-effort` fault; `SetSessionEffort{vendor_refused}` |
 | `rewind_files` | `rewindFiles()` answers `canRewind: false`, dry run or real | `RollBackSession{files_not_restorable}` |
+| `remote_control` | `enableRemoteControl()` rejects, ON or OFF | `SetSessionRemoteControl{vendor_refused}` |
 
 An unrecognized verb is a refusal to start, never a silently ignored knob.
 
@@ -544,6 +547,10 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
 | `!keepalive` | an ordinary short turn. It exists so a test can drive a keep-alive-shaped turn deterministically; the `<!--agent-repl:keepalive-->` marker is the SHIM's, and the mock never adds or removes it | the assistant line, the prompt line (marker and all) and the turn record | AgentResponse.from_model, AgentSuccess.completed — classified keep-alive by the marker on the PROMPT |
 | `!queue-vendor-turn` | an ordinary short turn, and then — ahead of the NEXT send's own turn — a turn the vendor runs ON ITS OWN, the way a background task's notification starts one: an assistant answer and a result with `origin: {kind: "task-notification"}`, and NO `user_message_uuid` anywhere, because no send asked for it | the assistant line, the prompt line and the turn record, then the vendor turn's assistant line and record | AgentResponse.from_model, AgentSuccess.completed — twice, the second answering nobody. Grounded in the 2026-09-23 keep-alive leak, where such a turn's result closed the shim's keep-alive early |
 | `!stop-on-rewind` | an ordinary short turn, and it ARMS the session: from then on every truncating resume (a keep-alive rewind's `resumeSessionAt`) reports, ahead of that query's first send, a background shell the previous process left unfinished: `task_notification{status:"stopped"}` naming no task kind, then a turn the vendor runs ON ITS OWN that answers nothing (a lone result with `origin: {kind: "task-notification"}`) | the assistant line, the prompt line and the turn record, a per-session mark under the account root, and on each replay an enqueue/dequeue pair and a TRANSCRIPT-ONLY task-notification user record (`queueTranscriptOnly`, `promptSource: system`) parented on the fork point, which the next send's prompt parents on; no reply, no turn record | AgentResponse.from_model, AgentSuccess.completed — and on each rewind a reply-less turn answering nobody. Grounded in the ship-gns transcript and shim log of 2026-10-02 15:17:08Z (CLI 2.1.280), where every keep-alive rewind replayed the stop |
+| `!remote-prompt` | this turn's own conclusion; then, with the Remote Control bridge on, a prompt typed on claude.ai (the args, else a default) that the vendor queues itself and runs as a turn of its own, echoed under a uuid the shim never sent | the closing text line; the remote prompt's user line (origin human) and its turn's lines | PROMPT_ORIGIN_REMOTE_CONTROL with `said` (the adopted turn the remote prompt starts) |
+| `!remote-interrupt` | the start of an answer, then the turn aborted INSIDE the vendor (a stop pressed on claude.ai): the interrupt terminal (`aborted_streaming`) with no `interrupt()` from the shim | the partial text line | AgentInterrupted.by_user with no command (a turn ended by a stop the shim did not make) |
+| `!perm-answered-remotely` | a gated `Bash` whose ask the vendor WITHDRAWS (its `canUseTool` signal aborted, as a `control_cancel_request` does when claude.ai answered first); the call then runs, as claude.ai allowed it | the tool_use line, the tool_result line, the closing text line | AgentPermission.start + AgentPermissionSuccess.answered_remotely |
+| `!perm-remote-interrupt` | a gated `Bash` whose ask the vendor WITHDRAWS because a stop pressed on claude.ai aborted the turn: the call's cancelled tool_result, then the interrupt terminal, with no `interrupt()` from the shim | the tool_use line, the cancelled tool_result line | AgentPermission.start + AgentPermissionDenied.by=user (the interrupt's), never answered_remotely |
 
 ### What the mock writes, and where
 
@@ -1318,6 +1325,64 @@ list (`src/engine/session.ts`); the contract is the comment on
   `<system-reminder>` block after what was said, never on the prompt row. The
   sidecar withholds agent-repl's own prompts from the transcript plane, so the
   feed never draws it.
+
+## Remote Control: a session reached from claude.ai (2026-10-31)
+
+The contract is `endpoint_set_session_remote_control.proto`,
+`conversation.v1.PROMPT_ORIGIN_REMOTE_CONTROL` and
+`AgentPermissionSuccess.answered_remotely`.
+
+- **THE BRIDGE IS THE VENDOR'S** (`src/engine/remote-control.ts`).
+  `Query.enableRemoteControl` (undeclared by the SDK, typed in
+  `src/sdk/types.ts`, held to the runtime by `asQueryLike` and the canary)
+  connects the session to claude.ai. Every ON asks `keepSessionOnExit`, so the
+  claude.ai session outlives its vendor process, and re-binds a bridge session
+  (`reattachSessionId`): the request's, else the latest the vendor answered.
+  Only a request the vendor accepted is held; calls reach the vendor one at a
+  time, in order. An OFF is always sent, even with no bridge held.
+- **THE STATE OUTLIVES THE VENDOR PROCESS, NOT THE SHIM.** `startQuery` puts a
+  held bridge back on every vendor process it opens (a rollback's restart, a
+  keep-alive rewind, a plain resume), without awaiting it; a refusal there is
+  the `vendor-remote-control` session fault, lifted by the next one that takes.
+- **NO PROMPT IS NEEDED FIRST.** StartSession opens the vendor process at once
+  and proves it live on a control round-trip, and the CLI answers control
+  requests before any first turn, so enabling needs no extra bring-up. The one
+  session with no query is one whose query died (nothing restarts it): that is
+  `no_session`.
+- **EVERY AGENT SESSION'S QUERY ECHOES ITS USER MESSAGES**
+  (`--replay-user-messages`, `REPLAY_USER_MESSAGES_FLAG`), so turning the
+  bridge on needs no new vendor process. `src/engine/replays.ts` classifies
+  each echo FIRST in `onSdkMessage`, before any other reading: the echo of a
+  uuid the shim sent (`OwnSends`, fed by `userMessage`) is dropped, so today's
+  behavior is unchanged; a foreign echo that is not a person's words on the
+  main thread (synthetic, another origin, one wrapping harness tag, wordless,
+  a subagent's) is dropped too.
+- **A REMOTE PROMPT IS ADOPTED, OR FOLDED.** Its uuid is stated to the send
+  ledger (`SendLedger.foreign`), so frames stamped with it are its turn's,
+  never an unknown echo. While a vendor turn runs, it was folded into that
+  turn: a `REMOTE_CONTROL` row with `folded_into`. Between turns it waits for
+  the next attributed frame: a vendor-started turn is adopted as the remote
+  prompt's (`REMOTE_CONTROL`, `said` = the echoed text) instead of
+  `VENDOR_STARTED`; a send of ours it was merged with takes it folded. Several
+  waiting at once are one merged turn: the first opens it, the rest fold in.
+  A remote prompt with the bridge off here is adopted all the same, at WARN.
+- **AN ASK ANSWERED ON claude.ai** (`src/engine/permission-gate.ts`, the file
+  comment states the rule). The vendor withdraws an ask from this host by a
+  `control_cancel_request`, which aborts the `canUseTool` signal, for an answer
+  on claude.ai AND for an interrupt. With the bridge OFF the abort is not read
+  (the ask stands, as before). With it ON the ask is withdrawn (a late local
+  answer is `no_open_ask`) and settled by the vendor's next word about it: the
+  gated call running, the asking agent speaking, or its turn ending other than
+  by a user stop is `answered_remotely`; a user stop is the interrupt's denial.
+  A stand-down or a replaced query settles it as denied. The shim's own
+  interrupts stand the gate down before they interrupt, so they never reach it.
+- **A STOP PRESSED ON claude.ai** ends the turn inside the vendor; its
+  interrupted result closes the turn like any other result.
+- **THE MOCK MODELS IT** (`src/fake/`): `enableRemoteControl` (deterministic
+  `fakeBridgeSessionId`, a re-bind of the id it is handed, `remote_control`
+  refusal), echoes under `replayUserMessages`, `FakeQuery.injectRemotePrompt`,
+  and `!remote-prompt`, `!remote-interrupt`, `!perm-answered-remotely`,
+  `!perm-remote-interrupt`.
 
 ## A resumed subagent is named by the store when this process never saw its spawn (2026-09-27)
 

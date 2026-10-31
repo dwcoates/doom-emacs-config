@@ -116,6 +116,7 @@ async function harness(persistence: RecordingPersistence = new RecordingPersiste
     onPermissionModeSet: () => undefined,
     onAskOpened: () => undefined,
     unattended: () => false,
+    remoteControl: () => false,
   });
   const state: Harness = {
     turns: undefined as unknown as TurnEngine,

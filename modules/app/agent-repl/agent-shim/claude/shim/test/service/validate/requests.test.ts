@@ -272,6 +272,59 @@ describe("validateSetSessionEffortRequest", () => {
   });
 });
 
+describe("validateSetSessionRemoteControlRequest", () => {
+  const request = (fields: { enabled: boolean; name?: string; reattachBridgeSessionId?: string }) =>
+    create(shimv1.SetSessionRemoteControlRequestSchema, fields);
+
+  it("accepts an ON naming the session", () => {
+    // Arrange, Act, Assert.
+    expect(
+      codeOf(() => validate.validateSetSessionRemoteControlRequest(requests.setSessionRemoteControlRequest())),
+    ).toBeUndefined();
+  });
+
+  it("accepts an ON re-binding a previous bridge session", () => {
+    // Arrange, Act, Assert.
+    expect(
+      codeOf(() =>
+        validate.validateSetSessionRemoteControlRequest(
+          request({ enabled: true, name: "parser-fix", reattachBridgeSessionId: "session_1" }),
+        ),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("refuses an ON naming no session", () => {
+    // Arrange, Act, Assert.
+    expect(codeOf(() => validate.validateSetSessionRemoteControlRequest(request({ enabled: true })))).toBe(
+      Code.InvalidArgument,
+    );
+  });
+
+  it("refuses an ON whose stated reattach id is empty", () => {
+    // Arrange, Act, Assert.
+    expect(
+      codeOf(() =>
+        validate.validateSetSessionRemoteControlRequest(
+          request({ enabled: true, name: "parser-fix", reattachBridgeSessionId: "" }),
+        ),
+      ),
+    ).toBe(Code.InvalidArgument);
+  });
+
+  it("accepts an OFF naming nothing", () => {
+    // Arrange, Act, Assert.
+    expect(codeOf(() => validate.validateSetSessionRemoteControlRequest(request({ enabled: false })))).toBeUndefined();
+  });
+
+  it("ignores an OFF's empty reattach id, which the contract ignores", () => {
+    // Arrange, Act, Assert.
+    expect(
+      codeOf(() => validate.validateSetSessionRemoteControlRequest(request({ enabled: false, reattachBridgeSessionId: "" }))),
+    ).toBeUndefined();
+  });
+});
+
 describe("validateHibernateRequest", () => {
   it("accepts the empty request the contract declares", () => {
     // Arrange, Act, Assert.

@@ -110,6 +110,12 @@ export async function askPermission(
      * only signal on this plane that says which agent raised the ask.
      */
     agentID?: string;
+    /**
+     * The signal the ask is handed, when the scenario withdraws it as the
+     * vendor does (a `control_cancel_request`: answered on claude.ai, or the
+     * turn interrupted). A fresh, never-aborted one otherwise.
+     */
+    signal?: AbortSignal;
   } = {},
 ): Promise<PermissionResultLike | null> {
   // THE MODE DECIDES WHETHER THERE IS AN ASK AT ALL, and it is the VENDOR that
@@ -138,7 +144,7 @@ export async function askPermission(
     return { behavior: "deny", message: "denied by the session's permission mode" };
   }
   return ctx.canUseTool(call.name, call.input, {
-    signal: new AbortController().signal,
+    signal: extra.signal ?? new AbortController().signal,
     toolUseID: call.toolUseId,
     requestId: `req_perm_${call.toolUseId}`,
     ...(extra.agentID === undefined ? {} : { agentID: extra.agentID }),

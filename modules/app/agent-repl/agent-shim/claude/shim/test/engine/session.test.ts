@@ -17233,3 +17233,644 @@ describe("ReviseResponse", () => {
     expect(update?.case === "responseRevision" ? update.value.prose?.markdown : "").toBe("1 🔎 the revised tree");
   });
 });
+
+/** A Remote Control request, ON under the workspace's name unless stated otherwise. */
+function remoteControlRequest(
+  fields: { enabled?: boolean; name?: string; reattachBridgeSessionId?: string } = {},
+): shimv1.SetSessionRemoteControlRequest {
+  return create(shimv1.SetSessionRemoteControlRequestSchema, { enabled: true, name: "parser-fix", ...fields });
+}
+
+/** The success arm of a SetSessionRemoteControl answer, or the failure's cause. */
+function remoteControlAnswer(response: shimv1.SetSessionRemoteControlResponse): unknown {
+  return response.result.case === "success"
+    ? { enabled: response.result.value.enabled, bridgeSessionId: response.result.value.bridgeSessionId }
+    : response.result.case === "failure"
+      ? response.result.value.cause.case
+      : "unset";
+}
+
+describe("SetSessionRemoteControl", () => {
+  it("answers no_session before any session was started", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    const response = await h.engine.setSessionRemoteControl(remoteControlRequest());
+
+    // Assert
+    expect(remoteControlAnswer(response)).toBe("noSession");
+  });
+
+  it("answers no_session once the session's vendor query died", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    h.queries[0]?.query.end();
+    await drainTurns();
+
+    // Act
+    const response = await h.engine.setSessionRemoteControl(remoteControlRequest());
+
+    // Assert
+    expect(remoteControlAnswer(response)).toBe("noSession");
+  });
+
+  it("turns the bridge on the live vendor query under the session's name, kept on the vendor's exit", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    await h.engine.setSessionRemoteControl(remoteControlRequest());
+
+    // Assert
+    expect(h.queries[0]?.query.remoteControlCalls).toEqual([
+      { enabled: true, name: "parser-fix", options: { keepSessionOnExit: true } },
+    ]);
+  });
+
+  it("needs no prompt first: the session's vendor process is already up", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const response = await h.engine.setSessionRemoteControl(remoteControlRequest());
+
+    // Assert
+    expect([remoteControlAnswer(response), h.queries.length]).toEqual([{ enabled: true, bridgeSessionId: "bridge-1" }, 1]);
+  });
+
+  it("re-binds the bridge session a previous shim answered", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+
+    // Act
+    const response = await h.engine.setSessionRemoteControl(remoteControlRequest({ reattachBridgeSessionId: "session_prev" }));
+
+    // Assert
+    expect([remoteControlAnswer(response), h.queries[0]?.query.remoteControlCalls[0]?.options?.reattachSessionId]).toEqual([
+      { enabled: true, bridgeSessionId: "session_prev" },
+      "session_prev",
+    ]);
+  });
+
+  it("answers vendor_refused, with the vendor's words, when the vendor refuses", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const query = h.queries[0]?.query;
+    if (query !== undefined) query.enableRemoteControlRejects = new Error("Remote Control is disabled by policy");
+
+    // Act
+    const response = await h.engine.setSessionRemoteControl(remoteControlRequest());
+
+    // Assert
+    expect([
+      remoteControlAnswer(response),
+      response.result.case === "failure" ? response.result.value.detail : "",
+    ]).toEqual(["vendorRefused", "Remote Control is disabled by policy"]);
+  });
+
+  it("turns the bridge off through the vendor and answers it off with no session id", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.setSessionRemoteControl(remoteControlRequest());
+
+    // Act
+    const response = await h.engine.setSessionRemoteControl(remoteControlRequest({ enabled: false, name: "" }));
+
+    // Assert
+    expect([remoteControlAnswer(response), h.queries[0]?.query.remoteControlCalls.at(-1)]).toEqual([
+      { enabled: false, bridgeSessionId: "" },
+      { enabled: false },
+    ]);
+  });
+
+  describe("on every vendor process the session opens afterwards", () => {
+    /** A user prompt record of `turn`, chained under `parent`. */
+    const promptLine = (turn: string, parent: string | null): Record<string, unknown> => ({
+      type: "user",
+      uuid: promptVendorUuid(turn),
+      parentUuid: parent,
+      message: { role: "user", content: `prompt of ${turn}` },
+    });
+    const answerLine = (uuid: string, parent: string): Record<string, unknown> => ({
+      type: "assistant",
+      uuid,
+      parentUuid: parent,
+      message: { role: "assistant", content: [{ type: "text", text: "ok" }] },
+    });
+
+    /** A started session with three turns on disk, rolled back to turn-1 so its query is replaced. */
+    async function rolledBack(options: Parameters<typeof harness>[0] = {}, bridge?: shimv1.SetSessionRemoteControlRequest): Promise<Harness> {
+      const h = harness(options);
+      await started(h);
+      writeTranscript(h.configDir, h.cwd, freshSessionId((await untilQuery(h, 0)).spec), [
+        promptLine("turn-0", null),
+        answerLine("a0", promptVendorUuid("turn-0")),
+        promptLine("turn-1", "a0"),
+        answerLine("a1", promptVendorUuid("turn-1")),
+      ]);
+      if (bridge !== undefined) await h.engine.setSessionRemoteControl(bridge);
+      const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+      try {
+        const response = await h.engine.rollBackSession(rollBackSessionRequestFor("turn-1", ["turn-1"]));
+        if (response.result.case !== "success") throw new Error("the rollback was refused");
+        for (;;) {
+          const next = await stream.next();
+          if (next.done === true) throw new Error("the session's pushes ended before the rollback settled");
+          if (next.value.update.case === "rollbackSettled") break;
+        }
+      } finally {
+        await stream.return?.();
+      }
+      await drainTurns();
+      return h;
+    }
+
+    it("puts the bridge back on the replacement query, re-binding the latest bridge session, kept on exit", async () => {
+      // Arrange, Act
+      const h = await rolledBack({}, remoteControlRequest({ reattachBridgeSessionId: "session_prev" }));
+
+      // Assert
+      expect(h.queries[1]?.query.remoteControlCalls).toEqual([
+        { enabled: true, name: "parser-fix", options: { keepSessionOnExit: true, reattachSessionId: "session_prev" } },
+      ]);
+    });
+
+    it("asks nothing of the replacement query while the bridge is off", async () => {
+      // Arrange, Act
+      const h = await rolledBack();
+
+      // Assert
+      expect(h.queries[1]?.query.remoteControlCalls).toEqual([]);
+    });
+
+    it("asks nothing of the replacement query once the bridge was turned off", async () => {
+      // Arrange
+      const h = harness();
+      await started(h);
+      await h.engine.setSessionRemoteControl(remoteControlRequest());
+
+      // Act
+      await h.engine.setSessionRemoteControl(remoteControlRequest({ enabled: false, name: "" }));
+      const replaced = await rolledBack();
+
+      // Assert
+      expect(replaced.queries[1]?.query.remoteControlCalls).toEqual([]);
+    });
+
+    it("states the vendor-remote-control fault when the replacement query refuses the bridge", async () => {
+      // Arrange
+      const h = await rolledBack(
+        {
+          onQueryCreated: (query, _spec, index) => {
+            if (index === 1) query.enableRemoteControlRejects = new Error("the bridge failed to connect");
+          },
+        },
+        remoteControlRequest(),
+      );
+
+      // Act
+      const faults = h.engine.pushes.diagnostics();
+
+      // Assert
+      expect(
+        faults.update.case === "diagnostics" && faults.update.value.health.case === "unhealthy"
+          ? faults.update.value.health.value.faults.map((fault) => [fault.component, fault.detail])
+          : [],
+      ).toContainEqual(["vendor-remote-control", "the bridge failed to connect"]);
+    });
+  });
+});
+
+describe("the vendor's echoes of user messages", () => {
+  /** The vendor's echo of a user message, under `uuid`. */
+  const echo = (uuid: string, fields: Record<string, unknown> = {}): SdkMessage =>
+    ({
+      type: "user",
+      message: { role: "user", content: "go" },
+      parent_tool_use_id: null,
+      uuid,
+      session_id: "s",
+      isReplay: true,
+      ...fields,
+    }) as never;
+
+  it("asks for echoes on every agent session's own query", async () => {
+    // Arrange
+    const h = harness();
+
+    // Act
+    await started(h);
+
+    // Assert
+    expect(h.queries[0]?.spec.replayUserMessages).toBe(true);
+  });
+
+  it("asks for no echoes on a chat session's query", async () => {
+    // Arrange
+    const h = harness();
+    const request = freshRequest();
+    request.profile = create(shimv1.SessionProfileSchema, {
+      kind: { case: "chat", value: { systemPrompt: { text: "Answer questions." } } },
+    });
+
+    // Act
+    const pending = h.engine.startSession(request);
+    const first = await untilQuery(h, 0);
+    first.query.emit(initMessage({ sessionId: freshSessionId(first.spec) }));
+    await pending;
+
+    // Assert
+    expect(first.spec.replayUserMessages).toBeUndefined();
+  });
+
+  it("drops the echo of the shim's own prompt before the fold or the store sees it", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    const seen = h.fold.seen.length;
+    const written = h.persistence.buffered.length;
+
+    // Act
+    await h.engine.onSdkMessage(echo(h.minted.at(-1) ?? ""));
+
+    // Assert
+    expect([h.fold.seen.length, h.persistence.buffered.length]).toEqual([seen, written]);
+  });
+
+  it("leaves the shim's own turn exactly as it was after the echo of its prompt", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await h.engine.onSdkMessage(echo(h.minted.at(-1) ?? ""));
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, assistantMessage("00000000-0000-4000-8000-0000000000a1")));
+
+    // Assert
+    expect(h.fold.contexts.at(-1)?.turnId?.value).toBe("turn-1");
+  });
+
+  it("drops a foreign echo that is no person's prompt, leaving the next vendor turn vendor-started", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(echo("00000000-0000-4000-8000-0000000000ee", { origin: { kind: "task-notification" } }));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000a1"));
+
+    // Assert
+    expect(
+      h.persistence.buffered.flatMap((entry) => (entry.item.kind === "prompt" ? [entry.item.prompt.origin] : [])),
+    ).toEqual([conversationv1.PromptOrigin.VENDOR_STARTED]);
+  });
+});
+
+describe("a prompt typed on claude.ai", () => {
+  const REMOTE = "00000000-0000-4000-8000-0000000000re";
+
+  /** The vendor's echo of a prompt typed on claude.ai, under `uuid`. */
+  const remoteEcho = (text: string, uuid = REMOTE): SdkMessage =>
+    ({
+      type: "user",
+      message: { role: "user", content: text },
+      parent_tool_use_id: null,
+      uuid,
+      session_id: "s",
+      isReplay: true,
+      origin: { kind: "human" },
+    }) as never;
+
+  /** A reply stamped as answering `uuid`. */
+  const stampedBy = (message: SdkMessage, uuid: string): SdkMessage =>
+    ({ ...message, user_message_uuid: uuid, user_message_uuids: [uuid] }) as SdkMessage;
+
+  /** Every prompt row written, as origin, text, and the turn it folded into. */
+  const prompts = (h: Harness): { origin: conversationv1.PromptOrigin; said: string; foldedInto?: string }[] =>
+    h.persistence.buffered.flatMap((entry) => {
+      if (entry.item.kind !== "prompt") return [];
+      const prompt = entry.item.prompt;
+      const block = prompt.said?.content?.blocks[0]?.block;
+      return [
+        {
+          origin: prompt.origin,
+          said: block?.case === "text" ? block.value.text : "",
+          ...(prompt.foldedInto === undefined ? {} : { foldedInto: prompt.foldedInto.value }),
+        },
+      ];
+    });
+
+  /** A started session with its bridge on. */
+  async function bridged(): Promise<Harness> {
+    const h = harness();
+    await started(h);
+    await h.engine.setSessionRemoteControl(remoteControlRequest());
+    return h;
+  }
+
+  it("adopts the turn it starts as REMOTE_CONTROL, saying what was typed, when its first reply is unstamped", async () => {
+    // Arrange
+    const h = await bridged();
+    await h.engine.onSdkMessage(remoteEcho("What changed since I left?"));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000a1"));
+
+    // Assert
+    expect(prompts(h)).toEqual([{ origin: conversationv1.PromptOrigin.REMOTE_CONTROL, said: "What changed since I left?" }]);
+  });
+
+  it("adopts the turn it starts as REMOTE_CONTROL when its first reply is stamped with its uuid", async () => {
+    // Arrange
+    const h = await bridged();
+    await h.engine.onSdkMessage(remoteEcho("run the tests"));
+
+    // Act
+    await h.engine.onSdkMessage(stampedBy(assistantMessage("00000000-0000-4000-8000-0000000000a1"), REMOTE));
+
+    // Assert
+    expect(prompts(h)).toEqual([{ origin: conversationv1.PromptOrigin.REMOTE_CONTROL, said: "run the tests" }]);
+  });
+
+  it("records no unknown echo for a reply stamped with its uuid", async () => {
+    // Arrange
+    const h = await bridged();
+    await h.engine.onSdkMessage(remoteEcho("run the tests"));
+    const mark = logSinkMark();
+
+    // Act
+    await h.engine.onSdkMessage(stampedBy(assistantMessage("00000000-0000-4000-8000-0000000000a1"), REMOTE));
+
+    // Assert
+    expect(logRecordsSince(mark).filter((record) => record.level === "error")).toEqual([]);
+  });
+
+  it("writes no row of its own until its turn's first reply", async () => {
+    // Arrange
+    const h = await bridged();
+    const written = h.persistence.buffered.length;
+
+    // Act
+    await h.engine.onSdkMessage(remoteEcho("run the tests"));
+
+    // Assert
+    expect(h.persistence.buffered.length).toBe(written);
+  });
+
+  it("closes its adopted turn on the turn's result, so the next StartTurn is accepted", async () => {
+    // Arrange
+    const h = await bridged();
+    await h.engine.onSdkMessage(remoteEcho("run the tests"));
+    await h.engine.onSdkMessage(stampedBy(assistantMessage("00000000-0000-4000-8000-0000000000a1"), REMOTE));
+    await h.engine.onSdkMessage(stampedBy(resultMessage(), REMOTE));
+
+    // Act
+    const response = await startDuring(h, "turn-2");
+
+    // Assert
+    expect(response.result.case).toBe("success");
+  });
+
+  it("charges its turn's rows to the turn it adopted", async () => {
+    // Arrange
+    const h = await bridged();
+    await h.engine.onSdkMessage(remoteEcho("run the tests"));
+
+    // Act
+    await h.engine.onSdkMessage(stampedBy(assistantMessage("00000000-0000-4000-8000-0000000000a1"), REMOTE));
+
+    // Assert
+    const adoptedId = h.persistence.buffered.find((entry) => entry.item.kind === "prompt")?.turn?.value;
+    expect(h.fold.contexts.at(-1)?.turnId?.value).toBe(adoptedId);
+  });
+
+  it("is folded into the shim's own turn when it arrives while that turn runs", async () => {
+    // Arrange
+    const h = await bridged();
+    await realPrompt(h, "turn-1");
+    await h.engine.onSdkMessage(answering(h, assistantMessage("00000000-0000-4000-8000-0000000000a1")));
+
+    // Act
+    await h.engine.onSdkMessage(remoteEcho("also check the docs"));
+
+    // Assert
+    expect(prompts(h).filter((prompt) => prompt.origin === conversationv1.PromptOrigin.REMOTE_CONTROL)).toEqual([
+      { origin: conversationv1.PromptOrigin.REMOTE_CONTROL, said: "also check the docs", foldedInto: "turn-1" },
+    ]);
+  });
+
+  it("opens no turn when folded into the shim's own turn", async () => {
+    // Arrange
+    const h = await bridged();
+    await realPrompt(h, "turn-1");
+    await h.engine.onSdkMessage(answering(h, assistantMessage("00000000-0000-4000-8000-0000000000a1")));
+    await h.engine.onSdkMessage(remoteEcho("also check the docs"));
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, assistantMessage("00000000-0000-4000-8000-0000000000a2")));
+
+    // Assert
+    expect([h.fold.contexts.at(-1)?.turnId?.value, prompts(h).some((prompt) => prompt.origin === conversationv1.PromptOrigin.VENDOR_STARTED)]).toEqual([
+      "turn-1",
+      false,
+    ]);
+  });
+
+  it("is folded into the shim's own turn when the vendor merged it with a send whose first reply follows", async () => {
+    // Arrange
+    const h = await bridged();
+    await realPrompt(h, "turn-1");
+    await h.engine.onSdkMessage(remoteEcho("and the docs"));
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, assistantMessage("00000000-0000-4000-8000-0000000000a1")));
+
+    // Assert
+    expect(prompts(h).filter((prompt) => prompt.origin === conversationv1.PromptOrigin.REMOTE_CONTROL)).toEqual([
+      { origin: conversationv1.PromptOrigin.REMOTE_CONTROL, said: "and the docs", foldedInto: "turn-1" },
+    ]);
+  });
+
+  it("is folded into a remote turn already running", async () => {
+    // Arrange
+    const h = await bridged();
+    await h.engine.onSdkMessage(remoteEcho("first"));
+    await h.engine.onSdkMessage(stampedBy(assistantMessage("00000000-0000-4000-8000-0000000000a1"), REMOTE));
+    const adoptedId = h.persistence.buffered.find((entry) => entry.item.kind === "prompt")?.turn?.value;
+
+    // Act
+    await h.engine.onSdkMessage(remoteEcho("second", "00000000-0000-4000-8000-0000000000r2"));
+
+    // Assert
+    expect(prompts(h).at(-1)).toEqual({ origin: conversationv1.PromptOrigin.REMOTE_CONTROL, said: "second", foldedInto: adoptedId });
+  });
+
+  it("folds a second prompt the vendor merged into the turn the first one opened", async () => {
+    // Arrange
+    const h = await bridged();
+    await h.engine.onSdkMessage(remoteEcho("first"));
+    await h.engine.onSdkMessage(remoteEcho("second", "00000000-0000-4000-8000-0000000000r2"));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000a1"));
+
+    // Assert
+    const adoptedId = h.persistence.buffered.find((entry) => entry.item.kind === "prompt")?.turn?.value;
+    expect(prompts(h)).toEqual([
+      { origin: conversationv1.PromptOrigin.REMOTE_CONTROL, said: "first" },
+      { origin: conversationv1.PromptOrigin.REMOTE_CONTROL, said: "second", foldedInto: adoptedId },
+    ]);
+  });
+
+  it("is adopted all the same, and said so at warn, when Remote Control is off here", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    const mark = logSinkMark();
+    await h.engine.onSdkMessage(remoteEcho("hello"));
+
+    // Act
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000a1"));
+
+    // Assert
+    expect([
+      prompts(h).map((prompt) => prompt.origin),
+      logRecordsSince(mark).some((record) => record.level === "warn" && record.message.includes("Remote Control is off")),
+    ]).toEqual([[conversationv1.PromptOrigin.REMOTE_CONTROL], true]);
+  });
+});
+
+describe("a turn stopped from claude.ai", () => {
+  /** A result the vendor wrote for a turn it aborted itself. */
+  const interrupted = (uuid: string): SdkMessage =>
+    ({
+      ...resultMessage(uuid),
+      subtype: "error_during_execution",
+      is_error: true,
+      terminal_reason: "aborted_streaming",
+      errors: ["Interrupted by user"],
+    }) as never;
+
+  it("ends the shim's own turn, though the shim asked for no interrupt", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await h.engine.onSdkMessage(answering(h, assistantMessage("00000000-0000-4000-8000-0000000000a1")));
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, interrupted("00000000-0000-4000-8000-0000000000f1")));
+
+    // Assert
+    const response = await startDuring(h, "turn-2");
+    expect([h.fold.contexts.at(-1)?.turnId?.value, response.result.case, h.queries[0]?.query.calls.includes("interrupt")]).toEqual([
+      "turn-1",
+      "success",
+      false,
+    ]);
+  });
+
+  it("ends a turn a prompt typed on claude.ai started", async () => {
+    // Arrange
+    const remote = "00000000-0000-4000-8000-0000000000re";
+    const h = harness();
+    await started(h);
+    await h.engine.setSessionRemoteControl(remoteControlRequest());
+    await h.engine.onSdkMessage({
+      type: "user",
+      message: { role: "user", content: "start" },
+      parent_tool_use_id: null,
+      uuid: remote,
+      session_id: "s",
+      isReplay: true,
+    } as never);
+    await h.engine.onSdkMessage({ ...assistantMessage("00000000-0000-4000-8000-0000000000a1"), user_message_uuid: remote } as never);
+
+    // Act
+    await h.engine.onSdkMessage({ ...interrupted("00000000-0000-4000-8000-0000000000f1"), user_message_uuid: remote } as never);
+
+    // Assert
+    const response = await startDuring(h, "turn-2");
+    expect(response.result.case).toBe("success");
+  });
+});
+
+describe("a permission answered on claude.ai", () => {
+  /** How the latest permission row settled: the decision's arm, or "open". */
+  const settledAs = (h: Harness): string => {
+    const rows = h.persistence.buffered.flatMap((entry) => {
+      const item = entry.item;
+      return item.kind === "frame" && item.frame.result.case === "update" && item.frame.result.value.update.case === "permission"
+        ? [item.frame.result.value.update.value]
+        : [];
+    });
+    const last = rows.at(-1);
+    if (last === undefined) return "none";
+    return last.result.case === "success" ? (last.result.value.decision.case ?? "unset") : "open";
+  };
+
+  /** Pose an ask through the query's own gate, then withdraw it, as a `control_cancel_request` does. */
+  async function askAndWithdraw(h: Harness): Promise<void> {
+    const controller = new AbortController();
+    const canUseTool = h.queries[0]?.spec.canUseTool;
+    if (canUseTool === undefined) throw new Error("no query was created");
+    void canUseTool("Bash", { command: "git push" }, { signal: controller.signal, toolUseID: "toolu_push", requestId: "req_1" });
+    await Promise.resolve();
+    controller.abort();
+  }
+
+  it("settles the ask as answered remotely once its turn goes on, with Remote Control on", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.setSessionRemoteControl(remoteControlRequest());
+    await realPrompt(h, "turn-1");
+    await askAndWithdraw(h);
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, assistantMessage("00000000-0000-4000-8000-0000000000a1")));
+
+    // Assert
+    expect(settledAs(h)).toBe("answeredRemotely");
+  });
+
+  it("settles the ask as the interrupt's denial when its turn ends by a user stop", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await h.engine.setSessionRemoteControl(remoteControlRequest());
+    await realPrompt(h, "turn-1");
+    await askAndWithdraw(h);
+
+    // Act
+    await h.engine.onSdkMessage(
+      answering(h, { ...resultMessage("00000000-0000-4000-8000-0000000000f1"), terminal_reason: "aborted_tools" } as never),
+    );
+
+    // Assert
+    expect(settledAs(h)).toBe("denied");
+  });
+
+  it("leaves the ask open when the vendor withdraws it with Remote Control off", async () => {
+    // Arrange
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await askAndWithdraw(h);
+
+    // Act
+    await h.engine.onSdkMessage(answering(h, assistantMessage("00000000-0000-4000-8000-0000000000a1")));
+
+    // Assert
+    expect(settledAs(h)).toBe("open");
+  });
+});

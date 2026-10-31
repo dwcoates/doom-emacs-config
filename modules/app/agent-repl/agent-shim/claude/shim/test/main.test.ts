@@ -1615,6 +1615,24 @@ describe("queryFactory forwards the whole spec to the real query", () => {
     // Assert.
     expect(calls[0]).not.toHaveProperty("resumeSessionAt");
   });
+
+  it("forwards the ask for user-message echoes", async () => {
+    // Arrange: the describe block's mocked real-query seam.
+    // Act.
+    await factory(false, env, "/ws")({ ...spec(), replayUserMessages: true });
+
+    // Assert.
+    expect(calls[0]).toMatchObject({ replayUserMessages: true });
+  });
+
+  it("omits the ask for user-message echoes when the query makes none", async () => {
+    // Arrange: the describe block's mocked real-query seam.
+    // Act.
+    await factory(false, env, "/ws")(spec());
+
+    // Assert.
+    expect(calls[0]).not.toHaveProperty("replayUserMessages");
+  });
 });
 
 /**
@@ -1703,6 +1721,24 @@ describe("queryFactory hands the mocked vendor the per-task stop declaration", (
 
     // Assert.
     expect(handed[0]).toMatchObject({ resumeSessionAt: "fork-1", resumeDropsTurn: "prompt-2" });
+  });
+
+  it("hands the mocked vendor the ask for user-message echoes", async () => {
+    // Arrange: the describe block's mocked fake seam.
+    // Act.
+    await factory(true, env, cwd)({
+      profile: { kind: "agent" },
+      binding: { kind: "fresh", sessionId: "session-1" },
+      workspaceName: "parser-fix",
+      permissionMode: "default",
+      canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
+      abortController: new AbortController(),
+      prompt: (async function* () {})(),
+      replayUserMessages: true,
+    });
+
+    // Assert.
+    expect(handed[0]).toMatchObject({ replayUserMessages: true });
   });
 });
 

@@ -372,6 +372,29 @@ describe("realQueryOptions declares the per-task stop", () => {
 });
 
 /**
+ * The user-message echoes (`--replay-user-messages`): asked for by a session's
+ * own query, so a Remote Control prompt typed on claude.ai is seen at all, and
+ * by nothing else.
+ */
+describe("realQueryOptions asks for user-message echoes", () => {
+  it("passes the bare --replay-user-messages flag when the spec asks for echoes", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec({ replayUserMessages: true }), NO_SERVERS);
+
+    // Assert.
+    expect(options.extraArgs).toEqual({ "replay-user-messages": null });
+  });
+
+  it("passes no extra CLI argument when the spec does not ask for echoes", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(spec(), NO_SERVERS);
+
+    // Assert.
+    expect(options.extraArgs).toBeUndefined();
+  });
+});
+
+/**
  * File checkpointing. RollBackSession's `restore_files` rewinds the files to a
  * prompt, which only works for a prompt sent with checkpointing on, so it rides
  * every way a session comes into being.
@@ -419,6 +442,7 @@ describe("createRealQuery", () => {
       interrupt: async (): Promise<void> => {},
       getSettings: () => Promise.resolve({ applied: { effort: null } }),
       cancelAsyncMessage: () => Promise.resolve(false),
+      enableRemoteControl: () => Promise.resolve({}),
     };
     vi.resetModules();
     vi.doMock("../../src/vendor-guard.js", () => ({
@@ -741,6 +765,7 @@ describe("asQueryLike", () => {
   const COMPLETE = {
     getSettings: () => Promise.resolve({ applied: { effort: null } }),
     cancelAsyncMessage: () => Promise.resolve(false),
+    enableRemoteControl: () => Promise.resolve({}),
   };
 
   it("passes a query that provides every undeclared member through unchanged", () => {
@@ -750,7 +775,7 @@ describe("asQueryLike", () => {
     expect(asQueryLike(query)).toBe(query);
   });
 
-  for (const member of ["getSettings", "cancelAsyncMessage"] as const) {
+  for (const member of ["getSettings", "cancelAsyncMessage", "enableRemoteControl"] as const) {
     it(`refuses a query that lost ${member}, loudly at construction`, () => {
       // Arrange
       const query: Record<string, unknown> = { ...COMPLETE };

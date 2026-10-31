@@ -28,6 +28,11 @@
  *   - `hooks` makes the vendor's `ListAgents` and `SendMessage` say that
  *     agent-repl workspaces are reached through agent-repld, never through
  *     them (sdk/agent-repl-hooks.ts).
+ *   - `--replay-user-messages` (`extraArgs`, on a session's own query only)
+ *     makes the CLI echo every user message it takes into a turn. It is what
+ *     makes a Remote Control prompt typed on claude.ai visible at all: the CLI
+ *     queues it itself, past the shim's input, and the echo under a uuid the
+ *     shim never sent is the only word of it (engine/replays.ts).
  *
  * THE BINARY IS THE SDK'S OWN. `pathToClaudeCodeExecutable` is deliberately
  * NOT set (ruling R12): the shim drives the SDK's bundled, pinned agent binary
@@ -168,7 +173,26 @@ export interface RealQuerySpec {
    * spawn changes.
    */
   readonly onChildExit?: (exit: VendorChildExit) => void;
+  /**
+   * Launch the CLI with `--replay-user-messages`, so it echoes every user
+   * message it takes into a turn ({@link REPLAY_USER_MESSAGES_FLAG}). Set for a
+   * session's own query (engine/session.ts, `startQuery`), never for a side
+   * query, which reads its one answer and nothing else.
+   */
+  readonly replayUserMessages?: boolean;
 }
+
+/**
+ * THE CLI FLAG THAT ECHOES USER MESSAGES, as `Options.extraArgs` spells it (a
+ * `null` value is a bare flag). The CLI accepts it only with stream-json input
+ * and output, which is how the SDK always launches it.
+ *
+ * SET ON EVERY AGENT SESSION'S QUERY, whether or not Remote Control is on, so
+ * turning the bridge on later needs no new vendor process. The echoes of the
+ * shim's own sends change nothing: the engine drops them before any other
+ * reading of the message (engine/replays.ts).
+ */
+export const REPLAY_USER_MESSAGES_FLAG = "replay-user-messages";
 
 /** How the vendor child ended. */
 export interface VendorChildExit {
@@ -305,6 +329,7 @@ export function realQueryOptions(spec: RealQuerySpec, mcpServers: Record<string,
     ...(spec.onChildExit === undefined
       ? { ...(spec.onStderr === undefined ? {} : { stderr: spec.onStderr }) }
       : { spawnClaudeCodeProcess: vendorSpawner(spec.onChildExit, spec.onStderr) }),
+    ...(spec.replayUserMessages === true ? { extraArgs: { [REPLAY_USER_MESSAGES_FLAG]: null } } : {}),
     ...bindingOptions(spec),
   };
   return options;
@@ -360,6 +385,7 @@ export async function createRealQuery(
 const UNDECLARED_MEMBERS = [
   { member: "getSettings", consequence: "the shim cannot read the applied effort" },
   { member: "cancelAsyncMessage", consequence: "the shim cannot take back a prompt waiting to join the running turn" },
+  { member: "enableRemoteControl", consequence: "the shim cannot turn the session's Remote Control bridge on or off" },
 ] as const;
 
 /**

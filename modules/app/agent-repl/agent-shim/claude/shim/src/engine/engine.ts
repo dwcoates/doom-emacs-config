@@ -68,6 +68,14 @@ export interface Engine {
     request: shimv1.SetSessionPermissionModeRequest,
   ): Promise<shimv1.SetSessionPermissionModeResponse>;
 
+  /**
+   * Put the session's Remote Control bridge (claude.ai) in the requested state,
+   * now and on every vendor process the session opens from here on.
+   */
+  setSessionRemoteControl(
+    request: shimv1.SetSessionRemoteControlRequest,
+  ): Promise<shimv1.SetSessionRemoteControlResponse>;
+
   /** Compact, then ack. The daemon stands the shim down only after the ack. */
   hibernate(request: shimv1.HibernateRequest): Promise<shimv1.HibernateResponse>;
 
@@ -233,6 +241,10 @@ export class NotImplementedEngine implements Engine {
 
   setSessionPermissionMode(): Promise<shimv1.SetSessionPermissionModeResponse> {
     return Promise.reject(unimplemented("SetSessionPermissionMode"));
+  }
+
+  setSessionRemoteControl(): Promise<shimv1.SetSessionRemoteControlResponse> {
+    return Promise.reject(unimplemented("SetSessionRemoteControl"));
   }
 
   hibernate(): Promise<shimv1.HibernateResponse> {

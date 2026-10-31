@@ -25,6 +25,30 @@
  * mismatched echo means the consumer answered a question the shim is not
  * holding, and choosing an option on the user's behalf is the one outcome a
  * permission gate must never produce.
+ *
+ * AN ASK THE VENDOR WITHDRAWS (2026-10-31, Remote Control). With the session's
+ * bridge on, the vendor poses every ask to claude.ai as well as here, and when
+ * claude.ai answers first it withdraws the ask from this host (a
+ * `control_cancel_request`, which the SDK turns into the abort of the signal
+ * it handed `canUseTool`). The vendor withdraws an ask the same way when the
+ * turn is INTERRUPTED (a stop from the phone, or any interrupt the shim did not
+ * make), and the SDK aborts every signal when the query ends. The abort itself
+ * says none of which, so THE RULE is:
+ *   - Remote Control OFF: the abort is not read at all. Nothing can answer
+ *     elsewhere, and every interrupt and every end of the query the shim makes
+ *     stands the gate down first (`standDown`), so the ask stands until it is
+ *     answered here or stood down, exactly as before the bridge existed.
+ *   - Remote Control ON: the ask is WITHDRAWN. It is taken out of the asks this
+ *     host can answer (a late local answer is refused `no_open_ask`), its
+ *     callback is released, and its settlement waits for the vendor's next word
+ *     about it: the gated call running (its `tool_progress`, or a `tool_result`
+ *     that is not an error), the asking agent speaking again, or its turn
+ *     ending other than by a user stop each say it was ANSWERED REMOTELY
+ *     (`AgentPermissionSuccess.answered_remotely`); the turn ending by a user
+ *     stop says it was cut by the INTERRUPT, settled as the stand-down's
+ *     denial. A stand-down settles it as one too. No interrupt is ever reported
+ *     as an answer from claude.ai, because an interrupted turn says nothing
+ *     more before its stop.
  */
 import { create, equals } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
@@ -32,9 +56,10 @@ import { conversationv1 } from "../proto.js";
 import { settledAt } from "../convert/entries.js";
 import { permissionId, questionId, toolCallActivityId } from "../convert/ids.js";
 import { permissionUpsertKey, questionUpsertKey } from "../store/keys.js";
+import { isUserStop } from "../convert/terminals.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { updateEntry } from "../store/update-entry.js";
-import type { PermissionModeLike, PermissionResultLike, PermissionUpdateLike } from "../sdk/types.js";
+import type { PermissionModeLike, PermissionResultLike, PermissionUpdateLike, SdkMessage } from "../sdk/types.js";
 
 const LOGGER = bindLog({ component: "shim-engine-permission", operation: "shim.engine.permission" });
 
@@ -464,7 +489,23 @@ interface PermissionGateDeps {
    * ask raised then is denied at once, never opened.
    */
   unattended(): boolean;
+  /**
+   * Whether the session's Remote Control bridge is on (engine/remote-control.ts):
+   * only then can an ask be answered on claude.ai, so only then is the vendor
+   * withdrawing an ask read at all (see the file comment).
+   */
+  remoteControl(): boolean;
 }
+
+/**
+ * What a withdrawn ask's callback is released with. The vendor has stopped
+ * waiting on this host by then, so nothing reads it; it exists only so the
+ * promise the SDK holds settles.
+ */
+const WITHDRAWN_ANSWER = "the ask was withdrawn: it was answered on claude.ai, or its turn was interrupted";
+
+/** The denial a withdrawn ask is settled with when its turn was interrupted. */
+const INTERRUPTED_ASK = "the turn was interrupted before the ask was answered";
 
 /**
  * The denial an ask raised in an unattended turn answers with. THE QUEUE WAITS
@@ -516,6 +557,15 @@ type AnswerOutcome = "delivered" | "no_open_ask" | "answer_mismatch";
  */
 export class PermissionGate {
   private readonly pendingByToolUse = new Map<string, Pending>();
+  /** Each pending ask's release of its listener on the signal the vendor handed it. */
+  private readonly unlisten = new Map<string, () => void>();
+  /**
+   * The asks the vendor withdrew while Remote Control was on, waiting for the
+   * vendor's next word about each to say whether claude.ai answered it or an
+   * interrupt cut it (see the file comment). Bounded by the asks the vendor
+   * can hold open at once.
+   */
+  private readonly withdrawnAsks = new Map<string, Pending>();
 
   /** How many times the gate has stood down, so an ask can tell one spanned it. */
   private standDowns = 0;
@@ -571,7 +621,7 @@ export class PermissionGate {
       if (this.standDowns !== epoch) {
         const pending = this.pendingByToolUse.get(toolUseId);
         if (pending !== undefined) {
-          this.pendingByToolUse.delete(toolUseId);
+          this.release(toolUseId);
           this.standDownOne(pending, this.lastStandDownReason);
           LOGGER.info(
             { tool_use_id: toolUseId, reason: this.lastStandDownReason },
@@ -671,6 +721,16 @@ export class PermissionGate {
    * re-send.
    */
   private unmatchedAnswer(kind: "permission" | "question", id: string): AnswerOutcome {
+    if (this.withdrawnAsks.has(id)) {
+      // A LATE ANSWER HERE FOR AN ASK THE VENDOR ALREADY WITHDREW: claude.ai
+      // answered it first, or its turn was interrupted. Nothing is waiting on
+      // this host for it, so nothing is delivered.
+      LOGGER.info(
+        { ask_kind: kind, ask_id: id },
+        "refused a local answer for an ask the vendor withdrew; it was answered on claude.ai or its turn was interrupted",
+      );
+      return "no_open_ask";
+    }
     const openOfKind = [...this.pendingByToolUse.values()].some(
       (pending) => pending.kind === kind,
     );
@@ -739,7 +799,7 @@ export class PermissionGate {
 
   private openQuestion(
     input: Record<string, unknown>,
-    options: { toolUseID: string; agentID?: string },
+    options: { signal: AbortSignal; toolUseID: string; agentID?: string },
   ): Promise<PermissionResultLike> {
     const batch = toQuestionBatch(input);
     const id = questionId(options.toolUseID);
@@ -752,7 +812,7 @@ export class PermissionGate {
   private openQuestionOn(
     agentId: conversationv1.AgentId,
     input: Record<string, unknown>,
-    options: { toolUseID: string; agentID?: string },
+    options: { signal: AbortSignal; toolUseID: string; agentID?: string },
     batch: conversationv1.AgentQuestionBatch,
     id: conversationv1.AgentQuestionId,
     startedAtMs: number,
@@ -768,7 +828,7 @@ export class PermissionGate {
       },
     });
     return new Promise<PermissionResultLike>((resolve) => {
-      this.register({
+      const pending: PendingQuestion = {
         kind: "question",
         toolUseId: options.toolUseID,
         agentId,
@@ -778,7 +838,8 @@ export class PermissionGate {
         input,
         startedAtMs,
         resolve,
-      });
+      };
+      this.register(pending);
       this.deps.persist([
         this.entry(agentId, questionUpsertKey(id), options.toolUseID, "agent_frame.update.question.start", {
           case: "question",
@@ -789,6 +850,7 @@ export class PermissionGate {
         { tool_use_id: options.toolUseID, questions: batch.questions.length },
         "opened a question and BLOCKED the vendor until it is answered",
       );
+      this.listenForWithdrawal(pending, options.signal);
     });
   }
 
@@ -809,7 +871,7 @@ export class PermissionGate {
       );
       return "answer_mismatch";
     }
-    this.pendingByToolUse.delete(ask.value);
+    this.release(ask.value);
     this.settleQuestion(pending, answers);
     pending.resolve({
       behavior: "allow",
@@ -852,6 +914,7 @@ export class PermissionGate {
   private openPermission(
     toolName: string,
     options: {
+      signal: AbortSignal;
       toolUseID: string;
       suggestions?: PermissionUpdateLike[];
       blockedPath?: string;
@@ -874,6 +937,7 @@ export class PermissionGate {
     agentId: conversationv1.AgentId,
     toolName: string,
     options: {
+      signal: AbortSignal;
       toolUseID: string;
       suggestions?: PermissionUpdateLike[];
       blockedPath?: string;
@@ -913,7 +977,7 @@ export class PermissionGate {
       },
     });
     return new Promise<PermissionResultLike>((resolve) => {
-      this.register({
+      const pending: PendingPermission = {
         kind: "permission",
         toolUseId: options.toolUseID,
         agentId,
@@ -923,7 +987,8 @@ export class PermissionGate {
         startedAtMs,
         resolve,
         ...(offeredStanding === undefined ? {} : { offeredStanding }),
-      });
+      };
+      this.register(pending);
       this.deps.persist([
         this.entry(agentId, permissionUpsertKey(id), options.toolUseID, "agent_frame.update.permission.start", {
           case: "permission",
@@ -934,6 +999,7 @@ export class PermissionGate {
         { tool_use_id: options.toolUseID, tool_name: toolName, offered_standing: offeredStanding !== undefined },
         "opened a permission gate and BLOCKED the vendor until it is decided",
       );
+      this.listenForWithdrawal(pending, options.signal);
     });
   }
 
@@ -976,7 +1042,7 @@ export class PermissionGate {
             return "answer_mismatch";
           }
           const updates = fromStanding(standing);
-          this.pendingByToolUse.delete(askId);
+          this.release(askId);
           this.settlePermission(pending, {
             case: "allowed",
             value: create(conversationv1.AgentPermissionAllowedSchema, {
@@ -998,7 +1064,7 @@ export class PermissionGate {
           LOGGER.debug({ permission_id: askId, scope: "standing" }, "allowed a tool call with a standing grant");
           return "delivered";
         }
-        this.pendingByToolUse.delete(askId);
+        this.release(askId);
         this.settlePermission(pending, {
           case: "allowed",
           value: create(conversationv1.AgentPermissionAllowedSchema, {
@@ -1011,7 +1077,7 @@ export class PermissionGate {
       }
       case "denied": {
         const message = decision.decision.value.message;
-        this.pendingByToolUse.delete(askId);
+        this.release(askId);
         this.settlePermission(pending, {
           case: "denied",
           value: create(conversationv1.AgentPermissionDeniedSchema, {
@@ -1073,8 +1139,10 @@ export class PermissionGate {
     this.standDowns += 1;
     this.lastStandDownReason = reason;
     const pending = [...this.pendingByToolUse.values()];
-    this.pendingByToolUse.clear();
+    for (const ask of pending) this.release(ask.toolUseId);
     for (const ask of pending) this.standDownOne(ask, reason);
+    // A WITHDRAWN ASK'S CALLBACK IS ALREADY RELEASED; only its record is owed.
+    this.settleWithdrawn(reason);
     if (pending.length > 0) {
       LOGGER.info(
         { reason, resolved: pending.length },
@@ -1086,20 +1154,120 @@ export class PermissionGate {
 
   /** Settle one ask as the stand-down's denial, and release the vendor. */
   private standDownOne(ask: Pending, reason: string): void {
+    this.settleDenied(ask, reason);
+    ask.resolve({ behavior: "deny", message: reason });
+  }
+
+  /** Record one ask as denied for `reason`: the stand-down's settlement, without the release. */
+  private settleDenied(ask: Pending, reason: string): void {
     if (ask.kind === "question") {
       this.settleQuestion(ask, undefined);
-    } else {
-      this.settlePermission(ask, {
-        case: "denied",
-        value: create(conversationv1.AgentPermissionDeniedSchema, {
-          by: {
-            case: "user",
-            value: create(conversationv1.AgentPermissionDeniedByUserSchema, { message: reason }),
-          },
-        }),
-      });
+      return;
     }
-    ask.resolve({ behavior: "deny", message: reason });
+    this.settlePermission(ask, {
+      case: "denied",
+      value: create(conversationv1.AgentPermissionDeniedSchema, {
+        by: {
+          case: "user",
+          value: create(conversationv1.AgentPermissionDeniedByUserSchema, { message: reason }),
+        },
+      }),
+    });
+  }
+
+  /**
+   * Settle every withdrawn ask as denied for `reason`, because the query whose
+   * next word would have said how it ended is gone: a stand-down, or the query
+   * replaced by a new one (a keep-alive rewind, a rollback's restart).
+   */
+  settleWithdrawn(reason: string): number {
+    const withdrawn = [...this.withdrawnAsks.values()];
+    this.withdrawnAsks.clear();
+    for (const ask of withdrawn) this.settleDenied(ask, reason);
+    if (withdrawn.length > 0) {
+      LOGGER.info(
+        { reason, settled: withdrawn.length },
+        "settled every withdrawn ask as denied: the query that would have said how it ended is gone",
+      );
+    }
+    return withdrawn.length;
+  }
+
+  // -- withdrawal (Remote Control) --------------------------------------------
+
+  /** Hear the vendor withdraw `pending` (see the file comment). */
+  private listenForWithdrawal(pending: Pending, signal: AbortSignal): void {
+    if (signal.aborted) {
+      this.withdrawn(pending);
+      return;
+    }
+    const onAbort = (): void => {
+      this.withdrawn(pending);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    this.unlisten.set(pending.toolUseId, () => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  }
+
+  /** Take `toolUseId` out of the asks this host can answer, and stop hearing its signal. */
+  private release(toolUseId: string): void {
+    this.pendingByToolUse.delete(toolUseId);
+    this.unlisten.get(toolUseId)?.();
+    this.unlisten.delete(toolUseId);
+  }
+
+  /** The vendor withdrew `pending`: read only while Remote Control is on (see the file comment). */
+  private withdrawn(pending: Pending): void {
+    if (this.pendingByToolUse.get(pending.toolUseId) !== pending) return;
+    const context = { tool_use_id: pending.toolUseId, ask_kind: pending.kind, agent_id: pending.agentId.value };
+    if (!this.deps.remoteControl()) {
+      LOGGER.debug(
+        context,
+        "the vendor withdrew an ask while Remote Control is off; nothing answers elsewhere, so the ask stands until it is answered here or stood down",
+      );
+      return;
+    }
+    this.release(pending.toolUseId);
+    this.withdrawnAsks.set(pending.toolUseId, pending);
+    pending.resolve({ behavior: "deny", message: WITHDRAWN_ANSWER });
+    LOGGER.info(
+      context,
+      "the vendor withdrew an ask while Remote Control is on; it was answered on claude.ai or cut by an interrupt, and the vendor's next word about it says which",
+    );
+  }
+
+  /**
+   * One vendor message, read for what it says of each withdrawn ask (see the
+   * file comment). Told every message, before the fold, so a settlement lands
+   * ahead of the rows that proved it.
+   */
+  noteVendorMessage(message: SdkMessage): void {
+    if (this.withdrawnAsks.size === 0) return;
+    const main = this.deps.mainAgentId().value;
+    for (const ask of [...this.withdrawnAsks.values()]) {
+      const verdict = withdrawalVerdict(ask, message, main);
+      if (verdict === undefined) continue;
+      this.withdrawnAsks.delete(ask.toolUseId);
+      const context = { tool_use_id: ask.toolUseId, ask_kind: ask.kind, evidence: verdict.evidence };
+      if (verdict.how === "interrupted") {
+        this.settleDenied(ask, INTERRUPTED_ASK);
+        LOGGER.info(context, "a withdrawn ask's turn ended by a user stop; the ask was cut by the interrupt");
+        continue;
+      }
+      if (ask.kind === "question") {
+        // NO ARM SAYS WHERE A QUESTION WAS ANSWERED, and the answers are not
+        // relayed: the question settles unanswered HERE, and its tool's own
+        // result carries what claude.ai chose.
+        this.settleQuestion(ask, undefined);
+      } else {
+        this.settlePermission(ask, {
+          case: "answeredRemotely",
+          value: create(conversationv1.AgentPermissionAnsweredRemotelySchema, {}),
+        });
+      }
+      LOGGER.info(context, "a withdrawn ask was answered on claude.ai: its turn went on");
+    }
   }
 
   private entry(
@@ -1120,6 +1288,47 @@ export class PermissionGate {
       turn: this.deps.turn(agentId),
       update,
     });
+  }
+}
+
+/** What one vendor message says of a withdrawn ask: how it ended, and the evidence. */
+interface WithdrawalVerdict {
+  readonly how: "remote" | "interrupted";
+  readonly evidence: string;
+}
+
+/**
+ * Read `message` for what it says of the withdrawn `ask` (the rule is the file
+ * comment's), or absence when it says nothing of it.
+ *
+ * AN INTERRUPTED TURN SAYS NOTHING MORE BEFORE ITS STOP: no gated call runs,
+ * no agent speaks again, and the result is a user stop. So each piece of
+ * evidence that the turn went on is evidence that the ask was answered.
+ */
+function withdrawalVerdict(ask: Pending, message: SdkMessage, mainAgentId: string): WithdrawalVerdict | undefined {
+  switch (message.type) {
+    case "result":
+      return isUserStop(message)
+        ? { how: "interrupted", evidence: "its turn ended by a user stop" }
+        : { how: "remote", evidence: "its turn ended other than by a user stop" };
+    case "assistant": {
+      // THE ASKING AGENT SPEAKS AGAIN: the main agent on the main thread, a
+      // subagent on the thread its spawning call names.
+      const thread = message.parent_tool_use_id ?? mainAgentId;
+      return thread === ask.agentId.value ? { how: "remote", evidence: "the asking agent spoke again" } : undefined;
+    }
+    case "tool_progress":
+      return message.tool_use_id === ask.toolUseId ? { how: "remote", evidence: "the gated call is running" } : undefined;
+    case "user": {
+      const content = message.message.content;
+      if (typeof content === "string") return undefined;
+      const ran = content.some(
+        (block) => block.type === "tool_result" && block.tool_use_id === ask.toolUseId && block.is_error !== true,
+      );
+      return ran ? { how: "remote", evidence: "the gated call ran" } : undefined;
+    }
+    default:
+      return undefined;
   }
 }
 

@@ -290,6 +290,70 @@ describe("the undeclared cancelAsyncMessage the shim relies on", () => {
   });
 });
 
+/**
+ * THE THIRD UNDECLARED MEMBER. `Query.enableRemoteControl()` exists only in the
+ * SDK's runtime; the shim turns the session's Remote Control bridge on and off
+ * through it, re-binding the same claude.ai session across vendor processes.
+ * See src/sdk/types.ts RemoteControlOptionsLike.
+ */
+describe("the undeclared enableRemoteControl the shim relies on", () => {
+  const SDK_MJS = readDeclarations("sdk.mjs");
+
+  it("is provided by the runtime query as the remote_control control request", () => {
+    expect(SDK_MJS).toMatch(/enableRemoteControl\(e,t,n\)\{[\s\S]{0,800}?subtype:"remote_control",enabled:e,/);
+  });
+
+  it("sends the reattach id and keep-on-exit the shim re-binds a claude.ai session by", () => {
+    expect(SDK_MJS).toContain(
+      "reattach_session_id:n?.reattachSessionId,keep_session_on_exit:n?.keepSessionOnExit",
+    );
+  });
+});
+
+/**
+ * THE WITHDRAWN ASK. With Remote Control on, the CLI withdraws an ask claude.ai
+ * answered (a `control_cancel_request`), and the SDK makes that the abort of the
+ * signal it handed `canUseTool`, which is the only word of it the gate gets
+ * (src/engine/permission-gate.ts).
+ */
+describe("the cancel of a can_use_tool request", () => {
+  const SDK_MJS = readDeclarations("sdk.mjs");
+
+  it("aborts the controller of the cancelled request", () => {
+    expect(SDK_MJS).toMatch(
+      /handleControlCancelRequest\(e\)\{let t=this\.cancelControllers\.get\(e\.request_id\);if\(t\)t\.abort\(\)/,
+    );
+  });
+
+  it("hands canUseTool that controller's signal", () => {
+    expect(SDK_MJS).toMatch(/await this\.canUseTool\(e\.request\.tool_name,e\.request\.input,\{signal:t,/);
+  });
+});
+
+/**
+ * THE ECHO OF A USER MESSAGE (`--replay-user-messages`): the only word the shim
+ * gets of a prompt typed on claude.ai (src/engine/replays.ts).
+ */
+describe("the declared user-message echo", () => {
+  const REPLAY = declarationBody(SDK_DTS, "SDKUserMessageReplay");
+
+  it("is marked isReplay", () => {
+    expect(REPLAY).toContain("isReplay: true;");
+  });
+
+  it("states the uuid the echoed message ran under", () => {
+    expect(REPLAY).toMatch(/^ {4}uuid: UUID;$/m);
+  });
+
+  it("states the message's origin", () => {
+    expect(REPLAY).toMatch(/^ {4}origin\?: SDKMessageOrigin;$/m);
+  });
+
+  it("is an arm of the message union the stream yields", () => {
+    expect(SDK_DTS).toMatch(/export declare type SDKMessage = [^;]*\bSDKUserMessageReplay\b/);
+  });
+});
+
 describe("Query methods the shim relies on", () => {
   for (const [name, returnType] of QUERY_METHODS) {
     it(`declares ${name}`, () => {

@@ -42,6 +42,7 @@ import {
   validateSetSessionEffortRequest,
   validateSetSessionModelRequest,
   validateSetSessionPermissionModeRequest,
+  validateSetSessionRemoteControlRequest,
   validateStartSessionRequest,
   validateStartTurnRequest,
   validateStopBashRequest,
@@ -207,6 +208,12 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
         entered("SetSessionPermissionMode");
         validateSetSessionPermissionModeRequest(request);
         return answering("SetSessionPermissionMode", () => engine.setSessionPermissionMode(request));
+      },
+
+      async setSessionRemoteControl(request) {
+        entered("SetSessionRemoteControl");
+        validateSetSessionRemoteControlRequest(request);
+        return answering("SetSessionRemoteControl", () => engine.setSessionRemoteControl(request));
       },
 
       async hibernate(request) {

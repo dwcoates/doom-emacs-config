@@ -9,6 +9,7 @@
  * than silently paid.
  */
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -2226,5 +2227,90 @@ describe("a skill installed mid-session", () => {
     const paths = await awaitSkillsChanged(watch);
     expect(paths.length).toBeGreaterThan(0);
     watch.close();
+  });
+});
+
+describe("SetSessionRemoteControl", () => {
+  /** An ON request under the workspace's name, its fields varied. */
+  const bridgeOn = (fields: { reattachBridgeSessionId?: string } = {}) =>
+    create(shimv1.SetSessionRemoteControlRequestSchema, { enabled: true, name: "parser-fix", ...fields });
+
+  /** The answer's success arm, or the failure's cause. */
+  const answered = (response: shimv1.SetSessionRemoteControlResponse): unknown =>
+    response.result.case === "success"
+      ? { enabled: response.result.value.enabled, bridgeSessionId: response.result.value.bridgeSessionId }
+      : response.result.case === "failure"
+        ? response.result.value.cause.case
+        : "unset";
+
+  test("refuses no_session with no session started", async () => {
+    const shim = await spawnShim();
+
+    const response = await shim.clients.h1.setSessionRemoteControl(bridgeOn());
+
+    expect(answered(response)).toBe("noSession");
+  });
+
+  test("refuses an ON naming no session as InvalidArgument", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    const refusal = await shim.clients.h1
+      .setSessionRemoteControl(create(shimv1.SetSessionRemoteControlRequestSchema, { enabled: true }))
+      .then(
+        () => undefined,
+        (err: unknown) => ConnectError.from(err).code,
+      );
+
+    expect(refusal).toBe(Code.InvalidArgument);
+  });
+
+  test("turns the bridge on with no prompt sent, answering the bridge's claude.ai session id", async () => {
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+
+    const response = await shim.clients.h1.setSessionRemoteControl(bridgeOn());
+
+    expect(answered(response)).toEqual({ enabled: true, bridgeSessionId: `session_fake_${started.vendorSessionId}` });
+  });
+
+  test("re-binds the bridge session a previous shim answered", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    const response = await shim.clients.h1.setSessionRemoteControl(bridgeOn({ reattachBridgeSessionId: "session_prev" }));
+
+    expect(answered(response)).toEqual({ enabled: true, bridgeSessionId: "session_prev" });
+  });
+
+  test("asks the vendor to keep the claude.ai session listed past its process", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const on = shim.log.record((record) => record.message === "fake vendor Remote Control ON");
+
+    await shim.clients.h1.setSessionRemoteControl(bridgeOn());
+
+    expect((await on).context.keep_session_on_exit).toBe(true);
+  });
+
+  test("turns the bridge off, answering it off", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.setSessionRemoteControl(bridgeOn());
+
+    const response = await shim.clients.h1.setSessionRemoteControl(
+      create(shimv1.SetSessionRemoteControlRequestSchema, { enabled: false }),
+    );
+
+    expect(answered(response)).toEqual({ enabled: false, bridgeSessionId: "" });
+  });
+
+  test("answers vendor_refused when the vendor refuses Remote Control", async () => {
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "remote_control" } });
+    await shim.clients.h1.startSession(freshSession());
+
+    const response = await shim.clients.h1.setSessionRemoteControl(bridgeOn());
+
+    expect(answered(response)).toBe("vendorRefused");
   });
 });

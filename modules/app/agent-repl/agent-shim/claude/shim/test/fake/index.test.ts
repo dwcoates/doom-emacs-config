@@ -16,6 +16,7 @@ import { join } from "node:path";
 import {
   createFakeQuery,
   defaultSpoolRoot,
+  fakeBridgeSessionId,
   FAIL_TURN_MARKER,
   FAKE_ACCOUNT_INFO,
   FAKE_AGENTS,
@@ -26,6 +27,7 @@ import {
   TURN_GATE_PATH_ENV,
   TURN_GATE_TEXT_ENV,
   vendorTaskType,
+  type FakeQuery,
 } from "../../src/fake/index.js";
 import type { CanUseToolLike, QueryLike, SdkMessage, SdkUserMessage } from "../../src/sdk/types.js";
 
@@ -1409,5 +1411,146 @@ describe("the task_type a monitor is typed by", () => {
       tasks: { task_type: string }[];
     }[];
     expect(levels.flatMap((level) => level.tasks.map((task) => task.task_type))).toEqual(["local_bash"]);
+  });
+});
+
+/**
+ * THE REMOTE CONTROL BRIDGE, offline (`enableRemoteControl`): a deterministic
+ * bridge session id, a re-bind of the one it is handed, and the refusal lever.
+ */
+describe("enableRemoteControl", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("answers the deterministic bridge session id of a session it was not told to re-bind", async () => {
+    // Arrange
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+
+    // Act
+    const answer = await query.enableRemoteControl(true, "parser-fix", { keepSessionOnExit: true });
+
+    // Assert
+    expect(answer.bridge_session_id).toBe(fakeBridgeSessionId("s"));
+  });
+
+  it("re-binds the bridge session it is handed", async () => {
+    // Arrange
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+
+    // Act
+    const answer = await query.enableRemoteControl(true, "parser-fix", { reattachSessionId: "session_prev" });
+
+    // Assert
+    expect(answer.bridge_session_id).toBe("session_prev");
+  });
+
+  it("records the call: its name, its re-bind and keep-on-exit", async () => {
+    // Arrange
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+    const from = logRecordsSince(0).length;
+
+    // Act
+    await query.enableRemoteControl(true, "parser-fix", { reattachSessionId: "session_prev", keepSessionOnExit: true });
+
+    // Assert
+    const record = logRecordsSince(0)
+      .slice(from)
+      .find((candidate) => candidate.message === "fake vendor Remote Control ON");
+    expect(record?.context).toMatchObject({
+      bridge_name: "parser-fix",
+      reattach_bridge_session_id: "session_prev",
+      keep_session_on_exit: true,
+    });
+  });
+
+  it("answers nothing for an OFF", async () => {
+    // Arrange
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+
+    // Act + Assert
+    await expect(query.enableRemoteControl(false)).resolves.toEqual({});
+  });
+
+  it("refuses when told to refuse remote_control", async () => {
+    // Arrange
+    vi.stubEnv("AGENT_REPL_FAKE_REFUSE", "remote_control");
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+
+    // Act + Assert
+    await expect(query.enableRemoteControl(true, "parser-fix")).rejects.toThrow(/refused Remote Control/);
+  });
+});
+
+/** `--replay-user-messages`, offline: every message a turn takes is echoed, or none is. */
+describe("the echoes of user messages", () => {
+  it("echoes each send under the uuid it carried, ahead of its turn's first reply", async () => {
+    // Arrange, Act
+    const driven = await driveScenario(["hello"], { clientUuids: ["ua"], opts: { replayUserMessages: true } });
+
+    // Assert
+    const lines = driven.messages as unknown as Record<string, unknown>[];
+    const echoAt = lines.findIndex((line) => line.type === "user" && line.isReplay === true);
+    const replyAt = lines.findIndex((line) => line.type === "stream_event" || line.type === "assistant");
+    expect([lines[echoAt]?.uuid, echoAt < replyAt]).toEqual(["ua", true]);
+  });
+
+  it("echoes nothing without the flag", async () => {
+    // Arrange, Act
+    const driven = await driveScenario(["hello"], { clientUuids: ["ua"] });
+
+    // Assert
+    expect(
+      (driven.messages as unknown as Record<string, unknown>[]).filter((line) => line.isReplay === true),
+    ).toEqual([]);
+  });
+});
+
+/** A prompt typed on claude.ai (`injectRemotePrompt`): a turn the host never sent. */
+describe("injectRemotePrompt", () => {
+  it("queues nothing while the bridge is off", () => {
+    // Arrange
+    const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
+
+    // Act + Assert
+    expect(query.injectRemotePrompt("hello")).toBeUndefined();
+  });
+
+  it("runs a turn stamped with the remote prompt's uuid while the bridge is on", async () => {
+    // Arrange
+    let uuid: string | undefined;
+
+    // Act
+    const driven = await driveScenario([], {
+      during: async (query, _feeder, messages) => {
+        await query.enableRemoteControl(true, "parser-fix");
+        uuid = (query as FakeQuery).injectRemotePrompt("hello");
+        await vi.waitFor(() => {
+          expect(messages.some((message) => message.type === "result")).toBe(true);
+        });
+      },
+    });
+
+    // Assert
+    expect(theResult(driven).user_message_uuid).toBe(uuid);
+  });
+
+  it("files the remote prompt in the transcript as a person's, from the bridge", async () => {
+    // Arrange, Act
+    const driven = await driveScenario([], {
+      during: async (query, _feeder, messages) => {
+        await query.enableRemoteControl(true, "parser-fix");
+        (query as FakeQuery).injectRemotePrompt("hello");
+        await vi.waitFor(() => {
+          expect(messages.some((message) => message.type === "result")).toBe(true);
+        });
+      },
+    });
+
+    // Assert
+    expect(recordsOfType(driven.transcript(), "user")[0]).toMatchObject({
+      origin: { kind: "human" },
+      promptSource: "bridge",
+    });
   });
 });

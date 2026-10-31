@@ -49,6 +49,7 @@ import { LIFECYCLE_SCENARIOS } from "./scenarios/lifecycle.js";
 import { PERMISSION_SCENARIOS } from "./scenarios/permissions.js";
 import { PROSE, PROSE_SCENARIOS } from "./scenarios/prose.js";
 import { QUESTION_SCENARIOS } from "./scenarios/questions.js";
+import { REMOTE_SCENARIOS } from "./scenarios/remote.js";
 import { SESSION_SCENARIOS } from "./scenarios/session.js";
 import { SHELL_SCENARIOS } from "./scenarios/shell.js";
 import { SKILL_SCENARIOS } from "./scenarios/skills.js";
@@ -75,6 +76,7 @@ export const SCENARIOS: readonly Scenario[] = [
   ...SESSION_SCENARIOS,
   ...FAILURE_SCENARIOS,
   ...LIFECYCLE_SCENARIOS,
+  ...REMOTE_SCENARIOS,
 ];
 
 /**

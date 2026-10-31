@@ -63,6 +63,7 @@ import type {
   SDKThinkingTokensMessage,
   SDKToolProgressMessage,
   SDKUserMessage,
+  SDKUserMessageReplay,
   RewindFilesResult,
   SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -81,6 +82,14 @@ export type SdkMessage = SDKMessage;
 
 /** The streaming-input user message the shim pushes into the query. */
 export type SdkUserMessage = SDKUserMessage;
+/**
+ * `type: "user", isReplay: true` — the vendor's ECHO of a user message it took
+ * into a turn, emitted only under `--replay-user-messages`
+ * (sdk/real-query.ts). The shim's own sends come back under the uuid it sent;
+ * one under any other uuid is a prompt the vendor queued itself (a Remote
+ * Control prompt typed on claude.ai, engine/replays.ts).
+ */
+export type SdkUserMessageReplay = SDKUserMessageReplay;
 
 /** `type: "assistant"` — one API response's content blocks, whole. */
 export type SdkAssistantMessage = SDKAssistantMessage;
@@ -199,6 +208,36 @@ export type InterruptReceipt = SDKControlInterruptResponse;
 /** `Query.rewindFiles`' answer: whether the files can go back, and which did. */
 export type RewindFilesResultLike = RewindFilesResult;
 
+/**
+ * `Query.enableRemoteControl()`'s options, as far as the shim sends them.
+ *
+ * UNDECLARED BY THE VENDOR: the SDK's runtime provides the method (it sends the
+ * `remote_control` control request with `reattach_session_id` and
+ * `keep_session_on_exit`), but `sdk.d.ts` declares neither it nor the request.
+ * The sdk-canary suite fails if the runtime method or those two request fields
+ * disappear.
+ */
+export interface RemoteControlOptionsLike {
+  /** The bridge session a previous vendor process held, to re-bind rather than list a new one. */
+  readonly reattachSessionId?: string;
+  /** Keep the claude.ai session listed when this vendor process exits, so the next one re-binds it. */
+  readonly keepSessionOnExit?: boolean;
+}
+
+/**
+ * `Query.enableRemoteControl()`'s answer: the CLI's `remote_control` control
+ * response. Every field is `unknown` because nothing declares it; the shim
+ * reads `bridge_session_id` alone (engine/remote-control.ts, `bridgeSessionIdOf`)
+ * and records the rest only in its log.
+ */
+export interface RemoteControlAnswerLike {
+  readonly bridge_session_id?: unknown;
+  readonly session_url?: unknown;
+  readonly connect_url?: unknown;
+  readonly environment_id?: unknown;
+  readonly bridge_epoch?: unknown;
+}
+
 // ---------------------------------------------------------------------------
 // The query surface the shim actually drives
 // ---------------------------------------------------------------------------
@@ -268,6 +307,18 @@ export interface QueryLike extends AsyncIterable<SdkMessage> {
    * SDK's runtime provides.
    */
   cancelAsyncMessage(messageUuid: string): Promise<boolean>;
+  /**
+   * Turn the session's Remote Control bridge (claude.ai) on or off, under the
+   * name claude.ai lists it by (the `remote_control` control request). A
+   * refusal (Remote Control disabled by policy, the account not eligible, the
+   * bridge failing to connect) rejects. UNDECLARED BY THE VENDOR, like
+   * `getSettings`; see {@link RemoteControlOptionsLike}.
+   */
+  enableRemoteControl(
+    enabled: boolean,
+    name?: string,
+    options?: RemoteControlOptionsLike,
+  ): Promise<RemoteControlAnswerLike>;
   /** Release the query and the CLI child behind it. */
   close(): void;
 }
@@ -282,12 +333,12 @@ export interface QueryLike extends AsyncIterable<SdkMessage> {
  */
 type Assert<T extends true> = T;
 //
-// `getSettings` and `cancelAsyncMessage` are the members the vendor does not
-// declare; they are held to the runtime instead (`asQueryLike` in
-// real-query.ts, and the sdk-canary suite), and every other member to the
-// declaration here.
+// `getSettings`, `cancelAsyncMessage` and `enableRemoteControl` are the
+// members the vendor does not declare; they are held to the runtime instead
+// (`asQueryLike` in real-query.ts, and the sdk-canary suite), and every other
+// member to the declaration here.
 type _QueryStillSatisfiesQueryLike = Assert<
-  Query extends Omit<QueryLike, "getSettings" | "cancelAsyncMessage"> ? true : false
+  Query extends Omit<QueryLike, "getSettings" | "cancelAsyncMessage" | "enableRemoteControl"> ? true : false
 >;
 
 /**

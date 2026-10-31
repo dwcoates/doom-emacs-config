@@ -152,6 +152,31 @@ export function validateSetSessionEffortRequest(request: shimv1.SetSessionEffort
   }
 }
 
+/**
+ * `shim.v1.SetSessionRemoteControlRequest` — ON names the session, as
+ * claude.ai lists it; a stated reattach id is never empty.
+ *
+ * OFF IGNORES BOTH, as the contract says: the name and the reattach id only
+ * describe a bridge being brought up, so neither is refused on an OFF.
+ */
+export function validateSetSessionRemoteControlRequest(request: shimv1.SetSessionRemoteControlRequest): void {
+  try {
+    if (!request.enabled) return;
+    if (request.name === "") {
+      throw invalidArgument(
+        "set_session_remote_control.name is empty; claude.ai lists a bridged session by the workspace's name",
+      );
+    }
+    if (request.reattachBridgeSessionId === "") {
+      throw invalidArgument(
+        "set_session_remote_control.reattach_bridge_session_id is set but empty; omit it to create a new bridge session",
+      );
+    }
+  } catch (err) {
+    refuse("SetSessionRemoteControl", err);
+  }
+}
+
 /** `shim.v1.HibernateRequest` — empty by design; see validateWatchSessionRequest. */
 export function validateHibernateRequest(_request: shimv1.HibernateRequest): void {
   // No fields. Nothing to refuse.

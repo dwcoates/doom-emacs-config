@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import {
+  FOREIGN_PROMPTS_REMEMBERED,
   OPEN_SENDS_BOUND,
   RETIRED_SENDS_REMEMBERED,
   SendLedger,
@@ -672,5 +673,128 @@ describe("the send ledger's lifecycle path, for peer sends", () => {
 
     // Assert
     expect(replies).toEqual([["peer-turn", 1.5]]);
+  });
+});
+
+/**
+ * A prompt typed on claude.ai, named by its own echo (the file comment's "A
+ * REMOTE PROMPT IS NAMED BY ITS OWN ECHO"): stated to the ledger before any
+ * reply to it, a frame stamped with its uuid is its turn's.
+ */
+describe("the send ledger's remote prompts", () => {
+  const REMOTE = "00000000-0000-4000-8000-0000000000re";
+
+  it("opens a vendor-started turn on a reply stamped with a remote prompt between turns", () => {
+    // Arrange
+    const ledger = ledgerWith();
+    ledger.foreign(REMOTE);
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(REMOTE)));
+
+    // Assert
+    expect([turnOf(verdict), verdict.openedVendorTurn]).toEqual(["vendor", true]);
+  });
+
+  it("opens a vendor-started turn on a stamped result with no reply ahead of it", () => {
+    // Arrange
+    const ledger = ledgerWith();
+    ledger.foreign(REMOTE);
+
+    // Act
+    const verdict = ledger.attribute(result(stamp(REMOTE)));
+
+    // Assert
+    expect([turnOf(verdict), verdict.openedVendorTurn, verdict.ended]).toEqual(["vendor", true, true]);
+  });
+
+  it("keeps a remote prompt's later frames on the vendor-started turn it opened", () => {
+    // Arrange
+    const ledger = ledgerWith();
+    ledger.foreign(REMOTE);
+    ledger.attribute(streamEvent(stamp(REMOTE)));
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(REMOTE)));
+
+    // Assert
+    expect([turnOf(verdict), verdict.openedVendorTurn]).toEqual(["vendor", false]);
+  });
+
+  it("leaves a send's running turn as the send's when a frame names a remote prompt folded into it", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST);
+    ledger.attribute(reply(stamp(FIRST.uuid)));
+    ledger.foreign(REMOTE);
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(REMOTE)));
+
+    // Assert
+    expect([turnOf(verdict), verdict.openedVendorTurn]).toEqual(["send:turn-1", false]);
+  });
+
+  it("attributes a frame naming a remote prompt and a send of ours to the send", () => {
+    // Arrange
+    const ledger = ledgerWith(FIRST);
+    ledger.foreign(REMOTE);
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(REMOTE, FIRST.uuid)));
+
+    // Assert
+    expect(turnOf(verdict)).toBe("send:turn-1");
+  });
+
+  it("records no unknown echo for a frame naming a remote prompt", () => {
+    // Arrange
+    const ledger = ledgerWith();
+    ledger.foreign(REMOTE);
+    const mark = logSinkMark();
+
+    // Act
+    ledger.attribute(reply(stamp(REMOTE)));
+
+    // Assert
+    expect(logRecordsSince(mark).filter((record) => record.level === "error")).toEqual([]);
+  });
+
+  it("still records a uuid nobody stated at ERROR", () => {
+    // Arrange
+    const ledger = ledgerWith();
+    ledger.foreign(REMOTE);
+    const mark = logSinkMark();
+
+    // Act
+    ledger.attribute(reply(stamp(STRANGER)));
+
+    // Assert
+    expect(logRecordsSince(mark).some((record) => record.level === "error" && record.message.includes("never sent"))).toBe(true);
+  });
+
+  it("forgets the oldest remote prompt once more than its bound were stated", () => {
+    // Arrange
+    const ledger = ledgerWith();
+    ledger.foreign(REMOTE);
+    for (let index = 0; index < FOREIGN_PROMPTS_REMEMBERED; index++) ledger.foreign(`remote-${index}`);
+
+    // Act
+    const verdict = ledger.attribute(reply(stamp(REMOTE)));
+
+    // Assert
+    expect(turnOf(verdict)).toBe("unknown");
+  });
+
+  it("ends the remote prompt's turn on its result", () => {
+    // Arrange
+    const ledger = ledgerWith();
+    ledger.foreign(REMOTE);
+    ledger.attribute(reply(stamp(REMOTE)));
+
+    // Act
+    ledger.attribute(result(stamp(REMOTE)));
+
+    // Assert
+    expect(ledger.current().kind).toBe("unstated");
   });
 });

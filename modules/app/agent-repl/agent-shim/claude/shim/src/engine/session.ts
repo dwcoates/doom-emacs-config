@@ -86,10 +86,13 @@ import type {
   QueryLike,
   SdkMessage,
   SdkUserMessage,
+  SdkUserMessageReplay,
   ContextUsageLike,
   McpServerStatusLike,
   ModelInfoLike,
 } from "../sdk/types.js";
+import { RemoteControl } from "./remote-control.js";
+import { classifyReplay, isReplay, OwnSends } from "./replays.js";
 import {
   forkPointAnswered,
   forkSessionAnswered,
@@ -109,6 +112,8 @@ import {
   setSessionEffortRefused,
   setSessionModelRefused,
   setSessionPermissionModeRefused,
+  setSessionRemoteControlRefused,
+  setSessionRemoteControlSucceeded,
   startSessionRefused,
   startSessionStarted,
   titleDigestGathered,
@@ -273,6 +278,13 @@ export interface QuerySpec {
    * the mocked vendor has no child to end.
    */
   readonly onChildExit?: (exit: VendorEnd) => void;
+  /**
+   * Have the vendor echo every user message it takes into a turn
+   * (`--replay-user-messages`, sdk/real-query.ts). Set on every agent
+   * session's own query, so Remote Control can be turned on without a new
+   * vendor process; a side query never asks for it.
+   */
+  readonly replayUserMessages?: boolean;
 }
 
 /**
@@ -628,6 +640,30 @@ const COMMAND_CATALOG_COMPONENT = "vendor-command-catalog";
 const LIVE_WORK_COMPONENT = "store-live-work";
 /** The shim's own keep-alive prompt: transient, recovered by the next beat. */
 const KEEPALIVE_COMPONENT = "shim-engine-keepalive";
+/**
+ * The Remote Control bridge put back in force on a new vendor process:
+ * recovered by the next one that takes, or by a SetSessionRemoteControl.
+ */
+const REMOTE_CONTROL_COMPONENT = "vendor-remote-control";
+
+/**
+ * How many prompts typed on claude.ai may wait for the turn they open.
+ *
+ * A remote prompt's echo arrives at its turn's start, and the turn's first
+ * reply follows it at once; two waiting at the same moment are a batch the
+ * vendor merged. More than this waiting with no turn ever starting is an
+ * invariant break, recorded at ERROR, and the oldest is dropped so the wait
+ * stays constant-size.
+ */
+const REMOTE_PROMPTS_WAITING_BOUND = 16;
+
+/** A prompt typed on claude.ai, as its echo stated it (engine/replays.ts). */
+interface RemotePrompt {
+  readonly uuid: string;
+  readonly said: conversationv1.UserSaid;
+  /** The echo itself: the transcript record the prompt is filed as. */
+  readonly message: SdkUserMessageReplay;
+}
 
 /** What one keep-alive beat did: submitted, or why not. */
 type KeepaliveBeatOutcome =
@@ -737,6 +773,25 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * that uuid, once, in {@link onSdkMessage}. Arrival order attributes nothing.
    */
   const sends = new SendLedger((_send, seconds) => measurements.observeFirstOutput(seconds));
+  /**
+   * EVERY UUID THE SHIM SENT UNDER (engine/replays.ts): the vendor echoes each
+   * send under `--replay-user-messages`, and an echo of one of these is
+   * dropped before anything else reads it.
+   */
+  const ownSends = new OwnSends();
+  /**
+   * THE SESSION'S REMOTE CONTROL BRIDGE (engine/remote-control.ts): what the
+   * daemon last asked for that the vendor accepted, put back in force on every
+   * vendor process the session opens.
+   */
+  const remoteControl = new RemoteControl();
+  /**
+   * THE PROMPTS TYPED ON claude.ai WAITING FOR THEIR TURN: each echoed while no
+   * vendor turn was running, so the turn it opens (or the send's turn it joins)
+   * is not yet known. Spent by the next attributed frame
+   * ({@link adoptVendorTurn}, {@link foldWaitingRemotePrompts}).
+   */
+  let remotePromptsWaiting: RemotePrompt[] = [];
   /**
    * The peer sends awaiting the vendor's word that it queued them
    * (engine/peer-send.ts): an agent's prompt is accepted only once the vendor
@@ -1256,6 +1311,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     },
     onAskOpened: () => withdrawJoinsForAsk(),
     unattended: () => open?.unattended === true,
+    remoteControl: () => remoteControl.enabled,
   });
 
   /** Whether the ask raised on `agentId`'s book is the keep-alive's. */
@@ -2313,6 +2369,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   // -- the message loop -----------------------------------------------------
 
   async function onSdkMessage(vendorMessage: SdkMessage): Promise<void> {
+    // THE VENDOR'S ECHO OF A USER MESSAGE, BEFORE ANYTHING ELSE READS IT
+    // (engine/replays.ts). The echo of one of the shim's own sends is dropped
+    // here, so asking for echoes (`--replay-user-messages`) changes nothing
+    // any other reading of the stream sees; a prompt typed on claude.ai is
+    // taken to the turn it starts or joins.
+    if (isReplay(vendorMessage)) {
+      noteReplay(vendorMessage);
+      return;
+    }
     // THE TASK'S KIND, TAKEN ONCE, before anything reads it: the live table
     // below and the fold read the same restated `task_type`, so a monitor the
     // vendor typed as a shell is a monitor to both (convert/detached.ts
@@ -2340,6 +2405,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // A turn the keep-alive's own rewind set off is the keep-alive's: tagged,
     // never adopted (engine/keepalive.ts `attribute`).
     if (verdict.openedVendorTurn && !attribution.keepalive) await adoptVendorTurn(message, verdict);
+    // A PROMPT TYPED ON claude.ai THAT WAITED FOR ITS TURN joins the turn this
+    // frame names, when no adoption took it.
+    if (remotePromptsWaiting.length > 0 && !attribution.keepalive) foldWaitingRemotePrompts(verdict.turn);
     // AFTER the adoption: the adopting message's own instant is the new
     // turn's, so it must not lift the bound its prompt is placed at.
     noteMainRecordInstant(message);
@@ -2369,6 +2437,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const awaitingAgent = deps.fold.taskAwaitingAgent(message, foldContext(attribution, verdict.turn));
     if (awaitingAgent !== undefined) await agentFromStore(awaitingAgent, "announcement");
     converterDefectThisMessage = false;
+    // WHAT IT SAYS OF AN ASK THE VENDOR WITHDREW (Remote Control), before the
+    // fold, so the ask's settlement lands ahead of the rows that proved it.
+    gate.noteVendorMessage(message);
     const output = deps.fold.onSdkMessage(message, foldContext(attribution, verdict.turn));
     if (message.type === "result" && !attribution.keepalive) retireStopCommand("the stopped turn's result was folded");
     if (converterDefectThisMessage) {
@@ -2536,7 +2607,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const turn = mintAdoptedTurn();
     adopted = turn;
     cadence?.pause();
-    writeAdoptedPrompt(turn, "the vendor started a turn with no send of the shim's answering", messageKind(message));
+    // A PROMPT TYPED ON claude.ai IS WHAT STARTED IT, when one waits: the
+    // first waiting is the turn's own prompt, and any other waiting beside it
+    // was merged into the same turn by the vendor.
+    const remote = remotePromptsWaiting.shift();
+    writeAdoptedPrompt(
+      turn,
+      remote === undefined
+        ? "the vendor started a turn with no send of the shim's answering"
+        : "a prompt typed on claude.ai started a turn",
+      messageKind(message),
+      remote,
+    );
+    if (remote !== undefined) foldWaitingRemotePrompts({ kind: "vendor" });
   }
 
   /**
@@ -2586,27 +2669,131 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * agent to resume a network-killed subagent ({@link deliverNetworkResume}),
    * so the two cannot announce a turn differently.
    */
-  function writeAdoptedPrompt(turn: OpenTurn, cause: string, firstMessage: string): void {
+  function writeAdoptedPrompt(turn: OpenTurn, cause: string, firstMessage: string, remote?: RemotePrompt): void {
     const agentId = requireIdentity().agentId;
+    // A REMOTE PROMPT'S ROW SAYS WHAT WAS SAID (PROMPT_ORIGIN_REMOTE_CONTROL);
+    // a turn the vendor started on its own has nobody's words (VENDOR_STARTED).
     const prompt = buildPrompt(
       turn.id,
       agentId,
-      create(conversationv1.UserSaidSchema, { content: create(conversationv1.UserContentSchema, {}) }),
-      conversationv1.PromptOrigin.VENDOR_STARTED,
+      remote?.said ?? create(conversationv1.UserSaidSchema, { content: create(conversationv1.UserContentSchema, {}) }),
+      remote === undefined ? conversationv1.PromptOrigin.VENDOR_STARTED : conversationv1.PromptOrigin.REMOTE_CONTROL,
     );
     const place = adoptedPromptPlace();
     const entry = promptEntry(prompt, agentId, false);
     deps.persistence.write([place === undefined ? entry : { ...entry, recordPlace: place }]);
+    // THE REMOTE PROMPT IS A RECORD OF THE TURN IT OPENED, booked where every
+    // record is (the rewind's anchor and span, the fork point).
+    if (remote !== undefined) {
+      noteConversationRecord(remote.message, { turnId: turn.id.value, keepalive: false, adopted: true });
+    }
     LOGGER.info(
       {
         turn_id: turn.id.value,
         place_at_ms: place?.atMs ?? "observed",
         cause,
         first_message: firstMessage,
+        origin: remote === undefined ? "vendor_started" : "remote_control",
+        remote_prompt_uuid: remote?.uuid ?? "",
         vendor_session_id: identity?.vendorSessionId ?? "",
         send_slot: open === undefined ? "" : open.keepalive ? "keepalive" : open.id.value,
       },
-      "adopted a turn the vendor started on its own; it runs as a real turn under a shim-minted id",
+      remote === undefined
+        ? "adopted a turn the vendor started on its own; it runs as a real turn under a shim-minted id"
+        : "adopted a turn a prompt typed on claude.ai started; it runs as a real turn under a shim-minted id",
+    );
+  }
+
+  /**
+   * THE VENDOR ECHOED A USER MESSAGE (engine/replays.ts). The shim's own send
+   * and a foreign message that is no person's prompt are dropped; a prompt
+   * typed on claude.ai is stated to the send ledger, so the frames answering
+   * it are its turn's, and then:
+   *   - while a vendor turn runs, the vendor folded it into that turn: its
+   *     row is written there with `folded_into`, and it opens no turn;
+   *   - between turns, it is what starts the next turn (or a send of ours
+   *     the vendor merged it with), and it waits for that turn's first
+   *     attributed frame.
+   */
+  function noteReplay(message: SdkUserMessageReplay): void {
+    const replay = classifyReplay(message, ownSends);
+    if (replay.kind === "own") {
+      LOGGER.logVerbose({ client_uuid: replay.uuid }, "dropped the vendor's echo of one of the shim's own sends");
+      return;
+    }
+    if (replay.kind === "other") {
+      LOGGER.debug(
+        { client_uuid: replay.uuid, why: replay.why },
+        "dropped the vendor's echo of a message the shim did not send that is no person's prompt",
+      );
+      return;
+    }
+    if (!remoteControl.enabled) {
+      // warn: a decision because a person's prompt the shim never sent can only have come over a bridge the shim did not turn on (a vendor setting), and it is adopted rather than lost.
+      LOGGER.warn(
+        { client_uuid: replay.uuid },
+        "the vendor ran a person's prompt the shim did not send while Remote Control is off here; it is adopted as a remote prompt",
+      );
+    }
+    sends.foreign(replay.uuid);
+    const prompt: RemotePrompt = { uuid: replay.uuid, said: replay.said, message };
+    const running = sends.current();
+    const into = running.kind === "send" || running.kind === "vendor" ? turnFor(false, running) : undefined;
+    if (into !== undefined) {
+      writeRemoteFolded(prompt, into, running);
+      return;
+    }
+    if (remotePromptsWaiting.length >= REMOTE_PROMPTS_WAITING_BOUND) {
+      const dropped = remotePromptsWaiting.shift();
+      LOGGER.error(
+        {
+          client_uuid: dropped?.uuid ?? "",
+          waiting: REMOTE_PROMPTS_WAITING_BOUND,
+          detail: "a remote prompt's echo comes at its turn's start, and the turn's first reply follows it",
+        },
+        "too many prompts typed on claude.ai waited for a turn that never started; the oldest is dropped unrecorded",
+      );
+    }
+    remotePromptsWaiting = [...remotePromptsWaiting, prompt];
+    LOGGER.info(
+      { client_uuid: replay.uuid, waiting: remotePromptsWaiting.length, send_slot: open?.id.value ?? "" },
+      "a prompt typed on claude.ai arrived ahead of its turn; the turn's first frame says which turn it is",
+    );
+  }
+
+  /**
+   * The waiting remote prompts join the turn `running` names, when it names
+   * one this session holds: each is written folded into it. With no such turn
+   * they keep waiting.
+   */
+  function foldWaitingRemotePrompts(running: VendorTurn): void {
+    if (running.kind !== "send" && running.kind !== "vendor") return;
+    const into = turnFor(false, running);
+    if (into === undefined) return;
+    const waiting = remotePromptsWaiting;
+    remotePromptsWaiting = [];
+    for (const prompt of waiting) writeRemoteFolded(prompt, into, running);
+  }
+
+  /**
+   * A remote prompt the vendor took into the running turn `into`: its
+   * `PROMPT_ORIGIN_REMOTE_CONTROL` row, naming that turn, under a shim-minted
+   * id. It opens no turn of its own.
+   */
+  function writeRemoteFolded(prompt: RemotePrompt, into: conversationv1.TurnId, running: VendorTurn): void {
+    const agentId = requireIdentity().agentId;
+    const row = create(conversationv1.AgentPromptSchema, {
+      id: mintAdoptedTurn().id,
+      agent: agentId,
+      said: prompt.said,
+      origin: conversationv1.PromptOrigin.REMOTE_CONTROL,
+      foldedInto: into,
+    });
+    deps.persistence.write([promptEntry(row, agentId, false)]);
+    noteConversationRecord(prompt.message, { turnId: into.value, keepalive: false, adopted: running.kind === "vendor" });
+    LOGGER.info(
+      { client_uuid: prompt.uuid, prompt_id: row.id?.value ?? "", folded_into: into.value, running: running.kind },
+      "a prompt typed on claude.ai was folded into the running turn; it opens no turn of its own",
     );
   }
 
@@ -3838,6 +4025,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     settleStartOnQueryEnd(detail);
     peerAdmissions.abandonAll(detail);
     gate.standDown(`the vendor query died: ${detail}`);
+    letRemotePromptsGo(`the vendor query died: ${detail}`);
     // NOTHING THE DEAD QUERY ANNOUNCED CAN SETTLE, so the fold lets go of it.
     deps.fold.endQuery(`the vendor query died: ${detail}`);
     query = undefined;
@@ -3956,6 +4144,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * from, and the SENDER's own permission class when the daemon declared one.
    */
   function userMessage(content: SaidContent, clientUuid: string, peer?: PeerDeclaration): SdkUserMessage {
+    // THE VENDOR ECHOES IT UNDER THIS UUID (`--replay-user-messages`), and the
+    // echo is dropped by it (engine/replays.ts).
+    ownSends.note(clientUuid);
     if (peer === undefined) {
       return {
         type: "user",
@@ -4780,6 +4971,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // THE REPLACED QUERY ANSWERS NOTHING MORE, so nothing it announced can
     // settle; the fold lets go of it before the new query's first message.
     deps.fold.endQuery("the query was replaced");
+    // AN ASK IT WITHDREW CAN NO LONGER BE TOLD APART (Remote Control): the
+    // query whose next word would have said how it ended is gone.
+    gate.settleWithdrawn("the vendor query was replaced");
+    letRemotePromptsGo("the vendor query was replaced");
     return startQuery(options.binding, options);
   }
 
@@ -4804,8 +4999,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const queue = new PromptQueue();
     const controller = new AbortController();
+    const sessionKind = sessionProfile().kind;
     const created = await deps.createQuery({
       profile: sessionProfile(),
+      // EVERY AGENT SESSION'S QUERY ECHOES ITS USER MESSAGES, so Remote
+      // Control can be turned on without a new vendor process
+      // (engine/replays.ts).
+      ...(sessionKind === "agent" ? { replayUserMessages: true } : {}),
       binding,
       workspaceName: requireWorkspaceName(),
       permissionMode: toVendorPermissionMode(permissionMode),
@@ -4833,7 +5033,40 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const park: LoopPark = { at: "vendor", message: "", sinceMs: deps.nowMs() };
     loopPark = park;
     loop = runLoop(created, park, released.signal);
+    // THE BRIDGE IN FORCE IS PUT BACK ON EVERY NEW VENDOR PROCESS, re-binding
+    // the same claude.ai session (engine/remote-control.ts). Not awaited: the
+    // bridge is the vendor's own connection, and nothing the query does next
+    // waits on it.
+    if (remoteControl.enabled) void reapplyRemoteControl(created);
     return created;
+  }
+
+  /** Put the held bridge back in force on `created`, the query just opened. */
+  async function reapplyRemoteControl(created: QueryLike): Promise<void> {
+    const outcome = await remoteControl.reapply(created, "a new vendor process", () => query === created);
+    if (outcome === undefined) return;
+    if (outcome.kind === "refused") {
+      // NOT STANDING NOW IS NOT A FAULT: a query let go while the call ran
+      // (a refused rollback boot) is replaced by one that is owed it too.
+      if (query !== created) return;
+      LOGGER.error(
+        { cause: outcome.detail, bridge_session_id: remoteControl.bridgeSessionId ?? "" },
+        "the Remote Control bridge could not be put back on the new vendor process; claude.ai cannot reach the session",
+      );
+      pushes.fault(sessionFault({ kind: "vendorQueryFailed" }, REMOTE_CONTROL_COMPONENT, outcome.detail));
+      return;
+    }
+    pushes.resolveComponent(REMOTE_CONTROL_COMPONENT, 0);
+  }
+
+  /** The remote prompts still waiting for a turn are let go with the query they came on. */
+  function letRemotePromptsGo(why: string): void {
+    if (remotePromptsWaiting.length === 0) return;
+    LOGGER.info(
+      { waiting: remotePromptsWaiting.length, why, uuids: remotePromptsWaiting.map((prompt) => prompt.uuid).join(",") },
+      "prompts typed on claude.ai that were waiting for a turn are let go with their query; none of them started one",
+    );
+    remotePromptsWaiting = [];
   }
 
   /** The session's profile; a query before StartSession set it is a bug. */
@@ -6715,6 +6948,52 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * Put the session's Remote Control bridge in the requested state
+   * (shim.v1.SetSessionRemoteControl), on the live query now and on every
+   * vendor process the session opens from here on (`startQuery`).
+   *
+   * THE VENDOR PROCESS IS ALREADY UP. StartSession opens the session's query
+   * at once and proves it live on a control round-trip, and the vendor answers
+   * control requests before any first turn, so a bridged session is reachable
+   * from claude.ai with no prompt sent here. The one session with no query is
+   * one whose query died, which nothing in this process restarts: it has no
+   * session to bridge.
+   */
+  async function setSessionRemoteControl(
+    request: shimv1.SetSessionRemoteControlRequest,
+  ): Promise<shimv1.SetSessionRemoteControlResponse> {
+    if (!started || identity === undefined) {
+      return setSessionRemoteControlRefused({ kind: "noSession" }, "no session has been started on this shim");
+    }
+    const active = query;
+    if (active === undefined) {
+      LOGGER.info(
+        { enabled: request.enabled },
+        "refused SetSessionRemoteControl: the session's vendor query is gone, and nothing in this process restarts it",
+      );
+      return setSessionRemoteControlRefused(
+        { kind: "noSession" },
+        "the session's vendor query is gone, and nothing in this process restarts it",
+      );
+    }
+    const outcome = await remoteControl.set(active, {
+      enabled: request.enabled,
+      name: request.name,
+      ...(request.reattachBridgeSessionId === undefined ? {} : { reattachBridgeSessionId: request.reattachBridgeSessionId }),
+    });
+    switch (outcome.kind) {
+      case "on":
+        pushes.resolveComponent(REMOTE_CONTROL_COMPONENT, 0);
+        return setSessionRemoteControlSucceeded({ enabled: true, bridgeSessionId: outcome.bridgeSessionId });
+      case "off":
+        pushes.resolveComponent(REMOTE_CONTROL_COMPONENT, 0);
+        return setSessionRemoteControlSucceeded({ enabled: false });
+      case "refused":
+        return setSessionRemoteControlRefused({ kind: "vendorRefused" }, outcome.detail);
+    }
+  }
+
+  /**
    * The pre-hibernation directive.
    *
    * IT STOPS THE SHIM AND THAT IS ALL IT DOES (owner's ruling, 2026-09-20).
@@ -7614,6 +7893,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     setSessionModel: afterRestart(setSessionModel),
     setSessionEffort: afterRestart(setSessionEffort),
     setSessionPermissionMode: afterRestart(setSessionPermissionMode),
+    setSessionRemoteControl: afterRestart(setSessionRemoteControl),
     hibernate: afterRestart(hibernate),
     sendKeepalive: afterRestart(sendKeepalive),
     retryVendorErrorNow: afterRestart(retryVendorErrorNow),

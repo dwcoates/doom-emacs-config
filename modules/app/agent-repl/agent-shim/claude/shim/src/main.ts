@@ -79,6 +79,7 @@ import {
   type PersistenceRetryPolicy,
 } from "./store/persistence.js";
 import { boundSessionId, createRealQuery, PER_TASK_STOP_AFFORDANCE } from "./sdk/real-query.js";
+import type { QueryLike } from "./sdk/types.js";
 import { createFakeQuery } from "./fake/index.js";
 import { forkFakeSession } from "./fake/fork.js";
 import { forkRealSession } from "./sdk/real-fork.js";
@@ -790,7 +791,8 @@ export function logCorrelation(
  */
 export interface QueryVendors {
   real: typeof createRealQuery;
-  fake: typeof createFakeQuery;
+  /** The mocked vendor; the engine drives it as the `QueryLike` it is. */
+  fake: (...args: Parameters<typeof createFakeQuery>) => QueryLike;
 }
 
 /** Production's vendor constructors. */
@@ -830,6 +832,7 @@ export function queryFactory(
           ...(spec.onChildExit === undefined ? {} : { onChildExit: spec.onChildExit }),
           ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
           ...(spec.resumeDropsTurn === undefined ? {} : { resumeDropsTurn: spec.resumeDropsTurn }),
+          ...(spec.replayUserMessages === true ? { replayUserMessages: true } : {}),
         },
         spec.prompt,
       );
@@ -861,6 +864,8 @@ export function queryFactory(
         // THE SAME DECLARATION THE REAL QUERY MAKES, so the mock's interrupt
         // runs under the posture production runs under.
         perTaskStopAffordance: PER_TASK_STOP_AFFORDANCE,
+        // THE SAME ECHOES THE REAL CLI GIVES UNDER `--replay-user-messages`.
+        ...(spec.replayUserMessages === true ? { replayUserMessages: true } : {}),
       }),
     );
   };

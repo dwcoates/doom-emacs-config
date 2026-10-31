@@ -52,6 +52,8 @@ import type {
   ModelInfoLike,
   PermissionModeLike,
   QueryLike,
+  RemoteControlAnswerLike,
+  RemoteControlOptionsLike,
   RewindFilesResultLike,
   SdkMessage,
   SdkUserMessage,
@@ -174,6 +176,10 @@ export const SPOOL_ROOT_ENV = "AGENT_REPL_FAKE_SPOOL_ROOT";
  * 401, which is what the shim's start-path auth diagnostic reads. It exists so
  * the diagnostic record can be driven at start without a real credential.
  *
+ * `remote_control` makes `enableRemoteControl` reject, ON or OFF, as a vendor
+ * whose Remote Control is disabled by policy or whose bridge cannot connect
+ * does: `SetSessionRemoteControl{vendor_refused}`.
+ *
  * `start-eof` and `start-error-result` are the two ways a query that WAS
  * created still never opens a session — the child exits, or the vendor answers
  * the opening with an error result — and they exist because the grounded
@@ -195,6 +201,7 @@ const REFUSABLE = new Set([
   "get_settings",
   "rewind_files",
   "cancel_async_message",
+  "remote_control",
 ]);
 
 /**
@@ -520,6 +527,35 @@ export interface FakeQueryOpts {
    * monitors are not named by the declaration and are untouched either way.
    */
   readonly perTaskStopAffordance?: boolean;
+  /**
+   * `--replay-user-messages`, as the consumer launched the CLI with it: every
+   * user message a turn takes is echoed (`{type: "user", isReplay: true}`)
+   * under the uuid it ran under, before the turn's first reply, the shim's own
+   * sends and a remote prompt alike. Absent, the mock echoes nothing, as the
+   * CLI does without the flag.
+   */
+  readonly replayUserMessages?: boolean;
+}
+
+/**
+ * The mocked vendor's query: the `QueryLike` the shim drives, and the one
+ * lever only an in-process test can pull.
+ */
+export interface FakeQuery extends QueryLike {
+  /**
+   * A person types `text` on claude.ai through the session's Remote Control
+   * bridge (see `ScenarioContext.injectRemotePrompt`). Answers the uuid the
+   * prompt runs under, or absence when the bridge is off.
+   */
+  injectRemotePrompt(text: string): string | undefined;
+}
+
+/**
+ * The bridge session id the mock answers for a session it was never told to
+ * re-bind: deterministic, so a suite can name it.
+ */
+export function fakeBridgeSessionId(sessionId: string): string {
+  return `session_fake_${sessionId}`;
 }
 
 /**
@@ -575,7 +611,7 @@ export function createFakeQuery(
   prompt: AsyncIterable<SdkUserMessage>,
   canUseTool: CanUseToolLike,
   opts: FakeQueryOpts,
-): QueryLike {
+): FakeQuery {
   const refuse = refusedVerbs();
   // READ AND VALIDATED HERE, beside the refusals, so an unrecognized value is a
   // refusal to start rather than a knob that turns out to have done nothing
@@ -669,6 +705,13 @@ export function createFakeQuery(
    * (`queueVendorTurn`), spent before the next send's own turn.
    */
   let vendorTurnQueued = false;
+  /**
+   * THE REMOTE CONTROL BRIDGE, while it is on: the name claude.ai lists the
+   * session under and the bridge session id the mock answered.
+   */
+  let bridge: { readonly name: string; readonly bridgeSessionId: string } | undefined;
+  /** The uuids remote prompts were queued under: their turns and echoes say so. */
+  const remoteUuids = new Set<string>();
   /**
    * THE SHIP-GNS REPLAY (2026-10-02), armed by `!stop-on-rewind`: every
    * truncating resume of the session reports a background task STOPPED, and
@@ -1483,6 +1526,7 @@ export function createFakeQuery(
         "fake vendor ARMED the stop replay: every truncating resume of this session replays a stopped task",
       );
     },
+    injectRemotePrompt: (text: string) => injectRemotePrompt(text),
     queueVendorTurn: () => {
       LOGGER.debug(
         { claude_session_id: sessionUuid },
@@ -1562,6 +1606,52 @@ export function createFakeQuery(
       summary: STOP_REPLAY_SUMMARY,
     });
     result({ subtype: "success", result: "", origin: { kind: "task-notification" }, streamOnly: true });
+  };
+
+  /**
+   * A PROMPT TYPED ON claude.ai, queued by the vendor itself behind whatever
+   * runs now, exactly as the CLI's bridge lane queues one: it never passes the
+   * consumer's input, it carries a person's origin, and its turn is stamped
+   * with the uuid it was queued under.
+   */
+  const injectRemotePrompt = (text: string): string | undefined => {
+    if (bridge === undefined) {
+      LOGGER.info(
+        { claude_session_id: sessionUuid },
+        "fake vendor has no Remote Control bridge on; no prompt can arrive from claude.ai",
+      );
+      return undefined;
+    }
+    const uuid = opts.newUuid();
+    remoteUuids.add(uuid);
+    LOGGER.info(
+      { claude_session_id: sessionUuid, client_uuid: uuid, bridge_session_id: bridge.bridgeSessionId },
+      "fake vendor queued a prompt typed on claude.ai; it runs as a turn of its own",
+    );
+    inbox.push({
+      type: "user",
+      message: { role: "user", content: text },
+      parent_tool_use_id: null,
+      uuid: uuid as SdkUserMessage["uuid"],
+      origin: { kind: "human" },
+    });
+    return uuid;
+  };
+
+  /**
+   * THE CLI'S ECHO OF A USER MESSAGE A TURN TOOK (`--replay-user-messages`),
+   * under the uuid it ran under and with the origin it carried, ahead of the
+   * turn's first reply.
+   */
+  const emitReplay = (message: SdkUserMessage, uuid: string, at: string): void => {
+    emitWithUuid(uuid, {
+      type: "user",
+      message: message.message,
+      parent_tool_use_id: null,
+      timestamp: at,
+      isReplay: true,
+      ...(message.origin === undefined ? {} : { origin: message.origin }),
+    });
   };
 
   const promptTextOf = (message: SdkUserMessage): string => {
@@ -1816,16 +1906,22 @@ export function createFakeQuery(
       // A PEER MESSAGE IS FILED AS THE CLI FILES AN INJECTED ONE: its whole
       // envelope as the record's text, marked meta, carrying the peer origin
       // the host stated and `hostInjected`.
+      const remote = userMessage.uuid !== undefined && remoteUuids.has(userMessage.uuid);
+      const recordUuid = userMessage.uuid ?? opts.newUuid();
+      // ONE INSTANT FOR THE RECORD AND ITS ECHO: the echo is the record.
+      const recordAt = nowIso();
       files.transcript.append({
         promptId,
         type: "user",
         message: { role: "user", content: [{ type: "text", text: peer === undefined ? text : promptTextOf(userMessage) }] },
-        uuid: userMessage.uuid ?? opts.newUuid(),
-        timestamp: nowIso(),
+        uuid: recordUuid,
+        timestamp: recordAt,
         permissionMode,
-        promptSource: "sdk",
+        promptSource: remote ? "bridge" : "sdk",
+        ...(remote ? { origin: { kind: "human" } } : {}),
         ...(peer === undefined ? {} : { isMeta: true, origin: { kind: "peer", ...peer, hostInjected: true, body: text } }),
       });
+      if (opts.replayUserMessages === true) emitReplay(userMessage, recordUuid, recordAt);
       LOGGER.debug(
         { claude_session_id: sessionUuid, turn, scenario: scenario.name === "" ? "prose" : scenario.name },
         "fake vendor selected a scenario for the turn",
@@ -1981,6 +2077,51 @@ export function createFakeQuery(
       }
       return { applied: { effort: fakeAppliedEffort(model, effortLevel) } };
     },
+
+    /**
+     * The `remote_control` control request, offline. ON answers a bridge
+     * session id: the one it was told to re-bind, else
+     * {@link fakeBridgeSessionId}. OFF takes the bridge down. `remote_control`
+     * in {@link REFUSE_ENV} rejects both.
+     */
+    enableRemoteControl: async (
+      enabled: boolean,
+      name?: string,
+      options?: RemoteControlOptionsLike,
+    ): Promise<RemoteControlAnswerLike> => {
+      if (refuse.has("remote_control")) {
+        throw new Error("the mocked vendor refused Remote Control: disabled by policy");
+      }
+      if (!enabled) {
+        LOGGER.info(
+          { claude_session_id: sessionUuid, bridge_session_id: bridge?.bridgeSessionId ?? "" },
+          "fake vendor Remote Control OFF",
+        );
+        bridge = undefined;
+        return {};
+      }
+      const bridgeSessionId = options?.reattachSessionId ?? fakeBridgeSessionId(opts.sessionId);
+      bridge = { name: name ?? "", bridgeSessionId };
+      LOGGER.info(
+        {
+          claude_session_id: sessionUuid,
+          bridge_name: bridge.name,
+          bridge_session_id: bridgeSessionId,
+          reattach_bridge_session_id: options?.reattachSessionId ?? "",
+          keep_session_on_exit: options?.keepSessionOnExit === true,
+        },
+        "fake vendor Remote Control ON",
+      );
+      return {
+        bridge_session_id: bridgeSessionId,
+        session_url: `https://claude.ai/code/${bridgeSessionId}`,
+        connect_url: `https://claude.ai/code/${bridgeSessionId}?connect=1`,
+        environment_id: "env_fake",
+        bridge_epoch: 1,
+      };
+    },
+
+    injectRemotePrompt,
 
     cancelAsyncMessage: async (messageUuid: string): Promise<boolean> => {
       if (refuse.has("cancel_async_message")) {
