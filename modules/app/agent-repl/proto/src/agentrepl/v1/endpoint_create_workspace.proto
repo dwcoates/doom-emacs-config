@@ -192,9 +192,10 @@ message CreateWorkspaceOneShot {
   // The one-shot's commission. A one-shot IS its prompt — always set.
   conversation.v1.UserSaid prompt = 1;
 
-  // How the one-shot stands to its creator's work. REQUIRED. A peer is the
-  // natural one-shot; a child one-shot lands itself only when its context is
-  // forked from its owner (`one_shot_owner_lands` otherwise).
+  // How the one-shot stands to its creator's work. REQUIRED. A one-shot
+  // always lands itself, whatever its context: a child one-shot, fresh or
+  // forked, still nests under its parent and is followed by it, and lands its
+  // own work into its landing target.
   WorkspaceRelationship relationship = 6;
   // Where the one-shot is cut from and where it lands. UNSET = the
   // relationship's default (WorkspaceLandingTarget).
@@ -471,8 +472,11 @@ message CreateWorkspaceError {
   // `unknown_owner`, a forked workspace without a conversation is
   // `fork_source_has_no_conversation`, and a workspace is always cut from its
   // source branch's tip.
-  reserved 3, 4, 5, 8, 9, 15;
-  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch";
+  // Tag 24 (`one_shot_owner_lands`) is RETIRED: a one-shot always lands
+  // itself, so a child one-shot whose context is fresh is created like any
+  // other.
+  reserved 3, 4, 5, 8, 9, 15, 24;
+  reserved "finish_required", "finish_not_one_shot", "fork_parent_has_no_conversation", "unknown_parent", "base_ref_unresolved", "base_ref_off_primary_branch", "one_shot_owner_lands";
   oneof cause {
     // An ungated permission mode was asked for without the explicit consent.
     CreateWorkspaceUngatedWithoutConsent ungated_without_consent = 1;
@@ -530,9 +534,6 @@ message CreateWorkspaceError {
     // A workspace that lands itself (forked from its owner, or with no owner)
     // carries an owner notice, so there is nothing for an owner to arbitrate.
     CreateWorkspaceOwnerNoticeUnexpected owner_notice_unexpected = 23;
-    // A one-shot whose context is not forked from its owner: only the owner
-    // lands such a workspace, and a one-shot lands itself.
-    CreateWorkspaceOneShotOwnerLands one_shot_owner_lands = 24;
     // The workspace to land into (WorkspaceLandingTarget.workspace) is not in
     // the daemon's registry, or is of another repository than the create's:
     // no branch crosses repositories. Nothing was created.
@@ -715,11 +716,6 @@ message CreateWorkspaceOwnerNoticeRequired {}
 // A workspace that lands itself carries a notice it may not carry.
 // DELIBERATELY EMPTY: the arm is the refusal.
 message CreateWorkspaceOwnerNoticeUnexpected {}
-// Names the owner that must land the refused one-shot.
-message CreateWorkspaceOneShotOwnerLands {
-  // The one-shot's owner, which alone lands it.
-  workspace.v1.WorkspaceRef owner = 1;
-}
 // Names the requester the registry does not hold.
 message CreateWorkspaceUnknownRequester {
   // The requester as the request named it.

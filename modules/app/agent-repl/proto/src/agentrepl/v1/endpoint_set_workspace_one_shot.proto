@@ -28,9 +28,10 @@
 // nothing. A brief that cannot be composed fails the unmark with nothing
 // changed.
 //
-// A CHILD ITS OWNER LANDS IS NEVER A ONE-SHOT: landing it is its owner's act,
-// so marking one is refused (`owner_lands`), as creating one is
-// (CreateWorkspaceError.one_shot_owner_lands).
+// A ONE-SHOT ALWAYS LANDS ITSELF, whatever its context: any created workspace
+// may be marked, a child included. Marking a child whose context is not forked
+// from its parent makes it land itself while it stays a one-shot; unmarking it
+// hands its landing back to its parent (WorkspaceStatusOwner.owner_lands).
 //
 // A REPOSITORY'S MAIN WORKSPACE IS NEVER A ONE-SHOT: the workspace on the
 // repository's main checkout sits on the main branch, lands nothing itself and
@@ -100,8 +101,6 @@ message SetWorkspaceOneShotError {
     // creation to mark. A repository's main workspace is answered
     // `main_workspace` instead, which says why it can never be marked.
     SetWorkspaceOneShotNoCreationJob no_creation_job = 4;
-    // The workspace is a child its owner lands. Nothing was changed.
-    SetWorkspaceOneShotOwnerLands owner_lands = 5;
     // The requester is neither the workspace, nor its owner, nor the user.
     SetWorkspaceOneShotRequesterMayNotSet requester_may_not_set = 6;
     // The workspace is its repository's main workspace, which is never a
@@ -113,6 +112,10 @@ message SetWorkspaceOneShotError {
   // workspace is told is the daemon's own, the same for every repository.
   reserved 7;
   reserved "policy_missing";
+  // Tag 5 (`owner_lands`) is RETIRED: a one-shot always lands itself, so a
+  // child whose parent would otherwise land it is marked like any other.
+  reserved 5;
+  reserved "owner_lands";
 }
 message SetWorkspaceOneShotUnknownWorkspace {}
 message SetWorkspaceOneShotWorkspaceRefMismatch {
@@ -121,10 +124,6 @@ message SetWorkspaceOneShotWorkspaceRefMismatch {
 }
 message SetWorkspaceOneShotClosed {}
 message SetWorkspaceOneShotNoCreationJob {}
-message SetWorkspaceOneShotOwnerLands {
-  // The owner, which lands the workspace.
-  workspace.v1.WorkspaceRef owner = 1;
-}
 message SetWorkspaceOneShotRequesterMayNotSet {}
 // A mark on a repository's main workspace. Empty: the arm is the whole
 // answer, and the workspace it names is the request's own.

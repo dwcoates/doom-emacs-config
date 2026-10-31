@@ -825,17 +825,18 @@ func (x *WorkspaceLandingTargetWorkspace) GetWorkspace() *v1.WorkspaceRef {
 // workspace itself, lands its work.
 //
 // WHO OWNS A WORKSPACE: a child's parent. A peer has no owner and always lands
-// itself, wherever it lands. WHO LANDS A CHILD depends on whose context it
-// starts with: a child whose context
-// is forked FROM ITS OWNER carries the owner's whole context and lands
+// itself, wherever it lands. A ONE-SHOT ALWAYS LANDS ITSELF too, child or
+// peer, fresh or forked: it is commissioned to finish unattended, so a main
+// workspace can dispatch fresh one-shot children off the main branch. WHO
+// LANDS ANY OTHER CHILD depends on whose context it starts with: a child whose
+// context is forked FROM ITS OWNER carries the owner's whole context and lands
 // itself; one that starts fresh, or forked from any other workspace, does not
 // know why its owner's work is shaped as it is, so its OWNER arbitrates and
-// lands it. Such a create must carry the notice, is refused as a one-shot, and
-// the workspace is refused merging itself (MergeWorkspaceError.owner_lands);
-// the owner lands it with FinishWorkspace. A create whose context is forked
-// from its owner, or a peer, must not carry one
-// (`owner_notice_unexpected`; `owner_notice_required` when one is owed and
-// absent).
+// lands it. Such a create must carry the notice, and the workspace is refused
+// merging itself (MergeWorkspaceError.owner_lands); the owner lands it with
+// FinishWorkspace. A create that lands itself (forked from its owner, a
+// one-shot, or a peer) must not carry one (`owner_notice_unexpected`;
+// `owner_notice_required` when one is owed and absent).
 type WorkspaceOwnerNotice struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Plain text, as the requesting agent or user wrote it: what the new

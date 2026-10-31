@@ -182,3 +182,54 @@ DECISIONS AND WHY ALTERNATIVES LOST.
   SetWorkspaceParent (verified: no Emacs or webapp caller), so no client relied
   on the old default.
 - `unchanged` with no landing target stays malformed: it would change nothing.
+
+### 4. A one-shot always lands itself (agentrepl.v1, owner ruling 2026-10-31)
+
+WHAT. `CreateWorkspaceError.one_shot_owner_lands` (24, with its message
+`CreateWorkspaceOneShotOwnerLands`) and `SetWorkspaceOneShotError.owner_lands`
+(5, with `SetWorkspaceOneShotOwnerLands`) are retired with reserved tags and
+names. A one-shot lands itself whatever its context: a child one-shot, fresh or
+forked, is still a child (nested under its parent, followed by it) and lands
+its own work into its landing target. A child that is NOT a one-shot keeps the
+entry 1 rule: forked from its parent = lands itself, fresh (or forked from a
+third workspace) = its parent lands it and the create carries the owner
+notice. `WorkspaceStatusOwner.owner_lands` and the topology comment now say so.
+
+WHY. The owner's ruling: a repository's main workspace must be able to create
+child workspaces off master, one-shots included and especially. That is the
+main workspace's workflow: during general discussion with the user it
+dispatches disparate one-shot or normal workspaces from master. The 2026-10-30
+record already declared the context (fresh or fork) an independent third
+setting, yet owner-lands was still derived from it alone, so a main workspace
+could not dispatch a fresh one-shot child (it would have had to fork its long
+conversation or create a peer, losing the coordination wiring).
+
+DECISIONS AND WHY ALTERNATIVES LOST.
+- OWNER-LANDS IS DERIVED ON READ FROM THE ONE-SHOT MARK. The stored
+  `workspaces.owner_lands` column keeps recording only the context half of the
+  rule (a child whose context is not forked from its parent; written at create
+  and re-decided by `wsm/parent.go` `writeTarget`), and the daemon's
+  `wsm.Workspace.OwnerLands` is that column AND NOT one-shot, computed where
+  the row is decoded. Every write of the one-shot mark (SetWorkspaceOneShot,
+  the sidebar's drag out of the One-shot subsection, a take-back, a one-shot
+  merge) therefore moves who lands the workspace with no second write to keep
+  in step. Alternatives lost: writing `owner_lands` at every one-shot write
+  site (four sites, any new one silently drifting), and storing the effective
+  value only at create (a fresh child marked later would stay owner-landed,
+  contradicting "a one-shot always lands itself").
+- UNMARKING A FRESH ONE-SHOT CHILD HANDS ITS LANDING BACK TO ITS PARENT, as the
+  ruling's "a non-one-shot child keeps today's rule" requires. Accepted cost:
+  such a child never carried the owner notice (a one-shot never owes one), so
+  its parent learns it owns the landing from the child's status
+  (`WorkspaceStatusOwner.owner_lands`) rather than a notice.
+- No new arm replaces the retired ones: nothing is refused any more.
+
+CONSEQUENCES (accepted).
+- Elisp drops its `one_shot_owner_lands` decoder; the webapp drops the
+  SetWorkspaceOneShot `ownerLands` refusal text.
+- The daemon no longer reports a refusal the caller already received as a
+  failed create to the main workspace: the create refusal arms are classified
+  exhaustively (caller input or not) in one map in
+  `daemon/internal/workspace/createfailed.go`, and a test checks the map
+  against every `CreateWorkspaceError` arm, so a new arm cannot go
+  unclassified.

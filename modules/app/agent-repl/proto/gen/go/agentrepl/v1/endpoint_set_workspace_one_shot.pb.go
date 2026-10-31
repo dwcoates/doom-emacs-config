@@ -28,9 +28,10 @@
 // nothing. A brief that cannot be composed fails the unmark with nothing
 // changed.
 //
-// A CHILD ITS OWNER LANDS IS NEVER A ONE-SHOT: landing it is its owner's act,
-// so marking one is refused (`owner_lands`), as creating one is
-// (CreateWorkspaceError.one_shot_owner_lands).
+// A ONE-SHOT ALWAYS LANDS ITSELF, whatever its context: any created workspace
+// may be marked, a child included. Marking a child whose context is not forked
+// from its parent makes it land itself while it stays a one-shot; unmarking it
+// hands its landing back to its parent (WorkspaceStatusOwner.owner_lands).
 //
 // A REPOSITORY'S MAIN WORKSPACE IS NEVER A ONE-SHOT: the workspace on the
 // repository's main checkout sits on the main branch, lands nothing itself and
@@ -287,7 +288,6 @@ type SetWorkspaceOneShotError struct {
 	//	*SetWorkspaceOneShotError_WorkspaceRefMismatch
 	//	*SetWorkspaceOneShotError_Closed
 	//	*SetWorkspaceOneShotError_NoCreationJob
-	//	*SetWorkspaceOneShotError_OwnerLands
 	//	*SetWorkspaceOneShotError_RequesterMayNotSet
 	//	*SetWorkspaceOneShotError_MainWorkspace
 	Cause         isSetWorkspaceOneShotError_Cause `protobuf_oneof:"cause"`
@@ -368,15 +368,6 @@ func (x *SetWorkspaceOneShotError) GetNoCreationJob() *SetWorkspaceOneShotNoCrea
 	return nil
 }
 
-func (x *SetWorkspaceOneShotError) GetOwnerLands() *SetWorkspaceOneShotOwnerLands {
-	if x != nil {
-		if x, ok := x.Cause.(*SetWorkspaceOneShotError_OwnerLands); ok {
-			return x.OwnerLands
-		}
-	}
-	return nil
-}
-
 func (x *SetWorkspaceOneShotError) GetRequesterMayNotSet() *SetWorkspaceOneShotRequesterMayNotSet {
 	if x != nil {
 		if x, ok := x.Cause.(*SetWorkspaceOneShotError_RequesterMayNotSet); ok {
@@ -421,11 +412,6 @@ type SetWorkspaceOneShotError_NoCreationJob struct {
 	NoCreationJob *SetWorkspaceOneShotNoCreationJob `protobuf:"bytes,4,opt,name=no_creation_job,json=noCreationJob,proto3,oneof"`
 }
 
-type SetWorkspaceOneShotError_OwnerLands struct {
-	// The workspace is a child its owner lands. Nothing was changed.
-	OwnerLands *SetWorkspaceOneShotOwnerLands `protobuf:"bytes,5,opt,name=owner_lands,json=ownerLands,proto3,oneof"`
-}
-
 type SetWorkspaceOneShotError_RequesterMayNotSet struct {
 	// The requester is neither the workspace, nor its owner, nor the user.
 	RequesterMayNotSet *SetWorkspaceOneShotRequesterMayNotSet `protobuf:"bytes,6,opt,name=requester_may_not_set,json=requesterMayNotSet,proto3,oneof"`
@@ -445,8 +431,6 @@ func (*SetWorkspaceOneShotError_WorkspaceRefMismatch) isSetWorkspaceOneShotError
 func (*SetWorkspaceOneShotError_Closed) isSetWorkspaceOneShotError_Cause() {}
 
 func (*SetWorkspaceOneShotError_NoCreationJob) isSetWorkspaceOneShotError_Cause() {}
-
-func (*SetWorkspaceOneShotError_OwnerLands) isSetWorkspaceOneShotError_Cause() {}
 
 func (*SetWorkspaceOneShotError_RequesterMayNotSet) isSetWorkspaceOneShotError_Cause() {}
 
@@ -605,51 +589,6 @@ func (*SetWorkspaceOneShotNoCreationJob) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescGZIP(), []int{7}
 }
 
-type SetWorkspaceOneShotOwnerLands struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The owner, which lands the workspace.
-	Owner         *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetWorkspaceOneShotOwnerLands) Reset() {
-	*x = SetWorkspaceOneShotOwnerLands{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetWorkspaceOneShotOwnerLands) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetWorkspaceOneShotOwnerLands) ProtoMessage() {}
-
-func (x *SetWorkspaceOneShotOwnerLands) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetWorkspaceOneShotOwnerLands.ProtoReflect.Descriptor instead.
-func (*SetWorkspaceOneShotOwnerLands) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *SetWorkspaceOneShotOwnerLands) GetOwner() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Owner
-	}
-	return nil
-}
-
 type SetWorkspaceOneShotRequesterMayNotSet struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -658,7 +597,7 @@ type SetWorkspaceOneShotRequesterMayNotSet struct {
 
 func (x *SetWorkspaceOneShotRequesterMayNotSet) Reset() {
 	*x = SetWorkspaceOneShotRequesterMayNotSet{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -670,7 +609,7 @@ func (x *SetWorkspaceOneShotRequesterMayNotSet) String() string {
 func (*SetWorkspaceOneShotRequesterMayNotSet) ProtoMessage() {}
 
 func (x *SetWorkspaceOneShotRequesterMayNotSet) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -683,7 +622,7 @@ func (x *SetWorkspaceOneShotRequesterMayNotSet) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use SetWorkspaceOneShotRequesterMayNotSet.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceOneShotRequesterMayNotSet) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescGZIP(), []int{8}
 }
 
 // A mark on a repository's main workspace. Empty: the arm is the whole
@@ -696,7 +635,7 @@ type SetWorkspaceOneShotMainWorkspace struct {
 
 func (x *SetWorkspaceOneShotMainWorkspace) Reset() {
 	*x = SetWorkspaceOneShotMainWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -708,7 +647,7 @@ func (x *SetWorkspaceOneShotMainWorkspace) String() string {
 func (*SetWorkspaceOneShotMainWorkspace) ProtoMessage() {}
 
 func (x *SetWorkspaceOneShotMainWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -721,7 +660,7 @@ func (x *SetWorkspaceOneShotMainWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWorkspaceOneShotMainWorkspace.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceOneShotMainWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescGZIP(), []int{9}
 }
 
 var File_agentrepl_v1_endpoint_set_workspace_one_shot_proto protoreflect.FileDescriptor
@@ -740,24 +679,20 @@ const file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDesc = "" +
 	"\x1aSetWorkspaceOneShotSuccess\x126\n" +
 	"\x14completion_directive\x18\x01 \x01(\tH\x00R\x13completionDirective\x88\x01\x01\x12'\n" +
 	"\x0froster_revision\x18\x02 \x01(\x04R\x0erosterRevisionB\x17\n" +
-	"\x15_completion_directive\"\xba\x05\n" +
+	"\x15_completion_directive\"\xfd\x04\n" +
 	"\x18SetWorkspaceOneShotError\x12`\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v21.agentrepl.v1.SetWorkspaceOneShotUnknownWorkspaceH\x00R\x10unknownWorkspace\x12m\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v25.agentrepl.v1.SetWorkspaceOneShotWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12A\n" +
 	"\x06closed\x18\x03 \x01(\v2'.agentrepl.v1.SetWorkspaceOneShotClosedH\x00R\x06closed\x12X\n" +
-	"\x0fno_creation_job\x18\x04 \x01(\v2..agentrepl.v1.SetWorkspaceOneShotNoCreationJobH\x00R\rnoCreationJob\x12N\n" +
-	"\vowner_lands\x18\x05 \x01(\v2+.agentrepl.v1.SetWorkspaceOneShotOwnerLandsH\x00R\n" +
-	"ownerLands\x12h\n" +
+	"\x0fno_creation_job\x18\x04 \x01(\v2..agentrepl.v1.SetWorkspaceOneShotNoCreationJobH\x00R\rnoCreationJob\x12h\n" +
 	"\x15requester_may_not_set\x18\x06 \x01(\v23.agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSetH\x00R\x12requesterMayNotSet\x12W\n" +
 	"\x0emain_workspace\x18\b \x01(\v2..agentrepl.v1.SetWorkspaceOneShotMainWorkspaceH\x00R\rmainWorkspaceB\a\n" +
-	"\x05causeJ\x04\b\a\x10\bR\x0epolicy_missing\"%\n" +
+	"\x05causeJ\x04\b\a\x10\bJ\x04\b\x05\x10\x06R\x0epolicy_missingR\vowner_lands\"%\n" +
 	"#SetWorkspaceOneShotUnknownWorkspace\"L\n" +
 	"'SetWorkspaceOneShotWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"\x1b\n" +
 	"\x19SetWorkspaceOneShotClosed\"\"\n" +
-	" SetWorkspaceOneShotNoCreationJob\"Q\n" +
-	"\x1dSetWorkspaceOneShotOwnerLands\x120\n" +
-	"\x05owner\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x05owner\"'\n" +
+	" SetWorkspaceOneShotNoCreationJob\"'\n" +
 	"%SetWorkspaceOneShotRequesterMayNotSet\"\"\n" +
 	" SetWorkspaceOneShotMainWorkspaceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -773,7 +708,7 @@ func file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescGZIP() []byt
 	return file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_goTypes = []any{
 	(*SetWorkspaceOneShotRequest)(nil),              // 0: agentrepl.v1.SetWorkspaceOneShotRequest
 	(*SetWorkspaceOneShotResponse)(nil),             // 1: agentrepl.v1.SetWorkspaceOneShotResponse
@@ -783,30 +718,27 @@ var file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_goTypes = []any{
 	(*SetWorkspaceOneShotWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.SetWorkspaceOneShotWorkspaceRefMismatch
 	(*SetWorkspaceOneShotClosed)(nil),               // 6: agentrepl.v1.SetWorkspaceOneShotClosed
 	(*SetWorkspaceOneShotNoCreationJob)(nil),        // 7: agentrepl.v1.SetWorkspaceOneShotNoCreationJob
-	(*SetWorkspaceOneShotOwnerLands)(nil),           // 8: agentrepl.v1.SetWorkspaceOneShotOwnerLands
-	(*SetWorkspaceOneShotRequesterMayNotSet)(nil),   // 9: agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSet
-	(*SetWorkspaceOneShotMainWorkspace)(nil),        // 10: agentrepl.v1.SetWorkspaceOneShotMainWorkspace
-	(*v1.WorkspaceRef)(nil),                         // 11: workspace.v1.WorkspaceRef
-	(*WorkspaceRequester)(nil),                      // 12: agentrepl.v1.WorkspaceRequester
+	(*SetWorkspaceOneShotRequesterMayNotSet)(nil),   // 8: agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSet
+	(*SetWorkspaceOneShotMainWorkspace)(nil),        // 9: agentrepl.v1.SetWorkspaceOneShotMainWorkspace
+	(*v1.WorkspaceRef)(nil),                         // 10: workspace.v1.WorkspaceRef
+	(*WorkspaceRequester)(nil),                      // 11: agentrepl.v1.WorkspaceRequester
 }
 var file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_depIdxs = []int32{
-	11, // 0: agentrepl.v1.SetWorkspaceOneShotRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	12, // 1: agentrepl.v1.SetWorkspaceOneShotRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
+	10, // 0: agentrepl.v1.SetWorkspaceOneShotRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	11, // 1: agentrepl.v1.SetWorkspaceOneShotRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
 	2,  // 2: agentrepl.v1.SetWorkspaceOneShotResponse.success:type_name -> agentrepl.v1.SetWorkspaceOneShotSuccess
 	3,  // 3: agentrepl.v1.SetWorkspaceOneShotResponse.error:type_name -> agentrepl.v1.SetWorkspaceOneShotError
 	4,  // 4: agentrepl.v1.SetWorkspaceOneShotError.unknown_workspace:type_name -> agentrepl.v1.SetWorkspaceOneShotUnknownWorkspace
 	5,  // 5: agentrepl.v1.SetWorkspaceOneShotError.workspace_ref_mismatch:type_name -> agentrepl.v1.SetWorkspaceOneShotWorkspaceRefMismatch
 	6,  // 6: agentrepl.v1.SetWorkspaceOneShotError.closed:type_name -> agentrepl.v1.SetWorkspaceOneShotClosed
 	7,  // 7: agentrepl.v1.SetWorkspaceOneShotError.no_creation_job:type_name -> agentrepl.v1.SetWorkspaceOneShotNoCreationJob
-	8,  // 8: agentrepl.v1.SetWorkspaceOneShotError.owner_lands:type_name -> agentrepl.v1.SetWorkspaceOneShotOwnerLands
-	9,  // 9: agentrepl.v1.SetWorkspaceOneShotError.requester_may_not_set:type_name -> agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSet
-	10, // 10: agentrepl.v1.SetWorkspaceOneShotError.main_workspace:type_name -> agentrepl.v1.SetWorkspaceOneShotMainWorkspace
-	11, // 11: agentrepl.v1.SetWorkspaceOneShotOwnerLands.owner:type_name -> workspace.v1.WorkspaceRef
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	8,  // 8: agentrepl.v1.SetWorkspaceOneShotError.requester_may_not_set:type_name -> agentrepl.v1.SetWorkspaceOneShotRequesterMayNotSet
+	9,  // 9: agentrepl.v1.SetWorkspaceOneShotError.main_workspace:type_name -> agentrepl.v1.SetWorkspaceOneShotMainWorkspace
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_init() }
@@ -825,7 +757,6 @@ func file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_init() {
 		(*SetWorkspaceOneShotError_WorkspaceRefMismatch)(nil),
 		(*SetWorkspaceOneShotError_Closed)(nil),
 		(*SetWorkspaceOneShotError_NoCreationJob)(nil),
-		(*SetWorkspaceOneShotError_OwnerLands)(nil),
 		(*SetWorkspaceOneShotError_RequesterMayNotSet)(nil),
 		(*SetWorkspaceOneShotError_MainWorkspace)(nil),
 	}
@@ -835,7 +766,7 @@ func file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDesc), len(file_agentrepl_v1_endpoint_set_workspace_one_shot_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

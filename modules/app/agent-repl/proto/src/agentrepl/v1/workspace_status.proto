@@ -91,7 +91,9 @@ message WorkspaceStatusOwner {
   // The owning workspace: the child's parent.
   workspace.v1.WorkspaceRef workspace = 1;
   // TRUE when the owner arbitrates and lands this workspace's work, because
-  // its context was not forked from the owner; FALSE when it lands itself.
+  // it is not a one-shot and its context was not forked from the owner; FALSE
+  // when it lands itself. Marking or unmarking the workspace a one-shot
+  // changes it.
   bool owner_lands = 2;
 }
 
