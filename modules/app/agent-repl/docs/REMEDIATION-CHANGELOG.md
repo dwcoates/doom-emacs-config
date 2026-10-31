@@ -1326,3 +1326,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-10-30 elisp-warning-free (landed off the merge queue): The editor's lisp byte-compiles without warnings again, so a hard bounce of agent-repl is no longer refused.
 - 2026-10-30 elisp-warning-free-2 (landed off the merge queue): The editor's remaining over-wide docstrings are rewrapped, so the byte-compile gate passes.
 - 2026-10-30 elisp-warning-free-3 (landed off the merge queue): The last over-wide editor docstring is rewrapped.
+- 2026-10-30 ramdisk-reused-device (landed off the merge queue): A test run's RAM disk is no longer detached under it when another run reclaims a dead run's disk that had the same device number.
