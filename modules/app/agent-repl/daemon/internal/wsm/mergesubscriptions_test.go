@@ -5,9 +5,11 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 )
 
 // subscription is WS's subscription to REPO at DETAIL, taken at instant.
@@ -446,5 +448,24 @@ func TestADeploysSubscriptionIsStoredAndReadBack(t *testing.T) {
 	// Assert
 	if got := subscriptionsOf(t, s); !reflect.DeepEqual(got, []MergeQueueSubscription{want}) {
 		t.Fatalf("subscriptions = %+v, want the deploys subscription", got)
+	}
+}
+
+// TestEverySingleSubscriptionEndGoesThroughEndSubscription pins that the one
+// statement deleting a single subscription is endSubscription's: an end that
+// hand-rolls it would skip the scope's normalization or its refusal record.
+func TestEverySingleSubscriptionEndGoesThroughEndSubscription(t *testing.T) {
+	// Arrange
+	statement := "DELETE FROM merge_queue_subscriptions WHERE subscriber = ? AND repo_key = ?"
+	found := 0
+
+	for _, file := range sourcescan.Production(t) {
+		// Act
+		found += strings.Count(string(file.Source), statement)
+	}
+
+	// Assert
+	if found != 1 {
+		t.Fatalf("%q appears %d times in production source, want once (endSubscription)", statement, found)
 	}
 }

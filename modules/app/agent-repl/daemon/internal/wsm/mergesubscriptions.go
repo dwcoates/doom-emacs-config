@@ -180,16 +180,24 @@ func (s *store) SubscribeMergeQueue(ctx context.Context, sub MergeQueueSubscript
 // UnsubscribeMergeQueue ends SUBSCRIBER's subscription in scope REPO, and
 // answers whether one stood there. It ends nothing in any other scope.
 func (s *store) UnsubscribeMergeQueue(ctx context.Context, subscriber WorkspaceID, repo RepoKey) (bool, error) {
-	const op = "daemon.wsm.unsubscribe_merge_queue"
-	fields := dlog.Context{"subscriber": string(subscriber), "repo": string(repo)}
+	return s.endSubscription(ctx, "daemon.wsm.unsubscribe_merge_queue", "refused a merge queue unsubscribe whose scope cannot be normalized",
+		dlog.Context{"subscriber": string(subscriber), "repo": string(repo)}, subscriber, repo, "")
+}
+
+// endSubscription deletes SUBSCRIBER's subscription in scope REPO, narrowed by
+// the extra WHERE clause MATCH and its ARGS, and answers whether it deleted
+// one. Every end of a single subscription goes through it, so each normalizes
+// its scope and records its refusal the same way.
+func (s *store) endSubscription(ctx context.Context, op, refused string, fields dlog.Context, subscriber WorkspaceID, repo RepoKey, match string, args ...any) (bool, error) {
 	key, err := subscriptionScope(repo)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue unsubscribe whose scope cannot be normalized", withError(fields, err))
+		s.log.Error(op, refused, withError(fields, err))
 		return false, err
 	}
 	var ended bool
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM merge_queue_subscriptions WHERE subscriber = ? AND repo_key = ?`, subscriber, key)
+		res, err := tx.ExecContext(ctx, `DELETE FROM merge_queue_subscriptions WHERE subscriber = ? AND repo_key = ?`+match,
+			append([]any{subscriber, key}, args...)...)
 		if err != nil {
 			return err
 		}
