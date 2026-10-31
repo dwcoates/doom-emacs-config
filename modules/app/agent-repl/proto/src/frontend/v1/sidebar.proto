@@ -1570,6 +1570,11 @@ message RosterRow {
   // field's whole contract.
   optional RosterRowLastTurnEnded last_turn_ended = 65;
 
+  // When one of this workspace's turns most recently STARTED or ENDED,
+  // whichever is newer. UNSET = no turn of the workspace has started yet. See
+  // RosterRowLastTurnBoundary, which carries the field's whole contract.
+  optional RosterRowLastTurnBoundary last_turn_boundary = 70;
+
   // When this workspace was CLOSED, and by whom: the durable close record the
   // daemon keeps across restarts of every client. UNSET while the workspace
   // is open. See RosterRowClosure, which carries the field's whole contract.
@@ -1874,6 +1879,28 @@ message RosterRowLastSelected {
 // RosterRowClosed, not by absence.
 message RosterRowLastTurnEnded {
   // The instant the workspace's most recent turn closed, epoch milliseconds.
+  int64 at_ms = 1;
+}
+
+// The newest TURN BOUNDARY of the workspace: the instant its most recent turn
+// STARTED while that turn is running, else the instant its most recent turn
+// ENDED. A turn starts after the previous one ended and ends after it started,
+// so that one instant IS the newer of the last start and the last end; the
+// daemon states it so no client re-derives it from the when-column, whose
+// sync-merging and hidden arms mask the running turn.
+//
+// It is TURN-ACTIVITY RECENCY, and it exists so a client short of room can
+// keep the workspaces whose work most recently moved: the editor's one-line
+// tab bar draws only the tabs that fit, choosing them newest boundary first
+// while drawing them in the sidebar's order. Clients order by it and never
+// draw it.
+//
+// Selecting the workspace does not move it. A running turn's start is the
+// daemon's live turn clock (frontend.v1.FooterClock.turn_started_at_ms), and
+// an end is the durable turn record (RosterRowLastTurnEnded), so after a
+// daemon restart an idle workspace still carries its last end.
+message RosterRowLastTurnBoundary {
+  // The boundary instant, epoch milliseconds on the daemon's clock.
   int64 at_ms = 1;
 }
 

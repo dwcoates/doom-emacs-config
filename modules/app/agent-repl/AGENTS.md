@@ -2819,8 +2819,8 @@ stays the stylesheet's disc. Owner rulings, 2026-10-13.
   (`docs/investigations/2026-10-13-tab-bar-icon-heights.md`). So the height is
   the MEASURED text row (`agent-repl-status-glyph-image-height`), and the row
   holding an image of that height is measured beside it: a row that grew fails
-  hard. A taller tab-bar row is the defect this exists to prevent (two rows of
-  tabs then clip in the tab bar's allotted space), so never size a tab glyph
+  hard. A taller tab-bar row is the defect this exists to prevent (the one row of
+  tabs then clips in the tab bar's allotted space), so never size a tab glyph
   any other way.
 - **Pictures are rasterized at the frame's backing scale**
   (`frame-scale-factor`) and drawn back down, so they are as sharp as the text

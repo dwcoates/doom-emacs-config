@@ -153,6 +153,14 @@ type Workspace struct {
 	// workspace. The Chats list's order (owner ruling, 2026-10-25): viewing a
 	// thread never moves it, asking one does.
 	LastAskedAt *time.Time
+	// MergeTurnStartedAt is when the turn that asked for the workspace's own
+	// queued merge STARTED: the newest of its turns' starts at or before its
+	// merge-queue entry was enqueued, derived on read, never stored on the row.
+	// Nil while the workspace has no queue entry of its own, and when none of
+	// its turns started before the entry. The roster's turn boundary reads it
+	// while a sync merge stands, because a sync merge continues the turn that
+	// finished into it (frontend.v1.RosterRowLastTurnBoundary).
+	MergeTurnStartedAt *time.Time
 	// StatusChangedAt is when the roster's status arm for the workspace last
 	// moved (SetStatusChangedAt); nil when no change has been recorded.
 	StatusChangedAt *time.Time

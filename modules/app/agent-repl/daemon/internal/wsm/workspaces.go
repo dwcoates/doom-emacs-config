@@ -58,7 +58,15 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
 	`(SELECT MAX(turns.closed_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL), ` +
+	mergeTurnStartedColumn + `, ` +
 	landsIntoColumn
+
+// mergeTurnStartedColumn derives MergeTurnStartedAt: the newest start of the
+// workspace's turns that began at or before its own merge-queue entry was
+// enqueued, so the turn that asked for the merge. NULL while the workspace has
+// no queue entry of its own. Both instants are the store's nanoseconds.
+const mergeTurnStartedColumn = `(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id ` +
+	`AND turns.started_at <= (SELECT MIN(merge_queue.enqueued_at) FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id))`
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range
 // priority is a decode failure, never a silently substituted default.
@@ -87,6 +95,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		commits       sql.NullInt64
 		ended         sql.NullInt64
 		asked         sql.NullInt64
+		mergeTurn     sql.NullInt64
 		hiddenAt      sql.NullInt64
 		lapsesAt      sql.NullInt64
 		gated         sql.NullInt64
@@ -103,7 +112,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		cacheCold     sql.NullInt64
 		landsInto     sql.NullString
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OwnerLands, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &ws.OneShot, &ws.MergePending, &ended, &asked, &landsInto); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &ws.OwnerLands, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &ws.OneShot, &ws.MergePending, &ended, &asked, &mergeTurn, &landsInto); err != nil {
 		return Workspace{}, err
 	}
 	switch WorkspaceKind(kind) {
@@ -185,6 +194,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	ws.LastActivityAt = optTime(activity)
 	ws.LastTurnEndedAt = optTime(ended)
 	ws.LastAskedAt = optTime(asked)
+	ws.MergeTurnStartedAt = optTime(mergeTurn)
 	ws.StatusChangedAt = optTime(statusChanged)
 	ws.CloseWhenTurnEnds = optTime(selfClose)
 	ws.LastKeepaliveAt = optTime(lastKeepalive)

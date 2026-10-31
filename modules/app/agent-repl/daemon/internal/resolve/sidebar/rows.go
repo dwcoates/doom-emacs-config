@@ -79,12 +79,16 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	}
 	r.assertArm(armName, rowLog)
 
+	// ONE READ OF THE MERGE AND THE CLOCK feeds both the when-column and the
+	// turn boundary, so the two cannot disagree about a running turn or a
+	// standing sync merge.
+	mergeStartedAt, clock := r.footer.MergeStartedAt(rec.ID), r.footer.TurnClock(rec.ID)
 	out := &frontendv1.RosterRow{
 		Workspace: &frontendv1.RosterRowWorkspace{
 			Workspace: rec.Ref()},
 		Name:    &frontendv1.RosterRowName{Text: rec.Name},
 		Current: &frontendv1.RosterRowCurrent{Current: current},
-		When:    when(rec, r.footer.MergeStartedAt(rec.ID), r.footer.TurnClock(rec.ID)),
+		When:    when(rec, mergeStartedAt, clock),
 		Detail:  detail(rec, s.summary, rc),
 		Closed:  &frontendv1.RosterRowClosed{Closed: closed},
 		// ALWAYS SET: an editor opens the workspace only once this leaves
@@ -143,6 +147,10 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// the workspace that most recently finished ranks by it. Unset when no
 	// turn of the workspace has closed.
 	out.LastTurnEnded = lastTurnEnded(rec)
+	// THE TURN-ACTIVITY INSTANT, for ordering only: the editor's one-line tab
+	// bar keeps the tabs whose turns most recently moved. Unset when no turn
+	// has started.
+	out.LastTurnBoundary = lastTurnBoundary(rec, mergeStartedAt, clock)
 	// THE DURABLE CLOSE RECORD, for filtering and ordering only: the editor's
 	// switcher offers the workspaces the user most recently closed. Unset
 	// while open, and on a close that predates the record.
@@ -195,6 +203,42 @@ func lastTurnEnded(rec wsm.Workspace) *frontendv1.RosterRowLastTurnEnded {
 		return nil
 	}
 	return &frontendv1.RosterRowLastTurnEnded{AtMs: rec.LastTurnEndedAt.UnixMilli()}
+}
+
+// runningTurnStart answers the start of the turn the footer clock shows
+// RUNNING, in epoch ms, or nil when none runs: a clock with a start and an end
+// is the last turn's, frozen. The one reading of "a turn is running" every row
+// field resolved from the clock shares.
+func runningTurnStart(clock *frontendv1.FooterClock) *int64 {
+	if clock.TurnStartedAtMs == nil || clock.TurnEndedAtMs != nil {
+		return nil
+	}
+	return clock.TurnStartedAtMs
+}
+
+// lastTurnBoundary resolves the row's newest turn start or end
+// (frontend.v1.RosterRowLastTurnBoundary), or nil when it has none. Turn
+// boundaries alternate, so the newest is the running turn's start when a turn
+// runs and the last end otherwise -- except under a SYNC MERGE, which
+// continues the turn that finished into it (owner ruling, 2026-10-31: the
+// workspace takes no prompt, so to the user the merge is still that turn),
+// and so counts from that turn's START (wsm MergeTurnStartedAt) whatever
+// turns the merge itself runs. mergeStartedAt and clock are the footer's
+// published facts the when-column reads too.
+func lastTurnBoundary(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv1.FooterClock) *frontendv1.RosterRowLastTurnBoundary {
+	var at *time.Time
+	switch {
+	case mergeStartedAt != nil:
+		at = rec.MergeTurnStartedAt
+	case runningTurnStart(clock) != nil:
+		return &frontendv1.RosterRowLastTurnBoundary{AtMs: *runningTurnStart(clock)}
+	default:
+		at = rec.LastTurnEndedAt
+	}
+	if at == nil {
+		return nil
+	}
+	return &frontendv1.RosterRowLastTurnBoundary{AtMs: at.UnixMilli()}
 }
 
 // lastUpdated resolves the row's update recency
@@ -310,9 +354,9 @@ func when(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv1.FooterCloc
 	case mergeStartedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_SyncMerging{
 			SyncMerging: &frontendv1.RosterRowWhenSyncMerging{StartedAtMs: *mergeStartedAt}}
-	case clock.TurnStartedAtMs != nil && clock.TurnEndedAtMs == nil:
+	case runningTurnStart(clock) != nil:
 		out.Shown = &frontendv1.RosterRowWhen_TurnRunning{
-			TurnRunning: &frontendv1.RosterRowWhenTurnRunning{StartedAtMs: *clock.TurnStartedAtMs}}
+			TurnRunning: &frontendv1.RosterRowWhenTurnRunning{StartedAtMs: *runningTurnStart(clock)}}
 	default:
 		// THE DURABLE END INSTANT, never the footer clock's: the clock is
 		// restated only from a history page, while the workspace record

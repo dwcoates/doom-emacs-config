@@ -307,11 +307,12 @@ precedence, so every merged row states it."
          (plist-get (plist-get when-column :value) :at-ms))))
 
 (defun agent-repl-roster-row-instant-ms (row field)
-  "Return the epoch ms of ROW's durable instant FIELD, or nil.
-FIELD is the row key of one of the durable instants (`:last-selected',
-`:last-turn-ended', `:last-updated'), each decoded to `(:at-ms MS)' by the
-one instant decoder.  nil when ROW is nil or does not carry FIELD.  The
-one reader every durable-instant accessor goes through."
+  "Return the epoch ms of ROW's instant FIELD, or nil.
+FIELD is the row key of one of the row's instants (`:last-selected',
+`:last-turn-ended', `:last-turn-boundary', `:last-updated'), each
+decoded to `(:at-ms MS)' by the one instant decoder.  nil when ROW is
+nil or does not carry FIELD.  The one reader every instant accessor
+goes through."
   (plist-get (plist-get row field) :at-ms))
 
 (defun agent-repl-roster-row-commit-count (row)
@@ -1027,6 +1028,15 @@ Read from WS's roster row (`RosterRowLastTurnEnded'), which the daemon
 fills from its turn record, so it survives an Emacs restart.  nil when
 the roster has no row for WS or no turn of WS has closed."
   (agent-repl-roster--instant-ms ws :last-turn-ended))
+
+(defun agent-repl-roster-last-turn-boundary-ms (ws)
+  "Return the instant one of WS's turns most recently started or ended, or nil.
+Epoch ms, read from WS's roster row (`RosterRowLastTurnBoundary'): the
+running turn's start, else the last end, and under a sync merge the start
+of the turn that finished into it, all resolved by the daemon.  nil when
+the roster has no row for WS or no turn of WS has started.  The one-line
+tab bar keeps the tabs newest by it (`agent-repl--tabline-recency-keep')."
+  (agent-repl-roster--instant-ms ws :last-turn-boundary))
 
 (defun agent-repl-roster-last-finished-name (names)
   "Return the one of NAMES that most recently FINISHED, or nil.

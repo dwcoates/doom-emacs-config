@@ -855,6 +855,11 @@ The top bar's phone chip, just left of the wifi chip, makes the workspace's sess
   - Closing the panels with `SPC o c`.
   - Opening a file that takes the whole frame.
   - Any other layout change that drops the webview window.
+- **The tab bar is one line, and when the tabs do not all fit it shows the ones whose turns moved most recently.**
+  - A turn starting and a turn ending count the same: whichever happened later is the tab's time.
+  - A workspace in a sync merge counts from when the turn that finished into the merge started, since the merge continues that turn.
+  - The shown tabs keep the sidebar's order, and a trailing `+N` counts the ones left out.
+  - A left-out tab keeps its number, so `M-1`..`M-9` still reach it.
 
 ## Switching workspaces from the keyboard
 
