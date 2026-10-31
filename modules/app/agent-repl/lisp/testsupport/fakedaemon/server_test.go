@@ -98,6 +98,26 @@ func TestDefaultSelectWorkspaceIsSuccess(t *testing.T) {
 	}
 }
 
+func TestDefaultUpdateRemoteControlModeIsSuccess(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.UpdateRemoteControlMode(context.Background(),
+		connect.NewRequest(&agentreplv1.UpdateRemoteControlModeRequest{
+			Workspace: &workspaceRef,
+			Action:    &agentreplv1.UpdateRemoteControlModeRequest_Toggle{Toggle: &agentreplv1.UpdateRemoteControlModeToggle{}}}))
+	if err != nil {
+		t.Fatalf("UpdateRemoteControlMode: %v", err)
+	}
+
+	// Assert: the toggle's default is the success arm, so `SPC j C' reaches its success path.
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateRemoteControlMode default is %v, want the success arm", resp.Msg)
+	}
+}
+
 func TestDefaultSubmitPromptCarriesATurnId(t *testing.T) {
 	// Arrange.
 	_, baseURL := newTestServer(t)
