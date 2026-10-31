@@ -1738,3 +1738,53 @@ func TestAnUndeclaredCloseCauseFailsHard(t *testing.T) {
 	}()
 	r.SetRegistry(registry(ws))
 }
+
+// THE TURN BOUNDARY is the running turn's start, else the durable last end,
+// except under a sync merge, which counts from the start of the turn that
+// asked for it.
+func TestTheRowCarriesTheNewestTurnBoundary(t *testing.T) {
+	queued := epoch.Add(3 * time.Hour)
+	tests := []struct {
+		name       string
+		ended      *time.Time
+		mergeTurn  *time.Time
+		runningAt  *time.Time
+		syncMerges bool
+		want       *int64
+	}{
+		{name: "no turn has started", want: nil},
+		{name: "an idle workspace counts from its last end", ended: at(time.Hour), want: millis(at(time.Hour))},
+		{name: "a running turn counts from its start", ended: at(time.Hour), runningAt: at(2 * time.Hour), want: millis(at(2 * time.Hour))},
+		{name: "a sync merge counts from the turn that asked for it", ended: at(2 * time.Hour), mergeTurn: at(time.Hour), syncMerges: true, want: millis(at(time.Hour))},
+		{name: "a sync merge counts from that turn while the merge runs its own", ended: at(2 * time.Hour), mergeTurn: at(time.Hour), runningAt: at(4 * time.Hour), syncMerges: true, want: millis(at(time.Hour))},
+		{name: "a sync merge with no turn before it has none", ended: at(2 * time.Hour), syncMerges: true, want: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			ws := workspace(string(theWS), "one")
+			ws.LastTurnEndedAt = tc.ended
+			ws.MergeTurnStartedAt = tc.mergeTurn
+			r := live(t, arrange(t, ws))
+			if tc.syncMerges {
+				r.SetMerge(theWS, footer.MergeFacts{State: "merging", QueuedAt: queued, Step: footer.StepTesting})
+			}
+
+			// Act.
+			if tc.runningAt != nil {
+				r.SetTurn(theWS, &footer.TurnStarted{At: *tc.runningAt, Act: footer.ActPrompt})
+			}
+
+			// Assert.
+			got := onlyRow(t, r).GetLastTurnBoundary()
+			switch {
+			case tc.want == nil && got != nil:
+				t.Fatalf("last_turn_boundary = %v, want unset", got)
+			case tc.want != nil && got == nil:
+				t.Fatalf("last_turn_boundary unset, want %d", *tc.want)
+			case tc.want != nil && got.GetAtMs() != *tc.want:
+				t.Fatalf("last_turn_boundary = %d, want %d", got.GetAtMs(), *tc.want)
+			}
+		})
+	}
+}

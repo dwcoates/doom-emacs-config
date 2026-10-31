@@ -1967,3 +1967,64 @@ func TestEveryTouchedQuestionAsksTouchedRow(t *testing.T) {
 		}
 	}
 }
+
+// THE MERGE TURN START is derived on read: the newest start of the
+// workspace's own turns at or before its own merge-queue entry was enqueued.
+func TestTheWorkspaceReadAnswersTheStartOfTheTurnThatAskedForItsMerge(t *testing.T) {
+	type turnSpec struct {
+		other bool
+		start time.Duration
+	}
+	hour := time.Hour
+	twoHours := 2 * time.Hour
+	tests := []struct {
+		name    string
+		turns   []turnSpec
+		queueAt *time.Duration
+		want    *time.Duration
+	}{
+		{name: "a turn but no queued merge", turns: []turnSpec{{start: 0}}, want: nil},
+		{name: "a queued merge with no turn before it", turns: []turnSpec{{start: twoHours}}, queueAt: &hour, want: nil},
+		{name: "the turn that asked for the merge", turns: []turnSpec{{start: 0}, {start: 30 * time.Minute}}, queueAt: &hour, want: ptrDuration(30 * time.Minute)},
+		{name: "a turn the merge runs after it was queued", turns: []turnSpec{{start: 0}, {start: twoHours}}, queueAt: &hour, want: ptrDuration(0)},
+		{name: "a turn started at the enqueue instant", turns: []turnSpec{{start: hour}}, queueAt: &hour, want: &hour},
+		{name: "another workspace's later turn", turns: []turnSpec{{start: 0}, {other: true, start: 50 * time.Minute}}, queueAt: &hour, want: ptrDuration(0)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			ctx := context.Background()
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			other := testWorkspaceNamed(t, s, "other")
+			for _, spec := range tc.turns {
+				owner := ws.ID
+				if spec.other {
+					owner = other.ID
+				}
+				if err := s.PutTurn(ctx, Turn{ID: NewTurnID(), Workspace: owner, Text: "go", Origin: "emacs", StartedAt: instant.Add(spec.start)}); err != nil {
+					t.Fatalf("PutTurn: %v", err)
+				}
+			}
+			if tc.queueAt != nil {
+				queued(t, s, RepoKey(t.TempDir()), ws.ID, instant.Add(*tc.queueAt))
+			}
+
+			// Act.
+			got, err := s.Workspace(ctx, ws.ID)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			switch {
+			case tc.want == nil && got.MergeTurnStartedAt != nil:
+				t.Fatalf("merge turn start = %v, want none", got.MergeTurnStartedAt)
+			case tc.want != nil && (got.MergeTurnStartedAt == nil || !got.MergeTurnStartedAt.Equal(instant.Add(*tc.want))):
+				t.Fatalf("merge turn start = %v, want %v", got.MergeTurnStartedAt, instant.Add(*tc.want))
+			}
+		})
+	}
+}
+
+func ptrDuration(d time.Duration) *time.Duration { return &d }
