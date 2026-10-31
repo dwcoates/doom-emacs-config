@@ -228,6 +228,17 @@ const (
 	// running turn and wakes an idle agent, and drawn as NO row: it is the
 	// daemon's word to the agent, as a workspace notice is.
 	PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT PromptOrigin = 44
+	// A prompt typed on claude.ai (or its mobile app) into a workspace whose
+	// remote control is on (agentrepl.v1.UpdateRemoteControlMode). The vendor
+	// queues it itself, past agent-repl's own submit pipeline, so the shim
+	// ADOPTS the turn it starts as it adopts a VENDOR_STARTED one: it mints the
+	// turn id and writes a prompt row of this origin as the turn's first row.
+	// Unlike VENDOR_STARTED, somebody DID say something: `said` is the prompt's
+	// text as the vendor echoed it, and a feed draws it as a prompt the user
+	// said.
+	//
+	// Never submitted by a client: only the shim produces it.
+	PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL PromptOrigin = 45
 )
 
 // Enum value maps for PromptOrigin.
@@ -277,6 +288,7 @@ var (
 		42: "PROMPT_ORIGIN_WORKSPACE_COMPACT",
 		43: "PROMPT_ORIGIN_DEPLOY_HOOK",
 		44: "PROMPT_ORIGIN_SUBSECTION_PLACEMENT",
+		45: "PROMPT_ORIGIN_REMOTE_CONTROL",
 	}
 	PromptOrigin_value = map[string]int32{
 		"PROMPT_ORIGIN_UNSPECIFIED":                 0,
@@ -323,6 +335,7 @@ var (
 		"PROMPT_ORIGIN_WORKSPACE_COMPACT":           42,
 		"PROMPT_ORIGIN_DEPLOY_HOOK":                 43,
 		"PROMPT_ORIGIN_SUBSECTION_PLACEMENT":        44,
+		"PROMPT_ORIGIN_REMOTE_CONTROL":              45,
 	}
 )
 
@@ -357,7 +370,7 @@ var File_conversation_v1_prompt_origin_proto protoreflect.FileDescriptor
 
 const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\n" +
-	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\x85\r\n" +
+	"#conversation/v1/prompt_origin.proto\x12\x0fconversation.v1*\xa7\r\n" +
 	"\fPromptOrigin\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17PROMPT_ORIGIN_USER_SENT\x10\x01\x12$\n" +
@@ -403,7 +416,8 @@ const file_conversation_v1_prompt_origin_proto_rawDesc = "" +
 	"\x18PROMPT_ORIGIN_AGENT_SENT\x10)\x12#\n" +
 	"\x1fPROMPT_ORIGIN_WORKSPACE_COMPACT\x10*\x12\x1d\n" +
 	"\x19PROMPT_ORIGIN_DEPLOY_HOOK\x10+\x12&\n" +
-	"\"PROMPT_ORIGIN_SUBSECTION_PLACEMENT\x10,B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
+	"\"PROMPT_ORIGIN_SUBSECTION_PLACEMENT\x10,\x12 \n" +
+	"\x1cPROMPT_ORIGIN_REMOTE_CONTROL\x10-B0Z.agentrepl/proto/conversation/v1;conversationv1b\x06proto3"
 
 var (
 	file_conversation_v1_prompt_origin_proto_rawDescOnce sync.Once

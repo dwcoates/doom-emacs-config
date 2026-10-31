@@ -1,0 +1,73 @@
+// endpoint_update_remote_control_mode.proto — UpdateRemoteControlMode: turn a
+// workspace's remote control on, off, or over.
+//
+// REMOTE CONTROL makes a workspace's session, which runs on this machine,
+// reachable from claude.ai and its mobile app through the vendor's Remote
+// Control bridge (shim.v1.SetSessionRemoteControl).
+//
+// THE MODE IS THE DAEMON'S, PERSISTED PER WORKSPACE. Unset, it defaults ON for
+// a repository's main worktree and OFF for every other workspace; a request
+// records the mode it leaves explicitly, so it holds across shims and daemons.
+//
+// A WORKSPACE IN REMOTE CONTROL KEEPS ITS SHIM UP BETWEEN KEEP-ALIVES. Its
+// keep-alives go on as every workspace's do, but none is followed by a stand-
+// down, so claude.ai always finds it served; its idle cutoff still hibernates
+// it. Turning the mode on for a workspace with no shim starts one; turning it
+// off leaves the shim up, and the next keep-alive parks it as usual.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateRemoteControlModeRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  oneof action {
+    UpdateRemoteControlModeOn on = 2;
+    UpdateRemoteControlModeOff off = 3;
+    // Turn it over from the mode the daemon reads at that moment.
+    UpdateRemoteControlModeToggle toggle = 4;
+  }
+}
+message UpdateRemoteControlModeOn {}
+message UpdateRemoteControlModeOff {}
+message UpdateRemoteControlModeToggle {}
+
+message UpdateRemoteControlModeResponse {
+  oneof result {
+    UpdateRemoteControlModeSuccess success = 1;
+    UpdateRemoteControlModeError error = 2;
+  }
+}
+
+// The mode is recorded and, where a shim is up, in force.
+message UpdateRemoteControlModeSuccess {
+  // The mode the request left.
+  bool on = 1;
+}
+
+message UpdateRemoteControlModeError {
+  oneof cause {
+    UpdateRemoteControlModeUnknownWorkspace unknown_workspace = 1;
+    UpdateRemoteControlModeWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    UpdateRemoteControlModeTransferringAway transferring_away = 3;
+    UpdateRemoteControlModeNotYetAdopted not_yet_adopted = 4;
+    // The vendor refused the bridge. The mode is still recorded as asked, and
+    // the refusal also rides the workspace's warning strip.
+    UpdateRemoteControlModeVendorRefused vendor_refused = 5;
+  }
+}
+message UpdateRemoteControlModeUnknownWorkspace {}
+message UpdateRemoteControlModeWorkspaceRefMismatch {
+  string registry_dir = 1;
+}
+message UpdateRemoteControlModeTransferringAway {
+  string address = 1;
+}
+message UpdateRemoteControlModeNotYetAdopted {}
+message UpdateRemoteControlModeVendorRefused {
+  string detail = 1;
+}

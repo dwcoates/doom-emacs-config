@@ -232,6 +232,9 @@ const (
 	AgentReplSetDefaultModelProcedure = "/agentrepl.v1.AgentRepl/SetDefaultModel"
 	// AgentReplSetEffortProcedure is the fully-qualified name of the AgentRepl's SetEffort RPC.
 	AgentReplSetEffortProcedure = "/agentrepl.v1.AgentRepl/SetEffort"
+	// AgentReplUpdateRemoteControlModeProcedure is the fully-qualified name of the AgentRepl's
+	// UpdateRemoteControlMode RPC.
+	AgentReplUpdateRemoteControlModeProcedure = "/agentrepl.v1.AgentRepl/UpdateRemoteControlMode"
 	// AgentReplSetPermissionModeProcedure is the fully-qualified name of the AgentRepl's
 	// SetPermissionMode RPC.
 	AgentReplSetPermissionModeProcedure = "/agentrepl.v1.AgentRepl/SetPermissionMode"
@@ -461,6 +464,7 @@ var (
 	agentReplSetModelMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("SetModel")
 	agentReplSetDefaultModelMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("SetDefaultModel")
 	agentReplSetEffortMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("SetEffort")
+	agentReplUpdateRemoteControlModeMethodDescriptor    = agentReplServiceDescriptor.Methods().ByName("UpdateRemoteControlMode")
 	agentReplSetPermissionModeMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SetPermissionMode")
 	agentReplSelectAccountMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("SelectAccount")
 	agentReplWatchFooterMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchFooter")
@@ -738,6 +742,9 @@ type AgentReplClient interface {
 	// The effort selector's pick, SetModel's sibling. See
 	// endpoint_set_effort.proto.
 	SetEffort(context.Context, *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error)
+	// Turn a workspace's remote control (its session reachable from claude.ai)
+	// on, off, or over. See endpoint_update_remote_control_mode.proto.
+	UpdateRemoteControlMode(context.Context, *connect.Request[v1.UpdateRemoteControlModeRequest]) (*connect.Response[v1.UpdateRemoteControlModeResponse], error)
 	// The permission-mode switch, SetModel's sibling. See
 	// endpoint_set_permission_mode.proto.
 	SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error)
@@ -1369,6 +1376,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplSetEffortMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		updateRemoteControlMode: connect.NewClient[v1.UpdateRemoteControlModeRequest, v1.UpdateRemoteControlModeResponse](
+			httpClient,
+			baseURL+AgentReplUpdateRemoteControlModeProcedure,
+			connect.WithSchema(agentReplUpdateRemoteControlModeMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		setPermissionMode: connect.NewClient[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse](
 			httpClient,
 			baseURL+AgentReplSetPermissionModeProcedure,
@@ -1793,6 +1806,7 @@ type agentReplClient struct {
 	setModel                   *connect.Client[v1.SetModelRequest, v1.SetModelResponse]
 	setDefaultModel            *connect.Client[v1.SetDefaultModelRequest, v1.SetDefaultModelResponse]
 	setEffort                  *connect.Client[v1.SetEffortRequest, v1.SetEffortResponse]
+	updateRemoteControlMode    *connect.Client[v1.UpdateRemoteControlModeRequest, v1.UpdateRemoteControlModeResponse]
 	setPermissionMode          *connect.Client[v1.SetPermissionModeRequest, v1.SetPermissionModeResponse]
 	selectAccount              *connect.Client[v1.SelectAccountRequest, v1.SelectAccountResponse]
 	watchFooter                *connect.Client[v1.WatchFooterRequest, v1.WatchFooterResponse]
@@ -2205,6 +2219,11 @@ func (c *agentReplClient) SetDefaultModel(ctx context.Context, req *connect.Requ
 // SetEffort calls agentrepl.v1.AgentRepl.SetEffort.
 func (c *agentReplClient) SetEffort(ctx context.Context, req *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error) {
 	return c.setEffort.CallUnary(ctx, req)
+}
+
+// UpdateRemoteControlMode calls agentrepl.v1.AgentRepl.UpdateRemoteControlMode.
+func (c *agentReplClient) UpdateRemoteControlMode(ctx context.Context, req *connect.Request[v1.UpdateRemoteControlModeRequest]) (*connect.Response[v1.UpdateRemoteControlModeResponse], error) {
+	return c.updateRemoteControlMode.CallUnary(ctx, req)
 }
 
 // SetPermissionMode calls agentrepl.v1.AgentRepl.SetPermissionMode.
@@ -2710,6 +2729,9 @@ type AgentReplHandler interface {
 	// The effort selector's pick, SetModel's sibling. See
 	// endpoint_set_effort.proto.
 	SetEffort(context.Context, *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error)
+	// Turn a workspace's remote control (its session reachable from claude.ai)
+	// on, off, or over. See endpoint_update_remote_control_mode.proto.
+	UpdateRemoteControlMode(context.Context, *connect.Request[v1.UpdateRemoteControlModeRequest]) (*connect.Response[v1.UpdateRemoteControlModeResponse], error)
 	// The permission-mode switch, SetModel's sibling. See
 	// endpoint_set_permission_mode.proto.
 	SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error)
@@ -3337,6 +3359,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplSetEffortMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplUpdateRemoteControlModeHandler := connect.NewUnaryHandler(
+		AgentReplUpdateRemoteControlModeProcedure,
+		svc.UpdateRemoteControlMode,
+		connect.WithSchema(agentReplUpdateRemoteControlModeMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplSetPermissionModeHandler := connect.NewUnaryHandler(
 		AgentReplSetPermissionModeProcedure,
 		svc.SetPermissionMode,
@@ -3829,6 +3857,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplSetDefaultModelHandler.ServeHTTP(w, r)
 		case AgentReplSetEffortProcedure:
 			agentReplSetEffortHandler.ServeHTTP(w, r)
+		case AgentReplUpdateRemoteControlModeProcedure:
+			agentReplUpdateRemoteControlModeHandler.ServeHTTP(w, r)
 		case AgentReplSetPermissionModeProcedure:
 			agentReplSetPermissionModeHandler.ServeHTTP(w, r)
 		case AgentReplSelectAccountProcedure:
@@ -4234,6 +4264,10 @@ func (UnimplementedAgentReplHandler) SetDefaultModel(context.Context, *connect.R
 
 func (UnimplementedAgentReplHandler) SetEffort(context.Context, *connect.Request[v1.SetEffortRequest]) (*connect.Response[v1.SetEffortResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SetEffort is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UpdateRemoteControlMode(context.Context, *connect.Request[v1.UpdateRemoteControlModeRequest]) (*connect.Response[v1.UpdateRemoteControlModeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UpdateRemoteControlMode is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) SetPermissionMode(context.Context, *connect.Request[v1.SetPermissionModeRequest]) (*connect.Response[v1.SetPermissionModeResponse], error) {

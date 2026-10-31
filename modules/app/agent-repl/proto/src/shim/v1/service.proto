@@ -24,6 +24,7 @@ import "shim/v1/endpoint_resolve_vendor_task.proto";
 import "shim/v1/endpoint_revise_response.proto";
 import "shim/v1/endpoint_set_session_model.proto";
 import "shim/v1/endpoint_set_session_effort.proto";
+import "shim/v1/endpoint_set_session_remote_control.proto";
 import "shim/v1/endpoint_set_session_permission_mode.proto";
 import "shim/v1/endpoint_send_keepalive.proto";
 import "shim/v1/endpoint_start_session.proto";
@@ -69,6 +70,10 @@ service Shim {
   rpc SetSessionEffort(SetSessionEffortRequest) returns (SetSessionEffortResponse);
   // Change the session's permission mode for every gate from now on.
   rpc SetSessionPermissionMode(SetSessionPermissionModeRequest) returns (SetSessionPermissionModeResponse);
+  // Turn the session's Remote Control bridge (claude.ai) on or off. Holds for
+  // every vendor process the shim opens from now on. See
+  // endpoint_set_session_remote_control.proto.
+  rpc SetSessionRemoteControl(SetSessionRemoteControlRequest) returns (SetSessionRemoteControlResponse);
 
   // The pre-hibernation directive: the shim compacts, then acks; the daemon
   // stands the shim down only after the ack. See endpoint_hibernate.proto.

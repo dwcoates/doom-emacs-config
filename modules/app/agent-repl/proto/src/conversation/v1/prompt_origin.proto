@@ -217,4 +217,15 @@ enum PromptOrigin {
   // running turn and wakes an idle agent, and drawn as NO row: it is the
   // daemon's word to the agent, as a workspace notice is.
   PROMPT_ORIGIN_SUBSECTION_PLACEMENT = 44;
+  // A prompt typed on claude.ai (or its mobile app) into a workspace whose
+  // remote control is on (agentrepl.v1.UpdateRemoteControlMode). The vendor
+  // queues it itself, past agent-repl's own submit pipeline, so the shim
+  // ADOPTS the turn it starts as it adopts a VENDOR_STARTED one: it mints the
+  // turn id and writes a prompt row of this origin as the turn's first row.
+  // Unlike VENDOR_STARTED, somebody DID say something: `said` is the prompt's
+  // text as the vendor echoed it, and a feed draws it as a prompt the user
+  // said.
+  //
+  // Never submitted by a client: only the shim produces it.
+  PROMPT_ORIGIN_REMOTE_CONTROL = 45;
 }

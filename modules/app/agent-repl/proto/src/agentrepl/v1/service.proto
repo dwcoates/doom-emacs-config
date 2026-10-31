@@ -122,6 +122,7 @@ import "agentrepl/v1/endpoint_update_deploy_hold.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
 import "agentrepl/v1/endpoint_update_merge_queue.proto";
 import "agentrepl/v1/endpoint_update_persistent_wifi_mode.proto";
+import "agentrepl/v1/endpoint_update_remote_control_mode.proto";
 import "agentrepl/v1/endpoint_update_question_draft.proto";
 import "agentrepl/v1/endpoint_update_shutdown_schedule.proto";
 import "agentrepl/v1/endpoint_update_sidebar_view.proto";
@@ -424,6 +425,10 @@ service AgentRepl {
   // The effort selector's pick, SetModel's sibling. See
   // endpoint_set_effort.proto.
   rpc SetEffort(SetEffortRequest) returns (SetEffortResponse);
+
+  // Turn a workspace's remote control (its session reachable from claude.ai)
+  // on, off, or over. See endpoint_update_remote_control_mode.proto.
+  rpc UpdateRemoteControlMode(UpdateRemoteControlModeRequest) returns (UpdateRemoteControlModeResponse);
 
   // The permission-mode switch, SetModel's sibling. See
   // endpoint_set_permission_mode.proto.
