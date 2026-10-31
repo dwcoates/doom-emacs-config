@@ -21,19 +21,12 @@ import (
 // (WithAccountUsages), so a restarted daemon draws it before any session has
 // spoken.
 
-// accountUsage is ONE account root's usage evidence.
-//
-// THE BILLING MODE IS ONE OF TWO (owner ruling, 2026-10-06): allowance
-// windows (`rate`, a subscription) or a seat's spend (`seat`, a per-seat
-// account), never both. A seat-spend sample clears the windows and a
-// windows sample clears the seat, so whichever the vendor reported last is
-// the mode drawn.
+// accountUsage is ONE account root's usage evidence: the allowance windows
+// the vendor's rate-limit events figured. The account's usage is never
+// sampled, so the events are its only source.
 type accountUsage struct {
 	// rate is the drawn allowances.
 	rate rateState
-	// seat is a per-seat account's spend, nil unless the account's newest
-	// sample said it is billed per seat.
-	seat *seatSpend
 	// generation counts the changes to this evidence. `mutate` compares it
 	// across a change to know the root's other workspaces need republishing
 	// and the evidence persisting, and the persister orders its writes by it.
@@ -43,38 +36,15 @@ type accountUsage struct {
 // figured reports whether any window has a figure to draw.
 func (u *accountUsage) figured() bool {
 	r := &u.rate
-	return r.session.figured || r.weekly.figured || r.weeklyOpus.figured || r.weeklySonnet.figured || r.overage.figured
-}
-
-// observed reports whether anything at all is known about the account.
-func (u *accountUsage) observed() bool {
-	return u.figured() || u.seat != nil
+	return r.weekly.figured || r.weeklyOpus.figured || r.weeklySonnet.figured || r.overage.figured
 }
 
 // arm names what the enduring line draws from this evidence, for the logs.
 func (u *accountUsage) arm() string {
-	switch {
-	case u.seat != nil:
-		return "seat_spend"
-	case u.figured():
+	if u.figured() {
 		return "usage"
-	default:
-		return "unobserved"
 	}
-}
-
-// seatSpend is a per-seat account's month-to-date spend against its monthly
-// allotment, in minor units of one currency.
-type seatSpend struct {
-	// allotmentMinor is the seat's monthly allotment.
-	allotmentMinor int64
-	// spentMinor is the month-to-date spend, nil while none is reported.
-	spentMinor *int64
-	// currency is the ISO 4217 code both amounts are in.
-	currency string
-	// sampledAtMs is the shim's stamp on the sample that read it, which
-	// keeps an older sample from overwriting a newer one.
-	sampledAtMs int64
+	return "unobserved"
 }
 
 // touch records that new evidence was filed at `at`.
@@ -85,44 +55,24 @@ func (u *accountUsage) touch(at time.Time) {
 
 // record is the evidence as the state store keeps it.
 func (u *accountUsage) record(root string) wsm.AccountUsage {
-	rec := wsm.AccountUsage{
+	return wsm.AccountUsage{
 		ConfigDir:    root,
 		ObservedAt:   u.rate.at,
-		Session:      u.rate.session.figures(),
 		Weekly:       u.rate.weekly.figures(),
 		WeeklyOpus:   u.rate.weeklyOpus.figures(),
 		WeeklySonnet: u.rate.weeklySonnet.figures(),
 		Overage:      u.rate.overage.figures(),
 	}
-	if u.seat != nil {
-		rec.Seat = &wsm.SeatSpend{
-			AllotmentMinor: u.seat.allotmentMinor,
-			SpentMinor:     u.seat.spentMinor,
-			Currency:       u.seat.currency,
-			SampledAtMs:    u.seat.sampledAtMs,
-		}
-	}
-	return rec
 }
 
 // usageFromRecord rebuilds an account's evidence from its stored row.
 func usageFromRecord(rec wsm.AccountUsage) *accountUsage {
 	u := &accountUsage{}
 	u.rate.at = rec.ObservedAt
-	// The five-hour window is never drawn (owner ruling, 2026-10-30), so a
-	// figure kept from before is not restored.
 	u.rate.weekly.restore(rec.Weekly)
 	u.rate.weeklyOpus.restore(rec.WeeklyOpus)
 	u.rate.weeklySonnet.restore(rec.WeeklySonnet)
 	u.rate.overage.restore(rec.Overage)
-	if rec.Seat != nil {
-		u.seat = &seatSpend{
-			allotmentMinor: rec.Seat.AllotmentMinor,
-			spentMinor:     rec.Seat.SpentMinor,
-			currency:       rec.Seat.Currency,
-			sampledAtMs:    rec.Seat.SampledAtMs,
-		}
-	}
 	return u
 }
 
@@ -134,7 +84,6 @@ func (w *allowanceWindow) figures() *wsm.AllowanceFigures {
 	return &wsm.AllowanceFigures{
 		Utilization:      w.utilization,
 		ResetsAtS:        w.resetsAtS,
-		SampledAtMs:      w.sampledAtMs,
 		Verdict:          w.verdict,
 		VerdictResetsAtS: w.verdictResetsAtS,
 	}
@@ -150,7 +99,6 @@ func (w *allowanceWindow) restore(f *wsm.AllowanceFigures) {
 		figured:          true,
 		utilization:      f.Utilization,
 		resetsAtS:        f.ResetsAtS,
-		sampledAtMs:      f.SampledAtMs,
 		verdict:          f.Verdict,
 		verdictResetsAtS: f.VerdictResetsAtS,
 	}
@@ -201,7 +149,7 @@ func (r *resolver) bindAccountLocked(ws ids.WorkspaceID, s *wsState, root string
 		shared = &accountUsage{}
 		r.accounts[root] = shared
 	}
-	if s.account == "" && !shared.observed() && s.usage.observed() {
+	if s.account == "" && !shared.figured() && s.usage.figured() {
 		*shared = *s.usage
 		shared.generation++
 	}

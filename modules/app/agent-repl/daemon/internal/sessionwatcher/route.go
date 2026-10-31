@@ -143,8 +143,7 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		// The footer's session_change transient announces the change.
 		w.sinks.Footer.OnSessionUpdate(w.ws, update)
 
-	case *conversationv1.SessionUpdate_AccountUsage,
-		*conversationv1.SessionUpdate_RateLimitStatus,
+	case *conversationv1.SessionUpdate_RateLimitStatus,
 		*conversationv1.SessionUpdate_Compacting,
 		// A COMPACTION'S PHASES are the footer's: its salient line while the
 		// compaction runs, and the transient that announces how it concluded.
@@ -310,8 +309,6 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "mcp_server"
 	case *conversationv1.SessionUpdate_IdentityRotated:
 		return "identity_rotated"
-	case *conversationv1.SessionUpdate_AccountUsage:
-		return "account_usage"
 	case *conversationv1.SessionUpdate_RateLimitStatus:
 		return "rate_limit_status"
 	case *conversationv1.SessionUpdate_Compacting:

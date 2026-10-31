@@ -988,11 +988,6 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"commands.OnCommandCatalog", "feed.OnSessionUpdate"},
 		},
 		{
-			name:   "account usage is the footer's",
-			update: accountUsageUpdate(),
-			want:   []string{"footer.OnSessionUpdate"},
-		},
-		{
 			name:   "the rate-limit status is the footer's",
 			update: rateLimitStatusUpdate(),
 			want:   []string{"footer.OnSessionUpdate"},

@@ -263,7 +263,7 @@ func (r *resolver) mutateTelling(ws ids.WorkspaceID, operation, message string, 
 		for _, peer := range r.peersLocked(ws, s.account) {
 			peers = append(peers, r.publishLocked(peer, r.states[peer]))
 		}
-		if s.account != "" && s.usage.observed() {
+		if s.account != "" && s.usage.figured() {
 			write = &usageWrite{generation: s.usage.generation, record: s.usage.record(s.account)}
 		}
 	}
@@ -1099,14 +1099,6 @@ func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.Session
 			r.endCompaction(ws, s, "daemon.footer.on_session_update.query_died")
 			s.tok.settled = true
 		}
-	case *conversationv1.SessionUpdate_AccountUsage:
-		// THE FIGURES' SOURCE. The sampled account usage carries both
-		// windows' utilization and reset, complete from the first sample;
-		// the rate-limit event carries the verdict.
-		return "account_usage", func(s *wsState) {
-			r.logSessionArm(ws, s, "account_usage")
-			r.observeAccountUsage(ws, s, u.AccountUsage)
-		}
 	case *conversationv1.SessionUpdate_RateLimitStatus:
 		return "rate_limit_status", func(s *wsState) {
 			r.logSessionArm(ws, s, "rate_limit_status")
@@ -1231,237 +1223,22 @@ func (r *resolver) logSessionArm(ws ids.WorkspaceID, s *wsState, arm string) {
 		dlog.Context{"arm": arm})
 }
 
-// observeAccountUsage takes one usage sample and files it BY BILLING MODE
-// (owner ruling, 2026-10-06) on the ACCOUNT's evidence (account.go).
-//
-// A SUBSCRIPTION sample (the available arm) files both windows' figures —
-// five_hour is the session allowance, seven_day the weekly one — and ends any
-// seat mode the account was in. A sample whose seven_day window the vendor
-// omitted leaves the weekly allowance unfigured, drawn absent rather than
-// invented.
-//
-// A PER-SEAT sample (the seat_spend arm, which the shim picks for an
-// enterprise account reporting a monthly limit and no five-hour window) files
-// the seat's spend and clears the windows: the two modes are never drawn
-// together.
-//
-// A sample that could read no figure (the unavailable arm) leaves what is on
-// hand standing and is surfaced to the logs, so a read that keeps failing
-// does not vanish silently.
-func (r *resolver) observeAccountUsage(ws ids.WorkspaceID, s *wsState, usage *conversationv1.SessionAccountUsage) {
-	if usage == nil {
-		return
-	}
-	account := s.usage
-	at := usage.GetObservedAtMs()
-	switch outcome := usage.GetOutcome().(type) {
-	case *conversationv1.SessionAccountUsage_SeatSpend:
-		r.observeSeatSpend(ws, s, outcome.SeatSpend, at)
-	case *conversationv1.SessionAccountUsage_Available:
-		// EVERY SAMPLE THE ACCOUNT'S SESSIONS TAKE IS COMPARED BY ITS SHIM
-		// STAMP. The account's workspaces run separate shims, but on one
-		// machine: their stamps are one wall clock, so an older sample is
-		// refused whichever workspace took it.
-		if seat := account.seat; seat != nil && at < seat.sampledAtMs {
-			r.logOf(ws, s).Debug("daemon.footer.account_usage_stale",
-				"refused a subscription sample older than the account's seat-spend sample",
-				dlog.Context{"observed_at_ms": at, "seat_sampled_at_ms": seat.sampledAtMs})
-			return
-		}
-		leftSeat := account.seat != nil
-		account.seat = nil
-		moved := leftSeat
-		if five := outcome.Available.GetFiveHour(); five != nil {
-			moved = r.observeSampledWindow(ws, s, "session", &account.rate.session, five, at) || moved
-		}
-		// THE LONGER WINDOWS ARE OPTIONAL, AND A SAMPLE IS COMPLETE: one that
-		// omits a window says the account has no such allowance, so a figure
-		// an older sample filed for it leaves rather than standing stale.
-		for _, optional := range []struct {
-			name   string
-			window *allowanceWindow
-			sample *conversationv1.SessionUsageWindow
-		}{
-			{"weekly", &account.rate.weekly, outcome.Available.GetSevenDay()},
-			{"weekly_opus", &account.rate.weeklyOpus, outcome.Available.GetSevenDayOpus()},
-			{"weekly_sonnet", &account.rate.weeklySonnet, outcome.Available.GetSevenDaySonnet()},
-		} {
-			if optional.sample == nil {
-				moved = r.retireUnreportedWindow(ws, s, optional.name, optional.window, at) || moved
-				continue
-			}
-			moved = r.observeSampledWindow(ws, s, optional.name, optional.window, optional.sample, at) || moved
-		}
-		if moved {
-			account.touch(r.opts.clock.Now())
-		}
-	default:
-		r.logUnreadableSample(ws, s, usage)
-	}
-}
-
-// retireUnreportedWindow clears a figured window a subscription sample did
-// not report, figure and verdict alike, and reports whether it did. A sample
-// older than the window's own newest one is no evidence the window went
-// away, so it leaves the window standing.
-func (r *resolver) retireUnreportedWindow(ws ids.WorkspaceID, s *wsState, name string, w *allowanceWindow, at int64) bool {
-	if !w.figured || at < w.sampledAtMs {
-		return false
-	}
-	r.logOf(ws, s).Info("daemon.footer.account_usage_figure",
-		"a usage sample reported no such window, so the account has none; its figure leaves the line",
-		dlog.Context{
-			"window": name, "source": "account_usage_sample", "observed_at_ms": at,
-			"previous_utilization": w.utilization, "previous_sampled_at_ms": w.sampledAtMs,
-		})
-	*w = allowanceWindow{}
-	return true
-}
-
-// observeSampledWindow files one window of a subscription sample and records
-// what became of it: a figure that changes the drawn line at INFO, so every
-// move of the footer's usage is in the log with its source and stamp, and a
-// stale or unchanged sample at DEBUG. It reports whether the sample was filed.
-func (r *resolver) observeSampledWindow(ws ids.WorkspaceID, s *wsState, name string, w *allowanceWindow,
-	sample *conversationv1.SessionUsageWindow, at int64) bool {
-	before := *w
-	filed := w.observeSampledFigures(sample.GetUtilizationPercent(), sample.GetResetsAtMs(), at)
-	fields := dlog.Context{
-		"window":                 name,
-		"source":                 "account_usage_sample",
-		"utilization_percent":    sample.GetUtilizationPercent(),
-		"resets_at_ms":           sample.GetResetsAtMs(),
-		"observed_at_ms":         at,
-		"previous_figured":       before.figured,
-		"previous_utilization":   before.utilization,
-		"previous_sampled_at_ms": before.sampledAtMs,
-	}
-	switch {
-	case !filed:
-		r.logOf(ws, s).Debug("daemon.footer.account_usage_stale",
-			"refused a usage sample older than the newest one on hand; the drawn figure stands", fields)
-	case before.figured && before.utilization == w.utilization && before.resetsAtS == w.resetsAtS:
-		r.logOf(ws, s).Debug("daemon.footer.account_usage_figure",
-			"a usage sample restated the drawn figure", fields)
-	default:
-		r.logOf(ws, s).Info("daemon.footer.account_usage_figure",
-			"a usage sample moved the drawn figure", fields)
-	}
-	return filed
-}
-
-// observeSeatSpend files a per-seat sample: the seat's spend replaces
-// whatever the account had, windows included. A sample older than the seat
-// spend or window figures on hand is refused, by the same shim stamp the
-// windows compare.
-func (r *resolver) observeSeatSpend(ws ids.WorkspaceID, s *wsState, spend *conversationv1.SessionAccountUsageSeatSpend, at int64) {
-	account := s.usage
-	rate := &account.rate
-	newest := max(rate.session.sampledAtMs, rate.weekly.sampledAtMs, rate.weeklyOpus.sampledAtMs, rate.weeklySonnet.sampledAtMs)
-	if account.seat != nil {
-		newest = max(newest, account.seat.sampledAtMs)
-	}
-	if at < newest {
-		r.logOf(ws, s).Debug("daemon.footer.account_usage_stale",
-			"refused a seat-spend sample older than the account's newest sample",
-			dlog.Context{"observed_at_ms": at, "newest_sampled_at_ms": newest})
-		return
-	}
-	allotment := spend.GetAllotment()
-	seat := &seatSpend{
-		allotmentMinor: allotment.GetAmountMinor(),
-		currency:       allotment.GetCurrency(),
-		sampledAtMs:    at,
-	}
-	if seat.currency == "" {
-		r.logOf(ws, s).Error("daemon.footer.account_usage",
-			"refused a seat's spend that names no currency; the account's usage stands", nil)
-		return
-	}
-	if spent := spend.GetSpent(); spent != nil {
-		if spent.GetCurrency() != seat.currency {
-			r.logOf(ws, s).Error("daemon.footer.account_usage",
-				"refused a seat's spend stated in a different currency from its allotment; the account's usage stands",
-				dlog.Context{"allotment_currency": seat.currency, "spent_currency": spent.GetCurrency()})
-			return
-		}
-		amount := spent.GetAmountMinor()
-		seat.spentMinor = &amount
-	}
-	account.seat = seat
-	account.rate = rateState{}
-	account.touch(r.opts.clock.Now())
-}
-
-// logUnreadableSample surfaces a usage sample that read NO figure. It drives
-// no strip cell any more, so this Debug breadcrumb is the one place a
-// persistently failing read stays visible; it never clears the figures on
-// hand (the caller returns without touching them).
-func (r *resolver) logUnreadableSample(ws ids.WorkspaceID, s *wsState, usage *conversationv1.SessionAccountUsage) {
-	unavailable, ok := usage.GetOutcome().(*conversationv1.SessionAccountUsage_Unavailable)
-	if !ok {
-		// No outcome arm at all: nothing was stated, so there is nothing to
-		// report and nothing was read.
-		return
-	}
-	fields := dlog.Context{"reason": unavailableReason(unavailable.Unavailable)}
-	// THE SHIM'S OWN CAUSE RIDES THE RECORD. Since the strip stopped drawing an
-	// unread caveat (owner ruling, fc4917be4) this breadcrumb is the ONLY place
-	// a sampling failure stays visible, and the reason arm alone says only
-	// "something failed" — the cause is the shim's account of what.
-	if failure := unavailable.Unavailable.GetSamplingFailure(); failure != nil {
-		fields["cause"] = failure.GetCause()
-	}
-	r.logOf(ws, s).Debug("daemon.footer.usage_sample_unreadable",
-		"an account-usage sample read no figure; the figures on hand stand", fields)
-}
-
-// unavailableReason names an unavailable sample's reason arm for the logs. An
-// unavailable arm whose own reason oneof is UNSET is still an unavailability,
-// reported as such rather than dropped.
-func unavailableReason(unavailable *conversationv1.SessionAccountUsageUnavailable) string {
-	switch unavailable.GetReason().(type) {
-	case *conversationv1.SessionAccountUsageUnavailable_ServiceUnavailable:
-		return "service_unavailable"
-	case *conversationv1.SessionAccountUsageUnavailable_WindowUnavailable:
-		return "window_unavailable"
-	case *conversationv1.SessionAccountUsageUnavailable_UtilizationUnavailable:
-		return "utilization_unavailable"
-	case *conversationv1.SessionAccountUsageUnavailable_SamplingFailure:
-		return "sampling_failure"
-	default:
-		return "unspecified"
-	}
-}
-
 // observeRateLimitStatus takes one rate-limit event and files it under the
-// window it is about, EACH VENDOR WINDOW ITS OWN: five_hour is the session
-// allowance, seven_day the account-wide weekly one, seven_day_opus and
-// seven_day_sonnet the per-model weekly ones, and overage the overage one.
-// The event is the VERDICT's only source, so filing it is what lets an
-// allowance's status arm join; the verdict is scoped to the window instance
-// the event names by its reset (allowanceWindow.observeVerdict). ITS
-// UTILIZATION IS NEVER DRAWN ON A SAMPLED WINDOW: it carries no instant to
-// order it against the samples, so the newest sample's figure stands (see
-// `allowanceWindow`). The overage window, which no sample figures, takes the
-// event's figure. The seven_day_overage_included window has no drawn
-// allowance, and a status naming no window is not filable at all; both still
-// count toward the session's block (wsState.rateLimits).
+// window it is about, EACH VENDOR WINDOW ITS OWN: seven_day is the
+// account-wide weekly allowance, seven_day_opus and seven_day_sonnet the
+// per-model weekly ones, and overage the overage one. The event is the only
+// source of a window's figure and its verdict (`allowanceWindow`); the verdict
+// is scoped to the window instance the event names by its reset
+// (allowanceWindow.observeVerdict). The five-hour and
+// seven_day_overage_included windows have no drawn allowance, and a status
+// naming no window is not filable at all; all of them still count toward the
+// session's block (wsState.rateLimits).
 func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.SessionRateLimitStatus) {
 	if status == nil {
 		return
 	}
 	account := s.usage
 	name := ladder.RateLimitWindow(status)
-	if account.seat != nil {
-		// A PER-SEAT ACCOUNT DRAWS ITS SPEND, NEVER A WINDOW: the modes are
-		// never held together, and only a subscription sample ends the seat
-		// mode (observeAccountUsage).
-		r.logOf(s.id, s).Debug("daemon.footer.rate_limit_on_seat",
-			"a rate-limit event for a per-seat account is not filed as a window; the seat's spend stands",
-			dlog.Context{"window": name})
-		return
-	}
 	var window *allowanceWindow
 	switch status.GetRateLimitType().GetWindow().(type) {
 	case *conversationv1.SessionRateLimitType_FiveHour:

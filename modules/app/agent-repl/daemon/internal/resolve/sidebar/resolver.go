@@ -945,8 +945,6 @@ func sessionUpdateArm(update *conversationv1.SessionUpdate) (string, func(*wsSta
 		return "fast_mode", func(*wsState) {}
 	case *conversationv1.SessionUpdate_McpServer:
 		return "mcp_server", func(*wsState) {}
-	case *conversationv1.SessionUpdate_AccountUsage:
-		return "account_usage", func(*wsState) {}
 	case *conversationv1.SessionUpdate_ContextUsage:
 		return "context_usage", func(*wsState) {}
 	default:

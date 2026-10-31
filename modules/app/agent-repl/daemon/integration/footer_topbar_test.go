@@ -1267,23 +1267,21 @@ func TestFooterTheEnduringLineStandsWithNoTransient(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
 
-	// Act: an unremarkable sample.
-	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_AccountUsage{AccountUsage: &conversationv1.SessionAccountUsage{
-			ObservedAtMs: 1_700_000_000_000,
-			Outcome: &conversationv1.SessionAccountUsage_Available{Available: &conversationv1.SessionAccountUsageAvailable{
-				FiveHour: &conversationv1.SessionUsageWindow{UtilizationPercent: 12, ResetsAtMs: 1_700_010_000_000},
-			}},
-		}},
-	})
+	// Act: an unremarkable weekly figure, on an allowed verdict.
+	resetsAtMs := time.Now().Add(7 * 24 * time.Hour).UnixMilli()
+	status := ratelimittest.Allowed(ratelimittest.SevenDay())
+	utilization := 12.0
+	status.UtilizationPercent = &utilization
+	status.ResetsAtMs = &resetsAtMs
+	f.shim.PushSessionUpdate(ratelimittest.Update(status))
 
 	// Assert
 	got := awaitFooter(t, f, footer, "the enduring usage line", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetSession() != nil
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring().GetUsage().GetWeekly() != nil
 	})
 	enduring := got.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring()
-	if session := enduring.GetUsage().GetSession(); session.GetUtilization() != 0.12 || session.GetNewsworthy() {
-		t.Fatalf("session allowance = %v, want 0.12 drawn and not newsworthy", session)
+	if weekly := enduring.GetUsage().GetWeekly().GetOverall(); weekly.GetUtilization() != 0.12 || weekly.GetNewsworthy() {
+		t.Fatalf("weekly allowance = %v, want 0.12 drawn and not newsworthy", weekly)
 	}
 }
 

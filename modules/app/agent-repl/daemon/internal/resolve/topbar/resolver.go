@@ -1014,8 +1014,6 @@ func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, fun
 		}
 	case *conversationv1.SessionUpdate_QueryDied:
 		return "query_died", func(*wsState) {}
-	case *conversationv1.SessionUpdate_AccountUsage:
-		return "account_usage", func(*wsState) {}
 	case *conversationv1.SessionUpdate_FastMode:
 		// THE STRIP NO LONGER DRAWS FAST MODE (TopbarView tag 10 retired,
 		// owner 2026-10-02), so the vendor's statement changes no view.

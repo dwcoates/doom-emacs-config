@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -70,50 +69,6 @@ func enduringOfWS(t *testing.T, h *harness, ws ids.WorkspaceID) *frontendv1.Foot
 	return view.GetStrip().GetStatus().GetIdle().GetActivity().GetUnpinned().GetEnduring()
 }
 
-// noFiveHourSample is a sample the usage service answered with no five-hour
-// window, as it does for an account billed by spend.
-func noFiveHourSample(observedAtMs int64) *conversationv1.SessionUpdate {
-	return &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_AccountUsage{
-			AccountUsage: &conversationv1.SessionAccountUsage{
-				ObservedAtMs: observedAtMs,
-				Outcome: &conversationv1.SessionAccountUsage_Unavailable{
-					Unavailable: &conversationv1.SessionAccountUsageUnavailable{
-						Reason: &conversationv1.SessionAccountUsageUnavailable_WindowUnavailable{
-							WindowUnavailable: &conversationv1.SessionUsageWindowUnavailable{},
-						},
-					},
-				},
-			},
-		},
-	}
-}
-
-// seatSample is a per-seat account's usage sample: its allotment and, when
-// reported, its month-to-date spend, in minor units of currency.
-func seatSample(allotmentMinor int64, spentMinor *int64, currency string, observedAtMs int64) *conversationv1.SessionUpdate {
-	spend := &conversationv1.SessionAccountUsageSeatSpend{
-		Allotment: &conversationv1.SessionMoney{AmountMinor: allotmentMinor, Currency: currency},
-	}
-	if spentMinor != nil {
-		spend.Spent = &conversationv1.SessionMoney{AmountMinor: *spentMinor, Currency: currency}
-	}
-	return &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_AccountUsage{
-			AccountUsage: &conversationv1.SessionAccountUsage{
-				ObservedAtMs: observedAtMs,
-				Outcome:      &conversationv1.SessionAccountUsage_SeatSpend{SeatSpend: spend},
-			},
-		},
-	}
-}
-
-// loggedAt reports whether the operation was recorded at the level.
-func loggedAt(h *harness, operation string, level string) bool {
-	_, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: level, Operation: operation})
-	return ok
-}
-
 func TestASecondWorkspaceOnTheAccountDrawsTheFiguresTheFirstLearns(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -123,12 +78,12 @@ func TestASecondWorkspaceOnTheAccountDrawsTheFiguresTheFirstLearns(t *testing.T)
 	h.r.SetAccount(otherWS, personalRoot)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
+	fileWeekly(h, 53)
 
 	// Assert
 	usage := enduringOfWS(t, h, otherWS).GetUsage()
-	if usage.GetSession().GetUtilization() != 0.44 || usage.GetWeekly().GetOverall().GetUtilization() != 0.53 {
-		t.Fatalf("second workspace's usage = %+v, want the account's 44%% and 53%%", usage)
+	if usage.GetWeekly().GetOverall().GetUtilization() != 0.53 {
+		t.Fatalf("second workspace's usage = %+v, want the account's 53%%", usage)
 	}
 }
 
@@ -141,7 +96,7 @@ func TestAWorkspaceOnAnotherAccountDoesNotDrawTheFigures(t *testing.T) {
 	h.r.SetAccount(otherWS, workRoot)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
+	fileWeekly(h, 53)
 
 	// Assert
 	if got := enduringOfWS(t, h, otherWS); got.GetUnobserved() == nil {
@@ -154,15 +109,15 @@ func TestAWorkspaceBoundAfterTheFiguresDrawsThemAtOnce(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 	h.r.SetAccount(testWS, personalRoot)
-	h.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
+	fileWeekly(h, 53)
 	bindOther(t, h)
 
 	// Act
 	h.r.SetAccount(otherWS, personalRoot)
 
 	// Assert
-	if got := enduringOfWS(t, h, otherWS).GetUsage().GetSession().GetUtilization(); got != 0.44 {
-		t.Fatalf("late workspace's session utilization = %v, want the account's 0.44", got)
+	if got := enduringOfWS(t, h, otherWS).GetUsage().GetWeekly().GetOverall().GetUtilization(); got != 0.53 {
+		t.Fatalf("late workspace's weekly utilization = %v, want the account's 0.53", got)
 	}
 }
 
@@ -173,7 +128,7 @@ func TestARateLimitVerdictIsSharedAcrossTheAccount(t *testing.T) {
 	bindOther(t, h)
 	h.r.SetAccount(testWS, personalRoot)
 	h.r.SetAccount(otherWS, personalRoot)
-	h.r.OnSessionUpdate(testWS, usageSample(30, 20, instant.UnixMilli()))
+	h.r.OnSessionUpdate(testWS, withVerdict(rateLimitStatus(ratelimittest.SevenDay(), 20, week), ratelimittest.Statusless))
 
 	// Act
 	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.SevenDay(), 30, 5*time.Hour))
@@ -188,7 +143,7 @@ func TestAnUnboundWorkspacesFiguresPassToItsRootOnBinding(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
+	fileWeekly(h, 53)
 	h.r.SetAccount(testWS, personalRoot)
 	bindOther(t, h)
 
@@ -196,8 +151,8 @@ func TestAnUnboundWorkspacesFiguresPassToItsRootOnBinding(t *testing.T) {
 	h.r.SetAccount(otherWS, personalRoot)
 
 	// Assert
-	if got := enduringOfWS(t, h, otherWS).GetUsage().GetSession().GetUtilization(); got != 0.44 {
-		t.Fatalf("second workspace's session utilization = %v, want the figures read before binding", got)
+	if got := enduringOfWS(t, h, otherWS).GetUsage().GetWeekly().GetOverall().GetUtilization(); got != 0.53 {
+		t.Fatalf("second workspace's weekly utilization = %v, want the figures read before binding", got)
 	}
 }
 
@@ -232,241 +187,18 @@ func TestAWorkspaceOnANeverObservedAccountDrawsUnobserved(t *testing.T) {
 	}
 }
 
-func TestASampleWithNoFiveHourWindowLeavesTheLineUnobserved(t *testing.T) {
+func TestAFiveHourEventAloneLeavesTheLineUnobserved(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 	h.r.SetAccount(testWS, workRoot)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, noFiveHourSample(instant.UnixMilli()))
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 50, 5*time.Hour))
 
 	// Assert
 	if got := enduringOf(t, h); got.GetUnobserved() == nil {
-		t.Fatalf("enduring = %+v, want unobserved: a missing window is not a billing mode", got)
-	}
-}
-
-func TestASeatSpendSampleDrawsTheSeatsSpend(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(22_388)), "USD", instant.UnixMilli()))
-
-	// Assert
-	seat := enduringOf(t, h).GetSeatSpend()
-	if seat.GetAllotment().GetAmountMinor() != 1_200_000 || seat.GetSpent().GetAmountMinor() != 22_388 ||
-		seat.GetSpent().GetCurrency() != "USD" {
-		t.Fatalf("seat_spend = %+v, want $223.88 of $12,000 in USD", seat)
-	}
-}
-
-func TestTheSeatsUtilizationIsSpentOverAllotment(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(1_000, ptr(int64(250)), "USD", instant.UnixMilli()))
-
-	// Assert
-	if got := enduringOf(t, h).GetSeatSpend().Utilization; got == nil || *got != 0.25 {
-		t.Fatalf("utilization = %v, want 0.25", got)
-	}
-}
-
-func TestASeatWithNoSpendReportedDrawsTheAllotmentAlone(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, nil, "USD", instant.UnixMilli()))
-
-	// Assert
-	seat := enduringOf(t, h).GetSeatSpend()
-	if seat.GetAllotment().GetAmountMinor() != 1_200_000 || seat.Spent != nil || seat.Utilization != nil {
-		t.Fatalf("seat_spend = %+v, want the allotment with spend and utilization unset", seat)
-	}
-}
-
-func TestASpendAgainstAZeroAllotmentIsDrawnFull(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(0, ptr(int64(5)), "USD", instant.UnixMilli()))
-
-	// Assert
-	if got := enduringOf(t, h).GetSeatSpend().Utilization; got == nil || *got != 1 {
-		t.Fatalf("utilization = %v, want 1 for a spend against a zero allotment", got)
-	}
-}
-
-func TestNoSpendAgainstAZeroAllotmentIsDrawnEmpty(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(0, ptr(int64(0)), "USD", instant.UnixMilli()))
-
-	// Assert
-	if got := enduringOf(t, h).GetSeatSpend().Utilization; got == nil || *got != 0 {
-		t.Fatalf("utilization = %v, want 0 for no spend against a zero allotment", got)
-	}
-}
-
-func TestASeatSpendSampleReplacesTheWindows(t *testing.T) {
-	// Arrange: the account was a subscription.
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-	h.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(1)), "USD", instant.UnixMilli()+1))
-
-	// Assert
-	if got := enduringOf(t, h); got.GetSeatSpend() == nil {
-		t.Fatalf("enduring = %+v, want the seat's spend in place of the windows", got)
-	}
-}
-
-func TestASeatSpendSampleClearsTheKeptWindows(t *testing.T) {
-	// Arrange: the account was a subscription.
-	kept := &keptUsage{}
-	h := newHarness(t, WithAccountUsageSink(kept.sink))
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-	h.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(1)), "USD", instant.UnixMilli()+1))
-
-	// Assert
-	got := kept.last(t)
-	if got.Seat == nil || got.Session != nil || got.Weekly != nil || got.Overage != nil {
-		t.Fatalf("kept = %+v, want the seat alone, never both billing modes", got)
-	}
-}
-
-func TestASubscriptionSampleEndsTheSeatMode(t *testing.T) {
-	// Arrange: the account was billed per seat.
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(1)), "USD", instant.UnixMilli()))
-
-	// Act
-	h.r.OnSessionUpdate(testWS, usageSample(12, -1, instant.UnixMilli()+1))
-
-	// Assert
-	if got := enduringOf(t, h).GetUsage().GetSession().GetUtilization(); got != 0.12 {
-		t.Fatalf("session utilization = %v, want the subscription's figure over the seat", got)
-	}
-}
-
-func TestAnOlderSubscriptionSampleLeavesTheSeatMode(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(1)), "USD", instant.UnixMilli()))
-
-	// Act
-	h.r.OnSessionUpdate(testWS, usageSample(12, -1, instant.UnixMilli()-1))
-
-	// Assert
-	if got := enduringOf(t, h); got.GetSeatSpend() == nil {
-		t.Fatalf("enduring = %+v, want the newer seat's spend standing", got)
-	}
-}
-
-func TestAnOlderSeatSampleIsRefused(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(500)), "USD", instant.UnixMilli()))
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(100)), "USD", instant.UnixMilli()-1))
-
-	// Assert
-	if got := enduringOf(t, h).GetSeatSpend().GetSpent().GetAmountMinor(); got != 500 {
-		t.Fatalf("spent = %d, want the newer sample's 500", got)
-	}
-}
-
-func TestARateLimitEventOnASeatAccountDrawsNoWindow(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(1)), "USD", instant.UnixMilli()))
-
-	// Act
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(ratelimittest.FiveHour(), 50, time.Hour))
-
-	// Assert
-	if got := enduringOf(t, h); got.GetSeatSpend() == nil {
-		t.Fatalf("enduring = %+v, want the seat's spend: a per-seat account draws no window", got)
-	}
-}
-
-func TestASeatSpendInAnotherCurrencyIsRefusedAtError(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-	update := seatSample(1_200_000, ptr(int64(1)), "USD", instant.UnixMilli())
-	update.GetAccountUsage().GetSeatSpend().GetSpent().Currency = "EUR"
-
-	// Act
-	h.r.OnSessionUpdate(testWS, update)
-
-	// Assert
-	if !loggedAt(h, "daemon.footer.account_usage", dlog.LevelError) || enduringOf(t, h).GetUnobserved() == nil {
-		t.Fatalf("enduring = %+v, want the mixed-currency spend refused at ERROR", enduringOf(t, h))
-	}
-}
-
-func TestASeatSpendWithNoCurrencyIsRefusedAtError(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, nil, "", instant.UnixMilli()))
-
-	// Assert
-	if !loggedAt(h, "daemon.footer.account_usage", dlog.LevelError) || enduringOf(t, h).GetUnobserved() == nil {
-		t.Fatalf("enduring = %+v, want the currencyless spend refused at ERROR", enduringOf(t, h))
-	}
-}
-
-func TestAServiceThatDidNotAnswerLeavesTheLineUnobserved(t *testing.T) {
-	// Arrange
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.UnixMilli()))
-
-	// Assert
-	if got := enduringOf(t, h); got.GetUnobserved() == nil {
-		t.Fatalf("enduring = %+v, want unobserved: a failed read says nothing about the account", got)
+		t.Fatalf("enduring = %+v, want unobserved: the five-hour window is not drawn", got)
 	}
 }
 
@@ -478,12 +210,12 @@ func TestAChangedUsageIsKeptForItsRoot(t *testing.T) {
 	h.r.SetAccount(testWS, personalRoot)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
+	fileWeekly(h, 53)
 
 	// Assert
 	got := kept.last(t)
-	if got.ConfigDir != personalRoot || got.Session == nil || got.Session.Utilization != 0.44 ||
-		got.Session.ResetsAtS != instant.Add(5*time.Hour).Unix() || !got.ObservedAt.Equal(instant) {
+	if got.ConfigDir != personalRoot || got.Weekly == nil || got.Weekly.Utilization != 0.53 ||
+		got.Weekly.ResetsAtS != instant.Add(week).Unix() || !got.ObservedAt.Equal(instant) {
 		t.Fatalf("kept = %+v, want the root's figures, reset and observation time", got)
 	}
 }
@@ -495,7 +227,7 @@ func TestAnUnboundWorkspacesUsageIsNotKept(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
+	fileWeekly(h, 53)
 
 	// Assert
 	if len(kept.records) != 0 {
@@ -509,7 +241,7 @@ func TestARestartedResolverDrawsTheKeptFigures(t *testing.T) {
 	before := newHarness(t, WithAccountUsageSink(kept.sink))
 	connected(before)
 	before.r.SetAccount(testWS, personalRoot)
-	before.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
+	fileWeekly(before, 53)
 	after := newHarness(t, WithAccountUsages([]wsm.AccountUsage{kept.last(t)}))
 
 	// Act
@@ -529,7 +261,7 @@ func TestARestartedResolverDrawsTheKeptModelWindowsAndVerdictScope(t *testing.T)
 	before := newHarness(t, WithAccountUsageSink(kept.sink))
 	connected(before)
 	before.r.SetAccount(testWS, personalRoot)
-	before.r.OnSessionUpdate(testWS, usageSampleWithModels(44, 53, 12, 30, instant.UnixMilli()))
+	fileWeeklyWindows(before, 53, 12, 30)
 	before.r.OnSessionUpdate(testWS, withVerdict(rateLimitStatus(ratelimittest.SevenDayOpus(), 100, time.Hour), ratelimittest.Rejected))
 	record := kept.last(t)
 	after := newHarness(t, WithAccountUsages([]wsm.AccountUsage{record}))
@@ -546,78 +278,6 @@ func TestARestartedResolverDrawsTheKeptModelWindowsAndVerdictScope(t *testing.T)
 	models := enduringOf(t, after).GetUsage().GetWeekly().GetModels()
 	if models.GetOpus().GetUtilization() != 1 || models.GetSonnet().GetUtilization() != 0.3 || models.GetOpus().GetStatus() != nil {
 		t.Fatalf("restarted models = %+v, want the kept 100%% (the event's) and 30%% with the lapsed verdict undrawn", models)
-	}
-}
-
-func TestASeatSpendSampleClearsTheKeptModelWindows(t *testing.T) {
-	// Arrange
-	kept := &keptUsage{}
-	h := newHarness(t, WithAccountUsageSink(kept.sink))
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-	h.r.OnSessionUpdate(testWS, usageSampleWithModels(44, 53, 12, 30, instant.UnixMilli()))
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(1)), "USD", instant.UnixMilli()+1))
-
-	// Assert
-	if got := kept.last(t); got.Seat == nil || got.WeeklyOpus != nil || got.WeeklySonnet != nil {
-		t.Fatalf("kept = %+v, want the seat alone with no model window", got)
-	}
-}
-
-func TestASeatSampleOlderThanAModelWindowsSampleIsRefused(t *testing.T) {
-	// Arrange: the newest sample on hand figured only the opus window.
-	h := newHarness(t)
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-	h.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
-	opusOnly := usageSampleWithModels(44, -1, 12, -1, instant.UnixMilli()+10)
-	opusOnly.GetAccountUsage().GetAvailable().FiveHour = nil
-	h.r.OnSessionUpdate(testWS, opusOnly)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, ptr(int64(1)), "USD", instant.UnixMilli()+5))
-
-	// Assert
-	if got := enduringOf(t, h); got.GetSeatSpend() != nil {
-		t.Fatalf("enduring = %+v, want the older seat sample refused", got)
-	}
-}
-
-func TestARestartedResolverDrawsTheKeptSeatSpend(t *testing.T) {
-	// Arrange
-	spent := int64(22_388)
-	h := newHarness(t, WithAccountUsages([]wsm.AccountUsage{{
-		ConfigDir: workRoot, ObservedAt: instant,
-		Seat: &wsm.SeatSpend{AllotmentMinor: 1_200_000, SpentMinor: &spent, Currency: "USD", SampledAtMs: instant.UnixMilli()},
-	}}))
-
-	// Act
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-
-	// Assert
-	if got := enduringOf(t, h).GetSeatSpend().GetSpent().GetAmountMinor(); got != spent {
-		t.Fatalf("spent = %d, want the kept %d", got, spent)
-	}
-}
-
-func TestASeatSpendIsKeptForItsRoot(t *testing.T) {
-	// Arrange
-	kept := &keptUsage{}
-	h := newHarness(t, WithAccountUsageSink(kept.sink))
-	connected(h)
-	h.r.SetAccount(testWS, workRoot)
-
-	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, nil, "USD", instant.UnixMilli()))
-
-	// Assert
-	got := kept.last(t)
-	want := wsm.SeatSpend{AllotmentMinor: 1_200_000, Currency: "USD", SampledAtMs: instant.UnixMilli()}
-	if got.ConfigDir != workRoot || got.Seat == nil || *got.Seat != want {
-		t.Fatalf("kept = %+v, want the root's seat %+v", got, want)
 	}
 }
 
@@ -639,23 +299,6 @@ func TestAKeptFigureIsShippedWithItsResetInstantSoALapseCanBeDrawn(t *testing.T)
 	}
 }
 
-func TestAKeptFiveHourFigureIsNotDrawn(t *testing.T) {
-	// Arrange: a five-hour figure kept from before the plan lost the window.
-	h := newHarness(t, WithAccountUsages([]wsm.AccountUsage{{
-		ConfigDir: personalRoot, ObservedAt: instant.Add(-time.Hour),
-		Session: &wsm.AllowanceFigures{Utilization: 0.41, ResetsAtS: instant.Add(time.Hour).Unix()},
-	}}))
-
-	// Act
-	connected(h)
-	h.r.SetAccount(testWS, personalRoot)
-
-	// Assert
-	if got := enduringOf(t, h).GetUsage().GetSession(); got != nil {
-		t.Fatalf("session allowance = %+v, want none: the five-hour window is not drawn", got)
-	}
-}
-
 func TestNewRefusesKeptUsageForNoRoot(t *testing.T) {
 	// Arrange, Act
 	_, err := newResolver(testColors(), dlog.NewTestSurfaces(), WithAccountUsages([]wsm.AccountUsage{{}}))
@@ -674,7 +317,7 @@ func TestAFailedKeepIsRecordedAtError(t *testing.T) {
 	h.r.SetAccount(testWS, personalRoot)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, usageSample(44, 53, instant.UnixMilli()))
+	fileWeekly(h, 53)
 
 	// Assert
 	for _, rec := range recordsOf(h.log.Records(), "daemon.footer.account_usage_persist") {
@@ -689,13 +332,13 @@ func TestAnOlderKeepNeverOverwritesANewerOne(t *testing.T) {
 	// Arrange
 	kept := &keptUsage{}
 	h := newHarness(t, WithAccountUsageSink(kept.sink))
-	h.r.persistUsage(usageWrite{generation: 2, record: wsm.AccountUsage{ConfigDir: personalRoot, Seat: &wsm.SeatSpend{Currency: "USD"}}})
+	h.r.persistUsage(usageWrite{generation: 2, record: wsm.AccountUsage{ConfigDir: personalRoot, Weekly: &wsm.AllowanceFigures{Utilization: 0.5}}})
 
 	// Act
 	h.r.persistUsage(usageWrite{generation: 1, record: wsm.AccountUsage{ConfigDir: personalRoot}})
 
 	// Assert
-	if len(kept.records) != 1 || kept.records[0].Seat == nil {
+	if len(kept.records) != 1 || kept.records[0].Weekly == nil {
 		t.Fatalf("kept = %+v, want only the newer write", kept.records)
 	}
 }
@@ -707,11 +350,11 @@ func TestTheAccountsArmChangeIsRecordedAtInfo(t *testing.T) {
 	h.r.SetAccount(testWS, workRoot)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, seatSample(1_200_000, nil, "USD", instant.UnixMilli()))
+	fileWeekly(h, 53)
 
 	// Assert
 	for _, rec := range recordsOf(h.log.Records(), "daemon.footer.account_usage") {
-		if rec.Level == dlog.LevelInfo && rec.Context["arm"] == "seat_spend" && rec.Context["previous_arm"] == "unobserved" {
+		if rec.Level == dlog.LevelInfo && rec.Context["arm"] == "usage" && rec.Context["previous_arm"] == "unobserved" {
 			return
 		}
 	}

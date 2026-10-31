@@ -157,7 +157,7 @@ func TestARateLimitEventFeedsTheUsageFiguresAndStandsNoSalientLine(t *testing.T)
 			// Arrange
 			h := newHarness(t)
 			connected(h)
-			bothAllowances(h, 85, 40)
+			fileWeekly(h, 40)
 
 			// Act
 			h.r.OnSessionUpdate(testWS, rateEvent(ratelimittest.SevenDay(), tt.verdict))
