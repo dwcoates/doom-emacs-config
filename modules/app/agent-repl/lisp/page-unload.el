@@ -82,6 +82,7 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl-vocab-read "agent-repl-core" (file &rest keys))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key value))
@@ -110,15 +111,10 @@
   :group 'agent-repl)
 
 (defconst agent-repl-page-unload-after
-  ;; `proto/' sits at the module root; this file lives in `lisp/'.
-  (let ((path (expand-file-name "../proto/vocab/page-hold.json"
-                                (file-name-directory (or load-file-name buffer-file-name)))))
-    (with-temp-buffer
-      (insert-file-contents path)
-      (let ((seconds (gethash "hold_seconds" (json-parse-buffer))))
-        (unless (natnump seconds)
-          (error "page-unload: page-hold.json hold_seconds is %S, not a count" seconds))
-        seconds)))
+  (let ((seconds (agent-repl-vocab-read "page-hold.json" "hold_seconds")))
+    (unless (natnump seconds)
+      (error "page-unload: page-hold.json hold_seconds is %S, not a count" seconds))
+    seconds)
   "Seconds a finished workspace\='s page is held after its last turn ended.
 THE ONE HOLD (owner ruling, 2026-10-30): read from
 proto/vocab/page-hold.json, the file the sidebar\='s name fade reads its
