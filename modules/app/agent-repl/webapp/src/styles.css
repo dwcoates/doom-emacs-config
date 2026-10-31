@@ -6950,27 +6950,17 @@ bubble-body.bubble-body { display: block; }
    shared vocabulary is the one table now — so the phase cell keeps its weight
    and padding and spends no color of its own. */
 
-/* THE STATUS WORD AND ITS SUBSTATUS ARE ONE SIZE (owner ruling, 2026-09-29:
-   the substatus size is right, the status word was too big). Both cells read
-   the one custom property, so the two can never drift apart again; the status
-   word keeps its heavier weight and its tone, and the substatus its muted
-   register. */
+/* THE STATUS WORD'S SIZE (owner ruling, 2026-09-29: the old substatus size is
+   right, the status word was too big), read from the one custom property. A
+   step is drawn AS the status (owner request, 2026-10-31), so there is no
+   second cell to keep in step with it. */
 .pfooter { --footer-status-font-size: 0.74rem; }
-.footer-status,
-.footer-substatus { font-size: var(--footer-status-font-size); }
+.footer-status { font-size: var(--footer-status-font-size); }
 
-/* The substatus cell: the step within the status, set a notch quieter than the
-   status word it qualifies, exactly as the old interrupt chip was. */
-.footer-substatus {
-  font-weight: 600;
-  color: var(--muted);
-}
-/* The queue place and the parked line ride inside it; the place carries its own
-   datum color (see `.tone-*`), so only the figures stand out. */
-.footer-substatus-place { font-variant-numeric: tabular-nums; }
-/* With no substatus to say, the status cell spans that segment: it keeps its
-   own padding and simply drops the hairline it would have divided against. */
-.footer-status-merged { border-right: 1px solid var(--border); }
+/* A step's figure rides inside the status cell after its word: a queue place,
+   a replay count, an attempt. It carries its own datum color (see `.tone-*`),
+   so only the figure stands out from the word's tone. */
+.footer-status-figure { font-variant-numeric: tabular-nums; }
 
 /* The activity cell's typed datums take their color from `.tone-*`; the prose
    around them stays the cell's own muted register. */

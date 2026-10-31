@@ -240,8 +240,26 @@ export const WAVING_STATUS_ARMS: ReadonlySet<string> = new Set([
   "closing",
 ]);
 
-/** Whether ARM's status word waves. */
-export function statusWordWaves(armCase: string): boolean {
+/**
+ * The steps of a waving arm that stand still, keyed `arm/step`.
+ *
+ * A step IS the status word (`statusCellWord`), so a step that waits rather
+ * than gets somewhere reads as waiting does: a close that is blocked, and a
+ * merge waiting in the queue, on the deploys ahead, on a workspace coming free
+ * or on the user. A turn waiting on the vendor still waves: the vendor is
+ * producing the reply.
+ */
+export const STILL_STATUS_STEPS: ReadonlySet<string> = new Set([
+  "closing/blocked",
+  "merging/enqueued",
+  "merging/awaitingTurn",
+  "merging/awaitingFree",
+  "merging/waitingOnUser",
+]);
+
+/** Whether the status word of ARM, standing on STEP when it has one, waves. */
+export function statusWordWaves(armCase: string, stepCase?: string): boolean {
+  if (stepCase !== undefined && STILL_STATUS_STEPS.has(`${armCase}/${stepCase}`)) return false;
   return WAVING_STATUS_ARMS.has(armCase);
 }
 

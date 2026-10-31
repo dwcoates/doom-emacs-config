@@ -1513,20 +1513,20 @@ describe("mountFooter: the client's own verdict overlays the daemon's view", () 
     clearClientFailures();
   });
 
-  it("draws the status disconnected under a unary transport failure", async () => {
+  it("marks the status disconnected under a unary transport failure", async () => {
     const { host } = mount();
     await settle();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
-    expect(host.querySelector(".footer-status")?.textContent).toBe(
+    expect(host.querySelector(".footer-status")?.getAttribute("data-arm")).toBe(
       "disconnected",
     );
   });
 
-  it("draws the substatus daemon unreachable under a unary transport failure", async () => {
+  it("draws the status daemon unreachable under a unary transport failure", async () => {
     const { host } = mount();
     await settle();
     reportClientFailure("unary_transport", "AnswerColdGate: unavailable");
-    expect(host.querySelector(".footer-substatus")?.textContent).toBe(
+    expect(host.querySelector(".footer-status")?.textContent).toBe(
       "daemon unreachable",
     );
   });

@@ -4279,35 +4279,42 @@ describe("the footer's one-line activity section", () => {
 });
 
 /**
- * THE FOOTER'S STATUS WORD AND SUBSTATUS ARE ONE SIZE (owner ruling,
- * 2026-09-29): both read `--footer-status-font-size`, the substatus's size.
+ * THE FOOTER'S STATUS WORD SIZE (owner ruling, 2026-09-29): it reads
+ * `--footer-status-font-size`, the old substatus's size. A step is drawn as
+ * the status (owner request, 2026-10-31), so no substatus rule remains.
  */
-describe("the footer's status and substatus size", () => {
-  it("sets the status word and the substatus from the one size", () => {
+describe("the footer's status size", () => {
+  it("sets the status word from the one size", () => {
     // Arrange
     const teardown = installStylesheet();
     const strip = document.createElement("div");
     strip.className = "pfooter";
     const status = document.createElement("div");
     status.className = "pfooter-cell pfooter-phase footer-status";
-    const substatus = document.createElement("div");
-    substatus.className = "pfooter-cell footer-substatus";
-    strip.append(status, substatus);
+    strip.append(status);
     document.body.replaceChildren(strip);
 
     // Act
     const statusSize = cascadedValue(status, "font-size");
-    const substatusSize = cascadedValue(substatus, "font-size");
 
     // Assert
     expect(statusSize).toBe("var(--footer-status-font-size)");
-    expect(substatusSize).toBe(statusSize);
     teardown();
   });
 
-  it("gives that size the substatus's own value", () => {
+  it("gives that size its value", () => {
     // Arrange / Act / Assert
     expect(stylesheet).toMatch(/\.pfooter \{ --footer-status-font-size: 0\.74rem; \}/);
+  });
+
+  it("keeps no substatus rule, the step being drawn as the status", () => {
+    // Arrange / Act / Assert
+    expect(stylesheet).not.toMatch(/\.footer-substatus/);
+  });
+
+  it("sets a step's figure in tabular figures", () => {
+    // Arrange / Act / Assert
+    expect(declarationsOf(".footer-status-figure")).toMatch(/font-variant-numeric:\s*tabular-nums/);
   });
 });
 

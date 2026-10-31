@@ -1,23 +1,26 @@
 /**
- * strip — the always-drawn footer row: | status | substatus | activity | clock
- * | tokens | chips |.
+ * strip — the always-drawn footer row: | status | activity | clock | tokens |
+ * chips |.
  *
- * THE THREE STATUS CELLS ARE ONE TREE, not three siblings. `FooterStatus` sets
+ * THE TWO STATUS CELLS ARE ONE TREE, not two siblings. `FooterStatus` sets
  * exactly one arm, that arm declares the substatus steps and activity kinds
  * legal beneath it, and this module walks that tree — which is why there is no
  * pairing to validate here: an illegal pairing is unrepresentable on the wire.
+ *
+ * THE SUBSTATUS IS DRAWN AS THE STATUS (owner request, 2026-10-31). There is
+ * no substatus cell: when the arm sets a step, the status cell's word is the
+ * step's (`statusCellWord`), in the arm's tone and the arm's wave, carrying the
+ * step's figure; with no step it is the arm's own word.
  *
  * THE WORD IS THE ARM NAME, LOWERCASE, WITH SPACES. footer.proto states this
  * rendering rule once, for status and substatus alike: the arm's schema
  * spelling is not the label, so `start_failed` draws as `start failed` and
  * never as `start_failed`. That derivation is the CONTRACT's, not a phase→word
- * table of this client's invention — the daemon ships no word for these two
- * cells, only the arm.
+ * table of this client's invention — the daemon ships no word for the status
+ * cell, only the arm and its step.
  *
- * THE SUBSTATUS CELL MERGES INTO THE STATUS CELL when the status arm has no
- * substatus oneof (background) or leaves it unset, and the ACTIVITY CELL always
- * absorbs the strip's free width. Both are footer.proto's rules, stated there
- * once and implemented here once.
+ * THE ACTIVITY CELL always absorbs the strip's free width, footer.proto's rule,
+ * stated there once and implemented here once.
  *
  * THE ACTIVITY CELL IS ITS OWN MODULE (`activity.ts`): the tiered line — the
  * salient line, or the transient over the enduring line — and every kind's
@@ -140,13 +143,13 @@ export function drawFooterStrip(u: FooterStrip, deps: StripDeps): HTMLElement {
  * that would have to arrive over it. So the three status cells are built HERE,
  * out of the client's own verdict (`src/rpc/link.ts`), in the same classes and
  * the same order the pushed strip uses — the reader sees the footer they
- * already know, saying `disconnected`, and not a second widget.
+ * already know, saying what the link's verdict is, and not a second widget.
  *
- * ONLY THE THREE STATUS CELLS ARE THE CLIENT'S. The clock, the tokens and the
+ * ONLY THE TWO STATUS CELLS ARE THE CLIENT'S. The clock, the tokens and the
  * chips are still drawn from the daemon's LAST pushed strip when there is one,
  * because a link that just died does not make the last figures untrue -- it
  * makes them the last ones -- and blanking half the dock would say more than
- * the client knows. With no push yet (LAST is null) the row is the three cells
+ * the client knows. With no push yet (LAST is null) the row is the two cells
  * alone.
  */
 export function drawClientDisconnectedStrip(
@@ -162,18 +165,15 @@ export function drawClientDisconnectedStrip(
   row.className = "pfooter-cells footer-strip";
 
   const word = document.createElement("div");
-  // THE CLIENT'S OWN VERDICT KEEPS ITS OWN WORD, and paints as the daemon's
+  // THE CLIENT'S OWN VERDICT IS ITS OWN STATUS, and paints as the daemon's
   // agent_repl_fault arm: an unreachable daemon is agent-repl's own service
-  // not serving (render-colors.json, blue).
+  // not serving (render-colors.json, blue). The verdict's kind is the step,
+  // so it is the word, as every step is (`drawFooterStatus`).
   word.className = `pfooter-cell pfooter-phase footer-status arm-disconnected ${statusArmClass("agentReplFault")}`;
   word.setAttribute("data-arm", "disconnected");
-  word.textContent = "disconnected";
+  word.setAttribute("data-substatus", substatus);
+  word.textContent = substatus;
   row.appendChild(word);
-
-  const step = document.createElement("div");
-  step.className = "pfooter-cell footer-substatus";
-  step.textContent = substatus;
-  row.appendChild(step);
 
   const cell = document.createElement("div");
   cell.className = "pfooter-cell pfooter-grow footer-activity";
@@ -229,27 +229,25 @@ export function footerStatusActivity(u: FooterStatus): FooterActivity {
   return requireMessage(statusParts(status, path).activity, `${path}.${status.case}.activity`);
 }
 
-/** One status arm's three cells, as the arm carries them. */
+/** One status arm's parts, as the arm carries them. */
 export interface StatusParts {
   substatus: SubStatusOneof | undefined;
   /** Required by the schema; `undefined` only on a malformed push. */
   activity: FooterActivity | undefined;
-  /** Set when the arm declares no substatus oneof at all (background). */
-  substatusless: boolean;
   /**
    * Set when the contract says the substatus is ALWAYS set (merge failed's
-   * area), so an unset one is malformed rather than a merged cell.
+   * area), so an unset one is malformed rather than the arm's own word.
    */
   substatusRequired: boolean;
 }
 
 /**
- * The status, its step and its activity line, as the one or two cells the
- * merge rule leaves.
+ * The status cell and the activity cell.
  *
  * The arm switch is exhaustive over `FooterStatus.status`; each case says only
- * WHAT that arm carries, and the drawing beneath is shared, because the three
- * cells are drawn identically whichever arm produced them.
+ * WHAT that arm carries, and the drawing beneath is shared, because the cells
+ * are drawn identically whichever arm produced them. The step, when the arm
+ * sets one, is drawn AS the status (`drawFooterStatusWord`).
  */
 export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[] {
   const path = "FooterStatus.status";
@@ -262,28 +260,59 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
     context: { status: status.case, substatus: parts.substatus?.case },
   });
 
-  const word = document.createElement("div");
-  word.className = `pfooter-cell pfooter-phase footer-status arm-${status.case} ${statusArmClass(status.case)}`;
-  word.setAttribute("data-arm", status.case);
-  drawStatusWord(word, status.case);
-
-  const cells: HTMLElement[] = [word];
   if (parts.substatusRequired) requireCase(parts.substatus ?? {}, `${path}.${status.case}.substatus`);
-  const sub =
-    parts.substatus === undefined || parts.substatus.case === undefined
-      ? null
-      : drawFooterSubStatus(parts.substatus, status.case);
-  if (sub === null) {
-    // THE MERGE RULE: with nothing finer to say, the status cell spans the
-    // substatus cell rather than leaving an empty segment in the row.
-    word.classList.add("footer-status-merged");
-    word.setAttribute("data-merged", "true");
-  } else {
-    cells.push(sub);
-  }
+  const step =
+    parts.substatus === undefined || parts.substatus.case === undefined ? undefined : parts.substatus;
+  return [
+    drawFooterStatusWord(status.case, step),
+    drawFooterStatusActivity(activity, deps, activityPath),
+  ];
+}
 
-  cells.push(drawFooterStatusActivity(activity, deps, activityPath));
-  return cells;
+/**
+ * The status cell: the step's word when the arm sets a STEP, the arm's own
+ * otherwise, in the ARM's tone, waving as the step does (`statusWordWaves`).
+ *
+ * THREE STEPS CARRY A FIGURE and the rest are empty messages whose NAME is the
+ * whole fact: a merge's queue place ("enqueued 2/5"), its replay progress
+ * ("rebasing 3/7") and its fixing attempt ("fixing attempt 2/3"), with the
+ * deploys ahead and what a merge waits on beside them. The figure follows the
+ * word inside the cell and never waves. The default branch is not a fallback:
+ * drawing an empty step's name is exactly what footer.proto's rendering rule
+ * prescribes, so a step this build has never heard of still draws correctly
+ * rather than refusing a frame over a step it can already spell.
+ */
+export function drawFooterStatusWord(
+  armCase: string,
+  step?: SubStatusOneof & { case: string },
+): HTMLElement {
+  const cell = document.createElement("div");
+  cell.className = `pfooter-cell pfooter-phase footer-status arm-${armCase} ${statusArmClass(armCase)}`;
+  cell.setAttribute("data-arm", armCase);
+  if (step !== undefined) cell.setAttribute("data-substatus", step.case);
+  drawStatusWord(cell, statusCellWord(armCase, step?.case), statusWordWaves(armCase, step?.case));
+
+  switch (step?.case) {
+    case "enqueued":
+      // The merge's 1-based place among the merges waiting in its repository.
+      return withStatusFigure(cell, " ", "position", `${step.value.place}/${step.value.waiting}`);
+    case "rebasing":
+      // How many of the branch's commits have been replayed onto the tip.
+      return withStatusFigure(cell, " ", "count", `${step.value.replayed}/${step.value.total}`);
+    case "fixing":
+      // This attempt among the most the merge makes before it fails.
+      return withStatusFigure(cell, " attempt ", "attempt", `${step.value.attempt}/${step.value.maxAttempts}`);
+    case "awaitingTurn":
+      // How many deploys queued ahead still run their one-at-a-time stages
+      // before this one, which has run its concurrent stages.
+      return withStatusFigure(cell, ": ", "count", `${step.value.ahead} ahead`);
+    case "awaitingFree":
+      // What the merge, which has not started, waits on: the awaited
+      // workspace's turn and detached work, as the daemon counted them.
+      return withStatusFigure(cell, " ", "count", awaitingFreeText(step.value));
+    default:
+      return cell;
+  }
 }
 
 /**
@@ -320,9 +349,8 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
  * The index advances on SPACES too, so the bulge crosses a two-word status at
  * the same speed it crosses the letters.
  */
-function drawStatusWord(word: HTMLElement, armCase: string): void {
-  const text = statusCellWord(armCase);
-  if (!statusWordWaves(armCase)) {
+function drawStatusWord(word: HTMLElement, text: string, waves: boolean): void {
+  if (!waves) {
     word.textContent = text;
     return;
   }
@@ -364,75 +392,68 @@ function statusParts(
       return {
         substatus: status.value.substatus,
         activity: status.value.activity,
-        substatusless: false,
         substatusRequired: false,
       };
     case "background": {
       // An arm with NO substatus oneof: the chips and panels carry the
-      // detail, so the substatus cell merges into the status cell always.
+      // detail, so the status cell always draws the arm's own word.
       const background: FooterStatusBackground = status.value;
       return {
         substatus: undefined,
         activity: background.activity,
-        substatusless: true,
         substatusRequired: false,
       };
     }
     case "mergeFailed": {
       // WHERE THE MERGE FAILED is the substatus, and footer.proto says exactly
-      // one area is set: an unset one is a malformed push, never a merged
-      // cell that would hide the area from the reader.
+      // one area is set: an unset one is a malformed push, never the arm's
+      // own word that would hide the area from the reader.
       const failed: FooterStatusMergeFailed = status.value;
       return {
         substatus: failed.substatus,
         activity: failed.activity,
-        substatusless: false,
         substatusRequired: true,
       };
     }
     case "merged": {
       // A LANDED merge declares no substatus oneof: the merge bubble carries
-      // the account, so the cell merges the same way.
+      // the account, so the status cell draws the arm's own word.
       const settled: FooterStatusMerged = status.value;
       return {
         substatus: undefined,
         activity: settled.activity,
-        substatusless: true,
         substatusRequired: false,
       };
     }
     case "updating":
     // A FINAL RESPONSE BEING UPDATED declares no substatus oneof either: the
-    // shimmering bubble shows which response, so the cell merges.
+    // shimmering bubble shows which response, so the arm's word stands.
     case "starting":
       // A BOOTING SESSION declares no substatus oneof (owner ruling,
-      // 2026-10-13: booting is an expected step, never a fault), so the cell
-      // merges the same way.
+      // 2026-10-13: booting is an expected step, never a fault), so the arm's
+      // word stands the same way.
       return {
         substatus: undefined,
         activity: status.value.activity,
-        substatusless: true,
         substatusRequired: false,
       };
     case "permission":
     case "question":
       // A GATE NAMES ITSELF (owner ruling, 2026-10-08): the status word is the
       // gate's kind and the activity line names the ask, so the arm declares
-      // no substatus oneof and the cell merges the same way.
+      // no substatus oneof and its word stands the same way.
       return {
         substatus: undefined,
         activity: status.value.activity,
-        substatusless: true,
         substatusRequired: false,
       };
     case "turnFailed": {
       // A failed turn declares no substatus oneof: the feed's turn-end row
-      // carries the account, so the cell merges the same way.
+      // carries the account, so the arm's word stands the same way.
       const failed: FooterStatusTurnFailed = status.value;
       return {
         substatus: undefined,
         activity: failed.activity,
-        substatusless: true,
         substatusRequired: false,
       };
     }
@@ -440,49 +461,6 @@ function statusParts(
       const other: { case: string } = status;
       return unreachableArm(path, other.case);
     }
-  }
-}
-
-/**
- * The substatus cell.
- *
- * THREE ARMS CARRY A FIGURE and the rest are empty messages whose NAME is the
- * whole fact: a merge's queue place ("enqueued 2/5"), its replay progress
- * ("rebasing 3/7") and its fixing attempt ("fixing attempt 2/3"). The default
- * branch is therefore not a fallback: drawing an empty arm's name is exactly
- * what footer.proto's rendering rule prescribes, so an arm this build has
- * never heard of still draws correctly rather than refusing a frame over a
- * step it can already spell.
- */
-export function drawFooterSubStatus(
-  sub: SubStatusOneof & { case: string },
-  statusCase: string,
-): HTMLElement {
-  const cell = document.createElement("div");
-  cell.className = "pfooter-cell footer-substatus";
-  cell.setAttribute("data-arm", sub.case);
-  cell.appendChild(document.createTextNode(subStatusWords(statusCase, sub.case)));
-
-  switch (sub.case) {
-    case "enqueued":
-      // The merge's 1-based place among the merges waiting in its repository.
-      return withSubstatusFigure(cell, " ", "position", `${sub.value.place}/${sub.value.waiting}`);
-    case "rebasing":
-      // How many of the branch's commits have been replayed onto the tip.
-      return withSubstatusFigure(cell, " ", "count", `${sub.value.replayed}/${sub.value.total}`);
-    case "fixing":
-      // This attempt among the most the merge makes before it fails.
-      return withSubstatusFigure(cell, " attempt ", "attempt", `${sub.value.attempt}/${sub.value.maxAttempts}`);
-    case "awaitingTurn":
-      // How many deploys queued ahead still run their one-at-a-time stages
-      // before this one, which has run its concurrent stages.
-      return withSubstatusFigure(cell, ": ", "count", `${sub.value.ahead} ahead`);
-    case "awaitingFree":
-      // What the merge, which has not started, waits on: the awaited
-      // workspace's turn and detached work, as the daemon counted them.
-      return withSubstatusFigure(cell, " ", "count", awaitingFreeText(sub.value));
-    default:
-      return cell;
   }
 }
 
@@ -515,31 +493,29 @@ export function awaitingFreeText(v: {
   return v.otherWorkspace !== "" ? `${what} in ${v.otherWorkspace}` : what;
 }
 
-/** A substatus figure, coloured as the typed datum it is. */
 /**
- * Ends a substatus CELL with its figure: JOINER after the substatus's words,
- * then the figure TEXT coloured as DATUM. Every substatus with a figure is
- * drawn through it, so each reads as its words, the joiner and the figure.
+ * Ends a status CELL with its step's figure: JOINER after the step's word,
+ * then the figure TEXT coloured as DATUM. Every step with a figure is drawn
+ * through it, so each reads as its word, the joiner and the figure.
  */
-export function withSubstatusFigure(
+export function withStatusFigure(
   cell: HTMLElement,
   joiner: string,
   datum: ActivityDatum,
   text: string,
 ): HTMLElement {
   cell.appendChild(document.createTextNode(joiner));
-  cell.appendChild(substatusFigure(datum, text));
+  cell.appendChild(statusFigure(datum, text));
   return cell;
 }
 
-function substatusFigure(datum: ActivityDatum, text: string): HTMLElement {
+function statusFigure(datum: ActivityDatum, text: string): HTMLElement {
   const figure = document.createElement("span");
-  figure.className = `footer-substatus-place ${activityDatumClass(datum)}`;
+  figure.className = `footer-status-figure ${activityDatumClass(datum)}`;
   figure.setAttribute("data-datum", datum);
   figure.textContent = text;
   return figure;
 }
-
 
 // ---- clock, tokens, chips -------------------------------------------------
 
@@ -826,29 +802,4 @@ export function chipGlyph(name: string, character: string): HTMLElement {
   mark.setAttribute("aria-hidden", "true");
   mark.textContent = character;
   return mark;
-}
-
-// ---- shared helpers -------------------------------------------------------
-/**
- * The substatus word, with the arms whose bare name would lie, say nothing or
- * misspell a stage.
- *
- * `FooterStatusClosing`'s step is spelled `blocked`, which is also a whole
- * STATUS in this same strip — a close that cannot proceed would read exactly
- * like a session the vendor has blocked. The message's own name
- * (`FooterSubStatusCloseBlocked`) is what the schema calls it, so the cell
- * draws that. `FooterStatusMergeFailed`'s catch-all area is spelled `other`,
- * and footer.proto draws it "merge". A deploy's first and last stages are
- * spelled `pre_deploy` and `post_deploy`, and footer.proto draws them
- * "pre-deploy" and "post-deploy", as a deploy config names them. These are
- * declared exceptions, not a per-arm label table: every other arm's name is
- * already its label.
- */
-export function subStatusWords(statusCase: string, subCase: string): string {
-  if (statusCase === "closing" && subCase === "blocked") return "close blocked";
-  if (statusCase === "merging" && subCase === "awaitingFree") return "waiting for";
-  if (statusCase === "merging" && subCase === "preDeploy") return "pre-deploy";
-  if (statusCase === "merging" && subCase === "postDeploy") return "post-deploy";
-  if (statusCase === "mergeFailed" && subCase === "other") return "merge";
-  return statusWords(subCase);
 }

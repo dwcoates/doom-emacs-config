@@ -23,14 +23,56 @@ export function statusWords(armCase: string): string {
 }
 
 /**
- * The status cell's word for a status arm. A BOOTING SESSION READS "loading"
- * (owner ruling, 2026-10-28): every shim start is drawn as an extension of the
- * loading the footer already shows, so the `starting` arm takes that word.
- * Every other arm reads as its name (statusWords).
+ * The status cell's word: the SUBSTATUS'S when the arm sets one, the arm's
+ * own otherwise.
+ *
+ * THE SUBSTATUS IS THE STATUS (owner request, 2026-10-31). The strip has no
+ * substatus cell: a step within a status is drawn AS the status, so a working
+ * turn that is executing reads "executing" in the status cell's tone, never
+ * "working · executing". The step therefore has to read as a status on its
+ * own, and the declared exceptions below are exactly the steps whose bare
+ * name would lie, say nothing without its status, or misspell a stage:
+ *
+ * - `FooterStatusClosing`'s `blocked` is also a whole STATUS elsewhere, so it
+ *   draws its message's name, "close blocked".
+ * - A deploy's first and last stages draw "pre-deploy" and "post-deploy", as
+ *   a deploy config names them, and a merge waiting on a workspace "waiting
+ *   for" what it waits on.
+ * - `FooterStatusMergeFailed`'s areas name where the merge failed, which says
+ *   nothing without "failed": "merge conflicts", "tests failed", "hook
+ *   failed", and the catch-all `other` "merge failed".
+ * - `FooterStatusInterrupted`'s `by_user` reads "interrupted by user".
+ * - `FooterStatusLoading`'s items read as what is loading: "loading memory",
+ *   "loading skill", "loading skills", "loading skill list".
+ * - `FooterStatusDegraded`'s `observation` reads "observation degraded".
+ *
+ * Every other step reads as its name (statusWords). With no step, A BOOTING
+ * SESSION READS "loading" (owner ruling, 2026-10-28): every shim start is
+ * drawn as an extension of the loading the footer already shows, so the
+ * `starting` arm takes that word, and every other arm reads as its name.
  */
-export function statusCellWord(armCase: string): string {
-  return armCase === "starting" ? "loading" : statusWords(armCase);
+export function statusCellWord(armCase: string, subCase?: string): string {
+  if (subCase === undefined) return armCase === "starting" ? "loading" : statusWords(armCase);
+  return ELEVATED_STEP_WORDS[`${armCase}/${subCase}`] ?? statusWords(subCase);
 }
+
+/** The declared exceptions of statusCellWord, keyed `arm/step`. */
+const ELEVATED_STEP_WORDS: Readonly<Record<string, string>> = Object.freeze({
+  "closing/blocked": "close blocked",
+  "merging/awaitingFree": "waiting for",
+  "merging/preDeploy": "pre-deploy",
+  "merging/postDeploy": "post-deploy",
+  "mergeFailed/conflicts": "merge conflicts",
+  "mergeFailed/tests": "tests failed",
+  "mergeFailed/hook": "hook failed",
+  "mergeFailed/other": "merge failed",
+  "interrupted/byUser": "interrupted by user",
+  "loading/memory": "loading memory",
+  "loading/invoked": "loading skill",
+  "loading/discovered": "loading skills",
+  "loading/listing": "loading skill list",
+  "degraded/observation": "observation degraded",
+});
 
 /** A composed line drawn verbatim, in its own classed span. */
 export function textLine(className: string, text: string): HTMLElement {

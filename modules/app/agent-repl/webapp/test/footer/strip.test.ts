@@ -22,14 +22,14 @@ import {
   CHIP_TOOLTIPS,
   chipWaiting,
   footerStatusActivity,
-  subStatusWords,
-  withSubstatusFigure,
+  withStatusFigure,
 } from "../../src/footer/strip.js";
 import { CHIP_PANELS, type FooterPanel } from "../../src/footer/expanded.js";
 import {
   STATUS_COLOR_CYCLE_MS,
   STATUS_WAVE_CYCLE_MS,
   STATUS_WAVE_LETTER_OFFSET_MS,
+  STILL_STATUS_STEPS,
   WAVING_STATUS_ARMS,
 } from "../../src/breathing.js";
 import {
@@ -200,56 +200,50 @@ describe("footerStatusActivity", () => {
   });
 });
 
-// ---- the substatus cell and the merge rule --------------------------------
+// ---- the step, drawn as the status -----------------------------------------
 
-describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () => {
-  it.each(SUBSTATUS_PAIRS)("draws %s/%s without underscores", (statusCase, subCase) => {
+describe("drawFooterStatus: a step is drawn as the status", () => {
+  it.each(SUBSTATUS_PAIRS)("draws %s/%s with no substatus cell", (statusCase, subCase) => {
     const { row } = drawStrip({ status: withSubStatus(statusCase, subCase) });
-    expect(row.querySelector(".footer-substatus")?.textContent).not.toContain("_");
+    expect(row.querySelector(".footer-substatus")).toBeNull();
   });
 
-  it.each(SUBSTATUS_PAIRS)("words %s/%s as the schema spells it", (statusCase, subCase) => {
+  it.each(SUBSTATUS_PAIRS)("draws %s/%s as two status cells before the clock", (statusCase, subCase) => {
     const { row } = drawStrip({ status: withSubStatus(statusCase, subCase) });
-    expect(row.querySelector(".footer-substatus")?.textContent).toContain(
-      subStatusWords(statusCase, subCase),
+    expect(row.children[1]?.classList.contains("footer-activity")).toBe(true);
+  });
+
+  it.each(SUBSTATUS_PAIRS)("draws %s/%s without underscores", (statusCase, subCase) => {
+    const { row } = drawStrip({ status: withSubStatus(statusCase, subCase) });
+    expect(row.querySelector(".footer-status")?.textContent).not.toContain("_");
+  });
+
+  it.each(SUBSTATUS_PAIRS)("words %s/%s as the step's status word", (statusCase, subCase) => {
+    const { row } = drawStrip({ status: withSubStatus(statusCase, subCase) });
+    expect(row.querySelector(".footer-status")?.textContent).toContain(
+      statusCellWord(statusCase, subCase),
     );
   });
 
-  it.each([
-    ["closing", "blocked", "close blocked"],
-    ["merging", "conflictResolution", "conflict resolution"],
-    ["merging", "deploying", "deploying"],
-    ["merging", "preDeploy", "pre-deploy"],
-    ["merging", "postDeploy", "post-deploy"],
-    ["mergeFailed", "conflicts", "conflicts"],
-    ["mergeFailed", "tests", "tests"],
-    ["mergeFailed", "other", "merge"],
-    ["mergeFailed", "hook", "hook"],
-    ["agentReplFault", "startFailed", "start failed"],
-    ["agentReplFault", "daemonImpaired", "daemon impaired"],
-    ["networkFault", "offline", "offline"],
-    ["vendorFault", "vendorRetry", "vendor retry"],
-    ["vendorFault", "vendorRejection", "vendor rejection"],
-    ["vendorFault", "vendorFailed", "vendor failed"],
-    ["interrupted", "byUser", "by user"],
-    ["interrupted", "hostShutdown", "host shutdown"],
-    ["vendorFault", "queryDied", "query died"],
-    // Every step of a working turn reads as its own name.
-    ["working", "thinking", "thinking"],
-    ["working", "executing", "executing"],
-    ["working", "reading", "reading"],
-    ["working", "writing", "writing"],
-    ["working", "searching", "searching"],
-    ["working", "fetching", "fetching"],
-    ["working", "delegating", "delegating"],
-    ["working", "waiting", "waiting"],
-  ])("spells %s/%s as '%s'", (statusCase, subCase, expected) => {
-    expect(subStatusWords(statusCase, subCase)).toBe(expected);
+  it.each(SUBSTATUS_PAIRS)("paints %s/%s in its status arm's tone", (statusCase, subCase) => {
+    const { row } = drawStrip({ status: withSubStatus(statusCase, subCase) });
+    expect(row.querySelector(".footer-status")?.classList.contains(statusArmClass(statusCase))).toBe(true);
   });
 
-  it("names the arm on the cell", () => {
+  it("names the status arm and the step on the cell", () => {
     const { row } = drawStrip({ status: withSubStatus("vendorFault", "auth") });
-    expect(row.querySelector(".footer-substatus")?.getAttribute("data-arm")).toBe("auth");
+    const cell = row.querySelector(".footer-status");
+    expect([cell?.getAttribute("data-arm"), cell?.getAttribute("data-substatus")]).toEqual(["vendorFault", "auth"]);
+  });
+
+  it("names no step on the cell of an arm whose substatus is unset", () => {
+    const { row } = drawStrip({ status: status("idle", {}) });
+    expect(row.querySelector(".footer-status")?.hasAttribute("data-substatus")).toBe(false);
+  });
+
+  it("draws a working turn that is executing as 'executing'", () => {
+    const { row } = drawStrip({ status: withSubStatus("working", "executing") });
+    expect(row.querySelector(".footer-status")?.textContent).toBe("executing");
   });
 
   it.each([
@@ -264,7 +258,7 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     ["postDeploy", {}, "post-deploy"],
   ])("draws the merging %s step as '%s'", (subCase, value, words) => {
     const { row } = drawStrip({ status: withSubStatus("merging", subCase, value) });
-    expect(row.querySelector(".footer-substatus")?.textContent).toBe(words);
+    expect(row.querySelector(".footer-status")?.textContent).toBe(words);
   });
 
   it.each([
@@ -274,24 +268,24 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     ["facts not in yet", { turnInFlight: false, subagents: 0, shells: 0, monitors: 0, pending: 0, otherWorkspace: "" }, "waiting for the session to come up"],
   ])("draws a merge awaiting %s as what it waits on", (_name, value, words) => {
     const { row } = drawStrip({ status: withSubStatus("merging", "awaitingFree", value) });
-    expect(row.querySelector(".footer-substatus")?.textContent).toBe(words);
+    expect(row.querySelector(".footer-status")?.textContent).toBe(words);
   });
 
   it("draws a deploy awaiting its turn with how many deploys are ahead", () => {
     const { row } = drawStrip({ status: withSubStatus("merging", "awaitingTurn", { ahead: 2 }) });
-    expect(row.querySelector(".footer-substatus")?.textContent).toBe("awaiting turn: 2 ahead");
+    expect(row.querySelector(".footer-status")?.textContent).toBe("awaiting turn: 2 ahead");
   });
 
   it("colours the deploys ahead as a count", () => {
     const { row } = drawStrip({ status: withSubStatus("merging", "awaitingTurn", { ahead: 2 }) });
-    expect(row.querySelector('.footer-substatus [data-datum="count"]')?.textContent).toBe("2 ahead");
+    expect(row.querySelector('.footer-status [data-datum="count"]')?.textContent).toBe("2 ahead");
   });
 
-  it("ends a substatus cell with its joiner and its coloured figure", () => {
+  it("ends a status cell with its joiner and its coloured figure", () => {
     const cell = document.createElement("div");
     cell.appendChild(document.createTextNode("rebasing"));
 
-    const got = withSubstatusFigure(cell, " ", "count", "3/7");
+    const got = withStatusFigure(cell, " ", "count", "3/7");
 
     expect(got).toBe(cell);
     expect(cell.textContent).toBe("rebasing 3/7");
@@ -304,42 +298,48 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     ["fixing", { attempt: 2, maxAttempts: 3 }],
     ["awaitingTurn", { ahead: 2 }],
     ["awaitingFree", {}],
-  ])("draws the %s substatus as its words, a joiner and one figure", (arm, value) => {
+  ])("ends the %s status with a joiner and one figure", (arm, value) => {
     const { row } = drawStrip({ status: withSubStatus("merging", arm, value) });
 
-    const nodes = [...(row.querySelector(".footer-substatus")?.childNodes ?? [])];
+    const nodes = [...(row.querySelector(".footer-status")?.childNodes ?? [])];
 
-    expect(nodes.map((n) => n.nodeType)).toEqual([Node.TEXT_NODE, Node.TEXT_NODE, Node.ELEMENT_NODE]);
-    expect((nodes[2] as HTMLElement).hasAttribute("data-datum")).toBe(true);
+    expect(nodes.slice(-2).map((n) => n.nodeType)).toEqual([Node.TEXT_NODE, Node.ELEMENT_NODE]);
+    expect((nodes[nodes.length - 1] as HTMLElement).classList.contains("footer-status-figure")).toBe(true);
+  });
+
+  it("keeps a waving step's figure out of the wave", () => {
+    const { row } = drawStrip({ status: withSubStatus("merging", "rebasing", { replayed: 3, total: 7 }) });
+    expect(row.querySelector(".footer-status-figure .pfooter-wave-letter")).toBeNull();
+  });
+
+  it("waves only a waving step's word, letter for letter", () => {
+    const { row } = drawStrip({ status: withSubStatus("merging", "rebasing", { replayed: 3, total: 7 }) });
+    expect(row.querySelectorAll(".footer-status .pfooter-wave-letter")).toHaveLength("rebasing".length);
   });
 
   it("colours the enqueued place as a queue position", () => {
     const { row } = drawStrip({ status: withSubStatus("merging", "enqueued", { place: 2, waiting: 5 }) });
-    expect(row.querySelector('.footer-substatus [data-datum="position"]')?.textContent).toBe("2/5");
+    expect(row.querySelector('.footer-status [data-datum="position"]')?.textContent).toBe("2/5");
   });
 
   it("colours the rebase progress as a count", () => {
     const { row } = drawStrip({ status: withSubStatus("merging", "rebasing", { replayed: 3, total: 7 }) });
-    expect(row.querySelector('.footer-substatus [data-datum="count"]')?.textContent).toBe("3/7");
+    expect(row.querySelector('.footer-status [data-datum="count"]')?.textContent).toBe("3/7");
   });
 
   it("colours the fixing attempt as an attempt", () => {
     const { row } = drawStrip({ status: withSubStatus("merging", "fixing", { attempt: 2, maxAttempts: 3 }) });
-    expect(row.querySelector('.footer-substatus [data-datum="attempt"]')?.textContent).toBe("2/3");
+    expect(row.querySelector('.footer-status [data-datum="attempt"]')?.textContent).toBe("2/3");
   });
 
   it.each([
-    ["conflicts", "conflicts"],
-    ["tests", "tests"],
-    ["other", "merge"],
+    ["conflicts", "merge conflicts"],
+    ["tests", "tests failed"],
+    ["hook", "hook failed"],
+    ["other", "merge failed"],
   ])("draws merge failed's %s area as '%s'", (subCase, words) => {
     const { row } = drawStrip({ status: withSubStatus("mergeFailed", subCase) });
-    expect(row.querySelector(".footer-substatus")?.textContent).toBe(words);
-  });
-
-  it("words the merge failed status 'merge failed'", () => {
-    const { row } = drawStrip({ status: withSubStatus("mergeFailed", "tests") });
-    expect(row.querySelector(".footer-status")?.textContent).toBe("merge failed");
+    expect(row.querySelector(".footer-status")?.textContent).toBe(words);
   });
 
   it("paints the merge failed status green, the workspace being back with the user", () => {
@@ -349,11 +349,6 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
 
   it("refuses a merge failed push that names no area", () => {
     expect(() => drawStrip({ status: status("mergeFailed", {}) })).toThrow(MalformedView);
-  });
-
-  it("MERGES the cell for the merged arm, which declares no substatus oneof", () => {
-    const { row } = drawStrip({ status: status("merged", {}) });
-    expect(row.querySelector(".footer-status")?.getAttribute("data-merged")).toBe("true");
   });
 
   it("words a landed merge 'merged' in tone-green", () => {
@@ -370,11 +365,6 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     expect([cell?.textContent, cell?.classList.contains("tone-red")]).toEqual(["updating", true]);
   });
 
-  it("MERGES the cell for the updating arm, which declares no substatus oneof", () => {
-    const { row } = drawStrip({ status: status("updating", {}) });
-    expect(row.querySelector(".footer-substatus")).toBeNull();
-  });
-
   // A GATE NAMES ITSELF (owner ruling, 2026-10-08): the status word is the
   // gate's kind, in the same green as done, never "waiting" and never red.
   it.each(["permission", "question"])("words a %s gate as its own kind in tone-green", (arm) => {
@@ -383,24 +373,14 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
     expect([cell?.textContent, cell?.classList.contains("tone-green")]).toEqual([arm, true]);
   });
 
-  it.each(["permission", "question"])("MERGES the cell for a %s gate, which declares no substatus oneof", (arm) => {
-    const { row } = drawStrip({ status: status(arm, {}) });
-    expect(row.querySelector(".footer-substatus")).toBeNull();
-  });
-
-  it("MERGES the cell for an arm with no substatus oneof at all", () => {
+  it("words an arm with no substatus oneof as the arm", () => {
     const { row } = drawStrip({ status: status("background", {}) });
-    expect(row.querySelector(".footer-substatus")).toBeNull();
+    expect(row.querySelector(".footer-status")?.textContent).toBe("background");
   });
 
-  it("marks the merged status cell as spanning", () => {
-    const { row } = drawStrip({ status: status("background", {}) });
-    expect(row.querySelector(".footer-status")?.getAttribute("data-merged")).toBe("true");
-  });
-
-  it("MERGES the cell for an arm whose substatus oneof is unset", () => {
+  it("words an arm whose substatus oneof is unset as the arm", () => {
     const { row } = drawStrip({ status: status("idle", {}) });
-    expect(row.querySelector(".footer-substatus")).toBeNull();
+    expect(row.querySelector(".footer-status")?.textContent).toBe("idle");
   });
 });
 
@@ -873,9 +853,14 @@ describe("drawClientDisconnectedStrip: the one strip this client composes", () =
     expect(row.querySelector(".footer-status")?.className).toContain(statusArmClass("agentReplFault"));
   });
 
-  it("draws the substatus it was handed", () => {
+  it("draws the verdict it was handed as the status", () => {
     const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
-    expect(row.querySelector(".footer-substatus")?.textContent).toBe("daemon unreachable");
+    expect(row.querySelector(".footer-status")?.textContent).toBe("daemon unreachable");
+  });
+
+  it("draws no substatus cell beside the verdict", () => {
+    const row = drawClientDisconnectedStrip("daemon unreachable", "AnswerColdGate: unavailable");
+    expect(row.querySelector(".footer-substatus")).toBeNull();
   });
 
   it("draws the ad-hoc activity line it was handed", () => {
@@ -969,7 +954,7 @@ describe("the footer status word's letter wave", () => {
     "splits the %s word into one span per letter",
     (arm) => {
       // Arrange / Act
-      const { row } = drawStrip({ status: armStatus(arm) });
+      const { row } = drawStrip({ status: status(arm, {}) });
 
       // Assert
       expect(letterDelays(row)).toHaveLength(statusCellWord(arm).length);
@@ -987,13 +972,24 @@ describe("the footer status word's letter wave", () => {
     expect(row.querySelector(".footer-status")?.getAttribute("data-status-wave")).toBe("progress");
   });
 
-  it("leaves the split word reading exactly as the arm's own word", () => {
+  it("leaves the split word reading exactly as the step's own word", () => {
     // Arrange / Act
     const { row } = drawStrip({ status: withSubStatus("working", "thinking") });
 
     // Assert
-    expect(row.querySelector(".footer-status")?.textContent).toBe("working");
+    expect(row.querySelector(".footer-status")?.textContent).toBe("thinking");
   });
+
+  it.each([...STILL_STATUS_STEPS].map((key) => key.split("/") as [string, string]))(
+    "draws the still %s/%s step as plain text",
+    (arm, step) => {
+      // Arrange / Act
+      const { row } = drawStrip({ status: withSubStatus(arm, step) });
+
+      // Assert
+      expect(row.querySelectorAll(".footer-status .pfooter-wave-letter")).toHaveLength(0);
+    },
+  );
 
   it("marks the waving cell as a progress status", () => {
     // Arrange / Act
