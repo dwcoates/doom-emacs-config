@@ -150,12 +150,13 @@ a remount."
   :type 'number
   :group 'agent-repl)
 
-(defcustom agent-repl-input-height-line-offset -1
+(defcustom agent-repl-input-height-line-offset -2
   "Lines added to the composer height `agent-repl-input-height-fraction' yields.
 Applied by `agent-repl-window--input-height' after the fraction is
-rounded to lines, so the default of -1 makes the composer exactly one
-line shorter than the fraction alone on every frame size (owner, 2026-10-02:
-one line shorter by default).  The minimum
+rounded to lines, so the default of -2 makes the composer exactly two
+lines shorter than the fraction alone on every frame size: one by the
+owner's ruling of 2026-10-02, and one more for the mode line the composer
+no longer draws (owner ruling, 2026-10-31).  The minimum
 \(`agent-repl-window--input-height-minimum') still holds."
   :type 'integer
   :group 'agent-repl)

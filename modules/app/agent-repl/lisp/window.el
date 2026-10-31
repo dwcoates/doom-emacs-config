@@ -284,11 +284,12 @@ Each keyword is independent and may be omitted:
 ;; shrinks the main area without changing the frame's text height) does
 ;; not.
 
-(defconst agent-repl-window--input-height-minimum 3
+(defconst agent-repl-window--input-height-minimum 2
   "Fewest total lines the composer may be given.
 A frame small enough to drive the declared fraction below this would
-produce a composer with no usable body; the floor keeps one typing line
-plus its mode line rather than letting the arithmetic decide.")
+produce a composer with no usable body; the floor keeps two typing lines
+rather than letting the arithmetic decide.  The composer draws no mode
+line, so every one of its lines is body.")
 
 (defconst agent-repl-window--input-height-parameter 'agent-repl-input-height
   "Frame parameter caching the composer height for a frame.
