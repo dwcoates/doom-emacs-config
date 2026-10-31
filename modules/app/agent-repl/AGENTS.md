@@ -1695,6 +1695,17 @@ killed, hidden, merged) and of its last status change, which the daemon keeps
 durable (`wsm` layout 54, `status_changed_at`). Emacs orders by it and never
 derives it. See `docs/protobuf-design/roster-last-updated.md`.
 
+Once the input narrows the list, the CURRENT REPOSITORY'S MAIN WORKSPACE tops
+the matches (owner request, 2026-10-30; `agent-repl--switch-hoist-main`):
+typing "main" matches every repository's main workspace, and the one wanted
+is the current repository's. The main workspace is the offered one whose
+directory is the repository's (the daemon's `IsMainWorktree`), the repository
+being the roster section's key for the current workspace. Ivy ignores a
+table's `display-sort-function`, so once ivy has defined its match sorters the
+read binds one (`agent-repl--switch-read`) and every other UI reads the table's display sort;
+both hoist through the one helper, and the unfiltered list keeps its recency
+order.
+
 Both draw each line with the sidebar's status mark before the name (a grey
 dot for a closed or merged row, `◌` in the status color for a hidden one,
 `agent-repl-status-roster-mark` otherwise) and three columns after it: the

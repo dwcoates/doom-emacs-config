@@ -105,6 +105,7 @@
 (declare-function agent-repl-roster-row-name "agent-repl-roster" (row))
 (declare-function agent-repl-verbs--roster-or-view "agent-repl-verbs" (roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
+(declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
 (declare-function agent-repl-roster-row-status "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-instant-ms "agent-repl-roster" (row field))
 (declare-function agent-repl-roster-row-merged-at "agent-repl-roster" (row))
@@ -953,6 +954,31 @@ by the caller."
              (nreverse closed)
              (lambda (entry) (agent-repl-roster-row-closed-by-user-at (plist-get entry :row)))))))
 
+(defun agent-repl--switch-repository-main (alist ws)
+  "Return ALIST's display name for WS's repository's main workspace, or nil.
+ALIST is `agent-repl--switch-display-alist''s.  A MAIN WORKSPACE IS THE
+ONE WHOSE DIRECTORY IS ITS REPOSITORY'S (the daemon's `IsMainWorktree'),
+and the repository is the roster section holding WS
+\(`agent-repl-roster-repository-of').  Nil when WS is no workspace (a
+persp-mode placeholder), when no roster section holds it yet, or when
+ALIST does not offer that main workspace."
+  (let* ((ref (and ws (agent-repl--ws-get ws :ref)))
+         (repository (and ref (agent-repl-roster-repository-of (plist-get ref :id))))
+         (dir (plist-get repository :dir)))
+    (and dir
+         (car (seq-find (lambda (cell) (equal (plist-get (cdr cell) :dir) dir))
+                        alist)))))
+
+(defun agent-repl--switch-hoist-main (candidates main)
+  "Return CANDIDATES with MAIN first when it is among them, else as given.
+THE CURRENT REPOSITORY'S MAIN WORKSPACE TOPS THE MATCHES (owner request,
+2026-10-30): typing \"main\" matches every repository's main workspace,
+and the one wanted is almost always the current repository's.  Every
+other candidate keeps its order."
+  (if (and main (member main candidates))
+      (cons (car (member main candidates)) (remove main candidates))
+    candidates))
+
 ;;;; ---- The switcher's columns ---------------------------------------------
 
 (defun agent-repl--switch-mark (entry)
@@ -1030,21 +1056,57 @@ purple (`agent-repl--switch-state-label')."
                            columns)))))
        candidates))))
 
-(defun agent-repl--switch-table (alist now-ms)
+(defun agent-repl--switch-table (alist now-ms &optional main)
   "Return the completion table offering ALIST's names with their columns.
 A function table, because that is how a table states its
 `affixation-function' (`agent-repl--switch-affixation').  ALIST's order is
 the order offered (`agent-repl--switch-by-recency'), so the table also
-states identity sort functions: a completion UI that sorts on its own
-would otherwise undo it."
+states its own sort functions: a completion UI that sorts on its own
+would otherwise undo it.
+
+MAIN, the current repository's main workspace
+\(`agent-repl--switch-repository-main'), tops the matches once the input
+has narrowed them (`agent-repl--switch-hoist-main').  The display sort
+sees only the matches, never the input, so narrowed means fewer matches
+than names: the unfiltered list keeps its recency order."
   (let ((names (mapcar #'car alist))
         (affixation (agent-repl--switch-affixation alist now-ms)))
     (lambda (string predicate action)
       (if (eq action 'metadata)
           `(metadata (affixation-function . ,affixation)
-                     (display-sort-function . identity)
+                     (display-sort-function
+                      . ,(lambda (candidates)
+                           (if (< (length candidates) (length names))
+                               (agent-repl--switch-hoist-main candidates main)
+                             candidates)))
                      (cycle-sort-function . identity))
         (complete-with-action action names string predicate)))))
+
+(defun agent-repl--switch-ivy-sort (main)
+  "Return the `ivy-sort-matches-functions-alist' sorter hoisting MAIN.
+Ivy ignores a table's `display-sort-function' and re-sorts the matches
+after every change of input with this sorter, which also sees the input:
+an empty input leaves the recency order, any other puts MAIN first
+\(`agent-repl--switch-hoist-main')."
+  (lambda (input candidates)
+    (if (string-empty-p input)
+        candidates
+      (agent-repl--switch-hoist-main candidates main))))
+
+(defun agent-repl--switch-read (prompt table main)
+  "Read a workspace name from TABLE at PROMPT, MAIN topping the matches.
+When ivy has defined its match sorters, the sorter is bound to
+`agent-repl--switch-ivy-sort' for the read; every other UI reads TABLE's
+own display sort (`agent-repl--switch-table').  Binding the variable
+before ivy defines it would leave it void once the read returns, so its
+being bound is the test."
+  (defvar ivy-sort-matches-functions-alist)
+  (if (boundp 'ivy-sort-matches-functions-alist)
+      (let ((ivy-sort-matches-functions-alist
+             (cons (cons t (agent-repl--switch-ivy-sort main))
+                   ivy-sort-matches-functions-alist)))
+        (completing-read prompt table nil t))
+    (completing-read prompt table nil t)))
 
 (defun agent-repl--switch-to-known-workspace (&optional all)
   "Pick a workspace and stand on it, opening it first if it is not here.
@@ -1082,11 +1144,16 @@ daemon-minted and there is no spelling of it Emacs could construct."
                        (if all known (agent-repl--switch-curated known))))))
     (unless candidates
       (user-error "agent-repl: no known workspaces"))
-    (let* ((choice (completing-read (if all "Switch to any workspace: "
-                                      "Switch to workspace: ")
-                                    (agent-repl--switch-table
-                                     candidates (agent-repl--now-unix-ms))
-                                    nil t))
+    (let* ((current (agent-repl--ws-current-name))
+           (main (agent-repl--switch-repository-main candidates current))
+           (_ (agent-repl--log (agent-repl--ws-current-log-name)
+                               "elisp.commands.switch-repository-main current=%s main=%s"
+                               current main))
+           (choice (agent-repl--switch-read (if all "Switch to any workspace: "
+                                              "Switch to workspace: ")
+                                            (agent-repl--switch-table
+                                             candidates (agent-repl--now-unix-ms) main)
+                                            main))
            (entry (cdr (assoc choice candidates)))
            (ws (plist-get entry :ws))
            (ref (plist-get entry :ref)))
