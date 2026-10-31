@@ -504,6 +504,10 @@ deploy:
       timeout_seconds: 60
   runs_for:
     main: {}
+# Once the queue fully depletes, master is pushed to origin as a release.
+queue_drained:
+  - path: modules/app/agent-repl/bin/push-release.sh
+    timeout_seconds: 120
 ```
 
 - WHAT THE CONFIG DECIDES, AND WHAT THE DAEMON ALWAYS DOES:
