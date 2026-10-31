@@ -267,8 +267,9 @@ here, which is what makes this the painted/unpainted answer."
      (if detail (concat "  " detail "\n\n") "")
      "  Try:\n"
      "    - wait: establishment legitimately takes up to 30s on a busy machine\n"
-     "    - M-x agent-repl-frontend-daemon-restart  (bounce an unreachable daemon)\n"
-     "    - press SPC o c again once this placeholder is gone\n")))
+     "    - press SPC o c again once this placeholder is gone\n"
+     "    - last resort, for a daemon that never answers:\n"
+     "      M-x agent-repl-frontend-daemon-restart  (ends every running turn and background task)\n")))
 
 (defun agent-repl--open-progress-render (ws)
   "Redraw WS's placeholder buffer from its registry entry.

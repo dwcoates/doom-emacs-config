@@ -245,6 +245,19 @@ placement is recorded rather than performed."
     (should (string-match-p "agent-repl-frontend-daemon-restart"
                             (agent-repl-test--open-progress-text "alpha-ws")))))
 
+(ert-deftest agent-repl-test-open-progress-escalation-names-the-restart-a-last-resort ()
+  "The forced restart is offered last, saying it ends running work."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    ;; Act
+    (agent-repl--open-progress-escalate "alpha-ws")
+    ;; Assert
+    (let ((text (agent-repl-test--open-progress-text "alpha-ws")))
+      (should (string-match-p "last resort.*\n.*agent-repl-frontend-daemon-restart.*ends every running turn" text))
+      (should (< (string-match "SPC o c again" text)
+                 (string-match "agent-repl-frontend-daemon-restart" text))))))
+
 (ert-deftest agent-repl-test-open-progress-escalation-spares-a-settled-failure ()
   "An escalation firing after a failure leaves the stated cause alone."
   ;; Arrange
