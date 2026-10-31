@@ -205,6 +205,17 @@ func lastTurnEnded(rec wsm.Workspace) *frontendv1.RosterRowLastTurnEnded {
 	return &frontendv1.RosterRowLastTurnEnded{AtMs: rec.LastTurnEndedAt.UnixMilli()}
 }
 
+// runningTurnStart answers the start of the turn the footer clock shows
+// RUNNING, in epoch ms, or nil when none runs: a clock with a start and an end
+// is the last turn's, frozen. The one reading of "a turn is running" every row
+// field resolved from the clock shares.
+func runningTurnStart(clock *frontendv1.FooterClock) *int64 {
+	if clock.TurnStartedAtMs == nil || clock.TurnEndedAtMs != nil {
+		return nil
+	}
+	return clock.TurnStartedAtMs
+}
+
 // lastTurnBoundary resolves the row's newest turn start or end
 // (frontend.v1.RosterRowLastTurnBoundary), or nil when it has none. Turn
 // boundaries alternate, so the newest is the running turn's start when a turn
@@ -219,8 +230,8 @@ func lastTurnBoundary(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv
 	switch {
 	case mergeStartedAt != nil:
 		at = rec.MergeTurnStartedAt
-	case clock.TurnStartedAtMs != nil && clock.TurnEndedAtMs == nil:
-		return &frontendv1.RosterRowLastTurnBoundary{AtMs: *clock.TurnStartedAtMs}
+	case runningTurnStart(clock) != nil:
+		return &frontendv1.RosterRowLastTurnBoundary{AtMs: *runningTurnStart(clock)}
 	default:
 		at = rec.LastTurnEndedAt
 	}
@@ -343,9 +354,9 @@ func when(rec wsm.Workspace, mergeStartedAt *int64, clock *frontendv1.FooterCloc
 	case mergeStartedAt != nil:
 		out.Shown = &frontendv1.RosterRowWhen_SyncMerging{
 			SyncMerging: &frontendv1.RosterRowWhenSyncMerging{StartedAtMs: *mergeStartedAt}}
-	case clock.TurnStartedAtMs != nil && clock.TurnEndedAtMs == nil:
+	case runningTurnStart(clock) != nil:
 		out.Shown = &frontendv1.RosterRowWhen_TurnRunning{
-			TurnRunning: &frontendv1.RosterRowWhenTurnRunning{StartedAtMs: *clock.TurnStartedAtMs}}
+			TurnRunning: &frontendv1.RosterRowWhenTurnRunning{StartedAtMs: *runningTurnStart(clock)}}
 	default:
 		// THE DURABLE END INSTANT, never the footer clock's: the clock is
 		// restated only from a history page, while the workspace record
