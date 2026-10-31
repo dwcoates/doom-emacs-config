@@ -141,6 +141,10 @@ Either kind:
   - CRITICAL: hard-stop ONLY when the user asks to stop the queue's work now.
 - `merge-queue disable-racing` and `merge-queue enable-racing`: on AC power the
   top two merges race at the tests; disabled, every queue works its head alone.
+- A head whose tests FAIL keeps its place while it fixes them, but lets the
+  merge behind it rebase and run its own tests meanwhile, on any power source
+  and with racing disabled; whichever passes on the target's tip first lands,
+  and a head the merge behind overtakes resumes right behind it.
 - `merge-queue subscribe -detail every_change|deploys|advances|depletes
   [-repository here|DIR]` has this workspace told as the queue changes (to land
   after it drains, to report a landing) instead of polling it;

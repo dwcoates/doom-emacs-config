@@ -53,11 +53,56 @@ func (r *run) concurrentStages() bool {
 // line when the head's config has concurrent stages, else the window in force
 // (queueWindow), which the power source and the racing switch decide for a
 // chain that tests ahead of its turn.
+//
+// A HEAD WHOSE TESTS FAILED LETS THE NEXT MERGE TEST (owner ruling,
+// 2026-10-30). While it fixes, it holds the head but runs no tests, so the
+// window behind it is at least two whatever the power source or the racing
+// switch: the merge behind it rebases and runs its own tests on the target's
+// tip, the two alternate at the test turn (testturn.go), and the first to
+// pass on the tip lands -- the merge behind by claiming the race (race.go),
+// which suspends the failing head right behind it until the winner is done.
+// The widening lasts as long as that run heads the chain, so a member it let
+// in is never stood down when its fixing ends.
 func (o *orchestrator) windowFor(head *run) int {
 	if head != nil && head.concurrentStages() {
 		return math.MaxInt
 	}
-	return o.queueWindow()
+	window := o.queueWindow()
+	if head != nil && head.failedAtHead() {
+		window = max(window, 2)
+	}
+	return window
+}
+
+// failedAtHead reports whether the run's tests failed while it headed its
+// queue (markFailedAtHead).
+func (r *run) failedAtHead() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.headFailed
+}
+
+// markFailedAtHead records that the run's tests failed while it heads its
+// queue, widening the chain behind it (windowFor), and offers the chain its
+// next member. A run behind the head is not marked: its failure is its own,
+// and it holds no head.
+func (o *orchestrator) markFailedAtHead(ctx context.Context, r *run) {
+	o.mu.Lock()
+	head := o.running[r.repo] == r
+	o.mu.Unlock()
+	if !head {
+		return
+	}
+	r.mu.Lock()
+	already := r.headFailed
+	r.headFailed = true
+	r.mu.Unlock()
+	if already {
+		return
+	}
+	o.deps.Log.Global().Info("daemon.merge.chain", "the head's tests failed; while it fixes them, the merge behind it rebases and runs its own tests, and lands first if it passes first",
+		dlog.Context{"repo": string(r.repo), "head": string(r.ws)})
+	o.extendChain(context.WithoutCancel(ctx), r.repo)
 }
 
 // awaitTurnFor is the boundary before STAGE: a run whose config runs STAGE one

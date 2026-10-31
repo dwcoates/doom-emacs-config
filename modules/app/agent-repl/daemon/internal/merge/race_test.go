@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -445,4 +446,73 @@ func TestAnAbandonedHeadIsNotOvertaken(t *testing.T) {
 	if !c.recorded("debug", "daemon.merge.race", "the head is already ending") {
 		t.Fatal("the merge behind did not record why it claimed no race")
 	}
+}
+
+// A HEAD WHOSE TESTS FAILED LETS THE NEXT MERGE TEST (owner ruling,
+// 2026-10-30): on a window that holds the head alone, the merge behind a
+// failing head still rebases and tests while the head fixes, and lands first.
+func TestAFailingHeadLetsTheMergeBehindItTestAndLandFirstOnAOneMergeWindow(t *testing.T) {
+	// Arrange: the head's first gate fails; its fixed gate holds until
+	// released, so the merge behind it passes first.
+	c := newChainOfWidth(t, 1)
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	c.runner.script(c.dirs[theWorkspace], scriptedRun{
+		Output: "[agent-repl-tests] ERROR: daemon failed after 4s with exit code 1\n", Code: 1})
+	headGate, releaseGate := c.runner.hold(c.dirs[theWorkspace])
+
+	// Act: once the head's failing gate runs, its next ask for the test turn
+	// (after its fix) is parked, so the merge behind it takes the turn.
+	done := admitAsync(c.h, context.Background())
+	<-headGate
+	release := c.parkRunsNextAsk(t, theWorkspace)
+	close(releaseGate)
+	if err := receiveWithin(t, done, "the failing head yielding to the merge behind it"); err != nil {
+		t.Fatalf("the failing head's admission ended on: %v", err)
+	}
+	release()
+	c.drain(t)
+
+	// Assert
+	if got := c.git.landedOwn(); len(got) != 2 || !slices.Equal(got[0], []string{"b1"}) || !slices.Equal(got[1], []string{"a1"}) {
+		t.Fatalf("landings brought %v, want [b1] then [a1]", got)
+	}
+}
+
+func TestAHeadThatNeverFailedKeepsItsOneMergeWindow(t *testing.T) {
+	// Arrange: a head holding its first gate, on a window of one.
+	c := newChainOfWidth(t, 1)
+	enqueue(t, c.h)
+	c.queue(t, "ws-b", "b1")
+	headGate, releaseHead := c.runner.hold(c.dirs[theWorkspace])
+	done := admitAsync(c.h, context.Background())
+	<-headGate
+
+	// Act
+	_, bRuns := c.h.o.runFor("ws-b")
+	bRuns = bRuns || c.h.o.inChain(c.h.repoKey(), "ws-b")
+	close(releaseHead)
+	<-done
+	c.drain(t)
+
+	// Assert
+	if bRuns {
+		t.Fatal("the merge behind a head that never failed ran on a one-merge window")
+	}
+}
+
+// parkRunsNextAsk holds the RUNNING merge of ws at its next ask for its test
+// turn, until the release it answers is called or that run is stopped.
+func (c *chain) parkRunsNextAsk(t *testing.T, ws ids.WorkspaceID) (release func()) {
+	t.Helper()
+	r, ok := c.h.o.runFor(ws)
+	if !ok {
+		t.Fatalf("no run of %s to park", ws)
+	}
+	p := &turnPark{held: make(chan struct{}), run: r}
+	c.turns.mu.Lock()
+	c.turns.parks[ws] = p
+	c.turns.mu.Unlock()
+	var once sync.Once
+	return func() { once.Do(func() { close(p.held) }) }
 }
