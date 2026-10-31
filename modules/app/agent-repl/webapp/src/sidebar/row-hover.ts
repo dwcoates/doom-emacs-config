@@ -31,6 +31,7 @@
  * reopens one.
  */
 import { log } from "../log.js";
+import { createKeyedTimers } from "../timers.js";
 import type { Dropdowns } from "./dropdowns.js";
 import { paintRowDetail } from "./row.js";
 
@@ -102,26 +103,14 @@ interface Pointer {
 export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): RowHover {
   let copies = new Map<string, DrawnRow[]>();
   const pointers = new Map<string, Pointer>();
-  const closeTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  const openTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const closeTimers = createKeyedTimers<string>();
+  const openTimers = createKeyedTimers<string>();
   /** Set by `dismiss`, cleared by `resume`: no panel opens while it stands. */
   let suspended = false;
 
-  const cancelClose = (id: string): void => {
-    const close = closeTimers.get(id);
-    if (close !== undefined) clearTimeout(close);
-    closeTimers.delete(id);
-  };
-
-  const cancelOpen = (id: string): void => {
-    const open = openTimers.get(id);
-    if (open !== undefined) clearTimeout(open);
-    openTimers.delete(id);
-  };
-
   const cancelTimers = (): void => {
-    for (const id of [...closeTimers.keys()]) cancelClose(id);
-    for (const id of [...openTimers.keys()]) cancelOpen(id);
+    closeTimers.cancelAll();
+    openTimers.cancelAll();
   };
 
   const pointerOver = (id: string): boolean => {
@@ -150,8 +139,8 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
   };
 
   function setOpen(id: string, open: boolean, via: string): void {
-    cancelClose(id);
-    cancelOpen(id);
+    closeTimers.cancel(id);
+    openTimers.cancel(id);
     if (openDetails.has(id) === open) return;
     log.debug("toggling a row's detail panel", {
       operation: "sidebar.row.detail-toggle",
@@ -167,29 +156,19 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
   }
 
   const scheduleClose = (id: string): void => {
-    cancelClose(id);
-    closeTimers.set(
-      id,
-      setTimeout(() => {
-        closeTimers.delete(id);
-        if (pointerOver(id) || focusedIn(id)) return;
-        setOpen(id, false, "leave");
-      }, HOVER_CLOSE_GRACE_MS),
-    );
+    closeTimers.start(id, HOVER_CLOSE_GRACE_MS, () => {
+      if (pointerOver(id) || focusedIn(id)) return;
+      setOpen(id, false, "leave");
+    });
   };
 
   // Every path that takes the pointer off the line (`leave`, `pointerAt`) or
   // stops the rail answering it (`dismiss`, `dispose`) cancels this timer, so
   // it fires only for a pointer still resting on the line.
   const scheduleOpen = (id: string): void => {
-    cancelOpen(id);
-    openTimers.set(
-      id,
-      setTimeout(() => {
-        openTimers.delete(id);
-        setOpen(id, true, "hover");
-      }, HOVER_OPEN_DELAY_MS),
-    );
+    openTimers.start(id, HOVER_OPEN_DELAY_MS, () => {
+      setOpen(id, true, "hover");
+    });
   };
 
   /** Whether NODE is inside the line or the panel of a drawn copy of ID's row. */
@@ -216,7 +195,7 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
       const at = pointers.get(id) ?? { line: false, panel: false };
       at[part] = true;
       pointers.set(id, at);
-      cancelClose(id);
+      closeTimers.cancel(id);
       if (part === "line" && !suspended && !openDetails.has(id)) scheduleOpen(id);
     },
     leave(id: string, part: HoverPart): void {
@@ -224,7 +203,7 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
       if (at === undefined || !at[part]) return;
       at[part] = false;
       if (!at.line && !at.panel) pointers.delete(id);
-      if (part === "line") cancelOpen(id);
+      if (part === "line") openTimers.cancel(id);
       scheduleClose(id);
     },
     focusIn(id: string): void {
@@ -247,7 +226,7 @@ export function createRowHover(dropdowns: Dropdowns, openDetails: Set<string>): 
           context: { workspace: id, left_rail: node === null },
         });
         pointers.delete(id);
-        cancelOpen(id);
+        openTimers.cancel(id);
         scheduleClose(id);
       }
     },

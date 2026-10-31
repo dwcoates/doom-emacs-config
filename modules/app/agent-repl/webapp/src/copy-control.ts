@@ -16,6 +16,7 @@
 import { writeClipboardText } from "./copy.js";
 import { log } from "./log.js";
 import { unreachableArm } from "./rpc/strict.js";
+import { createKeyedTimers } from "./timers.js";
 
 /** The class every copy control wears. */
 export const COPY_CONTROL_CLASS = "copy-control";
@@ -114,7 +115,7 @@ export function installCopyControls(
   resolvers: CopyResolvers,
   write: (text: string) => boolean = (text) => writeClipboardText(doc, text),
 ): () => void {
-  const timers = new Map<Element, ReturnType<typeof setTimeout>>();
+  const timers = createKeyedTimers<Element>();
   const onClick = (event: MouseEvent): void => {
     if (!(event.target instanceof Element)) return;
     const control = event.target.closest(`.${COPY_CONTROL_CLASS}`);
@@ -133,20 +134,14 @@ export function installCopyControls(
       operation: "copy-control.copy",
       context: { kind, characters: text.length, ...context, outcome: "copied" },
     });
-    clearTimeout(timers.get(control));
     control.setAttribute(COPIED_ATTRIBUTE, "");
-    timers.set(
-      control,
-      setTimeout(() => {
-        control.removeAttribute(COPIED_ATTRIBUTE);
-        timers.delete(control);
-      }, COPIED_MS),
-    );
+    timers.start(control, COPIED_MS, () => {
+      control.removeAttribute(COPIED_ATTRIBUTE);
+    });
   };
   doc.addEventListener("click", onClick);
   return () => {
     doc.removeEventListener("click", onClick);
-    for (const timer of timers.values()) clearTimeout(timer);
-    timers.clear();
+    timers.cancelAll();
   };
 }
