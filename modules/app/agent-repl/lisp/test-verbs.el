@@ -1704,7 +1704,7 @@ later creation is drawn as any async create's is."
        (list :op-id op-id :event (list :arm :create
                                        :value '(:arm :waiting-for-network :value (:create (:id "create-1"))))))
       (should (agent-repl-test-verbs--messaged-p
-               "agent-repl: no network: the workspace create waits"))
+               "agent-repl: creating workspace: no network, so it waits"))
       (should-not (agent-repl-test-verbs--messaged-p "FAILED"))
       (agent-repl-mutation-progress-handle
        (list :op-id op-id :event (list :arm :create
@@ -1720,7 +1720,7 @@ later creation is drawn as any async create's is."
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
                             :initial-prompt "fix the flaky login test")
     (should (agent-repl-test-verbs--messaged-p
-             "agent-repl: an identical workspace create is already under way; this request joined it"))))
+             "agent-repl: creating workspace: an identical create is already under way, and this request joined it"))))
 
 (ert-deftest agent-repl-verbs-create-naming-failed-names-the-cause ()
   "A create refused because the workspace could not be named states the cause
@@ -1797,7 +1797,7 @@ never echoed as a failed create."
     (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
                             :initial-prompt "fix the flaky login test")
     (should (agent-repl-test-verbs--messaged-p
-             "agent-repl: the daemon accepted the workspace create…"))))
+             "agent-repl: creating workspace: request accepted…"))))
 
 (ert-deftest agent-repl-verbs-create-acceptance-overtaken-by-a-stage-is-not-echoed ()
   "An ack arriving after the daemon's first stage push would put an older line
@@ -1813,7 +1813,7 @@ over a newer one, so it is recorded and not echoed."
                  (funcall (plist-get keys :on-response) (list :arm :accepted :value nil)))))
       (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
                               :initial-prompt "fix the flaky login test"))
-    (should-not (agent-repl-test-verbs--messaged-p "accepted the workspace create"))))
+    (should-not (agent-repl-test-verbs--messaged-p "request accepted"))))
 
 (ert-deftest agent-repl-verbs-create-synchronous-success-reports-completion ()
   "A daemon that answered success on the rpc still says the create is done."
@@ -1844,13 +1844,13 @@ to the staged progress the daemon pushes on the WatchDaemon channel."
   "The deriving-name stage renders the owner's exact minibuffer line."
   (agent-repl-test-verbs--with nil
     (agent-repl-verbs--create-stage-message :deriving-name)
-    (should (agent-repl-test-verbs--messaged-p "agent-repl: deriving the workspace's name…"))))
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: creating workspace: deriving its name…"))))
 
 (ert-deftest agent-repl-verbs-create-stage-message-renders-creating-worktree ()
   "The creating-worktree stage renders the owner's exact minibuffer line."
   (agent-repl-test-verbs--with nil
     (agent-repl-verbs--create-stage-message :creating-worktree)
-    (should (agent-repl-test-verbs--messaged-p "agent-repl: creating the workspace's git worktree…"))))
+    (should (agent-repl-test-verbs--messaged-p "agent-repl: creating workspace: creating its git worktree…"))))
 
 (ert-deftest agent-repl-verbs-create-failure-internal-messages-the-error ()
   "An internal failure event surfaces the daemon's sentence loudly."
