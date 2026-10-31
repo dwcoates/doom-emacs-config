@@ -1769,7 +1769,7 @@ npm run build         # esbuild -> dist/main.js (the entry the daemon spawns)
 npm run smoke         # spawn and dial dist/main.js for real (needs a build first)
 ```
 
-Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. The package's coverage is a coverage run of its suite (`agent-repld test run -suite shim -coverage`); its `coverage` and `coverage:verify` scripts are what that run executes.
+Tests run through the daemon, naming only the tests the change added or changed (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. The package's coverage is a coverage run of its suite (`agent-repld test run -suite shim -coverage`); its `coverage` and `coverage:verify` scripts are what that run executes.
 
 Dependencies come from the SELF-HEALING shared node store, exactly as the
 webapp's do: `node_modules` links `~/.cache/agent-repl/node-store/shim-<lockhash>`,

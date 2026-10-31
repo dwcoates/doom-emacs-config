@@ -184,7 +184,7 @@ npm run typecheck          tsc over src/ AND test/, integration suite included
 npm run build              typecheck plus vite build
 ```
 
-Tests run through the daemon, naming only the tests a change needs (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. The suites: the unit
+Tests run through the daemon, naming only the tests the change added or changed (`agent-repld test run`); the `agent-repl-tests` skill says how, and the full suite is the merge queue's gate. The suites: the unit
 suite (vitest + jsdom), the integration suite (the whole app against a
 loopback fake daemon), and `test:webkit` (real headless WebKit over the real
 stylesheet, test/webkit/).
