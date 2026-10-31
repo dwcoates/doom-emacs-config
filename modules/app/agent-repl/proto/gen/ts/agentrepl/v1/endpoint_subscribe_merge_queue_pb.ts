@@ -18,8 +18,17 @@
 // once, as one notice.
 //
 // LIFETIME: a subscription ends when its workspace unsubscribes in its scope,
-// and when the workspace closes, however it closes (closed, killed, nuked, or
-// closed by its own landing); re-opening the workspace does not restore it.
+// when the workspace closes, however it closes (closed, killed, nuked, or
+// closed by its own landing), and when a queue in its scope DEPLETES -- a
+// merge leaves it and no merge is left in line, so nothing runs. Re-opening
+// the workspace does not restore it. A depletion ends every subscription in
+// that queue's scope, the repository's and the every-repository one alike, at
+// every detail: each detail admits the depletion, so its notice is the
+// subscription's LAST and says the subscription has ended. A notice wakes the
+// subscriber and costs it a full read of its context, so a subscription never
+// outlives the work it was taken to watch. Following the queue's next work
+// takes a new subscription; one taken after the last notice stands, even one
+// taken before the daemon finished delivering it.
 // It is DURABLE across a daemon restart and a handover: a landing's own deploy
 // restarts the daemon, so a subscription that a restart dropped would end at
 // the very change it exists to report. A change made while no daemon serves
@@ -177,7 +186,9 @@ export const SubscribeMergeQueueAdvancesSchema: GenMessage<SubscribeMergeQueueAd
 
 /**
  * DEPLOYS: a merge leaves the queue (as ADVANCES), and a deploy of the
- * daemon's own checkout ends -- whichever daemon ends it, the one that stays
+ * daemon's own checkout ends, until a queue in scope depletes (LIFETIME): a
+ * deploy ending after the depletion that ended the subscription is told only
+ * to a subscription taken again -- whichever daemon ends it, the one that stays
  * or the successor it handed over to, and a fresh boot on a new build --
  * once its build is running, shims judged, or once it failed. The notice
  * names the reported landings its build carries. A deploy is the daemon's
@@ -198,7 +209,8 @@ export const SubscribeMergeQueueDeploysSchema: GenMessage<SubscribeMergeQueueDep
 
 /**
  * DEPLETES: a merge leaves the queue and no merge is left in line, reported
- * once per emptying. A queue that empties by a removal of a merge never put
+ * once per emptying. That one notice is the subscription's last: the
+ * depletion ends it (LIFETIME). A queue that empties by a removal of a merge never put
  * in line is not reported, since nothing left the line.
  *
  * @generated from message agentrepl.v1.SubscribeMergeQueueDepletes
